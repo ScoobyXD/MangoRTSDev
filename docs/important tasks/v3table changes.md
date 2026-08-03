@@ -2,13 +2,15 @@
 
 A Mango user creates a Node and adds textboxes. Textbox bodies are stored only in `node_textboxes`, and textbox-owned comments and seen markers disappear when their textbox no longer exists. If a comment's author account was deleted, the comment and captured display name remain while its relational user ID becomes null. When an email is downloaded, Mango stores its thread and messages once, and `email_relationships` connects a selected message to a Node, Project, Logic Gate, or one of their textboxes. During V3, an older Attached-email snapshot with no durable thread/message is copied into those permanent tables only after exactly one mailbox is proven; the existing Attached-email information ID remains the relationship ID. Deleting a host removes only the relationship: normalized email, draft content, and email attachment links survive independently. Converting an email into a Node is an ordinary workflow: store the email, create the Node, create the relationship, and use normal resource permissions. Shared email drafts are stored in `email_drafts` and receive access from the related resource rather than a special collaboration-participant subsystem. No current Node editor content is written to `node_information` or `node_projection_table` after the cutover.
 
+V3 is released through separate operator-gated phases: create the permanent destinations, copy without deleting legacy sources, reconcile the copy, switch the application, observe a soak period, and retire legacy storage only in a later release.
+
 # V3 table changes implementation handoff
 
 ## Purpose
 
 This document is the complete implementation target for retiring the remaining Node information/projection storage and the special email collaboration/placement tables.
 
-The implementation must update the canonical schema, add a strict migration, update backend and frontend reads/writes, update tests and process documentation, and leave the repository capable of creating a clean database directly from `backend/db/schema.sql`.
+The implementation must update the canonical schema, provide separately operated and verified migration phases, update backend and frontend reads/writes, update tests and process documentation, and leave the repository capable of creating a clean database directly from `backend/db/schema.sql`.
 
 An agent must not apply the migration to a live database. Repository agents may inspect a live database only with the designated database-enforced read-only credential. Never retrieve or print writer/admin credentials or unrelated secrets.
 
@@ -675,26 +677,49 @@ EXCLUSIVE` locks on every legacy or attachment table that it alters or drops,
 with a 60-second lock timeout, before performing any data work. If those locks
 cannot be acquired, fix the active-writer condition and rerun the whole transaction.
 
-## Strict migration and sequencing
+## Required phased migration and sequencing
 
-Implement this as one repository change, but the SQL itself should use safe phases inside a strict migration:
+V3 must not create tables, copy data, switch application code, and drop legacy storage in one migration transaction. The repository change may be cohesive, but the live rollout must use separate operator-gated releases. Do not put these phases in an automatic migration chain that immediately applies every phase.
+
+### Phase 1: expand the schema
 
 1. Assert the exact expected old schema and constraints. Abort on drift.
-2. Create the new tables, constraints, indexes, and validation triggers.
-3. Backfill normalized `email_threads` and `email_messages` first.
-4. Backfill `node_textbox_chats`, preserving old chat IDs.
-5. Backfill `email_relationships` from normalized thread links, old placement tables, collaborations, and attached-email projection rows.
-6. Backfill `email_drafts`, replacing collaboration references with relationship references.
-7. Backfill `node_textbox_seen_snapshots` from current textbox bodies and the old seen rows.
-8. Rename `node_content_changes.information_id` to `textbox_id` and add its textbox foreign key.
-9. Validate counts, IDs, selected messages, resource ownership, draft ownership, permissions, attachment targets, and thread/message membership after applying the explicit deleted-owner cleanup rules.
-10. Abort on unexpected or ambiguous source data; do not treat known textbox-owned orphan rows or deleted email relationships as permanent content.
-11. Switch all code paths to the new tables.
-12. Remove old writers and readers.
-13. Drop the retired tables and their triggers/indexes/constraints.
-14. Ensure `backend/db/schema.sql` directly creates only the final schema and contains no create-then-drop history for these retired structures.
+2. Create the permanent V3 tables, constraints, indexes, and validation triggers alongside the legacy tables.
+3. Add compatibility columns where identity must move, including `node_content_changes.textbox_id` alongside `information_id` and both legacy and permanent attachment targets.
+4. Leave all legacy tables, rows, readers, and writers intact. This phase must not copy, rewrite, or delete source data and must not switch application behavior.
 
-Do not use broad skip logic. Expected old objects should be referenced directly so an unexpected database state fails visibly.
+### Phase 2: restartable copy
+
+1. Copy normalized `email_threads` and `email_messages` first.
+2. Copy `node_textbox_chats`, preserving old chat IDs and recoverable author snapshots.
+3. Copy `email_relationships`, preserving existing relationship and Attached-email information IDs.
+4. Copy `email_drafts`, `node_textbox_seen_snapshots`, content-change identity, permissions, and attachment identity.
+5. Never delete or rewrite a legacy source row during the copy.
+6. Every source row must receive exactly one reported disposition: `copied`, `already_copied`, `discarded_deleted_host`, or `needs_human_mapping`.
+7. Rerunning the copy after interruption must be safe and must not create duplicate permanent identities.
+
+### Phase 3: authoritative reconciliation
+
+1. Run one read-only inventory that uses the same mapping and validation rules as the copy.
+2. Reconcile each source category to its target by company, permanent ID, ownership, selected message, thread/message membership, attachment target, and payload content.
+3. Report all blockers together. A zero-blocker result means every source row has exactly one valid disposition; it does not merely mean that SQL statements can run.
+4. Keep ambiguous active content as a blocker for human review. Do not invent owners, create fake textboxes, or discard active comments or emails.
+
+### Phase 4: application cutover
+
+1. In one planned maintenance window, pause database writers, run a final restartable delta copy, and repeat reconciliation.
+2. Switch backend and frontend readers and writers to the permanent V3 tables.
+3. Run editor, email, attachment, draft, permissions, and history smoke tests before restoring writers.
+4. Do not drop legacy tables or columns in this phase. They remain an immediate rollback source.
+
+### Phase 5: soak and retirement
+
+1. Observe the V3 application for an agreed soak period and compare permanent-table behavior with the preserved legacy source.
+2. Retire legacy readers and writers only after the cutover has remained healthy.
+3. Drop retired tables, columns, triggers, indexes, and constraints in a later explicit migration and release.
+4. Ensure `backend/db/schema.sql` directly creates only the final schema and contains no create-then-drop history for retired structures.
+
+Each phase must have an exact precondition, a postcondition query, and a safe rollback boundary. Do not use broad skip logic. Expected objects should be referenced directly so an unexpected database state fails visibly.
 
 ## Data-source precedence during backfill
 
@@ -711,7 +736,7 @@ Do not use broad skip logic. Expected old objects should be referenced directly 
 - Update the appropriate `docs/tests/*.md` files and put a distinct `Process Story` at the top of each changed business-process document.
 - Add schema-contract tests asserting every final table and column.
 - Add negative schema tests asserting all retired tables and columns are absent.
-- Add migration tests using the exact expected pre-cutover schema and representative legacy rows.
+- Add automated PostgreSQL integration tests that apply every phase in order to the exact expected pre-cutover schema with representative legacy rows, verify each phase's postconditions and rerun behavior, and prove that legacy sources remain available until the separate retirement phase. Static SQL string checks are not sufficient.
 - Test empty databases created from `backend/db/schema.sql`.
 - Test Node textbox create/edit/delete/reorder and history.
 - Test Node textbox chat create/edit/delete/reply, mentions, entity links, email selections, and attachment-only messages.
