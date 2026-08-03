@@ -167,6 +167,10 @@ func TestV3MigrationIsStrictAndHasRepresentativeLegacyFixture(t *testing.T) {
 		"trg_node_view_user_version_textbox_snapshots",
 		"mangorts_v3_chat_source_all", "mangorts_v3_attachment_targets",
 		"mangorts_v3_email_relationships_without_host",
+		"mangorts_v3_attached_email_projection_source",
+		"mangorts_v3_legacy_email_mailbox_candidates",
+		"mangorts_v3_legacy_email_resolution",
+		"cannot resolve exactly one mailbox for legacy attached email snapshot",
 		"when relationship_count=0 and message_count=1 then 'email_message'",
 		"where not is_shared and resolved_relationship_id is not null",
 		"set local lock_timeout = '60s'", "resource_attachments, attachment_upload_intents",
@@ -182,7 +186,7 @@ func TestV3MigrationIsStrictAndHasRepresentativeLegacyFixture(t *testing.T) {
 	for _, required := range []string{
 		"normalized subject", "collaboration fallback subject", "projection fallback subject",
 		"node_projection_seen_snapshots", "node_content_changes", "resource_attachments",
-		"deleted author survives",
+		"deleted author survives", "legacy snapshot-only subject",
 	} {
 		if !strings.Contains(fixture, required) {
 			t.Errorf("representative legacy fixture missing %q", required)
@@ -194,7 +198,7 @@ func TestV3MigrationIsStrictAndHasRepresentativeLegacyFixture(t *testing.T) {
 		"orphan textbox chat was not discarded", "missing chat parent was not detached",
 		"orphan seen snapshot was not discarded", "email attachment did not survive its deleted textbox",
 		"draft with missing source message was not preserved",
-		"deleted chat author identity was not nulled",
+		"deleted chat author identity was not nulled", "legacy snapshot-only email was not normalized",
 	} {
 		if !strings.Contains(assertions, required) {
 			t.Errorf("representative migration assertions missing %q", required)
@@ -217,6 +221,11 @@ func TestV3CutoverPreflightIsReadOnlyAndCoversLaterBlockers(t *testing.T) {
 		`severity:"cleanup"`, "cleanup_rows",
 		"attachment.pending_attached_email_upload",
 		"chat.invalid_payload_fields", "chat.author_user_missing",
+		"email.attached_projection_invalid_identity_or_date",
+		"email.attached_projection_message_ambiguous",
+		"email.placement_without_thread_or_projection",
+		"email.legacy_snapshot_requires_normalization",
+		"email.legacy_snapshot_mailbox_unresolved_or_ambiguous",
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("V3 preflight missing %q", required)
