@@ -668,6 +668,12 @@ The schema change is incomplete unless all application reads and writes move in 
 - Update attachment lookup to use the new chat, email message, relationship, and draft identities without duplicating attachment data.
 - Update recycle-bin allowlists and backup/restore ordering for every changed table.
 
+The cutover requires a maintenance window. Stop application/API workers and any
+other database writers before starting it. The migration acquires `ACCESS
+EXCLUSIVE` locks on every legacy or attachment table that it alters or drops,
+with a 60-second lock timeout, before performing any data work. If those locks
+cannot be acquired, fix the active-writer condition and rerun the whole transaction.
+
 ## Strict migration and sequencing
 
 Implement this as one repository change, but the SQL itself should use safe phases inside a strict migration:
@@ -737,7 +743,7 @@ History, permissions, attachments, delivery jobs, audit/change tracking, and mai
 
 ## V3 cutover preflight and legacy-drift handling
 
-Before another cutover attempt, run `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts\run_v3_cutover_preflight.ps1`. The only input is the literal `mangorts_readonly` password, entered through a secure prompt. The script uses the fixed development connection metadata, verifies the role has no write privilege on `node_textboxes`, starts a repeatable-read read-only transaction, prints one JSON finding per category, and never changes a permanent table. Findings are labeled `blocker`, `cleanup`, or `review`; only blockers produce exit code 2.
+Before another cutover attempt, run `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts\run_v3_cutover_preflight.ps1`. The only input is the literal `mangorts_readonly` password, entered through a secure prompt. The script uses the fixed development connection metadata, verifies the role has no write privilege on `node_textboxes`, starts a repeatable-read read-only transaction, prints one JSON finding per category, and never changes a permanent table. Findings are labeled `blocker`, `cleanup`, or `review`; only blockers produce exit code 2. This checks data and schema readiness only; it cannot prove that application writers are stopped for the later migration.
 
 Fresh-eyes evidence on 2026-08-02 established these identity and visibility rules:
 

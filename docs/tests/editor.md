@@ -1,3 +1,15 @@
+# Process Story: V3 cutover starts without application writers
+
+An operator finishes the read-only V3 preflight and schedules a maintenance window
+↓
+The API, workers, and other database writers are stopped before the migration begins
+↓
+The migration acquires every required `ACCESS EXCLUSIVE` table lock with a bounded timeout before transforming any data
+↓
+If a writer still holds a lock, the migration fails before cutover work starts; after the writer is stopped, the operator reruns the complete transaction
+
+Last updated: 2026-08-02
+
 # Process Story: V3 removes data owned by deleted textboxes
 
 The cutover finds a legacy chat or seen marker whose exact permanent Node textbox no longer exists
