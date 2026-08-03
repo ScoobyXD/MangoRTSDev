@@ -165,6 +165,11 @@ func TestV3MigrationIsStrictAndHasRepresentativeLegacyFixture(t *testing.T) {
 		"drop table node_projection_table;", "drop table communications_email_collaborations;",
 		"trg_validate_email_relationship_resource", "trg_node_view_version_textbox_chats",
 		"trg_node_view_user_version_textbox_snapshots",
+		"mangorts_v3_chat_source_all", "mangorts_v3_attachment_targets",
+		"mangorts_v3_email_relationships_without_host",
+		"when relationship_count=0 and message_count=1 then 'email_message'",
+		"where not is_shared and resolved_relationship_id is not null",
+		") > 1",
 	} {
 		if !strings.Contains(migration, required) {
 			t.Errorf("strict V3 migration missing %q", required)
@@ -181,6 +186,9 @@ func TestV3MigrationIsStrictAndHasRepresentativeLegacyFixture(t *testing.T) {
 	for _, required := range []string{
 		"normalized message did not keep precedence and id", "collaboration snapshot fallback failed",
 		"projection snapshot fallback failed", "attachment relationship identity was not converted",
+		"orphan textbox chat was not discarded", "missing chat parent was not detached",
+		"orphan seen snapshot was not discarded", "email attachment did not survive its deleted textbox",
+		"draft with missing source message was not preserved",
 	} {
 		if !strings.Contains(assertions, required) {
 			t.Errorf("representative migration assertions missing %q", required)
@@ -197,8 +205,10 @@ func TestV3CutoverPreflightIsReadOnlyAndCoversLaterBlockers(t *testing.T) {
 	for _, required := range []string{
 		"begin isolation level repeatable read read only", "database_role_is_not_enforced_read_only",
 		"chat.host_textbox_missing", "chat.parent_missing_or_wrong_textbox",
-		"seen_snapshot.missing_textbox", "email.thread_provider_not_exactly_one",
-		"email.invalid_fallback_snapshot", "draft.unmapped_relationship_or_source",
+		"seen_snapshot.missing_textbox", "email.relationship_host_missing", "email.thread_provider_not_exactly_one",
+		"email.invalid_fallback_snapshot", "draft.invalid_relationship_state",
+		"draft.source_message_not_normalized", "attachment.unrecoverable_attached_email_identity",
+		`severity:"cleanup"`, "cleanup_rows",
 		"attachment.pending_attached_email_upload",
 	} {
 		if !strings.Contains(script, required) {

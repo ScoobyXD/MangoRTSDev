@@ -9,7 +9,7 @@ begin
     raise exception 'representative V3 test: retired tables remain';
   end if;
   if (select count(*) from node_textboxes)<>3
-     or (select count(*) from node_textbox_chats)<>1
+     or (select count(*) from node_textbox_chats)<>2
      or (select count(*) from node_textbox_seen_snapshots)<>1 then
     raise exception 'representative V3 test: Node textbox row counts changed';
   end if;
@@ -21,6 +21,24 @@ begin
   ) then
     raise exception 'representative V3 test: projection chat did not win over stale history';
   end if;
+  if exists (
+    select 1 from node_textbox_chats
+    where chat_id='41000000-0000-0000-0000-000000000002'
+  ) or exists (
+    select 1 from resource_attachments
+    where resource_attachment_id='81000000-0000-0000-0000-000000000002'
+  ) then
+    raise exception 'representative V3 test: orphan textbox chat was not discarded';
+  end if;
+  if not exists (
+    select 1 from node_textbox_chats
+    where chat_id='41000000-0000-0000-0000-000000000003'
+      and parent_chat_id is null
+      and message='reply with missing parent'
+  ) then
+    raise exception 'representative V3 test: missing chat parent was not detached';
+  end if;
+
   if not exists (
     select 1 from node_textbox_seen_snapshots
     where textbox_id='40000000-0000-0000-0000-000000000001'
@@ -28,6 +46,12 @@ begin
       and body_json::text like '%authoritative one%'
   ) then
     raise exception 'representative V3 test: seen snapshot did not use authoritative textbox body';
+  end if;
+  if exists (
+    select 1 from node_textbox_seen_snapshots
+    where textbox_id='40000000-0000-0000-0000-000000000099'
+  ) then
+    raise exception 'representative V3 test: orphan seen snapshot was not discarded';
   end if;
   if not exists (
     select 1 from node_content_changes
@@ -81,6 +105,22 @@ begin
       and resource_id='71000000-0000-0000-0000-000000000002'
   ) then
     raise exception 'representative V3 test: attachment relationship identity was not converted';
+  end if;
+  if not exists (
+    select 1 from resource_attachments
+    where resource_attachment_id='81000000-0000-0000-0000-000000000003'
+      and resource_type='email_message'
+      and resource_id='60000000-0000-0000-0000-000000000001'
+  ) then
+    raise exception 'representative V3 test: email attachment did not survive its deleted textbox';
+  end if;
+  if not exists (
+    select 1 from email_drafts
+    where draft_id='fixture-missing-source-draft'
+      and source_email_message_id is null
+      and body_editor_html='<p>keep this draft</p>'
+  ) then
+    raise exception 'representative V3 test: draft with missing source message was not preserved';
   end if;
 end;
 $$;
