@@ -126,7 +126,8 @@ func TestV3NodeTextboxChatPhaseIsAdditiveAndOperatorGated(t *testing.T) {
 			t.Errorf("Step 2 create-copy-verify script is missing %q", required)
 		}
 	}
-	if strings.Count(step2SQL, "\nbegin;\n") != 1 || strings.Count(step2SQL, "\ncommit;") != 1 {
+	normalizedStep2SQL := strings.ReplaceAll(step2SQL, "\r\n", "\n")
+	if strings.Count(normalizedStep2SQL, "\nbegin;\n") != 1 || strings.Count(normalizedStep2SQL, "\ncommit;") != 1 {
 		t.Error("Step 2 must use one outer transaction for creation, copy, and final verification")
 	}
 }
