@@ -1,3 +1,15 @@
+# Process Story: V3 removes data owned by deleted textboxes
+
+The cutover finds a legacy chat or seen marker whose exact permanent Node textbox no longer exists
+↓
+Because that data was owned by the deleted textbox and was already unreachable in the old editor, Mango omits it from the permanent V3 chat and seen tables and removes any chat attachment link
+↓
+If the textbox survives but a reply's same-textbox parent does not, Mango keeps the reply as a top-level comment instead of deleting the child or inventing a parent
+↓
+Email data follows its separate normalized-storage rule and is never discarded merely because a Node or textbox relationship disappeared
+
+Last updated: 2026-08-02
+
 # Process Story: Node Textboxes Have One Current Body Store
 
 A user creates, edits, reorders, or deletes a Node textbox.

@@ -380,7 +380,7 @@ create index idx_node_textbox_chats_email_selection
   on node_textbox_chats(company_id,selection_email_message_id)
   where selection_email_message_id is not null and deleted_timestamp is null;
 
-create temp table mangorts_v3_chat_source on commit drop as
+create temp table mangorts_v3_chat_source_all on commit drop as
 select projection.company_id,projection.node_id,projection.information_id as chat_id,
        projection.information::jsonb as payload,projection.is_deleted,
        projection.revision,projection.created_timestamp,projection.updated_timestamp
@@ -390,34 +390,35 @@ where projection.type='Text block chat'::information_type;
 do $$
 begin
   if exists (
-    select 1 from mangorts_v3_chat_source source
+    select 1 from mangorts_v3_chat_source_all source
     where jsonb_typeof(source.payload)<>'object'
        or coalesce(source.payload->>'block_id','') !~
           '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
-       or not exists (
-         select 1 from node_textboxes textbox
-         where textbox.company_id=source.company_id
-           and textbox.node_id=source.node_id
-           and textbox.textbox_id=(source.payload->>'block_id')::uuid
-       )
   ) then
     raise exception 'V3 cutover found invalid or unmapped Node textbox chat payload';
   end if;
-  if exists (
-    select 1 from mangorts_v3_chat_source source
-    where coalesce(source.payload->>'parent_id','')<>''
-      and not exists (
-        select 1 from mangorts_v3_chat_source parent
-        where parent.company_id=source.company_id
-          and parent.node_id=source.node_id
-          and parent.chat_id=(source.payload->>'parent_id')::uuid
-          and parent.payload->>'block_id'=source.payload->>'block_id'
-      )
-  ) then
-    raise exception 'V3 cutover found chat reply whose parent is missing or belongs to another textbox';
-  end if;
 end;
 $$;
+
+-- Textbox-owned rows disappear with a deleted textbox. Keep only chats whose
+-- permanent host survives; a missing reply parent is detached below.
+create temp table mangorts_v3_chat_source on commit drop as
+select source.*
+from mangorts_v3_chat_source_all source
+join node_textboxes textbox
+  on textbox.company_id=source.company_id
+ and textbox.node_id=source.node_id
+ and textbox.textbox_id=(source.payload->>'block_id')::uuid;
+
+delete from resource_attachments attachment
+using mangorts_v3_chat_source_all source
+where attachment.company_id=source.company_id
+  and attachment.resource_type='node_chat_message'
+  and attachment.resource_id=source.chat_id::text
+  and not exists (
+    select 1 from mangorts_v3_chat_source surviving
+    where surviving.company_id=source.company_id and surviving.chat_id=source.chat_id
+  );
 
 insert into node_textbox_chats(
   company_id,chat_id,node_id,textbox_id,parent_chat_id,selection_source,
@@ -461,8 +462,13 @@ select source.company_id,source.chat_id,source.node_id,
 from mangorts_v3_chat_source source;
 
 update node_textbox_chats chat
-set parent_chat_id=nullif(source.payload->>'parent_id','')::uuid
+set parent_chat_id=parent.chat_id
 from mangorts_v3_chat_source source
+join mangorts_v3_chat_source parent
+  on parent.company_id=source.company_id
+ and parent.node_id=source.node_id
+ and parent.chat_id::text=source.payload->>'parent_id'
+ and parent.payload->>'block_id'=source.payload->>'block_id'
 where source.company_id=chat.company_id and source.chat_id=chat.chat_id;
 
 -- Permanent normalized email relationships.
@@ -950,6 +956,24 @@ from chosen
 join thread_max
   on thread_max.company_id=chosen.company_id
  and thread_max.email_thread_id=chosen.email_thread_id;
+
+-- A legacy attached-email row with an explicit textbox host is owned by that
+-- exact textbox relationship. Preserve its normalized email, but do not
+-- silently downgrade a missing textbox relationship to a Node relationship.
+create temp table mangorts_v3_email_relationships_without_host on commit drop as
+select projection.company_id,projection.information_id
+from node_projection_table projection
+where projection.type='Attached email'::information_type
+  and not projection.is_deleted
+  and coalesce(projection.information::jsonb->>'block_id','')<>''
+  and not exists (
+    select 1 from node_textboxes textbox
+    where textbox.company_id=projection.company_id
+      and textbox.node_id=projection.node_id
+      and textbox.textbox_id::text=projection.information::jsonb->>'block_id'
+      and textbox.deleted_timestamp is null
+  );
+
 create temp table mangorts_v3_relationship_candidates (
   company_id uuid not null,
   proposed_relationship_id uuid not null,
@@ -968,14 +992,34 @@ select link.company_id,link.information_id,
        'thread-link:'||link.company_id||':'||link.node_id||':'||link.information_id,
        10,link.email_thread_id,link.selected_provider_message_id,
        'node',link.node_id,null,link.created_timestamp
-from communications_node_email_threads link;
+from communications_node_email_threads link
+where exists (
+  select 1 from nodes node
+  where node.company_id=link.company_id
+    and node.node_id=link.node_id
+)
+and not exists (
+  select 1 from mangorts_v3_email_relationships_without_host missing_host
+  where missing_host.company_id=link.company_id
+    and missing_host.information_id=link.information_id
+);
 
 insert into mangorts_v3_relationship_candidates
 select collaboration.company_id,collaboration.attached_email_information_id,
        'collaboration:'||collaboration.company_id||':'||collaboration.collaboration_id,
        20,collaboration.email_thread_id,collaboration.latest_message_id,
        'node',collaboration.node_id,null,collaboration.created_timestamp
-from communications_email_collaborations collaboration;
+from communications_email_collaborations collaboration
+where exists (
+  select 1 from nodes node
+  where node.company_id=collaboration.company_id
+    and node.node_id=collaboration.node_id
+)
+and not exists (
+  select 1 from mangorts_v3_email_relationships_without_host missing_host
+  where missing_host.company_id=collaboration.company_id
+    and missing_host.information_id=collaboration.attached_email_information_id
+);
 
 insert into mangorts_v3_relationship_candidates
 select source.company_id,
@@ -986,7 +1030,12 @@ select source.company_id,
        'email-node:'||source.company_id||':'||source.node_id||':'||source.message_id,
        40,source.email_thread_id,source.message_id,
        'node',source.node_id,null,source.created_timestamp
-from communications_email_nodes source;
+from communications_email_nodes source
+where exists (
+  select 1 from nodes node
+  where node.company_id=source.company_id
+    and node.node_id=source.node_id
+);
 
 insert into mangorts_v3_relationship_candidates
 select source.company_id,
@@ -997,7 +1046,12 @@ select source.company_id,
        'email-attachment:'||source.company_id||':'||source.node_id||':'||source.message_id,
        50,source.email_thread_id,source.message_id,
        'node',source.node_id,null,source.created_timestamp
-from communications_email_node_attachments source;
+from communications_email_node_attachments source
+where exists (
+  select 1 from nodes node
+  where node.company_id=source.company_id
+    and node.node_id=source.node_id
+);
 
 insert into mangorts_v3_relationship_candidates
 select projection.company_id,projection.information_id,
@@ -1019,7 +1073,17 @@ select projection.company_id,projection.information_id,
        projection.created_timestamp
 from node_projection_table projection
 where projection.type='Attached email'::information_type
-  and not projection.is_deleted;
+  and not projection.is_deleted
+  and exists (
+    select 1 from nodes node
+    where node.company_id=projection.company_id
+      and node.node_id=projection.node_id
+  )
+  and not exists (
+    select 1 from mangorts_v3_email_relationships_without_host missing_host
+    where missing_host.company_id=projection.company_id
+      and missing_host.information_id=projection.information_id
+  );
 
 do $$
 begin
@@ -1160,6 +1224,9 @@ from communications_email_collaboration_participants participant
 join communications_email_collaborations collaboration
   on collaboration.company_id=participant.company_id
  and collaboration.collaboration_id=participant.collaboration_id
+join nodes node
+  on node.company_id=collaboration.company_id
+ and node.node_id=collaboration.node_id
 on conflict(company_id,resource_type,resource_id,subject_type,subject_id)
 do update set access_level='edit',user_id=excluded.user_id,updated_timestamp=now();
 
@@ -1296,11 +1363,9 @@ do $$
 begin
   if exists (
     select 1 from mangorts_v3_draft_resolved
-    where (is_shared and resolved_relationship_id is null)
-       or (not is_shared and resolved_relationship_id is not null)
-       or (btrim(source_message_id)<>'' and resolved_source_message_id is null)
+    where not is_shared and resolved_relationship_id is not null
   ) then
-    raise exception 'V3 cutover found draft with unmapped relationship or source message';
+    raise exception 'V3 cutover found draft with unmapped relationship';
   end if;
   if exists (
     select 1
@@ -1324,7 +1389,7 @@ begin
               and thread.mailbox_scope_type='shared'
               and thread.shared_inbox_id=draft.shared_inbox_id)
           )
-      ) <> 1
+      ) > 1
   ) then
     raise exception 'V3 cutover found ambiguous draft source message';
   end if;
@@ -1384,22 +1449,6 @@ create table node_textbox_seen_snapshots (
   constraint node_textbox_seen_snapshots_revision_chk check (textbox_revision>=0)
 );
 
-do $$
-begin
-  if exists (
-    select 1 from node_projection_seen_snapshots snapshot
-    where not exists (
-      select 1 from node_textboxes textbox
-      where textbox.company_id=snapshot.company_id
-        and textbox.node_id=snapshot.node_id
-        and textbox.textbox_id=snapshot.information_id
-    )
-  ) then
-    raise exception 'V3 cutover found seen snapshot without a permanent textbox';
-  end if;
-end;
-$$;
-
 insert into node_textbox_seen_snapshots(
   company_id,node_id,textbox_id,user_id,body_json,textbox_revision,
   textbox_updated_timestamp,seen_timestamp
@@ -1428,32 +1477,65 @@ begin
   ) then
     raise exception 'V3 cutover requires attached-email upload intents to finish before migration';
   end if;
+end;
+$$;
+
+create temp table mangorts_v3_attachment_targets on commit drop as
+with candidates as (
+  select attachment.resource_attachment_id,
+         message.email_message_id,
+         relationship.email_relationship_id
+  from resource_attachments attachment
+  left join email_messages message
+    on message.company_id=attachment.company_id
+   and message.provider_message_id=coalesce(
+     nullif(attachment.message_id,''),
+     case when attachment.resource_id ~ '^node:[0-9a-fA-F-]{36}:message:.+$'
+       then split_part(attachment.resource_id,':',4)
+     end
+   )
+  left join email_relationships relationship
+    on relationship.company_id=message.company_id
+   and relationship.email_thread_id=message.email_thread_id
+   and relationship.email_message_id=message.email_message_id
+   and relationship.resource_type='node'
+   and (
+     (attachment.information_id is not null and relationship.email_relationship_id=attachment.information_id)
+     or (attachment.information_id is null and relationship.resource_id=case
+       when attachment.resource_id ~ '^node:[0-9a-fA-F-]{36}:message:'
+         then split_part(attachment.resource_id,':',2)::uuid
+       when attachment.resource_id ~
+         '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+         then attachment.resource_id::uuid
+       else null
+     end)
+   )
+  where attachment.resource_type='attached_email'
+), grouped as (
+  select resource_attachment_id,
+         count(distinct email_relationship_id) as relationship_count,
+         count(distinct email_message_id) as message_count,
+         min(email_relationship_id::text) as email_relationship_id,
+         min(email_message_id::text) as email_message_id
+  from candidates
+  group by resource_attachment_id
+)
+select resource_attachment_id,
+       case
+         when relationship_count=1 then 'email_relationship'
+         when relationship_count=0 and message_count=1 then 'email_message'
+       end as target_resource_type,
+       case
+         when relationship_count=1 then email_relationship_id
+         when relationship_count=0 and message_count=1 then email_message_id
+       end as target_resource_id
+from grouped;
+
+do $$
+begin
   if exists (
-    select 1
-    from resource_attachments attachment
-    where attachment.resource_type='attached_email'
-      and (
-        select count(distinct relationship.email_relationship_id)
-        from email_relationships relationship
-        join email_messages message
-          on message.company_id=relationship.company_id
-         and message.email_thread_id=relationship.email_thread_id
-         and message.email_message_id=relationship.email_message_id
-        where relationship.company_id=attachment.company_id
-          and relationship.resource_type='node'
-          and message.provider_message_id=attachment.message_id
-          and (
-            relationship.email_relationship_id=attachment.information_id
-            or relationship.resource_id=case
-              when attachment.resource_id ~
-                '^node:[0-9a-fA-F-]{36}:message:'
-                then split_part(attachment.resource_id,':',2)::uuid
-              when attachment.resource_id ~                '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
-                then attachment.resource_id::uuid
-              else null
-            end
-          )
-      ) <> 1
+    select 1 from mangorts_v3_attachment_targets
+    where target_resource_type is null or target_resource_id is null
   ) then
     raise exception 'V3 cutover found unmapped or ambiguous attached-email attachment identity';
   end if;
@@ -1470,37 +1552,11 @@ alter table resource_attachments add constraint resource_attachments_type_chk ch
     'shared_inbox_folder'
   )
 );
-with resolved as (
-  select attachment.resource_attachment_id,
-         min(relationship.email_relationship_id::text)::uuid as email_relationship_id
-  from resource_attachments attachment
-  join email_relationships relationship
-    on relationship.company_id=attachment.company_id
-   and relationship.resource_type='node'
-  join email_messages message
-    on message.company_id=relationship.company_id
-   and message.email_thread_id=relationship.email_thread_id
-   and message.email_message_id=relationship.email_message_id
-   and message.provider_message_id=attachment.message_id
-  where attachment.resource_type='attached_email'
-    and (
-      relationship.email_relationship_id=attachment.information_id
-      or relationship.resource_id=case
-        when attachment.resource_id ~ '^node:[0-9a-fA-F-]{36}:message:'
-          then split_part(attachment.resource_id,':',2)::uuid
-        when attachment.resource_id ~
-          '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
-          then attachment.resource_id::uuid
-        else null
-      end
-    )
-  group by attachment.resource_attachment_id
-)
 update resource_attachments attachment
-set resource_type='email_relationship',
-    resource_id=resolved.email_relationship_id::text
-from resolved
-where attachment.resource_attachment_id=resolved.resource_attachment_id;
+set resource_type=target.target_resource_type,
+    resource_id=target.target_resource_id
+from mangorts_v3_attachment_targets target
+where attachment.resource_attachment_id=target.resource_attachment_id;
 
 alter table resource_attachments drop constraint resource_attachments_type_chk;
 alter table resource_attachments add constraint resource_attachments_type_chk check (
@@ -1525,12 +1581,15 @@ alter table attachment_upload_intents
 do $$
 begin
   if (select count(*) from node_textbox_chats)
-     <> (select count(*) from node_projection_table
-         where type='Text block chat'::information_type) then
+     <> (select count(*) from mangorts_v3_chat_source) then
     raise exception 'V3 cutover Node chat count mismatch';
   end if;
   if (select count(*) from node_textbox_seen_snapshots)
-     <> (select count(*) from node_projection_seen_snapshots) then
+     <> (select count(*)
+         from node_projection_seen_snapshots snapshot
+         join node_textboxes textbox
+           on (textbox.company_id,textbox.node_id,textbox.textbox_id)
+            =(snapshot.company_id,snapshot.node_id,snapshot.information_id)) then
     raise exception 'V3 cutover textbox seen snapshot count mismatch';
   end if;
   if (select count(*) from email_drafts)

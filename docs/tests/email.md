@@ -1,3 +1,15 @@
+# Process Story: Email survives a deleted Node or textbox relationship
+
+The V3 cutover finds a legacy email, draft, or attached-email attachment whose old host Node or textbox no longer exists
+↓
+Mango removes the dead resource relationship and its permission effect, but keeps the normalized thread and messages with their permanent IDs
+↓
+The draft content remains a mailbox draft when its old relationship is gone, and an attached-email attachment without a surviving relationship points to the exact normalized `email_message`
+↓
+No migration step creates a fake Node/textbox or silently deletes email content to satisfy a relationship check
+
+Last updated: 2026-08-02
+
 # Process Story: Normalized Email Storage and Resource Relationships
 
 A user imports an email from a personal mailbox or Shared Triage, and Mango stores the mailbox-scoped thread once in `email_threads` and each message once in `email_messages`.

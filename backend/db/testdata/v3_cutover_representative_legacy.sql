@@ -37,19 +37,26 @@ insert into node_projection_table(company_id,node_id,information_id,type,informa
  '{"format":"mango-tiptap-json","schema_version":"1","document":{"type":"doc","content":[]},"annotations":[]}',false,1,now(),now()),
 ('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','41000000-0000-0000-0000-000000000001','Text block chat',
  '{"block_id":"40000000-0000-0000-0000-000000000001","selection_source":"text","selection_quote":"selected","selection_start":0,"selection_end":8,"author_id":"20000000-0000-0000-0000-000000000001","author_name":"Fixture Owner","message":"current projection chat","entity_links":[],"mentioned_user_ids":["20000000-0000-0000-0000-000000000002"],"mentioned_group_ids":[]}',false,4,now(),now()),
+('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','41000000-0000-0000-0000-000000000002','Text block chat',
+ '{"block_id":"40000000-0000-0000-0000-000000000099","author_id":"20000000-0000-0000-0000-000000000001","author_name":"Fixture Owner","message":"orphan textbox chat"}',false,1,now(),now()),
+('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','41000000-0000-0000-0000-000000000003','Text block chat',
+ '{"block_id":"40000000-0000-0000-0000-000000000001","parent_id":"41000000-0000-0000-0000-000000000099","author_id":"20000000-0000-0000-0000-000000000001","author_name":"Fixture Owner","message":"reply with missing parent"}',false,1,now(),now()),
 ('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','71000000-0000-0000-0000-000000000001','Attached email',
  '{"message_id":"provider-message-1","thread_id":"provider-thread-1","email_thread_id":"50000000-0000-0000-0000-000000000001","subject":"fallback must not overwrite normalized","snippet":"stale duplicate"}',false,1,now(),now()),
 ('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000002','71000000-0000-0000-0000-000000000002','Attached email',
  '{"message_id":"provider-message-2","thread_id":"provider-thread-2","subject":"collaboration duplicate"}',false,1,now(),now()),
 ('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000003','71000000-0000-0000-0000-000000000003','Attached email',
- '{"message_id":"provider-message-3","thread_id":"provider-thread-3","email_thread_id":"50000000-0000-0000-0000-000000000003","subject":"Projection fallback subject","snippet":"Projection fallback snippet","date":1700000300}',false,1,now(),now());
+ '{"message_id":"provider-message-3","thread_id":"provider-thread-3","email_thread_id":"50000000-0000-0000-0000-000000000003","subject":"Projection fallback subject","snippet":"Projection fallback snippet","date":1700000300}',false,1,now(),now()),
+('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','71000000-0000-0000-0000-000000000004','Attached email',
+ '{"block_id":"40000000-0000-0000-0000-000000000099","message_id":"provider-message-1","thread_id":"provider-thread-1","email_thread_id":"50000000-0000-0000-0000-000000000001","subject":"email survives deleted textbox"}',false,1,now(),now());
 
 insert into node_information(company_id,information_id,node_id,type,information,save_kind,created_timestamp,updated_timestamp) values
 ('10000000-0000-0000-0000-000000000001','41000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','Text block chat',
  '{"block_id":"40000000-0000-0000-0000-000000000001","message":"stale history chat"}','legacy',now()-interval '1 day',now()-interval '1 day');
 
 insert into node_projection_seen_snapshots(company_id,node_id,information_id,user_id,information,projection_updated_timestamp,seen_timestamp) values
-('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000002','stale seen body',now()-interval '1 day',now());
+('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000002','stale seen body',now()-interval '1 day',now()),
+('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000099','20000000-0000-0000-0000-000000000002','orphan seen body',now()-interval '1 day',now());
 
 insert into node_content_changes(company_id,change_id,node_id,information_id,change_type,text,start_offset,end_offset,actor_user_id,actor_display_name) values
 ('10000000-0000-0000-0000-000000000001','42000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','addition','authoritative',0,13,'20000000-0000-0000-0000-000000000001','Fixture Owner');
@@ -68,6 +75,13 @@ insert into communications_email_messages(
  download_complete
 ) values
 ('10000000-0000-0000-0000-000000000001','60000000-0000-0000-0000-000000000001','50000000-0000-0000-0000-000000000001','provider-message-1','provider-thread-1',0,'Normalized subject','[{"name":"Sender","email":"sender@example.com"}]',1700000100,'<p>normalized body</p>','normalized snippet',true);
+
+insert into communications_email_drafts(
+ company_id,draft_id,personal_user_id,personal_account_email,created_by_user_id,
+ updated_by_user_id,kind,source_message_id,account_email,subject,body_editor_html
+) values
+('10000000-0000-0000-0000-000000000001','fixture-missing-source-draft','20000000-0000-0000-0000-000000000001','owner@example.com','20000000-0000-0000-0000-000000000001',
+ '20000000-0000-0000-0000-000000000001','reply','deleted-provider-message','owner@example.com','Preserved draft','<p>keep this draft</p>');
 
 insert into communications_node_email_threads(
  company_id,node_id,information_id,email_thread_id,selected_provider_message_id,
@@ -103,4 +117,8 @@ insert into resource_attachments(
  information_id,message_id,relationship_kind,created_by_user_id
 ) values
 ('81000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001','attached_email','30000000-0000-0000-0000-000000000002','80000000-0000-0000-0000-000000000001',
- '71000000-0000-0000-0000-000000000002','provider-message-2','email_attachment','20000000-0000-0000-0000-000000000001');
+ '71000000-0000-0000-0000-000000000002','provider-message-2','email_attachment','20000000-0000-0000-0000-000000000001'),
+('81000000-0000-0000-0000-000000000002','10000000-0000-0000-0000-000000000001','node_chat_message','41000000-0000-0000-0000-000000000002','80000000-0000-0000-0000-000000000001',
+ null,'','chat_attachment','20000000-0000-0000-0000-000000000001'),
+('81000000-0000-0000-0000-000000000003','10000000-0000-0000-0000-000000000001','attached_email','node:30000000-0000-0000-0000-000000000001:message:provider-message-1','80000000-0000-0000-0000-000000000001',
+ '71000000-0000-0000-0000-000000000004','','email_attachment','20000000-0000-0000-0000-000000000001');
