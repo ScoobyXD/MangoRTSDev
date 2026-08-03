@@ -1,3 +1,14 @@
+# Process Story: Comments survive a deleted author account
+
+A historical Node textbox comment points to a user account that was later deleted
+↓
+The V3 cutover keeps the comment, attachments, timestamps, and captured display name, but stores a null `author_user_id`
+↓
+The comment remains readable and the permanent foreign key matches its normal `ON DELETE SET NULL` behavior without inventing a user or dropping content
+
+Last updated: 2026-08-02
+
+
 # Process Story: V3 cutover starts without application writers
 
 An operator finishes the read-only V3 preflight and schedules a maintenance window

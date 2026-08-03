@@ -416,6 +416,73 @@ join node_textboxes textbox
  and textbox.node_id=source.node_id
  and textbox.textbox_id=(source.payload->>'block_id')::uuid;
 
+-- Legacy chat payloads were not protected by relational constraints. Validate
+-- every field that the permanent insert casts or constrains so one preflight
+-- reports malformed surviving content before the insert can fail opaquely.
+do $$
+begin
+  if exists (
+    select 1
+    from mangorts_v3_chat_source source
+    where coalesce(source.payload->>'selection_source','') not in ('','text','email')
+       or (
+         coalesce(source.payload->>'selection_block_id','')<>''
+         and source.payload->>'selection_block_id' !~
+           '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+       )
+       or (
+         coalesce(source.payload->>'author_id','')<>''
+         and source.payload->>'author_id' !~
+           '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+       )
+       or case
+         when source.payload->>'selection_start' is null
+          and source.payload->>'selection_end' is null then false
+         when source.payload->>'selection_start' is null
+           or source.payload->>'selection_end' is null then true
+         when not pg_input_is_valid(source.payload->>'selection_start','integer')
+           or not pg_input_is_valid(source.payload->>'selection_end','integer') then true
+         else (source.payload->>'selection_start')::integer < 0
+           or (source.payload->>'selection_end')::integer
+              < (source.payload->>'selection_start')::integer
+       end
+       or (
+         source.payload ? 'entity_links'
+         and jsonb_typeof(source.payload->'entity_links') not in ('array','null')
+       )
+       or (
+         source.payload ? 'mentioned_user_ids'
+         and jsonb_typeof(source.payload->'mentioned_user_ids') not in ('array','null')
+       )
+       or case
+         when jsonb_typeof(source.payload->'mentioned_user_ids')='array' then exists (
+           select 1
+           from jsonb_array_elements_text(source.payload->'mentioned_user_ids') value
+           where value !~
+             '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+         )
+         else false
+       end
+       or (
+         source.payload ? 'mentioned_group_ids'
+         and jsonb_typeof(source.payload->'mentioned_group_ids') not in ('array','null')
+       )
+       or case
+         when jsonb_typeof(source.payload->'mentioned_group_ids')='array' then exists (
+           select 1
+           from jsonb_array_elements_text(source.payload->'mentioned_group_ids') value
+           where value !~
+             '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+         )
+         else false
+       end
+       or source.updated_timestamp < source.created_timestamp
+  ) then
+    raise exception 'V3 cutover found malformed surviving Node textbox chat fields';
+  end if;
+end;
+$$;
+
 delete from resource_attachments attachment
 using mangorts_v3_chat_source_all source
 where attachment.company_id=source.company_id
@@ -447,25 +514,30 @@ select source.company_id,source.chat_id,source.node_id,
          then (source.payload->>'selection_start')::integer else null end,
        case when source.payload ? 'selection_end'
          then (source.payload->>'selection_end')::integer else null end,
-       nullif(source.payload->>'author_id','')::uuid,
+       chat_author.user_id,
        coalesce(source.payload->>'author_name',''),
        coalesce(source.payload->>'message',source.payload->>'content',''),
-       coalesce(source.payload->'entity_links','[]'::jsonb),
+       case when jsonb_typeof(source.payload->'entity_links')='array'
+         then source.payload->'entity_links' else '[]'::jsonb end,
        coalesce((
          select array_agg(value::uuid order by value)
          from jsonb_array_elements_text(
-           coalesce(source.payload->'mentioned_user_ids','[]'::jsonb)
+           case when jsonb_typeof(source.payload->'mentioned_user_ids')='array'
+             then source.payload->'mentioned_user_ids' else '[]'::jsonb end
          ) value
        ),'{}'::uuid[]),
        coalesce((
          select array_agg(value::uuid order by value)
          from jsonb_array_elements_text(
-           coalesce(source.payload->'mentioned_group_ids','[]'::jsonb)
+           case when jsonb_typeof(source.payload->'mentioned_group_ids')='array'
+             then source.payload->'mentioned_group_ids' else '[]'::jsonb end
          ) value
        ),'{}'::uuid[]),
        greatest(source.revision,1),source.created_timestamp,source.updated_timestamp,
        case when source.is_deleted then source.updated_timestamp else null end
-from mangorts_v3_chat_source source;
+from mangorts_v3_chat_source source
+left join users chat_author
+  on chat_author.user_id::text=lower(nullif(source.payload->>'author_id',''));
 
 update node_textbox_chats chat
 set parent_chat_id=parent.chat_id

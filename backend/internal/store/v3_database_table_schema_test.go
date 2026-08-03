@@ -173,6 +173,7 @@ func TestV3MigrationIsStrictAndHasRepresentativeLegacyFixture(t *testing.T) {
 		"in access exclusive mode",
 		"a weaker initial lock followed by an",
 		") > 1",
+		"left join users chat_author", "malformed surviving node textbox chat fields",
 	} {
 		if !strings.Contains(migration, required) {
 			t.Errorf("strict V3 migration missing %q", required)
@@ -181,6 +182,7 @@ func TestV3MigrationIsStrictAndHasRepresentativeLegacyFixture(t *testing.T) {
 	for _, required := range []string{
 		"normalized subject", "collaboration fallback subject", "projection fallback subject",
 		"node_projection_seen_snapshots", "node_content_changes", "resource_attachments",
+		"deleted author survives",
 	} {
 		if !strings.Contains(fixture, required) {
 			t.Errorf("representative legacy fixture missing %q", required)
@@ -192,6 +194,7 @@ func TestV3MigrationIsStrictAndHasRepresentativeLegacyFixture(t *testing.T) {
 		"orphan textbox chat was not discarded", "missing chat parent was not detached",
 		"orphan seen snapshot was not discarded", "email attachment did not survive its deleted textbox",
 		"draft with missing source message was not preserved",
+		"deleted chat author identity was not nulled",
 	} {
 		if !strings.Contains(assertions, required) {
 			t.Errorf("representative migration assertions missing %q", required)
@@ -213,6 +216,7 @@ func TestV3CutoverPreflightIsReadOnlyAndCoversLaterBlockers(t *testing.T) {
 		"draft.source_message_not_normalized", "attachment.unrecoverable_attached_email_identity",
 		`severity:"cleanup"`, "cleanup_rows",
 		"attachment.pending_attached_email_upload",
+		"chat.invalid_payload_fields", "chat.author_user_missing",
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("V3 preflight missing %q", required)
