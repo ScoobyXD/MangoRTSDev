@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test:node-relationships": "node ../tests/frontend/scripts/run-node-relationship-tests.contract.test.mjs && node ../tests/frontend/scripts/run-node-relationship-tests.mjs",
     "test:editor-converter": "node scripts/run-mango-html-to-json-tests.mjs",
-    "v3:node-textbox-backfill": "node scripts/run-v3-node-textbox-backfill.mjs"
+    "v3:node-textbox-backfill": "node scripts/run-v3-node-textbox-backfill.mjs",
+    "v3:cutover-preflight": "node scripts/run-v3-cutover-preflight.mjs"
   },
   "dependencies": {
     "@tiptap/core": "3.28.0",

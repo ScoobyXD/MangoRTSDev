@@ -1782,3 +1782,16 @@ Automated coverage:
 The Node v2 final gate retains disposable PostgreSQL store tests for owner-specific Project/Logic Gate JSON cutover routing, exact verification retention pins, a 1,002-comment reply-heavy thread, and ordered company purge. The former Chromium workflow harness was removed from CI on 2026-07-28; real React/Tiptap workflow acceptance is manual until replacement coverage is added.
 
 The separate PostgreSQL proof covers six isolated clients, offline replay, lost acknowledgement, delete-set durability, failed-write quarantine, compaction races, service restart, three-owner conversion, activation, stale rollback rejection, and restoration of post-cutover edits, creates, and deletes. All real gates remain inactive.
+
+
+## Process Story: V3 preflight reports all legacy drift before cutover
+
+An operator runs the V3 preflight and enters only the database-enforced read-only password
+↓
+The tool verifies that the role cannot insert, update, or delete `node_textboxes`, then opens a repeatable-read read-only transaction
+↓
+It inventories unsupported Node rows, missing textbox mappings, chat hosts and parents, seen snapshots, email provider and snapshot mappings, drafts, and attached-email upload identities in one run
+↓
+Each category prints its count and up to 25 stable IDs with non-content metadata; active chat message text is not printed
+↓
+Any blocker produces exit code 2, and the operator reviews a guarded remediation before rerunning the migration. The preflight never writes a live table.
