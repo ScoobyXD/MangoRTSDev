@@ -9,7 +9,7 @@ begin
     raise exception 'representative V3 test: retired tables remain';
   end if;
   if (select count(*) from node_textboxes)<>3
-     or (select count(*) from node_textbox_chats)<>2
+     or (select count(*) from node_textbox_chats)<>3
      or (select count(*) from node_textbox_seen_snapshots)<>1 then
     raise exception 'representative V3 test: Node textbox row counts changed';
   end if;
@@ -20,6 +20,18 @@ begin
       and mentioned_user_ids=array['20000000-0000-0000-0000-000000000002'::uuid]
   ) then
     raise exception 'representative V3 test: projection chat did not win over stale history';
+  end if;
+  if not exists (
+    select 1 from node_textbox_chats
+    where chat_id='41000000-0000-0000-0000-000000000004'
+      and author_user_id is null
+      and author_display_name='Former Fixture User'
+      and message='deleted author survives'
+      and entity_links='[]'::jsonb
+      and mentioned_user_ids='{}'::uuid[]
+      and mentioned_group_ids='{}'::uuid[]
+  ) then
+    raise exception 'representative V3 test: deleted chat author identity was not nulled';
   end if;
   if exists (
     select 1 from node_textbox_chats

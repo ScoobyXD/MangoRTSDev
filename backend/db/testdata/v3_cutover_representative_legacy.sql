@@ -41,6 +41,8 @@ insert into node_projection_table(company_id,node_id,information_id,type,informa
  '{"block_id":"40000000-0000-0000-0000-000000000099","author_id":"20000000-0000-0000-0000-000000000001","author_name":"Fixture Owner","message":"orphan textbox chat"}',false,1,now(),now()),
 ('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','41000000-0000-0000-0000-000000000003','Text block chat',
  '{"block_id":"40000000-0000-0000-0000-000000000001","parent_id":"41000000-0000-0000-0000-000000000099","author_id":"20000000-0000-0000-0000-000000000001","author_name":"Fixture Owner","message":"reply with missing parent"}',false,1,now(),now()),
+('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','41000000-0000-0000-0000-000000000004','Text block chat',
+ '{"block_id":"40000000-0000-0000-0000-000000000001","author_id":"20000000-0000-0000-0000-000000000099","author_name":"Former Fixture User","message":"deleted author survives","entity_links":null,"mentioned_user_ids":null,"mentioned_group_ids":null}',false,1,now(),now()),
 ('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','71000000-0000-0000-0000-000000000001','Attached email',
  '{"message_id":"provider-message-1","thread_id":"provider-thread-1","email_thread_id":"50000000-0000-0000-0000-000000000001","subject":"fallback must not overwrite normalized","snippet":"stale duplicate"}',false,1,now(),now()),
 ('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000002','71000000-0000-0000-0000-000000000002','Attached email',
