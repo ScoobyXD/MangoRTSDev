@@ -187,3 +187,27 @@ func TestV3MigrationIsStrictAndHasRepresentativeLegacyFixture(t *testing.T) {
 		}
 	}
 }
+
+func TestV3CutoverPreflightIsReadOnlyAndCoversLaterBlockers(t *testing.T) {
+	raw, err := os.ReadFile("../../../frontend/scripts/v3-cutover-preflight.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := strings.ToLower(string(raw))
+	for _, required := range []string{
+		"begin isolation level repeatable read read only", "database_role_is_not_enforced_read_only",
+		"chat.host_textbox_missing", "chat.parent_missing_or_wrong_textbox",
+		"seen_snapshot.missing_textbox", "email.thread_provider_not_exactly_one",
+		"email.invalid_fallback_snapshot", "draft.unmapped_relationship_or_source",
+		"attachment.pending_attached_email_upload",
+	} {
+		if !strings.Contains(script, required) {
+			t.Errorf("V3 preflight missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"insert into", "update ", "delete from", "alter table", "drop table", "create table"} {
+		if strings.Contains(script, forbidden) {
+			t.Errorf("V3 preflight must not contain mutation statement %q", forbidden)
+		}
+	}
+}

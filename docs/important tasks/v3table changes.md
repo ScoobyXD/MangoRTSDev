@@ -730,3 +730,17 @@ email_drafts
 ```
 
 History, permissions, attachments, delivery jobs, audit/change tracking, and mailbox connection tables remain separate because they have different product responsibilities.
+
+
+## V3 cutover preflight and legacy-drift handling
+
+Before another cutover attempt, run `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts\run_v3_cutover_preflight.ps1`. The only input is the literal `mangorts_readonly` password, entered through a secure prompt. The script uses the fixed development connection metadata, verifies the role has no write privilege on `node_textboxes`, starts a repeatable-read read-only transaction, prints one JSON finding per category, and never changes a permanent table. Exit code 2 means blockers were found.
+
+Fresh-eyes evidence on 2026-08-02 established these identity and visibility rules:
+
+- For a Text block chat, `information_id` is the chat ID and payload `block_id` is the host textbox ID. Historical frontend creation passed the current textbox ID as `block_id`; V3 did not invent this identity relationship.
+- The old API returned only active projection rows, but the old UI rendered chat panes only for surviving textbox IDs. A hostless chat could therefore remain active in storage while being invisible in the Node UI.
+- Textbox deletion gathered the chats visible in the browser and deleted them through separate requests. It was not one database transaction, so interrupted or incomplete cleanup could leave hostless active chats.
+- Active hostless messages are user content. They must not be deleted, assigned to a guessed current textbox, or made valid with an empty fake textbox. Review their content and choose a real surviving textbox or an explicit archival/removal policy.
+- A missing reply parent does not justify deleting the child. If the parent cannot be recovered, a guarded human-reviewed repair may clear only the child's parent link while preserving the child message.
+- Seen snapshots are derived per-user baselines, not permanent textbox bodies. Orphan seen rows are not visible without a permanent textbox, but the strict migration currently reports them and requires an explicit reviewed cleanup.
