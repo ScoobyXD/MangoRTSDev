@@ -96,6 +96,27 @@ func TestEditorTextboxBodyCompactsTiptapDefaultsWithoutLosingContent(t *testing.
 	}
 }
 
+func TestEditorTextboxBodyCompactionPreservesRequiredNodeEntityType(t *testing.T) {
+	document := editorMergeTestDocument(t,
+		`{"type":"paragraph","attrs":{"blockId":"project-block"},"content":[{"type":"mangoEntityLink","attrs":{"entityType":"node","entityId":"node-1","label":"Linked Node"}}]}`,
+	)
+
+	body, err := encodeEditorTextboxBody(document, []EditorJSONAnnotation{})
+	if err != nil {
+		t.Fatalf("encodeEditorTextboxBody rejected a valid node entity link: %v", err)
+	}
+	if !bytes.Contains(body, []byte(`"entityType":"node"`)) {
+		t.Fatalf("stored body lost required node entity type: %s", body)
+	}
+	decoded, _, err := decodeEditorTextboxBody(body)
+	if err != nil {
+		t.Fatalf("decodeEditorTextboxBody rejected the compacted node entity link: %v", err)
+	}
+	if !bytes.Contains(decoded, []byte(`"entityType":"node"`)) {
+		t.Fatalf("decoded document lost required node entity type: %s", decoded)
+	}
+}
+
 func TestMergeMangoTiptapDocumentsTreatsOmittedDefaultsAsEquivalent(t *testing.T) {
 	expandedParagraph := `{"type":"paragraph","attrs":{"blockId":"a","textAlign":null,"indentLevel":0},"content":[{"type":"text","text":"same","marks":[{"type":"link","attrs":{"href":"https://example.test","target":"_blank","rel":"noopener noreferrer nofollow","class":null,"title":null}}]}]}`
 	compactParagraph := `{"type":"paragraph","attrs":{"blockId":"a"},"content":[{"type":"text","text":"same","marks":[{"type":"link","attrs":{"href":"https://example.test"}}]}]}`

@@ -87,6 +87,7 @@ import {
   type EditorTypingCaretBookmark,
 } from "./useEditorDocumentSurfaceHandlers";
 import { useEditorDocumentPersistence } from "./useEditorDocumentPersistence";
+import { durableEditorAttachmentInformationID } from "./editorAttachmentPreparation";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
@@ -2548,7 +2549,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         companyID,
         resourceType: linkedEntityKind,
         resourceID: linkedNodeID,
-        informationID: documentInformationID || undefined,
+        informationID: durableEditorAttachmentInformationID(documentInformationID),
         editorSurface: linkedEntityKind === "logic_gate" ? "logic_gate_editor" : "node_editor",
         onError: setError,
       }

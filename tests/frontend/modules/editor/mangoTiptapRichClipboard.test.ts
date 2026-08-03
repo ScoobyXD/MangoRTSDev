@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { JSDOM } from "jsdom";
+import {
+  durableEditorAttachmentInformationID,
+} from "../../../../frontend/src/modules/editor/editorAttachmentPreparation.js";
 
 import {
   createMangoTiptapExtensions,
@@ -235,4 +238,12 @@ test("one file can back the same inline image twice without losing the surroundi
     restore();
     dom.window.close();
   }
+});
+
+test("Logic Gate overview image paste omits its non-UUID document alias from the attachment request", () => {
+  assert.equal(durableEditorAttachmentInformationID("logic-gate-overview"), undefined);
+  assert.equal(
+    durableEditorAttachmentInformationID("019f6223-8848-7101-b388-7a330e4636c8"),
+    "019f6223-8848-7101-b388-7a330e4636c8",
+  );
 });

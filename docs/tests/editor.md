@@ -6,7 +6,7 @@ A user types, formats text, inserts blank lines or hard breaks, or adds an attac
 ↓
 When the normal quiet-period or explicit save captures Tiptap JSON, Mango removes only node and mark attributes whose values exactly equal defaults declared by the active ProseMirror schema
 ↓
-Stable block IDs, text, intentional empty paragraphs, hard breaks, custom formatting, links, attachment IDs, filenames, MIME types, intrinsic/display dimensions, alt/title text, and every nondefault layout value remain in the one captured document
+Stable block IDs, text, intentional empty paragraphs, hard breaks, custom formatting, links, attachment IDs, filenames, MIME types, intrinsic/display dimensions, alt/title text, and every nondefault layout value remain in the one captured document. A `mangoEntityLink` always retains its required entity type, ID, and label, including when the type is `node` and matches the frontend schema default
 ↓
 The same compact object is written to IndexedDB recovery storage and sent in the normal revisioned request; Mango does not stringify or reparse it for compaction
 ↓
@@ -15,6 +15,20 @@ The backend applies the matching known-default compaction before current/history
 When an active editor reopens the document, ProseMirror restores omitted defaults from its schema. When a sleeping editor paints the document directly, its renderer applies the same visible defaults
 ↓
 Older verbose documents remain readable and compatible, while new reads and saves stop repeating null, zero, empty-string, left-alignment, break-position, and content-layout defaults
+
+## Process Story: Logic Gate overview image paste keeps durable attachment identity
+
+A user opens a Logic Gate overview and pastes an image
+↓
+Mango owns the paste, prepares the Logic Gate attachment resource, and uploads or links the image before inserting editor content
+↓
+When the selected text box has a real UUID information ID, Mango includes that ID so the attachment keeps its text-box provenance
+↓
+When an empty Logic Gate uses the special `logic-gate-overview` document alias, Mango omits that alias from UUID-only attachment metadata while retaining the Logic Gate resource type and ID
+↓
+The attachment API performs its normal resource edit authorization and creates the durable resource link
+↓
+Only a `mangoAttachmentImage` node with a non-empty attachment ID enters the JSON document; temporary `blob:` URLs, `data:` URLs, remote source URLs, signed URLs, and image bytes never persist
 
 ## Process Story: the editor has one permanent JSON storage path
 
@@ -148,7 +162,7 @@ After a successful commit, the realtime sender reads the outbox row and sends ot
 ↓
 Another browser downloads the newest complete JSON document only when it has no unsaved local work. If it does have unsaved work, the notice does not overwrite that work; a later revision mismatch uses Mango's existing conflict flow
 
-Last updated: 2026-07-31
+Last updated: 2026-08-02
 
 # Unified Editor Tests
 
@@ -157,11 +171,18 @@ Coverage Status:
 - The opt-in dev trace is covered by `editorTrace.test.ts`, `requestJSON.test.ts`, and `mangoTiptapFoundation.test.ts`; they verify raw event ordering, span completion, content exclusion, default-off behavior, request-boundary timing, quiet-timer behavior, IndexedDB work, save acknowledgement, and downloadable-export data integrity.
 - The July 31 annotation/React feedback-loop regression is covered by `mangoTiptapFoundation.test.ts`, `mangoTiptapEditorIntegration.test.tsx`, and `editorOpenPerformanceContract.test.ts`. The tests prove that a new but content-identical annotation array dispatches zero ProseMirror transactions, a real annotation change dispatches exactly once, one forced parent rerender settles within two editor commits, annotation-only work does not republish toolbar state, caret formatting still updates immediately, and Node row message arrays remain stable outside real message changes.
 - People-picker profile palette stability, fallback-key behavior, and minimum contrast are covered by `tests/frontend/modules/editor/editorMentions.test.ts`.
+- The August 2 Project compaction and Logic Gate image-paste regressions are covered by `postgres_editor_textboxes_test.go` and `mangoTiptapRichClipboard.test.ts`; they prove required Node entity-link identity survives compaction and the special Logic Gate overview alias is omitted from UUID-only attachment metadata while real UUID text-box identity remains.
 - Business Logic Covered By Scenarios: 100%
 - Business Logic Covered By Automated Tests: Partial overall. `editorTextboxSync.test.ts`, `realtimeWebSocket.test.ts`, backend sync/store/HTTP/cross-instance tests, and `unifiedRichEditorContract.test.ts` cover bounded HTML patches, deterministic disjoint-edit convergence, durable pending storage/recovery, exact subscription recovery/health, metadata isolation, and mounted Node/Logic Gate/Project adapters. `editorRowVirtualization.test.ts` covers window arithmetic, monotonic window movement, bottom reachability, fast-jump bounds, spacer geometry, and stable spacer identities across successive and pinned-row windows; `editorRowVirtualizationReact.test.tsx` renders the real Node and Project hosts to cover loaded-empty then late/incremental projections, zero-email and attached-email Node defaults, manual pane closure retention, correct editor/chat association, monotonic scrolling to the last row, handled target non-replay, mounted-row bounds, edited-row sync flush, unmount/remount preservation, exact single-message linked-email Show/Hide behavior, text-box-header navigation back to the exact message in the left thread column, rich-email chat-selection highlights, and unchanged Project defaults. `editorTextBlockChatNavigation.test.tsx` covers one explicit chat-to-source request scrolling exactly once, duplicate rerenders preserving the user's later scroll position, and a later request ID allowing one new navigation. `unifiedRichEditorContract.test.ts` records the matching parent-consumption and legacy/JSON acknowledgement wiring. Rich-editor DOM suites cover toolbar, bounded attachment hydration, formatting, and host behavior. The dedicated production-path realtime runner and browser-driven workflow coverage were removed from CI on 2026-07-28. Focused frontend, backend, and infrastructure suites remain; visible multi-user editor workflows require manual acceptance until replacement automation is added.
 - ED88 selected-text chat cancellation is covered by unifiedRichEditorContract.test.ts, including both the quote X and whole-chat close paths.
 
 ## Business Logic
+
+### 2026-08-02 Project Entity Links And Logic Gate Image Paste
+
+- `mangoEntityLink.entityType`, `entityId`, and `label` are required identity, not cosmetic defaults. Backend compaction may remove optional defaults, but it must preserve all three fields even when `entityType` is `node`.
+- Attachment `information_id` is UUID-only. A real Node or Logic Gate text-box UUID remains on its attachment link for provenance, but special editor document aliases such as `logic-gate-overview` must be omitted rather than sent to the upload API.
+- Omitting a non-UUID document alias does not weaken access or image validation. The upload remains scoped and authorized by company, resource type, and resource ID, and durable editor JSON still requires a non-empty attachment ID and rejects transient or unsafe URLs.
 
 ### 2026-07-30 Async Tiptap Paste Target Guard
 
