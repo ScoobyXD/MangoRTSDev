@@ -276,6 +276,52 @@ test("schema-default compaction shortens the reported Node Text Box JSON and rou
   }
 });
 
+test("legacy Project JSON repairs repeated block IDs and keeps required Node link identity when compacted", () => {
+  const normalized = normalizeMangoTiptapBlockIDs({
+    type: "doc",
+    content: [{
+      type: "paragraph",
+      attrs: { blockId: "repeated-project-block" },
+      content: [{
+        type: "mangoEntityLink",
+        attrs: { entityType: "node", entityId: "node-1", label: "Temp Admin Candidates" },
+      }],
+    }, {
+      type: "paragraph",
+      attrs: { blockId: "repeated-project-block" },
+      content: [{ type: "text", text: "Project notes" }],
+    }],
+  });
+  const blockIDs = (normalized.content ?? []).map((node) => node.attrs?.blockId);
+  assert.equal(new Set(blockIDs).size, 2, "load normalization must repair the repeated legacy block ID");
+
+  const editor = new MangoTiptapEditorEngine({
+    extensions: createMangoTiptapExtensions({ editable: false }),
+    content: createEmptyMangoTiptapDocument().document,
+  });
+  try {
+    const expanded: MangoTiptapDocument = {
+      format: "mango-tiptap-json",
+      schema_version: 1,
+      document: editor.schema.nodeFromJSON(normalized).toJSON(),
+    };
+    const compact = compactMangoTiptapDocument(expanded, editor.schema);
+    const entityLink = compact.document.content?.[0]?.content?.[0];
+    assert.deepEqual(entityLink?.attrs, {
+      entityType: "node",
+      entityId: "node-1",
+      label: "Temp Admin Candidates",
+    });
+    assert.deepEqual(
+      editor.schema.nodeFromJSON(compact.document).toJSON(),
+      expanded.document,
+      "compaction must retain the complete durable document identity",
+    );
+  } finally {
+    editor.destroy();
+  }
+});
+
 test("block ID normalization preserves the first ID and repairs missing or repeated IDs", () => {
   const source: MangoTiptapDocument["document"] = {
     type: "doc",

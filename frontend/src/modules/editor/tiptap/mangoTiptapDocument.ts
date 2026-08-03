@@ -58,6 +58,23 @@ export function parseMangoTiptapDocument(serialized: string): MangoTiptapValidat
 
 type MangoTiptapAttributeSpecs = Record<string, { default?: unknown }> | undefined;
 
+const mangoTiptapRequiredNodeAttributes: Readonly<Record<string, ReadonlySet<string>>> = {
+  paragraph: new Set(["blockId"]),
+  heading: new Set(["blockId"]),
+  blockquote: new Set(["blockId"]),
+  codeBlock: new Set(["blockId"]),
+  horizontalRule: new Set(["blockId"]),
+  bulletList: new Set(["blockId"]),
+  orderedList: new Set(["blockId"]),
+  listItem: new Set(["blockId"]),
+  taskList: new Set(["blockId"]),
+  taskItem: new Set(["blockId"]),
+  table: new Set(["blockId"]),
+  mention: new Set(["userId", "label"]),
+  mangoEntityLink: new Set(["entityType", "entityId", "label"]),
+  mangoAttachmentImage: new Set(["attachmentId"]),
+};
+
 function mangoTiptapJSONValuesEqual(left: unknown, right: unknown): boolean {
   if (Object.is(left, right)) return true;
   if (Array.isArray(left) || Array.isArray(right)) {
@@ -76,12 +93,18 @@ function mangoTiptapJSONValuesEqual(left: unknown, right: unknown): boolean {
 function compactMangoTiptapAttributes(
   attributes: Record<string, unknown> | undefined,
   specs: MangoTiptapAttributeSpecs,
+  requiredAttributes?: ReadonlySet<string>,
 ): Record<string, unknown> | undefined {
   if (!attributes) return undefined;
   const compact: Record<string, unknown> = {};
   Object.entries(attributes).forEach(([name, value]) => {
     const spec = specs?.[name];
-    if (spec && Object.prototype.hasOwnProperty.call(spec, "default") && mangoTiptapJSONValuesEqual(value, spec.default)) return;
+    if (
+      !requiredAttributes?.has(name)
+      && spec
+      && Object.prototype.hasOwnProperty.call(spec, "default")
+      && mangoTiptapJSONValuesEqual(value, spec.default)
+    ) return;
     compact[name] = value;
   });
   return Object.keys(compact).length > 0 ? compact : undefined;
@@ -89,7 +112,11 @@ function compactMangoTiptapAttributes(
 
 function compactMangoTiptapJSONContent(value: JSONContent, schema: Schema): JSONContent {
   const compact: JSONContent = { ...value };
-  const attributes = compactMangoTiptapAttributes(value.attrs, value.type ? schema.nodes[value.type]?.spec.attrs : undefined);
+  const attributes = compactMangoTiptapAttributes(
+    value.attrs,
+    value.type ? schema.nodes[value.type]?.spec.attrs : undefined,
+    value.type ? mangoTiptapRequiredNodeAttributes[value.type] : undefined,
+  );
   if (attributes) compact.attrs = attributes;
   else delete compact.attrs;
   if (value.content) compact.content = value.content.map((child) => compactMangoTiptapJSONContent(child, schema));
@@ -106,8 +133,8 @@ function compactMangoTiptapJSONContent(value: JSONContent, schema: Schema): JSON
 }
 
 /**
- * Removes only attributes equal to defaults declared by the active editor
- * schema. ProseMirror restores those defaults when the JSON is reopened.
+ * Removes optional attributes equal to defaults declared by the active editor
+ * schema. Required durable identity always remains explicit in saved JSON.
  */
 export function compactMangoTiptapDocument(value: MangoTiptapDocument, schema: Schema): MangoTiptapDocument {
   const result = validateMangoTiptapDocument(value);
