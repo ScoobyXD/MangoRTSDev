@@ -1,3 +1,13 @@
+# Process Story: Node textbox chats follow their textbox
+
+A user creates a chat inside a Node textbox, optionally quoting selected textbox text or an attached email
+↓
+The backend stores the chat in `node_textbox_chats` and stores any file relationship in existing `resource_attachments`
+↓
+Deleting the textbox deletes every chat owned by that textbox, including email-selection chats, and removes their attachment relationships
+↓
+The normalized email message, thread, and email attachment content remain available because the textbox never owns the email itself
+
 Last updated: 2026-07-22
 
 # Nodes Tests
@@ -700,6 +710,8 @@ N128 - The durable email tables store immutable HTML/body and message envelope m
 N129 - The Node email column renders the selected stored message immediately with an explicit thread-download status. While the durable job runs, successfully downloaded messages/files may appear without blanking the conversation. Partial/retry/failed states remain readable and expose a retryable status; successful completion means complete as of that user-initiated download, not permanently synchronized with the provider.
 N130 - Every stored-email and attachment read authorizes the company, Node, and exact Node/thread or Node/attachment link before returning data. Removing/revoking the source mailbox does not erase the imported snapshot. Provider grants, raw errors, signed object URLs, bodies, recipient data, attachment bytes, and secrets must not be logged or copied into editable Node JSON, realtime hints, or job errors.
 
+N131 - `node_textbox_chats` is the authority for current Node textbox comments after cutover. Deleting a textbox deletes all chats owned by it, including chats with an email selection, and tombstones their chat-attachment links; the normalized email message/thread and email attachments remain. Legacy `Text block chat` rows remain rollback evidence but are excluded from runtime reads and receive no new writes.
+
 ### Scenario N-S23: Email, Editor, And Chat Column Correction
 
 Business logic covered:
@@ -768,3 +780,19 @@ Expected:
 - Bob's import matches company, exact mailbox scope, Nylas thread ID, and Nylas message ID; it appends the new message once and reuses the existing Node-wide source.
 - The selected new message displays immediately, while only its missing content/files run through durable retryable work. Old messages and attachments are not downloaded again.
 - After commit, Joe sees the new Mango-stored card and attachments through Node authorization without obtaining Bob's provider access.
+
+### Scenario N-S26: Deleting a Textbox Removes Its Chats but Keeps Email
+
+Business logic covered:
+- N131
+
+Given:
+- A Node textbox has an ordinary chat, an email-selection chat, and a chat attachment; the selected email is stored in the normalized email tables.
+
+When:
+- An authorized user deletes that textbox.
+
+Expected:
+- Both chats and any reply descendants are removed from `node_textbox_chats`.
+- Their active `node_chat_message` attachment links are tombstoned without deleting the underlying attachment content.
+- The normalized email message, thread, and email attachments remain, and the deleted textbox's chats no longer appear in Node reads.

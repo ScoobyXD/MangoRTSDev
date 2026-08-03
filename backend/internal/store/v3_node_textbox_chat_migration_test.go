@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -49,6 +50,8 @@ func TestV3NodeTextboxChatPhaseIsAdditiveAndOperatorGated(t *testing.T) {
 			"primary key (company_id, chat_id)",
 			"references node_textboxes(company_id, node_id, textbox_id) on delete cascade",
 			"references users(user_id) on delete set null",
+			"edited_timestamp timestamptz",
+			"selection_source = 'email' and selection_email_message_id is not null",
 		} {
 			if !strings.Contains(sqlText, required) && !(name == "canonical schema" && strings.Contains(sqlText, strings.Replace(required, "create table ", "create table if not exists ", 1))) {
 				t.Errorf("%s is missing %q", name, required)
@@ -86,6 +89,8 @@ func TestV3NodeTextboxChatPhaseIsAdditiveAndOperatorGated(t *testing.T) {
 	}
 	for _, required := range []string{
 		"insert into node_textbox_chats",
+		"insert into resource_attachments",
+		"'node_chat_message'",
 		"on conflict (company_id, chat_id) do nothing",
 		"insert into v3_migration_items",
 		"set local lock_timeout = '5s'",
@@ -166,6 +171,7 @@ create table users(user_id uuid primary key);
 create table nodes(company_id uuid not null, node_id uuid not null, primary key(company_id,node_id));
 create table node_textboxes(
   company_id uuid not null, node_id uuid not null, textbox_id uuid not null,
+  deleted_timestamp timestamptz,
   primary key(company_id,node_id,textbox_id)
 );
 create table node_projection_table(
@@ -179,6 +185,19 @@ create table communications_email_messages(
   company_id uuid not null, email_message_id uuid not null, email_thread_id uuid not null,
   provider_message_id text not null,
   primary key(company_id,email_message_id)
+);
+create table attachments(
+  company_id uuid not null, attachment_id uuid not null,
+  original_filename text not null, mime_type text not null, byte_size bigint not null,
+  deleted_timestamp timestamptz,
+  primary key(company_id,attachment_id)
+);
+create table resource_attachments(
+  resource_attachment_id uuid primary key, company_id uuid not null,
+  resource_type text not null, resource_id text not null, attachment_id uuid not null,
+  information_id uuid, message_id text not null default '', editor_surface text not null default '',
+  relationship_kind text not null, created_by_user_id uuid,
+  created_timestamp timestamptz not null default now(), deleted_timestamp timestamptz
 );`
 	if _, err := db.Exec(fixtureSchema); err != nil {
 		t.Fatal(err)
@@ -200,6 +219,7 @@ create table communications_email_messages(
 	conflictChatID := newUUIDv7String()
 	emailMessageID := newUUIDv7String()
 	emailThreadID := newUUIDv7String()
+	attachmentID := newUUIDv7String()
 
 	setup := []struct {
 		query string
@@ -207,9 +227,12 @@ create table communications_email_messages(
 	}{
 		{`insert into users(user_id) values($1::uuid)`, []any{authorID}},
 		{`insert into nodes(company_id,node_id) values($1::uuid,$2::uuid)`, []any{companyID, nodeID}},
+		{`insert into node_textboxes(company_id,node_id,textbox_id,deleted_timestamp) values($1::uuid,$2::uuid,$3::uuid,now())`, []any{companyID, nodeID, missingTextboxID}},
 		{`insert into node_textboxes(company_id,node_id,textbox_id) values($1::uuid,$2::uuid,$3::uuid)`, []any{companyID, nodeID, textboxID}},
 		{`insert into communications_email_messages(company_id,email_message_id,email_thread_id,provider_message_id)
 values($1::uuid,$2::uuid,$3::uuid,'provider-message-1')`, []any{companyID, emailMessageID, emailThreadID}},
+		{`insert into attachments(company_id,attachment_id,original_filename,mime_type,byte_size)
+values($1::uuid,$2::uuid,'evidence.txt','text/plain',8)`, []any{companyID, attachmentID}},
 	}
 	for _, statement := range setup {
 		if _, err := db.Exec(statement.query, statement.args...); err != nil {
@@ -221,10 +244,12 @@ values($1::uuid,$2::uuid,$3::uuid,'provider-message-1')`, []any{companyID, email
 		t.Helper()
 		payload := map[string]any{
 			"block_id": blockID, "parent_id": parentID, "selection_source": selectionSource,
-			"selection_block_id": "", "selection_message_id": selectionMessageID,
+			"selection_block_id": blockID, "selection_message_id": selectionMessageID,
 			"selection_quote": "selected", "selection_start": 0, "selection_end": 3,
 			"author_id": authorID, "author_name": "Captured author", "message": message,
-			"entity_links": []any{}, "mentioned_user_ids": []any{}, "mentioned_group_ids": []any{},
+			"edited_timestamp": "2099-01-01T00:00:00Z",
+			"attachments":      []any{map[string]any{"id": attachmentID, "attachment_id": attachmentID, "name": "evidence.txt", "type": "text/plain", "size": 8}},
+			"entity_links":     []any{}, "mentioned_user_ids": []any{}, "mentioned_group_ids": []any{},
 		}
 		raw, err := json.Marshal(payload)
 		if err != nil {
@@ -284,6 +309,9 @@ where company_id=$1::uuid and node_id=$2::uuid and information_id=$3::uuid`,
 	var parentID sql.NullString
 	var copiedAuthor sql.NullString
 	var mappedEmail sql.NullString
+	var mappedSelectionTextbox sql.NullString
+	var copiedAttachmentLinks int
+	var copiedEditedTimestamp sql.NullTime
 	if err := db.QueryRow(`select parent_chat_id::text, author_user_id::text
 from node_textbox_chats where company_id=$1::uuid and chat_id=$2::uuid`, companyID, replyChatID).
 		Scan(&parentID, &copiedAuthor); err != nil {
@@ -292,13 +320,27 @@ from node_textbox_chats where company_id=$1::uuid and chat_id=$2::uuid`, company
 	if !parentID.Valid || parentID.String != rootChatID || copiedAuthor.Valid {
 		t.Fatalf("reply parent=%v author=%v, want preserved parent and null deleted author", parentID, copiedAuthor)
 	}
-	if err := db.QueryRow(`select selection_email_message_id::text
+	if err := db.QueryRow(`select selection_email_message_id::text, selection_textbox_id::text
 from node_textbox_chats where company_id=$1::uuid and chat_id=$2::uuid`, companyID, emailChatID).
-		Scan(&mappedEmail); err != nil {
+		Scan(&mappedEmail, &mappedSelectionTextbox); err != nil {
 		t.Fatal(err)
 	}
 	if !mappedEmail.Valid || mappedEmail.String != emailMessageID {
 		t.Fatalf("mapped email=%v, want %s", mappedEmail, emailMessageID)
+	}
+	if !mappedSelectionTextbox.Valid || mappedSelectionTextbox.String != textboxID {
+		t.Fatalf("mapped email selection textbox=%v, want %s", mappedSelectionTextbox, textboxID)
+	}
+	if err := db.QueryRow(`select
+  (select count(*) from resource_attachments
+   where company_id=$1::uuid and resource_type='node_chat_message' and resource_id=$2
+     and attachment_id=$3::uuid and relationship_kind='chat_attachment' and deleted_timestamp is null),
+  (select edited_timestamp from node_textbox_chats where company_id=$1::uuid and chat_id=$2::uuid)`,
+		companyID, rootChatID, attachmentID).Scan(&copiedAttachmentLinks, &copiedEditedTimestamp); err != nil {
+		t.Fatal(err)
+	}
+	if copiedAttachmentLinks != 1 || !copiedEditedTimestamp.Valid {
+		t.Fatalf("copied attachment links=%d edited=%v, want preserved payload fields", copiedAttachmentLinks, copiedEditedTimestamp)
 	}
 	if err := db.QueryRow(`select parent_chat_id::text
 from node_textbox_chats where company_id=$1::uuid and chat_id=$2::uuid`, companyID, missingParentChatID).
@@ -342,5 +384,73 @@ from v3_migration_items where run_id=(select run_id from latest)`).
 	}
 	if alreadyCopied != 4 || discarded != 1 || needsReview != 3 {
 		t.Fatalf("rerun dispositions already=%d discarded=%d review=%d", alreadyCopied, discarded, needsReview)
+	}
+	runtimeChatID := newUUIDv7String()
+	runtimeInput := NodeInformationInput{
+		CompanyID: companyID, NodeID: nodeID, InformationID: runtimeChatID,
+		Type:        CommunicationsEmailCollaborationChatInformationType,
+		Information: chatPayload(textboxID, "", "email", "provider-message-1", authorID, "Runtime write"),
+	}
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection, existed, err := upsertPostgresNodeTextboxChatTx(context.Background(), tx, runtimeInput, runtimeChatID)
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("runtime chat insert: %v", err)
+	}
+	if existed {
+		_ = tx.Rollback()
+		t.Fatal("runtime chat unexpectedly existed")
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(projection.Information, "provider-message-1") || !strings.Contains(projection.Information, attachmentID) {
+		t.Fatalf("runtime projection did not rebuild the frontend payload: %s", projection.Information)
+	}
+	listed, err := listPostgresNodeTextboxChatProjections(context.Background(), db, companyID, nodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundRuntime := false
+	for _, item := range listed {
+		foundRuntime = foundRuntime || item.InformationID == runtimeChatID
+	}
+	if !foundRuntime {
+		t.Fatal("runtime chat was not returned by the permanent-table reader")
+	}
+	var legacyRuntimeRows int
+	if err := db.QueryRow(`select count(*) from node_projection_table where information_id=$1::uuid`, runtimeChatID).Scan(&legacyRuntimeRows); err != nil {
+		t.Fatal(err)
+	}
+	if legacyRuntimeRows != 0 {
+		t.Fatalf("runtime chat also wrote %d legacy projection rows", legacyRuntimeRows)
+	}
+	tx, err = db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, deleted, err := deletePostgresNodeTextboxChatTx(context.Background(), tx, NodeProjectionDeleteInput{
+		CompanyID: companyID, NodeID: nodeID, InformationID: runtimeChatID,
+	})
+	if err != nil || !deleted {
+		_ = tx.Rollback()
+		t.Fatalf("runtime chat delete deleted=%v err=%v", deleted, err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	var remainingChatRows, remainingEmailRows, remainingAttachmentLinks int
+	if err := db.QueryRow(`select
+  (select count(*) from node_textbox_chats where chat_id=$1::uuid),
+  (select count(*) from communications_email_messages where email_message_id=$2::uuid),
+  (select count(*) from resource_attachments where resource_type='node_chat_message' and resource_id=($1::uuid)::text and deleted_timestamp is null)`,
+		runtimeChatID, emailMessageID).Scan(&remainingChatRows, &remainingEmailRows, &remainingAttachmentLinks); err != nil {
+		t.Fatal(err)
+	}
+	if remainingChatRows != 0 || remainingEmailRows != 1 || remainingAttachmentLinks != 0 {
+		t.Fatalf("chat/email/attachment-link delete result=%d/%d/%d, want 0/1/0", remainingChatRows, remainingEmailRows, remainingAttachmentLinks)
 	}
 }

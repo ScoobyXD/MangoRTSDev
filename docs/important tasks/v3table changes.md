@@ -33,14 +33,16 @@ Every attempt to run `20260802_zz_v3_database_table_cutover.sql` was rolled back
 
 Do not assume the development database is identical to either the original pre-V3 fixture or the rolled-back repository schema. Reinventory it with read-only queries before designing the replacement.
 
-## Current implementation: additive Node chat baby phase
+## Current implementation: scoped Node chat copy and backend cutover
 
-The repository now contains one deliberately small first phase. It has not been applied to a live database, it does not switch application reads or writes, and it does not delete or update any legacy row.
+The repository now contains one deliberately small Node-chat cutover. It has not been applied to a live database. Step 2 does not delete or update legacy rows; after the operator completes Step 2, the backend is ready to switch Node chat reads and writes to `node_textbox_chats`.
 
 Jonat's manual operation is intentionally reduced to two copy-paste SQL files:
 
 1. `scripts/v3_node_textbox_chats_step1_count.sql` runs in a repeatable-read, read-only transaction. It reports the current legacy chat count, exact `chats_to_copy`, missing-textbox rows, review rows, exception identities without message bodies, and the physical storage breakdown.
 2. `scripts/v3_node_textbox_chats_step2_create_copy_verify.sql` is the one-time writer-paused operation. One outer transaction creates the new table and migration controls, copies the current chats, reconciles them, verifies the final count, and commits. Any review row or mismatch rolls the whole operation back.
+3. The backend cutover reads, creates, edits, and deletes Node chats through `node_textbox_chats`, while preserving the existing API/frontend payload shape and excluding legacy chat projections.
+4. Deleting a textbox deletes all of its chats and chat-attachment links, including email-selection chats. The normalized email message, thread, and email attachments remain.
 
 The component files below remain because automated tests exercise expansion, copy, and reconciliation separately. Operators should use the two step files above rather than assembling the components by hand.
 
@@ -52,17 +54,17 @@ The component files below remain because automated tests exercise expansion, cop
 
 The current source rule is exact:
 
-- `node_projection_table` is the current UI authority for `Text block chat` rows. The application lists active projection rows and the frontend filters and parses this type.
+- Before the live cutover, `node_projection_table` is the legacy UI authority for `Text block chat` rows. After Step 2 and backend deployment, `node_textbox_chats` is the authority.
 - The projection `information_id` is the permanent `chat_id`.
 - JSON payload `block_id` is the owning permanent `textbox_id`.
 - `node_information` is event/history storage. It is not the set to copy merely because it contains rows whose type is `Text block chat`.
-- The copy is only a snapshot. While the old application remains live, later chats continue to land in the legacy tables and appear as `ready_to_copy` on the next run. A final delta still requires paused writers before application cutover.
+- Step 2 is the final snapshot and must run with Node chat writers paused. Deploy the backend cutover only after Step 2 commits, smoke-test it, and then resume writers.
 
 The 3.3 GB label shown for `node_information` is a physical relation-size measurement, not a live-row count. PostgreSQL relation size can include the main heap, indexes, out-of-line TOAST values, and space still occupied by old/dead row versions. Six hundred fifty live rows can therefore coexist with a multi-gigabyte relation. Use the inspection script to see each component and `pg_stat_user_tables.n_live_tup`/`n_dead_tup`; do not run `VACUUM FULL`, `CLUSTER`, or another table rewrite as part of this data-copy phase. Ordinary database maintenance is a separate operator decision after the actual size cause is measured.
 
 Rows with valid data and a surviving permanent host are copied. A deleted user leaves a null `author_user_id` but retains the captured author name and message. A missing same-textbox parent detaches the reply. A missing host is recorded as `discarded_deleted_host` without deleting the source. Invalid JSON, invalid identities, ambiguous email selections, duplicate company chat IDs, and target conflicts are recorded as `needs_human_mapping` and left untouched.
 
-This scoped phase does not authorize a full V3 cutover. The application must remain on legacy chat reads/writes until a later maintenance-window release has a zero-review final delta, reconciliation, rollback plan, and runtime cutover.
+This scoped phase authorizes only the Node textbox chat cutover. It does not authorize the remaining V3 table changes or any legacy-table retirement.
 
 ## What happened during the failed attempt
 
@@ -185,6 +187,7 @@ selection_end              integer
 author_user_id             uuid
 author_display_name        text        not null default ''
 message                    text        not null default ''
+edited_timestamp            timestamptz
 entity_links               jsonb       not null default '[]'::jsonb
 mentioned_user_ids         uuid[]      not null default '{}'::uuid[]
 mentioned_group_ids        uuid[]      not null default '{}'::uuid[]
@@ -202,11 +205,11 @@ Required keys and rules:
 - A parent chat must belong to the same company, Node, and textbox.
 - `selection_source` is `text` or `email`.
 - Text selections may use `selection_textbox_id`.
-- Email selections may use `selection_email_message_id`.
+- Email selections require `selection_email_message_id` and may also retain `selection_textbox_id` when the selected email was shown in that textbox.
 - Selection offsets must both be null or satisfy `0 <= selection_start <= selection_end`.
 - `entity_links` is a JSON array containing the existing `{start, end, entity_type, entity_id, label}` shape.
 - `revision > 0`.
-- Attachment-only comments remain legal, so the database must not require nonblank `message` without considering attachments.
+- Attachment-only comments remain legal. Attachment content stays in `attachments`, the chat relationship stays in `resource_attachments`, and the backend requires either message text or at least one valid attachment relationship.
 - Preserve the old projection `information_id` as `chat_id` during backfill.
 
 Chat attachments remain in `resource_attachments`:

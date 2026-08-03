@@ -33,6 +33,7 @@ create table node_textbox_chats (
   author_user_id uuid,
   author_display_name text not null default '',
   message text not null default '',
+  edited_timestamp timestamptz,
   entity_links jsonb not null default '[]'::jsonb,
   mentioned_user_ids uuid[] not null default '{}'::uuid[],
   mentioned_group_ids uuid[] not null default '{}'::uuid[],
@@ -51,7 +52,7 @@ create table node_textbox_chats (
     check (selection_source in ('text', 'email')),
   constraint node_textbox_chats_selection_target_chk check (
     (selection_source = 'text' and selection_email_message_id is null)
-    or (selection_source = 'email' and selection_textbox_id is null)
+    or (selection_source = 'email' and selection_email_message_id is not null)
   ),
   constraint node_textbox_chats_selection_offsets_chk check (
     (selection_start is null and selection_end is null)
@@ -62,6 +63,7 @@ create table node_textbox_chats (
   constraint node_textbox_chats_revision_chk check (revision > 0),
   constraint node_textbox_chats_timestamps_chk check (
     updated_timestamp >= created_timestamp
+    and (edited_timestamp is null or edited_timestamp >= created_timestamp)
     and (deleted_timestamp is null or deleted_timestamp >= created_timestamp)
   )
 );
@@ -79,7 +81,7 @@ create index idx_node_textbox_chats_email_selection
   where selection_email_message_id is not null and deleted_timestamp is null;
 
 comment on table node_textbox_chats is
-  'Permanent Node textbox chat storage. Application cutover is a later V3 phase.';
+  'Permanent Node textbox chat storage created by operator Step 2 before backend cutover.';
 
 create table v3_migration_runs (
   run_id uuid primary key,
@@ -165,6 +167,18 @@ exception when invalid_text_representation or numeric_value_out_of_range then
   return null;
 end
 $$;
+create function v3_migration_try_timestamptz_v1(value text)
+returns timestamptz
+language plpgsql
+stable
+strict
+as $$
+begin
+  return value::timestamptz;
+exception when invalid_datetime_format or datetime_field_overflow then
+  return null;
+end
+$$;
 
 create function v3_migration_try_uuid_array_v1(value jsonb)
 returns uuid[]
@@ -181,6 +195,35 @@ begin
   select coalesce(array_agg(item::uuid order by ordinal), '{}'::uuid[])
     into result
     from jsonb_array_elements_text(value) with ordinality as items(item, ordinal);
+  return result;
+exception when invalid_text_representation then
+  return null;
+end
+$$;
+
+create function v3_migration_try_chat_attachment_ids_v1(value jsonb)
+returns uuid[]
+language plpgsql
+immutable
+strict
+as $$
+declare
+  result uuid[];
+begin
+  if jsonb_typeof(value) <> 'array' or exists (
+    select 1
+    from jsonb_array_elements(value) item
+    where jsonb_typeof(item) <> 'object'
+       or coalesce(nullif(btrim(item->>'attachment_id'), ''), nullif(btrim(item->>'attachmentID'), ''), nullif(btrim(item->>'id'), '')) is null
+  ) then
+    return null;
+  end if;
+  select coalesce(array_agg(distinct attachment_id order by attachment_id), '{}'::uuid[])
+    into result
+    from (
+      select coalesce(nullif(btrim(item->>'attachment_id'), ''), nullif(btrim(item->>'attachmentID'), ''), nullif(btrim(item->>'id'), ''))::uuid as attachment_id
+      from jsonb_array_elements(value) item
+    ) parsed;
   return result;
 exception when invalid_text_representation then
   return null;
@@ -221,6 +264,9 @@ with raw as (
     v3_migration_try_integer_v1(nullif(raw.payload->>'selection_start', '')) as selection_start,
     v3_migration_try_integer_v1(nullif(raw.payload->>'selection_end', '')) as selection_end,
     nullif(lower(btrim(raw.payload->>'author_id')), '') as author_user_id_text,
+    nullif(btrim(raw.payload->>'edited_timestamp'), '') as edited_timestamp_text,
+    v3_migration_try_timestamptz_v1(nullif(btrim(raw.payload->>'edited_timestamp'), '')) as parsed_edited_timestamp,
+    v3_migration_try_chat_attachment_ids_v1(raw.payload->'attachments') as parsed_attachment_ids,
     v3_migration_try_uuid_v1(nullif(lower(btrim(raw.payload->>'author_id')), '')) as parsed_author_user_id,
     v3_migration_try_uuid_array_v1(raw.payload->'mentioned_user_ids') as parsed_mentioned_user_ids,
     v3_migration_try_uuid_array_v1(raw.payload->'mentioned_group_ids') as parsed_mentioned_group_ids
@@ -247,10 +293,18 @@ with raw as (
     coalesce(source.payload->>'author_name', '') as author_display_name,
     coalesce(source.payload->>'message', source.payload->>'content', '') as message,
     coalesce(source.payload->>'selection_quote', '') as selection_quote,
-    case
-      when source.selection_source = 'text' then source.parsed_selection_textbox_id
-      else null
-    end as selection_textbox_id,
+    source.parsed_edited_timestamp as edited_timestamp,
+    coalesce(source.parsed_attachment_ids, '{}'::uuid[]) as attachment_ids,
+    (
+      select count(*)
+      from unnest(coalesce(source.parsed_attachment_ids, '{}'::uuid[])) wanted(attachment_id)
+      left join attachments attachment
+        on attachment.company_id=source.company_id
+       and attachment.attachment_id=wanted.attachment_id
+       and attachment.deleted_timestamp is null
+      where attachment.attachment_id is null
+    ) as attachment_missing_count,
+    source.parsed_selection_textbox_id as selection_textbox_id,
     case
       when source.selection_source = 'email' and source.email_message_match_count = 1
         then source.mapped_email_message_id
@@ -270,6 +324,7 @@ with raw as (
     on host.company_id = source.company_id
    and host.node_id = source.node_id
    and host.textbox_id = source.textbox_id
+   and host.deleted_timestamp is null
   left join users author
     on author.user_id = source.parsed_author_user_id
 ), classified as (
@@ -287,9 +342,6 @@ with raw as (
       case when normalized.selection_textbox_id_text is not null
              and normalized.parsed_selection_textbox_id is null
         then 'selection_textbox_id_invalid' end,
-      case when normalized.selection_source = 'email'
-             and normalized.selection_textbox_id_text is not null
-        then 'email_selection_has_textbox_id' end,
       case when normalized.selection_source = 'text'
              and normalized.selection_message_id_text is not null
         then 'text_selection_has_email_message_id' end,
@@ -313,6 +365,12 @@ with raw as (
         then 'selection_offsets_invalid' end,
       case when normalized.author_user_id_text is not null and normalized.parsed_author_user_id is null
         then 'author_id_invalid' end,
+      case when normalized.payload ? 'attachments'
+             and normalized.payload->'attachments' <> 'null'::jsonb
+             and normalized.parsed_attachment_ids is null
+        then 'attachment_references_invalid' end,
+      case when normalized.attachment_missing_count > 0
+        then 'attachment_record_missing' end,
       case when normalized.payload ? 'entity_links'
              and normalized.payload->'entity_links' <> 'null'::jsonb
              and jsonb_typeof(normalized.payload->'entity_links') <> 'array'
@@ -326,7 +384,11 @@ with raw as (
              and normalized.parsed_mentioned_group_ids is null
         then 'mentioned_group_ids_invalid' end,
       case when normalized.company_chat_id_count > 1 then 'duplicate_company_chat_id' end,
-      case when normalized.updated_timestamp < normalized.created_timestamp then 'timestamps_invalid' end
+      case when normalized.updated_timestamp < normalized.created_timestamp then 'timestamps_invalid' end,
+      case when normalized.edited_timestamp_text is not null and normalized.edited_timestamp is null
+        then 'edited_timestamp_invalid' end,
+      case when normalized.edited_timestamp is not null and normalized.edited_timestamp < normalized.created_timestamp
+        then 'edited_timestamp_before_created' end
     ], null)::text[] as issue_codes
   from normalized
 ), parent_mapping as (
@@ -365,6 +427,8 @@ with raw as (
       'message', source.message,
       'entity_links', source.entity_links,
       'mentioned_user_ids', source.mentioned_user_ids,
+      'edited_timestamp', source.edited_timestamp,
+      'attachment_ids', source.attachment_ids,
       'mentioned_group_ids', source.mentioned_group_ids,
       'revision', source.target_revision,
       'created_timestamp', source.created_timestamp,
@@ -391,6 +455,8 @@ with raw as (
       and target.message = source.message
       and target.entity_links = source.entity_links
       and target.mentioned_user_ids = source.mentioned_user_ids
+      and target.edited_timestamp is not distinct from source.edited_timestamp
+      and target_attachment.attachment_ids = source.attachment_ids
       and target.mentioned_group_ids = source.mentioned_group_ids
       and target.revision = source.target_revision
       and target.created_timestamp = source.created_timestamp
@@ -401,6 +467,15 @@ with raw as (
   left join node_textbox_chats target
     on target.company_id = source.company_id
    and target.chat_id = source.chat_id
+  left join lateral (
+    select coalesce(array_agg(distinct link.attachment_id order by link.attachment_id), '{}'::uuid[]) as attachment_ids
+    from resource_attachments link
+    where link.company_id=source.company_id
+      and link.resource_type='node_chat_message'
+      and link.resource_id=source.chat_id::text
+      and link.relationship_kind='chat_attachment'
+      and link.deleted_timestamp is null
+  ) target_attachment on true
 )
 select
   target_state.company_id,
@@ -421,6 +496,8 @@ select
   target_state.message,
   target_state.entity_links,
   target_state.mentioned_user_ids,
+  target_state.edited_timestamp,
+  target_state.attachment_ids,
   target_state.mentioned_group_ids,
   target_state.target_revision as revision,
   target_state.created_timestamp,
@@ -453,11 +530,10 @@ from target_state;
 comment on view v3_node_textbox_chat_source_v1 is
   'Versioned shared classifier for V3 Node textbox chat inventory, copy, and reconciliation.';
 
-
 -- Operator-gated V3 Node textbox chat snapshot copy.
 --
 -- Preconditions:
---   1. The expansion component earlier in this Step 2 script has run.
+--   1. The expansion component from the operator-controlled Step 2 has run.
 --   2. This is run by a human-approved database operator.
 --
 -- This script never updates or deletes a legacy row. It copies every safely
@@ -479,12 +555,14 @@ insert into v3_migration_runs(run_id, phase, mapping_version, mapping_checksum, 
 select
   run_id,
   'node_textbox_chats',
-  1,
+  2,
   md5(
     pg_get_viewdef('v3_node_textbox_chat_source_v1'::regclass, true)
     || pg_get_functiondef('v3_migration_try_jsonb_v1(text)'::regprocedure)
     || pg_get_functiondef('v3_migration_try_uuid_v1(text)'::regprocedure)
     || pg_get_functiondef('v3_migration_try_integer_v1(text)'::regprocedure)
+    || pg_get_functiondef('v3_migration_try_timestamptz_v1(text)'::regprocedure)
+    || pg_get_functiondef('v3_migration_try_chat_attachment_ids_v1(jsonb)'::regprocedure)
     || pg_get_functiondef('v3_migration_try_uuid_array_v1(jsonb)'::regprocedure)
   ),
   'running'
@@ -510,6 +588,7 @@ insert into node_textbox_chats(
   author_user_id,
   author_display_name,
   message,
+  edited_timestamp,
   entity_links,
   mentioned_user_ids,
   mentioned_group_ids,
@@ -533,6 +612,7 @@ select
   source.author_user_id,
   source.author_display_name,
   source.message,
+  source.edited_timestamp,
   source.entity_links,
   source.mentioned_user_ids,
   source.mentioned_group_ids,
@@ -544,6 +624,45 @@ from mangorts_v3_chat_copy_source source
 where source.migration_state = 'ready_to_copy'
 order by source.company_id, source.node_id, source.chat_id
 on conflict (company_id, chat_id) do nothing;
+insert into resource_attachments(
+  resource_attachment_id,
+  company_id,
+  resource_type,
+  resource_id,
+  attachment_id,
+  information_id,
+  message_id,
+  editor_surface,
+  relationship_kind,
+  created_by_user_id,
+  created_timestamp
+)
+select
+  gen_random_uuid(),
+  source.company_id,
+  'node_chat_message',
+  source.chat_id::text,
+  attachment_id,
+  source.textbox_id,
+  '',
+  'node_textbox_chat',
+  'chat_attachment',
+  source.author_user_id,
+  source.created_timestamp
+from mangorts_v3_chat_copy_source source
+cross join lateral unnest(source.attachment_ids) attachment(attachment_id)
+where source.migration_state = 'ready_to_copy'
+  and not exists (
+    select 1
+    from resource_attachments existing
+    where existing.company_id=source.company_id
+      and existing.resource_type='node_chat_message'
+      and existing.resource_id=source.chat_id::text
+      and existing.attachment_id=attachment.attachment_id
+      and existing.relationship_kind='chat_attachment'
+      and existing.deleted_timestamp is null
+  );
+
 
 -- Parents are linked only after all copyable rows exist. A missing, malformed,
 -- wrong-textbox, hostless, or otherwise uncopyable parent leaves the reply as a
@@ -641,7 +760,6 @@ set
   completed_timestamp = now()
 where run.run_id = (select run_id from mangorts_v3_current_chat_run);
 
--- The outer transaction commits only after final reconciliation.
 
 select
   run.run_id,
@@ -658,7 +776,7 @@ where run.run_id = (select run_id from mangorts_v3_current_chat_run);
 drop table mangorts_v3_current_chat_run;
 
 -- Read-only inventory and reconciliation for the additive V3 chat phase.
--- Requires the expansion component earlier in this Step 2 script.
+-- Requires the expansion component from the operator-controlled Step 2.
 
 
 select migration_state, migration_reason, count(*) as source_rows
@@ -702,7 +820,6 @@ select
 from v3_migration_runs
 where phase = 'node_textbox_chats'
 order by started_timestamp desc, run_id desc;
-
 
 -- The target must contain every copyable source exactly once. Missing-host
 -- rows are explicitly excluded; review rows block the whole operation.
