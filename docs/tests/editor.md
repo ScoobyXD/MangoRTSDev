@@ -1,48 +1,3 @@
-# Process Story: Comments survive a deleted author account
-
-A historical Node textbox comment points to a user account that was later deleted
-↓
-The V3 cutover keeps the comment, attachments, timestamps, and captured display name, but stores a null `author_user_id`
-↓
-The comment remains readable and the permanent foreign key matches its normal `ON DELETE SET NULL` behavior without inventing a user or dropping content
-
-Last updated: 2026-08-02
-
-
-# Process Story: V3 cutover starts without application writers
-
-An operator finishes the read-only V3 preflight and schedules a maintenance window
-↓
-The API, workers, and other database writers are stopped before the migration begins
-↓
-The migration acquires every required `ACCESS EXCLUSIVE` table lock with a bounded timeout before transforming any data
-↓
-If a writer still holds a lock, the migration fails before cutover work starts; after the writer is stopped, the operator reruns the complete transaction
-
-Last updated: 2026-08-02
-
-# Process Story: V3 removes data owned by deleted textboxes
-
-The cutover finds a legacy chat or seen marker whose exact permanent Node textbox no longer exists
-↓
-Because that data was owned by the deleted textbox and was already unreachable in the old editor, Mango omits it from the permanent V3 chat and seen tables and removes any chat attachment link
-↓
-If the textbox survives but a reply's same-textbox parent does not, Mango keeps the reply as a top-level comment instead of deleting the child or inventing a parent
-↓
-Email data follows its separate normalized-storage rule and is never discarded merely because a Node or textbox relationship disappeared
-
-Last updated: 2026-08-02
-
-# Process Story: Node Textboxes Have One Current Body Store
-
-A user creates, edits, reorders, or deletes a Node textbox.
-↓
-The frontend sends Mango TipTap JSON with the textbox UUID and no title metadata.
-↓
-The backend reads and writes `node_textboxes` only; comments use `node_textbox_chats`, seen baselines use `node_textbox_seen_snapshots`, and changes point to `textbox_id`.
-↓
-Realtime versions and Recycle Bin capture/restore follow those permanent tables, so no retired information/projection row can become current again.
-
 # Editor Process Map
 
 ## Process Story: compact JSON keeps the same editor document
@@ -69,7 +24,7 @@ Mango always uses the TipTap JSON API and the current owner-specific textbox tab
 ↓
 Each current row stores the owner and textbox IDs, the complete `body_json` envelope, `revision`, display order where applicable, and lifecycle timestamps. Node text boxes do not duplicate the document into legacy JSON, plain-text, checksum, migration, actor, or idempotency columns
 ↓
-Normal saves update the current textbox, manual history, change tracking, and realtime outbox. Node information/projection tables are retired; Project and Logic Gate projection tables remain for their separate product responsibilities
+Normal saves continue to write current history, operation, and realtime-outbox records. Information and projection tables remain available for their current read-model and compatibility responsibilities
 ↓
 The retirement migration drops the 21 Node V2, editor-cutover, and HTML-collaboration tables with strict statements. If an expected object is missing, migration stops and exposes schema drift instead of silently skipping it
 ↓
@@ -515,7 +470,7 @@ Business logic covered:
 
 Given:
 - A user opens a chat pane inside a node or project text block.
-- A related-email chat may show authors and mention history through the optional shared ChatPane header slot, but authorization still comes from normal resource permissions; there is no participant roster.
+- An email collaboration supplies its participant roster through the optional shared ChatPane header slot, while Node and Project callers omit it.
 
 Expected:
 - Chat remains a conversation composer.
@@ -1817,16 +1772,3 @@ Automated coverage:
 The Node v2 final gate retains disposable PostgreSQL store tests for owner-specific Project/Logic Gate JSON cutover routing, exact verification retention pins, a 1,002-comment reply-heavy thread, and ordered company purge. The former Chromium workflow harness was removed from CI on 2026-07-28; real React/Tiptap workflow acceptance is manual until replacement coverage is added.
 
 The separate PostgreSQL proof covers six isolated clients, offline replay, lost acknowledgement, delete-set durability, failed-write quarantine, compaction races, service restart, three-owner conversion, activation, stale rollback rejection, and restoration of post-cutover edits, creates, and deletes. All real gates remain inactive.
-
-
-## Process Story: V3 preflight reports all legacy drift before cutover
-
-An operator runs the V3 preflight and enters only the database-enforced read-only password
-↓
-The tool verifies that the role cannot insert, update, or delete `node_textboxes`, then opens a repeatable-read read-only transaction
-↓
-It inventories unsupported Node rows, missing textbox mappings, chat hosts and parents, seen snapshots, email provider and snapshot mappings, drafts, and attached-email upload identities in one run
-↓
-Each category prints its count and up to 25 stable IDs with non-content metadata; active chat message text is not printed
-↓
-Any blocker produces exit code 2, and the operator reviews a guarded remediation before rerunning the migration. The preflight never writes a live table.

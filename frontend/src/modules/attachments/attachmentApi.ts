@@ -20,7 +20,7 @@ export type MangoAttachmentResourceType =
   | "email_message"
   | "email_draft"
   | "email_signature"
-  | "email_relationship"
+  | "attached_email"
   | "shared_inbox"
   | "company_explorer_folder"
   | "shared_inbox_folder";
@@ -402,6 +402,10 @@ export function mangoEmailMessageResourceID(input: { messageID: string; userID?:
   const sharedInboxID = input.sharedInboxID?.trim() ?? "";
   if (sharedInboxID) return `shared:${encodeURIComponent(sharedInboxID)}:${encodeURIComponent(messageID)}`;
   return `personal:${encodeURIComponent(input.userID?.trim() ?? "")}:${encodeURIComponent(messageID)}`;
+}
+
+export function mangoAttachedEmailResourceID(input: { nodeID: string; messageID: string }): string {
+  return `node:${encodeURIComponent(input.nodeID.trim())}:message:${encodeURIComponent(input.messageID.trim())}`;
 }
 
 export async function fetchMangoAttachmentBlob(

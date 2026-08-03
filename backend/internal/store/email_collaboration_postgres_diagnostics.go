@@ -95,7 +95,8 @@ func IsEmailCollaborationStorageNotReady(err error) bool {
 		"23514": // check_violation against a drifted constraint
 		return true
 	case "22P02":
-		return false
+		stage := EmailCollaborationEnsureErrorStage(err)
+		return stage == "insert_attached_email_history" || stage == "insert_attached_email_projection"
 	default:
 		return false
 	}

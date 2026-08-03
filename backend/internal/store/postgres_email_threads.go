@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"miraeopus/backend/internal/domain"
-	"strings"
+	"time"
 )
 
 type communicationsEmailThreadRowScanner interface {
@@ -16,17 +16,16 @@ type communicationsEmailThreadRowScanner interface {
 const postgresCommunicationsEmailThreadColumns = `
 t.company_id::text,
 t.email_thread_id::text,
-t.mailbox_scope_type,
+t.scope_type,
 coalesce(t.personal_user_id::text, ''),
 coalesce(t.personal_account_email, ''),
 coalesce(t.shared_inbox_id::text, ''),
-t.mailbox_account_email,
-t.provider,
+t.account_email,
 t.provider_thread_id,
 t.root_provider_message_id,
 t.download_status,
 t.history_complete,
-t.fetched_timestamp,
+t.fetched_at,
 t.last_download_error,
 t.created_timestamp,
 t.updated_timestamp`
@@ -37,7 +36,7 @@ func scanPostgresCommunicationsEmailThread(row communicationsEmailThreadRowScann
 	err := row.Scan(
 		&item.CompanyID, &item.EmailThreadID, &item.ScopeType,
 		&item.PersonalUserID, &item.PersonalAccountEmail, &item.SharedInboxID,
-		&item.AccountEmail, &item.Provider, &item.ProviderThreadID, &item.RootProviderMessageID,
+		&item.AccountEmail, &item.ProviderThreadID, &item.RootProviderMessageID,
 		&item.DownloadStatus, &item.HistoryComplete, &fetchedAt,
 		&item.LastDownloadError, &item.CreatedTimestamp, &item.UpdatedTimestamp,
 	)
@@ -58,14 +57,13 @@ func postgresCommunicationsEmailThreadMessages(ctx context.Context, db interface
 }, companyID, emailThreadID string) ([]domain.CommunicationsEmailMessage, error) {
 	rows, err := db.QueryContext(ctx, `
 select company_id::text, email_message_id::text, email_thread_id::text,
-       provider_message_id, message_order, subject,
+       provider_message_id, provider_thread_id, message_order, subject,
        sender_snapshot::text, to_snapshot::text, cc_snapshot::text,
-       bcc_snapshot::text, reply_to_snapshot::text,
-       coalesce(extract(epoch from message_timestamp)::bigint, 0),
+       bcc_snapshot::text, reply_to_snapshot::text, message_timestamp,
        rich_html_body, text_fallback, snippet, unread, starred,
        folder_snapshot::text, folder_id_snapshot::text, attachment_metadata::text, download_complete,
        created_timestamp, updated_timestamp
-from email_messages
+from communications_email_messages
 where company_id=$1::uuid and email_thread_id=$2::uuid
 order by message_order, provider_message_id`, companyID, emailThreadID)
 	if err != nil {
@@ -80,7 +78,7 @@ order by message_order, provider_message_id`, companyID, emailThreadID)
 		var textFallback string
 		if err := rows.Scan(
 			&item.CompanyID, &item.EmailMessageID, &item.EmailThreadID,
-			&item.ProviderMessageID, &item.MessageOrder,
+			&item.ProviderMessageID, &item.ProviderThreadID, &item.MessageOrder,
 			&item.Message.Subject, &fromJSON, &toJSON, &ccJSON, &bccJSON,
 			&replyToJSON, &item.Message.Date, &item.Message.Body, &textFallback,
 			&item.Message.Snippet, &item.Message.Unread, &item.Message.Starred,
@@ -90,6 +88,7 @@ order by message_order, provider_message_id`, companyID, emailThreadID)
 			return nil, err
 		}
 		item.Message.ID = item.ProviderMessageID
+		item.Message.ThreadID = item.ProviderThreadID
 		if item.Message.Snippet == "" {
 			item.Message.Snippet = textFallback
 		}
@@ -117,7 +116,7 @@ func postgresCommunicationsEmailThreadByID(ctx context.Context, db interface {
 }, companyID, emailThreadID string) (domain.CommunicationsEmailThread, error) {
 	item, err := scanPostgresCommunicationsEmailThread(db.QueryRowContext(ctx, `
 select `+postgresCommunicationsEmailThreadColumns+`
-from email_threads t
+from communications_email_threads t
 where t.company_id=$1::uuid and t.email_thread_id=$2::uuid`, companyID, emailThreadID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.CommunicationsEmailThread{}, ErrNotFound
@@ -129,51 +128,11 @@ where t.company_id=$1::uuid and t.email_thread_id=$2::uuid`, companyID, emailThr
 	if err != nil {
 		return domain.CommunicationsEmailThread{}, err
 	}
-	for index := range item.Messages {
-		item.Messages[index].ProviderThreadID = item.ProviderThreadID
-		item.Messages[index].Message.ThreadID = item.ProviderThreadID
-	}
 	return communicationsEmailThreadForMessages(item), nil
-}
-
-func postgresEmailThreadProviderTx(ctx context.Context, tx *sql.Tx, input CommunicationsEmailThreadUpsertInput, scope communicationsEmailCollaborationScope) (string, error) {
-	if input.Provider == "google" || input.Provider == "microsoft" {
-		return input.Provider, nil
-	}
-	var provider string
-	var err error
-	if scope.scopeType == CommunicationsEmailCollaborationScopePersonal {
-		err = tx.QueryRowContext(ctx, `select provider
-from user_email_connections
-where user_id=$1::uuid and account_email=$2`,
-			scope.personalUserID, scope.personalAccountEmail).Scan(&provider)
-	} else {
-		err = tx.QueryRowContext(ctx, `select connection.provider
-from shared_inboxes inbox
-join company_email_connections connection
-  on connection.company_id=inbox.company_id
- and connection.company_email_connection_id=inbox.company_email_connection_id
-where inbox.company_id=$1::uuid and inbox.shared_inbox_id=$2::uuid`,
-			input.CompanyID, scope.sharedInboxID).Scan(&provider)
-	}
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrInvalid
-	}
-	if err != nil {
-		return "", err
-	}
-	if provider != "google" && provider != "microsoft" {
-		return "", ErrInvalid
-	}
-	return provider, nil
 }
 
 func upsertPostgresCommunicationsEmailThreadTx(ctx context.Context, tx *sql.Tx, input CommunicationsEmailThreadUpsertInput) (domain.CommunicationsEmailThread, error) {
 	input, scope, err := normalizeCommunicationsEmailThreadInput(input)
-	if err != nil {
-		return domain.CommunicationsEmailThread{}, err
-	}
-	provider, err := postgresEmailThreadProviderTx(ctx, tx, input, scope)
 	if err != nil {
 		return domain.CommunicationsEmailThread{}, err
 	}
@@ -191,11 +150,11 @@ func upsertPostgresCommunicationsEmailThreadTx(ctx context.Context, tx *sql.Tx, 
 	}
 	err = tx.QueryRowContext(ctx, `
 select t.email_thread_id::text, t.provider_thread_id
-from email_threads t
-where company_id=$1::uuid and mailbox_scope_type=$2
+from communications_email_threads t
+where company_id=$1::uuid and scope_type=$2
   and (provider_thread_key=$6 or (root_provider_message_id=$7 and $7<>'')
        or exists (
-         select 1 from email_messages m
+         select 1 from communications_email_messages m
          where m.company_id=t.company_id and m.email_thread_id=t.email_thread_id and m.provider_message_id=$7
        ))
   and (($2='personal' and personal_user_id=nullif($3, '')::uuid and personal_account_email=$4)
@@ -209,17 +168,17 @@ for update`, input.CompanyID, scope.scopeType, scope.personalUserID, scope.perso
 		}
 		emailThreadID = newUUIDv7String()
 		_, err = tx.ExecContext(ctx, `
-insert into email_threads (
-  company_id, email_thread_id, mailbox_scope_type, personal_user_id, personal_account_email,
-  shared_inbox_id, mailbox_account_email, provider, provider_thread_key, provider_thread_id,
-  root_provider_message_id, download_status, history_complete, fetched_timestamp,
+insert into communications_email_threads (
+  company_id, email_thread_id, scope_type, personal_user_id, personal_account_email,
+  shared_inbox_id, account_email, provider_thread_key, provider_thread_id,
+  root_provider_message_id, download_status, history_complete, fetched_at,
   last_download_error, created_timestamp, updated_timestamp
 ) values (
   $1::uuid, $2::uuid, $3, nullif($4, '')::uuid, nullif($5, ''),
-  nullif($6, '')::uuid, $7, $8, $9, $10, $11,
-  case when $12 then 'complete' else 'partial' end, $12, $13, $14, now(), now()
+  nullif($6, '')::uuid, $7, $8, $9, $10,
+  case when $11 then 'complete' else 'partial' end, $11, $12, $13, now(), now()
 )`, input.CompanyID, emailThreadID, scope.scopeType, scope.personalUserID, scope.personalAccountEmail,
-			scope.sharedInboxID, scope.accountEmail, provider, providerKey, input.ProviderThreadID,
+			scope.sharedInboxID, scope.accountEmail, providerKey, input.ProviderThreadID,
 			input.SelectedMessageID, input.HistoryComplete, input.FetchedAt, input.LastDownloadError)
 	}
 	if err != nil {
@@ -229,12 +188,12 @@ insert into email_threads (
 		return domain.CommunicationsEmailThread{}, ErrInvalid
 	}
 	if _, err := tx.ExecContext(ctx, `
-update email_threads
+update communications_email_threads
 set provider_thread_key=case when provider_thread_id='' and $3<>'' then $7 else provider_thread_key end,
     provider_thread_id=case when provider_thread_id='' then $3 else provider_thread_id end,
     history_complete=history_complete or $4,
     download_status=case when history_complete or $4 then 'complete' else download_status end,
-    fetched_timestamp=greatest(coalesce(fetched_timestamp, $5), $5),
+    fetched_at=greatest(coalesce(fetched_at, $5), $5),
     last_download_error=case when history_complete or $4 then '' else $6 end,
     updated_timestamp=now()
 where company_id=$1::uuid and email_thread_id=$2::uuid`,
@@ -255,37 +214,38 @@ where company_id=$1::uuid and email_thread_id=$2::uuid`,
 		folderIDsJSON, _ := marshalEmailSnapshotJSON(message.FolderIDs)
 		attachmentsJSON, _ := marshalEmailSnapshotJSON(normalizeEmailAttachmentSnapshots(message.Attachments))
 		if _, err := tx.ExecContext(ctx, `
-insert into email_messages (
+insert into communications_email_messages (
   company_id, email_message_id, email_thread_id, provider_message_id,
-  message_order, subject, sender_snapshot, to_snapshot, cc_snapshot, bcc_snapshot,
-  reply_to_snapshot, message_timestamp, rich_html_body, text_fallback, snippet,
-  unread, starred, folder_snapshot, folder_id_snapshot, attachment_metadata,
-  download_complete, created_timestamp, updated_timestamp
+  provider_thread_id, message_order, subject, sender_snapshot, to_snapshot,
+  cc_snapshot, bcc_snapshot, reply_to_snapshot, message_timestamp,
+  rich_html_body, text_fallback, snippet, unread, starred, folder_snapshot,
+  folder_id_snapshot, attachment_metadata, download_complete, created_timestamp, updated_timestamp
 ) values (
-  $1::uuid, $2::uuid, $3::uuid, $4, 0, $5, $6::jsonb, $7::jsonb, $8::jsonb,
-  $9::jsonb, $10::jsonb, to_timestamp(nullif($11, 0)), $12, $13, $13, $14, $15,
-  $16::jsonb, $17::jsonb, $18::jsonb, $19, now(), now()
+  $1::uuid, $2::uuid, $3::uuid, $4, $5, 0, $6, $7::jsonb, $8::jsonb,
+  $9::jsonb, $10::jsonb, $11::jsonb, $12, $13, $14, $14, $15, $16,
+  $17::jsonb, $18::jsonb, $19::jsonb, $20, now(), now()
 )
 on conflict (company_id, email_thread_id, provider_message_id)
 do update set
-  subject=case when excluded.subject<>'' then excluded.subject else email_messages.subject end,
-  sender_snapshot=case when jsonb_array_length(excluded.sender_snapshot)>0 then excluded.sender_snapshot else email_messages.sender_snapshot end,
-  to_snapshot=case when jsonb_array_length(excluded.to_snapshot)>0 then excluded.to_snapshot else email_messages.to_snapshot end,
-  cc_snapshot=case when jsonb_array_length(excluded.cc_snapshot)>0 then excluded.cc_snapshot else email_messages.cc_snapshot end,
-  bcc_snapshot=case when jsonb_array_length(excluded.bcc_snapshot)>0 then excluded.bcc_snapshot else email_messages.bcc_snapshot end,
-  reply_to_snapshot=case when jsonb_array_length(excluded.reply_to_snapshot)>0 then excluded.reply_to_snapshot else email_messages.reply_to_snapshot end,
-  message_timestamp=coalesce(excluded.message_timestamp, email_messages.message_timestamp),
-  rich_html_body=case when excluded.rich_html_body<>'' then excluded.rich_html_body else email_messages.rich_html_body end,
-  text_fallback=case when excluded.text_fallback<>'' then excluded.text_fallback else email_messages.text_fallback end,
-  snippet=case when excluded.snippet<>'' then excluded.snippet else email_messages.snippet end,
+  provider_thread_id=case when excluded.provider_thread_id<>'' then excluded.provider_thread_id else communications_email_messages.provider_thread_id end,
+  subject=case when excluded.subject<>'' then excluded.subject else communications_email_messages.subject end,
+  sender_snapshot=case when jsonb_array_length(excluded.sender_snapshot)>0 then excluded.sender_snapshot else communications_email_messages.sender_snapshot end,
+  to_snapshot=case when jsonb_array_length(excluded.to_snapshot)>0 then excluded.to_snapshot else communications_email_messages.to_snapshot end,
+  cc_snapshot=case when jsonb_array_length(excluded.cc_snapshot)>0 then excluded.cc_snapshot else communications_email_messages.cc_snapshot end,
+  bcc_snapshot=case when jsonb_array_length(excluded.bcc_snapshot)>0 then excluded.bcc_snapshot else communications_email_messages.bcc_snapshot end,
+  reply_to_snapshot=case when jsonb_array_length(excluded.reply_to_snapshot)>0 then excluded.reply_to_snapshot else communications_email_messages.reply_to_snapshot end,
+  message_timestamp=case when excluded.message_timestamp>0 then excluded.message_timestamp else communications_email_messages.message_timestamp end,
+  rich_html_body=case when excluded.rich_html_body<>'' then excluded.rich_html_body else communications_email_messages.rich_html_body end,
+  text_fallback=case when excluded.text_fallback<>'' then excluded.text_fallback else communications_email_messages.text_fallback end,
+  snippet=case when excluded.snippet<>'' then excluded.snippet else communications_email_messages.snippet end,
   unread=excluded.unread,
   starred=excluded.starred,
-  folder_snapshot=case when jsonb_array_length(excluded.folder_snapshot)>0 then excluded.folder_snapshot else email_messages.folder_snapshot end,
-  folder_id_snapshot=case when jsonb_array_length(excluded.folder_id_snapshot)>0 then excluded.folder_id_snapshot else email_messages.folder_id_snapshot end,
-  attachment_metadata=case when jsonb_array_length(excluded.attachment_metadata)>0 then excluded.attachment_metadata else email_messages.attachment_metadata end,
-  download_complete=email_messages.download_complete or excluded.download_complete,
+  folder_snapshot=case when jsonb_array_length(excluded.folder_snapshot)>0 then excluded.folder_snapshot else communications_email_messages.folder_snapshot end,
+  folder_id_snapshot=case when jsonb_array_length(excluded.folder_id_snapshot)>0 then excluded.folder_id_snapshot else communications_email_messages.folder_id_snapshot end,
+  attachment_metadata=case when jsonb_array_length(excluded.attachment_metadata)>0 then excluded.attachment_metadata else communications_email_messages.attachment_metadata end,
+  download_complete=communications_email_messages.download_complete or excluded.download_complete,
   updated_timestamp=now()`,
-			input.CompanyID, newUUIDv7String(), emailThreadID, message.ID,
+			input.CompanyID, newUUIDv7String(), emailThreadID, message.ID, message.ThreadID,
 			message.Subject, fromJSON, toJSON, ccJSON, bccJSON, replyToJSON,
 			message.Date, message.Body, message.Snippet, message.Unread, message.Starred,
 			foldersJSON, folderIDsJSON, attachmentsJSON, message.DownloadComplete); err != nil {
@@ -296,10 +256,10 @@ do update set
 with ordered as (
   select email_message_id,
          row_number() over (order by message_timestamp, provider_message_id)-1 as next_order
-  from email_messages
+  from communications_email_messages
   where company_id=$1::uuid and email_thread_id=$2::uuid
 )
-update email_messages target
+update communications_email_messages target
 set message_order=ordered.next_order
 from ordered
 where target.company_id=$1::uuid and target.email_message_id=ordered.email_message_id`, input.CompanyID, emailThreadID); err != nil {
@@ -340,28 +300,15 @@ func (r *PostgresRepo) GetCommunicationsNodeEmailThread(companyID, nodeID, email
 	}
 	ctx := context.Background()
 	var item domain.CommunicationsNodeEmailThread
+	var createdBy sql.NullString
 	err := r.db.QueryRowContext(ctx, `
-select relationship.company_id::text,
-       relationship.resource_id::text,
-       relationship.email_relationship_id::text,
-       relationship.email_thread_id::text,
-       message.provider_message_id,
-       relationship.created_timestamp
-from email_relationships relationship
-join email_messages message
-  on message.company_id=relationship.company_id
- and message.email_thread_id=relationship.email_thread_id
- and message.email_message_id=relationship.email_message_id
-where relationship.company_id=$1::uuid
-  and relationship.resource_type='node'
-  and relationship.resource_id=$2::uuid
-  and relationship.email_thread_id=$3::uuid
-order by relationship.resource_textbox_id nulls first,
-         relationship.created_timestamp,
-         relationship.email_relationship_id
-limit 1`, companyID, nodeID, emailThreadID).Scan(
+select company_id::text, node_id::text, information_id::text, email_thread_id::text,
+       selected_provider_message_id, created_by_user_id::text, created_timestamp
+from communications_node_email_threads
+where company_id=$1::uuid and node_id=$2::uuid and email_thread_id=$3::uuid`,
+		companyID, nodeID, emailThreadID).Scan(
 		&item.CompanyID, &item.NodeID, &item.InformationID, &item.EmailThreadID,
-		&item.SelectedMessageID, &item.CreatedTimestamp,
+		&item.SelectedMessageID, &createdBy, &item.CreatedTimestamp,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.CommunicationsNodeEmailThread{}, ErrNotFound
@@ -369,55 +316,25 @@ limit 1`, companyID, nodeID, emailThreadID).Scan(
 	if err != nil {
 		return domain.CommunicationsNodeEmailThread{}, err
 	}
+	if createdBy.Valid {
+		item.CreatedByUserID = createdBy.String
+	}
 	item.Thread, err = postgresCommunicationsEmailThreadByID(ctx, r.db, companyID, emailThreadID)
 	return item, err
 }
 
-func linkPostgresCommunicationsEmailThreadToNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, relationshipID, emailThreadID, selectedMessageID, _ string) error {
-	result, err := tx.ExecContext(ctx, `
-insert into email_relationships (
-  company_id, email_relationship_id, email_thread_id, email_message_id,
-  resource_type, resource_id, resource_textbox_id, created_timestamp
-)
-select $1::uuid, $3::uuid, $4::uuid, message.email_message_id,
-       'node', $2::uuid, null, now()
-from email_messages message
-where message.company_id=$1::uuid
-  and message.email_thread_id=$4::uuid
-  and message.provider_message_id=$5
-on conflict do nothing`, companyID, nodeID, relationshipID, emailThreadID, selectedMessageID)
-	if err != nil {
-		return err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected > 0 {
-		return nil
-	}
-	var exists bool
-	if err := tx.QueryRowContext(ctx, `
-select exists (
-  select 1
-  from email_relationships relationship
-  join email_messages message
-    on message.company_id=relationship.company_id
-   and message.email_thread_id=relationship.email_thread_id
-   and message.email_message_id=relationship.email_message_id
-  where relationship.company_id=$1::uuid
-    and relationship.email_thread_id=$3::uuid
-    and relationship.resource_type='node'
-    and relationship.resource_id=$2::uuid
-    and relationship.resource_textbox_id is null
-    and message.provider_message_id=$4
-)`, companyID, nodeID, emailThreadID, selectedMessageID).Scan(&exists); err != nil {
-		return err
-	}
-	if !exists {
-		return ErrNotFound
-	}
-	return nil
+func linkPostgresCommunicationsEmailThreadToNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, informationID, emailThreadID, selectedMessageID, actorUserID string) error {
+	_, err := tx.ExecContext(ctx, `
+insert into communications_node_email_threads (
+  company_id, node_id, information_id, email_thread_id,
+  selected_provider_message_id, created_by_user_id, created_timestamp
+) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, nullif($6, '')::uuid, now())
+on conflict (company_id, node_id, email_thread_id)
+do update set
+  information_id=excluded.information_id,
+  selected_provider_message_id=excluded.selected_provider_message_id`,
+		companyID, nodeID, informationID, emailThreadID, selectedMessageID, actorUserID)
+	return err
 }
 
 func (r *PostgresRepo) ImportCommunicationsEmailIntoNode(input CommunicationsNodeEmailImportInput) (CommunicationsNodeEmailImportResult, error) {
@@ -448,27 +365,31 @@ func (r *PostgresRepo) ImportCommunicationsEmailIntoNode(input CommunicationsNod
 	if input.InformationID == "" {
 		input.InformationID = newUUIDv7String()
 	}
-	selectedProviderMessageID := strings.TrimSpace(input.Thread.SelectedMessageID)
-	if selectedProviderMessageID == "" && len(thread.Messages) > 0 {
-		selectedProviderMessageID = thread.Messages[0].ProviderMessageID
+	selected := thread.Messages[0].Message
+	for _, item := range thread.Messages {
+		if item.ProviderMessageID == input.Thread.SelectedMessageID {
+			selected = item.Message
+			break
+		}
 	}
-	if err := linkPostgresCommunicationsEmailThreadToNodeTx(ctx, tx, input.CompanyID, input.NodeID, input.InformationID, thread.EmailThreadID, selectedProviderMessageID, input.CreatedByUserID); err != nil {
+	now := time.Now().UTC()
+	information := attachedEmailProjectionInformationWithThread(selected, input.Thread.SharedInboxID, input.Thread.AccountEmail, thread.EmailThreadID, now, false)
+	if _, err := tx.ExecContext(ctx, `
+insert into node_information (company_id, information_id, node_id, type, information, created_timestamp, updated_timestamp)
+values ($1::uuid, $2::uuid, $3::uuid, 'Attached email'::information_type, $4, $5, $5)`,
+		input.CompanyID, input.InformationID, input.NodeID, information, now); err != nil {
 		return CommunicationsNodeEmailImportResult{}, err
 	}
-	if err := tx.QueryRowContext(ctx, `
-select relationship.email_relationship_id::text
-from email_relationships relationship
-join email_messages message
-  on message.company_id=relationship.company_id
- and message.email_thread_id=relationship.email_thread_id
- and message.email_message_id=relationship.email_message_id
-where relationship.company_id=$1::uuid
-  and relationship.email_thread_id=$3::uuid
-  and relationship.resource_type='node'
-  and relationship.resource_id=$2::uuid
-  and relationship.resource_textbox_id is null
-  and message.provider_message_id=$4`,
-		input.CompanyID, input.NodeID, thread.EmailThreadID, selectedProviderMessageID).Scan(&input.InformationID); err != nil {
+	if _, err := tx.ExecContext(ctx, `
+insert into node_projection_table (company_id, node_id, information_id, type, information, created_timestamp, updated_timestamp)
+values ($1::uuid, $2::uuid, $3::uuid, 'Attached email'::information_type, $4, $5, $5)
+on conflict (company_id, node_id, information_id)
+do update set type=excluded.type, information=excluded.information, is_deleted=false,
+              revision=node_projection_table.revision+1, updated_timestamp=excluded.updated_timestamp`,
+		input.CompanyID, input.NodeID, input.InformationID, information, now); err != nil {
+		return CommunicationsNodeEmailImportResult{}, err
+	}
+	if err := linkPostgresCommunicationsEmailThreadToNodeTx(ctx, tx, input.CompanyID, input.NodeID, input.InformationID, thread.EmailThreadID, selected.ID, input.CreatedByUserID); err != nil {
 		return CommunicationsNodeEmailImportResult{}, err
 	}
 	if downloadScope, requestedMessageID, ok := communicationsEmailThreadDownloadRequest(thread, input.Thread); ok {

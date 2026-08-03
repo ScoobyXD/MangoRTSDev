@@ -1304,6 +1304,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     if (!linkedEntityCanEdit) return;
     if (!companyID || linkedEntityKind !== "node") return;
     const title = input.title.trim() || "Image";
+    const blockTitle = input.blockTitle?.trim() || "Image";
     const document = input.document.trim();
     if (!document) return;
 
@@ -1366,7 +1367,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           document: parsed.value,
         }),
       });
-
+      await requestJSON<unknown>(path, {
+        method: "PATCH",
+        body: JSON.stringify({ title: blockTitle, attachments: [] }),
+      });
     upsertNodeRelationshipGraphNode(apiBase, companyID, node);
     upsertNodeMapPositionsInNodeRelationshipGraph(apiBase, companyID, response.node_map_positions ?? [{ entity_id: node.node_id, node_id: node.node_id, x: position.x, y: position.y }]);
     primeNodeRecordStoreCaches(apiBase, companyID, [{ node, relationships: [] }]);
@@ -2049,22 +2053,18 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         for (const { item, content, document } of desiredItems) {
           let documentID = item.source_information_id || item.information_id;
           let path = `/v1/editor-json/${resourceType}/${resourceID}/documents/${documentID}?company_id=${encodeURIComponent(companyID)}`;
-          if (resourceType !== "node") {
-            await requestJSON(path, {
-              method: "PATCH",
-              body: JSON.stringify({ title: content.title, attachments: content.attachments ?? [] }),
-            });
-          }
+          await requestJSON(path, {
+            method: "PATCH",
+            body: JSON.stringify({ title: content.title, attachments: content.attachments ?? [] }),
+          });
           let snapshot = await requestJSON<{ revision: number; deleted?: boolean }>(path);
           if (snapshot.deleted) {
             documentID = generateStableInformationID();
             path = `/v1/editor-json/${resourceType}/${resourceID}/documents/${documentID}?company_id=${encodeURIComponent(companyID)}`;
-            if (resourceType !== "node") {
-              await requestJSON(path, {
-                method: "PATCH",
-                body: JSON.stringify({ title: content.title, attachments: content.attachments ?? [] }),
-              });
-            }
+            await requestJSON(path, {
+              method: "PATCH",
+              body: JSON.stringify({ title: content.title, attachments: content.attachments ?? [] }),
+            });
             snapshot = await requestJSON<{ revision: number }>(path);
           }
           await requestJSON(path, {

@@ -31,9 +31,6 @@ func (r *PostgresRepo) UpdateEditorJSONMetadata(input EditorJSONMetadataInput) (
 	if err != nil {
 		return EditorJSONMetadataCommit{}, err
 	}
-	if input.Document.ResourceType == EntityTypeNode {
-		return EditorJSONMetadataCommit{}, ErrInvalid
-	}
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -48,15 +45,20 @@ func (r *PostgresRepo) UpdateEditorJSONMetadata(input EditorJSONMetadataInput) (
 	} else if !exists {
 		return EditorJSONMetadataCommit{}, ErrNotFound
 	}
-
-	now := time.Now().UTC()
-	var revision int64
-
 	information, err := editorProjectionInformationWithJSONMetadata(input, "")
 	if err != nil {
 		return EditorJSONMetadataCommit{}, err
 	}
+	now := time.Now().UTC()
+	var revision int64
 	switch input.Document.ResourceType {
+	case EntityTypeNode:
+		err = tx.QueryRowContext(ctx, `
+			insert into node_projection_table (company_id, node_id, information_id, type, information, is_deleted, revision, created_timestamp, updated_timestamp)
+			values ($1::uuid, $2::uuid, $3::uuid, 'Text box'::information_type, $4, false, 1, $5, $5)
+			on conflict (company_id, node_id, information_id) do update set
+				information=excluded.information, is_deleted=false, revision=node_projection_table.revision+1, updated_timestamp=excluded.updated_timestamp
+			returning revision`, input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID, information, now).Scan(&revision)
 	case EntityTypeLogicGate:
 		err = tx.QueryRowContext(ctx, `
 			insert into logic_gate_projection_table (company_id, logic_gate_id, information_id, type, information, is_deleted, revision, created_timestamp, updated_timestamp)
@@ -104,7 +106,7 @@ func deletePostgresEditorProjectionTx(ctx context.Context, tx *sql.Tx, ref Edito
 	var err error
 	switch ref.ResourceType {
 	case EntityTypeNode:
-		return nil
+		_, err = tx.ExecContext(ctx, `update node_projection_table set is_deleted=true, revision=revision+1, updated_timestamp=$4 where company_id=$1::uuid and node_id=$2::uuid and information_id=$3::uuid`, ref.CompanyID, ref.ResourceID, ref.DocumentID, now)
 	case EntityTypeLogicGate:
 		_, err = tx.ExecContext(ctx, `update logic_gate_projection_table set is_deleted=true, revision=revision+1, updated_timestamp=$4 where company_id=$1::uuid and logic_gate_id=$2::uuid and information_id=$3::uuid`, ref.CompanyID, ref.ResourceID, ref.DocumentID, now)
 	case EntityTypeProject:

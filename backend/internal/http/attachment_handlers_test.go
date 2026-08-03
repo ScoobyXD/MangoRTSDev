@@ -435,7 +435,7 @@ func attachmentRequestWithActor(req *http.Request, user domain.User, companyID, 
 	}))
 }
 
-func TestEmailRelationshipNodeAttachmentUsesNormalResourcePermissions(t *testing.T) {
+func TestEmailCollaborationNodeChatAttachmentRequiresPermanentParticipantEvenForAdmin(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-701300000201"
 	repo.EnsureCompany(companyID, "Attachment collaboration privacy company")
@@ -491,14 +491,14 @@ func TestEmailRelationshipNodeAttachmentUsesNormalResourcePermissions(t *testing
 	adminContent := attachmentRequestWithActor(httptest.NewRequest(http.MethodGet, "/v1/attachments/"+attachmentID+"/content?company_id="+companyID, nil), admin, companyID, domain.RoleCompanyAdmin)
 	adminContentRec := httptest.NewRecorder()
 	handler.ServeHTTP(adminContentRec, adminContent)
-	if adminContentRec.Code != http.StatusOK || !bytes.Equal(adminContentRec.Body.Bytes(), body) {
-		t.Fatalf("admin chat attachment content status = %d body=%s, want normal Node access", adminContentRec.Code, adminContentRec.Body.String())
+	if adminContentRec.Code != http.StatusNotFound {
+		t.Fatalf("nonparticipant admin chat attachment content status = %d body=%s, want 404", adminContentRec.Code, adminContentRec.Body.String())
 	}
 	adminList := attachmentRequestWithActor(httptest.NewRequest(http.MethodGet, "/v1/resources/node/"+collaboration.NodeID+"/attachments?company_id="+companyID, nil), admin, companyID, domain.RoleCompanyAdmin)
 	adminListRec := httptest.NewRecorder()
 	handler.ServeHTTP(adminListRec, adminList)
-	if adminListRec.Code != http.StatusOK {
-		t.Fatalf("admin chat attachment list status = %d body=%s, want normal Node access", adminListRec.Code, adminListRec.Body.String())
+	if adminListRec.Code != http.StatusNotFound {
+		t.Fatalf("nonparticipant admin chat attachment list status = %d body=%s, want 404", adminListRec.Code, adminListRec.Body.String())
 	}
 	participantContent := attachmentRequestWithActor(httptest.NewRequest(http.MethodGet, "/v1/attachments/"+attachmentID+"/content?company_id="+companyID, nil), participant, companyID, domain.RoleCompanyUser)
 	participantContentRec := httptest.NewRecorder()

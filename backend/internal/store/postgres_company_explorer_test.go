@@ -124,9 +124,9 @@ func TestPostgresCompanyExplorerV2NodeEdgeGuardsAreCollaborationScoped(t *testin
 	deleteBody := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) DeleteCompanyExplorerV2Edges")), " "))
 	for _, want := range []string{
 		"where item.target_type='node' and exists",
-		"from email_relationships email_relationship",
-		"email_relationship.company_id=item.company_id",
-		"email_relationship.resource_id=item.target_id",
+		"from communications_email_collaborations collaboration",
+		"collaboration.company_id=item.company_id",
+		"collaboration.node_id=item.target_id",
 	} {
 		if !strings.Contains(deleteBody, want) {
 			t.Fatalf("DeleteCompanyExplorerV2Edges missing collaboration-scoped Node guard %q", want)

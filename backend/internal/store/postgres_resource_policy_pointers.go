@@ -23,10 +23,9 @@ node_logic_gate_ancestors(logic_gate_id) as (
    and assignment.node_id=req.resource_id
   where not exists (
     select 1
-    from email_relationships email_relationship
-    where email_relationship.company_id=req.company_id
-      and email_relationship.resource_type='node'
-      and email_relationship.resource_id=req.resource_id
+    from communications_email_collaborations collaboration
+    where collaboration.company_id=req.company_id
+      and collaboration.node_id=req.resource_id
   )
 ),
 folder_seeds(folder_id) as (

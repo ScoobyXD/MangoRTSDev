@@ -273,19 +273,21 @@ func TestEditorTextboxCutoverAcceptsUUIDv7Identities(t *testing.T) {
 	}
 }
 
-func TestEditorTextboxV3OperationalScriptsRejectPartialCutovers(t *testing.T) {
+func TestEditorTextboxCutoverPreservesRecyclableDocumentsAndManualHistory(t *testing.T) {
 	checks := map[string][]string{
+		filepath.Join("..", "..", "db", "migrations", "20260801_editor_textbox_storage_foundation.sql"): {
+			"join nodes parent",
+			"information.save_kind <> 'auto'",
+		},
 		filepath.Join("..", "..", "..", "scripts", "verify_editor_textbox_cutover.sql"): {
-			"node_textboxes",
-			"node_textbox_chats",
-			"node_textbox_seen_snapshots",
-			"orphan email relationships",
-			"legacy attached_email attachment identities",
+			"recyclable node current rows missing or different in recycle payload",
+			"recycle current textbox projections not copied",
+			"recycle legacy editor save rows not converted",
 		},
 		filepath.Join("..", "..", "..", "scripts", "apply_editor_textbox_cleanup.sql"): {
-			"Retired by the V3 database-table cutover",
-			"20260802_zz_v3_database_table_cutover.sql",
-			"always aborts without changing data",
+			"editor_textbox_cleanup_blocked_recyclable_node_document",
+			"editor_textbox_cleanup_blocked_recycle_current_rows",
+			"editor_textbox_cleanup_blocked_recycle_history_rows",
 		},
 	}
 	for path, required := range checks {
@@ -295,11 +297,12 @@ func TestEditorTextboxV3OperationalScriptsRejectPartialCutovers(t *testing.T) {
 		}
 		for _, text := range required {
 			if !strings.Contains(string(contents), text) {
-				t.Fatalf("%s must enforce the V3 cutover contract; missing %q", path, text)
+				t.Fatalf("%s must preserve recycled editor state; missing %q", path, text)
 			}
 		}
 	}
 }
+
 func TestEditorTextboxRecyclePayloadUsesSixPermanentTables(t *testing.T) {
 	contents, err := os.ReadFile("postgres_recycle_bin.go")
 	if err != nil {

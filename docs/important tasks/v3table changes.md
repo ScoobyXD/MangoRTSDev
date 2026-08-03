@@ -1,6 +1,6 @@
 # Process Story
 
-A Mango user creates a Node and adds textboxes. Textbox bodies are stored only in `node_textboxes`, and textbox-owned comments and seen markers disappear when their textbox no longer exists. If a comment's author account was deleted, the comment and captured display name remain while its relational user ID becomes null. When an email is downloaded, Mango stores its thread and messages once, and `email_relationships` connects a selected message to a Node, Project, Logic Gate, or one of their textboxes. During V3, an older Attached-email snapshot with no durable thread/message is copied into those permanent tables only after exactly one mailbox is proven; the existing Attached-email information ID remains the relationship ID. Deleting a host removes only the relationship: normalized email, draft content, and email attachment links survive independently. Converting an email into a Node is an ordinary workflow: store the email, create the Node, create the relationship, and use normal resource permissions. Shared email drafts are stored in `email_drafts` and receive access from the related resource rather than a special collaboration-participant subsystem. No current Node editor content is written to `node_information` or `node_projection_table` after the cutover.
+A Mango user creates a Node and adds textboxes. Textbox bodies are stored only in `node_textboxes`. Comments made against a Node textbox are stored only in `node_textbox_chats`. When an email is downloaded, Mango stores its thread and messages once, and `email_relationships` connects a selected message to a Node, Project, Logic Gate, or one of their textboxes. Converting an email into a Node is an ordinary workflow: store the email, create the Node, create the relationship, and use normal resource permissions. Shared email drafts are stored in `email_drafts` and receive access from the related resource rather than a special collaboration-participant subsystem. No current Node editor content is written to `node_information` or `node_projection_table` after the cutover.
 
 # V3 table changes implementation handoff
 
@@ -17,7 +17,6 @@ An agent must not apply the migration to a live database. Repository agents may 
 - Node textboxes do not have titles.
 - `node_textboxes.body_json` is the only current Node textbox-body store.
 - Node textbox comments live in `node_textbox_chats`.
-- A surviving historical chat whose author no longer exists keeps its message and `author_display_name`; its nullable `author_user_id` becomes null, matching the permanent foreign key's `ON DELETE SET NULL` behavior.
 - There is no separate `email_id`. `email_message_id` is Mango's permanent internal ID for an email message.
 - Every email message belongs to an `email_thread_id`, including a one-message thread.
 - `email_threads`, `email_messages`, `email_relationships`, and `email_drafts` are the permanent email content tables.
@@ -28,9 +27,6 @@ An agent must not apply the migration to a live database. Repository agents may 
 - Shared-draft access comes from normal Node, Project, or Logic Gate permissions.
 - There is no email-collaboration participant table after the cutover.
 - Attachments remain in `attachments` and `resource_attachments`; do not add attachment blobs or attachment arrays to the new chat or relationship tables.
-- Textbox-owned chats, their attachment links, and seen snapshots are discarded when no permanent host textbox survives; a surviving reply with no surviving same-textbox parent becomes a top-level comment.
-- Deleting a Node or textbox removes its email relationship, not the normalized `email_threads` or `email_messages` content.
-- Email drafts and attached-email attachment links survive a deleted relationship; an attachment without a surviving relationship targets its exact normalized `email_message`.
 - The migration must fail on unexpected schema or unmapped data. Do not hide schema drift with broad `IF EXISTS` or `IF NOT EXISTS` statements.
 - Preserve existing permanent IDs whenever possible so deep links, attachment relationships, and realtime identities remain stable.
 
@@ -669,12 +665,6 @@ The schema change is incomplete unless all application reads and writes move in 
 - Update attachment lookup to use the new chat, email message, relationship, and draft identities without duplicating attachment data.
 - Update recycle-bin allowlists and backup/restore ordering for every changed table.
 
-The cutover requires a maintenance window. Stop application/API workers and any
-other database writers before starting it. The migration acquires `ACCESS
-EXCLUSIVE` locks on every legacy or attachment table that it alters or drops,
-with a 60-second lock timeout, before performing any data work. If those locks
-cannot be acquired, fix the active-writer condition and rerun the whole transaction.
-
 ## Strict migration and sequencing
 
 Implement this as one repository change, but the SQL itself should use safe phases inside a strict migration:
@@ -687,8 +677,8 @@ Implement this as one repository change, but the SQL itself should use safe phas
 6. Backfill `email_drafts`, replacing collaboration references with relationship references.
 7. Backfill `node_textbox_seen_snapshots` from current textbox bodies and the old seen rows.
 8. Rename `node_content_changes.information_id` to `textbox_id` and add its textbox foreign key.
-9. Validate counts, IDs, selected messages, resource ownership, draft ownership, permissions, attachment targets, and thread/message membership after applying the explicit deleted-owner cleanup rules.
-10. Abort on unexpected or ambiguous source data; do not treat known textbox-owned orphan rows or deleted email relationships as permanent content.
+9. Validate counts, IDs, parent links, selected messages, resource ownership, resource textbox ownership, draft ownership, permissions, attachment relationships, and thread/message membership.
+10. Abort if any source row is unmapped or ambiguous.
 11. Switch all code paths to the new tables.
 12. Remove old writers and readers.
 13. Drop the retired tables and their triggers/indexes/constraints.
@@ -702,7 +692,6 @@ Do not use broad skip logic. Expected old objects should be referenced directly 
 - Current `Text block chat` state comes from `node_projection_table`; `node_information` may contain stale earlier revisions.
 - Normalized current email thread/message rows are preferred over duplicated collaboration or projection snapshots.
 - Projection/collaboration snapshots are fallback repair sources only when normalized email rows are missing.
-- The July durable-email rollout intentionally allowed existing Attached-email projection snapshots to remain readable without backfilling `communications_email_threads` or `communications_email_messages`. V3 must normalize those rows during cutover: prove exactly one mailbox from a preserved thread, collaboration, exact shared inbox/account, placement user connection, or archive-job record; create or reuse the mailbox-scoped thread; copy the best snapshot; and preserve the Attached-email information ID as the relationship ID. Zero or multiple mailbox candidates are blockers, never a reason to delete the email or invent ownership.
 - `node_textboxes_history` is authoritative for permanent Node textbox save history.
 - Existing normal resource permissions are authoritative after any required participant-permission backfill.
 
@@ -741,22 +730,3 @@ email_drafts
 ```
 
 History, permissions, attachments, delivery jobs, audit/change tracking, and mailbox connection tables remain separate because they have different product responsibilities.
-
-
-## V3 cutover preflight and legacy-drift handling
-
-Before another cutover attempt, run `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts\run_v3_cutover_preflight.ps1`. The only input is the literal `mangorts_readonly` password, entered through a secure prompt. The script uses the fixed development connection metadata, verifies the role has no write privilege on `node_textboxes`, starts a repeatable-read read-only transaction, prints one JSON finding per category, and never changes a permanent table. Findings are labeled `blocker`, `cleanup`, or `review`; only blockers produce exit code 2. This checks data and schema readiness only; it cannot prove that application writers are stopped for the later migration.
-
-Fresh-eyes evidence on 2026-08-02 established these identity and visibility rules:
-
-- For a Text block chat, `information_id` is the chat ID and payload `block_id` is the host textbox ID. Historical frontend creation passed the current textbox ID as `block_id`; V3 did not invent this identity relationship.
-- The old API returned only active projection rows, but the old UI rendered chat panes only for surviving textbox IDs. A hostless chat could therefore remain active in storage while being invisible in the Node UI.
-- Textbox deletion gathered the chats visible in the browser and deleted them through separate requests. It was not one database transaction, so interrupted or incomplete cleanup could leave hostless active chats.
-- A chat is textbox-owned. If its exact permanent host textbox is absent, the cutover discards the chat and its chat attachment links; it does not guess a replacement or create an empty fake textbox.
-- If a chat's permanent textbox survives but its same-textbox parent does not, the cutover preserves the child as a top-level comment by leaving `parent_chat_id` null.
-- Seen snapshots are derived per-user baselines, not permanent textbox bodies. The cutover discards an orphan seen row when its permanent textbox is absent.
-- Normalized email content is not owned by its old Node/textbox link. Missing hosts remove relationship and permission rows only; email threads, messages, drafts, and email attachments are preserved, with attachments falling back to their exact normalized message identity.
-- Legacy chat payloads stored `author_id` only inside JSON, so deleting a user could not clear that identity. During cutover, a syntactically valid author ID that no longer resolves is treated like `ON DELETE SET NULL`: preserve the comment and captured author name, and store a null `author_user_id`.
-- Historical migration and rollout documentation prove that pre-July Attached-email snapshots were valid without durable thread/message rows. Their absence is an expected dual-write/backfill gap, not corrupt email content.
-- The preflight reports such rows as `email.legacy_snapshot_requires_normalization` (automatic cleanup) and reports only zero/multiple mailbox resolution as `email.legacy_snapshot_mailbox_unresolved_or_ambiguous` (blocker).
-- Mailbox evidence is exact and mailbox-scoped: preserved normalized thread metadata, collaboration scope, shared inbox plus company connection, personal account plus company membership, the importing placement user with exactly one matching connection, or an archive job tied to the same company/user and provider message. Subject, sender, snippet, body, and timestamps are content only and never ownership evidence.
