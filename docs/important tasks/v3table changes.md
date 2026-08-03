@@ -33,6 +33,37 @@ Every attempt to run `20260802_zz_v3_database_table_cutover.sql` was rolled back
 
 Do not assume the development database is identical to either the original pre-V3 fixture or the rolled-back repository schema. Reinventory it with read-only queries before designing the replacement.
 
+## Current implementation: additive Node chat baby phase
+
+The repository now contains one deliberately small first phase. It has not been applied to a live database, it does not switch application reads or writes, and it does not delete or update any legacy row.
+
+Jonat's manual operation is intentionally reduced to two copy-paste SQL files:
+
+1. `scripts/v3_node_textbox_chats_step1_count.sql` runs in a repeatable-read, read-only transaction. It reports the current legacy chat count, exact `chats_to_copy`, missing-textbox rows, review rows, exception identities without message bodies, and the physical storage breakdown.
+2. `scripts/v3_node_textbox_chats_step2_create_copy_verify.sql` is the one-time writer-paused operation. One outer transaction creates the new table and migration controls, copies the current chats, reconciles them, verifies the final count, and commits. Any review row or mismatch rolls the whole operation back.
+
+The component files below remain because automated tests exercise expansion, copy, and reconciliation separately. Operators should use the two step files above rather than assembling the components by hand.
+
+1. `scripts/inspect_v3_node_chat_storage.sql` is a read-only query that proves the current chat source and separates live row counts from heap, index, and TOAST storage. Run this first in the approved read-only database session.
+2. `scripts/v3_node_textbox_chats_expand_component.sql` is the reusable expansion component embedded in Step 2. It creates `node_textbox_chats`, migration ledgers, and the versioned `v3_node_textbox_chat_source_v1` classifier without copying data. It deliberately lives outside `backend/db/migrations` so deployment cannot run it ahead of the operator-controlled Step 2.
+3. `scripts/copy_v3_node_textbox_chats.sql` is the separately operated snapshot copy. It consumes the shared classifier, uses a short transaction, preserves legacy chat IDs, writes a disposition for every source row, and never mutates a legacy table.
+4. `scripts/verify_v3_node_textbox_chats.sql` is the read-only reconciliation. It reports later deltas, exact copies, deleted-host dispositions, detached parents, and rows requiring review without printing chat bodies.
+5. `docs/tests/v3-node-textbox-chat-migration.md` records the business rules and required test scenarios. `backend/internal/store/v3_node_textbox_chat_migration_test.go` contains static safety checks plus an opt-in disposable-PostgreSQL rerun test.
+
+The current source rule is exact:
+
+- `node_projection_table` is the current UI authority for `Text block chat` rows. The application lists active projection rows and the frontend filters and parses this type.
+- The projection `information_id` is the permanent `chat_id`.
+- JSON payload `block_id` is the owning permanent `textbox_id`.
+- `node_information` is event/history storage. It is not the set to copy merely because it contains rows whose type is `Text block chat`.
+- The copy is only a snapshot. While the old application remains live, later chats continue to land in the legacy tables and appear as `ready_to_copy` on the next run. A final delta still requires paused writers before application cutover.
+
+The 3.3 GB label shown for `node_information` is a physical relation-size measurement, not a live-row count. PostgreSQL relation size can include the main heap, indexes, out-of-line TOAST values, and space still occupied by old/dead row versions. Six hundred fifty live rows can therefore coexist with a multi-gigabyte relation. Use the inspection script to see each component and `pg_stat_user_tables.n_live_tup`/`n_dead_tup`; do not run `VACUUM FULL`, `CLUSTER`, or another table rewrite as part of this data-copy phase. Ordinary database maintenance is a separate operator decision after the actual size cause is measured.
+
+Rows with valid data and a surviving permanent host are copied. A deleted user leaves a null `author_user_id` but retains the captured author name and message. A missing same-textbox parent detaches the reply. A missing host is recorded as `discarded_deleted_host` without deleting the source. Invalid JSON, invalid identities, ambiguous email selections, duplicate company chat IDs, and target conflicts are recorded as `needs_human_mapping` and left untouched.
+
+This scoped phase does not authorize a full V3 cutover. The application must remain on legacy chat reads/writes until a later maintenance-window release has a zero-review final delta, reconciliation, rollback plan, and runtime cutover.
+
 ## What happened during the failed attempt
 
 The sequence below is evidence for the next implementation, not a checklist to rerun.
@@ -848,7 +879,9 @@ The old `scripts\run_v3_cutover_preflight.ps1` and its TypeScript implementation
 - `blocker`, `cleanup`, and `review` are stable documented meanings. A readiness exit code must be reported plainly rather than buried under a PowerShell exception stack.
 - A zero-blocker result is necessary but not sufficient: the final delta copy and reconciliation must be repeated with writers paused before application cutover.
 
-The replacement command and exact output location must be added here when the replacement preflight exists. Until then, there is no approved V3 cutover command.
+The scoped chat inspection and reconciliation commands are now `scripts/inspect_v3_node_chat_storage.sql` and `scripts/verify_v3_node_textbox_chats.sql`. They report chat-only results in the SQL client and deliberately do not claim to be the full V3 machine-readable preflight.
+
+The full replacement preflight command and exact machine-readable output location must still be added here when that implementation exists. Until then, there is no approved full V3 cutover command.
 
 Fresh-eyes evidence on 2026-08-02 established these identity and visibility rules:
 
