@@ -4,13 +4,19 @@
 -- or unmapped relationship aborts the transaction.
 begin;
 
+-- Acquire every DDL target at the start. A weaker initial lock followed by an
+-- ACCESS EXCLUSIVE upgrade can deadlock with an application transaction that
+-- read the table and then attempts a write. During the maintenance window this
+-- should be immediate; otherwise fail before any cutover work starts.
+set local lock_timeout = '60s';
 lock table node_information, node_projection_table, node_projection_seen_snapshots,
   node_content_changes, node_textboxes, communications_email_threads,
   communications_email_messages, communications_node_email_threads,
   communications_email_thread_download_jobs, communications_email_drafts,
   communications_email_collaborations, communications_email_collaboration_participants,
-  communications_email_nodes, communications_email_node_attachments
-in share row exclusive mode;
+  communications_email_nodes, communications_email_node_attachments,
+  resource_attachments, attachment_upload_intents
+in access exclusive mode;
 
 create function pg_temp.mangorts_v3_assert_columns(expected_table text, expected_columns text[])
 returns void language plpgsql as $$

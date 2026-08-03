@@ -154,7 +154,7 @@ func TestV3MigrationIsStrictAndHasRepresentativeLegacyFixture(t *testing.T) {
 			t.Errorf("strict V3 migration missing order-independent exact column-set check %q", exactSetCheck)
 		}
 	}
-	for _, forbidden := range []string{"drop table if exists", "create table if not exists node_textbox_chats", "create table if not exists email_relationships"} {
+	for _, forbidden := range []string{"drop table if exists", "create table if not exists node_textbox_chats", "create table if not exists email_relationships", "in share row exclusive mode"} {
 		if strings.Contains(migration, forbidden) {
 			t.Errorf("strict V3 migration contains drift-hiding statement %q", forbidden)
 		}
@@ -169,6 +169,9 @@ func TestV3MigrationIsStrictAndHasRepresentativeLegacyFixture(t *testing.T) {
 		"mangorts_v3_email_relationships_without_host",
 		"when relationship_count=0 and message_count=1 then 'email_message'",
 		"where not is_shared and resolved_relationship_id is not null",
+		"set local lock_timeout = '60s'", "resource_attachments, attachment_upload_intents",
+		"in access exclusive mode",
+		"a weaker initial lock followed by an",
 		") > 1",
 	} {
 		if !strings.Contains(migration, required) {
