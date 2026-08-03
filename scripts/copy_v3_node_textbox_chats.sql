@@ -24,12 +24,14 @@ insert into v3_migration_runs(run_id, phase, mapping_version, mapping_checksum, 
 select
   run_id,
   'node_textbox_chats',
-  1,
+  2,
   md5(
     pg_get_viewdef('v3_node_textbox_chat_source_v1'::regclass, true)
     || pg_get_functiondef('v3_migration_try_jsonb_v1(text)'::regprocedure)
     || pg_get_functiondef('v3_migration_try_uuid_v1(text)'::regprocedure)
     || pg_get_functiondef('v3_migration_try_integer_v1(text)'::regprocedure)
+    || pg_get_functiondef('v3_migration_try_timestamptz_v1(text)'::regprocedure)
+    || pg_get_functiondef('v3_migration_try_chat_attachment_ids_v1(jsonb)'::regprocedure)
     || pg_get_functiondef('v3_migration_try_uuid_array_v1(jsonb)'::regprocedure)
   ),
   'running'
@@ -55,6 +57,7 @@ insert into node_textbox_chats(
   author_user_id,
   author_display_name,
   message,
+  edited_timestamp,
   entity_links,
   mentioned_user_ids,
   mentioned_group_ids,
@@ -78,6 +81,7 @@ select
   source.author_user_id,
   source.author_display_name,
   source.message,
+  source.edited_timestamp,
   source.entity_links,
   source.mentioned_user_ids,
   source.mentioned_group_ids,
@@ -89,6 +93,45 @@ from mangorts_v3_chat_copy_source source
 where source.migration_state = 'ready_to_copy'
 order by source.company_id, source.node_id, source.chat_id
 on conflict (company_id, chat_id) do nothing;
+insert into resource_attachments(
+  resource_attachment_id,
+  company_id,
+  resource_type,
+  resource_id,
+  attachment_id,
+  information_id,
+  message_id,
+  editor_surface,
+  relationship_kind,
+  created_by_user_id,
+  created_timestamp
+)
+select
+  gen_random_uuid(),
+  source.company_id,
+  'node_chat_message',
+  source.chat_id::text,
+  attachment_id,
+  source.textbox_id,
+  '',
+  'node_textbox_chat',
+  'chat_attachment',
+  source.author_user_id,
+  source.created_timestamp
+from mangorts_v3_chat_copy_source source
+cross join lateral unnest(source.attachment_ids) attachment(attachment_id)
+where source.migration_state = 'ready_to_copy'
+  and not exists (
+    select 1
+    from resource_attachments existing
+    where existing.company_id=source.company_id
+      and existing.resource_type='node_chat_message'
+      and existing.resource_id=source.chat_id::text
+      and existing.attachment_id=attachment.attachment_id
+      and existing.relationship_kind='chat_attachment'
+      and existing.deleted_timestamp is null
+  );
+
 
 -- Parents are linked only after all copyable rows exist. A missing, malformed,
 -- wrong-textbox, hostless, or otherwise uncopyable parent leaves the reply as a

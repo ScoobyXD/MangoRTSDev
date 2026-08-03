@@ -1,22 +1,22 @@
-# Process Story: current Node textbox chats copy without touching legacy rows
+# Process Story: copy Node textbox chats, then switch the backend authority
 
 A user can open a Node textbox and see its current comments
 ↓
-The current comment authority is the active `Text block chat` row in `node_projection_table`; `node_information` is event/history storage and may contain older or stale rows
+Before cutover, the current comment authority is the active `Text block chat` row in `node_projection_table`; `node_information` is event/history storage and may contain older or stale rows
 ↓
-During the operator-controlled Step 2 transaction, the additive expansion component creates `node_textbox_chats`, a versioned shared classifier, and migration ledgers without deleting data or changing the application
+With Node chat writers paused, the operator-controlled Step 2 transaction creates `node_textbox_chats`, classifies the legacy rows, copies every safe row, links existing attachments through `resource_attachments`, and verifies the result
 ↓
-The inventory, copy, and verification scripts all consume that same classifier. Invalid JSON and invalid identities are classified before casts; exact source and target identities are preserved
+Invalid JSON and invalid identities are classified before casts. The projection `information_id` becomes `chat_id`, payload `block_id` becomes `textbox_id`, and exactly resolved provider message selections become permanent internal email-message IDs
 ↓
-The copy script inserts safely mapped projections in a short transaction. The projection `information_id` becomes `chat_id`, payload `block_id` becomes `textbox_id`, and exactly resolved provider message selections become permanent internal email-message IDs
+The backend is then deployed and reads, creates, edits, and deletes Node comments through `node_textbox_chats`; it rebuilds the existing frontend payload shape without writing new legacy chat rows
 ↓
 A valid chat whose user account was deleted keeps its message and captured author name while `author_user_id` becomes null. A reply whose same-textbox parent cannot survive becomes a top-level comment
 ↓
-A chat whose permanent textbox does not exist is recorded as `discarded_deleted_host` but is not deleted from legacy storage. Invalid, ambiguous, or conflicting content is recorded as `needs_human_mapping` and is not copied
+A chat whose permanent textbox does not exist is recorded as `discarded_deleted_host` but is not deleted from legacy storage. Invalid, ambiguous, or conflicting content is recorded as `needs_human_mapping` and prevents Step 2 from committing
 ↓
-Rerunning the script leaves exact targets unchanged, copies only a later delta, and records `already_copied`. An unexpected target mismatch rolls back the current transaction
+Deleting a Node textbox deletes every chat owned by that textbox, including chats that quote an email, and tombstones their chat-attachment links. The normalized email message, thread, and email attachments remain
 ↓
-The application continues to read and write the legacy tables until a later maintenance-window cutover. No legacy table or row is removed by this baby phase
+Legacy chat rows remain untouched as rollback evidence. Rerunning Step 2 leaves exact targets unchanged and an unexpected mismatch rolls back the transaction
 
 ## Required scenarios
 
@@ -39,3 +39,13 @@ V3CHAT8 - The first copy records `copied`; a safe rerun records `already_copied`
 V3CHAT9 - A pre-existing target that differs from the classified source is a review item. The copy never overwrites it.
 
 V3CHAT10 - The inspection query separates heap, index, and TOAST storage from live row counts so a large physical `node_information` relation is not mistaken for current chat volume.
+
+V3CHAT11 - After cutover, Node chat create, edit, read, and delete operations use `node_textbox_chats`; active legacy `Text block chat` projections are excluded from Node reads and no new legacy chat projection or information row is written.
+
+V3CHAT12 - An email selection may retain both its owning/selected textbox ID and its resolved internal email-message ID. The public payload continues to expose the provider message ID expected by the frontend.
+
+V3CHAT13 - Chat attachment content remains in `attachments`; chat ownership is represented by active `resource_attachments` rows using `resource_type = 'node_chat_message'`, `resource_id = chat_id`, and `relationship_kind = 'chat_attachment'`.
+
+V3CHAT14 - Deleting a chat also deletes reply descendants and tombstones their chat-attachment links. Deleting a textbox deletes every chat in that textbox and tombstones those links, while the associated email message/thread and email attachments remain.
+
+V3CHAT15 - The live rollout order is: pause Node chat writers, rerun Step 1, run and commit Step 2 only at zero review/missing-host counts, deploy the backend cutover, smoke-test chat behavior, and resume writers. The backend cutover must not be deployed before Step 2.

@@ -42,6 +42,12 @@ with raw as (
     nullif(btrim(raw.payload->>'selection_message_id'), '') as selection_message_id_text,
     nullif(raw.payload->>'selection_start', '') as selection_start_text,
     nullif(raw.payload->>'selection_end', '') as selection_end_text,
+    nullif(btrim(raw.payload->>'edited_timestamp'), '') as edited_timestamp_text,
+    case
+      when pg_input_is_valid(nullif(btrim(raw.payload->>'edited_timestamp'), ''), 'timestamptz')
+        then (raw.payload->>'edited_timestamp')::timestamptz
+      else null
+    end as edited_timestamp,
     nullif(lower(btrim(raw.payload->>'author_id')), '') as author_user_id_text
   from raw
 ), enriched as (
@@ -50,12 +56,15 @@ with raw as (
     host.textbox_id is not null as host_textbox_exists,
     coalesce(email_match.match_count, 0) as email_message_match_count,
     coalesce(user_mentions.invalid_count, 0) as invalid_user_mention_count,
-    coalesce(group_mentions.invalid_count, 0) as invalid_group_mention_count
+    coalesce(group_mentions.invalid_count, 0) as invalid_group_mention_count,
+    coalesce(attachment_references.invalid_count, 0) as invalid_attachment_reference_count,
+    coalesce(attachment_records.missing_count, 0) as missing_attachment_count
   from decoded
   left join node_textboxes host
     on host.company_id = decoded.company_id
    and host.node_id = decoded.node_id
    and host.textbox_id = decoded.textbox_id
+   and host.deleted_timestamp is null
   left join lateral (
     select count(*) as match_count
     from communications_email_messages message
@@ -86,6 +95,44 @@ with raw as (
       end
     ) item(value)
   ) group_mentions on true
+  left join lateral (
+    select count(*) filter (
+      where jsonb_typeof(item) <> 'object'
+         or not pg_input_is_valid(
+           coalesce(nullif(btrim(item->>'attachment_id'), ''), nullif(btrim(item->>'attachmentID'), ''), nullif(btrim(item->>'id'), '')),
+           'uuid'
+         )
+    ) as invalid_count
+    from jsonb_array_elements(
+      case
+        when jsonb_typeof(decoded.payload->'attachments') = 'array'
+          then decoded.payload->'attachments'
+        else '[]'::jsonb
+      end
+    ) item
+  ) attachment_references on true
+  left join lateral (
+    select count(*) filter (where attachment.attachment_id is null) as missing_count
+    from (
+      select coalesce(nullif(btrim(item->>'attachment_id'), ''), nullif(btrim(item->>'attachmentID'), ''), nullif(btrim(item->>'id'), '')) as attachment_id_text
+      from jsonb_array_elements(
+        case
+          when jsonb_typeof(decoded.payload->'attachments') = 'array'
+            then decoded.payload->'attachments'
+          else '[]'::jsonb
+        end
+      ) item
+      where jsonb_typeof(item) = 'object'
+        and pg_input_is_valid(
+          coalesce(nullif(btrim(item->>'attachment_id'), ''), nullif(btrim(item->>'attachmentID'), ''), nullif(btrim(item->>'id'), '')),
+          'uuid'
+        )
+    ) reference
+    left join attachments attachment
+      on attachment.company_id=decoded.company_id
+     and attachment.attachment_id=reference.attachment_id_text::uuid
+     and attachment.deleted_timestamp is null
+  ) attachment_records on true
 ), classified as (
   select
     enriched.*,
@@ -101,9 +148,6 @@ with raw as (
       case when enriched.selection_textbox_id_text is not null
              and not pg_input_is_valid(enriched.selection_textbox_id_text, 'uuid')
         then 'selection_textbox_id_invalid' end,
-      case when enriched.selection_source = 'email'
-             and enriched.selection_textbox_id_text is not null
-        then 'email_selection_has_textbox_id' end,
       case when enriched.selection_source = 'text'
              and enriched.selection_message_id_text is not null
         then 'text_selection_has_email_message_id' end,
@@ -136,6 +180,15 @@ with raw as (
       case when enriched.author_user_id_text is not null
              and not pg_input_is_valid(enriched.author_user_id_text, 'uuid')
         then 'author_id_invalid' end,
+      case when enriched.payload ? 'attachments'
+             and enriched.payload->'attachments' <> 'null'::jsonb
+             and (
+               jsonb_typeof(enriched.payload->'attachments') <> 'array'
+               or enriched.invalid_attachment_reference_count > 0
+             )
+        then 'attachment_references_invalid' end,
+      case when enriched.missing_attachment_count > 0
+        then 'attachment_record_missing' end,
       case when enriched.payload ? 'entity_links'
              and enriched.payload->'entity_links' <> 'null'::jsonb
              and jsonb_typeof(enriched.payload->'entity_links') <> 'array'
@@ -155,6 +208,10 @@ with raw as (
              )
         then 'mentioned_group_ids_invalid' end,
       case when enriched.company_chat_id_count > 1 then 'duplicate_company_chat_id' end,
+      case when enriched.edited_timestamp_text is not null and enriched.edited_timestamp is null
+        then 'edited_timestamp_invalid' end,
+      case when enriched.edited_timestamp is not null and enriched.edited_timestamp < enriched.created_timestamp
+        then 'edited_timestamp_before_created' end,
       case when enriched.updated_timestamp < enriched.created_timestamp then 'timestamps_invalid' end
     ], null)::text[] as issue_codes
   from enriched

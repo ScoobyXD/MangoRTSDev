@@ -4347,6 +4347,7 @@ create table if not exists node_textbox_chats (
   author_user_id uuid,
   author_display_name text not null default '',
   message text not null default '',
+  edited_timestamp timestamptz,
   entity_links jsonb not null default '[]'::jsonb,
   mentioned_user_ids uuid[] not null default '{}'::uuid[],
   mentioned_group_ids uuid[] not null default '{}'::uuid[],
@@ -4365,7 +4366,7 @@ create table if not exists node_textbox_chats (
     check (selection_source in ('text', 'email')),
   constraint node_textbox_chats_selection_target_chk check (
     (selection_source = 'text' and selection_email_message_id is null)
-    or (selection_source = 'email' and selection_textbox_id is null)
+    or (selection_source = 'email' and selection_email_message_id is not null)
   ),
   constraint node_textbox_chats_selection_offsets_chk check (
     (selection_start is null and selection_end is null)
@@ -4376,6 +4377,7 @@ create table if not exists node_textbox_chats (
   constraint node_textbox_chats_revision_chk check (revision > 0),
   constraint node_textbox_chats_timestamps_chk check (
     updated_timestamp >= created_timestamp
+    and (edited_timestamp is null or edited_timestamp >= created_timestamp)
     and (deleted_timestamp is null or deleted_timestamp >= created_timestamp)
   )
 );

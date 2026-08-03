@@ -341,6 +341,28 @@ func addPostgresEmailCollaborationChatParticipantsTx(ctx context.Context, tx *sq
 }
 
 func addEmailCollaborationNodeInformationTx(ctx context.Context, tx *sql.Tx, input NodeInformationInput) (domain.NodeInformation, error) {
+	if isNodeTextboxChatType(input.Type) {
+		chatID := cleanUUIDText(input.InformationID)
+		if chatID == "" {
+			chatID = newUUIDv7String()
+		}
+		previous, previousFound, err := postgresNodeTextboxChatProjectionTx(ctx, tx, input.CompanyID, input.NodeID, chatID)
+		if err != nil {
+			return domain.NodeInformation{}, err
+		}
+		projection, _, err := upsertPostgresNodeTextboxChatTx(ctx, tx, input, chatID)
+		if err != nil {
+			return domain.NodeInformation{}, err
+		}
+		if err := recordEmailCollaborationNodeContentChangesTx(ctx, tx, input, chatID, previous, previousFound); err != nil {
+			return domain.NodeInformation{}, err
+		}
+		return domain.NodeInformation{
+			CompanyID: projection.CompanyID, InformationID: projection.InformationID, NodeID: projection.NodeID,
+			Type: projection.Type, Information: projection.Information,
+			CreatedTimestamp: projection.CreatedTimestamp, UpdatedTimestamp: projection.UpdatedTimestamp,
+		}, nil
+	}
 	item := domain.NodeInformation{
 		CompanyID: input.CompanyID, InformationID: newUUIDv7String(), NodeID: input.NodeID,
 		Type: input.Type, Information: input.Information,
@@ -372,6 +394,20 @@ returning company_id::text, information_id::text, node_id::text, type::text, inf
 }
 
 func upsertEmailCollaborationNodeProjectionTx(ctx context.Context, tx *sql.Tx, input NodeInformationInput) (domain.NodeProjection, bool, error) {
+	if isNodeTextboxChatType(input.Type) {
+		previous, previousFound, err := postgresNodeTextboxChatProjectionTx(ctx, tx, input.CompanyID, input.NodeID, input.InformationID)
+		if err != nil {
+			return domain.NodeProjection{}, false, err
+		}
+		projection, _, err := upsertPostgresNodeTextboxChatTx(ctx, tx, input, input.InformationID)
+		if err != nil {
+			return domain.NodeProjection{}, false, err
+		}
+		if err := recordEmailCollaborationNodeContentChangesTx(ctx, tx, input, input.InformationID, previous, previousFound); err != nil {
+			return domain.NodeProjection{}, false, err
+		}
+		return projection, previousFound, nil
+	}
 	previous, previousFound, err := postgresNodeProjectionTx(ctx, tx, input.CompanyID, input.NodeID, input.InformationID)
 	if err != nil {
 		return domain.NodeProjection{}, false, err

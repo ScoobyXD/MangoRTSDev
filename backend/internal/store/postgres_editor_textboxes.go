@@ -557,6 +557,26 @@ func deletePostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONDelete
 		input.Document.DocumentID, nextRevision, now); err != nil {
 		return EditorJSONCommit{}, err
 	}
+	if input.Document.ResourceType == EntityTypeNode {
+		if _, err := tx.ExecContext(ctx, `update resource_attachments link
+set deleted_timestamp=coalesce(link.deleted_timestamp,clock_timestamp())
+where link.company_id=$1::uuid
+  and link.resource_type='node_chat_message'
+  and link.relationship_kind='chat_attachment'
+  and link.deleted_timestamp is null
+  and link.resource_id in (
+    select chat.chat_id::text
+    from node_textbox_chats chat
+    where chat.company_id=$1::uuid and chat.node_id=$2::uuid and chat.textbox_id=$3::uuid
+  )`, input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID); err != nil {
+			return EditorJSONCommit{}, err
+		}
+		if _, err := tx.ExecContext(ctx, `delete from node_textbox_chats
+where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid`,
+			input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID); err != nil {
+			return EditorJSONCommit{}, err
+		}
+	}
 	if input.Document.ResourceType == EntityTypeNode || input.Document.ResourceType == EntityTypeProject || input.Document.ResourceType == EntityTypeLogicGate {
 		if err := deletePostgresEditorProjectionTx(ctx, tx, EditorDocumentRef{
 			CompanyID: input.Document.CompanyID, ResourceType: input.Document.ResourceType,

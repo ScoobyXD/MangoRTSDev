@@ -1004,6 +1004,43 @@ func (r *PostgresRepo) addNodeInformation(input NodeInformationInput) (domain.No
 	} else if err != nil && !errors.Is(err, ErrNotFound) {
 		return domain.NodeInformation{}, err
 	}
+	if isNodeTextboxChatType(infoType) {
+		chatID := cleanUUIDText(informationID)
+		if chatID == "" {
+			chatID = newUUIDv7String()
+		}
+		projection, previousFound, err := upsertPostgresNodeTextboxChatTx(ctx, tx, input, chatID)
+		if err != nil {
+			return domain.NodeInformation{}, err
+		}
+		if previousFound {
+			return domain.NodeInformation{}, ErrAlreadyExists
+		}
+		if strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "" {
+			if err := insertNodeContentChangesTx(ctx, tx, buildNodeContentChanges(
+				companyID, nodeID, chatID, infoType, nil, projection.Information,
+				normalizeNodeContentChangeActor(cleanUUIDText(input.ActorUserID), input.ActorDisplayName), time.Now().UTC(),
+			)); err != nil {
+				return domain.NodeInformation{}, err
+			}
+		}
+		item := domain.NodeInformation{
+			CompanyID: projection.CompanyID, InformationID: projection.InformationID, NodeID: projection.NodeID,
+			Type: projection.Type, Information: projection.Information,
+			CreatedTimestamp: projection.CreatedTimestamp, UpdatedTimestamp: projection.UpdatedTimestamp,
+		}
+		outboxInput, err := nodeChatCreatedOutboxInput(item, chatID)
+		if err != nil {
+			return domain.NodeInformation{}, err
+		}
+		if _, err := r.enqueueRealtimeOutboxTx(ctx, tx, outboxInput); err != nil {
+			return domain.NodeInformation{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return domain.NodeInformation{}, err
+		}
+		return item, nil
+	}
 
 	item := domain.NodeInformation{
 		CompanyID:     companyID,
@@ -1181,6 +1218,7 @@ func (r *PostgresRepo) ListNodeProjections(companyID, nodeID string) ([]domain.N
 		   from node_projection_table
 		  where company_id=$1 and node_id=$2
 		    and not is_deleted
+		    and type <> 'Text block chat'::information_type
 		  order by created_timestamp asc, information_id asc`,
 		companyID, nodeID,
 	)
@@ -1210,6 +1248,17 @@ func (r *PostgresRepo) ListNodeProjections(companyID, nodeID string) ([]domain.N
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	chatItems, err := listPostgresNodeTextboxChatProjections(ctx, r.db, companyID, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, chatItems...)
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
+			return items[i].InformationID < items[j].InformationID
+		}
+		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+	})
 	return items, nil
 }
 
@@ -1254,6 +1303,29 @@ func (r *PostgresRepo) deleteNodeProjection(input NodeProjectionDeleteInput) err
 	previous, previousFound, err := postgresNodeProjectionTx(ctx, tx, companyID, nodeID, informationID)
 	if err != nil {
 		return err
+	}
+	chatPrevious, chatFound, err := deletePostgresNodeTextboxChatTx(ctx, tx, input)
+	if err != nil {
+		return err
+	}
+	if chatFound {
+		if strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "" {
+			previousCopy := chatPrevious
+			if err := insertNodeContentChangesTx(ctx, tx, buildNodeContentChanges(
+				companyID, nodeID, informationID, chatPrevious.Type, &previousCopy, "",
+				normalizeNodeContentChangeActor(cleanUUIDText(input.ActorUserID), input.ActorDisplayName), time.Now().UTC(),
+			)); err != nil {
+				return err
+			}
+		}
+		outboxInput, err := nodeChatDeletedOutboxInput(chatPrevious)
+		if err != nil {
+			return err
+		}
+		if _, err := r.enqueueRealtimeOutboxTx(ctx, tx, outboxInput); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
 	if (previousFound && isEditorTextBoxType(previous.Type)) || (!previousFound && input.ExpectedRevision != nil) {
 		return deletePostgresNodeTextProjection(ctx, tx, input, previous, previousFound)
