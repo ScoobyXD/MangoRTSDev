@@ -4331,6 +4331,70 @@ comment on table node_textboxes is
 comment on column node_textboxes.display_order is
   'User-controlled Node workspace order.';
 
+-- Permanent comments owned by an exact Node textbox.
+create table if not exists node_textbox_chats (
+  company_id uuid not null,
+  chat_id uuid not null,
+  node_id uuid not null,
+  textbox_id uuid not null,
+  parent_chat_id uuid,
+  selection_source text not null default 'text',
+  selection_textbox_id uuid,
+  selection_email_message_id uuid,
+  selection_quote text not null default '',
+  selection_start integer,
+  selection_end integer,
+  author_user_id uuid,
+  author_display_name text not null default '',
+  message text not null default '',
+  entity_links jsonb not null default '[]'::jsonb,
+  mentioned_user_ids uuid[] not null default '{}'::uuid[],
+  mentioned_group_ids uuid[] not null default '{}'::uuid[],
+  revision bigint not null default 1,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  deleted_timestamp timestamptz,
+  primary key (company_id, chat_id),
+  unique (company_id, node_id, textbox_id, chat_id),
+  foreign key (company_id, node_id, textbox_id)
+    references node_textboxes(company_id, node_id, textbox_id) on delete cascade,
+  foreign key (company_id, node_id, textbox_id, parent_chat_id)
+    references node_textbox_chats(company_id, node_id, textbox_id, chat_id) on delete cascade,
+  foreign key (author_user_id) references users(user_id) on delete set null,
+  constraint node_textbox_chats_selection_source_chk
+    check (selection_source in ('text', 'email')),
+  constraint node_textbox_chats_selection_target_chk check (
+    (selection_source = 'text' and selection_email_message_id is null)
+    or (selection_source = 'email' and selection_textbox_id is null)
+  ),
+  constraint node_textbox_chats_selection_offsets_chk check (
+    (selection_start is null and selection_end is null)
+    or (selection_start >= 0 and selection_end >= selection_start)
+  ),
+  constraint node_textbox_chats_entity_links_chk
+    check (jsonb_typeof(entity_links) = 'array'),
+  constraint node_textbox_chats_revision_chk check (revision > 0),
+  constraint node_textbox_chats_timestamps_chk check (
+    updated_timestamp >= created_timestamp
+    and (deleted_timestamp is null or deleted_timestamp >= created_timestamp)
+  )
+);
+
+create index if not exists idx_node_textbox_chats_textbox_created
+  on node_textbox_chats(company_id, node_id, textbox_id, created_timestamp, chat_id)
+  where deleted_timestamp is null;
+
+create index if not exists idx_node_textbox_chats_parent
+  on node_textbox_chats(company_id, node_id, textbox_id, parent_chat_id)
+  where parent_chat_id is not null and deleted_timestamp is null;
+
+create index if not exists idx_node_textbox_chats_email_selection
+  on node_textbox_chats(company_id, selection_email_message_id)
+  where selection_email_message_id is not null and deleted_timestamp is null;
+
+comment on table node_textbox_chats is
+  'Permanent Node textbox chats, keyed by the preserved legacy chat identity.';
+
 
 
 create table if not exists project_textboxes (
