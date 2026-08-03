@@ -11,7 +11,7 @@ import { visibleEmailAttachmentsForBody } from "../communications/emailAttachmen
 import { splitEmailQuotedHistory } from "../communications/emailQuotedContent.js";
 import { emailThreadMessageRenderKey, emailThreadMessageSourceLabel, normalizeEmailThreadMessages, type EmailThreadMessageCandidate } from "../communications/emailThreadMessages.js";
 import { buildReplyAllRecipients } from "../communications/emailRecipients";
-import { downloadMangoAttachment, fetchMangoAttachmentBlob, loadMangoAttachmentObjectURL, type AttachmentRequestJSON, type MangoAttachment, type MangoAttachmentResourceType, type MangoAttachmentUploadProgress, type MangoAttachmentVariantType, type MangoResourceAttachment } from "../attachments/attachmentApi";
+import { downloadMangoAttachment, fetchMangoAttachmentBlob, loadMangoAttachmentObjectURL, mangoAttachedEmailResourceID, type AttachmentRequestJSON, type MangoAttachment, type MangoAttachmentResourceType, type MangoAttachmentUploadProgress, type MangoAttachmentVariantType, type MangoResourceAttachment } from "../attachments/attachmentApi";
 import { classifyAttachmentPresentation, classifyAttachmentPreview, splitAttachmentFilename, type AttachmentPresentationKind, type AttachmentPreviewKind } from "../attachments/attachmentPresentation";
 import { canDeleteEditorTextBlockChatMessage, canEditEditorTextBlockChatMessage, type EditorAttachedEmail, type EditorChatAttachment, type EditorTextBlockChatMessage } from "./editorProjection";
 import {
@@ -3648,8 +3648,8 @@ const AttachedEmailThreadCard: React.FC<{
               sharedInboxID={email.sharedInboxID}
               accountEmail={email.accountEmail}
               attachmentRequestJSON={attachmentRequestJSON}
-              attachmentResourceType={email.collaborationID?.trim() ? "email_relationship" : attachmentResourceType}
-              attachmentResourceID={email.collaborationID?.trim() || attachmentResourceID}
+              attachmentResourceType={attachmentResourceType}
+              attachmentResourceID={attachmentResourceID}
               attachmentInformationID={attachmentInformationID}
               attachmentEditorSurface={attachmentEditorSurface}
               editable={editable}
@@ -5371,7 +5371,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   sharedInboxID,
   accountEmail = "",
   attachmentRequestJSON,
-  attachmentResourceType = "email_relationship",
+  attachmentResourceType = "attached_email",
   attachmentResourceID = "",
   attachmentInformationID,
   attachmentEditorSurface = "attached-email-reply",
@@ -5673,10 +5673,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const replyEditorHeight = Math.min(replyEditorMaxHeight, replyEditorMinHeight + Math.max(0, replyEditorLineCount - 4) * 18);
   const replyAttachmentResourceID = useMemo(() => (
     attachmentResourceID.trim()
-    || collaborationID?.trim()
-    || attachmentInformationID?.trim()
-    || ""
-  ), [attachmentInformationID, attachmentResourceID, collaborationID]);
+    || (nodeID.trim() && messageID.trim() ? mangoAttachedEmailResourceID({ nodeID, messageID }) : "")
+  ), [attachmentResourceID, messageID, nodeID]);
   const replyEditorImageAttachmentContext = attachmentRequestJSON && apiBase.trim() && companyID.trim() && replyAttachmentResourceID
     ? {
       requestJSON: attachmentRequestJSON,

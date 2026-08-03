@@ -252,6 +252,9 @@ func (r *PostgresRepo) AddEmailCollaborationNodeInformationWithActor(input NodeI
 	if err != nil {
 		return CommunicationsEmailCollaborationInformationWriteResult{}, err
 	}
+	if input.InformationID != "" && input.InformationID == target.AttachedEmailInformationID {
+		return CommunicationsEmailCollaborationInformationWriteResult{}, ErrProtectedEmailCollaborationResource
+	}
 	participants, err := addPostgresEmailCollaborationChatParticipantsTx(ctx, tx, input, target)
 	if err != nil {
 		return CommunicationsEmailCollaborationInformationWriteResult{}, err
@@ -297,6 +300,9 @@ func (r *PostgresRepo) UpsertEmailCollaborationNodeProjectionWithActor(input Nod
 	if err != nil {
 		return CommunicationsEmailCollaborationProjectionWriteResult{}, err
 	}
+	if input.InformationID == target.AttachedEmailInformationID {
+		return CommunicationsEmailCollaborationProjectionWriteResult{}, ErrProtectedEmailCollaborationResource
+	}
 	participants, err := addPostgresEmailCollaborationChatParticipantsTx(ctx, tx, input, target)
 	if err != nil {
 		return CommunicationsEmailCollaborationProjectionWriteResult{}, err
@@ -335,21 +341,74 @@ func addPostgresEmailCollaborationChatParticipantsTx(ctx context.Context, tx *sq
 }
 
 func addEmailCollaborationNodeInformationTx(ctx context.Context, tx *sql.Tx, input NodeInformationInput) (domain.NodeInformation, error) {
-	projection, err := postgresUpsertNodeV3ProjectionTx(ctx, tx, input)
+	item := domain.NodeInformation{
+		CompanyID: input.CompanyID, InformationID: newUUIDv7String(), NodeID: input.NodeID,
+		Type: input.Type, Information: input.Information,
+	}
+	if err := tx.QueryRowContext(ctx, `
+insert into node_information
+  (company_id, information_id, node_id, type, information, created_timestamp, updated_timestamp)
+values ($1::uuid, $2::uuid, $3::uuid, $4::information_type, $5, now(), now())
+returning company_id::text, information_id::text, node_id::text, type::text, information, created_timestamp, updated_timestamp`,
+		item.CompanyID, item.InformationID, item.NodeID, item.Type, item.Information,
+	).Scan(&item.CompanyID, &item.InformationID, &item.NodeID, &item.Type, &item.Information, &item.CreatedTimestamp, &item.UpdatedTimestamp); err != nil {
+		return domain.NodeInformation{}, err
+	}
+	projectionID := input.InformationID
+	if projectionID == "" {
+		projectionID = item.InformationID
+	}
+	previous, previousFound, err := postgresNodeProjectionTx(ctx, tx, input.CompanyID, input.NodeID, projectionID)
 	if err != nil {
 		return domain.NodeInformation{}, err
 	}
-	return nodeInformationFromProjection(projection), nil
+	if _, err := upsertEmailCollaborationNodeProjectionRowTx(ctx, tx, input, projectionID); err != nil {
+		return domain.NodeInformation{}, err
+	}
+	if err := recordEmailCollaborationNodeContentChangesTx(ctx, tx, input, projectionID, previous, previousFound); err != nil {
+		return domain.NodeInformation{}, err
+	}
+	return item, nil
 }
 
 func upsertEmailCollaborationNodeProjectionTx(ctx context.Context, tx *sql.Tx, input NodeInformationInput) (domain.NodeProjection, bool, error) {
-	_, previousFound, err := postgresNodeV3ProjectionTx(ctx, tx, input.CompanyID, input.NodeID, input.InformationID)
+	previous, previousFound, err := postgresNodeProjectionTx(ctx, tx, input.CompanyID, input.NodeID, input.InformationID)
 	if err != nil {
 		return domain.NodeProjection{}, false, err
 	}
-	projection, err := postgresUpsertNodeV3ProjectionTx(ctx, tx, input)
+	projection, err := upsertEmailCollaborationNodeProjectionRowTx(ctx, tx, input, input.InformationID)
 	if err != nil {
+		return domain.NodeProjection{}, false, err
+	}
+	if err := recordEmailCollaborationNodeContentChangesTx(ctx, tx, input, input.InformationID, previous, previousFound); err != nil {
 		return domain.NodeProjection{}, false, err
 	}
 	return projection, previousFound, nil
+}
+
+func upsertEmailCollaborationNodeProjectionRowTx(ctx context.Context, tx *sql.Tx, input NodeInformationInput, informationID string) (domain.NodeProjection, error) {
+	var projection domain.NodeProjection
+	if err := tx.QueryRowContext(ctx, `
+insert into node_projection_table
+  (company_id, node_id, information_id, type, information, created_timestamp, updated_timestamp)
+values ($1::uuid, $2::uuid, $3::uuid, $4::information_type, $5, now(), now())
+on conflict (company_id, node_id, information_id)
+do update set type=excluded.type, information=excluded.information, updated_timestamp=now()
+returning company_id::text, node_id::text, information_id::text, type::text, information, created_timestamp, updated_timestamp`,
+		input.CompanyID, input.NodeID, informationID, input.Type, input.Information,
+	).Scan(&projection.CompanyID, &projection.NodeID, &projection.InformationID, &projection.Type, &projection.Information, &projection.CreatedTimestamp, &projection.UpdatedTimestamp); err != nil {
+		return domain.NodeProjection{}, err
+	}
+	return projection, nil
+}
+
+func recordEmailCollaborationNodeContentChangesTx(ctx context.Context, tx *sql.Tx, input NodeInformationInput, informationID string, previous domain.NodeProjection, previousFound bool) error {
+	var previousPtr *domain.NodeProjection
+	if previousFound {
+		previousPtr = &previous
+	}
+	return insertNodeContentChangesTx(ctx, tx, buildNodeContentChanges(
+		input.CompanyID, input.NodeID, informationID, input.Type, previousPtr, input.Information,
+		normalizeNodeContentChangeActor(input.ActorUserID, input.ActorDisplayName), time.Now().UTC(),
+	))
 }

@@ -1122,8 +1122,22 @@ func postgresDeleteNodeRowsTx(ctx context.Context, tx *sql.Tx, companyID, nodeID
 		}
 		stop()
 	}
-	stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.email_relationships_delete")
-	if _, err := tx.ExecContext(ctx, `delete from email_relationships where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid`, companyID, nodeID); err != nil {
+	stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.node_information_delete")
+	if _, err := tx.ExecContext(ctx,
+		`delete from node_information
+		 where company_id=$1 and node_id=$2`,
+		companyID, nodeID,
+	); err != nil {
+		stop()
+		return err
+	}
+	stop()
+	stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.node_projection_delete")
+	if _, err := tx.ExecContext(ctx,
+		`delete from node_projection_table
+		 where company_id=$1 and node_id=$2`,
+		companyID, nodeID,
+	); err != nil {
 		stop()
 		return err
 	}

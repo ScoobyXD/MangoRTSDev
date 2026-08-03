@@ -195,7 +195,7 @@
     "../../../frontend/src/modules/editor/unifiedRichEditorContract.ts",
     "../../../frontend/src/modules/editor/unifiedNodeShellContract.ts",
     "../modules/editor/unifiedRichEditorContract.test.ts",
-
+    "../modules/editor/editorTextboxSync.test.ts",
     "../modules/editor/mangoTiptapFoundation.test.ts",
     "../modules/editor/mangoTiptapRichClipboard.test.ts",
     "../modules/editor/emailViewerContract.test.ts",

@@ -79,31 +79,21 @@ type postgresCommunicationsEmailNodeReference struct {
 func takePostgresCommunicationsEmailNodeReferenceForCardTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, boardID, cardID string) (postgresCommunicationsEmailNodeReference, bool, error) {
 	var reference postgresCommunicationsEmailNodeReference
 	err := tx.QueryRowContext(ctx, `
-select relationship.company_id::text,'',message.provider_message_id,
-       relationship.resource_id::text,
-       jsonb_build_object(
-        'id',message.provider_message_id,'thread_id',thread.provider_thread_id,
-        'subject',message.subject,'snippet',message.snippet,
-        'body',case when btrim(message.rich_html_body)<>'' then message.rich_html_body else message.text_fallback end,
-        'date',coalesce(floor(extract(epoch from message.message_timestamp)*1000)::bigint,0),
-        'unread',message.unread,'starred',message.starred,
-        'from',message.sender_snapshot,'to',message.to_snapshot,'cc',message.cc_snapshot,
-        'bcc',message.bcc_snapshot,'reply_to',message.reply_to_snapshot,
-        'attachments',message.attachment_metadata,'folders',message.folder_snapshot,
-        'folder_ids',message.folder_id_snapshot,'download_complete',message.download_complete),
-       relationship.created_timestamp
-from email_relationships relationship
-join email_threads thread on thread.company_id=relationship.company_id and thread.email_thread_id=relationship.email_thread_id
-join email_messages message on message.company_id=relationship.company_id
- and message.email_thread_id=relationship.email_thread_id and message.email_message_id=relationship.email_message_id
-join node_logic_gate_assignments assignment on assignment.company_id=relationship.company_id
- and assignment.node_id=relationship.resource_id
-where relationship.company_id=$1::uuid and relationship.resource_type='node'
- and relationship.resource_id=$2::uuid and relationship.resource_textbox_id is null
- and assignment.compatibility_board_id=$3 and assignment.compatibility_card_id=$4::uuid
-order by relationship.created_timestamp limit 1`, companyID, nodeID, boardID, cardID).Scan(
-		&reference.CompanyID, &reference.UserID, &reference.MessageID, &reference.NodeID,
-		&reference.Message, &reference.CreatedTimestamp)
+delete from communications_email_nodes
+where company_id=$1::uuid
+  and node_id=$2::uuid
+  and board_id=$3
+  and card_id=$4::uuid
+returning company_id::text, user_id::text, message_id, node_id::text, message, created_timestamp`,
+		companyID, nodeID, boardID, cardID,
+	).Scan(
+		&reference.CompanyID,
+		&reference.UserID,
+		&reference.MessageID,
+		&reference.NodeID,
+		&reference.Message,
+		&reference.CreatedTimestamp,
+	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return postgresCommunicationsEmailNodeReference{}, false, nil
 	}
@@ -114,35 +104,59 @@ order by relationship.created_timestamp limit 1`, companyID, nodeID, boardID, ca
 }
 
 func restorePostgresCommunicationsEmailNodeReferenceTx(ctx context.Context, tx *sql.Tx, reference postgresCommunicationsEmailNodeReference, boardID, cardID, logicGateID string) error {
-	var exists bool
-	if err := tx.QueryRowContext(ctx, `
-select exists(select 1 from email_relationships
- where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid)`,
-		reference.CompanyID, reference.NodeID).Scan(&exists); err != nil {
-		return err
-	}
-	if !exists {
-		return ErrNotFound
-	}
-	return nil
+	_, err := tx.ExecContext(ctx, `
+insert into communications_email_nodes (
+  company_id, user_id, message_id, node_id, board_id, card_id, logic_gate_id,
+  message, created_timestamp, updated_timestamp
+) values ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6::uuid, $7::uuid, $8::jsonb, $9, now())
+on conflict (company_id, node_id)
+do update set
+  user_id=excluded.user_id,
+  message_id=excluded.message_id,
+  board_id=excluded.board_id,
+  card_id=excluded.card_id,
+  logic_gate_id=excluded.logic_gate_id,
+  message=excluded.message,
+  updated_timestamp=now()`,
+		reference.CompanyID,
+		reference.UserID,
+		reference.MessageID,
+		reference.NodeID,
+		boardID,
+		cardID,
+		logicGateID,
+		string(reference.Message),
+		reference.CreatedTimestamp,
+	)
+	return err
 }
 
 func updatePostgresCommunicationsEmailNodeReferenceForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, boardID, cardID, logicGateID string) error {
-	var exists bool
-	if err := tx.QueryRowContext(ctx, `
-select exists(select 1 from email_relationships
- where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid)`,
-		companyID, nodeID).Scan(&exists); err != nil {
-		return err
-	}
-	if !exists {
-		return ErrNotFound
-	}
-	return nil
+	_, err := tx.ExecContext(ctx, `
+update communications_email_nodes
+set board_id=$3,
+    card_id=$4::uuid,
+    logic_gate_id=$5::uuid,
+    updated_timestamp=now()
+where company_id=$1::uuid
+  and node_id=$2::uuid`,
+		companyID, nodeID, boardID, cardID, logicGateID,
+	)
+	return err
 }
 
 func updatePostgresCommunicationsEmailAttachmentReferencesForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, boardID, cardID, logicGateID string) error {
-	return updatePostgresCommunicationsEmailNodeReferenceForNodeTx(ctx, tx, companyID, nodeID, boardID, cardID, logicGateID)
+	_, err := tx.ExecContext(ctx, `
+update communications_email_node_attachments
+set board_id=$3,
+    card_id=$4::uuid,
+    logic_gate_id=$5::uuid,
+    updated_timestamp=now()
+where company_id=$1::uuid
+  and node_id=$2::uuid`,
+		companyID, nodeID, boardID, cardID, logicGateID,
+	)
+	return err
 }
 
 func (r *PostgresRepo) UpsertCommunicationsTriageItem(userID string, message domain.EmailMessageSnapshot) (domain.CommunicationsTriageItem, error) {
@@ -369,11 +383,15 @@ values ($1, $2, $3, $4, now())`, input.CompanyID, nodeID, 120+float64(index*28),
 		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		now := time.Now().UTC()
-		placement := domain.CommunicationsEmailPlacement{
-			CompanyID: input.CompanyID, UserID: input.UserID, MessageID: messageID, NodeID: nodeID,
-			BoardID: board.BoardID, CardID: card.CardID, LogicGateID: input.LogicGateID,
-			CreatedTimestamp: now, UpdatedTimestamp: now,
+		placement, err := scanCommunicationsEmailPlacement(tx.QueryRowContext(ctx, `
+insert into communications_email_nodes (
+  company_id, user_id, message_id, node_id, board_id, card_id, logic_gate_id,
+  message, created_timestamp, updated_timestamp
+) values ($1, $2, $3, $4, $5, $6, $7::uuid, $8::jsonb, now(), now())
+returning company_id::text, user_id::text, message_id, node_id::text, board_id, card_id::text, logic_gate_id::text, created_timestamp, updated_timestamp`,
+			input.CompanyID, input.UserID, messageID, nodeID, board.BoardID, card.CardID, input.LogicGateID, string(rawMessage)))
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
 		}
 		emailInput := input
 		emailInput.NodeID = nodeID
@@ -708,11 +726,22 @@ for update`, input.UserID, messageID).Scan(&rawMessage); errors.Is(err, sql.ErrN
 			return CommunicationsTriageConversionResult{}, err
 		}
 
-		now := time.Now().UTC()
-		placement := domain.CommunicationsEmailPlacement{
-			CompanyID: input.CompanyID, UserID: input.UserID, MessageID: messageID, NodeID: input.NodeID,
-			BoardID: card.BoardID, CardID: card.CardID, LogicGateID: input.LogicGateID,
-			CreatedTimestamp: now, UpdatedTimestamp: now,
+		placement, err := scanCommunicationsEmailPlacement(tx.QueryRowContext(ctx, `
+insert into communications_email_node_attachments (
+  company_id, user_id, message_id, node_id, board_id, card_id, logic_gate_id,
+  message, created_timestamp, updated_timestamp
+) values ($1, $2, $3, $4, $5, $6::uuid, $7::uuid, $8::jsonb, now(), now())
+on conflict (company_id, user_id, message_id, node_id)
+do update set
+  board_id=excluded.board_id,
+  card_id=excluded.card_id,
+  logic_gate_id=excluded.logic_gate_id,
+  message=excluded.message,
+  updated_timestamp=now()
+returning company_id::text, user_id::text, message_id, node_id::text, board_id, card_id::text, logic_gate_id::text, created_timestamp, updated_timestamp`,
+			input.CompanyID, input.UserID, messageID, input.NodeID, card.BoardID, card.CardID, input.LogicGateID, string(rawMessage)))
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
 		}
 		informationID, emailThreadID, err := r.persistCommunicationsConversionEmailTx(ctx, tx, input, message, time.Now().UTC())
 		if err != nil {
@@ -757,7 +786,8 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 }
 
 func (r *PostgresRepo) ListCommunicationsEmailPlacements(userID, companyID string, messageIDs []string) ([]domain.CommunicationsEmailPlacement, error) {
-	userID, companyID = cleanUUIDText(userID), cleanUUIDText(companyID)
+	userID = strings.TrimSpace(userID)
+	companyID = strings.TrimSpace(companyID)
 	if userID == "" || companyID == "" {
 		return nil, ErrInvalid
 	}
@@ -765,6 +795,7 @@ func (r *PostgresRepo) ListCommunicationsEmailPlacements(userID, companyID strin
 	if len(ids) == 0 {
 		return []domain.CommunicationsEmailPlacement{}, nil
 	}
+
 	args := []any{userID, companyID}
 	placeholders := make([]string, 0, len(ids))
 	for _, id := range ids {
@@ -772,29 +803,26 @@ func (r *PostgresRepo) ListCommunicationsEmailPlacements(userID, companyID strin
 		placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
 	}
 	rows, err := r.db.Query(`
-select relationship.company_id::text,$1::text,message.provider_message_id,
-       relationship.resource_id::text,
-       coalesce(assignment.compatibility_board_id,''),
-       coalesce(assignment.compatibility_card_id::text,''),
-       coalesce(assignment.logic_gate_id::text,''),
-       relationship.created_timestamp,
-       greatest(relationship.created_timestamp,message.updated_timestamp)
-from email_relationships relationship
-join email_messages message on message.company_id=relationship.company_id
- and message.email_thread_id=relationship.email_thread_id
- and message.email_message_id=relationship.email_message_id
-left join node_logic_gate_assignments assignment on assignment.company_id=relationship.company_id
- and assignment.node_id=relationship.resource_id
-where relationship.company_id=$2::uuid and relationship.resource_type='node'
- and relationship.resource_textbox_id is null
- and message.provider_message_id in (`+strings.Join(placeholders, ",")+`)
- and mangorts_user_can_access_resource(relationship.company_id,'node',
-     relationship.resource_id,$1::uuid,'edit')
-order by relationship.created_timestamp desc,message.provider_message_id,relationship.resource_id`, args...)
+select company_id, user_id, message_id, node_id, board_id, card_id, logic_gate_id, created_timestamp, updated_timestamp
+from (
+  select company_id::text, user_id::text, message_id, node_id::text, board_id, card_id::text, logic_gate_id::text, created_timestamp, updated_timestamp
+  from communications_email_nodes
+  where user_id=$1
+    and company_id=$2
+    and message_id in (`+strings.Join(placeholders, ",")+`)
+  union all
+  select company_id::text, user_id::text, message_id, node_id::text, board_id, card_id::text, logic_gate_id::text, created_timestamp, updated_timestamp
+  from communications_email_node_attachments
+  where user_id=$1
+    and company_id=$2
+    and message_id in (`+strings.Join(placeholders, ",")+`)
+) placements
+order by created_timestamp desc, message_id asc, logic_gate_id asc`, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+
 	placements := make([]domain.CommunicationsEmailPlacement, 0)
 	for rows.Next() {
 		placement, err := scanCommunicationsEmailPlacement(rows)
@@ -807,121 +835,102 @@ order by relationship.created_timestamp desc,message.provider_message_id,relatio
 }
 
 func emailProjectionMailboxScopeSQL(ctx context.Context, tx *sql.Tx, companyID, nodeID, messageID string) (string, string, error) {
-	var sharedInboxID, accountEmail string
+	var information string
 	err := tx.QueryRowContext(ctx, `
-select coalesce(thread.shared_inbox_id::text,''),thread.mailbox_account_email
-from email_relationships relationship
-join email_threads thread on thread.company_id=relationship.company_id
- and thread.email_thread_id=relationship.email_thread_id
-join email_messages message on message.company_id=relationship.company_id
- and message.email_thread_id=relationship.email_thread_id
- and message.email_message_id=relationship.email_message_id
-where relationship.company_id=$1::uuid and relationship.resource_type='node'
- and relationship.resource_id=$2::uuid and message.provider_message_id=$3
-order by relationship.created_timestamp desc limit 1`, companyID, nodeID, messageID).Scan(&sharedInboxID, &accountEmail)
+select information
+from node_projection_table
+where company_id=$1 and node_id=$2 and type='Attached email'::information_type
+  and information::jsonb->>'message_id'=$3
+order by created_timestamp desc
+limit 1`, companyID, nodeID, messageID).Scan(&information)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", "", nil
 	}
-	return sharedInboxID, accountEmail, err
+	if err != nil {
+		return "", "", err
+	}
+	var payload struct {
+		SharedInboxID string `json:"shared_inbox_id"`
+		AccountEmail  string `json:"account_email"`
+	}
+	if err := json.Unmarshal([]byte(information), &payload); err != nil {
+		return "", "", nil
+	}
+	return strings.TrimSpace(payload.SharedInboxID), strings.TrimSpace(payload.AccountEmail), nil
 }
 
 func addEmailProjectionSQL(ctx context.Context, tx *sql.Tx, companyID, nodeID, sharedInboxID, accountEmail string, message domain.EmailMessageSnapshot, attachedAt time.Time, createdFromEmail bool) error {
-	var emailThreadID string
-	if err := tx.QueryRowContext(ctx, `
-select email_thread_id::text from email_messages
-where company_id=$1::uuid and provider_message_id=$2
-order by updated_timestamp desc limit 1`, companyID, message.ID).Scan(&emailThreadID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		}
-		return err
-	}
-	_, err := addEmailProjectionSQLWithThread(ctx, tx, companyID, nodeID, sharedInboxID, accountEmail, message, emailThreadID, attachedAt, createdFromEmail)
+	_, err := addEmailProjectionSQLWithThread(ctx, tx, companyID, nodeID, sharedInboxID, accountEmail, message, "", attachedAt, createdFromEmail)
 	return err
 }
 
 func addEmailProjectionSQLWithThread(ctx context.Context, tx *sql.Tx, companyID, nodeID, sharedInboxID, accountEmail string, message domain.EmailMessageSnapshot, emailThreadID string, attachedAt time.Time, createdFromEmail bool) (string, error) {
-	companyID, nodeID, emailThreadID = cleanUUIDText(companyID), cleanUUIDText(nodeID), cleanUUIDText(emailThreadID)
-	if companyID == "" || nodeID == "" || emailThreadID == "" || strings.TrimSpace(message.ID) == "" {
-		return "", ErrInvalid
-	}
-	relationshipID := newUUIDv7String()
-	if err := linkPostgresCommunicationsEmailThreadToNodeTx(ctx, tx, companyID, nodeID, relationshipID, emailThreadID, message.ID, ""); err != nil {
+	informationID, information := newUUIDv7String(), attachedEmailProjectionInformationWithThread(message, sharedInboxID, accountEmail, emailThreadID, attachedAt, createdFromEmail)
+	if _, err := tx.ExecContext(ctx, `
+insert into node_information (
+  company_id, information_id, node_id, type, information, created_timestamp, updated_timestamp
+) values ($1, $2, $3, 'Attached email'::information_type, $4, $5, $5)`,
+		companyID, informationID, nodeID, information, attachedAt); err != nil {
 		return "", err
 	}
-	if err := tx.QueryRowContext(ctx, `
-select relationship.email_relationship_id::text
-from email_relationships relationship
-join email_messages email_message on email_message.company_id=relationship.company_id
- and email_message.email_thread_id=relationship.email_thread_id
- and email_message.email_message_id=relationship.email_message_id
-where relationship.company_id=$1::uuid and relationship.resource_type='node'
- and relationship.resource_id=$2::uuid and relationship.email_thread_id=$3::uuid
- and relationship.resource_textbox_id is null and email_message.provider_message_id=$4`,
-		companyID, nodeID, emailThreadID, message.ID).Scan(&relationshipID); err != nil {
+	if _, err := tx.ExecContext(ctx, `
+insert into node_projection_table (
+  company_id, node_id, information_id, type, information, created_timestamp, updated_timestamp
+) values ($1, $2, $3, 'Attached email'::information_type, $4, $5, $5)
+on conflict (company_id, node_id, information_id)
+do update set
+  type=excluded.type,
+  information=excluded.information,
+  updated_timestamp=excluded.updated_timestamp`,
+		companyID, nodeID, informationID, information, attachedAt); err != nil {
 		return "", err
 	}
-	return relationshipID, nil
+	return informationID, nil
 }
 
 func deletePostgresCommunicationsEmailSourceNodeTx(ctx context.Context, tx *sql.Tx, companyID string, link communicationsEmailNodeLink) error {
-	if _, err := tx.ExecContext(ctx, `delete from email_relationships where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid`, companyID, link.NodeID); err != nil {
+	if _, err := tx.ExecContext(ctx, `
+delete from communications_email_nodes
+where company_id=$1 and board_id=$2 and card_id=$3`, companyID, link.BoardID, link.CardID); err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `delete from nodes where company_id=$1::uuid and node_id=$2::uuid`, companyID, link.NodeID)
-	if err != nil {
+	if _, err := tx.ExecContext(ctx, `
+delete from node_logic_gate_assignments
+where company_id=$1
+  and node_id=$2
+  and compatibility_board_id=$3
+  and compatibility_card_id=$4`, companyID, link.NodeID, link.BoardID, link.CardID); err != nil {
 		return err
 	}
-	if rows, _ := result.RowsAffected(); rows != 1 {
-		return ErrNotFound
+	if err := deleteKanbanBoardProjectionForNodeTx(ctx, tx, companyID, link.NodeID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from node_relationships
+where company_id=$1 and (node_id_a=$2 or node_id_b=$2)`, companyID, link.NodeID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from node_information
+where company_id=$1 and node_id=$2`, companyID, link.NodeID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from node_projection_table
+where company_id=$1 and node_id=$2`, companyID, link.NodeID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from node_map_positions
+where company_id=$1 and node_id=$2`, companyID, link.NodeID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from nodes
+where company_id=$1 and node_id=$2`, companyID, link.NodeID); err != nil {
+		return err
 	}
 	return nil
-}
-
-func loadPostgresCommunicationsEmailNodeLinkForCardTx(ctx context.Context, tx *sql.Tx, companyID, userID, boardID, cardID string) (communicationsEmailNodeLink, error) {
-	var link communicationsEmailNodeLink
-	var raw []byte
-	err := tx.QueryRowContext(ctx, `
-select relationship.company_id::text,$2::text,message.provider_message_id,
-       relationship.resource_id::text,assignment.compatibility_board_id,
-       assignment.compatibility_card_id::text,assignment.logic_gate_id::text,
-       jsonb_build_object(
-        'id',message.provider_message_id,'thread_id',thread.provider_thread_id,
-        'subject',message.subject,'snippet',message.snippet,
-        'body',case when btrim(message.rich_html_body)<>'' then message.rich_html_body else message.text_fallback end,
-        'date',coalesce(floor(extract(epoch from message.message_timestamp)*1000)::bigint,0),
-        'unread',message.unread,'starred',message.starred,
-        'from',message.sender_snapshot,'to',message.to_snapshot,'cc',message.cc_snapshot,
-        'bcc',message.bcc_snapshot,'reply_to',message.reply_to_snapshot,
-        'attachments',message.attachment_metadata,'folders',message.folder_snapshot,
-        'folder_ids',message.folder_id_snapshot,'download_complete',message.download_complete),
-       relationship.created_timestamp,greatest(message.updated_timestamp,relationship.created_timestamp)
-from email_relationships relationship
-join email_threads thread on thread.company_id=relationship.company_id and thread.email_thread_id=relationship.email_thread_id
-join email_messages message on message.company_id=relationship.company_id
- and message.email_thread_id=relationship.email_thread_id and message.email_message_id=relationship.email_message_id
-join node_logic_gate_assignments assignment on assignment.company_id=relationship.company_id
- and assignment.node_id=relationship.resource_id
-where relationship.company_id=$1::uuid and relationship.resource_type='node'
- and relationship.resource_textbox_id is null
- and assignment.compatibility_board_id=$3 and assignment.compatibility_card_id=$4::uuid
- and ($2='' or mangorts_user_can_access_resource(relationship.company_id,'node',
-     relationship.resource_id,$2::uuid,'edit'))
-order by relationship.created_timestamp limit 1
-for update of relationship`, companyID, userID, boardID, cardID).Scan(
-		&link.CompanyID, &link.UserID, &link.MessageID, &link.NodeID, &link.BoardID, &link.CardID,
-		&link.LogicGateID, &raw, &link.CreatedTimestamp, &link.UpdatedTimestamp)
-	if errors.Is(err, sql.ErrNoRows) {
-		return communicationsEmailNodeLink{}, ErrNotFound
-	}
-	if err != nil {
-		return communicationsEmailNodeLink{}, err
-	}
-	if err := json.Unmarshal(raw, &link.Message); err != nil {
-		return communicationsEmailNodeLink{}, err
-	}
-	link.Message = normalizeEmailMessageSnapshot(link.Message)
-	return link, nil
 }
 
 func (r *PostgresRepo) TransferCommunicationsEmailNode(input CommunicationsEmailNodeTransferInput) (CommunicationsEmailNodeTransferResult, error) {
@@ -929,21 +938,52 @@ func (r *PostgresRepo) TransferCommunicationsEmailNode(input CommunicationsEmail
 	if err != nil {
 		return CommunicationsEmailNodeTransferResult{}, err
 	}
+
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return CommunicationsEmailNodeTransferResult{}, err
 	}
 	defer tx.Rollback()
-	link, err := loadPostgresCommunicationsEmailNodeLinkForCardTx(ctx, tx, input.CompanyID, input.UserID, input.SourceBoardID, input.SourceCardID)
+
+	var link communicationsEmailNodeLink
+	var rawMessage []byte
+	if err := tx.QueryRowContext(ctx, `
+select company_id::text, user_id::text, message_id, node_id::text, board_id, card_id::text, logic_gate_id::text,
+       message, created_timestamp, updated_timestamp
+from communications_email_nodes
+where company_id=$1 and board_id=$2 and card_id=$3 and ($4 = '' or user_id::text=$4)
+for update`, input.CompanyID, input.SourceBoardID, input.SourceCardID, input.UserID).Scan(
+		&link.CompanyID,
+		&link.UserID,
+		&link.MessageID,
+		&link.NodeID,
+		&link.BoardID,
+		&link.CardID,
+		&link.LogicGateID,
+		&rawMessage,
+		&link.CreatedTimestamp,
+		&link.UpdatedTimestamp,
+	); errors.Is(err, sql.ErrNoRows) {
+		return CommunicationsEmailNodeTransferResult{}, ErrNotFound
+	} else if err != nil {
+		return CommunicationsEmailNodeTransferResult{}, err
+	}
+	if err := json.Unmarshal(rawMessage, &link.Message); err != nil {
+		return CommunicationsEmailNodeTransferResult{}, err
+	}
+	link.Message = normalizeEmailMessageSnapshot(link.Message)
+	rawMessage, err = json.Marshal(link.Message)
 	if err != nil {
 		return CommunicationsEmailNodeTransferResult{}, err
 	}
+
 	targetCard, err := scanKanbanCard(tx.QueryRowContext(ctx, `
 select `+kanbanBoardProjectionCardSelectColumns+`
 from kanban_board_projection projection
-where projection.company_id=$1::uuid and projection.compatibility_board_id=$2
- and projection.compatibility_card_id=$3::uuid
+where projection.company_id=$1::uuid
+  and projection.compatibility_board_id=$2
+  and projection.compatibility_card_id=$3::uuid
 for update`, input.CompanyID, input.TargetBoardID, input.TargetCardID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return CommunicationsEmailNodeTransferResult{}, ErrNotFound
@@ -962,16 +1002,30 @@ for update`, input.CompanyID, input.TargetBoardID, input.TargetCardID))
 	if err != nil {
 		return CommunicationsEmailNodeTransferResult{}, err
 	}
+
+	placement, err := scanCommunicationsEmailPlacement(tx.QueryRowContext(ctx, `
+insert into communications_email_node_attachments (
+  company_id, user_id, message_id, node_id, board_id, card_id, logic_gate_id,
+  message, created_timestamp, updated_timestamp
+) values ($1, $2, $3, $4, $5, $6::uuid, $7::uuid, $8::jsonb, now(), now())
+on conflict (company_id, user_id, message_id, node_id)
+do update set
+  board_id=excluded.board_id,
+  card_id=excluded.card_id,
+  logic_gate_id=excluded.logic_gate_id,
+  message=excluded.message,
+  updated_timestamp=now()
+returning company_id::text, user_id::text, message_id, node_id::text, board_id, card_id::text, logic_gate_id::text, created_timestamp, updated_timestamp`,
+		input.CompanyID, link.UserID, link.MessageID, targetCard.NodeID, targetCard.BoardID, targetCard.CardID, targetLogicGateID, string(rawMessage)))
+	if err != nil {
+		return CommunicationsEmailNodeTransferResult{}, err
+	}
 	if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, targetCard.NodeID, sharedInboxID, accountEmail, link.Message, time.Now().UTC(), false); err != nil {
 		return CommunicationsEmailNodeTransferResult{}, err
 	}
 	if err := deletePostgresCommunicationsEmailSourceNodeTx(ctx, tx, input.CompanyID, link); err != nil {
 		return CommunicationsEmailNodeTransferResult{}, err
 	}
-	now := time.Now().UTC()
-	placement := domain.CommunicationsEmailPlacement{CompanyID: input.CompanyID, UserID: link.UserID,
-		MessageID: link.MessageID, NodeID: targetCard.NodeID, BoardID: targetCard.BoardID,
-		CardID: targetCard.CardID, LogicGateID: targetLogicGateID, CreatedTimestamp: now, UpdatedTimestamp: now}
 	events, err := r.appendDomainEventsTx(ctx, tx, []DomainEventInput{
 		workspaceDomainEventInput(input.CompanyID, "kanban_card_deleted", map[string]any{"board_id": link.BoardID, "card_id": link.CardID}),
 		nodeDeletedWorkspaceEventInput(input.CompanyID, link.NodeID),
@@ -983,39 +1037,74 @@ for update`, input.CompanyID, input.TargetBoardID, input.TargetCardID))
 	if err := tx.Commit(); err != nil {
 		return CommunicationsEmailNodeTransferResult{}, err
 	}
-	return CommunicationsEmailNodeTransferResult{EmailPlacement: placement, DeletedNodeID: link.NodeID,
-		DeletedCardID: link.CardID, SourceBoardID: link.BoardID, TargetNodeID: targetCard.NodeID,
-		TargetBoardID: targetCard.BoardID, TargetCardID: targetCard.CardID, Events: events}, nil
+	return CommunicationsEmailNodeTransferResult{
+		EmailPlacement: placement,
+		DeletedNodeID:  link.NodeID,
+		DeletedCardID:  link.CardID,
+		SourceBoardID:  link.BoardID,
+		TargetNodeID:   targetCard.NodeID,
+		TargetBoardID:  targetCard.BoardID,
+		TargetCardID:   targetCard.CardID,
+		Events:         events,
+	}, nil
 }
 
 func (r *PostgresRepo) RevertCommunicationsTriageNode(input CommunicationsTriageRevertInput) (CommunicationsTriageRevertResult, error) {
-	input.UserID = cleanUUIDText(input.UserID)
-	input.CompanyID = cleanUUIDText(input.CompanyID)
+	input.UserID = strings.TrimSpace(input.UserID)
+	input.CompanyID = strings.TrimSpace(input.CompanyID)
 	input.BoardID = strings.TrimSpace(input.BoardID)
-	input.CardID = cleanUUIDText(input.CardID)
+	input.CardID = strings.TrimSpace(input.CardID)
 	if input.UserID == "" || input.CompanyID == "" || input.BoardID == "" || input.CardID == "" {
 		return CommunicationsTriageRevertResult{}, ErrInvalid
 	}
+
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return CommunicationsTriageRevertResult{}, err
 	}
 	defer tx.Rollback()
-	link, err := loadPostgresCommunicationsEmailNodeLinkForCardTx(ctx, tx, input.CompanyID, input.UserID, input.BoardID, input.CardID)
+
+	var link communicationsEmailNodeLink
+	var rawMessage []byte
+	if err := tx.QueryRowContext(ctx, `
+select company_id::text, user_id::text, message_id, node_id::text, board_id, card_id::text, logic_gate_id::text,
+       message, created_timestamp, updated_timestamp
+from communications_email_nodes
+where company_id=$1 and user_id=$2 and board_id=$3 and card_id=$4
+for update`, input.CompanyID, input.UserID, input.BoardID, input.CardID).Scan(
+		&link.CompanyID,
+		&link.UserID,
+		&link.MessageID,
+		&link.NodeID,
+		&link.BoardID,
+		&link.CardID,
+		&link.LogicGateID,
+		&rawMessage,
+		&link.CreatedTimestamp,
+		&link.UpdatedTimestamp,
+	); errors.Is(err, sql.ErrNoRows) {
+		return CommunicationsTriageRevertResult{}, ErrNotFound
+	} else if err != nil {
+		return CommunicationsTriageRevertResult{}, err
+	}
+	if err := json.Unmarshal(rawMessage, &link.Message); err != nil {
+		return CommunicationsTriageRevertResult{}, err
+	}
+	link.Message = normalizeEmailMessageSnapshot(link.Message)
+	rawMessage, err = json.Marshal(link.Message)
 	if err != nil {
 		return CommunicationsTriageRevertResult{}, err
 	}
-	rawMessage, err := json.Marshal(link.Message)
-	if err != nil {
-		return CommunicationsTriageRevertResult{}, err
-	}
+
 	triageItem, err := scanCommunicationsTriageItem(tx.QueryRowContext(ctx, `
-insert into communications_triage_items(user_id,message_id,message,created_timestamp,updated_timestamp)
-values($1::uuid,$2,$3::jsonb,now(),now())
-on conflict(user_id,message_id) do update set message=excluded.message,updated_timestamp=now()
-returning user_id::text,message_id,message,created_timestamp,updated_timestamp`,
-		input.UserID, link.MessageID, string(rawMessage)))
+insert into communications_triage_items (user_id, message_id, message, created_timestamp, updated_timestamp)
+values ($1, $2, $3::jsonb, now(), now())
+on conflict (user_id, message_id)
+do update set
+  message=excluded.message,
+  updated_timestamp=now()
+returning user_id::text, message_id, message, created_timestamp, updated_timestamp`, input.UserID, link.MessageID, string(rawMessage)))
 	if err != nil {
 		return CommunicationsTriageRevertResult{}, err
 	}
@@ -1029,11 +1118,17 @@ returning user_id::text,message_id,message,created_timestamp,updated_timestamp`,
 	if err != nil {
 		return CommunicationsTriageRevertResult{}, err
 	}
+
 	if err := tx.Commit(); err != nil {
 		return CommunicationsTriageRevertResult{}, err
 	}
-	return CommunicationsTriageRevertResult{TriageItem: triageItem, DeletedNodeID: link.NodeID,
-		DeletedCardID: input.CardID, BoardID: input.BoardID, Events: events}, nil
+	return CommunicationsTriageRevertResult{
+		TriageItem:    triageItem,
+		DeletedNodeID: link.NodeID,
+		DeletedCardID: input.CardID,
+		BoardID:       input.BoardID,
+		Events:        events,
+	}, nil
 }
 
 func (r *PostgresRepo) ListUserLogicGateShortcuts(userID, companyID string) ([]domain.UserLogicGateShortcut, error) {

@@ -1,14 +1,4 @@
-# Process Story: Related Email Uses Normal Resource Permissions
-
-A user attaches a normalized email message to a Node, Project, Logic Gate, or supported textbox.
-↓
-`email_relationships` records only the message/resource association; it does not create a participant roster or protected email-specific permission policy.
-↓
-Every stored-email, draft, chat, and relationship-attachment request resolves the related resource and applies its normal permission rules.
-↓
-A normal permission grant enables access and normal revocation removes it on the next check. Provider mailbox reads remain separately limited to the exact mailbox owner or shared inbox.
-
-Last updated: 2026-08-02
+Last updated: 2026-07-22
 
 # Permissions Tests
 
@@ -81,10 +71,10 @@ P59 - Company role, group membership, and group hierarchy changes that can alter
 P60 - The actor permission fingerprint is part of the ETag, so two users with different effective permissions do not share an actor-unsafe representation validator.
 P61 - GVIC Generated/request-owner data may appear in the Logic Gate header, but GVIC assignments do not set `can_edit`.
 P62 - Permission mutations still publish no generic permission/workspace event. Instead, before a later Node-chat, mounted-board, or shared-mailbox hint reaches an already-subscribed socket, that narrow publisher resolves the exact current audience and fails closed on lookup errors. A user revoked after subscribing receives no later resource identifiers/hints without needing a reconnect.
-P63 - An email-created Node is an ordinary Node. Its initial default/direct permissions come from the normal creation destination and actor rules, and later permission edits, Explorer placement, Project relationships, or Logic Gate transfers use the same policy system as every other Node.
-P64 - Email relationships, comments, mentions, and drafts do not grant resource access. Direct-user, group, default, inherited policy, and company-role rules remain the only resource-permission sources.
-P65 - A related email, resource-shared draft, Node textbox chat, and `email_relationship` attachment are authorized by resolving the exact related Node, Project, or Logic Gate and checking current normal access. There is no protected collaboration permission or append-only participant binding.
-P66 - Granting normal resource access makes existing related email data available according to that resource policy; revoking normal access removes it on the next authorization check. Neither action creates a mailbox row or permits a provider read without exact mailbox authorization.
+P63 - A newly created email Node has default access `no_access`, one system-managed direct edit binding for its creator, and creator direct Generated GVIC. It never inherits the Unfiled/Nodes folder or source shared-inbox permission policy. Later explicit Logic Gate/Project work may apply those normal resource policies, while generic permission replacement still cannot widen or remove collaboration participant grants.
+P64 - A committed direct user mention or resolved user-group mention snapshots each distinct same-company user as a collaboration participant and adds one system-managed direct edit binding for that user in the same durable transaction. These are user bindings, not live group pointers, so later group changes neither grant nor revoke collaboration access.
+P65 - Collaboration participant membership and its mandatory Node edit binding are append-only for the collaboration lifetime. The collaboration Node policy is system-managed: generic Node permission mutation cannot add a grant, remove/downgrade/replace a participant binding, or change its default away from `no_access`; only the accepted mention-participant path may add a binding. Deleting the mention message has no permission effect.
+P66 - A generic Node permission grant alone does not create email collaboration participation, a triage row, source-mailbox access, or shared-draft access. The existing dev-admin/company-admin bypass remains an administrative access rule but does not silently add the administrator to participant lists, mention notifications, or My Drafts.
 P67 - Chat mutation authorization is the intersection of normal entity Edit permission and exact stored comment authorship. An administrator, manager, collaborator, or other editor may read and reply according to existing access but may not edit or delete another user's comment. Missing or mismatched stored `author_id` fails closed, and legacy POST upsert paths cannot bypass the author-only PATCH boundary.
 
 ## Scenarios
@@ -294,7 +284,7 @@ Expected:
 - Removing edit access returns denial and does not expose cached card data.
 - GVIC assignment alone does not set `can_edit`.
 
-### Scenario P-S8: Related Email Uses Ordinary Resource Permissions
+### Scenario P-S8: Email Collaboration Participant Policy
 
 Business logic covered:
 - P4
@@ -306,16 +296,16 @@ Business logic covered:
 - P66
 
 Given:
-- An email relationship exists on a Node, and a chat mentions one user plus an overlapping user group.
-- Group membership later changes, the mention message is deleted, and a manager changes the Node's normal permissions.
+- An email collaboration is created by one user and a chat mentions one user plus an overlapping user group.
+- Group membership later changes, a mention message is deleted, and a manager attempts generic Node permission changes.
 
 Expected:
-- Creating the relationship does not create or replace any Node permission row.
-- Mentions create their normal notifications but do not grant Node, thread, message, draft, or attachment access.
-- A group remains a normal dynamic permission source only when a manager explicitly grants that group access to the Node.
-- Group changes and mention deletion do not create, snapshot, or preserve a separate email-participant roster.
-- Normal permission changes immediately control access to the related thread, message, drafts, chats, and relationship attachments.
-- Existing company-admin/dev-admin bypass remains intact but does not itself create a triage card, notification, relationship, or shared draft listing.
+- The collaboration Node starts at no access with one system-managed direct creator edit binding.
+- Each distinct resolved mentioned user receives one system-managed direct edit binding and participant row in the chat transaction.
+- The mention group is snapshotted to users rather than retained as a dynamic group permission pointer.
+- Group changes and mention deletion do not change existing participants.
+- Generic permission mutation cannot remove/downgrade participant bindings, change the default, or add a nonparticipant to email/thread/draft visibility.
+- Existing company-admin/dev-admin bypass remains intact but does not itself create a participant, triage card, notification, or shared draft listing.
 
 ### Scenario P-S9: Comment Authorship Is A Mutation Boundary
 
@@ -332,6 +322,6 @@ Expected:
 - Only the stored author may mutate it, and the author must still have normal entity Edit access.
 - A missing or mismatched `author_id` fails closed.
 - Legacy create/upsert routes cannot replace an existing chat projection.
-- These checks do not alter read, reply, mention-notification, or administrator visibility rules.
+- These checks do not alter read, reply, mention-participant, or administrator visibility rules.
 
 Focused backend coverage lives in `backend/internal/http/chat_comment_edit_test.go`.

@@ -11,8 +11,8 @@ import (
 func TestBuildReportInventoriesInlineAttachmentBytes(t *testing.T) {
 	row := candidateRow{
 		Location: migration.PayloadLocation{
-			Table:         "node_textboxes",
-			Column:        "body_json",
+			Table:         "node_projection_table",
+			Column:        "information",
 			SourcePK:      "11111111-1111-1111-1111-111111111111|22222222-2222-2222-2222-222222222222|33333333-3333-4333-8333-333333333333",
 			CompanyID:     "11111111-1111-1111-1111-111111111111",
 			ResourceType:  "node",
@@ -59,32 +59,10 @@ func TestCandidateSourcesConsumeStandardQueryArguments(t *testing.T) {
 	}
 }
 
-func TestCandidateSourcesUseV3NodeAndEmailTables(t *testing.T) {
-	joined := ""
-	for _, source := range candidateSources() {
-		joined += source.Table + "." + source.Column + "\n" + source.Query + "\n"
-	}
-	for _, required := range []string{
-		"node_textboxes.body_json",
-		"node_textbox_seen_snapshots.body_json",
-		"email_messages.attachment_metadata",
-		"email_messages.rich_html_body",
-		"email_drafts.body_editor_html",
-	} {
-		if !strings.Contains(joined, required) {
-			t.Fatalf("V3 attachment sources missing %q", required)
-		}
-	}
-	for _, retired := range []string{
-		"node_information",
-		"node_projection_table",
-		"node_projection_seen_snapshots",
-		"communications_email_nodes",
-		"communications_email_node_attachments",
-		"attached_email",
-	} {
-		if strings.Contains(joined, retired) {
-			t.Fatalf("attachment sources still reference retired storage %q", retired)
-		}
+func TestAttachedEmailMigrationResourceIDEscapesProviderMessageID(t *testing.T) {
+	got := attachedEmailMigrationResourceID("node-1", "msg:with/slash")
+	want := "node:node-1:message:msg%3Awith%2Fslash"
+	if got != want {
+		t.Fatalf("resource id = %q, want %q", got, want)
 	}
 }

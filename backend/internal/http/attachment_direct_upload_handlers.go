@@ -757,15 +757,12 @@ func (s *Server) resolveAttachmentUploadCompany(w http.ResponseWriter, r *http.R
 }
 
 func (s *Server) canEditAttachmentResourceForResolution(companyID, userID, resourceType, resourceID string) (bool, error) {
-	if resourceType == "email_relationship" {
-		resource, err := s.repo.GetEmailRelationshipAttachmentResource(companyID, resourceID)
-		if errors.Is(err, store.ErrInvalid) || errors.Is(err, store.ErrNotFound) {
+	if resourceType == "attached_email" {
+		nodeID, ok := parseAttachedEmailAttachmentResourceID(resourceID)
+		if !ok {
 			return false, nil
 		}
-		if err != nil {
-			return false, err
-		}
-		return s.repo.UserHasEffectiveAccess(companyID, userID, resource.ResourceType, resource.ResourceID, store.EntityPermissionEdit)
+		return s.repo.UserHasEffectiveAccess(companyID, userID, store.EntityTypeNode, nodeID, store.EntityPermissionEdit)
 	}
 	entityType, ok := attachmentPermissionEntityType(resourceType)
 	if !ok {
