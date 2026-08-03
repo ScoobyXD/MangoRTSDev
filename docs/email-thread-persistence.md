@@ -36,6 +36,6 @@ Node and collaboration thread reads always use Mango's stored messages and attac
 
 ## Rollout
 
-Apply `backend/db/migrations/20260719_persist_node_email_threads.sql` and the later durable-download-job migration through the normal human-reviewed database deployment process before deploying backend code that writes these tables. Do not apply either migration from an agent session or directly to a live database. Existing Attached email rows can continue to render from their legacy snapshot; new explicit imports populate and extend the durable tables.
+Apply `backend/db/migrations/20260719_persist_node_email_threads.sql` and the later durable-download-job migration through the normal human-reviewed database deployment process before deploying backend code that writes these tables. Do not apply either migration from an agent session or directly to a live database. That rollout intentionally did not backfill existing Attached-email snapshots; they remained readable from legacy projection JSON while new explicit imports populated the durable tables. The later V3 cutover must therefore normalize those older snapshots rather than assuming their thread/message rows already exist.
 
 The worker rollout must start only after the schema migration is applied. During a rolling deploy, enqueue remains safe and duplicate-proof; workers may claim only rows in the migrated durable job table.

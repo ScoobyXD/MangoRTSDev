@@ -1,12 +1,14 @@
-# Process Story: Email survives a deleted Node or textbox relationship
+# Process Story: V3 preserves and normalizes legacy attached email
 
-The V3 cutover finds a legacy email, draft, or attached-email attachment whose old host Node or textbox no longer exists
+The V3 cutover finds an older Attached-email snapshot that predates durable `communications_email_threads` and `communications_email_messages`
 ↓
-Mango removes the dead resource relationship and its permission effect, but keeps the normalized thread and messages with their permanent IDs
+Mango proves exactly one mailbox from its preserved thread, collaboration, shared inbox, account connection, legacy placement user, or archive-job record
 ↓
-The draft content remains a mailbox draft when its old relationship is gone, and an attached-email attachment without a surviving relationship points to the exact normalized `email_message`
+Mango creates or reuses one mailbox-scoped `email_threads` row, copies the best retained snapshot into `email_messages`, and keeps the original Attached-email information ID as the `email_relationships` ID
 ↓
-No migration step creates a fake Node/textbox or silently deletes email content to satisfy a relationship check
+If the old host Node/textbox is gone, only that dead relationship is removed; normalized email, drafts, and exact-message attachment links survive
+↓
+Ambiguous mailbox evidence blocks the cutover for human review. The migration never invents an owner, creates a fake Node/textbox, or silently deletes email content
 
 Last updated: 2026-08-02
 
@@ -173,6 +175,7 @@ EMAIL118 - Message persistence includes HTML body (and provider text when availa
 EMAIL119 - Incoming files and inline CID images are copied into Mango-owned private object storage and linked to normalized email messages; relationship-specific links use `resource_type='email_relationship'` and the relationship UUID. Retry uses stable identity. A user reads through normal relationship-resource authorization, never through the source user's provider grant.
 EMAIL120 - Stored messages are ordered by provider timestamp ascending with immutable Nylas message ID as the deterministic tie-breaker; UI reversal is presentation-only. `history_complete=true` means the provider thread was completely downloaded as observed by that specific user-initiated import job, not that the external thread can never receive another message. A later explicit import may append a newer, older, or same-timestamp message and recomputes order without changing stable Mango message IDs.
 EMAIL121 - Provider webhooks remain mailbox-list invalidation hints only. They may refresh the authorized mailbox view, but never create or update normalized resource relationships, enqueue a resource thread job, or reveal later mail through a Node/Project/Logic Gate. Adding later mail requires an authorized explicit import.
+EMAIL122 - The V3 cutover must normalize legacy Attached-email snapshots that predate durable thread/message rows. It may create or reuse a thread only when exactly one mailbox scope, owner/account or shared inbox, and provider are proven by retained durable metadata. It copies the best retained snapshot, preserves existing permanent thread/message IDs when present, and keeps the Attached-email information ID as the relationship ID. Zero or multiple mailbox candidates abort the cutover; the migration never invents ownership or deletes the email to make the schema pass.
 
 ## Scenarios
 
@@ -846,3 +849,14 @@ Given:
 Expected:
 - Bob and Joe can immediately read every completed Mango-stored message and file; the one failure does not blank or roll back the import.
 - The durable job records safe retry state and resumes only missing work after backoff or restart without duplicating stored data.
+
+### Scenario EMAIL-S32: V3 Normalizes A Legacy Snapshot-Only Email
+
+Business logic covered:
+- EMAIL122
+
+1. Load the exact pre-V3 schema with an active Attached-email projection whose provider message/thread, account, subject, snippet, and date survive, but which has no `communications_email_threads` or `communications_email_messages` row.
+2. Run the read-only preflight and confirm the row is reported as `email.legacy_snapshot_requires_normalization`, not as a blocker, when exactly one mailbox can be proven.
+3. Run the V3 migration in a disposable database.
+4. Confirm one mailbox-scoped `email_threads` row and one `email_messages` row were created, the subject/snippet/date survived, and the original Attached-email information ID became the `email_relationships` ID.
+5. Repeat with zero or multiple mailbox candidates and confirm the preflight reports `email.legacy_snapshot_mailbox_unresolved_or_ambiguous` and the migration aborts without committing.

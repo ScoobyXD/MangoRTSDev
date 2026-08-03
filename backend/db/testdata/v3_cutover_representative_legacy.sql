@@ -18,7 +18,8 @@ insert into user_email_connections(user_id,provider,account_email,grant_id,statu
 insert into nodes(company_id,node_id,name,status,due_date,priority,default_access,created_timestamp) values
 ('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','Normalized email Node',null,null,null,'edit',now()),
 ('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000002','Collaboration fallback Node',null,null,null,'edit',now()),
-('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000003','Projection fallback Node',null,null,null,'edit',now());
+('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000003','Projection fallback Node',null,null,null,'edit',now()),
+('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000004','Legacy snapshot-only email Node',null,null,null,'edit',now());
 
 insert into node_textboxes(company_id,node_id,textbox_id,body_json,revision,display_order) values
 ('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001',
@@ -50,7 +51,9 @@ insert into node_projection_table(company_id,node_id,information_id,type,informa
 ('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000003','71000000-0000-0000-0000-000000000003','Attached email',
  '{"message_id":"provider-message-3","thread_id":"provider-thread-3","email_thread_id":"50000000-0000-0000-0000-000000000003","subject":"Projection fallback subject","snippet":"Projection fallback snippet","date":1700000300}',false,1,now(),now()),
 ('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','71000000-0000-0000-0000-000000000004','Attached email',
- '{"block_id":"40000000-0000-0000-0000-000000000099","message_id":"provider-message-1","thread_id":"provider-thread-1","email_thread_id":"50000000-0000-0000-0000-000000000001","subject":"email survives deleted textbox"}',false,1,now(),now());
+ '{"block_id":"40000000-0000-0000-0000-000000000099","message_id":"provider-message-1","thread_id":"provider-thread-1","email_thread_id":"50000000-0000-0000-0000-000000000001","subject":"email survives deleted textbox"}',false,1,now(),now()),
+('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000004','71000000-0000-0000-0000-000000000005','Attached email',
+ '{"message_id":"provider-message-4","thread_id":"provider-thread-4","account_email":"owner@example.com","subject":"Legacy snapshot-only subject","snippet":"Legacy snapshot-only snippet","date":1700000400}',false,1,now(),now());
 
 insert into node_information(company_id,information_id,node_id,type,information,save_kind,created_timestamp,updated_timestamp) values
 ('10000000-0000-0000-0000-000000000001','41000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','Text block chat',

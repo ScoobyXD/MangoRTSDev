@@ -72,9 +72,9 @@ begin
   ) then
     raise exception 'representative V3 test: content change textbox identity was not preserved';
   end if;
-  if (select count(*) from email_threads)<>3
-     or (select count(*) from email_messages)<>3
-     or (select count(*) from email_relationships)<>3 then
+  if (select count(*) from email_threads)<>4
+     or (select count(*) from email_messages)<>4
+     or (select count(*) from email_relationships)<>4 then
     raise exception 'representative V3 test: normalized/fallback email counts are wrong';
   end if;
   if not exists (
@@ -99,6 +99,23 @@ begin
       and subject='Projection fallback subject'
   ) then
     raise exception 'representative V3 test: projection snapshot fallback failed';
+  end if;
+  if not exists (
+    select 1
+    from email_relationships relationship
+    join email_messages message
+      on message.company_id=relationship.company_id
+     and message.email_thread_id=relationship.email_thread_id
+     and message.email_message_id=relationship.email_message_id
+    join email_threads thread
+      on thread.company_id=message.company_id
+     and thread.email_thread_id=message.email_thread_id
+    where relationship.email_relationship_id='71000000-0000-0000-0000-000000000005'
+      and message.provider_message_id='provider-message-4'
+      and message.subject='Legacy snapshot-only subject'
+      and thread.personal_account_email='owner@example.com'
+  ) then
+    raise exception 'representative V3 test: legacy snapshot-only email was not normalized';
   end if;
   if not exists (
     select 1 from resource_permissions

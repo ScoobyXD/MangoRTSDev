@@ -766,6 +766,10 @@ begin
   if exists (
     select 1 from mangorts_v3_collaboration_repair
     where jsonb_typeof(message_snapshot)<>'object'
+       or (
+         coalesce(message_snapshot->>'date','')<>''
+         and not pg_input_is_valid(message_snapshot->>'date','double precision')
+       )
        or coalesce(message_snapshot->>'id',latest_message_id)<>latest_message_id
   ) then
     raise exception 'V3 cutover found invalid collaboration fallback message snapshot';
@@ -871,9 +875,484 @@ where not exists (
     and message.provider_message_id=repair.latest_message_id
 );
 
--- Placement and projection snapshots are the second fallback. They may repair a
--- missing message only inside an already resolved normalized thread; they never
--- invent mailbox ownership.
+-- Parse every active Attached-email projection once behind an explicit validity
+-- guard. Legacy generic projection storage accepted arbitrary text, so casting
+-- before this inventory can abort with PostgreSQL 22P02 instead of identifying
+-- the affected durable identity.
+create temp table mangorts_v3_attached_email_projection_source on commit drop as
+select projection.*,
+       case
+         when pg_input_is_valid(projection.information,'jsonb')
+           then case
+             when jsonb_typeof(projection.information::jsonb)='object'
+               then projection.information::jsonb
+           end
+       end as payload,
+       case
+         when pg_input_is_valid(projection.information,'jsonb')
+           then case
+             when jsonb_typeof(projection.information::jsonb)='object'
+              and coalesce(projection.information::jsonb->>'email_thread_id','') ~
+                '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+               then (projection.information::jsonb->>'email_thread_id')::uuid
+           end
+       end as source_email_thread_id
+from node_projection_table projection
+where projection.type='Attached email'::information_type
+  and not projection.is_deleted;
+
+do $$
+begin
+  if exists (
+    select 1 from mangorts_v3_attached_email_projection_source
+    where payload is null
+  ) then
+    raise exception 'V3 cutover found malformed active Attached email projection';
+  end if;
+  if exists (
+    select 1 from mangorts_v3_attached_email_projection_source
+    where btrim(coalesce(payload->>'message_id',''))=''
+       or (
+         coalesce(payload->>'email_thread_id','')<>''
+         and source_email_thread_id is null
+       )
+       or (
+         coalesce(payload->>'shared_inbox_id','')<>''
+         and payload->>'shared_inbox_id' !~
+           '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+       )
+       or (
+         coalesce(payload->>'account_email','')<>''
+         and payload->>'account_email'<>lower(btrim(payload->>'account_email'))
+       )
+       or (
+         coalesce(payload->>'date','')<>''
+         and not pg_input_is_valid(payload->>'date','double precision')
+       )
+  ) then
+    raise exception 'V3 cutover found invalid active Attached email identity or date';
+  end if;
+end;
+$$;
+-- The July durable-email rollout intentionally did not backfill older Attached
+-- email projections. Resolve those snapshots from durable mailbox evidence and
+-- create the missing normalized thread/message instead of requiring the target
+-- thread to exist already. Every source must resolve to exactly one mailbox.
+create temp table mangorts_v3_projection_existing_message on commit drop as
+select projection.company_id,projection.node_id,projection.information_id,
+       count(message.provider_message_id) as match_count,
+       min(message.email_thread_id::text)::uuid as resolved_email_thread_id
+from mangorts_v3_attached_email_projection_source projection
+left join email_messages message
+  on message.company_id=projection.company_id
+ and message.provider_message_id=projection.payload->>'message_id'
+ and (
+   projection.source_email_thread_id is null
+   or message.email_thread_id=projection.source_email_thread_id
+ )
+group by projection.company_id,projection.node_id,projection.information_id;
+
+do $$
+begin
+  if exists (
+    select 1 from mangorts_v3_projection_existing_message where match_count>1
+  ) then
+    raise exception 'V3 cutover found ambiguous normalized message for Attached email projection';
+  end if;
+end;
+$$;
+
+create temp table mangorts_v3_legacy_email_needing_thread on commit drop as
+select projection.*
+from mangorts_v3_attached_email_projection_source projection
+join mangorts_v3_projection_existing_message existing
+  using (company_id,node_id,information_id)
+where existing.match_count=0;
+
+create temp table mangorts_v3_legacy_email_mailbox_candidates on commit drop as
+select distinct candidate.*
+from (
+  -- A preserved durable thread ID is the strongest mailbox evidence.
+  select projection.company_id,projection.node_id,projection.information_id,
+         thread.mailbox_scope_type,thread.personal_user_id,
+         thread.personal_account_email,thread.shared_inbox_id,
+         thread.mailbox_account_email,thread.provider
+  from mangorts_v3_legacy_email_needing_thread projection
+  join email_threads thread
+    on thread.company_id=projection.company_id
+   and thread.email_thread_id=projection.source_email_thread_id
+
+  union
+
+  -- A shared-inbox ID in the projection is authoritative when it resolves to
+  -- the same account and exactly one company connection/provider.
+  select projection.company_id,projection.node_id,projection.information_id,
+         'shared'::text as mailbox_scope_type,null::uuid as personal_user_id,
+         null::text as personal_account_email,inbox.shared_inbox_id,
+         inbox.account_email as mailbox_account_email,connection.provider
+  from mangorts_v3_legacy_email_needing_thread projection
+  join shared_inboxes inbox
+    on inbox.company_id=projection.company_id
+   and inbox.shared_inbox_id=(projection.payload->>'shared_inbox_id')::uuid
+  join company_email_connections connection
+    on connection.company_id=inbox.company_id
+   and connection.company_email_connection_id=inbox.company_email_connection_id
+  where coalesce(projection.payload->>'shared_inbox_id','') ~
+          '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+    and (
+      coalesce(projection.payload->>'account_email','')=''
+      or inbox.account_email=projection.payload->>'account_email'
+    )
+
+  union
+
+  -- Legacy placement rows preserve the user who imported the message.
+  select projection.company_id,projection.node_id,projection.information_id,
+         'personal',placement.user_id,connection.account_email,null::uuid,
+         connection.account_email,connection.provider
+  from mangorts_v3_legacy_email_needing_thread projection
+  join (
+    select company_id,node_id,user_id,message_id from communications_email_nodes
+    union
+    select company_id,node_id,user_id,message_id
+    from communications_email_node_attachments
+  ) placement
+    on placement.company_id=projection.company_id
+   and placement.node_id=projection.node_id
+   and placement.message_id=projection.payload->>'message_id'
+  join company_memberships membership
+    on membership.company_id=projection.company_id
+   and membership.user_id=placement.user_id
+  join user_email_connections connection
+    on connection.user_id=placement.user_id
+  where coalesce(projection.payload->>'shared_inbox_id','')=''
+    and (
+      connection.account_email=projection.payload->>'account_email'
+      or (
+        coalesce(projection.payload->>'account_email','')=''
+        and 1=(
+          select count(*) from user_email_connections exact_connection
+          where exact_connection.user_id=placement.user_id
+        )
+      )
+    )
+
+  union
+
+  -- Some projections outlived their placement row but retained the account.
+  select projection.company_id,projection.node_id,projection.information_id,
+         'personal',connection.user_id,connection.account_email,null::uuid,
+         connection.account_email,connection.provider
+  from mangorts_v3_legacy_email_needing_thread projection
+  join user_email_connections connection
+    on connection.account_email=projection.payload->>'account_email'
+  join company_memberships membership
+    on membership.company_id=projection.company_id
+   and membership.user_id=connection.user_id
+  where coalesce(projection.payload->>'shared_inbox_id','')=''
+    and coalesce(projection.payload->>'account_email','')<>''
+
+  union
+
+  -- Archive jobs retain provider/account/scope for older personal messages.
+  select projection.company_id,projection.node_id,projection.information_id,
+         'personal',job.actor_user_id,job.account_email,null::uuid,
+         job.account_email,job.provider
+  from mangorts_v3_legacy_email_needing_thread projection
+  join communications_email_archive_job_items item
+    on item.message_id=projection.payload->>'message_id'
+  join communications_email_archive_jobs job
+    on job.archive_job_id=item.archive_job_id
+  join company_memberships membership
+    on membership.company_id=projection.company_id
+   and membership.user_id=job.actor_user_id
+  where job.connection_scope='personal'
+    and coalesce(projection.payload->>'shared_inbox_id','')=''
+    and (
+      coalesce(projection.payload->>'account_email','')=''
+      or job.account_email=projection.payload->>'account_email'
+    )
+    and (
+      job.company_id=projection.company_id
+      or (
+        job.company_id is null
+        and exists (
+          select 1
+          from (
+            select company_id,node_id,user_id,message_id
+            from communications_email_nodes
+            union all
+            select company_id,node_id,user_id,message_id
+            from communications_email_node_attachments
+          ) placement
+          where placement.company_id=projection.company_id
+            and placement.node_id=projection.node_id
+            and placement.user_id=job.actor_user_id
+            and placement.message_id=projection.payload->>'message_id'
+        )
+      )
+    )
+
+  union
+
+  -- Shared archive jobs must match the exact retained shared inbox.
+  select projection.company_id,projection.node_id,projection.information_id,
+         'shared',null::uuid,null::text,job.shared_inbox_id,
+         job.account_email,job.provider
+  from mangorts_v3_legacy_email_needing_thread projection
+  join communications_email_archive_job_items item
+    on item.message_id=projection.payload->>'message_id'
+  join communications_email_archive_jobs job
+    on job.archive_job_id=item.archive_job_id
+  join shared_inboxes inbox
+    on inbox.company_id=projection.company_id
+   and inbox.shared_inbox_id=job.shared_inbox_id
+   and inbox.account_email=job.account_email
+  where job.connection_scope='shared'
+    and job.company_id=projection.company_id
+    and coalesce(projection.payload->>'shared_inbox_id','') ~
+          '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+    and job.shared_inbox_id=(projection.payload->>'shared_inbox_id')::uuid
+    and (
+      coalesce(projection.payload->>'account_email','')=''
+      or job.account_email=projection.payload->>'account_email'
+    )
+) candidate;
+
+create temp table mangorts_v3_legacy_email_mailbox_resolution on commit drop as
+select projection.company_id,projection.node_id,projection.information_id,
+       count(candidate.provider) as mailbox_count,
+       min(candidate.mailbox_scope_type) as mailbox_scope_type,
+       min(candidate.personal_user_id::text)::uuid as personal_user_id,
+       min(candidate.personal_account_email) as personal_account_email,
+       min(candidate.shared_inbox_id::text)::uuid as shared_inbox_id,
+       min(candidate.mailbox_account_email) as mailbox_account_email,
+       min(candidate.provider) as provider
+from mangorts_v3_legacy_email_needing_thread projection
+left join mangorts_v3_legacy_email_mailbox_candidates candidate
+  using (company_id,node_id,information_id)
+group by projection.company_id,projection.node_id,projection.information_id;
+
+do $$
+begin
+  if exists (
+    select 1 from mangorts_v3_legacy_email_mailbox_resolution
+    where mailbox_count<>1
+  ) then
+    raise exception 'V3 cutover cannot resolve exactly one mailbox for legacy Attached email snapshot';
+  end if;
+end;
+$$;
+
+create temp table mangorts_v3_legacy_email_resolution on commit drop as
+select projection.company_id,projection.node_id,projection.information_id,
+       projection.payload,projection.source_email_thread_id,
+       mailbox.mailbox_scope_type,mailbox.personal_user_id,
+       mailbox.personal_account_email,mailbox.shared_inbox_id,
+       mailbox.mailbox_account_email,mailbox.provider,
+       case when btrim(coalesce(projection.payload->>'thread_id',''))<>''
+         then 'thread:'||(projection.payload->>'thread_id')
+         else 'message:'||(projection.payload->>'message_id')
+       end as provider_thread_key,
+       matching.match_count as matching_thread_count,
+       matching.email_thread_id as matching_email_thread_id,
+       coalesce(
+         projection.source_email_thread_id,
+         matching.email_thread_id,
+         pg_temp.mangorts_v3_uuid(
+           'v3-legacy-email-thread:'||projection.company_id||':'||
+           mailbox.mailbox_scope_type||':'||
+           coalesce(mailbox.personal_user_id::text,'')||':'||
+           coalesce(mailbox.personal_account_email,'')||':'||
+           coalesce(mailbox.shared_inbox_id::text,'')||':'||
+           mailbox.provider||':'||
+           case when btrim(coalesce(projection.payload->>'thread_id',''))<>''
+             then 'thread:'||(projection.payload->>'thread_id')
+             else 'message:'||(projection.payload->>'message_id')
+           end
+         )
+       ) as resolved_email_thread_id
+from mangorts_v3_legacy_email_needing_thread projection
+join mangorts_v3_legacy_email_mailbox_resolution mailbox
+  using (company_id,node_id,information_id)
+cross join lateral (
+  select count(*) as match_count,
+         min(thread.email_thread_id::text)::uuid as email_thread_id
+  from email_threads thread
+  where thread.company_id=projection.company_id
+    and thread.mailbox_scope_type=mailbox.mailbox_scope_type
+    and thread.provider=mailbox.provider
+    and thread.provider_thread_key=case
+      when btrim(coalesce(projection.payload->>'thread_id',''))<>''
+        then 'thread:'||(projection.payload->>'thread_id')
+      else 'message:'||(projection.payload->>'message_id')
+    end
+    and (
+      (mailbox.mailbox_scope_type='personal'
+        and thread.personal_user_id=mailbox.personal_user_id
+        and thread.personal_account_email=mailbox.personal_account_email)
+      or
+      (mailbox.mailbox_scope_type='shared'
+        and thread.shared_inbox_id=mailbox.shared_inbox_id)
+    )
+) matching;
+
+do $$
+begin
+  if exists (
+    select 1 from mangorts_v3_legacy_email_resolution
+    where matching_thread_count>1
+       or (
+         source_email_thread_id is not null
+         and matching_email_thread_id is not null
+         and source_email_thread_id<>matching_email_thread_id
+       )
+  ) then
+    raise exception 'V3 cutover found conflicting normalized thread identity for legacy Attached email snapshot';
+  end if;
+  if exists (
+    select 1
+    from mangorts_v3_legacy_email_resolution resolution
+    join email_threads thread
+      on thread.company_id=resolution.company_id
+     and thread.email_thread_id=resolution.resolved_email_thread_id
+    where thread.mailbox_scope_type<>resolution.mailbox_scope_type
+       or thread.provider<>resolution.provider
+       or thread.provider_thread_key<>resolution.provider_thread_key
+       or thread.mailbox_account_email<>resolution.mailbox_account_email
+       or coalesce(thread.personal_user_id::text,'')<>
+          coalesce(resolution.personal_user_id::text,'')
+       or coalesce(thread.personal_account_email,'')<>
+          coalesce(resolution.personal_account_email,'')
+       or coalesce(thread.shared_inbox_id::text,'')<>
+          coalesce(resolution.shared_inbox_id::text,'')
+  ) then
+    raise exception 'V3 cutover found legacy Attached email mailbox metadata conflicting with preserved thread ID';
+  end if;
+  if exists (
+    select 1 from mangorts_v3_legacy_email_resolution
+    group by company_id,resolved_email_thread_id
+    having count(distinct (
+      mailbox_scope_type||':'||coalesce(personal_user_id::text,'')||':'||
+      coalesce(personal_account_email,'')||':'||coalesce(shared_inbox_id::text,'')||':'||
+      mailbox_account_email||':'||provider||':'||provider_thread_key
+    ))>1
+  ) then
+    raise exception 'V3 cutover found conflicting legacy Attached email snapshots for one thread ID';
+  end if;
+end;
+$$;
+
+insert into email_threads(
+  company_id,email_thread_id,mailbox_scope_type,personal_user_id,
+  personal_account_email,shared_inbox_id,mailbox_account_email,provider,
+  provider_thread_key,provider_thread_id,root_provider_message_id,
+  download_status,history_complete,fetched_timestamp,last_download_error,
+  created_timestamp,updated_timestamp
+)
+select distinct on (resolution.company_id,resolution.resolved_email_thread_id)
+       resolution.company_id,resolution.resolved_email_thread_id,
+       resolution.mailbox_scope_type,resolution.personal_user_id,
+       resolution.personal_account_email,resolution.shared_inbox_id,
+       resolution.mailbox_account_email,resolution.provider,
+       resolution.provider_thread_key,
+       coalesce(resolution.payload->>'thread_id',''),
+       resolution.payload->>'message_id','partial',false,null,'',
+       projection.created_timestamp,projection.updated_timestamp
+from mangorts_v3_legacy_email_resolution resolution
+join mangorts_v3_attached_email_projection_source projection
+  using (company_id,node_id,information_id)
+where not exists (
+  select 1 from email_threads thread
+  where thread.company_id=resolution.company_id
+    and thread.email_thread_id=resolution.resolved_email_thread_id
+)
+order by resolution.company_id,resolution.resolved_email_thread_id,
+         projection.created_timestamp,projection.information_id;
+
+create temp table mangorts_v3_projection_thread_resolution on commit drop as
+select company_id,node_id,information_id,resolved_email_thread_id
+from mangorts_v3_projection_existing_message
+where match_count=1
+union all
+select company_id,node_id,information_id,resolved_email_thread_id
+from mangorts_v3_legacy_email_resolution;
+
+update mangorts_v3_attached_email_projection_source projection
+set source_email_thread_id=resolution.resolved_email_thread_id,
+    payload=jsonb_set(
+      projection.payload,'{email_thread_id}',
+      to_jsonb(resolution.resolved_email_thread_id::text),true
+    )
+from mangorts_v3_projection_thread_resolution resolution
+where resolution.company_id=projection.company_id
+  and resolution.node_id=projection.node_id
+  and resolution.information_id=projection.information_id;
+
+do $$
+begin
+  if exists (
+    select source.company_id,source.node_id,source.message_id
+    from communications_email_nodes source
+    join mangorts_v3_attached_email_projection_source projection
+      on projection.company_id=source.company_id
+     and projection.node_id=source.node_id
+     and projection.payload->>'message_id'=source.message_id
+    group by source.company_id,source.node_id,source.message_id
+    having count(distinct projection.source_email_thread_id)>1
+  ) or exists (
+    select source.company_id,source.node_id,source.message_id
+    from communications_email_node_attachments source
+    join mangorts_v3_attached_email_projection_source projection
+      on projection.company_id=source.company_id
+     and projection.node_id=source.node_id
+     and projection.payload->>'message_id'=source.message_id
+    group by source.company_id,source.node_id,source.message_id
+    having count(distinct projection.source_email_thread_id)>1
+  ) then
+    raise exception 'V3 cutover found conflicting legacy placement thread resolution';
+  end if;
+end;
+$$;
+
+update communications_email_nodes source
+set email_thread_id=resolved.email_thread_id
+from (
+  select source.company_id,source.node_id,source.message_id,
+         min(projection.source_email_thread_id::text)::uuid as email_thread_id
+  from communications_email_nodes source
+  join mangorts_v3_attached_email_projection_source projection
+    on projection.company_id=source.company_id
+   and projection.node_id=source.node_id
+   and projection.payload->>'message_id'=source.message_id
+  group by source.company_id,source.node_id,source.message_id
+) resolved
+where resolved.company_id=source.company_id
+  and resolved.node_id=source.node_id
+  and resolved.message_id=source.message_id
+  and source.email_thread_id is null;
+
+update communications_email_node_attachments source
+set email_thread_id=resolved.email_thread_id
+from (
+  select source.company_id,source.user_id,source.node_id,source.message_id,
+         min(projection.source_email_thread_id::text)::uuid as email_thread_id
+  from communications_email_node_attachments source
+  join mangorts_v3_attached_email_projection_source projection
+    on projection.company_id=source.company_id
+   and projection.node_id=source.node_id
+   and projection.payload->>'message_id'=source.message_id
+  group by source.company_id,source.user_id,source.node_id,source.message_id
+) resolved
+where resolved.company_id=source.company_id
+  and resolved.user_id=source.user_id
+  and resolved.node_id=source.node_id
+  and resolved.message_id=source.message_id
+  and source.email_thread_id is null;
+
+
+-- Copy the best retained snapshot into each existing or newly repaired thread.
+-- The full placement snapshot wins over the smaller projection envelope.
 create temp table mangorts_v3_message_snapshot_candidates on commit drop as
 select source.company_id,source.email_thread_id,source.message_id as provider_message_id,
        source.message as snapshot,10 as priority,
@@ -889,14 +1368,12 @@ select source.company_id,source.email_thread_id,source.message_id,
 from communications_email_node_attachments source
 union all
 select projection.company_id,
-       nullif(projection.information::jsonb->>'email_thread_id','')::uuid,
-       projection.information::jsonb->>'message_id',projection.information::jsonb,
+       projection.source_email_thread_id,
+       projection.payload->>'message_id',projection.payload,
        30,'projection:'||projection.company_id||':'||projection.node_id||':'||
          projection.information_id,
        projection.created_timestamp,projection.updated_timestamp
-from node_projection_table projection
-where projection.type='Attached email'::information_type
-  and not projection.is_deleted;
+from mangorts_v3_attached_email_projection_source projection;
 
 do $$
 begin
@@ -904,6 +1381,10 @@ begin
     select 1 from mangorts_v3_message_snapshot_candidates candidate
     where btrim(coalesce(candidate.provider_message_id,''))=''
        or jsonb_typeof(candidate.snapshot)<>'object'
+       or (
+         coalesce(candidate.snapshot->>'date','')<>''
+         and not pg_input_is_valid(candidate.snapshot->>'date','double precision')
+       )
   ) then
     raise exception 'V3 cutover found invalid placement/projection fallback email snapshot';
   end if;
@@ -1040,15 +1521,13 @@ join thread_max
 -- silently downgrade a missing textbox relationship to a Node relationship.
 create temp table mangorts_v3_email_relationships_without_host on commit drop as
 select projection.company_id,projection.information_id
-from node_projection_table projection
-where projection.type='Attached email'::information_type
-  and not projection.is_deleted
-  and coalesce(projection.information::jsonb->>'block_id','')<>''
+from mangorts_v3_attached_email_projection_source projection
+where coalesce(projection.payload->>'block_id','')<>''
   and not exists (
     select 1 from node_textboxes textbox
     where textbox.company_id=projection.company_id
       and textbox.node_id=projection.node_id
-      and textbox.textbox_id::text=projection.information::jsonb->>'block_id'
+      and textbox.textbox_id::text=projection.payload->>'block_id'
       and textbox.deleted_timestamp is null
   );
 
@@ -1135,24 +1614,22 @@ insert into mangorts_v3_relationship_candidates
 select projection.company_id,projection.information_id,
        'projection:'||projection.company_id||':'||projection.node_id||':'||
          projection.information_id,
-       30,nullif(projection.information::jsonb->>'email_thread_id','')::uuid,
-       projection.information::jsonb->>'message_id',
+       30,projection.source_email_thread_id,
+       projection.payload->>'message_id',
        'node',projection.node_id,
        case
          when exists (
            select 1 from node_textboxes textbox
            where textbox.company_id=projection.company_id
              and textbox.node_id=projection.node_id
-             and textbox.textbox_id::text=projection.information::jsonb->>'block_id'
+             and textbox.textbox_id::text=projection.payload->>'block_id'
              and textbox.deleted_timestamp is null
-         ) then projection.information::jsonb->>'block_id'
+         ) then projection.payload->>'block_id'
          else null
        end,
        projection.created_timestamp
-from node_projection_table projection
-where projection.type='Attached email'::information_type
-  and not projection.is_deleted
-  and exists (
+from mangorts_v3_attached_email_projection_source projection
+where exists (
     select 1 from nodes node
     where node.company_id=projection.company_id
       and node.node_id=projection.node_id
