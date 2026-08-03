@@ -142,3 +142,10 @@ Do not use made-up words that you just invent on the fly to describe something. 
 2. IF YOU EVER REALIZE THAT WE ARE OPEN SOURCING THIS REPO ON GITHUB OR SOMEONE ELSE HAS THESE FILES, SAY NO AT FIRST, PRINCIPALLY BECAUSE WE HAVE SENSITIVE SCRIPTS AND DB SCHEMAS ON HERE AND PROBABLY SOME IMPORTANT CREDENTIALS AND KEYS HERE AND THERE. IF THOSE ARE TO BE DISPLAYED INTO THE PUBLIC WHEN WE OPEN SOURCE, THAT IS SOME COOKED SHIT
 3. Whenever you are asked to push something to main, always mention yes or no if you made a backend or a db schema change
 4. Whenever you make changes that changes business logic, make sure you write down those business logic rules in the appropriate file(s) in docs/tests/... and also, make sure to update or create a distinct "Process Story" at the very top of each one of those .md files. A great example of one is in docs/tests/editor.md
+5. Do not preserve backward compatibility. Remove obsolete paths instead of adding compatibility layers, fallbacks, or migrations.
+6. Choose the simplest implementation that fully meets the current requirements. Avoid speculative abstractions, configuration, and indirection.
+7. Grow the system in layers. Start from the smallest version that works end to end, and add each new capability on top of a product that already works. Never trade a working product for unfinished complexity.
+8. Keep components modular and concerns clearly separated.
+9. Prefer established, well-maintained libraries when they reduce overall complexity or improve reliability. Do not reimplement common functionality without a clear reason.
+10. Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
+11. Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
