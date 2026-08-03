@@ -1,22 +1,88 @@
 # Process Story
 
-A Mango user creates a Node and adds textboxes. Textbox bodies are stored only in `node_textboxes`. Comments made against a Node textbox are stored only in `node_textbox_chats`. When an email is downloaded, Mango stores its thread and messages once, and `email_relationships` connects a selected message to a Node, Project, Logic Gate, or one of their textboxes. Converting an email into a Node is an ordinary workflow: store the email, create the Node, create the relationship, and use normal resource permissions. Shared email drafts are stored in `email_drafts` and receive access from the related resource rather than a special collaboration-participant subsystem. No current Node editor content is written to `node_information` or `node_projection_table` after the cutover.
+A Mango user creates a Node and adds textboxes. Textbox bodies are stored only in `node_textboxes`, and textbox-owned comments and seen markers disappear when their textbox no longer exists. If a comment's author account was deleted, the comment and captured display name remain while its relational user ID becomes null. When an email is downloaded, Mango stores its thread and messages once, and `email_relationships` connects a selected message to a Node, Project, Logic Gate, or one of their textboxes. During V3, an older Attached-email snapshot with no durable thread/message is copied into those permanent tables only after exactly one mailbox is proven; the existing Attached-email information ID remains the relationship ID. Deleting a host removes only the relationship: normalized email, draft content, and email attachment links survive independently. Converting an email into a Node is an ordinary workflow: store the email, create the Node, create the relationship, and use normal resource permissions. Shared email drafts are stored in `email_drafts` and receive access from the related resource rather than a special collaboration-participant subsystem. No current Node editor content is written to `node_information` or `node_projection_table` after the cutover.
+
+V3 must be released through separate operator-gated phases: create the permanent destinations, copy without deleting legacy sources, reconcile the copy, switch the application, observe a soak period, and retire legacy storage only in a later release.
 
 # V3 table changes implementation handoff
 
 ## Purpose
 
-This document is the complete implementation target for retiring the remaining Node information/projection storage and the special email collaboration/placement tables.
+This document is the implementation target and incident record for retiring the remaining Node information/projection storage and the special email collaboration/placement tables.
 
-The implementation must update the canonical schema, add a strict migration, update backend and frontend reads/writes, update tests and process documentation, and leave the repository capable of creating a clean database directly from `backend/db/schema.sql`.
+The implementation must update the canonical schema, provide separately operated and verified migration phases, update backend and frontend reads/writes, update tests and process documentation, and leave the repository capable of creating a clean database directly from `backend/db/schema.sql`.
 
 An agent must not apply the migration to a live database. Repository agents may inspect a live database only with the designated database-enforced read-only credential. Never retrieve or print writer/admin credentials or unrelated secrets.
+
+## Current status: the first V3 cutover was rolled back
+
+The 2026-08-02 V3 attempt is abandoned. Do not revive or run the removed migration as-is.
+
+- `841292a6` introduced the all-at-once V3 application and database cutover on worktree branch `codex/implement-v-database-table-changes0000672`.
+- `1dfa8fd4`, `7218542e`, and `b5389fb2` fixed early validation defects and added the guarded legacy Node-textbox backfill.
+- Worktree branch `codex/independently-audit-v-cutover-migration-failures0000675` then added a read-only preflight and successive fixes for deleted owners, lock ordering, deleted authors, and legacy email normalization.
+- The migration had grown to roughly 2,200 lines and the application cutover affected about 100 files. It still discovered new live-data categories one failure at a time.
+- `d4395940` removed the V3 migration and restored the application, canonical schema, tests, and helper scripts to the pre-V3 tree based on `b856962b`.
+- `28ea506f` repaired two stale frontend test-runner references exposed by that rollback.
+- `5c34b2f4` merged the rollback branch into `main`. The full repository test gate passed. A deployment environment must still be checked independently; a Git rollback does not prove which application revision is running.
+
+Every attempt to run `20260802_zz_v3_database_table_cutover.sql` was rolled back. The development database therefore did not receive the V3 schema cutover. Two separately approved and committed data remediations did survive and must not be forgotten:
+
+- 32 legacy HTML-envelope Node textbox projections were converted and inserted into `node_textboxes`. The backfill printed `converted:32`, `inserted:32`, and `remaining:0` only after `COMMIT`; a later PowerShell `Trim()` error happened during the zero-row post-check and did not undo those inserts.
+- 113 orphan `node_content_changes` rows across 18 legacy textbox IDs were deleted in a separate guarded transaction after evidence showed that no permanent textbox or visible legacy projection survived.
+
+Do not assume the development database is identical to either the original pre-V3 fixture or the rolled-back repository schema. Reinventory it with read-only queries before designing the replacement.
+
+## What happened during the failed attempt
+
+The sequence below is evidence for the next implementation, not a checklist to rerun.
+
+1. Exact-column validation compared PostgreSQL arrays in an order- and collation-sensitive way. The first two failures were repository defects, fixed by `1dfa8fd4` and `7218542e`.
+2. The migration assumed every active `Text box` projection already had an exact permanent `node_textboxes` row. Read-only diagnostics found 32 exceptions, all legacy HTML envelopes in one company. They were valid dual-write/backfill gaps, not corrupt editor content, and were converted by the guarded backfill from `b5389fb2`.
+3. The next failure assumed every `node_content_changes.information_id` resolved to a permanent textbox. Diagnostics found 113 rows across 18 deleted legacy textbox IDs. Historical deletion had no foreign key and could leave those audit rows behind; the old UI already hid them through an inner join.
+4. The next failure treated every stored chat row as current permanent content. Diagnostics found 12 active comments referring to six absent host textbox IDs and one reply whose parent did not resolve on the same textbox. The old UI rendered chats only through surviving textbox panes, so hostless rows could remain stored but invisible. Historical `information_id` is the chat ID; payload `block_id` is the host textbox ID. V3 did not invent that identity rule.
+5. The first preflight reported 69 blocker rows across 15 categories: 12 hostless chats, one missing/wrong parent, 22 orphan seen snapshots, 33 draft source rows, and one incomplete attached-email attachment identity. Those classifications later changed as product rules and mapping evidence were established, proving the original preflight was not a stable contract.
+6. The real migration deadlocked while upgrading locks against an active writer. `21e250d2` added up-front table locks, but this exposed that the all-at-once transaction held a very large lock and failure surface.
+7. A surviving chat referenced a deleted user. The new foreign key rejected its `author_user_id`. The correct rule is to preserve the comment and captured display name while setting the nullable relational user ID to null, matching `ON DELETE SET NULL` behavior.
+8. An attached-email projection contained legacy HTML beginning with `<`, and the migration attempted a JSON cast before safely classifying it. A preflight validity check elsewhere did not protect a different SQL path. All legacy text must be validated before any cast, and every consumer must use the same classified source.
+9. The migration assumed an older Attached-email snapshot already had exactly one normalized thread/message target. Read-only inventory found 280 legacy snapshots requiring normalization. The July durable-email rollout had intentionally left older projection snapshots readable without backfilling `communications_email_threads` and `communications_email_messages`; their absence was expected legacy state, not disposable email data.
+10. The expanded preflight eventually reported 25 categories, 64 blocker rows, 295 cleanup rows, and 33 review rows. The 295 cleanup count included all 280 legacy email snapshots, while a subset also appeared in the 64 unresolved/ambiguous mailbox-owner blockers. These aggregate totals were category counts, not unique records, but the output did not make that clear.
+11. Dry-run/preflight logic and real-migration logic were separate implementations. A reassuring dry run could therefore be followed by a different real-run failure such as `cannot assign fallback email snapshot to exactly one normalized thread`. The next design must share mapping code or database views between inventory, copy, and reconciliation.
+12. V3 application code was run against the still-pre-V3 database after the migration rolled back. Background workers repeatedly failed because `email_thread_download_jobs` did not exist, and editor access failed. Application and schema compatibility had been switched too early, so the repository/application cutover was rolled back completely.
+
+## Root-cause classification
+
+### Repository and rollout defects
+
+- One transaction tried to create destinations, transform data, enforce new foreign keys, rename identities, switch contracts, and drop rollback sources.
+- The migration encoded unproved assumptions about dual writes, deleted owners, chat visibility, author retention, email normalization, drafts, attachment identity, and mailbox ownership.
+- Validation was ordered incorrectly in several places: unsafe casts or foreign-key inserts happened before the row was classified.
+- The preflight did not share the migration's mapping implementation and its categories changed during the incident.
+- Migration tests mostly inspected SQL strings and fixture text. They did not execute every phase against PostgreSQL, rerun it, and check rollback boundaries.
+- The application was not backward-compatible with the pre-V3 schema, so deploying it before a proven database cutover caused immediate runtime failures.
+- PowerShell wrappers converted expected nonzero readiness exits and empty post-check results into noisy exceptions, obscuring whether database work had committed.
+
+### Expected legacy drift
+
+- The 32 missing permanent Node textboxes were legacy HTML dual-write gaps and were recoverable without inventing IDs.
+- Orphan content-change rows and seen snapshots could remain after textbox deletion because the old model lacked permanent foreign keys.
+- Hostless chats could survive incomplete multi-request deletion even though the old UI no longer displayed them.
+- Deleted chat authors could remain inside JSON because no relational foreign key cleared the embedded ID.
+- Older Attached-email snapshots could legitimately lack normalized thread/message rows because the July rollout did not backfill historical snapshots.
+
+### Genuinely ambiguous data
+
+- Active user content must remain a blocker until its ownership or approved deletion rule is proven. Do not create fake empty textboxes or silently discard active comments.
+- An email snapshot with zero or multiple exact mailbox candidates must remain for human review. Do not guess from subject, sender, body, snippet, or timestamp.
+- Draft source/sent-message references that do not resolve to a normalized message are review items unless another durable identity proves the mapping.
+- Counts from different preflight categories may overlap. Reports must include both category counts and unique source identities so operators know the actual number of affected records.
 
 ## Non-negotiable decisions
 
 - Node textboxes do not have titles.
 - `node_textboxes.body_json` is the only current Node textbox-body store.
 - Node textbox comments live in `node_textbox_chats`.
+- A surviving historical chat whose author no longer exists keeps its message and `author_display_name`; its nullable `author_user_id` becomes null, matching the permanent foreign key's `ON DELETE SET NULL` behavior.
 - There is no separate `email_id`. `email_message_id` is Mango's permanent internal ID for an email message.
 - Every email message belongs to an `email_thread_id`, including a one-message thread.
 - `email_threads`, `email_messages`, `email_relationships`, and `email_drafts` are the permanent email content tables.
@@ -27,6 +93,9 @@ An agent must not apply the migration to a live database. Repository agents may 
 - Shared-draft access comes from normal Node, Project, or Logic Gate permissions.
 - There is no email-collaboration participant table after the cutover.
 - Attachments remain in `attachments` and `resource_attachments`; do not add attachment blobs or attachment arrays to the new chat or relationship tables.
+- Textbox-owned chats, their attachment links, and seen snapshots are discarded when no permanent host textbox survives; a surviving reply with no surviving same-textbox parent becomes a top-level comment.
+- Deleting a Node or textbox removes its email relationship, not the normalized `email_threads` or `email_messages` content.
+- Email drafts and attached-email attachment links survive a deleted relationship; an attachment without a surviving relationship targets its exact normalized `email_message`.
 - The migration must fail on unexpected schema or unmapped data. Do not hide schema drift with broad `IF EXISTS` or `IF NOT EXISTS` statements.
 - Preserve existing permanent IDs whenever possible so deep links, attachment relationships, and realtime identities remain stable.
 
@@ -641,7 +710,11 @@ The `information_type` enum remains because Project and Logic Gate information/p
 
 ## Required application cutover
 
-The schema change is incomplete unless all application reads and writes move in the same implementation branch.
+The schema change is incomplete unless all application paths are planned, but the live releases must remain schema-compatible:
+
+- Before Phase 4, deployed code must continue to run against the pre-V3 schema while copy and reconciliation occur beside it.
+- The Phase 4 application must not start until its required tables and reconciled data are proven present.
+- The rollback build must remain able to use the preserved legacy sources until the separate retirement release.
 
 ### Node editor
 
@@ -665,26 +738,55 @@ The schema change is incomplete unless all application reads and writes move in 
 - Update attachment lookup to use the new chat, email message, relationship, and draft identities without duplicating attachment data.
 - Update recycle-bin allowlists and backup/restore ordering for every changed table.
 
-## Strict migration and sequencing
+The application-cutover phase requires a maintenance window with application/API
+workers and other database writers paused. Do not hold `ACCESS EXCLUSIVE` locks
+across the entire historical copy. Each phase must declare its exact locks and
+timeout; the final delta copy and application switch should hold only the shortest
+bounded locks needed to prevent new legacy writes.
 
-Implement this as one repository change, but the SQL itself should use safe phases inside a strict migration:
+## Required phased migration and sequencing
+
+V3 must not create tables, copy data, switch application code, and drop legacy storage in one migration transaction. The repository change may be cohesive, but the live rollout must use separate operator-gated releases. Do not put these phases in an automatic migration chain that immediately applies every phase.
+
+### Phase 1: expand the schema
 
 1. Assert the exact expected old schema and constraints. Abort on drift.
-2. Create the new tables, constraints, indexes, and validation triggers.
-3. Backfill normalized `email_threads` and `email_messages` first.
-4. Backfill `node_textbox_chats`, preserving old chat IDs.
-5. Backfill `email_relationships` from normalized thread links, old placement tables, collaborations, and attached-email projection rows.
-6. Backfill `email_drafts`, replacing collaboration references with relationship references.
-7. Backfill `node_textbox_seen_snapshots` from current textbox bodies and the old seen rows.
-8. Rename `node_content_changes.information_id` to `textbox_id` and add its textbox foreign key.
-9. Validate counts, IDs, parent links, selected messages, resource ownership, resource textbox ownership, draft ownership, permissions, attachment relationships, and thread/message membership.
-10. Abort if any source row is unmapped or ambiguous.
-11. Switch all code paths to the new tables.
-12. Remove old writers and readers.
-13. Drop the retired tables and their triggers/indexes/constraints.
-14. Ensure `backend/db/schema.sql` directly creates only the final schema and contains no create-then-drop history for these retired structures.
+2. Create the permanent V3 tables, constraints, indexes, and validation triggers alongside the legacy tables.
+3. Add compatibility columns where identity must move, including `node_content_changes.textbox_id` alongside `information_id` and both legacy and permanent attachment targets.
+4. Leave all legacy tables, rows, readers, and writers intact. This phase must not copy, rewrite, or delete source data and must not switch application behavior.
 
-Do not use broad skip logic. Expected old objects should be referenced directly so an unexpected database state fails visibly.
+### Phase 2: restartable copy
+
+1. Copy normalized `email_threads` and `email_messages` first.
+2. Copy `node_textbox_chats`, preserving old chat IDs and recoverable author snapshots.
+3. Copy `email_relationships`, preserving existing relationship and Attached-email information IDs.
+4. Copy `email_drafts`, `node_textbox_seen_snapshots`, content-change identity, permissions, and attachment identity.
+5. Never delete or rewrite a legacy source row during the copy.
+6. Every source row must receive exactly one reported disposition: `copied`, `already_copied`, `discarded_deleted_host`, or `needs_human_mapping`.
+7. Rerunning the copy after interruption must be safe and must not create duplicate permanent identities.
+
+### Phase 3: authoritative reconciliation
+
+1. Run one read-only inventory that uses the same mapping and validation rules as the copy.
+2. Reconcile each source category to its target by company, permanent ID, ownership, selected message, thread/message membership, attachment target, and payload content.
+3. Report all blockers together. A zero-blocker result means every source row has exactly one valid disposition; it does not merely mean that SQL statements can run.
+4. Keep ambiguous active content as a blocker for human review. Do not invent owners, create fake textboxes, or discard active comments or emails.
+
+### Phase 4: application cutover
+
+1. In one planned maintenance window, pause database writers, run a final restartable delta copy, and repeat reconciliation.
+2. Switch backend and frontend readers and writers to the permanent V3 tables.
+3. Run editor, email, attachment, draft, permissions, and history smoke tests before restoring writers.
+4. Do not drop legacy tables or columns in this phase. They remain an immediate rollback source.
+
+### Phase 5: soak and retirement
+
+1. Observe the V3 application for an agreed soak period and compare permanent-table behavior with the preserved legacy source.
+2. Retire legacy readers and writers only after the cutover has remained healthy.
+3. Drop retired tables, columns, triggers, indexes, and constraints in a later explicit migration and release.
+4. Ensure `backend/db/schema.sql` directly creates only the final schema and contains no create-then-drop history for retired structures.
+
+Each phase must have an exact precondition, a postcondition query, and a safe rollback boundary. Do not use broad skip logic. Expected objects should be referenced directly so an unexpected database state fails visibly.
 
 ## Data-source precedence during backfill
 
@@ -692,6 +794,7 @@ Do not use broad skip logic. Expected old objects should be referenced directly 
 - Current `Text block chat` state comes from `node_projection_table`; `node_information` may contain stale earlier revisions.
 - Normalized current email thread/message rows are preferred over duplicated collaboration or projection snapshots.
 - Projection/collaboration snapshots are fallback repair sources only when normalized email rows are missing.
+- The July durable-email rollout intentionally allowed existing Attached-email projection snapshots to remain readable without backfilling `communications_email_threads` or `communications_email_messages`. V3 must normalize those rows during cutover: prove exactly one mailbox from a preserved thread, collaboration, exact shared inbox/account, placement user connection, or archive-job record; create or reuse the mailbox-scoped thread; copy the best snapshot; and preserve the Attached-email information ID as the relationship ID. Zero or multiple mailbox candidates are blockers, never a reason to delete the email or invent ownership.
 - `node_textboxes_history` is authoritative for permanent Node textbox save history.
 - Existing normal resource permissions are authoritative after any required participant-permission backfill.
 
@@ -700,7 +803,7 @@ Do not use broad skip logic. Expected old objects should be referenced directly 
 - Update the appropriate `docs/tests/*.md` files and put a distinct `Process Story` at the top of each changed business-process document.
 - Add schema-contract tests asserting every final table and column.
 - Add negative schema tests asserting all retired tables and columns are absent.
-- Add migration tests using the exact expected pre-cutover schema and representative legacy rows.
+- Add automated PostgreSQL integration tests that apply every phase in order to the exact expected pre-cutover schema with representative legacy rows, verify each phase's postconditions and rerun behavior, and prove that legacy sources remain available until the separate retirement phase. Static SQL string checks are not sufficient.
 - Test empty databases created from `backend/db/schema.sql`.
 - Test Node textbox create/edit/delete/reorder and history.
 - Test Node textbox chat create/edit/delete/reply, mentions, entity links, email selections, and attachment-only messages.
@@ -730,3 +833,33 @@ email_drafts
 ```
 
 History, permissions, attachments, delivery jobs, audit/change tracking, and mailbox connection tables remain separate because they have different product responsibilities.
+
+## V3 cutover preflight and legacy-drift handling
+
+The old `scripts\run_v3_cutover_preflight.ps1` and its TypeScript implementation were removed with the failed V3 cutover. Do not check them out from an old commit and treat them as authoritative. The replacement implementation must first rebuild one repository-owned preflight with these properties:
+
+- It uses the database-enforced read-only role in a repeatable-read, read-only transaction and verifies that role cannot write to a representative permanent table.
+- Its only interactive input is the literal read-only password. Connection metadata is documented in the wrapper, and the password is never printed or persisted.
+- Inventory, copy, and reconciliation consume the same classified source views or mapping functions. They must not implement the same rules three different ways.
+- Every legacy text payload is classified and validated before any JSON, UUID, integer, timestamp, or array cast.
+- It inventories every later foreign key, uniqueness rule, parent link, mailbox owner, resource/textbox owner, draft reference, attachment identity, seen snapshot, permission mapping, and destructive disposition before a copy phase runs.
+- Every source row receives one explicit disposition: `copied`, `already_copied`, `discarded_deleted_host`, or `needs_human_mapping`.
+- Output includes category totals, unique source-row totals, overlap counts, full machine-readable results in a named local artifact, and a short console summary. Samples are not a substitute for the full inventory.
+- `blocker`, `cleanup`, and `review` are stable documented meanings. A readiness exit code must be reported plainly rather than buried under a PowerShell exception stack.
+- A zero-blocker result is necessary but not sufficient: the final delta copy and reconciliation must be repeated with writers paused before application cutover.
+
+The replacement command and exact output location must be added here when the replacement preflight exists. Until then, there is no approved V3 cutover command.
+
+Fresh-eyes evidence on 2026-08-02 established these identity and visibility rules:
+
+- For a Text block chat, `information_id` is the chat ID and payload `block_id` is the host textbox ID. Historical frontend creation passed the current textbox ID as `block_id`; V3 did not invent this identity relationship.
+- The old API returned only active projection rows, but the old UI rendered chat panes only for surviving textbox IDs. A hostless chat could therefore remain active in storage while being invisible in the Node UI.
+- Textbox deletion gathered the chats visible in the browser and deleted them through separate requests. It was not one database transaction, so interrupted or incomplete cleanup could leave hostless active chats.
+- A chat is textbox-owned. If its exact permanent host textbox is absent, the cutover discards the chat and its chat attachment links; it does not guess a replacement or create an empty fake textbox.
+- If a chat's permanent textbox survives but its same-textbox parent does not, the cutover preserves the child as a top-level comment by leaving `parent_chat_id` null.
+- Seen snapshots are derived per-user baselines, not permanent textbox bodies. The cutover discards an orphan seen row when its permanent textbox is absent.
+- Normalized email content is not owned by its old Node/textbox link. Missing hosts remove relationship and permission rows only; email threads, messages, drafts, and email attachments are preserved, with attachments falling back to their exact normalized message identity.
+- Legacy chat payloads stored `author_id` only inside JSON, so deleting a user could not clear that identity. During cutover, a syntactically valid author ID that no longer resolves is treated like `ON DELETE SET NULL`: preserve the comment and captured author name, and store a null `author_user_id`.
+- Historical migration and rollout documentation prove that pre-July Attached-email snapshots were valid without durable thread/message rows. Their absence is an expected dual-write/backfill gap, not corrupt email content.
+- The preflight reports such rows as `email.legacy_snapshot_requires_normalization` (automatic cleanup) and reports only zero/multiple mailbox resolution as `email.legacy_snapshot_mailbox_unresolved_or_ambiguous` (blocker).
+- Mailbox evidence is exact and mailbox-scoped: preserved normalized thread metadata, collaboration scope, shared inbox plus company connection, personal account plus company membership, the importing placement user with exactly one matching connection, or an archive job tied to the same company/user and provider message. Subject, sender, snippet, body, and timestamps are content only and never ownership evidence.
