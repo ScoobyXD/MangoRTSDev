@@ -34,6 +34,7 @@ import {
   indentMangoTiptapSelection,
   MangoTiptapEditorEngine,
   normalizeMangoTiptapBlockIDs,
+  repairMangoTiptapRecoveredDocument,
   outdentMangoTiptapSelection,
   readMangoTiptapSelectionState,
 } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapExtensions.js";
@@ -846,6 +847,114 @@ test("old queued IndexedDB work becomes one latest whole-document recovery recor
   }
 });
 
+test("stale invalid Project recovery is repaired before its save is retried", async () => {
+  const previous = {
+    indexedDB: globalThis.indexedDB,
+    IDBKeyRange: globalThis.IDBKeyRange,
+    sessionStorage: globalThis.sessionStorage,
+  };
+  Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: fakeIndexedDB });
+  Object.defineProperty(globalThis, "IDBKeyRange", { configurable: true, value: IDBKeyRange });
+  Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: new MemoryStorage() });
+
+  const optionsIdentity = {
+    companyID: "company-costco",
+    resourceType: "project" as const,
+    resourceID: "costco-project",
+    documentID: "costco-textbox",
+  };
+  const storageKey = mangoTiptapPendingStorageKey(optionsIdentity);
+  const staleDocument: MangoTiptapDocument = {
+    format: "mango-tiptap-json",
+    schema_version: 1,
+    document: {
+      type: "doc",
+      content: [{
+        type: "paragraph",
+        attrs: { blockId: "repeated-project-block" },
+        content: [{
+          type: "mangoEntityLink",
+          attrs: { entityId: "node-1", label: "Temp Admin Candidates" },
+        }],
+      }, {
+        type: "paragraph",
+        attrs: { blockId: "repeated-project-block" },
+        content: [{ type: "text", text: "Unsaved Costco notes" }],
+      }],
+    },
+  };
+  await writeRawMangoTiptapPending({
+    record_version: 2,
+    storage_key: storageKey,
+    company_id: optionsIdentity.companyID,
+    resource_type: optionsIdentity.resourceType,
+    resource_id: optionsIdentity.resourceID,
+    document_id: optionsIdentity.documentID,
+    document: staleDocument,
+    annotations: [],
+    generation: 7,
+    operation_id: "old-invalid-operation",
+    client_id: "old-client",
+    base_revision: 50,
+    captured_at: 1,
+  });
+
+  let posted: {
+    operation_id: string;
+    base_revision: number;
+    document: MangoTiptapDocument;
+  } | undefined;
+  let recovered: MangoTiptapDocument | undefined;
+  const sync = new MangoTiptapSync({
+    ...optionsIdentity,
+    repairRecoveredDocument: repairMangoTiptapRecoveredDocument,
+    requestJSON: async <T>(_path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
+      if (init?.method !== "POST") {
+        return {
+          revision: 50,
+          schema_version: 1,
+          document: createEmptyMangoTiptapDocument(),
+          annotations: [],
+        } as T;
+      }
+      posted = init.json as typeof posted;
+      return saveAcknowledgement(posted?.operation_id ?? "", 51) as T;
+    },
+    onDocument: (document, source) => {
+      if (source === "recovery") recovered = document;
+    },
+    batchMs: 60_000,
+    maxBatchMs: 60_000,
+  });
+
+  try {
+    await sync.start();
+    const postedRequest = posted as {
+      operation_id: string;
+      base_revision: number;
+      document: MangoTiptapDocument;
+    };
+    assert.ok(postedRequest);
+    assert.notEqual(postedRequest.operation_id, "old-invalid-operation", "a changed retry must use a fresh operation ID");
+    assert.equal(postedRequest.base_revision, 50);
+    const postedBlockIDs = mangoBlockIDs(postedRequest.document.document);
+    assert.equal(new Set(postedBlockIDs).size, postedBlockIDs.length);
+    assert.equal(
+      postedRequest.document.document.content?.[0]?.content?.[0]?.attrs?.entityType,
+      "node",
+      "the old compacted Node type must be restored before retry",
+    );
+    assert.deepEqual(recovered, postedRequest.document);
+    assert.equal(await readExactMangoTiptapPending(storageKey), null);
+  } finally {
+    await sync.shutdown();
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
+      else Object.defineProperty(globalThis, key, { configurable: true, value });
+    }
+  }
+});
+
 test("lost acknowledgement recovery replays the stable operation before conflict detection", async () => {
   const previous = {
     indexedDB: globalThis.indexedDB,
@@ -856,7 +965,7 @@ test("lost acknowledgement recovery replays the stable operation before conflict
   Object.defineProperty(globalThis, "IDBKeyRange", { configurable: true, value: IDBKeyRange });
   Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: new MemoryStorage() });
   const original = createEmptyMangoTiptapDocument();
-  const edited = richDocument("accepted despite a lost response");
+  const edited = repairMangoTiptapRecoveredDocument(richDocument("accepted despite a lost response"));
   const annotations = [
     { id: "comment-1", kind: "comment" as const, from: 3, to: 9 },
     { id: "change-1", kind: "change" as const, from: 10, to: 14 },
@@ -895,6 +1004,7 @@ test("lost acknowledgement recovery replays the stable operation before conflict
   const options = {
     companyID: "company-lost-ack", resourceType: "node" as const,
     resourceID: "resource-lost-ack", documentID: "document-lost-ack", requestJSON: request,
+    repairRecoveredDocument: repairMangoTiptapRecoveredDocument,
     onDocument: () => undefined, onConflict: () => { conflicts += 1; }, batchMs: 60_000, maxBatchMs: 60_000,
   };
   const first = new MangoTiptapSync(options);
