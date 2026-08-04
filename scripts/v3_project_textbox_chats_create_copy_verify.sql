@@ -363,9 +363,19 @@ with raw as (
         or relationship.resource_textbox_id=decoded.textbox_id
       )
   ) email_access on true
+), timed as (
+  select
+    resolved.*,
+    coalesce(payload_created_timestamp,created_timestamp) as target_created_timestamp,
+    greatest(
+      updated_timestamp,
+      coalesce(payload_created_timestamp,created_timestamp),
+      coalesce(edited_timestamp,updated_timestamp)
+    ) as target_updated_timestamp
+  from resolved
 )
 select
-  resolved.*,
+  timed.*,
   array_remove(array[
     case when payload is null then 'invalid_json' end,
     case when payload is not null and jsonb_typeof(payload)<>'object' then 'payload_not_object' end,
@@ -383,6 +393,7 @@ select
     case when author_id_text is not null and parsed_author_user_id is null then 'author_id_invalid' end,
     case when payload_created_text is not null and payload_created_timestamp is null then 'created_timestamp_invalid' end,
     case when edited_text is not null and edited_timestamp is null then 'edited_timestamp_invalid' end,
+    case when edited_timestamp is not null and edited_timestamp<target_created_timestamp then 'edited_timestamp_before_created' end,
     case when attachment_count<>0 then 'chat_attachments_changed_or_invalid' end,
     case when entity_links is null then 'entity_links_invalid' end,
     case when mentioned_user_ids is null then 'mentioned_user_ids_invalid' end,
@@ -390,7 +401,7 @@ select
     case when btrim(message)='' then 'empty_chat_message' end,
     case when updated_timestamp<created_timestamp then 'projection_timestamps_invalid' end
   ],null)::text[] as issue_codes
-from resolved;
+from timed;
 
 -- Reviewable identities only; no chat bodies, filenames, provider keys, or URLs.
 select
@@ -458,7 +469,7 @@ select
   selection_quote,selection_start,selection_end,
   author_user_id,author_display_name,message,edited_timestamp,
   entity_links,mentioned_user_ids,mentioned_group_ids,
-  1,coalesce(payload_created_timestamp,created_timestamp),updated_timestamp,null
+  1,target_created_timestamp,target_updated_timestamp,null
 from mango_project_chat_source
 order by company_id,project_id,chat_id
 on conflict (company_id,chat_id) do nothing;
@@ -500,8 +511,8 @@ begin
        or target.mentioned_user_ids<>source.mentioned_user_ids
        or target.mentioned_group_ids<>source.mentioned_group_ids
        or target.revision<>1
-       or target.created_timestamp<>coalesce(source.payload_created_timestamp,source.created_timestamp)
-       or target.updated_timestamp<>source.updated_timestamp
+       or target.created_timestamp<>source.target_created_timestamp
+       or target.updated_timestamp<>source.target_updated_timestamp
        or target.deleted_timestamp is not null
   ) then
     raise exception 'STOP: copied Project chat rows do not exactly match their source';
