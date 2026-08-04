@@ -63,7 +63,8 @@ func TestAttachmentStep1ArtifactsArePhasedAndOperatorGated(t *testing.T) {
 		"unsafe_cross_attachment_reuse", "legacy_preview_type", "upload_status",
 		"expected_final", "approved_broken_identities", "=213",
 		"approved_relationships_already_absent", "missing_owner_relationships_to_delete",
-		"target_cleanup_identity_conflicts",
+		"target_cleanup_identity_conflicts", "final_only_relationships_retained",
+		"final_only_pending_attachment_conflicts",
 	} {
 		if !strings.Contains(preflight, required) {
 			t.Errorf("preflight missing %q", required)
@@ -83,6 +84,7 @@ func TestAttachmentStep1ArtifactsArePhasedAndOperatorGated(t *testing.T) {
 		"set deleted_timestamp=coalesce", "ready_for_guarded_s3_cleanup",
 		"attachment_step1_relationship_cleanup",
 		"cleanup identity conflicts with an existing final relationship",
+		"attachment_step1_retained_final_only", "target_checksum",
 	} {
 		if !strings.Contains(step1, required) {
 			t.Errorf("Step 1 write entry point missing %q", required)
@@ -185,7 +187,7 @@ select current_setting('server_version_num')::integer,current_database()`).
 	if _, err := db.Exec(string(preflightRaw)); err != nil {
 		t.Fatalf("first preflight: %v", err)
 	}
-	assertAttachmentStep1Counts(t, db, 219, 5, 0, 0, 1)
+	assertAttachmentStep1Counts(t, db, 219, 7, 0, 0, 1)
 
 	stepRaw, err := os.ReadFile(filepath.Join("..", "..", "..", "scripts", "attachment_step1_create_copy_reconcile.sql"))
 	if err != nil {
@@ -194,7 +196,25 @@ select current_setting('server_version_num')::integer,current_database()`).
 	if _, err := db.Exec(string(stepRaw)); err != nil {
 		t.Fatalf("first Step 1 run: %v", err)
 	}
-	assertAttachmentStep1Counts(t, db, 4, 4, 1, 2, 1)
+	assertAttachmentStep1Counts(t, db, 4, 5, 1, 2, 1)
+	var finalOnlyRetained, finalOnlyDeletedRemoved, finalOnlyAttachmentActive bool
+	if err := db.QueryRow(`
+select
+  exists(select 1 from attachment_relationships
+    where attachment_relationship_id=md5('final-only-rel')::uuid),
+  not exists(select 1 from attachment_relationships
+    where attachment_relationship_id=md5('final-only-deleted-rel')::uuid),
+  exists(select 1 from attachments
+    where attachment_id=md5('final-only-file')::uuid
+      and deleted_timestamp is null)`).Scan(
+		&finalOnlyRetained, &finalOnlyDeletedRemoved, &finalOnlyAttachmentActive,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !finalOnlyRetained || !finalOnlyDeletedRemoved || !finalOnlyAttachmentActive {
+		t.Fatalf("final-only reconciliation retained/deleted/active=%v/%v/%v",
+			finalOnlyRetained, finalOnlyDeletedRemoved, finalOnlyAttachmentActive)
+	}
 	var pendingCleanup int
 	if err := db.QueryRow("select count(*) from attachments where deleted_timestamp is not null").
 		Scan(&pendingCleanup); err != nil {
@@ -207,7 +227,7 @@ select current_setting('server_version_num')::integer,current_database()`).
 	if _, err := db.Exec(string(stepRaw)); err != nil {
 		t.Fatalf("identical Step 1 rerun: %v", err)
 	}
-	assertAttachmentStep1Counts(t, db, 4, 4, 1, 2, 1)
+	assertAttachmentStep1Counts(t, db, 4, 5, 1, 2, 1)
 
 	if _, err := db.Exec(`
 delete from attachment_previews
@@ -386,7 +406,10 @@ insert into attachments(
    repeat('c',64),'test-bucket','retained/b','user_upload'),
   (md5('missing-owner-file')::uuid,md5('attachment-company')::uuid,
    md5('attachment-user')::uuid,'missing.bin','application/octet-stream',1,
-   repeat('f',64),'test-bucket','missing/owner','user_upload');
+   repeat('f',64),'test-bucket','missing/owner','user_upload'),
+  (md5('final-only-file')::uuid,md5('attachment-company')::uuid,
+   md5('attachment-user')::uuid,'final-only.bin','application/octet-stream',1,
+   repeat('1',64),'test-bucket','final-only/file','user_upload');
 
 insert into resource_attachments(
   resource_attachment_id,company_id,resource_type,resource_id,attachment_id,
@@ -449,6 +472,17 @@ select resource_attachment_id,company_id,'email_draft','draft-live',attachment_i
        null,'','',relationship_kind,created_by_user_id,created_timestamp,null
 from resource_attachments
 where resource_attachment_id=md5('legacy-email-rel')::uuid;
+
+insert into attachment_relationships(
+  attachment_relationship_id,company_id,resource_type,resource_id,attachment_id,
+  relationship_kind,created_by_user_id,deleted_timestamp
+) values
+  (md5('final-only-rel')::uuid,md5('attachment-company')::uuid,'node',
+   md5('node-a')::uuid::text,md5('final-only-file')::uuid,'file_attachment',
+   md5('attachment-user')::uuid,null),
+  (md5('final-only-deleted-rel')::uuid,md5('attachment-company')::uuid,'node',
+   md5('node-a')::uuid::text,md5('retained-a')::uuid,'migrated_inline_image',
+   md5('attachment-user')::uuid,now());
 
 insert into v3_email_migration_runs(
   run_id,mapping_version,status,summary,completed_timestamp

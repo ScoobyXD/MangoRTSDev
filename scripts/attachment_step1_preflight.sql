@@ -9,6 +9,8 @@
 -- Open this whole file in DBeaver and execute it as one script. It uses plain
 -- PostgreSQL SQL only and never returns filenames, resource IDs, object keys,
 -- message content, credentials, signed URLs, or attachment bytes.
+-- Valid final-only relationships written by the current backend after the legacy
+-- checkpoint are verified against their exact live owner and retained.
 
 begin transaction isolation level repeatable read read only;
 set local statement_timeout = '5min';
@@ -314,7 +316,120 @@ relationship_cleanup as (
   from owner_checks
   where deleted_timestamp is not null or not owner_exists
 ),
+legacy_cleanup_identities as (
+  select company_id,attachment_relationship_id,attachment_id
+  from relationship_cleanup
+  union
+  select company_id,resource_attachment_id,attachment_id
+  from approved_evidence
+),
+final_only_owner_checks as (
+  select target.*,case
+    when target.resource_type='node' then
+      pg_input_is_valid(target.resource_id,'uuid')
+      and exists(select 1 from nodes n where n.company_id=target.company_id
+        and n.node_id=case when pg_input_is_valid(target.resource_id,'uuid')
+          then target.resource_id::uuid end)
+    when target.resource_type='logic_gate' then
+      pg_input_is_valid(target.resource_id,'uuid')
+      and exists(select 1 from logic_gates g where g.company_id=target.company_id
+        and g.logic_gate_id=case when pg_input_is_valid(target.resource_id,'uuid')
+          then target.resource_id::uuid end)
+    when target.resource_type='project' then
+      pg_input_is_valid(target.resource_id,'uuid')
+      and exists(select 1 from projects p where p.company_id=target.company_id
+        and p.project_id=case when pg_input_is_valid(target.resource_id,'uuid')
+          then target.resource_id::uuid end)
+    when target.resource_type='node_chat_message' then
+      pg_input_is_valid(target.resource_id,'uuid')
+      and exists(select 1 from node_textbox_chats chat
+        where chat.company_id=target.company_id
+          and chat.chat_id=case when pg_input_is_valid(target.resource_id,'uuid')
+            then target.resource_id::uuid end and chat.deleted_timestamp is null)
+    when target.resource_type='logic_gate_chat_message' then
+      pg_input_is_valid(target.resource_id,'uuid')
+      and exists(select 1 from logic_gate_projection_table projection
+        where projection.company_id=target.company_id
+          and projection.information_id=
+            case when pg_input_is_valid(target.resource_id,'uuid')
+              then target.resource_id::uuid end
+          and projection.type='Text block chat'::information_type
+          and projection.is_deleted=false)
+    when target.resource_type='project_chat_message' then
+      pg_input_is_valid(target.resource_id,'uuid')
+      and exists(select 1 from project_projection_table projection
+        where projection.company_id=target.company_id
+          and projection.information_id=
+            case when pg_input_is_valid(target.resource_id,'uuid')
+              then target.resource_id::uuid end
+          and projection.type='Text block chat'::information_type)
+    when target.resource_type='email_message' then
+      pg_input_is_valid(target.resource_id,'uuid')
+      and exists(select 1 from email_messages message
+        where message.company_id=target.company_id
+          and message.email_message_id=
+            case when pg_input_is_valid(target.resource_id,'uuid')
+              then target.resource_id::uuid end)
+    when target.resource_type='email_draft' then
+      exists(select 1 from email_drafts draft
+        where draft.company_id=target.company_id
+          and draft.draft_id=target.resource_id
+          and draft.deleted_timestamp is null)
+    when target.resource_type='email_signature' then
+      exists(select 1 from email_signatures signature
+        where signature.company_id=target.company_id
+          and signature.signature_id=target.resource_id)
+    when target.resource_type='shared_inbox' then
+      pg_input_is_valid(target.resource_id,'uuid')
+      and exists(select 1 from shared_inboxes inbox
+        where inbox.company_id=target.company_id
+          and inbox.shared_inbox_id=
+            case when pg_input_is_valid(target.resource_id,'uuid')
+              then target.resource_id::uuid end)
+    when target.resource_type='company_explorer_folder' then
+      pg_input_is_valid(target.resource_id,'uuid')
+      and exists(select 1 from company_explorer_folders folder
+        where folder.company_id=target.company_id
+          and folder.folder_id=
+            case when pg_input_is_valid(target.resource_id,'uuid')
+              then target.resource_id::uuid end)
+    when target.resource_type='shared_inbox_folder' then
+      pg_input_is_valid(target.resource_id,'uuid')
+      and exists(select 1 from shared_inbox_folders folder
+        where folder.company_id=target.company_id
+          and folder.folder_id=
+            case when pg_input_is_valid(target.resource_id,'uuid')
+              then target.resource_id::uuid end)
+    else false end owner_exists,
+    exists(select 1 from attachments attachment
+      where attachment.company_id=target.company_id
+        and attachment.attachment_id=target.attachment_id
+        and attachment.deleted_timestamp is null) attachment_active
+  from attachment_relationships target
+  left join retained_desired desired
+    on desired.attachment_relationship_id=target.attachment_relationship_id
+  left join legacy_cleanup_identities cleanup
+    on cleanup.attachment_relationship_id=target.attachment_relationship_id
+  where desired.attachment_relationship_id is null
+    and cleanup.attachment_relationship_id is null
+),
+retained_final_only as (
+  select * from final_only_owner_checks
+  where deleted_timestamp is null and owner_exists and attachment_active
+),
+final_only_cleanup as (
+  select *,case when deleted_timestamp is not null
+                  then 'deleted_relationship'
+                else 'missing_owner' end cleanup_reason
+  from final_only_owner_checks
+  where deleted_timestamp is not null or not owner_exists
+),
+final_only_conflicts as (
+  select * from final_only_owner_checks
+  where deleted_timestamp is null and owner_exists and not attachment_active
+),
 unapproved_broken as (
+
   select broken.*
   from broken_live broken
   where not exists(
@@ -326,7 +441,11 @@ unapproved_broken as (
   )
 ),
 valid_active_relationships as (
-  select * from retained_desired
+  select company_id,attachment_relationship_id,attachment_id
+  from retained_desired
+  union all
+  select company_id,attachment_relationship_id,attachment_id
+  from retained_final_only
 ),
 relationship_counts as (
   select a.company_id,a.attachment_id,
@@ -360,11 +479,10 @@ target_conflicts as (
             d.created_by_user_id,d.created_timestamp,d.deleted_timestamp)
 ),
 cleanup_identities as (
-  select company_id,attachment_relationship_id,attachment_id
-  from relationship_cleanup
+  select * from legacy_cleanup_identities
   union
-  select company_id,resource_attachment_id,attachment_id
-  from approved_evidence
+  select company_id,attachment_relationship_id,attachment_id
+  from final_only_cleanup
 ),
 target_cleanup_conflicts as (
   select target.attachment_relationship_id
@@ -377,7 +495,7 @@ target_cleanup_conflicts as (
 target_extras as (
   select target.attachment_relationship_id
   from attachment_relationships target
-  left join retained_desired d
+  left join valid_active_relationships d
     on d.attachment_relationship_id=target.attachment_relationship_id
   left join cleanup_identities cleanup
     on cleanup.attachment_relationship_id=target.attachment_relationship_id
@@ -444,15 +562,23 @@ metrics as (
     from relationship_cleanup where cleanup_reason='missing_owner'
   union all select 'cleanup','deleted_relationships_to_delete',count(*)
     from relationship_cleanup where cleanup_reason='deleted_relationship'
+  union all select 'cleanup','final_only_relationships_retained',count(*)
+    from retained_final_only
+  union all select 'cleanup','final_only_missing_owner_relationships_to_delete',count(*)
+    from final_only_cleanup where cleanup_reason='missing_owner'
+  union all select 'cleanup','final_only_deleted_relationships_to_delete',count(*)
+    from final_only_cleanup where cleanup_reason='deleted_relationship'
   union all select 'classification','target_conflicts',count(*) from target_conflicts
   union all select 'classification','target_extras',count(*) from target_extras
+  union all select 'classification','final_only_pending_attachment_conflicts',count(*)
+    from final_only_conflicts
   union all select 'classification','target_cleanup_identity_conflicts',count(*)
     from target_cleanup_conflicts
   union all select 'classification','evidence_conflicts',count(*) from evidence_conflicts
   union all select 'relationship_cardinality','zero',count(*) from relationship_counts where active_relationship_count=0
   union all select 'relationship_cardinality','one',count(*) from relationship_counts where active_relationship_count=1
   union all select 'relationship_cardinality','many',count(*) from relationship_counts where active_relationship_count>1
-  union all select 'expected_final','attachment_relationships',count(*) from retained_desired
+  union all select 'expected_final','attachment_relationships',count(*) from valid_active_relationships
   union all select 'expected_final','attachment_upload_jobs',count(*) from attachment_upload_intents
   union all select 'expected_final','attachment_previews',count(*) from attachment_variants
     where variant_type in('display','thumbnail')
@@ -495,6 +621,7 @@ readiness as (
     and (select count(*) from unapproved_broken)=0
     and (select count(*) from target_conflicts)=0
     and (select count(*) from target_extras)=0
+    and (select count(*) from final_only_conflicts)=0
     and (select count(*) from target_cleanup_conflicts)=0
     and (select count(*) from evidence_conflicts)=0
     and (select count(*) from desired)+(select count(*) from broken_live)
@@ -548,6 +675,18 @@ select 'relationship_cleanup_identity',cleanup.cleanup_reason,cleanup.company_id
        cleanup.attachment_relationship_id,cleanup.attachment_id,
        'exact owner is gone or relationship is already deleted',null
 from relationship_cleanup cleanup
+union all
+select 'relationship_cleanup_identity','final_only_'||cleanup.cleanup_reason,
+       cleanup.company_id,cleanup.attachment_relationship_id,
+       cleanup.attachment_id,
+       'final-only row is deleted or its exact owner is gone',null
+from final_only_cleanup cleanup
+union all
+select 'blocking_relationship_identity','final_only_pending_attachment',
+       blocker.company_id,blocker.attachment_relationship_id,
+       blocker.attachment_id,
+       'active final-only relationship points to an attachment already pending deletion',null
+from final_only_conflicts blocker
 union all
 select 'blocking_relationship_identity','target_extra',target.company_id,
        target.attachment_relationship_id,target.attachment_id,
