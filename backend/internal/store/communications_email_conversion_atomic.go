@@ -71,8 +71,14 @@ func rewriteCommunicationsConversionInternalMessageID(input *CommunicationsTriag
 		if value == nil {
 			return nil
 		}
+		information := strings.TrimSpace(value.Information)
+		prefix := ""
+		if strings.HasPrefix(information, editorTextBlockProjectionPrefix) {
+			prefix = editorTextBlockProjectionPrefix
+			information = strings.TrimSpace(strings.TrimPrefix(information, prefix))
+		}
 		var payload map[string]any
-		if err := json.Unmarshal([]byte(value.Information), &payload); err != nil {
+		if err := json.Unmarshal([]byte(information), &payload); err != nil {
 			return ErrInvalid
 		}
 		payload[field] = emailMessageID
@@ -80,7 +86,7 @@ func rewriteCommunicationsConversionInternalMessageID(input *CommunicationsTriag
 		if err != nil {
 			return err
 		}
-		value.Information = string(raw)
+		value.Information = prefix + string(raw)
 		return nil
 	}
 	if err := rewrite(input.LinkedTextBlock, "email_message_id"); err != nil {

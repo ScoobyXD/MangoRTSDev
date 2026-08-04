@@ -12,6 +12,7 @@ import {
 import {
   buildEmailCollaborationParticipantRoster,
   buildEmailNodeDestinationSearchOptions,
+  emailNodeImportRequired,
   emailCollaborationChatSessionMounted,
   emailCollaborationChatSessionVisible,
   formatEmailCollaborationChatError,
@@ -22,6 +23,13 @@ import {
   toggleEmailCollaborationChatSession,
   type EmailCollaborationChatSession,
 } from "../../../../frontend/src/pages/home/emailCollaborationChat.js";
+
+test("provider-only email rows import before requiring an internal email message ID", () => {
+  assert.equal(emailNodeImportRequired("node-1", "", ""), true, "first import into an existing Node");
+  assert.equal(emailNodeImportRequired("node-1", "node-1", ""), true, "a later provider reply still needs exact-message import");
+  assert.equal(emailNodeImportRequired("node-2", "node-1", "email-message-1"), true, "an imported message still needs a relationship to another Node");
+  assert.equal(emailNodeImportRequired("node-1", "node-1", "email-message-1"), false, "the exact imported message relationship is reusable");
+});
 
 const users = [
   { company_id: "company-1", user_id: "creator-1", display_name: "Creator Person", email: "creator@example.test" },

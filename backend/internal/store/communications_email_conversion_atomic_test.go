@@ -1,7 +1,9 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"miraeopus/backend/internal/domain"
@@ -19,12 +21,12 @@ func TestMemoryEmailConversionAtomicallyPersistsEmailThreadTextBoxAndInitialChat
 		MessageIDs: []string{message.ID},
 		LinkedTextBlock: &NodeInformationInput{
 			InformationID: textBlockID, Type: "Text box",
-			Information: `{"title":"Imported email","document":"","attachments":[],"email_message_id":"mail-atomic","email_accent":"#4f46e5"}`,
+			Information: editorTextBlockProjectionPrefix + `{"title":"Imported email","document":"","attachments":[],"email_message_id":"","email_accent":"#4f46e5"}`,
 			ActorUserID: user.UserID,
 		},
 		InitialChat: &NodeInformationInput{
 			InformationID: chatID, Type: CommunicationsEmailCollaborationChatInformationType,
-			Information: `{"block_id":"44444444-4444-4444-8444-444444444492","message":"Imported email for review"}`,
+			Information: `{"block_id":"44444444-4444-4444-8444-444444444492","selection_source":"email","selection_message_id":"","message":"Imported email for review"}`,
 			ActorUserID: user.UserID,
 		},
 	})
@@ -32,7 +34,7 @@ func TestMemoryEmailConversionAtomicallyPersistsEmailThreadTextBoxAndInitialChat
 		t.Fatalf("ConvertCommunicationsTriageItems atomic import: %v", err)
 	}
 	if result.LinkedTextBlockID != textBlockID || result.InitialChatID != chatID ||
-		len(result.AttachedEmailInformationIDs) != 1 || len(result.EmailThreadIDs) != 1 {
+		len(result.AttachedEmailInformationIDs) != 1 || len(result.EmailThreadIDs) != 1 || len(result.EmailMessageIDs) != 1 {
 		t.Fatalf("atomic identifiers = %+v", result)
 	}
 	projections, err := repo.ListNodeProjections(companyID, node.NodeID)
@@ -48,6 +50,24 @@ func TestMemoryEmailConversionAtomicallyPersistsEmailThreadTextBoxAndInitialChat
 			t.Fatalf("node projections missing %q: %+v", required, projections)
 		}
 	}
+	for _, projection := range projections {
+		if projection.Type != "Text box" && projection.Type != CommunicationsEmailCollaborationChatInformationType {
+			continue
+		}
+		information := strings.TrimPrefix(projection.Information, editorTextBlockProjectionPrefix)
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(information), &payload); err != nil {
+			t.Fatalf("parse %s projection: %v", projection.Type, err)
+		}
+		field := "email_message_id"
+		if projection.Type == CommunicationsEmailCollaborationChatInformationType {
+			field = "selection_message_id"
+		}
+		if payload[field] != result.EmailMessageIDs[0] {
+			t.Fatalf("%s %s = %v, want %s", projection.Type, field, payload[field], result.EmailMessageIDs[0])
+		}
+	}
+
 	stored, err := repo.GetCommunicationsNodeEmailThread(companyID, node.NodeID, result.EmailThreadIDs[0])
 	if err != nil {
 		t.Fatalf("GetCommunicationsNodeEmailThread: %v", err)

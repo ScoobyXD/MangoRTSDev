@@ -69,6 +69,14 @@ export function nextEmailNodeDestinationRequest(
   };
 }
 
+export function emailNodeImportRequired(
+  targetNodeID: string,
+  detectedNodeID: string,
+  emailMessageID: string,
+): boolean {
+  return targetNodeID.trim() !== detectedNodeID.trim() || !emailMessageID.trim();
+}
+
 function emailNodeDestinationQuery(value: string): string {
   return value.trim().replace(/^#+\s*/, "").trim().toLocaleLowerCase();
 }
