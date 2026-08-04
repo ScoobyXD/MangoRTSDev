@@ -2,13 +2,13 @@
 
 A user creates a chat inside a Node textbox, optionally quoting selected textbox text or an attached email
 ↓
-The backend stores the chat in `node_textbox_chats` and stores any file relationship in existing `resource_attachments`
+The backend stores the chat in `node_textbox_chats` and stores any file relationship in `attachment_relationships`
 ↓
-Deleting the textbox deletes every chat owned by that textbox, including email-selection chats, and removes their attachment relationships
+Deleting the textbox deletes every chat owned by that textbox, including email-selection chats, and retires their attachment relationships through the shared last-owner cleanup lifecycle
 ↓
 The normalized email message, thread, and email attachment content remain available because the textbox never owns the email itself
 
-Last updated: 2026-07-22
+Last updated: 2026-08-04
 
 # Nodes Tests
 
@@ -24,7 +24,7 @@ Coverage Status:
 
 ### 2026-07-10 Text-Box Deletion Retention And Node-Level Viewers
 
-- Deleting a node text box removes that text-box projection and its local UI, but it must not treat node files or attached emails referenced from that box as child records to delete. File `resource_attachments` links and attached-email projections remain associated with the node unless an editor separately invokes **Remove from node** for the specific row.
+- Deleting a node text box removes that `node_textboxes` row and its local UI, but it must not treat Node-owned files or attached emails referenced from that box as child records to delete. Node-level `attachment_relationships` and `email_relationships` remain associated with the Node unless an editor separately invokes **Remove from node** for the specific row.
 - The node header attachment counter/list remains available independently of text boxes and includes files uploaded from deleted text boxes. A missing `information_id` target is displayed with an explicit deleted-text-box origin label instead of hiding the file or assigning it to another box.
 - The node header attached-email counter/list also remains available independently of text boxes. Opening it uses a standalone node-level attached-email organizer modal with its folders/list and selected conversation, not an automatically created or arbitrarily selected text box.
 - A retained attached email must be viewable from the global node header when the node has no text boxes and when the user has no access. Existing per-text-box email conversation panes remain available for live text boxes and are not the required host for the global viewer.

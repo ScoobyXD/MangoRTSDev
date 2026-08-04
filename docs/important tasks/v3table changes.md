@@ -4,7 +4,7 @@ A Mango user creates a Node and adds textboxes. Textbox bodies are stored only i
 
 A Mango file has one record in `attachments` and one or more ownership links in `attachment_relationships`. A Node-owned file can remember that it came from a textbox without making that textbox its owner. Removing one link never deletes a file that still has another live link. When the final live link is removed, Mango marks the attachment for deletion, deletes the original and every generated preview from S3, and then removes the database records. Sent-email files remain available because sending creates an `email_message` attachment relationship before the email draft is removed.
 
-The Node and email V3 work is released through separate operator-gated phases: create the permanent destinations, copy without deleting legacy sources, reconcile the copy, switch the application, observe a soak period, and retire legacy storage only in a later release. The development email data has now passed the create/copy/reconcile checkpoint. The backend still uses the legacy email tables, so application cutover is the next phase and old-table retirement remains later. The attachment rollout below follows its own approved three-step plan and explicitly allows Step 1 to remove the 213 proven broken relationships and files proven to have zero valid relationships.
+The Node textbox, Node textbox chat, email, and attachment application cutovers are now deployed in development. Each rollout used operator-gated phases: create the permanent destinations, copy without deleting valid legacy sources, reconcile the copy, switch the application during a short writer pause, observe a soak period, and retire legacy storage only in a later release. The old Node, email, and attachment tables remain only as rollback/audit evidence until the separately approved retirement phase.
 
 # V3 table changes implementation handoff
 
@@ -16,7 +16,18 @@ The implementation must update the canonical schema, provide separately operated
 
 An agent must not apply the migration to a live database. Repository agents may inspect a live database only with the designated database-enforced read-only credential. Never retrieve or print writer/admin credentials or unrelated secrets.
 
-## Current status: the first V3 cutover was rolled back
+## Development rollout status
+
+| Area | Current application authority | Completed development evidence | Remaining work |
+| --- | --- | --- | --- |
+| Node textboxes | `node_textboxes` | 32 legacy HTML-envelope textboxes were converted and inserted; 113 orphan content-change rows were removed; current editor bodies no longer use the old Node information/projection tables. | Soak and later legacy Node storage retirement. |
+| Node textbox chats | `node_textbox_chats` | 667 chats were copied and deployed on 2026-08-03; the one missing-parent reply was deliberately preserved as a top-level chat. | Soak and later legacy chat-row retirement. |
+| Email | `email_threads`, `email_messages`, `email_relationships`, `email_drafts`, and `email_signatures` | The final data copy reconciled 223 threads, 678 messages, 228 relationships, 49 drafts, and 9 signatures. The final-table backend was deployed in development and Jonat reported the smoke checks successful. | Snapshot/soak evidence and later legacy email-table retirement. |
+| Attachments | `attachments`, `attachment_relationships`, `attachment_upload_jobs`, `attachment_upload_parts`, and `attachment_previews` | Step 1 cleanup completed, the multipart boundary moved six part rows to `upload_job_id`, and backend commit `c8a08085` was deployed. The final sync reported 491 upload jobs, 842 previews, and 1,080 relationships; Jonat reported the smoke checks successful. | Post-cutover reconciliation, snapshot/soak evidence, and separately approved Step 3 legacy-table retirement. |
+
+No legacy reader, writer, fallback, or dual-write path remains for the completed Node textbox, Node textbox chat, email, or attachment contracts. Project and Logic Gate legacy information/projection storage is outside this completed set and is the subject of the next separately reviewed cutover. This status does not authorize dropping any preserved legacy table.
+
+## Historical incident: the first V3 cutover was rolled back
 
 The 2026-08-02 V3 attempt is abandoned. Do not revive or run the removed migration as-is.
 
@@ -70,11 +81,11 @@ The 3.3 GB label shown for `node_information` is a physical relation-size measur
 
 Rows with valid data and a surviving permanent host are copied. A deleted user leaves a null `author_user_id` but retains the captured author name and message. A missing same-textbox parent detaches the reply. A missing host is recorded as `discarded_deleted_host` without deleting the source. Invalid JSON, invalid identities, ambiguous email selections, duplicate company chat IDs, and target conflicts are recorded as `needs_human_mapping` and left untouched.
 
-This completed scoped phase authorizes only the Node textbox chat cutover. It does not authorize the remaining V3 table changes or any legacy-table retirement.
+At the 2026-08-03 checkpoint, this scoped phase authorized only the Node textbox chat cutover. It did not by itself authorize the later email/attachment cutovers or any legacy-table retirement.
 
-## Current implementation: V3 email data checkpoint completed; backend cutover next
+## Current implementation: V3 email backend cutover deployed
 
-On 2026-08-04 Jonat ran the email preflight and complete create/copy/reconcile entry point in DBeaver against the development database. This completed the data portion of the email migration. It did not switch a backend reader or writer, and it did not update, delete, or drop a legacy table.
+On 2026-08-04 Jonat ran the email preflight and complete create/copy/reconcile entry point in DBeaver against the development database. That transaction completed the data checkpoint without updating, deleting, or dropping a legacy email table. The matching backend cutover was subsequently deployed in development as part of application commit `c8a08085`, and Jonat reported the post-deployment smoke checks successful.
 
 - `scripts/v3_email_step1_count.sql` is the copy-paste, repeatable-read, read-only preflight. On the cleaned development data it reported `READY_TO_COPY`, 74 legacy threads, 509 legacy messages, 256 retained projection rows, 28 exact whole-Node duplicate pairs, 228 final relationship identities, 49 drafts, 9 signatures, 1,347 legacy attachment relationships, 1,134 valid final attachment relationships, 213 proven zero-target orphan links to omit, 223 expected final threads, and 678 expected final messages.
 - `scripts/v3_email_step2_create_copy_verify.sql` is the single operator entry point. It contains the complete plain PostgreSQL SQL inline, so an operator can open and execute the whole file in DBeaver without `psql` backslash commands such as `\\ir` or `\\set`. It created the final tables, ran the classifier/content/dependent/attachment sections, recorded a source-to-target ledger, reconciled counts, and committed in one transaction. It never updated or deleted a legacy row. The smaller component files remain only for maintenance and focused tests.
@@ -83,9 +94,9 @@ On 2026-08-04 Jonat ran the email preflight and complete create/copy/reconcile e
 - One soft-deleted compose draft has a stale source ID and no usable source snapshot. Step 2 keeps that draft but leaves its final source-message foreign key null.
 - The live read-only attachment audit found 213 validly shaped legacy file links whose exact email draft/message/relationship target no longer exists. The completed email-only Step 2 safely left every old `resource_attachments` row untouched, recorded these rows as `retained_orphan_evidence`, and created only the 1,134 relationships with exactly one surviving target. Jonat later approved deleting those 213 proven broken legacy relationships during the separately operated attachment data phase. That later phase may delete an underlying file only when the file has zero surviving valid relationships.
 - The full Step 2 entry point passed a first run, an identical rerun, and a forced-drift rollback test on a disposable PostgreSQL 18 database. `backend/internal/store/v3_email_migration_test.go` protects the additive and non-destructive contract.
-- `backend/db/schema.sql` can create the final tables on a clean database, while the old tables remain present for the current backend and rollback evidence.
+- `backend/db/schema.sql` can create the final tables on a clean database. The deployed backend uses the final contracts; the old tables remain only for rollback and audit evidence.
 
-The next email task is backend cutover, not more data cleanup. The backend implementation can now be built and tested, but it must not be deployed until every email writer is paused, Step 1 is rerun, Step 2 captures any final legacy-write delta, and the operator again reviews `READY_FOR_BACKEND_CUTOVER_REVIEW`. Old-table retirement remains a later explicit task after cutover testing, a database snapshot, and the agreed rollback/soak period.
+The development email cutover is complete. Durable imports, download jobs, relationships, drafts, signatures, attachment authorization, chat selections, permissions, and realtime fan-out now use the final V3 contracts. Ordinary personal and shared mailbox list/detail and provider mutation paths remain Nylas-backed and do not create durable V3 rows. Request-time draft DDL and the special collaboration participant path are removed. The remaining email work is to preserve post-cutover evidence, take the agreed database snapshot, complete the soak period, and approve legacy-table retirement as a separate task.
 
 ## What happened during the failed attempt
 
@@ -860,7 +871,7 @@ bounded locks needed to prevent new legacy writes.
 
 V3 must not create tables, copy data, switch application code, and drop legacy storage in one migration transaction. The repository change may be cohesive, but the live rollout must use separate operator-gated releases. Do not put these phases in an automatic migration chain that immediately applies every phase.
 
-Current email status: the development database has completed the email portions of Phase 1, Phase 2, and Phase 3 with the counts recorded above. Phase 4 backend cutover is next. These phase definitions remain the required rerun and rollout contract.
+Current email status: the development database and application have completed Phases 1 through 4 with the counts and deployment evidence recorded above. Phase 5 soak/snapshot evidence and later retirement remain. These phase definitions remain the required rollout contract for another environment.
 
 ### Phase 1: expand the schema
 
@@ -984,7 +995,7 @@ Fresh-eyes evidence on 2026-08-02 established these identity and visibility rule
 
 ## Approved V3 email decisions and current evidence
 
-This section records the 2026-08-03 repository inspection, the read-only development-database inventory, the completed 2026-08-04 data checkpoint, and the product decisions Jonat approved during the follow-up discussion. It is the current handoff for the backend email-cutover task. Where an older section or older test rule conflicts with this section, this section is the V3 target and the older contract must be updated during implementation.
+This section records the 2026-08-03 repository inspection, the read-only development-database inventory, the completed 2026-08-04 data checkpoint, the deployed backend cutover, and the product decisions Jonat approved during the follow-up discussion. It is the current email contract. Where an older section or older test rule conflicts with this section, this section is the V3 target.
 
 ### Plain-language model
 
@@ -1088,7 +1099,9 @@ After the cleanup and preflight matched the expected source shape, Jonat ran the
 - 1,134 `attachment_relationships`.
 - 213 proven orphan legacy attachment links omitted from the final relationship table and retained as audit evidence.
 
-This checkpoint proves the data copy completed. It does not prove the backend cutover completed. Until the backend is deployed against the V3 tables, legacy email writers remain authoritative and can make the copied tables stale.
+This checkpoint originally proved only that the data copy completed. The later writer-paused final-delta operation and backend deployment completed the application cutover: final V3 tables are now authoritative for durable email data, while the preserved legacy tables are frozen rollback/audit evidence.
+
+The 1,134 relationship count belongs to the earlier email-copy checkpoint. The later attachment-wide consolidation and approved cleanup reconciled the current final attachment model to 1,080 relationships; the two counts describe different rollout gates and are not a failed reconciliation.
 
 ### Exact source-of-truth order
 
@@ -1164,14 +1177,14 @@ The special collaboration participant permission system retires. Read-only evide
 
 ## Approved attachment consolidation decisions
 
-This section records the attachment decisions Jonat approved on 2026-08-04 and is the current product contract. The repository now contains the Step 1 schema and operator tooling listed below. Their presence does not authorize an agent to apply SQL to a live database or delete live S3 objects.
+This section records the attachment decisions Jonat approved on 2026-08-04 and is the current product contract. Development Steps 1 and 2 are complete and deployed. The repository retains the schema, operator tooling, and reusable rollout order below, but their presence does not authorize an agent to apply SQL to a live database or delete live S3 objects.
 
 These artifacts do not map one-to-one to the three rollout steps. Step 1 uses
 two SQL entry points so the read-only decision is separate from the authorized
-database/data write. Step 2 owns the backend cutover and the short multipart
-column/FK switch. Step 3 owns the test, snapshot, cutoff, and legacy-table
-retirement gate; its destructive retirement SQL is intentionally not present
-before Step 2 is implemented and proven.
+database/data write. Step 2 owned the backend cutover and the short multipart
+column/FK switch. Step 3 owns post-cutover reconciliation, the snapshot/soak
+gate, and legacy-table retirement. Destructive retirement SQL is intentionally
+not part of Steps 1 or 2.
 
 ### Step 1 implementation artifacts
 
@@ -1179,7 +1192,7 @@ before Step 2 is implemented and proven.
 - `scripts/attachment_step1_create_copy_reconcile.sql` is the separately operated transaction for additive creation, exact checkpoint verification, stable-ID copy, retention of current-backend final-only relationships whose exact owner and attachment remain live, exact evidence-ledger deletion of the 213 broken relationships, removal of already-deleted and exact missing-owner relationships as a separate cleanup class, complete zero-owner marking, and recount.
 - `backend/db/migrations/20260804_attachment_step1_expansion.sql` remains the additive Step 1 destination and pending-link guard without changing the deployed multipart-parts contract. The canonical `backend/db/schema.sql` now represents a clean Step 2 database with `attachment_upload_parts.upload_job_id` referencing `attachment_upload_jobs`; the operator boundary remains the only live-database change.
 - `backend/cmd/mango-attachment-step1-cleanup` is dry-run by default and requires company scope plus `-apply -confirm DELETE_ATTACHMENT_STEP1_ORPHANS` before it deletes S3 objects or finalizes Postgres cleanup. It uses the normal AWS provider/SSO configuration and preserves database keys after partial failure for safe retry.
-- `scripts/attachment_step2_database_cutover.sql` is not a Step 1 operation. At the later Step 2 maintenance, pause writers and rerun the exact Step 1 preflight/reconcile/cleanup sequence first so any intervening legacy writes are captured; the boundary then performs the `attachment_upload_parts.upload_intent_id` to `upload_job_id` rename and foreign-key swap immediately before Step 2 deploys the final backend.
+- `scripts/attachment_step2_database_cutover.sql` is not a Step 1 operation. Development ran it at the writer-paused Step 2 boundary after the exact Step 1 preflight/reconcile/cleanup rerun. For another environment, use the same order: capture intervening writes first, then perform the `attachment_upload_parts.upload_intent_id` to `upload_job_id` rename and foreign-key swap immediately before deploying the final backend.
 - `backend/internal/store/attachment_step1_migration_test.go` provides static phase checks and an opt-in disposable PostgreSQL 18 first-run/rerun/drift-rollback test. `backend/internal/attachmentcleanup/service_test.go` covers cleanup with mocks only. No live database or S3 operation is part of these tests.
 
 ### Final attachment table model
@@ -1225,7 +1238,7 @@ Retire `resource_attachments`, `attachment_upload_intents`, `attachment_variants
 #### Step 1: tables, data copy, and approved cleanup
 
 - Run one read-only preflight first. Count all eight current tables, active/deleted relationships, relationships by resource type, attachment IDs with zero/one/many live relationships, upload jobs by status, multipart parts, previews by type, duplicate S3 keys, and the exact 213 known broken relationships.
-- Exact-verify the 1,134-row `attachment_relationships` email checkpoint baseline, then separately classify every post-checkpoint final-only row already created by the current backend; on a clean database, create the destination instead. Create `attachment_upload_jobs` and `attachment_previews` with their final constraints while keeping the old tables available.
+- Exact-verify the 1,134-row `attachment_relationships` email checkpoint baseline, then separately classify every post-checkpoint final-only row already created by the then-current backend; on a clean database, create the destination instead. Create `attachment_upload_jobs` and `attachment_previews` with their final constraints while keeping the old tables available.
 - Copy valid active legacy relationships, preserve independently validated final-only relationships, and copy upload-job history plus `display`/`thumbnail` preview rows using stable IDs and exact conflict checks. Retain and recount `attachment_upload_parts` in place on its legacy `upload_intent_id` foreign key during Step 1 so the deployed backend keeps working; perform the final column/FK swap only at the writer-paused boundary immediately before Step 2.
 - Delete exact present matches from the 213 proven broken legacy relationship set, accept exact evidence identities already absent as settled, and separately remove already-deleted or exact missing-owner relationship rows. Then check every `attachments` row, not only rows touched by these cleanup classes. Delete every original and its previews when zero valid relationships survive, using the pending-delete and retry order above.
 - Remove any proven unused `email_send` preview data safely. Do not migrate `email_send` or `original` rows into `attachment_previews`.
@@ -1235,9 +1248,16 @@ Exit check: every retained attachment has at least one valid relationship; every
 
 #### Step 2: backend cutover
 
-Repository implementation status: Step 2 is implemented and tested in the worker repository but is not deployed. Application SQL uses only the five final tables; the old tables remain untouched for the Step 3 snapshot/retirement decision. The implementation also routes supported owner deletions through one last-relationship check, runs retryable S3-before-Postgres cleanup, and promotes shared-draft attachments to the exact persisted `email_message` before retiring the draft links.
+Development completion status: Step 2 is implemented, tested, and deployed. Application SQL uses only the five final tables; the old tables remain for the Step 3 snapshot/retirement decision. Supported owner deletions run through one last-relationship check, cleanup is retryable and deletes S3 before Postgres, and shared-draft attachments are promoted to the exact persisted `email_message` before draft links are retired.
 
-The required deployment order is intentionally short and coordinated:
+The completed operator run reported:
+
+- The final Step 1 sync returned `READY_FOR_ATTACHMENT_STEP2_DATABASE_BOUNDARY` with 491 upload jobs, 842 previews, and 1,080 attachment relationships.
+- All 253 pending zero-owner attachment cleanups were finalized successfully.
+- `scripts/attachment_step2_database_cutover.sql` returned `READY_FOR_IMMEDIATE_STEP2_BACKEND_DEPLOY` and moved all six multipart part rows to the final `upload_job_id` foreign-key contract.
+- Application commit `c8a08085` was deployed immediately after the boundary. Jonat reported health, final-table attachment behavior, multipart behavior, email attachment retention, and the broader application smoke checks successful.
+
+Development completed the following sequence. It remains the required short, coordinated deployment order for another environment:
 
 1. Pause all attachment, email, chat, and editor writers.
 2. Run the read-only Step 1 preflight, then the approved Step 1 create/copy/reconcile final delta and guarded cleanup until no pending work remains; rerun and preserve the clean preflight report.
@@ -1246,10 +1266,10 @@ The required deployment order is intentionally short and coordinated:
 5. Do not drop any legacy attachment or migration table. Reconciliation, snapshot, and table retirement remain Step 3.
 
 
-- Change all attachment reads, writes, authorization, upload, multipart, preview, email-send, chat, editor, and deletion code to use only the five final tables.
-- Remove the `email_send` preview constant and path. Sent-email access comes from the `email_message` relationship; outbound size handling remains the separate send-streaming rule.
-- Ensure owner deletion removes relationships and triggers zero-relationship cleanup. Ensure deleting one of several relationships keeps the shared file.
-- Do not keep a compatibility reader or writer for the retired table names.
+- All attachment reads, writes, authorization, upload, multipart, preview, email-send, chat, editor, and deletion code use only the five final tables.
+- The `email_send` preview constant and path are removed. Sent-email access comes from the `email_message` relationship; outbound size handling remains the separate send-streaming rule.
+- Owner deletion removes relationships and triggers zero-relationship cleanup. Deleting one of several relationships keeps the shared file.
+- No compatibility reader or writer remains for the legacy table names.
 
 Exit check: new writes reach only final tables, originals and previews remain private and authorized, sent-email files survive email draft deletion, multipart uploads still resume, and zero-owner cleanup succeeds and retries safely.
 
@@ -1263,7 +1283,7 @@ Exit check: new writes reach only final tables, originals and previews remain pr
 
 ### Request-time schema changes are forbidden
 
-The current `ensureCommunicationsEmailDraftsSchema()` path performs draft-table DDL on first use after backend startup. A normal API request can therefore create or alter tables, drop and recreate triggers, and change constraints. This must be removed during V3.
+Before the email cutover, `ensureCommunicationsEmailDraftsSchema()` performed draft-table DDL on first use after backend startup. The deployed V3 backend removed that path. The no-request-time-DDL rules below remain permanent.
 
 - Application/API request handlers never create, alter, or drop schema.
 - The operator-controlled migration is the only place for V3 schema DDL.
@@ -1330,7 +1350,7 @@ Exit check: source-versus-target counts and fingerprints reconcile; every copied
 
 Rollback: before application cutover, rollback means stop using the new tables and leave old readers/writers unchanged. Within a subphase, an assertion or mismatch rolls back that subphase. Never drop the old tables in Step 2.
 
-#### Step 3: backend cutover after the data checkpoint
+#### Step 3: backend cutover after the data checkpoint (completed in development)
 
 Entry check: the first Step 2 reconciliation has passed. Immediately before deployment, Step 2 must pass again as a final delta run with all database writers paused.
 
@@ -1342,9 +1362,9 @@ Entry check: the first Step 2 reconciliation has passed. Immediately before depl
 
 Exit check: no new email writes reach the retired sources, all smoke tests pass, and final counts remain reconciled. Keep legacy tables unchanged for the agreed soak and rollback period. Retirement is a later explicit release.
 
-Writer rule: the simplest rollout is old-writer operation during long copy, then a short writer freeze for final delta and cutover. A temporary dual-write path is needed only if the business cannot accept that maintenance window; it must not be invented by default.
+Writer rule: development kept the old writer during the long copy and then used a short writer freeze for final delta and cutover. Future environments must repeat that order; do not add a dual-write or compatibility path.
 
-### Repository paths inspected for the next implementation
+### Repository paths inspected for the completed implementation
 
 Schema and migrations: `backend/db/schema.sql`, `backend/db/migrations/20260527_email_node_attachments.sql`, `backend/db/migrations/20260709_mango_attachments.sql`, `backend/db/migrations/20260709_zz_email_drafts_signatures.sql`, `backend/db/migrations/20260713_email_thread_collaboration.sql`, `backend/db/migrations/20260719_persist_node_email_threads.sql`, and `backend/db/migrations/20260728_durable_email_thread_download_jobs.sql`.
 
@@ -1356,4 +1376,4 @@ Core frontend paths: `frontend/src/modules/communications/communicationsApi.ts`,
 
 ### Next implementation task
 
-Implement the backend cutover to the final email tables. The code work may begin from the completed development data checkpoint, but deployment must wait for an operator to pause all email writers and rerun the read-only preflight plus create/copy/reconcile entry point for the final delta. The backend task must remove request-time draft DDL, switch every email reader and writer plus attachment authorization to the final contracts, update chat selections to internal message IDs, replace special collaboration permission/fan-out paths with normal resource permission behavior, run the complete smoke-test list, and keep every old table unchanged for rollback. After successful cutover testing, Jonat takes a database snapshot. Old-table retirement is a separate later decision.
+Preserve the development cutover evidence and observe the agreed soak period. Reconcile that new Node textbox, Node chat, durable email, and attachment writes continue to reach only their final tables, then take the agreed database snapshot. Legacy Node, email, and attachment table retirement is a separate destructive task that requires explicit approval; it must not be combined with ordinary application work or inferred from the successful cutover.
