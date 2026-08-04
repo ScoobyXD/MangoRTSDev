@@ -259,42 +259,6 @@ func (r *PostgresRepo) GetCommunicationsEmailCollaboration(companyID, collaborat
 	}
 	return postgresEmailCollaborationByID(context.Background(), r.db, companyID, collaborationID, participantUserID)
 }
-func (r *PostgresRepo) ListCommunicationsEmailCollaborations(companyID, participantUserID string) ([]domain.CommunicationsEmailCollaboration, error) {
-	companyID, participantUserID = cleanUUIDText(companyID), cleanUUIDText(participantUserID)
-	if companyID == "" || participantUserID == "" {
-		return nil, ErrInvalid
-	}
-	ctx := context.Background()
-	rows, err := r.db.QueryContext(ctx, `select `+postgresEmailCollaborationColumns+`
-from email_relationships relationship
-join email_threads thread on thread.company_id=relationship.company_id and thread.email_thread_id=relationship.email_thread_id
-join email_messages message on message.company_id=relationship.company_id and message.email_thread_id=relationship.email_thread_id and message.email_message_id=relationship.email_message_id
-where relationship.company_id=$1::uuid and relationship.resource_type='node' and relationship.resource_textbox_id is null
- and mangorts_user_can_access_resource(relationship.company_id,relationship.resource_type,relationship.resource_id,$2::uuid,'edit')
-order by relationship.created_timestamp desc,relationship.email_relationship_id`, companyID, participantUserID)
-	if err != nil {
-		return nil, err
-	}
-	items := []domain.CommunicationsEmailCollaboration{}
-	for rows.Next() {
-		item, err := scanPostgresEmailCollaboration(rows)
-		if err != nil {
-			rows.Close()
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	for i := range items {
-		items[i].Participants, err = listPostgresEmailCollaborationParticipants(ctx, r.db, companyID, items[i].CollaborationID)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return items, nil
-}
 
 func (r *PostgresRepo) AddCommunicationsEmailCollaborationParticipants(input CommunicationsEmailCollaborationParticipantInput) (CommunicationsEmailCollaborationParticipantResult, error) {
 	input, err := normalizeCommunicationsEmailCollaborationParticipantInput(input)

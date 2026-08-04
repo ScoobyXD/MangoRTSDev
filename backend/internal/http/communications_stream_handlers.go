@@ -339,10 +339,7 @@ func (s *Server) applyNylasWebhookCacheInvalidationForAccountScope(accountScope 
 	}
 }
 
-func (s *Server) applyCommunicationsWebhookChange(ctx context.Context, grantContext communicationsWebhookGrantContext, change nylasWebhookChange) error {
-	if err := s.persistCommunicationsWebhookChange(ctx, grantContext, change); err != nil {
-		return err
-	}
+func (s *Server) applyCommunicationsWebhookChange(_ context.Context, grantContext communicationsWebhookGrantContext, change nylasWebhookChange) error {
 	if communicationsMessageReadStatusScopeTypeForConnection(grantContext.connection) != "shared" {
 		s.applyNylasWebhookCacheInvalidation(grantContext.connection.UserID, grantContext.cacheScope, change)
 		return s.publishPersonalMailboxWebhookHint(grantContext.connection.UserID, grantContext.connection.AccountEmail, change)

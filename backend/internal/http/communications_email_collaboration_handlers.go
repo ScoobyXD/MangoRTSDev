@@ -39,12 +39,7 @@ func (s *Server) handleCommunicationsEmailCollaborations(w http.ResponseWriter, 
 		messageID := strings.TrimSpace(r.URL.Query().Get("message_id"))
 		threadID := strings.TrimSpace(r.URL.Query().Get("thread_id"))
 		if messageID == "" && threadID == "" {
-			items, err := s.repo.ListCommunicationsEmailCollaborations(companyID, actor.User.UserID)
-			if err != nil {
-				s.writeEmailCollaborationStoreError(w, err, "failed_to_list_email_collaborations")
-				return
-			}
-			writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"collaborations": items})
+			writeError(w, http.StatusBadRequest, "email_message_or_thread_required")
 			return
 		}
 		scope, ok := s.resolveCommunicationsEmailScope(w, actor, companyID, r.URL.Query().Get("shared_inbox_id"), r.URL.Query().Get("account_email"), store.EntityPermissionEdit)

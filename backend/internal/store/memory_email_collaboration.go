@@ -307,26 +307,6 @@ func (r *MemoryRepo) GetCommunicationsEmailCollaboration(companyID, collaboratio
 	return r.withCollaborationParticipantsLocked(item), nil
 }
 
-func (r *MemoryRepo) ListCommunicationsEmailCollaborations(companyID, participantUserID string) ([]domain.CommunicationsEmailCollaboration, error) {
-	companyID, participantUserID = cleanUUIDText(companyID), cleanUUIDText(participantUserID)
-	if companyID == "" || participantUserID == "" {
-		return nil, ErrInvalid
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	items := []domain.CommunicationsEmailCollaboration{}
-	for _, item := range r.emailCollaborations {
-		if item.CompanyID != companyID {
-			continue
-		}
-		if r.userHasEffectiveAccessLocked(companyID, participantUserID, EntityTypeNode, item.NodeID, EntityPermissionEdit) {
-			items = append(items, r.withCollaborationParticipantsLocked(item))
-		}
-	}
-	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedTimestamp.After(items[j].UpdatedTimestamp) })
-	return items, nil
-}
-
 func (r *MemoryRepo) AddCommunicationsEmailCollaborationParticipants(input CommunicationsEmailCollaborationParticipantInput) (CommunicationsEmailCollaborationParticipantResult, error) {
 	input, err := normalizeCommunicationsEmailCollaborationParticipantInput(input)
 	if err != nil {

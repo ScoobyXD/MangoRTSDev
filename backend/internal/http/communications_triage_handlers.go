@@ -116,7 +116,7 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 	}
 	sourceMessagesByID := make(map[string]NylasMessage, len(conversionInput.MessageIDs))
 	for _, messageID := range conversionInput.MessageIDs {
-		message, err := s.storedCommunicationsMessage(connection, conversionInput.CompanyID, sharedInboxID, messageID)
+		message, err := s.communicationsMessage(r.Context(), connection, messageID)
 		if err != nil {
 			s.writeNylasError(w, r, connection, err)
 			return

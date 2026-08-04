@@ -30,7 +30,6 @@ import {
   listLogicGateFolderItems,
   listCommunicationsSharedInboxes,
   listEmailDrafts,
-  listEmailCollaborations,
   listEmailFolders,
   listEmailMessages,
   listNodeFolderItems,
@@ -78,34 +77,6 @@ test("communications message query omits empty values and encodes filters", () =
 test("communications folder query scopes shared inbox folder reads", () => {
   assert.equal(createFolderQuery({}), "");
   assert.equal(createFolderQuery({ companyID: " company-1 ", sharedInboxID: " shared-1 " }), "?company_id=company-1&shared_inbox_id=shared-1");
-});
-
-test("email collaboration reads are participant-scoped and clone stored message snapshots", async () => {
-  const calls: string[] = [];
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (input: RequestInfo | URL) => {
-    calls.push(input.toString());
-    return jsonResponse({
-      collaborations: [{
-        company_id: "company-1",
-        collaboration_id: "collab-1",
-        node_id: "node-1",
-        attached_email_information_id: "email-info-1",
-        provider_thread_id: "thread-1",
-        message_snapshot: { id: "message-1", subject: "Review", unread: false, starred: false },
-        participants: [{ company_id: "company-1", collaboration_id: "collab-1", user_id: "user-1" }],
-      }],
-    });
-  };
-  try {
-    const collaborations = await listEmailCollaborations(" company-1 ");
-    assert.deepEqual(calls, ["/v1/communications/email-collaborations?company_id=company-1"]);
-    assert.equal(collaborations[0]?.message_snapshot?.subject, "Review");
-    collaborations[0]!.message_snapshot!.subject = "Changed locally";
-    assert.equal(collaborations[0]?.participants?.[0]?.user_id, "user-1");
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
 });
 
 test("email collaboration resolve is read-only while ensure sends the complete source snapshot", async () => {
