@@ -70,7 +70,18 @@ Rows with valid data and a surviving permanent host are copied. A deleted user l
 
 This completed scoped phase authorizes only the Node textbox chat cutover. It does not authorize the remaining V3 table changes or any legacy-table retirement.
 
-The next planning scope is email data. The read-only repository and development-database investigation is now recorded in **Approved V3 email decisions and current evidence** below. The email work must follow the same small, separately operated pattern: read-only count/preflight and exception reporting first; targeted approved cleanup plus table creation, deterministic copy, and reconciliation second; backend cutover only after the data checkpoint passes. Do not combine email migration with Node chat cleanup.
+## Current implementation: V3 email expansion and copy SQL prepared
+
+The repository now contains the additive email schema and operator-controlled copy phase. No repository agent applied it to the development database, no backend reader or writer changed, and no legacy table was changed or removed.
+
+- `scripts/v3_email_step1_count.sql` is the copy-paste, repeatable-read, read-only preflight. On the cleaned development data it reported `READY_TO_COPY`, 74 legacy threads, 509 legacy messages, 256 retained projection rows, 28 exact whole-Node duplicate pairs, 228 final relationship identities, 49 drafts, 9 signatures, 1,347 attachment relationships, 223 expected final threads, and 678 expected final messages.
+- `scripts/v3_email_step2_create_copy_verify.sql` is the single operator entry point. It creates the final tables, calls the small classifier/content/dependent/attachment components, records a source-to-target ledger, reconciles counts, and commits in one transaction. It never updates or deletes a legacy row.
+- The 28 disputed Node pairs are now proven: each contains one collaboration row whose old `block_id` equals its own relationship ID and one `created_from_email` row. The self-ID is not a textbox ID. Both rows mean the same whole-Node relationship. Step 2 preserves the collaboration relationship ID, maps the other source row to it as `consolidated_duplicate`, and leaves both legacy rows untouched.
+- One soft-deleted compose draft has a stale source ID and no usable source snapshot. Step 2 keeps that draft but leaves its final source-message foreign key null.
+- The full Step 2 entry point passed a first run, an identical rerun, and a forced-drift rollback test on a disposable PostgreSQL 18 database. `backend/internal/store/v3_email_migration_test.go` protects the additive and non-destructive contract.
+- `backend/db/schema.sql` can create the final tables on a clean database, while the old tables remain present for the current backend and rollback evidence.
+
+The next email task is backend cutover, not more data cleanup. Immediately before that cutover, pause every email writer, run Step 1 again, run Step 2 for the final delta, review `READY_FOR_BACKEND_CUTOVER_REVIEW`, and only then deploy code that uses the new tables. Old-table retirement remains a later explicit task.
 
 ## What happened during the failed attempt
 
@@ -1029,8 +1040,8 @@ These counts were observed during the 2026-08-03 read-only investigation. They a
 - The final V3 email tables were absent.
 - `communications_email_threads`: 74 rows. Sixty-one were complete personal-email-account rows, one was a failed/incomplete personal-email-account row, and twelve were complete shared-email-account rows.
 - `communications_email_messages`: 509 rows. All inspected address/folder/attachment JSON values were valid arrays; all bigint message timestamps were Unix seconds; 334 rows had `download_complete = false`.
-- Active Attached-email projections: 321 rows: 314 Node and 7 Project, with none on a Logic Gate.
-- Those 321 projections represented 292 unique message/resource/textbox relationships before approved cleanup because 29 rows were duplicate extras.
+- Before cleanup there were 321 active Attached-email projections. The cleaned source now has 256 rows: 250 Node, 6 Project, and 0 Logic Gate.
+- The 256 retained rows become 228 final relationship identities because 28 exact Node pairs describe the same whole-Node relationship.
 - `communications_email_collaborations`: 43 rows with 56 participant rows.
 - `communications_email_nodes`: 111 rows.
 - `communications_email_node_attachments`: 12 rows.
@@ -1043,7 +1054,7 @@ These counts were observed during the 2026-08-03 read-only investigation. They a
 - All 156 Mango attachment IDs found in message attachment metadata resolved to real attachment rows.
 - Email archive storage contained 740 jobs and 6,994 job items.
 - `communications_triage_items`: 10 rows.
-- `recycle_bin_items`: 97 rows.
+- `recycle_bin_items`: 0 rows after the separately approved 97-row development cleanup.
 - All 16 current Node-chat email selections resolved at the time of inspection.
 
 ### Exact source-of-truth order
@@ -1062,33 +1073,24 @@ The active Attached-email projection decides whether a current resource relation
 
 Do not delete all stored email. The read-only evidence found three narrow cleanup sets that remove most of the ambiguity while preserving useful content.
 
-#### Set 1: 64 account-unresolved Attached-email relationships
+#### Completed cleanup checkpoint
 
-- There are 64 active relationship/projection rows across 61 surviving Nodes.
-- They reference 63 distinct provider message IDs and 63 provider thread IDs in one company and were created from May through July 2026.
-- No normalized message exists for these rows, and exact evidence does not prove one personal email account or shared email account.
-- They are not the source for any kept email draft, Node email-file link, old Node-thread link, or chat email selection. They also have no Project relationship.
-- Four provider messages have another Node relationship elsewhere; deleting this unresolved relationship still does not delete that other relationship or normalized content.
-- The approved narrow disposition is to delete only these 64 active relationship/projection rows and their matching relationship history evidence. This does not delete 64 normalized email messages because no normalized message exists for them.
-- The future operator SQL must identify this set from evidence, print exact dependency counts, and roll back if any count or dependency differs.
+- The 64 account-unresolved relationship rows were removed in the separately approved cleanup. The new preflight finds zero retained relationships without exactly one proven personal email account or shared email account.
+- The one Project duplicate pair was resolved by the separate cleanup. No Project duplicate remains.
+- All 97 approved development recycle-bin rows were removed. The new preflight requires the count to remain zero.
+- No email thread, message, draft, signature, stored file, or old rollback table is deleted by the new create/copy script.
 
-#### Set 2: 29 duplicate relationship extras
+#### The 28 retained Node source pairs
 
-- Twenty-eight Node duplicate groups each contain one collaboration relationship and one extra `created_from_email` relationship for the same message/resource/textbox identity.
-- Preserve the collaboration Attached-email information ID as the final relationship ID and delete only the duplicate extra in each Node pair.
-- One Project duplicate pair remains. The operator report must show both candidates and preserve the one selected from exact evidence.
-- Twenty-one duplicate extras are referenced by `communications_node_email_threads`; remove or redirect those legacy links during the same operator-controlled step because that table retires.
-- The extras have no unique file links, content changes, or seen snapshots. No email message is deleted.
+- Each pair contains one collaboration row whose old `block_id` equals its own Attached-email information ID and one `created_from_email` row.
+- The self-ID does not resolve to `node_textboxes`; it is an old relationship marker, not a textbox. Both rows therefore describe the same message/account/whole-Node relationship.
+- The copy preserves the collaboration Attached-email information ID as the final relationship ID and records the other source row as `consolidated_duplicate`.
+- Both legacy rows remain unchanged for rollback and audit evidence. The consolidation happens only in the final `email_relationships` table.
+- The operator script requires exactly 28 pairs, exactly two rows per pair, one self-ID collaboration row, and one `created_from_email` row. Any drift rolls back.
 
-#### Set 3: all 97 development recycle-bin rows
+The cleaned source has 256 projection rows and 228 final relationship identities: `256 - 28 = 228`.
 
-- Jonat explicitly approved deleting all development recycle-bin data, including recovery data for deleted Nodes, Projects, Logic Gates, and folders.
-- This must be a separate, count-guarded operator action. A repository agent must never apply it to a live database.
-- If the current count is not exactly the approved preflight count, the script stops and reports drift instead of deleting anything.
-
-After the first two targeted relationship cleanups, the expected active relationship identity count is `321 - 64 - 29 = 228`. Reconciliation must calculate this from source identities and stop if it does not match.
-
-The data kept for normalization includes all 74 existing threads, all 509 existing messages, all 49 email drafts, all 9 signatures, and all valid stored files. Among the older Attached-email snapshots that lack normalized content, 141 rows have exactly one proven email account and can be normalized automatically; they represent 138 distinct provider messages and 124 provider threads. The approved cleanup removes the 64 account-unresolved links instead of guessing their source account.
+The final preflight expects 223 email-account-scoped threads and 678 messages. Those totals include all 74 existing threads and 509 existing messages, normalized retained projection snapshots, and 33 draft-only source messages across 29 draft-only source threads. It keeps all 49 drafts, all 9 signatures, all 1,347 attachment relationships, and every valid stored file. One soft-deleted compose draft is retained with a null source-message link because its stale source ID has no usable snapshot.
 
 ### Access, relationships, chats, and deletion
 
@@ -1163,17 +1165,17 @@ Entry checks:
 
 The first script must measure:
 
-- all current and final table existence, columns, constraints, indexes, triggers, and foreign-key ordering;
-- counts and distinct identities for normalized threads/messages and legacy Attached-email projections/history;
-- exact source-email-account candidates for every legacy message/thread;
-- the 64 unresolved relationship set, the 29 duplicate extras, the 228 expected retained relationships, and every dependency of those rows;
+- current and final table presence plus exact target-column assertions in the write entry point;
+- counts and distinct identities for normalized threads/messages and retained Attached-email projections;
+- exact source-email-account candidates for every retained relationship and kept draft;
+- zero unresolved retained relationships, the exact shape of all 28 Node source pairs, and the 228 expected final relationships;
 - all 49 email drafts, including soft-delete status, kind, source/sent-message references, safe-send state, and file links;
 - all 9 signatures and their exact email-account scope and image links;
-- collaboration participants versus effective normal resource permissions, including the single expected permission exception;
-- provider attachment metadata versus `attachments` and `resource_attachments`, including invalid IDs and structured-ID decode cases;
-- all chat email selections and whether each resolves to an exact retained or repairable message;
-- deleted/stale resource and textbox hosts, archive evidence, triage references, download-job state, and all 97 recycle-bin rows;
-- category totals, unique source-row totals, overlaps, expected disposition, and byte/row size without returning user email content.
+- all `attachments` and `resource_attachments` counts, with exact structured-ID decoding and target resolution asserted during copy;
+- deleted/stale resource and textbox hosts, download-job state, and the required zero recycle-bin count;
+- expected final thread, message, relationship, draft, signature, job, and attachment-relationship totals without returning user email content.
+
+Chat-selection conversion, collaboration-permission retirement, and backend contract checks belong to the separately gated backend-cutover preflight. They do not block creation of the additive copy because this phase does not switch those readers or writers.
 
 Exit check: every source row has exactly one proposed disposition, all destructive candidates match their approved count and have zero forbidden dependencies, and the report clearly says whether Step 2 is ready. A report mismatch changes nothing and is safe to rerun.
 
@@ -1181,7 +1183,7 @@ Exit check: every source row has exactly one proposed disposition, all destructi
 
 Use one human-operated SQL entry point composed of small deterministic subphases with a ledger/checkpoint table:
 
-1. Reassert Step 1 counts. Perform only the approved 64-row, 29-row, and 97-row cleanup categories, each in a separately visible count guard. Roll back the whole cleanup subphase on drift.
+1. Reassert the cleaned checkpoint: zero unresolved retained relationships, exactly 28 approved Node source pairs, zero recycle-bin rows, and no invalid hosts. Do not repeat cleanup and do not change a legacy row.
 2. Create final tables, constraints, indexes, triggers, and the renamed support-table destinations. Do not switch application code.
 3. Copy existing normalized threads/messages, then normalize the retained one-account legacy snapshots in deterministic company/account/thread/message batches.
 4. Recount and reconcile thread/message IDs, content fields, thread membership, order, source account, and completeness before creating dependents.
@@ -1220,6 +1222,6 @@ Core backend HTTP/provider paths: `backend/internal/http/communications_handlers
 
 Core frontend paths: `frontend/src/modules/communications/communicationsApi.ts`, `frontend/src/modules/communications/emailThreadMessages.ts`, `frontend/src/modules/attachments/attachmentApi.ts`, `frontend/src/modules/editor/editorEmailMailboxScope.ts`, `frontend/src/modules/editor/editorProjection.ts`, `frontend/src/modules/editor/NodeWorkspaceSurface.tsx`, `frontend/src/pages/home/homeCommands.ts`, `frontend/src/pages/home/homeMailDrafts.ts`, `frontend/src/pages/home/homeMailboxRealtime.ts`, `frontend/src/pages/home/emailCollaborationChat.ts`, `frontend/src/pages/home/HomeMailWorkspace.tsx`, and `frontend/src/pages/home/HomePage.tsx`.
 
-### First future implementation task
+### Next future implementation task
 
-Implement only the copy-paste Step 1 read-only email count/preflight SQL and its tests. Do not create V3 email tables or change backend code in that first task. Its first query block should measure table/schema presence and the exact counts/distinct identities/dependencies for the 64 account-unresolved relationships, 29 duplicate extras, 141 auto-normalizable legacy snapshots, 228 retained final relationships, 49 email drafts, 9 signatures, email-related attachment links, 16 chat selections, the one expected permission exception, and 97 recycle-bin rows. The script must finish with one plain ready/not-ready summary and make no database changes.
+Implement the backend cutover to the final email tables only after an operator reruns the read-only preflight and create/copy/reconcile entry point with all email writers paused. That task must remove request-time draft DDL, switch all readers/writers and attachment authorization to the final contracts, update chat selections to internal message IDs, run the complete smoke-test list, and keep every old table unchanged for rollback. Old-table retirement is a separate later decision.
