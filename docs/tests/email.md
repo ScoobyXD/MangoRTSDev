@@ -6,9 +6,11 @@ A shared email account follows the same rules: Shared Triage reads Nylas without
 
 The development V3 email copy has now completed. The read-only preflight reported `READY_TO_COPY`, and the complete Step 2 file committed in DBeaver as one plain PostgreSQL transaction. It created 223 threads, 678 messages, 228 email relationships, 49 email drafts, 9 signatures, and 1,134 attachment relationships. The file does not depend on `psql` backslash commands or separately included files.
 
-The copy found 213 old file links whose email draft, email message, or attached-email relationship no longer exists. Mango treats those links as orphan evidence. The migration keeps the real `attachments` file row and records the old link in its audit ledger, but it does not invent a replacement owner or create a broken `attachment_relationships` row.
+The 1,134 attachment-relationship count is the historical email-copy checkpoint. The later attachment-wide consolidation and approved cleanup reconciled the current final attachment model to 1,080 relationships; those counts describe different rollout gates.
 
-The repository application cutover is now implemented for durable email data: explicitly imported email threads/messages, relationships, jobs, drafts, signatures, files, chats, realtime events, recycle-bin references, and backup ordering use the final V3 contracts. Ordinary personal and shared mailbox lists/details remain provider-backed and do not create durable V3 email rows. This code has not been deployed, and the copied development rows may now be stale. Immediately before deployment, every email writer must be paused and the two operator SQL steps rerun for the final delta. The old tables remain unchanged for rollback and audit until cutover testing succeeds, Jonat takes a database snapshot, and a later retirement task is explicitly approved.
+The copy found 213 old file links whose email draft, email message, or attached-email relationship no longer exists. Mango treated those links as orphan evidence: the email migration did not invent a replacement owner or create a broken `attachment_relationships` row. The later, separately approved attachment cleanup exact-verified and removed those broken legacy links, then deleted only files proven to have no surviving valid owner.
+
+The application cutover is now implemented and deployed in development for durable email data: explicitly imported email threads/messages, relationships, jobs, drafts, signatures, files, chats, realtime events, recycle-bin references, and backup ordering use the final V3 contracts. Ordinary personal and shared mailbox lists/details remain provider-backed and do not create durable V3 email rows. Operators completed the writer pause and final-delta rerun before deploying application commit `c8a08085`, and Jonat reported the smoke checks successful. The old email tables remain unchanged for rollback and audit until the snapshot/soak gate passes and a later retirement task is explicitly approved.
 
 Last updated: 2026-08-04
 
@@ -16,7 +18,7 @@ Last updated: 2026-08-04
 
 Coverage Status:
 
-- Business Logic Covered By Scenarios: The V3 schema, data-copy checkpoint, and repository application cutover are complete. The scenarios below cover provider-backed mailbox reads without persistence, explicit-import-only V3 storage, internal message IDs, exact account scope, ordinary resource permissions, normalized file ownership, relationship-only deletion, durable draft send recovery, and read-only schema readiness. Deployment and the final-delta operator rerun remain pending.
+- Business Logic Covered By Scenarios: The V3 schema, data-copy checkpoint, final-delta rerun, application cutover, deployment, and smoke checks are complete in development. The scenarios below cover provider-backed mailbox reads without persistence, explicit-import-only V3 storage, internal message IDs, exact account scope, ordinary resource permissions, normalized file ownership, relationship-only deletion, durable draft send recovery, and read-only schema readiness. Snapshot/soak evidence and later legacy-table retirement remain pending.
 - Exact mailbox hardening is covered by `homeMailboxRealtime.test.ts`, `unifiedRichEditorContract.test.ts`, `communications_singleflight_cancellation_test.go`, `realtime_audience_hardening_test.go`, `nylas_webhook_receipts_test.go`, and focused communications/store tests for retry-safe open receipts and exact-account migration ordering.
 - Business Logic Covered By Automated Tests: Partial (`tests/frontend/pages/home/homeCommands.test.ts` covers send payload construction, Mango attachment references, and mailbox-scoped signature save ordering; `tests/frontend/pages/home/homeMailboxRealtime.test.ts` covers exact active targets, first/reconnect acceptance, event mapping, coalescing, queued-final work, and navigation cancellation; `tests/frontend/pages/home/homeMailDrafts.test.ts` covers provider/auth error retention versus exact revocation purge, out-of-order loads, local save/delete fencing, multiple personal accounts, and live-draft preparation before attachment upload; `tests/frontend/modules/editor/richTextEditing.test.ts` and `unifiedRichEditorContract.test.ts` cover rich email behavior. Backend communications/realtime/attachment tests cover exact mailbox routing, provider send boundaries, S3 attachment resolution, live email-draft attachment authorization, deleted-draft denial, sent-message survival, and durable inline-byte rejection. Broader mounted compose/signature endpoint coverage remains partial.)
 - Outbound attachment tests in `backend/internal/http/communications_handlers_test.go` and `backend/internal/http/nylas_client_test.go` cover early validation, tenant/link authorization, the complete metadata limit preflight, lazy exact-length multipart streaming, inline CID fields, cancellation, provider rejection, and body cleanup.
@@ -39,7 +41,7 @@ These are the implemented rules for the V3 email cutover. The schema, data copy,
 - Email drafts use their stable `draft_id`, keep the exact original email account and safe-send state, and soft-delete instead of disappearing. Relationship deletion sets their relationship reference to null. Disconnected accounts keep drafts and signatures but cannot send or apply them until that exact account reconnects.
 - `attachments` stores file facts and `attachment_relationships` stores file ownership. Incoming files target `email_message`, outgoing files target `email_draft`, signature images target `email_signature`, and chat files target `node_chat_message`. Provider JSON never supplies file bytes, storage keys, or authorization, and files never target an email relationship.
 - Startup performs a read-only final-schema readiness check. Requests and workers never create, alter, drop, or repair schema.
-- Before deployment, operators must pause every deployed email writer, rerun Step 1 and Step 2 for the final delta, confirm `READY_FOR_BACKEND_CUTOVER_REVIEW`, deploy and smoke-test the cutover, then take the database snapshot and complete the agreed soak period. Old-table retirement remains a separate approval.
+- Development operators paused every deployed email writer, reran Step 1 and Step 2 for the final delta, confirmed `READY_FOR_BACKEND_CUTOVER_REVIEW`, deployed, and smoke-tested the cutover. Another environment must repeat that exact order. The database snapshot and agreed soak period still precede separately approved old-table retirement.
 
 #### Terms and account scope
 
@@ -191,27 +193,27 @@ V3EMAIL65 - The implemented Step 1 preflight remains read-only, and the separate
 
 V3EMAIL66 - The Step 2 operator entry point is one self-contained plain PostgreSQL SQL file. It contains no `psql`-only backslash commands and can be opened and executed as a complete script in DBeaver without manually combining component files.
 
-V3EMAIL67 - A legacy file link whose exact email draft, email message, or attached-email relationship target no longer exists is proven orphan evidence and does not block V3. Keep the `attachments` file row and the untouched legacy link for audit, record `retained_orphan_evidence` in the migration ledger, and omit the invalid final `attachment_relationships` row. Never invent a replacement target. A malformed link or a link with multiple possible live targets still stops the migration.
+V3EMAIL67 - A legacy file link whose exact email draft, email message, or attached-email relationship target no longer exists is proven orphan evidence and does not block V3. During the additive email copy, keep the `attachments` file row and legacy link for audit, record `retained_orphan_evidence` in the migration ledger, and omit the invalid final `attachment_relationships` row. A later separately approved attachment cleanup may exact-verify and remove that broken link, then remove the file only if no valid owner survives. Never invent a replacement target. A malformed link or a link with multiple possible live targets still stops the migration.
 
-#### Completed data checkpoint and backend handoff
+#### Completed data checkpoint and deployed backend
 
 V3EMAIL68 - The development Step 1 preflight completed with `READY_TO_COPY`. It proved 223 expected final threads, 678 expected final messages, 228 final email relationships, 49 email drafts, 9 signatures, 1,134 valid attachment relationships, 213 zero-target orphan links, and zero attachment links requiring review.
 
 V3EMAIL69 - The development Step 2 transaction completed and reconciled exactly 223 `email_threads`, 678 `email_messages`, 228 `email_relationships`, 49 `email_drafts`, 9 `email_signatures`, and 1,134 `attachment_relationships`.
 
-V3EMAIL70 - The 213 orphan legacy attachment links were intentionally omitted from `attachment_relationships`. Their actual `attachments` rows and untouched legacy `resource_attachments` rows remain. This is retention of audit evidence, not deletion of a Mango-stored file.
+V3EMAIL70 - The 213 orphan legacy attachment links were intentionally omitted from `attachment_relationships` during email Step 2 and retained as audit evidence at that checkpoint. The later approved attachment Step 1 exact-verified and removed those broken legacy links and finalized zero-owner files through the safe S3-before-Postgres cleanup lifecycle. It did not invent a replacement owner or delete a file with a surviving valid relationship.
 
-V3EMAIL71 - Completing Step 2 alone does not cut over the application. The repository cutover now uses V3 tables for durable imported email data, while ordinary mailbox reads stay provider-backed. It has not been deployed; the copied development V3 rows can therefore become stale while deployed legacy writers continue.
+V3EMAIL71 - Completing data Step 2 alone did not cut over the application. Development subsequently completed the writer-paused final delta and deployed the backend cutover. V3 tables are now authoritative for durable imported email data, while ordinary mailbox reads stay provider-backed.
 
-V3EMAIL72 - Immediately before backend deployment, pause API email writes, sync/download workers, archive workers, webhook consumers, and every other legacy email writer. Rerun Step 1 and Step 2 for the final delta, and deploy only after `READY_FOR_BACKEND_CUTOVER_REVIEW` is confirmed again.
+V3EMAIL72 - Development paused API email writes, sync/download workers, archive workers, webhook consumers, and every other legacy email writer immediately before deployment. It reran Step 1 and Step 2 for the final delta and deployed only after `READY_FOR_BACKEND_CUTOVER_REVIEW` was confirmed again. Every future environment must repeat this order.
 
 V3EMAIL73 - The implemented backend cutover removes request-time draft DDL and changes every durable imported-email job, relationship, permission, chat-selection, signature, draft, and attachment path to the V3 contracts. Ordinary mailbox list/detail and provider mutation paths remain Nylas-backed and never create V3 thread/message rows. The cutover does not drop or modify the old tables.
 
-V3EMAIL74 - After backend cutover smoke tests pass, keep the old email tables unchanged while Jonat takes a database snapshot and the application completes its agreed soak/rollback period. Dropping old tables is a separate later task.
+V3EMAIL74 - Development backend cutover smoke tests passed. Keep the old email tables unchanged while Jonat takes a database snapshot and the application completes its agreed soak/rollback period. Dropping old tables is a separate later task.
 
 V3EMAIL75 - Personal and shared mailbox lists, message details, provider attachments, refreshes, webhooks, read/star/folder changes, archive/restore, and delete operations use Nylas plus the existing short-lived server cache. None of those paths inserts or updates `email_threads` or `email_messages`; durable storage begins only at an explicit resource import.
 
-### Scenario V3EMAIL-S1: Completed Data Checkpoint And Final Cutover Freeze
+### Scenario V3EMAIL-S1: Completed Data Checkpoint And Deployed Cutover
 
 Business logic covered:
 
@@ -222,14 +224,14 @@ Given:
 
 - The development preflight reported `READY_TO_COPY`.
 - Step 2 committed the exact final counts recorded in V3EMAIL69.
-- Legacy backend writers may have continued after that copy.
+- Operators paused legacy backend writers, captured the final delta, and deployed the V3 backend.
 
 Expected:
 
-- The completed copy is accepted as the data checkpoint and is not mistaken for backend cutover.
+- The completed copy is preserved as the data checkpoint, and the later deployment is recorded separately as the backend cutover.
 - The 213 proven orphan links remain audit evidence and do not create broken final relationships.
-- Backend implementation may proceed, but deployment waits for a short writer freeze and an exact Step 1/Step 2 final-delta rerun.
-- Cutover tests use only the V3 tables, while the old tables remain untouched for rollback and the later database snapshot.
+- The short writer freeze and exact Step 1/Step 2 final-delta rerun complete before deployment.
+- Cutover tests and deployed durable writers use only the V3 tables, while the old tables remain untouched for rollback and the later database snapshot.
 
 ### Existing Pre-V3 Rules And Scenarios
 

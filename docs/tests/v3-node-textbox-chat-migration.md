@@ -4,7 +4,7 @@ A user can open a Node textbox and see its current comments
 ↓
 Before cutover, the current comment authority is the active `Text block chat` row in `node_projection_table`; `node_information` is event/history storage and may contain older or stale rows
 ↓
-With Node chat writers paused, the operator-controlled Step 2 transaction creates `node_textbox_chats`, classifies the legacy rows, copies every safe row, links existing attachments through `resource_attachments`, and verifies the result
+With Node chat writers paused, the operator-controlled Step 2 transaction creates `node_textbox_chats`, classifies the legacy rows, copies every safe row, preserves existing attachment links through the then-current `resource_attachments` table, and verifies the result; the later attachment cutover moves current link authority to `attachment_relationships`
 ↓
 Invalid JSON and invalid identities are classified before casts. The projection `information_id` becomes `chat_id`, payload `block_id` becomes `textbox_id`, and exactly resolved provider message selections become permanent internal email-message IDs
 ↓
@@ -44,8 +44,8 @@ V3CHAT11 - After cutover, Node chat create, edit, read, and delete operations us
 
 V3CHAT12 - An email selection may retain both its owning/selected textbox ID and its resolved internal email-message ID. The public payload continues to expose the provider message ID expected by the frontend.
 
-V3CHAT13 - Chat attachment content remains in `attachments`; chat ownership is represented by active `resource_attachments` rows using `resource_type = 'node_chat_message'`, `resource_id = chat_id`, and `relationship_kind = 'chat_attachment'`.
+V3CHAT13 - Chat attachment content remains in `attachments`; current chat ownership is represented only by active `attachment_relationships` rows using `resource_type = 'node_chat_message'`, `resource_id = chat_id`, and `relationship_kind = 'chat_attachment'`.
 
-V3CHAT14 - Deleting a chat also deletes reply descendants and tombstones their chat-attachment links. Deleting a textbox deletes every chat in that textbox and tombstones those links, while the associated email message/thread and email attachments remain.
+V3CHAT14 - Deleting a chat also deletes reply descendants and retires their `attachment_relationships` links. Deleting a textbox deletes every chat in that textbox and retires those links. The shared last-owner cleanup keeps a file when another valid relationship survives and otherwise runs the safe S3-before-Postgres deletion lifecycle, while the associated email message/thread and email attachments remain.
 
 V3CHAT15 - The live rollout order is: pause Node chat writers, rerun Step 1, run and commit Step 2 only at zero review/missing-host counts, deploy the backend cutover, smoke-test chat behavior, and resume writers. The backend cutover must not be deployed before Step 2.
