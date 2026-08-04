@@ -4,6 +4,8 @@ Alice opens a three-message conversation through her personal email account. Man
 
 A shared email account follows the same rules: one exact source email account per stored thread or email draft, ordinary resource permissions for attached access, no special collaboration-participant access system, and no guessing or merging across accounts.
 
+When an operator performs the V3 copy, they first run the read-only preflight and confirm `READY_TO_COPY`. After pausing email writers, they open the complete Step 2 file in DBeaver and execute it as one plain PostgreSQL transaction. The file does not depend on `psql` backslash commands or separately included files.
+
 Last updated: 2026-08-04
 
 # Email Tests
@@ -173,6 +175,8 @@ V3EMAIL63 - Jonat separately approved and completed the development recycle-bin 
 V3EMAIL64 - After cutover, keep old email tables unchanged for an agreed soak/rollback period. Table retirement is a later explicit release.
 
 V3EMAIL65 - The implemented Step 1 preflight remains read-only, and the separately invoked Step 2 SQL creates/copies/reconciles the final data without switching backend code or changing legacy rows.
+
+V3EMAIL66 - The Step 2 operator entry point is one self-contained plain PostgreSQL SQL file. It contains no `psql`-only backslash commands and can be opened and executed as a complete script in DBeaver without manually combining component files.
 
 ### Existing Pre-V3 Rules And Scenarios
 
