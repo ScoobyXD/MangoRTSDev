@@ -229,6 +229,9 @@ select exists(
 			return ErrStillOwned
 		}
 		if _, err := tx.ExecContext(ctx, `
+update attachment_migration_items
+set attachment_id=null,updated_timestamp=now()
+where company_id=$1::uuid and attachment_id=$2::uuid;
 delete from attachment_relationships
 where company_id=$1::uuid and attachment_id=$2::uuid;
 delete from resource_attachments
