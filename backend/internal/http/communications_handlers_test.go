@@ -1904,7 +1904,7 @@ func TestNylasCallbackTreatsStrictUserMailboxAsPersonalConnection(t *testing.T) 
 	}
 }
 
-func TestCommunicationsHandlersReadV3AndUseExactStoredGrantForProviderOperations(t *testing.T) {
+func TestCommunicationsHandlersReadProviderWithoutPersistingMailboxMessages(t *testing.T) {
 	t.Parallel()
 	key := mustRSAKey(t)
 	repo := store.NewMemoryRepo()
@@ -1923,11 +1923,10 @@ func TestCommunicationsHandlersReadV3AndUseExactStoredGrantForProviderOperations
 	}); err != nil {
 		t.Fatal(err)
 	}
-	storedMessage := NylasMessage{ID: "message-1", ThreadID: "thread-1", Subject: "Hello", Body: "Stored body", Unread: true, Folders: []string{"INBOX"}}
-	seedPersonalV3EmailMessageForCommunicationsTest(t, repo, companyID, user.UserID, user.Email, "google", storedMessage)
+	providerMessage := NylasMessage{ID: "message-1", ThreadID: "thread-1", Subject: "Hello", Body: "Provider body", Unread: true, Folders: []string{"INBOX"}}
 	nylas := &fakeNylasClient{
-		folders: []NylasFolder{{ID: "inbox", Name: "Inbox", Attributes: []string{"\\Inbox"}}},
-		message: storedMessage,
+		folders:  []NylasFolder{{ID: "inbox", Name: "Inbox", Attributes: []string{"\\Inbox"}}},
+		messages: []NylasMessage{providerMessage}, message: providerMessage,
 	}
 	handler := NewServerWithOptions(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas,
@@ -1938,12 +1937,21 @@ func TestCommunicationsHandlersReadV3AndUseExactStoredGrantForProviderOperations
 	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/folders?"+companyQuery, "", token, http.StatusOK)
 	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?"+companyQuery+"&limit=5&unread=true", "", token, http.StatusOK)
 	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages/message-1?"+companyQuery, "", token, http.StatusOK)
-	if nylas.messageCalls != 0 || nylas.detailCalls != 0 {
-		t.Fatalf("V3 reads called provider list/detail: list=%d detail=%d", nylas.messageCalls, nylas.detailCalls)
+	if nylas.messageCalls != 1 || nylas.detailCalls != 1 || nylas.lastMessageGrantID != "grant-1" || nylas.lastDetailGrantID != "grant-1" {
+		t.Fatalf("provider reads list=%d detail=%d list_grant=%q detail_grant=%q", nylas.messageCalls, nylas.detailCalls, nylas.lastMessageGrantID, nylas.lastDetailGrantID)
 	}
 	assertJSONStatus(t, handler, http.MethodPut, "/v1/communications/messages/message-1?"+companyQuery, `{"unread":false}`, token, http.StatusOK)
 	if len(nylas.updateCalls) != 1 || nylas.updateCalls[0].GrantID != "grant-1" || nylas.updateCalls[0].MessageID != "message-1" {
 		t.Fatalf("provider update calls = %+v, want exact personal grant and message", nylas.updateCalls)
+	}
+	threads, err := repo.ListCommunicationsEmailThreadsForAccount(store.CommunicationsEmailAccountReadInput{
+		CompanyID: companyID, PersonalUserID: user.UserID, PersonalAccountEmail: user.Email, AccountEmail: user.Email, Provider: "google",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(threads) != 0 {
+		t.Fatalf("ordinary mailbox reads/updates stored %d V3 threads, want 0", len(threads))
 	}
 	sendBody := `{"company_id":"` + companyID + `","to":[{"email":"friend@example.com"}],"subject":"Hi","body":"Body"}`
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/send", sendBody, token, http.StatusCreated)
@@ -2343,10 +2351,14 @@ func TestCommunicationsPersonalReadsSelectExactOwnedAccount(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	seedPersonalV3EmailMessageForCommunicationsTest(t, repo, companyID, actor.UserID, "account-a@example.com", "google", NylasMessage{ID: "message-a", Subject: "Account A", Folders: []string{"INBOX"}})
-	seedPersonalV3EmailMessageForCommunicationsTest(t, repo, companyID, actor.UserID, "account-b@example.com", "microsoft", NylasMessage{ID: "message-b", Subject: "Account B", Folders: []string{"Inbox"}})
-	seedPersonalV3EmailMessageForCommunicationsTest(t, repo, companyID, other.UserID, other.Email, "google", NylasMessage{ID: "message-other", Subject: "Other user", Folders: []string{"INBOX"}})
-	nylas := &fakeNylasClient{folders: []NylasFolder{{ID: "inbox", Name: "Inbox"}}}
+	nylas := &fakeNylasClient{
+		folders: []NylasFolder{{ID: "inbox", Name: "Inbox", Attributes: []string{"\\Inbox"}}},
+		messagesByGrantID: map[string][]NylasMessage{
+			"grant-account-a": []NylasMessage{{ID: "message-a", Subject: "Account A", Folders: []string{"INBOX"}}},
+			"grant-account-b": []NylasMessage{{ID: "message-b", Subject: "Account B", Folders: []string{"Inbox"}}},
+			"grant-other":     []NylasMessage{{ID: "message-other", Subject: "Other user", Folders: []string{"INBOX"}}},
+		},
+	}
 	handler := NewServerWithOptions(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas,
 	}).Routes()
@@ -2363,8 +2375,8 @@ func TestCommunicationsPersonalReadsSelectExactOwnedAccount(t *testing.T) {
 	if body := rec.Body.String(); !strings.Contains(body, "message-b") || strings.Contains(body, "message-a") || strings.Contains(body, "message-other") {
 		t.Fatalf("exact account response=%s, want only account B", body)
 	}
-	if nylas.messageCalls != 0 {
-		t.Fatalf("stored exact-account read made %d provider list calls", nylas.messageCalls)
+	if nylas.messageCalls != 1 || nylas.lastMessageGrantID != "grant-account-b" {
+		t.Fatalf("exact-account provider reads=%d grant=%q, want one grant-account-b call", nylas.messageCalls, nylas.lastMessageGrantID)
 	}
 	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/folders?"+base+"&account_email=ACCOUNT-B%40EXAMPLE.COM", "", token, http.StatusOK)
 	if nylas.lastFolderGrantID != "grant-account-b" || nylas.folderCalls != 1 {

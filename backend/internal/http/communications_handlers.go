@@ -3,17 +3,19 @@ package httpapi
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"golang.org/x/sync/singleflight"
 	"log"
+	"mime"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"net/url"
 	"regexp"
-
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -289,29 +291,30 @@ func (s *Server) handleCommunicationsMessages(w http.ResponseWriter, r *http.Req
 		if !ok {
 			return
 		}
-		if query.Refresh {
-			if err := s.refreshCommunicationsMessagesIntoV3(r.Context(), connection, query); err != nil {
-				if errors.Is(err, errInvalidCommunicationsMailbox) {
-					writeError(w, http.StatusBadRequest, "invalid_email_mailbox")
-					return
-				}
-				if errors.Is(err, errCommunicationsArchiveUnavailable) {
-					writeError(w, http.StatusConflict, "archive_folder_unavailable")
-					return
-				}
-				s.writeNylasError(w, r, connection, err)
+		query, err := s.applyCommunicationsMailboxQuery(r.Context(), connection, query)
+		if err != nil {
+			if errors.Is(err, errInvalidCommunicationsMailbox) {
+				writeError(w, http.StatusBadRequest, "invalid_email_mailbox")
 				return
 			}
-		}
-		page, err := s.storedCommunicationsMessagePage(connection, query)
-		if errors.Is(err, store.ErrInvalid) {
-			writeError(w, http.StatusBadRequest, "invalid_email_page_token")
+			if errors.Is(err, errCommunicationsArchiveUnavailable) {
+				writeError(w, http.StatusConflict, "archive_folder_unavailable")
+				return
+			}
+			s.writeNylasError(w, r, connection, err)
 			return
+		}
+		var page NylasMessagePage
+		if query.Order == "oldest" {
+			page, err = s.communicationsOldestMessageSnapshot(r.Context(), connection, query)
+		} else {
+			page, err = s.communicationsMessagePage(r.Context(), connection, query)
 		}
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_list_stored_email_messages")
+			s.writeNylasError(w, r, connection, err)
 			return
 		}
+		page = filterGooglePrimaryMessagePage(connection, query, page)
 		writeJSONMaybeNotModified(w, r, http.StatusOK, page)
 	case http.MethodPost:
 		connection, ok := s.requireCommunicationsSendConnection(w, r)
@@ -421,12 +424,9 @@ func (s *Server) handleCommunicationsMessagesArchiveBatch(w http.ResponseWriter,
 	})
 }
 
-func (s *Server) applyCommunicationsArchiveBatchResult(connection domain.UserEmailConnection, companyID, sharedInboxID string, result communicationsArchiveBatchResult) error {
+func (s *Server) applyCommunicationsArchiveBatchResult(connection domain.UserEmailConnection, _, _ string, result communicationsArchiveBatchResult) error {
 	if len(result.ArchivedIDs) == 0 {
 		return nil
-	}
-	if err := s.persistCommunicationsProviderMessages(companyID, sharedInboxID, connection, result.Messages); err != nil {
-		return err
 	}
 	now := time.Now().UTC()
 	cacheScope := communicationsConnectionCacheScope(connection)
@@ -465,13 +465,14 @@ func (s *Server) handleCommunicationsThreadByID(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	thread, err := s.storedCommunicationsThread(connection, companyID, sharedInboxID, threadID)
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "email_thread_not_found")
-		return
-	}
+	var thread NylasThread
+	err := s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
+		var err error
+		thread, err = s.nylasClient.GetThread(ctx, connection.GrantID, threadID)
+		return err
+	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_load_stored_email_thread")
+		s.writeNylasError(w, r, connection, err)
 		return
 	}
 	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"thread": thread})
@@ -585,13 +586,9 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 
 	switch r.Method {
 	case http.MethodGet:
-		message, err := s.storedCommunicationsMessage(connection, companyID, sharedInboxID, messageID)
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "email_message_not_found")
-			return
-		}
+		message, err := s.communicationsMessage(r.Context(), connection, messageID)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_load_stored_email_message")
+			s.writeNylasError(w, r, connection, err)
 			return
 		}
 		message = s.enrichCommunicationsMessagePlacements(connection.UserID, companyID, message)
@@ -625,10 +622,6 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 			s.writeNylasError(w, r, connection, err)
 			return
 		}
-		if err := s.persistCommunicationsProviderMessages(companyID, sharedInboxID, connection, []NylasMessage{message}); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_store_email_update")
-			return
-		}
 		now := time.Now().UTC()
 		cacheScope := communicationsConnectionCacheScope(connection)
 		s.commCache.patchMessagePages(connection.UserID, cacheScope, message, now)
@@ -652,34 +645,58 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 	}
 }
 
-func (s *Server) downloadCommunicationsAttachment(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection, companyID, sharedInboxID, messageID, attachmentID string) {
+func (s *Server) downloadCommunicationsAttachment(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection, _, _ string, messageID, attachmentID string) {
 	messageID = strings.TrimSpace(messageID)
 	attachmentID = strings.TrimSpace(attachmentID)
 	if messageID == "" || attachmentID == "" {
-		writeError(w, http.StatusNotFound, "email_attachment_not_found")
+		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	message, err := s.storedCommunicationsMessage(connection, companyID, sharedInboxID, messageID)
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "email_attachment_not_found")
-		return
-	}
+	message, err := s.communicationsMessage(r.Context(), connection, messageID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_load_stored_email_message")
+		s.writeNylasError(w, r, connection, err)
 		return
 	}
-	mangoAttachmentID := ""
-	for _, attachment := range message.Attachments {
-		if attachment.ID == attachmentID || attachment.AttachmentID == attachmentID {
-			mangoAttachmentID = strings.TrimSpace(attachment.AttachmentID)
-			break
+	attachment, ok := findNylasAttachmentByID(message.Attachments, attachmentID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "email_attachment_not_found")
+		return
+	}
+
+	var content []byte
+	if inlineContent := strings.TrimSpace(attachment.Content); inlineContent != "" {
+		var err error
+		content, err = base64.StdEncoding.DecodeString(inlineContent)
+		if err != nil || len(content) > communicationsAttachmentDownloadMaxBytes {
+			writeError(w, http.StatusBadRequest, "invalid_email_attachment")
+			return
+		}
+	} else {
+		err = s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
+			var err error
+			content, err = s.nylasClient.DownloadAttachment(ctx, connection.GrantID, messageID, attachmentID)
+			return err
+		})
+		if err != nil {
+			s.writeNylasError(w, r, connection, err)
+			return
 		}
 	}
-	if mangoAttachmentID == "" {
-		writeError(w, http.StatusNotFound, "email_attachment_not_found")
-		return
+
+	contentType := strings.TrimSpace(attachment.ContentType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
 	}
-	s.handleAttachmentContent(w, r, mangoAttachmentID)
+	filename := strings.TrimSpace(attachment.Filename)
+	if filename == "" {
+		filename = "attachment"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": filename}))
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(content)
 }
 func (s *Server) archiveCommunicationsMessage(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection, companyID, sharedInboxID, messageID string) {
 	archiveFolderID := ""
@@ -699,10 +716,6 @@ func (s *Server) archiveCommunicationsMessage(w http.ResponseWriter, r *http.Req
 	archived, err := s.archiveCommunicationsMessageByID(r.Context(), connection, companyID, sharedInboxID, messageID, archiveFolderID)
 	if err != nil {
 		s.writeNylasError(w, r, connection, err)
-		return
-	}
-	if err := s.persistCommunicationsProviderMessages(companyID, sharedInboxID, connection, []NylasMessage{archived}); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_store_archived_email")
 		return
 	}
 	now := time.Now().UTC()
@@ -731,10 +744,6 @@ func (s *Server) unarchiveCommunicationsMessage(w http.ResponseWriter, r *http.R
 	restored, err := s.unarchiveCommunicationsMessageByID(r.Context(), connection, companyID, sharedInboxID, messageID, inboxFolderID)
 	if err != nil {
 		s.writeNylasError(w, r, connection, err)
-		return
-	}
-	if err := s.persistCommunicationsProviderMessages(companyID, sharedInboxID, connection, []NylasMessage{restored}); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_store_unarchived_email")
 		return
 	}
 	now := time.Now().UTC()
@@ -892,8 +901,8 @@ func (s *Server) unarchiveCommunicationsMessageByID(ctx context.Context, connect
 	return restored, err
 }
 
-func (s *Server) communicationsMessageForFolderMutation(_ context.Context, connection domain.UserEmailConnection, companyID, sharedInboxID, messageID string) (NylasMessage, error) {
-	return s.storedCommunicationsMessage(connection, companyID, sharedInboxID, messageID)
+func (s *Server) communicationsMessageForFolderMutation(ctx context.Context, connection domain.UserEmailConnection, _, _ string, messageID string) (NylasMessage, error) {
+	return s.communicationsMessage(ctx, connection, messageID)
 }
 func (s *Server) invalidateCommunicationsMessageMutations(userID, accountScope string, messageIDs []string, foldersChanged bool) {
 	if s.commCache == nil {
@@ -1690,22 +1699,155 @@ func (s *Server) communicationsFolders(ctx context.Context, connection domain.Us
 }
 
 func (s *Server) communicationsMessagePage(ctx context.Context, connection domain.UserEmailConnection, query NylasMessageQuery) (NylasMessagePage, error) {
-	if err := ctx.Err(); err != nil {
+	now := time.Now().UTC()
+	cacheScope := communicationsConnectionCacheScope(connection)
+	cacheQuery := query
+	cacheQuery.Refresh = false
+	if !query.Refresh {
+		if page, ok := s.commCache.getMessagePage(connection.UserID, cacheScope, cacheQuery, communicationsMessagesCacheTTL, now); ok {
+			return s.enrichCommunicationsMessagePageForConnection(connection, query.CompanyID, page), nil
+		}
+	}
+	flightGeneration, releaseAdmission := s.commCache.beginMessagePageGeneration(connection.UserID, cacheScope)
+	defer releaseAdmission()
+	flightKey := communicationsMessagePageCacheKey(connection.UserID, cacheScope, cacheQuery) + communicationsCacheKeySeparator + strconv.FormatBool(query.Refresh) + communicationsCacheKeySeparator + strconv.FormatUint(flightGeneration, 10)
+	flightResult := s.communicationsMessagePageFlights.DoChan(flightKey, func() (any, error) {
+		flightNow := time.Now().UTC()
+		if !query.Refresh {
+			if cached, ok := s.commCache.getMessagePage(connection.UserID, cacheScope, cacheQuery, communicationsMessagesCacheTTL, flightNow); ok {
+				return cached, nil
+			}
+		}
+		var page NylasMessagePage
+		err := s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
+			var err error
+			page, err = s.nylasClient.ListMessages(ctx, connection.GrantID, query)
+			return err
+		})
+		if err != nil {
+			if shouldServeStaleCommunicationsCache(err) {
+				if cached, ok := s.commCache.getMessagePage(connection.UserID, cacheScope, cacheQuery, communicationsMessagesCacheTTL+communicationsMaxStaleTTL, flightNow); ok {
+					return cached, nil
+				}
+			}
+			return NylasMessagePage{}, err
+		}
+		page = filterGooglePrimaryMessagePage(connection, query, page)
+		s.commCache.setMessagePageIfGeneration(connection.UserID, cacheScope, cacheQuery, page, time.Now().UTC(), flightGeneration)
+		return page, nil
+	})
+	page, err := awaitCommunicationsFlight[NylasMessagePage](ctx, flightResult, "invalid communications message page flight result")
+	if err != nil {
 		return NylasMessagePage{}, err
 	}
-	return s.storedCommunicationsMessagePage(connection, query)
+	return s.enrichCommunicationsMessagePageForConnection(connection, query.CompanyID, page), nil
 }
 
 func (s *Server) communicationsOldestMessageSnapshot(ctx context.Context, connection domain.UserEmailConnection, query NylasMessageQuery) (NylasMessagePage, error) {
-	query.Order = "oldest"
-	return s.communicationsMessagePage(ctx, connection, query)
+	pageQuery := query
+	pageQuery.Order = ""
+	pageQuery.Limit = communicationsNylasOrderSnapshotLimit
+	pageQuery.PageToken = ""
+
+	messages := make([]NylasMessage, 0, communicationsNylasOrderSnapshotLimit)
+	seenMessageIDs := make(map[string]struct{})
+	seenPageTokens := make(map[string]struct{})
+	for {
+		page, err := s.communicationsMessagePage(ctx, connection, pageQuery)
+		if err != nil {
+			return NylasMessagePage{}, err
+		}
+		for _, message := range page.Messages {
+			messageID := strings.TrimSpace(message.ID)
+			if messageID == "" {
+				continue
+			}
+			if _, exists := seenMessageIDs[messageID]; exists {
+				continue
+			}
+			seenMessageIDs[messageID] = struct{}{}
+			messages = append(messages, message)
+		}
+
+		nextPageToken := strings.TrimSpace(page.NextPageToken)
+		if nextPageToken == "" {
+			break
+		}
+		if _, repeated := seenPageTokens[nextPageToken]; repeated {
+			return NylasMessagePage{}, errors.New("repeated communications message page token")
+		}
+		seenPageTokens[nextPageToken] = struct{}{}
+		pageQuery.PageToken = nextPageToken
+	}
+
+	sort.SliceStable(messages, func(i, j int) bool {
+		if messages[i].Date != messages[j].Date {
+			return messages[i].Date < messages[j].Date
+		}
+		return strings.TrimSpace(messages[i].ID) < strings.TrimSpace(messages[j].ID)
+	})
+	return NylasMessagePage{Messages: messages}, nil
 }
 
 func (s *Server) communicationsMessage(ctx context.Context, connection domain.UserEmailConnection, messageID string) (NylasMessage, error) {
-	if err := ctx.Err(); err != nil {
+	now := time.Now().UTC()
+	cacheScope := communicationsConnectionCacheScope(connection)
+	if message, ok := s.commCache.getMessage(connection.UserID, cacheScope, messageID, communicationsMessageCacheTTL, now); ok {
+		if !messageNeedsRawMIMEAttachmentRecovery(message) {
+			return s.enrichCommunicationsMessageReadStatus(connection, message), nil
+		}
+	}
+	flightGeneration, releaseAdmission := s.commCache.beginMessageGeneration(connection.UserID, cacheScope, messageID)
+	defer releaseAdmission()
+	flightKey := communicationsMessageCacheKey(connection.UserID, cacheScope, messageID) + communicationsCacheKeySeparator + strconv.FormatUint(flightGeneration, 10)
+	flightResult := s.communicationsMessageFlights.DoChan(flightKey, func() (any, error) {
+		flightNow := time.Now().UTC()
+		if cached, ok := s.commCache.getMessage(connection.UserID, cacheScope, messageID, communicationsMessageCacheTTL, flightNow); ok {
+			if messageNeedsRawMIMEAttachmentRecovery(cached) {
+				_ = s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
+					cached = s.recoverCommunicationsMessageRawMIMEAttachments(ctx, connection, cacheScope, cached, time.Now().UTC(), flightGeneration)
+					return nil
+				})
+			}
+			return cached, nil
+		}
+		var message NylasMessage
+		err := s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
+			var err error
+			message, err = s.nylasClient.GetMessage(ctx, connection.GrantID, messageID)
+			if err != nil {
+				return err
+			}
+			message = s.attachRawMIMEAttachmentsIfMissing(ctx, connection, message)
+			return nil
+		})
+		if err != nil {
+			if shouldServeStaleCommunicationsCache(err) {
+				if cached, ok := s.commCache.getMessage(connection.UserID, cacheScope, messageID, communicationsMessageCacheTTL+communicationsMaxStaleTTL, flightNow); ok {
+					return cached, nil
+				}
+			}
+			return NylasMessage{}, err
+		}
+		s.commCache.setMessageIfGeneration(connection.UserID, cacheScope, message, time.Now().UTC(), flightGeneration)
+		return message, nil
+	})
+	message, err := awaitCommunicationsFlight[NylasMessage](ctx, flightResult, "invalid communications message flight result")
+	if err != nil {
 		return NylasMessage{}, err
 	}
-	return s.storedCommunicationsMessage(connection, connection.CompanyID, "", messageID)
+	return s.enrichCommunicationsMessageReadStatus(connection, message), nil
+}
+
+func (s *Server) recoverCommunicationsMessageRawMIMEAttachments(ctx context.Context, connection domain.UserEmailConnection, cacheScope string, message NylasMessage, now time.Time, generation uint64) NylasMessage {
+	if !messageNeedsRawMIMEAttachmentRecovery(message) {
+		return message
+	}
+	recovered := s.attachRawMIMEAttachmentsIfMissing(ctx, connection, message)
+	if len(recovered.Attachments) != len(message.Attachments) || !messageNeedsRawMIMEAttachmentRecovery(recovered) {
+		s.commCache.setMessageIfGeneration(connection.UserID, cacheScope, recovered, now, generation)
+	}
+	return recovered
 }
 func shouldServeStaleCommunicationsCache(err error) bool {
 	var apiErr NylasAPIError
@@ -1812,11 +1954,18 @@ func (s *Server) enrichCommunicationsMessagesPlacements(userID, companyID string
 		return messages
 	}
 	logicGateIDsByMessage := make(map[string][]string, len(messageIDs))
+	nodeIDByMessage := make(map[string]string, len(messageIDs))
 	seenByMessage := make(map[string]map[string]bool, len(messageIDs))
 	for _, placement := range placements {
 		messageID := strings.TrimSpace(placement.MessageID)
+		if messageID == "" {
+			continue
+		}
+		if nodeID := strings.TrimSpace(placement.NodeID); nodeID != "" && nodeIDByMessage[messageID] == "" {
+			nodeIDByMessage[messageID] = nodeID
+		}
 		logicGateID := strings.TrimSpace(placement.LogicGateID)
-		if messageID == "" || logicGateID == "" {
+		if logicGateID == "" {
 			continue
 		}
 		seen := seenByMessage[messageID]
@@ -1831,6 +1980,7 @@ func (s *Server) enrichCommunicationsMessagesPlacements(userID, companyID string
 		logicGateIDsByMessage[messageID] = append(logicGateIDsByMessage[messageID], logicGateID)
 	}
 	for i := range messages {
+		messages[i].CollaborationNodeID = nodeIDByMessage[messages[i].ID]
 		logicGateIDs := logicGateIDsByMessage[messages[i].ID]
 		if len(logicGateIDs) == 0 {
 			messages[i].LogicGateIDs = nil

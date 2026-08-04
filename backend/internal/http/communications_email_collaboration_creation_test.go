@@ -251,9 +251,9 @@ func performEmailCollaborationCreationTestRequest(t *testing.T, repo store.Repos
 	return rec
 }
 
-func assertNoEmailCollaborationCreated(t *testing.T, repo store.Repository, participantUserID string) {
+func assertNoEmailCollaborationCreated(t *testing.T, repo store.Repository, _ string) {
 	t.Helper()
-	items, err := repo.ListCommunicationsEmailCollaborations(emailCollaborationThreadTestCompanyID, participantUserID)
+	items, err := repo.ListNodes(emailCollaborationThreadTestCompanyID)
 	if err != nil {
 		t.Fatal(err)
 	}

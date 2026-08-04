@@ -972,15 +972,6 @@ function emailCollaborationQuery(input: ResolveCommunicationsEmailCollaborationI
   return query;
 }
 
-export async function listEmailCollaborations(companyID: string): Promise<CommunicationsEmailCollaboration[]> {
-  const cleanCompanyID = companyID.trim();
-  if (!cleanCompanyID) return [];
-  const query = new URLSearchParams({ company_id: cleanCompanyID });
-  const payload = await apiFetchJSON<{ collaborations?: CommunicationsEmailCollaboration[] }>(
-    "/v1/communications/email-collaborations?" + query.toString(),
-  );
-  return (payload.collaborations ?? []).map(cloneCommunicationsEmailCollaboration);
-}
 
 export async function resolveEmailCollaboration(input: ResolveCommunicationsEmailCollaborationInput): Promise<CommunicationsEmailCollaboration | null> {
   if (!input.companyID.trim() || (!input.messageID?.trim() && !input.threadID?.trim())) return null;

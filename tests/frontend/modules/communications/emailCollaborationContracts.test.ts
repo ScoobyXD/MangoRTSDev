@@ -4,7 +4,6 @@ import {
   deleteEmailDraft,
   ensureEmailCollaboration,
   getEmailCollaboration,
-  listEmailCollaborations,
   listEmailDrafts,
   saveEmailDraft,
   sendEmailCollaborationDraft,
@@ -78,46 +77,6 @@ test("collaboration API preserves exact shared-inbox source identity", async () 
       calls[1]?.path,
       "/v1/communications/email-collaborations/collaboration%2F1?company_id=company-1",
     );
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test("collaboration reads return detached snapshots and participant records", async () => {
-  const originalFetch = globalThis.fetch;
-  const payload = {
-    collaborations: [{
-      company_id: "company-1",
-      collaboration_id: "collaboration-1",
-      node_id: "node-1",
-      attached_email_information_id: "information-1",
-      latest_message: {
-        id: "message-2",
-        subject: "Latest",
-        unread: false,
-        starred: false,
-        from: [{ name: "Sender", email: "sender@example.test" }],
-      },
-      participants: [{
-        company_id: "company-1",
-        collaboration_id: "collaboration-1",
-        user_id: "user-2",
-        added_via_type: "group",
-        added_via_id: "group-1",
-      }],
-    }],
-  };
-  globalThis.fetch = async () => jsonResponse(payload);
-
-  try {
-    const collaborations = await listEmailCollaborations("company-1");
-    collaborations[0]!.latest_message!.subject = "Local edit";
-    collaborations[0]!.latest_message!.from![0]!.name = "Local sender";
-    collaborations[0]!.participants![0]!.added_via_id = "local-group";
-
-    assert.equal(payload.collaborations[0]!.latest_message.subject, "Latest");
-    assert.equal(payload.collaborations[0]!.latest_message.from[0]!.name, "Sender");
-    assert.equal(payload.collaborations[0]!.participants[0]!.added_via_id, "group-1");
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -35,7 +35,6 @@ import {
   listCompanyUserGroups,
   listEmailFolders,
   listEmailMessages,
-  listEmailCollaborations,
   listCommunicationsSharedInboxes,
   mergeEmailMessageIntoMessageList,
   parseEmailAddressList,
@@ -1704,44 +1703,7 @@ export function HomePage({
       return;
     }
     if (!canLoadMailForView(activeViewID)) {
-      if (activeViewID === "my-triage" && mailbox === "primary") {
-        const requestKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly, "", messageListOrder);
-        messageListFilterKeyRef.current = requestKey;
-        setLoadingMessages(true);
-        setError("");
-        try {
-          const collaborations = await listEmailCollaborations(companyID);
-          const navigableSharedInboxIDs = new Set(sharedInboxes
-            .filter((inbox) => inbox.entry_type === "shared_inbox" && sharedInboxCanLoadMail(inbox))
-            .map((inbox) => inbox.folder_id.trim())
-            .filter(Boolean));
-          const collaborationMessages = mergeEmailCollaborationsForView([], collaborations, activeViewID, navigableSharedInboxIDs, activeMailAccountEmail, activeEmailMailboxScopeKey, currentUserID);
-          setEmailCollaborations(collaborations);
-          setMessages(collaborationMessages);
-          setNextPageToken("");
-          setLoadedMessageListKey(requestKey);
-          const firstMessage = collaborationMessages[0];
-          if (firstMessage && !collaborationMessages.some((candidate) => emailMessageRowKey(candidate) === selectedMessageRowKeyRef.current)) {
-            const firstMessageRowKey = emailMessageRowKey(firstMessage);
-            messageSelectionGenerationRef.current += 1;
-            selectedMessageIDRef.current = firstMessage.id;
-            selectedMessageRowKeyRef.current = firstMessageRowKey;
-            selectedMessageRef.current = firstMessage;
-            setSelectedMessageID(firstMessage.id);
-            setSelectedMessageRowKey(firstMessageRowKey);
-            setSelectedMessageIDs(new Set([firstMessageRowKey]));
-            setSelectionAnchorMessageID(firstMessageRowKey);
-            setSelectedMessage(firstMessage);
-          }
-        } catch (collaborationError) {
-          clearMailListState();
-          setError(formatError(collaborationError, "Failed to load shared email collaborations"));
-        } finally {
-          setLoadingMessages(false);
-        }
-      } else {
-        clearMailListState();
-      }
+      clearMailListState();
       return;
     }
     const requestKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly, activeEmailMailboxScopeKey, messageListOrder);
@@ -1784,34 +1746,24 @@ export function HomePage({
     setLoadingMessages(true);
     setError("");
     try {
-      const [page, collaborations] = await Promise.all([
-        listEmailMessages({
-          limit: MESSAGE_BATCH_SIZE,
-          order: messageListOrder === "oldest" ? "oldest" : undefined,
-          mailbox,
-          companyID,
-          sharedInboxID,
-          accountEmail: activeMailAccountEmail,
-          q: searchQuery,
-          unread: unreadOnly ? true : undefined,
-          refresh: options.refresh,
-        }),
-        isPrimaryTriageMailbox(activeViewID, mailbox)
-          ? listEmailCollaborations(companyID).catch(() => [] as CommunicationsEmailCollaboration[])
-          : Promise.resolve([] as CommunicationsEmailCollaboration[]),
-      ]);
+      const page = await listEmailMessages({
+        limit: MESSAGE_BATCH_SIZE,
+        order: messageListOrder === "oldest" ? "oldest" : undefined,
+        mailbox,
+        companyID,
+        sharedInboxID,
+        accountEmail: activeMailAccountEmail,
+        q: searchQuery,
+        unread: unreadOnly ? true : undefined,
+        refresh: options.refresh,
+      });
       if (messageRequestSeqRef.current !== requestSeq) return;
-      if (isPrimaryTriageMailbox(activeViewID, mailbox)) setEmailCollaborations(collaborations);
       const visiblePage = isPrimaryTriageMailbox(activeViewID, mailbox)
         ? await fillPrimaryTriageVisibleMessagePage(page, requestKey)
         : page;
       if (messageRequestSeqRef.current !== requestSeq) return;
-      const navigableSharedInboxIDs = new Set(sharedInboxes
-        .filter((inbox) => inbox.entry_type === "shared_inbox" && sharedInboxCanLoadMail(inbox))
-        .map((inbox) => inbox.folder_id.trim())
-        .filter(Boolean));
       const pageMessages = applyLocalReadOverlays(
-        mergeEmailCollaborationsForView(visiblePage.messages ?? [], collaborations, activeViewID, navigableSharedInboxIDs, activeMailAccountEmail, activeEmailMailboxScopeKey, currentUserID),
+        visiblePage.messages ?? [],
         locallyReadMessageKeysRef.current,
         activeEmailMailboxScopeKey,
       );

@@ -259,6 +259,7 @@ type NylasMessage struct {
 	FolderIDs                   []string                                `json:"folder_ids,omitempty"`
 	LogicGateIDs                []string                                `json:"logic_gate_ids,omitempty"`
 	LogicGateCount              int                                     `json:"logic_gate_count,omitempty"`
+	CollaborationNodeID         string                                  `json:"collaboration_node_id,omitempty"`
 	TrackingOptions             *NylasTrackingOptions                   `json:"tracking_options,omitempty"`
 	ReadStatus                  *domain.CommunicationsMessageReadStatus `json:"read_status,omitempty"`
 	RawMIMEAttachmentsRecovered bool                                    `json:"-"`
