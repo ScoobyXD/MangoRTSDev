@@ -370,6 +370,7 @@ EMAIL118 - Message persistence includes HTML body (and provider text when availa
 EMAIL119 - Every ordinary attachment, inline CID image, and signature asset referenced by the imported message is copied into Mango-owned private object storage and linked through Mango attachment metadata to every authorized Node that displays the thread. Retry uses stable identity so the same provider attachment is stored once. A Node collaborator downloads through Mango authorization and never through the source user's Nylas grant. Failure of one attachment leaves the readable message and completed siblings available while the job remains retryable/partially failed.
 EMAIL120 - Stored messages are ordered by provider timestamp ascending with immutable Nylas message ID as the deterministic tie-breaker; UI reversal is presentation-only. `history_complete=true` means the provider thread was completely downloaded as observed by that specific user-initiated import job, not that the external thread can never receive another message. A later explicit import may append a newer, older, or same-timestamp message and recomputes order without changing stable Mango message IDs.
 EMAIL121 - Nylas message/folder webhooks remain mailbox-list invalidation hints only. They may refresh a user's own Inbox/Shared Triage view, but they never create or update a durable Node email message, enqueue a Node thread job, or reveal later mail to collaborators. There is no periodic Node-thread reconciliation in this version. The sole trigger for adding later mail is an authorized user's explicit hashtag destination submission or equivalent email-chat import command.
+EMAIL122 - The Node-wide email column is bounded to the available Node workspace height and scrolls long email content inside its own pane. Opening a long email never increases the outer virtualized timeline height, hides unrelated text boxes below it, or creates a blank right side; the outer Node scroll remains driven by the text-box rows.
 
 ## Scenarios
 
@@ -952,6 +953,7 @@ Expected:
 
 Business logic covered:
 - EMAIL109 through EMAIL111
+- EMAIL122
 
 Given:
 - A user opens either My Triage or Shared Triage on a message that may be a standalone email, a reply in a larger thread, or a thread already attached to a Node.
@@ -964,6 +966,7 @@ Expected:
 - Every message card has its own Chat icon before the three-dot menu. If its exact mailbox/thread already belongs to a Node, Enter writes directly to that message-linked text-box chat. Otherwise Enter preserves the draft, runs the same priority then Logic Gate sequence, attaches the complete thread, creates the exact-message text box, and commits the draft to that text box's chat.
 - Each text-box row contains a left content column and an independently sized right chat column. Show email places the exact linked-message preview above the editor within the left column; when the editor is closed, that preview owns the left column. The chat always retains the row's full body height.
 - The Node-wide email column and chat pane use the full available vertical space. The Node-level Email toggle retains a stable three-track shell and animates width plus opacity/transform for open and close; the closed email pane is inert and pointer-disabled. Email, Editor, Chat, and linked-email visibility changes honor reduced-motion settings; the email-focus button retains its separate responsibility.
+- A long Node-wide email scrolls inside the bounded email pane. It does not stretch the outer virtualized timeline or prevent lower text boxes from appearing as the Node timeline scrolls.
 - With one surface visible it fills its available area; with multiple surfaces visible, Node-wide email, text-box content, and text-box chat remain distinct columns.
 - Legacy Attached-email-keyed chats may still render beside a linked text box, but no new chat or attachment is written to the Attached-email ID.
 - My Triage and Shared Triage use the same controls and persistence path. Their top toolbar keeps mail actions on the left and the compact hashtag destination search plus Chat together on the right.
