@@ -2707,7 +2707,7 @@ func TestCommunicationsArchiveMessageMovesFolderProvidersToArchiveFolder(t *test
 	}
 }
 
-func TestCommunicationsArchiveBatchUsesV3FoldersAndReturnsCompactResult(t *testing.T) {
+func TestCommunicationsArchiveBatchUsesProviderFoldersAndReturnsCompactResult(t *testing.T) {
 	t.Parallel()
 	key := mustRSAKey(t)
 	repo := store.NewMemoryRepo()
@@ -2759,8 +2759,8 @@ func TestCommunicationsArchiveBatchUsesV3FoldersAndReturnsCompactResult(t *testi
 	if len(payload.ArchivedIDs) != 1 || payload.ArchivedIDs[0] != "message-1" || len(payload.Failed) != 1 || payload.Failed[0].MessageID != "message-2" || payload.Failed[0].Error != "nylas_rate_limited" {
 		t.Fatalf("archive batch payload = %+v", payload)
 	}
-	if nylas.detailCalls != 0 || len(nylas.updateCalls) != 1 || strings.Join(nylas.updateCalls[0].Update.Folders, ",") != "Label_123" {
-		t.Fatalf("V3 archive calls detail=%d updates=%+v", nylas.detailCalls, nylas.updateCalls)
+	if nylas.detailCalls != 2 || len(nylas.updateCalls) != 1 || strings.Join(nylas.updateCalls[0].Update.Folders, ",") != "Label_123" {
+		t.Fatalf("provider archive calls detail=%d updates=%+v", nylas.detailCalls, nylas.updateCalls)
 	}
 }
 
