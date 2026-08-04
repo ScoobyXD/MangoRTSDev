@@ -82,13 +82,16 @@ func TestV3EmailExpansionIsAdditiveAndOperatorGated(t *testing.T) {
 	if strings.Count(step2, "\nbegin;\n") != 1 || strings.Count(step2, "\ncommit;") != 1 {
 		t.Error("Step 2 must have one outer transaction")
 	}
+	if strings.HasPrefix(step2, "\\") || strings.Contains(step2, "\n\\") {
+		t.Error("Step 2 contains a psql-only backslash command")
+	}
 	for _, include := range []string{
-		"\\ir v3_email_expand_component.sql",
-		"\\ir v3_email_copy_classify.sql",
-		"\\ir v3_email_copy_content.sql",
-		"\\ir v3_email_copy_dependents.sql",
-		"\\ir v3_email_copy_attachments.sql",
-		"\\ir v3_email_copy_reconcile.sql",
+		"-- begin inlined schema expansion",
+		"-- begin inlined source classification",
+		"-- begin inlined thread and message copy",
+		"-- begin inlined relationship, draft, signature, and job copy",
+		"-- begin inlined attachment relationship copy",
+		"-- begin inlined reconciliation",
 	} {
 		if !strings.Contains(step2, include) {
 			t.Errorf("Step 2 is missing %q", include)
