@@ -53,7 +53,18 @@ insert into v3_email_migration_items(run_id,source_table,company_id,source_key,
  target_table,target_key,disposition,source_checksum)
 select run.run_id,'resource_attachments',s.company_id,s.resource_attachment_id::text,
  'attachment_relationships',s.resource_attachment_id::text,'updated',md5(to_jsonb(s)::text)
-from v3_current_email_run run cross join resource_attachments s;
+from v3_current_email_run run cross join resource_attachments s
+join v3_attachment_desired desired
+ on desired.attachment_relationship_id=s.resource_attachment_id;
+
+insert into v3_email_migration_items(run_id,source_table,company_id,source_key,
+ target_table,target_key,disposition,source_checksum)
+select run.run_id,'resource_attachments',s.company_id,s.resource_attachment_id::text,
+ 'attachments',orphan.attachment_id::text,'retained_orphan_evidence',
+ md5(to_jsonb(s)::text)
+from v3_current_email_run run cross join resource_attachments s
+join v3_attachment_orphan_evidence orphan
+ on orphan.resource_attachment_id=s.resource_attachment_id;
 
 do $$
 begin
@@ -77,7 +88,7 @@ begin
   raise exception 'V3 email download-job final count mismatch';
  end if;
  if (select count(*) from attachment_relationships)
-    <>(select count(*) from resource_attachments) then
+    <>(select count(*) from v3_attachment_desired) then
   raise exception 'V3 attachment relationship final count mismatch';
  end if;
  if exists(select 1 from email_relationships r left join email_messages m
@@ -101,6 +112,8 @@ update v3_email_migration_runs run set status='complete',
   'email_signatures',(select count(*) from email_signatures),
   'email_thread_download_jobs',(select count(*) from email_thread_download_jobs),
   'attachment_relationships',(select count(*) from attachment_relationships),
+  'orphan_attachment_relationships_omitted',
+   (select count(*) from v3_attachment_orphan_evidence),
   'malformed_compose_source_links_omitted',(
     select count(*) from v3_draft_accounts
     where nullif(btrim(source_message_id),'') is not null and not valid_source_snapshot
@@ -115,5 +128,7 @@ select 'READY_FOR_BACKEND_CUTOVER_REVIEW' status,
  (select count(*) from email_relationships) email_relationships,
  (select count(*) from email_drafts) email_drafts,
  (select count(*) from email_signatures) email_signatures,
- (select count(*) from attachment_relationships) attachment_relationships;
+ (select count(*) from attachment_relationships) attachment_relationships,
+ (select count(*) from v3_attachment_orphan_evidence)
+  orphan_attachment_relationships_omitted;
 

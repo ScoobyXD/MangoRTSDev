@@ -6,6 +6,8 @@ A shared email account follows the same rules: one exact source email account pe
 
 When an operator performs the V3 copy, they first run the read-only preflight and confirm `READY_TO_COPY`. After pausing email writers, they open the complete Step 2 file in DBeaver and execute it as one plain PostgreSQL transaction. The file does not depend on `psql` backslash commands or separately included files.
 
+If an old file link points to an email draft, email message, or attached-email relationship that no longer exists, Mango treats the link as orphan evidence. The migration keeps the real `attachments` file row and records the old link in its audit ledger, but it does not invent a replacement owner or create a broken `attachment_relationships` row.
+
 Last updated: 2026-08-04
 
 # Email Tests
@@ -177,6 +179,8 @@ V3EMAIL64 - After cutover, keep old email tables unchanged for an agreed soak/ro
 V3EMAIL65 - The implemented Step 1 preflight remains read-only, and the separately invoked Step 2 SQL creates/copies/reconciles the final data without switching backend code or changing legacy rows.
 
 V3EMAIL66 - The Step 2 operator entry point is one self-contained plain PostgreSQL SQL file. It contains no `psql`-only backslash commands and can be opened and executed as a complete script in DBeaver without manually combining component files.
+
+V3EMAIL67 - A legacy file link whose exact email draft, email message, or attached-email relationship target no longer exists is proven orphan evidence and does not block V3. Keep the `attachments` file row and the untouched legacy link for audit, record `retained_orphan_evidence` in the migration ledger, and omit the invalid final `attachment_relationships` row. Never invent a replacement target. A malformed link or a link with multiple possible live targets still stops the migration.
 
 ### Existing Pre-V3 Rules And Scenarios
 

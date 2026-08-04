@@ -3,7 +3,7 @@
 -- keys, credentials, provider tokens, or attachment bytes.
 begin transaction isolation level repeatable read read only;
 
-with projections as (
+with recursive projections as (
  select p.company_id,'node'::text resource_type,p.node_id resource_id,
   p.information_id relationship_id,p.information::jsonb payload
  from node_projection_table p where p.type::text='Attached email' and not p.is_deleted
@@ -139,6 +139,130 @@ with projections as (
   d.personal_user_id,d.personal_account_email,d.shared_inbox_id,d.provider,
   'thread:'||(d.reply_to_message->>'thread_id'),d.reply_to_message->>'id'
  from drafts d where valid_source
+), attachment_sources as (
+ select r.*,string_to_array(r.resource_id,':') parts
+ from resource_attachments r
+), attachment_encoded_parts as (
+ select resource_attachment_id,'target'::text part_name,
+  parts[array_length(parts,1)] encoded_value
+ from attachment_sources
+ where resource_type='email_draft'
+  and ((parts[1]='personal' and array_length(parts,1) in(3,4))
+   or (parts[1] in('shared','collaboration') and array_length(parts,1)=3))
+ union all
+ select resource_attachment_id,'owner',parts[2] from attachment_sources
+ where resource_type in('email_signature','email_message','attached_email')
+ union all
+ select resource_attachment_id,'item',
+  case when resource_type='attached_email' then parts[4] else parts[3] end
+ from attachment_sources
+ where (resource_type in('email_signature','email_message'))
+   or resource_type='attached_email'
+), attachment_decode(resource_attachment_id,part_name,encoded_value,pos,decoded,valid) as (
+ select resource_attachment_id,part_name,encoded_value,1,''::bytea,true
+ from attachment_encoded_parts
+ union all
+ select resource_attachment_id,part_name,encoded_value,
+  case when substr(encoded_value,pos,1)='%'
+    and substr(encoded_value,pos+1,2)~'^[0-9A-Fa-f]{2}$'
+   then pos+3 else pos+1 end,
+  decoded||case
+   when substr(encoded_value,pos,1)='+' then convert_to(' ','UTF8')
+   when substr(encoded_value,pos,1)='%'
+    and substr(encoded_value,pos+1,2)~'^[0-9A-Fa-f]{2}$'
+    then decode(substr(encoded_value,pos+1,2),'hex')
+   when substr(encoded_value,pos,1)='%' then ''::bytea
+   else convert_to(substr(encoded_value,pos,1),'UTF8') end,
+  valid and (substr(encoded_value,pos,1)<>'%'
+   or substr(encoded_value,pos+1,2)~'^[0-9A-Fa-f]{2}$')
+ from attachment_decode
+ where valid and pos<=char_length(encoded_value)
+), attachment_decoded_parts as (
+ select resource_attachment_id,part_name,
+  case when valid and pos>char_length(encoded_value)
+   and btrim(convert_from(decoded,'UTF8'))<>'' then btrim(convert_from(decoded,'UTF8'))
+  end decoded_value
+ from attachment_decode
+ where not valid or pos>char_length(encoded_value)
+), attachment_inputs as (
+ select s.*,
+  (select decoded_value from attachment_decoded_parts d
+   where d.resource_attachment_id=s.resource_attachment_id and d.part_name='target') target_value,
+  (select decoded_value from attachment_decoded_parts d
+   where d.resource_attachment_id=s.resource_attachment_id and d.part_name='owner') owner_value,
+  (select decoded_value from attachment_decoded_parts d
+   where d.resource_attachment_id=s.resource_attachment_id and d.part_name='item') item_value
+ from attachment_sources s
+), attachment_shapes as (
+ select i.*,case
+  when resource_type in(
+   'logic_gate','project','node_chat_message','logic_gate_chat_message',
+   'project_chat_message','shared_inbox','company_explorer_folder',
+   'shared_inbox_folder'
+  ) then true
+  when resource_type='node' and not (
+   relationship_kind in('email_attachment','email_inline_attachment')
+   and btrim(message_id)<>''
+  ) then true
+  when resource_type='email_draft' then target_value is not null
+   and ((parts[1]='personal' and array_length(parts,1) in(3,4))
+    or (parts[1] in('shared','collaboration') and array_length(parts,1)=3))
+  when resource_type='email_signature' then
+   (parts[1]='personal' and array_length(parts,1)=3
+    and owner_value is not null and item_value is not null)
+   or (parts[1]='shared' and array_length(parts,1)=2 and owner_value is not null)
+  when resource_type='email_message' then parts[1] in('personal','shared')
+   and array_length(parts,1)=3 and owner_value is not null and item_value is not null
+  when resource_type='attached_email' then parts[1]='node'
+   and array_length(parts,1)=4 and parts[3]='message'
+   and owner_value is not null and item_value is not null
+  when resource_type='node' then btrim(resource_id)<>'' and btrim(message_id)<>''
+  else false end valid_shape
+ from attachment_inputs i
+), attachment_resolutions as (
+ select a.*,case
+  when not valid_shape then -1
+  when resource_type in(
+   'logic_gate','project','node_chat_message','logic_gate_chat_message',
+   'project_chat_message','shared_inbox','company_explorer_folder',
+   'shared_inbox_folder'
+  ) or (resource_type='node' and not (
+   relationship_kind in('email_attachment','email_inline_attachment')
+   and btrim(message_id)<>''
+  )) then 1
+  when resource_type='email_draft' then
+   (select count(*) from communications_email_drafts d
+    where d.company_id=a.company_id and d.draft_id=a.target_value)
+  when resource_type='email_signature' then
+   (select count(*) from communications_email_signatures signature
+    where signature.company_id=a.company_id and (
+     (parts[1]='personal' and signature.personal_user_id::text=a.owner_value
+      and signature.personal_account_email=lower(a.item_value))
+     or (parts[1]='shared' and signature.shared_inbox_id::text=a.owner_value)
+    ))
+  when resource_type='email_message' then
+   (select count(distinct (m.scope_type,m.personal_user_id,m.personal_account_email,
+     m.shared_inbox_id,m.provider,m.provider_thread_key,m.provider_message_id))
+    from message_identities m where m.company_id=a.company_id
+     and m.provider_message_id=a.item_value
+     and ((parts[1]='personal' and m.scope_type='personal'
+       and m.personal_user_id::text=a.owner_value)
+      or (parts[1]='shared' and m.scope_type='shared'
+       and m.shared_inbox_id::text=a.owner_value)))
+  when resource_type='attached_email' then
+   (select count(distinct (r.scope_type,r.personal_user_id,r.personal_account_email,
+     r.shared_inbox_id,r.provider,r.payload->>'thread_id',r.payload->>'message_id'))
+    from accounts r where r.candidate_count=1 and r.company_id=a.company_id
+     and r.resource_type='node' and r.resource_id::text=a.owner_value
+     and r.payload->>'message_id'=a.item_value)
+  when resource_type='node' then
+   (select count(distinct (r.scope_type,r.personal_user_id,r.personal_account_email,
+     r.shared_inbox_id,r.provider,r.payload->>'thread_id',r.payload->>'message_id'))
+    from accounts r where r.candidate_count=1 and r.company_id=a.company_id
+     and r.resource_type='node' and r.resource_id::text=a.resource_id
+     and r.payload->>'message_id'=a.message_id)
+  else -1 end resolution_count
+ from attachment_shapes a
 ), duplicate_groups as (
  select count(*) source_count,
   count(*) filter(where resource_type='node'
@@ -193,7 +317,13 @@ with projections as (
  union all select 'email_signatures',count(*) from communications_email_signatures
  union all select 'email_download_jobs',count(*) from communications_email_thread_download_jobs
  union all select 'attachments',count(*) from attachments
- union all select 'attachment_relationships_to_copy',count(*) from resource_attachments
+ union all select 'legacy_attachment_relationships',count(*) from attachment_resolutions
+ union all select 'attachment_relationships_to_copy',count(*) from attachment_resolutions
+  where resolution_count=1
+ union all select 'orphan_attachment_relationships_to_omit',count(*)
+  from attachment_resolutions where valid_shape and resolution_count=0
+ union all select 'attachment_relationships_requiring_review',count(*)
+  from attachment_resolutions where not valid_shape or resolution_count>1
  union all select 'recycle_bin_rows',count(*) from recycle_bin_items
 ), readiness as (
  select case when
@@ -207,6 +337,8 @@ with projections as (
        and not valid_source)=1
   and (select count(*) from drafts where nullif(btrim(source_message_id),'') is not null
        and not valid_source and kind='compose' and deleted_timestamp is not null)=1
+  and (select count(*) from attachment_resolutions
+       where not valid_shape or resolution_count>1)=0
   and (select count(*) from recycle_bin_items)=0
  then 'READY_TO_COPY' else 'STOP_AND_REVIEW' end status
 )

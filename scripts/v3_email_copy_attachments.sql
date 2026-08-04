@@ -23,7 +23,8 @@ select r.resource_attachment_id,r.company_id,'email_draft',
 from resource_attachments r
 cross join lateral (select string_to_array(r.resource_id,':') parts) decoded
 where r.resource_type='email_draft'
- and array_length(parts,1) in(3,4)
+ and ((parts[1]='personal' and array_length(parts,1) in(3,4))
+  or (parts[1] in('shared','collaboration') and array_length(parts,1)=3))
  and exists(select 1 from email_drafts d where d.company_id=r.company_id
   and d.draft_id=pg_temp.v3_query_unescape(parts[array_length(parts,1)]));
 
@@ -100,13 +101,78 @@ where r.resource_type='node'
  and r.relationship_kind in('email_attachment','email_inline_attachment')
  and btrim(r.message_id)<>'' and resolved.n=1;
 
+-- A source link whose exact email draft/message/relationship target no longer
+-- exists is orphan evidence. Keep its attachments row and its untouched legacy
+-- resource_attachments row, but do not invent an invalid final relationship.
+-- Malformed shapes and multiple possible targets remain hard failures.
+create temp table v3_attachment_orphan_evidence on commit drop as
+with unresolved as (
+ select r.*,string_to_array(r.resource_id,':') parts
+ from resource_attachments r
+ left join v3_attachment_desired d
+  on d.attachment_relationship_id=r.resource_attachment_id
+ where d.attachment_relationship_id is null
+), classified as (
+ select u.*,case
+  when u.resource_type='email_draft'
+   and ((parts[1]='personal' and array_length(parts,1) in(3,4))
+    or (parts[1] in('shared','collaboration') and array_length(parts,1)=3))
+   then (select count(*) from email_drafts d where d.company_id=u.company_id
+    and d.draft_id=pg_temp.v3_query_unescape(parts[array_length(parts,1)]))
+  when u.resource_type='email_signature'
+   and ((parts[1]='personal' and array_length(parts,1)=3)
+    or (parts[1]='shared' and array_length(parts,1)=2))
+   then (select count(*) from email_signatures signature
+    where signature.company_id=u.company_id and (
+     (parts[1]='personal' and signature.email_account_type='personal_email_account'
+      and signature.personal_user_id::text=pg_temp.v3_query_unescape(parts[2])
+      and signature.personal_account_email=lower(pg_temp.v3_query_unescape(parts[3])))
+     or
+     (parts[1]='shared' and signature.email_account_type='shared_email_account'
+      and signature.shared_inbox_id::text=pg_temp.v3_query_unescape(parts[2]))
+    ))
+  when u.resource_type='email_message'
+   and parts[1] in('personal','shared') and array_length(parts,1)=3
+   then (select count(distinct m.email_message_id)
+    from email_messages m join email_threads t on t.company_id=m.company_id
+     and t.email_thread_id=m.email_thread_id
+    where m.company_id=u.company_id
+     and m.provider_message_id=pg_temp.v3_query_unescape(parts[3])
+     and ((parts[1]='personal' and t.email_account_type='personal_email_account'
+       and t.personal_user_id::text=pg_temp.v3_query_unescape(parts[2]))
+      or (parts[1]='shared' and t.email_account_type='shared_email_account'
+       and t.shared_inbox_id::text=pg_temp.v3_query_unescape(parts[2]))))
+  when u.resource_type='attached_email' and array_length(parts,1)=4
+   and parts[1]='node' and parts[3]='message'
+   then (select count(distinct rel.email_message_id)
+    from email_relationships rel join email_messages m on m.company_id=rel.company_id
+     and m.email_message_id=rel.email_message_id
+    where rel.company_id=u.company_id and rel.resource_type='node'
+     and rel.resource_id::text=pg_temp.v3_query_unescape(parts[2])
+     and m.provider_message_id=pg_temp.v3_query_unescape(parts[4]))
+  when u.resource_type='node'
+   and u.relationship_kind in('email_attachment','email_inline_attachment')
+   and btrim(u.message_id)<>''
+   then (select count(distinct rel.email_message_id)
+    from email_relationships rel join email_messages m on m.company_id=rel.company_id
+     and m.email_message_id=rel.email_message_id
+    where rel.company_id=u.company_id and rel.resource_type='node'
+     and rel.resource_id::text=u.resource_id and m.provider_message_id=u.message_id)
+  else -1 end resolution_count
+ from unresolved u
+)
+select resource_attachment_id,company_id,attachment_id,resource_type,relationship_kind
+from classified where resolution_count=0;
+
 do $$
 begin
- if (select count(*) from v3_attachment_desired)<>(select count(*) from resource_attachments) then
-  raise exception 'not every legacy attachment relationship resolved exactly once';
- end if;
  if exists(select 1 from v3_attachment_desired group by attachment_relationship_id having count(*)<>1) then
   raise exception 'legacy attachment relationship mapped more than once';
+ end if;
+ if (select count(*) from v3_attachment_desired)
+    +(select count(*) from v3_attachment_orphan_evidence)
+    <>(select count(*) from resource_attachments) then
+  raise exception 'legacy attachment relationship is malformed or has multiple possible targets';
  end if;
  if exists(select 1 from v3_attachment_desired a where a.resource_type='email_message'
   and not exists(select 1 from email_messages m where m.company_id=a.company_id

@@ -5050,7 +5050,8 @@ create table if not exists v3_email_migration_items (
   constraint v3_email_migration_items_target_chk check (btrim(target_table)<>''),
   constraint v3_email_migration_items_target_key_chk check (btrim(target_key)<>''),
   constraint v3_email_migration_items_disposition_chk check (
-    disposition in ('copied','updated','consolidated_duplicate','retained_without_source_link')
+    disposition in ('copied','updated','consolidated_duplicate','retained_without_source_link',
+      'retained_orphan_evidence')
   ),
   constraint v3_email_migration_items_checksum_chk check (
     source_checksum ~ '^[0-9a-f]{32}$'
