@@ -78,7 +78,7 @@ logic, up from 17.7% in the previous snapshot.
 | `backend/cmd/miraeopus-api` | 1 | 365 | 0.1% |
 | `frontend/src/modules/fields` | 2 | 337 | 0.1% |
 | `frontend/src/modules/api` | 2 | 330 | 0.1% |
-| `backend/cmd/mango-attachment-variants` | 1 | 303 | 0.1% |
+| `backend/cmd/mango-attachment-previews` | 1 | 303 | 0.1% |
 | `frontend/src/modules/workspace` | 2 | 217 | 0.1% |
 | `frontend/src/modules/map` | 3 | 186 | 0.1% |
 | `frontend/src/modules/folders` | 1 | 145 | 0.1% |

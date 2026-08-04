@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"miraeopus/backend/internal/attachmentcleanup"
 	"miraeopus/backend/internal/domain"
 	"strings"
 	"time"
@@ -44,9 +45,9 @@ coalesce(ra.created_by_user_id::text, ''),
 ra.created_timestamp,
 ra.deleted_timestamp`
 
-const attachmentVariantSelectColumns = `
+const attachmentPreviewSelectColumns = `
 v.attachment_id::text,
-v.variant_type,
+v.preview_type,
 v.mime_type,
 v.byte_size,
 v.sha256,
@@ -194,15 +195,15 @@ func (r *PostgresRepo) PreparePermanentAttachmentDeletion(ctx context.Context, c
 		return AttachmentDeletionPlan{}, err
 	}
 	defer tx.Rollback()
-	var originalKey string
-	if err := tx.QueryRowContext(ctx, `select storage_key from attachments where company_id=$1::uuid and attachment_id=$2::uuid for update`, companyID, attachmentID).Scan(&originalKey); errors.Is(err, sql.ErrNoRows) {
+	var original attachmentcleanup.ObjectRef
+	if err := tx.QueryRowContext(ctx, `select storage_bucket,storage_key from attachments where company_id=$1::uuid and attachment_id=$2::uuid for update`, companyID, attachmentID).Scan(&original.Bucket, &original.Key); errors.Is(err, sql.ErrNoRows) {
 		return AttachmentDeletionPlan{}, ErrNotFound
 	} else if err != nil {
 		return AttachmentDeletionPlan{}, err
 	}
 	var matchingLink, otherActiveLink bool
 	if err := tx.QueryRowContext(ctx, `select
-		coalesce(bool_or(resource_type=$3 and resource_id=$4 and relationship_kind='file_attachment'),false),
+		coalesce(bool_or(deleted_timestamp is null and resource_type=$3 and resource_id=$4 and relationship_kind='file_attachment'),false),
 		coalesce(bool_or(deleted_timestamp is null and not(resource_type=$3 and resource_id=$4 and relationship_kind='file_attachment')),false)
 		from attachment_relationships where company_id=$1::uuid and attachment_id=$2::uuid`,
 		companyID, attachmentID, resourceType, resourceID).Scan(&matchingLink, &otherActiveLink); err != nil {
@@ -214,18 +215,18 @@ func (r *PostgresRepo) PreparePermanentAttachmentDeletion(ctx context.Context, c
 	if otherActiveLink {
 		return AttachmentDeletionPlan{}, ErrAttachmentShared
 	}
-	keys := []string{originalKey}
-	rows, err := tx.QueryContext(ctx, `select storage_key from attachment_variants where attachment_id=$1::uuid order by variant_type`, attachmentID)
+	objects := []attachmentcleanup.ObjectRef{original}
+	rows, err := tx.QueryContext(ctx, `select storage_bucket,storage_key from attachment_previews where attachment_id=$1::uuid order by preview_type`, attachmentID)
 	if err != nil {
 		return AttachmentDeletionPlan{}, err
 	}
 	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
+		var object attachmentcleanup.ObjectRef
+		if err := rows.Scan(&object.Bucket, &object.Key); err != nil {
 			rows.Close()
 			return AttachmentDeletionPlan{}, err
 		}
-		keys = append(keys, key)
+		objects = append(objects, object)
 	}
 	if err := rows.Close(); err != nil {
 		return AttachmentDeletionPlan{}, err
@@ -239,30 +240,7 @@ func (r *PostgresRepo) PreparePermanentAttachmentDeletion(ctx context.Context, c
 	if err := tx.Commit(); err != nil {
 		return AttachmentDeletionPlan{}, err
 	}
-	return AttachmentDeletionPlan{StorageKeys: keys}, nil
-}
-
-func (r *PostgresRepo) FinalizePermanentAttachmentDeletion(ctx context.Context, companyID, attachmentID string) error {
-	companyID = strings.TrimSpace(companyID)
-	attachmentID = cleanUUIDText(attachmentID)
-	if companyID == "" || attachmentID == "" {
-		return ErrInvalid
-	}
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `delete from attachments where company_id=$1::uuid and attachment_id=$2::uuid and deleted_timestamp is not null`, companyID, attachmentID)
-	if err != nil {
-		return err
-	}
-	if affected, err := result.RowsAffected(); err != nil {
-		return err
-	} else if affected == 0 {
-		return ErrNotFound
-	}
-	return tx.Commit()
+	return AttachmentDeletionPlan{Objects: objects}, nil
 }
 
 func (r *PostgresRepo) GetAttachmentVariant(ctx context.Context, companyID, attachmentID, variantType string) (domain.AttachmentVariant, error) {
@@ -293,13 +271,13 @@ where a.company_id=$1::uuid and a.attachment_id=$2::uuid and a.deleted_timestamp
 		}, nil
 	}
 	variant, err := scanAttachmentVariant(r.db.QueryRowContext(ctx, `
-select `+attachmentVariantSelectColumns+`
-from attachment_variants v
+select `+attachmentPreviewSelectColumns+`
+from attachment_previews v
 join attachments a on a.attachment_id = v.attachment_id
 where a.company_id=$1::uuid
   and a.attachment_id=$2::uuid
   and a.deleted_timestamp is null
-  and v.variant_type=$3
+  and v.preview_type=$3
   and v.sha256 is not null
   and v.generation_version=$4`,
 		companyID, attachmentID, variantType, AttachmentVariantGenerationVersion,
@@ -330,7 +308,7 @@ select
   a.created_timestamp,
   a.created_timestamp,
   $3,
-  case when v.attachment_id is null then 'original' else v.variant_type end,
+  case when v.attachment_id is null then 'original' else v.preview_type end,
   coalesce(v.mime_type, a.mime_type),
   coalesce(v.byte_size, a.byte_size),
   case when v.attachment_id is null then a.sha256 else coalesce(v.sha256, '') end,
@@ -343,9 +321,9 @@ select
   coalesce(v.updated_timestamp, a.created_timestamp),
   `+resourceAttachmentSelectColumns+`
 from attachments a
-left join attachment_variants v
+left join attachment_previews v
   on v.attachment_id=a.attachment_id
- and v.variant_type=$3
+ and v.preview_type=$3
  and $3 <> 'original'
 	and v.sha256 is not null
 	and v.generation_version=1
@@ -423,14 +401,14 @@ func (r *PostgresRepo) UpsertAttachmentVariants(ctx context.Context, companyID s
 			created = time.Now().UTC()
 		}
 		result, err := tx.ExecContext(ctx, `
-insert into attachment_variants (
-  attachment_id, variant_type, mime_type, byte_size, sha256, generation_version,
+insert into attachment_previews (
+  attachment_id, preview_type, mime_type, byte_size, sha256, generation_version,
   width, height, storage_bucket, storage_key, created_timestamp, updated_timestamp
 )
 select $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12
 from attachments a
 where a.company_id=$1::uuid and a.attachment_id=$2::uuid and a.deleted_timestamp is null
-on conflict (attachment_id, variant_type) do update
+on conflict (attachment_id, preview_type) do update
 set mime_type=excluded.mime_type,
     byte_size=excluded.byte_size,
     sha256=excluded.sha256,
@@ -440,9 +418,9 @@ set mime_type=excluded.mime_type,
     storage_bucket=excluded.storage_bucket,
     storage_key=excluded.storage_key,
     updated_timestamp=excluded.updated_timestamp
-where (attachment_variants.mime_type, attachment_variants.byte_size, attachment_variants.sha256,
-       attachment_variants.generation_version, attachment_variants.width, attachment_variants.height,
-       attachment_variants.storage_bucket, attachment_variants.storage_key)
+where (attachment_previews.mime_type, attachment_previews.byte_size, attachment_previews.sha256,
+       attachment_previews.generation_version, attachment_previews.width, attachment_previews.height,
+       attachment_previews.storage_bucket, attachment_previews.storage_key)
   is distinct from
       (excluded.mime_type, excluded.byte_size, excluded.sha256,
        excluded.generation_version, excluded.width, excluded.height,
@@ -600,8 +578,8 @@ order by ra.created_timestamp desc, ra.attachment_relationship_id desc`,
 
 func (r *PostgresRepo) listResourceAttachmentVariants(ctx context.Context, companyID, resourceType, resourceID string) (map[string][]domain.AttachmentVariant, error) {
 	rows, err := r.db.QueryContext(ctx, `
-select `+attachmentVariantSelectColumns+`
-from attachment_variants v
+select `+attachmentPreviewSelectColumns+`
+from attachment_previews v
 join attachments a on a.attachment_id=v.attachment_id
 where a.company_id=$1::uuid
   and a.deleted_timestamp is null
@@ -610,7 +588,7 @@ where a.company_id=$1::uuid
     where ra.company_id=$1::uuid and ra.resource_type=$2 and ra.resource_id=$3
       and ra.attachment_id=v.attachment_id and ra.deleted_timestamp is null
   )
-order by v.attachment_id, v.variant_type`, companyID, resourceType, resourceID)
+order by v.attachment_id, v.preview_type`, companyID, resourceType, resourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -671,29 +649,21 @@ func (r *PostgresRepo) SoftDeleteResourceAttachment(input ResourceAttachmentDele
 	if companyID == "" || resourceType == "" || resourceID == "" || attachmentID == "" {
 		return ErrInvalid
 	}
-	result, err := r.db.ExecContext(context.Background(), `
-update attachment_relationships
-set deleted_timestamp=now()
-where company_id=$1::uuid
-  and resource_type=$2
-  and resource_id=$3
-  and attachment_id=$4::uuid
-  and deleted_timestamp is null`,
-		companyID, resourceType, resourceID, attachmentID,
-	)
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	count, err := result.RowsAffected()
+	defer tx.Rollback()
+	retired, err := retireAttachmentRelationshipsTx(ctx, tx, companyID, resourceType, resourceID, attachmentID, "", "[]")
 	if err != nil {
 		return err
 	}
-	if count == 0 {
+	if len(retired) == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit()
 }
-
 func insertOrReviveResourceAttachmentTx(ctx context.Context, tx *sql.Tx, link domain.ResourceAttachment) (domain.ResourceAttachment, error) {
 	var existingID string
 	err := tx.QueryRowContext(ctx, `
@@ -785,12 +755,12 @@ from inserted ra`,
 
 func (r *PostgresRepo) listAttachmentVariants(ctx context.Context, companyID, attachmentID string) ([]domain.AttachmentVariant, error) {
 	rows, err := r.db.QueryContext(ctx, `
-select `+attachmentVariantSelectColumns+`
-from attachment_variants v
+select `+attachmentPreviewSelectColumns+`
+from attachment_previews v
 join attachments a on a.attachment_id = v.attachment_id
 where a.company_id=$1::uuid
   and a.attachment_id=$2::uuid
-order by v.variant_type`,
+order by v.preview_type`,
 		companyID, attachmentID,
 	)
 	if err != nil {

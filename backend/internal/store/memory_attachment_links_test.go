@@ -8,7 +8,7 @@ import (
 )
 
 func TestMemoryListAttachmentResourceLinksPreservesAttachmentExistenceSemantics(t *testing.T) {
-	t.Run("existing attachment with only deleted links returns empty", func(t *testing.T) {
+	t.Run("last relationship makes attachment pending deletion", func(t *testing.T) {
 		repo, companyID, nodeID, attachmentID := newMemoryAttachmentLinkFixture(t)
 		if err := repo.SoftDeleteResourceAttachment(ResourceAttachmentDeleteInput{
 			CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: nodeID, AttachmentID: attachmentID,
@@ -16,12 +16,48 @@ func TestMemoryListAttachmentResourceLinksPreservesAttachmentExistenceSemantics(
 			t.Fatalf("SoftDeleteResourceAttachment: %v", err)
 		}
 
-		links, err := repo.ListAttachmentResourceLinks(companyID, attachmentID)
-		if err != nil {
-			t.Fatalf("ListAttachmentResourceLinks: %v", err)
+		if _, err := repo.ListAttachmentResourceLinks(companyID, attachmentID); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("last-owner removal error = %v, want ErrNotFound", err)
 		}
-		if len(links) != 0 {
-			t.Fatalf("links = %+v, want empty", links)
+	})
+
+	t.Run("one relationship removal preserves another and last removal rejects relink", func(t *testing.T) {
+		repo, companyID, firstNodeID, attachmentID := newMemoryAttachmentLinkFixture(t)
+		secondNode, err := repo.CreateNode(companyID, "Second attachment owner")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.LinkResourceAttachment(ResourceAttachmentInput{
+			CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: secondNode.NodeID,
+			AttachmentID: attachmentID, RelationshipKind: AttachmentRelationshipFileAttachment,
+		}); err != nil {
+			t.Fatalf("link second owner: %v", err)
+		}
+		if err := repo.SoftDeleteResourceAttachment(ResourceAttachmentDeleteInput{
+			CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: firstNodeID, AttachmentID: attachmentID,
+		}); err != nil {
+			t.Fatalf("remove first owner: %v", err)
+		}
+		if _, err := repo.GetAttachment(companyID, attachmentID); err != nil {
+			t.Fatalf("attachment with surviving owner must stay live: %v", err)
+		}
+		if err := repo.SoftDeleteResourceAttachment(ResourceAttachmentDeleteInput{
+			CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: secondNode.NodeID, AttachmentID: attachmentID,
+		}); err != nil {
+			t.Fatalf("remove last owner: %v", err)
+		}
+		if _, err := repo.GetAttachment(companyID, attachmentID); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("pending-deletion attachment error = %v, want ErrNotFound", err)
+		}
+		thirdNode, err := repo.CreateNode(companyID, "Rejected attachment owner")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.LinkResourceAttachment(ResourceAttachmentInput{
+			CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: thirdNode.NodeID,
+			AttachmentID: attachmentID, RelationshipKind: AttachmentRelationshipFileAttachment,
+		}); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("pending-deletion relink error = %v, want ErrNotFound", err)
 		}
 	})
 

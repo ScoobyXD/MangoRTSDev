@@ -728,6 +728,9 @@ func (r *PostgresRepo) DeleteProjectProjection(input ProjectProjectionDeleteInpu
 		return err
 	}
 	defer tx.Rollback()
+	if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, input.CompanyID, "project_chat_message", input.InformationID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `delete from project_projection_table where company_id=$1::uuid and project_id=$2::uuid and information_id=$3::uuid`, input.CompanyID, input.ProjectID, input.InformationID); err != nil {
 		return err
 	}
@@ -1256,6 +1259,12 @@ func syncProjectRelationshipProjectionTx(ctx context.Context, tx *sql.Tx, compan
 }
 
 func postgresDeleteProjectTx(ctx context.Context, tx *sql.Tx, companyID, projectID string) error {
+	if err := retireProjectChatAttachmentRelationshipsTx(ctx, tx, companyID, projectID); err != nil {
+		return err
+	}
+	if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, EntityTypeProject, projectID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `delete from company_explorer_items where company_id=$1::uuid and target_type='project' and target_id=$2::uuid`, companyID, projectID); err != nil {
 		return err
 	}

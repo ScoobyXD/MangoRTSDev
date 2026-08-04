@@ -373,19 +373,7 @@ join attachments attachment
 	if wantedCount != foundCount {
 		return ErrInvalid
 	}
-	if _, err := tx.ExecContext(ctx, `
-update attachment_relationships link
-set deleted_timestamp=coalesce(link.deleted_timestamp, clock_timestamp())
-where link.company_id=$1::uuid
-  and link.resource_type='node_chat_message'
-  and link.resource_id=$2
-  and link.relationship_kind='chat_attachment'
-  and link.deleted_timestamp is null
-  and not exists (
-    select 1
-    from jsonb_array_elements_text($3::jsonb) wanted(attachment_id)
-    where wanted.attachment_id::uuid=link.attachment_id
-  )`, companyID, chatID, chat.AttachmentIDsJSON); err != nil {
+	if _, err := retireAttachmentRelationshipsTx(ctx, tx, companyID, "node_chat_message", chatID, "", AttachmentRelationshipChatAttachment, chat.AttachmentIDsJSON); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `
@@ -509,23 +497,7 @@ func deletePostgresNodeTextboxChatTx(ctx context.Context, tx *sql.Tx, input Node
 		current := previous
 		return domain.NodeProjection{}, true, &ProjectionRevisionConflictError{NodeCurrent: &current}
 	}
-	if _, err := tx.ExecContext(ctx, `with recursive deleted_chats(chat_id) as (
-  select chat_id
-  from node_textbox_chats
-  where company_id=$1::uuid and node_id=$2::uuid and chat_id=$3::uuid
-  union all
-  select child.chat_id
-  from node_textbox_chats child
-  join deleted_chats parent on child.parent_chat_id=parent.chat_id
-  where child.company_id=$1::uuid and child.node_id=$2::uuid
-)
-update attachment_relationships
-set deleted_timestamp=coalesce(deleted_timestamp,clock_timestamp())
-where company_id=$1::uuid
-  and resource_type='node_chat_message'
-  and resource_id in (select chat_id::text from deleted_chats)
-  and relationship_kind='chat_attachment'
-  and deleted_timestamp is null`, input.CompanyID, input.NodeID, input.InformationID); err != nil {
+	if err := retireNodeTextboxChatTreeRelationshipsTx(ctx, tx, input.CompanyID, input.NodeID, input.InformationID); err != nil {
 		return domain.NodeProjection{}, true, err
 	}
 	result, err := tx.ExecContext(ctx, `delete from node_textbox_chats

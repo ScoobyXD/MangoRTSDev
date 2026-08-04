@@ -14,7 +14,7 @@ func TestPostgresAttachmentReadsUseOneContentQueryAndBatchedMetadataVariants(t *
 	text := string(source)
 	for _, required := range []string{
 		"func (r *PostgresRepo) ReadAttachmentContent",
-		"left join attachment_variants v",
+		"left join attachment_previews v",
 		"join attachment_relationships ra",
 		"func (r *PostgresRepo) listResourceAttachmentVariants",
 	} {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"miraeopus/backend/internal/attachmentcleanup"
 	"miraeopus/backend/internal/domain"
 	"strings"
 	"time"
@@ -194,7 +195,6 @@ const (
 	AttachmentVariantOriginal          = "original"
 	AttachmentVariantDisplay           = "display"
 	AttachmentVariantThumbnail         = "thumbnail"
-	AttachmentVariantEmailSend         = "email_send"
 	AttachmentVariantGenerationVersion = 1
 
 	AttachmentRelationshipInlineImage       = "inline_image"
@@ -206,6 +206,7 @@ const (
 )
 
 type AttachmentRepository interface {
+	attachmentcleanup.Repository
 	GetEmailAttachmentResourceAccess(input EmailAttachmentResourceAccessInput) (EmailAttachmentResourceAccess, error)
 	CreateAttachmentWithResourceLink(input AttachmentCreateInput) (domain.Attachment, domain.ResourceAttachment, error)
 	GetAttachment(companyID, attachmentID string) (domain.Attachment, error)
@@ -217,7 +218,6 @@ type AttachmentRepository interface {
 	LinkResourceAttachment(input ResourceAttachmentInput) (domain.ResourceAttachment, error)
 	SoftDeleteResourceAttachment(input ResourceAttachmentDeleteInput) error
 	PreparePermanentAttachmentDeletion(ctx context.Context, companyID, attachmentID, resourceType, resourceID string) (AttachmentDeletionPlan, error)
-	FinalizePermanentAttachmentDeletion(ctx context.Context, companyID, attachmentID string) error
 	GetAttachmentUploadIntentByClientRequest(companyID, actorUserID, clientRequestID string) (domain.AttachmentUploadIntent, error)
 	CreateAttachmentUploadIntent(input AttachmentUploadIntentCreateInput) (domain.AttachmentUploadIntent, bool, error)
 	GetAttachmentUploadIntent(companyID, actorUserID, uploadIntentID string) (domain.AttachmentUploadIntent, error)
@@ -246,7 +246,7 @@ type EmailAttachmentResourceAccess struct {
 	SendState string
 }
 type AttachmentDeletionPlan struct {
-	StorageKeys []string
+	Objects []attachmentcleanup.ObjectRef
 }
 
 type AttachmentCreateInput struct {
@@ -428,8 +428,6 @@ func NormalizeAttachmentVariantType(variantType string) string {
 		return AttachmentVariantDisplay
 	case AttachmentVariantThumbnail:
 		return AttachmentVariantThumbnail
-	case AttachmentVariantEmailSend, "email-send":
-		return AttachmentVariantEmailSend
 	default:
 		return ""
 	}

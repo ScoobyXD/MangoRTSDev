@@ -29,18 +29,18 @@ func TestParseCommandConfigApplyRequiresScaryConfirmation(t *testing.T) {
 	}
 }
 
-func TestVariantCandidateQuerySelectsOnlyMissingOrStaleCurrentGeneration(t *testing.T) {
+func TestPreviewCandidateQuerySelectsOnlyMissingOrStaleCurrentGeneration(t *testing.T) {
 	for _, required := range []string{"display.generation_version=1", "thumbnail.generation_version=1", "display.sha256 is not null", "thumbnail.sha256 is not null",
 		"/variants/v1/display/%", "/variants/v1/thumbnail/%", "current_db_unverified_storage",
 		"a.byte_size <= 67108864", "a.attachment_id > $2::uuid", "limit $3"} {
-		if !strings.Contains(variantCandidateQuery, required) {
+		if !strings.Contains(previewCandidateQuery, required) {
 			t.Fatalf("candidate query missing %q", required)
 		}
 	}
-	if strings.Contains(variantCandidateQuery, "and (display.attachment_id is null or thumbnail.attachment_id is null)") {
+	if strings.Contains(previewCandidateQuery, "and (display.attachment_id is null or thumbnail.attachment_id is null)") {
 		t.Fatal("candidate query excludes DB-current rows whose storage objects still need verification")
 	}
-	if strings.Contains(variantCandidateQuery, "lower(a.mime_type)") {
+	if strings.Contains(previewCandidateQuery, "lower(a.mime_type)") {
 		t.Fatal("candidate query excludes magic-valid images whose stored MIME is wrong")
 	}
 }

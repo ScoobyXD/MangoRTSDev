@@ -322,6 +322,28 @@ func (r *MemoryRepo) CompleteCommunicationsEmailDraftSend(input CommunicationsEm
 		return ErrNotFound
 	}
 	now := time.Now().UTC()
+	draftRelationshipIDs := make([]string, 0)
+	draftLinks := make([]domain.ResourceAttachment, 0)
+	for relationshipID, link := range r.resourceAttachments {
+		if link.CompanyID == companyID && link.ResourceType == "email_draft" && link.ResourceID == draftID && link.DeletedTimestamp == nil {
+			draftRelationshipIDs = append(draftRelationshipIDs, relationshipID)
+			draftLinks = append(draftLinks, link)
+		}
+	}
+	for _, link := range draftLinks {
+		link.ResourceAttachmentID = newUUIDv7String()
+		link.ResourceType = "email_message"
+		link.ResourceID = sentEmailMessageID
+		link.CreatedTimestamp = now
+		if _, err := r.upsertResourceAttachmentLocked(link); err != nil {
+			return err
+		}
+	}
+	for _, relationshipID := range draftRelationshipIDs {
+		link := r.resourceAttachments[relationshipID]
+		link.DeletedTimestamp = &now
+		r.resourceAttachments[relationshipID] = link
+	}
 	draft.SendState = communicationsEmailDraftSendStateSent
 	draft.SendClaimToken = ""
 	draft.SendClaimedRevision = 0
@@ -483,6 +505,9 @@ for update`, companyID, relationshipID).Scan(&emailThreadID); err != nil {
 	if sentEmailMessageID == "" {
 		return ErrNotFound
 	}
+	if err := promoteEmailDraftAttachmentRelationshipsTx(ctx, tx, companyID, draftID, sentEmailMessageID); err != nil {
+		return err
+	}
 	result, err := tx.ExecContext(ctx, `
 update email_drafts set send_state='sent',send_claim_token='',
  send_claimed_revision=0,send_claimed_timestamp=null,
@@ -498,6 +523,9 @@ where company_id=$1::uuid and draft_id=$2 and email_relationship_id=$3::uuid
 	}
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return ErrNotFound
+	}
+	if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, "email_draft", draftID); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

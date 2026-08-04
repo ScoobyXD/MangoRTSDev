@@ -9,13 +9,13 @@ import (
 	"time"
 )
 
-const attachmentUploadIntentSelectColumns = `
-ui.upload_intent_id::text,
+const attachmentUploadJobSelectColumns = `
+ui.upload_job_id::text,
 ui.company_id::text,
 ui.actor_user_id::text,
 ui.client_request_id,
 ui.attachment_id::text,
-coalesce(ui.resource_attachment_id::text, ''),
+coalesce(ui.attachment_relationship_id::text, ''),
 ui.original_filename,
 ui.mime_type,
 ui.size_bytes,
@@ -49,7 +49,7 @@ ui.expires_timestamp,
 ui.completed_timestamp`
 
 const attachmentUploadPartSelectColumns = `
-p.upload_intent_id::text,
+p.upload_job_id::text,
 p.part_number,
 p.expected_size_bytes,
 p.observed_size_bytes,
@@ -71,8 +71,8 @@ func (r *PostgresRepo) GetAttachmentUploadIntentByClientRequest(companyID, actor
 		return domain.AttachmentUploadIntent{}, ErrInvalid
 	}
 	intent, err := scanAttachmentUploadIntent(r.db.QueryRowContext(context.Background(), `
-select `+attachmentUploadIntentSelectColumns+`
-from attachment_upload_intents ui
+select `+attachmentUploadJobSelectColumns+`
+from attachment_upload_jobs ui
 where ui.company_id=$1::uuid and ui.actor_user_id=$2::uuid and ui.client_request_id=$3`, companyID, actorUserID, clientRequestID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.AttachmentUploadIntent{}, ErrNotFound
@@ -93,8 +93,8 @@ func (r *PostgresRepo) CreateAttachmentUploadIntent(input AttachmentUploadIntent
 	defer tx.Rollback()
 	createdIntent, err := scanAttachmentUploadIntent(tx.QueryRowContext(ctx, `
 with inserted as (
-  insert into attachment_upload_intents (
-    upload_intent_id, company_id, actor_user_id, client_request_id, attachment_id,
+  insert into attachment_upload_jobs (
+    upload_job_id, company_id, actor_user_id, client_request_id, attachment_id,
     original_filename, mime_type, size_bytes, sha256, sha256_verification_method,
     resource_type, resource_id, information_id, message_id, editor_surface,
     relationship_kind, source_kind, source_provider, original_width, original_height,
@@ -111,7 +111,7 @@ with inserted as (
   on conflict (company_id, actor_user_id, client_request_id) do nothing
   returning *
 )
-select `+attachmentUploadIntentSelectColumns+` from inserted ui`,
+select `+attachmentUploadJobSelectColumns+` from inserted ui`,
 		intent.UploadIntentID, intent.CompanyID, intent.ActorUserID, intent.ClientRequestID, intent.AttachmentID,
 		intent.OriginalFilename, intent.MimeType, intent.SizeBytes, intent.SHA256, intent.SHA256VerificationMethod,
 		intent.ResourceType, intent.ResourceID, intent.InformationID, intent.MessageID, intent.EditorSurface,
@@ -121,7 +121,7 @@ select `+attachmentUploadIntentSelectColumns+` from inserted ui`,
 	created := err == nil
 	if errors.Is(err, sql.ErrNoRows) {
 		createdIntent, err = scanAttachmentUploadIntent(tx.QueryRowContext(ctx, `
-select `+attachmentUploadIntentSelectColumns+` from attachment_upload_intents ui
+select `+attachmentUploadJobSelectColumns+` from attachment_upload_jobs ui
 where ui.company_id=$1::uuid and ui.actor_user_id=$2::uuid and ui.client_request_id=$3
 for update`, intent.CompanyID, intent.ActorUserID, intent.ClientRequestID))
 		if err == nil && !sameAttachmentUploadPayload(createdIntent, intent) {
@@ -139,8 +139,8 @@ for update`, intent.CompanyID, intent.ActorUserID, intent.ClientRequestID))
 
 func (r *PostgresRepo) GetAttachmentUploadIntent(companyID, actorUserID, uploadIntentID string) (domain.AttachmentUploadIntent, error) {
 	intent, err := scanAttachmentUploadIntent(r.db.QueryRowContext(context.Background(), `
-select `+attachmentUploadIntentSelectColumns+` from attachment_upload_intents ui
-where ui.company_id=$1::uuid and ui.actor_user_id=$2::uuid and ui.upload_intent_id=$3::uuid`,
+select `+attachmentUploadJobSelectColumns+` from attachment_upload_jobs ui
+where ui.company_id=$1::uuid and ui.actor_user_id=$2::uuid and ui.upload_job_id=$3::uuid`,
 		strings.TrimSpace(companyID), cleanUUIDText(actorUserID), cleanUUIDText(uploadIntentID)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.AttachmentUploadIntent{}, ErrNotFound
@@ -171,10 +171,10 @@ func (r *PostgresRepo) UpsertAttachmentUploadParts(input AttachmentUploadPartsIn
 		var stored domain.AttachmentUploadPart
 		err = scanAttachmentUploadPart(tx.QueryRowContext(ctx, `
 insert into attachment_upload_parts (
-  upload_intent_id, part_number, expected_size_bytes, checksum_algorithm, expected_checksum,
+  upload_job_id, part_number, expected_size_bytes, checksum_algorithm, expected_checksum,
   signing_attempt_count, last_signed_timestamp, created_timestamp, updated_timestamp
 ) values ($1::uuid, $2, $3, $4, $5, 1, $6, $6, $6)
-on conflict (upload_intent_id, part_number) do update
+on conflict (upload_job_id, part_number) do update
 set signing_attempt_count=attachment_upload_parts.signing_attempt_count+1,
     last_signed_timestamp=excluded.last_signed_timestamp,
     updated_timestamp=excluded.updated_timestamp
@@ -190,9 +190,9 @@ returning `+strings.ReplaceAll(attachmentUploadPartSelectColumns, "p.", "attachm
 			return nil, err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `update attachment_upload_intents
+	if _, err := tx.ExecContext(ctx, `update attachment_upload_jobs
 set status='uploading', failure_code='', version=version+1, updated_timestamp=$2
-where upload_intent_id=$1::uuid`, intent.UploadIntentID, now); err != nil {
+where upload_job_id=$1::uuid`, intent.UploadIntentID, now); err != nil {
 		return nil, err
 	}
 	parts, err := listAttachmentUploadPartsTx(ctx, tx, intent.UploadIntentID)
@@ -220,13 +220,13 @@ func (r *PostgresRepo) ReplaceAttachmentUploadObservedParts(input AttachmentUplo
 		return nil, ErrUploadStateConflict
 	}
 	now := normalizedUploadNow(input.Now)
-	if _, err := tx.ExecContext(ctx, `update attachment_upload_parts set observed_size_bytes=0, etag='', s3_checksum='', uploaded_timestamp=null, updated_timestamp=$2 where upload_intent_id=$1::uuid`, intent.UploadIntentID, now); err != nil {
+	if _, err := tx.ExecContext(ctx, `update attachment_upload_parts set observed_size_bytes=0, etag='', s3_checksum='', uploaded_timestamp=null, updated_timestamp=$2 where upload_job_id=$1::uuid`, intent.UploadIntentID, now); err != nil {
 		return nil, err
 	}
 	for _, observed := range input.Parts {
 		result, err := tx.ExecContext(ctx, `update attachment_upload_parts
 set observed_size_bytes=$3, etag=$4, s3_checksum=$5, uploaded_timestamp=coalesce($6, $7), updated_timestamp=$7
-where upload_intent_id=$1::uuid and part_number=$2`, intent.UploadIntentID, observed.PartNumber,
+where upload_job_id=$1::uuid and part_number=$2`, intent.UploadIntentID, observed.PartNumber,
 			observed.ObservedSizeBytes, strings.Trim(strings.TrimSpace(observed.ETag), "\""), strings.TrimSpace(observed.S3Checksum),
 			observed.UploadedTimestamp, now)
 		if err != nil {
@@ -237,7 +237,7 @@ where upload_intent_id=$1::uuid and part_number=$2`, intent.UploadIntentID, obse
 			return nil, ErrInvalid
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `update attachment_upload_intents set version=version+1, updated_timestamp=$2 where upload_intent_id=$1::uuid`, intent.UploadIntentID, now); err != nil {
+	if _, err := tx.ExecContext(ctx, `update attachment_upload_jobs set version=version+1, updated_timestamp=$2 where upload_job_id=$1::uuid`, intent.UploadIntentID, now); err != nil {
 		return nil, err
 	}
 	parts, err := listAttachmentUploadPartsTx(ctx, tx, intent.UploadIntentID)
@@ -254,7 +254,7 @@ func (r *PostgresRepo) ListAttachmentUploadParts(companyID, actorUserID, uploadI
 	if _, err := r.GetAttachmentUploadIntent(companyID, actorUserID, uploadIntentID); err != nil {
 		return nil, err
 	}
-	rows, err := r.db.QueryContext(context.Background(), `select `+attachmentUploadPartSelectColumns+` from attachment_upload_parts p where p.upload_intent_id=$1::uuid order by p.part_number`, cleanUUIDText(uploadIntentID))
+	rows, err := r.db.QueryContext(context.Background(), `select `+attachmentUploadPartSelectColumns+` from attachment_upload_parts p where p.upload_job_id=$1::uuid order by p.part_number`, cleanUUIDText(uploadIntentID))
 	if err != nil {
 		return nil, err
 	}
@@ -285,10 +285,10 @@ func (r *PostgresRepo) BeginAttachmentUploadCompletion(input AttachmentUploadTra
 	}
 	intent, err = scanAttachmentUploadIntent(tx.QueryRowContext(ctx, `
 with changed as (
- update attachment_upload_intents set status='completing', failure_code='', updated_timestamp=$2, version=version+1
- where upload_intent_id=$1::uuid returning *
+ update attachment_upload_jobs set status='completing', failure_code='', updated_timestamp=$2, version=version+1
+ where upload_job_id=$1::uuid returning *
 )
-select `+attachmentUploadIntentSelectColumns+` from changed ui`, intent.UploadIntentID, now))
+select `+attachmentUploadJobSelectColumns+` from changed ui`, intent.UploadIntentID, now))
 	if err != nil {
 		return domain.AttachmentUploadIntent{}, false, err
 	}
@@ -398,11 +398,11 @@ limit 1`, attachment.CompanyID, attachment.AttachmentID, attachment.UploadedByUs
 	if err != nil {
 		return domain.Attachment{}, domain.ResourceAttachment{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `update attachment_upload_intents
-set status='completed', failure_code='', resource_attachment_id=$2::uuid, sha256_verification_method=$3,
+	if _, err := tx.ExecContext(ctx, `update attachment_upload_jobs
+set status='completed', failure_code='', attachment_relationship_id=$2::uuid, sha256_verification_method=$3,
  storage_checksum_algorithm=$4, storage_checksum_value=$5, storage_checksum_type=$6,
  completed_timestamp=$7, updated_timestamp=$7, version=version+1
-where upload_intent_id=$1::uuid`, intent.UploadIntentID, link.ResourceAttachmentID, strings.TrimSpace(input.SHA256VerificationMethod),
+where upload_job_id=$1::uuid`, intent.UploadIntentID, link.ResourceAttachmentID, strings.TrimSpace(input.SHA256VerificationMethod),
 		strings.TrimSpace(input.StorageChecksumAlgorithm), strings.TrimSpace(input.StorageChecksumValue), strings.TrimSpace(input.StorageChecksumType), now); err != nil {
 		return domain.Attachment{}, domain.ResourceAttachment{}, err
 	}
@@ -416,15 +416,15 @@ func (r *PostgresRepo) AbortAttachmentUploadIntent(input AttachmentUploadTransit
 	now := normalizedUploadNow(input.Now)
 	intent, err := scanAttachmentUploadIntent(r.db.QueryRowContext(context.Background(), `
 with changed as (
- update attachment_upload_intents
+ update attachment_upload_jobs
  set status=case when status in ('completed','aborted','expired') then status else 'aborted' end,
      failure_code=case when status in ('completed','aborted','expired') then failure_code else '' end,
      updated_timestamp=case when status in ('completed','aborted','expired') then updated_timestamp else $4 end,
      version=case when status in ('completed','aborted','expired') then version else version+1 end
- where company_id=$1::uuid and actor_user_id=$2::uuid and upload_intent_id=$3::uuid
+ where company_id=$1::uuid and actor_user_id=$2::uuid and upload_job_id=$3::uuid
  returning *
 )
-select `+attachmentUploadIntentSelectColumns+` from changed ui`, strings.TrimSpace(input.CompanyID),
+select `+attachmentUploadJobSelectColumns+` from changed ui`, strings.TrimSpace(input.CompanyID),
 		cleanUUIDText(input.ActorUserID), cleanUUIDText(input.UploadIntentID), now))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.AttachmentUploadIntent{}, ErrNotFound
@@ -437,10 +437,10 @@ func (r *PostgresRepo) ListExpiredAttachmentUploadIntents(now time.Time, limit i
 	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
-	rows, err := r.db.QueryContext(context.Background(), `select `+attachmentUploadIntentSelectColumns+`
-from attachment_upload_intents ui
+	rows, err := r.db.QueryContext(context.Background(), `select `+attachmentUploadJobSelectColumns+`
+from attachment_upload_jobs ui
 where (ui.expires_timestamp <= $1 and ui.status in ('pending','uploading','completing')) or ui.status='failed'
-order by ui.expires_timestamp, ui.upload_intent_id limit $2`, now, limit)
+order by ui.expires_timestamp, ui.upload_job_id limit $2`, now, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -459,12 +459,12 @@ order by ui.expires_timestamp, ui.upload_intent_id limit $2`, now, limit)
 func (r *PostgresRepo) ExpireAttachmentUploadIntent(uploadIntentID string, now time.Time) (domain.AttachmentUploadIntent, error) {
 	intent, err := scanAttachmentUploadIntent(r.db.QueryRowContext(context.Background(), `
 with changed as (
- update attachment_upload_intents set status='expired', updated_timestamp=$2, version=version+1
- where upload_intent_id=$1::uuid and status in ('pending','uploading','completing','failed') returning *
+ update attachment_upload_jobs set status='expired', updated_timestamp=$2, version=version+1
+ where upload_job_id=$1::uuid and status in ('pending','uploading','completing','failed') returning *
 )
-select `+attachmentUploadIntentSelectColumns+` from changed ui`, cleanUUIDText(uploadIntentID), normalizedUploadNow(now)))
+select `+attachmentUploadJobSelectColumns+` from changed ui`, cleanUUIDText(uploadIntentID), normalizedUploadNow(now)))
 	if errors.Is(err, sql.ErrNoRows) {
-		intent, err = scanAttachmentUploadIntent(r.db.QueryRowContext(context.Background(), `select `+attachmentUploadIntentSelectColumns+` from attachment_upload_intents ui where ui.upload_intent_id=$1::uuid`, cleanUUIDText(uploadIntentID)))
+		intent, err = scanAttachmentUploadIntent(r.db.QueryRowContext(context.Background(), `select `+attachmentUploadJobSelectColumns+` from attachment_upload_jobs ui where ui.upload_job_id=$1::uuid`, cleanUUIDText(uploadIntentID)))
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.AttachmentUploadIntent{}, ErrNotFound
@@ -490,10 +490,10 @@ func (r *PostgresRepo) transitionAttachmentUpload(input AttachmentUploadTransiti
 	if status != intent.Status || failureCode != intent.FailureCode {
 		intent, err = scanAttachmentUploadIntent(tx.QueryRowContext(ctx, `
 with changed as (
- update attachment_upload_intents set status=$2, failure_code=$3, updated_timestamp=$4, version=version+1
- where upload_intent_id=$1::uuid returning *
+ update attachment_upload_jobs set status=$2, failure_code=$3, updated_timestamp=$4, version=version+1
+ where upload_job_id=$1::uuid returning *
 )
-select `+attachmentUploadIntentSelectColumns+` from changed ui`, intent.UploadIntentID, status, failureCode, normalizedUploadNow(input.Now)))
+select `+attachmentUploadJobSelectColumns+` from changed ui`, intent.UploadIntentID, status, failureCode, normalizedUploadNow(input.Now)))
 		if err != nil {
 			return domain.AttachmentUploadIntent{}, err
 		}
@@ -505,8 +505,8 @@ select `+attachmentUploadIntentSelectColumns+` from changed ui`, intent.UploadIn
 }
 
 func lockAttachmentUploadIntent(ctx context.Context, tx *sql.Tx, companyID, actorUserID, uploadIntentID string, now time.Time) (domain.AttachmentUploadIntent, error) {
-	intent, err := scanAttachmentUploadIntent(tx.QueryRowContext(ctx, `select `+attachmentUploadIntentSelectColumns+`
-from attachment_upload_intents ui where ui.company_id=$1::uuid and ui.actor_user_id=$2::uuid and ui.upload_intent_id=$3::uuid for update`,
+	intent, err := scanAttachmentUploadIntent(tx.QueryRowContext(ctx, `select `+attachmentUploadJobSelectColumns+`
+from attachment_upload_jobs ui where ui.company_id=$1::uuid and ui.actor_user_id=$2::uuid and ui.upload_job_id=$3::uuid for update`,
 		strings.TrimSpace(companyID), cleanUUIDText(actorUserID), cleanUUIDText(uploadIntentID)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.AttachmentUploadIntent{}, ErrNotFound
@@ -522,7 +522,7 @@ from attachment_upload_intents ui where ui.company_id=$1::uuid and ui.actor_user
 }
 
 func listAttachmentUploadPartsTx(ctx context.Context, tx *sql.Tx, uploadIntentID string) ([]domain.AttachmentUploadPart, error) {
-	rows, err := tx.QueryContext(ctx, `select `+attachmentUploadPartSelectColumns+` from attachment_upload_parts p where p.upload_intent_id=$1::uuid order by p.part_number`, uploadIntentID)
+	rows, err := tx.QueryContext(ctx, `select `+attachmentUploadPartSelectColumns+` from attachment_upload_parts p where p.upload_job_id=$1::uuid order by p.part_number`, uploadIntentID)
 	if err != nil {
 		return nil, err
 	}

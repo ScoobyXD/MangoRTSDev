@@ -1177,7 +1177,7 @@ before Step 2 is implemented and proven.
 
 - `scripts/attachment_step1_preflight.sql` is the single DBeaver-compatible, repeatable-read, read-only inventory and READY/STOP report. It exposes only safe relationship and attachment identities, counts, and storage-key fingerprints.
 - `scripts/attachment_step1_create_copy_reconcile.sql` is the separately operated transaction for additive creation, exact checkpoint verification, stable-ID copy, retention of current-backend final-only relationships whose exact owner and attachment remain live, exact evidence-ledger deletion of the 213 broken relationships, removal of already-deleted and exact missing-owner relationships as a separate cleanup class, complete zero-owner marking, and recount.
-- `backend/db/migrations/20260804_attachment_step1_expansion.sql` and `backend/db/schema.sql` define the additive Step 1 destinations and pending-delete link guards without changing the deployed multipart-parts contract.
+- `backend/db/migrations/20260804_attachment_step1_expansion.sql` remains the additive Step 1 destination and pending-link guard without changing the deployed multipart-parts contract. The canonical `backend/db/schema.sql` now represents a clean Step 2 database with `attachment_upload_parts.upload_job_id` referencing `attachment_upload_jobs`; the operator boundary remains the only live-database change.
 - `backend/cmd/mango-attachment-step1-cleanup` is dry-run by default and requires company scope plus `-apply -confirm DELETE_ATTACHMENT_STEP1_ORPHANS` before it deletes S3 objects or finalizes Postgres cleanup. It uses the normal AWS provider/SSO configuration and preserves database keys after partial failure for safe retry.
 - `scripts/attachment_step2_database_cutover.sql` is not a Step 1 operation. At the later Step 2 maintenance, pause writers and rerun the exact Step 1 preflight/reconcile/cleanup sequence first so any intervening legacy writes are captured; the boundary then performs the `attachment_upload_parts.upload_intent_id` to `upload_job_id` rename and foreign-key swap immediately before Step 2 deploys the final backend.
 - `backend/internal/store/attachment_step1_migration_test.go` provides static phase checks and an opt-in disposable PostgreSQL 18 first-run/rerun/drift-rollback test. `backend/internal/attachmentcleanup/service_test.go` covers cleanup with mocks only. No live database or S3 operation is part of these tests.
@@ -1234,6 +1234,17 @@ Retire `resource_attachments`, `attachment_upload_intents`, `attachment_variants
 Exit check: every retained attachment has at least one valid relationship; every relationship resolves to a live attachment and a valid owner; no unexpected upload is active; every retained S3 key is unique in its intended role; and every approved deletion either completed in S3 and Postgres or remains explicitly marked for retry.
 
 #### Step 2: backend cutover
+
+Repository implementation status: Step 2 is implemented and tested in the worker repository but is not deployed. Application SQL uses only the five final tables; the old tables remain untouched for the Step 3 snapshot/retirement decision. The implementation also routes supported owner deletions through one last-relationship check, runs retryable S3-before-Postgres cleanup, and promotes shared-draft attachments to the exact persisted `email_message` before retiring the draft links.
+
+The required deployment order is intentionally short and coordinated:
+
+1. Pause all attachment, email, chat, and editor writers.
+2. Run the read-only Step 1 preflight, then the approved Step 1 create/copy/reconcile final delta and guarded cleanup until no pending work remains; rerun and preserve the clean preflight report.
+3. Keep writers paused and run `scripts/attachment_step2_database_cutover.sql` in DBeaver. Continue only when it returns `READY_FOR_IMMEDIATE_STEP2_BACKEND_DEPLOY`.
+4. Immediately deploy the matching Step 2 backend, verify health plus final-table read/upload-resume smoke checks, and only then resume writers. The legacy backend is incompatible after the multipart column/FK boundary.
+5. Do not drop any legacy attachment or migration table. Reconciliation, snapshot, and table retirement remain Step 3.
+
 
 - Change all attachment reads, writes, authorization, upload, multipart, preview, email-send, chat, editor, and deletion code to use only the five final tables.
 - Remove the `email_send` preview constant and path. Sent-email access comes from the `email_message` relationship; outbound size handling remains the separate send-streaming rule.

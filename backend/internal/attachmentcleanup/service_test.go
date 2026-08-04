@@ -211,25 +211,17 @@ func TestCleanupDryRunDoesNotDeleteOrFinalize(t *testing.T) {
 	}
 }
 
-func TestEmailSendSharedWithOriginalRemovesOnlyPreviewRow(t *testing.T) {
-	item := WorkItem{
-		Kind:         WorkEmailSendPreview,
-		CompanyID:    "11111111-1111-1111-1111-111111111111",
-		AttachmentID: "22222222-2222-2222-2222-222222222222",
-		PreviewType:  "email_send",
-		Objects:      []ObjectRef{{Bucket: "bucket", Key: "same-as-original"}},
-	}
+func TestCleanupRejectsWorkFromAnotherCompany(t *testing.T) {
+	item := orphanWork(ObjectRef{Bucket: "bucket", Key: "original"})
+	item.CompanyID = "33333333-3333-3333-3333-333333333333"
 	repository := &fakeRepository{
 		work:     []WorkItem{item},
 		eligible: map[string]bool{item.AttachmentID: true},
-		shared: map[string]bool{
-			item.AttachmentID + "\x1fbucket\x1fsame-as-original": true,
-		},
+		shared:   map[string]bool{},
 	}
 	storage := &fakeStorage{bucket: "bucket", outcomes: map[string][]error{}}
 	result := runApply(t, repository, storage)
-	if len(storage.calls) != 0 || !result.Items[0].Finalized ||
-		result.Items[0].ProtectedObjects != 1 {
-		t.Fatalf("result=%+v calls=%v", result, storage.calls)
+	if result.FailureCount() != 1 || len(storage.calls) != 0 || len(repository.finalized) != 0 {
+		t.Fatalf("result=%+v calls=%v finalized=%v", result, storage.calls, repository.finalized)
 	}
 }

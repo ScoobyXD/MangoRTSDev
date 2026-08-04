@@ -710,6 +710,11 @@ select folder_id::text from subtree`, companyID, folderID)
 		if len(ids) == 0 {
 			return ErrNotFound
 		}
+		for _, id := range ids {
+			if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, "shared_inbox_folder", id); err != nil {
+				return err
+			}
+		}
 		idList := strings.Join(ids, ",")
 		sharedInboxIDs := make([]string, 0)
 		companyEmailConnectionIDs := make([]string, 0)
@@ -777,6 +782,11 @@ where company_id=$1::uuid
 		}
 		if deleteCompanyConnections {
 			if len(sharedInboxIDs) > 0 {
+				for _, inboxID := range sharedInboxIDs {
+					if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, "shared_inbox", inboxID); err != nil {
+						return err
+					}
+				}
 				sharedInboxIDList := strings.Join(sharedInboxIDs, ",")
 				if _, err := tx.ExecContext(ctx, `
 delete from resource_permissions
@@ -866,6 +876,11 @@ where company_id=$1::uuid
 		}
 	}
 	sharedInboxIDList := strings.Join(sharedInboxIDs, ",")
+	for _, inboxID := range sharedInboxIDs {
+		if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, "shared_inbox", inboxID); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `
 delete from resource_permissions
 where company_id=$1::uuid

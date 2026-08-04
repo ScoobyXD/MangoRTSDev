@@ -593,10 +593,8 @@ create index if not exists idx_attachment_upload_intents_resource
 create index if not exists idx_attachment_upload_intents_actor
   on attachment_upload_intents(company_id, actor_user_id, updated_timestamp desc);
 
--- Attachment Step 1 keeps the deployed backend on attachment_upload_intents
--- while copying the same durable history into the permanent upload-job name.
--- attachment_upload_parts keeps upload_intent_id until the short, separately
--- operated boundary immediately before the Step 2 backend deployment.
+-- The legacy upload-intent table remains through Step 3 as rollback evidence.
+-- New application work uses attachment_upload_jobs only.
 create table if not exists attachment_upload_jobs (
   upload_job_id uuid primary key,
   company_id uuid not null,
@@ -696,7 +694,7 @@ create index if not exists idx_attachment_upload_jobs_actor
   on attachment_upload_jobs(company_id, actor_user_id, updated_timestamp desc);
 
 create table if not exists attachment_upload_parts (
-  upload_intent_id uuid not null,
+  upload_job_id uuid not null,
   part_number integer not null,
   expected_size_bytes bigint not null,
   observed_size_bytes bigint not null default 0,
@@ -714,8 +712,8 @@ create table if not exists attachment_upload_parts (
   constraint attachment_upload_parts_algorithm_chk check (checksum_algorithm = 'SHA256'),
   constraint attachment_upload_parts_checksum_nonblank_chk check (btrim(expected_checksum) <> ''),
   constraint attachment_upload_parts_signing_attempt_chk check (signing_attempt_count >= 0),
-  primary key (upload_intent_id, part_number),
-  foreign key (upload_intent_id) references attachment_upload_intents(upload_intent_id) on delete cascade
+  primary key (upload_job_id, part_number),
+  foreign key (upload_job_id) references attachment_upload_jobs(upload_job_id) on delete cascade
 );
 
 create table if not exists attachment_variants (

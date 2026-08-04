@@ -847,7 +847,16 @@ func (r *PostgresRepo) DeleteCompanyExplorerV2Folder(companyID, entityID string)
 	if err := protectCompanyExplorerDefaultFolderMutation(companyID, entityID); err != nil {
 		return err
 	}
-	result, err := r.db.ExecContext(context.Background(), `
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, "company_explorer_folder", entityID); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `
 delete from company_explorer_folders
 where company_id=$1::uuid
   and folder_id=$2::uuid`, companyID, entityID)
@@ -859,9 +868,8 @@ where company_id=$1::uuid
 	} else if affected == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit()
 }
-
 func (r *PostgresRepo) GetCompanyExplorerV2EntityWithParent(companyID, entityID, parentEntityID, edgeID, permissionUserID string) (CompanyExplorerV2Row, error) {
 	row, err := r.GetCompanyExplorerV2Entity(companyID, entityID, permissionUserID)
 	if err != nil {
