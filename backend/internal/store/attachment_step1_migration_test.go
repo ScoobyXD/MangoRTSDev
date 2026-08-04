@@ -62,6 +62,8 @@ func TestAttachmentStep1ArtifactsArePhasedAndOperatorGated(t *testing.T) {
 		"approved_broken_relationship", "other_zero_owner_attachment",
 		"unsafe_cross_attachment_reuse", "legacy_preview_type", "upload_status",
 		"expected_final", "approved_broken_identities", "=213",
+		"approved_relationships_already_absent", "missing_owner_relationships_to_delete",
+		"target_cleanup_identity_conflicts",
 	} {
 		if !strings.Contains(preflight, required) {
 			t.Errorf("preflight missing %q", required)
@@ -79,6 +81,8 @@ func TestAttachmentStep1ArtifactsArePhasedAndOperatorGated(t *testing.T) {
 		"unexpected unfinished attachment upload job",
 		"md5(to_jsonb(source)::text)=approved.source_checksum",
 		"set deleted_timestamp=coalesce", "ready_for_guarded_s3_cleanup",
+		"attachment_step1_relationship_cleanup",
+		"cleanup identity conflicts with an existing final relationship",
 	} {
 		if !strings.Contains(step1, required) {
 			t.Errorf("Step 1 write entry point missing %q", required)
@@ -181,7 +185,7 @@ select current_setting('server_version_num')::integer,current_database()`).
 	if _, err := db.Exec(string(preflightRaw)); err != nil {
 		t.Fatalf("first preflight: %v", err)
 	}
-	assertAttachmentStep1Counts(t, db, 216, 3, 0, 0, 1)
+	assertAttachmentStep1Counts(t, db, 219, 5, 0, 0, 1)
 
 	stepRaw, err := os.ReadFile(filepath.Join("..", "..", "..", "scripts", "attachment_step1_create_copy_reconcile.sql"))
 	if err != nil {
@@ -190,12 +194,20 @@ select current_setting('server_version_num')::integer,current_database()`).
 	if _, err := db.Exec(string(stepRaw)); err != nil {
 		t.Fatalf("first Step 1 run: %v", err)
 	}
-	assertAttachmentStep1Counts(t, db, 3, 3, 1, 2, 1)
+	assertAttachmentStep1Counts(t, db, 4, 4, 1, 2, 1)
+	var pendingCleanup int
+	if err := db.QueryRow("select count(*) from attachments where deleted_timestamp is not null").
+		Scan(&pendingCleanup); err != nil {
+		t.Fatal(err)
+	}
+	if pendingCleanup != 214 {
+		t.Fatalf("pending cleanup attachments=%d, want 214", pendingCleanup)
+	}
 
 	if _, err := db.Exec(string(stepRaw)); err != nil {
 		t.Fatalf("identical Step 1 rerun: %v", err)
 	}
-	assertAttachmentStep1Counts(t, db, 3, 3, 1, 2, 1)
+	assertAttachmentStep1Counts(t, db, 4, 4, 1, 2, 1)
 
 	if _, err := db.Exec(`
 delete from attachment_previews
@@ -345,6 +357,15 @@ values
   (md5('attachment-company')::uuid,md5('node-a')::uuid,'Node A',now()),
   (md5('attachment-company')::uuid,md5('node-b')::uuid,'Node B',now());
 
+insert into email_drafts(
+  company_id,draft_id,email_account_type,personal_user_id,
+  personal_account_email,created_by_user_id,updated_by_user_id
+) values(
+  md5('attachment-company')::uuid,'draft-live','personal_email_account',
+  md5('attachment-user')::uuid,'test@example.com',
+  md5('attachment-user')::uuid,md5('attachment-user')::uuid
+);
+
 insert into attachments(
   attachment_id,company_id,uploaded_by_user_id,original_filename,mime_type,
   byte_size,sha256,storage_bucket,storage_key,source_kind
@@ -362,7 +383,10 @@ insert into attachments(
    'test-bucket','retained/a','user_upload'),
   (md5('retained-b')::uuid,md5('attachment-company')::uuid,
    md5('attachment-user')::uuid,'b.bin','application/octet-stream',67108865,
-   repeat('c',64),'test-bucket','retained/b','user_upload');
+   repeat('c',64),'test-bucket','retained/b','user_upload'),
+  (md5('missing-owner-file')::uuid,md5('attachment-company')::uuid,
+   md5('attachment-user')::uuid,'missing.bin','application/octet-stream',1,
+   repeat('f',64),'test-bucket','missing/owner','user_upload');
 
 insert into resource_attachments(
   resource_attachment_id,company_id,resource_type,resource_id,attachment_id,
@@ -385,7 +409,26 @@ insert into resource_attachments(
    md5('attachment-user')::uuid),
   (md5('valid-rel-b')::uuid,md5('attachment-company')::uuid,'node',
    md5('node-a')::uuid::text,md5('retained-b')::uuid,'file_attachment',
+   md5('attachment-user')::uuid),
+  (md5('missing-owner-rel')::uuid,md5('attachment-company')::uuid,'node',
+   md5('missing-node')::uuid::text,md5('missing-owner-file')::uuid,
+   'file_attachment',md5('attachment-user')::uuid),
+  (md5('deleted-rel')::uuid,md5('attachment-company')::uuid,'node',
+   md5('node-a')::uuid::text,md5('retained-a')::uuid,'migrated_inline_image',
    md5('attachment-user')::uuid);
+update resource_attachments set deleted_timestamp=now()
+where resource_attachment_id=md5('deleted-rel')::uuid;
+
+insert into resource_attachments(
+  resource_attachment_id,company_id,resource_type,resource_id,attachment_id,
+  information_id,message_id,editor_surface,relationship_kind,created_by_user_id
+) values(
+  md5('legacy-email-rel')::uuid,md5('attachment-company')::uuid,'email_draft',
+  'personal:'||md5('attachment-user')::uuid::text||
+    ':test%40example.com:draft-live',md5('retained-a')::uuid,
+  md5('legacy-email-origin')::uuid,'legacy-provider-message','legacy-editor',
+  'email_attachment',md5('attachment-user')::uuid
+);
 
 insert into attachment_relationships
 select resource_attachment_id,company_id,resource_type,resource_id,attachment_id,
@@ -393,8 +436,19 @@ select resource_attachment_id,company_id,resource_type,resource_id,attachment_id
        created_by_user_id,created_timestamp,deleted_timestamp
 from resource_attachments
 where resource_attachment_id in(
-  md5('valid-rel-a1')::uuid,md5('valid-rel-a2')::uuid,md5('valid-rel-b')::uuid
+  md5('valid-rel-a1')::uuid,md5('valid-rel-a2')::uuid,md5('valid-rel-b')::uuid,
+  md5('deleted-rel')::uuid
 );
+
+insert into attachment_relationships(
+  attachment_relationship_id,company_id,resource_type,resource_id,attachment_id,
+  information_id,message_id,editor_surface,relationship_kind,created_by_user_id,
+  created_timestamp,deleted_timestamp
+)
+select resource_attachment_id,company_id,'email_draft','draft-live',attachment_id,
+       null,'','',relationship_kind,created_by_user_id,created_timestamp,null
+from resource_attachments
+where resource_attachment_id=md5('legacy-email-rel')::uuid;
 
 insert into v3_email_migration_runs(
   run_id,mapping_version,status,summary,completed_timestamp
@@ -407,8 +461,8 @@ select md5('email-run')::uuid,'resource_attachments',r.company_id,
        r.resource_attachment_id::text,'attachments',r.attachment_id::text,
        'retained_orphan_evidence',md5(to_jsonb(r)::text)
 from resource_attachments r
-where r.resource_attachment_id not in(
-  md5('valid-rel-a1')::uuid,md5('valid-rel-a2')::uuid,md5('valid-rel-b')::uuid
+where r.resource_attachment_id in(
+  select md5('broken-rel-'||g)::uuid from generate_series(1,213) g
 );
 
 insert into attachment_upload_intents(

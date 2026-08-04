@@ -177,7 +177,8 @@ candidates as (
 ),
 candidate_counts as (
   select s.resource_attachment_id,s.valid_shape,
-         count(distinct (c.mapped_resource_type,c.mapped_resource_id)) candidate_count
+         count(distinct (c.mapped_resource_type,c.mapped_resource_id))
+           filter(where c.resource_attachment_id is not null) candidate_count
   from shapes s
   left join candidates c on c.resource_attachment_id=s.resource_attachment_id
   group by s.resource_attachment_id,s.valid_shape
@@ -192,7 +193,16 @@ unique_candidates as (
 desired as (
   select s.resource_attachment_id attachment_relationship_id,s.company_id,
          c.mapped_resource_type resource_type,c.mapped_resource_id resource_id,
-         s.attachment_id,s.information_id,s.message_id,s.editor_surface,
+         s.attachment_id,
+         case when c.mapped_resource_type in(
+           'email_message','email_draft','email_signature'
+         ) then null else s.information_id end information_id,
+         case when c.mapped_resource_type in(
+           'email_message','email_draft','email_signature'
+         ) then '' else s.message_id end message_id,
+         case when c.mapped_resource_type in(
+           'email_message','email_draft','email_signature'
+         ) then '' else s.editor_surface end editor_surface,
          s.relationship_kind,s.created_by_user_id,s.created_timestamp,
          s.deleted_timestamp
   from shapes s
@@ -221,12 +231,18 @@ broken_live as (
 evidence_conflicts as (
   select e.resource_attachment_id
   from approved_evidence e
-  join candidate_counts cc on cc.resource_attachment_id=e.resource_attachment_id
-  where not (cc.valid_shape and cc.candidate_count=0)
+  join resource_attachments source
+    on source.company_id=e.company_id
+    and source.resource_attachment_id=e.resource_attachment_id
+  left join broken_live broken
+    on broken.company_id=e.company_id
+    and broken.resource_attachment_id=e.resource_attachment_id
+    and broken.attachment_id=e.attachment_id
+    and broken.source_checksum=e.source_checksum
+  where broken.resource_attachment_id is null
 ),
 owner_checks as (
   select d.*,case
-    when d.deleted_timestamp is not null then true
     when d.resource_type='node' then pg_input_is_valid(d.resource_id,'uuid')
       and exists(select 1 from nodes n where n.company_id=d.company_id
         and n.node_id=case when pg_input_is_valid(d.resource_id,'uuid')
@@ -287,9 +303,30 @@ owner_checks as (
     else false end owner_exists
   from desired d
 ),
-valid_active_relationships as (
+retained_desired as (
   select * from owner_checks
   where deleted_timestamp is null and owner_exists
+),
+relationship_cleanup as (
+  select *,case when deleted_timestamp is not null
+                  then 'deleted_relationship'
+                else 'missing_owner' end cleanup_reason
+  from owner_checks
+  where deleted_timestamp is not null or not owner_exists
+),
+unapproved_broken as (
+  select broken.*
+  from broken_live broken
+  where not exists(
+    select 1 from approved_evidence evidence
+    where evidence.company_id=broken.company_id
+      and evidence.resource_attachment_id=broken.resource_attachment_id
+      and evidence.attachment_id=broken.attachment_id
+      and evidence.source_checksum=broken.source_checksum
+  )
+),
+valid_active_relationships as (
+  select * from retained_desired
 ),
 relationship_counts as (
   select a.company_id,a.attachment_id,
@@ -311,7 +348,8 @@ orphan_attachments as (
 target_conflicts as (
   select target.attachment_relationship_id
   from attachment_relationships target
-  join desired d on d.attachment_relationship_id=target.attachment_relationship_id
+  join retained_desired d
+    on d.attachment_relationship_id=target.attachment_relationship_id
   where row(target.company_id,target.resource_type,target.resource_id,
             target.attachment_id,target.information_id,target.message_id,
             target.editor_surface,target.relationship_kind,target.created_by_user_id,
@@ -321,11 +359,32 @@ target_conflicts as (
             d.information_id,d.message_id,d.editor_surface,d.relationship_kind,
             d.created_by_user_id,d.created_timestamp,d.deleted_timestamp)
 ),
+cleanup_identities as (
+  select company_id,attachment_relationship_id,attachment_id
+  from relationship_cleanup
+  union
+  select company_id,resource_attachment_id,attachment_id
+  from approved_evidence
+),
+target_cleanup_conflicts as (
+  select target.attachment_relationship_id
+  from attachment_relationships target
+  join cleanup_identities cleanup
+    on cleanup.attachment_relationship_id=target.attachment_relationship_id
+  where target.company_id is distinct from cleanup.company_id
+     or target.attachment_id is distinct from cleanup.attachment_id
+),
 target_extras as (
   select target.attachment_relationship_id
   from attachment_relationships target
-  left join desired d on d.attachment_relationship_id=target.attachment_relationship_id
+  left join retained_desired d
+    on d.attachment_relationship_id=target.attachment_relationship_id
+  left join cleanup_identities cleanup
+    on cleanup.attachment_relationship_id=target.attachment_relationship_id
+    and cleanup.company_id=target.company_id
+    and cleanup.attachment_id=target.attachment_id
   where d.attachment_relationship_id is null
+    and cleanup.attachment_relationship_id is null
 ),
 storage_references as (
   select a.company_id,a.attachment_id,'original'::text storage_role,
@@ -363,20 +422,37 @@ metrics as (
   union all select 'legacy_relationship_state','deleted',count(*) from resource_attachments where deleted_timestamp is not null
   union all select 'final_relationship_state','active',count(*) from attachment_relationships where deleted_timestamp is null
   union all select 'final_relationship_state','deleted',count(*) from attachment_relationships where deleted_timestamp is not null
-  union all select 'classification','legacy_relationships_resolved',count(*) from desired
-  union all select 'classification','broken_relationships_live',count(*) from broken_live
+  union all select 'classification','legacy_relationships_mapped',count(*) from desired
+  union all select 'classification','retained_relationships',count(*) from retained_desired
+  union all select 'classification','approved_missing_target_rows_present',count(*)
+    from broken_live broken where exists(select 1 from approved_evidence evidence
+      where evidence.company_id=broken.company_id
+        and evidence.resource_attachment_id=broken.resource_attachment_id
+        and evidence.attachment_id=broken.attachment_id
+        and evidence.source_checksum=broken.source_checksum)
+  union all select 'classification','missing_target_rows',count(*) from broken_live
   union all select 'classification','approved_broken_identities',count(*) from approved_evidence
+  union all select 'classification','approved_relationships_already_absent',count(*)
+    from approved_evidence evidence where not exists(
+      select 1 from resource_attachments source
+      where source.company_id=evidence.company_id
+        and source.resource_attachment_id=evidence.resource_attachment_id)
+  union all select 'classification','unapproved_missing_target_rows',count(*) from unapproved_broken
   union all select 'classification','malformed_or_ambiguous_relationships',count(*)
     from candidate_counts where not valid_shape or candidate_count>1
-  union all select 'classification','invalid_active_final_owners',count(*)
-    from owner_checks where deleted_timestamp is null and not owner_exists
+  union all select 'cleanup','missing_owner_relationships_to_delete',count(*)
+    from relationship_cleanup where cleanup_reason='missing_owner'
+  union all select 'cleanup','deleted_relationships_to_delete',count(*)
+    from relationship_cleanup where cleanup_reason='deleted_relationship'
   union all select 'classification','target_conflicts',count(*) from target_conflicts
   union all select 'classification','target_extras',count(*) from target_extras
+  union all select 'classification','target_cleanup_identity_conflicts',count(*)
+    from target_cleanup_conflicts
   union all select 'classification','evidence_conflicts',count(*) from evidence_conflicts
   union all select 'relationship_cardinality','zero',count(*) from relationship_counts where active_relationship_count=0
   union all select 'relationship_cardinality','one',count(*) from relationship_counts where active_relationship_count=1
   union all select 'relationship_cardinality','many',count(*) from relationship_counts where active_relationship_count>1
-  union all select 'expected_final','attachment_relationships',count(*) from desired
+  union all select 'expected_final','attachment_relationships',count(*) from retained_desired
   union all select 'expected_final','attachment_upload_jobs',count(*) from attachment_upload_intents
   union all select 'expected_final','attachment_previews',count(*) from attachment_variants
     where variant_type in('display','thumbnail')
@@ -416,19 +492,13 @@ preview_metrics as (
 readiness as (
   select case when
     (select count(*) from candidate_counts where not valid_shape or candidate_count>1)=0
-    and (select count(*) from owner_checks
-         where deleted_timestamp is null and not owner_exists)=0
+    and (select count(*) from unapproved_broken)=0
     and (select count(*) from target_conflicts)=0
     and (select count(*) from target_extras)=0
+    and (select count(*) from target_cleanup_conflicts)=0
     and (select count(*) from evidence_conflicts)=0
-    and not exists(
-      select 1 from broken_live b
-      where not exists(select 1 from approved_evidence e
-        where e.company_id=b.company_id
-          and e.resource_attachment_id=b.resource_attachment_id
-          and e.attachment_id=b.attachment_id
-          and e.source_checksum=b.source_checksum)
-    )
+    and (select count(*) from desired)+(select count(*) from broken_live)
+        =(select count(*) from resource_attachments)
     and (
       (not exists(select 1 from v3_email_migration_runs)
         and (select count(*) from approved_evidence)=0)
@@ -462,11 +532,36 @@ from preview_metrics m
 union all
 select 'broken_relationship_identity','approved_broken_relationship',
        e.company_id,e.resource_attachment_id,e.attachment_id,
-       case when b.resource_attachment_id is null then 'already_deleted'
-            else b.resource_type||':'||b.relationship_kind end,null
+       case when source.resource_attachment_id is null then 'already_absent'
+            when b.resource_attachment_id is not null
+              then 'ready_to_delete:'||b.resource_type||':'||b.relationship_kind
+            else 'STOP_evidence_changed_or_target_now_resolves' end,null
 from approved_evidence e
+left join resource_attachments source on source.company_id=e.company_id
+  and source.resource_attachment_id=e.resource_attachment_id
 left join broken_live b on b.company_id=e.company_id
   and b.resource_attachment_id=e.resource_attachment_id
+  and b.attachment_id=e.attachment_id
+  and b.source_checksum=e.source_checksum
+union all
+select 'relationship_cleanup_identity',cleanup.cleanup_reason,cleanup.company_id,
+       cleanup.attachment_relationship_id,cleanup.attachment_id,
+       'exact owner is gone or relationship is already deleted',null
+from relationship_cleanup cleanup
+union all
+select 'blocking_relationship_identity','target_extra',target.company_id,
+       target.attachment_relationship_id,target.attachment_id,
+       'final row has no retained legacy source or approved cleanup identity',null
+from target_extras blocker
+join attachment_relationships target
+  on target.attachment_relationship_id=blocker.attachment_relationship_id
+union all
+select 'blocking_relationship_identity','target_conflict',target.company_id,
+       target.attachment_relationship_id,target.attachment_id,
+       'final row differs from the normalized retained source row',null
+from target_conflicts blocker
+join attachment_relationships target
+  on target.attachment_relationship_id=blocker.attachment_relationship_id
 union all
 select 'zero_owner_attachment',o.orphan_class,o.company_id,null,o.attachment_id,
        'no surviving active valid relationship',null
@@ -488,9 +583,11 @@ order by case section
            when 'readiness' then 1
            when 'metric' then 2
            when 'broken_relationship_identity' then 3
-           when 'zero_owner_attachment' then 4
-           when 'reused_storage_key' then 5
-           else 6
+           when 'relationship_cleanup_identity' then 4
+           when 'blocking_relationship_identity' then 5
+           when 'zero_owner_attachment' then 6
+           when 'reused_storage_key' then 7
+           else 8
          end,
          category,company_id,identity_id,attachment_id,detail;
 -- RESULT SET 2: exact current/destination column inventory. Eight current
