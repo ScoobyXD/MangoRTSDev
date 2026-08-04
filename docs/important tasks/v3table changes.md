@@ -2,7 +2,7 @@
 
 A Mango user creates a Node and adds textboxes. Textbox bodies are stored only in `node_textboxes`, and textbox-owned comments and seen markers disappear when their textbox no longer exists. If a comment's author account was deleted, the comment and captured display name remain while its relational user ID becomes null. When an email is downloaded, Mango stores one thread for the exact personal email account or shared email account and stores each message once inside that thread. `email_relationships` connects a selected message to a Node, Project, Logic Gate, or one of their textboxes. Deleting that connection removes only the relationship: normalized email, email draft content, and normalized email attachment links survive independently. Converting an email into a Node is an ordinary workflow: store the email, create the Node, create the relationship, and use normal resource permissions. A resource-shared email draft is stored in `email_drafts` and receives access from the related resource instead of a special collaboration-participant subsystem. No current Node editor content is written to `node_information` or `node_projection_table` after the cutover.
 
-V3 must be released through separate operator-gated phases: create the permanent destinations, copy without deleting legacy sources, reconcile the copy, switch the application, observe a soak period, and retire legacy storage only in a later release.
+V3 must be released through separate operator-gated phases: create the permanent destinations, copy without deleting legacy sources, reconcile the copy, switch the application, observe a soak period, and retire legacy storage only in a later release. The development email data has now passed the create/copy/reconcile checkpoint. The backend still uses the legacy email tables, so application cutover is the next phase and old-table retirement remains later.
 
 # V3 table changes implementation handoff
 
@@ -70,19 +70,20 @@ Rows with valid data and a surviving permanent host are copied. A deleted user l
 
 This completed scoped phase authorizes only the Node textbox chat cutover. It does not authorize the remaining V3 table changes or any legacy-table retirement.
 
-## Current implementation: V3 email expansion and copy SQL prepared
+## Current implementation: V3 email data checkpoint completed; backend cutover next
 
-The repository now contains the additive email schema and operator-controlled copy phase. No repository agent applied it to the development database, no backend reader or writer changed, and no legacy table was changed or removed.
+On 2026-08-04 Jonat ran the email preflight and complete create/copy/reconcile entry point in DBeaver against the development database. This completed the data portion of the email migration. It did not switch a backend reader or writer, and it did not update, delete, or drop a legacy table.
 
 - `scripts/v3_email_step1_count.sql` is the copy-paste, repeatable-read, read-only preflight. On the cleaned development data it reported `READY_TO_COPY`, 74 legacy threads, 509 legacy messages, 256 retained projection rows, 28 exact whole-Node duplicate pairs, 228 final relationship identities, 49 drafts, 9 signatures, 1,347 legacy attachment relationships, 1,134 valid final attachment relationships, 213 proven zero-target orphan links to omit, 223 expected final threads, and 678 expected final messages.
-- `scripts/v3_email_step2_create_copy_verify.sql` is the single operator entry point. It contains the complete plain PostgreSQL SQL inline, so an operator can open and execute the whole file in DBeaver without `psql` backslash commands such as `\\ir` or `\\set`. It creates the final tables, runs the classifier/content/dependent/attachment sections, records a source-to-target ledger, reconciles counts, and commits in one transaction. It never updates or deletes a legacy row. The smaller component files remain only for maintenance and focused tests.
+- `scripts/v3_email_step2_create_copy_verify.sql` is the single operator entry point. It contains the complete plain PostgreSQL SQL inline, so an operator can open and execute the whole file in DBeaver without `psql` backslash commands such as `\\ir` or `\\set`. It created the final tables, ran the classifier/content/dependent/attachment sections, recorded a source-to-target ledger, reconciled counts, and committed in one transaction. It never updated or deleted a legacy row. The smaller component files remain only for maintenance and focused tests.
+- The committed result reported `READY_FOR_BACKEND_CUTOVER_REVIEW` with 223 `email_threads`, 678 `email_messages`, 228 `email_relationships`, 49 `email_drafts`, 9 `email_signatures`, and 1,134 `attachment_relationships`.
 - The 28 disputed Node pairs are now proven: each contains one collaboration row whose old `block_id` equals its own relationship ID and one `created_from_email` row. The self-ID is not a textbox ID. Both rows mean the same whole-Node relationship. Step 2 preserves the collaboration relationship ID, maps the other source row to it as `consolidated_duplicate`, and leaves both legacy rows untouched.
 - One soft-deleted compose draft has a stale source ID and no usable source snapshot. Step 2 keeps that draft but leaves its final source-message foreign key null.
 - The live read-only attachment audit found 213 validly shaped legacy file links whose exact email draft/message/relationship target no longer exists. Step 2 keeps every underlying `attachments` row, leaves every old `resource_attachments` row untouched, records each as `retained_orphan_evidence`, and creates only the 1,134 relationships with exactly one surviving target. Malformed or ambiguous links still stop the transaction.
 - The full Step 2 entry point passed a first run, an identical rerun, and a forced-drift rollback test on a disposable PostgreSQL 18 database. `backend/internal/store/v3_email_migration_test.go` protects the additive and non-destructive contract.
 - `backend/db/schema.sql` can create the final tables on a clean database, while the old tables remain present for the current backend and rollback evidence.
 
-The next email task is backend cutover, not more data cleanup. Immediately before that cutover, pause every email writer, run Step 1 again, run Step 2 for the final delta, review `READY_FOR_BACKEND_CUTOVER_REVIEW`, and only then deploy code that uses the new tables. Old-table retirement remains a later explicit task.
+The next email task is backend cutover, not more data cleanup. The backend implementation can now be built and tested, but it must not be deployed until every email writer is paused, Step 1 is rerun, Step 2 captures any final legacy-write delta, and the operator again reviews `READY_FOR_BACKEND_CUTOVER_REVIEW`. Old-table retirement remains a later explicit task after cutover testing, a database snapshot, and the agreed rollback/soak period.
 
 ## What happened during the failed attempt
 
@@ -851,6 +852,8 @@ bounded locks needed to prevent new legacy writes.
 
 V3 must not create tables, copy data, switch application code, and drop legacy storage in one migration transaction. The repository change may be cohesive, but the live rollout must use separate operator-gated releases. Do not put these phases in an automatic migration chain that immediately applies every phase.
 
+Current email status: the development database has completed the email portions of Phase 1, Phase 2, and Phase 3 with the counts recorded above. Phase 4 backend cutover is next. These phase definitions remain the required rerun and rollout contract.
+
 ### Phase 1: expand the schema
 
 1. Assert the exact expected old schema and constraints. Abort on drift.
@@ -864,9 +867,9 @@ V3 must not create tables, copy data, switch application code, and drop legacy s
 2. Copy normalized `email_threads` and `email_messages` first.
 3. Run only Jonat-approved, count-guarded relationship/recycle cleanup after the read-only preflight reproduces the approved set exactly.
 4. Copy `email_relationships`, preserving existing relationship and Attached-email information IDs.
-5. Copy `email_drafts`, `email_signatures`, required normal resource permissions, and `attachment_relationships` only after every referenced target identity exists.
+5. Copy `email_drafts`, `email_signatures`, and `attachment_relationships` only after every referenced target identity exists. Do not modify `resource_permissions` during the additive copy; verify and repair any required participant-permission parity during the separately gated backend cutover.
 6. Never delete or rewrite a legacy source row except for a separately approved targeted cleanup category.
-7. Every source row must receive exactly one reported disposition: `copied`, `already_copied`, `discarded_approved_cleanup`, `discarded_deleted_host`, or `needs_human_mapping`.
+7. Every source row must receive exactly one reported disposition, including `copied`, `already_copied`, `consolidated_duplicate`, `retained_orphan_evidence`, `discarded_approved_cleanup`, `discarded_deleted_host`, or `needs_human_mapping` as appropriate.
 8. Rerunning the copy after interruption must be safe and must not create duplicate permanent identities.
 9. Split the operator SQL further when dependencies differ: thread/message copy first, approved relationship cleanup and relationship copy second, email draft/signature copy third, and attachment relationship conversion last.
 
@@ -948,14 +951,14 @@ The old `scripts\run_v3_cutover_preflight.ps1` and its TypeScript implementation
 - Inventory, copy, and reconciliation consume the same classified source views or mapping functions. They must not implement the same rules three different ways.
 - Every legacy text payload is classified and validated before any JSON, UUID, integer, timestamp, or array cast.
 - It inventories every later foreign key, uniqueness rule, parent link, personal-email-account/shared-email-account source, resource/textbox owner, email draft reference, attachment identity, seen snapshot, permission mapping, and destructive disposition before a copy phase runs.
-- Every source row receives one explicit disposition: `copied`, `already_copied`, `discarded_approved_cleanup`, `discarded_deleted_host`, or `needs_human_mapping`.
+- Every source row receives one explicit disposition, including `copied`, `already_copied`, `consolidated_duplicate`, `retained_orphan_evidence`, `discarded_approved_cleanup`, `discarded_deleted_host`, or `needs_human_mapping` as appropriate.
 - Output includes category totals, unique source-row totals, overlap counts, full machine-readable results in a named local artifact, and a short console summary. Samples are not a substitute for the full inventory.
 - `blocker`, `cleanup`, and `review` are stable documented meanings. A readiness exit code must be reported plainly rather than buried under a PowerShell exception stack.
 - A zero-blocker result is necessary but not sufficient: the final delta copy and reconciliation must be repeated with writers paused before application cutover.
 
 The scoped chat inspection and reconciliation commands are now `scripts/inspect_v3_node_chat_storage.sql` and `scripts/verify_v3_node_textbox_chats.sql`. They report chat-only results in the SQL client and deliberately do not claim to be the full V3 machine-readable preflight.
 
-The full replacement preflight command and exact machine-readable output location must still be added here when that implementation exists. Until then, there is no approved full V3 cutover command.
+The email portion now has approved Step 1 and Step 2 SQL entry points. A single command covering every remaining non-email V3 table still does not exist and must not be inferred from the email checkpoint.
 
 Fresh-eyes evidence on 2026-08-02 established these identity and visibility rules:
 
@@ -973,7 +976,7 @@ Fresh-eyes evidence on 2026-08-02 established these identity and visibility rule
 
 ## Approved V3 email decisions and current evidence
 
-This section records the 2026-08-03 repository inspection, the read-only development-database inventory, and the product decisions Jonat approved during the follow-up discussion. It is the current handoff for the next email-migration task. Where an older section or older test rule conflicts with this section, this section is the V3 target and the older contract must be updated during implementation.
+This section records the 2026-08-03 repository inspection, the read-only development-database inventory, the completed 2026-08-04 data checkpoint, and the product decisions Jonat approved during the follow-up discussion. It is the current handoff for the backend email-cutover task. Where an older section or older test rule conflicts with this section, this section is the V3 target and the older contract must be updated during implementation.
 
 ### Plain-language model
 
@@ -1034,11 +1037,11 @@ Do not create `email_draft_relationships`, `email_collaboration_participants`, a
 | `node_textbox_chats` | Keep as the completed chat authority. Change only its email-selection contract during email cutover. |
 | `recycle_bin_items` | Jonat approved clearing all development recycle-bin data in a separate exact-count, human-operated cleanup. Do not silently include it in an automatic migration. |
 
-### Read-only development-database snapshot
+### Read-only development-database snapshot before the copy
 
-These counts were observed during the 2026-08-03 read-only investigation. They are evidence, not permanent constants. Step 1 must recount them before any operator uses a write script.
+These counts were observed during the 2026-08-03 read-only investigation. They are pre-copy evidence, not permanent constants. Step 1 must recount them before every Step 2 rerun.
 
-- The final V3 email tables were absent.
+- At the time of this pre-copy snapshot, the final V3 email tables were absent. Step 2 created them successfully on 2026-08-04.
 - `communications_email_threads`: 74 rows. Sixty-one were complete personal-email-account rows, one was a failed/incomplete personal-email-account row, and twelve were complete shared-email-account rows.
 - `communications_email_messages`: 509 rows. All inspected address/folder/attachment JSON values were valid arrays; all bigint message timestamps were Unix seconds; 334 rows had `download_complete = false`.
 - Before cleanup there were 321 active Attached-email projections. The cleaned source now has 256 rows: 250 Node, 6 Project, and 0 Logic Gate.
@@ -1057,6 +1060,20 @@ These counts were observed during the 2026-08-03 read-only investigation. They a
 - `communications_triage_items`: 10 rows.
 - `recycle_bin_items`: 0 rows after the separately approved 97-row development cleanup.
 - All 16 current Node-chat email selections resolved at the time of inspection.
+
+### Completed development data checkpoint
+
+After the cleanup and preflight matched the expected source shape, Jonat ran the self-contained Step 2 transaction. Its final reconciliation reported:
+
+- 223 `email_threads`.
+- 678 `email_messages`.
+- 228 `email_relationships`.
+- 49 `email_drafts`.
+- 9 `email_signatures`.
+- 1,134 `attachment_relationships`.
+- 213 proven orphan legacy attachment links omitted from the final relationship table and retained as audit evidence.
+
+This checkpoint proves the data copy completed. It does not prove the backend cutover completed. Until the backend is deployed against the V3 tables, legacy email writers remain authoritative and can make the copied tables stale.
 
 ### Exact source-of-truth order
 
@@ -1091,7 +1108,7 @@ Do not delete all stored email. The read-only evidence found three narrow cleanu
 
 The cleaned source has 256 projection rows and 228 final relationship identities: `256 - 28 = 228`.
 
-The final preflight expects 223 email-account-scoped threads and 678 messages. Those totals include all 74 existing threads and 509 existing messages, normalized retained projection snapshots, and 33 draft-only source messages across 29 draft-only source threads. It keeps all 49 drafts, all 9 signatures, all 1,347 attachment relationships, and every valid stored file. One soft-deleted compose draft is retained with a null source-message link because its stale source ID has no usable snapshot.
+The final preflight expects 223 email-account-scoped threads and 678 messages. Those totals include all 74 existing threads and 509 existing messages, normalized retained projection snapshots, and 33 draft-only source messages across 29 draft-only source threads. It keeps all 49 drafts, all 9 signatures, and every valid stored file. Of 1,347 legacy attachment links, 1,134 resolve to exactly one live target and were copied; 213 proven zero-target links remain only as legacy/audit evidence. One soft-deleted compose draft is retained with a null source-message link because its stale source ID has no usable snapshot.
 
 ### Access, relationships, chats, and deletion
 
@@ -1188,20 +1205,20 @@ Use one human-operated SQL entry point composed of small deterministic subphases
 2. Create final tables, constraints, indexes, triggers, and the renamed support-table destinations. Do not switch application code.
 3. Copy existing normalized threads/messages, then normalize the retained one-account legacy snapshots in deterministic company/account/thread/message batches.
 4. Recount and reconcile thread/message IDs, content fields, thread membership, order, source account, and completeness before creating dependents.
-5. Copy the 228 retained relationship identities and repair the one expected normal permission exception only if the preflight still proves it.
+5. Copy the 228 retained relationship identities. Normal-permission parity and retirement of the collaboration-participant access path belong to the separately gated backend cutover; the additive data copy does not change `resource_permissions`.
 6. Copy every email draft and signature, preserving IDs, soft-delete state, source/sent-message links, send-safety state, and exact email-account scope.
-7. Convert `resource_attachments` to `attachment_relationships` after every referenced message, email draft, signature, chat, and ordinary resource identity exists.
+7. Convert `resource_attachments` to `attachment_relationships` after every referenced message, email draft, signature, chat, and ordinary resource identity exists. Copy the 1,134 exact live targets and record the 213 zero-target legacy links as retained orphan evidence without inventing a final owner.
 8. Copy/reconcile download jobs and other references only after their parent IDs exist.
 
 Each deterministic batch uses stable ordering and upsert/conflict checks that accept an exact prior copy but reject different data under the same ID. The ledger records source identity, target identity, disposition, source fingerprint, batch, and completion time. A process crash leaves completed batches reusable and incomplete work rerunnable. No step deletes preserved legacy rollback sources.
 
-Exit check: source-versus-target counts and fingerprints reconcile; every source row has one disposition; all foreign keys and uniqueness rules pass; all expected email drafts, signatures, files, relationships, chat selections, permissions, and jobs resolve; and no `needs_human_mapping` row remains outside a Jonat-approved disposition.
+Exit check: source-versus-target counts and fingerprints reconcile; every copied or intentionally omitted source row has one disposition; all foreign keys and uniqueness rules pass; all expected email drafts, signatures, files, relationships, and jobs resolve; and no `needs_human_mapping` row remains outside a Jonat-approved disposition. Chat-selection conversion and permission-path retirement are checked during backend cutover because Step 2 does not switch or rewrite them.
 
 Rollback: before application cutover, rollback means stop using the new tables and leave old readers/writers unchanged. Within a subphase, an assertion or mismatch rolls back that subphase. Never drop the old tables in Step 2.
 
 #### Step 3: backend cutover after the data checkpoint
 
-Entry check: Step 2 reconciliation has passed from a final delta run with all database writers paused.
+Entry check: the first Step 2 reconciliation has passed. Immediately before deployment, Step 2 must pass again as a final delta run with all database writers paused.
 
 - Pause API workers, download workers, archive workers, webhook consumers, and any other email writers for the shortest practical maintenance window.
 - Rerun final delta copy and reconciliation.
@@ -1223,6 +1240,6 @@ Core backend HTTP/provider paths: `backend/internal/http/communications_handlers
 
 Core frontend paths: `frontend/src/modules/communications/communicationsApi.ts`, `frontend/src/modules/communications/emailThreadMessages.ts`, `frontend/src/modules/attachments/attachmentApi.ts`, `frontend/src/modules/editor/editorEmailMailboxScope.ts`, `frontend/src/modules/editor/editorProjection.ts`, `frontend/src/modules/editor/NodeWorkspaceSurface.tsx`, `frontend/src/pages/home/homeCommands.ts`, `frontend/src/pages/home/homeMailDrafts.ts`, `frontend/src/pages/home/homeMailboxRealtime.ts`, `frontend/src/pages/home/emailCollaborationChat.ts`, `frontend/src/pages/home/HomeMailWorkspace.tsx`, and `frontend/src/pages/home/HomePage.tsx`.
 
-### Next future implementation task
+### Next implementation task
 
-Implement the backend cutover to the final email tables only after an operator reruns the read-only preflight and create/copy/reconcile entry point with all email writers paused. That task must remove request-time draft DDL, switch all readers/writers and attachment authorization to the final contracts, update chat selections to internal message IDs, run the complete smoke-test list, and keep every old table unchanged for rollback. Old-table retirement is a separate later decision.
+Implement the backend cutover to the final email tables. The code work may begin from the completed development data checkpoint, but deployment must wait for an operator to pause all email writers and rerun the read-only preflight plus create/copy/reconcile entry point for the final delta. The backend task must remove request-time draft DDL, switch every email reader and writer plus attachment authorization to the final contracts, update chat selections to internal message IDs, replace special collaboration permission/fan-out paths with normal resource permission behavior, run the complete smoke-test list, and keep every old table unchanged for rollback. After successful cutover testing, Jonat takes a database snapshot. Old-table retirement is a separate later decision.
