@@ -2,7 +2,9 @@
 
 A Mango user creates a Node and adds textboxes. Textbox bodies are stored only in `node_textboxes`, and textbox-owned comments and seen markers disappear when their textbox no longer exists. If a comment's author account was deleted, the comment and captured display name remain while its relational user ID becomes null. When an email is downloaded, Mango stores one thread for the exact personal email account or shared email account and stores each message once inside that thread. `email_relationships` connects a selected message to a Node, Project, Logic Gate, or one of their textboxes. Deleting that connection removes only the relationship: normalized email, email draft content, and normalized email attachment links survive independently. Converting an email into a Node is an ordinary workflow: store the email, create the Node, create the relationship, and use normal resource permissions. A resource-shared email draft is stored in `email_drafts` and receives access from the related resource instead of a special collaboration-participant subsystem. No current Node editor content is written to `node_information` or `node_projection_table` after the cutover.
 
-V3 must be released through separate operator-gated phases: create the permanent destinations, copy without deleting legacy sources, reconcile the copy, switch the application, observe a soak period, and retire legacy storage only in a later release. The development email data has now passed the create/copy/reconcile checkpoint. The backend still uses the legacy email tables, so application cutover is the next phase and old-table retirement remains later.
+A Mango file has one record in `attachments` and one or more ownership links in `attachment_relationships`. A Node-owned file can remember that it came from a textbox without making that textbox its owner. Removing one link never deletes a file that still has another live link. When the final live link is removed, Mango marks the attachment for deletion, deletes the original and every generated preview from S3, and then removes the database records. Sent-email files remain available because sending creates an `email_message` attachment relationship before the email draft is removed.
+
+The Node and email V3 work is released through separate operator-gated phases: create the permanent destinations, copy without deleting legacy sources, reconcile the copy, switch the application, observe a soak period, and retire legacy storage only in a later release. The development email data has now passed the create/copy/reconcile checkpoint. The backend still uses the legacy email tables, so application cutover is the next phase and old-table retirement remains later. The attachment rollout below follows its own approved three-step plan and explicitly allows Step 1 to remove the 213 proven broken relationships and files proven to have zero valid relationships.
 
 # V3 table changes implementation handoff
 
@@ -79,7 +81,7 @@ On 2026-08-04 Jonat ran the email preflight and complete create/copy/reconcile e
 - The committed result reported `READY_FOR_BACKEND_CUTOVER_REVIEW` with 223 `email_threads`, 678 `email_messages`, 228 `email_relationships`, 49 `email_drafts`, 9 `email_signatures`, and 1,134 `attachment_relationships`.
 - The 28 disputed Node pairs are now proven: each contains one collaboration row whose old `block_id` equals its own relationship ID and one `created_from_email` row. The self-ID is not a textbox ID. Both rows mean the same whole-Node relationship. Step 2 preserves the collaboration relationship ID, maps the other source row to it as `consolidated_duplicate`, and leaves both legacy rows untouched.
 - One soft-deleted compose draft has a stale source ID and no usable source snapshot. Step 2 keeps that draft but leaves its final source-message foreign key null.
-- The live read-only attachment audit found 213 validly shaped legacy file links whose exact email draft/message/relationship target no longer exists. Step 2 keeps every underlying `attachments` row, leaves every old `resource_attachments` row untouched, records each as `retained_orphan_evidence`, and creates only the 1,134 relationships with exactly one surviving target. Malformed or ambiguous links still stop the transaction.
+- The live read-only attachment audit found 213 validly shaped legacy file links whose exact email draft/message/relationship target no longer exists. The completed email-only Step 2 safely left every old `resource_attachments` row untouched, recorded these rows as `retained_orphan_evidence`, and created only the 1,134 relationships with exactly one surviving target. Jonat later approved deleting those 213 proven broken legacy relationships during the separately operated attachment data phase. That later phase may delete an underlying file only when the file has zero surviving valid relationships.
 - The full Step 2 entry point passed a first run, an identical rerun, and a forced-drift rollback test on a disposable PostgreSQL 18 database. `backend/internal/store/v3_email_migration_test.go` protects the additive and non-destructive contract.
 - `backend/db/schema.sql` can create the final tables on a clean database, while the old tables remain present for the current backend and rollback evidence.
 
@@ -146,7 +148,7 @@ The sequence below is evidence for the next implementation, not a checklist to r
 - Resource-shared email draft access comes from normal Node, Project, or Logic Gate permissions.
 - There is no email-collaboration participant table after the cutover.
 - Email threads and messages are not added to `resource_permissions`. Direct access comes from the exact personal email account or shared email account; attached access comes through `email_relationships` and the normal permissions of the related resource.
-- Attachments remain in `attachments`, and `resource_attachments` is renamed to `attachment_relationships`. Do not add attachment blobs to the new chat, message, or relationship tables and do not create a third attachment relationship table.
+- The final attachment tables are `attachments`, `attachment_relationships`, `attachment_upload_jobs`, `attachment_upload_parts`, and `attachment_previews`. Do not add attachment blobs to chat, message, or relationship tables and do not create another attachment ownership table.
 - Textbox-owned chats, their attachment links, and seen snapshots are discarded when no permanent host textbox survives; a surviving reply with no surviving same-textbox parent becomes a top-level comment.
 - Deleting a Node or textbox removes its email relationship, not the normalized `email_threads` or `email_messages` content.
 - Email drafts and normalized email attachment links survive a deleted email relationship. A stored incoming-email file targets its exact normalized `email_message`, never an `email_relationship_id`.
@@ -567,7 +569,7 @@ Required behavior:
 
 ### `attachments` and `attachment_relationships`
 
-`attachments` keeps the actual Mango file record. Rename `resource_attachments` to `attachment_relationships`; do not create another attachment-association table.
+`attachments` keeps the actual Mango file record. `attachment_relationships` is the one ownership table. Copy valid `resource_attachments` rows into it; do not create another attachment-association table.
 
 Required behavior:
 
@@ -579,7 +581,10 @@ Required behavior:
 - Node chat files use `resource_type = 'node_chat_message'` and the chat ID.
 - Ordinary resource files target the Node, Project, or Logic Gate.
 - No file targets an `email_relationship_id`.
-- Deleting an email relationship, host resource, chat, or textbox does not delete normalized incoming-email files.
+- One attachment may have more than one active relationship. Removing one relationship keeps the file when another valid relationship survives.
+- Deleting an email relationship does not delete an incoming-email file because the file belongs to the normalized `email_message`, not to the email relationship.
+- A textbox may be the origin of a Node-owned file without being its lifetime owner. Deleting that textbox keeps the Node relationship and therefore keeps the file. Deleting the owning resource or chat removes that owner's relationship.
+- After any unlink or owner deletion, zero active relationships means the original file and every generated preview must be deleted from S3 and then removed from Postgres. A file with at least one active relationship remains.
 - Legacy structured resource IDs must be decoded with the exact same URL-decoding behavior as the application before they are mapped.
 
 ## Tables deleted completely
@@ -750,6 +755,8 @@ communications_email_drafts               -> email_drafts
 communications_email_signatures            -> email_signatures
 communications_email_thread_download_jobs -> email_thread_download_jobs
 resource_attachments                       -> attachment_relationships
+attachment_upload_intents                   -> attachment_upload_jobs
+attachment_variants                         -> attachment_previews
 node_projection_seen_snapshots             -> node_textbox_seen_snapshots
 ```
 
@@ -799,6 +806,7 @@ logic_gate_information
 logic_gate_projection_table
 node_content_change_seen
 attachments
+attachment_upload_parts
 user_email_connections
 company_email_connections
 communications_email_archive_jobs
@@ -1008,6 +1016,9 @@ Supporting final tables are:
 - `email_thread_download_jobs`, renamed from `communications_email_thread_download_jobs`.
 - `attachments`, which stores each real Mango file record.
 - `attachment_relationships`, renamed from `resource_attachments`, which states what Mango record each file belongs to.
+- `attachment_upload_jobs`, renamed from `attachment_upload_intents`, which tracks a browser upload from preparation through completion, failure, expiration, or cancellation.
+- `attachment_upload_parts`, which keeps resumable multipart-upload part state and remains a child of the upload job.
+- `attachment_previews`, renamed from `attachment_variants`, which stores only generated `display` and `thumbnail` S3 copies. The original is represented by `attachments`, not by a preview row.
 
 Do not create `email_draft_relationships`, `email_collaboration_participants`, a signature relationship table, or another attachment relationship table.
 
@@ -1029,6 +1040,10 @@ Do not create `email_draft_relationships`, `email_collaboration_participants`, a
 | `communications_node_email_threads` | Treat as an old Node-to-thread link, not a thread store. Replace it with exact-message relationships, then retire it. |
 | `attachments` | Keep as the actual Mango file table. |
 | `resource_attachments` | Rename/copy to `attachment_relationships`. |
+| `attachment_upload_intents` | Rename/copy to `attachment_upload_jobs`; update the part foreign key and all backend code to use the new name. |
+| `attachment_upload_parts` | Keep; point each part to its exact `attachment_upload_jobs` row. |
+| `attachment_variants` | Copy only current `display` and `thumbnail` rows into `attachment_previews`. Do not copy `original` or `email_send` as preview types. |
+| `attachment_migration_runs` and `attachment_migration_items` | Do not use them as permanent product tables. Drop them with the other retired attachment tables only after the new backend passes Step 3 testing and a database snapshot is taken. |
 | `user_email_connections` | Keep as personal-email-account connection and provider-grant plumbing. It is not stored email content. |
 | `company_email_connections` and `shared_inboxes` | Keep as shared-email-account connection, provider-grant, and access plumbing. They are not stored email content. |
 | `communications_email_archive_jobs` and `communications_email_archive_job_items` | Keep; use as exact source-email-account evidence where valid. |
@@ -1146,6 +1161,75 @@ The special collaboration participant permission system retires. Read-only evide
 - Incoming-email files target the internal `email_message_id`; email draft files target `draft_id`; signature images target the signature ID; Node chat files target the chat ID.
 - Files never target an email relationship. Removing a relationship must not orphan or delete a normalized message file.
 - File bytes, storage keys, hashes, and access checks never come from message JSON.
+
+## Approved attachment consolidation decisions
+
+This section records the attachment decisions Jonat approved on 2026-08-04. It is the handoff for the future attachment table and backend work. No schema or live data change is authorized merely by documenting these rules.
+
+### Final attachment table model
+
+The final model has five tables:
+
+1. `attachments`: one row for each completed original file that Mango actually stores in private S3.
+2. `attachment_relationships`: the only table that says which Mango records use that file. One attachment may have several rows here.
+3. `attachment_upload_jobs`: durable control and retry state for direct browser uploads, renamed from `attachment_upload_intents`. Rename its primary key from `upload_intent_id` to `upload_job_id` and `resource_attachment_id` to `attachment_relationship_id`.
+4. `attachment_upload_parts`: the small child table needed only for resumable multipart uploads. Rename `upload_intent_id` to `upload_job_id` and point it to `attachment_upload_jobs`.
+5. `attachment_previews`: generated `display` and `thumbnail` copies stored in S3, renamed from `attachment_variants`. Rename `variant_type` to `preview_type`.
+
+Retire `resource_attachments`, `attachment_upload_intents`, `attachment_variants`, `attachment_migration_runs`, and `attachment_migration_items` only in the final retirement step. `attachment_upload_parts` remains and changes its foreign key from the old upload-intent table to `attachment_upload_jobs`.
+
+`email_send` is not a final preview type. Active code does not need it to retain sent-email files or to perform large uploads. Step 1 must count any existing `email_send` rows. If any exist, remove their S3 objects only after proving those keys are not also used by the original or a retained preview. The final `attachment_previews` type constraint allows only `display` and `thumbnail`.
+
+### Ownership and deletion
+
+- A relationship is ownership/use, not another copy of the file. The original bytes exist once in S3 even when several resources use them.
+- Removing one broken or obsolete relationship never deletes an attachment that still has another active valid relationship.
+- Removing the final active relationship makes the attachment garbage. Mango must delete it; unowned attachment records and unowned S3 objects are not intentionally retained.
+- The 213 known legacy relationships whose exact targets no longer exist are approved bad data. Step 1 deletes those relationship rows after an exact recount confirms the same classification. It must not invent replacement owners.
+- The 213 count is a relationship count, not necessarily a file count. After deleting those relationships, evaluate each affected `attachment_id` separately and delete only files with zero surviving valid relationships.
+- When a Node, Project, Logic Gate, chat, email message, email draft, signature, or other owning record is deleted, remove its attachment relationships and run the same zero-relationship cleanup.
+- A Node-level relationship can survive deletion of the textbox recorded as its upload origin. In that case the Node still owns the file, so it is not an orphan.
+- A sent email keeps its file through an exact `email_message` relationship created before the email draft is removed. This is why the Sent viewer can still open the file. It is unrelated to the removed `email_send` preview type.
+
+### Keeping Postgres and S3 aligned
+
+- A permanent `attachments` row means Mango has completed and verified the original S3 upload. Pending and failed browser work lives in `attachment_upload_jobs`, not in normal attachment lists.
+- Database and S3 cleanup cannot be one atomic transaction. When the final relationship disappears, set `attachments.deleted_timestamp` so the file immediately becomes unavailable, then have cleanup delete the original and every `attachment_previews` object from S3.
+- Hard-delete the preview and attachment rows only after S3 reports success. A missing S3 object counts as already deleted. Temporary S3 failures remain marked for retry; never erase the last database key before the S3 cleanup succeeds.
+- Linking an attachment that is marked for deletion is rejected. This prevents a file from becoming owned again while cleanup is removing its bytes.
+- Direct S3 object deletion is not a product workflow. Product deletion starts from the Mango attachment/owner action so permissions, relationships, S3 bytes, previews, and database records are handled together.
+- A complete bucket-wide S3 audit is not required for this first consolidation. Step 1 must still verify the exact database rows and S3 keys it actively deletes.
+- Jonat confirmed there are no currently unfinished uploads that must be preserved for the development cutover. Step 1 still reports upload-job status counts so unexpected active work stops the operation.
+
+### Three-step attachment rollout
+
+#### Step 1: tables, data copy, and approved cleanup
+
+- Run one read-only preflight first. Count all eight current tables, active/deleted relationships, relationships by resource type, attachment IDs with zero/one/many live relationships, upload jobs by status, multipart parts, previews by type, duplicate S3 keys, and the exact 213 known broken relationships.
+- Exact-verify the `attachment_relationships` table and 1,134 rows already created by the completed email data checkpoint, or create it on a clean database. Create `attachment_upload_jobs` and `attachment_previews` with their final constraints while keeping the old tables available.
+- Copy valid active relationships, upload-job history that is intentionally retained, multipart part references, and `display`/`thumbnail` preview rows using stable IDs and exact conflict checks.
+- Delete the 213 proven broken legacy relationship rows after the recount matches. Then check every `attachments` row, not only the rows touched by those 213 relationships. Delete every original and its previews when zero valid relationships survive, using the pending-delete and retry order above.
+- Remove any proven unused `email_send` preview data safely. Do not migrate `email_send` or `original` rows into `attachment_previews`.
+- Recount and reconcile every copied, omitted, and deleted row. A mismatch stops the operation and must not guess or broaden the deletion set.
+
+Exit check: every retained attachment has at least one valid relationship; every relationship resolves to a live attachment and a valid owner; no unexpected upload is active; every retained S3 key is unique in its intended role; and every approved deletion either completed in S3 and Postgres or remains explicitly marked for retry.
+
+#### Step 2: backend cutover
+
+- Change all attachment reads, writes, authorization, upload, multipart, preview, email-send, chat, editor, and deletion code to use only the five final tables.
+- Remove the `email_send` preview constant and path. Sent-email access comes from the `email_message` relationship; outbound size handling remains the separate send-streaming rule.
+- Ensure owner deletion removes relationships and triggers zero-relationship cleanup. Ensure deleting one of several relationships keeps the shared file.
+- Do not keep a compatibility reader or writer for the retired table names.
+
+Exit check: new writes reach only final tables, originals and previews remain private and authorized, sent-email files survive email draft deletion, multipart uploads still resume, and zero-owner cleanup succeeds and retries safely.
+
+#### Step 3: test, snapshot, and retire old tables
+
+- Run the full automated attachment, email, chat, editor, authorization, upload, preview, and deletion suites plus focused manual smoke tests.
+- Reconcile Postgres after testing and confirm there are no writes to old attachment tables.
+- Take the agreed database snapshot before destructive retirement.
+- Drop `resource_attachments`, `attachment_upload_intents`, `attachment_variants`, `attachment_migration_runs`, and `attachment_migration_items` only after the test and snapshot gates pass.
+- Keep `attachments`, `attachment_relationships`, `attachment_upload_jobs`, `attachment_upload_parts`, and `attachment_previews` as the complete attachment model.
 
 ### Request-time schema changes are forbidden
 
