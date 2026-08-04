@@ -75,6 +75,8 @@ func TestAttachmentStep1ArtifactsArePhasedAndOperatorGated(t *testing.T) {
 	}
 	for _, required := range []string{
 		"share row exclusive mode", "attachment_step1_assert_columns",
+		"array_agg(columns.column_name order by columns.column_name)",
+		"from unnest(expected_columns) expected(column_name)",
 		"attachment_step1_approved_evidence", "source_checksum",
 		"conflicting existing attachment_relationships target",
 		"on conflict(upload_job_id) do nothing",
