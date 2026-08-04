@@ -1,9 +1,16 @@
-Last updated: 2026-07-22
+# Process Story
+
+Alice opens a three-message conversation through her personal email account. Mango stores one `email_threads` row for Alice's exact personal email account and three `email_messages` rows. Alice attaches message 2 to a Node, so Mango adds one `email_relationships` row; it does not copy the thread or messages. Bob can open the complete stored email through that Node only when normal Node permissions allow it. If the relationship is removed later, a chat quote from message 2 remains, but opening the complete email now requires another surviving relationship or direct access through Alice's exact personal email account. Alice's reply remains a separate `email_drafts` row tied to Alice's original personal email account. Disconnecting that account keeps the email draft and signature but makes them unsendable until the same account reconnects. Real stored files live in `attachments`, and `attachment_relationships` connects them to the message, email draft, signature, chat, or ordinary resource that actually owns the file.
+
+A shared email account follows the same rules: one exact source email account per stored thread or email draft, ordinary resource permissions for attached access, no special collaboration-participant access system, and no guessing or merging across accounts.
+
+Last updated: 2026-08-03
 
 # Email Tests
 
 Coverage Status:
-- Business Logic Covered By Scenarios: 100%
+
+- Business Logic Covered By Scenarios: Existing product behavior is covered below. The approved V3 storage/cutover rules are documented here before implementation; their implementation scenarios and automated coverage are still pending.
 - Exact mailbox hardening is covered by `homeMailboxRealtime.test.ts`, `unifiedRichEditorContract.test.ts`, `communications_singleflight_cancellation_test.go`, `realtime_audience_hardening_test.go`, `nylas_webhook_receipts_test.go`, and focused communications/store tests for retry-safe open receipts and exact-account migration ordering.
 - Business Logic Covered By Automated Tests: Partial (`tests/frontend/pages/home/homeCommands.test.ts` covers send payload construction, Mango attachment references, and mailbox-scoped signature save ordering; `tests/frontend/pages/home/homeMailboxRealtime.test.ts` covers exact active targets, first/reconnect acceptance, event mapping, coalescing, queued-final work, and navigation cancellation; `tests/frontend/pages/home/homeMailDrafts.test.ts` covers provider/auth error retention versus exact revocation purge, out-of-order loads, local save/delete fencing, multiple personal accounts, and live-draft preparation before attachment upload; `tests/frontend/modules/editor/richTextEditing.test.ts` and `unifiedRichEditorContract.test.ts` cover rich email behavior. Backend communications/realtime/attachment tests cover exact mailbox routing, provider send boundaries, S3 attachment resolution, live email-draft attachment authorization, deleted-draft denial, sent-message survival, and durable inline-byte rejection. Broader mounted compose/signature endpoint coverage remains partial.)
 - Outbound attachment tests in `backend/internal/http/communications_handlers_test.go` and `backend/internal/http/nylas_client_test.go` cover early validation, tenant/link authorization, the complete metadata limit preflight, lazy exact-length multipart streaming, inline CID fields, cancellation, provider rejection, and body cleanup.
@@ -14,7 +21,153 @@ Coverage Status:
 
 ## Business Logic
 
-### 2026-07-10 Node Attached-Email Retention Contract
+### Approved V3 Email Storage And Access Contract
+
+These are approved target rules for the V3 email cutover. They are documented before implementation so schema, backend, frontend, operator SQL, and tests use one contract. If an older `EMAIL` rule below names a legacy table, collaboration participant, `created_from_email`, or account-agnostic “mailbox” scope that conflicts with a `V3EMAIL` rule, the `V3EMAIL` rule is the final target and the older rule must be updated when the cutover is implemented.
+
+#### Terms and account scope
+
+V3EMAIL1 - New business and migration prose says **personal email account** or **shared email account**. The word “personal” is not used alone. Literal old code, database, API, UI, and test identifiers may retain words such as `mailbox`, `scope_type`, or `shared_inbox_id` until the cutover removes or renames them.
+
+V3EMAIL2 - Every stored email thread is scoped to exactly one personal email account or shared email account. The row is Mango's copy as seen through that email account; the row does not own the worldwide conversation.
+
+V3EMAIL3 - The same outside conversation viewed through two different email accounts produces two different Mango thread records. Mango never merges cross-account copies by subject, participants, provider ID, RFC Message-ID, body, snippet, or time.
+
+V3EMAIL4 - A personal email account thread keeps its exact user/account identity. A shared email account thread keeps its exact shared-inbox/company-connection identity. Disconnecting the provider grant does not erase that durable origin identity.
+
+#### Threads, messages, and the three-message example
+
+V3EMAIL5 - The four permanent email content tables are `email_threads`, `email_messages`, `email_relationships`, and `email_drafts`. Email drafts are a fourth table because their edit/send lifecycle is different from stored received or sent messages.
+
+V3EMAIL6 - One conversation with three messages produces one `email_threads` row and three `email_messages` rows for that exact email account. Every message belongs to exactly one thread, including a one-message conversation.
+
+V3EMAIL7 - `email_message_id` is Mango's internal permanent message ID. Provider message and thread IDs remain origin metadata and may not substitute for internal IDs in relationships, chats, permissions, or file ownership.
+
+V3EMAIL8 - Stored messages preserve immutable email HTML, text fallback, subject, snippet, timestamp, sender, To, Cc, Bcc, Reply-To, folders, provider identity, stable order, and download completeness. Empty body or empty Bcc is valid data, not automatic evidence of an incomplete row.
+
+V3EMAIL9 - Existing normalized content is preferred. A retained legacy snapshot with no normalized row may create a partial message using its proven subject, sender, snippet, and date. Missing body fields remain empty and the row remains incomplete rather than inventing content.
+
+#### Email relationships
+
+V3EMAIL10 - `email_relationships` connects one exact internal message to a Node, Project, or Logic Gate, optionally at one textbox. It replaces old collaboration, conversion, placement, and Node-thread association tables.
+
+V3EMAIL11 - In the three-message example, attaching only message 2 to a Node creates one relationship for message 2. It does not duplicate the thread or any of its three messages.
+
+V3EMAIL12 - A whole-resource relationship has a null textbox ID. A textbox relationship contains the exact textbox ID, and the database verifies that the textbox belongs to the selected resource type and resource ID.
+
+V3EMAIL13 - A message may have many relationships. Each relationship connects it to only one whole resource or one resource textbox. Duplicate company/message/resource/textbox relationships are rejected.
+
+V3EMAIL14 - Preserve the old Attached-email information ID as the new relationship ID where possible so deep links and saved identities remain stable.
+
+V3EMAIL15 - An email relationship contains no `email_id`, `created_from_email`, `attached_by_user_id`, `collaboration_id`, special Node-conversion flag, or separate Node/Project/Logic Gate ID columns. Resource type plus resource ID is the relationship.
+
+V3EMAIL16 - An email-derived Node is an ordinary Node with ordinary permissions plus an email relationship. Creating it is one ordinary Node creation followed by one relationship creation.
+
+V3EMAIL17 - Deleting a relationship removes only that connection and its relationship-derived access. It never deletes the stored thread, message, email draft, signature, or Mango-stored file.
+
+#### Permissions and sharing
+
+V3EMAIL18 - `resource_permissions` continues to grant access to Nodes, Projects, and Logic Gates. Email thread IDs and message IDs are not added as new `resource_permissions` resources or as a new polymorphic ID column.
+
+V3EMAIL19 - Direct stored-email access comes from the exact personal email account or shared email account that the thread belongs to.
+
+V3EMAIL20 - Attached stored-email access comes from an `email_relationships` row plus normal permission to its Node, Project, or Logic Gate.
+
+V3EMAIL21 - A resource-shared email draft receives shared access from its relationship's resource. An ordinary email draft receives access only from its exact original personal email account or shared email account.
+
+V3EMAIL22 - The special `communications_email_collaboration_participants` permission system is removed after every kept participant has equivalent normal resource permission. There is no replacement email participant table.
+
+V3EMAIL23 - Realtime audiences for relationships and resource-shared email drafts are derived from the related resource and normal permissions, never from the retired collaboration participant table.
+
+#### Chats and deletion behavior
+
+V3EMAIL24 - The completed `node_textbox_chats` cutover remains authoritative and is not recopied or changed as part of email data cleanup.
+
+V3EMAIL25 - A chat email selection stores the exact internal `email_message_id`, not a provider ID, provider thread ID, relationship ID, or old Attached-email information ID standing in for the message.
+
+V3EMAIL26 - If a chat preserves a quote from an email and the email relationship is later removed, the chat text and quote remain.
+
+V3EMAIL27 - After that relationship is removed, the user may open the complete email only through another surviving relationship or direct access through the exact personal email account or shared email account.
+
+V3EMAIL28 - If approved migration cleanup removes a selected old source, preserve the chat text/quote and clear or detach only the full-email reference. Never delete the chat for that reason.
+
+V3EMAIL29 - Deleting a Node, Project, Logic Gate, textbox, chat, or email relationship does not delete the normalized thread, message, email draft, signature, or normalized incoming-email file.
+
+#### Email drafts
+
+V3EMAIL30 - Every email draft always belongs to exactly one original personal email account or shared email account.
+
+V3EMAIL31 - An ordinary email draft has a null `email_relationship_id`. A resource-shared email draft has one `email_relationship_id`. There is no `email_draft_relationships` table.
+
+V3EMAIL32 - Many email drafts may point to one relationship, but one email draft may point to at most one relationship.
+
+V3EMAIL33 - Deleting the relationship sets the email draft relationship to null. The email draft remains and falls back to access through its exact original email account.
+
+V3EMAIL34 - Disconnecting a personal email account or shared email account keeps its ordinary and resource-shared email drafts, soft-deleted email drafts, and files. Those drafts are unsendable until the exact same email account reconnects. Mango never switches the email draft to another account.
+
+V3EMAIL35 - Keep active and soft-deleted email drafts during V3. Preserve compose/reply/forward kind, addressing, body, schedule, source and sent-message identity, revision, deletion time, and creator/updater information.
+
+V3EMAIL36 - Keep send claim, lease, revision, grant, and idempotency state. Retried or recovered work must not send an outside email twice.
+
+V3EMAIL37 - Reply and forward email drafts keep enough normalized source-message context to reopen and send safely. A source message used by a kept email draft cannot be discarded by general email cleanup.
+
+V3EMAIL38 - Email draft IDs remain stable text IDs. The V3 copy preserves existing IDs instead of inventing UUID-only replacements.
+
+#### Signatures
+
+V3EMAIL39 - Rename `communications_email_signatures` to `email_signatures` and keep every current signature.
+
+V3EMAIL40 - Each signature belongs directly to exactly one personal email account or shared email account. There is no signature relationship table and there is at most one default signature for each exact email account.
+
+V3EMAIL41 - Disconnecting an email account keeps its signatures, but Mango may not use them for sending until that same account reconnects.
+
+#### Attachments
+
+V3EMAIL42 - `attachments` is the actual Mango file table. Rename `resource_attachments` to `attachment_relationships`; do not create a third file-association table.
+
+V3EMAIL43 - `attachment_relationships` is the only authority for which Mango record a real stored file belongs to.
+
+V3EMAIL44 - Incoming-email files target `email_message` plus the internal `email_message_id`. Email draft files target `email_draft` plus `draft_id`. Signature images target `email_signature` plus signature ID. Node chat files target `node_chat_message` plus chat ID. Ordinary resource files target their Node, Project, or Logic Gate.
+
+V3EMAIL45 - A file never targets an `email_relationship_id`. Removing a relationship therefore cannot remove or orphan the normalized message's stored file.
+
+V3EMAIL46 - `email_messages.attachment_metadata` may contain provider-only data needed to locate or download a provider part. Provider metadata does not prove Mango stored a file when no `attachments` row and `attachment_relationships` row exist.
+
+V3EMAIL47 - File bytes, object-storage keys, hashes, and file authorization never come from message JSON.
+
+V3EMAIL48 - Legacy structured attachment resource IDs are decoded using the application's exact URL-decoding behavior before mapping. Similar-looking raw strings are not assumed equivalent.
+
+#### Schema ownership and rollout safety
+
+V3EMAIL49 - API requests, background jobs, and first-use code never create, alter, or drop database schema. Remove `ensureCommunicationsEmailDraftsSchema()` and every request-time DDL path.
+
+V3EMAIL50 - Reviewed operator-controlled SQL is the only V3 schema writer. Backend readiness may run a read-only schema check and fail clearly, but it never repairs schema.
+
+V3EMAIL51 - The normal application database role should not have DDL permission. A separate operator migration role performs reviewed schema changes.
+
+V3EMAIL52 - The email migration is three operator-gated steps: read-only count/preflight; separately operated create/copy/recount/reconcile; then backend cutover only after the data checkpoint passes.
+
+V3EMAIL53 - Step 1 reports exact schema, source counts, unique identities, overlaps, exceptions, foreign-key dependencies, email-account evidence, permissions, email draft/signature/file references, chat selections, and destructive candidates without printing email content or secrets.
+
+V3EMAIL54 - Step 2 uses deterministic batches, stable ordering, checkpoints, exact conflict checks, and one disposition per source row. A rerun accepts an exact prior copy and rejects different data under the same ID.
+
+V3EMAIL55 - A failed batch or count drift rolls back that subphase and leaves preserved legacy sources unchanged. Legacy tables are not dropped during copy or backend cutover.
+
+V3EMAIL56 - Long copy may run while the old application still writes legacy tables. The simplest final switch pauses all email writers, runs a final delta copy and reconciliation, deploys the new backend, smoke-tests it, and restores writers. Temporary dual-write is required only if the business rejects that maintenance window.
+
+V3EMAIL57 - The approved targeted relationship cleanup contains only the preflight-proven account-unresolved relationship rows and duplicate relationship extras. It never becomes permission to delete all stored email.
+
+V3EMAIL58 - Jonat separately approved clearing all development recycle-bin data. The operator script must count-guard that action and stop on drift; a repository agent never applies it to a live database.
+
+V3EMAIL59 - After cutover, keep old email tables unchanged for an agreed soak/rollback period. Table retirement is a later explicit release.
+
+V3EMAIL60 - The first future implementation is only the copy-paste read-only email count/preflight SQL and tests. It must not create tables, change backend code, or write to the database.
+
+### Existing Pre-V3 Rules And Scenarios
+
+The rules below record current and historical product behavior. At V3 cutover, the `V3EMAIL` rules above replace conflicting legacy table, collaboration-participant, attachment-link, relationship-ownership, email-account-scope, and deletion behavior. Non-conflicting UI, provider, rendering, sending, and interaction rules remain required.
+
+#### 2026-07-10 Node Attached-Email Retention Contract
 
 - An email attached to a node is node-owned durable context. A text box may display or originate that association, but deleting the text box must not delete the attached-email projection, detach the provider message, or remove the email from the node-level count/list.
 - The global node-header email counter/list opens a standalone node-level attached-email organizer modal with its folders/list and selected conversation. It must not depend on a live text box, auto-create a text box, or choose another text box as a replacement display target.

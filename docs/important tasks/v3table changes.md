@@ -1,6 +1,6 @@
 # Process Story
 
-A Mango user creates a Node and adds textboxes. Textbox bodies are stored only in `node_textboxes`, and textbox-owned comments and seen markers disappear when their textbox no longer exists. If a comment's author account was deleted, the comment and captured display name remain while its relational user ID becomes null. When an email is downloaded, Mango stores its thread and messages once, and `email_relationships` connects a selected message to a Node, Project, Logic Gate, or one of their textboxes. During V3, an older Attached-email snapshot with no durable thread/message is copied into those permanent tables only after exactly one mailbox is proven; the existing Attached-email information ID remains the relationship ID. Deleting a host removes only the relationship: normalized email, draft content, and email attachment links survive independently. Converting an email into a Node is an ordinary workflow: store the email, create the Node, create the relationship, and use normal resource permissions. Shared email drafts are stored in `email_drafts` and receive access from the related resource rather than a special collaboration-participant subsystem. No current Node editor content is written to `node_information` or `node_projection_table` after the cutover.
+A Mango user creates a Node and adds textboxes. Textbox bodies are stored only in `node_textboxes`, and textbox-owned comments and seen markers disappear when their textbox no longer exists. If a comment's author account was deleted, the comment and captured display name remain while its relational user ID becomes null. When an email is downloaded, Mango stores one thread for the exact personal email account or shared email account and stores each message once inside that thread. `email_relationships` connects a selected message to a Node, Project, Logic Gate, or one of their textboxes. Deleting that connection removes only the relationship: normalized email, email draft content, and normalized email attachment links survive independently. Converting an email into a Node is an ordinary workflow: store the email, create the Node, create the relationship, and use normal resource permissions. A resource-shared email draft is stored in `email_drafts` and receives access from the related resource instead of a special collaboration-participant subsystem. No current Node editor content is written to `node_information` or `node_projection_table` after the cutover.
 
 V3 must be released through separate operator-gated phases: create the permanent destinations, copy without deleting legacy sources, reconcile the copy, switch the application, observe a soak period, and retire legacy storage only in a later release.
 
@@ -70,7 +70,7 @@ Rows with valid data and a surviving permanent host are copied. A deleted user l
 
 This completed scoped phase authorizes only the Node textbox chat cutover. It does not authorize the remaining V3 table changes or any legacy-table retirement.
 
-The next planning scope is email data. Investigation must inventory the intended permanent `email_threads`, `email_messages`, `email_relationships`, and `email_drafts` contracts against the repository's current communications, projection, attachment, and draft tables before any SQL is written. The email work should follow the same small, separately operated pattern: read-only count/preflight and exception reporting first; table creation plus deterministic copy and reconciliation second; backend cutover only after the data checkpoint passes. Do not assume legacy email rows can be deleted, and do not combine email migration with Node chat cleanup.
+The next planning scope is email data. The read-only repository and development-database investigation is now recorded in **Approved V3 email decisions and current evidence** below. The email work must follow the same small, separately operated pattern: read-only count/preflight and exception reporting first; targeted approved cleanup plus table creation, deterministic copy, and reconciliation second; backend cutover only after the data checkpoint passes. Do not combine email migration with Node chat cleanup.
 
 ## What happened during the failed attempt
 
@@ -94,7 +94,7 @@ The sequence below is evidence for the next implementation, not a checklist to r
 ### Repository and rollout defects
 
 - One transaction tried to create destinations, transform data, enforce new foreign keys, rename identities, switch contracts, and drop rollback sources.
-- The migration encoded unproved assumptions about dual writes, deleted owners, chat visibility, author retention, email normalization, drafts, attachment identity, and mailbox ownership.
+- The migration encoded unproved assumptions about dual writes, deleted owners, chat visibility, author retention, email normalization, email drafts, attachment identity, and exact source-email-account ownership.
 - Validation was ordered incorrectly in several places: unsafe casts or foreign-key inserts happened before the row was classified.
 - The preflight did not share the migration's mapping implementation and its categories changed during the incident.
 - Migration tests mostly inspected SQL strings and fixture text. They did not execute every phase against PostgreSQL, rerun it, and check rollback boundaries.
@@ -124,17 +124,21 @@ The sequence below is evidence for the next implementation, not a checklist to r
 - A surviving historical chat whose author no longer exists keeps its message and `author_display_name`; its nullable `author_user_id` becomes null, matching the permanent foreign key's `ON DELETE SET NULL` behavior.
 - There is no separate `email_id`. `email_message_id` is Mango's permanent internal ID for an email message.
 - Every email message belongs to an `email_thread_id`, including a one-message thread.
-- `email_threads`, `email_messages`, `email_relationships`, and `email_drafts` are the permanent email content tables.
+- `email_threads`, `email_messages`, `email_relationships`, and `email_drafts` are the four permanent email content tables. They are not three tables because email drafts have a different lifecycle from received and sent email messages.
 - The table must be called `email_relationships`, not `email_placements`.
 - The draft table must be called `email_drafts`.
 - Email relationships do not contain `attached_by_user_id`, `created_from_email`, or special Node-conversion flags.
 - Email conversion into a Node does not have a special database subsystem.
-- Shared-draft access comes from normal Node, Project, or Logic Gate permissions.
+- Every email draft belongs to exactly one personal email account or shared email account. A resource-shared email draft may also point to one `email_relationships` row.
+- Resource-shared email draft access comes from normal Node, Project, or Logic Gate permissions.
 - There is no email-collaboration participant table after the cutover.
-- Attachments remain in `attachments` and `resource_attachments`; do not add attachment blobs or attachment arrays to the new chat or relationship tables.
+- Email threads and messages are not added to `resource_permissions`. Direct access comes from the exact personal email account or shared email account; attached access comes through `email_relationships` and the normal permissions of the related resource.
+- Attachments remain in `attachments`, and `resource_attachments` is renamed to `attachment_relationships`. Do not add attachment blobs to the new chat, message, or relationship tables and do not create a third attachment relationship table.
 - Textbox-owned chats, their attachment links, and seen snapshots are discarded when no permanent host textbox survives; a surviving reply with no surviving same-textbox parent becomes a top-level comment.
 - Deleting a Node or textbox removes its email relationship, not the normalized `email_threads` or `email_messages` content.
-- Email drafts and attached-email attachment links survive a deleted relationship; an attachment without a surviving relationship targets its exact normalized `email_message`.
+- Email drafts and normalized email attachment links survive a deleted email relationship. A stored incoming-email file targets its exact normalized `email_message`, never an `email_relationship_id`.
+- Keep email drafts and signatures when their personal email account or shared email account is disconnected. They become unusable for sending until that exact same email account reconnects; Mango never silently switches them to another email account.
+- Application requests must never create, alter, or drop database schema. Schema changes belong only in operator-controlled migration SQL.
 - The migration must fail on unexpected schema or unmapped data. Do not hide schema drift with broad `IF EXISTS` or `IF NOT EXISTS` statements.
 - Preserve existing permanent IDs whenever possible so deep links, attachment relationships, and realtime identities remain stable.
 
@@ -215,10 +219,10 @@ Required keys and rules:
 - Selection offsets must both be null or satisfy `0 <= selection_start <= selection_end`.
 - `entity_links` is a JSON array containing the existing `{start, end, entity_type, entity_id, label}` shape.
 - `revision > 0`.
-- Attachment-only comments remain legal. Attachment content stays in `attachments`, the chat relationship stays in `resource_attachments`, and the backend requires either message text or at least one valid attachment relationship.
+- Attachment-only comments remain legal. Attachment content stays in `attachments`, the chat relationship stays in `attachment_relationships`, and the backend requires either message text or at least one valid attachment relationship.
 - Preserve the old projection `information_id` as `chat_id` during backfill.
 
-Chat attachments remain in `resource_attachments`:
+Chat attachments live in `attachment_relationships` after the final rename:
 
 ```text
 resource_type = 'node_chat_message'
@@ -300,11 +304,11 @@ This replaces `communications_email_threads`.
 ```sql
 company_id               uuid        not null
 email_thread_id          uuid        not null
-mailbox_scope_type       text        not null
+email_account_type       text        not null
 personal_user_id         uuid
 personal_account_email   text
 shared_inbox_id          uuid
-mailbox_account_email    text        not null
+email_account_email      text        not null
 provider                 text        not null
 provider_thread_key      text        not null
 provider_thread_id       text        not null default ''
@@ -320,8 +324,8 @@ updated_timestamp        timestamptz not null default now()
 Renames and additions:
 
 ```text
-scope_type    -> mailbox_scope_type
-account_email -> mailbox_account_email
+scope_type    -> email_account_type
+account_email -> email_account_email
 fetched_at    -> fetched_timestamp
 add provider
 ```
@@ -329,14 +333,16 @@ add provider
 Required rules:
 
 - Primary key: `(company_id, email_thread_id)`.
-- `mailbox_scope_type` is `personal` or `shared`.
+- `email_account_type` is `personal_email_account` or `shared_email_account`.
 - `provider` is `google` or `microsoft`.
-- Personal scope requires `personal_user_id` and `personal_account_email`, with no `shared_inbox_id`.
-- Shared scope requires `shared_inbox_id`, with no personal source columns.
+- A personal email account requires `personal_user_id` and `personal_account_email`, with no `shared_inbox_id`.
+- A shared email account requires `shared_inbox_id`, with no personal email account source columns.
 - Account emails are normalized lowercase values.
-- Source identifiers remain durable origin metadata if the mailbox connection is later removed.
+- The row is scoped to exactly one personal email account or shared email account. It does not claim ownership of the worldwide conversation.
+- If two Mango users participate in the same outside conversation through two different personal email accounts, Mango stores two `email_threads` rows. Provider IDs, subject, sender, body, or timestamp similarity must never merge those cross-account copies.
+- Source identifiers remain durable origin metadata if the email account connection is later removed.
 - `download_status` remains `partial`, `downloading`, `complete`, or `failed`.
-- Preserve the current personal-scope and shared-scope provider-thread uniqueness rules.
+- Preserve the current personal-email-account and shared-email-account provider-thread uniqueness rules.
 
 ### `email_messages`
 
@@ -378,6 +384,10 @@ Required changes and rules:
 - `(company_id, email_thread_id)` references `email_threads` with cascade delete.
 - Address, folder, and attachment metadata values remain JSON arrays.
 - `message_order >= 0`.
+- `attachment_metadata` may contain provider-only information needed to locate and download an email part. It never proves that Mango stored a file.
+- A Mango-stored file exists only when an `attachments` row exists and an `attachment_relationships` row links it to this exact `email_message_id`.
+- File bytes, object-storage keys, and file authorization never come from message JSON.
+- Three messages in one conversation produce one `email_threads` row and three `email_messages` rows. Attaching only message 2 to a Node adds one `email_relationships` row for message 2; it does not duplicate the thread or any message.
 
 ### New `email_relationships`
 
@@ -406,6 +416,10 @@ Required keys and rules:
 - `(company_id, email_thread_id, email_message_id)` must reference a message in the specified thread.
 - Prevent duplicate active relationships for the same message, resource, and optional textbox.
 - Preserve `attached_email_information_id` as `email_relationship_id` where possible.
+- A message may have many relationships. Each relationship connects that exact message to one whole resource or one resource textbox.
+- Deleting a relationship deletes only the connection. It never deletes the thread, message, email draft, or Mango-stored file.
+- A file never targets `email_relationship_id`; normalized incoming-email files target `email_message`, email draft files target `email_draft`, signature images target `email_signature`, and chat files target `node_chat_message`.
+- An email-derived Node is an ordinary Node with ordinary permissions plus an email relationship. It has no special ownership flag or permission system.
 
 Intentionally absent:
 
@@ -437,14 +451,14 @@ unique active identity
 
 ### `email_drafts`
 
-This replaces `communications_email_drafts` and stores both ordinary mailbox drafts and resource-shared drafts.
+This replaces `communications_email_drafts` and stores both ordinary email drafts and resource-shared email drafts.
 
 ```sql
 company_id                  uuid        not null
 draft_id                    text        not null
 email_relationship_id      uuid
 source_email_message_id    uuid
-mailbox_scope_type          text        not null
+email_account_type          text        not null
 personal_user_id           uuid
 personal_account_email     text
 shared_inbox_id            uuid
@@ -476,15 +490,20 @@ deleted_timestamp          timestamptz
 Required behavior:
 
 - Primary key: `(company_id, draft_id)`.
-- `email_relationship_id is null` means an ordinary mailbox draft.
-- `email_relationship_id is not null` means a resource-shared draft.
-- Shared-draft authorization comes from normal permissions on the related Node, Project, or Logic Gate.
+- Every email draft is associated with exactly one original personal email account or shared email account.
+- `email_relationship_id is null` means an ordinary email-account draft.
+- `email_relationship_id is not null` means a resource-shared email draft. There is no `email_draft_relationships` table.
+- Many email drafts may point to the same relationship, but each email draft may point to at most one relationship.
+- Resource-shared email draft authorization comes from normal permissions on the related Node, Project, or Logic Gate.
+- If the email relationship is deleted, `email_relationship_id` becomes null through `ON DELETE SET NULL`. The email draft remains and falls back to exact personal-email-account or shared-email-account access.
+- If the original email account disconnects, keep the email draft and its files but make it unsendable until the exact same email account reconnects. Never substitute another email account.
 - `source_email_message_id` represents the source for reply and forward drafts.
+- Reply and forward email drafts keep enough normalized source-message context to reopen safely. Source messages used by kept email drafts are not part of targeted cleanup.
 - `kind` is `compose`, `reply`, or `forward`.
 - `revision > 0`.
 - `send_state` retains the current safe-send states.
 - Keep send-claim and idempotency columns. They prevent duplicate external email sends during retries or crashes.
-- Draft attachments remain in `resource_attachments` with `resource_type = 'email_draft'`.
+- Email draft files remain in `attachment_relationships` with `resource_type = 'email_draft'`.
 - Preserve existing text `draft_id` values; current IDs are not UUID-only.
 
 Remove or replace these old columns:
@@ -521,6 +540,34 @@ updated_timestamp             timestamptz not null default now()
 ```
 
 Preserve the current active-job uniqueness and claim indexes.
+
+### `email_signatures`
+
+Rename `communications_email_signatures` to `email_signatures`.
+
+Required behavior:
+
+- Each signature row is scoped directly to exactly one personal email account or shared email account. There is no signature relationship table.
+- Preserve all current signatures and allow at most one default signature for each exact email account.
+- Keep signatures when an email account disconnects, but do not allow the signature to be used for sending until that exact same email account reconnects.
+- Signature images target `email_signature` through `attachment_relationships`.
+
+### `attachments` and `attachment_relationships`
+
+`attachments` keeps the actual Mango file record. Rename `resource_attachments` to `attachment_relationships`; do not create another attachment-association table.
+
+Required behavior:
+
+- `attachments` stores actual file metadata, storage keys, hashes, sizes, and content types.
+- `attachment_relationships` is the authority for which Mango record a stored file belongs to.
+- Incoming email files use `resource_type = 'email_message'` and the internal `email_message_id`.
+- Email draft files use `resource_type = 'email_draft'` and the `draft_id`.
+- Signature images use `resource_type = 'email_signature'` and the signature ID.
+- Node chat files use `resource_type = 'node_chat_message'` and the chat ID.
+- Ordinary resource files target the Node, Project, or Logic Gate.
+- No file targets an `email_relationship_id`.
+- Deleting an email relationship, host resource, chat, or textbox does not delete normalized incoming-email files.
+- Legacy structured resource IDs must be decoded with the exact same URL-decoding behavior as the application before they are mapped.
 
 ## Tables deleted completely
 
@@ -687,7 +734,9 @@ The old names must not remain in a newly created database:
 communications_email_threads              -> email_threads
 communications_email_messages             -> email_messages
 communications_email_drafts               -> email_drafts
+communications_email_signatures            -> email_signatures
 communications_email_thread_download_jobs -> email_thread_download_jobs
+resource_attachments                       -> attachment_relationships
 node_projection_seen_snapshots             -> node_textbox_seen_snapshots
 ```
 
@@ -737,10 +786,8 @@ logic_gate_information
 logic_gate_projection_table
 node_content_change_seen
 attachments
-resource_attachments
 user_email_connections
 company_email_connections
-communications_email_signatures
 communications_email_archive_jobs
 communications_email_archive_job_items
 communications_triage_items
@@ -772,10 +819,14 @@ The schema change is incomplete unless all application paths are planned, but th
 - Read attached emails through `email_relationships` joined to messages and threads.
 - Create an email-derived Node through the ordinary Node creation workflow and then insert an `email_relationships` row.
 - Replace collaboration routes and special collaboration resource guards with ordinary resource permission checks.
-- Keep shared drafts durable in `email_drafts` and authorize them through their relationship's resource.
+- Keep all email drafts durable in `email_drafts`. Authorize an ordinary email draft through its exact personal email account or shared email account and authorize a resource-shared email draft through its relationship's resource.
 - Remove special collaboration participant fan-out. Realtime affected-resource fan-out must be derived from `email_relationships`.
 - Remove special protected-collaboration Node behavior.
-- Update attachment lookup to use the new chat, email message, relationship, and draft identities without duplicating attachment data.
+- Rename `communications_email_signatures` to `email_signatures` and keep each signature directly scoped to its exact email account.
+- Rename `resource_attachments` to `attachment_relationships`. Update attachment lookup to use chat, email message, email draft, signature, and ordinary resource identities without duplicating attachment data.
+- Never authorize a stored email through a provider ID alone. Use the exact email account or a surviving email relationship and normal resource permission.
+- If a chat preserves a quote from an email and its email relationship is later removed, keep the quote. Opening the complete email then requires another surviving relationship or exact personal-email-account/shared-email-account access.
+- Remove `ensureCommunicationsEmailDraftsSchema()` and all other request-time DDL. Backend readiness may perform a read-only schema check and fail clearly, but may not repair schema.
 - Update recycle-bin allowlists and backup/restore ordering for every changed table.
 
 The application-cutover phase requires a maintenance window with application/API
@@ -797,13 +848,15 @@ V3 must not create tables, copy data, switch application code, and drop legacy s
 
 ### Phase 2: restartable copy
 
-1. Copy normalized `email_threads` and `email_messages` first.
-2. Copy `node_textbox_chats`, preserving old chat IDs and recoverable author snapshots.
-3. Copy `email_relationships`, preserving existing relationship and Attached-email information IDs.
-4. Copy `email_drafts`, `node_textbox_seen_snapshots`, content-change identity, permissions, and attachment identity.
-5. Never delete or rewrite a legacy source row during the copy.
-6. Every source row must receive exactly one reported disposition: `copied`, `already_copied`, `discarded_deleted_host`, or `needs_human_mapping`.
-7. Rerunning the copy after interruption must be safe and must not create duplicate permanent identities.
+1. Treat the completed `node_textbox_chats` checkpoint as fixed. Do not recopy, rewrite, or combine it with the email operation.
+2. Copy normalized `email_threads` and `email_messages` first.
+3. Run only Jonat-approved, count-guarded relationship/recycle cleanup after the read-only preflight reproduces the approved set exactly.
+4. Copy `email_relationships`, preserving existing relationship and Attached-email information IDs.
+5. Copy `email_drafts`, `email_signatures`, required normal resource permissions, and `attachment_relationships` only after every referenced target identity exists.
+6. Never delete or rewrite a legacy source row except for a separately approved targeted cleanup category.
+7. Every source row must receive exactly one reported disposition: `copied`, `already_copied`, `discarded_approved_cleanup`, `discarded_deleted_host`, or `needs_human_mapping`.
+8. Rerunning the copy after interruption must be safe and must not create duplicate permanent identities.
+9. Split the operator SQL further when dependencies differ: thread/message copy first, approved relationship cleanup and relationship copy second, email draft/signature copy third, and attachment relationship conversion last.
 
 ### Phase 3: authoritative reconciliation
 
@@ -834,7 +887,7 @@ Each phase must have an exact precondition, a postcondition query, and a safe ro
 - Current `Text block chat` state comes from `node_projection_table`; `node_information` may contain stale earlier revisions.
 - Normalized current email thread/message rows are preferred over duplicated collaboration or projection snapshots.
 - Projection/collaboration snapshots are fallback repair sources only when normalized email rows are missing.
-- The July durable-email rollout intentionally allowed existing Attached-email projection snapshots to remain readable without backfilling `communications_email_threads` or `communications_email_messages`. V3 must normalize those rows during cutover: prove exactly one mailbox from a preserved thread, collaboration, exact shared inbox/account, placement user connection, or archive-job record; create or reuse the mailbox-scoped thread; copy the best snapshot; and preserve the Attached-email information ID as the relationship ID. Zero or multiple mailbox candidates are blockers, never a reason to delete the email or invent ownership.
+- The July durable-email rollout intentionally allowed existing Attached-email projection snapshots to remain readable without backfilling `communications_email_threads` or `communications_email_messages`. V3 must normalize retained rows during cutover: prove exactly one personal email account or shared email account from a preserved thread, collaboration, exact shared-inbox/company-connection record, personal-email-account connection, placement-user connection, or archive-job record; create or reuse the email-account-scoped thread; copy the best snapshot; and preserve the Attached-email information ID as the relationship ID. Zero or multiple exact email-account candidates require explicit disposition and are never a reason to guess from content.
 - `node_textboxes_history` is authoritative for permanent Node textbox save history.
 - Existing normal resource permissions are authoritative after any required participant-permission backfill.
 
@@ -872,7 +925,7 @@ email_relationships
 email_drafts
 ```
 
-History, permissions, attachments, delivery jobs, audit/change tracking, and mailbox connection tables remain separate because they have different product responsibilities.
+History, permissions, `attachments`, `attachment_relationships`, `email_signatures`, delivery jobs, audit/change tracking, and personal-email-account/shared-email-account connection tables remain separate because they have different product responsibilities.
 
 ## V3 cutover preflight and legacy-drift handling
 
@@ -882,8 +935,8 @@ The old `scripts\run_v3_cutover_preflight.ps1` and its TypeScript implementation
 - Its only interactive input is the literal read-only password. Connection metadata is documented in the wrapper, and the password is never printed or persisted.
 - Inventory, copy, and reconciliation consume the same classified source views or mapping functions. They must not implement the same rules three different ways.
 - Every legacy text payload is classified and validated before any JSON, UUID, integer, timestamp, or array cast.
-- It inventories every later foreign key, uniqueness rule, parent link, mailbox owner, resource/textbox owner, draft reference, attachment identity, seen snapshot, permission mapping, and destructive disposition before a copy phase runs.
-- Every source row receives one explicit disposition: `copied`, `already_copied`, `discarded_deleted_host`, or `needs_human_mapping`.
+- It inventories every later foreign key, uniqueness rule, parent link, personal-email-account/shared-email-account source, resource/textbox owner, email draft reference, attachment identity, seen snapshot, permission mapping, and destructive disposition before a copy phase runs.
+- Every source row receives one explicit disposition: `copied`, `already_copied`, `discarded_approved_cleanup`, `discarded_deleted_host`, or `needs_human_mapping`.
 - Output includes category totals, unique source-row totals, overlap counts, full machine-readable results in a named local artifact, and a short console summary. Samples are not a substitute for the full inventory.
 - `blocker`, `cleanup`, and `review` are stable documented meanings. A readiness exit code must be reported plainly rather than buried under a PowerShell exception stack.
 - A zero-blocker result is necessary but not sufficient: the final delta copy and reconciliation must be repeated with writers paused before application cutover.
@@ -903,5 +956,270 @@ Fresh-eyes evidence on 2026-08-02 established these identity and visibility rule
 - Normalized email content is not owned by its old Node/textbox link. Missing hosts remove relationship and permission rows only; email threads, messages, drafts, and email attachments are preserved, with attachments falling back to their exact normalized message identity.
 - Legacy chat payloads stored `author_id` only inside JSON, so deleting a user could not clear that identity. During cutover, a syntactically valid author ID that no longer resolves is treated like `ON DELETE SET NULL`: preserve the comment and captured author name, and store a null `author_user_id`.
 - Historical migration and rollout documentation prove that pre-July Attached-email snapshots were valid without durable thread/message rows. Their absence is an expected dual-write/backfill gap, not corrupt email content.
-- The preflight reports such rows as `email.legacy_snapshot_requires_normalization` (automatic cleanup) and reports only zero/multiple mailbox resolution as `email.legacy_snapshot_mailbox_unresolved_or_ambiguous` (blocker).
-- Mailbox evidence is exact and mailbox-scoped: preserved normalized thread metadata, collaboration scope, shared inbox plus company connection, personal account plus company membership, the importing placement user with exactly one matching connection, or an archive job tied to the same company/user and provider message. Subject, sender, snippet, body, and timestamps are content only and never ownership evidence.
+- The preflight reports retained rows that need normalization as `email.legacy_snapshot_requires_normalization`. It separately reports exact-email-account failures as `email.legacy_snapshot_email_account_unresolved_or_ambiguous`.
+- Exact email-account evidence is limited to preserved normalized thread metadata, collaboration scope, shared-inbox plus company-connection evidence, personal-email-account plus company-membership evidence, the importing placement user with exactly one matching connection, or an archive job tied to the same company/user and provider message. Subject, sender, snippet, body, and timestamps are content only and never identify the source email account.
+
+## Approved V3 email decisions and current evidence
+
+This section records the 2026-08-03 repository inspection, the read-only development-database inventory, and the product decisions Jonat approved during the follow-up discussion. It is the current handoff for the next email-migration task. Where an older section or older test rule conflicts with this section, this section is the V3 target and the older contract must be updated during implementation.
+
+### Plain-language model
+
+Use **personal email account** and **shared email account** in new product and migration prose. Do not use the word “personal” by itself. Existing code, old SQL columns, API fields, UI labels, and test names may still contain `mailbox`, `personal`, `shared`, `scope_type`, or `shared_inbox_id`; those are literal legacy identifiers, not the preferred V3 business terms.
+
+An email thread does not “own” an outside conversation. It is Mango's stored copy of that conversation as seen through exactly one personal email account or shared email account.
+
+Example: Alice and Bob both use Mango and exchange one thread containing three messages.
+
+- Alice's personal email account produces one `email_threads` row and three `email_messages` rows.
+- Bob's personal email account produces a different `email_threads` row and three different `email_messages` rows.
+- Mango never merges Alice's and Bob's rows just because the provider IDs, subject, participants, bodies, or times look related.
+- If Alice attaches message 2 to one Node, Mango adds one `email_relationships` row that points to Alice's internal message-2 ID and that Node.
+- If the same message is also attached to a Project, Mango adds a second relationship. The thread and its three messages are still stored once for Alice's personal email account.
+- An email draft remains a separate `email_drafts` row because it can be edited, scheduled, discarded, or sent independently of the stored thread.
+
+### Final tables and what each one does
+
+The four permanent email content tables are:
+
+1. `email_threads`: one conversation copy for one exact personal email account or shared email account.
+2. `email_messages`: one immutable stored email inside one thread. Every message belongs to a thread, including a one-message conversation.
+3. `email_relationships`: one connection from one exact stored message to a whole Node, Project, or Logic Gate, or to one textbox inside that resource.
+4. `email_drafts`: Mango-authored compose, reply, and forward work, always tied to one exact original personal email account or shared email account and optionally tied to one email relationship.
+
+Supporting final tables are:
+
+- `email_signatures`, renamed from `communications_email_signatures`.
+- `email_thread_download_jobs`, renamed from `communications_email_thread_download_jobs`.
+- `attachments`, which stores each real Mango file record.
+- `attachment_relationships`, renamed from `resource_attachments`, which states what Mango record each file belongs to.
+
+Do not create `email_draft_relationships`, `email_collaboration_participants`, a signature relationship table, or another attachment relationship table.
+
+### Current-to-final table inventory
+
+| Current or legacy source | Final use or disposition |
+| --- | --- |
+| `communications_email_threads` | Copy and transform into `email_threads`. |
+| `communications_email_messages` | Copy and transform into `email_messages`. |
+| `communications_email_drafts` | Copy all active and soft-deleted rows into `email_drafts`. |
+| `communications_email_signatures` | Rename/copy into `email_signatures`; keep every row. |
+| `communications_email_thread_download_jobs` | Rename/copy into `email_thread_download_jobs`; preserve operational state. |
+| `node_information` and `node_projection_table` Attached-email rows | Use active projection state as relationship authority and history as evidence. Normalize retained message snapshots, then retire the email rows with the old Node stores in the later retirement release. |
+| `project_information`, `project_projection_table`, `logic_gate_information`, `logic_gate_projection_table` Attached-email rows | Normalize retained email content and copy active relationships. History is evidence, not another relationship. |
+| `communications_email_collaborations` | Use its fuller snapshots and account evidence where needed, then retire it. |
+| `communications_email_collaboration_participants` | Repair missing normal resource permission first, then retire it without a replacement participant table. |
+| `communications_email_nodes` | Collapse its Node/message association into `email_relationships`, then retire it. |
+| `communications_email_node_attachments` | Use only unique evidence needed for the final relationship or message, then retire it. |
+| `communications_node_email_threads` | Treat as an old Node-to-thread link, not a thread store. Replace it with exact-message relationships, then retire it. |
+| `attachments` | Keep as the actual Mango file table. |
+| `resource_attachments` | Rename/copy to `attachment_relationships`. |
+| `user_email_connections` | Keep as personal-email-account connection and provider-grant plumbing. It is not stored email content. |
+| `company_email_connections` and `shared_inboxes` | Keep as shared-email-account connection, provider-grant, and access plumbing. They are not stored email content. |
+| `communications_email_archive_jobs` and `communications_email_archive_job_items` | Keep; use as exact source-email-account evidence where valid. |
+| `communications_triage_items` | Keep; update final IDs/contracts as required. |
+| `resource_permissions` | Keep for Node, Project, and Logic Gate access. Do not add email thread or message rows to it. |
+| `node_textbox_chats` | Keep as the completed chat authority. Change only its email-selection contract during email cutover. |
+| `recycle_bin_items` | Jonat approved clearing all development recycle-bin data in a separate exact-count, human-operated cleanup. Do not silently include it in an automatic migration. |
+
+### Read-only development-database snapshot
+
+These counts were observed during the 2026-08-03 read-only investigation. They are evidence, not permanent constants. Step 1 must recount them before any operator uses a write script.
+
+- The final V3 email tables were absent.
+- `communications_email_threads`: 74 rows. Sixty-one were complete personal-email-account rows, one was a failed/incomplete personal-email-account row, and twelve were complete shared-email-account rows.
+- `communications_email_messages`: 509 rows. All inspected address/folder/attachment JSON values were valid arrays; all bigint message timestamps were Unix seconds; 334 rows had `download_complete = false`.
+- Active Attached-email projections: 321 rows: 314 Node and 7 Project, with none on a Logic Gate.
+- Those 321 projections represented 292 unique message/resource/textbox relationships before approved cleanup because 29 rows were duplicate extras.
+- `communications_email_collaborations`: 43 rows with 56 participant rows.
+- `communications_email_nodes`: 111 rows.
+- `communications_email_node_attachments`: 12 rows.
+- `communications_node_email_threads`: 80 rows.
+- `communications_email_thread_download_jobs`: 29 rows: 28 complete, one failed, none active.
+- `communications_email_drafts`: 49 rows: 15 active and 34 soft-deleted; 10 compose, 38 reply, and one forward.
+- `communications_email_signatures`: 9 rows.
+- `attachments`: 1,199 rows.
+- `resource_attachments`: 1,347 rows. Active email-related links included 200 Node email-file links, 22 `email_message` links, 41 `email_draft` links, and one legacy `attached_email` link.
+- All 156 Mango attachment IDs found in message attachment metadata resolved to real attachment rows.
+- Email archive storage contained 740 jobs and 6,994 job items.
+- `communications_triage_items`: 10 rows.
+- `recycle_bin_items`: 97 rows.
+- All 16 current Node-chat email selections resolved at the time of inspection.
+
+### Exact source-of-truth order
+
+When several old rows describe the same email, use this order:
+
+1. An existing normalized `communications_email_threads` and `communications_email_messages` row is the highest-priority content source.
+2. An exact collaboration or conversion full-message snapshot is next.
+3. Exact archive-job, personal-email-account connection, or shared-email-account connection evidence may prove the source email account.
+4. An active Attached-email projection summary may create a partial normalized message when fuller content does not exist. Preserve its subject, sender, snippet, and date; use empty bodies only when no body exists; mark it incomplete for later download.
+5. If the exact source email account still cannot be proven, assign `needs_human_mapping` unless the row belongs to the separately approved targeted cleanup set described below.
+
+The active Attached-email projection decides whether a current resource relationship exists. Old information/history, collaboration, conversion, and Node-thread rows are supporting evidence and must not create duplicate relationships.
+
+### The small problem set that causes most migration difficulty
+
+Do not delete all stored email. The read-only evidence found three narrow cleanup sets that remove most of the ambiguity while preserving useful content.
+
+#### Set 1: 64 account-unresolved Attached-email relationships
+
+- There are 64 active relationship/projection rows across 61 surviving Nodes.
+- They reference 63 distinct provider message IDs and 63 provider thread IDs in one company and were created from May through July 2026.
+- No normalized message exists for these rows, and exact evidence does not prove one personal email account or shared email account.
+- They are not the source for any kept email draft, Node email-file link, old Node-thread link, or chat email selection. They also have no Project relationship.
+- Four provider messages have another Node relationship elsewhere; deleting this unresolved relationship still does not delete that other relationship or normalized content.
+- The approved narrow disposition is to delete only these 64 active relationship/projection rows and their matching relationship history evidence. This does not delete 64 normalized email messages because no normalized message exists for them.
+- The future operator SQL must identify this set from evidence, print exact dependency counts, and roll back if any count or dependency differs.
+
+#### Set 2: 29 duplicate relationship extras
+
+- Twenty-eight Node duplicate groups each contain one collaboration relationship and one extra `created_from_email` relationship for the same message/resource/textbox identity.
+- Preserve the collaboration Attached-email information ID as the final relationship ID and delete only the duplicate extra in each Node pair.
+- One Project duplicate pair remains. The operator report must show both candidates and preserve the one selected from exact evidence.
+- Twenty-one duplicate extras are referenced by `communications_node_email_threads`; remove or redirect those legacy links during the same operator-controlled step because that table retires.
+- The extras have no unique file links, content changes, or seen snapshots. No email message is deleted.
+
+#### Set 3: all 97 development recycle-bin rows
+
+- Jonat explicitly approved deleting all development recycle-bin data, including recovery data for deleted Nodes, Projects, Logic Gates, and folders.
+- This must be a separate, count-guarded operator action. A repository agent must never apply it to a live database.
+- If the current count is not exactly the approved preflight count, the script stops and reports drift instead of deleting anything.
+
+After the first two targeted relationship cleanups, the expected active relationship identity count is `321 - 64 - 29 = 228`. Reconciliation must calculate this from source identities and stop if it does not match.
+
+The data kept for normalization includes all 74 existing threads, all 509 existing messages, all 49 email drafts, all 9 signatures, and all valid stored files. Among the older Attached-email snapshots that lack normalized content, 141 rows have exactly one proven email account and can be normalized automatically; they represent 138 distinct provider messages and 124 provider threads. The approved cleanup removes the 64 account-unresolved links instead of guessing their source account.
+
+### Access, relationships, chats, and deletion
+
+- A user may open the complete stored email directly through the exact personal email account or shared email account that the thread belongs to.
+- A user may also open it through an `email_relationships` row when normal permissions grant access to that relationship's Node, Project, or Logic Gate.
+- `resource_permissions` continues to contain ordinary resource permissions. Do not add a new resource type or a polymorphic email thread/message ID column.
+- A whole-resource relationship has `resource_textbox_id = null`. A textbox relationship contains the exact textbox ID, and a database trigger verifies that the textbox belongs to the selected resource.
+- The relationship has an exact internal `email_message_id`, not a provider message ID, thread ID, or relationship ID standing in for a message.
+- Prevent duplicate relationships for the same company, message, resource, and optional textbox.
+- Deleting a resource or relationship deletes only the link and relationship-derived access. It does not delete the normalized thread, message, email draft, or incoming-email files.
+- If a chat preserves a quote from an email and the relationship is later removed, the quote remains.
+- Opening the complete email from that chat then requires another surviving relationship or access through the exact personal email account or shared email account.
+- If targeted cleanup removes a selected source relationship, preserve the chat text/quote and clear or detach only the full-email reference. Never delete the chat for that reason.
+- The completed Node-chat cutover remains untouched. Current chat email selections must move to internal `email_message_id` values during the email cutover.
+
+The special collaboration participant permission system retires. Read-only evidence found 55 of 56 participant entries already had normal effective Node edit access; one collaboration creator did not. Before retirement, grant or repair the exact missing normal permission only after the preflight proves the same exception. Realtime audiences then come from the related resource and normal permissions, not a collaboration-participant table.
+
+### Email drafts and signatures
+
+- Keep all active and soft-deleted email drafts. Soft-deleted rows remain part of history/recovery unless a later explicit product decision says otherwise.
+- An ordinary email draft has no `email_relationship_id`. A resource-shared email draft has exactly one optional relationship ID.
+- Many email drafts may share one relationship; one email draft never points to multiple relationships.
+- Deleting a relationship sets the email draft relationship to null and leaves the email draft available through its exact original email account.
+- Disconnecting the source email account keeps the email draft, its body, and its files. It becomes unsendable until the exact same email account reconnects.
+- Keep safe-send claim, revision, lease, grant, and idempotency data so retries and crashes cannot send twice.
+- Keep source and sent-message identity. Reply and forward email drafts may require a minimal normalized source message even when other old email data is cleaned.
+- Keep every signature. Each signature belongs directly to one exact personal email account or shared email account, with at most one default signature per email account.
+- Disconnecting the email account keeps its signature but makes it unusable for sending until that same email account reconnects.
+
+### Attachment authority
+
+- `email_messages.attachment_metadata` may retain provider-only IDs, content IDs, names, content types, sizes, and other values needed to locate a provider part.
+- Provider metadata must not pretend a Mango attachment exists when no `attachments` row exists.
+- `attachments` contains the actual Mango file record. `attachment_relationships` is the only authority for what Mango record the file belongs to.
+- Incoming-email files target the internal `email_message_id`; email draft files target `draft_id`; signature images target the signature ID; Node chat files target the chat ID.
+- Files never target an email relationship. Removing a relationship must not orphan or delete a normalized message file.
+- File bytes, storage keys, hashes, and access checks never come from message JSON.
+
+### Request-time schema changes are forbidden
+
+The current `ensureCommunicationsEmailDraftsSchema()` path performs draft-table DDL on first use after backend startup. A normal API request can therefore create or alter tables, drop and recreate triggers, and change constraints. This must be removed during V3.
+
+- Application/API request handlers never create, alter, or drop schema.
+- The operator-controlled migration is the only place for V3 schema DDL.
+- Backend startup/readiness may run a read-only schema compatibility check and fail with a clear message. It may not repair the schema.
+- The normal application database role should not have DDL permission. A separate operator migration role performs reviewed schema changes.
+
+### Why the one-shot migration failed
+
+The earlier attempt combined too many risks in one large transaction and learned about live exceptions one failure at a time. The main failure classes were:
+
+- It assumed old Attached-email snapshots already had normalized messages, although 205 legacy snapshots lacked them.
+- It treated ambiguous personal-email-account/shared-email-account evidence as a mapping problem that had to be solved inside the write transaction.
+- It validated or cast legacy HTML, JSON, UUIDs, arrays, and timestamps on different code paths, so preflight success did not guarantee migration success.
+- It mixed current projections with stale history, deleted hosts, and duplicate collaboration/conversion rows.
+- It did not fully order threads, messages, relationships, email drafts, permissions, and attachment foreign keys before inserting dependents.
+- It attempted large lock upgrades while active writers were running, causing deadlocks and timeouts.
+- It combined table creation, data copy, constraint changes, application-contract changes, and old-table removal, making rollback and rerun behavior too large to reason about.
+- Its preflight and copy logic were separate implementations and reported overlapping category totals without a unique-record total.
+- The application was deployed against a database that had rolled back, so missing V3 tables immediately broke background jobs and editor access.
+- Draft DDL still exists in a runtime request path, which hides schema ownership and must not survive the cutover.
+
+### Required small migration sequence
+
+#### Step 1: one read-only count and preflight report
+
+Entry checks:
+
+- Use only the database-enforced read-only credential in a repeatable-read, read-only transaction.
+- Assert the exact current schema and that final V3 tables are absent or, on a rerun, exactly match the expected expansion schema.
+- Do not print bodies, addresses, credentials, provider tokens, storage URLs, or attachment bytes.
+
+The first script must measure:
+
+- all current and final table existence, columns, constraints, indexes, triggers, and foreign-key ordering;
+- counts and distinct identities for normalized threads/messages and legacy Attached-email projections/history;
+- exact source-email-account candidates for every legacy message/thread;
+- the 64 unresolved relationship set, the 29 duplicate extras, the 228 expected retained relationships, and every dependency of those rows;
+- all 49 email drafts, including soft-delete status, kind, source/sent-message references, safe-send state, and file links;
+- all 9 signatures and their exact email-account scope and image links;
+- collaboration participants versus effective normal resource permissions, including the single expected permission exception;
+- provider attachment metadata versus `attachments` and `resource_attachments`, including invalid IDs and structured-ID decode cases;
+- all chat email selections and whether each resolves to an exact retained or repairable message;
+- deleted/stale resource and textbox hosts, archive evidence, triage references, download-job state, and all 97 recycle-bin rows;
+- category totals, unique source-row totals, overlaps, expected disposition, and byte/row size without returning user email content.
+
+Exit check: every source row has exactly one proposed disposition, all destructive candidates match their approved count and have zero forbidden dependencies, and the report clearly says whether Step 2 is ready. A report mismatch changes nothing and is safe to rerun.
+
+#### Step 2: separately operated create, copy, recount, and reconcile
+
+Use one human-operated SQL entry point composed of small deterministic subphases with a ledger/checkpoint table:
+
+1. Reassert Step 1 counts. Perform only the approved 64-row, 29-row, and 97-row cleanup categories, each in a separately visible count guard. Roll back the whole cleanup subphase on drift.
+2. Create final tables, constraints, indexes, triggers, and the renamed support-table destinations. Do not switch application code.
+3. Copy existing normalized threads/messages, then normalize the retained one-account legacy snapshots in deterministic company/account/thread/message batches.
+4. Recount and reconcile thread/message IDs, content fields, thread membership, order, source account, and completeness before creating dependents.
+5. Copy the 228 retained relationship identities and repair the one expected normal permission exception only if the preflight still proves it.
+6. Copy every email draft and signature, preserving IDs, soft-delete state, source/sent-message links, send-safety state, and exact email-account scope.
+7. Convert `resource_attachments` to `attachment_relationships` after every referenced message, email draft, signature, chat, and ordinary resource identity exists.
+8. Copy/reconcile download jobs and other references only after their parent IDs exist.
+
+Each deterministic batch uses stable ordering and upsert/conflict checks that accept an exact prior copy but reject different data under the same ID. The ledger records source identity, target identity, disposition, source fingerprint, batch, and completion time. A process crash leaves completed batches reusable and incomplete work rerunnable. No step deletes preserved legacy rollback sources.
+
+Exit check: source-versus-target counts and fingerprints reconcile; every source row has one disposition; all foreign keys and uniqueness rules pass; all expected email drafts, signatures, files, relationships, chat selections, permissions, and jobs resolve; and no `needs_human_mapping` row remains outside a Jonat-approved disposition.
+
+Rollback: before application cutover, rollback means stop using the new tables and leave old readers/writers unchanged. Within a subphase, an assertion or mismatch rolls back that subphase. Never drop the old tables in Step 2.
+
+#### Step 3: backend cutover after the data checkpoint
+
+Entry check: Step 2 reconciliation has passed from a final delta run with all database writers paused.
+
+- Pause API workers, download workers, archive workers, webhook consumers, and any other email writers for the shortest practical maintenance window.
+- Rerun final delta copy and reconciliation.
+- Deploy code that reads and writes only the final email contracts, removes runtime schema DDL, uses exact-email-account or relationship-derived access, and uses `attachment_relationships`.
+- Smoke-test list/read, import, relationship create/delete, Node/Project/Logic Gate opening, chat selections, compose/reply/forward, email draft save/send/recovery, signature use, personal-email-account/shared-email-account access, realtime fan-out, and file download.
+- Restore writers only after the checkpoint passes.
+
+Exit check: no new email writes reach the retired sources, all smoke tests pass, and final counts remain reconciled. Keep legacy tables unchanged for the agreed soak and rollback period. Retirement is a later explicit release.
+
+Writer rule: the simplest rollout is old-writer operation during long copy, then a short writer freeze for final delta and cutover. A temporary dual-write path is needed only if the business cannot accept that maintenance window; it must not be invented by default.
+
+### Repository paths inspected for the next implementation
+
+Schema and migrations: `backend/db/schema.sql`, `backend/db/migrations/20260527_email_node_attachments.sql`, `backend/db/migrations/20260709_mango_attachments.sql`, `backend/db/migrations/20260709_zz_email_drafts_signatures.sql`, `backend/db/migrations/20260713_email_thread_collaboration.sql`, `backend/db/migrations/20260719_persist_node_email_threads.sql`, and `backend/db/migrations/20260728_durable_email_thread_download_jobs.sql`.
+
+Core backend stores and contracts: `backend/internal/store/postgres_email_threads.go`, `backend/internal/store/postgres_email_drafts.go`, `backend/internal/store/postgres_email_collaboration.go`, `backend/internal/store/postgres_email_thread_download_jobs.go`, `backend/internal/store/postgres_attachments.go`, `backend/internal/store/postgres_attachment_uploads.go`, `backend/internal/store/postgres_resource_access.go`, `backend/internal/store/communications_email_conversion_atomic.go`, `backend/internal/store/shared_email_drafts.go`, `backend/internal/store/shared_email_draft_send.go`, and `backend/internal/domain/types.go`.
+
+Core backend HTTP/provider paths: `backend/internal/http/communications_handlers.go`, `backend/internal/http/communications_email_draft_handlers.go`, `backend/internal/http/communications_email_collaboration_handlers.go`, `backend/internal/http/communications_email_collaboration_thread.go`, `backend/internal/http/communications_email_collaboration_draft_send.go`, `backend/internal/http/communications_email_thread_download_worker.go`, `backend/internal/http/communications_node_email_thread_handlers.go`, `backend/internal/http/communications_shared_inbox_handlers.go`, `backend/internal/http/communications_archive_worker.go`, `backend/internal/http/attachment_handlers.go`, `backend/internal/http/nylas_client.go`, `backend/internal/http/nylas_mime_attachments.go`, and `backend/internal/http/realtime_ws.go`.
+
+Core frontend paths: `frontend/src/modules/communications/communicationsApi.ts`, `frontend/src/modules/communications/emailThreadMessages.ts`, `frontend/src/modules/attachments/attachmentApi.ts`, `frontend/src/modules/editor/editorEmailMailboxScope.ts`, `frontend/src/modules/editor/editorProjection.ts`, `frontend/src/modules/editor/NodeWorkspaceSurface.tsx`, `frontend/src/pages/home/homeCommands.ts`, `frontend/src/pages/home/homeMailDrafts.ts`, `frontend/src/pages/home/homeMailboxRealtime.ts`, `frontend/src/pages/home/emailCollaborationChat.ts`, `frontend/src/pages/home/HomeMailWorkspace.tsx`, and `frontend/src/pages/home/HomePage.tsx`.
+
+### First future implementation task
+
+Implement only the copy-paste Step 1 read-only email count/preflight SQL and its tests. Do not create V3 email tables or change backend code in that first task. Its first query block should measure table/schema presence and the exact counts/distinct identities/dependencies for the 64 account-unresolved relationships, 29 duplicate extras, 141 auto-normalizable legacy snapshots, 228 retained final relationships, 49 email drafts, 9 signatures, email-related attachment links, 16 chat selections, the one expected permission exception, and 97 recycle-bin rows. The script must finish with one plain ready/not-ready summary and make no database changes.
