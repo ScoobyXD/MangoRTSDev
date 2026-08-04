@@ -3,8 +3,9 @@
 -- code and it does not perform the Step 3 legacy-table cutoff.
 --
 -- Open this whole file in DBeaver and execute it as one script. This transaction
--- deletes only the exact ledger-backed broken legacy relationships. It marks
--- zero-owner attachments unavailable but deliberately retains every S3 key and
+-- deletes the exact ledger-backed broken relationships plus relationships that
+-- are already deleted or whose exact owner no longer exists. It marks zero-owner
+-- attachments unavailable but deliberately retains every S3 key and
 -- database row needed by the separately confirmed cleanup command.
 --
 -- The deployed backend remains on resource_attachments,
@@ -20,7 +21,11 @@ set local idle_in_transaction_session_timeout = '12min';
 lock table attachments,resource_attachments,
   attachment_upload_intents,attachment_upload_parts,attachment_variants,
   attachment_migration_runs,attachment_migration_items,
-  v3_email_migration_runs,v3_email_migration_items
+  v3_email_migration_runs,v3_email_migration_items,
+  nodes,logic_gates,projects,node_textbox_chats,
+  logic_gate_projection_table,project_projection_table,
+  email_threads,email_messages,email_relationships,email_drafts,email_signatures,
+  shared_inboxes,company_explorer_folders,shared_inbox_folders
 in share row exclusive mode;
 
 -- BEGIN INLINED ADDITIVE EXPANSION
@@ -806,6 +811,153 @@ begin
   end if;
 end $$;
 
+-- BEGIN ATTACHMENT STEP 1 RELATIONSHIP CLEANUP
+-- Relationships that are already deleted or whose exact owner is gone are
+-- cleanup work, not retained final relationships. Their identities and current
+-- row checksums are frozen under the locks above before either table is changed.
+create temp table attachment_step1_relationship_cleanup on commit drop as
+select desired.attachment_relationship_id,desired.company_id,
+       desired.attachment_id,md5(to_jsonb(source)::text) source_checksum,
+       case when desired.deleted_timestamp is not null
+              then 'deleted_relationship'
+            else 'missing_owner' end cleanup_reason
+from attachment_step1_desired desired
+join resource_attachments source
+  on source.resource_attachment_id=desired.attachment_relationship_id
+where desired.deleted_timestamp is not null
+   or not (
+    case
+      when desired.resource_type='node' then
+        pg_input_is_valid(desired.resource_id,'uuid')
+        and exists(select 1 from nodes node
+          where node.company_id=desired.company_id
+            and node.node_id=case when pg_input_is_valid(desired.resource_id,'uuid')
+              then desired.resource_id::uuid end)
+      when desired.resource_type='logic_gate' then
+        pg_input_is_valid(desired.resource_id,'uuid')
+        and exists(select 1 from logic_gates gate
+          where gate.company_id=desired.company_id
+            and gate.logic_gate_id=case when pg_input_is_valid(desired.resource_id,'uuid')
+              then desired.resource_id::uuid end)
+      when desired.resource_type='project' then
+        pg_input_is_valid(desired.resource_id,'uuid')
+        and exists(select 1 from projects project
+          where project.company_id=desired.company_id
+            and project.project_id=case when pg_input_is_valid(desired.resource_id,'uuid')
+              then desired.resource_id::uuid end)
+      when desired.resource_type='node_chat_message' then
+        pg_input_is_valid(desired.resource_id,'uuid')
+        and exists(select 1 from node_textbox_chats chat
+          where chat.company_id=desired.company_id
+            and chat.chat_id=case when pg_input_is_valid(desired.resource_id,'uuid')
+              then desired.resource_id::uuid end
+            and chat.deleted_timestamp is null)
+      when desired.resource_type='logic_gate_chat_message' then
+        pg_input_is_valid(desired.resource_id,'uuid')
+        and exists(select 1 from logic_gate_projection_table projection
+          where projection.company_id=desired.company_id
+            and projection.information_id=
+              case when pg_input_is_valid(desired.resource_id,'uuid')
+                then desired.resource_id::uuid end
+            and projection.type='Text block chat'::information_type
+            and projection.is_deleted=false)
+      when desired.resource_type='project_chat_message' then
+        pg_input_is_valid(desired.resource_id,'uuid')
+        and exists(select 1 from project_projection_table projection
+          where projection.company_id=desired.company_id
+            and projection.information_id=
+              case when pg_input_is_valid(desired.resource_id,'uuid')
+                then desired.resource_id::uuid end
+            and projection.type='Text block chat'::information_type)
+      when desired.resource_type='email_message' then
+        pg_input_is_valid(desired.resource_id,'uuid')
+        and exists(select 1 from email_messages message
+          where message.company_id=desired.company_id
+            and message.email_message_id=
+              case when pg_input_is_valid(desired.resource_id,'uuid')
+                then desired.resource_id::uuid end)
+      when desired.resource_type='email_draft' then
+        exists(select 1 from email_drafts draft
+          where draft.company_id=desired.company_id
+            and draft.draft_id=desired.resource_id
+            and draft.deleted_timestamp is null)
+      when desired.resource_type='email_signature' then
+        exists(select 1 from email_signatures signature
+          where signature.company_id=desired.company_id
+            and signature.signature_id=desired.resource_id)
+      when desired.resource_type='shared_inbox' then
+        pg_input_is_valid(desired.resource_id,'uuid')
+        and exists(select 1 from shared_inboxes inbox
+          where inbox.company_id=desired.company_id
+            and inbox.shared_inbox_id=
+              case when pg_input_is_valid(desired.resource_id,'uuid')
+                then desired.resource_id::uuid end)
+      when desired.resource_type='company_explorer_folder' then
+        pg_input_is_valid(desired.resource_id,'uuid')
+        and exists(select 1 from company_explorer_folders folder
+          where folder.company_id=desired.company_id
+            and folder.folder_id=
+              case when pg_input_is_valid(desired.resource_id,'uuid')
+                then desired.resource_id::uuid end)
+      when desired.resource_type='shared_inbox_folder' then
+        pg_input_is_valid(desired.resource_id,'uuid')
+        and exists(select 1 from shared_inbox_folders folder
+          where folder.company_id=desired.company_id
+            and folder.folder_id=
+              case when pg_input_is_valid(desired.resource_id,'uuid')
+                then desired.resource_id::uuid end)
+      else false
+    end
+  );
+
+create temp table attachment_step1_cleanup_identities on commit drop as
+select company_id,attachment_relationship_id,attachment_id
+from attachment_step1_relationship_cleanup
+union
+select company_id,resource_attachment_id,attachment_id
+from attachment_step1_approved_evidence;
+
+do $$
+begin
+  if exists(
+    select 1 from attachment_relationships target
+    join attachment_step1_cleanup_identities cleanup
+      on cleanup.attachment_relationship_id=target.attachment_relationship_id
+    where target.company_id is distinct from cleanup.company_id
+       or target.attachment_id is distinct from cleanup.attachment_id
+  ) then
+    raise exception 'cleanup identity conflicts with an existing final relationship';
+  end if;
+end $$;
+
+delete from attachment_relationships target
+using attachment_step1_cleanup_identities cleanup
+where target.attachment_relationship_id=cleanup.attachment_relationship_id
+  and target.company_id=cleanup.company_id
+  and target.attachment_id=cleanup.attachment_id;
+
+delete from resource_attachments source
+using attachment_step1_relationship_cleanup cleanup
+where source.resource_attachment_id=cleanup.attachment_relationship_id
+  and source.company_id=cleanup.company_id
+  and source.attachment_id=cleanup.attachment_id
+  and md5(to_jsonb(source)::text)=cleanup.source_checksum;
+
+delete from attachment_step1_desired desired
+using attachment_step1_relationship_cleanup cleanup
+where desired.attachment_relationship_id=cleanup.attachment_relationship_id;
+
+do $$
+begin
+  if exists(
+    select 1 from resource_attachments source
+    join attachment_step1_relationship_cleanup cleanup
+      on cleanup.attachment_relationship_id=source.resource_attachment_id
+  ) then
+    raise exception 'deleted-owner relationship cleanup did not delete its exact source row';
+  end if;
+end $$;
+
 do $$
 begin
   if exists(
@@ -1100,6 +1252,12 @@ select 'copied_display_thumbnail_previews',count(*) from attachment_previews
 union all
 select 'approved_broken_relationships_proven',
        count(*) from attachment_step1_approved_evidence
+union all
+select 'missing_owner_relationships_deleted',count(*)
+from attachment_step1_relationship_cleanup where cleanup_reason='missing_owner'
+union all
+select 'already_deleted_relationships_removed',count(*)
+from attachment_step1_relationship_cleanup where cleanup_reason='deleted_relationship'
 union all
 select 'attachments_pending_s3_cleanup',count(*) from attachments
   where deleted_timestamp is not null
