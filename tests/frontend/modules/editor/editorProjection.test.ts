@@ -206,8 +206,8 @@ test("parses titled node text block content payloads with legacy fallback", () =
 
 test("parses attached email projection payloads", () => {
   const payload = buildEditorAttachedEmailPayload({
-    collaborationID: "collaboration-1",
-    messageID: "message-1",
+    messageID: "provider-message-1",
+    emailMessageID: "message-1",
     threadID: "thread-1",
     sharedInboxID: "shared-1",
     accountEmail: "shared@example.test",
@@ -221,8 +221,8 @@ test("parses attached email projection payloads", () => {
   ]);
 
   assert.equal(emails.length, 1);
-  assert.equal(emails[0].messageID, "message-1");
-  assert.equal(emails[0].collaborationID, "collaboration-1");
+  assert.equal(emails[0].messageID, "provider-message-1");
+  assert.equal(emails[0].emailMessageID, "message-1");
   assert.equal(emails[0].sharedInboxID, "shared-1");
   assert.equal(emails[0].accountEmail, "shared@example.test");
   assert.equal(emails[0].createdFromEmail, true);

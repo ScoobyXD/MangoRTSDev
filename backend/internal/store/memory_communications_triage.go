@@ -333,12 +333,13 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 		r.emailNodeLinks[emailNodeLinkKey(input.CompanyID, board.BoardID, card.CardID)] = link
 		emailInput := input
 		emailInput.NodeID = nodeID
-		informationID, emailThreadID, err := r.persistCommunicationsConversionEmailLocked(emailInput, triageItem.Message, now)
+		informationID, emailThreadID, emailMessageID, err := r.persistCommunicationsConversionEmailLocked(emailInput, triageItem.Message, now)
 		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 		result.AttachedEmailInformationIDs = append(result.AttachedEmailInformationIDs, informationID)
 		result.EmailThreadIDs = append(result.EmailThreadIDs, emailThreadID)
+		result.EmailMessageIDs = append(result.EmailMessageIDs, emailMessageID)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
 		if input.Target.ProjectID != "" {
 			relationships, err := r.upsertCommunicationsTriageProjectRelationshipLocked(input, nodeID, now)
@@ -402,12 +403,13 @@ func (r *MemoryRepo) attachCommunicationsTriageItemsToStandaloneNodeLocked(input
 		if !ok {
 			return CommunicationsTriageConversionResult{}, ErrNotFound
 		}
-		informationID, emailThreadID, err := r.persistCommunicationsConversionEmailLocked(input, triageItem.Message, now)
+		informationID, emailThreadID, emailMessageID, err := r.persistCommunicationsConversionEmailLocked(input, triageItem.Message, now)
 		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 		result.AttachedEmailInformationIDs = append(result.AttachedEmailInformationIDs, informationID)
 		result.EmailThreadIDs = append(result.EmailThreadIDs, emailThreadID)
+		result.EmailMessageIDs = append(result.EmailMessageIDs, emailMessageID)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
 		updatedNode := r.withNodeReadModelLocked(r.nodes[key(input.CompanyID, input.NodeID)])
 		result.Nodes = append(result.Nodes, updatedNode)
@@ -459,12 +461,13 @@ func (r *MemoryRepo) convertCommunicationsTriageItemsToExplorerTargetLocked(inpu
 		}
 		emailInput := input
 		emailInput.NodeID = nodeID
-		informationID, emailThreadID, err := r.persistCommunicationsConversionEmailLocked(emailInput, triageItem.Message, now)
+		informationID, emailThreadID, emailMessageID, err := r.persistCommunicationsConversionEmailLocked(emailInput, triageItem.Message, now)
 		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 		result.AttachedEmailInformationIDs = append(result.AttachedEmailInformationIDs, informationID)
 		result.EmailThreadIDs = append(result.EmailThreadIDs, emailThreadID)
+		result.EmailMessageIDs = append(result.EmailMessageIDs, emailMessageID)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
 		if input.Target.ProjectID != "" {
 			relationships, err := r.upsertCommunicationsTriageProjectRelationshipLocked(input, nodeID, now)
@@ -585,12 +588,13 @@ func (r *MemoryRepo) attachCommunicationsTriageItemsToExistingNodeLocked(input C
 			UpdatedTimestamp: now,
 		}
 		r.emailNodeLinks[emailNodeAttachmentLinkKey(input.CompanyID, input.UserID, messageID, input.NodeID)] = link
-		informationID, emailThreadID, err := r.persistCommunicationsConversionEmailLocked(input, triageItem.Message, now)
+		informationID, emailThreadID, emailMessageID, err := r.persistCommunicationsConversionEmailLocked(input, triageItem.Message, now)
 		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 		result.AttachedEmailInformationIDs = append(result.AttachedEmailInformationIDs, informationID)
 		result.EmailThreadIDs = append(result.EmailThreadIDs, emailThreadID)
+		result.EmailMessageIDs = append(result.EmailMessageIDs, emailMessageID)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
 
 		updatedNode := r.withNodeReadModelLocked(r.nodes[key(input.CompanyID, input.NodeID)])
@@ -983,6 +987,7 @@ func attachedEmailProjectionInformationWithThread(message domain.EmailMessageSna
 	}
 	payload := struct {
 		MessageID         string `json:"message_id"`
+		EmailMessageID    string `json:"email_message_id,omitempty"`
 		ThreadID          string `json:"thread_id"`
 		EmailThreadID     string `json:"email_thread_id,omitempty"`
 		SharedInboxID     string `json:"shared_inbox_id,omitempty"`
@@ -995,6 +1000,7 @@ func attachedEmailProjectionInformationWithThread(message domain.EmailMessageSna
 		CreatedFromEmail  bool   `json:"created_from_email,omitempty"`
 	}{
 		MessageID:         strings.TrimSpace(message.ID),
+		EmailMessageID:    cleanUUIDText(message.EmailMessageID),
 		ThreadID:          strings.TrimSpace(message.ThreadID),
 		EmailThreadID:     strings.TrimSpace(emailThreadID),
 		SharedInboxID:     strings.TrimSpace(sharedInboxID),

@@ -11,7 +11,7 @@ import { visibleEmailAttachmentsForBody } from "../communications/emailAttachmen
 import { splitEmailQuotedHistory } from "../communications/emailQuotedContent.js";
 import { emailThreadMessageRenderKey, emailThreadMessageSourceLabel, normalizeEmailThreadMessages, type EmailThreadMessageCandidate } from "../communications/emailThreadMessages.js";
 import { buildReplyAllRecipients } from "../communications/emailRecipients";
-import { downloadMangoAttachment, fetchMangoAttachmentBlob, loadMangoAttachmentObjectURL, mangoAttachedEmailResourceID, type AttachmentRequestJSON, type MangoAttachment, type MangoAttachmentResourceType, type MangoAttachmentUploadProgress, type MangoAttachmentVariantType, type MangoResourceAttachment } from "../attachments/attachmentApi";
+import { downloadMangoAttachment, fetchMangoAttachmentBlob, loadMangoAttachmentObjectURL, type AttachmentRequestJSON, type MangoAttachment, type MangoAttachmentResourceType, type MangoAttachmentUploadProgress, type MangoAttachmentVariantType, type MangoResourceAttachment } from "../attachments/attachmentApi";
 import { classifyAttachmentPresentation, classifyAttachmentPreview, splitAttachmentFilename, type AttachmentPresentationKind, type AttachmentPreviewKind } from "../attachments/attachmentPresentation";
 import { canDeleteEditorTextBlockChatMessage, canEditEditorTextBlockChatMessage, type EditorAttachedEmail, type EditorChatAttachment, type EditorTextBlockChatMessage } from "./editorProjection";
 import {
@@ -3450,15 +3450,18 @@ const AttachedEmailThreadCard: React.FC<{
     };
   }, [companyID, email, nodeID]);
 
+  const initialFocusProviderMessageID = initialFocusMessageID?.trim() === email.emailMessageID
+    ? email.messageID
+    : threadMessages.find((message) => message.email_message_id?.trim() === initialFocusMessageID?.trim())?.id ?? "";
+
   useEffect(() => {
     const targetMessageID = initialFocusMessageID?.trim() ?? "";
-    if (!targetMessageID || !onFocusMessageFound) return;
-    if (targetMessageID !== email.messageID && !threadMessages.some((message) => message.id === targetMessageID)) return;
+    if (!targetMessageID || !initialFocusProviderMessageID || !onFocusMessageFound) return;
     const requestKey = `${targetMessageID}:${initialFocusMessageRequestID}`;
     if (handledFocusMessageRequestRef.current === requestKey) return;
     handledFocusMessageRequestRef.current = requestKey;
     onFocusMessageFound(email.messageID);
-  }, [email.messageID, initialFocusMessageID, initialFocusMessageRequestID, onFocusMessageFound, threadMessages]);
+  }, [email.messageID, initialFocusMessageID, initialFocusMessageRequestID, initialFocusProviderMessageID, onFocusMessageFound]);
 
   const childMessages = threadMessages.filter((message) => message.id !== email.messageID);
   const hasThreadChildren = childMessages.length > 0;
@@ -3489,8 +3492,21 @@ const AttachedEmailThreadCard: React.FC<{
   });
   const replyComposerOpen = Boolean(replyTargetMessageID.trim());
   const replyAvailable = editable && !email.collaborationID?.trim();
-  const rootMessageAccent = messageAccents[email.messageID]?.trim() || "";
-
+  const internalMessageIDForProvider = (providerMessageID: string): string => {
+    const cleanProviderMessageID = providerMessageID.trim();
+    return threadMessages.find((message) => message.id.trim() === cleanProviderMessageID)?.email_message_id?.trim()
+      || (cleanProviderMessageID === email.messageID.trim() ? email.emailMessageID?.trim() : "")
+      || "";
+  };
+  const durableSelection = (selection: EmailSelectionDraft): [string, EmailSelectionDraft] | null => {
+    const internalMessageID = internalMessageIDForProvider(selection.messageID || email.messageID);
+    if (!internalMessageID) {
+      onError("email_message_id_missing");
+      return null;
+    }
+    return [internalMessageID, { ...selection, messageID: internalMessageID }];
+  };
+  const rootMessageAccent = messageAccents[email.emailMessageID?.trim() || email.messageID]?.trim() || "";
   return (
     <div
       onDragEnd={onDragEnd}
@@ -3658,7 +3674,7 @@ const AttachedEmailThreadCard: React.FC<{
               strokeColor={strokeColor}
               ruleColor={ruleColor}
               activeSelection={activeSelection}
-              initialFocusMessageID={initialFocusMessageID}
+              initialFocusMessageID={initialFocusProviderMessageID}
               initialFocusMessageRequestID={initialFocusMessageRequestID}
               onMessageActivate={onMessageActivate}
               highlightRemovalRequest={highlightRemovalRequest}
@@ -3668,10 +3684,10 @@ const AttachedEmailThreadCard: React.FC<{
               onReplyComplete={onReplyComplete}
               onReplyEditorFocus={onReplyEditorFocus}
               onError={onError}
-              onSelectionChatRequest={onSelectionChatRequest ? (selection) => onSelectionChatRequest(selection.messageID || email.messageID, selection) : undefined}
-              onSelectionTextBoxRequest={onSelectionTextBoxRequest ? (selection) => onSelectionTextBoxRequest(selection.messageID || email.messageID, selection.quote) : undefined}
-              onSelectionNodeRequest={onSelectionNodeRequest ? (selection) => onSelectionNodeRequest(selection.messageID || email.messageID, selection.quote) : undefined}
-              onMessageTextBoxRequest={onMessageTextBoxRequest}
+              onSelectionChatRequest={onSelectionChatRequest ? (selection) => { const durable = durableSelection(selection); if (durable) onSelectionChatRequest(...durable); } : undefined}
+              onSelectionTextBoxRequest={onSelectionTextBoxRequest ? (selection) => { const durable = durableSelection(selection); if (durable) onSelectionTextBoxRequest(durable[0], selection.quote); } : undefined}
+              onSelectionNodeRequest={onSelectionNodeRequest ? (selection) => { const durable = durableSelection(selection); if (durable) onSelectionNodeRequest(durable[0], selection.quote); } : undefined}
+              onMessageTextBoxRequest={onMessageTextBoxRequest ? (providerMessageID) => { const internalMessageID = internalMessageIDForProvider(providerMessageID); if (!internalMessageID) { onError("email_message_id_missing"); return; } onMessageTextBoxRequest(internalMessageID); } : undefined}
               messageAccents={messageAccents}
             />
           </div>
@@ -3790,8 +3806,8 @@ async function resolveLinkedEmailPreview(
 ): Promise<ResolvedLinkedEmailPreview | null> {
   const cleanMessageID = messageID.trim();
   if (!cleanMessageID) return null;
-  const directMessage = emails.find((email) => email.messageID.trim() === cleanMessageID);
-  if (directMessage) return { email: directMessage, focusMessageID: cleanMessageID };
+  const directMessage = emails.find((email) => email.emailMessageID.trim() === cleanMessageID);
+  if (directMessage) return { email: directMessage, focusMessageID: directMessage.messageID };
   const directProjection = emails.find((email) => email.id.trim() === cleanMessageID);
   if (directProjection) return { email: directProjection, focusMessageID: directProjection.messageID };
 
@@ -3801,8 +3817,9 @@ async function resolveLinkedEmailPreview(
   })));
   for (const result of threadResults) {
     if (result.status !== "fulfilled") continue;
-    if (result.value.messages.some((message) => message.id.trim() === cleanMessageID)) {
-      return { email: result.value.email, focusMessageID: cleanMessageID };
+    const matchedMessage = result.value.messages.find((message) => message.email_message_id?.trim() === cleanMessageID);
+    if (matchedMessage) {
+      return { email: result.value.email, focusMessageID: matchedMessage.id };
     }
   }
 
@@ -3816,24 +3833,28 @@ async function resolveLinkedEmailPreview(
     attemptedScopes.add(scopeKey);
     try {
       const message = await getEmailMessage(cleanMessageID, companyID, mailboxScope.sharedInboxID, { accountEmail: mailboxScope.accountEmail });
+      const emailMessageID = message.email_message_id?.trim() ?? "";
+      if (!emailMessageID) throw new Error("email_message_id_missing");
       return {
         email: {
           ...(candidate ?? {
             id: `linked-email:${cleanMessageID}`,
-            messageID: cleanMessageID,
+            messageID: message.id,
+            emailMessageID,
             attachedTimestamp: "",
             subject: message.subject || "(no subject)",
           }),
           collaborationID: undefined,
           emailThreadID: undefined,
-          messageID: message.id || cleanMessageID,
+          messageID: message.id,
+          emailMessageID,
           threadID: message.thread_id?.trim() || candidate?.threadID,
           subject: message.subject || candidate?.subject || "(no subject)",
           snippet: message.snippet || candidate?.snippet,
           from: formatAddressList(message.from) || candidate?.from,
           date: message.date ?? candidate?.date,
         },
-        focusMessageID: message.id || cleanMessageID,
+        focusMessageID: message.id,
       };
     } catch {
       // Try the next attached mailbox scope before reporting that the link is unavailable.
@@ -5371,7 +5392,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   sharedInboxID,
   accountEmail = "",
   attachmentRequestJSON,
-  attachmentResourceType = "attached_email",
+  attachmentResourceType = "email_message",
   attachmentResourceID = "",
   attachmentInformationID,
   attachmentEditorSurface = "attached-email-reply",
@@ -5673,7 +5694,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const replyEditorHeight = Math.min(replyEditorMaxHeight, replyEditorMinHeight + Math.max(0, replyEditorLineCount - 4) * 18);
   const replyAttachmentResourceID = useMemo(() => (
     attachmentResourceID.trim()
-    || (nodeID.trim() && messageID.trim() ? mangoAttachedEmailResourceID({ nodeID, messageID }) : "")
+    || messageID.trim()
   ), [attachmentResourceID, messageID, nodeID]);
   const replyEditorImageAttachmentContext = attachmentRequestJSON && apiBase.trim() && companyID.trim() && replyAttachmentResourceID
     ? {

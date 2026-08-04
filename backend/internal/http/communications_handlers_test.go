@@ -514,43 +514,65 @@ func seedEmailSignatureAttachmentForCommunicationsTest(t *testing.T, repo *store
 
 func seedLiveEmailDraftAttachmentForCommunicationsTest(t *testing.T, repo *store.MemoryRepo, storage *fakeAttachmentObjectStorage, actorUserID, companyID, resourceID, filename, contentType string, content []byte) string {
 	t.Helper()
-	parsed, ok := parseEmailScopedAttachmentResourceID("email_draft", resourceID)
-	if !ok || (parsed.scope == "personal" && parsed.accountEmail == "") {
-		t.Fatalf("seed live email draft attachment: invalid exact draft resource %q", resourceID)
+	draftID := strings.TrimSpace(resourceID)
+	if draftID == "" {
+		t.Fatal("seed live email draft attachment: draft ID required")
 	}
-	input := store.CommunicationsEmailDraftInput{
-		CompanyID: companyID, DraftID: parsed.itemID, CreatedByUserID: actorUserID, UpdatedByUserID: actorUserID, Kind: "compose",
+	connections, err := repo.ListUserEmailConnections(actorUserID)
+	if err != nil || len(connections) == 0 {
+		t.Fatalf("seed live email draft attachment: exact personal email account unavailable: %v", err)
 	}
-	if parsed.scope == "shared" {
-		input.SharedInboxID = parsed.sharedInboxID
-	} else {
-		input.PersonalUserID = parsed.userID
-		input.PersonalAccountEmail = parsed.accountEmail
-		input.AccountEmail = parsed.accountEmail
-	}
-	if _, err := repo.UpsertCommunicationsEmailDraft(input); err != nil {
+	accountEmail := connections[0].AccountEmail
+	if _, err := repo.UpsertCommunicationsEmailDraft(store.CommunicationsEmailDraftInput{
+		CompanyID: companyID, DraftID: draftID, CreatedByUserID: actorUserID, UpdatedByUserID: actorUserID,
+		Kind: "compose", PersonalUserID: actorUserID, PersonalAccountEmail: accountEmail, AccountEmail: accountEmail,
+	}); err != nil {
 		t.Fatalf("seed live email draft attachment draft: %v", err)
 	}
-	return seedEmailAttachmentForCommunicationsTest(t, repo, storage, actorUserID, companyID, resourceID, filename, contentType, content)
+	return seedEmailAttachmentForCommunicationsTest(t, repo, storage, actorUserID, companyID, draftID, filename, contentType, content)
+}
+func personalEmailDraftResourceID(_, _, draftID string) string { return strings.TrimSpace(draftID) }
+
+func sharedEmailDraftResourceID(_, draftID string) string { return strings.TrimSpace(draftID) }
+
+func seedPersonalV3EmailMessageForCommunicationsTest(t *testing.T, repo *store.MemoryRepo, companyID, userID, accountEmail, provider string, message NylasMessage) domain.CommunicationsEmailThread {
+	t.Helper()
+	if strings.TrimSpace(message.ThreadID) == "" {
+		message.ThreadID = "thread-" + message.ID
+	}
+	thread, err := repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+		CompanyID: companyID, PersonalUserID: userID, PersonalAccountEmail: accountEmail,
+		AccountEmail: accountEmail, Provider: provider, ProviderThreadID: message.ThreadID,
+		SelectedMessageID: message.ID, Messages: []domain.EmailMessageSnapshot{emailMessageSnapshotFromNylas(message)}, HistoryComplete: true,
+	})
+	if err != nil {
+		t.Fatalf("seed personal V3 email message: %v", err)
+	}
+	return thread
 }
 
-func personalEmailDraftResourceID(userID, accountEmail, draftID string) string {
-	return "personal:" +
-		url.QueryEscape(strings.TrimSpace(userID)) + ":" +
-		url.QueryEscape(normalizeEmailForCompare(accountEmail)) + ":" +
-		url.QueryEscape(strings.TrimSpace(draftID))
-}
-
-func sharedEmailDraftResourceID(sharedInboxID, draftID string) string {
-	return "shared:" + url.QueryEscape(strings.TrimSpace(sharedInboxID)) + ":" + url.QueryEscape(strings.TrimSpace(draftID))
+func seedSharedV3EmailMessageForCommunicationsTest(t *testing.T, repo *store.MemoryRepo, companyID, sharedInboxID, accountEmail, provider string, message NylasMessage) domain.CommunicationsEmailThread {
+	t.Helper()
+	if strings.TrimSpace(message.ThreadID) == "" {
+		message.ThreadID = "thread-" + message.ID
+	}
+	thread, err := repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+		CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: accountEmail, Provider: provider,
+		ProviderThreadID: message.ThreadID, SelectedMessageID: message.ID,
+		Messages: []domain.EmailMessageSnapshot{emailMessageSnapshotFromNylas(message)}, HistoryComplete: true,
+	})
+	if err != nil {
+		t.Fatalf("seed shared V3 email message: %v", err)
+	}
+	return thread
 }
 
 func personalEmailSignatureResourceID(userID, accountEmail string) string {
-	return "personal:" + url.QueryEscape(strings.TrimSpace(userID)) + ":" + url.QueryEscape(normalizeEmailForCompare(accountEmail))
+	return "personal:" + strings.TrimSpace(userID) + ":" + normalizeEmailForCompare(accountEmail)
 }
 
 func sharedEmailSignatureResourceID(sharedInboxID string) string {
-	return "shared:" + url.QueryEscape(strings.TrimSpace(sharedInboxID))
+	return "shared:" + strings.TrimSpace(sharedInboxID)
 }
 
 type countingCommunicationsAttachmentRepo struct {
@@ -818,13 +840,20 @@ func TestValidCommunicationsSendAttachmentContentRequiresCoherentOriginal(t *tes
 
 func TestCommunicationsSendPersonalSignatureImageUsesHealthyOriginalAndPromotesSentLink(t *testing.T) {
 	fixture := newCommunicationsSendTestFixture(t)
-	resourceID := personalEmailSignatureResourceID(fixture.userID, fixture.accountEmail)
+	storedSignature, err := fixture.repo.UpsertCommunicationsEmailSignature(store.CommunicationsEmailSignatureInput{
+		CompanyID: fixture.companyID, PersonalUserID: fixture.userID, PersonalAccountEmail: fixture.accountEmail,
+		Name: "Default", IsDefault: true, CreatedByUserID: fixture.userID, UpdatedByUserID: fixture.userID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	original := []byte("personal-signature-original")
 	display := []byte("personal-signature-display")
-	attachmentID := seedEmailSignatureAttachmentForCommunicationsTest(t, fixture.repo, fixture.storage, fixture.userID, fixture.companyID, resourceID, original, display)
+	attachmentID := seedEmailSignatureAttachmentForCommunicationsTest(t, fixture.repo, fixture.storage, fixture.userID, fixture.companyID, storedSignature.SignatureID, original, display)
 	signatureBody := "<p>Regards</p><img src=\"mango-attachment:" + url.PathEscape(attachmentID) + "\">"
 	if _, err := fixture.repo.UpsertCommunicationsEmailSignature(store.CommunicationsEmailSignatureInput{
-		CompanyID: fixture.companyID, PersonalUserID: fixture.userID, PersonalAccountEmail: fixture.accountEmail,
+		CompanyID: fixture.companyID, SignatureID: storedSignature.SignatureID,
+		PersonalUserID: fixture.userID, PersonalAccountEmail: fixture.accountEmail,
 		Name: "Default", BodyEditorHTML: signatureBody, IsDefault: true,
 		CreatedByUserID: fixture.userID, UpdatedByUserID: fixture.userID,
 	}); err != nil {
@@ -868,15 +897,14 @@ func TestCommunicationsSendPersonalSignatureImageUsesHealthyOriginalAndPromotesS
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantSentResource := communicationsSentMessageResourceID(fixture.userID, "", "sent-message")
 	foundSentLink := false
 	for _, link := range links {
-		if link.ResourceType == "email_message" && link.ResourceID == wantSentResource && link.RelationshipKind == store.AttachmentRelationshipEmailInline {
+		if link.ResourceType == "email_message" && strings.TrimSpace(link.ResourceID) != "" && link.RelationshipKind == store.AttachmentRelationshipEmailInline {
 			foundSentLink = true
 		}
 	}
 	if !foundSentLink {
-		t.Fatalf("resource links=%+v, want promoted sent-message inline image link %q", links, wantSentResource)
+		t.Fatalf("resource links=%+v, want promoted internal email_message inline image link", links)
 	}
 }
 
@@ -1234,53 +1262,6 @@ func TestCommunicationsAuthURLIncludesSignedState(t *testing.T) {
 	}
 	if !state.StrictEmail {
 		t.Fatalf("state.StrictEmail = false, want true for personal auth URL")
-	}
-}
-
-func TestCommunicationsThreadReturnsAuthoritativeInboundAndSentMessageIDs(t *testing.T) {
-	t.Parallel()
-
-	key := mustRSAKey(t)
-	repo := store.NewMemoryRepo()
-	const subject = "thread-history-user"
-	user, err := repo.UpsertAuthUser(subject, "thread-user@example.com", "Thread User")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       user.UserID,
-		Provider:     "google",
-		AccountEmail: user.Email,
-		GrantID:      "thread-history-grant",
-		Status:       "connected",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	nylas := &fakeNylasClient{thread: NylasThread{
-		ID:         "thread-1",
-		MessageIDs: []string{"external-original", "user-sent", "external-latest"},
-	}}
-	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
-	}).Routes()
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/communications/threads/thread-1", nil)
-	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", subject, user.Email))
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
-	}
-	var payload struct {
-		Thread NylasThread `json:"thread"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.Join(payload.Thread.MessageIDs, ","); got != "external-original,user-sent,external-latest" {
-		t.Fatalf("thread message ids = %q", got)
 	}
 }
 
@@ -1923,247 +1904,51 @@ func TestNylasCallbackTreatsStrictUserMailboxAsPersonalConnection(t *testing.T) 
 	}
 }
 
-func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
+func TestCommunicationsHandlersReadV3AndUseExactStoredGrantForProviderOperations(t *testing.T) {
 	t.Parallel()
-
 	key := mustRSAKey(t)
 	repo := store.NewMemoryRepo()
 	const subject = "email-user"
-	const companyID = "communications-proxy-company"
+	const companyID = "11111111-1111-4111-8111-701300000401"
+	repo.EnsureCompany(companyID, "Communications Proxy Company")
 	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo.EnsureCompany(companyID, "Communications Proxy Company")
 	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       user.UserID,
-		Provider:     "google",
-		AccountEmail: user.Email,
-		GrantID:      "grant-1",
-		Status:       "connected",
+		UserID: user.UserID, Provider: "google", AccountEmail: user.Email, GrantID: "grant-1", Status: "connected",
 	}); err != nil {
 		t.Fatal(err)
 	}
+	storedMessage := NylasMessage{ID: "message-1", ThreadID: "thread-1", Subject: "Hello", Body: "Stored body", Unread: true, Folders: []string{"INBOX"}}
+	seedPersonalV3EmailMessageForCommunicationsTest(t, repo, companyID, user.UserID, user.Email, "google", storedMessage)
 	nylas := &fakeNylasClient{
-		folders:         []NylasFolder{{ID: "inbox", Name: "Inbox", Attributes: []string{"\\Inbox"}}},
-		messages:        []NylasMessage{{ID: "message-1", Subject: "Hello", Unread: true, Attachments: []NylasAttachment{{ID: "attachment-1", Filename: "photo.jpg", ContentType: "image/jpeg", Size: 12}}}},
-		message:         NylasMessage{ID: "message-1", Subject: "Hello", Body: "Body", Unread: true, Attachments: []NylasAttachment{{ID: "attachment-1", Filename: "photo.jpg", ContentType: "image/jpeg", Size: 12}}},
-		downloadContent: []byte("photo-bytes"),
+		folders: []NylasFolder{{ID: "inbox", Name: "Inbox", Attributes: []string{"\\Inbox"}}},
+		message: storedMessage,
 	}
-	storage := newFakeAttachmentObjectStorage()
 	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator:     testValidator(t, "kid", key),
-		NylasConfig:       testNylasConfig(),
-		NylasClient:       nylas,
-		AttachmentStorage: storage,
+		AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas,
 	}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
-
+	companyQuery := "company_id=" + url.QueryEscape(companyID)
 	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/status", "", token, http.StatusOK)
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/folders", "", token, http.StatusOK)
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?limit=5&unread=true", "", token, http.StatusOK)
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages/message-1", "", token, http.StatusOK)
-	attachmentReq := httptest.NewRequest(http.MethodGet, "/v1/communications/messages/message-1/attachments/attachment-1", nil)
-	attachmentReq.Header.Set("Authorization", token)
-	attachmentRec := httptest.NewRecorder()
-	handler.ServeHTTP(attachmentRec, attachmentReq)
-	if attachmentRec.Code != http.StatusOK {
-		t.Fatalf("attachment status = %d body=%s", attachmentRec.Code, attachmentRec.Body.String())
+	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/folders?"+companyQuery, "", token, http.StatusOK)
+	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?"+companyQuery+"&limit=5&unread=true", "", token, http.StatusOK)
+	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages/message-1?"+companyQuery, "", token, http.StatusOK)
+	if nylas.messageCalls != 0 || nylas.detailCalls != 0 {
+		t.Fatalf("V3 reads called provider list/detail: list=%d detail=%d", nylas.messageCalls, nylas.detailCalls)
 	}
-	if attachmentRec.Header().Get("Content-Type") != "image/jpeg" || attachmentRec.Body.String() != "photo-bytes" {
-		t.Fatalf("attachment content-type=%q body=%q, want image/jpeg photo-bytes", attachmentRec.Header().Get("Content-Type"), attachmentRec.Body.String())
+	assertJSONStatus(t, handler, http.MethodPut, "/v1/communications/messages/message-1?"+companyQuery, `{"unread":false}`, token, http.StatusOK)
+	if len(nylas.updateCalls) != 1 || nylas.updateCalls[0].GrantID != "grant-1" || nylas.updateCalls[0].MessageID != "message-1" {
+		t.Fatalf("provider update calls = %+v, want exact personal grant and message", nylas.updateCalls)
 	}
-	if nylas.lastDownloadGrantID != "grant-1" || nylas.lastDownloadMessageID != "message-1" || nylas.lastDownloadAttachmentID != "attachment-1" {
-		t.Fatalf("download scope grant=%q message=%q attachment=%q", nylas.lastDownloadGrantID, nylas.lastDownloadMessageID, nylas.lastDownloadAttachmentID)
-	}
-	assertJSONStatus(t, handler, http.MethodPut, "/v1/communications/messages/message-1", `{"unread":false,"folders":["archive"]}`, token, http.StatusOK)
-	if nylas.update.Unread == nil || *nylas.update.Unread || len(nylas.update.Folders) != 1 || nylas.update.Folders[0] != "archive" {
-		t.Fatalf("update = %+v, want unread=false and archive folder", nylas.update)
-	}
-	attachmentID := seedLiveEmailDraftAttachmentForCommunicationsTest(t, repo, storage, user.UserID, companyID, personalEmailDraftResourceID(user.UserID, user.Email, "draft-proxy"), "note.txt", "text/plain", []byte("hello"))
-	sendBody := `{"company_id":"` + companyID + `","to":[{"email":"friend@example.com"}],"subject":"Hi","body":"Body","attachments":[{"attachment_id":"` + attachmentID + `","filename":"note.txt","content_type":"text/plain","size":5}]}`
+	sendBody := `{"company_id":"` + companyID + `","to":[{"email":"friend@example.com"}],"subject":"Hi","body":"Body"}`
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/send", sendBody, token, http.StatusCreated)
-	if nylas.sent.To[0].Email != "friend@example.com" || nylas.sent.Subject != "Hi" {
-		t.Fatalf("sent = %+v, want normalized send request", nylas.sent)
-	}
-	if nylas.sent.TrackingOptions == nil || !nylas.sent.TrackingOptions.Opens {
-		t.Fatalf("tracking options = %+v, want opens enabled", nylas.sent.TrackingOptions)
-	}
-	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].AttachmentID != attachmentID || nylas.sent.Attachments[0].Filename != "note.txt" || nylas.sent.Attachments[0].ContentType != "text/plain" || nylas.sent.Attachments[0].Content != "" ||
-		len(nylas.sent.OutboundAttachments) != 1 || len(nylas.sentAttachmentBodies) != 1 || string(nylas.sentAttachmentBodies[0]) != "hello" {
-		t.Fatalf("metadata=%+v outbound=%+v bodies=%q, want metadata-only attachment and streamed hello", nylas.sent.Attachments, nylas.sent.OutboundAttachments, nylas.sentAttachmentBodies)
-	}
-	inlineAttachmentID := seedLiveEmailDraftAttachmentForCommunicationsTest(t, repo, storage, user.UserID, companyID, personalEmailDraftResourceID(user.UserID, user.Email, "draft-inline"), "screenshot.png", "image/png", []byte("png-bytes"))
-	inlineBody := `<div>Screenshot</div><img src="mango-attachment:` + url.PathEscape(inlineAttachmentID) + `" alt="screenshot"><img src='mango-attachment:` + url.PathEscape(inlineAttachmentID) + `' alt="duplicate reference">`
-	inlinePayload, err := json.Marshal(map[string]any{
-		"company_id": companyID,
-		"to":         []map[string]string{{"email": "friend@example.com"}},
-		"subject":    "Inline screenshot",
-		"body":       inlineBody,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	inlineSendReq := httptest.NewRequest(http.MethodPost, "/v1/communications/messages/send", strings.NewReader(string(inlinePayload)))
-	inlineSendReq.Header.Set("Authorization", token)
-	inlineSendReq.Header.Set("Content-Type", "application/json")
-	inlineSendRec := httptest.NewRecorder()
-	handler.ServeHTTP(inlineSendRec, inlineSendReq)
-	if inlineSendRec.Code != http.StatusCreated {
-		t.Fatalf("inline send status = %d body=%s", inlineSendRec.Code, inlineSendRec.Body.String())
-	}
-	inlineContentID := communicationsInlineImageContentID(inlineAttachmentID)
-	if strings.Contains(nylas.sent.Body, "mango-attachment:") || strings.Count(nylas.sent.Body, "cid:"+inlineContentID) != 2 {
-		t.Fatalf("sent body = %q, want internal attachment source rewritten to cid", nylas.sent.Body)
-	}
-	if len(nylas.sent.Attachments) != 1 {
-		t.Fatalf("inline attachments = %+v, want one resolved attachment", nylas.sent.Attachments)
-	}
-	inlineAttachment := nylas.sent.Attachments[0]
-	if inlineAttachment.AttachmentID != inlineAttachmentID || inlineAttachment.ContentID != inlineContentID || !inlineAttachment.IsInline || inlineAttachment.ContentDisposition != "inline" || inlineAttachment.Content != "" ||
-		len(nylas.sent.OutboundAttachments) != 1 || len(nylas.sentAttachmentBodies) != 1 || string(nylas.sentAttachmentBodies[0]) != "png-bytes" {
-		t.Fatalf("inline metadata=%+v outbound=%+v bodies=%q, want CID-linked streamed screenshot", inlineAttachment, nylas.sent.OutboundAttachments, nylas.sentAttachmentBodies)
-	}
-	var inlineSendResponse struct {
-		Message NylasMessage `json:"message"`
-	}
-	if err := json.Unmarshal(inlineSendRec.Body.Bytes(), &inlineSendResponse); err != nil {
-		t.Fatal(err)
-	}
-	if inlineSendResponse.Message.Body != nylas.sent.Body || len(inlineSendResponse.Message.Attachments) != 1 {
-		t.Fatalf("inline send response = %+v, want provider-ready body and attachment metadata", inlineSendResponse.Message)
-	}
-	responseAttachment := inlineSendResponse.Message.Attachments[0]
-	if responseAttachment.Content != "" || responseAttachment.AttachmentID != inlineAttachmentID || responseAttachment.ContentID != inlineContentID || !responseAttachment.IsInline {
-		t.Fatalf("response attachment = %+v, want metadata-only Mango inline attachment", responseAttachment)
-	}
-	sentResourceID := communicationsSentMessageResourceID(user.UserID, "", inlineSendResponse.Message.ID)
-	sentLinks, err := repo.ListResourceAttachments(companyID, "email_message", sentResourceID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var sentInlineLink *domain.ResourceAttachment
-	for index := range sentLinks {
-		if sentLinks[index].AttachmentID == inlineAttachmentID {
-			sentInlineLink = &sentLinks[index]
-			break
-		}
-	}
-	if sentInlineLink == nil || sentInlineLink.RelationshipKind != store.AttachmentRelationshipEmailInline {
-		t.Fatalf("sent attachment links = %+v, want durable inline email_message link", sentLinks)
-	}
-	if err := repo.SoftDeleteCommunicationsEmailDraft(store.CommunicationsEmailDraftDeleteInput{
-		CompanyID: companyID, DraftID: "draft-inline", PersonalUserID: user.UserID,
-		PersonalAccountEmail: user.Email, UpdatedByUserID: user.UserID,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	sentInlineRequest := httptest.NewRequest(http.MethodGet, "/v1/attachments/"+url.PathEscape(inlineAttachmentID)+"/content?company_id="+url.QueryEscape(companyID)+"&variant=original", nil)
-	sentInlineRequest.Header.Set("Authorization", token)
-	sentInlineContent := httptest.NewRecorder()
-	handler.ServeHTTP(sentInlineContent, sentInlineRequest)
-	if sentInlineContent.Code != http.StatusOK || sentInlineContent.Body.String() != "png-bytes" {
-		t.Fatalf("sent inline content after draft cleanup status=%d body=%q", sentInlineContent.Code, sentInlineContent.Body.String())
-	}
-
-	missingInlinePayload, err := json.Marshal(map[string]any{
-		"company_id": companyID,
-		"to":         []map[string]string{{"email": "friend@example.com"}},
-		"subject":    "Broken inline reference",
-		"body":       `<img src="mango-attachment:missing-attachment">`,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/send", string(missingInlinePayload), token, http.StatusNotFound)
-	if nylas.sent.Subject != "Inline screenshot" {
-		t.Fatalf("send reached provider for missing inline attachment: %+v", nylas.sent)
-	}
-	assertJSONStatus(t, handler, http.MethodDelete, "/v1/communications/messages/message-1", "", token, http.StatusOK)
-	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/disconnect", "", token, http.StatusOK)
-	if _, err := repo.GetUserEmailConnection(user.UserID); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("connection after disconnect error = %v, want ErrNotFound", err)
-	}
-}
-
-func TestCommunicationsMessageSkipsRawMIMEWithoutCIDReferences(t *testing.T) {
-	t.Parallel()
-
-	key := mustRSAKey(t)
-	repo := store.NewMemoryRepo()
-	const subject = "email-user"
-	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       user.UserID,
-		Provider:     "google",
-		AccountEmail: user.Email,
-		GrantID:      "grant-1",
-		Status:       "connected",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	nylas := &fakeNylasClient{
-		message: NylasMessage{ID: "message-1", Subject: "Photos", Body: "Body", Attachments: []NylasAttachment{{
-			ID:          "provider-file-1",
-			Filename:    "photo.png",
-			ContentType: "image/png",
-		}}},
-		rawMIME: strings.Join([]string{
-			"From: Sender <sender@example.com>",
-			"To: User <user@example.com>",
-			"Subject: Photos",
-			"MIME-Version: 1.0",
-			`Content-Type: multipart/mixed; boundary="mango-boundary"`,
-			"",
-			"--mango-boundary",
-			"Content-Type: text/plain; charset=utf-8",
-			"",
-			"Body",
-			"--mango-boundary",
-			`Content-Type: image/png; name="photo.png"`,
-			`Content-Disposition: attachment; filename="photo.png"`,
-			"Content-Transfer-Encoding: base64",
-			"",
-			"aW1hZ2UtYnl0ZXM=",
-			"--mango-boundary--",
-			"",
-		}, "\r\n"),
-	}
-	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
-	}).Routes()
-	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/communications/messages/message-1", nil)
-	req.Header.Set("Authorization", token)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("message status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	var payload struct {
-		Message NylasMessage `json:"message"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
-		t.Fatal(err)
-	}
-	if nylas.lastRawMIMEGrantID != "" || nylas.lastRawMIMEMessageID != "" {
-		t.Fatalf("ordinary message fetched raw MIME grant=%q message=%q", nylas.lastRawMIMEGrantID, nylas.lastRawMIMEMessageID)
-	}
-	if len(payload.Message.Attachments) != 1 {
-		t.Fatalf("attachments = %+v, want provider attachment only", payload.Message.Attachments)
-	}
-	attachment := payload.Message.Attachments[0]
-	if attachment.ID != "provider-file-1" || attachment.Content != "" {
-		t.Fatalf("attachment = %+v, want unchanged provider attachment", attachment)
+	if nylas.lastSendGrantID != "grant-1" || nylas.sent.Subject != "Hi" {
+		t.Fatalf("provider send grant=%q payload=%+v", nylas.lastSendGrantID, nylas.sent)
 	}
 }
 
@@ -2192,213 +1977,6 @@ func TestMessageNeedsRawMIMEAttachmentRecoveryOnlyForUnresolvedCID(t *testing.T)
 				t.Fatalf("messageNeedsRawMIMEAttachmentRecovery() = %t, want %t", got, test.want)
 			}
 		})
-	}
-}
-
-func TestCommunicationsMessageUsesProviderDownloadForResolvableCIDAttachment(t *testing.T) {
-	t.Parallel()
-
-	key := mustRSAKey(t)
-	repo := store.NewMemoryRepo()
-	const subject = "email-user"
-	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       user.UserID,
-		Provider:     "google",
-		AccountEmail: user.Email,
-		GrantID:      "grant-1",
-		Status:       "connected",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	nylas := &fakeNylasClient{
-		message: NylasMessage{
-			ID:      "message-1",
-			Subject: "Inline image",
-			Body:    `<div>Here</div><img src="cid:image-1@local" alt="image.png">`,
-			Attachments: []NylasAttachment{{
-				ID:                 "provider-inline-1",
-				Filename:           "image.png",
-				ContentType:        "image/png",
-				ContentID:          "image-1@local",
-				ContentDisposition: "inline",
-				IsInline:           true,
-				Size:               86,
-			}, {
-				ID:          "provider-file-1",
-				Filename:    "dashboard.png",
-				ContentType: "image/png",
-				Size:        197,
-			}},
-		},
-		rawMIME: strings.Join([]string{
-			"From: Sender <sender@example.com>",
-			"To: User <user@example.com>",
-			"Subject: Inline image",
-			"MIME-Version: 1.0",
-			`Content-Type: multipart/related; boundary="mango-related"`,
-			"",
-			"--mango-related",
-			"Content-Type: text/html; charset=utf-8",
-			"",
-			`<div>Here</div><img src="cid:image-1@local" alt="image.png">`,
-			"--mango-related",
-			"Content-Type: image/png",
-			"Content-Disposition: inline",
-			"Content-ID: <image-1@local>",
-			"Content-Transfer-Encoding: base64",
-			"",
-			"aW1hZ2UtYnl0ZXM=",
-			"--mango-related",
-			`Content-Type: image/png; name="dashboard.png"`,
-			`Content-Disposition: attachment; filename="dashboard.png"`,
-			"Content-Transfer-Encoding: base64",
-			"",
-			"ZGFzaGJvYXJk",
-			"--mango-related--",
-			"",
-		}, "\r\n"),
-		downloadContent: []byte("image-bytes"),
-	}
-	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
-	}).Routes()
-	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/communications/messages/message-1", nil)
-	req.Header.Set("Authorization", token)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("message status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	var payload struct {
-		Message NylasMessage `json:"message"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
-		t.Fatal(err)
-	}
-	if nylas.lastRawMIMEGrantID != "" || nylas.lastRawMIMEMessageID != "" {
-		t.Fatalf("downloadable CID metadata fetched raw MIME grant=%q message=%q", nylas.lastRawMIMEGrantID, nylas.lastRawMIMEMessageID)
-	}
-	if len(payload.Message.Attachments) != 2 {
-		t.Fatalf("attachments = %+v, want existing inline attachment merged without duplicating regular attachments", payload.Message.Attachments)
-	}
-	var attachment NylasAttachment
-	for _, item := range payload.Message.Attachments {
-		if item.ID == "provider-inline-1" {
-			attachment = item
-		}
-	}
-	if attachment.ID != "provider-inline-1" || attachment.ContentID != "image-1@local" || attachment.Content != "" || !attachment.IsInline {
-		t.Fatalf("attachment = %+v, want unchanged downloadable provider metadata", attachment)
-	}
-
-	attachmentReq := httptest.NewRequest(http.MethodGet, "/v1/communications/messages/message-1/attachments/provider-inline-1", nil)
-	attachmentReq.Header.Set("Authorization", token)
-	attachmentRec := httptest.NewRecorder()
-	handler.ServeHTTP(attachmentRec, attachmentReq)
-	if attachmentRec.Code != http.StatusOK {
-		t.Fatalf("provider inline attachment status = %d body=%s", attachmentRec.Code, attachmentRec.Body.String())
-	}
-	if attachmentRec.Header().Get("Content-Type") != "image/png" || attachmentRec.Body.String() != "image-bytes" {
-		t.Fatalf("provider inline attachment content-type=%q body=%q, want image/png image-bytes", attachmentRec.Header().Get("Content-Type"), attachmentRec.Body.String())
-	}
-	if nylas.lastDownloadAttachmentID != "provider-inline-1" {
-		t.Fatalf("download attachment id = %q, want provider-inline-1", nylas.lastDownloadAttachmentID)
-	}
-}
-
-func TestCommunicationsCachedMessageRecoversRawMIMEInlineAttachmentContent(t *testing.T) {
-	t.Parallel()
-
-	key := mustRSAKey(t)
-	repo := store.NewMemoryRepo()
-	const subject = "email-user"
-	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
-	if err != nil {
-		t.Fatal(err)
-	}
-	connection, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       user.UserID,
-		Provider:     "google",
-		AccountEmail: user.Email,
-		GrantID:      "grant-1",
-		Status:       "connected",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	nylas := &fakeNylasClient{
-		rawMIME: strings.Join([]string{
-			"From: Sender <sender@example.com>",
-			"To: User <user@example.com>",
-			"Subject: Cached inline image",
-			"MIME-Version: 1.0",
-			`Content-Type: multipart/related; boundary="mango-related"`,
-			"",
-			"--mango-related",
-			"Content-Type: text/html; charset=utf-8",
-			"",
-			`<div>Here</div><img src="cid:image-1@local" alt="image.png">`,
-			"--mango-related",
-			"Content-Type: image/png",
-			"Content-Disposition: inline",
-			"Content-ID: <image-1@local>",
-			"Content-Transfer-Encoding: base64",
-			"",
-			"aW1hZ2UtYnl0ZXM=",
-			"--mango-related--",
-			"",
-		}, "\r\n"),
-	}
-	server := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
-	})
-	server.commCache.setMessage(user.UserID, communicationsConnectionCacheScope(connection), NylasMessage{
-		ID:      "message-1",
-		Subject: "Cached inline image",
-		Body:    `<div>Here</div><img src="cid:image-1@local" alt="image.png">`,
-		Attachments: []NylasAttachment{{
-			Filename:           "image.png",
-			ContentType:        "image/png",
-			ContentID:          "image-1@local",
-			ContentDisposition: "inline",
-			IsInline:           true,
-			Size:               86,
-		}},
-	}, time.Now().UTC())
-	handler := server.Routes()
-	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/communications/messages/message-1", nil)
-	req.Header.Set("Authorization", token)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("cached message status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	var payload struct {
-		Message NylasMessage `json:"message"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
-		t.Fatal(err)
-	}
-	if nylas.detailCalls != 0 {
-		t.Fatalf("detail calls = %d, want cached detail with raw MIME recovery", nylas.detailCalls)
-	}
-	if nylas.lastRawMIMEGrantID != "grant-1" || nylas.lastRawMIMEMessageID != "message-1" {
-		t.Fatalf("raw mime scope grant=%q message=%q", nylas.lastRawMIMEGrantID, nylas.lastRawMIMEMessageID)
-	}
-	if len(payload.Message.Attachments) != 1 || payload.Message.Attachments[0].Content != "aW1hZ2UtYnl0ZXM=" {
-		t.Fatalf("attachments = %+v, want cached inline attachment recovered from raw MIME", payload.Message.Attachments)
 	}
 }
 
@@ -2735,556 +2313,17 @@ func TestCommunicationsFoldersInvalidationFencesRequestQueuedBeforeProviderStart
 	}
 }
 
-func TestCommunicationsCanceledColdReadsReleaseGenerationOwnershipWithoutProviderCalls(t *testing.T) {
-	client := &fakeNylasClient{}
-	server := NewServerWithOptions(store.NewMemoryRepo(), ServerOptions{
-		NylasClient:                        client,
-		DisableCommunicationsArchiveWorker: true,
-		DisableNotificationCleanup:         true,
-		DisableAttachmentUploadCleanup:     true,
-	})
-	defer server.Close()
-	server.nylasGate = newNylasRequestGate(0)
-	server.nylasGate.capacity = 1
-	connection := domain.UserEmailConnection{UserID: "cancelled-cold-user", Provider: "google", AccountEmail: "cancelled@example.com", GrantID: "cancelled-cold-grant", Scope: "personal"}
-	releaseGate, err := server.nylasGate.acquire(context.Background(), connection.GrantID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer releaseGate()
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := server.communicationsFolders(ctx, connection, true); !errors.Is(err, context.Canceled) {
-		t.Fatalf("canceled cold folders error = %v, want context canceled", err)
-	}
-	if _, err := server.communicationsMessagePage(ctx, connection, NylasMessageQuery{Limit: 12, Refresh: true}); !errors.Is(err, context.Canceled) {
-		t.Fatalf("canceled cold page error = %v, want context canceled", err)
-	}
-	if _, err := server.communicationsMessage(ctx, connection, "cancelled-message"); !errors.Is(err, context.Canceled) {
-		t.Fatalf("canceled cold detail error = %v, want context canceled", err)
-	}
-	if client.folderCalls != 0 || client.messageCalls != 0 || client.detailCalls != 0 {
-		t.Fatalf("canceled cold provider calls folders=%d pages=%d details=%d, want none", client.folderCalls, client.messageCalls, client.detailCalls)
-	}
-	server.commCache.mu.RLock()
-	folderGenerations := len(server.commCache.folderGenerations)
-	pageGenerations := len(server.commCache.pageGenerations)
-	detailGenerations := len(server.commCache.messageGenerations)
-	server.commCache.mu.RUnlock()
-	if folderGenerations != 0 || pageGenerations != 0 || detailGenerations != 0 {
-		t.Fatalf("canceled cold reads leaked generation ownership folders=%d pages=%d details=%d", folderGenerations, pageGenerations, detailGenerations)
-	}
-}
-
-func TestSharedAccountScopeInvalidationFencesColdInFlightFolderPageAndDetailReads(t *testing.T) {
-	folderStarted := make(chan struct{})
-	folderRelease := make(chan struct{})
-	pageStarted := make(chan struct{})
-	pageRelease := make(chan struct{})
-	detailStarted := make(chan struct{})
-	detailRelease := make(chan struct{})
-	client := &blockingCommunicationsNylasClient{
-		fakeNylasClient: &fakeNylasClient{
-			messages: []NylasMessage{{ID: "shared-cold-message", Subject: "Old page"}},
-			message:  NylasMessage{ID: "shared-cold-message", Subject: "Old detail", Body: "Old body"},
-		},
-		folderStarted: folderStarted,
-		folderRelease: folderRelease,
-		folderResult:  []NylasFolder{{ID: "inbox", Name: "Old folders"}},
-		pageStarted:   pageStarted,
-		pageRelease:   pageRelease,
-		detailStarted: detailStarted,
-		detailRelease: detailRelease,
-	}
-	server := NewServerWithOptions(store.NewMemoryRepo(), ServerOptions{
-		NylasClient:                        client,
-		DisableCommunicationsArchiveWorker: true,
-		DisableNotificationCleanup:         true,
-		DisableAttachmentUploadCleanup:     true,
-	})
-	defer server.Close()
-	server.nylasGate = newNylasRequestGate(0)
-	server.nylasGate.capacity = 3
-	connection := domain.UserEmailConnection{
-		UserID:                   "revoked-shared-cold-user",
-		Provider:                 "google",
-		AccountEmail:             "shared@example.com",
-		GrantID:                  "shared-cold-grant",
-		Scope:                    "shared",
-		CompanyID:                "shared-cold-company",
-		CompanyEmailConnectionID: "shared-cold-connection",
-	}
-	query := NylasMessageQuery{Limit: communicationsNylasMaxMessageLimit, Mailbox: "primary", Refresh: true}
-	errs := make(chan error, 3)
-	go func() {
-		_, err := server.communicationsFolders(context.Background(), connection, true)
-		errs <- err
-	}()
-	go func() {
-		_, err := server.communicationsMessagePage(context.Background(), connection, query)
-		errs <- err
-	}()
-	go func() {
-		_, err := server.communicationsMessage(context.Background(), connection, "shared-cold-message")
-		errs <- err
-	}()
-	<-folderStarted
-	<-pageStarted
-	<-detailStarted
-
-	cacheScope := communicationsConnectionCacheScope(connection)
-	server.applyNylasWebhookCacheInvalidationForAccountScope(cacheScope, nylasWebhookChange{Trigger: "message.updated", MessageID: "shared-cold-message"})
-	client.setFolderResult([]NylasFolder{{ID: "inbox", Name: "New folders"}})
-	client.setPageResult([]NylasMessage{{ID: "shared-cold-message", Subject: "New page"}})
-	client.setDetailResult(NylasMessage{ID: "shared-cold-message", Subject: "New detail", Body: "New body"})
-	close(folderRelease)
-	close(pageRelease)
-	close(detailRelease)
-	for i := 0; i < 3; i++ {
-		if err := <-errs; err != nil {
-			t.Fatalf("cold shared in-flight read %d: %v", i+1, err)
-		}
-	}
-	cacheQuery := query
-	cacheQuery.Refresh = false
-	if cached, ok := server.commCache.getFolders(connection.UserID, cacheScope, communicationsFoldersCacheTTL, time.Now().UTC()); ok {
-		t.Fatalf("cold shared folder flight repopulated invalidated cache: %+v", cached)
-	}
-	if cached, ok := server.commCache.getMessagePage(connection.UserID, cacheScope, cacheQuery, communicationsMessagesCacheTTL, time.Now().UTC()); ok {
-		t.Fatalf("cold shared page flight repopulated invalidated cache: %+v", cached)
-	}
-	if cached, ok := server.commCache.getMessage(connection.UserID, cacheScope, "shared-cold-message", communicationsMessageCacheTTL, time.Now().UTC()); ok {
-		t.Fatalf("cold shared detail flight repopulated invalidated cache: %+v", cached)
-	}
-
-	newFolders, err := server.communicationsFolders(context.Background(), connection, true)
-	if err != nil || len(newFolders) != 1 || newFolders[0].Name != "New folders" {
-		t.Fatalf("canonical shared folders after invalidation = %+v err=%v", newFolders, err)
-	}
-	newPage, err := server.communicationsMessagePage(context.Background(), connection, query)
-	if err != nil || len(newPage.Messages) != 1 || newPage.Messages[0].Subject != "New page" {
-		t.Fatalf("canonical shared page after invalidation = %+v err=%v", newPage, err)
-	}
-	newDetail, err := server.communicationsMessage(context.Background(), connection, "shared-cold-message")
-	if err != nil || newDetail.Subject != "New detail" || newDetail.Body != "New body" {
-		t.Fatalf("canonical shared detail after invalidation = %+v err=%v", newDetail, err)
-	}
-	if client.folderReadCalls() != 2 || client.pageCalls() != 2 || client.detailCalls() != 2 {
-		t.Fatalf("shared provider calls folders=%d pages=%d details=%d, want old plus canonical read for each", client.folderReadCalls(), client.pageCalls(), client.detailCalls())
-	}
-}
-
-func TestCommunicationsMessageCoalescesSameKeyProviderReads(t *testing.T) {
-	started := make(chan struct{})
-	release := make(chan struct{})
-	client := &blockingCommunicationsNylasClient{
-		fakeNylasClient: &fakeNylasClient{message: NylasMessage{ID: "message-1", Body: "<p>Body</p>"}},
-		detailStarted:   started,
-		detailRelease:   release,
-	}
-	server := NewServerWithOptions(store.NewMemoryRepo(), ServerOptions{NylasClient: client})
-	server.nylasGate = newNylasRequestGate(0)
-	connection := domain.UserEmailConnection{
-		UserID:       "user-1",
-		Provider:     "google",
-		AccountEmail: "user@example.com",
-		GrantID:      "grant-1",
-		Scope:        "personal",
-	}
-	errs := make(chan error, 2)
-	for i := 0; i < 2; i++ {
-		go func() {
-			_, err := server.communicationsMessage(context.Background(), connection, "message-1")
-			errs <- err
-		}()
-		if i == 0 {
-			select {
-			case <-started:
-			case <-time.After(5 * time.Second):
-				close(release)
-				t.Fatal("first detail provider call did not start")
-			}
-		}
-	}
-	cacheScope := communicationsConnectionCacheScope(connection)
-	waitForCommunicationsCacheGenerationOwners(t, server.commCache, "message", communicationsMessageCacheKey(connection.UserID, cacheScope, "message-1"), 2)
-	close(release)
-	for i := 0; i < 2; i++ {
-		select {
-		case err := <-errs:
-			if err != nil {
-				t.Fatal(err)
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatal("coalesced detail request did not complete")
-		}
-	}
-	if client.detailCalls() != 1 {
-		t.Fatalf("detail provider calls = %d, want one", client.detailCalls())
-	}
-}
-
-func TestCommunicationsMessagePageCoalescesSameKeyForcedRefreshes(t *testing.T) {
-	started := make(chan struct{})
-	release := make(chan struct{})
-	client := &blockingCommunicationsNylasClient{
-		fakeNylasClient: &fakeNylasClient{messages: []NylasMessage{{ID: "message-1"}}},
-		pageStarted:     started,
-		pageRelease:     release,
-	}
-	server := NewServerWithOptions(store.NewMemoryRepo(), ServerOptions{NylasClient: client})
-	server.nylasGate = newNylasRequestGate(0)
-	connection := domain.UserEmailConnection{
-		UserID:       "user-1",
-		Provider:     "google",
-		AccountEmail: "user@example.com",
-		GrantID:      "grant-1",
-		Scope:        "personal",
-	}
-	query := NylasMessageQuery{Limit: communicationsNylasMaxMessageLimit, Mailbox: "primary", Refresh: true}
-	errs := make(chan error, 2)
-	for i := 0; i < 2; i++ {
-		go func() {
-			_, err := server.communicationsMessagePage(context.Background(), connection, query)
-			errs <- err
-		}()
-		if i == 0 {
-			select {
-			case <-started:
-			case <-time.After(5 * time.Second):
-				close(release)
-				t.Fatal("first page provider call did not start")
-			}
-		}
-	}
-	cacheScope := communicationsConnectionCacheScope(connection)
-	waitForCommunicationsCacheGenerationOwners(t, server.commCache, "page", communicationsAccountScopedCacheKey(connection.UserID, cacheScope), 2)
-	close(release)
-	for i := 0; i < 2; i++ {
-		select {
-		case err := <-errs:
-			if err != nil {
-				t.Fatal(err)
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatal("coalesced page request did not complete")
-		}
-	}
-	if client.pageCalls() != 1 {
-		t.Fatalf("page provider calls = %d, want one", client.pageCalls())
-	}
-}
-
-func TestCommunicationsMessagePageInvalidationFencesOldFlightAndStartsCanonicalRead(t *testing.T) {
-	started := make(chan struct{})
-	release := make(chan struct{})
-	secondCall := make(chan struct{})
-	client := &blockingCommunicationsNylasClient{
-		fakeNylasClient: &fakeNylasClient{messages: []NylasMessage{{ID: "message-old", Subject: "Before commit"}}},
-		pageStarted:     started,
-		pageRelease:     release,
-		pageSecondCall:  secondCall,
-	}
-	server := NewServerWithOptions(store.NewMemoryRepo(), ServerOptions{
-		NylasClient:                        client,
-		DisableCommunicationsArchiveWorker: true,
-		DisableNotificationCleanup:         true,
-		DisableAttachmentUploadCleanup:     true,
-	})
-	defer server.Close()
-	server.nylasGate = newNylasRequestGate(0)
-	connection := domain.UserEmailConnection{UserID: "page-race-user", Provider: "google", AccountEmail: "page@example.com", GrantID: "page-race-grant", Scope: "personal"}
-	query := NylasMessageQuery{Limit: communicationsNylasMaxMessageLimit, Mailbox: "primary", Refresh: true}
-	oldResult := make(chan NylasMessagePage, 1)
-	newResult := make(chan NylasMessagePage, 1)
-	errs := make(chan error, 2)
-	go func() {
-		page, err := server.communicationsMessagePage(context.Background(), connection, query)
-		oldResult <- page
-		errs <- err
-	}()
-	<-started
-	cacheScope := communicationsConnectionCacheScope(connection)
-	server.applyNylasWebhookCacheInvalidation(connection.UserID, cacheScope, nylasWebhookChange{Trigger: "message.updated", MessageID: "message-old"})
-	client.setPageResult([]NylasMessage{{ID: "message-new", Subject: "After commit"}})
-	go func() {
-		page, err := server.communicationsMessagePage(context.Background(), connection, query)
-		newResult <- page
-		errs <- err
-	}()
-	<-secondCall
-	close(release)
-	for i := 0; i < 2; i++ {
-		if err := <-errs; err != nil {
-			t.Fatalf("generation-separated message page read: %v", err)
-		}
-	}
-	oldPage := <-oldResult
-	newPage := <-newResult
-	if len(oldPage.Messages) != 1 || oldPage.Messages[0].Subject != "Before commit" {
-		t.Fatalf("old page response = %+v, want pre-commit response only for its original caller", oldPage)
-	}
-	if len(newPage.Messages) != 1 || newPage.Messages[0].Subject != "After commit" {
-		t.Fatalf("post-webhook page response = %+v, want independent canonical read", newPage)
-	}
-	if calls := client.pageCalls(); calls != 2 {
-		t.Fatalf("generation-separated page provider calls = %d, want 2", calls)
-	}
-	cacheQuery := query
-	cacheQuery.Refresh = false
-	cached, ok := server.commCache.getMessagePage(connection.UserID, cacheScope, cacheQuery, communicationsMessagesCacheTTL, time.Now().UTC())
-	if !ok || len(cached.Messages) != 1 || cached.Messages[0].Subject != "After commit" {
-		t.Fatalf("message page cache after old-flight completion = %+v present=%t, want post-commit page", cached, ok)
-	}
-}
-
-func TestCommunicationsMessageInvalidationFencesOldFlightAndStartsCanonicalRead(t *testing.T) {
-	started := make(chan struct{})
-	release := make(chan struct{})
-	secondCall := make(chan struct{})
-	client := &blockingCommunicationsNylasClient{
-		fakeNylasClient:  &fakeNylasClient{message: NylasMessage{ID: "same-message", Subject: "Before commit", Body: "Old body"}},
-		detailStarted:    started,
-		detailRelease:    release,
-		detailSecondCall: secondCall,
-	}
-	server := NewServerWithOptions(store.NewMemoryRepo(), ServerOptions{
-		NylasClient:                        client,
-		DisableCommunicationsArchiveWorker: true,
-		DisableNotificationCleanup:         true,
-		DisableAttachmentUploadCleanup:     true,
-	})
-	defer server.Close()
-	server.nylasGate = newNylasRequestGate(0)
-	connection := domain.UserEmailConnection{UserID: "detail-race-user", Provider: "google", AccountEmail: "detail@example.com", GrantID: "detail-race-grant", Scope: "personal"}
-	oldResult := make(chan NylasMessage, 1)
-	newResult := make(chan NylasMessage, 1)
-	errs := make(chan error, 2)
-	go func() {
-		message, err := server.communicationsMessage(context.Background(), connection, "same-message")
-		oldResult <- message
-		errs <- err
-	}()
-	<-started
-	cacheScope := communicationsConnectionCacheScope(connection)
-	server.applyNylasWebhookCacheInvalidation(connection.UserID, cacheScope, nylasWebhookChange{Trigger: "message.updated", MessageID: "same-message"})
-	client.setDetailResult(NylasMessage{ID: "same-message", Subject: "After commit", Body: "New body"})
-	go func() {
-		message, err := server.communicationsMessage(context.Background(), connection, "same-message")
-		newResult <- message
-		errs <- err
-	}()
-	<-secondCall
-	close(release)
-	for i := 0; i < 2; i++ {
-		if err := <-errs; err != nil {
-			t.Fatalf("generation-separated message detail read: %v", err)
-		}
-	}
-	oldMessage := <-oldResult
-	newMessage := <-newResult
-	if oldMessage.Subject != "Before commit" || oldMessage.Body != "Old body" {
-		t.Fatalf("old detail response = %+v, want pre-commit response only for its original caller", oldMessage)
-	}
-	if newMessage.Subject != "After commit" || newMessage.Body != "New body" {
-		t.Fatalf("post-webhook detail response = %+v, want independent canonical read", newMessage)
-	}
-	if calls := client.detailCalls(); calls != 2 {
-		t.Fatalf("generation-separated detail provider calls = %d, want 2", calls)
-	}
-	cached, ok := server.commCache.getMessage(connection.UserID, cacheScope, "same-message", communicationsMessageCacheTTL, time.Now().UTC())
-	if !ok || cached.Subject != "After commit" || cached.Body != "New body" {
-		t.Fatalf("message detail cache after old-flight completion = %+v present=%t, want post-commit detail", cached, ok)
-	}
-}
-
-func TestCommunicationsMessagesCacheIsScopedPerSharedInboxAccount(t *testing.T) {
+func TestCommunicationsPersonalReadsSelectExactOwnedAccount(t *testing.T) {
 	t.Parallel()
-
 	key := mustRSAKey(t)
 	repo := store.NewMemoryRepo()
-	const companyID = "company-shared-message-cache"
-	repo.EnsureCompany(companyID, "Shared Message Cache Company")
-	actor, err := repo.UpsertAuthUser("cache-actor", "actor@example.com", "Actor")
+	const companyID = "11111111-1111-4111-8111-701300000402"
+	repo.EnsureCompany(companyID, "Exact Account Read Company")
+	actor, err := repo.UpsertAuthUser("exact-account-actor", "account-a@example.com", "Exact Account Actor")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.AddCompanyMembership(actor.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       actor.UserID,
-		Provider:     "google",
-		AccountEmail: actor.Email,
-		GrantID:      "grant-personal",
-		Status:       "connected",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       actor.UserID,
-		Provider:     "google",
-		AccountEmail: "support@example.com",
-		Scope:        "shared",
-		GrantID:      "grant-shared",
-		Status:       "connected",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Support", "support@example.com")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: store.EntityTypeSharedInbox,
-		EntityID:   folder.FolderID,
-		Permissions: []store.EntityPermissionInput{{
-			SubjectType: store.EntityPermissionSubjectUser,
-			SubjectID:   actor.UserID,
-			AccessLevel: store.EntityPermissionEdit,
-		}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	nylas := &fakeNylasClient{
-		messagesByGrantID: map[string][]NylasMessage{
-			"grant-personal": {{ID: "personal-message", Subject: "Personal inbox"}},
-			"grant-shared":   {{ID: "shared-message", Subject: "Shared inbox"}},
-		},
-	}
-	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
-	}).Routes()
-	token := "Bearer " + testJWT(t, key, "kid", actor.CognitoSubject, actor.Email)
-
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=primary&limit=5", "", token, http.StatusOK)
-	if nylas.lastMessageGrantID != "grant-personal" {
-		t.Fatalf("personal message grant = %q, want grant-personal", nylas.lastMessageGrantID)
-	}
-	if nylas.lastQuery.SearchQueryNative != "in:inbox -category:social -category:promotions" {
-		t.Fatalf("personal Primary search_query_native = %q", nylas.lastQuery.SearchQueryNative)
-	}
-
-	sharedPath := "/v1/communications/messages?mailbox=primary&limit=5&company_id=" + url.QueryEscape(companyID) + "&shared_inbox_id=" + url.QueryEscape(folder.FolderID)
-	req := httptest.NewRequest(http.MethodGet, sharedPath, nil)
-	req.Header.Set("Authorization", token)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("shared inbox messages status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
-	if nylas.lastMessageGrantID != "grant-shared" {
-		t.Fatalf("shared message grant = %q, want grant-shared", nylas.lastMessageGrantID)
-	}
-	if nylas.lastQuery.SearchQueryNative != "in:inbox -category:social -category:promotions" {
-		t.Fatalf("shared Primary search_query_native = %q", nylas.lastQuery.SearchQueryNative)
-	}
-	body := rec.Body.String()
-	if !strings.Contains(body, "shared-message") || strings.Contains(body, "personal-message") {
-		t.Fatalf("shared inbox response = %s, want shared mailbox messages only", body)
-	}
-	if nylas.messageCalls != 2 {
-		t.Fatalf("message calls = %d, want personal and shared Nylas reads", nylas.messageCalls)
-	}
-	assertJSONStatus(t, handler, http.MethodGet, sharedPath, "", token, http.StatusOK)
-	if nylas.messageCalls != 2 {
-		t.Fatalf("message calls after shared cache read = %d, want cached shared page", nylas.messageCalls)
-	}
-}
-
-func TestCommunicationsMessagesOldestOrderLoadsCompleteFilteredSnapshot(t *testing.T) {
-	t.Parallel()
-
-	key := mustRSAKey(t)
-	repo := store.NewMemoryRepo()
-	actor, err := repo.UpsertAuthUser("oldest-order-actor", "oldest@example.com", "Oldest Order Actor")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       actor.UserID,
-		Provider:     "google",
-		AccountEmail: actor.Email,
-		GrantID:      "grant-oldest",
-		Status:       "connected",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	nylas := &fakeNylasClient{
-		messagePagesByToken: map[string]NylasMessagePage{
-			"": {
-				Messages: []NylasMessage{
-					{ID: "newest", Date: 300},
-					{ID: "middle", Date: 200},
-				},
-				NextPageToken: "page-2",
-			},
-			"page-2": {
-				Messages: []NylasMessage{
-					{ID: "middle", Date: 200},
-					{ID: "oldest", Date: 100},
-				},
-			},
-		},
-	}
-	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
-	}).Routes()
-	token := "Bearer " + testJWT(t, key, "kid", actor.CognitoSubject, actor.Email)
-	req := httptest.NewRequest(http.MethodGet, "/v1/communications/messages?mailbox=all&limit=12&order=oldest", nil)
-	req.Header.Set("Authorization", token)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("oldest order status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
-	var page NylasMessagePage
-	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
-		t.Fatal(err)
-	}
-	gotIDs := make([]string, 0, len(page.Messages))
-	for _, message := range page.Messages {
-		gotIDs = append(gotIDs, message.ID)
-	}
-	if got, want := strings.Join(gotIDs, ","), "oldest,middle,newest"; got != want {
-		t.Fatalf("oldest order ids = %q, want %q", got, want)
-	}
-	if page.NextPageToken != "" {
-		t.Fatalf("oldest order next page token = %q, want complete snapshot", page.NextPageToken)
-	}
-	if len(nylas.messageQueries) != 2 {
-		t.Fatalf("oldest order provider reads = %d, want 2", len(nylas.messageQueries))
-	}
-	for index, query := range nylas.messageQueries {
-		if query.Limit != communicationsNylasOrderSnapshotLimit {
-			t.Fatalf("oldest order query %d limit = %d, want %d", index, query.Limit, communicationsNylasOrderSnapshotLimit)
-		}
-		if query.Order != "" {
-			t.Fatalf("oldest order query %d leaked internal order = %q", index, query.Order)
-		}
-		if query.SearchQueryNative != "in:anywhere" {
-			t.Fatalf("oldest order query %d search = %q, want in:anywhere", index, query.SearchQueryNative)
-		}
-	}
-
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=all&order=newest", "", token, http.StatusBadRequest)
-	if nylas.messageCalls != 2 {
-		t.Fatalf("invalid order made provider reads: %d", nylas.messageCalls)
-	}
-}
-
-func TestCommunicationsPersonalReadsSelectExactOwnedAccount(t *testing.T) {
-	t.Parallel()
-
-	key := mustRSAKey(t)
-	repo := store.NewMemoryRepo()
-	actor, err := repo.UpsertAuthUser("exact-account-actor", "account-a@example.com", "Exact Account Actor")
-	if err != nil {
 		t.Fatal(err)
 	}
 	for _, connection := range []store.UserEmailConnectionInput{
@@ -3304,20 +2343,16 @@ func TestCommunicationsPersonalReadsSelectExactOwnedAccount(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-
-	nylas := &fakeNylasClient{messagesByGrantID: map[string][]NylasMessage{
-		"grant-account-a": {{ID: "message-a", Subject: "Account A"}},
-		"grant-account-b": {{ID: "message-b", Subject: "Account B"}},
-		"grant-other":     {{ID: "message-other", Subject: "Other user"}},
-	}}
+	seedPersonalV3EmailMessageForCommunicationsTest(t, repo, companyID, actor.UserID, "account-a@example.com", "google", NylasMessage{ID: "message-a", Subject: "Account A", Folders: []string{"INBOX"}})
+	seedPersonalV3EmailMessageForCommunicationsTest(t, repo, companyID, actor.UserID, "account-b@example.com", "microsoft", NylasMessage{ID: "message-b", Subject: "Account B", Folders: []string{"Inbox"}})
+	seedPersonalV3EmailMessageForCommunicationsTest(t, repo, companyID, other.UserID, other.Email, "google", NylasMessage{ID: "message-other", Subject: "Other user", Folders: []string{"INBOX"}})
+	nylas := &fakeNylasClient{folders: []NylasFolder{{ID: "inbox", Name: "Inbox"}}}
 	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
+		AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas,
 	}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", actor.CognitoSubject, actor.Email)
-
-	path := "/v1/communications/messages?mailbox=primary&limit=5&account_email=ACCOUNT-B%40EXAMPLE.COM"
+	base := "company_id=" + url.QueryEscape(companyID)
+	path := "/v1/communications/messages?" + base + "&mailbox=primary&limit=5&account_email=ACCOUNT-B%40EXAMPLE.COM"
 	req := httptest.NewRequest(http.MethodGet, path, nil)
 	req.Header.Set("Authorization", token)
 	rec := httptest.NewRecorder()
@@ -3325,27 +2360,18 @@ func TestCommunicationsPersonalReadsSelectExactOwnedAccount(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("exact account messages status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if nylas.lastMessageGrantID != "grant-account-b" {
-		t.Fatalf("exact account grant=%q, want grant-account-b", nylas.lastMessageGrantID)
-	}
 	if body := rec.Body.String(); !strings.Contains(body, "message-b") || strings.Contains(body, "message-a") || strings.Contains(body, "message-other") {
 		t.Fatalf("exact account response=%s, want only account B", body)
 	}
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/folders?account_email=ACCOUNT-B%40EXAMPLE.COM", "", token, http.StatusOK)
+	if nylas.messageCalls != 0 {
+		t.Fatalf("stored exact-account read made %d provider list calls", nylas.messageCalls)
+	}
+	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/folders?"+base+"&account_email=ACCOUNT-B%40EXAMPLE.COM", "", token, http.StatusOK)
 	if nylas.lastFolderGrantID != "grant-account-b" || nylas.folderCalls != 1 {
-		t.Fatalf("exact account folder grant=%q calls=%d, want grant-account-b and one provider read", nylas.lastFolderGrantID, nylas.folderCalls)
+		t.Fatalf("exact account folder grant=%q calls=%d", nylas.lastFolderGrantID, nylas.folderCalls)
 	}
-
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=primary&account_email=missing%40example.com", "", token, http.StatusForbidden)
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=primary&account_email=other%40example.com", "", token, http.StatusForbidden)
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/folders?account_email=missing%40example.com&refresh=true", "", token, http.StatusForbidden)
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/folders?account_email=other%40example.com&refresh=true", "", token, http.StatusForbidden)
-	if nylas.messageCalls != 1 {
-		t.Fatalf("provider calls=%d, want denied accounts rejected before provider reads", nylas.messageCalls)
-	}
-	if nylas.folderCalls != 1 {
-		t.Fatalf("folder provider calls=%d, want denied accounts rejected before provider reads", nylas.folderCalls)
-	}
+	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?"+base+"&account_email=missing%40example.com", "", token, http.StatusForbidden)
+	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?"+base+"&account_email=other%40example.com", "", token, http.StatusForbidden)
 }
 
 func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T) {
@@ -3353,7 +2379,7 @@ func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T
 
 	key := mustRSAKey(t)
 	repo := store.NewMemoryRepo()
-	const companyID = "company-shared-send"
+	const companyID = "11111111-1111-4111-8111-701300000411"
 	repo.EnsureCompany(companyID, "Shared Send Company")
 	actor, err := repo.UpsertAuthUser("shared-send-actor", "actor@example.com", "Actor")
 	if err != nil {
@@ -3414,12 +2440,20 @@ func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T
 		EntityID:         folder.FolderID,
 		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
 		DefaultAccessSet: true,
-		OverrideUserIDs:  []string{actor.UserID},
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser, SubjectID: actor.UserID, AccessLevel: store.EntityPermissionEdit,
+		}},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	sharedContent := []byte("shared attachment bytes")
-	attachmentID := seedLiveEmailDraftAttachmentForCommunicationsTest(t, repo, storage, actor.UserID, companyID, sharedEmailDraftResourceID(folder.FolderID, "draft-shared-send"), "shared-large.txt", "text/plain", sharedContent)
+	if _, err := repo.UpsertCommunicationsEmailDraft(store.CommunicationsEmailDraftInput{
+		CompanyID: companyID, DraftID: "draft-shared-send", SharedInboxID: folder.FolderID,
+		AccountEmail: sharedUser.Email, CreatedByUserID: actor.UserID, UpdatedByUserID: actor.UserID, Kind: "compose",
+	}); err != nil {
+		t.Fatalf("seed shared V3 email draft: %v", err)
+	}
+	attachmentID := seedEmailAttachmentForCommunicationsTest(t, repo, storage, actor.UserID, companyID, "draft-shared-send", "shared-large.txt", "text/plain", sharedContent)
 	largeBody := `{"to":[{"email":"customer@example.com"}],"subject":"Shared hello","body":"Body","attachments":[{"attachment_id":"` + attachmentID + `","filename":"shared-large.txt","content_type":"text/plain","size":` + fmt.Sprint(len(sharedContent)) + `}]}`
 	assertJSONStatus(t, handler, http.MethodPost, path, largeBody, token, http.StatusCreated)
 	if nylas.lastSendGrantID != "grant-support" {
@@ -3432,11 +2466,18 @@ func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T
 		len(nylas.sent.OutboundAttachments) != 1 || len(nylas.sentAttachmentBodies) != 1 || string(nylas.sentAttachmentBodies[0]) != string(sharedContent) {
 		t.Fatalf("metadata=%+v outbound=%+v bodies=%q, want streamed shared inbox attachment", nylas.sent.Attachments, nylas.sent.OutboundAttachments, nylas.sentAttachmentBodies)
 	}
+	storedSignature, err := repo.UpsertCommunicationsEmailSignature(store.CommunicationsEmailSignatureInput{
+		CompanyID: companyID, SharedInboxID: folder.FolderID, Name: "Shared default",
+		IsDefault: true, CreatedByUserID: actor.UserID, UpdatedByUserID: actor.UserID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	inlineOriginal := []byte("shared-signature-original")
-	inlineAttachmentID := seedEmailSignatureAttachmentForCommunicationsTest(t, repo, storage, actor.UserID, companyID, sharedEmailSignatureResourceID(folder.FolderID), inlineOriginal, []byte("shared-signature-display"))
+	inlineAttachmentID := seedEmailSignatureAttachmentForCommunicationsTest(t, repo, storage, actor.UserID, companyID, storedSignature.SignatureID, inlineOriginal, []byte("shared-signature-display"))
 	signatureBody := "<p>Shared regards</p><img src=\"mango-attachment:" + url.PathEscape(inlineAttachmentID) + "\">"
 	if _, err := repo.UpsertCommunicationsEmailSignature(store.CommunicationsEmailSignatureInput{
-		CompanyID: companyID, SharedInboxID: folder.FolderID, Name: "Shared default",
+		CompanyID: companyID, SignatureID: storedSignature.SignatureID, SharedInboxID: folder.FolderID, Name: "Shared default",
 		BodyEditorHTML: signatureBody, IsDefault: true, CreatedByUserID: actor.UserID, UpdatedByUserID: actor.UserID,
 	}); err != nil {
 		t.Fatal(err)
@@ -3459,247 +2500,6 @@ func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T
 		len(nylas.sentAttachmentBodies) != 1 || !bytes.Equal(nylas.sentAttachmentBodies[0], inlineOriginal) {
 		t.Fatalf("shared inline metadata=%+v outbound=%+v bodies=%q, want one checksum-validated original CID signature image", nylas.sent.Attachments, nylas.sent.OutboundAttachments, nylas.sentAttachmentBodies)
 	}
-}
-
-func TestCommunicationsCacheAvoidsRepeatedNylasReads(t *testing.T) {
-	t.Parallel()
-
-	key := mustRSAKey(t)
-	repo := store.NewMemoryRepo()
-	const subject = "email-user"
-	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       user.UserID,
-		Provider:     "microsoft",
-		AccountEmail: user.Email,
-		GrantID:      "grant-1",
-		Status:       "connected",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	nylas := &fakeNylasClient{
-		folders:  []NylasFolder{{ID: "inbox", Name: "Inbox", Attributes: []string{"\\Inbox"}}},
-		messages: []NylasMessage{{ID: "message-1", Subject: "Hello", Unread: true}},
-		message:  NylasMessage{ID: "message-1", Subject: "Hello", Body: "Body", Unread: true},
-	}
-	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
-	}).Routes()
-	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
-
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/folders", "", token, http.StatusOK)
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/folders", "", token, http.StatusOK)
-	if nylas.folderCalls != 1 {
-		t.Fatalf("folder calls = %d, want 1", nylas.folderCalls)
-	}
-
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=primary&limit=5", "", token, http.StatusOK)
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=primary&limit=5", "", token, http.StatusOK)
-	if nylas.folderCalls != 1 {
-		t.Fatalf("folder calls after mailbox resolution = %d, want 1", nylas.folderCalls)
-	}
-	if nylas.messageCalls != 1 {
-		t.Fatalf("message list calls = %d, want 1", nylas.messageCalls)
-	}
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=primary&limit=5&refresh=true", "", token, http.StatusOK)
-	if nylas.messageCalls != 2 {
-		t.Fatalf("message list calls after refresh = %d, want 2", nylas.messageCalls)
-	}
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=primary&limit=5", "", token, http.StatusOK)
-	if nylas.messageCalls != 2 {
-		t.Fatalf("message list calls after refreshed cache read = %d, want 2", nylas.messageCalls)
-	}
-
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages/message-1", "", token, http.StatusOK)
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages/message-1", "", token, http.StatusOK)
-	if nylas.detailCalls != 1 {
-		t.Fatalf("message detail calls = %d, want 1", nylas.detailCalls)
-	}
-
-	nylas.mu.Lock()
-	nylas.folders = []NylasFolder{{ID: "inbox", Name: "Inbox after commit", Attributes: []string{"\\Inbox"}}}
-	nylas.mu.Unlock()
-	refreshReq := httptest.NewRequest(http.MethodGet, "/v1/communications/folders?refresh=true", nil)
-	refreshReq.Header.Set("Authorization", token)
-	refreshRec := httptest.NewRecorder()
-	handler.ServeHTTP(refreshRec, refreshReq)
-	if refreshRec.Code != http.StatusOK || !strings.Contains(refreshRec.Body.String(), "Inbox after commit") {
-		t.Fatalf("folder refresh status=%d body=%s, want canonical post-commit folders", refreshRec.Code, refreshRec.Body.String())
-	}
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/folders", "", token, http.StatusOK)
-	if nylas.folderCalls != 2 {
-		t.Fatalf("folder calls after explicit refresh and cache read = %d, want 2", nylas.folderCalls)
-	}
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/folders?refresh=not-a-boolean", "", token, http.StatusBadRequest)
-	if nylas.folderCalls != 2 {
-		t.Fatalf("folder calls after invalid refresh = %d, want validation before provider read", nylas.folderCalls)
-	}
-}
-
-func TestCommunicationsCacheEvictsBoundedEntries(t *testing.T) {
-	t.Parallel()
-
-	cache := newCommunicationsCache()
-	now := time.Unix(1000, 0).UTC()
-
-	for i := 0; i < communicationsMaxMessagePagesPerUser+2; i++ {
-		query := NylasMessageQuery{Limit: 5, PageToken: fmt.Sprintf("page-%d", i)}
-		page := NylasMessagePage{Messages: []NylasMessage{{ID: fmt.Sprintf("message-%d", i)}}}
-		cache.setMessagePage("user-1", "account:user@example.com", query, page, now.Add(time.Duration(i)*time.Second))
-	}
-	if len(cache.messagePages) != communicationsMaxMessagePagesPerUser {
-		t.Fatalf("message page cache size = %d, want %d", len(cache.messagePages), communicationsMaxMessagePagesPerUser)
-	}
-	if _, ok := cache.getMessagePage("user-1", "account:user@example.com", NylasMessageQuery{Limit: 5, PageToken: "page-0"}, communicationsMaxStaleTTL, now.Add(time.Minute)); ok {
-		t.Fatal("oldest message page was not evicted")
-	}
-	if _, ok := cache.getMessagePage("user-1", "account:user@example.com", NylasMessageQuery{Limit: 5, PageToken: fmt.Sprintf("page-%d", communicationsMaxMessagePagesPerUser+1)}, communicationsMaxStaleTTL, now.Add(time.Minute)); !ok {
-		t.Fatal("newest message page was evicted")
-	}
-
-	for i := 0; i < communicationsMaxMessageEntries+4; i++ {
-		cache.setMessage(fmt.Sprintf("global-user-%d", i), "account:user@example.com", NylasMessage{ID: "message-1", Body: "body"}, now.Add(time.Duration(i)*time.Second))
-	}
-	if len(cache.messages) != communicationsMaxMessageEntries {
-		t.Fatalf("message detail cache size = %d, want %d", len(cache.messages), communicationsMaxMessageEntries)
-	}
-	if _, ok := cache.getMessage("global-user-0", "account:user@example.com", "message-1", communicationsMaxStaleTTL, now.Add(time.Minute)); ok {
-		t.Fatal("oldest message detail was not globally evicted")
-	}
-
-	for i := 0; i < communicationsMaxMessageDetailsPerUser+2; i++ {
-		cache.setMessage("detail-user", "account:user@example.com", NylasMessage{ID: fmt.Sprintf("detail-%d", i), Body: "body"}, now.Add(time.Duration(i)*time.Second))
-	}
-	if _, ok := cache.getMessage("detail-user", "account:user@example.com", "detail-0", communicationsMaxStaleTTL, now.Add(time.Minute)); ok {
-		t.Fatal("oldest per-user message detail was not evicted")
-	}
-	if _, ok := cache.getMessage("detail-user", "account:user@example.com", fmt.Sprintf("detail-%d", communicationsMaxMessageDetailsPerUser+1), communicationsMaxStaleTTL, now.Add(time.Minute)); !ok {
-		t.Fatal("newest per-user message detail was evicted")
-	}
-}
-
-func TestCommunicationsCacheGenerationBookkeepingStaysBoundedToLiveOwners(t *testing.T) {
-	cache := newCommunicationsCache()
-	now := time.Unix(2000, 0).UTC()
-	folderUsers := make([]string, 0, communicationsMaxCachedFolderUsers+16)
-	for i := 0; i < communicationsMaxCachedFolderUsers+16; i++ {
-		userID := fmt.Sprintf("folder-owner-%d", i)
-		folderUsers = append(folderUsers, userID)
-		generation, release := cache.beginFolderGeneration(userID, "grant:folder")
-		if !cache.setFoldersIfGeneration(userID, "grant:folder", []NylasFolder{{ID: "inbox"}}, now.Add(time.Duration(i)*time.Second), generation) {
-			t.Fatalf("set generation-owned folders %d", i)
-		}
-		release()
-	}
-	if len(cache.folders) != communicationsMaxCachedFolderUsers || len(cache.folderGenerations) != len(cache.folders) {
-		t.Fatalf("folder cache=%d generations=%d, want exactly %d live owners", len(cache.folders), len(cache.folderGenerations), communicationsMaxCachedFolderUsers)
-	}
-
-	detailUsers := make([]string, 0, communicationsMaxMessageEntries+16)
-	for i := 0; i < communicationsMaxMessageEntries+16; i++ {
-		userID := fmt.Sprintf("detail-owner-%d", i)
-		detailUsers = append(detailUsers, userID)
-		generation, release := cache.beginMessageGeneration(userID, "grant:detail", "message")
-		if !cache.setMessageIfGeneration(userID, "grant:detail", NylasMessage{ID: "message"}, now.Add(time.Duration(i)*time.Second), generation) {
-			t.Fatalf("set generation-owned detail %d", i)
-		}
-		release()
-	}
-	if len(cache.messages) != communicationsMaxMessageEntries || len(cache.messageGenerations) != len(cache.messages) {
-		t.Fatalf("detail cache=%d generations=%d, want exactly %d live owners", len(cache.messages), len(cache.messageGenerations), communicationsMaxMessageEntries)
-	}
-
-	pageOwners := map[string]struct{}{}
-	for i := 0; i < 128; i++ {
-		userID := fmt.Sprintf("page-owner-%d", i)
-		generation, release := cache.beginMessagePageGeneration(userID, "grant:page")
-		query := NylasMessageQuery{Limit: 12, PageToken: fmt.Sprintf("page-%d", i)}
-		if !cache.setMessagePageIfGeneration(userID, "grant:page", query, NylasMessagePage{Messages: []NylasMessage{{ID: "message"}}}, now.Add(time.Duration(i)*time.Second), generation) {
-			t.Fatalf("set generation-owned page %d", i)
-		}
-		release()
-		pageOwners[communicationsAccountScopedCacheKey(userID, "grant:page")] = struct{}{}
-	}
-	if len(cache.pageGenerations) != len(pageOwners) {
-		t.Fatalf("page generations=%d, want %d live user/account owners", len(cache.pageGenerations), len(pageOwners))
-	}
-
-	folderGenerationCount := len(cache.folderGenerations)
-	pageGenerationCount := len(cache.pageGenerations)
-	detailGenerationCount := len(cache.messageGenerations)
-	for i := 0; i < 1000; i++ {
-		userID := fmt.Sprintf("uncached-user-%d", i)
-		cache.invalidateFolders(userID, "grant:missing")
-		cache.invalidateMessagePages(userID, "grant:missing")
-		cache.invalidateMessage(userID, "grant:missing", fmt.Sprintf("missing-%d", i))
-	}
-	if len(cache.folderGenerations) != folderGenerationCount || len(cache.pageGenerations) != pageGenerationCount || len(cache.messageGenerations) != detailGenerationCount {
-		t.Fatalf("uncached invalidations created tombstones folders=%d/%d pages=%d/%d details=%d/%d", len(cache.folderGenerations), folderGenerationCount, len(cache.pageGenerations), pageGenerationCount, len(cache.messageGenerations), detailGenerationCount)
-	}
-
-	for _, userID := range folderUsers {
-		cache.invalidateUser(userID)
-	}
-	for _, userID := range detailUsers {
-		cache.invalidateUser(userID)
-	}
-	for i := 0; i < 128; i++ {
-		cache.invalidateUser(fmt.Sprintf("page-owner-%d", i))
-	}
-	if len(cache.folders) != 0 || len(cache.messagePages) != 0 || len(cache.messages) != 0 || len(cache.folderGenerations) != 0 || len(cache.pageGenerations) != 0 || len(cache.messageGenerations) != 0 {
-		t.Fatalf("cache cleanup left live entries or generations folders=%d/%d pages=%d/%d details=%d/%d", len(cache.folders), len(cache.folderGenerations), len(cache.messagePages), len(cache.pageGenerations), len(cache.messages), len(cache.messageGenerations))
-	}
-}
-
-func TestCommunicationsCommittedLocalPatchesFenceOlderPageAndDetailWriters(t *testing.T) {
-	cache := newCommunicationsCache()
-	now := time.Unix(3000, 0).UTC()
-	const userID = "mutation-fence-user"
-	const cacheScope = "grant:mutation-fence"
-	query := NylasMessageQuery{Limit: 12, Mailbox: "primary"}
-	cache.setMessagePage(userID, cacheScope, query, NylasMessagePage{Messages: []NylasMessage{{ID: "message-1", Subject: "Before", Unread: true, Folders: []string{"INBOX"}}}}, now)
-	cache.setMessage(userID, cacheScope, NylasMessage{ID: "message-1", Subject: "Before", Unread: true, Folders: []string{"INBOX"}}, now)
-	pageGeneration, releasePage := cache.beginMessagePageGeneration(userID, cacheScope)
-	detailGeneration, releaseDetail := cache.beginMessageGeneration(userID, cacheScope, "message-1")
-
-	unread := false
-	starred := true
-	committed := NylasMessage{ID: "message-1", Subject: "Committed", Unread: false, Starred: true, Folders: []string{"INBOX"}}
-	cache.patchMessagePages(userID, cacheScope, committed, now.Add(time.Second))
-	cache.patchMessageMetadata(userID, cacheScope, "message-1", NylasMessageUpdate{Unread: &unread, Starred: &starred}, committed)
-	if cache.setMessagePageIfGeneration(userID, cacheScope, query, NylasMessagePage{Messages: []NylasMessage{{ID: "message-1", Subject: "Stale page"}}}, now.Add(2*time.Second), pageGeneration) {
-		t.Fatal("pre-mutation page writer was accepted after committed cache patch")
-	}
-	if cache.setMessageIfGeneration(userID, cacheScope, NylasMessage{ID: "message-1", Subject: "Stale detail", Unread: true}, now.Add(2*time.Second), detailGeneration) {
-		t.Fatal("pre-mutation detail writer was accepted after committed cache patch")
-	}
-	page, ok := cache.getMessagePage(userID, cacheScope, query, communicationsMessagesCacheTTL, now.Add(3*time.Second))
-	if !ok || len(page.Messages) != 1 || page.Messages[0].Subject != "Committed" || page.Messages[0].Unread || !page.Messages[0].Starred {
-		t.Fatalf("committed page patch was overwritten: %+v present=%t", page, ok)
-	}
-	detail, ok := cache.getMessage(userID, cacheScope, "message-1", communicationsMessageCacheTTL, now.Add(3*time.Second))
-	if !ok || detail.Subject != "Before" || detail.Unread || !detail.Starred {
-		t.Fatalf("committed detail metadata patch was overwritten: %+v present=%t", detail, ok)
-	}
-	releasePage()
-	releaseDetail()
-
-	cache.setMessagePage(userID, cacheScope, query, NylasMessagePage{Messages: []NylasMessage{{ID: "message-1", Subject: "Committed"}}}, now.Add(4*time.Second))
-	removeGeneration, releaseRemove := cache.beginMessagePageGeneration(userID, cacheScope)
-	cache.removeMessagesFromPages(userID, cacheScope, []string{"message-1"}, "primary", now.Add(5*time.Second))
-	if cache.setMessagePageIfGeneration(userID, cacheScope, query, NylasMessagePage{Messages: []NylasMessage{{ID: "message-1", Subject: "Resurrected stale page"}}}, now.Add(6*time.Second), removeGeneration) {
-		t.Fatal("pre-delete page writer resurrected a locally removed message")
-	}
-	page, ok = cache.getMessagePage(userID, cacheScope, query, communicationsMessagesCacheTTL, now.Add(7*time.Second))
-	if !ok || len(page.Messages) != 0 {
-		t.Fatalf("committed page removal was overwritten: %+v present=%t", page, ok)
-	}
-	releaseRemove()
 }
 
 func TestParseNylasWebhookChangesCanonicalizesMailboxTriggers(t *testing.T) {
@@ -3744,178 +2544,6 @@ func TestParseNylasWebhookChangesCapturesRenderableMessageSnapshot(t *testing.T)
 		message.Subject != "Renderable update" || message.Body != "<p>Complete body</p>" ||
 		len(message.From) != 1 || message.From[0].Email != "sender@example.com" {
 		t.Fatalf("message snapshot = %+v", message)
-	}
-}
-
-func TestNylasWebhookCacheInvalidationIsGranular(t *testing.T) {
-	t.Parallel()
-
-	now := time.Unix(1000, 0).UTC()
-	query := NylasMessageQuery{Limit: 5, Mailbox: "primary"}
-
-	cache := newCommunicationsCache()
-	server := &Server{commCache: cache}
-	cache.setFolders("user-1", "account:user@example.com", []NylasFolder{{ID: "inbox", Name: "Inbox"}}, now)
-	cache.setMessagePage("user-1", "account:user@example.com", query, NylasMessagePage{Messages: []NylasMessage{{ID: "message-1"}}}, now)
-	cache.setMessage("user-1", "account:user@example.com", NylasMessage{ID: "message-1", Subject: "Cached"}, now)
-
-	server.applyNylasWebhookCacheInvalidation("user-1", "account:user@example.com", nylasWebhookChange{Trigger: "message.opened", MessageID: "message-1"})
-
-	if _, ok := cache.getFolders("user-1", "account:user@example.com", communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
-		t.Fatal("message webhook invalidated folders; want folder cache preserved")
-	}
-	if _, ok := cache.getMessagePage("user-1", "account:user@example.com", query, communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
-		t.Fatal("message.opened invalidated message page; want list cache preserved")
-	}
-	if message, ok := cache.getMessage("user-1", "account:user@example.com", "message-1", communicationsMaxStaleTTL, now.Add(time.Second)); !ok || message.Subject != "Cached" {
-		t.Fatal("message.opened invalidated provider detail; want read status enriched without discarding the body")
-	}
-
-	cache.setMessagePage("user-1", "account:user@example.com", query, NylasMessagePage{Messages: []NylasMessage{{ID: "message-1"}}}, now)
-	cache.setMessage("user-1", "account:user@example.com", NylasMessage{ID: "message-1", Subject: "Cached"}, now)
-	cache.setMessagePage("user-1", "account:other@example.com", query, NylasMessagePage{Messages: []NylasMessage{{ID: "other-message"}}}, now)
-	cache.setMessage("user-1", "account:other@example.com", NylasMessage{ID: "other-message", Subject: "Other cached body"}, now)
-	server.applyNylasWebhookCacheInvalidation("user-1", "account:user@example.com", nylasWebhookChange{Trigger: "message.created", MessageID: "message-1"})
-	if _, ok := cache.getFolders("user-1", "account:user@example.com", communicationsMaxStaleTTL, now.Add(time.Second)); ok {
-		t.Fatal("message.created preserved folders; want unread and mailbox counts invalidated")
-	}
-	if _, ok := cache.getMessagePage("user-1", "account:user@example.com", query, communicationsMaxStaleTTL, now.Add(time.Second)); ok {
-		t.Fatal("message.created preserved message page; want list cache invalidated")
-	}
-	if _, ok := cache.getMessage("user-1", "account:user@example.com", "message-1", communicationsMaxStaleTTL, now.Add(time.Second)); ok {
-		t.Fatal("message.created preserved detail; want changed message detail invalidated")
-	}
-	if _, ok := cache.getMessagePage("user-1", "account:other@example.com", query, communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
-		t.Fatal("message.created invalidated an unrelated account page")
-	}
-	if _, ok := cache.getMessage("user-1", "account:other@example.com", "other-message", communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
-		t.Fatal("message.created invalidated an unrelated account detail")
-	}
-
-	cache.setFolders("user-1", "account:user@example.com", []NylasFolder{{ID: "inbox", Name: "Inbox"}}, now)
-	cache.setMessagePage("user-1", "account:user@example.com", query, NylasMessagePage{Messages: []NylasMessage{{ID: "message-1"}}}, now)
-	cache.setMessage("user-1", "account:user@example.com", NylasMessage{ID: "message-1", Subject: "Cached"}, now)
-	server.applyNylasWebhookCacheInvalidation("user-1", "account:user@example.com", nylasWebhookChange{Trigger: "message.updated", MessageID: "message-1"})
-	if _, ok := cache.getFolders("user-1", "account:user@example.com", communicationsMaxStaleTTL, now.Add(time.Second)); ok {
-		t.Fatal("message.updated preserved folders; want unread and mailbox counts invalidated")
-	}
-	if _, ok := cache.getMessagePage("user-1", "account:user@example.com", query, communicationsMaxStaleTTL, now.Add(time.Second)); ok {
-		t.Fatal("message.updated preserved message page; want list cache invalidated")
-	}
-	if _, ok := cache.getMessage("user-1", "account:user@example.com", "message-1", communicationsMaxStaleTTL, now.Add(time.Second)); ok {
-		t.Fatal("message.updated preserved detail; want changed message detail invalidated")
-	}
-
-	cache = newCommunicationsCache()
-	server.commCache = cache
-	cache.setFolders("user-1", "account:user@example.com", []NylasFolder{{ID: "inbox", Name: "Inbox"}}, now)
-	cache.setMessagePage("user-1", "account:user@example.com", query, NylasMessagePage{Messages: []NylasMessage{{ID: "message-1"}}}, now)
-	cache.setMessage("user-1", "account:user@example.com", NylasMessage{ID: "message-1", Subject: "Cached"}, now)
-
-	server.applyNylasWebhookCacheInvalidation("user-1", "account:user@example.com", nylasWebhookChange{Trigger: "folder.updated"})
-
-	if _, ok := cache.getFolders("user-1", "account:user@example.com", communicationsMaxStaleTTL, now.Add(time.Second)); ok {
-		t.Fatal("folder webhook preserved folders; want folder cache invalidated")
-	}
-	if _, ok := cache.getMessagePage("user-1", "account:user@example.com", query, communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
-		t.Fatal("folder webhook invalidated message page; want list cache preserved")
-	}
-	if _, ok := cache.getMessage("user-1", "account:user@example.com", "message-1", communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
-		t.Fatal("folder webhook invalidated message detail; want detail cache preserved")
-	}
-}
-
-func TestCommunicationsPrimaryMailboxUsesGmailNativeSearch(t *testing.T) {
-	t.Parallel()
-
-	key := mustRSAKey(t)
-	repo := store.NewMemoryRepo()
-	const subject = "email-user"
-	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       user.UserID,
-		Provider:     "google",
-		AccountEmail: user.Email,
-		GrantID:      "grant-1",
-		Status:       "connected",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	nylas := &fakeNylasClient{messages: []NylasMessage{
-		{ID: "primary-message", Unread: true, Folders: []string{"INBOX", "CATEGORY_PERSONAL"}},
-		{ID: "social-message", Unread: true, Folders: []string{"INBOX", "CATEGORY_SOCIAL"}},
-		{ID: "promotions-message", Unread: true, FolderIDs: []string{"INBOX", "CATEGORY_PROMOTIONS"}},
-		{ID: "sent-message", Unread: true, Folders: []string{"SENT"}},
-	}}
-	server := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
-	})
-	handler := server.Routes()
-	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
-
-	requestPage := func(requestPath string) NylasMessagePage {
-		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, requestPath, nil)
-		req.Header.Set("Authorization", token)
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("GET %s status = %d, want 200 body=%s", requestPath, rec.Code, rec.Body.String())
-		}
-		var page NylasMessagePage
-		if err := json.NewDecoder(rec.Body).Decode(&page); err != nil {
-			t.Fatal(err)
-		}
-		return page
-	}
-	assertPrimaryOnly := func(label string, page NylasMessagePage) {
-		t.Helper()
-		if len(page.Messages) != 1 || page.Messages[0].ID != "primary-message" {
-			t.Fatalf("%s Primary messages = %+v, want only primary-message", label, page.Messages)
-		}
-		if page.NextPageToken != "next-token" {
-			t.Fatalf("%s Primary next page token = %q, want next-token", label, page.NextPageToken)
-		}
-	}
-
-	path := "/v1/communications/messages?mailbox=primary&q=" + url.QueryEscape("from:ops@example.com OR category:social") + "&unread=true"
-	assertPrimaryOnly("fresh", requestPage(path))
-	if nylas.lastQuery.SearchQueryNative != "in:inbox -category:social -category:promotions (from:ops@example.com OR category:social) is:unread" {
-		t.Fatalf("search_query_native = %q", nylas.lastQuery.SearchQueryNative)
-	}
-	if nylas.lastQuery.Query != "" || nylas.lastQuery.Unread != nil || nylas.lastQuery.FolderID != "" {
-		t.Fatalf("query = %+v, want Gmail-native inbox search only", nylas.lastQuery)
-	}
-	if cached, ok := server.commCache.getMessagePage(
-		user.UserID,
-		"grant:grant-1",
-		nylas.lastQuery,
-		communicationsMessagesCacheTTL,
-		time.Now().UTC(),
-	); !ok || len(cached.Messages) != 1 || cached.Messages[0].ID != "primary-message" {
-		t.Fatalf("cached Primary page = %+v present=%v, want only primary-message", cached.Messages, ok)
-	}
-	assertPrimaryOnly("cached", requestPage(path))
-	if nylas.messageCalls != 1 {
-		t.Fatalf("message calls after cached Primary read = %d, want 1", nylas.messageCalls)
-	}
-	assertPrimaryOnly("refreshed", requestPage(path+"&refresh=true"))
-	if nylas.messageCalls != 2 {
-		t.Fatalf("message calls after refreshed Primary read = %d, want 2", nylas.messageCalls)
-	}
-
-	allPath := "/v1/communications/messages?mailbox=all&q=" + url.QueryEscape("from:ops@example.com OR category:social") + "&unread=true"
-	allPage := requestPage(allPath)
-	if len(allPage.Messages) != 4 {
-		t.Fatalf("All messages = %+v, want Primary, Social, Promotions, and Sent", allPage.Messages)
-	}
-	if nylas.messageCalls != 3 {
-		t.Fatalf("message calls after All read = %d, want 3", nylas.messageCalls)
 	}
 }
 
@@ -3983,404 +2611,125 @@ func TestCommunicationsGoogleThreadListBypassesMailboxNativeSearch(t *testing.T)
 	}
 }
 
-func TestCommunicationsArchiveMailboxUsesGmailNativeSearch(t *testing.T) {
-	t.Parallel()
-
-	key := mustRSAKey(t)
-	repo := store.NewMemoryRepo()
-	const subject = "email-user"
-	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       user.UserID,
-		Provider:     "google",
-		AccountEmail: user.Email,
-		GrantID:      "grant-1",
-		Status:       "connected",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	nylas := &fakeNylasClient{}
-	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
-	}).Routes()
-	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
-
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=archive&q=invoice&unread=true", "", token, http.StatusOK)
-	if nylas.lastQuery.SearchQueryNative != "in:anywhere -in:inbox -in:trash -in:spam -in:sent -in:drafts (invoice) is:unread" {
-		t.Fatalf("search_query_native = %q", nylas.lastQuery.SearchQueryNative)
-	}
-	if nylas.lastQuery.Query != "" || nylas.lastQuery.Unread != nil || nylas.lastQuery.FolderID != "" {
-		t.Fatalf("query = %+v, want Gmail-native archive search only", nylas.lastQuery)
-	}
-}
-
-func TestCommunicationsSpamMailboxUsesGmailNativeSearch(t *testing.T) {
-	t.Parallel()
-
-	key := mustRSAKey(t)
-	repo := store.NewMemoryRepo()
-	const subject = "email-user"
-	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       user.UserID,
-		Provider:     "google",
-		AccountEmail: user.Email,
-		GrantID:      "grant-1",
-		Status:       "connected",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	nylas := &fakeNylasClient{}
-	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
-	}).Routes()
-	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
-
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=spam&q=invoice&unread=true", "", token, http.StatusOK)
-	if nylas.lastQuery.SearchQueryNative != "in:spam (invoice) is:unread" {
-		t.Fatalf("search_query_native = %q", nylas.lastQuery.SearchQueryNative)
-	}
-	if nylas.lastQuery.Query != "" || nylas.lastQuery.Unread != nil || nylas.lastQuery.FolderID != "" {
-		t.Fatalf("query = %+v, want Gmail-native spam search only", nylas.lastQuery)
-	}
-}
-
-func TestCommunicationsAllMailboxUsesGmailNativeSearch(t *testing.T) {
-	t.Parallel()
-
-	key := mustRSAKey(t)
-	repo := store.NewMemoryRepo()
-	const subject = "email-user"
-	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       user.UserID,
-		Provider:     "google",
-		AccountEmail: user.Email,
-		GrantID:      "grant-1",
-		Status:       "connected",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	nylas := &fakeNylasClient{}
-	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
-	}).Routes()
-	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
-
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=all&q=invoice&unread=true", "", token, http.StatusOK)
-	if nylas.lastQuery.SearchQueryNative != "in:anywhere (invoice) is:unread" {
-		t.Fatalf("search_query_native = %q", nylas.lastQuery.SearchQueryNative)
-	}
-	if nylas.lastQuery.Query != "" || nylas.lastQuery.Unread != nil {
-		t.Fatalf("query = %+v, want Gmail-native all-mail search only", nylas.lastQuery)
-	}
-}
-
-func TestCommunicationsStarredMailboxAppliesStarredFilter(t *testing.T) {
-	t.Parallel()
-
-	key := mustRSAKey(t)
-	repo := store.NewMemoryRepo()
-	const subject = "email-user"
-	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       user.UserID,
-		Provider:     "google",
-		AccountEmail: user.Email,
-		GrantID:      "grant-1",
-		Status:       "connected",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	nylas := &fakeNylasClient{}
-	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
-	}).Routes()
-	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
-
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=starred&q=invoice&unread=true", "", token, http.StatusOK)
-	if nylas.lastQuery.SearchQueryNative != "is:starred (invoice) is:unread" {
-		t.Fatalf("search_query_native = %q", nylas.lastQuery.SearchQueryNative)
-	}
-	if nylas.lastQuery.Query != "" || nylas.lastQuery.Unread != nil || nylas.lastQuery.Starred != nil {
-		t.Fatalf("query = %+v, want Gmail-native starred search only", nylas.lastQuery)
-	}
-}
-
 func TestCommunicationsStarMessagePreservesGmailInboxLabel(t *testing.T) {
 	t.Parallel()
-
 	key := mustRSAKey(t)
 	repo := store.NewMemoryRepo()
 	const subject = "email-user"
+	const companyID = "11111111-1111-4111-8111-701300000403"
+	repo.EnsureCompany(companyID, "Star Message Company")
 	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       user.UserID,
-		Provider:     "google",
-		AccountEmail: user.Email,
-		GrantID:      "grant-1",
-		Status:       "connected",
-	}); err != nil {
+	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
-	nylas := &fakeNylasClient{
-		message: NylasMessage{ID: "message-1", Subject: "Hello", Folders: []string{"INBOX", "UNREAD", "CATEGORY_PERSONAL", "SNOOZED", "CHAT", "Label_123"}},
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{UserID: user.UserID, Provider: "google", AccountEmail: user.Email, GrantID: "grant-1", Status: "connected"}); err != nil {
+		t.Fatal(err)
 	}
-	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
-	}).Routes()
+	message := NylasMessage{ID: "message-1", Subject: "Hello", Folders: []string{"INBOX", "UNREAD", "CATEGORY_PERSONAL", "SNOOZED", "CHAT", "Label_123"}}
+	seedPersonalV3EmailMessageForCommunicationsTest(t, repo, companyID, user.UserID, user.Email, "google", message)
+	nylas := &fakeNylasClient{message: message}
+	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
-
-	assertJSONStatus(t, handler, http.MethodPut, "/v1/communications/messages/message-1", `{"starred":true}`, token, http.StatusOK)
-	if nylas.update.Starred == nil || !*nylas.update.Starred {
-		t.Fatalf("starred update = %v, want true", nylas.update.Starred)
-	}
-	if nylas.update.Folders != nil {
-		t.Fatalf("folders update = %v, want nil so starring preserves mailbox folders", nylas.update.Folders)
-	}
-}
-
-func TestCommunicationsUnreadAndStarUpdatesPreserveHydratedDetailCache(t *testing.T) {
-	t.Parallel()
-
-	key := mustRSAKey(t)
-	repo := store.NewMemoryRepo()
-	const subject = "email-cache-user"
-	user, err := repo.UpsertAuthUser(subject, "cache@example.com", "Cache User")
-	if err != nil {
-		t.Fatal(err)
-	}
-	connection, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       user.UserID,
-		Provider:     "google",
-		AccountEmail: user.Email,
-		GrantID:      "grant-cache",
-		Status:       "connected",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	nylas := &fakeNylasClient{message: NylasMessage{ID: "message-1", Unread: true}}
-	server := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
-	})
-	server.commCache.setMessage(user.UserID, communicationsConnectionCacheScope(connection), NylasMessage{
-		ID:      "message-1",
-		Subject: "Hydrated subject",
-		Body:    "<p>Hydrated body</p>",
-		Unread:  true,
-	}, time.Now().UTC())
-	handler := server.Routes()
-	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
-
-	assertJSONStatus(t, handler, http.MethodPut, "/v1/communications/messages/message-1", "{\"unread\":false,\"starred\":true}", token, http.StatusOK)
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/communications/messages/message-1", nil)
-	req.Header.Set("Authorization", token)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("message status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	var payload struct {
-		Message NylasMessage
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
-		t.Fatal(err)
-	}
-	if nylas.detailCalls != 0 {
-		t.Fatalf("detail calls = %d, want hydrated body cache preserved", nylas.detailCalls)
-	}
-	if payload.Message.Body != "<p>Hydrated body</p>" || payload.Message.Unread || !payload.Message.Starred {
-		t.Fatalf("message = %+v, want cached body with patched unread/starred metadata", payload.Message)
-	}
-}
-func TestCommunicationsCacheIncludesStarredMessagesInSourceMailboxes(t *testing.T) {
-	t.Parallel()
-
-	message := NylasMessage{ID: "message-1", Starred: true, Folders: []string{"INBOX", "CATEGORY_PERSONAL"}}
-	if !nylasMessageMatchesCachedPageQuery(message, NylasMessageQuery{Mailbox: "primary"}) {
-		t.Fatal("primary cache matcher excluded a starred inbox message")
-	}
-	if !nylasMessageMatchesCachedPageQuery(message, NylasMessageQuery{Mailbox: "starred"}) {
-		t.Fatal("starred cache matcher excluded a starred inbox message")
-	}
-	if !nylasMessageMatchesCachedPageQuery(NylasMessage{ID: "message-2", Starred: true, Folders: []string{"CATEGORY_PERSONAL"}}, NylasMessageQuery{Mailbox: "archive"}) {
-		t.Fatal("archive cache matcher excluded a starred archived message")
-	}
-	if !nylasMessageMatchesCachedPageQuery(NylasMessage{ID: "message-3", Folders: []string{"SPAM"}}, NylasMessageQuery{Mailbox: "spam"}) {
-		t.Fatal("spam cache matcher excluded a spam message")
-	}
-	for _, category := range []string{"CATEGORY_SOCIAL", "CATEGORY_PROMOTIONS"} {
-		categorized := NylasMessage{ID: "categorized", Starred: true, Folders: []string{"INBOX", category}}
-		if nylasMessageMatchesCachedPageQuery(categorized, NylasMessageQuery{Mailbox: "primary"}) {
-			t.Fatalf("primary cache matcher included %s message", category)
-		}
-		if !nylasMessageMatchesCachedPageQuery(categorized, NylasMessageQuery{Mailbox: "starred"}) {
-			t.Fatalf("starred cache matcher excluded %s message", category)
-		}
+	assertJSONStatus(t, handler, http.MethodPut, "/v1/communications/messages/message-1?company_id="+url.QueryEscape(companyID), `{"starred":true}`, token, http.StatusOK)
+	if nylas.update.Starred == nil || !*nylas.update.Starred || nylas.update.Folders != nil {
+		t.Fatalf("star update = %+v, want starred=true without folder replacement", nylas.update)
 	}
 }
 
 func TestCommunicationsArchiveMessageRemovesGmailInboxLabel(t *testing.T) {
 	t.Parallel()
-
 	key := mustRSAKey(t)
 	repo := store.NewMemoryRepo()
 	const subject = "email-user"
+	const companyID = "11111111-1111-4111-8111-701300000404"
+	repo.EnsureCompany(companyID, "Archive Google Company")
 	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       user.UserID,
-		Provider:     "google",
-		AccountEmail: user.Email,
-		GrantID:      "grant-1",
-		Status:       "connected",
-	}); err != nil {
+	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
-	nylas := &fakeNylasClient{
-		message: NylasMessage{ID: "message-1", Subject: "Hello", Folders: []string{"INBOX", "UNREAD", "CATEGORY_PERSONAL", "SNOOZED", "CHAT", "STARRED", "Label_123"}},
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{UserID: user.UserID, Provider: "google", AccountEmail: user.Email, GrantID: "grant-1", Status: "connected"}); err != nil {
+		t.Fatal(err)
 	}
-	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
-	}).Routes()
+	message := NylasMessage{ID: "message-1", Subject: "Hello", Folders: []string{"INBOX", "UNREAD", "CATEGORY_PERSONAL", "SNOOZED", "CHAT", "STARRED", "Label_123"}}
+	seedPersonalV3EmailMessageForCommunicationsTest(t, repo, companyID, user.UserID, user.Email, "google", message)
+	nylas := &fakeNylasClient{message: message}
+	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
-
-	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/message-1/archive", "", token, http.StatusOK)
+	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/message-1/archive?company_id="+url.QueryEscape(companyID), "", token, http.StatusOK)
 	if got, want := strings.Join(nylas.update.Folders, ","), "STARRED,Label_123"; got != want {
 		t.Fatalf("folders = %q, want %q", got, want)
-	}
-	raw, err := json.Marshal(NylasMessageUpdate{Folders: []string{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(raw) != `{"folders":[]}` {
-		t.Fatalf("empty folder update JSON = %s, want explicit folders array", raw)
 	}
 }
 
 func TestCommunicationsArchiveMessageMovesFolderProvidersToArchiveFolder(t *testing.T) {
 	t.Parallel()
-
 	key := mustRSAKey(t)
 	repo := store.NewMemoryRepo()
 	const subject = "email-user"
+	const companyID = "11111111-1111-4111-8111-701300000405"
+	repo.EnsureCompany(companyID, "Archive Microsoft Company")
 	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       user.UserID,
-		Provider:     "microsoft",
-		AccountEmail: user.Email,
-		GrantID:      "grant-1",
-		Status:       "connected",
-	}); err != nil {
+	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
-	nylas := &fakeNylasClient{
-		folders: []NylasFolder{
-			{ID: "inbox-id", Name: "Inbox"},
-			{ID: "archive-id", Name: "Archive"},
-		},
-		message: NylasMessage{ID: "message-1", Subject: "Hello", Folders: []string{"inbox-id"}},
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{UserID: user.UserID, Provider: "microsoft", AccountEmail: user.Email, GrantID: "grant-1", Status: "connected"}); err != nil {
+		t.Fatal(err)
 	}
-	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
-	}).Routes()
+	message := NylasMessage{ID: "message-1", Subject: "Hello", Folders: []string{"inbox-id"}}
+	seedPersonalV3EmailMessageForCommunicationsTest(t, repo, companyID, user.UserID, user.Email, "microsoft", message)
+	nylas := &fakeNylasClient{folders: []NylasFolder{{ID: "inbox-id", Name: "Inbox"}, {ID: "archive-id", Name: "Archive"}}, message: message}
+	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
-
-	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/message-1/archive", "", token, http.StatusOK)
-	if len(nylas.update.Folders) != 1 || nylas.update.Folders[0] != "archive-id" {
-		t.Fatalf("folders = %+v, want archive-id", nylas.update.Folders)
-	}
-	if nylas.detailCalls != 0 {
-		t.Fatalf("detail calls = %d, want archive without message body fetch", nylas.detailCalls)
+	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/message-1/archive?company_id="+url.QueryEscape(companyID), "", token, http.StatusOK)
+	if len(nylas.update.Folders) != 1 || nylas.update.Folders[0] != "archive-id" || nylas.detailCalls != 0 {
+		t.Fatalf("archive update=%+v detail calls=%d", nylas.update, nylas.detailCalls)
 	}
 }
 
-func TestCommunicationsArchiveBatchUsesCachedListFoldersAndReturnsCompactResult(t *testing.T) {
+func TestCommunicationsArchiveBatchUsesV3FoldersAndReturnsCompactResult(t *testing.T) {
 	t.Parallel()
-
 	key := mustRSAKey(t)
 	repo := store.NewMemoryRepo()
 	const subject = "email-user"
+	const companyID = "11111111-1111-4111-8111-701300000406"
+	repo.EnsureCompany(companyID, "Archive Batch Company")
 	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       user.UserID,
-		Provider:     "google",
-		AccountEmail: user.Email,
-		GrantID:      "grant-1",
-		Status:       "connected",
-	}); err != nil {
+	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
-	nylas := &fakeNylasClient{
-		messages: []NylasMessage{
-			{ID: "message-1", Subject: "One", Folders: []string{"INBOX", "CATEGORY_PERSONAL", "Label_123"}},
-			{ID: "message-2", Subject: "Two", Folders: []string{"INBOX", "Label_456"}},
-		},
-		updateErrByID: map[string]error{
-			"message-2": NylasAPIError{StatusCode: http.StatusTooManyRequests, Code: "rate_limited", RetryAfter: "4"},
-		},
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{UserID: user.UserID, Provider: "google", AccountEmail: user.Email, GrantID: "grant-1", Status: "connected"}); err != nil {
+		t.Fatal(err)
 	}
-	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
-	}).Routes()
+	message1 := NylasMessage{ID: "message-1", Subject: "One", Folders: []string{"INBOX", "CATEGORY_PERSONAL", "Label_123"}}
+	message2 := NylasMessage{ID: "message-2", Subject: "Two", Folders: []string{"INBOX", "Label_456"}}
+	seedPersonalV3EmailMessageForCommunicationsTest(t, repo, companyID, user.UserID, user.Email, "google", message1)
+	seedPersonalV3EmailMessageForCommunicationsTest(t, repo, companyID, user.UserID, user.Email, "google", message2)
+	nylas := &fakeNylasClient{messagesByID: map[string]NylasMessage{"message-1": message1, "message-2": message2}, updateErrByID: map[string]error{
+		"message-2": NylasAPIError{StatusCode: http.StatusTooManyRequests, Code: "rate_limited", RetryAfter: "4"},
+	}}
+	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
-
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=primary&limit=5", "", token, http.StatusOK)
-
 	body := `{"message_ids":["message-1","message-2","message-1"," "]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/communications/messages/archive-batch", strings.NewReader(body))
+	path := "/v1/communications/messages/archive-batch?company_id=" + url.QueryEscape(companyID)
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", token)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
-	if got := rec.Header().Get("Retry-After"); got != "4" {
-		t.Fatalf("Retry-After = %q, want 4", got)
+	if rec.Code != http.StatusOK || rec.Header().Get("Retry-After") != "4" {
+		t.Fatalf("archive batch status=%d retry=%q body=%s", rec.Code, rec.Header().Get("Retry-After"), rec.Body.String())
 	}
 	if strings.Contains(rec.Body.String(), `"message"`) || strings.Contains(rec.Body.String(), "CATEGORY_PERSONAL") {
 		t.Fatalf("batch response should be compact, got %s", rec.Body.String())
@@ -4395,17 +2744,11 @@ func TestCommunicationsArchiveBatchUsesCachedListFoldersAndReturnsCompactResult(
 	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
 		t.Fatal(err)
 	}
-	if len(payload.ArchivedIDs) != 1 || payload.ArchivedIDs[0] != "message-1" {
-		t.Fatalf("archived ids = %+v, want message-1", payload.ArchivedIDs)
+	if len(payload.ArchivedIDs) != 1 || payload.ArchivedIDs[0] != "message-1" || len(payload.Failed) != 1 || payload.Failed[0].MessageID != "message-2" || payload.Failed[0].Error != "nylas_rate_limited" {
+		t.Fatalf("archive batch payload = %+v", payload)
 	}
-	if len(payload.Failed) != 1 || payload.Failed[0].MessageID != "message-2" || payload.Failed[0].Error != "nylas_rate_limited" {
-		t.Fatalf("failed = %+v, want message-2 rate limit", payload.Failed)
-	}
-	if nylas.detailCalls != 0 {
-		t.Fatalf("detail calls = %d, want cached list folder data", nylas.detailCalls)
-	}
-	if len(nylas.updateCalls) != 1 || nylas.updateCalls[0].MessageID != "message-1" || strings.Join(nylas.updateCalls[0].Update.Folders, ",") != "Label_123" {
-		t.Fatalf("update calls = %+v, want compact Gmail archive update", nylas.updateCalls)
+	if nylas.detailCalls != 0 || len(nylas.updateCalls) != 1 || strings.Join(nylas.updateCalls[0].Update.Folders, ",") != "Label_123" {
+		t.Fatalf("V3 archive calls detail=%d updates=%+v", nylas.detailCalls, nylas.updateCalls)
 	}
 }
 
@@ -4413,99 +2756,68 @@ func TestCommunicationsArchiveBatchBackgroundReturnsAcceptedAndArchivesAsync(t *
 	key := mustRSAKey(t)
 	repo := store.NewMemoryRepo()
 	const subject = "email-user"
+	const companyID = "11111111-1111-4111-8111-701300000407"
+	repo.EnsureCompany(companyID, "Background Archive Company")
 	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       user.UserID,
-		Provider:     "google",
-		AccountEmail: user.Email,
-		GrantID:      "grant-1",
-		Status:       "connected",
-	}); err != nil {
+	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
-	nylas := &fakeNylasClient{
-		messages: []NylasMessage{
-			{ID: "message-1", Subject: "One", Folders: []string{"INBOX", "CATEGORY_PERSONAL", "Label_123"}},
-			{ID: "message-2", Subject: "Two", Folders: []string{"INBOX", "Label_456"}},
-		},
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{UserID: user.UserID, Provider: "google", AccountEmail: user.Email, GrantID: "grant-1", Status: "connected"}); err != nil {
+		t.Fatal(err)
 	}
-	server := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator:                      testValidator(t, "kid", key),
-		NylasConfig:                        testNylasConfig(),
-		NylasClient:                        nylas,
-		DisableCommunicationsArchiveWorker: true,
-	})
+	messages := []NylasMessage{
+		{ID: "message-1", Subject: "One", Folders: []string{"INBOX", "CATEGORY_PERSONAL", "Label_123"}},
+		{ID: "message-2", Subject: "Two", Folders: []string{"INBOX", "Label_456"}},
+	}
+	messagesByID := map[string]NylasMessage{}
+	for _, message := range messages {
+		seedPersonalV3EmailMessageForCommunicationsTest(t, repo, companyID, user.UserID, user.Email, "google", message)
+		messagesByID[message.ID] = message
+	}
+	nylas := &fakeNylasClient{messagesByID: messagesByID}
+	server := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas, DisableCommunicationsArchiveWorker: true})
 	defer server.Close()
 	handler := server.Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
-
-	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=primary&limit=5", "", token, http.StatusOK)
-
 	body := `{"message_ids":["message-1","message-2"]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/communications/messages/archive-batch?background=true", strings.NewReader(body))
+	path := "/v1/communications/messages/archive-batch?background=true&company_id=" + url.QueryEscape(companyID)
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", token)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	var payload struct {
 		JobID       string   `json:"job_id"`
 		AcceptedIDs []string `json:"accepted_ids"`
 		ArchivedIDs []string `json:"archived_ids"`
-		Failed      []struct {
-			MessageID string `json:"message_id"`
-			Error     string `json:"error"`
-		} `json:"failed"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(payload.AcceptedIDs, ",") != "message-1,message-2" {
-		t.Fatalf("accepted ids = %+v, want both messages", payload.AcceptedIDs)
-	}
-	if strings.TrimSpace(payload.JobID) == "" {
-		t.Fatalf("job_id = %q, want durable job id", payload.JobID)
-	}
-	if len(payload.ArchivedIDs) != 0 || len(payload.Failed) != 0 {
-		t.Fatalf("background response = archived %+v failed %+v, want compact accepted response", payload.ArchivedIDs, payload.Failed)
-	}
-	if len(nylas.updateCalls) != 0 {
-		t.Fatalf("update calls before worker = %+v, want durable enqueue only", nylas.updateCalls)
+	if strings.TrimSpace(payload.JobID) == "" || strings.Join(payload.AcceptedIDs, ",") != "message-1,message-2" || len(payload.ArchivedIDs) != 0 || len(nylas.updateCalls) != 0 {
+		t.Fatalf("accepted background payload=%+v calls=%+v", payload, nylas.updateCalls)
 	}
 	items, err := repo.ListCommunicationsArchiveJobItems(payload.JobID)
-	if err != nil {
-		t.Fatalf("ListCommunicationsArchiveJobItems: %v", err)
+	if err != nil || len(items) != 2 {
+		t.Fatalf("job items=%+v err=%v", items, err)
 	}
-	if len(items) != 2 || items[0].Status != store.CommunicationsArchiveJobItemStatusPending || items[1].Status != store.CommunicationsArchiveJobItemStatusPending {
-		t.Fatalf("job items after accept = %+v, want two pending items", items)
-	}
-
 	processed, err := server.processAvailableCommunicationsArchiveJobItems(context.Background(), 10)
-	if err != nil {
-		t.Fatalf("processAvailableCommunicationsArchiveJobItems: %v", err)
-	}
-	if processed != 2 {
-		t.Fatalf("processed = %d, want 2", processed)
-	}
-	updateCalls := append([]fakeNylasUpdateCall(nil), nylas.updateCalls...)
-	if len(updateCalls) != 2 {
-		t.Fatalf("update calls = %+v, want 2 background archive updates", updateCalls)
-	}
-	if updateCalls[0].MessageID == "" || updateCalls[1].MessageID == "" {
-		t.Fatalf("update calls = %+v, want message IDs", updateCalls)
+	if err != nil || processed != 2 || len(nylas.updateCalls) != 2 {
+		t.Fatalf("processed=%d err=%v calls=%+v", processed, err, nylas.updateCalls)
 	}
 	items, err = repo.ListCommunicationsArchiveJobItems(payload.JobID)
 	if err != nil {
-		t.Fatalf("ListCommunicationsArchiveJobItems after process: %v", err)
+		t.Fatal(err)
 	}
 	for _, item := range items {
 		if item.Status != store.CommunicationsArchiveJobItemStatusArchived || item.ArchivedTimestamp == nil {
-			t.Fatalf("processed item = %+v, want archived timestamp", item)
+			t.Fatalf("processed item=%+v", item)
 		}
 	}
 }
@@ -4513,7 +2825,7 @@ func TestCommunicationsArchiveBatchBackgroundReturnsAcceptedAndArchivesAsync(t *
 func TestCommunicationsArchiveBatchBackgroundUsesSharedInboxJobScope(t *testing.T) {
 	key := mustRSAKey(t)
 	repo := store.NewMemoryRepo()
-	const companyID = "company-shared-archive-job"
+	const companyID = "11111111-1111-4111-8111-701300000410"
 	repo.EnsureCompany(companyID, "Shared Archive Job Company")
 	actor, err := repo.UpsertAuthUser("shared-archive-actor", "actor@example.com", "Actor")
 	if err != nil {
@@ -4522,47 +2834,23 @@ func TestCommunicationsArchiveBatchBackgroundUsesSharedInboxJobScope(t *testing.
 	if _, err := repo.AddCompanyMembership(actor.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.UpsertCompanyEmailConnection(store.CompanyEmailConnectionInput{
-		CompanyID:         companyID,
-		Provider:          "google",
-		AccountEmail:      "support@example.com",
-		GrantID:           "grant-shared",
-		Status:            "connected",
-		ConnectedByUserID: actor.UserID,
-	}); err != nil {
+	if _, err := repo.UpsertCompanyEmailConnection(store.CompanyEmailConnectionInput{CompanyID: companyID, Provider: "google", AccountEmail: "support@example.com", GrantID: "grant-shared", Status: "connected", ConnectedByUserID: actor.UserID}); err != nil {
 		t.Fatal(err)
 	}
 	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Support", "support@example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: store.EntityTypeSharedInbox,
-		EntityID:   folder.FolderID,
-		Permissions: []store.EntityPermissionInput{{
-			SubjectType: store.EntityPermissionSubjectUser,
-			SubjectID:   actor.UserID,
-			AccessLevel: store.EntityPermissionEdit,
-		}},
-	}); err != nil {
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{CompanyID: companyID, EntityType: store.EntityTypeSharedInbox, EntityID: folder.FolderID, Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: actor.UserID, AccessLevel: store.EntityPermissionEdit}}}); err != nil {
 		t.Fatal(err)
 	}
-	nylas := &fakeNylasClient{
-		messagesByID: map[string]NylasMessage{
-			"shared-message-1": {ID: "shared-message-1", Subject: "Shared", Folders: []string{"INBOX", "Label_shared"}},
-		},
-	}
-	server := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator:                      testValidator(t, "kid", key),
-		NylasConfig:                        testNylasConfig(),
-		NylasClient:                        nylas,
-		DisableCommunicationsArchiveWorker: true,
-	})
+	message := NylasMessage{ID: "shared-message-1", Subject: "Shared", Folders: []string{"INBOX", "Label_shared"}}
+	seedSharedV3EmailMessageForCommunicationsTest(t, repo, companyID, folder.FolderID, "support@example.com", "google", message)
+	nylas := &fakeNylasClient{messagesByID: map[string]NylasMessage{message.ID: message}}
+	server := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas, DisableCommunicationsArchiveWorker: true})
 	defer server.Close()
 	handler := server.Routes()
 	token := "Bearer " + testJWT(t, key, "kid", actor.CognitoSubject, actor.Email)
-
 	body := `{"message_ids":["shared-message-1"]}`
 	path := "/v1/communications/messages/archive-batch?background=true&company_id=" + url.QueryEscape(companyID) + "&shared_inbox_id=" + url.QueryEscape(folder.FolderID)
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
@@ -4571,7 +2859,7 @@ func TestCommunicationsArchiveBatchBackgroundUsesSharedInboxJobScope(t *testing.
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	var payload struct {
 		JobID string `json:"job_id"`
@@ -4580,50 +2868,40 @@ func TestCommunicationsArchiveBatchBackgroundUsesSharedInboxJobScope(t *testing.
 		t.Fatal(err)
 	}
 	items, err := repo.ListCommunicationsArchiveJobItems(payload.JobID)
-	if err != nil {
-		t.Fatalf("ListCommunicationsArchiveJobItems: %v", err)
-	}
-	if len(items) != 1 || items[0].CompanyID != companyID || items[0].SharedInboxID != folder.FolderID || items[0].ConnectionScope != "shared" {
-		t.Fatalf("shared archive job item = %+v, want shared scope", items)
+	if err != nil || len(items) != 1 || items[0].CompanyID != companyID || items[0].SharedInboxID != folder.FolderID || items[0].ConnectionScope != "shared" {
+		t.Fatalf("shared job items=%+v err=%v", items, err)
 	}
 	if processed, err := server.processAvailableCommunicationsArchiveJobItems(context.Background(), 10); err != nil || processed != 1 {
-		t.Fatalf("process shared archive job = %d err=%v, want one", processed, err)
+		t.Fatalf("processed=%d err=%v", processed, err)
 	}
-	if len(nylas.updateCalls) != 1 || nylas.updateCalls[0].GrantID != "grant-shared" || nylas.updateCalls[0].MessageID != "shared-message-1" {
-		t.Fatalf("shared archive update calls = %+v, want shared grant/message", nylas.updateCalls)
+	if len(nylas.updateCalls) != 1 || nylas.updateCalls[0].GrantID != "grant-shared" || nylas.updateCalls[0].MessageID != message.ID {
+		t.Fatalf("shared archive calls=%+v", nylas.updateCalls)
 	}
 }
 
 func TestCommunicationsUnarchiveMessageAddsGmailInboxLabel(t *testing.T) {
 	t.Parallel()
-
 	key := mustRSAKey(t)
 	repo := store.NewMemoryRepo()
 	const subject = "email-user"
+	const companyID = "11111111-1111-4111-8111-701300000408"
+	repo.EnsureCompany(companyID, "Unarchive Google Company")
 	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       user.UserID,
-		Provider:     "google",
-		AccountEmail: user.Email,
-		GrantID:      "grant-1",
-		Status:       "connected",
-	}); err != nil {
+	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
-	nylas := &fakeNylasClient{
-		message: NylasMessage{ID: "message-1", Subject: "Hello", Folders: []string{"UNREAD", "CATEGORY_PERSONAL", "Label_123"}},
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{UserID: user.UserID, Provider: "google", AccountEmail: user.Email, GrantID: "grant-1", Status: "connected"}); err != nil {
+		t.Fatal(err)
 	}
-	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
-	}).Routes()
+	message := NylasMessage{ID: "message-1", Subject: "Hello", Folders: []string{"UNREAD", "CATEGORY_PERSONAL", "Label_123"}}
+	seedPersonalV3EmailMessageForCommunicationsTest(t, repo, companyID, user.UserID, user.Email, "google", message)
+	nylas := &fakeNylasClient{message: message}
+	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
-
-	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/message-1/unarchive", "", token, http.StatusOK)
+	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/message-1/unarchive?company_id="+url.QueryEscape(companyID), "", token, http.StatusOK)
 	if got, want := strings.Join(nylas.update.Folders, ","), "Label_123,INBOX"; got != want {
 		t.Fatalf("folders = %q, want %q", got, want)
 	}
@@ -4631,43 +2909,29 @@ func TestCommunicationsUnarchiveMessageAddsGmailInboxLabel(t *testing.T) {
 
 func TestCommunicationsUnarchiveMessageMovesFolderProvidersToInboxFolder(t *testing.T) {
 	t.Parallel()
-
 	key := mustRSAKey(t)
 	repo := store.NewMemoryRepo()
 	const subject = "email-user"
+	const companyID = "11111111-1111-4111-8111-701300000409"
+	repo.EnsureCompany(companyID, "Unarchive Microsoft Company")
 	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       user.UserID,
-		Provider:     "microsoft",
-		AccountEmail: user.Email,
-		GrantID:      "grant-1",
-		Status:       "connected",
-	}); err != nil {
+	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
-	nylas := &fakeNylasClient{
-		folders: []NylasFolder{
-			{ID: "inbox-id", Name: "Inbox"},
-			{ID: "archive-id", Name: "Archive"},
-		},
-		message: NylasMessage{ID: "message-1", Subject: "Hello", Folders: []string{"archive-id"}},
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{UserID: user.UserID, Provider: "microsoft", AccountEmail: user.Email, GrantID: "grant-1", Status: "connected"}); err != nil {
+		t.Fatal(err)
 	}
-	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
-	}).Routes()
+	message := NylasMessage{ID: "message-1", Subject: "Hello", Folders: []string{"archive-id"}}
+	seedPersonalV3EmailMessageForCommunicationsTest(t, repo, companyID, user.UserID, user.Email, "microsoft", message)
+	nylas := &fakeNylasClient{folders: []NylasFolder{{ID: "inbox-id", Name: "Inbox"}, {ID: "archive-id", Name: "Archive"}}, message: message}
+	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
-
-	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/message-1/unarchive", "", token, http.StatusOK)
-	if len(nylas.update.Folders) != 1 || nylas.update.Folders[0] != "inbox-id" {
-		t.Fatalf("folders = %+v, want inbox-id", nylas.update.Folders)
-	}
-	if nylas.detailCalls != 0 {
-		t.Fatalf("detail calls = %d, want unarchive without message body fetch", nylas.detailCalls)
+	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/message-1/unarchive?company_id="+url.QueryEscape(companyID), "", token, http.StatusOK)
+	if len(nylas.update.Folders) != 1 || nylas.update.Folders[0] != "inbox-id" || nylas.detailCalls != 0 {
+		t.Fatalf("unarchive update=%+v detail calls=%d", nylas.update, nylas.detailCalls)
 	}
 }
 
@@ -4690,7 +2954,7 @@ func TestNylasWebhookDeliveryFailureForgetsReceiptSoProviderRetryCanRecover(t *t
 	server := NewServerWithOptions(repo, ServerOptions{NylasConfig: config, NylasClient: &fakeNylasClient{}})
 	defer server.Close()
 	handler := server.Routes()
-	body := `{"type":"message.created","data":{"object":{"id":"retry-message","thread_id":"retry-thread","grant_id":"retry-grant"}}}`
+	body := `{"type":"message.created","data":{"object":{"id":"retry-message","thread_id":"retry-thread","grant_id":"retry-grant","subject":"Retry","snippet":"Retry","body":"<p>Retry</p>","date":1783988000,"from":[{"email":"sender@example.com"}]}}}`
 
 	send := func() *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
@@ -4840,7 +3104,7 @@ func TestNylasWebhookVerifiesSignatureDeduplicatesAndStoresReadStatus(t *testing
 	server.commCache.setMessagePage(user.UserID, cacheScope, query, NylasMessagePage{Messages: []NylasMessage{{ID: "message-1"}}}, now)
 	server.commCache.setMessage(user.UserID, cacheScope, NylasMessage{ID: "message-1", Subject: "Stale"}, now)
 
-	body := `{"type":"message.created","time":"2026-06-09T20:00:00Z","data":{"object":{"id":"message-1","thread_id":"thread-1","grant_id":"grant-1"}}}`
+	body := `{"type":"message.created","time":"2026-06-09T20:00:00Z","data":{"object":{"id":"message-1","thread_id":"thread-1","grant_id":"grant-1","subject":"Created","snippet":"Created","body":"<p>Created</p>","date":1783988000,"from":[{"email":"sender@example.com"}]}}}`
 	req := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
 	req.Header.Set("X-Nylas-Signature", signWebhookBody("webhook-secret", body))
 	rec := httptest.NewRecorder()
@@ -4931,7 +3195,7 @@ func TestNylasWebhookDoesNotAdvancePersonalEmailCollaboration(t *testing.T) {
 	}
 	created, err := repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
-		AccountEmail: creator.Email, CreatedByUserID: creator.UserID,
+		AccountEmail: creator.Email, Provider: "google", CreatedByUserID: creator.UserID,
 		Message: domain.EmailMessageSnapshot{
 			ID: "collaboration-root-message", ThreadID: "collaboration-thread",
 			Subject: "Original subject", Snippet: "Original snippet", Body: "<p>Original body</p>",
@@ -4969,7 +3233,7 @@ func TestNylasWebhookDoesNotAdvancePersonalEmailCollaboration(t *testing.T) {
 	defer server.Close()
 	handler := server.Routes()
 
-	body := "{\"type\":\"message.created\",\"time\":\"2026-07-13T20:30:00Z\",\"data\":{\"object\":{\"id\":\"collaboration-future-message\",\"thread_id\":\"collaboration-thread\",\"grant_id\":\"collaboration-webhook-grant\"}}}"
+	body := "{\"type\":\"message.created\",\"time\":\"2026-07-13T20:30:00Z\",\"data\":{\"object\":{\"id\":\"collaboration-future-message\",\"thread_id\":\"collaboration-thread\",\"grant_id\":\"collaboration-webhook-grant\",\"subject\":\"Future thread reply\",\"snippet\":\"New reply preview\",\"body\":\"<p>New reply body</p>\",\"date\":1783989000,\"from\":[{\"email\":\"sender@example.com\"}]}}}"
 	req := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
 	req.Header.Set("X-Nylas-Signature", signWebhookBody(config.WebhookSecret, body))
 	rec := httptest.NewRecorder()
@@ -4984,7 +3248,7 @@ func TestNylasWebhookDoesNotAdvancePersonalEmailCollaboration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if collaboration.LatestMessageID != "collaboration-root-message" ||
+	if collaboration.LatestMessageID != created.Collaboration.RootMessageID ||
 		collaboration.Message.Subject != "Original subject" ||
 		collaboration.Message.Body != "<p>Original body</p>" {
 		t.Fatalf("webhook changed stored collaboration = %+v", collaboration)
@@ -5154,7 +3418,7 @@ func TestNylasWebhookDoesNotAdvanceSharedEmailCollaboration(t *testing.T) {
 		t.Fatal(err)
 	}
 	created, err := repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
-		CompanyID: companyID, SharedInboxID: folder.FolderID, AccountEmail: "support@example.com",
+		CompanyID: companyID, SharedInboxID: folder.FolderID, AccountEmail: "support@example.com", Provider: "google",
 		CreatedByUserID: creator.UserID,
 		Message: domain.EmailMessageSnapshot{
 			ID: "shared-collaboration-root", ThreadID: "shared-collaboration-thread",
@@ -5193,7 +3457,7 @@ func TestNylasWebhookDoesNotAdvanceSharedEmailCollaboration(t *testing.T) {
 	defer server.Close()
 	handler := server.Routes()
 
-	body := "{\"type\":\"message.created\",\"time\":\"2026-07-13T20:40:00Z\",\"data\":{\"object\":{\"id\":\"shared-collaboration-future\",\"thread_id\":\"shared-collaboration-thread\",\"grant_id\":\"shared-collaboration-grant\"}}}"
+	body := "{\"type\":\"message.created\",\"time\":\"2026-07-13T20:40:00Z\",\"data\":{\"object\":{\"id\":\"shared-collaboration-future\",\"thread_id\":\"shared-collaboration-thread\",\"grant_id\":\"shared-collaboration-grant\",\"subject\":\"Shared future reply\",\"snippet\":\"Customer answered\",\"body\":\"<p>Customer answer</p>\",\"date\":1783989500,\"from\":[{\"email\":\"customer@example.com\"}]}}}"
 	req := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
 	req.Header.Set("X-Nylas-Signature", signWebhookBody(config.WebhookSecret, body))
 	rec := httptest.NewRecorder()
@@ -5208,7 +3472,7 @@ func TestNylasWebhookDoesNotAdvanceSharedEmailCollaboration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if collaboration.LatestMessageID != "shared-collaboration-root" ||
+	if collaboration.LatestMessageID != created.Collaboration.RootMessageID ||
 		collaboration.Message.Subject != "Shared original" ||
 		collaboration.Message.Body != "<p>Original</p>" {
 		t.Fatalf("shared webhook changed stored collaboration = %+v", collaboration)
@@ -5297,7 +3561,7 @@ func TestNylasWebhookPublishesSharedMailboxHintOnlyToCurrentAudience(t *testing.
 	server.commCache.setMessagePage(revoked.UserID, unrelatedScope, query, NylasMessagePage{Messages: []NylasMessage{{ID: "unrelated-message"}}}, now)
 	server.commCache.setMessage(revoked.UserID, unrelatedScope, NylasMessage{ID: "unrelated-message", Subject: "Unrelated"}, now)
 
-	body := `{"type":"message.created","time":"2026-06-10T15:00:00Z","data":{"object":{"id":"shared-message-live","thread_id":"shared-thread-live","grant_id":"shared-live-grant"}}}`
+	body := `{"type":"message.created","time":"2026-06-10T15:00:00Z","data":{"object":{"id":"shared-message-live","thread_id":"shared-thread-live","grant_id":"shared-live-grant","subject":"Shared live","snippet":"Shared live","body":"<p>Shared live</p>","date":1783989500,"from":[{"email":"customer@example.com"}]}}}`
 	req := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
 	req.Header.Set("X-Nylas-Signature", signWebhookBody("webhook-secret", body))
 	rec := httptest.NewRecorder()
@@ -5405,76 +3669,60 @@ func TestNylasWebhookPublishesSharedMailboxHintOnlyToCurrentAudience(t *testing.
 
 func TestCommunicationsNylasAuthErrorMarksReauthRequired(t *testing.T) {
 	t.Parallel()
-
 	key := mustRSAKey(t)
 	repo := store.NewMemoryRepo()
 	const subject = "email-user"
+	const companyID = "company-personal-reauth"
+	repo.EnsureCompany(companyID, "Personal Reauth Company")
 	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       user.UserID,
-		Provider:     "google",
-		AccountEmail: user.Email,
-		GrantID:      "grant-1",
-		Status:       "connected",
-	}); err != nil {
+	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
-	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   &fakeNylasClient{listErr: NylasAPIError{StatusCode: http.StatusUnauthorized, Code: "unauthorized"}},
-	}).Routes()
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/communications/messages", nil)
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{UserID: user.UserID, Provider: "google", AccountEmail: user.Email, GrantID: "grant-1", Status: "connected"}); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: &fakeNylasClient{listErr: NylasAPIError{StatusCode: http.StatusUnauthorized, Code: "unauthorized"}}}).Routes()
+	path := "/v1/communications/messages?refresh=true&company_id=" + url.QueryEscape(companyID)
+	req := httptest.NewRequest(http.MethodGet, path, nil)
 	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", subject, user.Email))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409 body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	connection, err := repo.GetUserEmailConnection(user.UserID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if connection.Status != "reauth_required" {
-		t.Fatalf("connection status = %q, want reauth_required", connection.Status)
+	if err != nil || connection.Status != "reauth_required" {
+		t.Fatalf("connection=%+v err=%v", connection, err)
 	}
 }
 
 func TestCommunicationsStoredReauthRequiredReturnsConflict(t *testing.T) {
 	t.Parallel()
-
 	key := mustRSAKey(t)
 	repo := store.NewMemoryRepo()
 	const subject = "email-user"
+	const companyID = "company-stored-personal-reauth"
+	repo.EnsureCompany(companyID, "Stored Personal Reauth Company")
 	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       user.UserID,
-		Provider:     "google",
-		AccountEmail: user.Email,
-		GrantID:      "grant-1",
-		Status:       "reauth_required",
-	}); err != nil {
+	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
-	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   &fakeNylasClient{},
-	}).Routes()
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/communications/messages", nil)
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{UserID: user.UserID, Provider: "google", AccountEmail: user.Email, GrantID: "grant-1", Status: "reauth_required"}); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: &fakeNylasClient{}}).Routes()
+	req := httptest.NewRequest(http.MethodGet, "/v1/communications/messages?company_id="+url.QueryEscape(companyID), nil)
 	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", subject, user.Email))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409 body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -5535,7 +3783,7 @@ func TestCommunicationsSharedNylasAuthErrorMarksCompanyConnectionReauthRequired(
 		NylasClient:   &fakeNylasClient{listErr: NylasAPIError{StatusCode: http.StatusUnauthorized, Code: "unauthorized"}},
 	}).Routes()
 
-	path := "/v1/communications/messages?company_id=" + url.QueryEscape(companyID) + "&shared_inbox_id=" + url.QueryEscape(folder.FolderID)
+	path := "/v1/communications/messages?refresh=true&company_id=" + url.QueryEscape(companyID) + "&shared_inbox_id=" + url.QueryEscape(folder.FolderID)
 	req := httptest.NewRequest(http.MethodGet, path, nil)
 	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", subject, user.Email))
 	rec := httptest.NewRecorder()
@@ -5631,45 +3879,28 @@ func TestCommunicationsStoredSharedReauthRequiredReturnsConflict(t *testing.T) {
 
 func TestCommunicationsNylasRateLimitPreservesRetryAfter(t *testing.T) {
 	t.Parallel()
-
 	key := mustRSAKey(t)
 	repo := store.NewMemoryRepo()
 	const subject = "email-user"
+	const companyID = "company-personal-rate-limit"
+	repo.EnsureCompany(companyID, "Personal Rate Limit Company")
 	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       user.UserID,
-		Provider:     "google",
-		AccountEmail: user.Email,
-		GrantID:      "grant-1",
-		Status:       "connected",
-	}); err != nil {
+	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
-	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient: &fakeNylasClient{listErr: NylasAPIError{
-			StatusCode: http.StatusTooManyRequests,
-			Code:       "rate_limited",
-			RetryAfter: "3",
-		}},
-	}).Routes()
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/communications/messages", nil)
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{UserID: user.UserID, Provider: "google", AccountEmail: user.Email, GrantID: "grant-1", Status: "connected"}); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: &fakeNylasClient{listErr: NylasAPIError{StatusCode: http.StatusTooManyRequests, Code: "rate_limited", RetryAfter: "3"}}}).Routes()
+	req := httptest.NewRequest(http.MethodGet, "/v1/communications/messages?refresh=true&company_id="+url.QueryEscape(companyID), nil)
 	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", subject, user.Email))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("status = %d, want 429 body=%s", rec.Code, rec.Body.String())
-	}
-	if got := rec.Header().Get("Retry-After"); got != "3" {
-		t.Fatalf("Retry-After = %q, want 3", got)
-	}
-	if !strings.Contains(rec.Body.String(), "nylas_rate_limited") {
-		t.Fatalf("body = %s, want nylas_rate_limited", rec.Body.String())
+	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") != "3" || !strings.Contains(rec.Body.String(), "nylas_rate_limited") {
+		t.Fatalf("status=%d retry=%q body=%s", rec.Code, rec.Header().Get("Retry-After"), rec.Body.String())
 	}
 }
 

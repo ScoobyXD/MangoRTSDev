@@ -35,8 +35,34 @@ func memoryNodeEmailThreadKey(companyID, nodeID, emailThreadID string) string {
 	return strings.Join([]string{companyID, nodeID, emailThreadID}, "\x1f")
 }
 
+func (r *MemoryRepo) communicationsEmailThreadProviderLocked(input CommunicationsEmailThreadUpsertInput, scope communicationsEmailCollaborationScope) (string, error) {
+	if input.Provider == "google" || input.Provider == "microsoft" {
+		return input.Provider, nil
+	}
+	if scope.scopeType == CommunicationsEmailCollaborationScopePersonal {
+		connection, ok := r.emailConnections[emailConnectionKey(scope.personalUserID, scope.personalAccountEmail)]
+		if !ok || (connection.Provider != "google" && connection.Provider != "microsoft") {
+			return "", ErrInvalid
+		}
+		return connection.Provider, nil
+	}
+	folder, ok := r.folders[key(input.CompanyID, scope.sharedInboxID)]
+	if !ok || normalizeMemorySharedInboxFolder(folder).EntryType != CommunicationsSharedInboxEntryTypeSharedInbox {
+		return "", ErrInvalid
+	}
+	connection, ok := r.companyEmailConnections[companyEmailConnectionKey(input.CompanyID, folder.CompanyEmailConnectionID)]
+	if !ok || normalizeEmail(connection.AccountEmail) != scope.accountEmail || (connection.Provider != "google" && connection.Provider != "microsoft") {
+		return "", ErrInvalid
+	}
+	return connection.Provider, nil
+}
+
 func (r *MemoryRepo) upsertCommunicationsEmailThreadLocked(input CommunicationsEmailThreadUpsertInput) (domain.CommunicationsEmailThread, error) {
 	input, scope, err := normalizeCommunicationsEmailThreadInput(input)
+	if err != nil {
+		return domain.CommunicationsEmailThread{}, err
+	}
+	input.Provider, err = r.communicationsEmailThreadProviderLocked(input, scope)
 	if err != nil {
 		return domain.CommunicationsEmailThread{}, err
 	}
@@ -70,12 +96,15 @@ func (r *MemoryRepo) upsertCommunicationsEmailThreadLocked(input CommunicationsE
 		thread = domain.CommunicationsEmailThread{
 			CompanyID: input.CompanyID, EmailThreadID: threadID, ScopeType: scope.scopeType,
 			PersonalUserID: scope.personalUserID, PersonalAccountEmail: scope.personalAccountEmail,
-			SharedInboxID: scope.sharedInboxID, AccountEmail: scope.accountEmail,
+			SharedInboxID: scope.sharedInboxID, AccountEmail: scope.accountEmail, Provider: input.Provider,
 			ProviderThreadID: input.ProviderThreadID, RootProviderMessageID: input.SelectedMessageID,
 			DownloadStatus:   CommunicationsEmailThreadDownloadPartial,
 			CreatedTimestamp: now,
 		}
 		r.emailThreadScopeIDs[scopeKey] = threadID
+	}
+	if thread.Provider == "" {
+		thread.Provider = input.Provider
 	}
 	if thread.ProviderThreadID != "" && input.ProviderThreadID != "" && thread.ProviderThreadID != input.ProviderThreadID {
 		return domain.CommunicationsEmailThread{}, ErrInvalid
@@ -112,6 +141,7 @@ func (r *MemoryRepo) upsertCommunicationsEmailThreadLocked(input CommunicationsE
 	})
 	for index := range thread.Messages {
 		thread.Messages[index].MessageOrder = index
+		thread.Messages[index].Message.EmailMessageID = thread.Messages[index].EmailMessageID
 	}
 	thread.HistoryComplete = thread.HistoryComplete || input.HistoryComplete
 	if thread.HistoryComplete {
@@ -148,6 +178,27 @@ func (r *MemoryRepo) GetCommunicationsEmailThread(companyID, emailThreadID strin
 	return cloneCommunicationsEmailThread(item), nil
 }
 
+func (r *MemoryRepo) ListCommunicationsEmailThreadsForAccount(input CommunicationsEmailAccountReadInput) ([]domain.CommunicationsEmailThread, error) {
+	input, scope, err := normalizeCommunicationsEmailAccountReadInput(input)
+	if err != nil {
+		return nil, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	items := []domain.CommunicationsEmailThread{}
+	for _, thread := range r.emailThreads {
+		if thread.Provider == input.Provider && communicationsEmailThreadMatchesScope(thread, input.CompanyID, scope) {
+			items = append(items, cloneCommunicationsEmailThread(thread))
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if !items[i].UpdatedTimestamp.Equal(items[j].UpdatedTimestamp) {
+			return items[i].UpdatedTimestamp.After(items[j].UpdatedTimestamp)
+		}
+		return items[i].EmailThreadID < items[j].EmailThreadID
+	})
+	return items, nil
+}
 func (r *MemoryRepo) GetCommunicationsNodeEmailThread(companyID, nodeID, emailThreadID string) (domain.CommunicationsNodeEmailThread, error) {
 	companyID, nodeID, emailThreadID = cleanUUIDText(companyID), cleanUUIDText(nodeID), cleanUUIDText(emailThreadID)
 	if companyID == "" || nodeID == "" || emailThreadID == "" {
@@ -168,9 +219,18 @@ func (r *MemoryRepo) GetCommunicationsNodeEmailThread(companyID, nodeID, emailTh
 }
 
 func (r *MemoryRepo) linkCommunicationsEmailThreadToNodeLocked(companyID, nodeID, informationID, emailThreadID, selectedMessageID, actorUserID string, now time.Time) domain.CommunicationsNodeEmailThread {
+	selectedInternalMessageID := cleanUUIDText(selectedMessageID)
+	if thread, ok := r.emailThreads[key(companyID, emailThreadID)]; ok {
+		for _, message := range thread.Messages {
+			if message.ProviderMessageID == selectedMessageID || message.EmailMessageID == selectedMessageID {
+				selectedInternalMessageID = message.EmailMessageID
+				break
+			}
+		}
+	}
 	link := domain.CommunicationsNodeEmailThread{
 		CompanyID: companyID, NodeID: nodeID, InformationID: informationID,
-		EmailThreadID: emailThreadID, SelectedMessageID: selectedMessageID,
+		EmailThreadID: emailThreadID, SelectedMessageID: selectedInternalMessageID,
 		CreatedByUserID: actorUserID, CreatedTimestamp: now,
 	}
 	r.nodeEmailThreads[memoryNodeEmailThreadKey(companyID, nodeID, emailThreadID)] = link

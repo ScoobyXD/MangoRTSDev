@@ -338,12 +338,12 @@ func (r *PostgresRepo) FinalizeAttachmentUpload(input AttachmentUploadFinalizeIn
 		var link domain.ResourceAttachment
 		if intent.ResourceAttachmentID != "" {
 			link, err = scanResourceAttachment(tx.QueryRowContext(ctx, `select `+resourceAttachmentSelectColumns+`
-from resource_attachments ra
-where ra.company_id=$1::uuid and ra.attachment_id=$2::uuid and ra.resource_attachment_id=$3::uuid`,
+from attachment_relationships ra
+where ra.company_id=$1::uuid and ra.attachment_id=$2::uuid and ra.attachment_relationship_id=$3::uuid`,
 				intent.CompanyID, intent.AttachmentID, intent.ResourceAttachmentID))
 		} else {
 			link, err = scanResourceAttachment(tx.QueryRowContext(ctx, `select `+resourceAttachmentSelectColumns+`
-from resource_attachments ra
+from attachment_relationships ra
 where ra.company_id=$1::uuid and ra.attachment_id=$2::uuid and ra.resource_type=$3 and ra.resource_id=$4
   and ra.relationship_kind=$5 and coalesce(ra.information_id::text, '')=$6 and ra.message_id=$7
   and ra.editor_surface=$8

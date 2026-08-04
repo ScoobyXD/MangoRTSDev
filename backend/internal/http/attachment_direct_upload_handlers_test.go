@@ -829,9 +829,7 @@ func TestAttachmentDirectUploadCompanyHintAndRequestValidation(t *testing.T) {
 				CompanyID: fixture.companyID, UserID: fixture.allowed.UserID, Role: domain.RoleCompanyUser,
 			}},
 		}
-		payload := attachmentDirectUploadIntentPayload("provider-attached-email-nonmember", "nonmember-company-hint", 4, directUploadTestSHA256Hex("nonmember-company-hint"))
-		payload["resourceType"] = "attached_email"
-		payload["relationshipKind"] = "email_attachment"
+		payload := attachmentDirectUploadIntentPayload(fixture.node.NodeID, "nonmember-company-hint", 4, directUploadTestSHA256Hex("nonmember-company-hint"))
 		recorder := performAttachmentDirectUploadRequestWithActorContext(t, fixture, http.MethodPost, "/v1/attachments/upload-intents", payload, actor, nonmemberCompanyID)
 		if recorder.Code != http.StatusForbidden {
 			t.Fatalf("nonmember company hint status = %d, want %d; body=%s", recorder.Code, http.StatusForbidden, recorder.Body.String())
@@ -857,9 +855,7 @@ func TestAttachmentDirectUploadCompanyHintAndRequestValidation(t *testing.T) {
 			},
 			CompanyID: fixture.companyID, CompanyRole: domain.RoleCompanyUser,
 		}
-		payload := attachmentDirectUploadIntentPayload("provider-attached-email-conflict", "conflicting-company-hint", 4, directUploadTestSHA256Hex("conflicting-company-hint"))
-		payload["resourceType"] = "attached_email"
-		payload["relationshipKind"] = "email_attachment"
+		payload := attachmentDirectUploadIntentPayload(fixture.node.NodeID, "conflicting-company-hint", 4, directUploadTestSHA256Hex("conflicting-company-hint"))
 		recorder := performAttachmentDirectUploadRequestWithActorContext(t, fixture, http.MethodPost, "/v1/attachments/upload-intents", payload, actor, secondCompanyID)
 		if recorder.Code < 400 {
 			t.Fatalf("conflicting company hint unexpectedly succeeded: status=%d body=%s", recorder.Code, recorder.Body.String())
@@ -869,61 +865,37 @@ func TestAttachmentDirectUploadCompanyHintAndRequestValidation(t *testing.T) {
 		}
 	})
 
-	t.Run("multi-company email resources use only the authorized hinted company", func(t *testing.T) {
-		for _, resourceType := range []string{"email_message", "attached_email"} {
-			t.Run(resourceType, func(t *testing.T) {
-				fixture := newAttachmentDirectUploadTestFixture(t)
-				secondCompanyID := "22222222-2222-4222-8222-222222222222"
-				fixture.repo.EnsureCompany(secondCompanyID, "Second company")
-				secondMembership, err := fixture.repo.AddCompanyMembership(fixture.allowed.CognitoSubject, secondCompanyID, domain.RoleCompanyUser)
-				if err != nil {
-					t.Fatalf("add second company membership: %v", err)
-				}
-				actor := ActorContext{
-					User: fixture.allowed,
-					Memberships: []domain.CompanyMembership{
-						{CompanyID: fixture.companyID, UserID: fixture.allowed.UserID, Role: domain.RoleCompanyUser},
-						secondMembership,
-					},
-				}
-				resourceID := fmt.Sprintf("personal:%s:provider-resource-%s", fixture.allowed.UserID, resourceType)
-				if resourceType == "attached_email" {
-					secondNode, err := fixture.repo.CreateNode(secondCompanyID, "Second-company attachment node")
-					if err != nil {
-						t.Fatalf("create second-company node: %v", err)
-					}
-					grantAttachmentTestAccess(t, fixture.repo, secondCompanyID, secondNode.NodeID, fixture.allowed.UserID)
-					resourceID = fmt.Sprintf("node:%s:message:provider-resource-%s", secondNode.NodeID, resourceType)
-				}
-				payload := attachmentDirectUploadIntentPayload(resourceID, "multi-company-"+resourceType, 4, directUploadTestSHA256Hex(resourceType))
-				payload["resourceType"] = resourceType
-				payload["relationshipKind"] = "email_attachment"
-				recorder := performAttachmentDirectUploadRequestWithActorContext(t, fixture, http.MethodPost, "/v1/attachments/upload-intents", payload, actor, secondCompanyID)
-				if recorder.Code != http.StatusCreated {
-					t.Fatalf("hinted %s create status = %d, want %d; body=%s", resourceType, recorder.Code, http.StatusCreated, recorder.Body.String())
-				}
-				var created attachmentUploadIntentResponse
-				if err := json.Unmarshal(recorder.Body.Bytes(), &created); err != nil {
-					t.Fatalf("decode hinted upload response: %v", err)
-				}
-				intent, err := fixture.repo.GetAttachmentUploadIntent(secondCompanyID, fixture.allowed.UserID, created.UploadIntentID)
-				if err != nil {
-					t.Fatalf("load hinted upload from authorized company: %v", err)
-				}
-				if intent.CompanyID != secondCompanyID || intent.ResourceType != resourceType {
-					t.Fatalf("hinted upload scope = company %q resource %q, want %q/%q", intent.CompanyID, intent.ResourceType, secondCompanyID, resourceType)
-				}
-				if intent.StorageKey != attachmentOriginalObjectKey(secondCompanyID, created.AttachmentID) {
-					t.Fatalf("hinted storage key = %q, want company-scoped server key", intent.StorageKey)
-				}
-				if len(fixture.storage.presignPutInputs) != 1 || fixture.storage.presignPutInputs[0].Key != intent.StorageKey {
-					t.Fatalf("hinted storage presign = %#v, want exactly one scoped key", fixture.storage.presignPutInputs)
-				}
-			})
+	t.Run("multi-company resources use only the authorized hinted company", func(t *testing.T) {
+		fixture := newAttachmentDirectUploadTestFixture(t)
+		secondCompanyID := "22222222-2222-4222-8222-222222222222"
+		fixture.repo.EnsureCompany(secondCompanyID, "Second company")
+		secondMembership, err := fixture.repo.AddCompanyMembership(fixture.allowed.CognitoSubject, secondCompanyID, domain.RoleCompanyUser)
+		if err != nil {
+			t.Fatalf("add second company membership: %v", err)
+		}
+		secondNode, err := fixture.repo.CreateNode(secondCompanyID, "Second-company attachment node")
+		if err != nil {
+			t.Fatalf("create second-company node: %v", err)
+		}
+		grantAttachmentTestAccess(t, fixture.repo, secondCompanyID, secondNode.NodeID, fixture.allowed.UserID)
+		actor := ActorContext{User: fixture.allowed, Memberships: []domain.CompanyMembership{
+			{CompanyID: fixture.companyID, UserID: fixture.allowed.UserID, Role: domain.RoleCompanyUser}, secondMembership,
+		}}
+		payload := attachmentDirectUploadIntentPayload(secondNode.NodeID, "multi-company-node", 4, directUploadTestSHA256Hex("node"))
+		recorder := performAttachmentDirectUploadRequestWithActorContext(t, fixture, http.MethodPost, "/v1/attachments/upload-intents", payload, actor, secondCompanyID)
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("hinted Node create status = %d, want %d; body=%s", recorder.Code, http.StatusCreated, recorder.Body.String())
+		}
+		var created attachmentUploadIntentResponse
+		if err := json.Unmarshal(recorder.Body.Bytes(), &created); err != nil {
+			t.Fatalf("decode hinted upload response: %v", err)
+		}
+		intent, err := fixture.repo.GetAttachmentUploadIntent(secondCompanyID, fixture.allowed.UserID, created.UploadIntentID)
+		if err != nil || intent.CompanyID != secondCompanyID || intent.ResourceType != "node" {
+			t.Fatalf("hinted upload = %+v err=%v", intent, err)
 		}
 	})
 }
-
 func TestAttachmentDirectUploadMultipartAmbiguousCompletionRecovery(t *testing.T) {
 	fixture := newAttachmentDirectUploadTestFixture(t)
 	sizeBytes := attachmentSinglePutMaxBytes + 1

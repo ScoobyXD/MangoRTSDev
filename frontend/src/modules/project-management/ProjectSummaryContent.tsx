@@ -895,7 +895,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     if (blocks.some((block) => block.id === targetID)) return targetID;
     const chatMessage = chatMessages.find((message) => message.id === targetID);
     if (chatMessage) return chatMessage.blockID;
-    const attachedEmail = attachedEmails.find((email) => email.id === targetID || email.messageID === targetID);
+    const attachedEmail = attachedEmails.find((email) => email.id === targetID || email.messageID === targetID || email.emailMessageID === targetID);
     return attachedEmail?.blockID?.trim() ?? "";
   }, [attachedEmails, blocks, chatMessages, focusInformationID]);
   const focusTargetIndex = useMemo(
@@ -934,7 +934,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     const block = blocks[focusTargetIndex];
     if (!block) return;
     const chatMessage = chatMessages.find((message) => message.id === targetID);
-    const attachedEmail = attachedEmails.find((email) => email.id === targetID || email.messageID === targetID);
+    const attachedEmail = attachedEmails.find((email) => email.id === targetID || email.messageID === targetID || email.emailMessageID === targetID);
     if (chatMessage) {
       setOpenChatBlockIDs((current) => new Set(current).add(block.id));
       setActiveChatMessageIDs((current) => ({ ...current, [block.id]: chatMessage.id }));
@@ -1509,6 +1509,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       id,
       blockID,
       messageID: payload.messageID,
+      emailMessageID: payload.emailMessageID,
       threadID: payload.threadID,
       sharedInboxID: payload.sharedInboxID,
       accountEmail: payload.accountEmail,

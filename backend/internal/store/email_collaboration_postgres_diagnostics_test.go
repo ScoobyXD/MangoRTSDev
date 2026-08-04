@@ -93,7 +93,7 @@ func TestEmailCollaborationInvalidEnumValueIsStorageDriftOnlyAtAttachedEmailStag
 	}
 }
 
-func TestPostgresEmailCollaborationCreationSkipsBroadProjectionSync(t *testing.T) {
+func TestPostgresEmailRelationshipCreationUsesFinalTablesAndOrdinaryPermissions(t *testing.T) {
 	raw, err := os.ReadFile("postgres_email_collaboration.go")
 	if err != nil {
 		t.Fatal(err)
@@ -105,28 +105,14 @@ func TestPostgresEmailCollaborationCreationSkipsBroadProjectionSync(t *testing.T
 		t.Fatal("could not isolate EnsureCommunicationsEmailCollaboration source")
 	}
 	ensureSource := source[start:end]
-	if strings.Contains(ensureSource, "syncNodeProjectionDependenciesTx") {
-		t.Fatal("standalone email collaboration creation must not depend on broad Node derived projections")
+	for _, required := range []string{"upsertPostgresCommunicationsEmailThreadTx", "linkPostgresCommunicationsEmailThreadToNodeTx", "insertPostgresResourcePermissionTx", "resource_gvic_assignments"} {
+		if !strings.Contains(ensureSource, required) {
+			t.Fatalf("final email relationship creation missing %q", required)
+		}
 	}
-	for _, stage := range []string{
-		"lookup_existing",
-		"insert_node",
-		"insert_attached_email_history",
-		"insert_attached_email_projection",
-		"place_explorer_node",
-		"insert_collaboration",
-		"insert_creator_participant",
-		"grant_creator_access",
-		"assign_creator_gvic",
-		"allocate_creator_gvic_policy",
-		"set_creator_gvic_policy",
-		"sync_creator_gvic",
-		"sync_creator_gvic_projection",
-		"load_created",
-		"commit_created",
-	} {
-		if !strings.Contains(ensureSource, `wrapEmailCollaborationEnsureStage("`+stage+`"`) {
-			t.Fatalf("creation path missing staged diagnostic %q", stage)
+	for _, forbidden := range []string{"communications_email_collaborations", "communications_email_collaboration_participants", "syncNodeProjectionDependenciesTx"} {
+		if strings.Contains(ensureSource, forbidden) {
+			t.Fatalf("final email relationship creation retained %q", forbidden)
 		}
 	}
 }

@@ -241,67 +241,6 @@ where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid and 
 		forceRealtimeOutboxEvent(t, db, "notification.created", false)
 	})
 
-	t.Run("email collaboration mailbox hint", func(t *testing.T) {
-		peer, err := repo.UpsertAuthUser("realtime-pg-peer", "realtime-pg-peer@example.test", "Realtime PG Peer")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := repo.AddCompanyMembership("realtime-pg-peer", company.CompanyID, "company_user"); err != nil {
-			t.Fatal(err)
-		}
-		for _, connection := range []UserEmailConnectionInput{
-			{UserID: user.UserID, Provider: "google", AccountEmail: user.Email, GrantID: "realtime-pg-creator-grant", Status: "connected"},
-			{UserID: peer.UserID, Provider: "microsoft", AccountEmail: peer.Email, GrantID: "realtime-pg-peer-grant", Status: "connected"},
-		} {
-			if _, err := repo.UpsertUserEmailConnection(connection); err != nil {
-				t.Fatal(err)
-			}
-		}
-		created, err := repo.EnsureCommunicationsEmailCollaboration(CommunicationsEmailCollaborationEnsureInput{
-			CompanyID: company.CompanyID, PersonalUserID: user.UserID, PersonalAccountEmail: user.Email,
-			CreatedByUserID: user.UserID,
-			Message:         domain.EmailMessageSnapshot{ID: "pg-mailbox-root", ThreadID: "pg-mailbox-thread", Subject: "Root", Date: 10},
-		})
-		if err != nil {
-			t.Fatalf("email collaboration ensure stage=%s sqlstate=%s category=%s", EmailCollaborationEnsureErrorStage(err), EmailCollaborationEnsureErrorSQLState(err), EmailCollaborationEnsureErrorCategory(err))
-		}
-		if _, err := repo.AddCommunicationsEmailCollaborationParticipants(CommunicationsEmailCollaborationParticipantInput{
-			CompanyID: company.CompanyID, CollaborationID: created.Collaboration.CollaborationID,
-			ActorUserID: user.UserID, MentionedUserIDs: []string{peer.UserID},
-		}); err != nil {
-			t.Fatal(err)
-		}
-		input := CommunicationsEmailCollaborationMessageInput{
-			CompanyID: company.CompanyID, PersonalUserID: user.UserID, PersonalAccountEmail: user.Email,
-			Message: domain.EmailMessageSnapshot{ID: "pg-mailbox-next", ThreadID: "pg-mailbox-thread", Subject: "Next", Date: 20},
-		}
-		forceRealtimeOutboxEvent(t, db, "mailbox.message.changed", true)
-		if _, err := repo.UpdateCommunicationsEmailCollaborationMessage(input); err == nil {
-			t.Fatal("email collaboration update succeeded with forced mailbox outbox failure")
-		}
-		var latestMessageID string
-		if err := db.QueryRow(
-			"select latest_message_id from communications_email_collaborations where company_id=$1::uuid and collaboration_id=$2::uuid",
-			company.CompanyID, created.Collaboration.CollaborationID,
-		).Scan(&latestMessageID); err != nil || latestMessageID != "pg-mailbox-root" {
-			t.Fatalf("mailbox snapshot after rollback = %q err=%v", latestMessageID, err)
-		}
-		scope := "mailbox:personal:account:" + peer.UserID + ":" + peer.Email
-		if got := countPostgresRows(t, db, "select count(*) from realtime_outbox where company_id=$1::uuid and scope=$2", company.CompanyID, scope); got != 0 {
-			t.Fatalf("rolled-back mailbox outbox rows = %d", got)
-		}
-		forceRealtimeOutboxEvent(t, db, "mailbox.message.changed", false)
-		if _, err := repo.UpdateCommunicationsEmailCollaborationMessage(input); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := repo.UpdateCommunicationsEmailCollaborationMessage(input); err != nil {
-			t.Fatal(err)
-		}
-		if got := countPostgresRows(t, db, "select count(*) from realtime_outbox where company_id=$1::uuid and scope=$2 and event_type='mailbox.message.changed'", company.CompanyID, scope); got != 1 {
-			t.Fatalf("idempotent mailbox outbox rows = %d, want 1", got)
-		}
-	})
-
 	t.Run("JSON editor annotations, atomicity, and lost acknowledgement replay", func(t *testing.T) {
 		documentID := "00000000-0000-4000-8000-000000000131"
 		ref := EditorJSONDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID, DocumentID: documentID}

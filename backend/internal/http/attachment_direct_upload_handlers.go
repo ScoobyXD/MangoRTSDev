@@ -757,23 +757,19 @@ func (s *Server) resolveAttachmentUploadCompany(w http.ResponseWriter, r *http.R
 }
 
 func (s *Server) canEditAttachmentResourceForResolution(companyID, userID, resourceType, resourceID string) (bool, error) {
-	if resourceType == "attached_email" {
-		nodeID, ok := parseAttachedEmailAttachmentResourceID(resourceID)
-		if !ok {
+	if isFinalEmailAttachmentResource(resourceType) {
+		access, err := s.getEmailAttachmentResourceAccess(companyID, userID, resourceType, resourceID)
+		if errors.Is(err, store.ErrInvalid) || errors.Is(err, store.ErrNotFound) {
 			return false, nil
 		}
-		return s.repo.UserHasEffectiveAccess(companyID, userID, store.EntityTypeNode, nodeID, store.EntityPermissionEdit)
+		return access.Allowed, err
 	}
 	entityType, ok := attachmentPermissionEntityType(resourceType)
 	if !ok {
-		// Email-scoped resources do not have a generic entity key. The final
-		// existing authorization helper remains authoritative when only one
-		// company membership is possible.
 		return false, nil
 	}
 	return s.repo.UserHasEffectiveAccess(companyID, userID, entityType, resourceID, store.EntityPermissionEdit)
 }
-
 func (s *Server) findAttachmentUploadIntentForActor(w http.ResponseWriter, r *http.Request, uploadIntentID string) (ActorContext, domain.AttachmentUploadIntent, bool) {
 	return s.findAttachmentUploadIntentForActorWithExpiry(w, r, uploadIntentID, false)
 }

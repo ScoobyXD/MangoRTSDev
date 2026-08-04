@@ -130,7 +130,7 @@ func (r *MemoryRepo) withKanbanCardProjectionFieldsLocked(card domain.KanbanCard
 	if link, ok := r.emailNodeLinks[emailNodeLinkKey(card.CompanyID, card.BoardID, card.CardID)]; ok && link.NodeID == card.NodeID {
 		card.CreatedFromEmail = true
 	}
-	if _, ok := r.emailCollaborationForNodeLocked(card.CompanyID, card.NodeID); ok {
+	if _, ok := r.emailRelationshipForNodeLocked(card.CompanyID, card.NodeID); ok {
 		card.CreatedFromEmail = true
 	}
 	return card

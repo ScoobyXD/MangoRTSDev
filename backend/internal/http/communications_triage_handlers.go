@@ -116,7 +116,7 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 	}
 	sourceMessagesByID := make(map[string]NylasMessage, len(conversionInput.MessageIDs))
 	for _, messageID := range conversionInput.MessageIDs {
-		message, err := s.communicationsMessage(r.Context(), connection, messageID)
+		message, err := s.storedCommunicationsMessage(connection, conversionInput.CompanyID, sharedInboxID, messageID)
 		if err != nil {
 			s.writeNylasError(w, r, connection, err)
 			return
@@ -124,7 +124,7 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		sourceMessagesByID[messageID] = message
 		snapshot := emailMessageSnapshotFromNylas(message)
 		threadInput := store.CommunicationsEmailThreadUpsertInput{
-			CompanyID: conversionInput.CompanyID, AccountEmail: connection.AccountEmail,
+			CompanyID: conversionInput.CompanyID, AccountEmail: connection.AccountEmail, Provider: connection.Provider,
 			ProviderThreadID: snapshot.ThreadID, SelectedMessageID: snapshot.ID,
 			Messages: []domain.EmailMessageSnapshot{snapshot}, HistoryComplete: snapshot.ThreadID == "",
 			FetchedAt: time.Now().UTC(), RequestDownload: true, RequestedByUserID: actor.User.UserID,

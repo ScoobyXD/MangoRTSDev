@@ -1,10 +1,9 @@
 package httpapi
 
 import (
-	"context"
-	"encoding/base64"
-	"mime"
+	"errors"
 	"miraeopus/backend/internal/domain"
+	"miraeopus/backend/internal/store"
 	"net/http"
 	"strings"
 )
@@ -12,73 +11,40 @@ import (
 func (s *Server) downloadEmailCollaborationAttachment(
 	w http.ResponseWriter,
 	r *http.Request,
-	connection domain.UserEmailConnection,
 	collaboration domain.CommunicationsEmailCollaboration,
 	messageID string,
 	attachmentID string,
 ) {
 	messageID = strings.TrimSpace(messageID)
 	attachmentID = strings.TrimSpace(attachmentID)
-	if messageID == "" || attachmentID == "" {
-		writeError(w, http.StatusNotFound, "not_found")
-		return
-	}
-	providerThreadID := strings.TrimSpace(collaboration.ProviderThreadID)
-	if providerThreadID == "" &&
-		messageID != strings.TrimSpace(collaboration.RootMessageID) &&
-		messageID != strings.TrimSpace(collaboration.LatestMessageID) &&
-		messageID != strings.TrimSpace(collaboration.Message.ID) {
+	if messageID == "" || attachmentID == "" || messageID != strings.TrimSpace(collaboration.RootMessageID) {
 		writeError(w, http.StatusNotFound, "email_attachment_not_found")
 		return
 	}
-
-	message, err := s.communicationsMessage(r.Context(), connection, messageID)
+	thread, err := s.repo.GetCommunicationsEmailThread(collaboration.CompanyID, collaboration.EmailThreadID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "email_attachment_not_found")
+		return
+	}
 	if err != nil {
-		s.writeNylasError(w, r, connection, err)
+		writeError(w, http.StatusInternalServerError, "failed_to_load_email_attachment")
 		return
 	}
-	if strings.TrimSpace(message.ID) != messageID ||
-		(providerThreadID != "" && strings.TrimSpace(message.ThreadID) != providerThreadID) {
+	mangoAttachmentID := ""
+	for _, stored := range thread.Messages {
+		if stored.EmailMessageID != collaboration.RootMessageID {
+			continue
+		}
+		for _, attachment := range stored.Message.Attachments {
+			if attachment.ID == attachmentID || attachment.AttachmentID == attachmentID {
+				mangoAttachmentID = strings.TrimSpace(attachment.AttachmentID)
+				break
+			}
+		}
+	}
+	if mangoAttachmentID == "" {
 		writeError(w, http.StatusNotFound, "email_attachment_not_found")
 		return
 	}
-	attachment, ok := findNylasAttachmentByID(message.Attachments, attachmentID)
-	if !ok {
-		writeError(w, http.StatusNotFound, "email_attachment_not_found")
-		return
-	}
-
-	var content []byte
-	if inlineContent := strings.TrimSpace(attachment.Content); inlineContent != "" {
-		content, err = base64.StdEncoding.DecodeString(inlineContent)
-		if err != nil || len(content) > communicationsAttachmentDownloadMaxBytes {
-			writeError(w, http.StatusBadRequest, "invalid_email_attachment")
-			return
-		}
-	} else {
-		err = s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
-			var downloadErr error
-			content, downloadErr = s.nylasClient.DownloadAttachment(ctx, connection.GrantID, messageID, attachmentID)
-			return downloadErr
-		})
-		if err != nil {
-			s.writeNylasError(w, r, connection, err)
-			return
-		}
-	}
-
-	contentType := strings.TrimSpace(attachment.ContentType)
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
-	filename := strings.TrimSpace(attachment.Filename)
-	if filename == "" {
-		filename = "attachment"
-	}
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": filename}))
-	w.Header().Set("Cache-Control", "private, max-age=300")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(content)
+	s.handleAttachmentContent(w, r, mangoAttachmentID)
 }

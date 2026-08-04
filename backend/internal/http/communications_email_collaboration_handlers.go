@@ -111,7 +111,7 @@ func (s *Server) handleCommunicationsEmailCollaborations(w http.ResponseWriter, 
 		result, err := s.repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
 			CompanyID: req.CompanyID, PersonalUserID: scope.personalUserID,
 			PersonalAccountEmail: scope.personalAccountEmail, SharedInboxID: scope.sharedInboxID,
-			AccountEmail: scope.accountEmail, CreatedByUserID: actor.User.UserID, Priority: req.Priority, Message: providerSnapshot,
+			AccountEmail: scope.accountEmail, Provider: connection.Provider, CreatedByUserID: actor.User.UserID, Priority: req.Priority, Message: providerSnapshot,
 		})
 		if err != nil {
 			scopeType := "personal"

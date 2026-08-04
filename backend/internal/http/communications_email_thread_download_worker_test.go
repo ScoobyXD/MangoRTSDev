@@ -3,7 +3,6 @@ package httpapi
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"testing"
@@ -19,7 +18,7 @@ func TestCommunicationsEmailThreadDownloadWorkerStoresThreadAttachmentsAndLaterM
 	}
 	created, err := repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: emailCollaborationThreadTestCompanyID, PersonalUserID: owner.UserID, PersonalAccountEmail: owner.Email,
-		AccountEmail: owner.Email, CreatedByUserID: owner.UserID,
+		AccountEmail: owner.Email, Provider: "google", CreatedByUserID: owner.UserID,
 		Message: domain.EmailMessageSnapshot{ID: "worker-root", ThreadID: "worker-thread", Subject: "Stored immediately", Body: "<p>selected</p>"},
 	})
 	if err != nil {
@@ -27,11 +26,12 @@ func TestCommunicationsEmailThreadDownloadWorkerStoresThreadAttachmentsAndLaterM
 	}
 
 	client := newEmailCollaborationThreadTestClient()
+	client.downloadContent = []byte("report bytes")
 	client.threadsByID["worker-thread"] = NylasThread{ID: "worker-thread", MessageIDs: []string{"worker-root", "worker-reply", "worker-root"}}
 	client.messagesByID["worker-root"] = NylasMessage{ID: "worker-root", ThreadID: "worker-thread", Subject: "Thread", Body: "<p>root</p>", Date: 10}
 	client.messagesByID["worker-reply"] = NylasMessage{
 		ID: "worker-reply", ThreadID: "worker-thread", Subject: "Re: Thread", Body: "<p>reply</p>", Date: 20,
-		Attachments: []NylasAttachment{{ID: "provider-file", Filename: "report.pdf", ContentType: "application/pdf", Content: base64.StdEncoding.EncodeToString([]byte("report bytes")), Size: 12}},
+		Attachments: []NylasAttachment{{ID: "provider-file", Filename: "report.pdf", ContentType: "application/pdf", Size: 12}},
 	}
 	storage := newFakeAttachmentObjectStorage()
 	server := NewServerWithOptions(repo, ServerOptions{
@@ -60,13 +60,14 @@ func TestCommunicationsEmailThreadDownloadWorkerStoresThreadAttachmentsAndLaterM
 	if len(attachments) != 1 || attachments[0].AttachmentID == "" {
 		t.Fatalf("stored attachment metadata = %+v", attachments)
 	}
-	links, err := repo.ListResourceAttachments(emailCollaborationThreadTestCompanyID, store.EntityTypeNode, created.Collaboration.NodeID)
+	storedMessageID := thread.Messages[1].EmailMessageID
+	links, err := repo.ListResourceAttachments(emailCollaborationThreadTestCompanyID, "email_message", storedMessageID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	found := false
 	for _, link := range links {
-		if link.AttachmentID == attachments[0].AttachmentID && link.MessageID == "worker-reply" {
+		if link.AttachmentID == attachments[0].AttachmentID && link.ResourceID == storedMessageID {
 			found = true
 		}
 	}
@@ -116,7 +117,7 @@ func TestCommunicationsEmailThreadDownloadWorkerStoresThreadAttachmentsAndLaterM
 
 	orphan, err := repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: emailCollaborationThreadTestCompanyID, PersonalUserID: owner.UserID, PersonalAccountEmail: owner.Email,
-		AccountEmail: owner.Email, CreatedByUserID: owner.UserID,
+		AccountEmail: owner.Email, Provider: "google", CreatedByUserID: owner.UserID,
 		Message: domain.EmailMessageSnapshot{ID: "worker-orphan", Subject: "No provider thread", Body: "<p>orphan</p>"},
 	})
 	if err != nil {

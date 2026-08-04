@@ -179,6 +179,7 @@ export function formatTimestamp(value: string | number | undefined, granularity:
 
 export function messageAttachmentPayload(message: EmailMessage, sharedInboxID = "", accountEmail = ""): {
   messageID: string;
+  emailMessageID: string;
   threadID?: string;
   sharedInboxID?: string;
   accountEmail?: string;
@@ -188,8 +189,11 @@ export function messageAttachmentPayload(message: EmailMessage, sharedInboxID = 
   date?: number;
   attachedTimestamp: string;
 } {
+  const emailMessageID = message.email_message_id?.trim() ?? "";
+  if (!emailMessageID) throw new Error("email_message_id_missing");
   return {
     messageID: message.id,
+    emailMessageID,
     threadID: message.thread_id,
     sharedInboxID: sharedInboxID.trim() || undefined,
     accountEmail: accountEmail.trim() || undefined,
@@ -206,7 +210,7 @@ export function parseDraggedEmail(dataTransfer: DataTransfer): ReturnType<typeof
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as ReturnType<typeof messageAttachmentPayload>;
-    return parsed.messageID ? parsed : null;
+    return parsed.messageID && parsed.emailMessageID ? parsed : null;
   } catch {
     return null;
   }

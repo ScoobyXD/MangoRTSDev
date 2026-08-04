@@ -1106,18 +1106,18 @@ test("signature hydration, empty remote rows, and attachment scope preserve the 
     "an existing remote row, including an empty body, must win before local fallback upload",
   );
 
-  assert.match(homePage, /emailSignatureAccountEmail=\{composeSignatureAccountEmail\}/);
-  assert.match(homeMailWorkspace, /emailSignatureAccountEmail: string/);
-  assert.match(homeMailWorkspace, /emailSignatureAccountEmail=\{emailSignatureAccountEmail\}/);
-  assert.match(homeParts, /accountEmail: emailSignatureAccountEmail/);
-  assert.match(homeParts, /const composeAttachmentResourceID[\s\S]*accountEmail: compose\.accountEmail/);
+  assert.match(homePage, /emailSignatureID=\{composeScopeEmailSignatureID\}/);
+  assert.match(homeMailWorkspace, /emailSignatureID: string/);
+  assert.match(homeMailWorkspace, /emailSignatureID=\{emailSignatureID\}/);
+  assert.match(homeParts, /signatureID: emailSignatureID/);
+  assert.match(homeParts, /const composeAttachmentResourceID[\s\S]*draftID: compose\.draftID/);
   const signatureAttachmentScope = sourceSliceBetween(
     homeParts,
     "const signatureAttachmentResourceID",
-    "[compose.sharedInboxID, currentUserID, emailSignatureAccountEmail]",
+    "[emailSignatureID]",
     "signature attachment resource scope",
   );
-  assert.doesNotMatch(signatureAttachmentScope, /accountEmail: compose\.accountEmail/);
+  assert.doesNotMatch(signatureAttachmentScope, /accountEmail|sharedInboxID|userID/);
   assert.match(homeMailDrafts, /const homeMailSignatureLocalRevisions = new Map<string, number>\(\)/);
   assert.match(signatureLoader, /const localRevisionAtLoadStart = readHomeMailSignatureLocalRevision\(scopeKey\)/);
   assert.match(signatureLoader, /readHomeMailSignatureLocalRevision\(scopeKey\) !== localRevisionAtLoadStart/);

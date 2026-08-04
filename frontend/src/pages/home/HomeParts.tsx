@@ -4986,11 +4986,12 @@ function matchingCompanyUsers(users: CompanyUser[], value: string, existingRecip
     .slice(0, 6);
 }
 
-export function ComposePanel({ compose, busy, replyMessage, emailSignature, emailSignatureAccountEmail, companyID, currentUserID, companyUsers, onChange, onCancel, onSubmit, onEmailSignatureChange, onSaveEmailSignature, onSaveDraft, onEnsureDraft, onDiscardEmptyDraft }: {
+export function ComposePanel({ compose, busy, replyMessage, emailSignature, emailSignatureID, emailSignatureAccountEmail, companyID, currentUserID, companyUsers, onChange, onCancel, onSubmit, onEmailSignatureChange, onSaveEmailSignature, onSaveDraft, onEnsureDraft, onDiscardEmptyDraft }: {
   compose: ComposeState;
   busy: boolean;
   replyMessage?: EmailMessage | null;
   emailSignature: string;
+  emailSignatureID: string;
   emailSignatureAccountEmail: string;
   companyID: string;
   currentUserID: string;
@@ -5230,14 +5231,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
     try {
       const preparedCompose = await onEnsureDraft(preparedTarget);
       const preparedSharedInboxID = preparedCompose.sharedInboxID.trim();
-      const preparedAccountEmail = preparedCompose.accountEmail.trim().toLowerCase();
-      const resourceID = mangoEmailDraftResourceID({
-        draftID: cleanDraftID,
-        userID: currentUserID,
-        accountEmail: preparedAccountEmail,
-        sharedInboxID: preparedSharedInboxID,
-        collaborationID: preparedCompose.sharedDraft ? preparedCompose.collaborationID.trim() : "",
-      });
+      const resourceID = mangoEmailDraftResourceID({ draftID: cleanDraftID });
       const results = await Promise.allSettled(selectedFiles.map(async (file) => {
         const uploaded = await uploadMangoAttachment(attachmentRequestJSON, {
           companyID: cleanCompanyID,
@@ -5407,20 +5401,10 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
   const composeEditorSurfaceID = compose.sharedDraft
     ? "email-collaboration-shared-draft"
     : compose.sharedInboxID.trim() ? "shared-triage-compose" : "my-triage-compose";
-  const composeAttachmentResourceID = React.useMemo(() => {
-    const cleanDraftID = compose.draftID.trim();
-    if (!cleanDraftID) return "";
-    const cleanCollaborationID = compose.sharedDraft ? compose.collaborationID.trim() : "";
-    const cleanSharedInboxID = compose.sharedInboxID.trim();
-    if (!cleanCollaborationID && !cleanSharedInboxID && !currentUserID.trim()) return "";
-    return mangoEmailDraftResourceID({
-      draftID: cleanDraftID,
-      userID: currentUserID,
-      accountEmail: compose.accountEmail,
-      sharedInboxID: cleanSharedInboxID,
-      collaborationID: cleanCollaborationID,
-    });
-  }, [compose.accountEmail, compose.collaborationID, compose.draftID, compose.sharedDraft, compose.sharedInboxID, currentUserID]);
+  const composeAttachmentResourceID = React.useMemo(
+    () => mangoEmailDraftResourceID({ draftID: compose.draftID }),
+    [compose.draftID],
+  );
   const composeEditorImageAttachmentContext = companyID.trim() && composeAttachmentResourceID
     ? {
       requestJSON: attachmentRequestJSON,
@@ -5438,11 +5422,10 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
       },
     }
     : undefined;
-  const signatureAttachmentResourceID = React.useMemo(() => mangoEmailSignatureResourceID({
-    userID: currentUserID,
-    accountEmail: emailSignatureAccountEmail,
-    sharedInboxID: compose.sharedInboxID,
-  }), [compose.sharedInboxID, currentUserID, emailSignatureAccountEmail]);
+  const signatureAttachmentResourceID = React.useMemo(
+    () => mangoEmailSignatureResourceID({ signatureID: emailSignatureID }),
+    [emailSignatureID],
+  );
   const signatureEditorImageAttachmentContext = companyID.trim() && signatureAttachmentResourceID
     ? {
       requestJSON: attachmentRequestJSON,

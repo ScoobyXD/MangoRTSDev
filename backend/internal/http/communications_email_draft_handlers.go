@@ -6,7 +6,7 @@ import (
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
-	"net/url"
+
 	"strconv"
 	"strings"
 	"time"
@@ -246,7 +246,7 @@ func (s *Server) handleCommunicationsEmailDraftUpsert(w http.ResponseWriter, r *
 		}
 		replyToJSON = string(req.ReplyToMessage)
 	}
-	sourceMessageID := strings.TrimSpace(firstNonBlank(req.SourceMessageID, req.ReplyToMessageID))
+	sourceMessageID := strings.TrimSpace(req.SourceMessageID)
 	draft, err := s.repo.UpsertCommunicationsEmailDraft(store.CommunicationsEmailDraftInput{
 		CompanyID:              companyID,
 		DraftID:                draftID,
@@ -580,22 +580,6 @@ func (s *Server) communicationsEmailDraftResponse(draft domain.CommunicationsEma
 	if err != nil {
 		attachments = []domain.ResourceAttachment{}
 	}
-	if strings.TrimSpace(draft.SharedInboxID) == "" {
-		legacyAttachments, legacyErr := s.repo.ListResourceAttachments(draft.CompanyID, "email_draft", legacyCommunicationsEmailDraftResourceID(draft))
-		if legacyErr == nil && len(legacyAttachments) > 0 {
-			seen := make(map[string]struct{}, len(attachments))
-			for _, attachment := range attachments {
-				seen[attachment.ResourceAttachmentID] = struct{}{}
-			}
-			for _, attachment := range legacyAttachments {
-				if _, exists := seen[attachment.ResourceAttachmentID]; exists {
-					continue
-				}
-				seen[attachment.ResourceAttachmentID] = struct{}{}
-				attachments = append(attachments, attachment)
-			}
-		}
-	}
 	replyToMessage := json.RawMessage(draft.ReplyToMessageJSON)
 	if len(replyToMessage) == 0 || !json.Valid(replyToMessage) || string(replyToMessage) == "{}" {
 		replyToMessage = nil
@@ -629,22 +613,8 @@ func (s *Server) communicationsEmailDraftResponse(draft domain.CommunicationsEma
 }
 
 func communicationsEmailDraftResourceID(draft domain.CommunicationsEmailDraft) string {
-	if draft.IsShared && strings.TrimSpace(draft.CollaborationID) != "" {
-		return "collaboration:" + url.QueryEscape(strings.TrimSpace(draft.CollaborationID)) + ":" + url.QueryEscape(strings.TrimSpace(draft.DraftID))
-	}
-	if strings.TrimSpace(draft.SharedInboxID) != "" {
-		return "shared:" + url.QueryEscape(strings.TrimSpace(draft.SharedInboxID)) + ":" + url.QueryEscape(strings.TrimSpace(draft.DraftID))
-	}
-	return "personal:" +
-		url.QueryEscape(strings.TrimSpace(draft.PersonalUserID)) + ":" +
-		url.QueryEscape(normalizeEmailForCompare(draft.PersonalAccountEmail)) + ":" +
-		url.QueryEscape(strings.TrimSpace(draft.DraftID))
+	return strings.TrimSpace(draft.DraftID)
 }
-
-func legacyCommunicationsEmailDraftResourceID(draft domain.CommunicationsEmailDraft) string {
-	return "personal:" + url.QueryEscape(strings.TrimSpace(draft.PersonalUserID)) + ":" + url.QueryEscape(strings.TrimSpace(draft.DraftID))
-}
-
 func communicationsEmailDraftKindFromID(draftID string) string {
 	if strings.HasPrefix(strings.TrimSpace(draftID), "draft:reply:") {
 		return "reply"

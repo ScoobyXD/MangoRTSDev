@@ -309,9 +309,10 @@ test("My and Shared Triage keep email chat opt-in while reusing the shared ChatP
   assert.match(surface, /const textBlockWrite = existingLinkedProjection \? undefined/);
   assert.match(surface, /parseEditorAttachedEmails/);
   assert.match(surface, /const ensureLinkedEmailTextBlock = React\.useCallback/);
-  assert.match(surface, /emailMessageID,[\s\S]{0,160}emailAccent: editorEmailMessageAccent/);
+  assert.match(surface, /emailMessageID,[\s\S]{0,180}editorEmailMessageAccent\(emailMessageID/);
+  assert.doesNotMatch(surface, /emailMessageID: emailMessageID \|\| providerMessageID/);
   assert.match(surface, /const activeBlockID = await ensureLinkedEmailTextBlock\(activeCollaboration\)/);
-  assert.match(surface, /blockID: activeBlockID,[\s\S]{0,500}selectionMessageID: !replyTargetID \? \(selection\?\.messageID \?\? message\.id\)/);
+  assert.match(surface, /blockID: activeBlockID,[\s\S]{0,500}selectionMessageID: !replyTargetID \? selectionEmailMessageID/);
   assert.match(surface, /const linkedTextBlockID = await ensureLinkedEmailTextBlock\(created\);[\s\S]*saveCurrentDraftToCollaboration\(created, linkedTextBlockID\)/);
   assert.match(surface, /informationID: activeBlockID,[\s\S]{0,120}editorSurface: "email_collaboration_chat"/);
   assert.match(surface, /<ChatPane[\s\S]{0,800}fillHeight/);

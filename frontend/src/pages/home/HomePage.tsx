@@ -25,6 +25,7 @@ import {
   fetchCommunicationsStatus,
   getEmailCollaborationThread,
   getEmailMessage,
+  getEmailSignature,
   getEmailThread,
   invalidateCommunicationsCache,
   invalidateCommunicationsMailboxCache,
@@ -41,6 +42,7 @@ import {
   patchEmailMessagesLogicGatePlacement,
   removeLogicGateGVICAssignments,
   settleCommunicationsMailboxMessageOverlays,
+  saveEmailSignature,
   sendEmailCollaborationDraft,
   sortEmailMessagesByDateDescending,
   updateCommunicationsSharedInboxGVICAssignments,
@@ -499,6 +501,8 @@ export function HomePage({
   const [mailDrafts, setMailDrafts] = useState<HomeMailDraft[]>([]);
   const [emailSignature, setEmailSignature] = useState("");
   const [emailSignatureScopeKey, setEmailSignatureScopeKey] = useState("");
+  const [emailSignatureID, setEmailSignatureID] = useState("");
+  const [emailSignatureIDScopeKey, setEmailSignatureIDScopeKey] = useState("");
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [loadingMoreMessages, setLoadingMoreMessages] = useState(false);
@@ -881,6 +885,36 @@ export function HomePage({
   const composeScopeEmailSignature = emailSignatureScopeKey === composeSignatureScopeKey
     ? emailSignature
     : readHomeMailSignature(companyID, currentUserID, compose.sharedInboxID, composeSignatureAccountEmail);
+  const composeScopeEmailSignatureID = emailSignatureIDScopeKey === composeSignatureScopeKey
+    ? emailSignatureID
+    : "";
+  useEffect(() => {
+    const sharedInboxID = compose.sharedInboxID.trim();
+    const accountEmail = composeSignatureAccountEmail.trim();
+    if (!compose.open || !companyID.trim() || (!sharedInboxID && !accountEmail)) return undefined;
+    const initialBody = readHomeMailSignature(companyID, currentUserID, sharedInboxID, accountEmail);
+    let cancelled = false;
+    void getEmailSignature(companyID, sharedInboxID, accountEmail)
+      .then((signature) => signature ?? saveEmailSignature({
+        companyID,
+        sharedInboxID,
+        accountEmail,
+        bodyEditorHTML: initialBody,
+      }))
+      .then((signature) => {
+        if (cancelled) return;
+        setEmailSignatureID(signature.signature_id.trim());
+        setEmailSignatureIDScopeKey(composeSignatureScopeKey);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setEmailSignatureID("");
+        setEmailSignatureIDScopeKey(composeSignatureScopeKey);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyID, compose.open, compose.sharedInboxID, composeSignatureAccountEmail, composeSignatureScopeKey, currentUserID]);
   useEffect(() => {
     const localSignature = readHomeMailSignature(companyID, currentUserID, activeSharedInboxFolderID, activeMailAccountEmail);
     setEmailSignature(localSignature);
@@ -3511,12 +3545,7 @@ export function HomePage({
         };
         const drafts = await ensureHomeMailDraftAttachmentTarget(companyID, currentUserID, preparedCompose, activeScopeEmailSignature);
         setMailDraftsForScopeIfActive(drafts, sharedInboxID, accountEmail);
-        const resourceID = mangoEmailDraftResourceID({
-          draftID: forwardDraftID,
-          userID: currentUserID,
-          accountEmail,
-          sharedInboxID,
-        });
+        const resourceID = mangoEmailDraftResourceID({ draftID: forwardDraftID });
         if (!resourceID) throw new Error("Email attachment context is unavailable.");
         const results = await Promise.allSettled(attachmentsToCopy.map(async (attachment) => {
           const providerAttachmentID = forwardedProviderAttachmentID(attachment);
@@ -6013,6 +6042,7 @@ export function HomePage({
             compose={compose}
             draftCount={activeMailDrafts.length}
             emailSignature={composeScopeEmailSignature}
+            emailSignatureID={composeScopeEmailSignatureID}
             emailSignatureAccountEmail={composeSignatureAccountEmail}
             error={error}
             isArchivableListView={isArchivableListView}

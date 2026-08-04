@@ -999,11 +999,7 @@ func (r *PostgresRepo) addNodeInformation(input NodeInformationInput) (domain.No
 	if !exists {
 		return domain.NodeInformation{}, ErrNotFound
 	}
-	if collaboration, err := postgresEmailCollaborationByNode(ctx, tx, companyID, nodeID); err == nil && collaboration.AttachedEmailInformationID == informationID {
-		return domain.NodeInformation{}, ErrProtectedEmailCollaborationResource
-	} else if err != nil && !errors.Is(err, ErrNotFound) {
-		return domain.NodeInformation{}, err
-	}
+
 	if isNodeTextboxChatType(infoType) {
 		chatID := cleanUUIDText(informationID)
 		if chatID == "" {
@@ -1248,6 +1244,11 @@ func (r *PostgresRepo) ListNodeProjections(companyID, nodeID string) ([]domain.N
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	emailItems, err := listPostgresNodeEmailRelationshipProjections(ctx, r.db, companyID, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, emailItems...)
 	chatItems, err := listPostgresNodeTextboxChatProjections(ctx, r.db, companyID, nodeID)
 	if err != nil {
 		return nil, err
@@ -1262,6 +1263,61 @@ func (r *PostgresRepo) ListNodeProjections(companyID, nodeID string) ([]domain.N
 	return items, nil
 }
 
+func listPostgresNodeEmailRelationshipProjections(ctx context.Context, queryer *sql.DB, companyID, nodeID string) ([]domain.NodeProjection, error) {
+	rows, err := queryer.QueryContext(ctx, `
+select relationship.company_id::text,
+       relationship.resource_id::text,
+       relationship.email_relationship_id::text,
+       jsonb_build_object(
+         'block_id', relationship.email_relationship_id::text,
+         'collaboration_id', relationship.email_relationship_id::text,
+         'message_id', message.provider_message_id,
+         'email_message_id', message.email_message_id::text,
+         'thread_id', thread.provider_thread_id,
+         'email_thread_id', thread.email_thread_id::text,
+         'shared_inbox_id', coalesce(thread.shared_inbox_id::text, ''),
+         'account_email', thread.email_account_email,
+         'created_from_email', true,
+         'subject', message.subject,
+         'snippet', message.snippet,
+         'from', coalesce(nullif(message.sender_snapshot->0->>'name', ''), message.sender_snapshot->0->>'email', ''),
+         'date', case when message.message_timestamp is null then null else floor(extract(epoch from message.message_timestamp))::bigint end,
+         'attached_timestamp', relationship.created_timestamp
+       )::text,
+       relationship.created_timestamp
+from email_relationships relationship
+join email_messages message
+  on message.company_id=relationship.company_id
+ and message.email_thread_id=relationship.email_thread_id
+ and message.email_message_id=relationship.email_message_id
+join email_threads thread
+  on thread.company_id=message.company_id
+ and thread.email_thread_id=message.email_thread_id
+where relationship.company_id=$1::uuid
+  and relationship.resource_type='node'
+  and relationship.resource_id=$2::uuid
+  and relationship.resource_textbox_id is null
+order by relationship.created_timestamp, relationship.email_relationship_id`, companyID, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.NodeProjection, 0)
+	for rows.Next() {
+		var item domain.NodeProjection
+		if err := rows.Scan(&item.CompanyID, &item.NodeID, &item.InformationID, &item.Information, &item.CreatedTimestamp); err != nil {
+			return nil, err
+		}
+		item.Type = "Attached email"
+		item.Revision = 1
+		item.UpdatedTimestamp = item.CreatedTimestamp
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
 func (r *PostgresRepo) DeleteNodeProjection(companyID, nodeID, informationID string) error {
 	return r.deleteNodeProjection(NodeProjectionDeleteInput{
 		CompanyID:     companyID,
@@ -1295,11 +1351,22 @@ func (r *PostgresRepo) deleteNodeProjection(input NodeProjectionDeleteInput) err
 	if !exists {
 		return ErrNotFound
 	}
-	if collaboration, err := postgresEmailCollaborationByNode(ctx, tx, companyID, nodeID); err == nil && collaboration.AttachedEmailInformationID == informationID {
-		return ErrProtectedEmailCollaborationResource
-	} else if err != nil && !errors.Is(err, ErrNotFound) {
+
+	deletedRelationship, err := tx.ExecContext(ctx, `
+delete from email_relationships
+where company_id=$1::uuid
+  and email_relationship_id=$3::uuid
+  and resource_type='node'
+  and resource_id=$2::uuid`, companyID, nodeID, informationID)
+	if err != nil {
 		return err
 	}
+	if affected, err := deletedRelationship.RowsAffected(); err != nil {
+		return err
+	} else if affected > 0 {
+		return tx.Commit()
+	}
+
 	previous, previousFound, err := postgresNodeProjectionTx(ctx, tx, companyID, nodeID, informationID)
 	if err != nil {
 		return err

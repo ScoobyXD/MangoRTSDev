@@ -18,7 +18,7 @@ func TestMemorySharedEmailDraftClaimLifecycleAndImmutableIdentity(t *testing.T) 
 
 	created, err := repo.EnsureCommunicationsEmailCollaboration(CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
-		AccountEmail: creator.Email, CreatedByUserID: creator.UserID,
+		AccountEmail: creator.Email, Provider: "google", CreatedByUserID: creator.UserID,
 		Message: domain.EmailMessageSnapshot{
 			ID: "shared-draft-source", ThreadID: "shared-draft-thread", Subject: "Source subject",
 			From: []domain.EmailAddressSnapshot{{Name: "Customer", Email: "customer@example.com"}},
@@ -52,7 +52,7 @@ func TestMemorySharedEmailDraftClaimLifecycleAndImmutableIdentity(t *testing.T) 
 		CompanyID: companyID, DraftID: draftID, CollaborationID: collaboration.CollaborationID,
 		ParticipantUserID: creator.UserID, IsShared: true, ExpectedRevision: 0,
 		CreatedByUserID: creator.UserID, UpdatedByUserID: creator.UserID,
-		Kind: "compose", SourceMessageID: "shared-draft-source",
+		Kind: "compose", SourceMessageID: collaboration.RootMessageID,
 		AccountEmail: "spoofed@example.com", ToRecipients: "attacker@example.com",
 		Subject: "Shared reply", BodyEditorHTML: "<p>First</p>", ReplyToMessageJSON: "{}",
 	})
@@ -60,7 +60,7 @@ func TestMemorySharedEmailDraftClaimLifecycleAndImmutableIdentity(t *testing.T) 
 		t.Fatalf("create shared draft: %v", err)
 	}
 	if !draft.IsShared || draft.Kind != "reply" || draft.Revision != 1 ||
-		draft.SourceMessageID != "shared-draft-source" || draft.AccountEmail != creator.Email ||
+		draft.SourceMessageID != collaboration.RootMessageID || draft.AccountEmail != creator.Email ||
 		!strings.Contains(draft.ToRecipients, "customer@example.com") ||
 		!strings.Contains(draft.CcRecipients, participant.Email) ||
 		strings.Contains(draft.ToRecipients, "attacker@example.com") {
@@ -103,7 +103,7 @@ func TestMemorySharedEmailDraftClaimLifecycleAndImmutableIdentity(t *testing.T) 
 		CompanyID: companyID, DraftID: "duplicate-shared-draft", CollaborationID: collaboration.CollaborationID,
 		ParticipantUserID: creator.UserID, IsShared: true, ExpectedRevision: 0,
 		CreatedByUserID: creator.UserID, UpdatedByUserID: creator.UserID,
-		SourceMessageID: "shared-draft-source", Subject: "Duplicate", BodyEditorHTML: "<p>Duplicate</p>",
+		SourceMessageID: collaboration.RootMessageID, Subject: "Duplicate", BodyEditorHTML: "<p>Duplicate</p>",
 	})
 	if !errors.Is(err, ErrAlreadyExists) {
 		t.Fatalf("duplicate active source error = %v, want ErrAlreadyExists", err)
@@ -169,11 +169,12 @@ func TestMemorySharedEmailDraftClaimLifecycleAndImmutableIdentity(t *testing.T) 
 	if err != nil || retry.IdempotencyKey == claim.IdempotencyKey || retry.ClaimToken == claim.ClaimToken || retry.Recovered {
 		t.Fatalf("retry claim = %+v err=%v, first=%+v", retry, err, claim)
 	}
-	if err := repo.FinalizeCommunicationsEmailDraftSend(CommunicationsEmailDraftSendFinalizeInput{
-		CompanyID: companyID, DraftID: draftID, ClaimToken: retry.ClaimToken,
-		SentMessageID: "sent-shared-message", UpdatedByUserID: participant.UserID,
+	if err := repo.CompleteCommunicationsEmailDraftSend(CommunicationsEmailDraftSendCompleteInput{
+		CompanyID: companyID, DraftID: draftID, CollaborationID: collaboration.CollaborationID,
+		ClaimToken: retry.ClaimToken, UpdatedByUserID: participant.UserID,
+		Message: domain.EmailMessageSnapshot{ID: "sent-shared-message", ThreadID: collaboration.ProviderThreadID},
 	}); err != nil {
-		t.Fatalf("finalize send: %v", err)
+		t.Fatalf("complete send: %v", err)
 	}
 	if _, err := repo.GetCommunicationsEmailDraft(CommunicationsEmailDraftGetInput{
 		CompanyID: companyID, DraftID: draftID, ParticipantUserID: creator.UserID,
@@ -190,7 +191,7 @@ func seedSharedEmailDraftRecoveryTest(t *testing.T, suffix string) (*MemoryRepo,
 	owner := mustEmailCollaborationGuardUser(t, repo, companyID, "shared-draft-recovery-"+suffix, "recovery-"+suffix+"@example.com", domain.RoleCompanyUser)
 	ensured, err := repo.EnsureCommunicationsEmailCollaboration(CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: owner.UserID, PersonalAccountEmail: owner.Email,
-		AccountEmail: owner.Email, CreatedByUserID: owner.UserID,
+		AccountEmail: owner.Email, Provider: "google", CreatedByUserID: owner.UserID,
 		Message: domain.EmailMessageSnapshot{
 			ID: "recovery-source-" + suffix, ThreadID: "recovery-thread-" + suffix,
 			From: []domain.EmailAddressSnapshot{{Email: "customer@example.com"}},
@@ -204,7 +205,7 @@ func seedSharedEmailDraftRecoveryTest(t *testing.T, suffix string) (*MemoryRepo,
 		CompanyID: companyID, DraftID: "recovery-draft-" + suffix,
 		CollaborationID: ensured.Collaboration.CollaborationID, ParticipantUserID: owner.UserID,
 		IsShared: true, CreatedByUserID: owner.UserID, UpdatedByUserID: owner.UserID,
-		SourceMessageID: "recovery-source-" + suffix, Subject: "Recovery", BodyEditorHTML: "<p>Once</p>",
+		SourceMessageID: ensured.Collaboration.RootMessageID, Subject: "Recovery", BodyEditorHTML: "<p>Once</p>",
 	})
 	if err != nil {
 		t.Fatalf("create recovery draft: %v", err)
@@ -239,11 +240,12 @@ func TestMemorySharedEmailDraftStaleClaimRecoveryPreservesProviderIdempotency(t 
 		recovered.Draft.SendClaimedTimestamp == nil || !recovered.Draft.SendClaimedTimestamp.Equal(claimInput.Now) {
 		t.Fatalf("recovered clocks = idempotency=%v claimed=%v", recovered.Draft.SendIdempotencyTimestamp, recovered.Draft.SendClaimedTimestamp)
 	}
-	if err := repo.FinalizeCommunicationsEmailDraftSend(CommunicationsEmailDraftSendFinalizeInput{
-		CompanyID: draft.CompanyID, DraftID: draft.DraftID, ClaimToken: first.ClaimToken,
-		SentMessageID: "old-claim-must-not-complete", UpdatedByUserID: owner.UserID,
+	if err := repo.CompleteCommunicationsEmailDraftSend(CommunicationsEmailDraftSendCompleteInput{
+		CompanyID: draft.CompanyID, DraftID: draft.DraftID, CollaborationID: collaboration.CollaborationID,
+		ClaimToken: first.ClaimToken, UpdatedByUserID: owner.UserID,
+		Message: domain.EmailMessageSnapshot{ID: "old-claim-must-not-complete", ThreadID: collaboration.ProviderThreadID},
 	}); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("superseded claim finalize error = %v, want ErrNotFound", err)
+		t.Fatalf("superseded claim completion error = %v, want ErrNotFound", err)
 	}
 	if err := repo.CompleteCommunicationsEmailDraftSend(CommunicationsEmailDraftSendCompleteInput{
 		CompanyID: draft.CompanyID, DraftID: draft.DraftID, CollaborationID: collaboration.CollaborationID,

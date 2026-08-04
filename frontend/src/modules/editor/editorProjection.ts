@@ -103,6 +103,7 @@ export type EditorAttachedEmail = {
   blockID?: string;
   collaborationID?: string;
   messageID: string;
+  emailMessageID: string;
   threadID?: string;
   sharedInboxID?: string;
   emailThreadID?: string;
@@ -217,6 +218,7 @@ export function buildEditorAttachedEmailPayload(input: {
   blockID?: string;
   collaborationID?: string;
   messageID: string;
+  emailMessageID: string;
   threadID?: string;
   emailThreadID?: string;
   sharedInboxID?: string;
@@ -232,9 +234,10 @@ export function buildEditorAttachedEmailPayload(input: {
     block_id: input.blockID?.trim() ?? "",
     collaboration_id: input.collaborationID?.trim() ?? "",
     message_id: input.messageID,
+    email_message_id: input.emailMessageID.trim(),
     thread_id: input.threadID ?? "",
     shared_inbox_id: input.sharedInboxID?.trim() ?? "",
-  email_thread_id: input.emailThreadID?.trim() ?? "",
+    email_thread_id: input.emailThreadID?.trim() ?? "",
     account_email: input.accountEmail?.trim() ?? "",
     created_from_email: input.createdFromEmail === true,
     subject: input.subject,
@@ -414,7 +417,8 @@ function parseEditorAttachedEmail(item: EditorProjectionItem): EditorAttachedEma
   if (!payload || typeof payload !== "object") return null;
   const record = payload as Record<string, unknown>;
   const messageID = stringValue(record, "message_id");
-  if (!messageID) return null;
+  const emailMessageID = stringValue(record, "email_message_id");
+  if (!messageID || !emailMessageID) return null;
   const blockID = stringValue(record, "block_id");
   const collaborationID = stringValue(record, "collaboration_id");
   const threadID = stringValue(record, "thread_id");
@@ -428,6 +432,7 @@ function parseEditorAttachedEmail(item: EditorProjectionItem): EditorAttachedEma
     blockID: blockID || undefined,
     collaborationID: collaborationID || undefined,
     messageID,
+    emailMessageID,
     threadID: threadID || undefined,
   emailThreadID: emailThreadID || undefined,
     sharedInboxID: sharedInboxID || undefined,

@@ -52,7 +52,7 @@ func TestMemoryEmailConversionAtomicallyPersistsEmailThreadTextBoxAndInitialChat
 	if err != nil {
 		t.Fatalf("GetCommunicationsNodeEmailThread: %v", err)
 	}
-	if stored.SelectedMessageID != message.ID || len(stored.Thread.Messages) != 1 ||
+	if stored.SelectedMessageID != stored.Thread.Messages[0].EmailMessageID || len(stored.Thread.Messages) != 1 ||
 		stored.Thread.Messages[0].Message.Body != message.Body {
 		t.Fatalf("stored imported thread = %+v", stored)
 	}

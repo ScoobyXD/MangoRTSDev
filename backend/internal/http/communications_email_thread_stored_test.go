@@ -19,7 +19,7 @@ func TestEmailCollaborationThreadDefaultReadUsesMangoWithoutProviderCall(t *test
 	}
 	collaboration := ensureEmailCollaborationThreadTestCollaboration(t, repo, store.CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: emailCollaborationThreadTestCompanyID, PersonalUserID: owner.UserID,
-		PersonalAccountEmail: owner.Email, AccountEmail: owner.Email, CreatedByUserID: owner.UserID,
+		PersonalAccountEmail: owner.Email, AccountEmail: owner.Email, Provider: "google", CreatedByUserID: owner.UserID,
 		Message: domain.EmailMessageSnapshot{
 			ID: "stored-root", ThreadID: "stored-thread", Subject: "Stored immediately",
 			Body: "<p><strong>Stored rich body</strong></p>",
@@ -56,14 +56,14 @@ func TestNodeEmailThreadRouteReturnsDurableStoredHistory(t *testing.T) {
 	repo, owner, _, _ := newEmailCollaborationThreadTestRepo(t)
 	collaboration := ensureEmailCollaborationThreadTestCollaboration(t, repo, store.CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: emailCollaborationThreadTestCompanyID, PersonalUserID: owner.UserID,
-		PersonalAccountEmail: owner.Email, AccountEmail: owner.Email, CreatedByUserID: owner.UserID,
+		PersonalAccountEmail: owner.Email, AccountEmail: owner.Email, Provider: "google", CreatedByUserID: owner.UserID,
 		Message: domain.EmailMessageSnapshot{
 			ID: "node-thread-root", ThreadID: "node-thread", Subject: "Stored root", Body: "Stored root body", Date: 1,
 		},
 	})
 	stored, err := repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
 		CompanyID: emailCollaborationThreadTestCompanyID, PersonalUserID: owner.UserID,
-		PersonalAccountEmail: owner.Email, AccountEmail: owner.Email,
+		PersonalAccountEmail: owner.Email, AccountEmail: owner.Email, Provider: "google",
 		ProviderThreadID: "node-thread", SelectedMessageID: "node-thread-root", HistoryComplete: true,
 		Messages: []domain.EmailMessageSnapshot{
 			{ID: "node-thread-root", ThreadID: "node-thread", Subject: "Stored root", Body: "Stored root body", Date: 1},
@@ -100,7 +100,7 @@ func TestNodeEmailThreadRouteReturnsDurableStoredHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	if response.NodeID != collaboration.NodeID || response.InformationID != collaboration.AttachedEmailInformationID ||
-		response.EmailThreadID != collaboration.EmailThreadID || response.SelectedMessageID != "node-thread-root" ||
+		response.EmailThreadID != collaboration.EmailThreadID || response.SelectedMessageID != collaboration.RootMessageID ||
 		response.ThreadID != "node-thread" || !response.HistoryComplete {
 		t.Fatalf("node email thread response = %+v", response)
 	}

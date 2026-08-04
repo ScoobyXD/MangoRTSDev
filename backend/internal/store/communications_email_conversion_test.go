@@ -30,8 +30,7 @@ func TestMemoryEmailConversionCommandCreatesAssignedWorkItemWithProvenanceAndEve
 	result, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
 		UserID:         user.UserID,
 		CompanyID:      companyID,
-		SharedInboxID:  "11111111-1111-4111-8111-701900000101",
-		AccountEmail:   "support@example.com",
+		AccountEmail:   user.Email,
 		LogicGateID:    logicGate.LogicGateID,
 		Status:         "in_progress",
 		MessageIDs:     []string{message.ID},
@@ -89,7 +88,7 @@ func TestMemoryEmailConversionCommandCreatesAssignedWorkItemWithProvenanceAndEve
 	if err := json.Unmarshal([]byte(projections[0].Information), &projectionPayload); err != nil {
 		t.Fatalf("projection payload json: %v", err)
 	}
-	if projectionPayload["message_id"] != message.ID || projectionPayload["thread_id"] != message.ThreadID || projectionPayload["shared_inbox_id"] != "11111111-1111-4111-8111-701900000101" || projectionPayload["account_email"] != "support@example.com" {
+	if _, hasSharedInbox := projectionPayload["shared_inbox_id"]; projectionPayload["message_id"] != message.ID || projectionPayload["thread_id"] != message.ThreadID || hasSharedInbox || projectionPayload["account_email"] != user.Email {
 		t.Fatalf("projection payload = %+v, want message/thread/mailbox provenance", projectionPayload)
 	}
 	triageItems := communicationsTriageItemsForTest(repo, user.UserID)
@@ -123,8 +122,9 @@ func TestMemoryEmailConversionCommandCanCreateNewLogicGate(t *testing.T) {
 	}
 
 	result, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
-		UserID:    user.UserID,
-		CompanyID: companyID,
+		UserID:       user.UserID,
+		CompanyID:    companyID,
+		AccountEmail: user.Email,
 		Target: CommunicationsTriageConversionTarget{
 			Mode:   CommunicationsEmailConversionTargetNewLogicGate,
 			Header: "Email Intake Gate",
@@ -187,7 +187,7 @@ func TestMemoryEmailConversionCommandAttachesEmailToExistingNode(t *testing.T) {
 	result, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
 		UserID:       user.UserID,
 		CompanyID:    companyID,
-		AccountEmail: "owner@example.test",
+		AccountEmail: user.Email,
 		LogicGateID:  logicGate.LogicGateID,
 		NodeID:       node.NodeID,
 		Target: CommunicationsTriageConversionTarget{
@@ -229,7 +229,7 @@ func TestMemoryEmailConversionCommandAttachesEmailToExistingNode(t *testing.T) {
 	if err := json.Unmarshal([]byte(projections[0].Information), &projectionPayload); err != nil {
 		t.Fatalf("projection payload json: %v", err)
 	}
-	if projectionPayload["message_id"] != message.ID || projectionPayload["thread_id"] != message.ThreadID || projectionPayload["account_email"] != "owner@example.test" {
+	if projectionPayload["message_id"] != message.ID || projectionPayload["thread_id"] != message.ThreadID || projectionPayload["account_email"] != user.Email {
 		t.Fatalf("projection payload = %+v, want message/thread/personal mailbox provenance", projectionPayload)
 	}
 	nodes, err := repo.ListNodes(companyID)
@@ -275,10 +275,11 @@ func TestMemoryEmailNodeTransferAttachesEmailAndDeletesSourceNode(t *testing.T) 
 		t.Fatalf("UpsertCommunicationsTriageItem: %v", err)
 	}
 	sourceConversion, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
-		UserID:      user.UserID,
-		CompanyID:   companyID,
-		LogicGateID: logicGate.LogicGateID,
-		MessageIDs:  []string{message.ID},
+		UserID:       user.UserID,
+		CompanyID:    companyID,
+		AccountEmail: user.Email,
+		LogicGateID:  logicGate.LogicGateID,
+		MessageIDs:   []string{message.ID},
 	})
 	if err != nil {
 		t.Fatalf("ConvertCommunicationsTriageItems source: %v", err)
@@ -471,8 +472,9 @@ func TestMemoryEmailConversionCommandCreatesNodeInProjectLogicGateTarget(t *test
 	}
 
 	result, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
-		UserID:    user.UserID,
-		CompanyID: companyID,
+		UserID:       user.UserID,
+		CompanyID:    companyID,
+		AccountEmail: user.Email,
 		Target: CommunicationsTriageConversionTarget{
 			Mode:        CommunicationsEmailConversionTargetExistingLogicGate,
 			LogicGateID: logicGate.LogicGateID,
@@ -557,8 +559,9 @@ func TestMemoryEmailConversionCommandAttachesEmailToStandaloneExistingNode(t *te
 	priority := 1
 
 	result, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
-		UserID:    user.UserID,
-		CompanyID: companyID,
+		UserID:       user.UserID,
+		CompanyID:    companyID,
+		AccountEmail: user.Email,
 		Target: CommunicationsTriageConversionTarget{
 			Mode:   CommunicationsEmailConversionTargetExistingNode,
 			NodeID: node.NodeID,
@@ -607,7 +610,7 @@ func TestMemoryEmailConversionCommandRollsBackPartialWork(t *testing.T) {
 		if _, err := repo.UpsertCommunicationsTriageItem(user.UserID, message); err != nil {
 			t.Fatalf("UpsertCommunicationsTriageItem: %v", err)
 		}
-		_, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{UserID: user.UserID, CompanyID: companyID, LogicGateID: logicGate.LogicGateID, MessageIDs: []string{message.ID, "missing-message"}})
+		_, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{UserID: user.UserID, CompanyID: companyID, AccountEmail: user.Email, LogicGateID: logicGate.LogicGateID, MessageIDs: []string{message.ID, "missing-message"}})
 		if !errors.Is(err, ErrNotFound) {
 			t.Fatalf("err = %v, want ErrNotFound", err)
 		}
@@ -624,7 +627,7 @@ func TestMemoryEmailConversionCommandRollsBackPartialWork(t *testing.T) {
 			t.Fatalf("UpsertCommunicationsTriageItem: %v", err)
 		}
 		repo.domainEventAppendErr = errAppend
-		_, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{UserID: user.UserID, CompanyID: companyID, LogicGateID: logicGate.LogicGateID, MessageIDs: []string{message.ID}})
+		_, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{UserID: user.UserID, CompanyID: companyID, AccountEmail: user.Email, LogicGateID: logicGate.LogicGateID, MessageIDs: []string{message.ID}})
 		if !errors.Is(err, errAppend) {
 			t.Fatalf("err = %v, want append failure", err)
 		}
@@ -642,7 +645,7 @@ func TestMemoryEmailConversionCommandRollsBackPartialWork(t *testing.T) {
 		forced := errors.New("forced outbox failure")
 		repo.realtimeOutboxErr = forced
 		_, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
-			UserID: user.UserID, CompanyID: companyID, LogicGateID: logicGate.LogicGateID,
+			UserID: user.UserID, CompanyID: companyID, AccountEmail: user.Email, LogicGateID: logicGate.LogicGateID,
 			MessageIDs: []string{message.ID}, ActorUserID: user.UserID, IdempotencyKey: "outbox-failure",
 		})
 		if !errors.Is(err, forced) {
@@ -678,10 +681,10 @@ func TestMemoryEmailConversionCommandValidatesInputs(t *testing.T) {
 			t.Fatalf("ConvertCommunicationsTriageItems(%+v) err = %v, want ErrInvalid", input, err)
 		}
 	}
-	if _, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{UserID: user.UserID, CompanyID: companyID, LogicGateID: "missing-gate", MessageIDs: []string{message.ID}}); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{UserID: user.UserID, CompanyID: companyID, AccountEmail: user.Email, LogicGateID: "missing-gate", MessageIDs: []string{message.ID}}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing logic gate err = %v, want ErrNotFound", err)
 	}
-	if _, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{UserID: user.UserID, CompanyID: companyID, LogicGateID: logicGate.LogicGateID, MessageIDs: []string{"missing-message"}}); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{UserID: user.UserID, CompanyID: companyID, AccountEmail: user.Email, LogicGateID: logicGate.LogicGateID, MessageIDs: []string{"missing-message"}}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing message err = %v, want ErrNotFound", err)
 	}
 	if _, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{UserID: "missing-user", CompanyID: companyID, LogicGateID: logicGate.LogicGateID, MessageIDs: []string{message.ID}}); !errors.Is(err, ErrNotFound) {
@@ -703,6 +706,12 @@ func setupEmailConversionUserAndGate(t *testing.T, repo *MemoryRepo, companyID s
 	}
 	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership: %v", err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(UserEmailConnectionInput{
+		UserID: user.UserID, Provider: "google", AccountEmail: user.Email,
+		GrantID: "grant-" + suffix, Status: "connected",
+	}); err != nil {
+		t.Fatalf("UpsertUserEmailConnection: %v", err)
 	}
 	logicGate, err := repo.CreateLogicGate(companyID, "Support Gate "+suffix)
 	if err != nil {

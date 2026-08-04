@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"miraeopus/backend/internal/domain"
 	"strings"
@@ -61,18 +62,59 @@ func communicationsEmailThreadInputForConversionMessage(input CommunicationsTria
 	return thread
 }
 
-func (r *MemoryRepo) addCommunicationsConversionInformationLocked(input NodeInformationInput) (domain.NodeInformation, error) {
-	if input.Type == CommunicationsEmailCollaborationChatInformationType {
-		if collaboration, ok := r.emailCollaborationForNodeLocked(input.CompanyID, input.NodeID); ok {
-			mentionedUserIDs, mentionedGroupIDs := CommunicationsEmailChatMentionPrincipalIDs(input.Information)
-			if _, err := r.addCollaborationParticipantsLocked(CommunicationsEmailCollaborationParticipantInput{
-				CompanyID: input.CompanyID, CollaborationID: collaboration.CollaborationID, ActorUserID: input.ActorUserID,
-				MentionedUserIDs: mentionedUserIDs, MentionedGroupIDs: mentionedGroupIDs,
-			}); err != nil {
-				return domain.NodeInformation{}, err
+func rewriteCommunicationsConversionInternalMessageID(input *CommunicationsTriageConversionInput, emailMessageID string) error {
+	emailMessageID = cleanUUIDText(emailMessageID)
+	if emailMessageID == "" {
+		return ErrInvalid
+	}
+	rewrite := func(value *NodeInformationInput, field string) error {
+		if value == nil {
+			return nil
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(value.Information), &payload); err != nil {
+			return ErrInvalid
+		}
+		payload[field] = emailMessageID
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		value.Information = string(raw)
+		return nil
+	}
+	if err := rewrite(input.LinkedTextBlock, "email_message_id"); err != nil {
+		return err
+	}
+	return rewrite(input.InitialChat, "selection_message_id")
+}
+
+func (r *MemoryRepo) communicationsConversionInternalMessageIDLocked(input CommunicationsTriageConversionInput) string {
+	providerMessageID := strings.TrimSpace(input.MessageIDs[0])
+	for _, relationship := range r.nodeEmailThreads {
+		if relationship.CompanyID != input.CompanyID || relationship.NodeID != input.NodeID {
+			continue
+		}
+		thread, ok := r.emailThreads[key(input.CompanyID, relationship.EmailThreadID)]
+		if !ok {
+			continue
+		}
+		if input.SharedInboxID != "" && thread.SharedInboxID != input.SharedInboxID {
+			continue
+		}
+		if input.SharedInboxID == "" && (thread.PersonalUserID != input.UserID || thread.PersonalAccountEmail != normalizeEmail(input.AccountEmail)) {
+			continue
+		}
+		for _, message := range thread.Messages {
+			if message.ProviderMessageID == providerMessageID {
+				return message.EmailMessageID
 			}
 		}
 	}
+	return ""
+}
+func (r *MemoryRepo) addCommunicationsConversionInformationLocked(input NodeInformationInput) (domain.NodeInformation, error) {
+
 	item := r.addEmailCollaborationNodeInformationLocked(input)
 	if input.Type == CommunicationsEmailCollaborationChatInformationType {
 		outboxInput, err := nodeChatCreatedOutboxInput(item, input.InformationID)
@@ -87,16 +129,7 @@ func (r *MemoryRepo) addCommunicationsConversionInformationLocked(input NodeInfo
 }
 
 func (r *PostgresRepo) addCommunicationsConversionInformationTx(ctx context.Context, tx *sql.Tx, input NodeInformationInput) (domain.NodeInformation, error) {
-	if input.Type == CommunicationsEmailCollaborationChatInformationType {
-		target, err := lockPostgresEmailCollaborationTarget(ctx, tx, input.CompanyID, "", input.NodeID)
-		if err == nil {
-			if _, err := addPostgresEmailCollaborationChatParticipantsTx(ctx, tx, input, target); err != nil {
-				return domain.NodeInformation{}, err
-			}
-		} else if !errors.Is(err, ErrNotFound) {
-			return domain.NodeInformation{}, err
-		}
-	}
+
 	item, err := addEmailCollaborationNodeInformationTx(ctx, tx, input)
 	if err != nil {
 		return domain.NodeInformation{}, err
@@ -116,6 +149,9 @@ func (r *PostgresRepo) addCommunicationsConversionInformationTx(ctx context.Cont
 func (r *MemoryRepo) addCommunicationsConversionAtomicWritesLocked(input CommunicationsTriageConversionInput, result *CommunicationsTriageConversionResult) error {
 	if input.LinkedTextBlock == nil {
 		return nil
+	}
+	if err := rewriteCommunicationsConversionInternalMessageID(&input, r.communicationsConversionInternalMessageIDLocked(input)); err != nil {
+		return err
 	}
 	item, err := r.addCommunicationsConversionInformationLocked(*input.LinkedTextBlock)
 	if err != nil {
@@ -138,6 +174,27 @@ func (r *PostgresRepo) addCommunicationsConversionAtomicWritesTx(ctx context.Con
 	if input.LinkedTextBlock == nil {
 		return nil
 	}
+	var emailMessageID string
+	err := tx.QueryRowContext(ctx, `
+select relationship.email_message_id::text
+from email_relationships relationship
+join email_messages message on message.company_id=relationship.company_id and message.email_message_id=relationship.email_message_id
+join email_threads thread on thread.company_id=relationship.company_id and thread.email_thread_id=relationship.email_thread_id
+where relationship.company_id=$1::uuid and relationship.resource_type='node' and relationship.resource_id=$2::uuid
+  and relationship.resource_textbox_id is null and message.provider_message_id=$3
+  and (($4<>'' and thread.shared_inbox_id=nullif($4,'')::uuid)
+    or ($4='' and thread.personal_user_id=$5::uuid and thread.personal_account_email=$6))
+order by relationship.created_timestamp desc
+limit 1`, input.CompanyID, input.NodeID, input.MessageIDs[0], input.SharedInboxID, input.UserID, normalizeEmail(input.AccountEmail)).Scan(&emailMessageID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if err := rewriteCommunicationsConversionInternalMessageID(&input, emailMessageID); err != nil {
+		return err
+	}
 	if _, err := r.addCommunicationsConversionInformationTx(ctx, tx, *input.LinkedTextBlock); err != nil {
 		return err
 	}
@@ -151,59 +208,38 @@ func (r *PostgresRepo) addCommunicationsConversionAtomicWritesTx(ctx context.Con
 	return nil
 }
 
-func (r *MemoryRepo) persistCommunicationsConversionEmailLocked(input CommunicationsTriageConversionInput, message domain.EmailMessageSnapshot, now time.Time) (string, string, error) {
+func (r *MemoryRepo) persistCommunicationsConversionEmailLocked(input CommunicationsTriageConversionInput, message domain.EmailMessageSnapshot, now time.Time) (string, string, string, error) {
 	threadInput := communicationsEmailThreadInputForConversionMessage(input, message)
 	thread, err := r.upsertCommunicationsEmailThreadLocked(threadInput)
-	if strings.TrimSpace(input.AccountEmail) == "" {
-		informationID := r.addEmailProjectionWithThreadLocked(input.CompanyID, input.NodeID, input.SharedInboxID, input.AccountEmail, message, "", now, input.Target.Mode != CommunicationsEmailConversionTargetExistingNode)
-		return informationID, "", nil
-	}
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	informationID := r.addEmailProjectionWithThreadLocked(input.CompanyID, input.NodeID, input.SharedInboxID, input.AccountEmail, message, thread.EmailThreadID, now, input.Target.Mode != CommunicationsEmailConversionTargetExistingNode)
 	r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, input.NodeID, informationID, thread.EmailThreadID, message.ID, input.ActorUserID, now)
 	if downloadScope, requestedMessageID, ok := communicationsEmailThreadDownloadRequest(thread, threadInput); ok {
 		if _, _, err := r.ensureCommunicationsEmailThreadDownloadJobLocked(input.CompanyID, thread.EmailThreadID, downloadScope, requestedMessageID, threadInput.RequestedByUserID); err != nil {
-			return "", "", err
+			return "", "", "", err
 		}
 	}
-	return informationID, thread.EmailThreadID, nil
+	return informationID, thread.EmailThreadID, internalEmailMessageIDForProvider(thread, message.ID), nil
 }
-
-func (r *PostgresRepo) persistCommunicationsConversionEmailTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput, message domain.EmailMessageSnapshot, now time.Time) (string, string, error) {
+func (r *PostgresRepo) persistCommunicationsConversionEmailTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput, message domain.EmailMessageSnapshot, now time.Time) (string, string, string, error) {
 	threadInput := communicationsEmailThreadInputForConversionMessage(input, message)
 	thread, err := upsertPostgresCommunicationsEmailThreadTx(ctx, tx, threadInput)
 	if err != nil {
-		if strings.TrimSpace(input.AccountEmail) == "" {
-			informationID, err := addEmailProjectionSQLWithThread(ctx, tx, input.CompanyID, input.NodeID, input.SharedInboxID, input.AccountEmail, message, "", now, input.Target.Mode != CommunicationsEmailConversionTargetExistingNode)
-			return informationID, "", err
-		}
-		return "", "", err
+		return "", "", "", err
 	}
-	informationID, err := addEmailProjectionSQLWithThread(ctx, tx, input.CompanyID, input.NodeID, input.SharedInboxID, input.AccountEmail, message, thread.EmailThreadID, now, input.Target.Mode != CommunicationsEmailConversionTargetExistingNode)
+	relationshipID, err := addEmailProjectionSQLWithThread(ctx, tx, input.CompanyID, input.NodeID,
+		input.SharedInboxID, input.AccountEmail, message, thread.EmailThreadID, now,
+		input.Target.Mode != CommunicationsEmailConversionTargetExistingNode)
 	if err != nil {
-		return "", "", err
-	}
-	if err := linkPostgresCommunicationsEmailThreadToNodeTx(ctx, tx, input.CompanyID, input.NodeID, informationID, thread.EmailThreadID, message.ID, input.ActorUserID); err != nil {
-		return "", "", err
-	}
-	if _, err := tx.ExecContext(ctx, `update communications_email_nodes
-set email_thread_id=$4::uuid, updated_timestamp=now()
-where company_id=$1::uuid and node_id=$2::uuid and message_id=$3`,
-		input.CompanyID, input.NodeID, message.ID, thread.EmailThreadID); err != nil {
-		return "", "", err
-	}
-	if _, err := tx.ExecContext(ctx, `update communications_email_node_attachments
-set email_thread_id=$5::uuid, updated_timestamp=now()
-where company_id=$1::uuid and user_id=$2::uuid and message_id=$3 and node_id=$4::uuid`,
-		input.CompanyID, input.UserID, message.ID, input.NodeID, thread.EmailThreadID); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if downloadScope, requestedMessageID, ok := communicationsEmailThreadDownloadRequest(thread, threadInput); ok {
-		if _, _, err := ensurePostgresCommunicationsEmailThreadDownloadJobTx(ctx, tx, input.CompanyID, thread.EmailThreadID, downloadScope, requestedMessageID, threadInput.RequestedByUserID); err != nil {
-			return "", "", err
+		if _, _, err := ensurePostgresCommunicationsEmailThreadDownloadJobTx(ctx, tx, input.CompanyID,
+			thread.EmailThreadID, downloadScope, requestedMessageID, threadInput.RequestedByUserID); err != nil {
+			return "", "", "", err
 		}
 	}
-	return informationID, thread.EmailThreadID, nil
+	return relationshipID, thread.EmailThreadID, internalEmailMessageIDForProvider(thread, message.ID), nil
 }

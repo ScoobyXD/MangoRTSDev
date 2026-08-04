@@ -59,11 +59,6 @@ func (r *PostgresRepo) UpsertNodeProjectionWithActor(input NodeInformationInput)
 	if !exists {
 		return domain.NodeProjection{}, ErrNotFound
 	}
-	if collaboration, err := postgresEmailCollaborationByNode(ctx, tx, companyID, nodeID); err == nil && collaboration.AttachedEmailInformationID == informationID {
-		return domain.NodeProjection{}, ErrProtectedEmailCollaborationResource
-	} else if err != nil && !errors.Is(err, ErrNotFound) {
-		return domain.NodeProjection{}, err
-	}
 
 	if isEditorTextBoxType(infoType) {
 		return upsertPostgresNodeTextProjection(ctx, tx, input, companyID, nodeID, informationID, infoType)

@@ -153,6 +153,7 @@ type CommunicationsRepository interface {
 	ListCommunicationsEmailPlacements(userID, companyID string, messageIDs []string) ([]domain.CommunicationsEmailPlacement, error)
 	UpsertCommunicationsEmailThread(input CommunicationsEmailThreadUpsertInput) (domain.CommunicationsEmailThread, error)
 	GetCommunicationsEmailThread(companyID, emailThreadID string) (domain.CommunicationsEmailThread, error)
+	ListCommunicationsEmailThreadsForAccount(input CommunicationsEmailAccountReadInput) ([]domain.CommunicationsEmailThread, error)
 	EnsureCommunicationsEmailThreadDownloadJob(companyID, emailThreadID, downloadScope, requestedProviderMessageID, requestedByUserID string) (CommunicationsEmailThreadDownloadJob, bool, error)
 	ClaimCommunicationsEmailThreadDownloadJobs(limit int, processingLeaseTimeout time.Duration) ([]CommunicationsEmailThreadDownloadJob, error)
 	MarkCommunicationsEmailThreadDownloadJobCompleted(downloadJobID string) error
@@ -164,20 +165,17 @@ type CommunicationsRepository interface {
 	EnsureCommunicationsEmailCollaboration(input CommunicationsEmailCollaborationEnsureInput) (CommunicationsEmailCollaborationEnsureResult, error)
 	ResolveCommunicationsEmailCollaboration(input CommunicationsEmailCollaborationResolveInput) (domain.CommunicationsEmailCollaboration, error)
 	GetCommunicationsEmailCollaboration(companyID, collaborationID, participantUserID string) (domain.CommunicationsEmailCollaboration, error)
-	GetCommunicationsEmailCollaborationByNode(companyID, nodeID string) (domain.CommunicationsEmailCollaboration, error)
 	ListCommunicationsEmailCollaborations(companyID, participantUserID string) ([]domain.CommunicationsEmailCollaboration, error)
 	AddCommunicationsEmailCollaborationParticipants(input CommunicationsEmailCollaborationParticipantInput) (CommunicationsEmailCollaborationParticipantResult, error)
 	AddCommunicationsEmailCollaborationParticipantsForNode(input CommunicationsEmailCollaborationNodeParticipantInput) (CommunicationsEmailCollaborationParticipantResult, error)
 	AddEmailCollaborationNodeInformationWithActor(input NodeInformationInput) (CommunicationsEmailCollaborationInformationWriteResult, error)
 	UpsertEmailCollaborationNodeProjectionWithActor(input NodeInformationInput) (CommunicationsEmailCollaborationProjectionWriteResult, error)
-	UpdateCommunicationsEmailCollaborationMessage(input CommunicationsEmailCollaborationMessageInput) ([]string, error)
 	ListCommunicationsEmailDrafts(input CommunicationsEmailDraftListInput) ([]domain.CommunicationsEmailDraft, error)
 	GetCommunicationsEmailDraft(input CommunicationsEmailDraftGetInput) (domain.CommunicationsEmailDraft, error)
 	UpsertCommunicationsEmailDraft(input CommunicationsEmailDraftInput) (domain.CommunicationsEmailDraft, error)
 	SoftDeleteCommunicationsEmailDraft(input CommunicationsEmailDraftDeleteInput) error
 	ClaimCommunicationsEmailDraftSend(input CommunicationsEmailDraftSendClaimInput) (CommunicationsEmailDraftSendClaim, error)
 	ReleaseCommunicationsEmailDraftSend(input CommunicationsEmailDraftSendReleaseInput) error
-	FinalizeCommunicationsEmailDraftSend(input CommunicationsEmailDraftSendFinalizeInput) error
 	CompleteCommunicationsEmailDraftSend(input CommunicationsEmailDraftSendCompleteInput) error
 	GetCommunicationsEmailSignature(input CommunicationsEmailSignatureScopeInput) (domain.CommunicationsEmailSignature, error)
 	UpsertCommunicationsEmailSignature(input CommunicationsEmailSignatureInput) (domain.CommunicationsEmailSignature, error)
@@ -209,6 +207,7 @@ const (
 )
 
 type AttachmentRepository interface {
+	GetEmailAttachmentResourceAccess(input EmailAttachmentResourceAccessInput) (EmailAttachmentResourceAccess, error)
 	CreateAttachmentWithResourceLink(input AttachmentCreateInput) (domain.Attachment, domain.ResourceAttachment, error)
 	GetAttachment(companyID, attachmentID string) (domain.Attachment, error)
 	GetAttachmentVariant(ctx context.Context, companyID, attachmentID, variantType string) (domain.AttachmentVariant, error)
@@ -235,6 +234,18 @@ type AttachmentRepository interface {
 	ExpireAttachmentUploadIntent(uploadIntentID string, now time.Time) (domain.AttachmentUploadIntent, error)
 }
 
+type EmailAttachmentResourceAccessInput struct {
+	CompanyID    string
+	UserID       string
+	ResourceType string
+	ResourceID   string
+	AccessLevel  string
+}
+
+type EmailAttachmentResourceAccess struct {
+	Allowed   bool
+	SendState string
+}
 type AttachmentDeletionPlan struct {
 	StorageKeys []string
 }
@@ -464,8 +475,6 @@ func NormalizeAttachmentResourceType(resourceType string) string {
 		return "email_draft"
 	case "email_signature", "email-signature":
 		return "email_signature"
-	case "attached_email", "attached-email":
-		return "attached_email"
 	case "shared_inbox", "shared-inbox":
 		return "shared_inbox"
 	case "company_explorer_folder", "company-explorer-folder":
@@ -1861,6 +1870,7 @@ type CommunicationsTriageConversionResult struct {
 	ExplorerV2Rows              []CompanyExplorerV2Row                    `json:"explorer_v2_rows,omitempty"`
 	AttachedEmailInformationIDs []string                                  `json:"attached_email_information_ids,omitempty"`
 	EmailThreadIDs              []string                                  `json:"email_thread_ids,omitempty"`
+	EmailMessageIDs             []string                                  `json:"email_message_ids,omitempty"`
 	LinkedTextBlockID           string                                    `json:"linked_text_block_id,omitempty"`
 	InitialChatID               string                                    `json:"initial_chat_id,omitempty"`
 	ProjectRelationships        []domain.ProjectRelationshipProjection    `json:"project_relationships,omitempty"`
@@ -2481,14 +2491,6 @@ type CommunicationsEmailDraftSendReleaseInput struct {
 	CompanyID  string
 	DraftID    string
 	ClaimToken string
-}
-
-type CommunicationsEmailDraftSendFinalizeInput struct {
-	CompanyID       string
-	DraftID         string
-	ClaimToken      string
-	SentMessageID   string
-	UpdatedByUserID string
 }
 
 // CommunicationsEmailDraftSendCompleteInput commits the two durable effects of

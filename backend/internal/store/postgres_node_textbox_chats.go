@@ -178,18 +178,47 @@ func normalizeNodeTextboxChatPayload(ctx context.Context, tx *sql.Tx, companyID 
 			return normalizedNodeTextboxChat{}, ErrInvalid
 		}
 	} else {
-		if selectionMessageID == "" {
+		selectionEmailMessageID = cleanUUIDText(selectionMessageID)
+		if selectionEmailMessageID == "" || cleanUUIDText(input.ActorUserID) == "" {
 			return normalizedNodeTextboxChat{}, ErrInvalid
 		}
-		var matchCount int
-		if err := tx.QueryRowContext(ctx, `
-select count(*), coalesce((array_agg(email_message_id order by email_message_id))[1]::text, '')
-from communications_email_messages
-where company_id=$1::uuid and provider_message_id=$2`, companyID, selectionMessageID).
-			Scan(&matchCount, &selectionEmailMessageID); err != nil {
+		var canSelect bool
+		if err := tx.QueryRowContext(ctx, `select exists(
+  select 1
+  from email_messages message
+  join email_threads thread
+    on thread.company_id=message.company_id
+   and thread.email_thread_id=message.email_thread_id
+  where message.company_id=$1::uuid
+    and message.email_message_id=$2::uuid
+    and (
+      (thread.email_account_type='personal_email_account' and thread.personal_user_id=$3::uuid)
+      or (thread.email_account_type='shared_email_account' and mangorts_user_can_access_resource(
+        $1::uuid,'shared_inbox',thread.shared_inbox_id,$3::uuid,'edit'
+      ))
+      or exists (
+        select 1
+        from email_relationships relationship
+        where relationship.company_id=message.company_id
+          and relationship.email_message_id=message.email_message_id
+          and relationship.resource_type='node'
+          and relationship.resource_id=$4::uuid
+      )
+      or exists (
+        select 1
+        from node_textbox_chats chat
+        where chat.company_id=message.company_id
+          and chat.node_id=$4::uuid
+          and chat.chat_id=nullif($5,'')::uuid
+          and chat.deleted_timestamp is null
+          and chat.selection_source='email'
+          and chat.selection_email_message_id=message.email_message_id
+      )
+    )
+)`, companyID, selectionEmailMessageID, input.ActorUserID, input.NodeID, cleanUUIDText(input.InformationID)).Scan(&canSelect); err != nil {
 			return normalizedNodeTextboxChat{}, err
 		}
-		if matchCount != 1 || cleanUUIDText(selectionEmailMessageID) == "" {
+		if !canSelect {
 			return normalizedNodeTextboxChat{}, ErrInvalid
 		}
 	}
@@ -247,7 +276,7 @@ select chat.company_id::text,
          'parent_id', coalesce(chat.parent_chat_id::text, ''),
          'selection_source', chat.selection_source,
          'selection_block_id', coalesce(chat.selection_textbox_id::text, ''),
-         'selection_message_id', coalesce(email_message.provider_message_id, ''),
+         'selection_message_id', coalesce(chat.selection_email_message_id::text, ''),
          'selection_quote', chat.selection_quote,
          'selection_start', chat.selection_start,
          'selection_end', chat.selection_end,
@@ -270,7 +299,7 @@ select chat.company_id::text,
              )
              order by link.created_timestamp, attachment.attachment_id
            )
-           from resource_attachments link
+           from attachment_relationships link
            join attachments attachment
              on attachment.company_id=link.company_id
             and attachment.attachment_id=link.attachment_id
@@ -289,10 +318,7 @@ select chat.company_id::text,
        chat.revision,
        chat.created_timestamp,
        chat.updated_timestamp
-from node_textbox_chats chat
-left join communications_email_messages email_message
-  on email_message.company_id=chat.company_id
- and email_message.email_message_id=chat.selection_email_message_id`
+from node_textbox_chats chat`
 
 func scanNodeTextboxChatProjection(row interface{ Scan(...any) error }) (domain.NodeProjection, error) {
 	var item domain.NodeProjection
@@ -348,7 +374,7 @@ join attachments attachment
 		return ErrInvalid
 	}
 	if _, err := tx.ExecContext(ctx, `
-update resource_attachments link
+update attachment_relationships link
 set deleted_timestamp=coalesce(link.deleted_timestamp, clock_timestamp())
 where link.company_id=$1::uuid
   and link.resource_type='node_chat_message'
@@ -363,8 +389,8 @@ where link.company_id=$1::uuid
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `
-insert into resource_attachments(
-  resource_attachment_id,company_id,resource_type,resource_id,attachment_id,information_id,
+insert into attachment_relationships(
+  attachment_relationship_id,company_id,resource_type,resource_id,attachment_id,information_id,
   message_id,editor_surface,relationship_kind,created_by_user_id,created_timestamp
 )
 select
@@ -376,7 +402,7 @@ from (
 ) wanted
 where not exists (
   select 1
-  from resource_attachments link
+  from attachment_relationships link
   where link.company_id=$1::uuid
     and link.resource_type='node_chat_message'
     and link.resource_id=$2
@@ -493,7 +519,7 @@ func deletePostgresNodeTextboxChatTx(ctx context.Context, tx *sql.Tx, input Node
   join deleted_chats parent on child.parent_chat_id=parent.chat_id
   where child.company_id=$1::uuid and child.node_id=$2::uuid
 )
-update resource_attachments
+update attachment_relationships
 set deleted_timestamp=coalesce(deleted_timestamp,clock_timestamp())
 where company_id=$1::uuid
   and resource_type='node_chat_message'

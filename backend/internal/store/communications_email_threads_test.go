@@ -17,6 +17,7 @@ func TestMemoryCommunicationsEmailThreadPersistsRichOrderedMailboxScopedSnapshot
 		PersonalUserID:       "22222222-2222-4222-8222-222222222291",
 		PersonalAccountEmail: "owner@example.com",
 		AccountEmail:         "owner@example.com",
+		Provider:             "google",
 		ProviderThreadID:     "provider-thread-1",
 		SelectedMessageID:    "provider-message-late",
 		FetchedAt:            time.Unix(1_780_000_000, 0).UTC(),
@@ -98,7 +99,7 @@ func TestMemoryCommunicationsEmailThreadConvergesMessageFallbackToProviderThread
 	input := CommunicationsEmailThreadUpsertInput{
 		CompanyID:            "11111111-1111-4111-8111-111111111194",
 		PersonalUserID:       "22222222-2222-4222-8222-222222222294",
-		PersonalAccountEmail: "owner@example.com", AccountEmail: "owner@example.com",
+		PersonalAccountEmail: "owner@example.com", AccountEmail: "owner@example.com", Provider: "google",
 		SelectedMessageID: "provider-root",
 		Messages:          []domain.EmailMessageSnapshot{{ID: "provider-root", Subject: "Fallback identity", Body: "<p>Stored</p>"}},
 	}
@@ -126,6 +127,7 @@ func TestCommunicationsEmailThreadRejectsCrossThreadAndMissingSelectedMessage(t 
 		PersonalUserID:       "22222222-2222-4222-8222-222222222295",
 		PersonalAccountEmail: "owner@example.com",
 		AccountEmail:         "owner@example.com",
+		Provider:             "google",
 		ProviderThreadID:     "provider-thread-a",
 		SelectedMessageID:    "provider-message-a",
 		Messages: []domain.EmailMessageSnapshot{
@@ -144,41 +146,35 @@ func TestCommunicationsEmailThreadRejectsCrossThreadAndMissingSelectedMessage(t 
 }
 
 func TestCommunicationsEmailThreadSchemaKeepsBodiesAndMetadataOutOfHotProjections(t *testing.T) {
-	for _, path := range []string{
-		"../../db/schema.sql",
-		"../../db/migrations/20260719_persist_node_email_threads.sql",
+	raw, err := os.ReadFile("../../db/schema.sql")
+	if err != nil {
+		t.Fatalf("read canonical schema: %v", err)
+	}
+	source := strings.ToLower(string(raw))
+	for _, required := range []string{
+		"create table if not exists email_threads",
+		"create table if not exists email_messages",
+		"create table if not exists email_relationships",
+		"rich_html_body text",
+		"attachment_metadata jsonb",
+		"references email_messages(company_id, email_thread_id, email_message_id)",
 	} {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
+		if !strings.Contains(source, required) {
+			t.Fatalf("canonical schema missing %q", required)
 		}
-		source := strings.ToLower(string(raw))
-		for _, required := range []string{
-			"create table if not exists communications_email_threads",
-			"create table if not exists communications_email_messages",
-			"create table if not exists communications_node_email_threads",
-			"rich_html_body text",
-			"attachment_metadata jsonb",
-			"foreign key (company_id, email_thread_id)",
-		} {
-			if !strings.Contains(source, required) {
-				t.Fatalf("%s missing %q", path, required)
-			}
-		}
-		for _, forbidden := range []string{"attachment_bytes", "presigned_url", "object_url"} {
-			if strings.Contains(source, forbidden) {
-				t.Fatalf("%s must not persist %q", path, forbidden)
-			}
+	}
+	for _, forbidden := range []string{"attachment_bytes", "presigned_url", "object_url"} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("canonical email schema must not persist %q", forbidden)
 		}
 	}
 }
-
 func TestMemoryCommunicationsEmailThreadDownloadJobsAreDurableAndIdempotent(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-111111111196"
 	userID := "22222222-2222-4222-8222-222222222296"
 	thread, err := repo.UpsertCommunicationsEmailThread(CommunicationsEmailThreadUpsertInput{
-		CompanyID: companyID, PersonalUserID: userID, PersonalAccountEmail: "owner@example.com", AccountEmail: "owner@example.com",
+		CompanyID: companyID, PersonalUserID: userID, PersonalAccountEmail: "owner@example.com", AccountEmail: "owner@example.com", Provider: "google",
 		ProviderThreadID: "provider-thread", SelectedMessageID: "provider-root",
 		Messages: []domain.EmailMessageSnapshot{{ID: "provider-root", ThreadID: "provider-thread", Body: "<p>Selected</p>"}},
 	})
@@ -234,7 +230,7 @@ func TestMemoryCommunicationsEmailThreadLaterManualMessageReusesThreadAndQueuesO
 	companyID := "11111111-1111-4111-8111-111111111197"
 	userID := "22222222-2222-4222-8222-222222222297"
 	base := CommunicationsEmailThreadUpsertInput{
-		CompanyID: companyID, PersonalUserID: userID, PersonalAccountEmail: "owner@example.com", AccountEmail: "owner@example.com",
+		CompanyID: companyID, PersonalUserID: userID, PersonalAccountEmail: "owner@example.com", AccountEmail: "owner@example.com", Provider: "google",
 		ProviderThreadID: "provider-thread", SelectedMessageID: "provider-old", HistoryComplete: true,
 		Messages: []domain.EmailMessageSnapshot{{ID: "provider-old", ThreadID: "provider-thread", Date: 10, Body: "old", DownloadComplete: true}},
 	}
@@ -275,7 +271,7 @@ func TestMemoryCommunicationsEmailThreadFindsExistingNonRootMessageBeforeAssigni
 	companyID := "11111111-1111-4111-8111-111111111198"
 	userID := "22222222-2222-4222-8222-222222222298"
 	stored, err := repo.UpsertCommunicationsEmailThread(CommunicationsEmailThreadUpsertInput{
-		CompanyID: companyID, PersonalUserID: userID, PersonalAccountEmail: "owner@example.com", AccountEmail: "owner@example.com",
+		CompanyID: companyID, PersonalUserID: userID, PersonalAccountEmail: "owner@example.com", AccountEmail: "owner@example.com", Provider: "google",
 		SelectedMessageID: "provider-root",
 		Messages: []domain.EmailMessageSnapshot{
 			{ID: "provider-root", Date: 10, Body: "root"},
@@ -290,7 +286,7 @@ func TestMemoryCommunicationsEmailThreadFindsExistingNonRootMessageBeforeAssigni
 	}
 
 	assigned, err := repo.UpsertCommunicationsEmailThread(CommunicationsEmailThreadUpsertInput{
-		CompanyID: companyID, PersonalUserID: userID, PersonalAccountEmail: "owner@example.com", AccountEmail: "owner@example.com",
+		CompanyID: companyID, PersonalUserID: userID, PersonalAccountEmail: "owner@example.com", AccountEmail: "owner@example.com", Provider: "google",
 		ProviderThreadID: "provider-thread", SelectedMessageID: "provider-known-reply",
 		Messages: []domain.EmailMessageSnapshot{{ID: "provider-known-reply", ThreadID: "provider-thread", Date: 20, Body: "known reply complete"}},
 	})
@@ -302,7 +298,7 @@ func TestMemoryCommunicationsEmailThreadFindsExistingNonRootMessageBeforeAssigni
 	}
 
 	appended, err := repo.UpsertCommunicationsEmailThread(CommunicationsEmailThreadUpsertInput{
-		CompanyID: companyID, PersonalUserID: userID, PersonalAccountEmail: "owner@example.com", AccountEmail: "owner@example.com",
+		CompanyID: companyID, PersonalUserID: userID, PersonalAccountEmail: "owner@example.com", AccountEmail: "owner@example.com", Provider: "google",
 		ProviderThreadID: "provider-thread", SelectedMessageID: "provider-new-reply",
 		Messages: []domain.EmailMessageSnapshot{{ID: "provider-new-reply", ThreadID: "provider-thread", Date: 30, Body: "new reply"}},
 	})
@@ -314,7 +310,7 @@ func TestMemoryCommunicationsEmailThreadFindsExistingNonRootMessageBeforeAssigni
 	}
 
 	_, err = repo.UpsertCommunicationsEmailThread(CommunicationsEmailThreadUpsertInput{
-		CompanyID: companyID, PersonalUserID: userID, PersonalAccountEmail: "owner@example.com", AccountEmail: "owner@example.com",
+		CompanyID: companyID, PersonalUserID: userID, PersonalAccountEmail: "owner@example.com", AccountEmail: "owner@example.com", Provider: "google",
 		ProviderThreadID: "conflicting-thread", SelectedMessageID: "provider-known-reply",
 		Messages: []domain.EmailMessageSnapshot{{ID: "provider-known-reply", ThreadID: "conflicting-thread"}},
 	})
@@ -324,34 +320,21 @@ func TestMemoryCommunicationsEmailThreadFindsExistingNonRootMessageBeforeAssigni
 }
 
 func TestCommunicationsEmailThreadDurableDownloadSchemaContract(t *testing.T) {
-	checks := map[string][]string{
-		"../../db/schema.sql": {
-			"download_status text not null",
-			"download_complete boolean not null default false",
-			"create table if not exists communications_email_thread_download_jobs",
-			"idx_communications_email_thread_download_jobs_active_full",
-			"idx_communications_email_thread_download_jobs_active_message",
-			"unique (company_id, email_thread_id, provider_message_id)",
-		},
-		"../../db/migrations/20260728_durable_email_thread_download_jobs.sql": {
-			"rename column hydration_status to download_status",
-			"rename column last_hydration_error to last_download_error",
-			"add column if not exists download_complete boolean not null default false",
-			"create table if not exists communications_email_thread_download_jobs",
-			"idx_communications_email_thread_download_jobs_active_full",
-			"idx_communications_email_thread_download_jobs_active_message",
-		},
+	raw, err := os.ReadFile("../../db/schema.sql")
+	if err != nil {
+		t.Fatalf("read canonical schema: %v", err)
 	}
-	for path, required := range checks {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
-		source := strings.ToLower(string(raw))
-		for _, fragment := range required {
-			if !strings.Contains(source, fragment) {
-				t.Fatalf("%s missing %q", path, fragment)
-			}
+	source := strings.ToLower(string(raw))
+	for _, fragment := range []string{
+		"download_status text not null",
+		"download_complete boolean not null default false",
+		"create table if not exists email_thread_download_jobs",
+		"idx_email_thread_download_jobs_active_full",
+		"idx_email_thread_download_jobs_active_message",
+		"unique (company_id,email_thread_id,provider_message_id)",
+	} {
+		if !strings.Contains(strings.ReplaceAll(source, " ", ""), strings.ReplaceAll(fragment, " ", "")) {
+			t.Fatalf("canonical schema missing %q", fragment)
 		}
 	}
 }

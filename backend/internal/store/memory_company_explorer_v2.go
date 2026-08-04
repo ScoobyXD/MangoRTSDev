@@ -425,9 +425,6 @@ func (r *MemoryRepo) MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdgeIn
 	if !ok {
 		return CompanyExplorerV2Row{}, ErrNotFound
 	}
-	if err := r.rejectEmailCollaborationExplorerNodeMutationLocked(input.CompanyID, child); err != nil {
-		return CompanyExplorerV2Row{}, err
-	}
 	parent, ok := r.companyExplorerV2Entities[key(input.CompanyID, input.ParentEntityID)]
 	if !ok {
 		return CompanyExplorerV2Row{}, ErrNotFound
@@ -479,14 +476,8 @@ func (r *MemoryRepo) DeleteCompanyExplorerV2Edges(companyID string, edgeIDs []st
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, edgeID := range edgeIDs {
-		edge, ok := r.companyExplorerV2Edges[key(companyID, edgeID)]
-		if !ok {
+		if _, ok := r.companyExplorerV2Edges[key(companyID, edgeID)]; !ok {
 			return ErrNotFound
-		}
-		if child, ok := r.companyExplorerV2Entities[key(companyID, edge.ChildEntityID)]; ok {
-			if err := r.rejectEmailCollaborationExplorerNodeMutationLocked(companyID, child); err != nil {
-				return err
-			}
 		}
 	}
 	for _, edgeID := range edgeIDs {

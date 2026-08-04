@@ -48,61 +48,6 @@ func TestCommunicationsJoinedReadWaiterReturnsOnOwnCancellation(t *testing.T) {
 			},
 		)
 	})
-
-	t.Run("message page", func(t *testing.T) {
-		started := make(chan struct{})
-		release := make(chan struct{})
-		client := &blockingCommunicationsNylasClient{
-			fakeNylasClient: &fakeNylasClient{messages: []NylasMessage{{ID: "message-1"}}},
-			pageStarted:     started,
-			pageRelease:     release,
-		}
-		server := NewServerWithOptions(store.NewMemoryRepo(), ServerOptions{NylasClient: client})
-		server.nylasGate = newNylasRequestGate(0)
-		t.Cleanup(server.Close)
-		query := NylasMessageQuery{Limit: communicationsNylasMaxMessageLimit, Mailbox: "primary", Refresh: true}
-
-		assertJoinedCommunicationsReadCancellation(
-			t,
-			server.commCache,
-			"page",
-			communicationsAccountScopedCacheKey(connection.UserID, cacheScope),
-			started,
-			release,
-			client.pageCalls,
-			func(ctx context.Context) error {
-				_, err := server.communicationsMessagePage(ctx, connection, query)
-				return err
-			},
-		)
-	})
-
-	t.Run("message detail", func(t *testing.T) {
-		started := make(chan struct{})
-		release := make(chan struct{})
-		client := &blockingCommunicationsNylasClient{
-			fakeNylasClient: &fakeNylasClient{message: NylasMessage{ID: "message-1", Body: "<p>Body</p>"}},
-			detailStarted:   started,
-			detailRelease:   release,
-		}
-		server := NewServerWithOptions(store.NewMemoryRepo(), ServerOptions{NylasClient: client})
-		server.nylasGate = newNylasRequestGate(0)
-		t.Cleanup(server.Close)
-
-		assertJoinedCommunicationsReadCancellation(
-			t,
-			server.commCache,
-			"message",
-			communicationsMessageCacheKey(connection.UserID, cacheScope, "message-1"),
-			started,
-			release,
-			client.detailCalls,
-			func(ctx context.Context) error {
-				_, err := server.communicationsMessage(ctx, connection, "message-1")
-				return err
-			},
-		)
-	})
 }
 
 func assertJoinedCommunicationsReadCancellation(

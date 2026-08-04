@@ -30,6 +30,7 @@ type CommunicationsEmailCollaborationEnsureInput struct {
 	PersonalAccountEmail string
 	SharedInboxID        string
 	AccountEmail         string
+	Provider             string
 	CreatedByUserID      string
 	Priority             *int
 	Message              domain.EmailMessageSnapshot
@@ -88,14 +89,6 @@ type CommunicationsEmailCollaborationProjectionWriteResult struct {
 	Projection       domain.NodeProjection `json:"projection"`
 	CollaborationID  string                `json:"collaboration_id"`
 	MentionedUserIDs []string              `json:"mentioned_user_ids"`
-}
-
-type CommunicationsEmailCollaborationMessageInput struct {
-	CompanyID            string
-	PersonalUserID       string
-	PersonalAccountEmail string
-	SharedInboxID        string
-	Message              domain.EmailMessageSnapshot
 }
 
 type communicationsEmailCollaborationScope struct {
@@ -161,6 +154,10 @@ func normalizeCommunicationsEmailCollaborationEnsureInput(input CommunicationsEm
 	input.PersonalAccountEmail = scope.personalAccountEmail
 	input.SharedInboxID = scope.sharedInboxID
 	input.AccountEmail = scope.accountEmail
+	input.Provider = normalizeEmailProvider(input.Provider)
+	if input.Provider == "" {
+		return CommunicationsEmailCollaborationEnsureInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
+	}
 	input.CreatedByUserID = creatorID
 	input.Message = message
 	return input, scope, nil

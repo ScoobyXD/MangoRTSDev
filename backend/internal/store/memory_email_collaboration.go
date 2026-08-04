@@ -15,18 +15,21 @@ func cloneCommunicationsEmailCollaboration(item domain.CommunicationsEmailCollab
 }
 
 func (r *MemoryRepo) collaborationParticipantsLocked(companyID, collaborationID string) []domain.CommunicationsEmailCollaborationParticipant {
-	items := []domain.CommunicationsEmailCollaborationParticipant{}
-	for _, participant := range r.emailCollaborationParticipants {
-		if participant.CompanyID == companyID && participant.CollaborationID == collaborationID {
-			items = append(items, participant)
-		}
+	item, ok := r.emailCollaborations[key(companyID, collaborationID)]
+	if !ok {
+		return nil
 	}
-	sort.Slice(items, func(i, j int) bool {
-		if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
-			return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+	items := []domain.CommunicationsEmailCollaborationParticipant{}
+	for _, membership := range r.memberships {
+		if membership.CompanyID != companyID || !r.userHasEffectiveAccessLocked(companyID, membership.UserID, EntityTypeNode, item.NodeID, EntityPermissionEdit) {
+			continue
 		}
-		return items[i].UserID < items[j].UserID
-	})
+		items = append(items, domain.CommunicationsEmailCollaborationParticipant{
+			CompanyID: companyID, CollaborationID: collaborationID, UserID: membership.UserID,
+			AddedViaType: "permission", CreatedTimestamp: item.CreatedTimestamp,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].UserID < items[j].UserID })
 	return items
 }
 
@@ -34,7 +37,6 @@ func (r *MemoryRepo) withCollaborationParticipantsLocked(item domain.Communicati
 	item.Participants = r.collaborationParticipantsLocked(item.CompanyID, item.CollaborationID)
 	return cloneCommunicationsEmailCollaboration(item)
 }
-
 func collaborationScopeMatches(item domain.CommunicationsEmailCollaboration, scope communicationsEmailCollaborationScope) bool {
 	if item.ScopeType != scope.scopeType {
 		return false
@@ -67,6 +69,15 @@ func (r *MemoryRepo) findCollaborationLocked(companyID string, scope communicati
 	return domain.CommunicationsEmailCollaboration{}, false
 }
 
+func internalEmailMessageIDForProvider(thread domain.CommunicationsEmailThread, providerMessageID string) string {
+	providerMessageID = strings.TrimSpace(providerMessageID)
+	for _, message := range thread.Messages {
+		if message.ProviderMessageID == providerMessageID {
+			return message.EmailMessageID
+		}
+	}
+	return ""
+}
 func (r *MemoryRepo) reconcileEnsuredEmailCollaborationLocked(existing domain.CommunicationsEmailCollaboration, input CommunicationsEmailCollaborationEnsureInput) domain.CommunicationsEmailCollaboration {
 	providerThreadID := strings.TrimSpace(existing.ProviderThreadID)
 	incomingThreadID := strings.TrimSpace(input.Message.ThreadID)
@@ -76,15 +87,7 @@ func (r *MemoryRepo) reconcileEnsuredEmailCollaborationLocked(existing domain.Co
 		existing.ProviderThreadID = incomingThreadID
 		changed = true
 	}
-	if shouldAdvanceEmailCollaborationMessage(existing.Message, input.Message) {
-		message := mergeEmailMessageSnapshot(existing.Message, input.Message)
-		if providerThreadID != "" {
-			message.ThreadID = providerThreadID
-		}
-		existing.Message = message
-		existing.LatestMessageID = message.ID
-		changed = true
-	}
+
 	if providerThreadID != "" && existing.Message.ThreadID != providerThreadID {
 		existing.Message.ThreadID = providerThreadID
 		changed = true
@@ -151,7 +154,7 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 	threadInput := CommunicationsEmailThreadUpsertInput{
 		CompanyID: input.CompanyID, PersonalUserID: scope.personalUserID,
 		PersonalAccountEmail: scope.personalAccountEmail, SharedInboxID: scope.sharedInboxID,
-		AccountEmail: scope.accountEmail, ProviderThreadID: input.Message.ThreadID,
+		AccountEmail: scope.accountEmail, Provider: input.Provider, ProviderThreadID: input.Message.ThreadID,
 		SelectedMessageID: input.Message.ID, Messages: []domain.EmailMessageSnapshot{input.Message},
 		HistoryComplete: input.Message.ThreadID == "", FetchedAt: time.Now().UTC(),
 		RequestDownload: true, RequestedByUserID: input.CreatedByUserID,
@@ -164,8 +167,8 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 	if existing, ok := r.findCollaborationLocked(input.CompanyID, scope, input.Message.ID, input.Message.ThreadID); ok {
 		existing = r.reconcileEnsuredEmailCollaborationLocked(existing, input)
 		existing.EmailThreadID = thread.EmailThreadID
+		existing.Provider = thread.Provider
 		r.emailCollaborations[key(existing.CompanyID, existing.CollaborationID)] = existing
-		r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, existing.NodeID, existing.AttachedEmailInformationID, thread.EmailThreadID, input.Message.ID, input.CreatedByUserID, time.Now().UTC())
 		if downloadScope, requestedMessageID, ok := communicationsEmailThreadDownloadRequest(thread, threadInput); ok {
 			if _, _, err := r.ensureCommunicationsEmailThreadDownloadJobLocked(input.CompanyID, thread.EmailThreadID, downloadScope, requestedMessageID, input.CreatedByUserID); err != nil {
 				restore()
@@ -210,13 +213,15 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 		restore()
 		return CommunicationsEmailCollaborationEnsureResult{}, ErrInvalid
 	}
+	internalMessageID := internalEmailMessageIDForProvider(thread, input.Message.ID)
+	input.Message.EmailMessageID = internalMessageID
 	item := domain.CommunicationsEmailCollaboration{
 		CompanyID: input.CompanyID, CollaborationID: collaborationID, NodeID: node.NodeID,
 		AttachedEmailInformationID: informationID, ScopeType: scope.scopeType,
 		PersonalUserID: scope.personalUserID, PersonalAccountEmail: scope.personalAccountEmail,
-		SharedInboxID: scope.sharedInboxID, AccountEmail: scope.accountEmail,
-		ProviderThreadID: input.Message.ThreadID, RootMessageID: input.Message.ID,
-		LatestMessageID: input.Message.ID, Message: input.Message, CreatedByUserID: input.CreatedByUserID,
+		SharedInboxID: scope.sharedInboxID, AccountEmail: scope.accountEmail, Provider: thread.Provider,
+		ProviderThreadID: input.Message.ThreadID, RootMessageID: internalMessageID,
+		LatestMessageID: internalMessageID, Message: input.Message, CreatedByUserID: input.CreatedByUserID,
 		EmailThreadID:    thread.EmailThreadID,
 		CreatedTimestamp: now, UpdatedTimestamp: now,
 	}
@@ -228,8 +233,7 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 			return CommunicationsEmailCollaborationEnsureResult{}, err
 		}
 	}
-	participant := domain.CommunicationsEmailCollaborationParticipant{CompanyID: input.CompanyID, CollaborationID: item.CollaborationID, UserID: input.CreatedByUserID, AddedByUserID: input.CreatedByUserID, AddedViaType: CommunicationsEmailCollaborationParticipantCreator, CreatedTimestamp: now}
-	r.emailCollaborationParticipants[emailCollaborationParticipantKey(input.CompanyID, item.CollaborationID, participant.UserID)] = participant
+
 	if err := r.grantCollaborationNodeEditLocked(input.CompanyID, node.NodeID, input.CreatedByUserID, now); err != nil {
 		restore()
 		return CommunicationsEmailCollaborationEnsureResult{}, err
@@ -280,7 +284,7 @@ func (r *MemoryRepo) ResolveCommunicationsEmailCollaboration(input Communication
 	if !ok {
 		return domain.CommunicationsEmailCollaboration{}, ErrNotFound
 	}
-	if _, ok := r.emailCollaborationParticipants[emailCollaborationParticipantKey(input.CompanyID, item.CollaborationID, input.ParticipantUserID)]; !ok {
+	if !r.userHasEffectiveAccessLocked(input.CompanyID, input.ParticipantUserID, EntityTypeNode, item.NodeID, EntityPermissionEdit) {
 		return domain.CommunicationsEmailCollaboration{}, ErrNotFound
 	}
 	return r.withCollaborationParticipantsLocked(item), nil
@@ -297,7 +301,7 @@ func (r *MemoryRepo) GetCommunicationsEmailCollaboration(companyID, collaboratio
 	if !ok {
 		return domain.CommunicationsEmailCollaboration{}, ErrNotFound
 	}
-	if _, ok := r.emailCollaborationParticipants[emailCollaborationParticipantKey(companyID, collaborationID, participantUserID)]; !ok {
+	if !r.userHasEffectiveAccessLocked(companyID, participantUserID, EntityTypeNode, item.NodeID, EntityPermissionEdit) {
 		return domain.CommunicationsEmailCollaboration{}, ErrNotFound
 	}
 	return r.withCollaborationParticipantsLocked(item), nil
@@ -315,7 +319,7 @@ func (r *MemoryRepo) ListCommunicationsEmailCollaborations(companyID, participan
 		if item.CompanyID != companyID {
 			continue
 		}
-		if _, ok := r.emailCollaborationParticipants[emailCollaborationParticipantKey(companyID, item.CollaborationID, participantUserID)]; ok {
+		if r.userHasEffectiveAccessLocked(companyID, participantUserID, EntityTypeNode, item.NodeID, EntityPermissionEdit) {
 			items = append(items, r.withCollaborationParticipantsLocked(item))
 		}
 	}
@@ -350,19 +354,15 @@ func (r *MemoryRepo) AddCommunicationsEmailCollaborationParticipantsForNode(inpu
 
 func (r *MemoryRepo) addCollaborationParticipantsLocked(input CommunicationsEmailCollaborationParticipantInput) (CommunicationsEmailCollaborationParticipantResult, error) {
 	item, ok := r.emailCollaborations[key(input.CompanyID, input.CollaborationID)]
-	if !ok {
+	if !ok || !r.userHasEffectiveAccessLocked(input.CompanyID, input.ActorUserID, EntityTypeNode, item.NodeID, EntityPermissionEdit) {
 		return CommunicationsEmailCollaborationParticipantResult{}, ErrNotFound
 	}
-	if _, ok := r.emailCollaborationParticipants[emailCollaborationParticipantKey(input.CompanyID, item.CollaborationID, input.ActorUserID)]; !ok {
-		return CommunicationsEmailCollaborationParticipantResult{}, ErrNotFound
-	}
-	type provenance struct{ viaType, viaID string }
-	mentioned := map[string]provenance{}
+	mentioned := map[string]bool{}
 	for _, userID := range input.MentionedUserIDs {
 		if _, ok := r.memberships[membershipKey(input.CompanyID, userID)]; !ok {
 			return CommunicationsEmailCollaborationParticipantResult{}, ErrPrincipalNotInCompany
 		}
-		mentioned[userID] = provenance{CommunicationsEmailCollaborationParticipantUser, userID}
+		mentioned[userID] = true
 	}
 	for _, groupID := range input.MentionedGroupIDs {
 		groupIDs := companyUserGroupSubtreeIDsLocked(r.userGroups, input.CompanyID, groupID)
@@ -371,104 +371,22 @@ func (r *MemoryRepo) addCollaborationParticipantsLocked(input CommunicationsEmai
 		}
 		for _, member := range r.userGroupMembers {
 			if member.CompanyID == input.CompanyID && groupIDs[member.GroupID] {
-				if _, explicit := mentioned[member.UserID]; !explicit {
-					mentioned[member.UserID] = provenance{CommunicationsEmailCollaborationParticipantGroup, groupID}
-				}
+				mentioned[member.UserID] = true
 			}
 		}
 	}
 	now := time.Now().UTC()
 	mentionedUserIDs := make([]string, 0, len(mentioned))
-	for userID, source := range mentioned {
+	for userID := range mentioned {
 		mentionedUserIDs = append(mentionedUserIDs, userID)
-		participantKey := emailCollaborationParticipantKey(input.CompanyID, item.CollaborationID, userID)
-		if _, exists := r.emailCollaborationParticipants[participantKey]; !exists {
-			r.emailCollaborationParticipants[participantKey] = domain.CommunicationsEmailCollaborationParticipant{CompanyID: input.CompanyID, CollaborationID: item.CollaborationID, UserID: userID, AddedByUserID: input.ActorUserID, AddedViaType: source.viaType, AddedViaID: source.viaID, CreatedTimestamp: now}
-		}
 		if err := r.grantCollaborationNodeEditLocked(input.CompanyID, item.NodeID, userID, now); err != nil {
 			return CommunicationsEmailCollaborationParticipantResult{}, err
 		}
 	}
 	sort.Strings(mentionedUserIDs)
-	return CommunicationsEmailCollaborationParticipantResult{CollaborationID: item.CollaborationID, NodeID: item.NodeID, Participants: r.collaborationParticipantsLocked(input.CompanyID, item.CollaborationID), MentionedUserIDs: mentionedUserIDs}, nil
-}
-
-func (r *MemoryRepo) UpdateCommunicationsEmailCollaborationMessage(input CommunicationsEmailCollaborationMessageInput) ([]string, error) {
-	accountEmail := input.PersonalAccountEmail
-	if strings.TrimSpace(input.SharedInboxID) != "" {
-		accountEmail = "shared@scope.invalid"
-	}
-	companyID, scope, err := normalizeCommunicationsEmailCollaborationScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID, accountEmail)
-	if err != nil {
-		return nil, err
-	}
-	message := normalizeEmailMessageSnapshot(input.Message)
-	if message.ID == "" {
-		return nil, ErrInvalid
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	beforeCollaborations := maps.Clone(r.emailCollaborations)
-	beforeEmailThreads := cloneCommunicationsEmailThreadsMap(r.emailThreads)
-	beforeEmailThreadScopeIDs := maps.Clone(r.emailThreadScopeIDs)
-	beforeNodeEmailThreads := maps.Clone(r.nodeEmailThreads)
-	beforeOutbox := maps.Clone(r.realtimeOutbox)
-	beforeOutboxSequence := r.realtimeOutboxSequence
-	restore := func() {
-		r.emailCollaborations = beforeCollaborations
-		r.emailThreads, r.emailThreadScopeIDs, r.nodeEmailThreads = beforeEmailThreads, beforeEmailThreadScopeIDs, beforeNodeEmailThreads
-		r.realtimeOutbox = beforeOutbox
-		r.realtimeOutboxSequence = beforeOutboxSequence
-	}
-	item, ok := r.findCollaborationLocked(companyID, scope, message.ID, message.ThreadID)
-	if !ok {
-		return []string{}, nil
-	}
-	thread, err := r.upsertCommunicationsEmailThreadLocked(CommunicationsEmailThreadUpsertInput{
-		CompanyID: item.CompanyID, PersonalUserID: item.PersonalUserID,
-		PersonalAccountEmail: item.PersonalAccountEmail, SharedInboxID: item.SharedInboxID,
-		AccountEmail: item.AccountEmail, ProviderThreadID: item.ProviderThreadID,
-		SelectedMessageID: item.RootMessageID, Messages: []domain.EmailMessageSnapshot{message},
-		FetchedAt: time.Now().UTC(),
-	})
-	if err != nil {
-		restore()
-		return nil, err
-	}
-	item.EmailThreadID = thread.EmailThreadID
-	r.emailCollaborations[key(companyID, item.CollaborationID)] = item
-	r.linkCommunicationsEmailThreadToNodeLocked(item.CompanyID, item.NodeID, item.AttachedEmailInformationID, thread.EmailThreadID, item.RootMessageID, item.CreatedByUserID, time.Now().UTC())
-
-	if shouldAdvanceEmailCollaborationMessage(item.Message, message) {
-		message = mergeEmailMessageSnapshot(item.Message, message)
-		item.Message, item.LatestMessageID = message, message.ID
-		if item.ProviderThreadID == "" {
-			item.ProviderThreadID = message.ThreadID
-		}
-		item.UpdatedTimestamp = time.Now().UTC()
-		r.emailCollaborations[key(companyID, item.CollaborationID)] = item
-	}
-	participants := r.collaborationParticipantsLocked(companyID, item.CollaborationID)
-	userIDs := make([]string, 0, len(participants))
-	for _, participant := range participants {
-		userIDs = append(userIDs, participant.UserID)
-		if scope.scopeType == CommunicationsEmailCollaborationScopePersonal && participant.UserID == scope.personalUserID {
-			continue
-		}
-		for _, connection := range r.emailConnections {
-			if connection.UserID != participant.UserID || strings.TrimSpace(connection.Status) != "connected" || strings.TrimSpace(connection.GrantID) == "" {
-				continue
-			}
-			outbox, err := communicationsEmailCollaborationMailboxOutboxInput(companyID, participant.UserID, connection.AccountEmail, message)
-			if err != nil {
-				restore()
-				return nil, err
-			}
-			if _, err := r.enqueueRealtimeOutboxLocked(outbox); err != nil {
-				restore()
-				return nil, err
-			}
-		}
-	}
-	return userIDs, nil
+	return CommunicationsEmailCollaborationParticipantResult{
+		CollaborationID: item.CollaborationID, NodeID: item.NodeID,
+		Participants:     r.collaborationParticipantsLocked(input.CompanyID, item.CollaborationID),
+		MentionedUserIDs: mentionedUserIDs,
+	}, nil
 }

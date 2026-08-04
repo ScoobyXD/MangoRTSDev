@@ -181,32 +181,14 @@ test("imports a remote rich-document image into the exact editor attachment reso
   assert.equal(result, expected);
 });
 
-test("signature attachment resource IDs require a complete personal mailbox scope", () => {
-  assert.equal(mangoEmailSignatureResourceID({
-    userID: " user-1 ",
-    accountEmail: " Person@Example.Test ",
-  }), "personal:user-1:person%40example.test");
-  assert.equal(mangoEmailSignatureResourceID({ userID: "user-1" }), "");
-  assert.equal(mangoEmailSignatureResourceID({ accountEmail: "person@example.test" }), "");
-  assert.equal(mangoEmailSignatureResourceID({ sharedInboxID: " shared-1 " }), "shared:shared-1");
+test("signature attachment resource IDs use the stable V3 signature ID", () => {
+  assert.equal(mangoEmailSignatureResourceID({ signatureID: " signature-1 " }), "signature-1");
+  assert.equal(mangoEmailSignatureResourceID({}), "");
 });
 
-test("draft attachment resource IDs separate personal accounts and shared inboxes", () => {
-  assert.equal(mangoEmailDraftResourceID({
-    draftID: " draft:1 ",
-    userID: " user-1 ",
-    accountEmail: " Person@Example.Test ",
-  }), "personal:user-1:person%40example.test:draft%3A1");
-  assert.equal(mangoEmailDraftResourceID({ draftID: "draft:1", userID: "user-1" }), "");
-  assert.equal(mangoEmailDraftResourceID({
-    draftID: "draft:1",
-    sharedInboxID: " shared-1 ",
-  }), "shared:shared-1:draft%3A1");
-  assert.equal(mangoEmailDraftResourceID({
-    draftID: "draft:1",
-    collaborationID: " collaboration-1 ",
-    sharedInboxID: "shared-1",
-  }), "collaboration:collaboration-1:draft%3A1");
+test("draft attachment resource IDs use the stable V3 draft ID", () => {
+  assert.equal(mangoEmailDraftResourceID({ draftID: " draft:1 " }), "draft:1");
+  assert.equal(mangoEmailDraftResourceID({ draftID: "   " }), "");
 });
 
 test("filters node text-block files without changing the source list", () => {

@@ -387,7 +387,7 @@ func TestPhase4LogicGateWorkSourceShape(t *testing.T) {
 		t.Fatalf("postgres logic gate work read does not select projection priority")
 	}
 	for _, required := range []string{
-		"communications_email_nodes",
+		"email_relationships",
 		"resource_gvic_assignments",
 		"projection.status_rank",
 	} {

@@ -196,26 +196,12 @@ func (s *Server) handleNodeChatCommentEdit(w http.ResponseWriter, r *http.Reques
 		CompanyID: req.CompanyID, NodeID: nodeID, Type: existing.Type, Information: updatedInformation,
 		InformationID: existing.InformationID, ActorUserID: actorUserID, ActorDisplayName: actorLabel,
 	}
-	var projection domain.NodeProjection
-	var explicitMentionedUserIDs []string
-	var collaborationID string
-	atomicResult, atomicErr := s.repo.UpsertEmailCollaborationNodeProjectionWithActor(input)
-	if atomicErr == nil {
-		projection = atomicResult.Projection
-		explicitMentionedUserIDs = atomicResult.MentionedUserIDs
-		collaborationID = atomicResult.CollaborationID
-	} else if errors.Is(atomicErr, store.ErrNotEmailCollaboration) {
-		projection, err = s.repo.UpsertNodeProjectionWithActor(input)
-	} else {
-		err = atomicErr
-	}
+	projection, err := s.repo.UpsertNodeProjectionWithActor(input)
 	if err != nil {
 		writeChatCommentEditError(w, err, "failed_to_edit_chat_comment")
 		return
 	}
-	if collaborationID != "" {
-		s.recordEmailCollaborationExplicitMentionNotifications(r, req.CompanyID, nodeID, informationID, existing.Type, updatedInformation, collaborationID, explicitMentionedUserIDs)
-	}
+
 	s.recordMentionNotifications(r, req.CompanyID, "node", nodeID, informationID, existing.Type, updatedInformation)
 	s.publishWorkspaceEvent(req.CompanyID, "node_chat_comment_updated", map[string]any{"node_id": nodeID, "information_id": informationID})
 	s.publishNodeChatUpdated(req.CompanyID, nodeID, informationID)

@@ -23,12 +23,42 @@ const (
 	CommunicationsEmailThreadDownloadJobFailed     = "failed"
 )
 
+type CommunicationsEmailAccountReadInput struct {
+	CompanyID            string
+	PersonalUserID       string
+	PersonalAccountEmail string
+	SharedInboxID        string
+	AccountEmail         string
+	Provider             string
+}
+
+func normalizeCommunicationsEmailAccountReadInput(input CommunicationsEmailAccountReadInput) (CommunicationsEmailAccountReadInput, communicationsEmailCollaborationScope, error) {
+	companyID, scope, err := normalizeCommunicationsEmailCollaborationScope(
+		input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail,
+		input.SharedInboxID, input.AccountEmail,
+	)
+	if err != nil {
+		return CommunicationsEmailAccountReadInput{}, communicationsEmailCollaborationScope{}, err
+	}
+	input.CompanyID = companyID
+	input.PersonalUserID = scope.personalUserID
+	input.PersonalAccountEmail = scope.personalAccountEmail
+	input.SharedInboxID = scope.sharedInboxID
+	input.AccountEmail = scope.accountEmail
+	input.Provider = strings.ToLower(strings.TrimSpace(input.Provider))
+	if input.Provider != "google" && input.Provider != "microsoft" {
+		return CommunicationsEmailAccountReadInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
+	}
+	return input, scope, nil
+}
+
 type CommunicationsEmailThreadUpsertInput struct {
 	CompanyID            string
 	PersonalUserID       string
 	PersonalAccountEmail string
 	SharedInboxID        string
 	AccountEmail         string
+	Provider             string
 	ProviderThreadID     string
 	SelectedMessageID    string
 	Messages             []domain.EmailMessageSnapshot
@@ -129,6 +159,10 @@ func normalizeCommunicationsEmailThreadInput(input CommunicationsEmailThreadUpse
 	input.PersonalAccountEmail = scope.personalAccountEmail
 	input.SharedInboxID = scope.sharedInboxID
 	input.AccountEmail = scope.accountEmail
+	input.Provider = strings.ToLower(strings.TrimSpace(input.Provider))
+	if input.Provider != "" && input.Provider != "google" && input.Provider != "microsoft" {
+		return CommunicationsEmailThreadUpsertInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
+	}
 	input.ProviderThreadID = strings.TrimSpace(input.ProviderThreadID)
 	input.SelectedMessageID = strings.TrimSpace(input.SelectedMessageID)
 	input.LastDownloadError = strings.TrimSpace(input.LastDownloadError)

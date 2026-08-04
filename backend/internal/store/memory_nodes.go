@@ -376,7 +376,9 @@ func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string) error {
 	}
 	for draftKey, draft := range r.emailDrafts {
 		if draft.CompanyID == companyID && collaborationIDs[draft.CollaborationID] {
-			delete(r.emailDrafts, draftKey)
+			draft.CollaborationID = ""
+			draft.IsShared = false
+			r.emailDrafts[draftKey] = draft
 		}
 	}
 	for board, cards := range r.kanbanCards {
@@ -534,9 +536,7 @@ func (r *MemoryRepo) addNodeInformation(input NodeInformationInput) (domain.Node
 	if _, ok := r.nodes[key(companyID, nodeID)]; !ok {
 		return domain.NodeInformation{}, ErrNotFound
 	}
-	if collaboration, protected := r.emailCollaborationForNodeLocked(companyID, nodeID); protected && collaboration.AttachedEmailInformationID == informationID {
-		return domain.NodeInformation{}, ErrProtectedEmailCollaborationResource
-	}
+
 	now := time.Now().UTC()
 	k := key(companyID, nodeID)
 	item := domain.NodeInformation{
@@ -651,9 +651,7 @@ func (r *MemoryRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error
 	if _, ok := r.nodes[key(companyID, nodeID)]; !ok {
 		return ErrNotFound
 	}
-	if collaboration, protected := r.emailCollaborationForNodeLocked(companyID, nodeID); protected && collaboration.AttachedEmailInformationID == informationID {
-		return ErrProtectedEmailCollaborationResource
-	}
+
 	k := key(companyID, nodeID)
 	existing, projectionExists := r.nodeText[k][informationID]
 	if projectionExists && isEditorTextBoxType(existing.Type) {
@@ -666,6 +664,27 @@ func (r *MemoryRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error
 		if existing.IsDeleted || *input.ExpectedRevision != existing.Revision {
 			current := existing
 			return &ProjectionRevisionConflictError{NodeCurrent: &current}
+		}
+	}
+	if projectionExists && strings.EqualFold(strings.TrimSpace(existing.Type), "Attached email") {
+		collaborationIDs := map[string]bool{}
+		for collaborationKey, collaboration := range r.emailCollaborations {
+			if collaboration.CompanyID == companyID && collaboration.NodeID == nodeID && collaboration.AttachedEmailInformationID == informationID {
+				collaborationIDs[collaboration.CollaborationID] = true
+				delete(r.emailCollaborations, collaborationKey)
+			}
+		}
+		for linkKey, link := range r.nodeEmailThreads {
+			if link.CompanyID == companyID && link.NodeID == nodeID && link.InformationID == informationID {
+				delete(r.nodeEmailThreads, linkKey)
+			}
+		}
+		for draftKey, draft := range r.emailDrafts {
+			if draft.CompanyID == companyID && collaborationIDs[draft.CollaborationID] {
+				draft.CollaborationID = ""
+				draft.IsShared = false
+				r.emailDrafts[draftKey] = draft
+			}
 		}
 	}
 	if projectionExists && strings.EqualFold(strings.TrimSpace(existing.Type), "Text block chat") {
