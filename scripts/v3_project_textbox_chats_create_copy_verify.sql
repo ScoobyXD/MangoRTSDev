@@ -405,24 +405,24 @@ order by company_id,project_id,chat_id;
 
 do $$
 declare
-  source_count integer;
-  reply_count integer;
-  attachment_count integer;
+  v_source_count integer;
+  v_reply_count integer;
+  v_attachment_count integer;
 begin
   select count(*),
-         count(*) filter(where requested_parent_chat_id is not null),
-         coalesce(sum(greatest(attachment_count,0)),0)
-    into source_count,reply_count,attachment_count
-    from mango_project_chat_source;
+         count(*) filter(where source.requested_parent_chat_id is not null),
+         coalesce(sum(greatest(source.attachment_count,0)),0)
+    into v_source_count,v_reply_count,v_attachment_count
+    from mango_project_chat_source source;
 
-  if source_count<>16 then
-    raise exception 'STOP: expected the reviewed 16 Project chats, found %',source_count;
+  if v_source_count<>16 then
+    raise exception 'STOP: expected the reviewed 16 Project chats, found %',v_source_count;
   end if;
-  if reply_count<>3 then
-    raise exception 'STOP: expected the reviewed 3 Project replies, found %',reply_count;
+  if v_reply_count<>3 then
+    raise exception 'STOP: expected the reviewed 3 Project replies, found %',v_reply_count;
   end if;
-  if attachment_count<>0 then
-    raise exception 'STOP: expected zero Project chat attachments, found %',attachment_count;
+  if v_attachment_count<>0 then
+    raise exception 'STOP: expected zero Project chat attachments, found %',v_attachment_count;
   end if;
   if exists(select 1 from mango_project_chat_source where cardinality(issue_codes)>0) then
     raise exception 'STOP: at least one Project chat needs review; nothing was copied';
