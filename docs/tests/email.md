@@ -1,10 +1,10 @@
 # Process Story
 
-Alice opens a three-message conversation through her personal email account. Mango stores one `email_threads` row for Alice's exact personal email account and three `email_messages` rows. Alice attaches message 2 to a Node, so Mango adds one `email_relationships` row; it does not copy the thread or messages. Bob can open the complete stored email through that Node only when normal Node permissions allow it. If the relationship is removed later, a chat quote from message 2 remains, but opening the complete email now requires another surviving relationship or direct access through Alice's exact personal email account. Alice's reply remains a separate `email_drafts` row tied to Alice's original personal email account. Disconnecting that account keeps the email draft and signature but makes them unsendable until the same account reconnects. Real stored files live in `attachments`, and `attachment_relationships` connects them to the message, email draft, signature, chat, or ordinary resource that actually owns the file.
+Alice opens a three-message conversation through her personal email account. Mango stores one `email_threads` row for Alice's exact personal email account and three `email_messages` rows. Alice attaches message 2 to a Node, so Mango adds one `email_relationships` row; it does not copy the thread or messages. If two old rows both describe that same whole-Node attachment, V3 keeps one final relationship and records how both old rows mapped to it. Bob can open the complete stored email through that Node only when normal Node permissions allow it. If the relationship is removed later, a chat quote from message 2 remains, but opening the complete email now requires another surviving relationship or direct access through Alice's exact personal email account. Alice's reply remains a separate `email_drafts` row tied to Alice's original personal email account. Disconnecting that account keeps the email draft and signature but makes them unsendable until the same account reconnects. Real stored files live in `attachments`, and `attachment_relationships` connects them to the message, email draft, signature, chat, or ordinary resource that actually owns the file.
 
 A shared email account follows the same rules: one exact source email account per stored thread or email draft, ordinary resource permissions for attached access, no special collaboration-participant access system, and no guessing or merging across accounts.
 
-Last updated: 2026-08-03
+Last updated: 2026-08-04
 
 # Email Tests
 
@@ -15,6 +15,7 @@ Coverage Status:
 - Business Logic Covered By Automated Tests: Partial (`tests/frontend/pages/home/homeCommands.test.ts` covers send payload construction, Mango attachment references, and mailbox-scoped signature save ordering; `tests/frontend/pages/home/homeMailboxRealtime.test.ts` covers exact active targets, first/reconnect acceptance, event mapping, coalescing, queued-final work, and navigation cancellation; `tests/frontend/pages/home/homeMailDrafts.test.ts` covers provider/auth error retention versus exact revocation purge, out-of-order loads, local save/delete fencing, multiple personal accounts, and live-draft preparation before attachment upload; `tests/frontend/modules/editor/richTextEditing.test.ts` and `unifiedRichEditorContract.test.ts` cover rich email behavior. Backend communications/realtime/attachment tests cover exact mailbox routing, provider send boundaries, S3 attachment resolution, live email-draft attachment authorization, deleted-draft denial, sent-message survival, and durable inline-byte rejection. Broader mounted compose/signature endpoint coverage remains partial.)
 - Outbound attachment tests in `backend/internal/http/communications_handlers_test.go` and `backend/internal/http/nylas_client_test.go` cover early validation, tenant/link authorization, the complete metadata limit preflight, lazy exact-length multipart streaming, inline CID fields, cancellation, provider rejection, and body cleanup.
 - Mailbox query-mode tests in `backend/internal/http/communications_handlers_test.go`, `backend/internal/http/nylas_client_test.go`, and `tests/frontend/modules/communications/communicationsApi.test.ts` cover exact Google Primary bucketing, native/structured parameter exclusivity, thread precedence, preview-only response normalization, and Primary cache-overlay exclusions.
+- The additive V3 email schema and operator SQL safety contract are covered by `backend/internal/store/v3_email_migration_test.go`. The full create/copy script was also run twice against a disposable PostgreSQL 18 database, followed by a forced-drift rollback test.
 - Canonical thread reconciliation, authored-only quote extraction, timeline affordances, and Reply All focus are covered by `tests/frontend/modules/communications/emailThreadMessages.test.ts`, `tests/frontend/modules/communications/emailQuotedContent.test.ts`, `tests/frontend/modules/editor/emailViewerContract.test.ts`, and `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`; recipient deduplication/mailbox exclusion by `tests/frontend/modules/communications/emailRecipients.test.ts`; explicit reply/forward draft identity by `tests/frontend/pages/home/homeMailDrafts.test.ts`; faithful sanitized forwarding and attachment copying by `tests/frontend/pages/home/emailForwarding.test.ts` and `tests/frontend/pages/home/homeCommands.test.ts`; calendar event-detail/RSVP request construction by `tests/frontend/modules/communications/communicationsApi.test.ts` plus backend calendar/Nylas handler tests; and honest grouped receipt presentation by `tests/frontend/pages/home/emailReadReceipts.test.ts`.
 
 - Automatic signature insertion, rich-body deduplication, signature-only draft detection, mailbox scope keys, and personal/shared signature request scope are covered by `tests/frontend/pages/home/homeCommands.test.ts`, `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`, and `tests/frontend/modules/communications/communicationsApi.test.ts`.
@@ -153,15 +154,25 @@ V3EMAIL54 - Step 2 uses deterministic batches, stable ordering, checkpoints, exa
 
 V3EMAIL55 - A failed batch or count drift rolls back that subphase and leaves preserved legacy sources unchanged. Legacy tables are not dropped during copy or backend cutover.
 
-V3EMAIL56 - Long copy may run while the old application still writes legacy tables. The simplest final switch pauses all email writers, runs a final delta copy and reconciliation, deploys the new backend, smoke-tests it, and restores writers. Temporary dual-write is required only if the business rejects that maintenance window.
 
-V3EMAIL57 - The approved targeted relationship cleanup contains only the preflight-proven account-unresolved relationship rows and duplicate relationship extras. It never becomes permission to delete all stored email.
+V3EMAIL56 - In 28 retained Node pairs, the collaboration projection's old `block_id` equals its own Attached-email information ID. That value is an old relationship marker, not a textbox ID. It maps to a whole-Node relationship with a null `resource_textbox_id`.
 
-V3EMAIL58 - Jonat separately approved clearing all development recycle-bin data. The operator script must count-guard that action and stop on drift; a repository agent never applies it to a live database.
+V3EMAIL57 - Each of those 28 pairs has exactly one collaboration row and one `created_from_email` row for the same personal email account, message, Node, and whole-resource target. Step 2 keeps the collaboration Attached-email information ID as the final relationship ID, maps both source rows to it in the audit ledger, and does not delete either old row.
 
-V3EMAIL59 - After cutover, keep old email tables unchanged for an agreed soak/rollback period. Table retirement is a later explicit release.
+V3EMAIL58 - The cleaned development source has 256 retained projection rows but 228 final relationship identities after the 28 exact whole-Node pairs are consolidated. Any change to the number or shape of those pairs stops the operator script for review.
 
-V3EMAIL60 - The first future implementation is only the copy-paste read-only email count/preflight SQL and tests. It must not create tables, change backend code, or write to the database.
+V3EMAIL59 - One soft-deleted compose draft has a stale source ID with no matching source snapshot. Keep the draft and its files, but leave `source_email_message_id` null. Never invent a source email for it.
+
+V3EMAIL60 - The additive database step does not switch backend readers or writers. Until backend cutover, the old tables remain authoritative; run the copy again with all email writers paused immediately before cutover to capture the final delta.
+V3EMAIL61 - Long copy may run while the old application still writes legacy tables. The simplest final switch pauses all email writers, runs a final delta copy and reconciliation, deploys the new backend, smoke-tests it, and restores writers. Temporary dual-write is required only if the business rejects that maintenance window.
+
+V3EMAIL62 - The approved account-unresolved and Project-duplicate cleanup was completed separately before Step 2. The create/copy script never repeats that cleanup and never deletes stored email or a legacy relationship row.
+
+V3EMAIL63 - Jonat separately approved and completed the development recycle-bin cleanup. Step 1 and Step 2 require the recycle-bin count to remain zero and stop on drift; the V3 copy never clears it itself.
+
+V3EMAIL64 - After cutover, keep old email tables unchanged for an agreed soak/rollback period. Table retirement is a later explicit release.
+
+V3EMAIL65 - The implemented Step 1 preflight remains read-only, and the separately invoked Step 2 SQL creates/copies/reconciles the final data without switching backend code or changing legacy rows.
 
 ### Existing Pre-V3 Rules And Scenarios
 
