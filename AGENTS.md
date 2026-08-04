@@ -149,3 +149,13 @@ Do not use made-up words that you just invent on the fly to describe something. 
 9. Prefer established, well-maintained libraries when they reduce overall complexity or improve reliability. Do not reimplement common functionality without a clear reason.
 10. Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
 11. Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
+
+
+## PostgreSQL and operator SQL rules
+
+- The current MangoRTS development database runs PostgreSQL 17.7 (`server_version_num = 170007`). Repository database scripts that target the development database must support PostgreSQL 17.x. Do not require PostgreSQL 18 merely because local or CI disposable tests use PostgreSQL 18.
+- Copy-paste operator scripts must use plain PostgreSQL SQL that runs directly in DBeaver. Do not use psql backslash commands or psql-only features such as `\set`, `\i`, `\copy`, `\echo`, or variables written as `:variable`.
+- Preflight scripts must report the connected PostgreSQL server version and return STOP before any write script is run when the server version is unsupported.
+- Never treat physical column order as schema drift. PostgreSQL column order may differ because columns were added later.
+- Compare schemas using the exact unordered set of column names plus the exact column count. Do not compare arrays ordered by `ordinal_position`, identifier sorting, locale, or collation.
+- A schema check must still reject genuinely missing or extra columns, but it must accept the same exact columns in any physical order.
