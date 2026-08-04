@@ -353,17 +353,17 @@ lock table attachment_relationships,attachment_upload_jobs,attachment_previews i
 create or replace function pg_temp.attachment_step1_assert_columns(
   expected_table text,expected_columns text[]
 ) returns void language plpgsql as $$
-declare actual_columns text[]; normalized_expected_columns text[];
+declare actual_columns text[];
 begin
-  select array_agg(columns.column_name order by columns.column_name) into actual_columns
+  select array_agg(columns.column_name::text order by columns.ordinal_position)
+  into actual_columns
   from information_schema.columns columns
   where columns.table_schema=current_schema() and columns.table_name=expected_table;
-  select array_agg(expected.column_name order by expected.column_name)
-  into normalized_expected_columns
-  from unnest(expected_columns) expected(column_name);
-  if actual_columns is distinct from normalized_expected_columns then
+  if cardinality(actual_columns) is distinct from cardinality(expected_columns)
+     or not coalesce(actual_columns @> expected_columns,false)
+     or not coalesce(expected_columns @> actual_columns,false) then
     raise exception 'Attachment Step 1 column drift for %: expected %, found %',
-      expected_table,normalized_expected_columns,actual_columns;
+      expected_table,expected_columns,actual_columns;
   end if;
 end $$;
 
