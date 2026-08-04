@@ -725,8 +725,12 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     assert.ok(chatToggle);
     assert.equal(emailWorkspace.dataset.nodeEmailWorkspaceMode, "email-with-text");
     assert.equal(emailNodeRow.querySelector<HTMLElement>('[data-node-visible-panes]')?.dataset.nodeVisiblePanes, "editor-chat");
-    assert.equal(emailColumn.style.height, "auto", "the email column should grow with the complete message instead of becoming a nested scroller");
-    assert.ok(Number.parseFloat(emailColumn.style.minHeight) >= 240, "the email column should still fill the remaining Node viewport");
+    assert.equal(emailColumn.style.height, emailColumn.style.minHeight, "the email column should remain bounded to the available Node viewport");
+    assert.ok(Number.parseFloat(emailColumn.style.minHeight) >= 240, "the email column should fill the remaining Node viewport");
+    assert.equal(emailColumn.style.overflow, "hidden", "a long email should not extend the outer virtualized timeline");
+    const emailColumnScroll = emailColumn.querySelector<HTMLElement>(".editor-document-scroll");
+    assert.ok(emailColumnScroll, "the bounded email column should retain its own content scroller");
+    assert.equal(emailColumnScroll.style.overflowY, "auto", "long email content should scroll inside the email column");
     assert.ok(emailNodeRow.querySelector('[data-node-text-block-id="node-block-0"]'));
     assert.ok(emailNodeRow.querySelector('[data-node-chat-block-id="node-block-0"]'));
     assert.equal(emailNodeRow.querySelector('[data-node-chat-block-id="node-block-0"] [data-chat-pane-header="true"]'), null, "embedded Node chat should use the shared row header instead of rendering a second header");
