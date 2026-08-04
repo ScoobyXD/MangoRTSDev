@@ -43,7 +43,7 @@ func TestV3EmailExpansionIsAdditiveAndOperatorGated(t *testing.T) {
 			"create table if not exists attachment_relationships",
 			"email_account_type in ('personal_email_account','shared_email_account')",
 			"references email_relationships(company_id,email_relationship_id) on delete set null",
-			"attachment_relationship_id uuid not null",
+			"attachment_relationship_id uuid not null", "retained_orphan_evidence",
 		} {
 			if !strings.Contains(strings.ReplaceAll(sqlText, " ", ""), strings.ReplaceAll(required, " ", "")) {
 				t.Errorf("schema expansion is missing %q", required)
@@ -73,6 +73,7 @@ func TestV3EmailExpansionIsAdditiveAndOperatorGated(t *testing.T) {
 		"ready_to_copy", "relationships_without_one_account",
 		"relationship_rows_to_consolidate", "expected_final_email_relationships",
 		"stale_compose_source_links_to_omit", "attachment_relationships_to_copy",
+		"orphan_attachment_relationships_to_omit", "attachment_relationships_requiring_review",
 	} {
 		if !strings.Contains(step1, required) {
 			t.Errorf("Step 1 is missing %q", required)
@@ -144,7 +145,8 @@ func TestV3EmailCopyEncodesApprovedBusinessRules(t *testing.T) {
 		"pg_temp.v3_query_unescape", "'email_message'", "'email_draft'",
 		"'email_signature'", "resource_type='attached_email'",
 		"relationship_kind in('email_attachment','email_inline_attachment')",
-		"not every legacy attachment relationship resolved exactly once",
+		"v3_attachment_orphan_evidence", "resolution_count=0",
+		"legacy attachment relationship is malformed or has multiple possible targets",
 	} {
 		if !strings.Contains(attachments, required) {
 			t.Errorf("attachment copy is missing %q", required)
@@ -152,7 +154,7 @@ func TestV3EmailCopyEncodesApprovedBusinessRules(t *testing.T) {
 	}
 	for _, required := range []string{
 		"'consolidated_duplicate'", "'retained_without_source_link'",
-		"v3 email thread final count mismatch", "ready_for_backend_cutover_review",
+		"v3 email thread final count mismatch", "ready_for_backend_cutover_review", "retained_orphan_evidence",
 	} {
 		if !strings.Contains(reconcile, required) {
 			t.Errorf("reconciliation is missing %q", required)
