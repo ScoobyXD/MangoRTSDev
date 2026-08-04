@@ -90,7 +90,7 @@ func TestPersonalEmailDraftAttachmentContentUsesDraftIdentityAndSurvivesDisconne
 	fixture := newCommunicationsEmailDraftScopeHTTPFixture(t)
 	storage := newFakeAttachmentObjectStorage()
 	handler := NewServerWithOptions(fixture.repo, ServerOptions{AttachmentStorage: storage}).Routes()
-	exactAttachmentID := seedLiveEmailDraftAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, "content-draft", "exact.txt", "text/plain", []byte("exact"))
+	exactAttachmentID := seedLiveEmailDraftAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, "owner-a@example.com", "content-draft", "exact.txt", "text/plain", []byte("exact"))
 	if _, err := fixture.repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
 		UserID: fixture.owner.UserID, Provider: "google", AccountEmail: "disconnected@example.com", GrantID: "disconnected", Status: "reauth_required",
 	}); err != nil {
@@ -133,7 +133,7 @@ func TestDeletedEmailDraftAttachmentLinkIsRetiredButSentMessageLinkSurvives(t *t
 	storage := newFakeAttachmentObjectStorage()
 	handler := NewServerWithOptions(fixture.repo, ServerOptions{AttachmentStorage: storage}).Routes()
 	const draftID = "deleted-attachment-draft"
-	draftOnlyAttachmentID := seedLiveEmailDraftAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, draftID, "draft-only.txt", "text/plain", []byte("draft-only"))
+	draftOnlyAttachmentID := seedLiveEmailDraftAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, "owner-a@example.com", draftID, "draft-only.txt", "text/plain", []byte("draft-only"))
 	sentAttachmentID := seedEmailAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, draftID, "sent.txt", "text/plain", []byte("sent"))
 	ensured, err := fixture.repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: fixture.companyID, PersonalUserID: fixture.owner.UserID,

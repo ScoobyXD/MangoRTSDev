@@ -512,17 +512,16 @@ func seedEmailSignatureAttachmentForCommunicationsTest(t *testing.T, repo *store
 	return attachmentID
 }
 
-func seedLiveEmailDraftAttachmentForCommunicationsTest(t *testing.T, repo *store.MemoryRepo, storage *fakeAttachmentObjectStorage, actorUserID, companyID, resourceID, filename, contentType string, content []byte) string {
+func seedLiveEmailDraftAttachmentForCommunicationsTest(t *testing.T, repo *store.MemoryRepo, storage *fakeAttachmentObjectStorage, actorUserID, companyID, accountEmail, resourceID, filename, contentType string, content []byte) string {
 	t.Helper()
 	draftID := strings.TrimSpace(resourceID)
 	if draftID == "" {
 		t.Fatal("seed live email draft attachment: draft ID required")
 	}
-	connections, err := repo.ListUserEmailConnections(actorUserID)
-	if err != nil || len(connections) == 0 {
-		t.Fatalf("seed live email draft attachment: exact personal email account unavailable: %v", err)
+	accountEmail = strings.TrimSpace(accountEmail)
+	if accountEmail == "" {
+		t.Fatal("seed live email draft attachment: account email required")
 	}
-	accountEmail := connections[0].AccountEmail
 	if _, err := repo.UpsertCommunicationsEmailDraft(store.CommunicationsEmailDraftInput{
 		CompanyID: companyID, DraftID: draftID, CreatedByUserID: actorUserID, UpdatedByUserID: actorUserID,
 		Kind: "compose", PersonalUserID: actorUserID, PersonalAccountEmail: accountEmail, AccountEmail: accountEmail,
@@ -689,7 +688,7 @@ func newCommunicationsSendTestFixture(t *testing.T) *communicationsSendTestFixtu
 
 func (f *communicationsSendTestFixture) seedAttachment(t *testing.T, resourceID, filename string, content []byte) string {
 	t.Helper()
-	return seedLiveEmailDraftAttachmentForCommunicationsTest(t, f.repo, f.storage, f.userID, f.companyID, resourceID, filename, "application/octet-stream", content)
+	return seedLiveEmailDraftAttachmentForCommunicationsTest(t, f.repo, f.storage, f.userID, f.companyID, f.accountEmail, resourceID, filename, "application/octet-stream", content)
 }
 
 func (f *communicationsSendTestFixture) send(t *testing.T, payload any) *httptest.ResponseRecorder {
@@ -2022,7 +2021,7 @@ func TestCommunicationsSendResolvesLargeMangoAttachmentWithQueryCompanyID(t *tes
 	}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 	largeContent := []byte(strings.Repeat("ABC", 280000))
-	attachmentID := seedLiveEmailDraftAttachmentForCommunicationsTest(t, repo, storage, user.UserID, companyID, personalEmailDraftResourceID(user.UserID, user.Email, "draft-large"), "large.txt", "text/plain", largeContent)
+	attachmentID := seedLiveEmailDraftAttachmentForCommunicationsTest(t, repo, storage, user.UserID, companyID, user.Email, personalEmailDraftResourceID(user.UserID, user.Email, "draft-large"), "large.txt", "text/plain", largeContent)
 	body := `{"to":[{"email":"friend@example.com"}],"subject":"Hi","body":"Body","attachments":[{"attachment_id":"` + attachmentID + `","filename":"large.txt","content_type":"text/plain","size":` + fmt.Sprint(len(largeContent)) + `}]}`
 
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/send?company_id="+companyID, body, token, http.StatusCreated)
