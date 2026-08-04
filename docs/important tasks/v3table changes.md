@@ -1164,7 +1164,16 @@ The special collaboration participant permission system retires. Read-only evide
 
 ## Approved attachment consolidation decisions
 
-This section records the attachment decisions Jonat approved on 2026-08-04. It is the handoff for the future attachment table and backend work. No schema or live data change is authorized merely by documenting these rules.
+This section records the attachment decisions Jonat approved on 2026-08-04 and is the current product contract. The repository now contains the Step 1 schema and operator tooling listed below. Their presence does not authorize an agent to apply SQL to a live database or delete live S3 objects.
+
+### Step 1 implementation artifacts
+
+- `scripts/attachment_step1_preflight.sql` is the single DBeaver-compatible, repeatable-read, read-only inventory and READY/STOP report. It exposes only safe relationship and attachment identities, counts, and storage-key fingerprints.
+- `scripts/attachment_step1_create_copy_reconcile.sql` is the separately operated transaction for additive creation, exact checkpoint verification, stable-ID copy, exact evidence-ledger deletion of the 213 broken relationships, complete zero-owner marking, and recount.
+- `backend/db/migrations/20260804_attachment_step1_expansion.sql` and `backend/db/schema.sql` define the additive Step 1 destinations and pending-delete link guards without changing the deployed multipart-parts contract.
+- `backend/cmd/mango-attachment-step1-cleanup` is dry-run by default and requires company scope plus `-apply -confirm DELETE_ATTACHMENT_STEP1_ORPHANS` before it deletes S3 objects or finalizes Postgres cleanup. It uses the normal AWS provider/SSO configuration and preserves database keys after partial failure for safe retry.
+- `scripts/attachment_step1_to_step2_boundary.sql` is not a Step 1 operation. At the later Step 2 maintenance, pause writers and rerun the exact Step 1 preflight/reconcile/cleanup sequence first so any intervening legacy writes are captured; the boundary then performs the `attachment_upload_parts.upload_intent_id` to `upload_job_id` rename and foreign-key swap immediately before Step 2 deploys the final backend.
+- `backend/internal/store/attachment_step1_migration_test.go` provides static phase checks and an opt-in disposable PostgreSQL 18 first-run/rerun/drift-rollback test. `backend/internal/attachmentcleanup/service_test.go` covers cleanup with mocks only. No live database or S3 operation is part of these tests.
 
 ### Final attachment table model
 
@@ -1207,7 +1216,7 @@ Retire `resource_attachments`, `attachment_upload_intents`, `attachment_variants
 
 - Run one read-only preflight first. Count all eight current tables, active/deleted relationships, relationships by resource type, attachment IDs with zero/one/many live relationships, upload jobs by status, multipart parts, previews by type, duplicate S3 keys, and the exact 213 known broken relationships.
 - Exact-verify the `attachment_relationships` table and 1,134 rows already created by the completed email data checkpoint, or create it on a clean database. Create `attachment_upload_jobs` and `attachment_previews` with their final constraints while keeping the old tables available.
-- Copy valid active relationships, upload-job history that is intentionally retained, multipart part references, and `display`/`thumbnail` preview rows using stable IDs and exact conflict checks.
+- Copy valid active relationships, upload-job history that is intentionally retained, and `display`/`thumbnail` preview rows using stable IDs and exact conflict checks. Retain and recount `attachment_upload_parts` in place on its legacy `upload_intent_id` foreign key during Step 1 so the deployed backend keeps working; perform the final column/FK swap only at the writer-paused boundary immediately before Step 2.
 - Delete the 213 proven broken legacy relationship rows after the recount matches. Then check every `attachments` row, not only the rows touched by those 213 relationships. Delete every original and its previews when zero valid relationships survive, using the pending-delete and retry order above.
 - Remove any proven unused `email_send` preview data safely. Do not migrate `email_send` or `original` rows into `attachment_previews`.
 - Recount and reconcile every copied, omitted, and deleted row. A mismatch stops the operation and must not guess or broaden the deletion set.
