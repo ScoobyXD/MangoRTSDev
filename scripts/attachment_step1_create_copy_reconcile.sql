@@ -1,4 +1,7 @@
 -- Attachment Step 1 create/copy/recount/reconcile entry point.
+-- This is the Step 1 database/data operation. It is not Step 2 application
+-- code and it does not perform the Step 3 legacy-table cutoff.
+--
 -- Open this whole file in DBeaver and execute it as one script. This transaction
 -- deletes only the exact ledger-backed broken legacy relationships. It marks
 -- zero-owner attachments unavailable but deliberately retains every S3 key and

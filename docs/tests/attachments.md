@@ -109,12 +109,19 @@ ATT68 - The 213 proven legacy relationships whose exact target was already delet
 ATT69 - Sending an email creates an idempotent `email_message` relationship for every retained sent file before the email draft is removed. Sent-message visibility and authorization come from that relationship, not from a preview type.
 ATT70 - `email_send` is removed. `attachment_previews` permits only `display` and `thumbnail`; the completed original is stored by `attachments`. Outbound email size checks and streaming are separate code and do not require an `email_send` preview.
 ATT71 - The development attachment cutover has no known unfinished uploads to preserve. Step 1 still counts every upload-job status and stops if unexpected active jobs appear. `attachment_upload_parts` remains because future files larger than 64 MiB still need resumable multipart uploads.
-ATT72 - Attachment rollout has three gates: Step 1 creates final destinations, copies/reconciles retained data, and deletes only approved bad data while leaving the live multipart-parts legacy column and foreign key intact; the writer-paused `attachment_step1_to_step2_boundary.sql` swap then occurs immediately before Step 2 changes the backend to read and write only the five final tables; Step 3 runs full tests, reconciles data, takes a database snapshot, and only then drops `resource_attachments`, `attachment_upload_intents`, `attachment_variants`, `attachment_migration_runs`, and `attachment_migration_items`.
+ATT72 - Attachment rollout has three gates: Step 1 creates final destinations, copies/reconciles retained data, and deletes only approved bad data while leaving the live multipart-parts legacy column and foreign key intact; the writer-paused `attachment_step2_database_cutover.sql` swap then occurs immediately before Step 2 changes the backend to read and write only the five final tables; Step 3 runs full tests, reconciles data, takes a database snapshot, and only then drops `resource_attachments`, `attachment_upload_intents`, `attachment_variants`, `attachment_migration_runs`, and `attachment_migration_items`.
 ATT73 - A complete bucket-wide S3 audit is not required for the first consolidation. Every object actively deleted by the migration or product cleanup must still be matched to its database key, and normal product deletion must start through Mango rather than by directly removing an S3 object.
 
 ### Attachment Step 1 operator sequence
 
-1. In DBeaver, use the database-enforced read-only credential to run `scripts/attachment_step1_preflight.sql`. Continue only when its final result is `READY_FOR_ATTACHMENT_STEP1` and the reported approved identities exactly match the 213-row evidence ledger.
+The number of repository scripts does not equal the number of product rollout
+steps. Step 1 deliberately has two SQL entry points: a read-only decision report
+and a separately authorized database/data operation. Step 2 owns the application
+code cutover plus its short database column/FK switch. Step 3 owns testing,
+snapshot, cutoff, and old-table retirement; no Step 3 retirement SQL exists yet
+because that work is not authorized until Step 2 passes its gates.
+
+1. In DBeaver, use the database-enforced read-only credential to run `scripts/attachment_step1_preflight.sql`. Its first result set starts with the decision row. Continue only when that first row is `READY_FOR_ATTACHMENT_STEP1` and the reported approved identities exactly match the 213-row evidence ledger.
 2. In a separately approved writer session, run `scripts/attachment_step1_create_copy_reconcile.sql`. A failure leaves the transaction aborted; roll it back, investigate, and rerun the preflight. Do not edit a deletion predicate to make a count pass.
 3. With the normal backend database configuration, attachment bucket/region, and AWS SSO profile set only in the operator session, run the cleanup from `backend/`. The first command is dry-run only:
 
@@ -128,7 +135,7 @@ go run ./cmd/mango-attachment-step1-cleanup -company-id <company-uuid> -limit 10
 go run ./cmd/mango-attachment-step1-cleanup -company-id <company-uuid> -limit 100 -apply -confirm DELETE_ATTACHMENT_STEP1_ORPHANS
 ```
 
-5. Repeat dry-run/apply until `examined=0`, then rerun the preflight and preserve its reconciliation report. Do not run `scripts/attachment_step1_to_step2_boundary.sql` during Step 1. At the later Step 2 maintenance, pause writers, rerun this exact preflight/reconcile/cleanup sequence to capture any intervening legacy writes, and only then run the boundary immediately before deploying the Step 2 backend.
+5. Repeat dry-run/apply until `examined=0`, then rerun the preflight and preserve its reconciliation report. Do not run `scripts/attachment_step2_database_cutover.sql` during Step 1. At the later Step 2 maintenance, pause writers, rerun this exact preflight/reconcile/cleanup sequence to capture any intervening legacy writes, and only then run the boundary immediately before deploying the Step 2 backend.
 
 ## Scenarios
 

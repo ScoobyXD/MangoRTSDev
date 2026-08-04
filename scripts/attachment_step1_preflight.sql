@@ -1,4 +1,11 @@
 -- Attachment Step 1 read-only preflight.
+-- RESULT SET 1 starts with exactly one readiness row. Do not continue unless
+-- that first row says READY_FOR_ATTACHMENT_STEP1. Summary counts follow it,
+-- then the safe identities needed to audit any cleanup candidates.
+-- RESULT SET 2 is the exact attachment-table column inventory.
+-- RESULT SET 3 is the exact constraint and index inventory.
+--
+-- These SQL files do not map one-to-one to the three product rollout steps.
 -- Open this whole file in DBeaver and execute it as one script. It uses plain
 -- PostgreSQL SQL only and never returns filenames, resource IDs, object keys,
 -- message content, credentials, signed URLs, or attachment bytes.
@@ -8,43 +15,7 @@ set local statement_timeout = '5min';
 set local lock_timeout = '3s';
 set local idle_in_transaction_session_timeout = '6min';
 
--- Exact current/destination column inventory. Eight current tables are always
--- listed; the two additive destinations appear when already expanded.
-select c.table_name,c.ordinal_position,c.column_name,c.data_type,c.udt_name,
-       c.is_nullable,c.column_default
-from information_schema.columns c
-where c.table_schema='public'
-  and c.table_name in (
-    'attachments','resource_attachments','attachment_relationships',
-    'attachment_upload_intents','attachment_upload_parts','attachment_variants',
-    'attachment_migration_runs','attachment_migration_items',
-    'attachment_upload_jobs','attachment_previews'
-  )
-order by c.table_name,c.ordinal_position;
-
--- Exact keys, checks, foreign keys, and indexes without table data.
-select 'constraint' object_kind,cls.relname table_name,con.conname object_name,
-       pg_get_constraintdef(con.oid,true) definition
-from pg_constraint con
-join pg_class cls on cls.oid=con.conrelid
-join pg_namespace ns on ns.oid=cls.relnamespace
-where ns.nspname='public' and cls.relname in (
-  'attachments','resource_attachments','attachment_relationships',
-  'attachment_upload_intents','attachment_upload_parts','attachment_variants',
-  'attachment_migration_runs','attachment_migration_items',
-  'attachment_upload_jobs','attachment_previews'
-)
-union all
-select 'index',tablename,indexname,indexdef
-from pg_indexes
-where schemaname='public' and tablename in (
-  'attachments','resource_attachments','attachment_relationships',
-  'attachment_upload_intents','attachment_upload_parts','attachment_variants',
-  'attachment_migration_runs','attachment_migration_items',
-  'attachment_upload_jobs','attachment_previews'
-)
-order by table_name,object_kind,object_name;
-
+-- RESULT SET 1: decision first, summary second, safe audit detail last.
 with recursive
 source_relationships as (
   select r.*,string_to_array(r.resource_id,':') parts
@@ -473,7 +444,9 @@ readiness as (
         where i.upload_intent_id=p.upload_intent_id))
     then 'READY_FOR_ATTACHMENT_STEP1'
     else 'STOP_AND_REVIEW' end status
-)
+),
+report_rows as (
+  -- Summary metrics and safe audit details share one result set.
 select 'metric' section,m.category,null::uuid company_id,null::uuid identity_id,
        null::uuid attachment_id,m.detail,m.value
 from metrics m
@@ -504,8 +477,57 @@ select 'reused_storage_key','storage_key_fingerprint',null,null,null,
 from reused_storage r
 union all
 select 'readiness',status,null,null,null,
-       'Review every result set before running the write entry point.',null
+       case when status='READY_FOR_ATTACHMENT_STEP1'
+            then 'Continue only after reviewing the summary counts and safe audit details below.'
+            else 'Stop. Do not run the Step 1 write script.' end,null
 from readiness
-order by section,category,company_id,identity_id,attachment_id,detail;
+)
+select section,category,company_id,identity_id,attachment_id,detail,value
+from report_rows
+order by case section
+           when 'readiness' then 1
+           when 'metric' then 2
+           when 'broken_relationship_identity' then 3
+           when 'zero_owner_attachment' then 4
+           when 'reused_storage_key' then 5
+           else 6
+         end,
+         category,company_id,identity_id,attachment_id,detail;
+-- RESULT SET 2: exact current/destination column inventory. Eight current
+-- tables are always listed; additive destinations appear when expanded.
+select c.table_name,c.ordinal_position,c.column_name,c.data_type,c.udt_name,
+       c.is_nullable,c.column_default
+from information_schema.columns c
+where c.table_schema='public'
+  and c.table_name in (
+    'attachments','resource_attachments','attachment_relationships',
+    'attachment_upload_intents','attachment_upload_parts','attachment_variants',
+    'attachment_migration_runs','attachment_migration_items',
+    'attachment_upload_jobs','attachment_previews'
+  )
+order by c.table_name,c.ordinal_position;
 
-rollback;
+-- RESULT SET 3: exact keys, checks, foreign keys, and indexes without table data.
+select 'constraint' object_kind,cls.relname table_name,con.conname object_name,
+       pg_get_constraintdef(con.oid,true) definition
+from pg_constraint con
+join pg_class cls on cls.oid=con.conrelid
+join pg_namespace ns on ns.oid=cls.relnamespace
+where ns.nspname='public' and cls.relname in (
+  'attachments','resource_attachments','attachment_relationships',
+  'attachment_upload_intents','attachment_upload_parts','attachment_variants',
+  'attachment_migration_runs','attachment_migration_items',
+  'attachment_upload_jobs','attachment_previews'
+)
+union all
+select 'index',tablename,indexname,indexdef
+from pg_indexes
+where schemaname='public' and tablename in (
+  'attachments','resource_attachments','attachment_relationships',
+  'attachment_upload_intents','attachment_upload_parts','attachment_variants',
+  'attachment_migration_runs','attachment_migration_items',
+  'attachment_upload_jobs','attachment_previews'
+)
+order by table_name,object_kind,object_name;
+
+rollback; -- end read-only preflight
