@@ -50,6 +50,7 @@ import { upsertProjectRelationship } from "../../modules/project-management/proj
 import { subscribeRealtimeScope } from "../../modules/realtime/realtimeWebSocket";
 import { EmailCollaborationParticipantRoster } from "./EmailCollaborationParticipantRoster";
 import {
+  emailNodeImportRequired,
   formatEmailCollaborationChatError,
   resolveEmailCollaborationChatPlacement,
   type EmailCollaborationActionRequest,
@@ -531,21 +532,24 @@ export function EmailCollaborationChatSurface({
     const cleanDraft = draft.trim();
     setSubmitting(true);
     try {
-      const shouldAttachEmail = cleanNodeID !== detectedNodeID;
       const providerMessageID = selection?.messageID?.trim() || message.id.trim();
-      let emailMessageID = collaborationTargetMessage.email_message_id?.trim()
-        || message.email_message_id?.trim()
-        || collaboration?.root_message_id?.trim()
+      let emailMessageID = (collaborationTargetMessage.id.trim() === providerMessageID
+        ? collaborationTargetMessage.email_message_id?.trim()
+        : "")
+        || (message.id.trim() === providerMessageID ? message.email_message_id?.trim() : "")
+        || (collaboration?.message?.id?.trim() === providerMessageID ? collaboration.root_message_id?.trim() : "")
         || "";
-      if (!emailMessageID) throw new Error("email_message_id_missing");
+      const shouldAttachEmail = emailNodeImportRequired(cleanNodeID, detectedNodeID, emailMessageID);
       const createdTimestamp = new Date().toISOString();
       const subject = message.subject?.trim() || "Email";
       const targetProjections = await getNodeInformationProjectionSingleFlight(apiBase, companyID, cleanNodeID).catch(() => []);
       let attachedEmailInformationID = collaboration?.attached_email_information_id?.trim() ?? "";
       const existingTextBlockProjections = listEditorTextBlockProjections(targetProjections);
-      const existingLinkedProjection = existingTextBlockProjections.find((projection) => (
-        parseEditorTextBlockContent(projection.information).emailMessageID?.trim() === emailMessageID
-      ));
+      const existingLinkedProjection = emailMessageID
+        ? existingTextBlockProjections.find((projection) => (
+          parseEditorTextBlockContent(projection.information).emailMessageID?.trim() === emailMessageID
+        ))
+        : undefined;
       const textBlockID = existingLinkedProjection?.information_id ?? generateStableInformationID();
       const existingEmailContents = existingTextBlockProjections.map((projection) => parseEditorTextBlockContent(projection.information));
       const existingMessageAccent = existingEmailContents
