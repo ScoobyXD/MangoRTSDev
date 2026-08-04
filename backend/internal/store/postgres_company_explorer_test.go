@@ -102,41 +102,21 @@ func TestPostgresCompanyExplorerV2RowsUseFinalStorageAndLeafItems(t *testing.T) 
 	}
 }
 
-func TestPostgresCompanyExplorerV2NodeEdgeGuardsAreCollaborationScoped(t *testing.T) {
+func TestPostgresCompanyExplorerV2NodeEdgesUseOrdinaryNodeSemantics(t *testing.T) {
 	raw, err := os.ReadFile("postgres_company_explorer_v2.go")
 	if err != nil {
 		t.Fatalf("ReadFile postgres_company_explorer_v2.go: %v", err)
 	}
 	source := string(raw)
-	moveBody := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) MoveCompanyExplorerV2Edge")), " "))
-	for _, want := range []string{
-		"if targettype == entitytypenode",
-		"postgresrejectemailcollaborationnodemutation(ctx, tx, input.companyid, targetid)",
-	} {
-		if !strings.Contains(moveBody, want) {
-			t.Fatalf("MoveCompanyExplorerV2Edge missing collaboration-scoped Node guard %q", want)
+	for _, signature := range []string{"func (r *PostgresRepo) MoveCompanyExplorerV2Edge", "func (r *PostgresRepo) DeleteCompanyExplorerV2Edges"} {
+		body := extractFunctionSourceForTest(t, source, signature)
+		for _, forbidden := range []string{"postgresRejectEmailCollaborationNodeMutation", "communications_email_collaborations", "ErrProtectedEmailCollaborationResource"} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s retains special email Node guard %q", signature, forbidden)
+			}
 		}
-	}
-	if strings.Contains(moveBody, "if targettype == entitytypenode { return companyexplorerv2row{}, errprotectedemailcollaborationresource") {
-		t.Fatal("MoveCompanyExplorerV2Edge still protects every Node edge by target type alone")
-	}
-
-	deleteBody := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) DeleteCompanyExplorerV2Edges")), " "))
-	for _, want := range []string{
-		"where item.target_type='node' and exists",
-		"from communications_email_collaborations collaboration",
-		"collaboration.company_id=item.company_id",
-		"collaboration.node_id=item.target_id",
-	} {
-		if !strings.Contains(deleteBody, want) {
-			t.Fatalf("DeleteCompanyExplorerV2Edges missing collaboration-scoped Node guard %q", want)
-		}
-	}
-	if strings.Contains(deleteBody, "count(*) filter (where target_type='node')") {
-		t.Fatal("DeleteCompanyExplorerV2Edges still protects every Node edge by target type alone")
 	}
 }
-
 func TestPostgresCompanyExplorerV2PermissionRuleMarkersCoverLeafResources(t *testing.T) {
 	markerSQL := strings.ToLower(strings.Join(strings.Fields(companyExplorerPermissionRulesSelect("all_rows.entity_type", "all_rows.entity_id")), " "))
 	for _, want := range []string{

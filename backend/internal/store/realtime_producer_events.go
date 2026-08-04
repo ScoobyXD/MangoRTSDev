@@ -107,33 +107,6 @@ func notificationDeletionOutboxInputs(items []domain.Notification, mode string) 
 	return inputs, nil
 }
 
-func communicationsEmailCollaborationMailboxOutboxInput(companyID, userID, accountEmail string, message domain.EmailMessageSnapshot) (RealtimeOutboxInput, error) {
-	companyID = strings.TrimSpace(companyID)
-	userID = strings.TrimSpace(userID)
-	accountEmail = normalizeEmail(accountEmail)
-	message = normalizeEmailMessageSnapshot(message)
-	if companyID == "" || userID == "" || accountEmail == "" || message.ID == "" {
-		return RealtimeOutboxInput{}, ErrInvalid
-	}
-	scope := "mailbox:personal:account:" + userID + ":" + accountEmail
-	payload := map[string]any{
-		"type": "mailbox.message.changed", "company_id": companyID, "scope": scope,
-		"trigger": "message.created", "message_id": message.ID, "thread_id": message.ThreadID,
-	}
-	if message.Date > 0 {
-		payload["occurred_at"] = time.Unix(message.Date, 0).UTC()
-	}
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return RealtimeOutboxInput{}, err
-	}
-	return normalizeRealtimeOutboxInput(RealtimeOutboxInput{
-		EventID:   stableRealtimeEventID("mailbox.message.changed", "email-collaboration", companyID, userID, accountEmail, message.ID),
-		CompanyID: companyID, Scope: scope, EventType: "mailbox.message.changed", Payload: encoded,
-		AllowedUserIDs: []string{userID}, AudienceRestricted: true,
-	})
-}
-
 func nodeChatOutboxInput(companyID, nodeID, blockID, messageID, eventType string) (RealtimeOutboxInput, error) {
 	companyID = strings.TrimSpace(companyID)
 	nodeID = strings.TrimSpace(nodeID)

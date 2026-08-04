@@ -114,6 +114,7 @@ function nodeEmailProjection(blockID: string): NodeProjectionItem {
     information: buildEditorAttachedEmailPayload({
       blockID,
       messageID: `thread-root-${blockID}`,
+      emailMessageID: `email-message-${blockID}`,
       threadID: `thread-${blockID}`,
       subject: `Email for ${blockID}`,
       from: "sender@example.test",
@@ -346,6 +347,7 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     const url = new URL(String(input), dom.window.location.href);
     if (url.pathname === "/v1/communications/messages/thread-root-node-block-0") return jsonResponse({
       message: {
+        email_message_id: "email-message-node-block-0",
         id: "thread-root-node-block-0",
         thread_id: "thread-node-block-0",
         subject: "Email for node-block-0",
@@ -360,6 +362,7 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     });
     if (url.pathname === "/v1/communications/messages/message-node-block-0") return jsonResponse({
       message: {
+        email_message_id: "internal-message-node-block-0",
         id: "message-node-block-0",
         thread_id: "thread-node-block-0",
         subject: "Email for node-block-0",
@@ -692,7 +695,7 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     const emailLinkedPayload = JSON.parse(emailLinkedProjection.information.slice(TEXT_BLOCK_PREFIX.length)) as Record<string, unknown>;
     emailLinkedProjection.information = TEXT_BLOCK_PREFIX + JSON.stringify({
       ...emailLinkedPayload,
-      email_message_id: "message-node-block-0",
+      email_message_id: "internal-message-node-block-0",
       email_accent: "#2563eb",
     });
     currentNodeProjectionItems = [
@@ -1162,6 +1165,7 @@ test("real Node, Project, and Logic Gate page hosts load JSON editors and preser
     information: buildEditorAttachedEmailPayload({
       blockID: hostNodeDocumentID,
       messageID: "durable-html-message",
+      emailMessageID: "internal-durable-html-message",
       threadID: "durable-html-thread",
       emailThreadID: "durable-provider-independent-thread",
       subject: "HTML email stays outside Tiptap",

@@ -277,7 +277,8 @@ var recycleSnapshotTables = map[string]bool{
 	"resource_gvic_assignments":              true,
 	"resource_permissions":                   true,
 	"company_explorer_items":                 true,
-	"communications_email_nodes":             true,
+	"email_relationships":                    true,
+	"email_drafts":                           true,
 }
 
 var recycleRestoreTableOrder = []string{
@@ -306,7 +307,8 @@ var recycleRestoreTableOrder = []string{
 	"resource_gvic_assignments",
 	"resource_permissions",
 	"user_logic_gate_shortcuts",
-	"communications_email_nodes",
+	"email_relationships",
+	"email_drafts",
 	"node_logic_gate_assignments",
 	"node_relationships",
 	"logic_gate_relationships",
@@ -522,10 +524,13 @@ func postgresSnapshotRecyclePayloadWithCacheTx(ctx context.Context, tx *sql.Tx, 
 			}
 		}
 	}
-	if len(nodeIDs) > 0 || len(logicGateIDs) > 0 {
-		emailWhere, emailArgs := recycleResourceWhere(companyID, nodeIDs, logicGateIDs, nil, "node_id", "logic_gate_id", "")
+	if len(nodeIDs) > 0 || len(logicGateIDs) > 0 || len(projectIDs) > 0 {
+		emailWhere, emailArgs := recycleTypedResourceWhere(companyID, nodeIDs, logicGateIDs, projectIDs, "resource_type", "resource_id")
 		if emailWhere != "" {
-			if err := addTable("communications_email_nodes", emailWhere, emailArgs...); err != nil {
+			if err := addTable("email_relationships", emailWhere, emailArgs...); err != nil {
+				return nil, err
+			}
+			if err := addTable("email_drafts", "company_id=$1::uuid and email_relationship_id in (select email_relationship_id from email_relationships where "+emailWhere+")", emailArgs...); err != nil {
 				return nil, err
 			}
 		}

@@ -433,6 +433,7 @@ type EmailAttachmentSnapshot struct {
 }
 
 type EmailMessageSnapshot struct {
+	EmailMessageID   string                    `json:"email_message_id,omitempty"`
 	ID               string                    `json:"id"`
 	ThreadID         string                    `json:"thread_id,omitempty"`
 	Subject          string                    `json:"subject"`
@@ -464,6 +465,7 @@ type CommunicationsEmailThread struct {
 	PersonalAccountEmail  string                       `json:"personal_account_email,omitempty"`
 	SharedInboxID         string                       `json:"shared_inbox_id,omitempty"`
 	AccountEmail          string                       `json:"account_email"`
+	Provider              string                       `json:"provider"`
 	ProviderThreadID      string                       `json:"provider_thread_id,omitempty"`
 	RootProviderMessageID string                       `json:"root_provider_message_id"`
 	DownloadStatus        string                       `json:"download_status"`
@@ -606,6 +608,7 @@ type CommunicationsEmailCollaboration struct {
 	PersonalAccountEmail       string                                        `json:"personal_account_email,omitempty"`
 	SharedInboxID              string                                        `json:"shared_inbox_id,omitempty"`
 	AccountEmail               string                                        `json:"account_email"`
+	Provider                   string                                        `json:"provider"`
 	ProviderThreadID           string                                        `json:"provider_thread_id,omitempty"`
 	EmailThreadID              string                                        `json:"email_thread_id,omitempty"`
 	RootMessageID              string                                        `json:"root_message_id"`

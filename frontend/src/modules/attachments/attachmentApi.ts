@@ -20,7 +20,6 @@ export type MangoAttachmentResourceType =
   | "email_message"
   | "email_draft"
   | "email_signature"
-  | "attached_email"
   | "shared_inbox"
   | "company_explorer_folder"
   | "shared_inbox_folder";
@@ -376,38 +375,17 @@ export function mangoAttachmentContentPath(companyID: string, attachmentID: stri
   return `/v1/attachments/${encodeURIComponent(attachmentID.trim())}/content?${query.toString()}`;
 }
 
-export function mangoEmailDraftResourceID(input: { draftID: string; userID?: string; accountEmail?: string; sharedInboxID?: string; collaborationID?: string }): string {
-  const draftID = input.draftID.trim();
-  const collaborationID = input.collaborationID?.trim() ?? "";
-  if (collaborationID && draftID) return `collaboration:${encodeURIComponent(collaborationID)}:${encodeURIComponent(draftID)}`;
-  const sharedInboxID = input.sharedInboxID?.trim() ?? "";
-  if (sharedInboxID) return `shared:${encodeURIComponent(sharedInboxID)}:${encodeURIComponent(draftID)}`;
-  const userID = input.userID?.trim() ?? "";
-  const accountEmail = input.accountEmail?.trim().toLowerCase() ?? "";
-  if (!userID || !accountEmail || !draftID) return "";
-  return `personal:${encodeURIComponent(userID)}:${encodeURIComponent(accountEmail)}:${encodeURIComponent(draftID)}`;
+export function mangoEmailDraftResourceID(input: { draftID: string }): string {
+  return input.draftID.trim();
 }
 
-export function mangoEmailSignatureResourceID(input: { userID?: string; accountEmail?: string; sharedInboxID?: string }): string {
-  const sharedInboxID = input.sharedInboxID?.trim() ?? "";
-  if (sharedInboxID) return `shared:${encodeURIComponent(sharedInboxID)}`;
-  const userID = input.userID?.trim() ?? "";
-  const accountEmail = input.accountEmail?.trim().toLowerCase() ?? "";
-  if (!userID || !accountEmail) return "";
-  return `personal:${encodeURIComponent(userID)}:${encodeURIComponent(accountEmail)}`;
+export function mangoEmailSignatureResourceID(input: { signatureID?: string }): string {
+  return input.signatureID?.trim() ?? "";
 }
 
-export function mangoEmailMessageResourceID(input: { messageID: string; userID?: string; sharedInboxID?: string }): string {
-  const messageID = input.messageID.trim();
-  const sharedInboxID = input.sharedInboxID?.trim() ?? "";
-  if (sharedInboxID) return `shared:${encodeURIComponent(sharedInboxID)}:${encodeURIComponent(messageID)}`;
-  return `personal:${encodeURIComponent(input.userID?.trim() ?? "")}:${encodeURIComponent(messageID)}`;
+export function mangoEmailMessageResourceID(input: { messageID: string }): string {
+  return input.messageID.trim();
 }
-
-export function mangoAttachedEmailResourceID(input: { nodeID: string; messageID: string }): string {
-  return `node:${encodeURIComponent(input.nodeID.trim())}:message:${encodeURIComponent(input.messageID.trim())}`;
-}
-
 export async function fetchMangoAttachmentBlob(
   apiBase: string,
   companyID: string,

@@ -11,74 +11,57 @@ import (
 	"testing"
 )
 
-func TestEmailCollaborationInformationMentionCommitsAtomically(t *testing.T) {
+func TestEmailRelationshipChatUsesOrdinaryNodePermissions(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-701300000301"
-	repo.EnsureCompany(companyID, "Atomic email chat HTTP company")
+	repo.EnsureCompany(companyID, "Email relationship chat HTTP company")
 	creator := mustHTTPEmailCollaborationGuardUser(t, repo, companyID, "atomic-http-creator", "atomic-http-creator@example.com", domain.RoleCompanyUser)
 	target := mustHTTPEmailCollaborationGuardUser(t, repo, companyID, "atomic-http-target", "atomic-http-target@example.com", domain.RoleCompanyUser)
+	outsider := mustHTTPEmailCollaborationGuardUser(t, repo, companyID, "atomic-http-outsider", "atomic-http-outsider@example.com", domain.RoleCompanyUser)
 	created, err := repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
-		AccountEmail: creator.Email, CreatedByUserID: creator.UserID,
+		AccountEmail: creator.Email, Provider: "google", CreatedByUserID: creator.UserID,
 		Message: domain.EmailMessageSnapshot{ID: "atomic-http-message", ThreadID: "atomic-http-thread", Subject: "Atomic HTTP chat"},
 	})
 	if err != nil {
 		t.Fatalf("EnsureCommunicationsEmailCollaboration: %v", err)
 	}
-	collaboration := created.Collaboration
+	relationship := created.Collaboration
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID: companyID, EntityType: store.EntityTypeNode, EntityID: relationship.NodeID,
+		DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: creator.UserID, AccessLevel: store.EntityPermissionEdit},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: target.UserID, AccessLevel: store.EntityPermissionEdit},
+		},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions: %v", err)
+	}
 	handler := NewServerWithOptions(repo, ServerOptions{}).Routes()
-
-	invalidChatID := store.NewUUIDv7String()
-	invalidInformation, _ := json.Marshal(map[string]any{
-		"block_id": invalidChatID, "content": "invalid group",
-		"mentioned_group_ids": []string{"11111111-1111-4111-8111-701300000399"},
-	})
-	invalidBody, _ := json.Marshal(map[string]any{
-		"company_id": companyID, "type": store.CommunicationsEmailCollaborationChatInformationType,
-		"information": string(invalidInformation), "information_id": invalidChatID,
-	})
-	invalidReq := httptest.NewRequest(http.MethodPost, "/v1/nodes/"+collaboration.NodeID+"/information", bytes.NewReader(invalidBody))
-	invalidReq = attachmentRequestWithActor(invalidReq, creator, companyID, domain.RoleCompanyUser)
-	invalidRec := httptest.NewRecorder()
-	handler.ServeHTTP(invalidRec, invalidReq)
-	if invalidRec.Code != http.StatusBadRequest {
-		t.Fatalf("invalid mention status = %d body=%s, want 400", invalidRec.Code, invalidRec.Body.String())
-	}
-	details, err := repo.GetNodeDetails(companyID, collaboration.NodeID)
-	if err != nil || details.InformationCount != 1 {
-		t.Fatalf("invalid mention committed history: %+v err=%v", details, err)
-	}
-	projections, err := repo.ListNodeProjections(companyID, collaboration.NodeID)
-	if err != nil || httpTestHasProjection(projections, invalidChatID) {
-		t.Fatalf("invalid mention committed projection: %+v err=%v", projections, err)
-	}
-
 	chatID := store.NewUUIDv7String()
-	validInformation := emailCollaborationMentionInformation(t, target.UserID)
-	validBody, _ := json.Marshal(map[string]any{
-		"company_id": companyID, "type": store.CommunicationsEmailCollaborationChatInformationType,
-		"information": validInformation, "information_id": chatID,
+	information, _ := json.Marshal(map[string]any{
+		"block_id": relationship.AttachedEmailInformationID, "content": "Please review",
+		"email_message_id": relationship.RootMessageID,
 	})
-	validReq := httptest.NewRequest(http.MethodPost, "/v1/nodes/"+collaboration.NodeID+"/information", bytes.NewReader(validBody))
-	validReq = attachmentRequestWithActor(validReq, creator, companyID, domain.RoleCompanyUser)
-	validRec := httptest.NewRecorder()
-	handler.ServeHTTP(validRec, validReq)
-	if validRec.Code != http.StatusCreated {
-		t.Fatalf("valid mention status = %d body=%s, want 201", validRec.Code, validRec.Body.String())
+	body, _ := json.Marshal(map[string]any{
+		"company_id": companyID, "type": store.CommunicationsEmailCollaborationChatInformationType,
+		"information": string(information), "information_id": chatID,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/nodes/"+relationship.NodeID+"/information", bytes.NewReader(body))
+	req = attachmentRequestWithActor(req, creator, companyID, domain.RoleCompanyUser)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("ordinary Node chat status = %d body=%s, want 201", rec.Code, rec.Body.String())
 	}
-	if _, err := repo.GetCommunicationsEmailCollaboration(companyID, collaboration.CollaborationID, target.UserID); err != nil {
-		t.Fatalf("valid mention did not snapshot participant: %v", err)
+	if projections, err := repo.ListNodeProjections(companyID, relationship.NodeID); err != nil || !httpTestHasProjection(projections, chatID) {
+		t.Fatalf("ordinary Node chat projection missing: %+v err=%v", projections, err)
 	}
-	details, err = repo.GetNodeDetails(companyID, collaboration.NodeID)
-	if err != nil || details.InformationCount != 2 {
-		t.Fatalf("valid mention history = %+v err=%v", details, err)
+	if _, err := repo.GetCommunicationsEmailCollaboration(companyID, relationship.CollaborationID, target.UserID); err != nil {
+		t.Fatalf("user with ordinary Node permission cannot read relationship: %v", err)
 	}
-	projections, err = repo.ListNodeProjections(companyID, collaboration.NodeID)
-	if err != nil || !httpTestHasProjection(projections, chatID) {
-		t.Fatalf("valid mention projection missing: %+v err=%v", projections, err)
-	}
-	if _, err := repo.GetCommunicationsEmailCollaboration(companyID, collaboration.CollaborationID, "11111111-1111-4111-8111-701300000398"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("unmentioned principal error = %v, want ErrNotFound", err)
+	if _, err := repo.GetCommunicationsEmailCollaboration(companyID, relationship.CollaborationID, outsider.UserID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("user without ordinary Node permission error = %v, want ErrNotFound", err)
 	}
 }
 

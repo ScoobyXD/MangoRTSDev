@@ -15,7 +15,7 @@ func TestPostgresAttachmentReadsUseOneContentQueryAndBatchedMetadataVariants(t *
 	for _, required := range []string{
 		"func (r *PostgresRepo) ReadAttachmentContent",
 		"left join attachment_variants v",
-		"join resource_attachments ra",
+		"join attachment_relationships ra",
 		"func (r *PostgresRepo) listResourceAttachmentVariants",
 	} {
 		if !strings.Contains(text, required) {
@@ -40,7 +40,7 @@ func TestPostgresAttachmentReadsUseOneContentQueryAndBatchedMetadataVariants(t *
 	if strings.Contains(linkBody, "select exists(") {
 		t.Fatal("ListAttachmentResourceLinks still performs a separate existence query")
 	}
-	if !strings.Contains(linkBody, "left join resource_attachments ra") {
+	if !strings.Contains(linkBody, "left join attachment_relationships ra") {
 		t.Fatal("ListAttachmentResourceLinks must preserve existing-with-no-links semantics in one query")
 	}
 }

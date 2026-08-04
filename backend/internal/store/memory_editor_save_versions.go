@@ -21,9 +21,7 @@ func (r *MemoryRepo) UpsertNodeProjectionWithActor(input NodeInformationInput) (
 	if _, ok := r.nodes[key(companyID, nodeID)]; !ok {
 		return domain.NodeProjection{}, ErrNotFound
 	}
-	if collaboration, protected := r.emailCollaborationForNodeLocked(companyID, nodeID); protected && collaboration.AttachedEmailInformationID == informationID {
-		return domain.NodeProjection{}, ErrProtectedEmailCollaborationResource
-	}
+
 	k := key(companyID, nodeID)
 	if r.nodeText[k] == nil {
 		r.nodeText[k] = map[string]domain.NodeProjection{}

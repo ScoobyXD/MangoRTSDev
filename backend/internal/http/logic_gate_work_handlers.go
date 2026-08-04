@@ -518,10 +518,6 @@ func (s *Server) requireLogicGateWorkExistingSourceEditAccess(w http.ResponseWri
 }
 
 func writeLogicGateWorkMutationError(w http.ResponseWriter, err error, fallback string) bool {
-	if errors.Is(err, store.ErrProtectedEmailCollaborationResource) {
-		writeError(w, http.StatusConflict, "email_collaboration_node_managed")
-		return false
-	}
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_logic_gate_work_assignment")
 		return false
@@ -543,10 +539,6 @@ func writeLogicGateWorkMutationError(w http.ResponseWriter, err error, fallback 
 }
 
 func writeLogicGateWorkRemoveError(w http.ResponseWriter, err error) bool {
-	if errors.Is(err, store.ErrProtectedEmailCollaborationResource) {
-		writeError(w, http.StatusConflict, "email_collaboration_node_managed")
-		return false
-	}
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_logic_gate_work_assignment")
 		return false

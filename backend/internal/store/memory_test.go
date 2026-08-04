@@ -1582,6 +1582,11 @@ func TestMemoryRepoConvertCommunicationsTriageItemsAddsAttachedEmailProjection(t
 	if err != nil {
 		t.Fatalf("UpsertAuthUser failed: %v", err)
 	}
+	if _, err := repo.UpsertUserEmailConnection(UserEmailConnectionInput{
+		UserID: user.UserID, Provider: "google", AccountEmail: user.Email, GrantID: "triage-grant", Status: "connected",
+	}); err != nil {
+		t.Fatalf("UpsertUserEmailConnection: %v", err)
+	}
 	logicGate, err := repo.CreateLogicGate(companyID, "Support Gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate failed: %v", err)
@@ -1600,10 +1605,11 @@ func TestMemoryRepoConvertCommunicationsTriageItemsAddsAttachedEmailProjection(t
 	}
 
 	result, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
-		UserID:      user.UserID,
-		CompanyID:   companyID,
-		LogicGateID: logicGate.LogicGateID,
-		MessageIDs:  []string{message.ID},
+		UserID:       user.UserID,
+		CompanyID:    companyID,
+		AccountEmail: user.Email,
+		LogicGateID:  logicGate.LogicGateID,
+		MessageIDs:   []string{message.ID},
 	})
 	if err != nil {
 		t.Fatalf("ConvertCommunicationsTriageItems failed: %v", err)
@@ -1764,6 +1770,11 @@ func TestMemoryRepo_MoveLogicGateAssignmentMovesCommunicationsEmailPlacementToFi
 	if err != nil {
 		t.Fatalf("UpsertAuthUser: %v", err)
 	}
+	if _, err := repo.UpsertUserEmailConnection(UserEmailConnectionInput{
+		UserID: user.UserID, Provider: "google", AccountEmail: user.Email, GrantID: "move-email-grant", Status: "connected",
+	}); err != nil {
+		t.Fatalf("UpsertUserEmailConnection: %v", err)
+	}
 	sourceGate, err := repo.CreateLogicGate(companyID, "Source Email Gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate source: %v", err)
@@ -1784,10 +1795,11 @@ func TestMemoryRepo_MoveLogicGateAssignmentMovesCommunicationsEmailPlacementToFi
 		t.Fatalf("UpsertCommunicationsTriageItem: %v", err)
 	}
 	converted, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
-		UserID:      user.UserID,
-		CompanyID:   companyID,
-		LogicGateID: sourceGate.LogicGateID,
-		MessageIDs:  []string{message.ID},
+		UserID:       user.UserID,
+		CompanyID:    companyID,
+		AccountEmail: user.Email,
+		LogicGateID:  sourceGate.LogicGateID,
+		MessageIDs:   []string{message.ID},
 	})
 	if err != nil {
 		t.Fatalf("ConvertCommunicationsTriageItems: %v", err)

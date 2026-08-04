@@ -228,6 +228,7 @@ export function HomeMailWorkspace({
   compose,
   draftCount,
   emailSignature,
+  emailSignatureID,
   emailSignatureAccountEmail,
   error,
   isArchivableListView,
@@ -316,6 +317,7 @@ export function HomeMailWorkspace({
   compose: ComposeState;
   draftCount: number;
   emailSignature: string;
+  emailSignatureID: string;
   emailSignatureAccountEmail: string;
   error: string;
   isArchivableListView: boolean;
@@ -893,6 +895,7 @@ export function HomeMailWorkspace({
             busy={busy === "send"}
             replyMessage={compose.replyToMessage ?? (selectedMessage?.id === compose.replyToMessageID ? selectedMessage : null)}
             emailSignature={emailSignature}
+            emailSignatureID={emailSignatureID}
             emailSignatureAccountEmail={emailSignatureAccountEmail}
             companyID={companyID}
             currentUserID={currentUserID}

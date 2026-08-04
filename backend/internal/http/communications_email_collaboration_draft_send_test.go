@@ -34,7 +34,7 @@ func TestEmailCollaborationSharedDraftSendUsesExactProviderReplyAllAndFinalizes(
 	}
 	ensured, err := repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
-		AccountEmail: creator.Email, CreatedByUserID: creator.UserID,
+		AccountEmail: creator.Email, Provider: "google", CreatedByUserID: creator.UserID,
 		Message: domain.EmailMessageSnapshot{
 			ID: "shared-send-source", ThreadID: "shared-send-thread", Subject: "Snapshot subject", Date: 10,
 			From: []domain.EmailAddressSnapshot{{Email: "stale-snapshot@example.com"}},
@@ -49,7 +49,7 @@ func TestEmailCollaborationSharedDraftSendUsesExactProviderReplyAllAndFinalizes(
 		CompanyID: companyID, DraftID: "shared-send-draft", CollaborationID: collaboration.CollaborationID,
 		ParticipantUserID: creator.UserID, IsShared: true, ExpectedRevision: 0,
 		CreatedByUserID: creator.UserID, UpdatedByUserID: creator.UserID,
-		SourceMessageID: "shared-send-source", Subject: "Re: Snapshot subject",
+		SourceMessageID: collaboration.RootMessageID, Subject: "Re: Snapshot subject",
 		BodyEditorHTML: "<p>Collaborative answer</p>",
 	})
 	if err != nil {
@@ -206,7 +206,7 @@ func TestEmailCollaborationSharedDraftSendRecoversDurableCompletionFailureWithSa
 	}
 	ensured, err := repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
-		AccountEmail: creator.Email, CreatedByUserID: creator.UserID,
+		AccountEmail: creator.Email, Provider: "google", CreatedByUserID: creator.UserID,
 		Message: domain.EmailMessageSnapshot{
 			ID: "shared-send-finalize-source", ThreadID: "shared-send-finalize-thread", Date: 10,
 			From: []domain.EmailAddressSnapshot{{Email: "customer@example.com"}},
@@ -221,7 +221,7 @@ func TestEmailCollaborationSharedDraftSendRecoversDurableCompletionFailureWithSa
 		CompanyID: companyID, DraftID: "shared-send-finalize-draft", CollaborationID: collaboration.CollaborationID,
 		ParticipantUserID: creator.UserID, IsShared: true, ExpectedRevision: 0,
 		CreatedByUserID: creator.UserID, UpdatedByUserID: creator.UserID,
-		SourceMessageID: "shared-send-finalize-source", Subject: "Reply", BodyEditorHTML: "<p>Sent once</p>",
+		SourceMessageID: collaboration.RootMessageID, Subject: "Reply", BodyEditorHTML: "<p>Sent once</p>",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -415,7 +415,7 @@ func seedEmailCollaborationSharedDraftRecoveryHTTPTest(t *testing.T, companyID, 
 	threadID := "shared-send-recovery-thread-" + suffix
 	ensured, err := repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: owner.UserID, PersonalAccountEmail: owner.Email,
-		AccountEmail: owner.Email, CreatedByUserID: owner.UserID,
+		AccountEmail: owner.Email, Provider: "google", CreatedByUserID: owner.UserID,
 		Message: domain.EmailMessageSnapshot{
 			ID: sourceID, ThreadID: threadID, Date: 10,
 			From: []domain.EmailAddressSnapshot{{Email: "customer@example.com"}},
@@ -429,7 +429,7 @@ func seedEmailCollaborationSharedDraftRecoveryHTTPTest(t *testing.T, companyID, 
 		CompanyID: companyID, DraftID: "shared-send-recovery-draft-" + suffix,
 		CollaborationID: ensured.Collaboration.CollaborationID, ParticipantUserID: owner.UserID,
 		IsShared: true, CreatedByUserID: owner.UserID, UpdatedByUserID: owner.UserID,
-		SourceMessageID: sourceID, Subject: "Reply once", BodyEditorHTML: "<p>Recover me</p>",
+		SourceMessageID: ensured.Collaboration.RootMessageID, Subject: "Reply once", BodyEditorHTML: "<p>Recover me</p>",
 	})
 	if err != nil {
 		t.Fatal(err)

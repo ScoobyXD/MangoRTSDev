@@ -102,7 +102,7 @@ func (s *Server) processCommunicationsArchiveJobItem(ctx context.Context, item s
 		}
 	}
 
-	archived, err := s.archiveCommunicationsMessageByID(ctx, connection, item.MessageID, archiveFolderID)
+	archived, err := s.archiveCommunicationsMessageByID(ctx, connection, item.CompanyID, item.SharedInboxID, item.MessageID, archiveFolderID)
 	if err != nil {
 		var apiErr NylasAPIError
 		if errors.As(err, &apiErr) && (apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden) {
@@ -111,15 +111,17 @@ func (s *Server) processCommunicationsArchiveJobItem(ctx context.Context, item s
 		return s.recordCommunicationsArchiveJobItemFailure(item, err)
 	}
 
-	if err := s.repo.MarkCommunicationsArchiveJobItemArchived(item.JobItemID); err != nil {
-		return err
-	}
 	messageID := firstNonBlank(archived.ID, item.MessageID)
-	s.applyCommunicationsArchiveBatchResult(connection, item.SharedInboxID, communicationsArchiveBatchResult{
+	if err := s.applyCommunicationsArchiveBatchResult(connection, item.CompanyID, item.SharedInboxID, communicationsArchiveBatchResult{
 		ArchivedIDs: []string{messageID},
 		Messages:    []NylasMessage{archived},
 		Failed:      []communicationsArchiveBatchFailure{},
-	})
+	}); err != nil {
+		return s.recordCommunicationsArchiveJobItemFailure(item, err)
+	}
+	if err := s.repo.MarkCommunicationsArchiveJobItemArchived(item.JobItemID); err != nil {
+		return err
+	}
 	return nil
 }
 

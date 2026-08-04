@@ -6,63 +6,34 @@ import (
 	"testing"
 )
 
-func TestPostgresEmailNodeWorkPathsAreOpenWhileCanonicalEmailRemainsProtected(t *testing.T) {
-	allowed := []struct {
-		file      string
-		signature string
-	}{
-		{file: "postgres_editor_textbox_history.go", signature: "func createPostgresEditorTextboxHistory"},
-		{file: "postgres_editor_textbox_history.go", signature: "func restorePostgresEditorTextboxHistory"},
-		{file: "postgres_kanban.go", signature: "func (r *PostgresRepo) assignNodeToLogicGateStatusTx"},
-		{file: "postgres_kanban.go", signature: "func (r *PostgresRepo) MoveLogicGateNodeAssignment"},
-		{file: "postgres_kanban.go", signature: "func (r *PostgresRepo) RemoveLogicGateNodeAssignment"},
-		{file: "postgres_kanban.go", signature: "func (r *PostgresRepo) SetLogicGateNodeAssignmentIssue"},
-		{file: "postgres_gvic.go", signature: "func (r *PostgresRepo) applyResourceGVICAssignmentCommand"},
-		{file: "accounts.go", signature: "func (r *PostgresRepo) SetNodeAccountAssignments"},
-		{file: "postgres_projects.go", signature: "func (r *PostgresRepo) UpsertProjectRelationship"},
-		{file: "postgres_company_explorer.go", signature: "func postgresDeleteNodeWithDependentProjectionsTx"},
-	}
-	for _, test := range allowed {
-		raw, err := os.ReadFile(test.file)
+func TestEmailRelationshipsUseOrdinaryHostResourceSemantics(t *testing.T) {
+	for _, file := range []string{
+		"postgres_nodes.go",
+		"postgres_editor_save_versions.go",
+		"postgres_company_explorer_v2.go",
+		"postgres_projects.go",
+		"postgres_entity_permissions.go",
+		"memory_company_explorer_v2.go",
+		"memory_entity_permissions.go",
+		"memory_resource_policy_pointers.go",
+		"email_collaboration_guards.go",
+		"../http/account_handlers.go",
+		"../http/company_explorer_handlers.go",
+		"../http/entity_permission_handlers.go",
+		"../http/gvic_handlers.go",
+		"../http/logic_gate_work_handlers.go",
+		"../http/node_handlers.go",
+		"../http/work_item_handlers.go",
+	} {
+		raw, err := os.ReadFile(file)
 		if err != nil {
-			t.Fatalf("ReadFile %s: %v", test.file, err)
+			t.Fatalf("ReadFile %s: %v", file, err)
 		}
-		body := emailCollaborationPostgresFunctionBodyForTest(t, strings.ReplaceAll(string(raw), "\r\n", "\n"), test.signature)
-		if strings.Contains(body, "postgresRejectEmailCollaborationNodeMutation") {
-			t.Errorf("%s in %s still rejects normal email-node work semantics", test.signature, test.file)
-		}
-	}
-
-	canonical := []struct {
-		file      string
-		signature string
-	}{
-		{file: "postgres_nodes.go", signature: "func (r *PostgresRepo) addNodeInformation"},
-		{file: "postgres_editor_save_versions.go", signature: "func (r *PostgresRepo) UpsertNodeProjectionWithActor"},
-		{file: "postgres_nodes.go", signature: "func (r *PostgresRepo) deleteNodeProjection"},
-	}
-	for _, test := range canonical {
-		raw, err := os.ReadFile(test.file)
-		if err != nil {
-			t.Fatalf("ReadFile %s: %v", test.file, err)
-		}
-		body := emailCollaborationPostgresFunctionBodyForTest(t, strings.ReplaceAll(string(raw), "\r\n", "\n"), test.signature)
-		if !strings.Contains(body, "AttachedEmailInformationID") || !strings.Contains(body, "ErrProtectedEmailCollaborationResource") {
-			t.Errorf("%s in %s does not protect only the canonical attached-email projection", test.signature, test.file)
+		source := string(raw)
+		for _, forbidden := range []string{"postgresRejectEmailCollaborationNodeMutation", "ErrProtectedEmailCollaborationResource", "emailCollaborationForNodeLocked", "email_collaboration_node_managed", "email_collaboration_explorer_item_managed", "email_collaboration_permissions_managed", "email_collaboration_attached_email_managed", "communications_email_collaboration_participants"} {
+			if strings.Contains(source, forbidden) {
+				t.Fatalf("%s retains special email ownership/participant guard %q", file, forbidden)
+			}
 		}
 	}
-}
-
-func emailCollaborationPostgresFunctionBodyForTest(t *testing.T, source, signature string) string {
-	t.Helper()
-	start := strings.Index(source, signature)
-	if start < 0 {
-		t.Fatalf("missing function %q", signature)
-	}
-	remaining := source[start+len(signature):]
-	end := strings.Index(remaining, "\nfunc ")
-	if end < 0 {
-		return remaining
-	}
-	return remaining[:end]
 }

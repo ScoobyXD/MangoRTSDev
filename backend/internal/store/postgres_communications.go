@@ -14,9 +14,6 @@ func (r *PostgresRepo) GetUserEmailConnection(userID string) (domain.UserEmailCo
 	if userID == "" {
 		return domain.UserEmailConnection{}, ErrInvalid
 	}
-	if err := r.ensureUserEmailConnectionsPerAccountSchema(); err != nil {
-		return domain.UserEmailConnection{}, err
-	}
 
 	var connection domain.UserEmailConnection
 	err := r.db.QueryRow(
@@ -49,9 +46,6 @@ func (r *PostgresRepo) ListUserEmailConnections(userID string) ([]domain.UserEma
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, ErrInvalid
-	}
-	if err := r.ensureUserEmailConnectionsPerAccountSchema(); err != nil {
-		return nil, err
 	}
 
 	var userExists bool
@@ -215,9 +209,6 @@ func (r *PostgresRepo) GetUserEmailConnectionByGrantID(grantID string) (domain.U
 	if grantID == "" {
 		return domain.UserEmailConnection{}, ErrInvalid
 	}
-	if err := r.ensureUserEmailConnectionsPerAccountSchema(); err != nil {
-		return domain.UserEmailConnection{}, err
-	}
 
 	var connection domain.UserEmailConnection
 	err := r.db.QueryRow(
@@ -250,9 +241,6 @@ func (r *PostgresRepo) UpsertUserEmailConnection(input UserEmailConnectionInput)
 	status := normalizeEmailConnectionStatus(input.Status)
 	if userID == "" || provider == "" || accountEmail == "" || scope == "" || grantID == "" || status == "" {
 		return domain.UserEmailConnection{}, ErrInvalid
-	}
-	if err := r.ensureUserEmailConnectionsPerAccountSchema(); err != nil {
-		return domain.UserEmailConnection{}, err
 	}
 	var userExists bool
 	if err := r.db.QueryRow(`select exists(select 1 from users where user_id = $1::uuid)`, userID).Scan(&userExists); err != nil {
@@ -485,9 +473,6 @@ func (r *PostgresRepo) UpdateUserEmailConnectionStatus(userID, accountEmail, sta
 	if userID == "" || accountEmail == "" || status == "" {
 		return domain.UserEmailConnection{}, ErrInvalid
 	}
-	if err := r.ensureUserEmailConnectionsPerAccountSchema(); err != nil {
-		return domain.UserEmailConnection{}, err
-	}
 
 	var connection domain.UserEmailConnection
 	err := r.db.QueryRow(
@@ -521,9 +506,6 @@ func (r *PostgresRepo) DeleteUserEmailConnection(userID string) error {
 	if userID == "" {
 		return ErrInvalid
 	}
-	if err := r.ensureUserEmailConnectionsPerAccountSchema(); err != nil {
-		return err
-	}
 	result, err := r.db.Exec(
 		`delete from user_email_connections connection
 		 using users app_user
@@ -545,135 +527,7 @@ func (r *PostgresRepo) DeleteUserEmailConnection(userID string) error {
 	return nil
 }
 
-func (r *PostgresRepo) ensureUserEmailConnectionsPerAccountSchema() error {
-	if r == nil || r.db == nil {
-		return ErrInvalid
-	}
-	r.userEmailConnectionsPerAccountSchemaOnce.Do(func() {
-		_, r.userEmailConnectionsPerAccountSchemaErr = r.db.Exec(`
-do $$
-declare
-  pk_name text;
-  pk_def text;
-begin
-  if to_regclass('public.user_email_connections') is null then
-    return;
-  end if;
-
-  if exists (
-    select 1
-    from information_schema.columns
-    where table_schema = 'public'
-      and table_name = 'user_email_connections'
-      and column_name = 'connection_scope'
-  ) then
-    if to_regclass('public.company_email_connections') is not null
-       and to_regclass('public.shared_inboxes') is not null then
-      with ranked_connections as (
-        select
-          inbox.company_id,
-          inbox.account_email,
-          connection.user_id as connected_by_user_id,
-          connection.provider,
-          connection.grant_id,
-          connection.status,
-          connection.created_timestamp,
-          connection.updated_timestamp,
-          row_number() over (
-            partition by inbox.company_id, inbox.account_email
-            order by
-              case connection.status when 'connected' then 1 when 'reauth_required' then 2 else 3 end,
-              connection.updated_timestamp desc
-          ) as rn
-        from public.shared_inboxes inbox
-        join public.user_email_connections connection
-          on connection.account_email = inbox.account_email
-         and connection.connection_scope = 'shared'
-      )
-      insert into public.company_email_connections (
-        company_email_connection_id,
-        company_id,
-        provider,
-        account_email,
-        grant_id,
-        status,
-        connected_by_user_id,
-        created_timestamp,
-        updated_timestamp
-      )
-      select
-        md5('company_email_connection:' || company_id::text || ':' || account_email)::uuid,
-        company_id,
-        provider,
-        account_email,
-        grant_id,
-        status,
-        connected_by_user_id,
-        created_timestamp,
-        updated_timestamp
-      from ranked_connections
-      where rn = 1
-      on conflict (company_id, account_email) do update set
-        provider = excluded.provider,
-        grant_id = excluded.grant_id,
-        status = excluded.status,
-        connected_by_user_id = excluded.connected_by_user_id,
-        updated_timestamp = excluded.updated_timestamp;
-
-      update public.shared_inboxes inbox
-      set company_email_connection_id = connection.company_email_connection_id,
-          updated_timestamp = now()
-      from public.company_email_connections connection
-      where connection.company_id = inbox.company_id
-        and connection.account_email = inbox.account_email
-        and inbox.company_email_connection_id is null;
-
-      delete from public.user_email_connections
-      where connection_scope <> 'personal';
-
-      alter table public.user_email_connections
-        drop constraint if exists user_email_connections_scope_chk;
-
-      alter table public.user_email_connections
-        drop column if exists connection_scope;
-    end if;
-  end if;
-
-  select conname, pg_get_constraintdef(oid)
-    into pk_name, pk_def
-  from pg_constraint
-  where conrelid = 'public.user_email_connections'::regclass
-    and contype = 'p'
-  limit 1;
-
-  if pk_name is not null and pk_def <> 'PRIMARY KEY (user_id, account_email)' then
-    execute format('alter table public.user_email_connections drop constraint %I', pk_name);
-  end if;
-
-  if not exists (
-    select 1
-    from pg_constraint
-    where conrelid = 'public.user_email_connections'::regclass
-      and contype = 'p'
-      and pg_get_constraintdef(oid) = 'PRIMARY KEY (user_id, account_email)'
-  ) then
-    alter table public.user_email_connections add primary key (user_id, account_email);
-  end if;
-
-  create unique index if not exists idx_user_email_connections_grant_id
-    on public.user_email_connections(grant_id);
-
-  create index if not exists idx_user_email_connections_user_updated
-    on public.user_email_connections(user_id, updated_timestamp desc);
-end $$;`)
-	})
-	return r.userEmailConnectionsPerAccountSchemaErr
-}
-
 func (r *PostgresRepo) UpsertCommunicationsMessageReadStatus(input CommunicationsMessageReadStatusInput) (domain.CommunicationsMessageReadStatus, error) {
-	if err := r.ensureCommunicationsMessageReadStatusSchema(); err != nil {
-		return domain.CommunicationsMessageReadStatus{}, err
-	}
 	scope, ok := communicationsMessageReadStatusScope(input.ScopeType, input.UserID, input.PersonalAccountEmail, input.CompanyID, input.CompanyEmailConnectionID, input.SharedInboxID)
 	if !ok {
 		return domain.CommunicationsMessageReadStatus{}, ErrInvalid
@@ -798,9 +652,6 @@ order by signal_timestamp asc`, scope.ScopeType, scope.ScopeID, messageID)
 }
 
 func (r *PostgresRepo) ListCommunicationsMessageReadStatuses(input CommunicationsMessageReadStatusListInput) ([]domain.CommunicationsMessageReadStatus, error) {
-	if err := r.ensureCommunicationsMessageReadStatusSchema(); err != nil {
-		return nil, err
-	}
 	scope, ok := communicationsMessageReadStatusScope(input.ScopeType, input.UserID, input.PersonalAccountEmail, input.CompanyID, input.CompanyEmailConnectionID, "")
 	if !ok {
 		return nil, ErrInvalid
@@ -867,81 +718,6 @@ order by message_id asc, signal_timestamp asc`, args...)
 		}
 	}
 	return statuses, signalRows.Err()
-}
-
-func (r *PostgresRepo) ensureCommunicationsMessageReadStatusSchema() error {
-	if r == nil || r.db == nil {
-		return ErrInvalid
-	}
-	r.communicationsMessageReadStatusSchemaOnce.Do(func() {
-		_, r.communicationsMessageReadStatusSchemaErr = r.db.Exec(`
-create table if not exists communications_message_read_receipt_summaries (
-  receipt_scope_type varchar not null,
-  receipt_scope_id varchar not null,
-  user_id uuid references users(user_id) on delete cascade,
-  company_id uuid references companies(company_id) on delete cascade,
-  company_email_connection_id uuid references company_email_connections(company_email_connection_id) on delete cascade,
-  shared_inbox_id uuid,
-  message_id text not null,
-  thread_id text not null default '',
-  status text not null default 'likely_read',
-  signal_count integer not null default 0,
-  first_signal_timestamp timestamptz not null,
-  last_signal_timestamp timestamptz not null,
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  primary key (receipt_scope_type, receipt_scope_id, message_id),
-  constraint communications_message_read_receipt_summaries_scope_chk check (receipt_scope_type in ('personal', 'shared')),
-  constraint communications_message_read_receipt_summaries_message_id_chk check (btrim(message_id) <> ''),
-  constraint communications_message_read_receipt_summaries_status_chk check (status in ('likely_read', 'read')),
-  constraint communications_message_read_receipt_summaries_signal_count_chk check (signal_count >= 0),
-  constraint communications_message_read_receipt_summaries_personal_chk check (
-    (
-      receipt_scope_type = 'personal'
-      and user_id is not null
-      and company_email_connection_id is null
-      and receipt_scope_id like user_id::text || ':%'
-      and length(receipt_scope_id) > length(user_id::text) + 1
-    )
-    or (
-      receipt_scope_type = 'shared'
-      and company_id is not null
-      and company_email_connection_id is not null
-    )
-  )
-);
-
-create table if not exists communications_message_read_receipt_signals (
-  receipt_scope_type varchar not null,
-  receipt_scope_id varchar not null,
-  message_id text not null,
-  signal_timestamp timestamptz not null,
-  created_timestamp timestamptz not null default now(),
-  primary key (receipt_scope_type, receipt_scope_id, message_id, signal_timestamp),
-  foreign key (receipt_scope_type, receipt_scope_id, message_id)
-    references communications_message_read_receipt_summaries(receipt_scope_type, receipt_scope_id, message_id) on delete cascade
-);
-
-insert into communications_message_read_receipt_signals (
-  receipt_scope_type, receipt_scope_id, message_id, signal_timestamp
-)
-select receipt_scope_type, receipt_scope_id, message_id, last_signal_timestamp
-from communications_message_read_receipt_summaries
-on conflict do nothing;
-
-create index if not exists idx_communications_message_read_receipt_summaries_user_latest
-  on communications_message_read_receipt_summaries(user_id, last_signal_timestamp desc)
-  where receipt_scope_type = 'personal';
-
-create index if not exists idx_communications_message_read_receipt_summaries_shared_latest
-  on communications_message_read_receipt_summaries(company_email_connection_id, last_signal_timestamp desc)
-  where receipt_scope_type = 'shared';
-
-create index if not exists idx_communications_message_read_receipt_summaries_thread
-  on communications_message_read_receipt_summaries(receipt_scope_type, receipt_scope_id, thread_id)
-  where thread_id <> '';`)
-	})
-	return r.communicationsMessageReadStatusSchemaErr
 }
 
 func scanCommunicationsMessageReadReceiptSummary(row interface {

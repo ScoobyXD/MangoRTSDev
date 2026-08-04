@@ -72,6 +72,7 @@ export type EmailFolder = {
 };
 
 export type EmailMessage = {
+  email_message_id?: string;
   id: string;
   detail_fetched?: boolean;
   thread_id?: string;
@@ -1519,6 +1520,7 @@ export type CommunicationsTriageConversionResult = {
   unstarred_message_ids?: string[];
   attached_email_information_ids?: string[];
   email_thread_ids?: string[];
+  email_message_ids?: string[];
   linked_text_block_id?: string;
   initial_chat_id?: string;
 

@@ -789,9 +789,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     const contentChange = unseenChanges.find((change) => change.change_id === targetID && change.node_id === nodeID);
     if (contentChange?.information_id) return contentChange.information_id;
-    const attachedEmail = nodeAttachedEmails.find((email) => email.id === targetID || email.messageID === targetID || email.messageID === emailMessageID);
+    const attachedEmail = nodeAttachedEmails.find((email) => email.id === targetID || email.messageID === targetID || email.emailMessageID === emailMessageID);
     if (attachedEmail) {
-      const linkedBlock = blocks.find((block) => block.emailMessageID === attachedEmail.messageID)
+      const linkedBlock = blocks.find((block) => block.emailMessageID === attachedEmail.emailMessageID)
         ?? (attachedEmail.blockID ? blocks.find((block) => block.id === attachedEmail.blockID) : undefined);
       return linkedBlock?.id || emailOriginChatHostBlockID || blocks[0]?.id || "";
     }
@@ -1480,7 +1480,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (!editorTextCanEdit || !cleanMessageID) return "";
     const now = new Date().toISOString();
     const blockID = generateStableInformationID();
-    const sourceEmail = nodeAttachedEmails.find((email) => email.messageID === cleanMessageID || email.id === cleanMessageID);
+    const sourceEmail = nodeAttachedEmails.find((email) => email.emailMessageID === cleanMessageID || email.id === cleanMessageID);
     const existingMessageAccent = blocks.find((block) => block.emailMessageID?.trim() === cleanMessageID)?.emailAccent?.trim() ?? "";
     const unavailableAccents = blocks.filter((block) => block.emailMessageID?.trim() !== cleanMessageID).map((block) => block.emailAccent ?? "");
     const emailAccent = existingMessageAccent || editorEmailMessageAccent(cleanMessageID, unavailableAccents);
@@ -2244,7 +2244,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (typeof document === "undefined") return;
     const cleanQuote = quote.trim();
     if (!cleanQuote) return;
-    const sourceEmail = attachedEmails.find((email) => email.messageID === messageID || email.id === messageID);
+    const sourceEmail = attachedEmails.find((email) => email.emailMessageID === messageID || email.id === messageID);
     const fallbackTitle = sourceEmail?.subject.trim() || "Email selection";
     const selectionDocument = createEmailSelectionDocument(document, cleanQuote);
     if (!selectionDocument) return;
@@ -2275,6 +2275,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const attached: EditorAttachedEmail = {
       id,
       messageID: email.messageID,
+      emailMessageID: email.emailMessageID,
       threadID: email.threadID,
       sharedInboxID: email.sharedInboxID,
       accountEmail: email.accountEmail,
@@ -2715,15 +2716,15 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (block) {
       handledFocusRequestRef.current = requestKey;
       const message = chatMessages.find((item) => item.id === cleanInformationID);
-      const attachedEmail = nodeAttachedEmails.find((email) => email.id === cleanInformationID || email.messageID === cleanInformationID || email.messageID === cleanEmailMessageID);
+      const attachedEmail = nodeAttachedEmails.find((email) => email.id === cleanInformationID || email.messageID === cleanInformationID || email.emailMessageID === cleanEmailMessageID);
       if (message) {
         const messages = chatMessagesByBlock.get(message.blockID) ?? [];
         navigateToChatMessage(message.blockID, messages, message.id);
-      } else if (attachedEmail) {
+      } else if (attachedEmail || (cleanEmailMessageID && nodeAttachedEmails.length > 0)) {
         setFocusedTextBlockID("");
         setActiveRowBlockID(block.id);
         setOpenEmailBlockIDs((current) => new Set(current).add(NODE_EMAIL_COLUMN_LAYOUT_ID));
-        setSelectedEmailIDsByBlock((current) => ({ ...current, [NODE_EMAIL_COLUMN_LAYOUT_ID]: attachedEmail.messageID }));
+        if (attachedEmail) setSelectedEmailIDsByBlock((current) => ({ ...current, [NODE_EMAIL_COLUMN_LAYOUT_ID]: attachedEmail.messageID }));
         setClosedEmailBlockIDs((current) => {
           if (!current.has(NODE_EMAIL_COLUMN_LAYOUT_ID)) return current;
           const next = new Set(current);

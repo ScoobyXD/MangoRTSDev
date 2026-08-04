@@ -435,7 +435,7 @@ func attachmentRequestWithActor(req *http.Request, user domain.User, companyID, 
 	}))
 }
 
-func TestEmailCollaborationNodeChatAttachmentRequiresPermanentParticipantEvenForAdmin(t *testing.T) {
+func TestEmailRelationshipNodeChatAttachmentUsesOrdinaryNodePermissions(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-701300000201"
 	repo.EnsureCompany(companyID, "Attachment collaboration privacy company")
@@ -455,7 +455,7 @@ func TestEmailCollaborationNodeChatAttachmentRequiresPermanentParticipantEvenFor
 	admin := createUser("attachment-collab-admin", "admin@example.com", domain.RoleCompanyAdmin)
 	created, err := repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
-		AccountEmail: creator.Email, CreatedByUserID: creator.UserID,
+		AccountEmail: creator.Email, Provider: "google", CreatedByUserID: creator.UserID,
 		Message: domain.EmailMessageSnapshot{
 			ID: "attachment-collab-message", ThreadID: "attachment-collab-thread", Subject: "Attachment privacy",
 			From: []domain.EmailAddressSnapshot{{Email: "sender@example.com"}}, To: []domain.EmailAddressSnapshot{{Email: creator.Email}},
@@ -491,14 +491,14 @@ func TestEmailCollaborationNodeChatAttachmentRequiresPermanentParticipantEvenFor
 	adminContent := attachmentRequestWithActor(httptest.NewRequest(http.MethodGet, "/v1/attachments/"+attachmentID+"/content?company_id="+companyID, nil), admin, companyID, domain.RoleCompanyAdmin)
 	adminContentRec := httptest.NewRecorder()
 	handler.ServeHTTP(adminContentRec, adminContent)
-	if adminContentRec.Code != http.StatusNotFound {
-		t.Fatalf("nonparticipant admin chat attachment content status = %d body=%s, want 404", adminContentRec.Code, adminContentRec.Body.String())
+	if adminContentRec.Code != http.StatusOK || !bytes.Equal(adminContentRec.Body.Bytes(), body) {
+		t.Fatalf("admin chat attachment content status = %d body=%s, want ordinary Node access", adminContentRec.Code, adminContentRec.Body.String())
 	}
 	adminList := attachmentRequestWithActor(httptest.NewRequest(http.MethodGet, "/v1/resources/node/"+collaboration.NodeID+"/attachments?company_id="+companyID, nil), admin, companyID, domain.RoleCompanyAdmin)
 	adminListRec := httptest.NewRecorder()
 	handler.ServeHTTP(adminListRec, adminList)
-	if adminListRec.Code != http.StatusNotFound {
-		t.Fatalf("nonparticipant admin chat attachment list status = %d body=%s, want 404", adminListRec.Code, adminListRec.Body.String())
+	if adminListRec.Code != http.StatusOK {
+		t.Fatalf("admin chat attachment list status = %d body=%s, want ordinary Node access", adminListRec.Code, adminListRec.Body.String())
 	}
 	participantContent := attachmentRequestWithActor(httptest.NewRequest(http.MethodGet, "/v1/attachments/"+attachmentID+"/content?company_id="+companyID, nil), participant, companyID, domain.RoleCompanyUser)
 	participantContentRec := httptest.NewRecorder()

@@ -88,6 +88,28 @@ func (r *MemoryRepo) UpsertCommunicationsEmailDraft(input CommunicationsEmailDra
 		}
 	}
 
+	if draft.SourceMessageID != "" {
+		found := false
+		for _, thread := range r.emailThreads {
+			if thread.CompanyID != draft.CompanyID || thread.ScopeType != draft.ScopeType ||
+				(draft.ScopeType == "personal" && (thread.PersonalUserID != draft.PersonalUserID || thread.PersonalAccountEmail != draft.PersonalAccountEmail)) ||
+				(draft.ScopeType == "shared" && thread.SharedInboxID != draft.SharedInboxID) {
+				continue
+			}
+			for _, message := range thread.Messages {
+				if message.EmailMessageID == draft.SourceMessageID {
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+		if !found {
+			return domain.CommunicationsEmailDraft{}, ErrNotFound
+		}
+	}
 	now := time.Now().UTC()
 	existing, exists := r.emailDrafts[communicationsEmailDraftKey(draft.CompanyID, draft.DraftID)]
 	if exists && !communicationsEmailDraftScopesMatch(existing, draft) {

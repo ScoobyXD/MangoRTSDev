@@ -73,8 +73,6 @@ type Server struct {
 	communicationsEmailThreadDownloadWorkerDisabled     bool
 	commCache                                           *communicationsCache
 	communicationsFolderFlights                         singleflight.Group
-	communicationsMessageFlights                        singleflight.Group
-	communicationsMessagePageFlights                    singleflight.Group
 	nylasGate                                           *nylasRequestGate
 	nylasWebhooks                                       *nylasWebhookReceiptCache
 	authValidator                                       AuthTokenValidator

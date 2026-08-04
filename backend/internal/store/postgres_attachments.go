@@ -31,7 +31,7 @@ a.created_timestamp,
 a.deleted_timestamp`
 
 const resourceAttachmentSelectColumns = `
-ra.resource_attachment_id::text,
+ra.attachment_relationship_id::text,
 ra.company_id::text,
 ra.resource_type,
 ra.resource_id,
@@ -204,7 +204,7 @@ func (r *PostgresRepo) PreparePermanentAttachmentDeletion(ctx context.Context, c
 	if err := tx.QueryRowContext(ctx, `select
 		coalesce(bool_or(resource_type=$3 and resource_id=$4 and relationship_kind='file_attachment'),false),
 		coalesce(bool_or(deleted_timestamp is null and not(resource_type=$3 and resource_id=$4 and relationship_kind='file_attachment')),false)
-		from resource_attachments where company_id=$1::uuid and attachment_id=$2::uuid`,
+		from attachment_relationships where company_id=$1::uuid and attachment_id=$2::uuid`,
 		companyID, attachmentID, resourceType, resourceID).Scan(&matchingLink, &otherActiveLink); err != nil {
 		return AttachmentDeletionPlan{}, err
 	}
@@ -233,7 +233,7 @@ func (r *PostgresRepo) PreparePermanentAttachmentDeletion(ctx context.Context, c
 	if _, err := tx.ExecContext(ctx, `update attachments set deleted_timestamp=coalesce(deleted_timestamp,clock_timestamp()) where company_id=$1::uuid and attachment_id=$2::uuid`, companyID, attachmentID); err != nil {
 		return AttachmentDeletionPlan{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `update resource_attachments set deleted_timestamp=coalesce(deleted_timestamp,clock_timestamp()) where company_id=$1::uuid and attachment_id=$2::uuid`, companyID, attachmentID); err != nil {
+	if _, err := tx.ExecContext(ctx, `update attachment_relationships set deleted_timestamp=coalesce(deleted_timestamp,clock_timestamp()) where company_id=$1::uuid and attachment_id=$2::uuid`, companyID, attachmentID); err != nil {
 		return AttachmentDeletionPlan{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -349,14 +349,14 @@ left join attachment_variants v
  and $3 <> 'original'
 	and v.sha256 is not null
 	and v.generation_version=1
-join resource_attachments ra
+join attachment_relationships ra
   on ra.company_id=a.company_id
  and ra.attachment_id=a.attachment_id
  and ra.deleted_timestamp is null
 where a.company_id=$1::uuid
   and a.attachment_id=$2::uuid
   and a.deleted_timestamp is null
-order by ra.created_timestamp desc, ra.resource_attachment_id desc`, companyID, attachmentID, variantType)
+order by ra.created_timestamp desc, ra.attachment_relationship_id desc`, companyID, attachmentID, variantType)
 	if err != nil {
 		return AttachmentContentRead{}, err
 	}
@@ -500,7 +500,7 @@ func (r *PostgresRepo) ListAttachmentResourceLinks(companyID, attachmentID strin
 	}
 	rows, err := r.db.QueryContext(context.Background(), `
 select
-  coalesce(ra.resource_attachment_id::text, ''),
+  coalesce(ra.attachment_relationship_id::text, ''),
   a.company_id::text,
   coalesce(ra.resource_type, ''),
   coalesce(ra.resource_id, ''),
@@ -513,14 +513,14 @@ select
   coalesce(ra.created_timestamp, a.created_timestamp),
   ra.deleted_timestamp
 from attachments a
-left join resource_attachments ra
+left join attachment_relationships ra
   on ra.company_id=a.company_id
  and ra.attachment_id=a.attachment_id
  and ra.deleted_timestamp is null
 where a.company_id=$1::uuid
   and a.attachment_id=$2::uuid
   and a.deleted_timestamp is null
-order by ra.created_timestamp desc nulls last, ra.resource_attachment_id desc nulls last`,
+order by ra.created_timestamp desc nulls last, ra.attachment_relationship_id desc nulls last`,
 		companyID, attachmentID,
 	)
 	if err != nil {
@@ -559,7 +559,7 @@ func (r *PostgresRepo) ListResourceAttachments(companyID, resourceType, resource
 select
   `+resourceAttachmentSelectColumns+`,
   `+attachmentSelectColumns+`
-from resource_attachments ra
+from attachment_relationships ra
 join attachments a
   on a.company_id = ra.company_id
  and a.attachment_id = ra.attachment_id
@@ -568,7 +568,7 @@ where ra.company_id=$1::uuid
   and ra.resource_id=$3
   and ra.deleted_timestamp is null
   and a.deleted_timestamp is null
-order by ra.created_timestamp desc, ra.resource_attachment_id desc`,
+order by ra.created_timestamp desc, ra.attachment_relationship_id desc`,
 		companyID, resourceType, resourceID,
 	)
 	if err != nil {
@@ -606,7 +606,7 @@ join attachments a on a.attachment_id=v.attachment_id
 where a.company_id=$1::uuid
   and a.deleted_timestamp is null
   and exists (
-    select 1 from resource_attachments ra
+    select 1 from attachment_relationships ra
     where ra.company_id=$1::uuid and ra.resource_type=$2 and ra.resource_id=$3
       and ra.attachment_id=v.attachment_id and ra.deleted_timestamp is null
   )
@@ -672,7 +672,7 @@ func (r *PostgresRepo) SoftDeleteResourceAttachment(input ResourceAttachmentDele
 		return ErrInvalid
 	}
 	result, err := r.db.ExecContext(context.Background(), `
-update resource_attachments
+update attachment_relationships
 set deleted_timestamp=now()
 where company_id=$1::uuid
   and resource_type=$2
@@ -697,8 +697,8 @@ where company_id=$1::uuid
 func insertOrReviveResourceAttachmentTx(ctx context.Context, tx *sql.Tx, link domain.ResourceAttachment) (domain.ResourceAttachment, error) {
 	var existingID string
 	err := tx.QueryRowContext(ctx, `
-select resource_attachment_id::text
-from resource_attachments
+select attachment_relationship_id::text
+from attachment_relationships
 where company_id=$1::uuid
   and resource_type=$2
   and resource_id=$3
@@ -723,11 +723,11 @@ limit 1`,
 	if existingID != "" {
 		return scanResourceAttachment(tx.QueryRowContext(ctx, `
 with changed as (
-update resource_attachments
+update attachment_relationships
 set deleted_timestamp=null,
     created_by_user_id=nullif($2, '')::uuid,
     created_timestamp=$3
-where resource_attachment_id=$1::uuid
+where attachment_relationship_id=$1::uuid
 returning *
 )
 select `+resourceAttachmentSelectColumns+`
@@ -739,8 +739,8 @@ from changed ra`,
 	}
 	return scanResourceAttachment(tx.QueryRowContext(ctx, `
 with inserted as (
-insert into resource_attachments (
-  resource_attachment_id,
+insert into attachment_relationships (
+  attachment_relationship_id,
   company_id,
   resource_type,
   resource_id,

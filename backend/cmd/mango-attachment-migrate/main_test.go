@@ -58,11 +58,3 @@ func TestCandidateSourcesConsumeStandardQueryArguments(t *testing.T) {
 		}
 	}
 }
-
-func TestAttachedEmailMigrationResourceIDEscapesProviderMessageID(t *testing.T) {
-	got := attachedEmailMigrationResourceID("node-1", "msg:with/slash")
-	want := "node:node-1:message:msg%3Awith%2Fslash"
-	if got != want {
-		t.Fatalf("resource id = %q, want %q", got, want)
-	}
-}

@@ -558,7 +558,7 @@ func deletePostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONDelete
 		return EditorJSONCommit{}, err
 	}
 	if input.Document.ResourceType == EntityTypeNode {
-		if _, err := tx.ExecContext(ctx, `update resource_attachments link
+		if _, err := tx.ExecContext(ctx, `update attachment_relationships link
 set deleted_timestamp=coalesce(link.deleted_timestamp,clock_timestamp())
 where link.company_id=$1::uuid
   and link.resource_type='node_chat_message'

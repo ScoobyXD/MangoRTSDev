@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"log"
@@ -137,6 +136,12 @@ func (s *Server) processCommunicationsEmailThreadDownloadJob(ctx context.Context
 		if emailMessageHasUnresolvedCIDAttachments(message) {
 			return s.recordCommunicationsEmailThreadDownloadFailure(job, errCommunicationsEmailAttachmentUnavailable)
 		}
+		preliminarySnapshot := emailMessageSnapshotFromNylas(message)
+		preliminarySnapshot.DownloadComplete = false
+		thread, err = s.repo.UpsertCommunicationsEmailThread(communicationsEmailThreadInputFromStoredThread(thread, preliminarySnapshot, thread.HistoryComplete))
+		if err != nil {
+			return s.recordCommunicationsEmailThreadDownloadFailure(job, err)
+		}
 		message, err = s.storeImportedEmailMessageAttachments(ctx, connection, thread, job.RequestedByUserID, message)
 		if err != nil {
 			return s.recordCommunicationsEmailThreadDownloadFailure(job, err)
@@ -177,10 +182,20 @@ func storedEmailMessageDownloadComplete(thread domain.CommunicationsEmailThread,
 	return false
 }
 
+func internalEmailMessageIDForProvider(thread domain.CommunicationsEmailThread, providerMessageID string) string {
+	providerMessageID = strings.TrimSpace(providerMessageID)
+	for _, item := range thread.Messages {
+		if strings.TrimSpace(item.ProviderMessageID) == providerMessageID {
+			return strings.TrimSpace(item.EmailMessageID)
+		}
+	}
+	return ""
+}
+
 func communicationsEmailThreadInputFromStoredThread(thread domain.CommunicationsEmailThread, message domain.EmailMessageSnapshot, historyComplete bool) store.CommunicationsEmailThreadUpsertInput {
 	input := store.CommunicationsEmailThreadUpsertInput{
 		CompanyID: thread.CompanyID, PersonalUserID: thread.PersonalUserID, PersonalAccountEmail: thread.PersonalAccountEmail,
-		SharedInboxID: thread.SharedInboxID, AccountEmail: thread.AccountEmail, ProviderThreadID: thread.ProviderThreadID,
+		SharedInboxID: thread.SharedInboxID, AccountEmail: thread.AccountEmail, Provider: thread.Provider, ProviderThreadID: thread.ProviderThreadID,
 		SelectedMessageID: message.ID, Messages: []domain.EmailMessageSnapshot{message}, HistoryComplete: historyComplete, FetchedAt: time.Now().UTC(),
 	}
 	return input
@@ -201,8 +216,8 @@ func (s *Server) storeImportedEmailMessageAttachments(ctx context.Context, conne
 	if s.attachmentStorage == nil {
 		return NylasMessage{}, errCommunicationsEmailAttachmentUnavailable
 	}
-	nodeIDs, err := s.repo.ListCommunicationsEmailThreadNodeIDs(thread.CompanyID, thread.EmailThreadID)
-	if err != nil || len(nodeIDs) == 0 {
+	emailMessageID := internalEmailMessageIDForProvider(thread, message.ID)
+	if emailMessageID == "" {
 		return NylasMessage{}, errCommunicationsEmailAttachmentUnavailable
 	}
 	for index := range message.Attachments {
@@ -210,7 +225,7 @@ func (s *Server) storeImportedEmailMessageAttachments(ctx context.Context, conne
 		mangoAttachmentID := strings.TrimSpace(attachment.AttachmentID)
 		if mangoAttachmentID != "" {
 			if _, getErr := s.repo.GetAttachment(thread.CompanyID, mangoAttachmentID); getErr == nil {
-				if err := s.linkImportedEmailAttachmentToNodes(thread.CompanyID, nodeIDs, actorUserID, message.ID, mangoAttachmentID, attachment.IsInline || strings.TrimSpace(attachment.ContentID) != ""); err != nil {
+				if err := s.linkImportedEmailAttachment(thread.CompanyID, actorUserID, emailMessageID, mangoAttachmentID, attachment.IsInline || strings.TrimSpace(attachment.ContentID) != ""); err != nil {
 					return NylasMessage{}, err
 				}
 				continue
@@ -220,12 +235,12 @@ func (s *Server) storeImportedEmailMessageAttachments(ctx context.Context, conne
 		mangoAttachmentID = deterministicImportedEmailAttachmentID(thread.CompanyID, thread.EmailThreadID, message.ID, providerAttachmentID, attachment.ContentID, attachment.Filename)
 		if _, getErr := s.repo.GetAttachment(thread.CompanyID, mangoAttachmentID); getErr == nil {
 			attachment.AttachmentID = mangoAttachmentID
-			if err := s.linkImportedEmailAttachmentToNodes(thread.CompanyID, nodeIDs, actorUserID, message.ID, mangoAttachmentID, attachment.IsInline || strings.TrimSpace(attachment.ContentID) != ""); err != nil {
+			if err := s.linkImportedEmailAttachment(thread.CompanyID, actorUserID, emailMessageID, mangoAttachmentID, attachment.IsInline || strings.TrimSpace(attachment.ContentID) != ""); err != nil {
 				return NylasMessage{}, err
 			}
 			continue
 		}
-		body, err := importedEmailAttachmentBytes(ctx, s, connection, message.ID, providerAttachmentID, attachment.Content)
+		body, err := importedEmailAttachmentBytes(ctx, s, connection, message.ID, providerAttachmentID)
 		if err != nil {
 			return NylasMessage{}, err
 		}
@@ -254,33 +269,20 @@ func (s *Server) storeImportedEmailMessageAttachments(ctx context.Context, conne
 			StorageChecksumAlgorithm: "SHA256", StorageChecksumValue: rawSHA256Base64(digestHex), StorageChecksumType: "FULL_OBJECT",
 			StorageBucket: s.attachmentStorage.Bucket(), StorageKey: storageKey, SourceKind: store.AttachmentSourceEmailIncoming,
 			SourceProvider: strings.TrimSpace(connection.Provider), CreatedTimestamp: now,
-			ResourceLink: store.ResourceAttachmentInput{CompanyID: thread.CompanyID, ResourceType: store.EntityTypeNode, ResourceID: nodeIDs[0], MessageID: message.ID, RelationshipKind: relationship, CreatedByUserID: actorUserID, CreatedTimestamp: now},
+			ResourceLink: store.ResourceAttachmentInput{CompanyID: thread.CompanyID, ResourceType: "email_message", ResourceID: emailMessageID, RelationshipKind: relationship, CreatedByUserID: actorUserID, CreatedTimestamp: now},
 		})
 		if createErr != nil && !errors.Is(createErr, store.ErrAlreadyExists) {
 			return NylasMessage{}, createErr
 		}
 		attachment.AttachmentID = mangoAttachmentID
-		if err := s.linkImportedEmailAttachmentToNodes(thread.CompanyID, nodeIDs, actorUserID, message.ID, mangoAttachmentID, relationship == store.AttachmentRelationshipEmailInline); err != nil {
+		if err := s.linkImportedEmailAttachment(thread.CompanyID, actorUserID, emailMessageID, mangoAttachmentID, relationship == store.AttachmentRelationshipEmailInline); err != nil {
 			return NylasMessage{}, err
 		}
 	}
 	return message, nil
 }
 
-func importedEmailAttachmentBytes(ctx context.Context, s *Server, connection domain.UserEmailConnection, messageID, providerAttachmentID, content string) ([]byte, error) {
-	if content = strings.TrimSpace(content); content != "" {
-		body, err := base64.StdEncoding.DecodeString(content)
-		if err != nil {
-			body, err = base64.RawStdEncoding.DecodeString(content)
-		}
-		if err != nil {
-			return nil, errCommunicationsEmailAttachmentUnavailable
-		}
-		if int64(len(body)) > communicationsAttachmentDownloadMaxBytes {
-			return nil, errCommunicationsEmailAttachmentUnavailable
-		}
-		return body, nil
-	}
+func importedEmailAttachmentBytes(ctx context.Context, s *Server, connection domain.UserEmailConnection, messageID, providerAttachmentID string) ([]byte, error) {
 	if strings.TrimSpace(providerAttachmentID) == "" {
 		return nil, errCommunicationsEmailAttachmentUnavailable
 	}
@@ -295,7 +297,6 @@ func importedEmailAttachmentBytes(ctx context.Context, s *Server, connection dom
 	}
 	return body, nil
 }
-
 func deterministicImportedEmailAttachmentID(parts ...string) string {
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x1f")))
 	b := append([]byte(nil), sum[:16]...)
@@ -304,19 +305,17 @@ func deterministicImportedEmailAttachmentID(parts ...string) string {
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
-func (s *Server) linkImportedEmailAttachmentToNodes(companyID string, nodeIDs []string, actorUserID, messageID, attachmentID string, inline bool) error {
+func (s *Server) linkImportedEmailAttachment(companyID, actorUserID, emailMessageID, attachmentID string, inline bool) error {
 	relationship := store.AttachmentRelationshipEmailAttachment
 	if inline {
 		relationship = store.AttachmentRelationshipEmailInline
 	}
-	for _, nodeID := range nodeIDs {
-		if _, err := s.repo.LinkResourceAttachment(store.ResourceAttachmentInput{CompanyID: companyID, ResourceType: store.EntityTypeNode, ResourceID: nodeID, AttachmentID: attachmentID, MessageID: messageID, RelationshipKind: relationship, CreatedByUserID: actorUserID}); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err := s.repo.LinkResourceAttachment(store.ResourceAttachmentInput{
+		CompanyID: companyID, ResourceType: "email_message", ResourceID: emailMessageID,
+		AttachmentID: attachmentID, RelationshipKind: relationship, CreatedByUserID: actorUserID,
+	})
+	return err
 }
-
 func (s *Server) recordCommunicationsEmailThreadDownloadFailure(job store.CommunicationsEmailThreadDownloadJob, downloadErr error) error {
 	code := communicationsMutationErrorCode(downloadErr)
 	if errors.Is(downloadErr, errCommunicationsEmailAttachmentUnavailable) {
@@ -361,10 +360,7 @@ func (s *Server) linkStoredEmailThreadAttachments(companyID, emailThreadID, acto
 	if err != nil {
 		return err
 	}
-	nodeIDs, err := s.repo.ListCommunicationsEmailThreadNodeIDs(companyID, emailThreadID)
-	if err != nil {
-		return err
-	}
+
 	for _, item := range thread.Messages {
 		for _, attachment := range item.Message.Attachments {
 			attachmentID := strings.TrimSpace(attachment.AttachmentID)
@@ -374,7 +370,7 @@ func (s *Server) linkStoredEmailThreadAttachments(companyID, emailThreadID, acto
 			if _, err := s.repo.GetAttachment(companyID, attachmentID); err != nil {
 				continue
 			}
-			if err := s.linkImportedEmailAttachmentToNodes(companyID, nodeIDs, actorUserID, item.ProviderMessageID, attachmentID, attachment.IsInline || strings.TrimSpace(attachment.ContentID) != ""); err != nil {
+			if err := s.linkImportedEmailAttachment(companyID, actorUserID, item.EmailMessageID, attachmentID, attachment.IsInline || strings.TrimSpace(attachment.ContentID) != ""); err != nil {
 				return err
 			}
 		}

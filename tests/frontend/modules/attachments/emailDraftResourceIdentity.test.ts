@@ -4,30 +4,25 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { mangoEmailDraftResourceID } from "../../../../frontend/src/modules/attachments/attachmentApi.js";
 
-test("shared draft attachment identity is collaboration-first and URL-safe", () => {
-  assert.equal(
-    mangoEmailDraftResourceID({
-      draftID: " draft/shared:1 ",
-      collaborationID: " collaboration/shared:1 ",
-      sharedInboxID: "ignored-shared-inbox",
-      userID: "ignored-user",
-      accountEmail: "ignored@example.test",
-    }),
-    "collaboration:collaboration%2Fshared%3A1:draft%2Fshared%3A1",
-  );
+test("shared draft attachments use the exact stable V3 draft ID", () => {
+  assert.equal(mangoEmailDraftResourceID({ draftID: " draft/shared:1 " }), "draft/shared:1");
 });
 
-test("collaboration attachment identity rejects an incomplete draft key", () => {
-  assert.equal(mangoEmailDraftResourceID({
-    draftID: "   ",
-    collaborationID: "collaboration-1",
-  }), "");
+test("draft attachment identity rejects a missing stable draft ID", () => {
+  assert.equal(mangoEmailDraftResourceID({ draftID: "   " }), "");
 });
 
-test("shared-draft file and inline-image uploads use the same collaboration resource", () => {
+test("shared-draft file and inline-image uploads use the same stable draft resource", () => {
   const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
 
-  assert.match(homeParts, /const cleanCollaborationID = compose\.sharedDraft \? compose\.collaborationID\.trim\(\) : ""/);
-  assert.match(homeParts, /collaborationID: cleanCollaborationID/);
-  assert.match(homeParts, /compose\.sharedDraft\s*\? "email-collaboration-shared-draft"/);
+  const start = homeParts.indexOf("const composeAttachmentResourceID");
+  const end = homeParts.indexOf("const composeEditorImageAttachmentContext", start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const identity = homeParts.slice(start, end);
+
+  assert.match(identity, /draftID: compose\.draftID/);
+  assert.doesNotMatch(identity, /collaborationID|sharedInboxID|accountEmail|userID/);
+  assert.match(homeParts, /resourceType: "email_draft"[\s\S]*resourceID: composeAttachmentResourceID/);
+
 });

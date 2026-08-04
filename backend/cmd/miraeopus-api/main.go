@@ -117,9 +117,18 @@ func buildRepository() (store.Repository, func()) {
 		log.Fatalf("failed to connect postgres in %s: %v", appEnv, err)
 	}
 	configureDatabasePool(db)
+	repo := store.NewPostgresRepo(db)
+	if err := repo.CheckApplicationSchemaReadiness(); err != nil {
+		_ = db.Close()
+		if appEnv == "dev" || allowFallback {
+			log.Printf("postgres application schema is not ready (%v), falling back to in-memory repository", err)
+			return store.NewMemoryRepo(), func() {}
+		}
+		log.Fatalf("postgres application schema is not ready in %s: %v", appEnv, err)
+	}
 
 	log.Printf("using postgres repository host=%s db=%s sslmode=%s", host, dbName, sslMode)
-	return store.NewPostgresRepo(db), func() { _ = db.Close() }
+	return repo, func() { _ = db.Close() }
 }
 
 func getenvDefault(key, fallback string) string {

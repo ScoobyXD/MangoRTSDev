@@ -18,14 +18,14 @@ func TestMemoryEmailCollaborationEnsureConvergesFallbackAndKnownThread(t *testin
 	peer := mustEmailCollaborationGuardUser(t, repo, companyID, "convergence-peer", "peer-convergence@example.com", domain.RoleCompanyUser)
 
 	first, err := repo.EnsureCommunicationsEmailCollaboration(CommunicationsEmailCollaborationEnsureInput{
-		CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "support@example.com", CreatedByUserID: creator.UserID,
+		CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "support@example.com", Provider: "google", CreatedByUserID: creator.UserID,
 		Message: domain.EmailMessageSnapshot{ID: "fallback-message", Subject: "Fallback first", Snippet: "initial", Date: 10},
 	})
 	if err != nil || !first.Created {
 		t.Fatalf("first EnsureCommunicationsEmailCollaboration = %+v err=%v", first, err)
 	}
 	second, err := repo.EnsureCommunicationsEmailCollaboration(CommunicationsEmailCollaborationEnsureInput{
-		CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "support@example.com", CreatedByUserID: peer.UserID,
+		CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "support@example.com", Provider: "google", CreatedByUserID: peer.UserID,
 		Message: domain.EmailMessageSnapshot{ID: "fallback-message", ThreadID: "provider-thread"},
 	})
 	if err != nil {
@@ -42,14 +42,14 @@ func TestMemoryEmailCollaborationEnsureConvergesFallbackAndKnownThread(t *testin
 	}
 
 	future, err := repo.EnsureCommunicationsEmailCollaboration(CommunicationsEmailCollaborationEnsureInput{
-		CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "support@example.com", CreatedByUserID: peer.UserID,
+		CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "support@example.com", Provider: "google", CreatedByUserID: peer.UserID,
 		Message: domain.EmailMessageSnapshot{ID: "future-message", ThreadID: "provider-thread", Subject: "Fallback first", Snippet: "new", Date: 20},
 	})
-	if err != nil || future.Collaboration.CollaborationID != first.Collaboration.CollaborationID || future.Collaboration.LatestMessageID != "future-message" {
-		t.Fatalf("thread ensure = %+v err=%v, want original collaboration and advanced message", future, err)
+	if err != nil || future.Collaboration.CollaborationID != first.Collaboration.CollaborationID || future.Collaboration.LatestMessageID != first.Collaboration.LatestMessageID {
+		t.Fatalf("thread ensure = %+v err=%v, want the original exact-message relationship", future, err)
 	}
 	otherScope, err := repo.EnsureCommunicationsEmailCollaboration(CommunicationsEmailCollaborationEnsureInput{
-		CompanyID: companyID, SharedInboxID: otherSharedInboxID, AccountEmail: "other@example.com", CreatedByUserID: creator.UserID,
+		CompanyID: companyID, SharedInboxID: otherSharedInboxID, AccountEmail: "other@example.com", Provider: "google", CreatedByUserID: creator.UserID,
 		Message: domain.EmailMessageSnapshot{ID: "fallback-message", ThreadID: "provider-thread", Subject: "Other mailbox", Date: 20},
 	})
 	if err != nil || !otherScope.Created || otherScope.Collaboration.CollaborationID == first.Collaboration.CollaborationID {
@@ -66,11 +66,11 @@ func TestMemoryEmailCollaborationConcurrentFallbackAndKnownThreadEnsureConverge(
 	peer := mustEmailCollaborationGuardUser(t, repo, companyID, "concurrent-peer", "concurrent-peer@example.com", domain.RoleCompanyUser)
 	inputs := []CommunicationsEmailCollaborationEnsureInput{
 		{
-			CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "concurrent@example.com", CreatedByUserID: creator.UserID,
+			CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "concurrent@example.com", Provider: "google", CreatedByUserID: creator.UserID,
 			Message: domain.EmailMessageSnapshot{ID: "concurrent-message", Subject: "Concurrent"},
 		},
 		{
-			CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "concurrent@example.com", CreatedByUserID: peer.UserID,
+			CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "concurrent@example.com", Provider: "google", CreatedByUserID: peer.UserID,
 			Message: domain.EmailMessageSnapshot{ID: "concurrent-message", ThreadID: "concurrent-thread"},
 		},
 	}
@@ -231,7 +231,7 @@ func setupAtomicEmailCollaboration(t *testing.T) (*MemoryRepo, string, domain.Us
 	creator := mustEmailCollaborationGuardUser(t, repo, companyID, "atomic-creator", "atomic-creator@example.com", domain.RoleCompanyUser)
 	participant := mustEmailCollaborationGuardUser(t, repo, companyID, "atomic-participant", "atomic-participant@example.com", domain.RoleCompanyUser)
 	created, err := repo.EnsureCommunicationsEmailCollaboration(CommunicationsEmailCollaborationEnsureInput{
-		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
+		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email, Provider: "google",
 		AccountEmail: creator.Email, CreatedByUserID: creator.UserID,
 		Message: domain.EmailMessageSnapshot{ID: "atomic-message", ThreadID: "atomic-thread", Subject: "Atomic chat"},
 	})
@@ -269,79 +269,4 @@ func hasNodeProjectionID(items []domain.NodeProjection, informationID string) bo
 		}
 	}
 	return false
-}
-
-func TestMemoryEmailCollaborationMailboxHintCommitsAtomically(t *testing.T) {
-	repo := NewMemoryRepo()
-	companyID := "11111111-1111-4111-8111-701300000191"
-	repo.EnsureCompany(companyID, "Email collaboration realtime")
-	creator := mustEmailCollaborationGuardUser(t, repo, companyID, "realtime-email-creator", "creator-realtime@example.com", domain.RoleCompanyUser)
-	peer := mustEmailCollaborationGuardUser(t, repo, companyID, "realtime-email-peer", "peer-realtime@example.com", domain.RoleCompanyUser)
-	for _, connection := range []UserEmailConnectionInput{
-		{UserID: creator.UserID, Provider: "google", AccountEmail: creator.Email, GrantID: "creator-grant", Status: "connected"},
-		{UserID: peer.UserID, Provider: "microsoft", AccountEmail: peer.Email, GrantID: "peer-grant", Status: "connected"},
-	} {
-		if _, err := repo.UpsertUserEmailConnection(connection); err != nil {
-			t.Fatal(err)
-		}
-	}
-	created, err := repo.EnsureCommunicationsEmailCollaboration(CommunicationsEmailCollaborationEnsureInput{
-		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
-		CreatedByUserID: creator.UserID,
-		Message:         domain.EmailMessageSnapshot{ID: "mailbox-root", ThreadID: "mailbox-thread", Subject: "Root", Date: 10},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.AddCommunicationsEmailCollaborationParticipants(CommunicationsEmailCollaborationParticipantInput{
-		CompanyID: companyID, CollaborationID: created.Collaboration.CollaborationID,
-		ActorUserID: creator.UserID, MentionedUserIDs: []string{peer.UserID},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	input := CommunicationsEmailCollaborationMessageInput{
-		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
-		Message: domain.EmailMessageSnapshot{ID: "mailbox-next", ThreadID: "mailbox-thread", Subject: "Next", Date: 20},
-	}
-	forced := errors.New("forced mailbox outbox failure")
-	repo.realtimeOutboxErr = forced
-	if _, err := repo.UpdateCommunicationsEmailCollaborationMessage(input); !errors.Is(err, forced) {
-		t.Fatalf("mailbox update error = %v, want forced failure", err)
-	}
-	stored, err := repo.GetCommunicationsEmailCollaboration(companyID, created.Collaboration.CollaborationID, creator.UserID)
-	if err != nil || stored.LatestMessageID != "mailbox-root" {
-		t.Fatalf("snapshot after outbox failure = %+v err=%v", stored, err)
-	}
-	rolledBackThread, err := repo.GetCommunicationsEmailThread(companyID, created.Collaboration.EmailThreadID)
-	if err != nil || len(rolledBackThread.Messages) != 1 || rolledBackThread.Messages[0].ProviderMessageID != "mailbox-root" {
-		t.Fatalf("durable thread after outbox rollback = %+v err=%v", rolledBackThread, err)
-	}
-	if len(repo.realtimeOutbox) != 0 {
-		t.Fatalf("outbox after rolled-back mailbox update = %d", len(repo.realtimeOutbox))
-	}
-
-	repo.realtimeOutboxErr = nil
-	if _, err := repo.UpdateCommunicationsEmailCollaborationMessage(input); err != nil {
-		t.Fatal(err)
-	}
-	durableThread, err := repo.GetCommunicationsEmailThread(companyID, created.Collaboration.EmailThreadID)
-	if err != nil || len(durableThread.Messages) != 2 || durableThread.Messages[1].ProviderMessageID != "mailbox-next" {
-		t.Fatalf("durable thread after webhook update = %+v err=%v", durableThread, err)
-	}
-	if len(repo.realtimeOutbox) != 1 {
-		t.Fatalf("mailbox outbox rows = %d, want 1", len(repo.realtimeOutbox))
-	}
-	for _, event := range repo.realtimeOutbox {
-		wantScope := "mailbox:personal:account:" + peer.UserID + ":" + peer.Email
-		if event.EventType != "mailbox.message.changed" || event.Scope != wantScope ||
-			len(event.AllowedUserIDs) != 1 || event.AllowedUserIDs[0] != peer.UserID {
-			t.Fatalf("mailbox outbox event = %+v", event)
-		}
-	}
-	if _, err := repo.UpdateCommunicationsEmailCollaborationMessage(input); err != nil {
-		t.Fatal(err)
-	}
-	if len(repo.realtimeOutbox) != 1 {
-		t.Fatalf("duplicate mailbox update outbox rows = %d, want stable idempotent row", len(repo.realtimeOutbox))
-	}
 }

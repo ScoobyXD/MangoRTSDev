@@ -21,7 +21,7 @@ func TestMemoryProjectRelationshipAllowsEmailNodeAndPreservesEmailOrigin(t *test
 	priority := 3
 	collaborationResult, err := repo.EnsureCommunicationsEmailCollaboration(CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: user.UserID, PersonalAccountEmail: user.Email,
-		AccountEmail: user.Email, CreatedByUserID: user.UserID, Priority: &priority,
+		AccountEmail: user.Email, Provider: "google", CreatedByUserID: user.UserID, Priority: &priority,
 		Message: domain.EmailMessageSnapshot{ID: "project-email-message", ThreadID: "project-email-thread", Subject: "Project email node"},
 	})
 	if err != nil {
@@ -75,7 +75,7 @@ func TestPostgresProjectRelationshipAllowsEmailNodeAttach(t *testing.T) {
 		t.Fatalf("ReadFile postgres_projects.go: %v", err)
 	}
 	source := strings.ReplaceAll(string(raw), "\r\n", "\n")
-	upsert := emailCollaborationPostgresFunctionBodyForTest(t, source, "func (r *PostgresRepo) UpsertProjectRelationship")
+	upsert := extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) UpsertProjectRelationship")
 	if strings.Contains(upsert, "postgresRejectEmailCollaborationNodeMutation") {
 		t.Fatal("UpsertProjectRelationship must allow email-derived Nodes to use normal Project behavior")
 	}

@@ -38,6 +38,13 @@ func TestCommunicationsTriageConvertUsesCommittedEmailConversionCommandEvents(t 
 		From:     []NylasEmailAddress{{Name: "Customer", Email: "customer@example.com"}},
 		Starred:  true,
 	}}
+	if _, err := repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+		CompanyID: companyID, PersonalUserID: user.UserID, PersonalAccountEmail: user.Email,
+		AccountEmail: user.Email, Provider: "google", ProviderThreadID: nylas.message.ThreadID,
+		SelectedMessageID: nylas.message.ID, Messages: []domain.EmailMessageSnapshot{emailMessageSnapshotFromNylas(nylas.message)}, HistoryComplete: true,
+	}); err != nil {
+		t.Fatalf("seed personal V3 email: %v", err)
+	}
 	server := NewServerWithOptions(repo, ServerOptions{
 		NylasConfig: testNylasConfig(),
 		NylasClient: nylas,
@@ -142,6 +149,13 @@ func TestCommunicationsTriageConvertUsesSharedInboxConnection(t *testing.T) {
 		From:     []NylasEmailAddress{{Name: "Customer", Email: "customer@example.com"}},
 		Starred:  true,
 	}}
+	if _, err := repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+		CompanyID: companyID, SharedInboxID: folder.FolderID, AccountEmail: "support@example.com", Provider: "google",
+		ProviderThreadID: nylas.message.ThreadID, SelectedMessageID: nylas.message.ID,
+		Messages: []domain.EmailMessageSnapshot{emailMessageSnapshotFromNylas(nylas.message)}, HistoryComplete: true,
+	}); err != nil {
+		t.Fatalf("seed shared V3 email: %v", err)
+	}
 	server := NewServerWithOptions(repo, ServerOptions{
 		NylasConfig: testNylasConfig(),
 		NylasClient: nylas,
@@ -161,8 +175,8 @@ func TestCommunicationsTriageConvertUsesSharedInboxConnection(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("POST shared convert status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	if nylas.lastDetailGrantID != "grant-shared-convert" {
-		t.Fatalf("Nylas detail grant = %q, want shared grant", nylas.lastDetailGrantID)
+	if nylas.detailCalls != 0 {
+		t.Fatalf("stored shared conversion called provider detail %d times", nylas.detailCalls)
 	}
 	var response map[string]json.RawMessage
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
@@ -231,6 +245,13 @@ func TestCommunicationsTriageConvertSelectsExactOwnedPersonalAccount(t *testing.
 		From:     []NylasEmailAddress{{Email: "customer@example.com"}},
 		Starred:  true,
 	}}
+	if _, err := repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+		CompanyID: companyID, PersonalUserID: user.UserID, PersonalAccountEmail: "account-b@example.com",
+		AccountEmail: "account-b@example.com", Provider: "microsoft", ProviderThreadID: nylas.message.ThreadID,
+		SelectedMessageID: nylas.message.ID, Messages: []domain.EmailMessageSnapshot{emailMessageSnapshotFromNylas(nylas.message)}, HistoryComplete: true,
+	}); err != nil {
+		t.Fatalf("seed exact-account V3 email: %v", err)
+	}
 	server := NewServerWithOptions(repo, ServerOptions{NylasConfig: testNylasConfig(), NylasClient: nylas})
 	body, _ := json.Marshal(map[string]any{
 		"company_id":    companyID,
@@ -246,8 +267,8 @@ func TestCommunicationsTriageConvertSelectsExactOwnedPersonalAccount(t *testing.
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("POST exact account convert status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	if nylas.lastDetailGrantID != "grant-convert-account-b" {
-		t.Fatalf("Nylas detail grant = %q, want grant-convert-account-b", nylas.lastDetailGrantID)
+	if nylas.detailCalls != 0 {
+		t.Fatalf("stored exact-account conversion called provider detail %d times", nylas.detailCalls)
 	}
 	if len(nylas.updateCalls) != 1 || nylas.updateCalls[0].GrantID != "grant-convert-account-b" {
 		t.Fatalf("Nylas update calls = %+v, want exact account B grant", nylas.updateCalls)

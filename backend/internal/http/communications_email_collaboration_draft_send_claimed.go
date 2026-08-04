@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"strings"
@@ -93,10 +94,19 @@ func (s *Server) handleCommunicationsEmailCollaborationDraftSend(w http.Response
 		return
 	}
 
+	var storedSource domain.EmailMessageSnapshot
+	if err := json.Unmarshal([]byte(strings.TrimSpace(draft.ReplyToMessageJSON)), &storedSource); err != nil ||
+		strings.TrimSpace(storedSource.EmailMessageID) != strings.TrimSpace(draft.SourceMessageID) ||
+		strings.TrimSpace(storedSource.ID) == "" {
+		releaseFreshPreProviderClaim()
+		writeError(w, http.StatusConflict, "shared_email_draft_reply_source_invalid")
+		return
+	}
+	providerSourceMessageID := strings.TrimSpace(storedSource.ID)
 	var sourceMessage NylasMessage
 	err = s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
 		var fetchErr error
-		sourceMessage, fetchErr = s.nylasClient.GetMessage(ctx, connection.GrantID, draft.SourceMessageID)
+		sourceMessage, fetchErr = s.nylasClient.GetMessage(ctx, connection.GrantID, providerSourceMessageID)
 		return fetchErr
 	})
 	if err != nil {
@@ -107,7 +117,7 @@ func (s *Server) handleCommunicationsEmailCollaborationDraftSend(w http.Response
 		s.writeNylasError(w, r, connection, err)
 		return
 	}
-	if strings.TrimSpace(sourceMessage.ID) != strings.TrimSpace(draft.SourceMessageID) ||
+	if strings.TrimSpace(sourceMessage.ID) != providerSourceMessageID ||
 		(strings.TrimSpace(collaboration.ProviderThreadID) != "" &&
 			strings.TrimSpace(sourceMessage.ThreadID) != strings.TrimSpace(collaboration.ProviderThreadID)) {
 		releaseFreshPreProviderClaim()
@@ -119,7 +129,7 @@ func (s *Server) handleCommunicationsEmailCollaborationDraftSend(w http.Response
 	sendReq := NylasSendMessageRequest{
 		To: draftRecipientAddresses(toRecipients), Cc: draftRecipientAddresses(ccRecipients),
 		Subject: strings.TrimSpace(draft.Subject), Body: strings.TrimSpace(draft.BodyEditorHTML),
-		ReplyToMessageID: strings.TrimSpace(draft.SourceMessageID), IdempotencyKey: claim.IdempotencyKey,
+		ReplyToMessageID: providerSourceMessageID, IdempotencyKey: claim.IdempotencyKey,
 	}
 	if len(sendReq.To) == 0 && len(sendReq.Cc) == 0 {
 		releaseFreshPreProviderClaim()

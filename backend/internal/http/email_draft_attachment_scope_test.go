@@ -59,38 +59,26 @@ func TestPersonalEmailDraftAttachmentsAreOwnerOnlyEvenForCompanyManagers(t *test
 	fixture := newCommunicationsEmailDraftScopeHTTPFixture(t)
 	const draftID = "personal-attachment-draft"
 	if _, err := fixture.repo.UpsertCommunicationsEmailDraft(store.CommunicationsEmailDraftInput{
-		CompanyID: fixture.companyID, DraftID: draftID, PersonalUserID: fixture.owner.UserID, PersonalAccountEmail: "owner-a@example.com",
-		CreatedByUserID: fixture.owner.UserID, UpdatedByUserID: fixture.owner.UserID, Kind: "compose", AccountEmail: "owner-a@example.com",
+		CompanyID: fixture.companyID, DraftID: draftID, PersonalUserID: fixture.owner.UserID,
+		PersonalAccountEmail: "owner-a@example.com", AccountEmail: "owner-a@example.com",
+		CreatedByUserID: fixture.owner.UserID, UpdatedByUserID: fixture.owner.UserID, Kind: "compose",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	resourceID := "personal:" + url.QueryEscape(fixture.owner.UserID) + ":" + url.QueryEscape("owner-a@example.com") + ":" + url.QueryEscape(draftID)
-	path := "/v1/resources/email_draft/" + resourceID + "/attachments?company_id=" + url.QueryEscape(fixture.companyID)
+	path := "/v1/resources/email_draft/" + draftID + "/attachments?company_id=" + url.QueryEscape(fixture.companyID)
 	fixture.expectStatus(t, http.MethodGet, path, nil, fixture.owner, domain.RoleCompanyUser, http.StatusOK)
 	fixture.expectStatus(t, http.MethodGet, path, nil, fixture.manager, domain.RoleCompanyManager, http.StatusNotFound)
-	unknownAccountResourceID := "personal:" + url.QueryEscape(fixture.owner.UserID) + ":" + url.QueryEscape("unknown@example.com") + ":" + url.QueryEscape(draftID)
-	fixture.expectStatus(t, http.MethodGet, "/v1/resources/email_draft/"+unknownAccountResourceID+"/attachments?company_id="+url.QueryEscape(fixture.companyID), nil, fixture.owner, domain.RoleCompanyUser, http.StatusNotFound)
-	missingDraftResourceID := "personal:" + url.QueryEscape(fixture.owner.UserID) + ":" + url.QueryEscape("owner-a@example.com") + ":missing-draft"
-	fixture.expectStatus(t, http.MethodGet, "/v1/resources/email_draft/"+missingDraftResourceID+"/attachments?company_id="+url.QueryEscape(fixture.companyID), nil, fixture.owner, domain.RoleCompanyUser, http.StatusNotFound)
-	legacyResourceID := "personal:" + url.QueryEscape(fixture.owner.UserID) + ":" + url.QueryEscape(draftID)
-	fixture.expectStatus(t, http.MethodGet, "/v1/resources/email_draft/"+legacyResourceID+"/attachments?company_id="+url.QueryEscape(fixture.companyID), nil, fixture.owner, domain.RoleCompanyUser, http.StatusOK)
-	fixture.expectStatus(t, http.MethodGet, "/v1/resources/email_draft/"+legacyResourceID+"/attachments?company_id="+url.QueryEscape(fixture.companyID), nil, fixture.manager, domain.RoleCompanyAdmin, http.StatusNotFound)
+	obsoleteID := "personal:" + url.QueryEscape(fixture.owner.UserID) + ":" + url.QueryEscape(draftID)
+	fixture.expectStatus(t, http.MethodGet, "/v1/resources/email_draft/"+obsoleteID+"/attachments?company_id="+url.QueryEscape(fixture.companyID), nil, fixture.owner, domain.RoleCompanyUser, http.StatusNotFound)
 
 	server := NewServer(fixture.repo)
 	ownerRequest := emailDraftAttachmentScopeRequest(fixture.owner, fixture.companyID, domain.RoleCompanyUser)
-	if recorder := httptest.NewRecorder(); !server.requireAttachmentResourceEdit(recorder, ownerRequest, fixture.companyID, "email_draft", resourceID) {
+	if recorder := httptest.NewRecorder(); !server.requireAttachmentResourceEdit(recorder, ownerRequest, fixture.companyID, "email_draft", draftID) {
 		t.Fatalf("owner edit denied status=%d body=%s", recorder.Code, recorder.Body.String())
-	}
-	legacyEditRecorder := httptest.NewRecorder()
-	if server.requireAttachmentResourceEdit(legacyEditRecorder, ownerRequest, fixture.companyID, "email_draft", legacyResourceID) {
-		t.Fatal("owner unexpectedly received write access through a legacy accountless draft resource")
-	}
-	if legacyEditRecorder.Code != http.StatusBadRequest {
-		t.Fatalf("legacy draft edit denial status=%d body=%s", legacyEditRecorder.Code, legacyEditRecorder.Body.String())
 	}
 	managerRequest := emailDraftAttachmentScopeRequest(fixture.manager, fixture.companyID, domain.RoleCompanyManager)
 	managerRecorder := httptest.NewRecorder()
-	if server.requireAttachmentResourceEdit(managerRecorder, managerRequest, fixture.companyID, "email_draft", resourceID) {
+	if server.requireAttachmentResourceEdit(managerRecorder, managerRequest, fixture.companyID, "email_draft", draftID) {
 		t.Fatal("company manager unexpectedly received personal-draft attachment edit access")
 	}
 	if managerRecorder.Code != http.StatusNotFound {
@@ -98,117 +86,76 @@ func TestPersonalEmailDraftAttachmentsAreOwnerOnlyEvenForCompanyManagers(t *test
 	}
 }
 
-func TestPersonalEmailDraftAttachmentContentRequiresExactOwnerAccount(t *testing.T) {
+func TestPersonalEmailDraftAttachmentContentUsesDraftIdentityAndSurvivesDisconnect(t *testing.T) {
 	fixture := newCommunicationsEmailDraftScopeHTTPFixture(t)
 	storage := newFakeAttachmentObjectStorage()
 	handler := NewServerWithOptions(fixture.repo, ServerOptions{AttachmentStorage: storage}).Routes()
-	exactResourceID := personalEmailDraftResourceID(fixture.owner.UserID, "owner-a@example.com", "content-draft")
-	wrongAccountResourceID := personalEmailDraftResourceID(fixture.owner.UserID, "owner-b@example.com", "wrong-account-draft")
-	disconnectedAccountResourceID := personalEmailDraftResourceID(fixture.owner.UserID, "disconnected@example.com", "disconnected-draft")
-	legacyResourceID := "personal:" + url.QueryEscape(fixture.owner.UserID) + ":legacy-draft"
+	exactAttachmentID := seedLiveEmailDraftAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, "content-draft", "exact.txt", "text/plain", []byte("exact"))
 	if _, err := fixture.repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
 		UserID: fixture.owner.UserID, Provider: "google", AccountEmail: "disconnected@example.com", GrantID: "disconnected", Status: "reauth_required",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	exactAttachmentID := seedLiveEmailDraftAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, exactResourceID, "exact.txt", "text/plain", []byte("exact"))
 	if _, err := fixture.repo.UpsertCommunicationsEmailDraft(store.CommunicationsEmailDraftInput{
-		CompanyID: fixture.companyID, DraftID: "wrong-account-draft", PersonalUserID: fixture.owner.UserID, PersonalAccountEmail: "owner-a@example.com",
-		CreatedByUserID: fixture.owner.UserID, UpdatedByUserID: fixture.owner.UserID, Kind: "compose", AccountEmail: "owner-a@example.com",
+		CompanyID: fixture.companyID, DraftID: "disconnected-draft", PersonalUserID: fixture.owner.UserID,
+		PersonalAccountEmail: "disconnected@example.com", AccountEmail: "disconnected@example.com",
+		CreatedByUserID: fixture.owner.UserID, UpdatedByUserID: fixture.owner.UserID, Kind: "compose",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	wrongAccountAttachmentID := seedEmailAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, wrongAccountResourceID, "wrong.txt", "text/plain", []byte("wrong"))
-	disconnectedAccountAttachmentID := seedLiveEmailDraftAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, disconnectedAccountResourceID, "disconnected.txt", "text/plain", []byte("disconnected"))
-	if _, err := fixture.repo.UpsertCommunicationsEmailDraft(store.CommunicationsEmailDraftInput{
-		CompanyID: fixture.companyID, DraftID: "legacy-draft", PersonalUserID: fixture.owner.UserID, PersonalAccountEmail: "owner-a@example.com",
-		CreatedByUserID: fixture.owner.UserID, UpdatedByUserID: fixture.owner.UserID, Kind: "compose", AccountEmail: "owner-a@example.com",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	legacyAttachmentID := seedEmailAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, legacyResourceID, "legacy.txt", "text/plain", []byte("legacy"))
+	disconnectedAttachmentID := seedEmailAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, "disconnected-draft", "disconnected.txt", "text/plain", []byte("disconnected"))
 
 	exact := serveEmailAttachmentScopeRequest(handler, fixture.owner, fixture.companyID, domain.RoleCompanyUser, exactAttachmentID)
 	if exact.Code != http.StatusOK || exact.Body.String() != "exact" {
 		t.Fatalf("exact owner content status=%d body=%q", exact.Code, exact.Body.String())
 	}
-	manager := serveEmailAttachmentScopeRequest(handler, fixture.manager, fixture.companyID, domain.RoleCompanyManager, exactAttachmentID)
-	if manager.Code != http.StatusNotFound {
-		t.Fatalf("manager content status=%d body=%s", manager.Code, manager.Body.String())
+	for name, actor := range map[string]struct {
+		user domain.User
+		role string
+	}{
+		"manager":  {fixture.manager, domain.RoleCompanyManager},
+		"admin":    {fixture.manager, domain.RoleCompanyAdmin},
+		"attacker": {fixture.attacker, domain.RoleCompanyUser},
+	} {
+		response := serveEmailAttachmentScopeRequest(handler, actor.user, fixture.companyID, actor.role, exactAttachmentID)
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("%s content status=%d body=%s", name, response.Code, response.Body.String())
+		}
 	}
-	companyAdmin := serveEmailAttachmentScopeRequest(handler, fixture.manager, fixture.companyID, domain.RoleCompanyAdmin, exactAttachmentID)
-	if companyAdmin.Code != http.StatusNotFound {
-		t.Fatalf("company-admin content status=%d body=%s", companyAdmin.Code, companyAdmin.Body.String())
-	}
-	attacker := serveEmailAttachmentScopeRequest(handler, fixture.attacker, fixture.companyID, domain.RoleCompanyUser, exactAttachmentID)
-	if attacker.Code != http.StatusNotFound {
-		t.Fatalf("wrong-user content status=%d body=%s", attacker.Code, attacker.Body.String())
-	}
-	wrongAccount := serveEmailAttachmentScopeRequest(handler, fixture.owner, fixture.companyID, domain.RoleCompanyUser, wrongAccountAttachmentID)
-	if wrongAccount.Code != http.StatusNotFound {
-		t.Fatalf("wrong-account content status=%d body=%s", wrongAccount.Code, wrongAccount.Body.String())
-	}
-	disconnectedAccount := serveEmailAttachmentScopeRequest(handler, fixture.owner, fixture.companyID, domain.RoleCompanyUser, disconnectedAccountAttachmentID)
-	if disconnectedAccount.Code != http.StatusOK || disconnectedAccount.Body.String() != "disconnected" {
-		t.Fatalf("disconnected-account content status=%d body=%s", disconnectedAccount.Code, disconnectedAccount.Body.String())
-	}
-	legacy := serveEmailAttachmentScopeRequest(handler, fixture.owner, fixture.companyID, domain.RoleCompanyUser, legacyAttachmentID)
-	if legacy.Code != http.StatusOK || legacy.Body.String() != "legacy" {
-		t.Fatalf("legacy draft content status=%d body=%s", legacy.Code, legacy.Body.String())
-	}
-	legacyAdmin := serveEmailAttachmentScopeRequest(handler, fixture.manager, fixture.companyID, domain.RoleCompanyAdmin, legacyAttachmentID)
-	if legacyAdmin.Code != http.StatusNotFound {
-		t.Fatalf("legacy draft admin content status=%d body=%s", legacyAdmin.Code, legacyAdmin.Body.String())
+	disconnected := serveEmailAttachmentScopeRequest(handler, fixture.owner, fixture.companyID, domain.RoleCompanyUser, disconnectedAttachmentID)
+	if disconnected.Code != http.StatusOK || disconnected.Body.String() != "disconnected" {
+		t.Fatalf("disconnected-account content status=%d body=%s", disconnected.Code, disconnected.Body.String())
 	}
 }
 
-func TestDeletedEmailDraftAttachmentLinksAreRetiredButSentMessageLinkSurvives(t *testing.T) {
+func TestDeletedEmailDraftAttachmentLinkIsRetiredButSentMessageLinkSurvives(t *testing.T) {
 	fixture := newCommunicationsEmailDraftScopeHTTPFixture(t)
 	storage := newFakeAttachmentObjectStorage()
 	handler := NewServerWithOptions(fixture.repo, ServerOptions{AttachmentStorage: storage}).Routes()
 	const draftID = "deleted-attachment-draft"
-	exactResourceID := personalEmailDraftResourceID(fixture.owner.UserID, "owner-a@example.com", draftID)
-	legacyResourceID := "personal:" + url.QueryEscape(fixture.owner.UserID) + ":" + url.QueryEscape(draftID)
-	draftOnlyAttachmentID := seedLiveEmailDraftAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, exactResourceID, "draft-only.txt", "text/plain", []byte("draft-only"))
-	legacyAttachmentID := seedEmailAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, legacyResourceID, "legacy.txt", "text/plain", []byte("legacy"))
-	sentAttachmentID := seedEmailAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, exactResourceID, "sent.txt", "text/plain", []byte("sent"))
-	sentResourceID := "personal:" + url.QueryEscape(fixture.owner.UserID) + ":sent-message-1"
+	draftOnlyAttachmentID := seedLiveEmailDraftAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, draftID, "draft-only.txt", "text/plain", []byte("draft-only"))
+	sentAttachmentID := seedEmailAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, draftID, "sent.txt", "text/plain", []byte("sent"))
+	ensured, err := fixture.repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
+		CompanyID: fixture.companyID, PersonalUserID: fixture.owner.UserID,
+		PersonalAccountEmail: "owner-a@example.com", AccountEmail: "owner-a@example.com", Provider: "google",
+		CreatedByUserID: fixture.owner.UserID,
+		Message:         domain.EmailMessageSnapshot{ID: "sent-provider-message", ThreadID: "sent-provider-thread", Subject: "Sent"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := fixture.repo.LinkResourceAttachment(store.ResourceAttachmentInput{
-		CompanyID: fixture.companyID, ResourceType: "email_message", ResourceID: sentResourceID, AttachmentID: sentAttachmentID,
-		RelationshipKind: store.AttachmentRelationshipEmailAttachment, CreatedByUserID: fixture.owner.UserID,
+		CompanyID: fixture.companyID, ResourceType: "email_message", ResourceID: ensured.Collaboration.RootMessageID,
+		AttachmentID: sentAttachmentID, RelationshipKind: store.AttachmentRelationshipEmailAttachment,
+		CreatedByUserID: fixture.owner.UserID,
 	}); err != nil {
 		t.Fatal(err)
 	}
-
-	for name, attachmentID := range map[string]string{
-		"exact active draft":  draftOnlyAttachmentID,
-		"legacy active draft": legacyAttachmentID,
-		"sent attachment":     sentAttachmentID,
-	} {
-		recorder := serveEmailAttachmentScopeRequest(handler, fixture.owner, fixture.companyID, domain.RoleCompanyUser, attachmentID)
-		if recorder.Code != http.StatusOK {
-			t.Fatalf("%s content status=%d body=%s", name, recorder.Code, recorder.Body.String())
-		}
-	}
 	fixture.expectStatus(t, http.MethodDelete, fixture.draftByIDPath(draftID, "owner-a@example.com", ""), nil, fixture.owner, domain.RoleCompanyUser, http.StatusOK)
 
-	for name, attachmentID := range map[string]string{
-		"exact deleted draft":  draftOnlyAttachmentID,
-		"legacy deleted draft": legacyAttachmentID,
-	} {
-		recorder := serveEmailAttachmentScopeRequest(handler, fixture.owner, fixture.companyID, domain.RoleCompanyUser, attachmentID)
-		if recorder.Code != http.StatusNotFound {
-			t.Fatalf("%s content status=%d body=%s", name, recorder.Code, recorder.Body.String())
-		}
-	}
-	listPath := "/v1/resources/email_draft/" + exactResourceID + "/attachments?company_id=" + url.QueryEscape(fixture.companyID)
-	fixture.expectStatus(t, http.MethodGet, listPath, nil, fixture.owner, domain.RoleCompanyUser, http.StatusNotFound)
-	deletedEditRecorder := httptest.NewRecorder()
-	if NewServer(fixture.repo).requireAttachmentResourceEdit(deletedEditRecorder, emailDraftAttachmentScopeRequest(fixture.owner, fixture.companyID, domain.RoleCompanyUser), fixture.companyID, "email_draft", exactResourceID) {
-		t.Fatal("deleted draft unexpectedly remained mutable through its attachment resource")
-	}
-	if deletedEditRecorder.Code != http.StatusNotFound {
-		t.Fatalf("deleted draft attachment edit status=%d body=%s", deletedEditRecorder.Code, deletedEditRecorder.Body.String())
+	draftOnly := serveEmailAttachmentScopeRequest(handler, fixture.owner, fixture.companyID, domain.RoleCompanyUser, draftOnlyAttachmentID)
+	if draftOnly.Code != http.StatusNotFound {
+		t.Fatalf("deleted draft-only attachment status=%d body=%s", draftOnly.Code, draftOnly.Body.String())
 	}
 	sent := serveEmailAttachmentScopeRequest(handler, fixture.owner, fixture.companyID, domain.RoleCompanyUser, sentAttachmentID)
 	if sent.Code != http.StatusOK || sent.Body.String() != "sent" {
@@ -216,30 +163,30 @@ func TestDeletedEmailDraftAttachmentLinksAreRetiredButSentMessageLinkSurvives(t 
 	}
 }
 
-func TestPersonalEmailMessageAttachmentsRetainThreePartResourceID(t *testing.T) {
+func TestEmailMessageAttachmentResourceRejectsObsoleteCompositeID(t *testing.T) {
 	fixture := newCommunicationsEmailDraftScopeHTTPFixture(t)
 	resourceID := "personal:" + url.QueryEscape(fixture.owner.UserID) + ":message-attachment"
 	path := "/v1/resources/email_message/" + resourceID + "/attachments?company_id=" + url.QueryEscape(fixture.companyID)
-	fixture.expectStatus(t, http.MethodGet, path, nil, fixture.owner, domain.RoleCompanyUser, http.StatusOK)
+	fixture.expectStatus(t, http.MethodGet, path, nil, fixture.owner, domain.RoleCompanyUser, http.StatusBadRequest)
 }
 
-func TestCommunicationsEmailDraftResponseIncludesOwnerOnlyLegacyPersonalAttachmentLinks(t *testing.T) {
+func TestCommunicationsEmailDraftResponseUsesOnlyExactDraftAttachmentLinks(t *testing.T) {
 	fixture := newCommunicationsEmailDraftScopeHTTPFixture(t)
 	draft, err := fixture.repo.UpsertCommunicationsEmailDraft(store.CommunicationsEmailDraftInput{
-		CompanyID: fixture.companyID, DraftID: "response-draft", PersonalUserID: fixture.owner.UserID, PersonalAccountEmail: "owner-a@example.com",
-		CreatedByUserID: fixture.owner.UserID, UpdatedByUserID: fixture.owner.UserID, Kind: "compose", AccountEmail: "owner-a@example.com",
+		CompanyID: fixture.companyID, DraftID: "response-draft", PersonalUserID: fixture.owner.UserID,
+		PersonalAccountEmail: "owner-a@example.com", AccountEmail: "owner-a@example.com",
+		CreatedByUserID: fixture.owner.UserID, UpdatedByUserID: fixture.owner.UserID, Kind: "compose",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	storage := newFakeAttachmentObjectStorage()
-	exactAttachmentID := seedEmailAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, communicationsEmailDraftResourceID(draft), "exact.txt", "text/plain", []byte("exact"))
-	legacyResourceID := "personal:" + url.QueryEscape(fixture.owner.UserID) + ":" + url.QueryEscape(draft.DraftID)
-	legacyAttachmentID := seedEmailAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, legacyResourceID, "legacy.txt", "text/plain", []byte("legacy"))
+	exactAttachmentID := seedEmailAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, draft.DraftID, "exact.txt", "text/plain", []byte("exact"))
+	obsoleteAttachmentID := seedEmailAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, "personal:"+fixture.owner.UserID+":"+draft.DraftID, "obsolete.txt", "text/plain", []byte("obsolete"))
 
 	response := NewServer(fixture.repo).communicationsEmailDraftResponse(draft)
-	if len(response.Attachments) != 2 || response.Attachments[0].AttachmentID != exactAttachmentID || response.Attachments[1].AttachmentID != legacyAttachmentID {
-		t.Fatalf("draft response attachments=%+v, want exact %q and legacy %q", response.Attachments, exactAttachmentID, legacyAttachmentID)
+	if len(response.Attachments) != 1 || response.Attachments[0].AttachmentID != exactAttachmentID {
+		t.Fatalf("draft response attachments=%+v, want exact %q only; obsolete=%q", response.Attachments, exactAttachmentID, obsoleteAttachmentID)
 	}
 }
 
@@ -252,7 +199,7 @@ func TestSharedEmailDraftAttachmentsUseSharedInboxEditPermissions(t *testing.T) 
 	}); err != nil {
 		t.Fatal(err)
 	}
-	resourceID := "shared:" + url.QueryEscape(fixture.sharedA.FolderID) + ":" + draftID
+	resourceID := draftID
 	path := "/v1/resources/email_draft/" + resourceID + "/attachments?company_id=" + url.QueryEscape(fixture.companyID)
 	fixture.expectStatus(t, http.MethodGet, path, nil, fixture.viewer, domain.RoleCompanyUser, http.StatusOK)
 	fixture.expectStatus(t, http.MethodGet, path, nil, fixture.attacker, domain.RoleCompanyUser, http.StatusNotFound)
@@ -274,8 +221,14 @@ func TestSharedEmailDraftAttachmentReadRechecksPermissionAndLiveDraft(t *testing
 	storage := newFakeAttachmentObjectStorage()
 	handler := NewServerWithOptions(fixture.repo, ServerOptions{AttachmentStorage: storage}).Routes()
 	const draftID = "shared-revocation-draft"
-	resourceID := sharedEmailDraftResourceID(fixture.sharedA.FolderID, draftID)
-	attachmentID := seedLiveEmailDraftAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, resourceID, "shared.txt", "text/plain", []byte("shared"))
+	resourceID := draftID
+	if _, err := fixture.repo.UpsertCommunicationsEmailDraft(store.CommunicationsEmailDraftInput{
+		CompanyID: fixture.companyID, DraftID: draftID, SharedInboxID: fixture.sharedA.FolderID,
+		CreatedByUserID: fixture.owner.UserID, UpdatedByUserID: fixture.owner.UserID, Kind: "compose",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	attachmentID := seedEmailAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, resourceID, "shared.txt", "text/plain", []byte("shared"))
 
 	viewer := serveEmailAttachmentScopeRequest(handler, fixture.viewer, fixture.companyID, domain.RoleCompanyUser, attachmentID)
 	if viewer.Code != http.StatusOK {
@@ -286,8 +239,8 @@ func TestSharedEmailDraftAttachmentReadRechecksPermissionAndLiveDraft(t *testing
 		t.Fatalf("shared manager without inbox permission status=%d body=%s", manager.Code, manager.Body.String())
 	}
 	admin := serveEmailAttachmentScopeRequest(handler, fixture.manager, fixture.companyID, domain.RoleCompanyAdmin, attachmentID)
-	if admin.Code != http.StatusOK {
-		t.Fatalf("shared admin active-draft status=%d body=%s", admin.Code, admin.Body.String())
+	if admin.Code != http.StatusNotFound {
+		t.Fatalf("shared admin without ordinary inbox permission status=%d body=%s", admin.Code, admin.Body.String())
 	}
 	if _, err := fixture.repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID: fixture.companyID, EntityType: store.EntityTypeSharedInbox, EntityID: fixture.sharedA.FolderID,

@@ -71,13 +71,11 @@ func (r *MemoryRepo) AddEmailCollaborationNodeInformationWithActor(input NodeInf
 		r.realtimeOutboxSequence = outboxSequenceBefore
 	}()
 
-	collaboration, ok := r.emailCollaborationForNodeLocked(input.CompanyID, input.NodeID)
+	collaboration, ok := r.emailRelationshipForNodeLocked(input.CompanyID, input.NodeID)
 	if !ok {
 		return CommunicationsEmailCollaborationInformationWriteResult{}, ErrNotEmailCollaboration
 	}
-	if input.InformationID != "" && input.InformationID == collaboration.AttachedEmailInformationID {
-		return CommunicationsEmailCollaborationInformationWriteResult{}, ErrProtectedEmailCollaborationResource
-	}
+
 	mentionedUserIDs, mentionedGroupIDs := CommunicationsEmailChatMentionPrincipalIDs(input.Information)
 	participants, err := r.addCollaborationParticipantsLocked(CommunicationsEmailCollaborationParticipantInput{
 		CompanyID: input.CompanyID, CollaborationID: collaboration.CollaborationID, ActorUserID: input.ActorUserID,
@@ -176,13 +174,11 @@ func (r *MemoryRepo) UpsertEmailCollaborationNodeProjectionWithActor(input NodeI
 		r.realtimeOutbox = outboxBefore
 		r.realtimeOutboxSequence = outboxSequenceBefore
 	}()
-	collaboration, ok := r.emailCollaborationForNodeLocked(input.CompanyID, input.NodeID)
+	collaboration, ok := r.emailRelationshipForNodeLocked(input.CompanyID, input.NodeID)
 	if !ok {
 		return CommunicationsEmailCollaborationProjectionWriteResult{}, ErrNotEmailCollaboration
 	}
-	if input.InformationID == collaboration.AttachedEmailInformationID {
-		return CommunicationsEmailCollaborationProjectionWriteResult{}, ErrProtectedEmailCollaborationResource
-	}
+
 	mentionedUserIDs, mentionedGroupIDs := CommunicationsEmailChatMentionPrincipalIDs(input.Information)
 	participants, err := r.addCollaborationParticipantsLocked(CommunicationsEmailCollaborationParticipantInput{
 		CompanyID: input.CompanyID, CollaborationID: collaboration.CollaborationID, ActorUserID: input.ActorUserID,
@@ -252,9 +248,7 @@ func (r *PostgresRepo) AddEmailCollaborationNodeInformationWithActor(input NodeI
 	if err != nil {
 		return CommunicationsEmailCollaborationInformationWriteResult{}, err
 	}
-	if input.InformationID != "" && input.InformationID == target.AttachedEmailInformationID {
-		return CommunicationsEmailCollaborationInformationWriteResult{}, ErrProtectedEmailCollaborationResource
-	}
+
 	participants, err := addPostgresEmailCollaborationChatParticipantsTx(ctx, tx, input, target)
 	if err != nil {
 		return CommunicationsEmailCollaborationInformationWriteResult{}, err
@@ -300,9 +294,7 @@ func (r *PostgresRepo) UpsertEmailCollaborationNodeProjectionWithActor(input Nod
 	if err != nil {
 		return CommunicationsEmailCollaborationProjectionWriteResult{}, err
 	}
-	if input.InformationID == target.AttachedEmailInformationID {
-		return CommunicationsEmailCollaborationProjectionWriteResult{}, ErrProtectedEmailCollaborationResource
-	}
+
 	participants, err := addPostgresEmailCollaborationChatParticipantsTx(ctx, tx, input, target)
 	if err != nil {
 		return CommunicationsEmailCollaborationProjectionWriteResult{}, err

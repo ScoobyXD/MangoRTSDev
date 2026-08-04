@@ -755,11 +755,7 @@ where company_id=$1::uuid
 	if err != nil {
 		return CompanyExplorerV2Row{}, err
 	}
-	if targetType == EntityTypeNode {
-		if err := postgresRejectEmailCollaborationNodeMutation(ctx, tx, input.CompanyID, targetID); err != nil {
-			return CompanyExplorerV2Row{}, err
-		}
-	}
+
 	err = tx.QueryRowContext(ctx, `
 update company_explorer_items
 set parent_folder_id=$3::uuid,
@@ -815,28 +811,18 @@ func (r *PostgresRepo) DeleteCompanyExplorerV2Edges(companyID string, edgeIDs []
 		return err
 	}
 	defer tx.Rollback()
-	var existingCount, protectedNodeCount int
+	var existingCount int
 	if err := tx.QueryRowContext(ctx, `
-select count(*), count(*) filter (
-  where item.target_type='node'
-    and exists (
-      select 1
-      from communications_email_collaborations collaboration
-      where collaboration.company_id=item.company_id
-        and collaboration.node_id=item.target_id
-    )
-)
+select count(*)
 from company_explorer_items item
 where item.company_id=$1::uuid
-  and item.item_id = any(string_to_array($2, ',')::uuid[])`, companyID, strings.Join(cleanEdgeIDs, ",")).Scan(&existingCount, &protectedNodeCount); err != nil {
+  and item.item_id = any(string_to_array($2, ',')::uuid[])`, companyID, strings.Join(cleanEdgeIDs, ",")).Scan(&existingCount); err != nil {
 		return err
 	}
 	if existingCount != len(cleanEdgeIDs) {
 		return ErrNotFound
 	}
-	if protectedNodeCount > 0 {
-		return ErrProtectedEmailCollaborationResource
-	}
+
 	result, err := tx.ExecContext(ctx, `
 delete from company_explorer_items
 where company_id=$1::uuid
