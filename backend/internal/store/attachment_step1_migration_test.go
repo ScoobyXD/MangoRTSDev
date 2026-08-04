@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
+	"miraeopus/backend/internal/attachmentcleanup"
 )
 
 func readAttachmentStep1Artifact(t *testing.T, path ...string) string {
@@ -343,6 +345,42 @@ select
 		t.Fatalf("Step 2 multipart boundary shape: fk=%v legacy=%v final=%v",
 			finalFK, legacyColumn, finalColumn)
 	}
+
+	companyID := md5FixtureUUID(t, db, "attachment-company")
+	attachmentID := md5FixtureUUID(t, db, "orphan-1")
+	repository := attachmentcleanup.PostgresRepository{DB: db}
+	if err := repository.Finalize(context.Background(), attachmentcleanup.WorkItem{
+		Kind:         attachmentcleanup.WorkOrphanAttachment,
+		CompanyID:    companyID,
+		AttachmentID: attachmentID,
+	}); err != nil {
+		t.Fatalf("finalize orphan with retained migration audit: %v", err)
+	}
+	var attachmentDeleted, auditPreserved bool
+	if err := db.QueryRow(`
+select
+  not exists(select 1 from attachments
+    where company_id=md5('attachment-company')::uuid
+      and attachment_id=md5('orphan-1')::uuid),
+  exists(select 1 from attachment_migration_items
+    where migration_item_id=md5('attachment-cleanup-audit-item')::uuid
+      and company_id=md5('attachment-company')::uuid
+      and attachment_id is null)`).Scan(&attachmentDeleted, &auditPreserved); err != nil {
+		t.Fatal(err)
+	}
+	if !attachmentDeleted || !auditPreserved {
+		t.Fatalf("orphan finalization deleted/audit-preserved=%v/%v, want true/true",
+			attachmentDeleted, auditPreserved)
+	}
+}
+
+func md5FixtureUUID(t *testing.T, db *sql.DB, value string) string {
+	t.Helper()
+	var id string
+	if err := db.QueryRow(`select md5($1)::uuid::text`, value).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
 }
 
 func assertAttachmentStep1Counts(
@@ -542,4 +580,21 @@ insert into attachment_variants(
    'test-bucket','retained/a'),
   (md5('retained-b')::uuid,'email_send','application/octet-stream',67108865,
    repeat('c',64),1,null,null,'test-bucket','retained/b-email-send');
+
+insert into attachment_migration_runs(
+  migration_run_id,company_id,status,dry_run,source_scope,summary,
+  completed_timestamp
+) values(
+  md5('attachment-cleanup-audit-run')::uuid,
+  md5('attachment-company')::uuid,'completed',false,'fixture','{}'::jsonb,now()
+);
+insert into attachment_migration_items(
+  migration_item_id,migration_run_id,company_id,source_table,source_pk,
+  resource_type,resource_id,attachment_id,status
+) values(
+  md5('attachment-cleanup-audit-item')::uuid,
+  md5('attachment-cleanup-audit-run')::uuid,
+  md5('attachment-company')::uuid,'fixture','orphan-1',
+  'email_draft','missing-draft-1',md5('orphan-1')::uuid,'migrated'
+);
 `
