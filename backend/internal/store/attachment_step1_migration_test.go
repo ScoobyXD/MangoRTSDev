@@ -65,18 +65,25 @@ func TestAttachmentStep1ArtifactsArePhasedAndOperatorGated(t *testing.T) {
 		"approved_relationships_already_absent", "missing_owner_relationships_to_delete",
 		"target_cleanup_identity_conflicts", "final_only_relationships_retained",
 		"final_only_pending_attachment_conflicts",
+		"postgresql_server_version_num", "between 170000 and 189999",
 	} {
 		if !strings.Contains(preflight, required) {
 			t.Errorf("preflight missing %q", required)
 		}
 	}
-	if strings.HasPrefix(step1, "\\") || strings.Contains(step1, "\n\\") {
-		t.Error("Step 1 write entry point contains a psql-only command")
+	for name, artifact := range map[string]string{
+		"preflight": preflight, "Step 1 write entry point": step1,
+		"Step 2 database boundary": boundary,
+	} {
+		if strings.HasPrefix(artifact, "\\") || strings.Contains(artifact, "\n\\") {
+			t.Errorf("%s contains a psql-only command", name)
+		}
 	}
 	for _, required := range []string{
 		"share row exclusive mode", "attachment_step1_assert_columns",
 		"cardinality(actual_columns) is distinct from cardinality(expected_columns)",
 		"actual_columns @> expected_columns", "expected_columns @> actual_columns",
+		"supports postgresql 17 and 18", "between 170000 and 189999",
 		"attachment_step1_approved_evidence", "source_checksum",
 		"conflicting existing attachment_relationships target",
 		"on conflict(upload_job_id) do nothing",
