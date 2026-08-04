@@ -164,8 +164,8 @@ func TestCommunicationsTriageConvertUsesSharedInboxConnection(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("POST shared convert status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	if nylas.detailCalls != 1 || nylas.lastDetailGrantID != "shared-grant" {
-		t.Fatalf("explicit shared import provider reads=%d grant=%q, want one shared-grant call", nylas.detailCalls, nylas.lastDetailGrantID)
+	if nylas.detailCalls != 1 || nylas.lastDetailGrantID != "grant-shared-convert" {
+		t.Fatalf("explicit shared import provider reads=%d grant=%q, want one grant-shared-convert call", nylas.detailCalls, nylas.lastDetailGrantID)
 	}
 	var response map[string]json.RawMessage
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
