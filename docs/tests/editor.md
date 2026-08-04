@@ -1,5 +1,19 @@
 # Editor Process Map
 
+## Process Story: Node textbox chats use their permanent table
+
+A user opens a Node and reads, creates, replies to, edits, or deletes a textbox chat
+↓
+The backend uses `node_textbox_chats` as the current authority and rebuilds the existing frontend payload from its permanent columns and attachment relationships
+↓
+New writes do not create `Text block chat` rows in `node_projection_table` or `node_information`
+↓
+Deleting a textbox deletes every chat owned by that textbox, including a chat that selects or quotes an attached email, and removes the chat's attachment relationships
+↓
+The normalized email message, email thread, and email attachments remain because the textbox owns the chat but does not own the email
+↓
+Legacy Node chat rows remain unchanged as rollback and audit evidence but are excluded from current reads
+
 ## Process Story: compact JSON keeps the same editor document
 
 A user types, formats text, inserts blank lines or hard breaks, or adds an attachment image in a Node, Project, or Logic Gate text box
@@ -326,6 +340,8 @@ ED113 - Saving must not interrupt typing by routing dirty/saved bookkeeping thro
 ED114 - Detailed editor tracing is an explicit developer diagnostic, never ordinary editor persistence. It activates only when `editorTrace=1` is present on localhost or the dev-site host, displays an unmistakable fixed recording panel, holds a maximum of 250,000 ordered events in memory, performs no per-event console, network, file, or IndexedDB logging of its own, and exports one raw JSON file from a user click. The export correlates input IDs and transaction IDs with microsecond timestamps and named spans for input, ProseMirror dispatch/plugins, Tiptap callbacks, selection/toolbar calculation, React editor commits, lifecycle pinning, quiet/max/retry timers and lateness, snapshot creation, IndexedDB, request serialization/fetch/parsing, long tasks, long animation frames, and frame gaps. It may record only non-content metadata such as counts, sizes, states, duration, method, and URL path; it must never record editor/paste text, JSON bodies, response bodies, authorization data, operation/client/company/resource/document IDs, or URL query values. The normal production host and every URL without the opt-in parameter must install no trace panel, input listeners, performance observers, or trace storage.
 ED115 - Annotation arrays are compared by their meaningful values, not by JavaScript array identity. A new array containing the same annotation IDs, kinds, ranges, active flags, and durability flags must dispatch zero replacement transactions. A real annotation change dispatches exactly once. Annotation-only transactions must not recalculate or republish selection-toolbar state. Document changes without a separate selection event and stored-mark changes at the caret still publish current formatting, while selection changes use the selection callback. Equal inline-format values must keep the current React state object. Node timeline rows must reuse memoized per-block chat arrays unless the underlying chat data or legacy email-chat mapping actually changes. These rules apply regardless of document length, annotation count, editor surface, or how many editor rows are mounted.
 ED116 - Current Tiptap JSON snapshots omit only attributes equal to defaults in the active schema. Stable block IDs, intentional empty paragraphs, hard breaks, custom node/mark attributes, and attachment identity/metadata/dimensions/accessibility text remain explicit. ProseMirror hydration and the sleeping static renderer must apply the same omitted defaults. The backend compacts the matching known defaults before storage and canonical reads, and stale-edit merge must treat an older expanded block and a compact block as equal instead of duplicating either one. The required top-level format, schema version, document root, and annotations array remain unchanged; no database migration is required.
+
+ED117 - `node_textbox_chats` is the current authority for Node textbox chats. Reads, creates, replies, edits, and deletes use that table and must not create new legacy `Text block chat` information or projection rows. Deleting a textbox deletes every chat it owns, including email-selection chats, and removes each chat's attachment relationships. The normalized email message, thread, and email attachments remain. Existing legacy chat rows are ignored by current reads and retained only as rollback and audit evidence until a separately approved retirement.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -1799,3 +1815,23 @@ Automated coverage:
 The Node v2 final gate retains disposable PostgreSQL store tests for owner-specific Project/Logic Gate JSON cutover routing, exact verification retention pins, a 1,002-comment reply-heavy thread, and ordered company purge. The former Chromium workflow harness was removed from CI on 2026-07-28; real React/Tiptap workflow acceptance is manual until replacement coverage is added.
 
 The separate PostgreSQL proof covers six isolated clients, offline replay, lost acknowledgement, delete-set durability, failed-write quarantine, compaction races, service restart, three-owner conversion, activation, stale rollback rejection, and restoration of post-cutover edits, creates, and deletes. All real gates remain inactive.
+
+### Scenario ED-S22: Node Textbox Chats Use Permanent Storage
+
+Business logic covered:
+- ED117
+
+Given:
+- A Node textbox has a normal chat, a reply, a chat that selects or quotes an attached email, and a chat attachment.
+- The normalized email message, thread, and email attachments exist independently of the textbox.
+
+When:
+- The user reads, creates, replies to, edits, or deletes a chat.
+- The user deletes the owning textbox.
+
+Expected:
+- Current chat reads and writes use `node_textbox_chats` and do not create new legacy `Text block chat` rows.
+- Deleting the textbox deletes every chat it owns, including the email-selection chat and its replies.
+- Chat attachment relationships are removed with the deleted chats.
+- The normalized email message, thread, and email attachments remain.
+- Existing legacy chat rows remain unchanged and are ignored by current reads.

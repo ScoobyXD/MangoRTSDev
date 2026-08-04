@@ -33,16 +33,18 @@ Every attempt to run `20260802_zz_v3_database_table_cutover.sql` was rolled back
 
 Do not assume the development database is identical to either the original pre-V3 fixture or the rolled-back repository schema. Reinventory it with read-only queries before designing the replacement.
 
-## Current implementation: scoped Node chat copy and backend cutover
+## Current implementation: Node textbox chat cutover completed
 
-The repository now contains one deliberately small Node-chat cutover. It has not been applied to a live database. Step 2 does not delete or update legacy rows; after the operator completes Step 2, the backend is ready to switch Node chat reads and writes to `node_textbox_chats`.
+On 2026-08-03 Jonat completed the deliberately small Node-chat cutover and deployed/restarted the backend. `node_textbox_chats` is now the current authority for Node textbox chats.
+
+The operator-run Step 2 reported `source_rows: 667`, `copied: 667`, `needs_human_mapping: 0`, and `discarded_deleted_host: 0`. The independent reconciliation reported 667 legacy chat rows, 667 exact copies, zero delta rows, zero deleted-host rows, zero review rows, one detached parent, and 667 permanent chat rows. The detached reply was intentionally preserved as a top-level chat and did not block the cutover.
 
 Jonat's manual operation is intentionally reduced to two copy-paste SQL files:
 
-1. `scripts/v3_node_textbox_chats_step1_count.sql` runs in a repeatable-read, read-only transaction. It reports the current legacy chat count, exact `chats_to_copy`, missing-textbox rows, review rows, exception identities without message bodies, and the physical storage breakdown.
-2. `scripts/v3_node_textbox_chats_step2_create_copy_verify.sql` is the one-time writer-paused operation. One outer transaction creates the new table and migration controls, copies the current chats, reconciles them, verifies the final count, and commits. Any review row or mismatch rolls the whole operation back.
-3. The backend cutover reads, creates, edits, and deletes Node chats through `node_textbox_chats`, while preserving the existing API/frontend payload shape and excluding legacy chat projections.
-4. Deleting a textbox deletes all of its chats and chat-attachment links, including email-selection chats. The normalized email message, thread, and email attachments remain.
+1. `scripts/v3_node_textbox_chats_step1_count.sql` ran in a repeatable-read, read-only transaction and identified the exact source set.
+2. `scripts/v3_node_textbox_chats_step2_create_copy_verify.sql` created the permanent table and migration controls, copied the approved snapshot, reconciled it, and committed successfully.
+3. The deployed backend now reads, creates, edits, replies to, and deletes Node chats through `node_textbox_chats`, while preserving the existing API/frontend payload shape and excluding legacy chat projections.
+4. Deleting a textbox deletes all chats owned by that textbox and their chat-attachment relationships, including chats that quote or select an attached email. The normalized email message, thread, and email attachments remain because the textbox owns the chat, not the email.
 
 The component files below remain because automated tests exercise expansion, copy, and reconciliation separately. Operators should use the two step files above rather than assembling the components by hand.
 
@@ -54,17 +56,21 @@ The component files below remain because automated tests exercise expansion, cop
 
 The current source rule is exact:
 
-- Before the live cutover, `node_projection_table` is the legacy UI authority for `Text block chat` rows. After Step 2 and backend deployment, `node_textbox_chats` is the authority.
+- Before the live cutover, `node_projection_table` was the legacy UI authority for `Text block chat` rows. After the completed Step 2 and backend deployment, `node_textbox_chats` is the authority.
 - The projection `information_id` is the permanent `chat_id`.
 - JSON payload `block_id` is the owning permanent `textbox_id`.
 - `node_information` is event/history storage. It is not the set to copy merely because it contains rows whose type is `Text block chat`.
-- Step 2 is the final snapshot and must run with Node chat writers paused. Deploy the backend cutover only after Step 2 commits, smoke-test it, and then resume writers.
+- The completed Step 2 was the final snapshot. New Node chat writes no longer create `Text block chat` rows in `node_projection_table` or `node_information`.
+
+Legacy Node chat rows remain unchanged as rollback and audit evidence, but current reads ignore them. Legacy-table retirement is a separate future decision and is not authorized by this checkpoint.
 
 The 3.3 GB label shown for `node_information` is a physical relation-size measurement, not a live-row count. PostgreSQL relation size can include the main heap, indexes, out-of-line TOAST values, and space still occupied by old/dead row versions. Six hundred fifty live rows can therefore coexist with a multi-gigabyte relation. Use the inspection script to see each component and `pg_stat_user_tables.n_live_tup`/`n_dead_tup`; do not run `VACUUM FULL`, `CLUSTER`, or another table rewrite as part of this data-copy phase. Ordinary database maintenance is a separate operator decision after the actual size cause is measured.
 
 Rows with valid data and a surviving permanent host are copied. A deleted user leaves a null `author_user_id` but retains the captured author name and message. A missing same-textbox parent detaches the reply. A missing host is recorded as `discarded_deleted_host` without deleting the source. Invalid JSON, invalid identities, ambiguous email selections, duplicate company chat IDs, and target conflicts are recorded as `needs_human_mapping` and left untouched.
 
-This scoped phase authorizes only the Node textbox chat cutover. It does not authorize the remaining V3 table changes or any legacy-table retirement.
+This completed scoped phase authorizes only the Node textbox chat cutover. It does not authorize the remaining V3 table changes or any legacy-table retirement.
+
+The next planning scope is email data. Investigation must inventory the intended permanent `email_threads`, `email_messages`, `email_relationships`, and `email_drafts` contracts against the repository's current communications, projection, attachment, and draft tables before any SQL is written. The email work should follow the same small, separately operated pattern: read-only count/preflight and exception reporting first; table creation plus deterministic copy and reconciliation second; backend cutover only after the data checkpoint passes. Do not assume legacy email rows can be deleted, and do not combine email migration with Node chat cleanup.
 
 ## What happened during the failed attempt
 
