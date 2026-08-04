@@ -869,6 +869,12 @@ where relationship.company_id=$1::uuid and relationship.resource_type='node'
 }
 
 func deletePostgresCommunicationsEmailSourceNodeTx(ctx context.Context, tx *sql.Tx, companyID string, link communicationsEmailNodeLink) error {
+	if err := retireNodeChatAttachmentRelationshipsTx(ctx, tx, companyID, link.NodeID); err != nil {
+		return err
+	}
+	if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, EntityTypeNode, link.NodeID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `delete from email_relationships where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid`, companyID, link.NodeID); err != nil {
 		return err
 	}

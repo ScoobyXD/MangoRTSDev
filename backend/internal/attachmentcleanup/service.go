@@ -17,7 +17,6 @@ type WorkKind string
 
 const (
 	WorkOrphanAttachment WorkKind = "orphan_attachment"
-	WorkEmailSendPreview WorkKind = "email_send_preview"
 )
 
 type ObjectRef struct {
@@ -29,7 +28,6 @@ type WorkItem struct {
 	Kind         WorkKind
 	CompanyID    string
 	AttachmentID string
-	PreviewType  string
 	Objects      []ObjectRef
 }
 
@@ -106,84 +104,88 @@ func (s Service) Run(ctx context.Context, options Options) (Result, error) {
 	}
 	result := Result{Items: make([]ItemResult, 0, len(work))}
 	for _, item := range work {
-		item.CompanyID = strings.TrimSpace(item.CompanyID)
-		item.AttachmentID = strings.TrimSpace(item.AttachmentID)
-		current := ItemResult{
-			Kind:         item.Kind,
-			AttachmentID: item.AttachmentID,
-			ObjectCount:  len(item.Objects),
-		}
-		if item.CompanyID != companyID || item.AttachmentID == "" ||
-			(item.Kind != WorkOrphanAttachment && item.Kind != WorkEmailSendPreview) {
-			current.Err = errors.New("repository returned invalid cleanup identity")
-			result.Items = append(result.Items, current)
+		if strings.TrimSpace(item.CompanyID) != companyID {
+			result.Items = append(result.Items, ItemResult{
+				Kind:         item.Kind,
+				AttachmentID: strings.TrimSpace(item.AttachmentID),
+				Err:          errors.New("repository returned cleanup work for another company"),
+			})
 			continue
 		}
-		eligible, eligibleErr := s.Repository.Eligible(ctx, item)
-		if eligibleErr != nil {
-			current.Err = fmt.Errorf("recheck cleanup eligibility: %w", eligibleErr)
-			result.Items = append(result.Items, current)
-			continue
-		}
-		if !eligible {
-			current.Skipped = true
-			result.Items = append(result.Items, current)
-			continue
-		}
-
-		objects := deduplicateObjects(item.Objects)
-		current.ObjectCount = len(objects)
-		readyToFinalize := true
-		for _, object := range objects {
-			if strings.TrimSpace(object.Bucket) == "" || strings.TrimSpace(object.Key) == "" {
-				current.Err = errors.New("database cleanup object is missing bucket or key")
-				readyToFinalize = false
-				break
-			}
-			shared, sharedErr := s.Repository.SharedWithRetained(ctx, item, object)
-			if sharedErr != nil {
-				current.Err = fmt.Errorf("check retained object references: %w", sharedErr)
-				readyToFinalize = false
-				break
-			}
-			if shared {
-				current.ProtectedObjects++
-				continue
-			}
-			if !options.Apply {
-				continue
-			}
-			if strings.TrimSpace(s.Storage.Bucket()) != strings.TrimSpace(object.Bucket) {
-				current.Err = errors.New("database object bucket does not match configured attachment bucket")
-				readyToFinalize = false
-				break
-			}
-			deleteErr := s.Storage.DeleteObject(ctx, object.Key)
-			switch {
-			case deleteErr == nil:
-				current.DeletedObjects++
-			case errors.Is(deleteErr, ErrObjectNotFound):
-				current.AlreadyMissing++
-			default:
-				current.Err = fmt.Errorf("delete attachment object: %w", deleteErr)
-				readyToFinalize = false
-			}
-			if !readyToFinalize {
-				break
-			}
-		}
-		if options.Apply && readyToFinalize {
-			if finalizeErr := s.Repository.Finalize(ctx, item); finalizeErr != nil {
-				current.Err = fmt.Errorf("finalize database cleanup: %w", finalizeErr)
-			} else {
-				current.Finalized = true
-			}
-		}
-		result.Items = append(result.Items, current)
+		result.Items = append(result.Items, s.RunItem(ctx, item, options.Apply))
 	}
 	return result, nil
 }
 
+func (s Service) RunItem(ctx context.Context, item WorkItem, apply bool) ItemResult {
+	item.CompanyID = strings.TrimSpace(item.CompanyID)
+	item.AttachmentID = strings.TrimSpace(item.AttachmentID)
+	current := ItemResult{Kind: item.Kind, AttachmentID: item.AttachmentID, ObjectCount: len(item.Objects)}
+	if ctx == nil || s.Repository == nil || s.Storage == nil || item.CompanyID == "" ||
+		item.AttachmentID == "" || item.Kind != WorkOrphanAttachment {
+		current.Err = errors.New("invalid cleanup work item")
+		return current
+	}
+	eligible, eligibleErr := s.Repository.Eligible(ctx, item)
+	if eligibleErr != nil {
+		current.Err = fmt.Errorf("recheck cleanup eligibility: %w", eligibleErr)
+		return current
+	}
+	if !eligible {
+		current.Skipped = true
+		return current
+	}
+
+	objects := deduplicateObjects(item.Objects)
+	current.ObjectCount = len(objects)
+	readyToFinalize := true
+	for _, object := range objects {
+		if strings.TrimSpace(object.Bucket) == "" || strings.TrimSpace(object.Key) == "" {
+			current.Err = errors.New("database cleanup object is missing bucket or key")
+			readyToFinalize = false
+			break
+		}
+		shared, sharedErr := s.Repository.SharedWithRetained(ctx, item, object)
+		if sharedErr != nil {
+			current.Err = fmt.Errorf("check retained object references: %w", sharedErr)
+			readyToFinalize = false
+			break
+		}
+		if shared {
+			current.ProtectedObjects++
+			continue
+		}
+		if !apply {
+			continue
+		}
+		if strings.TrimSpace(s.Storage.Bucket()) != strings.TrimSpace(object.Bucket) {
+			current.Err = errors.New("database object bucket does not match configured attachment bucket")
+			readyToFinalize = false
+			break
+		}
+		deleteErr := s.Storage.DeleteObject(ctx, object.Key)
+		switch {
+		case deleteErr == nil:
+			current.DeletedObjects++
+		case errors.Is(deleteErr, ErrObjectNotFound):
+			current.AlreadyMissing++
+		default:
+			current.Err = fmt.Errorf("delete attachment object: %w", deleteErr)
+			readyToFinalize = false
+		}
+		if !readyToFinalize {
+			break
+		}
+	}
+	if apply && readyToFinalize {
+		if finalizeErr := s.Repository.Finalize(ctx, item); finalizeErr != nil {
+			current.Err = fmt.Errorf("finalize database cleanup: %w", finalizeErr)
+		} else {
+			current.Finalized = true
+		}
+	}
+	return current
+}
 func deduplicateObjects(objects []ObjectRef) []ObjectRef {
 	byIdentity := make(map[string]ObjectRef, len(objects))
 	for _, object := range objects {

@@ -268,7 +268,7 @@ func (s *Server) handleAttachmentUploadIntentCreate(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusInternalServerError, "failed_to_create_attachment_upload_intent")
 		return
 	}
-	log.Printf("attachment_direct_upload_intent status=created upload_intent_id=%s strategy=%s size_bytes=%d", intent.UploadIntentID, intent.Strategy, intent.SizeBytes)
+	log.Printf("attachment_direct_upload_job status=created upload_job_id=%s strategy=%s size_bytes=%d", intent.UploadIntentID, intent.Strategy, intent.SizeBytes)
 	s.writeAttachmentUploadIntentCreated(w, r, storage, intent)
 }
 
@@ -365,7 +365,7 @@ func (s *Server) handleAttachmentUploadPartSign(w http.ResponseWriter, r *http.R
 		}
 		response = append(response, signedPart{PartNumber: part.PartNumber, Method: presigned.Method, URL: presigned.URL,
 			ExpiresAt: presigned.ExpiresAt, RequiredHeaders: presigned.RequiredHeaders})
-		log.Printf("attachment_direct_upload_part status=signed upload_intent_id=%s part_number=%d signing_attempt=%d", intent.UploadIntentID, part.PartNumber, signingAttempts[part.PartNumber])
+		log.Printf("attachment_direct_upload_part status=signed upload_job_id=%s part_number=%d signing_attempt=%d", intent.UploadIntentID, part.PartNumber, signingAttempts[part.PartNumber])
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"parts": response})
 }
@@ -575,7 +575,7 @@ func (s *Server) writeCompletedAttachmentIntent(ctx context.Context, w http.Resp
 			attachment.Variants = variants
 		}
 	}
-	log.Printf("attachment_direct_upload_intent status=completed upload_intent_id=%s strategy=%s size_bytes=%d latency_ms=%d", intent.UploadIntentID, intent.Strategy, intent.SizeBytes, time.Since(intent.CreatedTimestamp).Milliseconds())
+	log.Printf("attachment_direct_upload_job status=completed upload_job_id=%s strategy=%s size_bytes=%d latency_ms=%d", intent.UploadIntentID, intent.Strategy, intent.SizeBytes, time.Since(intent.CreatedTimestamp).Milliseconds())
 	writeJSON(w, http.StatusCreated, attachmentUploadResponse{Attachment: attachment, ResourceAttachment: link})
 }
 
@@ -606,7 +606,7 @@ func (s *Server) handleAttachmentUploadIntentAbort(w http.ResponseWriter, r *htt
 		writeAttachmentUploadStoreError(w, err)
 		return
 	}
-	log.Printf("attachment_direct_upload_intent status=%s upload_intent_id=%s", intent.Status, intent.UploadIntentID)
+	log.Printf("attachment_direct_upload_job status=%s upload_job_id=%s", intent.Status, intent.UploadIntentID)
 	writeJSON(w, http.StatusOK, map[string]any{"uploadIntentId": intent.UploadIntentID, "status": intent.Status})
 }
 
@@ -623,19 +623,19 @@ func (s *Server) cleanupExpiredAttachmentUploads(ctx context.Context) {
 	for _, intent := range items {
 		if intent.Strategy == domain.AttachmentUploadStrategyMultipart {
 			if err := storage.AbortMultipartUpload(ctx, AttachmentMultipartInput{Key: intent.StorageKey, UploadID: intent.MultipartUploadID}); err != nil {
-				log.Printf("attachment_direct_upload_cleanup status=abort_failed upload_intent_id=%s", intent.UploadIntentID)
+				log.Printf("attachment_direct_upload_cleanup status=abort_failed upload_job_id=%s", intent.UploadIntentID)
 				continue
 			}
 		}
 		if err := storage.DeleteObject(ctx, intent.StorageKey); err != nil {
-			log.Printf("attachment_direct_upload_cleanup status=delete_failed upload_intent_id=%s", intent.UploadIntentID)
+			log.Printf("attachment_direct_upload_cleanup status=delete_failed upload_job_id=%s", intent.UploadIntentID)
 			continue
 		}
 		if _, err := s.repo.ExpireAttachmentUploadIntent(intent.UploadIntentID, time.Now().UTC()); err != nil {
-			log.Printf("attachment_direct_upload_cleanup status=mark_failed upload_intent_id=%s", intent.UploadIntentID)
+			log.Printf("attachment_direct_upload_cleanup status=mark_failed upload_job_id=%s", intent.UploadIntentID)
 			continue
 		}
-		log.Printf("attachment_direct_upload_cleanup status=expired upload_intent_id=%s", intent.UploadIntentID)
+		log.Printf("attachment_direct_upload_cleanup status=expired upload_job_id=%s", intent.UploadIntentID)
 	}
 }
 

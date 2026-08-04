@@ -1418,6 +1418,9 @@ func (r *PostgresRepo) DeleteLogicGateProjection(input LogicGateProjectionDelete
 	if (previousFound && isEditorTextBoxType(previous.Type)) || (!previousFound && input.ExpectedRevision != nil) {
 		return deletePostgresLogicGateTextProjection(ctx, tx, input, previous, previousFound)
 	}
+	if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, "logic_gate_chat_message", informationID); err != nil {
+		return err
+	}
 	deleted, err := tx.ExecContext(ctx,
 		`delete from logic_gate_projection_table
 		 where company_id=$1 and logic_gate_id=$2 and information_id=$3`,

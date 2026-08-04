@@ -124,6 +124,19 @@ func TestMemorySharedEmailDraftClaimLifecycleAndImmutableIdentity(t *testing.T) 
 		t.Fatalf("revisionless shared delete error = %v, want ErrInvalid", err)
 	}
 
+	const attachmentID = "11111111-1111-4111-8111-701300000212"
+	if _, _, err := repo.CreateAttachmentWithResourceLink(AttachmentCreateInput{
+		CompanyID: companyID, AttachmentID: attachmentID, OriginalFilename: "sent.txt", MimeType: "text/plain",
+		ByteSize: 4, SHA256: strings.Repeat("a", 64), StorageBucket: "shared-draft-test-bucket",
+		StorageKey: "companies/" + companyID + "/attachments/" + attachmentID + "/original",
+		SourceKind: AttachmentSourceEmailOutgoing, ResourceLink: ResourceAttachmentInput{
+			CompanyID: companyID, ResourceType: "email_draft", ResourceID: draftID, AttachmentID: attachmentID,
+			RelationshipKind: AttachmentRelationshipEmailAttachment, CreatedByUserID: creator.UserID,
+		},
+	}); err != nil {
+		t.Fatalf("create draft attachment: %v", err)
+	}
+
 	if _, err := repo.ClaimCommunicationsEmailDraftSend(CommunicationsEmailDraftSendClaimInput{
 		CompanyID: companyID, DraftID: draftID, CollaborationID: collaboration.CollaborationID,
 		ParticipantUserID: outsider.UserID, ExpectedRevision: 2, ProviderGrantID: "shared-draft-test-grant",
@@ -175,6 +188,18 @@ func TestMemorySharedEmailDraftClaimLifecycleAndImmutableIdentity(t *testing.T) 
 		Message: domain.EmailMessageSnapshot{ID: "sent-shared-message", ThreadID: collaboration.ProviderThreadID},
 	}); err != nil {
 		t.Fatalf("complete send: %v", err)
+	}
+	sentMessageID := repo.emailDrafts[communicationsEmailDraftKey(companyID, draftID)].SentMessageID
+	sentLinks, err := repo.ListResourceAttachments(companyID, "email_message", sentMessageID)
+	if err != nil || len(sentLinks) != 1 || sentLinks[0].AttachmentID != attachmentID {
+		t.Fatalf("sent message attachment links = %+v err=%v", sentLinks, err)
+	}
+	draftLinks, err := repo.ListResourceAttachments(companyID, "email_draft", draftID)
+	if err != nil || len(draftLinks) != 0 {
+		t.Fatalf("retired draft attachment links = %+v err=%v", draftLinks, err)
+	}
+	if _, err := repo.GetAttachment(companyID, attachmentID); err != nil {
+		t.Fatalf("sent attachment must remain live: %v", err)
 	}
 	if _, err := repo.GetCommunicationsEmailDraft(CommunicationsEmailDraftGetInput{
 		CompanyID: companyID, DraftID: draftID, ParticipantUserID: creator.UserID,

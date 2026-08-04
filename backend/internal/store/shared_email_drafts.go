@@ -273,7 +273,13 @@ exists (
   and relationship.email_relationship_id=email_drafts.email_relationship_id
   and mangorts_user_can_access_resource(relationship.company_id,relationship.resource_type,
       relationship.resource_id,$3::uuid,'edit'))`
-	result, err := r.db.Exec(`
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `
 update email_drafts set deleted_timestamp=now(),updated_timestamp=now(),
  updated_by_user_id=nullif($4,'')::uuid,revision=revision+1
 where company_id=$1::uuid and draft_id=$2 and deleted_timestamp is null
@@ -286,12 +292,15 @@ where company_id=$1::uuid and draft_id=$2 and deleted_timestamp is null
 		return err
 	}
 	if rows, _ := result.RowsAffected(); rows > 0 {
-		return nil
+		if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, "email_draft", draftID); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
 	var currentRevision int64
 	var sendState string
 	var claimed sql.NullTime
-	err = r.db.QueryRow(`
+	err = tx.QueryRowContext(ctx, `
 select revision,send_state,send_claimed_timestamp from email_drafts
 where company_id=$1::uuid and draft_id=$2 and deleted_timestamp is null
  and email_relationship_id is not null and `+permission,

@@ -1,12 +1,12 @@
 package httpapi
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"log"
 	"mime"
+	"miraeopus/backend/internal/attachmentcleanup"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
@@ -106,7 +106,7 @@ func (s *Server) handleAttachmentContent(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	variantType := store.NormalizeAttachmentVariantType(r.URL.Query().Get("variant"))
-	if variantType == "" || variantType == store.AttachmentVariantEmailSend {
+	if variantType == "" {
 		writeError(w, http.StatusBadRequest, "invalid_attachment_variant")
 		return
 	}
@@ -349,12 +349,11 @@ func (s *Server) handleResourceAttachmentDelete(w http.ResponseWriter, r *http.R
 			writeError(w, http.StatusInternalServerError, "failed_to_unlink_attachment")
 			return
 		}
+		s.wakeAttachmentDeletionCleanup()
 		writeJSON(w, http.StatusOK, map[string]any{"status": "unlinked"})
 		return
 	}
-	storage, ok := s.attachmentStorage.(interface {
-		DeleteObject(context.Context, string) error
-	})
+	deletionStorage, ok := s.attachmentStorage.(attachmentDeletionObjectStorage)
 	if !ok {
 		writeError(w, http.StatusServiceUnavailable, "attachment_storage_unavailable")
 		return
@@ -376,23 +375,20 @@ func (s *Server) handleResourceAttachmentDelete(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, "failed_to_prepare_attachment_deletion")
 		return
 	}
-	deleted := map[string]struct{}{}
-	for _, key := range plan.StorageKeys {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		if _, duplicate := deleted[key]; duplicate {
-			continue
-		}
-		if err := storage.DeleteObject(r.Context(), key); err != nil {
-			writeAttachmentStorageError(w, err)
+	result := (attachmentcleanup.Service{
+		Repository: s.repo,
+		Storage:    attachmentDeletionStorage{storage: deletionStorage},
+	}).RunItem(r.Context(), attachmentcleanup.WorkItem{
+		Kind: attachmentcleanup.WorkOrphanAttachment, CompanyID: companyID,
+		AttachmentID: attachmentID, Objects: plan.Objects,
+	}, true)
+	if result.Err != nil || !result.Finalized {
+		s.wakeAttachmentDeletionCleanup()
+		if errors.Is(result.Err, ErrAttachmentStorageUnavailable) {
+			writeError(w, http.StatusServiceUnavailable, "attachment_storage_unavailable")
 			return
 		}
-		deleted[key] = struct{}{}
-	}
-	if err := s.repo.FinalizePermanentAttachmentDeletion(r.Context(), companyID, attachmentID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_finalize_attachment_deletion")
+		writeError(w, http.StatusBadGateway, "attachment_storage_failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted"})

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"miraeopus/backend/internal/domain"
@@ -182,7 +183,13 @@ func (r *PostgresRepo) SoftDeleteCommunicationsEmailDraft(input CommunicationsEm
 	if draftID == "" {
 		return ErrInvalid
 	}
-	result, err := r.db.Exec(`
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `
 update email_drafts
 set deleted_timestamp = now(),
 	updated_timestamp = now(),
@@ -204,9 +211,11 @@ where company_id = $1::uuid
 	if rows == 0 {
 		return ErrNotFound
 	}
-	return nil
+	if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, scope.companyID, "email_draft", draftID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
-
 func (r *PostgresRepo) GetCommunicationsEmailSignature(input CommunicationsEmailSignatureScopeInput) (domain.CommunicationsEmailSignature, error) {
 	scope, err := normalizeCommunicationsEmailScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
 	if err != nil {

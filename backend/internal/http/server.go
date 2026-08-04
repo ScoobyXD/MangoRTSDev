@@ -92,6 +92,8 @@ type Server struct {
 	attachmentDirectUpload                              attachmentDirectUploadConfig
 	attachmentUploadCleanupCancel                       context.CancelFunc
 	attachmentUploadCleanupDisabled                     bool
+	attachmentDeletionCleanupCancel                     context.CancelFunc
+	attachmentDeletionCleanupWake                       chan struct{}
 	maxBodyBytes                                        int64
 	legacyMapRoutesEnabled                              bool
 }
@@ -241,6 +243,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		attachmentRemoteImageDownloader: newSafeAttachmentRemoteImageDownloader(),
 		attachmentDirectUpload:          attachmentDirectUploadConfigFromEnv(),
 		attachmentUploadCleanupDisabled: options.DisableAttachmentUploadCleanup,
+		attachmentDeletionCleanupWake:   make(chan struct{}, 1),
 		maxBodyBytes:                    options.MaxRequestBodyBytes,
 		legacyMapRoutesEnabled:          options.LegacyMapRoutesEnabled || isTruthyQueryValue(os.Getenv("MANGORTS_ENABLE_LEGACY_MAP_ROUTES")),
 	}
@@ -249,6 +252,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 	}
 	server.initializeWorkspaceDerivedDomainEventCheckpoints(context.Background())
 	server.startAttachmentUploadCleanup()
+	server.startAttachmentDeletionCleanup()
 	server.startWorkspaceDerivedDomainEventCatchup()
 	server.startNotificationCleanup()
 	server.startCommunicationsArchiveWorker()
@@ -263,6 +267,9 @@ func (s *Server) Close() {
 	}
 	if s.attachmentUploadCleanupCancel != nil {
 		s.attachmentUploadCleanupCancel()
+	}
+	if s.attachmentDeletionCleanupCancel != nil {
+		s.attachmentDeletionCleanupCancel()
 	}
 	if s.workspaceDerivedCatchupCancel != nil {
 		s.workspaceDerivedCatchupCancel()

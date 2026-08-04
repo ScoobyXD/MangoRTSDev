@@ -660,7 +660,16 @@ func (r *PostgresRepo) DeleteCompanyExplorerFolder(companyID, folderID string) e
 	if err := protectCompanyExplorerDefaultFolderMutation(companyID, folderID); err != nil {
 		return err
 	}
-	deleted, err := r.db.ExecContext(context.Background(), `
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, "company_explorer_folder", folderID); err != nil {
+		return err
+	}
+	deleted, err := tx.ExecContext(ctx, `
 delete from company_explorer_folders
 where company_id=$1::uuid and folder_id=$2::uuid`, companyID, folderID)
 	if err != nil {
@@ -671,7 +680,7 @@ where company_id=$1::uuid and folder_id=$2::uuid`, companyID, folderID)
 	} else if affected == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit()
 }
 func postgresCompanyHasConnectedEmailAccount(ctx context.Context, tx *sql.Tx, companyID, accountEmail string) (bool, error) {
 	var exists bool
@@ -925,6 +934,10 @@ func (r *PostgresRepo) deleteCompanyExplorerTargets(companyID string, targets []
 
 	stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.folder_effective_delete")
 	for folderID := range folderIDs {
+		if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, "company_explorer_folder", folderID); err != nil {
+			stop()
+			return CompanyExplorerDeleteResult{}, err
+		}
 		if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeCompanyExplorerFolder, folderID); err != nil {
 			stop()
 			return CompanyExplorerDeleteResult{}, err
@@ -1069,6 +1082,12 @@ func postgresDeleteNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID str
 }
 
 func postgresDeleteNodeRowsTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string, deleteProjectionRows bool) error {
+	if err := retireNodeChatAttachmentRelationshipsTx(ctx, tx, companyID, nodeID); err != nil {
+		return err
+	}
+	if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, EntityTypeNode, nodeID); err != nil {
+		return err
+	}
 	defer observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.total")()
 	stop := observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.effective_facts_delete")
 	if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeNode, nodeID); err != nil {
@@ -1222,6 +1241,12 @@ func postgresDeleteLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logic
 }
 
 func postgresDeleteLogicGateRowsTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, deleteProjectionRows bool) error {
+	if err := retireLogicGateChatAttachmentRelationshipsTx(ctx, tx, companyID, logicGateID); err != nil {
+		return err
+	}
+	if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, EntityTypeLogicGate, logicGateID); err != nil {
+		return err
+	}
 	if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeLogicGate, logicGateID); err != nil {
 		return err
 	}

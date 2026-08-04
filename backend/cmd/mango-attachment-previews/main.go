@@ -23,7 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 )
 
-const applyConfirmation = "GENERATE_ATTACHMENT_VARIANTS_FOR_COMPANY"
+const applyConfirmation = "GENERATE_ATTACHMENT_PREVIEWS_FOR_COMPANY"
 
 type commandConfig struct {
 	Apply             bool
@@ -43,7 +43,7 @@ type dbConfig struct {
 	ConnectTimeoutSeconds int
 }
 
-type variantCandidate struct {
+type previewCandidate struct {
 	Attachment domain.Attachment
 	Reason     string
 }
@@ -96,7 +96,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
-	candidates, err := listVariantCandidates(ctx, db, cfg.CompanyID, cfg.AfterAttachmentID, cfg.Limit)
+	candidates, err := listPreviewCandidates(ctx, db, cfg.CompanyID, cfg.AfterAttachmentID, cfg.Limit)
 	if err != nil {
 		return err
 	}
@@ -156,16 +156,16 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 		return err
 	}
 	if rep.Failed > 0 {
-		return fmt.Errorf("%d attachment variant candidates failed; see emitted report", rep.Failed)
+		return fmt.Errorf("%d attachment preview candidates failed; see emitted report", rep.Failed)
 	}
 	return nil
 }
 
 func parseCommandConfig(args []string) (commandConfig, error) {
-	flags := flag.NewFlagSet("mango-attachment-variants", flag.ContinueOnError)
+	flags := flag.NewFlagSet("mango-attachment-previews", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	var cfg commandConfig
-	flags.BoolVar(&cfg.Apply, "apply", false, "generate and persist variants; defaults to dry-run")
+	flags.BoolVar(&cfg.Apply, "apply", false, "generate and persist previews; defaults to dry-run")
 	flags.StringVar(&cfg.ConfirmApply, "confirm-apply", "", "required scary confirmation for apply")
 	flags.StringVar(&cfg.CompanyID, "company-id", "", "required company UUID")
 	flags.IntVar(&cfg.Limit, "limit", 0, "required explicit maximum candidate count")
@@ -196,15 +196,15 @@ func parseCommandConfig(args []string) (commandConfig, error) {
 	return cfg, nil
 }
 
-func listVariantCandidates(ctx context.Context, db *sql.DB, companyID, afterAttachmentID string, limit int) ([]variantCandidate, error) {
-	rows, err := db.QueryContext(ctx, variantCandidateQuery, companyID, afterAttachmentID, limit)
+func listPreviewCandidates(ctx context.Context, db *sql.DB, companyID, afterAttachmentID string, limit int) ([]previewCandidate, error) {
+	rows, err := db.QueryContext(ctx, previewCandidateQuery, companyID, afterAttachmentID, limit)
 	if err != nil {
-		return nil, fmt.Errorf("query attachment variant candidates: %w", err)
+		return nil, fmt.Errorf("query attachment preview candidates: %w", err)
 	}
 	defer rows.Close()
-	items := make([]variantCandidate, 0)
+	items := make([]previewCandidate, 0)
 	for rows.Next() {
-		var item variantCandidate
+		var item previewCandidate
 		var width, height sql.NullInt64
 		if err := rows.Scan(&item.Attachment.CompanyID, &item.Attachment.AttachmentID, &item.Attachment.UploadedByUserID,
 			&item.Attachment.OriginalFilename, &item.Attachment.MimeType, &item.Attachment.ByteSize,
@@ -226,7 +226,7 @@ func listVariantCandidates(ctx context.Context, db *sql.DB, companyID, afterAtta
 	return items, rows.Err()
 }
 
-const variantCandidateQuery = `
+const previewCandidateQuery = `
 select
   a.company_id::text,
   a.attachment_id::text,
@@ -247,15 +247,15 @@ select
     case when thumbnail.attachment_id is null then 'thumbnail_missing_or_stale' end
   ), ''), 'current_db_unverified_storage')
 from attachments a
-left join attachment_variants display
+left join attachment_previews display
   on display.attachment_id=a.attachment_id
- and display.variant_type='display'
+ and display.preview_type='display'
  and display.generation_version=1
  and display.sha256 is not null
 	and display.storage_key like 'companies/' || a.company_id::text || '/attachments/' || a.attachment_id::text || '/variants/v1/display/%'
-left join attachment_variants thumbnail
+left join attachment_previews thumbnail
   on thumbnail.attachment_id=a.attachment_id
- and thumbnail.variant_type='thumbnail'
+ and thumbnail.preview_type='thumbnail'
  and thumbnail.generation_version=1
  and thumbnail.sha256 is not null
 	and thumbnail.storage_key like 'companies/' || a.company_id::text || '/attachments/' || a.attachment_id::text || '/variants/v1/thumbnail/%'
