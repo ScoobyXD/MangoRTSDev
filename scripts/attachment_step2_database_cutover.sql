@@ -1,4 +1,7 @@
--- Attachment Step 1 -> Step 2 maintenance boundary.
+-- PRODUCT STEP 2 database cutover boundary.
+-- This is not part of Step 1 and it is not the Step 3 test/snapshot/retirement
+-- operation. It does not drop any legacy table.
+--
 -- DO NOT RUN DURING STEP 1. Run this whole file only after all application and
 -- attachment workers are paused and immediately before deploying the Step 2
 -- backend. The current legacy backend cannot use upload_job_id.

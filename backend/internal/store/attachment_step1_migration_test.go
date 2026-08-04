@@ -23,7 +23,7 @@ func readAttachmentStep1Artifact(t *testing.T, path ...string) string {
 func TestAttachmentStep1ArtifactsArePhasedAndOperatorGated(t *testing.T) {
 	preflight := readAttachmentStep1Artifact(t, "..", "..", "..", "scripts", "attachment_step1_preflight.sql")
 	step1 := readAttachmentStep1Artifact(t, "..", "..", "..", "scripts", "attachment_step1_create_copy_reconcile.sql")
-	boundary := readAttachmentStep1Artifact(t, "..", "..", "..", "scripts", "attachment_step1_to_step2_boundary.sql")
+	boundary := readAttachmentStep1Artifact(t, "..", "..", "..", "scripts", "attachment_step2_database_cutover.sql")
 	migration := readAttachmentStep1Artifact(t, "..", "..", "db", "migrations", "20260804_attachment_step1_expansion.sql")
 	schema := readAttachmentStep1Artifact(t, "..", "..", "db", "schema.sql")
 	cleanupMain := readAttachmentStep1Artifact(t, "..", "..", "cmd", "mango-attachment-step1-cleanup", "main.go")
@@ -40,6 +40,16 @@ func TestAttachmentStep1ArtifactsArePhasedAndOperatorGated(t *testing.T) {
 		!strings.Contains(preflight, "stop_and_review") {
 		t.Fatal("preflight is not a clear repeatable-read, read-only readiness report")
 	}
+	decisionStart := strings.Index(preflight, "-- result set 1: decision first")
+	columnsStart := strings.Index(preflight, "-- result set 2: exact current/destination column inventory")
+	constraintsStart := strings.Index(preflight, "-- result set 3: exact keys")
+	if decisionStart < 0 || columnsStart <= decisionStart || constraintsStart <= columnsStart {
+		t.Fatal("preflight does not present decision, summary, and detail before schema inventories")
+	}
+	if !strings.Contains(preflight, "when 'readiness' then 1") {
+		t.Fatal("preflight does not put the readiness row first")
+	}
+
 	for _, forbidden := range []string{"insert into ", "update ", "delete from ", "create table ", "alter table ", "drop table "} {
 		if strings.Contains(preflight, forbidden) {
 			t.Errorf("preflight contains write SQL %q", forbidden)
@@ -265,7 +275,7 @@ on conflict(attachment_id,preview_type) do nothing`); err != nil {
 	if _, err := db.Exec(string(stepRaw)); err != nil {
 		t.Fatalf("reconcile repaired disposable target: %v", err)
 	}
-	boundaryRaw, err := os.ReadFile(filepath.Join("..", "..", "..", "scripts", "attachment_step1_to_step2_boundary.sql"))
+	boundaryRaw, err := os.ReadFile(filepath.Join("..", "..", "..", "scripts", "attachment_step2_database_cutover.sql"))
 	if err != nil {
 		t.Fatal(err)
 	}

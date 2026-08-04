@@ -1166,13 +1166,20 @@ The special collaboration participant permission system retires. Read-only evide
 
 This section records the attachment decisions Jonat approved on 2026-08-04 and is the current product contract. The repository now contains the Step 1 schema and operator tooling listed below. Their presence does not authorize an agent to apply SQL to a live database or delete live S3 objects.
 
+These artifacts do not map one-to-one to the three rollout steps. Step 1 uses
+two SQL entry points so the read-only decision is separate from the authorized
+database/data write. Step 2 owns the backend cutover and the short multipart
+column/FK switch. Step 3 owns the test, snapshot, cutoff, and legacy-table
+retirement gate; its destructive retirement SQL is intentionally not present
+before Step 2 is implemented and proven.
+
 ### Step 1 implementation artifacts
 
 - `scripts/attachment_step1_preflight.sql` is the single DBeaver-compatible, repeatable-read, read-only inventory and READY/STOP report. It exposes only safe relationship and attachment identities, counts, and storage-key fingerprints.
 - `scripts/attachment_step1_create_copy_reconcile.sql` is the separately operated transaction for additive creation, exact checkpoint verification, stable-ID copy, exact evidence-ledger deletion of the 213 broken relationships, complete zero-owner marking, and recount.
 - `backend/db/migrations/20260804_attachment_step1_expansion.sql` and `backend/db/schema.sql` define the additive Step 1 destinations and pending-delete link guards without changing the deployed multipart-parts contract.
 - `backend/cmd/mango-attachment-step1-cleanup` is dry-run by default and requires company scope plus `-apply -confirm DELETE_ATTACHMENT_STEP1_ORPHANS` before it deletes S3 objects or finalizes Postgres cleanup. It uses the normal AWS provider/SSO configuration and preserves database keys after partial failure for safe retry.
-- `scripts/attachment_step1_to_step2_boundary.sql` is not a Step 1 operation. At the later Step 2 maintenance, pause writers and rerun the exact Step 1 preflight/reconcile/cleanup sequence first so any intervening legacy writes are captured; the boundary then performs the `attachment_upload_parts.upload_intent_id` to `upload_job_id` rename and foreign-key swap immediately before Step 2 deploys the final backend.
+- `scripts/attachment_step2_database_cutover.sql` is not a Step 1 operation. At the later Step 2 maintenance, pause writers and rerun the exact Step 1 preflight/reconcile/cleanup sequence first so any intervening legacy writes are captured; the boundary then performs the `attachment_upload_parts.upload_intent_id` to `upload_job_id` rename and foreign-key swap immediately before Step 2 deploys the final backend.
 - `backend/internal/store/attachment_step1_migration_test.go` provides static phase checks and an opt-in disposable PostgreSQL 18 first-run/rerun/drift-rollback test. `backend/internal/attachmentcleanup/service_test.go` covers cleanup with mocks only. No live database or S3 operation is part of these tests.
 
 ### Final attachment table model
