@@ -11,6 +11,8 @@
 -- message content, credentials, signed URLs, or attachment bytes.
 -- Valid final-only relationships written by the current backend after the legacy
 -- checkpoint are verified against their exact live owner and retained.
+-- Supports PostgreSQL server 17.x and 18.x. The file uses plain PostgreSQL SQL
+-- only; it contains no psql backslash commands.
 
 begin transaction isolation level repeatable read read only;
 set local statement_timeout = '5min';
@@ -615,9 +617,15 @@ preview_metrics as (
   select 'legacy_preview_type' category,variant_type detail,count(*)::bigint value
   from attachment_variants group by variant_type
 ),
+database_metrics as (
+  select 'database_runtime'::text category,
+         'postgresql_server_version_num'::text detail,
+         current_setting('server_version_num')::bigint value
+),
 readiness as (
   select case when
-    (select count(*) from candidate_counts where not valid_shape or candidate_count>1)=0
+    current_setting('server_version_num')::integer between 170000 and 189999
+    and (select count(*) from candidate_counts where not valid_shape or candidate_count>1)=0
     and (select count(*) from unapproved_broken)=0
     and (select count(*) from target_conflicts)=0
     and (select count(*) from target_extras)=0
@@ -656,6 +664,9 @@ from upload_metrics m
 union all
 select 'metric',m.category,null,null,null,m.detail,m.value
 from preview_metrics m
+union all
+select 'metric',m.category,null,null,null,m.detail,m.value
+from database_metrics m
 union all
 select 'broken_relationship_identity','approved_broken_relationship',
        e.company_id,e.resource_attachment_id,e.attachment_id,

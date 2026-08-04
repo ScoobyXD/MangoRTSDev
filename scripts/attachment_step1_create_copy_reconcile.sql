@@ -13,11 +13,21 @@
 -- jobs, multipart parts, and previews still use their legacy table/column
 -- contracts. Do not run the Step 2 multipart boundary rename from this
 -- maintenance operation.
+-- Supports PostgreSQL server 17.x and 18.x. The file uses plain PostgreSQL SQL
+-- only; it contains no psql backslash commands.
 
 begin;
 set local lock_timeout = '10s';
 set local statement_timeout = '10min';
 set local idle_in_transaction_session_timeout = '12min';
+
+do $$
+begin
+  if current_setting('server_version_num')::integer not between 170000 and 189999 then
+    raise exception 'Attachment Step 1 supports PostgreSQL 17 and 18; connected server is %',
+      current_setting('server_version');
+  end if;
+end $$;
 
 lock table attachments,resource_attachments,
   attachment_upload_intents,attachment_upload_parts,attachment_variants,
@@ -452,16 +462,14 @@ select pg_temp.attachment_step1_assert_columns('attachment_migration_items',arra
   'embedded_sha256','status','error','created_timestamp','updated_timestamp'
 ]);
 
--- PostgreSQL 18 renders constraint/index/trigger definitions deterministically.
+-- PostgreSQL 17 and 18 render these constraint/index/trigger definitions
+-- consistently for the objects used here.
 -- These signatures cover every non-NOT-NULL constraint and every index on each
 -- final destination, plus both pending-delete safety triggers. A same-named but
 -- drifted object therefore stops before any data copy or deletion.
 do $$
 declare expected record; actual_count bigint; actual_signature text;
 begin
-  if current_setting('server_version_num')::integer not between 180000 and 189999 then
-    raise exception 'Attachment Step 1 schema signatures require PostgreSQL 18';
-  end if;
   for expected in select * from (values
     ('attachment_relationships'::text,7::bigint,'7a3a3c941bceeddbdf403f11a8ec968d'::text),
     ('attachment_upload_jobs',22,'784483d957e0cdbf314f750e53de0ec6'),
