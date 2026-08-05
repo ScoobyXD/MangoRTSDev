@@ -1,5 +1,5 @@
 import type React from "react";
-import { logicGateGVICRaisedSurfaceStyle, logicGateGVICRolePresentation } from "../../modules/logic-gate-map/gvicPresentation.js";
+import { logicGateGVICRaisedSurfaceStyle, logicGateGVICRolePresentation } from "../../modules/logic-gates/gvicPresentation.js";
 import { KANBAN_NODE_PRIORITY_STYLE_OPTIONS } from "../../modules/kanban/shared.js";
 import type { UpdateGroup } from "../../modules/notifications/notificationsApi.js";
 

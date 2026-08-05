@@ -4,9 +4,9 @@ import { AppModalPortal, useAppFloatingMenuDismissal } from "../../app/AppModalP
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { isAbortError } from "../api/requestJSON";
 import { humanLabelOrFallback } from "../entityLabels.js";
-import { getLogicGateRecordSingleFlight } from "../logic-gate-map/LogicGateRecordStore.js";
-import type { LogicGateRecord } from "../logic-gate-map/shared";
-import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../node-map/eventbus";
+import { getLogicGateRecordSingleFlight } from "../logic-gates/logicGateRecordStore.js";
+import type { LogicGateRecord } from "../logic-gates/types";
+import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../dashboardEvents";
 import { ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons";
 import { CompanyExplorerSearchBox } from "../company-explorer/CompanyExplorerSearchBox";
 import { fetchCompanyExplorerSearchResults, type CompanyExplorerSearchResult } from "../company-explorer/companyExplorerLazyApi";
@@ -14,7 +14,7 @@ import { reconcileCompanyExplorerSearchResultTitles } from "../company-explorer/
 import { foldCommittedEntityTitlesSince, readCommittedEntityTitleVersion, subscribeCommittedEntityTitleUpdates } from "../realtime/committedEntityTitleUpdates";
 import { buildCompanyExplorerSearchTreeRows } from "../company-explorer/companyExplorerTreeRows";
 import type { ExplorerTreeNode } from "../company-explorer/companyExplorerTypes";
-import { reconcileCommittedLogicGateRecordTitles } from "../map/committedTitleSnapshotReconciliation";
+import { reconcileCommittedLogicGateRecordTitles } from "../realtime/committedTitleSnapshotReconciliation";
 import {
   fetchProjectView,
   listProjectRelationshipsForResource,

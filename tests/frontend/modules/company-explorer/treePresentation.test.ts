@@ -17,8 +17,6 @@ import {
   resolveExplorerPublishedSelection,
   resolveExplorerRenameTarget,
   resolveExplorerRootDropTarget,
-  shouldAcceptClearedMapSelectionAfterExplorerSelection,
-  shouldAcceptMapSelectionAfterExplorerSelection,
 } from "../../../../frontend/src/modules/company-explorer/treePresentation.js";
 import { getExplorerRowContainerID } from "../../../../frontend/src/modules/company-explorer/companyExplorerDragDrop.js";
 import { buildCompanyExplorerSearchTreeRows, buildCompanyExplorerTreeRows, buildCompanyExplorerV2TreeRows, buildScopedCompanyExplorerTreeRows, findCompanyExplorerRootFolderByName, isCompanyExplorerV2FolderItemPlacementRow } from "../../../../frontend/src/modules/company-explorer/companyExplorerTreeRows.js";
@@ -811,7 +809,6 @@ run("published selection follows the active tree row during domain switches", ()
     selectedKanbanBoardID: "",
     selectedFolderID: "",
     selectedFolderKind: "node",
-    targetFrameKind: "node-map",
   });
 
   assert.equal(selection.entityKind, "node");
@@ -821,7 +818,7 @@ run("published selection follows the active tree row during domain switches", ()
   assert.equal(selection.isLogicGateContext, false);
 });
 
-run("published folder selection targets the matching map domain", () => {
+run("published folder selection keeps the matching entity domain", () => {
   const logicFolder = resolveExplorerPublishedSelection({
     selectedTreeID: "workspace-folder-logic",
     selectedNodeID: "",
@@ -829,21 +826,10 @@ run("published folder selection targets the matching map domain", () => {
     selectedKanbanBoardID: "",
     selectedFolderID: "logic",
     selectedFolderKind: "logic_gate",
-    targetFrameKind: "node-map",
   });
   assert.equal(logicFolder.entityKind, "folder");
   assert.equal(logicFolder.entityID, "logic");
   assert.equal(logicFolder.isLogicGateContext, true);
-
-  const emptyRootForLogicMap = resolveExplorerPublishedSelection({
-    selectedTreeID: "folder-root",
-    selectedNodeID: "",
-    selectedLogicGateID: "",
-    selectedKanbanBoardID: "",
-    selectedFolderID: "",
-    targetFrameKind: "logic-map",
-  });
-  assert.equal(emptyRootForLogicMap.isLogicGateContext, true);
 });
 
 run("keyboard navigation moves selection and expands folders without DOM focus assumptions", () => {
@@ -976,102 +962,4 @@ run("find selection ignores duplicate and unknown requested entities", () => {
   assert.deepEqual(plan.selectedTreeIDs, ["logic-gate-gate-a"]);
   assert.equal(plan.primaryEntity?.id, "gate-a");
   assert.deepEqual([...plan.expandedTreeIDs].sort(), ["folder-root", "workspace-folder-open"]);
-});
-
-run("stale opposite-map selections do not override recent Explorer domain changes", () => {
-  assert.equal(
-    shouldAcceptMapSelectionAfterExplorerSelection({
-      incomingDomain: "node",
-      currentDomain: "logic_gate",
-      localSelectionChangedAt: 2000,
-      incomingChangedAt: 1500,
-      now: 2100,
-    }),
-    false,
-  );
-  assert.equal(
-    shouldAcceptMapSelectionAfterExplorerSelection({
-      incomingDomain: "node",
-      currentDomain: "logic_gate",
-      localSelectionChangedAt: 2000,
-      incomingChangedAt: 2500,
-      now: 2600,
-    }),
-    true,
-  );
-});
-
-run("stale same-domain map selections do not override rapid Explorer navigation", () => {
-  assert.equal(
-    shouldAcceptMapSelectionAfterExplorerSelection({
-      incomingDomain: "node",
-      currentDomain: "node",
-      localSelectionChangedAt: 2000,
-      incomingChangedAt: 2050,
-      now: 2060,
-    }),
-    false,
-  );
-  assert.equal(
-    shouldAcceptMapSelectionAfterExplorerSelection({
-      incomingDomain: "node",
-      currentDomain: "node",
-      localSelectionChangedAt: 2000,
-      incomingChangedAt: 1990,
-      now: 2010,
-    }),
-    false,
-  );
-  assert.equal(
-    shouldAcceptMapSelectionAfterExplorerSelection({
-      incomingDomain: "node",
-      currentDomain: "node",
-      localSelectionChangedAt: 2000,
-      incomingChangedAt: 2200,
-      now: 2210,
-    }),
-    true,
-  );
-});
-
-run("untimestamped map selections wait out recent Explorer intent", () => {
-  assert.equal(
-    shouldAcceptMapSelectionAfterExplorerSelection({
-      incomingDomain: "node",
-      currentDomain: "folder",
-      localSelectionChangedAt: 2000,
-      now: 2100,
-    }),
-    false,
-  );
-  assert.equal(
-    shouldAcceptMapSelectionAfterExplorerSelection({
-      incomingDomain: "node",
-      currentDomain: "folder",
-      localSelectionChangedAt: 2000,
-      now: 3000,
-    }),
-    true,
-  );
-});
-
-run("fresh cleared map selections do not erase a recent Explorer click", () => {
-  assert.equal(
-    shouldAcceptClearedMapSelectionAfterExplorerSelection({
-      currentDomain: "node",
-      localSelectionChangedAt: 2000,
-      incomingChangedAt: 2050,
-      now: 2100,
-    }),
-    false,
-  );
-  assert.equal(
-    shouldAcceptClearedMapSelectionAfterExplorerSelection({
-      currentDomain: "node",
-      localSelectionChangedAt: 2000,
-      incomingChangedAt: 2050,
-      now: 3000,
-    }),
-    true,
-  );
 });

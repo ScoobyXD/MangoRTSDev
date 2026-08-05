@@ -3,8 +3,8 @@ import type {
   CompanyUser,
   CompanyUserGroup,
 } from "../../modules/communications/communicationsApi.js";
-import type { LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
-import type { NodeRecord } from "../../modules/node-map/shared.js";
+import type { LogicGateRecord } from "../../modules/logic-gates/types.js";
+import type { NodeRecord } from "../../modules/nodes/types.js";
 import type { ProjectRecord } from "../../modules/project-management/projectManagementApi.js";
 import {
   listEditorTextBlockProjections,

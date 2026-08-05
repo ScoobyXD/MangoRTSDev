@@ -1,8 +1,8 @@
 import { requestJSON } from "../api/requestJSON.js";
 import type { Account } from "../accounts/accountsApi.js";
 import type { CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
-import type { LogicGateGVICRole, LogicGateRecord } from "../logic-gate-map/shared.js";
-import type { NodeRecord } from "../node-map/shared.js";
+import type { LogicGateGVICRole, LogicGateRecord } from "../logic-gates/types.js";
+import type { NodeRecord } from "../nodes/types.js";
 import { markWorkspaceSnapshotScopeStale } from "../workspace/workspaceSnapshotCache.js";
 import {
   invalidateKanbanBoardContentsCache,
@@ -45,8 +45,8 @@ function markKanbanWorkspaceSnapshotStale(apiBase: string, companyID: string, bo
   markWorkspaceSnapshotScopeStale(apiBase, companyID, { scope: "kanban", boardID: cleanBoardID });
 }
 
-function markNodeMapWorkspaceSnapshotStale(apiBase: string, companyID: string): void {
-  markWorkspaceSnapshotScopeStale(apiBase, companyID, { scope: "node_map" });
+function markNodeWorkspaceSnapshotStale(apiBase: string, companyID: string): void {
+  markWorkspaceSnapshotScopeStale(apiBase, companyID, { scope: "full" });
 }
 
 function markLogicGateAssignmentWorkspaceSnapshotsStale(args: { apiBase: string; companyID: string; logicGateID?: string; fromLogicGateID?: string; nodeID?: string }): void {
@@ -54,7 +54,7 @@ function markLogicGateAssignmentWorkspaceSnapshotsStale(args: { apiBase: string;
   const fromLogicGateID = args.fromLogicGateID?.trim() ?? "";
   if (logicGateID) markKanbanWorkspaceSnapshotStale(args.apiBase, args.companyID, logicGateKanbanBoardID(logicGateID));
   if (fromLogicGateID && fromLogicGateID !== logicGateID) markKanbanWorkspaceSnapshotStale(args.apiBase, args.companyID, logicGateKanbanBoardID(fromLogicGateID));
-  if (args.nodeID?.trim()) markNodeMapWorkspaceSnapshotStale(args.apiBase, args.companyID);
+  if (args.nodeID?.trim()) markNodeWorkspaceSnapshotStale(args.apiBase, args.companyID);
 }
 
 function reconcileCommittedCrossLogicGateAssignment(args: {
@@ -200,7 +200,7 @@ export async function upsertKanbanCard(args: {
   });
   invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, logicGateIDFromKanbanBoardID(args.boardID));
   markKanbanWorkspaceSnapshotStale(args.apiBase, args.companyID, args.boardID);
-  markNodeMapWorkspaceSnapshotStale(args.apiBase, args.companyID);
+  markNodeWorkspaceSnapshotStale(args.apiBase, args.companyID);
   return card;
 }
 
@@ -291,7 +291,7 @@ export async function createGVICMatrixNode(args: {
   if (payload.card?.board_id) {
     markKanbanWorkspaceSnapshotStale(args.apiBase, args.companyID, payload.card.board_id);
   }
-  markNodeMapWorkspaceSnapshotStale(args.apiBase, args.companyID);
+  markNodeWorkspaceSnapshotStale(args.apiBase, args.companyID);
   return {
     ...payload,
     gvic_projection_rows: normalizeGVICMatrixProjectionRows(payload.gvic_projection_rows),

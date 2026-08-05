@@ -29,9 +29,9 @@ import {
 } from "../../../../frontend/src/modules/company-explorer/companyExplorerGVICCommittedTitles.js";
 import {
   reconcileCommittedLogicGateRecordTitles,
-} from "../../../../frontend/src/modules/map/committedTitleSnapshotReconciliation.js";
+} from "../../../../frontend/src/modules/realtime/committedTitleSnapshotReconciliation.js";
 import type { CompanyExplorerSearchResult } from "../../../../frontend/src/modules/company-explorer/companyExplorerLazyApi.js";
-import type { LogicGateRecord } from "../../../../frontend/src/modules/logic-gate-map/shared.js";
+import type { LogicGateRecord } from "../../../../frontend/src/modules/logic-gates/types.js";
 
 
 function run(name: string, fn: () => void): void {

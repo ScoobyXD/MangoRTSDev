@@ -1,6 +1,6 @@
 import type { CompanyExplorerFolderKind, CompanyExplorerFolderScopeType, CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders.js";
 import type { CompanyExplorerV2EntityType } from "./companyExplorerLazyApi.js";
-import type { LogicGateGVICRole } from "../logic-gate-map/shared.js";
+import type { LogicGateGVICRole } from "../logic-gates/types.js";
 import type {
   ExplorerCreationTargets,
   ExplorerDropPayload,

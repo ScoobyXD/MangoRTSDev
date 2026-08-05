@@ -4,7 +4,7 @@ import React, { act } from "react";
 import { Simulate } from "react-dom/test-utils";
 import { JSDOM } from "jsdom";
 import { IDBKeyRange, indexedDB as fakeIndexedDB } from "fake-indexeddb";
-import type { NodeProjectionItem } from "../../../../frontend/src/modules/node-map/NodeRecordStore.ts";
+import type { NodeProjectionItem } from "../../../../frontend/src/modules/nodes/nodeRecordStore.ts";
 import { buildEditorAttachedEmailPayload, buildEditorTextBlockChatPayload } from "../../../../frontend/src/modules/editor/editorProjection.ts";
 import { applyEmailBodyHighlights } from "../../../../frontend/src/modules/editor/emailBodyHighlights.ts";
 import type { ProjectProjection, ProjectView } from "../../../../frontend/src/modules/project-management/projectManagementApi.ts";

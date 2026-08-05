@@ -107,8 +107,8 @@ import { setEntityFieldAssignments, type EntityField } from "../fields/entityFie
 import { getScopedItemIDs, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 import { UniversalGroupingControls } from "../grouping/UniversalGroupingControls.js";
 import { moveLogicGateAssignment } from "../kanban/kanbanApi.js";
-import type { LogicGateRecord } from "../logic-gate-map/shared.js";
-import type { NodeRecord } from "../node-map/shared.js";
+import type { LogicGateRecord } from "../logic-gates/types.js";
+import type { NodeRecord } from "../nodes/types.js";
 import { EVENT_HOME_TRIAGE_CONVERSION_APPLIED, type HomeTriageConversionAppliedDetail } from "../../pages/home/homeConstants.js";
 import { cleanIDList, hasTriageMessageDrag, readTriageMessageDrag } from "../../pages/home/homeUtils.js";
 import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog.js";

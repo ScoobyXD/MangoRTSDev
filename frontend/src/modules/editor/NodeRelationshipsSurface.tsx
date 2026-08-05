@@ -3,13 +3,13 @@ import { publishLiveSelection } from "../selectionCoordinator";
 import {
   getNodeRelationshipGraphSnapshot,
   subscribeNodeRelationshipGraph,
-} from "../node-map/NodeRelationshipGraph";
+} from "../nodes/nodeRelationshipGraph";
 import {
   buildNodeRelationshipHierarchyRows,
   collectNodeStructureIDs,
   type NodeRelationshipHierarchyRow,
-} from "../node-map/nodeRelationshipStructure";
-import { getNodeTitle, type NodeRecord, type NodeRelationship } from "../node-map/shared";
+} from "../nodes/nodeRelationshipStructure";
+import { getNodeTitle, type NodeRecord, type NodeRelationship } from "../nodes/types";
 import {
   EDITOR_NEU_ACTIVE_SURFACE,
   EDITOR_NEU_EDGE_FRAME,

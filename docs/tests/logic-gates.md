@@ -1,3 +1,14 @@
+# Process Story: Logic Gate work continues without canvas storage
+
+A user creates or opens a Logic Gate from Explorer, Home, Logic Gate Arena, Kanban, or a direct route
+↓
+The canonical Logic Gate record, Input/Output relationships, permissions, and GVIC assignments load through surviving APIs and caches
+↓
+The Editor saves the one current final textbox document and manual Save appends saving-user history
+↓
+Rename, relationship, deletion, recycle, restore, attachment, email, and collaboration behavior publish the same retained domain effects
+↓
+No request or response reads, writes, or returns entity coordinates
 # Process Story: Logic Gate documents use final storage
 
 A user opens a Logic Gate and reads or edits its one document
@@ -62,7 +73,7 @@ LG36 - The board request owner is the Logic Gate's Generated user ID. The work p
 LG37 - Logic Gate text highlighting must use the shared `EditorTabBar` split button, palette/custom/**No highlight** choices, and shared formatting controller. The main hitbox applies/toggles the selected color to a restored range or collapsed-caret pending style without opening the picker; the arrow opens the picker without applying color. Highlight reports the chosen active/pending color and round-trips through sanitized rich HTML. **No highlight** clears selected highlighting or the pending highlight typing style, and a selection ending at a line/list-item boundary must not bleed into the following sibling.
 LG38 - Hydrating changed Logic Gate editor content while the editor or one of its shared toolbar controls owns focus must preserve the logical selection. The editor restores the last valid range, records text offsets before replacing the DOM, and restores those offsets afterward so toolbar focus does not move formatting to an unrelated location.
 LG39 - When a Logic Gate document is hidden by Metadata, History, or Save Settings isolation, its rich editor must also be hidden and formatting commands must be disabled. Editor navigation tabs remain usable so the user can return to the document.
-LG40 - Every successful Logic Gate rename entry point covered by RW15 publishes the concrete committed-title event after commit, and applicable same-window Logic Gate labels converge under RW15. An active Editor or Logic Gate Map title draft/caret is preserved until editing ends; passive dock/pin updates preserve recency/storage, and no cross-user/generalized fan-out is created.
+LG40 - Every successful Logic Gate rename entry point covered by RW15 publishes the concrete committed-title event after commit, and applicable same-window Logic Gate labels converge under RW15. An active Editor title draft/caret is preserved until editing ends; passive dock/pin updates preserve recency/storage, and no cross-user/generalized fan-out is created.
 LG41 - The Logic Gate editor header keeps Editor, Permissions, the shared formatting toolbar, Outline Styles/Automatic Numbering, and the immediately adjacent More control on one nonwrapping line. Relationships, Metadata, History, Save Settings, save-version/related-node commands, and any supported secondary actions remain available in the keyboard-operable **More editor actions** menu with their existing permission and disabled states.
 LG42 - Blocking Logic Gate editor dialogs and fullscreen image previews mount through the shared body-level modal portal above Key Views, Explorer, Search Explorer, and feature-local stacking contexts, trap focus while topmost, and restore prior focus when closed.
 LG43 - The Generated, Verified, Consulted, and Informed cards remain in one compact four-column horizontal row. Narrowing may clip that row beneath an adjacent pane, but must not wrap it vertically or add a persistent apply/current-GVIC card.

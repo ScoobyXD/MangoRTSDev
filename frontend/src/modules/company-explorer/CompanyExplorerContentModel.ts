@@ -1,5 +1,5 @@
-import { type NodeRecord } from "../node-map/shared.js";
-import { type LogicGateRecord as LogicGateApiRecord } from "../logic-gate-map/shared.js";
+import { type NodeRecord } from "../nodes/types.js";
+import { type LogicGateRecord as LogicGateApiRecord } from "../logic-gates/types.js";
 import {
   type CompanyExplorerFolder,
   type CompanyExplorerFolderItem,

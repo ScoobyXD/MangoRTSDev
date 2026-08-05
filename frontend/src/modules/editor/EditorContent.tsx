@@ -1,33 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmActionMenu } from "../../app/ConfirmActionMenu";
-import {
-  getNodeTitle,
-  MINI_GRID,
-  NODE_H,
-  NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX,
-  NODE_W,
-  canEditResourceAccess,
-  persistedMapPositionsToNodePositions,
-  resolveOpenNodeMapPosition,
-  type NodeDirection,
-  type NodeRecord,
-  type NodeRelationship,
-} from "../node-map/shared";
-import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, getNodeTitle as getLogicGateTitle, toLogicGateCanvasRecord, type LogicGateGVICAssignment, type LogicGateGVICRole, type LogicGateGVICPrincipalType, type LogicGateRecord } from "../logic-gate-map/shared";
-import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
-import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
-import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, getNodeContentChangesSingleFlight, getNodeGVICAssignmentsSingleFlight, invalidateNodeRecordStoreCaches, primeNodeRecordStoreCaches, type NodeProjectionItem } from "../node-map/NodeRecordStore";
-import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertNodeMapPositionsInNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertNodeRelationshipGraphRelationship } from "../node-map/NodeRelationshipGraph";
+import { getNodeTitle, canEditResourceAccess, type NodeRecord, type NodeRelationship } from "../nodes/types";
+import { getLogicGateTitle, toLogicGateViewRecord, type LogicGateGVICAssignment, type LogicGateGVICRole, type LogicGateGVICPrincipalType, type LogicGateRecord } from "../logic-gates/types";
+import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../dashboardEvents";
+import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, getNodeContentChangesSingleFlight, getNodeGVICAssignmentsSingleFlight, invalidateNodeRecordStoreCaches, primeNodeRecordStoreCaches, type NodeProjectionItem } from "../nodes/nodeRecordStore";
+import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertNodeRelationshipGraphRelationship } from "../nodes/nodeRelationshipGraph";
 import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand } from "../workspace/workspaceEntityCommands";
-import { buildLinkedNodePayloadFromSourceSide } from "../node-map/relationshipProjection";
-import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingleFlight, invalidateLogicGateRecordStoreCaches, patchLogicGateRecordStoreGVICAssignments, type LogicGateProjectionItem } from "../logic-gate-map/LogicGateRecordStore";
-import { getLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
+import { buildLinkedNodePayload } from "../nodes/relationshipRules";
+import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingleFlight, invalidateLogicGateRecordStoreCaches, patchLogicGateRecordStoreGVICAssignments, type LogicGateProjectionItem } from "../logic-gates/logicGateRecordStore";
+import { getLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gates/logicGateRelationshipGraph";
 import { patchLogicGateGVICAssignmentsInCommunicationsWorkspaceCache } from "../communications/communicationsApi";
 import { linkMangoResourceAttachment } from "../attachments/attachmentApi";
 import { createRequestJSON, isAbortError } from "../api/requestJSON";
 import { clearResourceMissing, isTerminalResourceNotFoundError } from "../api/missingResources";
-import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
-import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange, type SelectionIntent } from "../selectionCoordinator";
+import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 import { getEditorDocumentIsolationState, type EditorRelatedNodeCreationKind, type EditorTabID } from "./editorTabs";
 import { EDITOR_TAB_TEXT } from "./plainTextEditing";
 import { createEditorScrollMemory } from "./editorScroll";
@@ -63,10 +49,8 @@ import {
 } from "./richTextEditing";
 import {
   generateStableInformationID,
-  shouldReadStoredSelectionForEvent,
   type DocumentSaveRequest,
   type DocumentSaveTarget,
-  type LinkedSelection,
 } from "./editorTypes";
 import {
   EDITOR_DOCUMENT_FONT_SIZE_PX,
@@ -152,11 +136,8 @@ type CompanyUser = {
 type EditorNodeBatchResponse = {
   nodes?: NodeRecord[];
   relationships?: NodeRelationship[];
-  node_map_positions?: Array<{ entity_id?: string; node_id?: string; x: number; y: number; updated_timestamp?: string }>;
 };
 
-const EDITOR_RELATIONSHIP_WORLD_W = 12800;
-const EDITOR_RELATIONSHIP_WORLD_H = 8800;
 const EDITOR_SAVE_VERSION_INTERVAL_OPTIONS = [5, 10, 30, 60] as const;
 const EDITOR_SAVE_VERSION_DEFAULT_INTERVAL_MINUTES = 10;
 const EDITOR_AUTO_SAVE_VERSION_CREATION_ENABLED: boolean = false;
@@ -568,8 +549,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const companyID = getActiveCompanyID();
   const scope = widgetId?.trim() ? widgetId : "global";
   const outlineStyleStorageKey = `editor-outline-style-v1:${companyID}:${scope}`;
-  const [linkedMapWidgetID, setLinkedMapWidgetID] = useState("");
-  const [linkedLogicMapWidgetID, setLinkedLogicMapWidgetID] = useState("");
   const [linkedEntityKind, setLinkedEntityKind] = useState<"" | "node" | "logic_gate">("");
   const [linkedNodeID, setLinkedNodeID] = useState("");
   const [linkedEntityCanEdit, setLinkedEntityCanEdit] = useState(false);
@@ -648,8 +627,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const queuedSaveRef = useRef<DocumentSaveRequest | null>(null);
   const saveInFlightRef = useRef(false);
   const editorRootRef = useRef<HTMLDivElement | null>(null);
-  const lastSelectionRevisionRef = useRef(0);
-  const lastLogicGateSelectionRevisionRef = useRef(0);
   const lastAppliedSelectionChangedAtRef = useRef(0);
   const shouldFocusEditorForSelectionRef = useRef(true);
   const pendingEditorFontSizeRef = useRef<number | null>(null);
@@ -968,75 +945,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     };
   }, [flushPendingDocumentSave, linkedEntityKind, linkedNodeID, rememberCurrentDocumentScroll]);
 
-  const readLinkedMapWidgetID = useCallback((): string => {
-    const edges = readFrameLinksFromStorage();
-    const registry = readFrameRegistryFromStorage();
-    return resolveLinkedFrameByKindFromGraph({ startFrameID: scope, targetKind: "map", edges, registry });
-  }, [scope]);
-
-  const readLinkedLogicMapWidgetID = useCallback((): string => {
-    const edges = readFrameLinksFromStorage();
-    const registry = readFrameRegistryFromStorage();
-    return resolveLinkedFrameByKindFromGraph({ startFrameID: scope, targetKind: "logic-map", edges, registry });
-  }, [scope]);
-
-  const readSelectedNodeFromMap = useCallback((mapWidgetID: string): string => {
-    if (!mapWidgetID) return "";
-    try {
-      const raw = localStorage.getItem(`node-map-state-v1:${companyID}:${mapWidgetID}`);
-      if (!raw) return "";
-      const parsed = JSON.parse(raw) as { selectedNodeID?: string };
-      return typeof parsed.selectedNodeID === "string" ? parsed.selectedNodeID : "";
-    } catch {
-      return "";
-    }
-  }, [companyID]);
-
-  const readSelectedLogicGateFromMap = useCallback((mapWidgetID: string): string => {
-    if (!mapWidgetID) return "";
-    try {
-      const raw = localStorage.getItem(`logic-gate-map-state-v1:${companyID}:${mapWidgetID}`);
-      if (!raw) return "";
-      const parsed = JSON.parse(raw) as { selectedNodeID?: string; selectedLogicGateID?: string };
-      if (typeof parsed.selectedLogicGateID === "string") return parsed.selectedLogicGateID;
-      return typeof parsed.selectedNodeID === "string" ? parsed.selectedNodeID : "";
-    } catch {
-      return "";
-    }
-  }, [companyID]);
-
-  const readSelectedNodeFromExplorerContext = useCallback((): LinkedSelection => {
-    try {
-      const raw = localStorage.getItem(`${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`);
-      if (!raw) return { id: "", label: "" };
-      const parsed = JSON.parse(raw) as { selectedNodeID?: string; selectedLabel?: string; selectionIntent?: SelectionIntent; ts?: number };
-      return {
-        id: typeof parsed.selectedNodeID === "string" ? parsed.selectedNodeID : "",
-        label: typeof parsed.selectedLabel === "string" ? parsed.selectedLabel : "",
-        changedAt: typeof parsed.ts === "number" && Number.isFinite(parsed.ts) ? parsed.ts : 0,
-        selectionIntent: parsed.selectionIntent,
-      };
-    } catch {
-      return { id: "", label: "" };
-    }
-  }, [companyID, scope]);
-
-  const readSelectedLogicGateFromExplorerContext = useCallback((): LinkedSelection => {
-    try {
-      const raw = localStorage.getItem(`${LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`);
-      if (!raw) return { id: "", label: "" };
-      const parsed = JSON.parse(raw) as { selectedLogicGateID?: string; selectedNodeID?: string; selectedLabel?: string; selectionIntent?: SelectionIntent; ts?: number };
-      return {
-        id: typeof parsed.selectedLogicGateID === "string" ? parsed.selectedLogicGateID : (typeof parsed.selectedNodeID === "string" ? parsed.selectedNodeID : ""),
-        label: typeof parsed.selectedLabel === "string" ? parsed.selectedLabel : "",
-        changedAt: typeof parsed.ts === "number" && Number.isFinite(parsed.ts) ? parsed.ts : 0,
-        selectionIntent: parsed.selectionIntent,
-      };
-    } catch {
-      return { id: "", label: "" };
-    }
-  }, [companyID, scope]);
-
   const readNodeLabelFromGraph = useCallback((nodeID: string): string => {
     if (!nodeID) return "";
     const node = (getNodeRelationshipGraphSnapshot(apiBase, companyID).nodes ?? []).find((item) => item.node_id === nodeID);
@@ -1183,7 +1091,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         );
         setLinkedNodeTitle(updated.header);
         onLogicGateTitleChange?.({ logicGateID: updated.logic_gate_id, label: updated.header });
-        upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateCanvasRecord(updated));
+        upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateViewRecord(updated));
       } else {
         const updated = await commitEntityTitleMutation(
           () => requestJSON<NodeRecord>(`/v1/nodes/${linkedNodeID}`, {
@@ -1229,44 +1137,13 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }), [applyCommittedEditorTitle, companyID, linkedEntityKind, linkedNodeID]);
 
   const createRelatedNode = useCallback(async (kind: EditorRelatedNodeCreationKind) => {
-    if (!linkedEntityCanEdit) return;
-    if (!companyID || !linkedNodeID || linkedEntityKind !== "node") return;
-    const directionByKind: Record<EditorRelatedNodeCreationKind, NodeDirection> = {
-      parent: "top",
-      peer: "right",
-      child: "bottom",
-    };
+    if (!linkedEntityCanEdit || !companyID || !linkedNodeID || linkedEntityKind !== "node") return;
     const titleByKind: Record<EditorRelatedNodeCreationKind, string> = {
       parent: "new parent node",
       peer: "new peer node",
       child: "new child node",
     };
-    const direction = directionByKind[kind];
-    const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
-    const occupiedPositions = persistedMapPositionsToNodePositions({
-      positions: snapshot.node_map_positions ?? [],
-      worldWidth: EDITOR_RELATIONSHIP_WORLD_W,
-      worldHeight: EDITOR_RELATIONSHIP_WORLD_H,
-      nodeWidth: NODE_W,
-      nodeHeight: NODE_H,
-    });
-    const origin = occupiedPositions[linkedNodeID] ?? { x: 240, y: 240 };
-    const clearance = MINI_GRID * 4;
-    const horizontalGap = NODE_W + clearance;
-    const verticalGap = NODE_H + clearance;
-    const desired = {
-      x: origin.x + (direction === "left" ? -horizontalGap : direction === "right" ? horizontalGap : 0),
-      y: origin.y + (direction === "top" ? -verticalGap : direction === "bottom" ? verticalGap : 0),
-    };
-    const position = resolveOpenNodeMapPosition({
-      desired,
-      occupied: occupiedPositions,
-      worldWidth: EDITOR_RELATIONSHIP_WORLD_W,
-      worldHeight: EDITOR_RELATIONSHIP_WORLD_H,
-      nodeWidth: NODE_W,
-      nodeHeight: NODE_H,
-    });
-    const payload = buildLinkedNodePayloadFromSourceSide(direction);
+    const payload = buildLinkedNodePayload(kind);
     const clientID = createWorkspaceEntityBatchClientID(`editor-${kind}-node`);
     setError("");
     try {
@@ -1274,12 +1151,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         companyID,
         entityKind: "node",
         mutationOrigin: "editor",
-        items: [{
-          client_id: clientID,
-          name: titleByKind[kind],
-          x: position.x,
-          y: position.y,
-        }],
+        items: [{ client_id: clientID, name: titleByKind[kind] }],
         relationships: [{
           entity_id_a: linkedNodeID,
           client_id_b: clientID,
@@ -1293,50 +1165,26 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       const relationship = response.relationships?.[0];
       upsertNodeRelationshipGraphNode(apiBase, companyID, node);
       if (relationship) upsertNodeRelationshipGraphRelationship(apiBase, companyID, relationship);
-      upsertNodeMapPositionsInNodeRelationshipGraph(apiBase, companyID, response.node_map_positions ?? [{ entity_id: node.node_id, node_id: node.node_id, x: position.x, y: position.y }]);
       primeNodeRecordStoreCaches(apiBase, companyID, [{ node, relationships: relationship ? [relationship] : [] }]);
       invalidateWorkspaceSnapshot(apiBase, companyID);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_related_node");
     }
-  }, [apiBase, companyID, currentUserID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, requestJSON]);
+  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, requestJSON]);
 
   const createNodeFromImageDocument = useCallback(async (input: NodeImageNodeRequest) => {
-    if (!linkedEntityCanEdit) return;
-    if (!companyID || linkedEntityKind !== "node") return;
+    if (!linkedEntityCanEdit || !companyID || linkedEntityKind !== "node") return;
     const title = input.title.trim() || "Image";
     const blockTitle = input.blockTitle?.trim() || "Image";
     const document = input.document.trim();
     if (!document) return;
 
-    const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
-    const occupiedPositions = persistedMapPositionsToNodePositions({
-      positions: snapshot.node_map_positions ?? [],
-      worldWidth: EDITOR_RELATIONSHIP_WORLD_W,
-      worldHeight: EDITOR_RELATIONSHIP_WORLD_H,
-      nodeWidth: NODE_W,
-      nodeHeight: NODE_H,
-    });
-    const origin = linkedNodeID ? occupiedPositions[linkedNodeID] ?? { x: 240, y: 240 } : { x: 240, y: 240 };
-    const position = resolveOpenNodeMapPosition({
-      desired: { x: origin.x + NODE_W + MINI_GRID * 4, y: origin.y },
-      occupied: occupiedPositions,
-      worldWidth: EDITOR_RELATIONSHIP_WORLD_W,
-      worldHeight: EDITOR_RELATIONSHIP_WORLD_H,
-      nodeWidth: NODE_W,
-      nodeHeight: NODE_H,
-    });
     const clientID = createWorkspaceEntityBatchClientID("editor-image-node");
     const response = await createWorkspaceEntityBatchCommand<EditorNodeBatchResponse>({
       companyID,
       entityKind: "node",
       mutationOrigin: "editor",
-      items: [{
-        client_id: clientID,
-        name: title,
-        x: position.x,
-        y: position.y,
-      }],
+      items: [{ client_id: clientID, name: title }],
       requestJSON,
     });
     const node = response.nodes?.[0];
@@ -1355,29 +1203,25 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         editorSurface: "node_text_block",
       });
     }
-      const parsed = parseMangoTiptapDocument(input.tiptapDocument ?? document);
-      if (!parsed.valid) throw new Error(`invalid_image_node_tiptap_document: ${parsed.error}`);
-      const path = `/v1/editor-json/node/${node.node_id}/documents/${informationID}?company_id=${encodeURIComponent(companyID)}`;
-      await requestJSON<unknown>(path, {
-        method: "POST",
-        body: JSON.stringify({
-          operation_id: operationID,
-          client_id: `editor-image-node:${currentUserID}`,
-          base_revision: 0,
-          schema_version: parsed.value.schema_version,
-          document: parsed.value,
-        }),
-      });
-      await requestJSON<unknown>(path, {
-        method: "PATCH",
-        body: JSON.stringify({ title: blockTitle, attachments: [] }),
-      });
+    const parsed = parseMangoTiptapDocument(input.tiptapDocument ?? document);
+    if (!parsed.valid) throw new Error(`invalid_image_node_tiptap_document: ${parsed.error}`);
+    const path = `/v1/editor-json/node/${node.node_id}/documents/${informationID}?company_id=${encodeURIComponent(companyID)}`;
+    await requestJSON<unknown>(path, {
+      method: "POST",
+      body: JSON.stringify({
+        operation_id: operationID,
+        client_id: `editor-image-node:${currentUserID}`,
+        base_revision: 0,
+        schema_version: parsed.value.schema_version,
+        document: parsed.value,
+      }),
+    });
+    await requestJSON<unknown>(path, { method: "PATCH", body: JSON.stringify({ title: blockTitle, attachments: [] }) });
     upsertNodeRelationshipGraphNode(apiBase, companyID, node);
-    upsertNodeMapPositionsInNodeRelationshipGraph(apiBase, companyID, response.node_map_positions ?? [{ entity_id: node.node_id, node_id: node.node_id, x: position.x, y: position.y }]);
     primeNodeRecordStoreCaches(apiBase, companyID, [{ node, relationships: [] }]);
     invalidateNodeRecordStoreCaches(apiBase, companyID, node.node_id);
     invalidateWorkspaceSnapshot(apiBase, companyID);
-  }, [apiBase, companyID, currentUserID, editorDataFormat.gate?.editor_format, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, requestJSON]);
+  }, [apiBase, companyID, currentUserID, linkedEntityCanEdit, linkedEntityKind, requestJSON]);
 
   const assignLinkedNodeToLogicGate = useCallback(async (logicGateID: string) => {
     if (!linkedEntityCanEdit) return;
@@ -2141,24 +1985,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setNodePriorityRequirementError("");
   }, [linkedEntityKind, linkedNodeID]);
 
-  useEffect(() => {
-    const refresh = () => {
-      setLinkedMapWidgetID(readLinkedMapWidgetID());
-      setLinkedLogicMapWidgetID(readLinkedLogicMapWidgetID());
-    };
-    refresh();
-    const onStorage = (event: StorageEvent) => {
-      if (event.key && event.key !== FRAME_LINKS_KEY && event.key !== FRAME_REGISTRY_KEY) return;
-      refresh();
-    };
-    const onGraphUpdated = () => refresh();
-    window.addEventListener("storage", onStorage);
-    window.addEventListener(EVENT_FRAME_LINK_GRAPH_UPDATED, onGraphUpdated);
-    return () => {
-      window.removeEventListener("storage", onStorage);
-      window.removeEventListener(EVENT_FRAME_LINK_GRAPH_UPDATED, onGraphUpdated);
-    };
-  }, [readLinkedLogicMapWidgetID, readLinkedMapWidgetID]);
 
   useEffect(() => {
     if (forcedEntityKind) return;
@@ -2177,103 +2003,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       applyLinkedNode("", "", { focusEditor });
       return true;
     };
-    const refresh = () => {
-      const liveSelection = readLiveSelectionForFrame(companyID, scope);
-      if (liveSelection) {
-        const liveSelectionApplied = applyLiveSelection(liveSelection);
-        if (liveSelectionApplied) return;
-      }
-      const selectedFromExplorer = readSelectedNodeFromExplorerContext();
-      const selectedLogicFromExplorer = readSelectedLogicGateFromExplorerContext();
-      const freshExplorerSelectionWindowMs = 30_000;
-      const selectedFromExplorerIsFresh = !!selectedFromExplorer.id
-        && !!selectedFromExplorer.changedAt
-        && Date.now() - selectedFromExplorer.changedAt < freshExplorerSelectionWindowMs;
-      const selectedLogicFromExplorerIsFresh = !!selectedLogicFromExplorer.id
-        && !!selectedLogicFromExplorer.changedAt
-        && Date.now() - selectedLogicFromExplorer.changedAt < freshExplorerSelectionWindowMs;
-      if (selectedFromExplorerIsFresh || selectedLogicFromExplorerIsFresh) {
-        if (
-          selectedLogicFromExplorerIsFresh
-          && (!selectedFromExplorerIsFresh || (selectedLogicFromExplorer.changedAt ?? 0) >= (selectedFromExplorer.changedAt ?? 0))
-        ) {
-          if (!shouldApplySelectionChangedAt(selectedLogicFromExplorer.changedAt)) return;
-          applyLinkedLogicGate(selectedLogicFromExplorer.id, selectedLogicFromExplorer.label, { focusEditor: selectedLogicFromExplorer.selectionIntent !== "navigate" });
-          return;
-        }
-        if (!shouldApplySelectionChangedAt(selectedFromExplorer.changedAt)) return;
-        applyLinkedNode(selectedFromExplorer.id, selectedFromExplorer.label, { focusEditor: selectedFromExplorer.selectionIntent !== "navigate" });
-        return;
-      }
-      const selectedFromMap = readSelectedNodeFromMap(linkedMapWidgetID);
-      if (selectedFromMap) {
-        applyLinkedNode(selectedFromMap);
-        return;
-      }
-      const selectedFromLogicMap = readSelectedLogicGateFromMap(linkedLogicMapWidgetID || linkedMapWidgetID);
-      if (selectedFromLogicMap) {
-        applyLinkedLogicGate(selectedFromLogicMap);
-        return;
-      }
-      if (selectedFromExplorer.id) {
-        applyLinkedNode(selectedFromExplorer.id, selectedFromExplorer.label, { focusEditor: selectedFromExplorer.selectionIntent !== "navigate" });
-        return;
-      }
-      if (selectedLogicFromExplorer.id) {
-        applyLinkedLogicGate(selectedLogicFromExplorer.id, selectedLogicFromExplorer.label, { focusEditor: selectedLogicFromExplorer.selectionIntent !== "navigate" });
-        return;
-      }
-      applyLinkedNode("");
-    };
-    // Initial restore only. Same-tab clicks use SelectionCoordinator payloads
-    // below so the editor does not open a stale peer localStorage snapshot.
-    refresh();
-    const onMapStateUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; revision?: number; changedAt?: number; sourceExplorerID?: string; envelope?: ContextMutationEnvelope }>).detail;
-      if (!detail || detail.mapWidgetID !== linkedMapWidgetID) return;
-      if (detail.sourceExplorerID) return;
-      const revision = readIncomingSequence(detail);
-      if (revision > 0 && !isNewerSequence(lastSelectionRevisionRef.current, revision)) return;
-      const eventSelectedNodeID = typeof detail.selectedNodeID === "string" ? detail.selectedNodeID : null;
-      const eventHasSelection = eventSelectedNodeID !== null;
-      if (revision > 0 && shouldReadStoredSelectionForEvent(hasSequenceGap(lastSelectionRevisionRef.current, revision), eventHasSelection)) refresh();
-      if (revision > 0) lastSelectionRevisionRef.current = revision;
-      if (eventSelectedNodeID !== null) {
-        if (!shouldApplySelectionChangedAt(detail.changedAt)) return;
-        applyLinkedNode(eventSelectedNodeID);
-        return;
-      }
-      refresh();
-    };
-    const onLogicMapStateUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; selectedLogicGateID?: string; revision?: number; changedAt?: number; sourceExplorerID?: string; envelope?: ContextMutationEnvelope }>).detail;
-      const logicContextFrameID = linkedLogicMapWidgetID || linkedMapWidgetID;
-      if (!detail || detail.mapWidgetID !== logicContextFrameID) return;
-      if (detail.sourceExplorerID) return;
-      const revision = readIncomingSequence(detail);
-      if (revision > 0 && !isNewerSequence(lastLogicGateSelectionRevisionRef.current, revision)) return;
-      const eventSelectedLogicGateID = typeof detail.selectedLogicGateID === "string"
-        ? detail.selectedLogicGateID
-        : (typeof detail.selectedNodeID === "string" ? detail.selectedNodeID : null);
-      const eventHasSelection = eventSelectedLogicGateID !== null;
-      if (revision > 0 && shouldReadStoredSelectionForEvent(hasSequenceGap(lastLogicGateSelectionRevisionRef.current, revision), eventHasSelection)) refresh();
-      if (revision > 0) lastLogicGateSelectionRevisionRef.current = revision;
-      if (eventSelectedLogicGateID !== null) {
-        if (!shouldApplySelectionChangedAt(detail.changedAt)) return;
-        applyLinkedLogicGate(eventSelectedLogicGateID);
-        return;
-      }
-      refresh();
-    };
-    const unsubscribeLiveSelection = subscribeLiveSelection(scope, applyLiveSelection);
-    window.addEventListener(EVENT_NODE_MAP_SELECTION_UPDATED, onMapStateUpdated);
-    window.addEventListener(EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, onLogicMapStateUpdated);
-    return () => {
-      unsubscribeLiveSelection();
-      window.removeEventListener(EVENT_NODE_MAP_SELECTION_UPDATED, onMapStateUpdated);
-      window.removeEventListener(EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, onLogicMapStateUpdated);
-    };
-  }, [applyLinkedLogicGate, applyLinkedNode, companyID, forcedEntityID, forcedEntityKind, linkedLogicMapWidgetID, linkedMapWidgetID, readSelectedLogicGateFromExplorerContext, readSelectedLogicGateFromMap, readSelectedNodeFromExplorerContext, readSelectedNodeFromMap, scope, shouldApplySelectionChangedAt]);
+    const current = readLiveSelectionForFrame(companyID, scope);
+    if (current) applyLiveSelection(current);
+    return subscribeLiveSelection(scope, applyLiveSelection);
+  }, [applyLinkedLogicGate, applyLinkedNode, companyID, forcedEntityKind, scope, shouldApplySelectionChangedAt]);
 
   useEffect(() => {
     if (forcedEntityKind) return;

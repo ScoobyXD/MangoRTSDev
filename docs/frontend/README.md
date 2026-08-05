@@ -17,15 +17,15 @@ This folder contains architecture, product behavior, and migration documentation
 
 ### Modules
 - `docs/frontend/src/modules/nodes.md`
-  - Node Map + Node Doc behavior
+  - Node records, relationships, Editor, authored changes, unread/seen behavior, and manual history
   - API contracts
-  - persistence model
+  - final storage and cache contracts
   - file ownership for node runtime
 - `docs/frontend/src/modules/logic-gates.md`
-  - Logic Gate Map behavior
+  - Logic Gate records, Input/Output relationships, Editor, GVIC, and manual history
   - Input/Output relationship semantics
-  - API-first/headless contracts
-  - Editor and Company Explorer linking behavior
+  - API and final-storage contracts
+  - Editor, Arena/Kanban, and Company Explorer behavior
 - `docs/frontend/src/modules/company-explorer.md`
   - Company Explorer standalone behavior
   - 3-pane responsibilities (tree/details/context)

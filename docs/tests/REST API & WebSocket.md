@@ -1,3 +1,14 @@
+# Process Story: Realtime carries only surviving product changes
+
+A committed Node, Logic Gate, Editor, Explorer, Kanban, communications, Project, permission, or notification mutation appends its retained domain event
+↓
+The backend publishes only the exact authorized realtime scopes for that product
+↓
+Frontend caches invalidate or reconcile the affected surviving entity and title views
+↓
+Node authored-change annotations and unread/seen ETags keep their existing routes and state transitions
+↓
+No geometry event, workspace scope, or derived position task is produced or consumed
 # Process Story: Logic Gate document commands use final storage
 
 A UI or headless caller loads the current Logic Gate document
@@ -35,7 +46,7 @@ RW11 - Approved scope patterns are `notifications:user:{user_id}`, `chat:node:{n
 RW12 - Socket open never means Connected or Saved. Green requires confirmed application heartbeat, restored authorization, every exact subscription acceptance, mounted-document full-snapshot/buffer recovery, and pending acknowledgements.
 RW13 - Browser-side API request timing should make status=error timeout cases visible with the route that timed out.
 RW14 - Dev or production timeout triage must consider backend, database, and cache-refetch load before changing the client timeout threshold.
-RW15 - Successful Node and Logic Gate renames publish one concrete same-window committed-title event after the HTTP command succeeds. Every supported Editor, Kanban, Node Map, Logic Gate Map, Home/My Work, and Company Explorer rename entry point patches matching mounted Editor, Kanban/Arena, map, Explorer, Home, My Work, Updates current Node/Logic Gate row, selected-panel, and open-action labels, AppLayout dock/popup/sidebar-pin, AppTimeline, and Project Management labels as applicable. For Logic Gates only, Updates also resolves saved Logic Gate grouping headers and sort values from the current title; stored notification title/body prose remains historical. The wired async title-bearing setters capture the shared registry version before awaiting and overlay only newer same-window commits before storing their result. The app-lifetime publication coordinator synchronously patches or invalidates affected title-bearing communications, project-relationship, Kanban, My Work matrix, entity-record, workspace-snapshot, and graph caches. Request-start version folding and targeted cache generation/invalidation guards prevent pre-commit requests from repopulating an old title. Denormalized persisted sidebar-pin responses overlay all latest commits. A later canonical request remains authoritative rather than being permanently masked. Passive convergence preserves dock recency, pin persistence, dirty editor text, and every active title `contentEditable` draft/caret; another user revalidates on activation/navigation because there is no broad title browser stream.
+RW15 - Successful Node and Logic Gate renames publish one concrete same-window committed-title event after the HTTP command succeeds. Every supported Editor, Kanban, Home/My Work, and Company Explorer rename entry point patches matching mounted Editor, Kanban/Arena, Explorer, Home, My Work, Updates current Node/Logic Gate row, selected-panel, and open-action labels, AppLayout dock/popup/sidebar-pin, AppTimeline, and Project Management labels as applicable. For Logic Gates only, Updates also resolves saved Logic Gate grouping headers and sort values from the current title; stored notification title/body prose remains historical. The wired async title-bearing setters capture the shared registry version before awaiting and overlay only newer same-window commits before storing their result. The app-lifetime publication coordinator synchronously patches or invalidates affected title-bearing communications, project-relationship, Kanban, My Work matrix, entity-record, workspace-snapshot, and graph caches. Request-start version folding and targeted cache generation/invalidation guards prevent pre-commit requests from repopulating an old title. Denormalized persisted sidebar-pin responses overlay all latest commits. A later canonical request remains authoritative rather than being permanently masked. Passive convergence preserves dock recency, pin persistence, dirty editor text, and every active title `contentEditable` draft/caret; another user revalidates on activation/navigation because there is no broad title browser stream.
 RW16 - Explicit editor saved versions remain HTTP commands after pending editor operations are acknowledged. The save transaction materializes each canonical document before writing one batch to its permanent textbox-history table; ordinary typing never appends saved-version rows.
 RW17 - Confirmed saved-version restore atomically replaces the current permanent textbox snapshot and inserts compact exact-scope outbox events. Subscribers fetch full snapshots; restore never fans out a whole document body or revives the legacy projection-conflict path.
 RW18 - A terminal `401` or failed auth refresh must make realtime and API recovery quieter: stop ticket requests, WebSocket reconnects, fallback refetches, editor saves, and background retries, then rely on the auth layer to force the normal Mango login page.
@@ -191,7 +202,7 @@ Business logic covered:
 - RW15
 
 Given:
-- The same Node or Logic Gate is visible in concurrently mounted Editor, Kanban/Arena, Node Map, Logic Gate Map, Company Explorer, Home, My Work, Updates, AppLayout dock/popup/sidebar pins, AppTimeline, and Project Management caches as applicable.
+- The same Node or Logic Gate is visible in concurrently mounted Editor, Kanban/Arena, Company Explorer, Home, My Work, Updates, AppLayout dock/popup/sidebar pins, AppTimeline, and Project Management caches as applicable.
 - Each supported rename entry point successfully commits once; one editor document is dirty/in flight and one Editor or map title `contentEditable` has a live draft and caret.
 
 Expected:

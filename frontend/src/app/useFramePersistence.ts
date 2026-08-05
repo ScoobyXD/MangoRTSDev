@@ -1,6 +1,6 @@
 import type { FrameDataModel } from "../types";
 import { FRAME_REGISTRY_KEY } from "../modules/linkingGraph";
-import { createAccountManagerFrames, createDefaultNodeViewFrames, createFieldsFrames, createHomeViewFrames, createLogicGateArenaFrames, createProjectManagementFrames, createTeamsFrames, LEGACY_DEFAULT_NODE_VIEW_FRAME_IDS } from "./DefaultViews";
+import { createAccountManagerFrames, createFieldsFrames, createHomeViewFrames, createLogicGateArenaFrames, createProjectManagementFrames, createTeamsFrames } from "./DefaultViews";
 import {
   FRAME_LINKS_KEY,
   sanitizeFrameLinks,
@@ -19,17 +19,12 @@ import {
 
 const VIEWS_KEY = "grid-dashboard-views-v1";
 const SETTINGS_KEY = "grid-dashboard-settings";
-const LEGACY_DEFAULT_NODE_VIEW_FRAME_ID_SET = new Set<string>(Object.values(LEGACY_DEFAULT_NODE_VIEW_FRAME_IDS));
 const SUPPORTED_PERSISTED_FRAME_KINDS = new Set<string>([
   "company-explorer",
   "communications",
   "editor",
   "home",
   "kanban",
-  "logic-map",
-  "map",
-  "nodes",
-  "nodes-map",
   "account-manager",
   "project-management",
   "fields",
@@ -144,7 +139,7 @@ function sanitizePage(value: unknown): ViewTab["page"] {
 
 function createUniqueFrameID(usedFrameIDs: Set<string>): string {
   let nextID = createFrameId();
-  while (usedFrameIDs.has(nextID) || LEGACY_DEFAULT_NODE_VIEW_FRAME_ID_SET.has(nextID)) {
+  while (usedFrameIDs.has(nextID)) {
     nextID = createFrameId();
   }
   return nextID;
@@ -174,17 +169,12 @@ function isFieldsTab(tab: ViewTab): boolean {
   return tab.page === "fields" || /^fields$/i.test(tab.name.trim());
 }
 
-function isPrimaryMapTab(tab: ViewTab): boolean {
-  return !tab.page && /^(default node view|default map view|map)$/i.test(tab.name.trim());
-}
-
 function normalizePrimaryTab(tab: ViewTab): ViewTab {
   if (isCommunicationsTab(tab)) return { ...tab, name: "Home", page: "home" };
   if (isLogicGateArenaTab(tab)) return { ...tab, name: "Logic Gate Arena", page: "logic-gate-arena" };
   if (isProjectManagementTab(tab)) return { ...tab, name: "Projects", page: "project-management" };
   if (isAccountManagerTab(tab)) return { ...tab, name: "Accounts", page: "account-manager" };
   if (isTeamsTab(tab)) return { ...tab, name: "Teams", page: "teams" };
-  if (isPrimaryMapTab(tab)) return { ...tab, name: "Map", page: undefined };
   if (isFieldsTab(tab)) return { ...tab, name: "Fields", page: "fields" };
   return tab;
 }
@@ -197,7 +187,6 @@ function createPrimaryTabs(): ViewTab[] {
     { id: "view-account-manager", name: "Accounts", page: "account-manager", frames: createAccountManagerFrames() },
     { id: "view-teams", name: "Teams", page: "teams", frames: createTeamsFrames() },
     { id: "view-fields", name: "Fields", page: "fields", frames: createFieldsFrames() },
-    { id: "view-default", name: "Map", frames: createDefaultNodeViewFrames() },
   ];
 }
 
@@ -211,12 +200,11 @@ function ensurePrimaryHeaderTabs(tabs: ViewTab[]): ViewTab[] {
   if (!next.some(isAccountManagerTab)) next.push(defaults[3]);
   if (!next.some(isTeamsTab)) next.push(defaults[4]);
   if (!next.some(isFieldsTab)) next.push(defaults[5]);
-  if (!next.some(isPrimaryMapTab)) next.push(defaults[6]);
 
   return next
     .map((tab, index) => ({ tab, index }))
     .sort((a, b) => {
-      const rank = (tab: ViewTab) => isCommunicationsTab(tab) ? 0 : isLogicGateArenaTab(tab) ? 1 : isProjectManagementTab(tab) ? 2 : isAccountManagerTab(tab) ? 3 : isTeamsTab(tab) ? 4 : isFieldsTab(tab) ? 5 : isPrimaryMapTab(tab) ? 6 : 7;
+      const rank = (tab: ViewTab) => isCommunicationsTab(tab) ? 0 : isLogicGateArenaTab(tab) ? 1 : isProjectManagementTab(tab) ? 2 : isAccountManagerTab(tab) ? 3 : isTeamsTab(tab) ? 4 : isFieldsTab(tab) ? 5 : 6;
       const rankDelta = rank(a.tab) - rank(b.tab);
       return rankDelta || a.index - b.index;
     })
@@ -230,7 +218,7 @@ function ensureGloballyUniqueFrameIDs(tabs: ViewTab[]): ViewTab[] {
     const tabFrameIDs = new Set<string>();
 
     for (const frame of tab.frames) {
-      const shouldRemap = usedFrameIDs.has(frame.id) || LEGACY_DEFAULT_NODE_VIEW_FRAME_ID_SET.has(frame.id);
+      const shouldRemap = usedFrameIDs.has(frame.id);
       const nextID = shouldRemap ? createUniqueFrameID(usedFrameIDs) : frame.id;
       frameIDMap.set(frame.id, nextID);
       usedFrameIDs.add(nextID);
@@ -267,7 +255,7 @@ export function persistFrameLinks(next: FrameLinkEdge[]) {
 // Load saved dashboard views/tabs with legacy widget compatibility fallback.
 export function loadViews(): { tabs: ViewTab[]; activeId: string } {
   const fallbackTabs = createPrimaryTabs();
-  const fallback = { tabs: fallbackTabs, activeId: "view-default" };
+  const fallback = { tabs: fallbackTabs, activeId: "view-home" };
   try {
     const raw = localStorage.getItem(VIEWS_KEY);
     if (!raw) return fallback;
@@ -281,11 +269,12 @@ export function loadViews(): { tabs: ViewTab[]; activeId: string } {
         const page = sanitizePage(tab.page);
         return { id: tab.id, name: tab.name, ...(page ? { page } : {}), frames };
       })
-      .filter((tab): tab is ViewTab => !!tab);
+      .filter((tab): tab is ViewTab => !!tab)
+      .filter((tab) => tab.frames.length > 0 || !!tab.page);
 
     if (tabs.length === 0) return fallback;
     const normalizedTabs = ensurePrimaryHeaderTabs(ensureGloballyUniqueFrameIDs(tabs));
-    const activeId = normalizedTabs.some((tab) => tab.id === parsed.activeId) ? parsed.activeId : (normalizedTabs.find(isPrimaryMapTab)?.id ?? normalizedTabs[0].id);
+    const activeId = normalizedTabs.some((tab) => tab.id === parsed.activeId) ? parsed.activeId : (normalizedTabs.find(isCommunicationsTab)?.id ?? normalizedTabs[0].id);
     return { tabs: normalizedTabs, activeId };
   } catch {
     return fallback;

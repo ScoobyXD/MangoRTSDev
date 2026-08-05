@@ -39,7 +39,7 @@ test("fetchWorkspaceSnapshot sends If-None-Match and keeps cached payload on 304
 
 test("fetchWorkspaceSnapshot keeps cached payload on non-OK responses", async () => {
   const originalFetch = globalThis.fetch;
-  const firstPayload = { scope: "node_map", company_id: "company-1", nodes: [{ node_id: "node-1" }] };
+  const firstPayload = { scope: "full", company_id: "company-1", nodes: [{ node_id: "node-1" }] };
   let requestCount = 0;
   globalThis.fetch = (async () => {
     requestCount += 1;
@@ -49,8 +49,8 @@ test("fetchWorkspaceSnapshot keeps cached payload on non-OK responses", async ()
 
   try {
     invalidateWorkspaceSnapshot();
-    await fetchWorkspaceSnapshot("https://api.example.test", "company-1", { scope: "node_map", force: true });
-    const result = await fetchWorkspaceSnapshot("https://api.example.test", "company-1", { scope: "node_map", force: true });
+    await fetchWorkspaceSnapshot("https://api.example.test", "company-1", { scope: "full", force: true });
+    const result = await fetchWorkspaceSnapshot("https://api.example.test", "company-1", { scope: "full", force: true });
 
     assert.deepEqual(result.payload, firstPayload);
     assert.equal(result.changed, false);

@@ -95,7 +95,6 @@ type Server struct {
 	attachmentDeletionCleanupCancel                     context.CancelFunc
 	attachmentDeletionCleanupWake                       chan struct{}
 	maxBodyBytes                                        int64
-	legacyMapRoutesEnabled                              bool
 }
 
 type ServerOptions struct {
@@ -116,7 +115,6 @@ type ServerOptions struct {
 	RealtimeSpinePollInterval                           time.Duration
 	DisableRealtimeSpine                                bool
 	MaxRequestBodyBytes                                 int64
-	LegacyMapRoutesEnabled                              bool
 	WorkspaceDerivedCatchupInterval                     time.Duration
 	WorkspaceDerivedCatchupLimit                        int
 	NotificationCleanupInterval                         time.Duration
@@ -245,7 +243,6 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		attachmentUploadCleanupDisabled: options.DisableAttachmentUploadCleanup,
 		attachmentDeletionCleanupWake:   make(chan struct{}, 1),
 		maxBodyBytes:                    options.MaxRequestBodyBytes,
-		legacyMapRoutesEnabled:          options.LegacyMapRoutesEnabled || isTruthyQueryValue(os.Getenv("MANGORTS_ENABLE_LEGACY_MAP_ROUTES")),
 	}
 	if server.attachmentVariantEnsurer == nil && server.attachmentStorage != nil {
 		server.attachmentVariantEnsurer = repositoryAttachmentImageVariantEnsurer{repo: repo, storage: server.attachmentStorage}
@@ -366,8 +363,6 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/recycle-bin", s.handleRecycleBin)
 	mux.HandleFunc("/v1/recycle-bin/restore", s.handleRecycleBinRestore)
 	mux.HandleFunc("/v1/recycle-bin/delete", s.handleRecycleBinPermanentDelete)
-	mux.HandleFunc("/v1/map-layout", s.handleMapLayout)
-	mux.HandleFunc("/v1/map-entity-batches", s.handleMapEntityBatches)
 	mux.HandleFunc("/v1/workspace/entity-batches", s.handleWorkspaceEntityBatches)
 	mux.HandleFunc("/v1/logic-gate-arena", s.handleLogicGateArena)
 	mux.HandleFunc("/v1/logic-gates", s.handleLogicGates)

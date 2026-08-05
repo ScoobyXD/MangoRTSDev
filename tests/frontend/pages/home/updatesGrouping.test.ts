@@ -23,7 +23,7 @@ import {
   collectAllUpdateGroupIDs,
   reconcileExpandedUpdateGroupIDs,
 } from "../../../../frontend/src/pages/home/updatesExpansion.js";
-import { logicGateGVICRolePresentation } from "../../../../frontend/src/modules/logic-gate-map/gvicPresentation.js";
+import { logicGateGVICRolePresentation } from "../../../../frontend/src/modules/logic-gates/gvicPresentation.js";
 import { resolveUpdateGroupSemanticPresentation } from "../../../../frontend/src/pages/home/updatesGroupPresentation.js";
 
 test("the built-in Updates grouping chain is Date, GVIC, Priority, then Logic Gate", () => {

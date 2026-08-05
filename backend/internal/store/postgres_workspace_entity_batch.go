@@ -39,12 +39,7 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 	}
 
 	syncFolderItems := input.EntityKind != EntityTypeNode && strings.TrimSpace(input.FolderID) != "" && MutationOriginNeedsCompanyExplorerFolderItem(input.MutationOrigin)
-	if strings.TrimSpace(input.FolderID) != "" && (input.MutationOrigin == MutationOriginNodeMap || input.MutationOrigin == MutationOriginLogicGateMap) {
-		syncFolderItems = input.EntityKind != EntityTypeNode
-	}
 	syncDefaultFolderItems := input.EntityKind != EntityTypeNode && strings.TrimSpace(input.FolderID) == "" && MutationOriginNeedsCompanyExplorerDefaultPlacement(input.MutationOrigin)
-	syncMapPositions := (input.EntityKind == "node" && MutationOriginNeedsNodeMapPosition(input.MutationOrigin)) ||
-		(input.EntityKind == "logic_gate" && MutationOriginNeedsLogicGateMapPosition(input.MutationOrigin))
 
 	targetFolderID := input.FolderID
 	targetFolderKind := input.EntityKind
@@ -120,24 +115,6 @@ do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
 			result.Nodes = append(result.Nodes, created)
 			clientToEntityID[item.ClientID] = created.NodeID
 			result.EntityMappings = append(result.EntityMappings, WorkspaceEntityBatchEntityMapping{ClientID: item.ClientID, EntityID: created.NodeID})
-
-			position := domain.NodeMapPosition{CompanyID: input.CompanyID, NodeID: created.NodeID, X: item.X, Y: item.Y}
-			if syncMapPositions {
-				stop = observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.map_position_writes")
-				if err := tx.QueryRowContext(ctx,
-					`insert into node_map_positions (company_id, node_id, x, y, updated_timestamp)
-					 values ($1, $2, $3, $4, now())
-					 returning company_id, node_id, x, y, updated_timestamp`,
-					input.CompanyID, created.NodeID, item.X, item.Y,
-				).Scan(&position.CompanyID, &position.NodeID, &position.X, &position.Y, &position.UpdatedTimestamp); err != nil {
-					stop()
-					return WorkspaceEntityBatchResult{}, err
-				}
-				stop()
-				result.NodeMapPositions = append(result.NodeMapPositions, position)
-			} else {
-				result.DeferredNodeMapPositions = append(result.DeferredNodeMapPositions, position)
-			}
 			continue
 		}
 
@@ -201,24 +178,6 @@ do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
 		result.LogicGates = append(result.LogicGates, created)
 		clientToEntityID[item.ClientID] = created.LogicGateID
 		result.EntityMappings = append(result.EntityMappings, WorkspaceEntityBatchEntityMapping{ClientID: item.ClientID, EntityID: created.LogicGateID})
-
-		position := domain.LogicGateMapPosition{CompanyID: input.CompanyID, LogicGateID: created.LogicGateID, X: item.X, Y: item.Y}
-		if syncMapPositions {
-			stop = observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.map_position_writes")
-			if err := tx.QueryRowContext(ctx,
-				`insert into logic_gate_map_positions (company_id, logic_gate_id, x, y, updated_timestamp)
-				 values ($1, $2, $3, $4, now())
-				 returning company_id, logic_gate_id, x, y, updated_timestamp`,
-				input.CompanyID, created.LogicGateID, item.X, item.Y,
-			).Scan(&position.CompanyID, &position.LogicGateID, &position.X, &position.Y, &position.UpdatedTimestamp); err != nil {
-				stop()
-				return WorkspaceEntityBatchResult{}, err
-			}
-			stop()
-			result.LogicGateMapPositions = append(result.LogicGateMapPositions, position)
-		} else {
-			result.DeferredLogicGateMapPositions = append(result.DeferredLogicGateMapPositions, position)
-		}
 	}
 
 	if syncFolderItems && targetFolderID != "" {

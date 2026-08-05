@@ -35,10 +35,6 @@ function createLazyModule(loader: ModuleLoader): { render: ModuleComponent; prel
   };
 }
 
-const mapModule = createLazyModule(() => import("./map/MapContent").then((module) => ({ default: module.MapContent as ModuleComponent })));
-const logicMapModule = createLazyModule(() => import("./map/MapContent").then((module) => ({
-  default: ((props: ModuleProps) => React.createElement(module.MapContent, { ...props, initialMode: "logic_gate" })) as ModuleComponent,
-})));
 const editorModule = createLazyModule(() => import("./editor/EditorContent").then((module) => ({ default: module.EditorContent as ModuleComponent })));
 const companyExplorerModule = createLazyModule(() => import("./company-explorer/CompanyExplorerContent").then((module) => ({ default: module.CompanyExplorerContent as ModuleComponent })));
 const kanbanModule = createLazyModule(() => import("./kanban/KanbanContent").then((module) => ({ default: module.KanbanContent as ModuleComponent })));
@@ -59,7 +55,6 @@ const moduleEntries = [
   { kind: "account-manager", label: "Accounts", defaultW: 42, defaultH: 30, ...accountManagerModule },
   { kind: "teams", label: "Teams", defaultW: 42, defaultH: 30, ...teamsModule },
   { kind: "fields", label: "Fields", defaultW: 42, defaultH: 30, ...fieldsModule },
-  { kind: "map", label: "Map", defaultW: 16, defaultH: 14, ...mapModule },
 ];
 
 // Master module library used by add-module flow and module-picker context menu.
@@ -70,17 +65,11 @@ export const MODULE_CONTENT_MAP: Record<string, ModuleComponent> = Object.fromEn
   MODULE_LIBRARY.map((module) => [module.kind, module.render])
 );
 
-// Legacy aliases maintained so older persisted layouts still open correctly.
-MODULE_CONTENT_MAP.nodes = mapModule.render;
-MODULE_CONTENT_MAP["nodes-map"] = mapModule.render;
-MODULE_CONTENT_MAP["logic-map"] = logicMapModule.render;
+// Existing aliases used by editor and Home frame routes.
 MODULE_CONTENT_MAP["node-doc"] = editorModule.render;
 MODULE_CONTENT_MAP.communications = homeModule.render;
 
 const MODULE_PRELOADERS: Record<string, () => void> = Object.fromEntries(moduleEntries.map((entry) => [entry.kind, entry.preload]));
-MODULE_PRELOADERS.nodes = mapModule.preload;
-MODULE_PRELOADERS["nodes-map"] = mapModule.preload;
-MODULE_PRELOADERS["logic-map"] = logicMapModule.preload;
 MODULE_PRELOADERS["node-doc"] = editorModule.preload;
 MODULE_PRELOADERS.communications = homeModule.preload;
 

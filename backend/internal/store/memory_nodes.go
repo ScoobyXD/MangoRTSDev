@@ -340,7 +340,6 @@ func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string) error {
 		}
 	}
 	delete(r.folderItems, folderItemKey(companyID, "node", nodeID))
-	delete(r.nodeMapPositions, k)
 	delete(r.nodeLogicGateAssignments, nodeLogicGateAssignmentKey(companyID, nodeID))
 	for assignmentKey, assignment := range r.nodeAccountAssignments {
 		if assignment.CompanyID == companyID && assignment.NodeID == nodeID {
@@ -401,114 +400,6 @@ func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string) error {
 	}
 	r.nodeRels[companyID] = filtered
 	return nil
-}
-
-func (r *MemoryRepo) ListNodeMapPositions(companyID string) ([]domain.NodeMapPosition, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	items := make([]domain.NodeMapPosition, 0)
-	for _, item := range r.nodeMapPositions {
-		if item.CompanyID == companyID {
-			items = append(items, item)
-		}
-	}
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].NodeID < items[j].NodeID
-	})
-	return items, nil
-}
-
-func (r *MemoryRepo) ListNodeMapPositionsInFolderSubtree(companyID, folderID string) ([]domain.NodeMapPosition, error) {
-	folderID = strings.TrimSpace(folderID)
-	if folderID == "" {
-		return r.ListNodeMapPositions(companyID)
-	}
-	return []domain.NodeMapPosition{}, nil
-}
-func (r *MemoryRepo) nodeMapWindowPositionsLocked(query NodeMapWindowQuery, folderIDs map[string]bool) []domain.NodeMapPosition {
-	return []domain.NodeMapPosition{}
-}
-
-func (r *MemoryRepo) ListNodeMapPositionsWindow(query NodeMapWindowQuery) ([]domain.NodeMapPosition, error) {
-	query, err := NormalizeNodeMapWindowQuery(query)
-	if err != nil {
-		return nil, err
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, query.CompanyID, query.FolderID, "")
-	if len(folderIDs) == 0 {
-		return nil, ErrNotFound
-	}
-	return r.nodeMapWindowPositionsLocked(query, folderIDs), nil
-}
-
-func (r *MemoryRepo) ListNodeMapWindow(query NodeMapWindowQuery) (NodeMapWindowResult, error) {
-	query, err := NormalizeNodeMapWindowQuery(query)
-	if err != nil {
-		return NodeMapWindowResult{}, err
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, query.CompanyID, query.FolderID, "")
-	if len(folderIDs) == 0 {
-		return NodeMapWindowResult{}, ErrNotFound
-	}
-
-	positions := r.nodeMapWindowPositionsLocked(query, folderIDs)
-	result := NodeMapWindowResult{
-		CompanyID:        query.CompanyID,
-		FolderID:         query.FolderID,
-		Window:           query.Window,
-		Limit:            query.Limit,
-		Nodes:            []domain.Node{},
-		Relationships:    []domain.NodeRelationship{},
-		Folders:          []domain.CompanyExplorerFolder{},
-		FolderItems:      []domain.CompanyExplorerFolderItem{},
-		NodeMapPositions: positions,
-	}
-	for _, folder := range r.folders {
-		if !folderIDs[folder.FolderID] {
-			continue
-		}
-		if folder.SystemKey != nil && *folder.SystemKey == "kanban_boards" {
-			continue
-		}
-		result.Folders = append(result.Folders, r.withSharedInboxGVICLocked(folder))
-	}
-	sort.Slice(result.Folders, func(i, j int) bool {
-		if result.Folders[i].Position == result.Folders[j].Position {
-			if !result.Folders[i].CreatedTimestamp.Equal(result.Folders[j].CreatedTimestamp) {
-				return result.Folders[i].CreatedTimestamp.Before(result.Folders[j].CreatedTimestamp)
-			}
-			return result.Folders[i].FolderID < result.Folders[j].FolderID
-		}
-		return result.Folders[i].Position < result.Folders[j].Position
-	})
-	return result, nil
-}
-func (r *MemoryRepo) UpsertNodeMapPositions(companyID string, positions []domain.NodeMapPosition) ([]domain.NodeMapPosition, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, position := range positions {
-		if _, ok := r.nodes[key(companyID, position.NodeID)]; !ok {
-			return nil, ErrNotFound
-		}
-	}
-	now := time.Now().UTC()
-	out := make([]domain.NodeMapPosition, 0, len(positions))
-	for _, position := range positions {
-		item := domain.NodeMapPosition{
-			CompanyID:        companyID,
-			NodeID:           position.NodeID,
-			X:                position.X,
-			Y:                position.Y,
-			UpdatedTimestamp: now,
-		}
-		r.nodeMapPositions[key(companyID, item.NodeID)] = item
-		out = append(out, item)
-	}
-	return out, nil
 }
 
 func (r *MemoryRepo) AddNodeInformation(companyID, nodeID, infoType, information, informationID string) (domain.NodeInformation, error) {

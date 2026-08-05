@@ -1,11 +1,11 @@
 import { markCommunicationsWorkspacePanelStale } from "../modules/communications/communicationsApi.js";
 import type { CommittedEntityTitleUpdate } from "../modules/realtime/committedEntityTitleUpdates.js";
-import { invalidateLogicGateRecordStoreCaches } from "../modules/logic-gate-map/LogicGateRecordStore.js";
-import { reconcileLogicGateRelationshipGraphTitle } from "../modules/logic-gate-map/LogicGateRelationshipGraph.js";
+import { invalidateLogicGateRecordStoreCaches } from "../modules/logic-gates/logicGateRecordStore.js";
+import { reconcileLogicGateRelationshipGraphTitle } from "../modules/logic-gates/logicGateRelationshipGraph.js";
 import { reconcileKanbanBoardContentTitles } from "../modules/kanban/KanbanBoardContentStore.js";
 import { invalidateKanbanBoardListCache } from "../modules/kanban/kanbanApi.js";
-import { invalidateNodeRecordStoreCaches } from "../modules/node-map/NodeRecordStore.js";
-import { reconcileNodeRelationshipGraphTitle } from "../modules/node-map/NodeRelationshipGraph.js";
+import { invalidateNodeRecordStoreCaches } from "../modules/nodes/nodeRecordStore.js";
+import { reconcileNodeRelationshipGraphTitle } from "../modules/nodes/nodeRelationshipGraph.js";
 import { invalidateProjectRelationshipsForResource } from "../modules/project-management/projectManagementApi.js";
 import { invalidateWorkspaceSnapshot } from "../modules/workspace/workspaceSnapshotCache.js";
 import { patchMyWorkMatrixCachesForCommittedTitle } from "../pages/home/myWorkMatrixLoader.js";

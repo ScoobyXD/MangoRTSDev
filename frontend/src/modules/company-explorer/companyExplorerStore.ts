@@ -1,9 +1,9 @@
-import type { NodeRecord } from "../node-map/shared.js";
+import type { NodeRecord } from "../nodes/types.js";
 import {
   type LogicGateRecord as LogicGateApiRecord,
-  type NodeRecord as LogicGateRecord,
-  toLogicGateCanvasRecord,
-} from "../logic-gate-map/shared.js";
+  type LogicGateViewRecord as LogicGateRecord,
+  toLogicGateViewRecord,
+} from "../logic-gates/types.js";
 import type {
   CompanyExplorerFolder,
   CompanyExplorerFolderItem,
@@ -94,7 +94,7 @@ export function reduceCompanyExplorerStore(
       return {
         ...state,
         nodes: action.snapshot.nodes ?? [],
-        logicGates: (action.snapshot.logic_gates ?? []).map(toLogicGateCanvasRecord),
+        logicGates: (action.snapshot.logic_gates ?? []).map(toLogicGateViewRecord),
         projects: action.snapshot.projects ?? [],
         folders: action.snapshot.folders ?? [],
         folderItems: filterCompanyExplorerFolderItemsForExplorer(action.snapshot.folder_items ?? []),
@@ -105,7 +105,7 @@ export function reduceCompanyExplorerStore(
       return {
         ...state,
         nodes: mergeByID(state.nodes, action.snapshot.nodes ?? [], (node) => node.node_id),
-        logicGates: mergeByID(state.logicGates, (action.snapshot.logic_gates ?? []).map(toLogicGateCanvasRecord), (logicGate) => logicGate.logic_gate_id),
+        logicGates: mergeByID(state.logicGates, (action.snapshot.logic_gates ?? []).map(toLogicGateViewRecord), (logicGate) => logicGate.logic_gate_id),
         projects: mergeByID(state.projects, action.snapshot.projects ?? [], (project) => project.project_id),
         folders: mergeByID(state.folders, action.snapshot.folders ?? [], (folder) => folder.folder_id),
         folderItems: upsertFolderItems(state.folderItems, action.snapshot.folder_items ?? []),

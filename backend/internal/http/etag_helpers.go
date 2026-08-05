@@ -12,8 +12,6 @@ var (
 	nodeRelationshipWorkspaceEventTypes          = store.NodeRelationshipWorkspaceEventTypes
 	logicGateListWorkspaceEventTypes             = store.LogicGateListWorkspaceEventTypes
 	logicGateRelationshipWorkspaceEventTypes     = store.LogicGateRelationshipWorkspaceEventTypes
-	nodeMapPositionWorkspaceEventTypes           = store.NodeMapPositionWorkspaceEventTypes
-	logicGateMapPositionWorkspaceEventTypes      = store.LogicGateMapPositionWorkspaceEventTypes
 	companyExplorerFolderWorkspaceEventTypes     = store.CompanyExplorerFolderWorkspaceEventTypes
 	companyExplorerFolderItemWorkspaceEventTypes = store.CompanyExplorerFolderItemWorkspaceEventTypes
 	kanbanBoardWorkspaceEventTypes               = store.KanbanBoardWorkspaceEventTypes
@@ -91,7 +89,7 @@ func (s *Server) workspaceEventVersionWithReadVersion(companyID string, readVers
 
 func workspaceReadVersionQueryForResource(companyID, resource string, queries []store.DomainEventStreamQuery) store.WorkspaceReadVersionQuery {
 	switch resource {
-	case "nodes", "node-relationships", "logic-gates", "logic-gate-relationships", "map-layout:node", "map-layout:node-window", "map-layout:logic_gate", "map-layout:logic_gate-window", "kanban-boards":
+	case "nodes", "node-relationships", "logic-gates", "logic-gate-relationships", "kanban-boards":
 		return store.WorkspaceReadVersionQuery{CompanyID: companyID, Scope: resource}
 	case "company-explorer-folder-items":
 		itemType := workspaceEventQueryPayloadValue(queries, "item_type")
@@ -129,7 +127,7 @@ func workspaceEventQueryPayloadValue(queries []store.DomainEventStreamQuery, key
 func workspaceSnapshotReadVersionQuery(r *http.Request, companyID, scope string) store.WorkspaceReadVersionQuery {
 	userID := workspaceReadVersionUserID(r, companyID)
 	switch scope {
-	case "full", "node_map", "node_map_window", "logic_gate_map", "logic_gate_map_window":
+	case "full":
 		return store.WorkspaceReadVersionQuery{CompanyID: companyID, UserID: userID, Scope: "workspace-snapshot:" + scope}
 	case "company_explorer":
 		folderKind := strings.TrimSpace(r.URL.Query().Get("folder_kind"))

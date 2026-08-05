@@ -14,8 +14,8 @@ import { collectFolderSubtreeIDs, EXPLORER_DRAG_MIME } from "../../modules/compa
 import { getExplorerDropPayloadItems } from "../../modules/company-explorer/treePresentation.js";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes.js";
 import { humanLabelOrFallback } from "../../modules/entityLabels.js";
-import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
-import { getNodeTitle, type NodeRecord } from "../../modules/node-map/shared.js";
+import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gates/types.js";
+import { getNodeTitle, type NodeRecord } from "../../modules/nodes/types.js";
 import { attachStackedDragPreview, EXPLORER_ENTITY_DRAG_MIME, KANBAN_LOGIC_GATE_DONE_COLOR, KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR, KANBAN_LOGIC_GATE_PENDING_COLOR, KANBAN_LOGIC_GATE_REVIEW_COLOR, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../../modules/kanban/shared.js";
 import { editorEmailDisplayDocument } from "../../modules/editor/richTextEditing.js";
 import { HOME_COLUMN_MAX_WIDTHS, HOME_COLUMN_MIN_WIDTHS, HOME_COLUMN_RESIZER_WIDTH, HOME_COLUMN_WIDTHS_STORAGE_KEY, HOME_INBOX_MATRIX_PANEL_MIN_WIDTH, INBOX_NO_LOGIC_GATE_ID, MAILBOX_OPTIONS, GVIC_INBOX_SECTIONS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants.js";

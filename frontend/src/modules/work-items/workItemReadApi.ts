@@ -1,7 +1,7 @@
 import { requestJSON } from "../api/requestJSON.js";
 import type { GVICMatrixProjectionRow } from "../kanban/kanbanApi.js";
-import type { LogicGateGVICRole, LogicGateRecord } from "../logic-gate-map/shared.js";
-import type { NodeRecord } from "../node-map/shared.js";
+import type { LogicGateGVICRole, LogicGateRecord } from "../logic-gates/types.js";
+import type { NodeRecord } from "../nodes/types.js";
 
 export type WorkItemInboxReadParams = {
   apiBase: string;

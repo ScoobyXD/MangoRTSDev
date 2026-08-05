@@ -1,7 +1,7 @@
 import type { CurrentUserResponse } from "../../auth/cognitoAuth.js";
 import type { EmailMessage } from "../../modules/communications/communicationsApi.js";
-import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
-import type { NodeRecord } from "../../modules/node-map/shared.js";
+import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gates/types.js";
+import type { NodeRecord } from "../../modules/nodes/types.js";
 
 export type HomePageProps = {
   me?: CurrentUserResponse;

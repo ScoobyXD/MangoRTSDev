@@ -32,7 +32,6 @@ type memoryCommunicationsTriageConversionSnapshot struct {
 	folders                        map[string]domain.CompanyExplorerFolder
 	folderItems                    map[string]domain.CompanyExplorerFolderItem
 	defaultFolderSeed              map[string]bool
-	nodeMapPositions               map[string]domain.NodeMapPosition
 	kanbanBoards                   map[string]domain.KanbanBoard
 	kanbanColumns                  map[string][]domain.KanbanColumn
 	kanbanCards                    map[string][]domain.KanbanCard
@@ -71,7 +70,6 @@ func (r *MemoryRepo) snapshotCommunicationsTriageConversionStateLocked() memoryC
 		folders:                        cloneMemoryMap(r.folders),
 		folderItems:                    cloneMemoryMap(r.folderItems),
 		defaultFolderSeed:              cloneMemoryMap(r.defaultFolderSeed),
-		nodeMapPositions:               cloneMemoryMap(r.nodeMapPositions),
 		kanbanBoards:                   cloneMemoryMap(r.kanbanBoards),
 		kanbanColumns:                  cloneMemorySliceMap(r.kanbanColumns),
 		kanbanCards:                    cloneMemorySliceMap(r.kanbanCards),
@@ -110,7 +108,6 @@ func (r *MemoryRepo) restoreCommunicationsTriageConversionStateLocked(snapshot m
 	r.folders = snapshot.folders
 	r.folderItems = snapshot.folderItems
 	r.defaultFolderSeed = snapshot.defaultFolderSeed
-	r.nodeMapPositions = snapshot.nodeMapPositions
 	r.kanbanBoards = snapshot.kanbanBoards
 	r.kanbanColumns = snapshot.kanbanColumns
 	r.kanbanCards = snapshot.kanbanCards
@@ -272,13 +269,6 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 			CreatedTimestamp: now,
 		}
 		r.nodes[key(input.CompanyID, nodeID)] = node
-		r.nodeMapPositions[key(input.CompanyID, nodeID)] = domain.NodeMapPosition{
-			CompanyID:        input.CompanyID,
-			NodeID:           nodeID,
-			X:                120 + float64(index*28),
-			Y:                120 + float64(index*28),
-			UpdatedTimestamp: now,
-		}
 
 		logicGateID := input.LogicGateID
 		card := domain.KanbanCard{
@@ -437,7 +427,7 @@ func (r *MemoryRepo) convertCommunicationsTriageItemsToExplorerTargetLocked(inpu
 
 	now := time.Now().UTC()
 	result := CommunicationsTriageConversionResult{Target: input.Target}
-	for index, messageID := range input.MessageIDs {
+	for _, messageID := range input.MessageIDs {
 		triageItem, ok := r.triageItems[triageItemKey(input.UserID, messageID)]
 		if !ok {
 			return CommunicationsTriageConversionResult{}, ErrNotFound
@@ -452,13 +442,6 @@ func (r *MemoryRepo) convertCommunicationsTriageItemsToExplorerTargetLocked(inpu
 			CreatedTimestamp: now,
 		}
 		r.nodes[key(input.CompanyID, nodeID)] = node
-		r.nodeMapPositions[key(input.CompanyID, nodeID)] = domain.NodeMapPosition{
-			CompanyID:        input.CompanyID,
-			NodeID:           nodeID,
-			X:                120 + float64(index*28),
-			Y:                120 + float64(index*28),
-			UpdatedTimestamp: now,
-		}
 		emailInput := input
 		emailInput.NodeID = nodeID
 		informationID, emailThreadID, emailMessageID, err := r.persistCommunicationsConversionEmailLocked(emailInput, triageItem.Message, now)
@@ -784,7 +767,6 @@ func (r *MemoryRepo) deleteCommunicationsEmailSourceNodeLocked(companyID, direct
 	delete(r.nodes, key(companyID, link.NodeID))
 	delete(r.nodeInfo, key(companyID, link.NodeID))
 	delete(r.nodeText, key(companyID, link.NodeID))
-	delete(r.nodeMapPositions, key(companyID, link.NodeID))
 	delete(r.folderItems, folderItemKey(companyID, "node", link.NodeID))
 }
 

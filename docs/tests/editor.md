@@ -1,3 +1,14 @@
+# Process Story: Editor context stays intact after canvas removal
+
+A user selects a Node or Logic Gate from Explorer, Home, Kanban, Project, or a direct route
+↓
+The generic live-selection and route contracts open the exact existing Editor document
+↓
+The Editor preserves normal collaboration, attachments, emails, chats, permissions, title updates, and revision behavior
+↓
+Manual Save, saving-user identity, History, and Restore continue through the final history tables
+↓
+For Nodes, authored additions/deletions, author labels, unread counts, seen baselines, and mark-seen behavior remain unchanged
 # Editor Process Map
 
 ## Process Story: Logic Gate editor uses final storage
@@ -684,7 +695,6 @@ Only the mail adapter emits `data-mango-unified-rich-editor`. Node, project, and
 These surfaces do not inherit the rich editor's list, indentation, paste, image, or formatting semantics:
 
 - Node/project chat composer: native textarea. Enter sends, Shift+Enter inserts a newline, and Tab accepts an open mention or follows normal focus behavior.
-- Node Map inline comments: native textarea. Ctrl/Cmd+Enter submits.
 - Email signature editor: native textarea with ordinary browser Enter and Tab behavior.
 - Header and map title editors: single-line `contentEditable` fields that commit on Enter and cancel on Escape.
 - Search, recipient, metadata, project-title, due-date, and critical-path fields: ordinary form inputs.

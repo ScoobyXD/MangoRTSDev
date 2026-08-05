@@ -42,9 +42,9 @@ import type { EditorInlineStyleCommand, EditorSelectionInlineFormatState, Editor
 import { EDITOR_DOCUMENT_FONT_SIZE_PX } from "../../modules/editor/useEditorPreferences";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
-import type { NodeRecord, NodeRelationship } from "../../modules/node-map/shared";
-import { buildNodeRelationshipHierarchyRows } from "../../modules/node-map/nodeRelationshipStructure";
-import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
+import type { NodeRecord, NodeRelationship } from "../../modules/nodes/types";
+import { buildNodeRelationshipHierarchyRows } from "../../modules/nodes/nodeRelationshipStructure";
+import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gates/types";
 import {
   markNotificationRead,
   fetchNotifications,

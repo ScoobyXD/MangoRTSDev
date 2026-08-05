@@ -66,20 +66,20 @@ import { isOutboundEmailUndoneError } from "../../modules/communications/outboun
 import { realtimePersonalMailboxScope, realtimeSharedMailboxScope, subscribeRealtimeScope } from "../../modules/realtime/realtimeWebSocket";
 import { buildReplyAllRecipients } from "../../modules/communications/emailRecipients";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
-import type { NodeRecord, NodeRelationship } from "../../modules/node-map/shared";
+import type { NodeRecord, NodeRelationship } from "../../modules/nodes/types";
 import { buildCompanyExplorerTreeRows } from "../../modules/company-explorer/companyExplorerTreeRows";
 import {
   reconcileCommittedLogicGateRecordTitles,
   reconcileCommittedNodeTitleInSnapshot,
-} from "../../modules/map/committedTitleSnapshotReconciliation";
+} from "../../modules/realtime/committedTitleSnapshotReconciliation";
 import { resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
-import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
-import { toLogicGateCanvasRecord } from "../../modules/logic-gate-map/shared";
-import { invalidateNodeRecordStoreCaches } from "../../modules/node-map/NodeRecordStore";
-import { getLogicGateRecordSingleFlight } from "../../modules/logic-gate-map/LogicGateRecordStore";
-import { removeNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../../modules/node-map/NodeRelationshipGraph";
-import { removeLogicGateRelationshipGraphNode, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../../modules/logic-gate-map/LogicGateRelationshipGraph";
+import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gates/types";
+import { toLogicGateViewRecord } from "../../modules/logic-gates/types";
+import { invalidateNodeRecordStoreCaches } from "../../modules/nodes/nodeRecordStore";
+import { getLogicGateRecordSingleFlight } from "../../modules/logic-gates/logicGateRecordStore";
+import { removeNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../../modules/nodes/nodeRelationshipGraph";
+import { removeLogicGateRelationshipGraphNode, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../../modules/logic-gates/logicGateRelationshipGraph";
 import { invalidateKanbanBoardContentsCache } from "../../modules/kanban/KanbanBoardContentStore";
 import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache, type GVICMatrixProjectionRow } from "../../modules/kanban/kanbanApi";
 
@@ -91,7 +91,7 @@ import {
   readCommittedEntityTitleVersion,
   subscribeCommittedEntityTitleUpdates,
 } from "../../modules/realtime/committedEntityTitleUpdates";
-import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../../modules/node-map/eventbus";
+import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../../modules/dashboardEvents";
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
 import { buildLogicGateRoute, buildProjectRoute } from "../../app/deepLinkRoutes";
 import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, LogicGateRail, NodeEditorPopup, NodeInboxRail, GVICMatrixViewerSelector, GVICRoleInboxMatrix, SharedInboxGVICSettingsModal, type GVICMatrixViewerListEntry } from "./HomeParts";
@@ -4884,7 +4884,7 @@ export function HomePage({
       const reconciledByID = new Map(reconciledLogicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate]));
       for (const logicGateID of nextProjectedLogicGateIDs) {
         const logicGate = reconciledByID.get(logicGateID);
-        if (logicGate) upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateCanvasRecord(logicGate));
+        if (logicGate) upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateViewRecord(logicGate));
       }
       return reconciledLogicGates;
     });
@@ -4953,7 +4953,7 @@ export function HomePage({
       return [...next, reconciledLogicGate];
     });
     mergeCreatedFolderItems(folderItems);
-    upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateCanvasRecord(reconciledLogicGate));
+    upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateViewRecord(reconciledLogicGate));
     return reconciledLogicGate;
   }, [apiBase, companyID, mergeCreatedFolderItems]);
   const createHomeNode = useCallback(async (assignment?: { logicGateID: string; priority: InboxPriority; status?: GVICInboxStatus }) => {
@@ -4965,8 +4965,8 @@ export function HomePage({
       mergeCreatedFolderItems(result.folderItems);
       mergeUpdatedNode(result.node, titleVersionAtStart);
       if (assignment?.logicGateID.trim()) {
-        const nodeMap = new Map(nodeByID);
-        nodeMap.set(result.node.node_id, result.node);
+        const nextNodeByID = new Map(nodeByID);
+        nextNodeByID.set(result.node.node_id, result.node);
         const dropResult = await dropNodesIntoInboxLogicGateCommand({
           apiBase,
           companyID,
@@ -4974,7 +4974,7 @@ export function HomePage({
           nodeIDs: [result.node.node_id],
           priority: assignment.priority,
           status: assignment.status,
-          nodeByID: nodeMap,
+          nodeByID: nextNodeByID,
           invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
         });
         applyGVICMatrixProjectionRows(dropResult.gvic_projection_rows, { titleVersionAtStart });

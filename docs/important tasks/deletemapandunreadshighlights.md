@@ -1,6 +1,6 @@
 # Delete Node Map and Logic Gate Map
 
-Status: Step 1 inventory complete. Step 2 map-only implementation is approved and ready for a fresh worktree.
+Status: Step 1 inventory and Step 2 application/source removal are complete. Step 3 live retirement remains a separately approved human operation.
 
 ## Goal
 
@@ -129,7 +129,7 @@ Tests and documentation:
 
 ## Step 2: Delete Maps and Rewire Surviving Code
 
-Status: Approved. Must run in a fresh Codex-managed worktree.
+Status: Complete in the dedicated worker branch. No live SQL was applied.
 
 Using the approved inventory:
 
@@ -144,13 +144,24 @@ Using the approved inventory:
 - Add the correct forward migration and separately gated operator retirement SQL for existing deployments. Do not rewrite historical migrations that have already shipped.
 - Update affected documentation and place the required Process Story and business rules at the top of every changed `docs/tests` file.
 
+### Step 2 Implementation Record — 2026-08-05
+
+- Deleted both map frontends, all launch points, routes, frames, browser persistence, map-specific caches/events, and map-only tests.
+- Moved retained Node, Logic Gate, relationship, GVIC, selected-text creation, title-reconciliation, and generic event behavior into non-map modules.
+- Removed backend map routes, handlers, repositories, position storage, workspace scopes, ETags, realtime event names, mutation origins, derived handlers, recycle behavior, batch coordinates/results, and readiness checks.
+- Kept Company Explorer derived projection and every protected authored-change, unread/seen, relationship, editor, manual history, permission, attachment, email, deletion, recycle, restore, and non-map realtime contract.
+- Removed both position tables and their indexes from the canonical schema. Added `backend/db/migrations/20260805_zz_remove_map_runtime_contracts.sql` for map-free read-version functions/rows without dropping existing tables.
+- Added `scripts/map_position_storage_retirement_preflight.sql` and `scripts/retire_map_position_storage.sql`. The read-only preflight detects unprocessed historical map projection work. The retirement script is PostgreSQL 17 DBeaver-compatible, approval-gated, drift/dependency checked, transactional, and drops only the two approved tables without `CASCADE`.
+- Preserved all shipped historical migrations, dated audits, and `docs/important tasks/Old Stuff/**` unchanged.
+- Production frontend/backend/canonical-schema search has no map runtime reference. Remaining names are confined to shipped historical records, this tracker, the new forward migration, the preflight/operator scripts, and tests that enforce removal.
+- Verification passed: `node tests/frontend/scripts/run-node-relationship-tests.mjs`, `go test ./...`, and `node scripts/run_all_tests.mjs` (frontend tests, production build, backend tests, and infrastructure contract tests).
 Production code must have zero readers, writers, fallbacks, runtime schema checks, response fields, cache scopes, or realtime events for the two map-position tables before Step 3 can begin. Production code must continue using the three unread/highlight tables.
 
 Agents must not apply SQL to a live database.
 
 ## Step 3: Verify, Then Retire the Two Position Tables
 
-Status: Blocked on Step 2.
+Status: Application/source verification is complete. Live deployment, read-only database preflight, smoke testing, snapshot approval, and human-run table retirement remain pending.
 
 Before table retirement:
 

@@ -128,7 +128,7 @@ type SidebarSectionID = "shared-triage";
 export type HomeKeyViewID = "my-triage" | "shared-root" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox" | "my-work" | "updates" | `shared:${string}`;
 export type { SidebarPin, SidebarPinKind } from "./sidebarPins";
 
-type AppSidebarPrimaryPage = "map" | "home" | "logic-gate-arena" | "project-management" | "account-manager" | "teams" | "fields";
+type AppSidebarPrimaryPage = "home" | "logic-gate-arena" | "project-management" | "account-manager" | "teams" | "fields";
 
 type AppSidebarProps = {
   accountChrome?: React.ReactNode;

@@ -1,7 +1,7 @@
 import type { FrameDataModel } from "../types.js";
 import type { ViewTab } from "./frameLayoutTypes.js";
 
-export const DEFAULT_DASHBOARD_MODULE_KINDS = ["map", "company-explorer", "editor"];
+export const DEFAULT_DASHBOARD_MODULE_KINDS = ["home"];
 export const LOGIC_GATE_ARENA_MODULE_KINDS = ["editor", "kanban"];
 export const HOME_MODULE_KINDS = ["home"];
 export const PROJECT_MANAGEMENT_MODULE_KINDS = ["project-management"];

@@ -4,8 +4,6 @@ export type SelectionEntityKind = "node" | "logic_gate" | "project" | "folder" |
 
 export type SelectionSourceModule =
   | "company-explorer"
-  | "node-map"
-  | "logic-gate-map"
   | "kanban"
   | "editor";
 

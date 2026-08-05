@@ -65,15 +65,14 @@ The app layout keeps compatibility for persisted payloads:
 - Compact header plate is now edge-flush (`top:0`, `left:0`) with explicit right/bottom borders so the plate reads as a clean rectangle integrated into the frame corner without corner gaps.
 - Selection no longer causes subtle content shifts because frame borders keep constant width in selected/non-selected states.
 - Frame right-click menu `Link modules` label now shows `No other module selected` when only one module is active in selection/context.
-- Link planning now supports Editor + Company Explorer linking when both already share exactly one existing Node Map link target (fallback map inference).
-- Right-click menu now includes `Delink modules`, which removes link mappings touching selected/context modules (including reverse links when a Node Map is selected).
+- Link planning directly supports Editor, Company Explorer, and Kanban context links.
+- Right-click menu includes `Delink modules`, which removes every context link touching the selected modules.
 - Frame actions such as Duplicate, Detach Child Frame, Delink modules, colorway, and Delete are now only opened from the compact frame/module header plate. Module body right-clicks are reserved for module-specific menus such as Company Explorer creation actions.
 
 ## Frame linking + canvas menu updates (2026-04-26)
 
-- Frame linking now uses a generic graph-style context-link model (`frame-module-links-v1`) instead of a Node-Map-only pairing model.
-- Context-menu linking can directly connect Company Explorer and Editor to each other, and now includes additional module kinds such as Logic Gate Map and Kanban.
-- Existing module contracts are preserved by deriving legacy editor/explorer -> map link keys from the link graph (compatibility bridge for current module internals).
+- Frame linking uses the generic graph-style context-link model `frame-module-links-v1`.
+- Context-menu linking directly connects Company Explorer, Editor, and Kanban modules.
 - Right-clicking empty canvas now includes `Create new frame`, which spawns a frame at the clicked grid location.
 - Selected frames now use the Mango orange focus outline + focus ring shadow for stronger visibility.
 - Selection ring, Mango default frame option, and drag placement splash now use `rgb(255, 136, 32)` / `#ff8820` to match the canvas/header accent direction. Teal remains a selectable colorway.
@@ -95,7 +94,7 @@ The app layout keeps compatibility for persisted payloads:
   1. collect current target frame IDs (single or multi-select)
   2. open confirmation modal (`Are you sure you want to delete N frame(s)?`)
   3. only remove frames after explicit `Yes`
-- This aligns frame deletion safety with existing Node Map delete-confirm behavior, reducing accidental destructive actions on hot interaction paths.
+- This reduces accidental destructive actions on hot interaction paths.
 - Confirmation dialog copy includes Undo guidance (`Ctrl/Cmd + Z`) so recovery remains obvious for rapid workflows.
 
 ## Keyboard shortcut routing update (2026-05-03)

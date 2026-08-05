@@ -1135,22 +1135,6 @@ type RecycleBinItem struct {
 	DeletedTimestamp time.Time                 `json:"deleted_timestamp"`
 }
 
-type NodeMapPosition struct {
-	CompanyID        string    `json:"company_id"`
-	NodeID           string    `json:"node_id"`
-	X                float64   `json:"x"`
-	Y                float64   `json:"y"`
-	UpdatedTimestamp time.Time `json:"updated_timestamp"`
-}
-
-type LogicGateMapPosition struct {
-	CompanyID        string    `json:"company_id"`
-	LogicGateID      string    `json:"logic_gate_id"`
-	X                float64   `json:"x"`
-	Y                float64   `json:"y"`
-	UpdatedTimestamp time.Time `json:"updated_timestamp"`
-}
-
 type KanbanBoard struct {
 	CompanyID        string    `json:"company_id"`
 	BoardID          string    `json:"board_id"`

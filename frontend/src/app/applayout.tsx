@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { HeaderAccountManagerIcon, HeaderFieldsIcon, HeaderHomeIcon, HeaderLogicGateArenaIcon, HeaderMapIcon, HeaderProjectManagementIcon, HeaderTeamsIcon } from "./HeaderIcons";
+import { HeaderAccountManagerIcon, HeaderFieldsIcon, HeaderHomeIcon, HeaderLogicGateArenaIcon, HeaderProjectManagementIcon, HeaderTeamsIcon } from "./HeaderIcons";
 import type { CurrentUserResponse } from "../auth/cognitoAuth";
 import { getActiveCompanyID } from "../auth/currentCompany";
 import FrameCanvas from "./framecanvas";
@@ -10,9 +10,9 @@ import { MODULE_LIBRARY as FRAME_MODULE_LIBRARY, preloadModuleKind } from "../mo
 import type { FrameDataModel, DragState } from "../types";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { shouldDeferToNativeTextEditing, shouldNavigateBrowserHistoryBack } from "../hooks/keyboardShortcutRouting";
-import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, EVENT_FRAME_LINK_GRAPH_UPDATED } from "../modules/node-map/eventbus";
+import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, EVENT_FRAME_LINK_GRAPH_UPDATED } from "../modules/dashboardEvents";
 import { buildLinkModulesLabel, buildLinkPool, computeLinkPlan, delinkForPool, mergeLinkPlan, type FrameLinkEdge } from "./frameLinking";
-import { createAccountManagerFrames, createDefaultNodeViewFrames, createFieldsFrames, createHomeViewFrames, createLogicGateArenaFrames, createProjectManagementFrames, createTeamsFrames } from "./DefaultViews";
+import { createAccountManagerFrames, createFieldsFrames, createHomeViewFrames, createLogicGateArenaFrames, createProjectManagementFrames, createTeamsFrames } from "./DefaultViews";
 import { FrameCard, GridCrosses, PlacementSplash } from "./FrameChrome";
 import {
   CELL_SIZE,
@@ -34,7 +34,7 @@ import {
   type ViewTab,
 } from "./frameLayoutTypes";
 import { loadFrameLinks, loadSettings, loadViews, persistFrameLinks, persistFrameRegistry, saveSettings, saveViews } from "./useFramePersistence";
-import { preloadAccountManagerSurface, preloadDefaultDashboardModules, preloadFieldsSurface, preloadHomeSurface, preloadLogicGateArenaSurface, preloadProjectManagementSurface, preloadTeamsSurface, preloadVisibleFrameModules } from "./preloadDashboardModules";
+import { preloadAccountManagerSurface, preloadFieldsSurface, preloadHomeSurface, preloadLogicGateArenaSurface, preloadProjectManagementSurface, preloadTeamsSurface, preloadVisibleFrameModules } from "./preloadDashboardModules";
 import { LazyAccountManagerPage, LazyFieldsPage, LazyHomePage, LazyLogicGateArenaPage, LazyProjectManagementPage, LazyTeamsPage } from "../pages/lazyPages";
 import type { HomeViewID } from "../pages/home/homeTypes";
 import { writePendingLogicGateArenaSelection } from "../pages/logic-gate-arena/logicGateArenaLaunch";
@@ -44,7 +44,7 @@ import { AppNodeEditorPopup, AppSidebar, SIDEBAR_EXPLORER_WIDGET_ID, type HomeKe
 import { EVENT_APP_SIDEBAR_PIN_REQUESTED, sidebarPinFallbackName, type SidebarPinDraft, type SidebarPinRequestDetail } from "./sidebarPins";
 import { createSidebarPin, deleteSidebarPin, fetchSidebarPins, reorderSidebarPins } from "./sidebarPinsApi";
 import { hasMangoDragPayload, hasSidebarPinSectionDrop, isSidebarPinKind, sidebarPinsFromDrop } from "./sidebarPinDrops";
-import { TextSelectionNodeCreator } from "../modules/node-map/TextSelectionNodeCreator";
+import { TextSelectionNodeCreator } from "../modules/nodes/TextSelectionNodeCreator";
 import { returnToEditorEntitySourceNode } from "../modules/editor/editorEntityLinks";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "./ConfirmActionMenu";
 import { AppTaskbar } from "./AppTaskbar";
@@ -54,8 +54,8 @@ import { buildGvicRoute, buildLogicGateRoute, buildNodeRoute, buildProjectLogicG
 import { replaceProjectWorkPanelHistoryState, type ProjectLogicGateReturnContext } from "./projectRouteHistory";
 import { buildContextualNodeRoute, openAppPathInNewTab } from "./resourceLinks";
 import { createRequestJSON } from "../modules/api/requestJSON";
-import { invalidateNodeRecordStoreCaches } from "../modules/node-map/NodeRecordStore";
-import { removeNodeRelationshipGraphNode } from "../modules/node-map/NodeRelationshipGraph";
+import { invalidateNodeRecordStoreCaches } from "../modules/nodes/nodeRecordStore";
+import { removeNodeRelationshipGraphNode } from "../modules/nodes/nodeRelationshipGraph";
 import { foldLatestCommittedEntityTitles, subscribeCommittedEntityTitleUpdates } from "../modules/realtime/committedEntityTitleUpdates";
 import { reconcileCachesForCommittedEntityTitle } from "./committedTitleCacheReconciliation";
 import {
@@ -85,7 +85,7 @@ const SIDEBAR_WIDTH_KEY = "mangorts.app-sidebar-width.v1";
 const HOME_VIEW_STORAGE_PREFIX = "mangorts.app.home-view.v1";
 const SHOW_LEGACY_HEADER = false;
 
-type PrimaryPage = "map" | "home" | "logic-gate-arena" | "project-management" | "account-manager" | "teams" | "fields";
+type PrimaryPage = "home" | "logic-gate-arena" | "project-management" | "account-manager" | "teams" | "fields";
 type NavigateOptions = { replace?: boolean };
 type ExplorerEntityActivatedDetail = {
   companyID?: string;
@@ -151,7 +151,7 @@ function createPrimaryPageTab(page: PrimaryPage, id = createTabId()): ViewTab {
   if (page === "account-manager") return { id, name: "Accounts", page: "account-manager", frames: createAccountManagerFrames() };
   if (page === "teams") return { id, name: "Teams", page: "teams", frames: createTeamsFrames() };
   if (page === "fields") return { id, name: "Fields", page: "fields", frames: createFieldsFrames() };
-  return { id, name: "Map", frames: createDefaultNodeViewFrames() };
+  return { id, name: "Home", page: "home", frames: createHomeViewFrames() };
 }
 
 function ensurePrimaryPageTab(tabs: ViewTab[], page: PrimaryPage): { tabs: ViewTab[]; tab: ViewTab } {
@@ -162,22 +162,12 @@ function ensurePrimaryPageTab(tabs: ViewTab[], page: PrimaryPage): { tabs: ViewT
 }
 
 function isExplorerSelectionTargetFrame(frame: FrameDataModel): boolean {
-  return frame.kind === "map"
-    || frame.kind === "nodes"
-    || frame.kind === "nodes-map"
-    || frame.kind === "logic-map"
-    || frame.kind === "editor"
-    || frame.kind === "kanban";
+  return frame.kind === "editor" || frame.kind === "kanban";
 }
 
 function isTextSelectionNodeCreateTargetFrame(frame: FrameDataModel): boolean {
-  return frame.kind === "map"
-    || frame.kind === "nodes"
-    || frame.kind === "nodes-map"
-    || frame.kind === "company-explorer"
-    || frame.kind === "kanban";
+  return frame.kind === "company-explorer" || frame.kind === "kanban";
 }
-
 function getSidebarExplorerSelectionTargetFrameIDs(tab: ViewTab | undefined): string[] {
   if (!tab) return [];
   const page = pageForTab(tab);
@@ -257,7 +247,6 @@ function pageForTab(tab: ViewTab): PrimaryPage | null {
   if (/^(account manager|accounts)$/i.test(tab.name.trim())) return "account-manager";
   if (/^teams$/i.test(tab.name.trim())) return "teams";
   if (/^fields$/i.test(tab.name.trim())) return "fields";
-  if (!tab.page && /^(map|default node view|default map view)$/i.test(tab.name.trim())) return "map";
   return null;
 }
 
@@ -269,7 +258,6 @@ function labelForTab(tab: ViewTab): string {
   if (page === "account-manager") return "Accounts";
   if (page === "teams") return "Teams";
   if (page === "fields") return "Fields";
-  if (page === "map") return "Map";
   return tab.name;
 }
 
@@ -281,7 +269,6 @@ function iconForTab(tab: ViewTab): React.ReactNode {
   if (page === "account-manager") return <HeaderAccountManagerIcon />;
   if (page === "teams") return <HeaderTeamsIcon />;
   if (page === "fields") return <HeaderFieldsIcon />;
-  if (page === "map") return <HeaderMapIcon />;
   return null;
 }
 
@@ -516,7 +503,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
               ? { id, name: "Teams", page: "teams", frames: createTeamsFrames() }
               : initialPage === "fields"
                 ? { id, name: "Fields", page: "fields", frames: createFieldsFrames() }
-                : { id, name: "Map", frames: createDefaultNodeViewFrames() };
+                : { id, name: "Home", page: "home", frames: createHomeViewFrames() };
     setTabs((previous) => [...previous, nextTab]);
     setActiveTabId(id);
   }, [activeTabId, initialPage, overrideContent, tabs]);
@@ -1026,16 +1013,6 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   }, [tabs.length, activeTabId]);
 
 
-  const openDefaultNodeView = useCallback((tabID: string) => {
-    preloadDefaultDashboardModules();
-    const framesForView = createDefaultNodeViewFrames();
-    const replacedFrameIDs = new Set(tabs.find((tab) => tab.id === tabID)?.frames.map((frame) => frame.id) ?? []);
-    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Map", page: undefined, frames: framesForView } : tab)));
-    setFrameLinks((previous) => mergeLinkPlan(previous.filter((edge) => !replacedFrameIDs.has(edge.a) && !replacedFrameIDs.has(edge.b)), computeLinkPlan(framesForView)));
-    setActiveTabId(tabID);
-    setEditMode(true);
-  }, [tabs]);
-
   const openLogicGateArena = useCallback((tabID: string) => {
     preloadLogicGateArenaSurface();
     const framesForView = createLogicGateArenaFrames();
@@ -1082,12 +1059,11 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     if (page === "account-manager") preloadAccountManagerSurface();
     if (page === "teams") preloadTeamsSurface();
     if (page === "fields") preloadFieldsSurface();
-    if (page === "map") preloadDefaultDashboardModules();
 
     const ensured = ensurePrimaryPageTab(tabs, page);
     setTabs(ensured.tabs);
     setActiveTabId(ensured.tab.id);
-    setEditMode(page === "map");
+    setEditMode(false);
     setSelectedFrameId(null);
     setSelectedFrameIds(new Set());
     setActiveDockTabID(null);
@@ -1392,7 +1368,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       label: selection.label,
     });
     setActiveDockTabID(null);
-    selectPrimaryPage("map");
+    selectPrimaryPage("home");
   }, [selectPrimaryPage, upsertDockTab]);
 
   const handleLogicGateArenaTitleChange = useCallback((update: { logicGateID: string; label: string }) => {
@@ -1787,7 +1763,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
                   onDoubleClick={() => startRenamingTab(tab.id)}
                   onClick={(e) => {
                     if (e.button !== 0 || isDraggingTab) return;
-                    const nextPage = pageForTab(tab) ?? "map";
+                    const nextPage = pageForTab(tab) ?? "home";
                     setActiveTabId(tab.id);
                     setEditMode(false);
                     if (onNavigate) {
@@ -2144,7 +2120,6 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
         <FrameRightClickMenu x={tabMenu.x} y={tabMenu.y} onClose={closeMenus}>
           <button style={menuBtnBase} onClick={() => { startRenamingTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Rename View</button>
           <button style={{ ...menuBtnBase, color: tabs.length > 1 ? "#dc2626" : "#999" }} disabled={tabs.length === 1} onClick={() => { deleteTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Delete View</button>
-          <button style={menuBtnBase} onClick={() => { openDefaultNodeView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Map</button>
           <button style={menuBtnBase} onPointerEnter={preloadLogicGateArenaSurface} onFocus={preloadLogicGateArenaSurface} onPointerDown={preloadLogicGateArenaSurface} onClick={() => { openLogicGateArena(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Logic Gate Arena</button>
           <button style={menuBtnBase} onPointerEnter={preloadHomeSurface} onFocus={preloadHomeSurface} onPointerDown={preloadHomeSurface} onClick={() => { openHomeView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Home</button>
           <button style={menuBtnBase} onClick={() => { saveCurrentAsTemplate(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Save Current as Template</button>

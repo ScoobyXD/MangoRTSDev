@@ -146,7 +146,6 @@ test("Node and Project integrate one row primitive, fixed sections, independent 
   const node = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
   const project = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
   const parts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
-  const logicGate = readFileSync(resolve(process.cwd(), "frontend/src/modules/logic-gate-map/LogicGateMapContent.tsx"), "utf8");
 
   assert.match(node, /data-mango-bounded-editor-rows="node"/);
   assert.match(project, /data-mango-bounded-editor-rows="project"/);
@@ -172,7 +171,6 @@ test("Node and Project integrate one row primitive, fixed sections, independent 
   assert.ok(project.includes("setOpenEditorBlockIDs(new Set(nextBlockIDs))"));
   assert.ok(node.includes("nodeEmailColumnVisible && renderTextSidePaneResizeHandle"));
   assert.ok(project.includes("emailOpen || emailReplyBlockID === block.id"));
-  assert.doesNotMatch(logicGate, /useBoundedEditorRowVirtualization|data-mango-bounded-editor-rows/);
 });
 
 test("target intent is passed through for Project navigation and resolved after data loads", () => {

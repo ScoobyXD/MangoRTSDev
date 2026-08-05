@@ -12,9 +12,9 @@ import { EXPLORER_DRAG_MIME } from "../company-explorer/companyExplorerDragDrop"
 import { listCompanyUsers, transferEmailNodeCardToNode } from "../communications/communicationsApi";
 import { EVENT_HOME_TRIAGE_CONVERSION_APPLIED, type HomeTriageConversionAppliedDetail } from "../../pages/home/homeConstants";
 import { cleanIDList, hasTriageMessageDrag, readTriageMessageDrag } from "../../pages/home/homeUtils";
-import { getNodeTitle, type NodeRecord } from "../node-map/shared";
-import { getNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
-import { invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
+import { getNodeTitle, type NodeRecord } from "../nodes/types";
+import { getNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../nodes/nodeRelationshipGraph";
+import { invalidateNodeRecordStoreCaches } from "../nodes/nodeRecordStore";
 import { createCoalescedCanonicalRefresh } from "../realtime/coalescedCanonicalRefresh";
 import { subscribeRealtimeScope } from "../realtime/realtimeWebSocket";
 import { commitEntityTitleMutation, foldCommittedEntityTitlesSince, readCommittedEntityTitleVersion, subscribeCommittedEntityTitleUpdates } from "../realtime/committedEntityTitleUpdates";

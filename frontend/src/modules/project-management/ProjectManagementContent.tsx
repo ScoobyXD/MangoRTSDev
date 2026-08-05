@@ -21,9 +21,9 @@ import type { ExplorerTreeNode } from "../company-explorer/companyExplorerTypes.
 import { listEntityFields, setEntityFieldAssignments, type EntityField } from "../fields/entityFieldsApi.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 import { UniversalGroupingControls } from "../grouping/UniversalGroupingControls.js";
-import type { LogicGateRecord } from "../logic-gate-map/shared.js";
-import { toLogicGateCanvasRecord } from "../logic-gate-map/shared.js";
-import { getNodeTitle, type NodeRecord } from "../node-map/shared.js";
+import type { LogicGateRecord } from "../logic-gates/types.js";
+import { toLogicGateViewRecord } from "../logic-gates/types.js";
+import { getNodeTitle, type NodeRecord } from "../nodes/types.js";
 import {
   fetchCommunicationsWorkspacePanel,
   invalidateCommunicationsWorkspacePanelCache,
@@ -393,7 +393,7 @@ function buildProjectExplorerRows(input: {
   return buildCompanyExplorerTreeRows({
     expanded: input.expanded,
     nodes: input.nodes,
-    logicGates: input.logicGates.map(toLogicGateCanvasRecord),
+    logicGates: input.logicGates.map(toLogicGateViewRecord),
     projects: [],
     kanbanBoards: [],
     folders: [...input.nodeFolders, ...input.logicGateFolders],

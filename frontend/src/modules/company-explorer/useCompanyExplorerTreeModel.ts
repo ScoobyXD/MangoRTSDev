@@ -1,6 +1,6 @@
 import { useMemo } from "react";
-import type { NodeRecord } from "../node-map/shared";
-import type { NodeRecord as LogicGateRecord } from "../logic-gate-map/shared";
+import type { NodeRecord } from "../nodes/types";
+import type { LogicGateViewRecord as LogicGateRecord } from "../logic-gates/types";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import type { KanbanBoard } from "../kanban/shared";
 import type { ProjectRecord } from "../project-management/projectManagementApi";

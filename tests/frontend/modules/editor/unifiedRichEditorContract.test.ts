@@ -774,7 +774,7 @@ test("editor header keeps primary controls visible and preserves all secondary o
   const editorTabBar = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorTabBar.tsx"), "utf8");
   const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
   const linkedDocumentPanels = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorLinkedDocumentPanels.tsx"), "utf8");
-  const gvicPresentation = readFileSync(resolve(process.cwd(), "frontend/src/modules/logic-gate-map/gvicPresentation.ts"), "utf8");
+  const gvicPresentation = readFileSync(resolve(process.cwd(), "frontend/src/modules/logic-gates/gvicPresentation.ts"), "utf8");
   const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
 
   assert.match(editorTabBar, /const primaryTabs = visibleTabs\.filter\(\(tab\) => EDITOR_PRIMARY_HEADER_TAB_IDS\.includes\(tab\.id\)\)/);

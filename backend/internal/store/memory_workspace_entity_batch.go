@@ -106,16 +106,6 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 			result.Nodes = append(result.Nodes, r.withNodeReadModelLocked(created))
 			clientToEntityID[item.ClientID] = created.NodeID
 			result.EntityMappings = append(result.EntityMappings, WorkspaceEntityBatchEntityMapping{ClientID: item.ClientID, EntityID: created.NodeID})
-
-			position := domain.NodeMapPosition{
-				CompanyID:        input.CompanyID,
-				NodeID:           created.NodeID,
-				X:                item.X,
-				Y:                item.Y,
-				UpdatedTimestamp: now,
-			}
-			r.nodeMapPositions[key(input.CompanyID, created.NodeID)] = position
-			result.NodeMapPositions = append(result.NodeMapPositions, position)
 			continue
 		}
 
@@ -148,16 +138,6 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 		result.LogicGates = append(result.LogicGates, created)
 		clientToEntityID[item.ClientID] = created.LogicGateID
 		result.EntityMappings = append(result.EntityMappings, WorkspaceEntityBatchEntityMapping{ClientID: item.ClientID, EntityID: created.LogicGateID})
-
-		position := domain.LogicGateMapPosition{
-			CompanyID:        input.CompanyID,
-			LogicGateID:      created.LogicGateID,
-			X:                item.X,
-			Y:                item.Y,
-			UpdatedTimestamp: now,
-		}
-		r.logicMapPositions[key(input.CompanyID, created.LogicGateID)] = position
-		result.LogicGateMapPositions = append(result.LogicGateMapPositions, position)
 	}
 
 	if targetFolderID != "" {

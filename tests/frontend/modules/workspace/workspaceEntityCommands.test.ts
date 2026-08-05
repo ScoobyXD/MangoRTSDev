@@ -17,7 +17,7 @@ test("createWorkspaceEntityBatchCommand posts one workspace entity batch request
     entityKind: "logic_gate",
     folderID: "folder-1",
     creatorLogicGateGVICRole: "generated",
-    items: [{ client_id: "gate-a", title: "Gate A", x: 120, y: 240 }],
+    items: [{ client_id: "gate-a", title: "Gate A" }],
     relationships: [{ entity_id_a: "source", client_id_b: "gate-a", a_position: "Input", b_position: "Output" }],
     requestJSON,
   });
@@ -31,7 +31,7 @@ test("createWorkspaceEntityBatchCommand posts one workspace entity batch request
       entity_kind: "logic_gate",
       folder_id: "folder-1",
       creator_logic_gate_gvic_role: "generated",
-      items: [{ client_id: "gate-a", title: "Gate A", x: 120, y: 240 }],
+      items: [{ client_id: "gate-a", title: "Gate A" }],
       relationships: [{ entity_id_a: "source", client_id_b: "gate-a", a_position: "Input", b_position: "Output" }],
     },
   }]);

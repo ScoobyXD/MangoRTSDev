@@ -42,9 +42,9 @@ import { generateStableInformationID } from "../../modules/editor/editorTypes";
 import {
   getNodeInformationProjectionSingleFlight,
   invalidateNodeRecordStoreCaches,
-} from "../../modules/node-map/NodeRecordStore";
-import type { NodeRecord } from "../../modules/node-map/shared";
-import type { LogicGateRecord } from "../../modules/logic-gate-map/shared";
+} from "../../modules/nodes/nodeRecordStore";
+import type { NodeRecord } from "../../modules/nodes/types";
+import type { LogicGateRecord } from "../../modules/logic-gates/types";
 import { assignNodeToLogicGateStatus } from "../../modules/kanban/kanbanApi";
 import { upsertProjectRelationship } from "../../modules/project-management/projectManagementApi";
 import { subscribeRealtimeScope } from "../../modules/realtime/realtimeWebSocket";
