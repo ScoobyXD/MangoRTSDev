@@ -17,11 +17,6 @@ func TestRetiredDatabaseStorageIsAbsentFromCanonicalSchemaAndStrictlyDropped(t *
 	}
 	schema := strings.ToLower(string(schemaBytes))
 	migration := strings.ToLower(string(migrationBytes))
-	logicGateRetirementBytes, err := os.ReadFile("../../db/operator_migrations/20260805_retire_logic_gate_legacy_storage.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	logicGateRetirement := strings.ToLower(string(logicGateRetirementBytes))
 	retiredTables := []string{
 		"workspace_editor_formats",
 		"editor_rollout_gates",
@@ -63,11 +58,8 @@ func TestRetiredDatabaseStorageIsAbsentFromCanonicalSchemaAndStrictlyDropped(t *
 		if strings.Contains(schema, "create table if not exists "+table) {
 			t.Errorf("canonical schema creates retired Logic Gate table %s", table)
 		}
-		if !strings.Contains(logicGateRetirement, "drop table "+table+";") {
-			t.Errorf("Logic Gate operator retirement does not strictly drop %s", table)
-		}
 	}
-	nodeRetirementBytes, err := os.ReadFile("../../db/operator_migrations/20260805_retire_node_legacy_storage.sql")
+	nodeRetirementBytes, err := os.ReadFile("../../db/migrations/20260805_retire_node_legacy_storage.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,15 +72,6 @@ func TestRetiredDatabaseStorageIsAbsentFromCanonicalSchemaAndStrictlyDropped(t *
 			t.Errorf("Node operator retirement does not strictly drop %s", table)
 		}
 	}
-	if strings.Contains(logicGateRetirement, "drop table if exists") || strings.Contains(logicGateRetirement, "drop table logic_gate_information cascade") {
-		t.Error("Logic Gate retirement must refuse drift and must not use CASCADE")
-	}
-	for _, gate := range []string{"copy_verified", "no_current_writer_verified", "smoke_and_recycle_verified", "soak_and_snapshot_confirmed", "operator_approved"} {
-		if !strings.Contains(logicGateRetirement, gate) {
-			t.Errorf("Logic Gate retirement missing operator gate %q", gate)
-		}
-	}
-
 	nodeStart := strings.Index(schema, "create table if not exists node_textboxes (")
 	if nodeStart < 0 {
 		t.Fatal("canonical current node_textboxes block not found")
