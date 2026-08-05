@@ -141,7 +141,7 @@ func TestNodeForwardMigrationAndOperatorAreStrictAndDBeaverSafe(t *testing.T) {
 	if strings.Contains(migration, "update node_textboxes") {
 		t.Error("writer-paused delta must not overwrite textboxes already present in final storage")
 	}
-	operator := readNodeFinalContractFile(t, "..", "..", "db", "operator_migrations", "20260805_retire_node_legacy_storage.sql")
+	operator := readNodeFinalContractFile(t, "..", "..", "db", "migrations", "20260805_retire_node_legacy_storage.sql")
 	for _, required := range []string{
 		"copy_verified", "no_current_writer_verified", "smoke_and_recycle_verified",
 		"soak_and_snapshot_confirmed", "operator_approved", "server_version_num",

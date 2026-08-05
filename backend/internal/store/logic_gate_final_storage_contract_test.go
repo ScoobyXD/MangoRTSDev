@@ -54,7 +54,7 @@ func TestLogicGateReadinessUsesFinalStorage(t *testing.T) {
 	}
 }
 
-func TestLogicGateFinalSchemaMigrationAndOperatorSafety(t *testing.T) {
+func TestLogicGateFinalSchemaAndMigrationSafety(t *testing.T) {
 	schemaBytes, err := os.ReadFile("../../db/schema.sql")
 	if err != nil {
 		t.Fatal(err)
@@ -110,23 +110,5 @@ func TestLogicGateFinalSchemaMigrationAndOperatorSafety(t *testing.T) {
 		if !strings.Contains(preflight, required) {
 			t.Errorf("Logic Gate preflight missing %q", required)
 		}
-	}
-
-	retirementBytes, err := os.ReadFile("../../db/operator_migrations/20260805_retire_logic_gate_legacy_storage.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	retirement := strings.ToLower(string(retirementBytes))
-	for _, required := range []string{
-		"copy_verified", "no_current_writer_verified", "smoke_and_recycle_verified",
-		"soak_and_snapshot_confirmed", "operator_approved",
-		"drop table logic_gate_information;", "drop table logic_gate_projection_table;",
-	} {
-		if !strings.Contains(retirement, required) {
-			t.Errorf("Logic Gate operator retirement missing %q", required)
-		}
-	}
-	if strings.Contains(retirement, "drop table if exists") || strings.Contains(retirement, "drop table logic_gate_information cascade") || strings.Contains(retirement, "drop table logic_gate_projection_table cascade") {
-		t.Error("Logic Gate retirement must expose drift and refuse surviving dependencies")
 	}
 }

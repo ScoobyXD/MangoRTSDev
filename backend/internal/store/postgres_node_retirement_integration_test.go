@@ -205,7 +205,7 @@ where company_id='00000000-0000-4000-8000-000000000602'
 		t.Fatal("forward migration rerun unexpectedly succeeded")
 	}
 
-	operator := readNodeRetirementIntegrationSQL(t, "..", "..", "db", "operator_migrations", "20260805_retire_node_legacy_storage.sql")
+	operator := readNodeRetirementIntegrationSQL(t, "..", "..", "db", "migrations", "20260805_retire_node_legacy_storage.sql")
 	approved := strings.Replace(operator, "values(false,false,false,false,false)", "values(true,true,true,true,true)", 1)
 	if approved == operator {
 		t.Fatal("could not enable disposable retirement approvals")
