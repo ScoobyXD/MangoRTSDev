@@ -24,6 +24,8 @@ func (r *PostgresRepo) CheckApplicationSchemaReadiness() error {
 		"communications_message_read_receipt_summaries", "communications_message_read_receipt_signals",
 		"email_threads", "email_messages", "email_relationships", "email_drafts",
 		"email_signatures", "email_thread_download_jobs", "attachments", "attachment_relationships",
+		"node_textboxes", "node_textbox_chats", "node_textboxes_history", "node_textbox_seen_snapshots",
+		"node_content_changes", "node_content_change_seen",
 		"project_textboxes", "project_textbox_chats", "logic_gate_textboxes", "logic_gate_textboxes_history",
 	}
 	for _, table := range requiredTables {
@@ -45,6 +47,10 @@ func (r *PostgresRepo) CheckApplicationSchemaReadiness() error {
 		{"email_drafts", "sent_email_message_id"},
 		{"attachment_relationships", "resource_type"},
 		{"attachment_relationships", "resource_id"},
+		{"node_textboxes", "body_json"},
+		{"node_textbox_chats", "chat_id"},
+		{"node_textbox_seen_snapshots", "textbox_revision"},
+		{"node_content_changes", "textbox_id"},
 		{"project_textboxes", "title"},
 		{"project_textboxes", "email_message_id"},
 		{"project_textboxes", "email_accent"},
@@ -78,6 +84,17 @@ select exists (
 	}
 	if obsoleteConnectionScope {
 		return fmt.Errorf("application schema is not ready: obsolete user_email_connections.connection_scope remains")
+	}
+	var obsoleteNodeInformationID bool
+	if err := r.db.QueryRow(`
+select exists (
+  select 1 from information_schema.columns
+  where table_schema='public' and table_name='node_content_changes' and column_name='information_id'
+)`).Scan(&obsoleteNodeInformationID); err != nil {
+		return err
+	}
+	if obsoleteNodeInformationID {
+		return fmt.Errorf("application schema is not ready: obsolete node_content_changes.information_id remains")
 	}
 	return nil
 }

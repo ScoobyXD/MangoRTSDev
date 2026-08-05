@@ -1,15 +1,8 @@
 # Process Story: Restoring Deleted Editor Textboxes
 
-A user deletes a Node, Project, or Logic Gate that contains current textboxes and
-manual history. Before the owner rows are deleted, the Recycle Bin payload copies
-the matching current and history rows from the six permanent editor tables.
-For a Project it also copies `project_textbox_chats` and exact final email
-relationships. For a Logic Gate it copies the one final textbox/history set and
-exact final email relationships. Neither path copies its legacy
-information/projection tables. Restoring the item recreates the owner first,
-restores its textbox/history rows, then restores supported Project chats and the
-remaining relationships. Permanent delete removes the payload, including those
-editor copies.
+A user deletes a Node, Project, or Logic Gate that contains current textboxes and manual history. Before the owner rows are deleted, the Recycle Bin payload copies the matching final current/history rows. For a Node it also copies `node_textbox_chats`, `node_content_changes`, `node_content_change_seen`, `node_textbox_seen_snapshots`, exact `email_relationships`, and final `attachment_relationships`. Neither Node, Project, nor Logic Gate copies a legacy information/projection table.
+
+Restore recreates the owner first, then textboxes/history, chats and seen/change rows, email relationships, and finally attachment relationships. An existing soft-retired attachment relationship is reactivated from its snapshot instead of being skipped by `ON CONFLICT`. The attachment itself must still exist; permanent last-owner cleanup remains S3-before-Postgres and retry-safe. Permanent delete removes the payload, including those final editor copies.
 
 Old recycle payloads created before the six-table cutover are converted in place.
 Their HTML-era textboxes and manual saves must pass the same text-preserving

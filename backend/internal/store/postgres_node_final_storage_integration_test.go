@@ -1,0 +1,188 @@
+package store
+
+import (
+	"encoding/json"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestPostgresNodeFinalTextboxChatEmailUnseenAndAttachmentStorage(t *testing.T) {
+	db, repo := openRealtimePostgresIntegration(t)
+	company, err := repo.CreateCompany("Node final storage integration")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = db.Exec("delete from companies where company_id=$1::uuid", company.CompanyID) })
+	owner, err := repo.UpsertAuthUser("node-final-owner", "node-final-owner@example.test", "Node Final Owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := repo.UpsertAuthUser("node-final-other", "node-final-other@example.test", "Node Final Other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.CreateNode(company.CompanyID, "Final Node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	textboxID := "00000000-0000-4000-8000-000000000501"
+	document := editorMergeTestDocument(t,
+		`{"type":"paragraph","attrs":{"blockId":"node-final-a"},"content":[{"type":"text","text":"first"}]}`)
+	commit, err := repo.CommitEditorJSONDocument(EditorJSONCommitInput{
+		Document: EditorJSONDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeNode,
+			ResourceID: node.NodeID, DocumentID: textboxID},
+		OperationID: newUUIDv7String(), ClientID: "node-final", ActorUserID: owner.UserID,
+		BaseRevision: 0, SchemaVersion: MangoTiptapSchemaVersion, JSONDocument: document,
+	})
+	if err != nil || commit.Revision != 1 {
+		t.Fatalf("initial Node textbox commit=%+v err=%v", commit, err)
+	}
+	if _, err := repo.MarkNodeContentChangeSeen(NodeContentChangeSeenInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, UserID: owner.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	updatedDocument := editorMergeTestDocument(t,
+		`{"type":"paragraph","attrs":{"blockId":"node-final-a"},"content":[{"type":"text","text":"first and second"}]}`)
+	if _, err := repo.CommitEditorJSONDocument(EditorJSONCommitInput{
+		Document: EditorJSONDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeNode,
+			ResourceID: node.NodeID, DocumentID: textboxID},
+		OperationID: newUUIDv7String(), ClientID: "node-final-other", ActorUserID: other.UserID,
+		BaseRevision: 1, SchemaVersion: MangoTiptapSchemaVersion, JSONDocument: updatedDocument,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	unseen, err := repo.ListUnseenNodeContentChanges(NodeContentChangeListInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, UserID: owner.UserID,
+	})
+	if err != nil || len(unseen) == 0 || !strings.Contains(unseen[len(unseen)-1].Text, "second") ||
+		unseen[len(unseen)-1].ActorDisplayName != "Node Final Other" {
+		t.Fatalf("unseen Node changes=%+v err=%v", unseen, err)
+	}
+	var seenRevision int64
+	if err := db.QueryRow(`select textbox_revision from node_textbox_seen_snapshots
+where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid and user_id=$4::uuid`,
+		company.CompanyID, node.NodeID, textboxID, owner.UserID).Scan(&seenRevision); err != nil {
+		t.Fatal(err)
+	}
+	if seenRevision != 1 {
+		t.Fatalf("seen textbox revision=%d, want 1", seenRevision)
+	}
+
+	emailThreadID := "00000000-0000-4000-8000-000000000502"
+	emailMessageID := "00000000-0000-4000-8000-000000000503"
+	if _, err := db.Exec(`insert into email_threads(
+  company_id,email_thread_id,email_account_type,personal_user_id,personal_account_email,
+  email_account_email,provider,provider_thread_key,provider_thread_id,root_provider_message_id
+) values($1::uuid,$2::uuid,'personal_email_account',$3::uuid,'node-final-owner@example.test',
+  'node-final-owner@example.test','google','node-final-thread','provider-node-thread','provider-node-message')`,
+		company.CompanyID, emailThreadID, owner.UserID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`insert into email_messages(
+  company_id,email_message_id,email_thread_id,provider_message_id,message_order,subject,snippet,sender_snapshot
+) values($1::uuid,$2::uuid,$3::uuid,'provider-node-message',0,'Exact Node email','Node email snippet',
+  '[{"name":"Sender","email":"sender@example.test"}]'::jsonb)`, company.CompanyID, emailMessageID, emailThreadID); err != nil {
+		t.Fatal(err)
+	}
+	emailPayload, _ := json.Marshal(map[string]any{
+		"block_id": textboxID, "email_message_id": emailMessageID,
+		"attached_timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	emailRelationshipID := "00000000-0000-4000-8000-000000000504"
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: emailRelationshipID,
+		Type: "Attached email", Information: string(emailPayload), ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: newUUIDv7String(),
+		Type: "Attached email", Information: string(emailPayload), ActorUserID: other.UserID,
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("unowned exact email attach err=%v, want ErrInvalid", err)
+	}
+
+	chatID := "00000000-0000-4000-8000-000000000505"
+	chatPayload, _ := json.Marshal(map[string]any{
+		"block_id": textboxID, "selection_source": "email", "selection_message_id": emailMessageID,
+		"author_id": owner.UserID, "author_name": "Node Final Owner", "message": "Exact Node comment",
+		"created_timestamp": time.Now().UTC().Format(time.RFC3339Nano), "attachments": []any{},
+		"entity_links": []any{}, "mentioned_user_ids": []string{}, "mentioned_group_ids": []string{},
+	})
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: chatID,
+		Type: CommunicationsEmailCollaborationChatInformationType, Information: string(chatPayload), ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	attachmentID := "00000000-0000-4000-8000-000000000506"
+	if _, err := db.Exec(`insert into attachments(
+  attachment_id,company_id,uploaded_by_user_id,original_filename,mime_type,byte_size,sha256,
+  storage_bucket,storage_key,source_kind
+) values($1::uuid,$2::uuid,$3::uuid,'shared-node-file.txt','text/plain',5,
+  '0000000000000000000000000000000000000000000000000000000000000000',
+  'disposable-test-bucket','node-final-storage/shared-node-file.txt','editor_paste')`,
+		attachmentID, company.CompanyID, owner.UserID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`insert into attachment_relationships(
+  attachment_relationship_id,company_id,resource_type,resource_id,attachment_id,information_id,
+  message_id,editor_surface,relationship_kind,created_by_user_id
+) values
+  ('00000000-0000-4000-8000-000000000507',$1::uuid,'node',$2,$3::uuid,$4::uuid,'','node_textbox','file_attachment',$5::uuid),
+  ('00000000-0000-4000-8000-000000000508',$1::uuid,'email_message',$6,$3::uuid,null,'','email_message','email_attachment',$5::uuid)`,
+		company.CompanyID, node.NodeID, attachmentID, textboxID, owner.UserID, emailMessageID); err != nil {
+		t.Fatal(err)
+	}
+
+	projections, err := repo.ListNodeProjections(company.CompanyID, node.NodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]bool{}
+	for _, projection := range projections {
+		found[projection.InformationID] = true
+		if projection.InformationID == emailRelationshipID && !strings.Contains(projection.Information, emailMessageID) {
+			t.Fatalf("Node email projection lost exact message identity: %s", projection.Information)
+		}
+		if projection.InformationID == chatID && !strings.Contains(projection.Information, emailMessageID) {
+			t.Fatalf("Node chat projection lost exact email selection: %s", projection.Information)
+		}
+	}
+	for _, id := range []string{textboxID, emailRelationshipID, chatID} {
+		if !found[id] {
+			t.Fatalf("final Node projection %s missing: %+v", id, projections)
+		}
+	}
+	if err := repo.DeleteNodeProjectionWithActor(NodeProjectionDeleteInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: textboxID,
+		ExpectedRevision: func() *int64 { value := int64(2); return &value }(), ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var liveChats, liveEmails, activeNodeLinks, activeEmailLinks, storedMessages int
+	if err := db.QueryRow(`select
+  (select count(*) from node_textbox_chats where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid),
+  (select count(*) from email_relationships where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid and resource_textbox_id=$3::text),
+  (select count(*) from attachment_relationships where company_id=$1::uuid and attachment_id=$4::uuid and resource_type='node' and deleted_timestamp is null),
+	  (select count(*) from attachment_relationships where company_id=$1::uuid and attachment_id=$4::uuid and resource_type='email_message' and deleted_timestamp is null),
+	  (select count(*) from email_messages where company_id=$1::uuid and email_message_id=$5::uuid)`,
+		company.CompanyID, node.NodeID, textboxID, attachmentID, emailMessageID).Scan(&liveChats, &liveEmails, &activeNodeLinks, &activeEmailLinks, &storedMessages); err != nil {
+		t.Fatal(err)
+	}
+	if liveChats != 0 || liveEmails != 1 || activeNodeLinks != 1 || activeEmailLinks != 1 || storedMessages != 1 {
+		t.Fatalf("textbox delete chat/email/node-link/email-link/message=%d/%d/%d/%d/%d", liveChats, liveEmails, activeNodeLinks, activeEmailLinks, storedMessages)
+	}
+	var attachmentActive bool
+	if err := db.QueryRow(`select deleted_timestamp is null from attachments
+where company_id=$1::uuid and attachment_id=$2::uuid`, company.CompanyID, attachmentID).Scan(&attachmentActive); err != nil {
+		t.Fatal(err)
+	}
+	if !attachmentActive {
+		t.Fatal("shared attachment was marked pending while its exact email_message owner survived")
+	}
+}

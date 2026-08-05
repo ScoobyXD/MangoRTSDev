@@ -22,7 +22,7 @@ func TestAttachmentUploadStep2SchemaContract(t *testing.T) {
 	if jobStart < 0 {
 		t.Fatal("could not find final upload-job schema")
 	}
-	previewOffset := strings.Index(schema[jobStart:], "create table if not exists attachment_variants")
+	previewOffset := strings.Index(schema[jobStart:], "create table if not exists attachment_previews")
 	if previewOffset <= 0 {
 		t.Fatal("could not isolate final upload-job schema")
 	}

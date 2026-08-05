@@ -732,7 +732,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "information_required")
 			return
 		}
-		if rejectDurableInlineFileBytes(w, "node_information", req.Information) {
+		if rejectDurableInlineFileBytes(w, "node_content", req.Information) {
 			return
 		}
 		if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeNode, nodeID, "node_not_found") {

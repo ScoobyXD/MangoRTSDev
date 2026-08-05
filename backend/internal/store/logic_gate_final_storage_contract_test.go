@@ -19,7 +19,6 @@ func TestLogicGateProductionStorageHasNoLegacyTableSQL(t *testing.T) {
 		"postgres_recycle_bin.go",
 		"attachment_relationship_cleanup.go",
 		"../http/logic_gate_handlers.go",
-		"../../cmd/mango-attachment-migrate/main.go",
 	}
 	for _, path := range paths {
 		body, err := os.ReadFile(path)

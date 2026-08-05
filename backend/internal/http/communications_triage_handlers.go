@@ -47,7 +47,7 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		return
 	}
 	for _, item := range []*communicationsTriageAtomicNodeInformationRequest{req.LinkedTextBlock, req.InitialChat} {
-		if item != nil && rejectDurableInlineFileBytes(w, "communications_triage_atomic_node_information", item.Information) {
+		if item != nil && rejectDurableInlineFileBytes(w, "communications_triage_atomic_node_content", item.Information) {
 			return
 		}
 	}

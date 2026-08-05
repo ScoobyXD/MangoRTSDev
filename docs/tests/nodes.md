@@ -1,12 +1,14 @@
-# Process Story: Node textbox chats follow their textbox
+# Process Story: Node content lives in final purpose-built storage
 
-A user creates a chat inside a Node textbox, optionally quoting selected textbox text or an attached email
+A user creates or edits a Node textbox, attaches an exact email, uploads a file, or creates a chat
 ↓
-The backend stores the chat in `node_textbox_chats` and stores any file relationship in `attachment_relationships`
+The backend stores TipTap JSON in `node_textboxes`, chat rows in `node_textbox_chats`, exact email placement in `email_relationships`, and file ownership in `attachment_relationships`
 ↓
-Deleting the textbox deletes every chat owned by that textbox, including email-selection chats, and retires their attachment relationships through the shared last-owner cleanup lifecycle
+Content changes and viewer baselines use `node_content_changes.textbox_id`, `node_content_change_seen`, and `node_textbox_seen_snapshots`; the API keeps the stable public `information_id` by assembling projection-shaped responses from those final rows
 ↓
-The normalized email message, thread, and email attachment content remain available because the textbox never owns the email itself
+Deleting a textbox removes its owned chats and retires those chats' file links. Node-owned file and email relationships remain available from the Node header even when their recorded textbox origin is deleted; deleting the final file owner follows pending-delete, S3-before-Postgres, retry-safe cleanup
+
+The production Node path must never query or write `node_information`, `node_projection_table`, or `node_projection_seen_snapshots`. Textbox creation and editing use the JSON editor API; the old projection-shaped text writer is rejected rather than translated or dual-written.
 
 Last updated: 2026-08-04
 
@@ -58,9 +60,9 @@ N19 - A node header can show and edit the node's project placement: the project 
 N20 - Assigning a node to a project from the node header supports project-only assignment; selecting a Logic Gate within that project is optional and moves or assigns the node to that Logic Gate only when chosen.
 N21 - A node with a known project relationship exposes a Go to Project action that opens the related project directly.
 N22 - When selected Node text is sent to chat as a quote/prefill, canceling with the quote X or closing that pending chat completely cancels the action: it clears the quote/prefill, removes the temporary source annotation, and collapses the editor/browser selection without sending a message. An unrelated chat draft remains intact.
-N23 - Live node editor typing writes the current text-block state to the node editor projection table and must not append a full rich-text document row to `node_information` on every keystroke autosave.
+N23 - Live Node editor typing writes current TipTap JSON only to `node_textboxes`. It must not write a projection or information row.
 N24 - Node Save Settings lists saved editor versions sorted by saved timestamp, including save kind, saving user, save time, and saved text box count; automatic saved-version creation is disabled during the emergency slowness fix.
-N25 - Clicking Save flushes and acknowledges every pending structured collaboration operation, materializes the canonical collaboration head, then creates one manual saved editor version in `node_information`.
+N25 - Clicking Save flushes the current JSON document and creates one manual batch in `node_textboxes_history`.
 N26 - Node automatic saved-version creation must not run in the background during the emergency slowness fix. If auto saved versions are re-enabled later, they must only consider active nodes, must only save nodes whose editor projection has changed, and must never scan or save every node in the system.
 N27 - Restoring a node saved version requires confirmation and overwrites the current node editor projection rows from that saved version without creating another saved-version row.
 N28 - Node text-box typing is converted to ordered 160 ms micro-batched HTML patches. One acknowledged operation is in flight per exact document/client queue; later edits remain durable pending operations and never trigger overlapping whole-document projection writes.
@@ -327,7 +329,7 @@ Given:
 - A newer projection value may arrive while the document or a shared toolbar control has focus.
 
 Expected:
-- Regular typing commits bounded collaboration operations; `node_projection_table` is materialized only as a derived compatibility snapshot/metadata read model, while explicit saved versions still append to `node_information`.
+- Regular typing commits the final `node_textboxes` JSON row; explicit saved versions use `node_textboxes_history`. Projection-shaped API rows are assembled at read time and are not stored in a compatibility table.
 - Save Settings shows saved versions with save kind, saving user, timestamp, and text box count.
 - Saved-version history is requested only after Save Settings activation; initial open uses the exact collaboration snapshot/ETag.
 - Manual Save flushes and acknowledges pending operations, materializes the canonical collaboration head, then writes one saved-version batch.

@@ -190,84 +190,36 @@ returning relationship_id::text`, input.CompanyID, relationshipID, input.Project
 func (r *PostgresRepo) addInitialNodeInformationTx(ctx context.Context, tx *sql.Tx, input NodeInformationInput) (domain.NodeInformation, error) {
 	companyID := cleanUUIDText(input.CompanyID)
 	nodeID := cleanUUIDText(input.NodeID)
-	infoType := strings.TrimSpace(input.Type)
-	if companyID == "" || nodeID == "" || infoType == "" || strings.TrimSpace(input.Information) == "" {
+	if companyID == "" || nodeID == "" || !isEditorTextBoxType(input.Type) {
 		return domain.NodeInformation{}, ErrInvalid
-	}
-	item := domain.NodeInformation{
-		CompanyID:     companyID,
-		InformationID: newUUIDv7String(),
-		NodeID:        nodeID,
-		Type:          infoType,
-		Information:   input.Information,
-	}
-	if err := tx.QueryRowContext(ctx,
-		`insert into node_information
-		 (company_id, information_id, node_id, type, information, created_timestamp, updated_timestamp)
-		 values ($1::uuid, $2::uuid, $3::uuid, $4::information_type, $5, now(), now())
-		 returning company_id::text, information_id::text, node_id::text, type::text, information, created_timestamp, updated_timestamp`,
-		item.CompanyID, item.InformationID, item.NodeID, item.Type, item.Information,
-	).Scan(
-		&item.CompanyID,
-		&item.InformationID,
-		&item.NodeID,
-		&item.Type,
-		&item.Information,
-		&item.CreatedTimestamp,
-		&item.UpdatedTimestamp,
-	); err != nil {
-		return domain.NodeInformation{}, err
 	}
 	keyValue := cleanUUIDText(input.InformationID)
 	if keyValue == "" {
-		keyValue = item.InformationID
+		keyValue = newUUIDv7String()
 	}
-	previous, previousFound, err := postgresNodeProjectionTx(ctx, tx, companyID, nodeID, keyValue)
+	body, err := nodeTextboxBodyFromProjectionInformation(input.Information)
 	if err != nil {
 		return domain.NodeInformation{}, err
 	}
-	var projection domain.NodeProjection
-	if err := tx.QueryRowContext(ctx,
-		`insert into node_projection_table
-		 (company_id, node_id, information_id, type, information, created_timestamp, updated_timestamp)
-		 values ($1::uuid, $2::uuid, $3::uuid, $4::information_type, $5, now(), now())
-		 on conflict (company_id, node_id, information_id)
-		 do update set
-		   type=excluded.type,
-		   information=excluded.information,
-		   updated_timestamp=now()
-		 returning company_id::text, node_id::text, information_id::text, type::text, information, created_timestamp, updated_timestamp`,
-		item.CompanyID, item.NodeID, keyValue, item.Type, item.Information,
-	).Scan(
-		&projection.CompanyID,
-		&projection.NodeID,
-		&projection.InformationID,
-		&projection.Type,
-		&projection.Information,
-		&projection.CreatedTimestamp,
-		&projection.UpdatedTimestamp,
-	); err != nil {
+	if _, err := tx.ExecContext(ctx, `insert into node_textboxes(
+  company_id,node_id,textbox_id,body_json,revision,display_order,created_timestamp,updated_timestamp
+) values($1::uuid,$2::uuid,$3::uuid,$4::jsonb,1,0,now(),now())`, companyID, nodeID, keyValue, body); err != nil {
 		return domain.NodeInformation{}, err
 	}
-	if strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "" {
-		var previousPtr *domain.NodeProjection
-		if previousFound {
-			previousPtr = &previous
-		}
-		if err := insertNodeContentChangesTx(ctx, tx, buildNodeContentChanges(
-			companyID,
-			nodeID,
-			keyValue,
-			infoType,
-			previousPtr,
-			input.Information,
-			normalizeNodeContentChangeActor(cleanUUIDText(input.ActorUserID), input.ActorDisplayName),
-			time.Now().UTC(),
-		)); err != nil {
+	projection, found, err := postgresNodeFinalProjectionTx(ctx, tx, companyID, nodeID, keyValue)
+	if err != nil {
+		return domain.NodeInformation{}, err
+	}
+	if !found {
+		return domain.NodeInformation{}, ErrNotFound
+	}
+	if cleanUUIDText(input.ActorUserID) != "" {
+		if err := insertNodeContentChangesTx(ctx, tx, buildNodeContentChanges(companyID, nodeID, keyValue,
+			"Text box", nil, string(body), normalizeNodeContentChangeActor(input.ActorUserID, input.ActorDisplayName), time.Now().UTC())); err != nil {
 			return domain.NodeInformation{}, err
 		}
 	}
-	return item, nil
+	return nodeProjectionAsInformation(projection), nil
 }
 
 func projectRelationshipUpsertedWorkspaceEventInput(item domain.ProjectRelationshipProjection, actorUserID string) DomainEventInput {

@@ -41,8 +41,8 @@ Recommended starting classification:
 | `users` | map | Prod Cognito subjects are separate; map by lowercase email. |
 | `company_memberships` | map | Import only approved real users and companies. |
 | `company_user_groups`, `company_user_group_members` | map | Rewrite user and company references. |
-| `nodes`, `node_information`, `node_relationships` | copy or map | Core product data; filter test/debug rows. |
-| `logic_gates`, `logic_gate_information`, `logic_gate_relationships` | copy or map | Core product data; preserve relationships. |
+| `nodes`, `node_textboxes`, `node_textboxes_history`, `node_textbox_chats`, `node_content_changes`, `node_content_change_seen`, `node_textbox_seen_snapshots`, `node_relationships` | copy or map | Core Node data in the final model; preserve exact textbox/chat IDs and copy owners before dependents. |
+| `logic_gates`, `logic_gate_textboxes`, `logic_gate_textboxes_history`, `logic_gate_relationships` | copy or map | Core Logic Gate data in the final model; preserve relationships. |
 | `node_logic_gate_assignments` | copy or map | Requires nodes and logic gates to be imported first. |
 | `projects`, `project_relationships`, `accounts` | copy or map | Core business data if real. |
 | `company_explorer_*` | copy or map | Preserve folder/item tree only after filtering dev/test content. |
@@ -55,7 +55,7 @@ Recommended starting classification:
 | `communications_*` provider/cache/job/read tables | skip or rebuild | Avoid copying webhook/archive/read state unless explicitly approved. |
 | Archive/job tables | skip | Do not replay dev operational jobs in prod. `event_rows` was removed by `20260712_realtime_simplification.sql`. |
 | `notifications` | rebuild or skip | Derived/user-facing state; copy only with a deliberate decision. Notification replay checkpoints were removed by `20260712_realtime_simplification.sql`. |
-| `*_projection*`, `workspace_read_versions`, remaining workspace-derived checkpoints | rebuild | Derived hot-read state should be regenerated where possible. |
+| `workspace_read_versions` and remaining derived checkpoints | rebuild | Derived hot-read state should be regenerated where possible. Retired information/projection tables must not be imported or recreated. |
 
 The final migration inventory should live in a reviewed doc or script comments and include the exact table names found in the current schema.
 

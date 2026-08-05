@@ -16,7 +16,7 @@ func TestAttachmentPreviewSchemaUsesFinalContract(t *testing.T) {
 	if start < 0 {
 		t.Fatal("could not find attachment_previews schema")
 	}
-	end := strings.Index(text[start:], "create table if not exists resource_attachments")
+	end := strings.Index(text[start:], "create table if not exists nodes")
 	if end < 0 {
 		t.Fatal("could not isolate attachment_previews schema")
 	}

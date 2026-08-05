@@ -12,6 +12,18 @@ Old information/projection writes are refused, and no Logic Gate chat feature or
 ↓
 Delete, recycle, and later operator-controlled retirement use the final ownership rules
 
+## Process Story: Node textbox JSON uses final storage
+
+A user opens or edits a Node textbox
+↓
+The backend reads and writes the exact `node_textboxes` TipTap JSON row and records authored visible-text changes by `textbox_id`
+↓
+Viewer baselines are stored in `node_textbox_seen_snapshots`, and saved batches are stored in `node_textboxes_history`
+↓
+The frontend keeps its stable projection-shaped `information_id`, assembled from final textbox, email, chat, and attachment rows
+↓
+The old Node information/projection writer is rejected; there is no fallback or dual write
+
 ## Process Story: Node textbox chats use their permanent table
 
 A user opens a Node and reads, creates, replies to, edits, or deletes a textbox chat
@@ -24,7 +36,7 @@ Deleting a textbox deletes every chat owned by that textbox, including a chat th
 ↓
 The normalized email message, email thread, and email attachments remain because the textbox owns the chat but does not own the email
 ↓
-Legacy Node chat rows remain unchanged as rollback and audit evidence but are excluded from current reads
+The legacy Node chat source rows are retirement evidence only and are excluded from current reads; the migration-only source view is not recreated
 
 ## Process Story: compact JSON keeps the same editor document
 

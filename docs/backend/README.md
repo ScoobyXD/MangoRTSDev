@@ -2,7 +2,7 @@
 
 The Go module and binary still use the older `miraeopus` internal name. The product name and AWS resource naming are MangoRTS.
 
-This backend now targets the canonical Aurora PostgreSQL schema (`nodes`, `node_information`, `logic_gates`, Kanban, communications, etc.).
+This backend targets the canonical Aurora PostgreSQL schema. Node editor content uses `node_textboxes`, `node_textbox_chats`, `node_content_changes`, and `node_textbox_seen_snapshots`; durable mail uses `email_threads`, `email_messages`, and `email_relationships`; files use the final attachment tables. The retired generic information/projection tables are not part of a fresh database.
 
 ## Run locally
 

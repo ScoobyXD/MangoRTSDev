@@ -135,7 +135,9 @@ func (r *MemoryRepo) addCommunicationsConversionInformationLocked(input NodeInfo
 }
 
 func (r *PostgresRepo) addCommunicationsConversionInformationTx(ctx context.Context, tx *sql.Tx, input NodeInformationInput) (domain.NodeInformation, error) {
-
+	if isEditorTextBoxType(input.Type) {
+		return r.addInitialNodeInformationTx(ctx, tx, input)
+	}
 	item, err := addEmailCollaborationNodeInformationTx(ctx, tx, input)
 	if err != nil {
 		return domain.NodeInformation{}, err

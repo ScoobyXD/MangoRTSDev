@@ -1,5 +1,7 @@
 # Process Story: copy Node textbox chats, then switch the backend authority
 
+Status: complete and historical. `node_textbox_chats` is the only current chat authority. The migration-only `v3_node_textbox_chat_source_v1` view and its retired email/attachment source tables must not be recreated. The final Node retirement transaction verifies chat identity coverage before dropping the three remaining legacy Node tables.
+
 A user can open a Node textbox and see its current comments
 ↓
 Before cutover, the current comment authority is the active `Text block chat` row in `node_projection_table`; `node_information` is event/history storage and may contain older or stale rows
