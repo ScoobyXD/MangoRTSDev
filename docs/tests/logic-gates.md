@@ -1,4 +1,16 @@
-Last updated: 2026-07-21
+# Process Story: Logic Gate documents use final storage
+
+A user opens a Logic Gate and reads or edits its one document
+↓
+The existing projection-shaped read response is assembled from `logic_gate_textboxes`, exact final email relationships, and final attachment relationships
+↓
+Typing saves only through the editor JSON contract into `logic_gate_textboxes`, while a manual Save appends one batch to `logic_gate_textboxes_history`
+↓
+Deleting or recycling the Logic Gate cleans up exact final email and attachment ownership without reading or writing the legacy information/projection tables
+↓
+The two legacy Logic Gate tables may be retired only after the guarded copy, deployment, smoke, reconciliation, soak, snapshot, dependency, and operator-approval gates pass
+
+Last updated: 2026-08-04
 
 # Logic Gates Tests
 
@@ -27,17 +39,17 @@ LG13 - New Logic Gate editor documents default to alphanumerical numbering, and 
 LG14 - The Logic Gate editor font-size control applies to selected text and, for a collapsed caret, becomes the sticky font size for subsequently typed characters until changed again. Toolbar focus and repeated plus/minus clicks preserve the saved caret and update the visible pending size/typing height rather than discarding it.
 LG15 - Logic Gate editor Bold, Underline, Italic, and Strikethrough controls must toggle selected text or collapsed-caret typing semantics and must visually reflect the active or pending formatting at the current caret or selection. Italic selected with a collapsed caret remains pending after toolbar focus and applies to subsequently typed text.
 LG16 - Inserting a table from the shared Logic Gate editor toolbar must insert it at the current caret/selection location, not at the top-left or beginning of the editor. A table must not inject cell-level alignment-icon controls because alignment remains in the shared header toolbar.
-LG17 - Live Logic Gate editor typing writes the current text state to the Logic Gate editor projection table and must not append a full rich-text document row to `logic_gate_information` on every keystroke autosave.
+LG17 - Live Logic Gate editor typing writes the current JSON document to `logic_gate_textboxes.body_json`, advances its revision, and never writes `logic_gate_information` or `logic_gate_projection_table`.
 LG18 - Logic Gate Save Settings lists saved editor versions sorted by saved timestamp, including save kind, saving user, save time, and saved text box count; automatic saved-version creation is disabled during the emergency slowness fix.
-LG19 - Clicking Save flushes and acknowledges pending collaboration operations, materializes the canonical collaboration head, then creates one manual saved version in `logic_gate_information`.
-LG20 - Logic Gate automatic saved-version creation must not run in the background during the emergency slowness fix. If auto saved versions are re-enabled later, they must only consider active Logic Gates, must only save Logic Gates whose editor projection has changed, and must never scan or save every Logic Gate in the system.
-LG21 - Restoring a Logic Gate saved version requires confirmation and overwrites the current Logic Gate editor projection row from that saved version without creating another saved-version row.
+LG19 - Clicking Save flushes and acknowledges pending collaboration operations, materializes the canonical document, then creates one manual saved version batch in `logic_gate_textboxes_history`.
+LG20 - Logic Gate automatic saved-version creation must not run in the background during the emergency slowness fix. If auto saved versions are re-enabled later, they must only consider active Logic Gates, must only save Logic Gates whose final document changed, and must never scan or save every Logic Gate in the system.
+LG21 - Restoring a Logic Gate saved version requires confirmation and overwrites the current `logic_gate_textboxes` row from final history without creating another saved-version row.
 LG22 - Logic Gate typing uses ordered 160 ms structured-operation micro-batches on one exact document queue. Stable operation IDs and server revisions serialize commit acknowledgement without overlapping whole-document projection writes or cross-target queue replacement.
 LG23 - Logic Gate editor save state must use the vocabulary and behavior `has changed`, `has not changed`, `save in progress`, and `save needed after current save`. The editor is marked `has not changed` only when the completed request's version matches the latest local version.
 LG24 - The Logic Gate editor exposes applying the current GVIC template to already assigned nodes as a one-shot action in the shared **More editor actions** menu, not as a persistent checkbox, fifth GVIC card, or vertical control between the title and GVIC fields.
 LG25 - Pressing the Logic Gate editor's apply-to-assigned-nodes action opens an explicit Yes/No confirmation; No, cancel, or dismissal makes no write, and only Yes applies the current Logic Gate GVIC template to nodes currently assigned to that Logic Gate. Ordinary GVIC role edits remain template-only for existing assigned nodes.
 LG26 - Logic Gate editor surfaces participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, italic, strikethrough, text highlight/No highlight, left/center/right alignment, table, and people-suggestion/entity-boundary semantics must apply to Logic Gate editor text wherever it is opened. The `@`/`!` people picker uses stable, visible per-user profile colors rather than gray-only rows.
-LG27 - Logic Gate editor inline images/files must follow `docs/tests/attachments.md`: rich-editor paste/drop uses the shared editor image path, and durable Logic Gate information/projection rows store attachment references instead of data URLs or base64 file bytes.
+LG27 - Logic Gate editor inline images/files must follow `docs/tests/attachments.md`: rich-editor paste/drop uses the shared editor image path, `logic_gate_textboxes.body_json` stores attachment references, and file ownership comes only from `attachments` plus `attachment_relationships`; no durable row stores data URLs or base64 file bytes.
 LG28 - The Logic Gate editor toolbar must use the shared rich-editor toolbar source and shared formatting controller. Font-size minus/value/plus, Bold, Underline, Italic, Strikethrough, the Highlight split button with **No highlight**, left/center/right alignment, table insertion, and the outline-style dropdown must match node text boxes, project text boxes, mail editor surfaces, and email signatures. The highlight main hitbox applies the chosen color without opening the picker, while the arrow only opens the picker. Vibrant active styling applies only to the individual hitbox and remains distinct from hover, focus, and disabled state.
 LG29 - A Logic Gate permissions view opened from the editor, map, Company Explorer, or another Logic Gate entry point always displays **Save** when editable. Saving persists the current selection without closing; denied views remain dismissible and do not attempt a write. This permission action is distinct from editor saved-version Save.
 LG30 - When a personal or Shared Triage email is converted into a node/card assigned to a Logic Gate, the created attached-email projection retains the source account email and, for shared mail, the shared-inbox ID. Later node email reads and mutations use that stored mailbox scope.
@@ -63,6 +75,12 @@ LG49 - Exact committed Logic Gate deltas reach every healthy exact subscriber th
 LG51 - A successful cross-Logic-Gate Node reassignment creates exactly one immutable Node timeline transfer stamp in the same transaction, using historical actor/source/destination name snapshots.
 LG52 - Same-Logic-Gate status movement, initial assignment, and removal do not create cross-Logic-Gate transfer stamps.
 LG50 - A Logic Gate document is fully healthy only after identity/Edit authorization, exact subscription acceptance, confirmed heartbeat, canonical snapshot recovery, buffered-event ordering, and pending acknowledgements complete. Orange permits durable queued typing; global red states gate interactions.
+LG54 - The current product has exactly one independently editable document per Logic Gate. It has no Logic Gate textbox-chat pane, so the final model must not invent a `logic_gate_textbox_chats` table or chat API.
+LG55 - The existing projection-shaped Logic Gate read contract is assembled from the one live `logic_gate_textboxes` row, its final attachment relationships, and exact `email_relationships` joined to `email_messages` and `email_threads`; this preserves the frontend response without preserving legacy storage.
+LG56 - Current Logic Gate attached-email access comes only from an exact active `email_relationships` row plus normal Logic Gate permission. The cutover adds no new attach-email product surface.
+LG57 - Legacy Logic Gate information writes are closed: text writes require the editor JSON contract, and unsupported legacy information types are rejected. There is no compatibility read, fallback, or dual write.
+LG58 - Logic Gate deletion and recycle capture use final textbox/history, exact email relationships, and modular attachment cleanup. Removing one attachment owner retains a shared file, while final-owner cleanup follows the pending-delete, S3-before-Postgres, retry-safe lifecycle.
+LG59 - Dropping `logic_gate_information` and `logic_gate_projection_table` is a separate human operation. It requires PostgreSQL 17.x, exact unordered schema evidence, a reconciled copy, no-current-writer proof, smoke/recycle verification, soak and snapshot confirmation, no surviving dependency, and explicit operator approval.
 
 ## Scenarios
 
@@ -223,12 +241,12 @@ Business logic covered:
 
 Given:
 - A user pastes or drops screenshots into a Logic Gate editor body.
-- The editor saves the latest Logic Gate projection.
+- The editor saves the latest final Logic Gate textbox document.
 
 Expected:
 - The image upload/reference behavior comes from the unified rich-editor image path, not a Logic Gate-only implementation.
-- The saved Logic Gate projection stores attachment references.
-- Logic Gate information/projection rows do not store durable data URLs or base64 file bytes.
+- The saved `logic_gate_textboxes` document stores attachment references.
+- Final Logic Gate textbox/history rows do not store durable data URLs or base64 file bytes.
 - Fullscreen image preview still opens the original or highest-quality available file through the shared body-level modal layer above Key Views/Explorer/Search Explorer, traps focus while open, and restores prior focus when closed.
 
 ### Scenario LG-S8: Logic Gate Permissions Save
@@ -317,3 +335,30 @@ Expected:
 LG51 - Email-derived Nodes are not attached to a Logic Gate at chat creation. A later ordinary assignment is allowed, preserves selected Node priority/status behavior, and returns `created_from_email=true` immediately so the established email icon appears on the Logic Gate row/card without waiting for a refresh.
 LG52 - Normal and urgent mentions committed from a Logic Gate editor use that Logic Gate's current effective GVIC assignments and roles. Node GVIC is not consulted for a Logic Gate-owned action.
 LG53 - A Logic Gate GVIC mutation sends an assignment update only to a newly assigned or effective-role-changed user. Existing unchanged users, removed users, unrelated users, and the actor receive none.
+
+### Scenario LG-S13: Final Logic Gate storage and retirement boundary
+
+Business logic covered:
+- LG17
+- LG19
+- LG21
+- LG54
+- LG55
+- LG56
+- LG57
+- LG58
+- LG59
+
+Given:
+- A user opens the current Logic Gate document, types, manually saves, restores a saved batch, and reloads it.
+- The Logic Gate has a final attachment relationship and may have an exact final attached-email relationship.
+- An old client attempts a legacy information/projection write.
+- An operator evaluates the two legacy Logic Gate tables for retirement.
+
+Expected:
+- Current document reads and writes use `logic_gate_textboxes`; manual save and restore use `logic_gate_textboxes_history`.
+- The existing projection-shaped read contains the final textbox, attachment references, and only exact active final email relationships.
+- No Logic Gate chat table or chat feature is created.
+- The legacy text endpoint directs the caller to editor JSON, every unsupported legacy information type is rejected, and no legacy row is written.
+- Delete and recycle paths use only final Logic Gate, email, and attachment ownership rules, including shared-file retention and last-owner cleanup.
+- Retirement refuses PostgreSQL drift, unsupported legacy rows, copy mismatch, missing approvals, or surviving dependencies and never uses `CASCADE`.

@@ -1,7 +1,7 @@
 # Editor Module
 
 ## Purpose
-The Editor module is the linked document workspace for MangoRTS. It gives the selected node or logic gate one full-frame writing surface with native caret behavior, scrolling, and projection-backed persistence.
+The Editor module is the linked document workspace for MangoRTS. It gives the selected node or logic gate one full-frame writing surface with native caret behavior, scrolling, and final textbox-backed persistence.
 
 ## Retired Node v2/Yjs path (historical record, 2026-07-28)
 
@@ -100,10 +100,10 @@ Search and creation retain the current company/workspace scope and existing effe
 - Read the currently selected node from linked Node Map local state.
 - Read the currently selected logic gate from linked Logic Gate Map local state.
 - Load selected node details and latest `Text box` projection rows.
-- Load selected node/logic-gate projection rows for latest text-box values.
+- Load the existing projection-shaped Node/Logic Gate response assembled from final textbox storage.
 - Render a single rich document editor surface that supports normal click-to-place caret, blinking insertion point, typing, spacing, tabs, links, per-selection font sizing, and scroll overflow.
-- Persist document edits back to backend node/logic-gate information APIs with a stable `information_id`.
-- Clear a document by deleting its latest projection row instead of writing blank history rows.
+- Persist document edits through the editor JSON API with a stable document/textbox ID.
+- Clear a document by saving the empty canonical JSON document instead of writing a legacy projection/history row.
 - Surface node context from the same selected node (metadata summary, history timeline, and non-text info preview).
 - Support generic node title updates directly from editor context header (`PUT /v1/nodes/:node_id`), including inline rename UX.
 
@@ -112,14 +112,14 @@ Search and creation retain the current company/workspace scope and existing effe
 - **Linking source:** generic frame-link graph (`frame-module-links-v1`) + frame registry (`frame-module-registry-v1`) with graph traversal to nearest linked map frame.
 - **Explorer fallback context source:** editor can read explorer-driven node selection from `node-map-explorer-context-v1:<company_id>:<editor_widget_id>` when no direct map-state context is available.
 - **Backend read path:** `GET /v1/nodes/:node_id?company_id=...`.
-- **Backend write path:** `POST /v1/nodes/:node_id/information` for text-box payloads.
-- **Logic gate write path:** `POST /v1/logic-gates/:logic_gate_id/information` for text-box payloads.
-- **Backend document clear path:** `DELETE /v1/nodes/:node_id/projection/:information_id?company_id=...`.
-- **Backend logic-gate document clear path:** `DELETE /v1/logic-gates/:logic_gate_id/projection/:information_id?company_id=...`.
+- **Node document write path:** `POST /v1/editor-json/node/:node_id/documents/:document_id?company_id=...`.
+- **Logic Gate document write path:** `POST /v1/editor-json/logic_gate/:logic_gate_id/documents/:document_id?company_id=...`.
+- **Backend Node document clear path:** save the empty canonical JSON document through the same editor JSON document path.
+- **Backend Logic Gate document clear path:** save the empty canonical JSON document through the same editor JSON document path; the legacy projection-delete path is not a document writer.
 - **Backend node-title update path:** `PUT /v1/nodes/:node_id` with `{ company_id, title }`.
 - **Backend logic-gate header update path:** `PUT /v1/logic-gates/:logic_gate_id` with `{ company_id, header }`.
 - **Backend projection read path:** `GET /v1/nodes/:node_id/projection?company_id=...` (typed node projection rows for hot editor loads).
-- **Backend logic-gate projection read path:** `GET /v1/logic-gates/:logic_gate_id/projection?company_id=...` (typed latest logic-gate information rows).
+- **Backend Logic Gate projection read path:** `GET /v1/logic-gates/:logic_gate_id/projection?company_id=...` (existing response shape synthesized from `logic_gate_textboxes` and final relationships).
 - **Event sync hooks:** `EVENT_FRAME_LINK_GRAPH_UPDATED`, `EVENT_NODE_MAP_SELECTION_UPDATED`, `EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED`, `EVENT_EXPLORER_CONTEXT_UPDATED`, and `storage` events.
 
 ## Unified Map + Rename Sync Update (2026-05-03)
@@ -129,10 +129,10 @@ Search and creation retain the current company/workspace scope and existing effe
 
 ## Logic Gate Context Update (2026-05-01)
 - When Editor is linked to a Logic Gate Map, the context header says `Logic Gate:` instead of `Node:`.
-- Logic-gate documents use the same text surface as node documents. Saves append history to `logic_gate_information` and upsert latest values into `logic_gate_projection_table`.
-- Editor loads latest logic-gate document text from `GET /v1/logic-gates/:logic_gate_id/projection`, matching the node projection path.
-- Blank/whitespace-only editor contents are never sent as information writes; old blank logic-gate text rows are ignored when choosing the document to display.
-- This keeps UI and headless API behavior equivalent: agents can create/edit logic-gate notes without needing the visual editor.
+- Logic Gate documents use the same text surface as node documents. Ordinary saves update `logic_gate_textboxes`; manual saved versions use `logic_gate_textboxes_history`.
+- Editor loads the latest Logic Gate document from `GET /v1/logic-gates/:logic_gate_id/projection`; the backend preserves that response shape while reading final tables.
+- Blank documents follow the editor JSON contract. No current request creates or selects a legacy Logic Gate information/projection row.
+- Headless callers use the same editor JSON document contract as the UI; the legacy information endpoint is not a compatibility writer.
 
 ## Document Editing Reliability Update (2026-05-04)
 - The body editor uses a constrained rich `contentEditable` surface so selected text can carry inline formatting while the frame still owns scroll, autosave, and document context.
@@ -152,10 +152,10 @@ Search and creation retain the current company/workspace scope and existing effe
 - `Indent Guides` places guides on VS Code-style indent boundaries, meaning the depth-1 guide sits at the left text edge, the depth-2 guide sits one tab width in, and each deeper guide advances by exactly one five-space tab width.
 - In `Indent Guides`, Enter copies the current line indentation, Shift+Tab removes one indent level, and Backspace deletes a preceding tab-sized five-space run in one edit.
 - Clearing all text calls the projection delete API. This keeps reload behavior correct while preserving append-only nonblank history for audit and scale.
-- The same document APIs work for headless agents: agents can post latest document content with a stable `information_id`, read projections for sub-100ms hot paths, and delete a projection to clear the latest document value. Outline helpers remain pure frontend functions so future agent-facing command APIs can reuse the same text-edit rules without needing a browser.
+- The same editor JSON document APIs work for headless agents: callers save with a stable document ID, read the projection-shaped hot response where needed, and save the empty canonical JSON document to clear it. Outline helpers remain pure frontend functions so future agent-facing command APIs can reuse the same text-edit rules without needing a browser.
 
 ## Approved Editor Feel
-- Keep the editor feeling like this: a simple, fast, rich document surface with natural typing, preserved document viewport, vertical and horizontal scrolling, and projection-backed autosave.
+- Keep the editor feeling like this: a simple, fast, rich document surface with natural typing, preserved document viewport, vertical and horizontal scrolling, and final textbox-backed autosave.
 - Outline behavior must stay input-only. Switching outline modes must never scan and transform the whole existing document.
 - Tab is intentionally five literal spaces. This is UI-only text input behavior; the backend remains the same headless API contract for users and agents.
 - Node and logic-gate title text stays neutral black in light mode, not the Mango accent. The document insertion caret also stays neutral black in light mode, not orange.
@@ -163,7 +163,7 @@ Search and creation retain the current company/workspace scope and existing effe
 - Rich formatting is intentionally kept inline and sanitized at the document boundary. This keeps writes append-only, API-friendly, and cheap to serve through projection hot paths while allowing document-level formatting in the UI.
 
 ## Semantic vs layout persistence policy (2026-04-27)
-- Editor information values are persisted server-side and served through typed node/logic-gate projection rows for hot-path loads.
+- Editor document values are persisted in final textbox tables and may be served through projection-shaped API responses for hot-path loads.
 - The editor no longer persists document geometry. Frame geometry remains dashboard layout state; document text remains semantic data.
 - This removes hot-path JSON geometry reconstruction work while preserving fast local layout interaction.
 
@@ -181,11 +181,11 @@ Search and creation retain the current company/workspace scope and existing effe
 ## Projection identity hardening update (2026-04-28)
 - Every newly created editor textbox now gets a stable client-generated UUID `information_id` immediately (before first network save).
 - Blur saves and follow-up saves continue using that same textbox identity key.
-- The API still appends history rows to `node_information`, but projection identity now remains stable in `node_projection_table`.
-- Logic-gate text boxes follow the same contract with `logic_gate_information` history rows and `logic_gate_projection_table` latest rows.
+- Node textbox IDs remain stable in `node_textboxes`; manual history uses `node_textboxes_history`.
+- Logic Gate textboxes keep stable IDs in `logic_gate_textboxes`; manual history uses `logic_gate_textboxes_history`.
 - This prevents textbox duplication after refresh caused by projection-key drift during rapid save/blur sequences.
-- The current Editor has one document surface per node or logic gate. `Text box` projections are canonicalized to one current row per entity; duplicate text-box projection IDs are collapsed by the backend read/write path and cleanup migration.
-- Multiple non-text projection rows can still exist for distinct future attachments/fields, but they must not be loaded into the single editor document surface.
+- The current Editor has one document surface per node or Logic Gate. The selected stable textbox row is the current document authority.
+- Attachments and exact email links come from their final relationship tables and do not become extra editor documents.
 
 ## Blank-title inline-edit continuity fix (2026-04-29)
 - Editor now keeps the node-title header visible whenever a node is selected, even if the node title is currently blank.

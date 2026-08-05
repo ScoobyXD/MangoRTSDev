@@ -1696,42 +1696,6 @@ create table if not exists logic_gate_relationships (
   foreign key (company_id, logic_gate_id_b) references logic_gates (company_id, logic_gate_id)
 );
 
-create table if not exists logic_gate_information (
-  company_id uuid not null,
-  information_id uuid not null,
-  logic_gate_id uuid not null,
-  type information_type not null,
-  information text not null,
-  save_batch_id uuid,
-  save_kind text not null default 'legacy',
-  saved_by_user_id uuid,
-  saved_by_display_name text not null default '',
-  source_information_id uuid,
-  created_timestamp timestamptz not null,
-  updated_timestamp timestamptz not null,
-  constraint logic_gate_information_save_kind_chk check (save_kind in ('legacy', 'manual', 'auto')),
-  constraint logic_gate_information_nonblank_chk check (btrim(information) <> ''),
-  primary key (company_id, information_id),
-  foreign key (saved_by_user_id) references users (user_id) on delete set null,
-  foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id)
-);
-
-create table if not exists logic_gate_projection_table (
-  company_id uuid not null,
-  logic_gate_id uuid not null,
-  information_id uuid not null,
-  type information_type not null,
-  information text not null,
-  is_deleted boolean not null default false,
-  revision bigint not null default 1,
-  created_timestamp timestamptz not null,
-  updated_timestamp timestamptz not null,
-  constraint logic_gate_projection_table_nonblank_chk check (btrim(information) <> ''),
-  constraint logic_gate_projection_table_revision_chk check (revision > 0),
-  primary key (company_id, logic_gate_id, information_id),
-  foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id)
-);
-
 create table if not exists logic_gate_map_positions (
   company_id uuid not null,
   logic_gate_id uuid not null,
@@ -1757,100 +1721,6 @@ create table if not exists user_logic_gate_shortcuts (
 create index if not exists idx_user_logic_gate_shortcuts_user_company_position
   on user_logic_gate_shortcuts(user_id, company_id, position, logic_gate_id);
 
--- Existing deployments may already have current-value logic_gate_information rows.
--- Seed the projection table once so the new hot read path can serve those rows too.
-do $$
-begin
-  if to_regclass('public.idx_logic_gate_projection_table_one_text_box') is not null then
-    execute $sql$
-      insert into logic_gate_projection_table (
-        company_id,
-        logic_gate_id,
-        information_id,
-        type,
-        information,
-        created_timestamp,
-        updated_timestamp
-      )
-      select distinct on (company_id, logic_gate_id, type)
-        company_id,
-        logic_gate_id,
-        information_id,
-        type,
-        information,
-        created_timestamp,
-        updated_timestamp
-      from logic_gate_information
-      where btrim(information) <> ''
-        and type = 'Text box'::information_type
-      order by company_id, logic_gate_id, type, updated_timestamp desc, created_timestamp desc, information_id desc
-      on conflict (company_id, logic_gate_id, type) where type = 'Text box'::information_type
-      do update set
-        information = excluded.information,
-        updated_timestamp = excluded.updated_timestamp
-      where logic_gate_projection_table.updated_timestamp <= excluded.updated_timestamp
-    $sql$;
-
-    execute $sql$
-      insert into logic_gate_projection_table (
-        company_id,
-        logic_gate_id,
-        information_id,
-        type,
-        information,
-        created_timestamp,
-        updated_timestamp
-      )
-      select distinct on (company_id, logic_gate_id, information_id)
-        company_id,
-        logic_gate_id,
-        information_id,
-        type,
-        information,
-        created_timestamp,
-        updated_timestamp
-      from logic_gate_information
-      where btrim(information) <> ''
-        and type <> 'Text box'::information_type
-      order by company_id, logic_gate_id, information_id, updated_timestamp desc
-      on conflict (company_id, logic_gate_id, information_id)
-      do update set
-        type = excluded.type,
-        information = excluded.information,
-        updated_timestamp = excluded.updated_timestamp
-      where logic_gate_projection_table.updated_timestamp <= excluded.updated_timestamp
-    $sql$;
-  else
-    execute $sql$
-      insert into logic_gate_projection_table (
-        company_id,
-        logic_gate_id,
-        information_id,
-        type,
-        information,
-        created_timestamp,
-        updated_timestamp
-      )
-      select distinct on (company_id, logic_gate_id, information_id)
-        company_id,
-        logic_gate_id,
-        information_id,
-        type,
-        information,
-        created_timestamp,
-        updated_timestamp
-      from logic_gate_information
-      where btrim(information) <> ''
-      order by company_id, logic_gate_id, information_id, updated_timestamp desc
-      on conflict (company_id, logic_gate_id, information_id)
-      do update set
-        type = excluded.type,
-        information = excluded.information,
-        updated_timestamp = excluded.updated_timestamp
-      where logic_gate_projection_table.updated_timestamp <= excluded.updated_timestamp
-    $sql$;
-  end if;
-end $$;
 -- Source table for node-to-Logic-Gate work assignment.
 -- Kanban board/card API shapes are synthesized from this source and kanban_board_projection.
 create table if not exists node_logic_gate_assignments (
@@ -2127,25 +1997,6 @@ create index if not exists idx_node_projection_seen_user
 create index if not exists idx_node_map_positions_company_updated on node_map_positions(company_id, updated_timestamp desc);
 create index if not exists idx_node_relationships_a on node_relationships(company_id, node_id_a);
 create index if not exists idx_node_relationships_b on node_relationships(company_id, node_id_b);
-create index if not exists idx_logic_gate_information_logic_gate on logic_gate_information(company_id, logic_gate_id);
-create index if not exists idx_logic_gate_information_save_batch
-  on logic_gate_information(company_id, logic_gate_id, save_batch_id, created_timestamp desc)
-  where save_batch_id is not null;
-create index if not exists idx_logic_gate_projection_table_logic_gate_updated on logic_gate_projection_table(company_id, logic_gate_id, updated_timestamp desc);
-with ranked_logic_gate_text as (
-  select ctid,
-         row_number() over (
-           partition by company_id, logic_gate_id, type
-           order by updated_timestamp desc, created_timestamp desc, information_id desc
-         ) as rn
-  from logic_gate_projection_table
-  where type = 'Text box'::information_type
-)
-delete from logic_gate_projection_table target
-using ranked_logic_gate_text ranked
-where target.ctid = ranked.ctid
-  and ranked.rn > 1;
-create unique index if not exists idx_logic_gate_projection_table_one_text_box on logic_gate_projection_table(company_id, logic_gate_id, type) where type = 'Text box'::information_type;
 create index if not exists idx_logic_gate_map_positions_company_updated on logic_gate_map_positions(company_id, updated_timestamp desc);
 create index if not exists idx_logic_gate_relationships_a on logic_gate_relationships(company_id, logic_gate_id_a);
 create index if not exists idx_logic_gate_relationships_b on logic_gate_relationships(company_id, logic_gate_id_b);
@@ -2497,12 +2348,6 @@ create table if not exists workspace_read_versions (
 
 create index if not exists idx_workspace_read_versions_scope_company
   on workspace_read_versions(scope, company_id, resource_key);
-
--- Match the current dev database validation state for legacy backfill constraints.
-alter table logic_gate_information
-  drop constraint if exists logic_gate_information_nonblank_chk;
-alter table logic_gate_information
-  add constraint logic_gate_information_nonblank_chk check (btrim(information) <> '') not valid;
 
 alter table logic_gate_relationships
   drop constraint if exists logic_gate_relationships_not_self_chk;
@@ -4217,13 +4062,6 @@ create index if not exists idx_realtime_outbox_scope_sequence
   on realtime_outbox(company_id, scope, outbox_sequence);
 
 
--- Logic Gate collaboration treats every independently editable text body as an
--- exact document. Remove the historical one-text-box-per-gate uniqueness rule.
-drop index if exists idx_logic_gate_projection_table_one_text_box;
-create index if not exists idx_logic_gate_projection_table_text_boxes
-  on logic_gate_projection_table(company_id, logic_gate_id, created_timestamp, information_id)
-  where type = 'Text box'::information_type;
-
 -- Durable provider-independent email snapshots for Node and collaboration reads.
 -- Provider credentials, attachment bytes, object URLs, and presigned URLs are
 -- excluded; attachment bytes live in Mango's private attachment object storage.
@@ -4635,6 +4473,10 @@ create table if not exists logic_gate_textboxes (
   textbox_id text not null,
   body_json jsonb not null,
   revision bigint not null default 0,
+  title text not null default '',
+  email_message_id text not null default '',
+  email_accent text not null default '',
+  metadata_revision bigint not null default 1,
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
   deleted_timestamp timestamptz,
@@ -4642,6 +4484,9 @@ create table if not exists logic_gate_textboxes (
   foreign key (company_id, logic_gate_id) references logic_gates(company_id, logic_gate_id) on delete cascade,
   constraint logic_gate_textboxes_id_chk check (btrim(textbox_id) <> ''),
   constraint logic_gate_textboxes_revision_chk check (revision >= 0),
+  constraint logic_gate_textboxes_metadata_revision_chk check (metadata_revision > 0),
+  constraint logic_gate_textboxes_title_chk check (length(title) <= 500),
+  constraint logic_gate_textboxes_email_accent_chk check (email_accent='' or email_accent ~ '^#[0-9A-Fa-f]{6}$'),
   constraint logic_gate_textboxes_body_json_chk check (
     body_json->>'format' = 'mango-tiptap-json'
     and body_json->>'schema_version' = '1'
@@ -5292,15 +5137,6 @@ begin
        or not exists(select 1 from node_textbox_chats where company_id=new.company_id
                      and chat_id=case when pg_input_is_valid(new.resource_id,'uuid') then new.resource_id::uuid end and deleted_timestamp is null) then
       raise exception 'attachment Node chat owner does not exist' using errcode='23503';
-    end if;
-  elsif new.resource_type='logic_gate_chat_message' then
-    if not pg_input_is_valid(new.resource_id,'uuid')
-       or not exists(select 1 from logic_gate_projection_table
-                     where company_id=new.company_id
-                       and information_id=case when pg_input_is_valid(new.resource_id,'uuid') then new.resource_id::uuid end
-                       and type='Text block chat'::information_type
-                       and is_deleted=false) then
-      raise exception 'attachment Logic Gate chat owner does not exist' using errcode='23503';
     end if;
   elsif new.resource_type='project_chat_message' then
     if not pg_input_is_valid(new.resource_id,'uuid')

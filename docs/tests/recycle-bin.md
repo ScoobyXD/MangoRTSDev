@@ -4,10 +4,12 @@ A user deletes a Node, Project, or Logic Gate that contains current textboxes an
 manual history. Before the owner rows are deleted, the Recycle Bin payload copies
 the matching current and history rows from the six permanent editor tables.
 For a Project it also copies `project_textbox_chats` and exact final email
-relationships, never the legacy Project information/projection tables. Restoring
-the item recreates the owner first, restores its textbox/history rows, then
-restores Project chats and the remaining relationships. Permanent delete removes
-the payload, including those editor copies.
+relationships. For a Logic Gate it copies the one final textbox/history set and
+exact final email relationships. Neither path copies its legacy
+information/projection tables. Restoring the item recreates the owner first,
+restores its textbox/history rows, then restores supported Project chats and the
+remaining relationships. Permanent delete removes the payload, including those
+editor copies.
 
 Old recycle payloads created before the six-table cutover are converted in place.
 Their HTML-era textboxes and manual saves must pass the same text-preserving
@@ -51,8 +53,9 @@ RB25 - Restore and permanent-delete actions operate only on selected recycle-bin
 RB26 - Dev admins and company admins list all recycle-bin rows for the company, grouped in the UI by deleting user with user-group context when available.
 RB27 - Admin permanent delete can purge any selected recycle-bin row in the company, regardless of which user originally deleted it.
 RB28 - Restore remains scoped to the deleting user; an admin aggregate view must not imply that an admin can restore another user's recycle-bin item unless a future rule explicitly allows it.
-RB29 - Recycle payloads preserve current and manual-history rows from node_textboxes, project_textboxes, logic_gate_textboxes, and their three _history tables. Old payloads must be converted before editor cleanup; disabled automatic snapshots are not manual history and are excluded.
+RB29 - Recycle payloads preserve current and manual-history rows from `node_textboxes`, `project_textboxes`, `logic_gate_textboxes`, and their three `_history` tables. Old payloads must be converted before editor cleanup; disabled automatic snapshots are not manual history and are excluded.
 RB30 - A new Project recycle payload stores `project_textbox_chats` after its Project textbox owners and stores exact `email_relationships` in relationship order. It does not store `project_information` or `project_projection_table`.
+RB31 - A new Logic Gate recycle payload stores `logic_gate_textboxes` and `logic_gate_textboxes_history` after the Logic Gate owner plus exact final relationships. It stores no Logic Gate chat rows and does not store `logic_gate_information` or `logic_gate_projection_table`.
 
 ## Scenarios
 
@@ -187,6 +190,7 @@ Business logic covered:
 - RB16
 - RB19
 - RB29
+- RB31
 
 Given:
 
@@ -201,4 +205,6 @@ Expected:
 - Automatic snapshots are not added to manual history.
 - Restore recreates the owner before its textbox rows, so foreign keys remain
   valid and current content plus manual history return together.
+- A Logic Gate payload contains no legacy information/projection row and no
+  speculative chat row; exact final relationships are restored in dependency order.
 - Permanent delete removes the only recycled copies and does not recreate them.

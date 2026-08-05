@@ -17,6 +17,11 @@ func TestRetiredDatabaseStorageIsAbsentFromCanonicalSchemaAndStrictlyDropped(t *
 	}
 	schema := strings.ToLower(string(schemaBytes))
 	migration := strings.ToLower(string(migrationBytes))
+	logicGateRetirementBytes, err := os.ReadFile("../../db/operator_migrations/20260805_retire_logic_gate_legacy_storage.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	logicGateRetirement := strings.ToLower(string(logicGateRetirementBytes))
 	retiredTables := []string{
 		"workspace_editor_formats",
 		"editor_rollout_gates",
@@ -54,6 +59,22 @@ func TestRetiredDatabaseStorageIsAbsentFromCanonicalSchemaAndStrictlyDropped(t *
 	if strings.Contains(migration, "if exists") {
 		t.Error("retirement migration must expose drift instead of silently skipping missing objects")
 	}
+	for _, table := range []string{"logic_gate_information", "logic_gate_projection_table"} {
+		if strings.Contains(schema, "create table if not exists "+table) {
+			t.Errorf("canonical schema creates retired Logic Gate table %s", table)
+		}
+		if !strings.Contains(logicGateRetirement, "drop table "+table+";") {
+			t.Errorf("Logic Gate operator retirement does not strictly drop %s", table)
+		}
+	}
+	if strings.Contains(logicGateRetirement, "drop table if exists") || strings.Contains(logicGateRetirement, "drop table logic_gate_information cascade") {
+		t.Error("Logic Gate retirement must refuse drift and must not use CASCADE")
+	}
+	for _, gate := range []string{"copy_verified", "no_current_writer_verified", "smoke_and_recycle_verified", "soak_and_snapshot_confirmed", "operator_approved"} {
+		if !strings.Contains(logicGateRetirement, gate) {
+			t.Errorf("Logic Gate retirement missing operator gate %q", gate)
+		}
+	}
 
 	nodeStart := strings.Index(schema, "create table if not exists node_textboxes (")
 	if nodeStart < 0 {
@@ -89,8 +110,6 @@ func TestRetiredDatabaseStorageIsAbsentFromCanonicalSchemaAndStrictlyDropped(t *
 		"create table if not exists node_projection_table",
 		"create table if not exists project_information",
 		"create table if not exists project_projection_table",
-		"create table if not exists logic_gate_information",
-		"create table if not exists logic_gate_projection_table",
 	} {
 		if !strings.Contains(schema, required) {
 			t.Errorf("canonical schema missing retained structure %q", required)

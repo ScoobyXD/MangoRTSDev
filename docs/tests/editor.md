@@ -1,5 +1,17 @@
 # Editor Process Map
 
+## Process Story: Logic Gate editor uses final storage
+
+A user opens the one document owned by a Logic Gate
+↓
+The projection-shaped load identifies the document from `logic_gate_textboxes` and decorates it with final email and attachment relationships
+↓
+The editor JSON save updates that exact final textbox row, while manual history uses `logic_gate_textboxes_history`
+↓
+Old information/projection writes are refused, and no Logic Gate chat feature or table is invented
+↓
+Delete, recycle, and later operator-controlled retirement use the final ownership rules
+
 ## Process Story: Node textbox chats use their permanent table
 
 A user opens a Node and reads, creates, replies to, edits, or deletes a textbox chat
@@ -313,7 +325,7 @@ ED87 - Backspace on a selected/focused inline entity, or at a collapsed caret im
 ED88 - Turning selected Node text into a pending chat quote preserves only the temporary source annotation needed while composing. Clicking the quote X or closing that pending chat removes the quote/annotation and collapses the native/ProseMirror selection, so no selected-text highlight survives cancellation. Sending successfully may replace the temporary annotation with the durable chat annotation.
 ED89 - For editor entity ranking, a Node is done only when its status is `Done`; a Project is done when its status is `Done`, `Completed`, or `Archived`. Every other nonblank or missing Node/Project status stays in its active bucket, so Planning, On Hold, Pending, Review, and similar work remain discoverable before Logic Gates.
 ED90 - The PostgreSQL editor-only search applies text filtering and effective-access/visible-location checks before its bounded sort and does not construct unused Explorer location-path JSON. Case-insensitive contains search uses canonical `pg_trgm` GIN indexes on Node names, Project names, and Logic Gate headers. Ordinary Company Explorer search retains its separate tree/path response and ordering.
-ED91 - The completed textbox cutover stores current Node, Project, and Logic Gate documents in their permanent owner textbox tables. Ordinary edits update `body_json` and `revision`, keep annotations inside the same JSON value, and do not write the retired generic or owner-specific operation/version tables. The three projection tables remain unchanged for phase 2.
+ED91 - The completed textbox cutover stores current Node, Project, and Logic Gate documents in their permanent owner textbox tables. Ordinary edits update `body_json` and `revision`, keep annotations inside the same JSON value, and do not write the retired generic or owner-specific operation/version tables. Current reads and writes do not use the legacy owner information/projection tables; destructive retirement remains a separately gated operator action.
 ED91 - Every sent comment rendered by the shared `ChatPane` exposes Edit only to its original author. Edit opens an inline text area with Save/Cancel and Ctrl+Enter submission, keeps the editor open when persistence fails, and shows an Edited marker after success. The edit changes only message text and current mention IDs; it preserves the stable comment ID, author, created timestamp, reply/source-selection context, attachments, thread position, and all unrelated payload fields. Blank text remains valid only when the comment still has an attachment.
 ED92 - The shared Node/Project `ChatPane` composer applies the workspace-entity `#` search contract alongside its existing `@` and `!` people picker. `#` queries the same company-scoped, permission-filtered Nodes/Logic Gates/Projects endpoint and ranking as the editor, Arrow Up/Down navigate, Enter or plain Tab accepts, Escape closes, and pointer selection matches the keyboard result. Acceptance inserts readable `#Name` text plus durable type/ID/label offsets in the existing chat payload; sent and reloaded comments render the correct product icon and open the same in-app deep route without a page reload. Ordinary composer edits remap intact references and discard a reference edited through its label. This adds no table, placement, or migration.
 ED93 - An editable JSON/Tiptap attachment image uses the hand-selection cursor and direct manipulation instead of a detached labeled action strip. Its body remains a native movable ProseMirror node; selection shows eight edge/corner resize handles, an image-anchored bottom-right download icon, and icon-only comment/create-node actions when supported. Double-click uses the shared fullscreen image modal, and native Delete/Backspace removes the selected image. Selecting, dragging without a drop, opening controls, or previewing does not create a document operation; committed move, resize, or deletion does.
@@ -347,9 +359,9 @@ ED117 - `node_textbox_chats` is the current authority for Node textbox chats. Re
 
 | Surface | Required runtime host | Shared toolbar/controller | Persistence boundary |
 |---|---|---|---|
-| Logic Gate editor body | `EditorContent` configures the one `EditorDocumentSurface` | `EditorTabBar` + `useEditorDocumentFormattingController` + `useEditorDocumentSurfaceHandlers` | Logic Gate information/projection |
-| Node text box in every full node opener | `NodeTextBlockEditor` configures the one `EditorDocumentSurface` | Same shared toolbar, controller, and behavior handler | Node information/projection inside the text-block envelope |
-| Project text box/information editor | Project Summary reuses `NodeTextBlockEditor` and the one `EditorDocumentSurface` | Same shared toolbar, controller, and behavior handler | Project information/projection inside the text-block envelope |
+| Logic Gate editor body | `EditorContent` configures the one `EditorDocumentSurface` | `EditorTabBar` + `useEditorDocumentFormattingController` + `useEditorDocumentSurfaceHandlers` | `logic_gate_textboxes` current JSON and `logic_gate_textboxes_history` manual saves |
+| Node text box in every full node opener | `NodeTextBlockEditor` configures the one `EditorDocumentSurface` | Same shared toolbar, controller, and behavior handler | `node_textboxes` current JSON and `node_textboxes_history` manual saves |
+| Project textbox editor | Project Summary reuses `NodeTextBlockEditor` and the one `EditorDocumentSurface` | Same shared toolbar, controller, and behavior handler | `project_textboxes` current JSON and `project_textboxes_history` manual saves |
 | My Triage compose/reply | `ComposePanel` mounts `UnifiedRichEditorSurface`, which mounts the one `EditorDocumentSurface` | Same shared toolbar, controller, and behavior handler | Personal mailbox draft/send |
 | Shared Triage compose/reply | The same `ComposePanel`/`UnifiedRichEditorSurface` path selects shared mailbox scope | Same shared toolbar, controller, and behavior handler | Shared mailbox draft/send |
 | Attached-email reply from a node or project | `EmailConversationPane` mounts `UnifiedRichEditorSurface`, which mounts the one `EditorDocumentSurface` | Same shared toolbar, controller, and behavior handler | Source personal/shared mailbox send scope; draft lifecycle remains domain-owned |
@@ -463,9 +475,9 @@ Given:
 - A user edits node, Logic Gate, project, personal email, shared email, and mailbox signature rich content.
 
 Expected:
-- Node edits persist to node information/projection state.
-- Logic Gate edits persist to Logic Gate information/projection state.
-- Project edits persist to project information/projection state.
+- Node edits persist to `node_textboxes`.
+- Logic Gate edits persist to `logic_gate_textboxes` and manual saves persist to `logic_gate_textboxes_history`.
+- Project edits persist to `project_textboxes`.
 - Personal email compose/reply sends or drafts through the personal mailbox scope.
 - Shared email compose/reply sends or drafts through the selected shared mailbox scope.
 - Personal and shared signatures save through their current mailbox-scoped signature record.
@@ -638,10 +650,10 @@ The declared unified surface IDs and persistence boundaries live in `frontend/sr
 
 | Surface | Runtime wrapper and shared behavior | Surface-specific differences | Persistence boundary |
 |---|---|---|---|
-| Logic Gate editor body | `EditorContent` mounts `EditorDocumentSurface` and calls `useEditorDocumentSurfaceHandlers` | Shared toolbar including table insertion, company mentions, and inline images | Logic Gate information/projection |
-| Node text box | `EditorContent` mounts `NodeWorkspaceSurface`, whose blocks use `NodeTextBlockEditor` and the shared handler | Mentions, inline images, shared-toolbar table insertion, text/image comment actions, content-change overlays, attached-email pane, and separate chat pane | Node information/projection, inside the `mango-node-text-block-v1` envelope |
-| Node editor opener variants | Home, sidebar, dock restore, Updates, Kanban/My Work, Company Explorer, and Project critical-path windows all mount the same node workspace | Opener chrome and state differ, but the text engine is the same | Node information/projection |
-| Project text box | Project Summary directly reuses `NodeTextBlockEditor` | Same rich behavior as a node block, plus project-specific saving; its chat and attached-email panes stay separate | Project information/projection, inside the same text-block envelope |
+| Logic Gate editor body | `EditorContent` mounts `EditorDocumentSurface` and calls `useEditorDocumentSurfaceHandlers` | Shared toolbar including table insertion, company mentions, and inline images | `logic_gate_textboxes` |
+| Node text box | `EditorContent` mounts `NodeWorkspaceSurface`, whose blocks use `NodeTextBlockEditor` and the shared handler | Mentions, inline images, shared-toolbar table insertion, text/image comment actions, content-change overlays, attached-email pane, and separate chat pane | `node_textboxes` |
+| Node editor opener variants | Home, sidebar, dock restore, Updates, Kanban/My Work, Company Explorer, and Project critical-path windows all mount the same node workspace | Opener chrome and state differ, but the text engine is the same | `node_textboxes` |
+| Project text box | Project Summary directly reuses `NodeTextBlockEditor` | Same rich behavior as a node block, plus project-specific saving; its chat and attached-email panes stay separate | `project_textboxes` |
 | My Triage compose/reply/forward | `ComposePanel` mounts `UnifiedRichEditorSurface` with `my-triage-compose` | Compact Format + Outline toolbar, no company mention users, email-draft attachment ownership; Forward adds a locked sanitized original preview outside the editor | Personal mailbox draft/send |
 | Shared Triage compose/reply/forward | The same `ComposePanel` selects `shared-triage-compose` when a shared inbox is active | Same editing and locked-forward-preview behavior as My Triage; mailbox and attachment ownership differ | Shared mailbox draft/send |
 | Email collaboration shared draft | The same `ComposePanel` selects `email-collaboration-shared-draft` for a revisioned participant draft | Same editor, selection, toolbar, inline-image, and flush behavior; collaboration participation and revision replace mailbox ownership | Collaboration-scoped shared draft/send |

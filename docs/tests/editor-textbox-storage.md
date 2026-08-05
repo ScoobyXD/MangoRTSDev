@@ -1,14 +1,14 @@
 # Process Story: Editor Textboxes and Manual History
 
-A Project user opens or edits a textbox
+A Project user opens a textbox, or a Logic Gate user opens its one document
 ↓
-The body, title, display metadata, revision, and timestamps come from the exact `project_textboxes` row
+The current body and metadata come from the exact `project_textboxes` or `logic_gate_textboxes` row
 ↓
-The existing projection-shaped response is assembled from permanent textbox, attachment, chat, and email relationships instead of a stored Project projection row
+The existing projection-shaped response is assembled from permanent textbox, attachment, chat where the product supports it, and exact email relationships instead of a stored legacy projection row
 ↓
-Manual Project saves continue to create one batch in `project_textboxes_history`
+Manual saves create one batch in `project_textboxes_history` or `logic_gate_textboxes_history`
 ↓
-Recycle snapshots and restores order the Project owner, textboxes/history, and `project_textbox_chats` so no restored child precedes its owner
+Recycle snapshots and restores order the owner before its final textbox/history rows; Project also restores its supported `project_textbox_chats`
 
 ## What the user does
 
@@ -134,9 +134,23 @@ Project runtime storage has completed the next phase:
 - No production Project request reads or writes `project_information` or `project_projection_table`.
 
 The two legacy Project tables remain unchanged only until the separately gated
-snapshot, soak, dependency check, and destructive retirement. Node and Logic
-Gate legacy projection retirement are separate cutovers and are not implied by
-the Project change.
+snapshot, soak, dependency check, and destructive retirement. Node retirement
+remains separate and is not implied by the Project change.
+
+Logic Gate runtime storage has now completed its application cutover:
+
+- `logic_gate_textboxes` is the only current Logic Gate document store.
+- `logic_gate_textboxes_history` is the only manual saved-version store.
+- The product has one Logic Gate document and no Logic Gate textbox chat feature or chat table.
+- Exact Logic Gate attached-email ownership comes from `email_relationships` joined to `email_messages` and `email_threads`.
+- Logic Gate files come from `attachments` and `attachment_relationships`.
+- The backend rebuilds the existing projection-shaped API response from those final tables.
+- No production Logic Gate request reads or writes `logic_gate_information` or `logic_gate_projection_table`.
+
+The two legacy Logic Gate tables are retirement candidates only after the
+separately operated PostgreSQL 17 preflight/copy, matching backend deployment,
+smoke/recycle checks, reconciliation, soak, snapshot, dependency proof, and
+explicit operator approval complete.
 
 ## Read-only development evidence
 

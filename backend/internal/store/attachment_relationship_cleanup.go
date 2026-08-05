@@ -256,34 +256,6 @@ order by chat_id`, companyID, nodeID)
 	return nil
 }
 
-func retireLogicGateChatAttachmentRelationshipsTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
-	rows, err := tx.QueryContext(ctx, `
-select information_id::text from logic_gate_projection_table
-where company_id=$1::uuid and logic_gate_id=$2::uuid and type='Text block chat'::information_type
-order by information_id`, companyID, logicGateID)
-	if err != nil {
-		return err
-	}
-	ids := make([]string, 0)
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return err
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	for _, id := range ids {
-		if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, "logic_gate_chat_message", id); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func retireProjectTextboxChatTreeRelationshipsTx(ctx context.Context, tx *sql.Tx, companyID, projectID, rootChatID string) error {
 	rows, err := tx.QueryContext(ctx, `
 with recursive deleted_chats(chat_id) as (

@@ -730,7 +730,7 @@ func TestNodeChatMentionResolvesDevAdminOutsideCompany(t *testing.T) {
 	}
 }
 
-func TestLogicGateTextBoxMentionCreatesMentionNotification(t *testing.T) {
+func TestLogicGateLegacyTextBoxMentionWriteIsRejected(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -778,20 +778,14 @@ func TestLogicGateTextBoxMentionCreatesMentionNotification(t *testing.T) {
 	infoReq.Header.Set("Content-Type", "application/json")
 	infoRec := httptest.NewRecorder()
 	handler.ServeHTTP(infoRec, infoReq)
-	if infoRec.Code != http.StatusCreated {
-		t.Fatalf("POST logic gate information status = %d body=%s", infoRec.Code, infoRec.Body.String())
+	if infoRec.Code != http.StatusConflict || !strings.Contains(infoRec.Body.String(), "editor_collaboration_required") {
+		t.Fatalf("legacy Logic Gate information status = %d body=%s", infoRec.Code, infoRec.Body.String())
 	}
 
-	notifications := waitForNotificationCountForTest(t, func() []domain.Notification {
-		listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID+"&type="+domain.NotificationEventMentionCreated, nil)
-		listReq = requestWithActorForNotifications(listReq, mentioned, companyID)
-		return listNotificationsForRequestForTest(t, handler, listReq)
-	}, 1)
-	if item := notifications[0]; item.Type != domain.NotificationEventMentionCreated || item.EntityType != store.EntityTypeLogicGate || item.EntityID != logicGate.LogicGateID {
-		t.Fatalf("mention notification = %+v, want logic gate mention", item)
-	}
-	if item := notifications[0]; item.Surface != domain.NotificationSurfaceACIInbox || item.Role != domain.GVICRoleVerified || item.LogicGateID != logicGate.LogicGateID {
-		t.Fatalf("logic gate mention routing = %+v, want accountable logic gate", item)
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID+"&type="+domain.NotificationEventMentionCreated, nil)
+	listReq = requestWithActorForNotifications(listReq, mentioned, companyID)
+	if notifications := listNotificationsForRequestForTest(t, handler, listReq); len(notifications) != 0 {
+		t.Fatalf("legacy rejected Logic Gate write created notifications: %+v", notifications)
 	}
 }
 

@@ -1,4 +1,16 @@
-Last updated: 2026-07-22
+# Process Story: Logic Gate document commands use final storage
+
+A UI or headless caller loads the current Logic Gate document
+↓
+The projection-shaped read is assembled from `logic_gate_textboxes` and final relationships
+↓
+The caller saves through the authenticated editor JSON document route; manual Save and restore use `logic_gate_textboxes_history`
+↓
+Legacy information/projection commands cannot write a compatibility row
+↓
+Committed revision events keep the existing exact realtime behavior
+
+Last updated: 2026-08-04
 
 # REST API & WebSocket Tests
 
@@ -24,8 +36,8 @@ RW12 - Socket open never means Connected or Saved. Green requires confirmed appl
 RW13 - Browser-side API request timing should make status=error timeout cases visible with the route that timed out.
 RW14 - Dev or production timeout triage must consider backend, database, and cache-refetch load before changing the client timeout threshold.
 RW15 - Successful Node and Logic Gate renames publish one concrete same-window committed-title event after the HTTP command succeeds. Every supported Editor, Kanban, Node Map, Logic Gate Map, Home/My Work, and Company Explorer rename entry point patches matching mounted Editor, Kanban/Arena, map, Explorer, Home, My Work, Updates current Node/Logic Gate row, selected-panel, and open-action labels, AppLayout dock/popup/sidebar-pin, AppTimeline, and Project Management labels as applicable. For Logic Gates only, Updates also resolves saved Logic Gate grouping headers and sort values from the current title; stored notification title/body prose remains historical. The wired async title-bearing setters capture the shared registry version before awaiting and overlay only newer same-window commits before storing their result. The app-lifetime publication coordinator synchronously patches or invalidates affected title-bearing communications, project-relationship, Kanban, My Work matrix, entity-record, workspace-snapshot, and graph caches. Request-start version folding and targeted cache generation/invalidation guards prevent pre-commit requests from repopulating an old title. Denormalized persisted sidebar-pin responses overlay all latest commits. A later canonical request remains authoritative rather than being permanently masked. Passive convergence preserves dock recency, pin persistence, dirty editor text, and every active title `contentEditable` draft/caret; another user revalidates on activation/navigation because there is no broad title browser stream.
-RW16 - Explicit editor saved versions remain HTTP commands after pending collaboration operations are acknowledged. The save transaction materializes each canonical collaboration head before writing the information-table version batch; ordinary typing never appends saved-version rows.
-RW17 - Confirmed saved-version restore atomically replaces canonical collaboration snapshots/tombstones and inserts compact exact-scope outbox events. Subscribers fetch full snapshots; restore never fans out a whole document body or revives the legacy projection-conflict path.
+RW16 - Explicit editor saved versions remain HTTP commands after pending editor operations are acknowledged. The save transaction materializes each canonical document before writing one batch to its permanent textbox-history table; ordinary typing never appends saved-version rows.
+RW17 - Confirmed saved-version restore atomically replaces the current permanent textbox snapshot and inserts compact exact-scope outbox events. Subscribers fetch full snapshots; restore never fans out a whole document body or revives the legacy projection-conflict path.
 RW18 - A terminal `401` or failed auth refresh must make realtime and API recovery quieter: stop ticket requests, WebSocket reconnects, fallback refetches, editor saves, and background retries, then rely on the auth layer to force the normal Mango login page.
 RW19 - WebSocket reconnects after backend replacement/deploy must use randomized delay, exponential backoff, and bounded or very slow retry behavior; clients must not all reconnect immediately.
 RW20 - First subscription acceptance and reconnect acceptance reconcile only the active notification summary, mounted Node chat, mounted board, or exact actively viewed mailbox canonical reads. A late local handler joining an already accepted shared scope receives immediate local acceptance; accepted state resets on disconnect, rejection, or last unsubscribe. Notifications acceptance is tagged summary-only; an open Updates feed reloads only for a real notification-created/deleted/cleared change. Each slow canonical read is single-flight with at most one queued final refresh; later acceptance/hints never overlap or abort/restart it, and no path refetches the whole app.
@@ -67,6 +79,7 @@ RW55 - Canonical HTTP reconciliation owns durable server data, not transient loc
 RW56 - The unified collaboration rollout is coordinated: apply `20260715_unified_realtime_collaboration.sql` before the matching backend/frontend release, then require pre-cutover tabs to reload. Migrated `Text box` projection POST/DELETE compatibility writes remain rejected; no revisionless or whole-document fallback is restored.
 RW57 - An otherwise healthy realtime WebSocket remains connected while idle. The backend sends an empty protocol-level ping every 25 seconds, below the deployed load balancer's 60-second idle timeout; the browser networking stack answers without JavaScript timers, API fetches, auth refreshes, or new realtime tickets. Only a genuine transport failure invokes bounded reconnect and scoped canonical recovery.
 RW58 - Node and Project chat edits use author-checked `PATCH .../projection/{projection_id}` commands. The request may replace trimmed message text and resolved mention IDs but cannot replace the stored author, created timestamp, source selection, reply context, attachments, text-box ownership, or arbitrary payload fields. Node edits enqueue a durable compact `chat.message.updated` event on `chat:node:{node_id}`; mounted clients respond with one canonical projection refresh. The existing exact-scope authorization, current-audience resolution, retry/outbox behavior, and no-project-chat-subscription boundary remain unchanged.
+RW59 - Logic Gate document writes use `/v1/editor-json/logic_gate/{logic_gate_id}/documents/{document_id}` and `logic_gate_textboxes`. A legacy text information write returns `editor_collaboration_required`; every unsupported legacy information type returns `logic_gate_information_type_not_supported`; neither path writes `logic_gate_information` or `logic_gate_projection_table`.
 
 ## Scenarios
 
@@ -79,17 +92,18 @@ Business logic covered:
 - RW4
 - RW10
 - RW56
+- RW59
 
 Given:
 - A user edits a node or logic gate editor document.
 - The frontend has access to the normal HTTP API.
 
 Expected:
-- Local editor mutations render immediately, become durable stable HTML patches, and micro-batch through the exact collaboration HTTP route.
+- Local editor mutations render immediately, enter the exact authenticated editor JSON HTTP route, and commit to the permanent owner textbox row.
 - The backend authorizes the exact company/resource/document and atomically commits collaboration integration, next revision, canonical state, and outbox event before acknowledging Saved.
 - Every healthy exact subscriber applies the committed operation once through the shared cross-instance spine; unrelated scopes receive nothing and remote apply creates no echo save.
 - Reconnect/gap recovery restores the exact subscription, full snapshot/ETag, buffered order, and durable pending operations before green health.
-- The collaboration migration is applied before the coordinated app release; pre-cutover tabs reload and legacy whole-document projection writes remain rejected.
+- The matching final-storage migration is applied before the coordinated app release; pre-cutover tabs reload and legacy Logic Gate information/projection writes remain rejected without compatibility rows.
 
 ### Scenario RW-S1B: Editor Saved Versions Use Explicit HTTP Version Routes
 
@@ -107,10 +121,10 @@ Given:
 - The user clicks Save, an interval auto-save fires, or the user restores an existing saved version.
 
 Expected:
-- Manual and interval saved versions flush pending projection writes before creating the saved-version batch.
-- Saved-version creation writes to the node or logic gate information table only through the save-version route.
+- Manual and interval saved versions flush pending document writes before creating the saved-version batch.
+- Saved-version creation writes only to the resource permanent textbox-history table through the save-version route.
 - No per-keystroke collaboration WebSocket traffic or endpoint exists.
-- Restoring a saved version asks for confirmation, then overwrites the current editor projection through the restore route.
+- Restoring a saved version asks for confirmation, then overwrites the current permanent textbox row through the restore route.
 
 ### Scenario RW-S2: API Timeout Does Not Automatically Prove Save Failure
 

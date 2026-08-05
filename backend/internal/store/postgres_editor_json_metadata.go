@@ -60,12 +60,27 @@ func (r *PostgresRepo) UpdateEditorJSONMetadata(input EditorJSONMetadataInput) (
 				information=excluded.information, is_deleted=false, revision=node_projection_table.revision+1, updated_timestamp=excluded.updated_timestamp
 			returning revision`, input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID, information, now).Scan(&revision)
 	case EntityTypeLogicGate:
+		textboxRef := EditorJSONDocumentRef{
+			CompanyID: input.Document.CompanyID, ResourceType: input.Document.ResourceType,
+			ResourceID: input.Document.ResourceID, DocumentID: input.Document.DocumentID,
+		}
+		storage, ok := postgresEditorTextboxStorageFor(textboxRef)
+		if !ok {
+			return EditorJSONMetadataCommit{}, ErrInvalid
+		}
+		if err = insertEmptyPostgresEditorTextboxTx(ctx, tx, storage, textboxRef); err != nil {
+			return EditorJSONMetadataCommit{}, err
+		}
 		err = tx.QueryRowContext(ctx, `
-			insert into logic_gate_projection_table (company_id, logic_gate_id, information_id, type, information, is_deleted, revision, created_timestamp, updated_timestamp)
-			values ($1::uuid, $2::uuid, $3::uuid, 'Text box'::information_type, $4, false, 1, $5, $5)
-			on conflict (company_id, logic_gate_id, information_id) do update set
-				information=excluded.information, is_deleted=false, revision=logic_gate_projection_table.revision+1, updated_timestamp=excluded.updated_timestamp
-			returning revision`, input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID, information, now).Scan(&revision)
+			update logic_gate_textboxes
+			set title=$4,email_message_id=$5,email_accent=$6,
+			    metadata_revision=metadata_revision+1,
+			    updated_timestamp=greatest(clock_timestamp(),created_timestamp)
+			where company_id=$1::uuid and logic_gate_id=$2::uuid and textbox_id=$3
+			  and deleted_timestamp is null
+			returning metadata_revision,updated_timestamp`,
+			input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID,
+			input.Title, input.EmailMessageID, input.EmailAccent).Scan(&revision, &now)
 	case EntityTypeProject:
 		textboxRef := EditorJSONDocumentRef{
 			CompanyID:    input.Document.CompanyID,
@@ -125,7 +140,8 @@ func deletePostgresEditorProjectionTx(ctx context.Context, tx *sql.Tx, ref Edito
 	case EntityTypeNode:
 		_, err = tx.ExecContext(ctx, `update node_projection_table set is_deleted=true, revision=revision+1, updated_timestamp=$4 where company_id=$1::uuid and node_id=$2::uuid and information_id=$3::uuid`, ref.CompanyID, ref.ResourceID, ref.DocumentID, now)
 	case EntityTypeLogicGate:
-		_, err = tx.ExecContext(ctx, `update logic_gate_projection_table set is_deleted=true, revision=revision+1, updated_timestamp=$4 where company_id=$1::uuid and logic_gate_id=$2::uuid and information_id=$3::uuid`, ref.CompanyID, ref.ResourceID, ref.DocumentID, now)
+		// Logic Gate textbox metadata is retired with the final textbox row.
+		err = nil
 	case EntityTypeProject:
 		// Project textbox metadata lives on project_textboxes and is retired with the textbox row.
 		err = nil

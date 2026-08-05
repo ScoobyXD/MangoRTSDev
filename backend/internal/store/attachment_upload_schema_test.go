@@ -85,19 +85,19 @@ func TestAttachmentOwnerDeletionPathsUseSharedRetirement(t *testing.T) {
 	contracts := map[string][]string{
 		"postgres_company_explorer.go": {
 			"retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, \"company_explorer_folder\"",
-			"retireNodeChatAttachmentRelationshipsTx", "retireLogicGateChatAttachmentRelationshipsTx",
+			"retireNodeChatAttachmentRelationshipsTx", "EntityTypeLogicGate", "delete from email_relationships",
 		},
-		"postgres_communications_triage.go":  {"retireNodeChatAttachmentRelationshipsTx", "EntityTypeNode"},
-		"postgres_projects.go":               {"retireProjectChatAttachmentRelationshipsTx", "EntityTypeProject", "delete from email_relationships"},
-		"postgres_logic_gates.go":            {"logic_gate_chat_message"},
-		"postgres_node_textbox_chats.go":     {"retireNodeTextboxChatTreeRelationshipsTx", "retireAttachmentRelationshipsTx"},
-		"postgres_editor_textboxes.go":       {"retireNodeTextboxAttachmentRelationshipsTx", "retireProjectTextboxAttachmentRelationshipsTx"},
-		"attachment_relationship_cleanup.go": {"project_textbox_chats", "project_chat_message", "retireProjectTextboxChatTreeRelationshipsTx"},
-		"postgres_project_final_storage.go":  {"project_chat_message", "attachment_relationships"},
-		"postgres_email_drafts.go":           {"retireAttachmentOwnerRelationshipsTx", "email_draft"},
-		"shared_email_drafts.go":             {"retireAttachmentOwnerRelationshipsTx", "email_draft"},
-		"shared_email_draft_send.go":         {"promoteEmailDraftAttachmentRelationshipsTx", "retireAttachmentOwnerRelationshipsTx"},
-		"postgres_shared_inbox_folders.go":   {"shared_inbox_folder", "shared_inbox", "retireAttachmentOwnerRelationshipsTx"},
+		"postgres_communications_triage.go":    {"retireNodeChatAttachmentRelationshipsTx", "EntityTypeNode"},
+		"postgres_projects.go":                 {"retireProjectChatAttachmentRelationshipsTx", "EntityTypeProject", "delete from email_relationships"},
+		"postgres_logic_gate_final_storage.go": {"resource_type='logic_gate'", "attachment_relationships"},
+		"postgres_node_textbox_chats.go":       {"retireNodeTextboxChatTreeRelationshipsTx", "retireAttachmentRelationshipsTx"},
+		"postgres_editor_textboxes.go":         {"retireNodeTextboxAttachmentRelationshipsTx", "retireProjectTextboxAttachmentRelationshipsTx"},
+		"attachment_relationship_cleanup.go":   {"project_textbox_chats", "project_chat_message", "retireProjectTextboxChatTreeRelationshipsTx"},
+		"postgres_project_final_storage.go":    {"project_chat_message", "attachment_relationships"},
+		"postgres_email_drafts.go":             {"retireAttachmentOwnerRelationshipsTx", "email_draft"},
+		"shared_email_drafts.go":               {"retireAttachmentOwnerRelationshipsTx", "email_draft"},
+		"shared_email_draft_send.go":           {"promoteEmailDraftAttachmentRelationshipsTx", "retireAttachmentOwnerRelationshipsTx"},
+		"postgres_shared_inbox_folders.go":     {"shared_inbox_folder", "shared_inbox", "retireAttachmentOwnerRelationshipsTx"},
 	}
 	for path, required := range contracts {
 		body, err := os.ReadFile(path)
