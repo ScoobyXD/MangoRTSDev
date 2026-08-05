@@ -52,6 +52,7 @@ type Options struct {
 type ItemResult struct {
 	Kind             WorkKind
 	AttachmentID     string
+	FailureStage     string
 	ObjectCount      int
 	DeletedObjects   int
 	AlreadyMissing   int
@@ -108,6 +109,7 @@ func (s Service) Run(ctx context.Context, options Options) (Result, error) {
 			result.Items = append(result.Items, ItemResult{
 				Kind:         item.Kind,
 				AttachmentID: strings.TrimSpace(item.AttachmentID),
+				FailureStage: "company_scope",
 				Err:          errors.New("repository returned cleanup work for another company"),
 			})
 			continue
@@ -123,11 +125,13 @@ func (s Service) RunItem(ctx context.Context, item WorkItem, apply bool) ItemRes
 	current := ItemResult{Kind: item.Kind, AttachmentID: item.AttachmentID, ObjectCount: len(item.Objects)}
 	if ctx == nil || s.Repository == nil || s.Storage == nil || item.CompanyID == "" ||
 		item.AttachmentID == "" || item.Kind != WorkOrphanAttachment {
+		current.FailureStage = "validate_work_item"
 		current.Err = errors.New("invalid cleanup work item")
 		return current
 	}
 	eligible, eligibleErr := s.Repository.Eligible(ctx, item)
 	if eligibleErr != nil {
+		current.FailureStage = "recheck_eligibility"
 		current.Err = fmt.Errorf("recheck cleanup eligibility: %w", eligibleErr)
 		return current
 	}
@@ -141,12 +145,14 @@ func (s Service) RunItem(ctx context.Context, item WorkItem, apply bool) ItemRes
 	readyToFinalize := true
 	for _, object := range objects {
 		if strings.TrimSpace(object.Bucket) == "" || strings.TrimSpace(object.Key) == "" {
+			current.FailureStage = "validate_object_reference"
 			current.Err = errors.New("database cleanup object is missing bucket or key")
 			readyToFinalize = false
 			break
 		}
 		shared, sharedErr := s.Repository.SharedWithRetained(ctx, item, object)
 		if sharedErr != nil {
+			current.FailureStage = "check_retained_references"
 			current.Err = fmt.Errorf("check retained object references: %w", sharedErr)
 			readyToFinalize = false
 			break
@@ -159,6 +165,7 @@ func (s Service) RunItem(ctx context.Context, item WorkItem, apply bool) ItemRes
 			continue
 		}
 		if strings.TrimSpace(s.Storage.Bucket()) != strings.TrimSpace(object.Bucket) {
+			current.FailureStage = "validate_storage_bucket"
 			current.Err = errors.New("database object bucket does not match configured attachment bucket")
 			readyToFinalize = false
 			break
@@ -170,6 +177,7 @@ func (s Service) RunItem(ctx context.Context, item WorkItem, apply bool) ItemRes
 		case errors.Is(deleteErr, ErrObjectNotFound):
 			current.AlreadyMissing++
 		default:
+			current.FailureStage = "delete_storage_object"
 			current.Err = fmt.Errorf("delete attachment object: %w", deleteErr)
 			readyToFinalize = false
 		}
@@ -179,6 +187,7 @@ func (s Service) RunItem(ctx context.Context, item WorkItem, apply bool) ItemRes
 	}
 	if apply && readyToFinalize {
 		if finalizeErr := s.Repository.Finalize(ctx, item); finalizeErr != nil {
+			current.FailureStage = "finalize_database"
 			current.Err = fmt.Errorf("finalize database cleanup: %w", finalizeErr)
 		} else {
 			current.Finalized = true
