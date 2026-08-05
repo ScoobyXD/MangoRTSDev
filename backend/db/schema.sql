@@ -705,16 +705,6 @@ create table if not exists node_content_change_seen (
   foreign key (user_id) references users (user_id) on delete cascade
 );
 
-create table if not exists node_map_positions (
-  company_id uuid not null,
-  node_id uuid not null,
-  x double precision not null,
-  y double precision not null,
-  updated_timestamp timestamptz not null default now(),
-  primary key (company_id, node_id),
-  foreign key (company_id, node_id) references nodes (company_id, node_id) on delete cascade
-);
-
 create table if not exists logic_gates (
   company_id uuid not null,
   logic_gate_id uuid not null,
@@ -1267,16 +1257,6 @@ create table if not exists logic_gate_relationships (
   foreign key (company_id, logic_gate_id_b) references logic_gates (company_id, logic_gate_id)
 );
 
-create table if not exists logic_gate_map_positions (
-  company_id uuid not null,
-  logic_gate_id uuid not null,
-  x double precision not null,
-  y double precision not null,
-  updated_timestamp timestamptz not null default now(),
-  primary key (company_id, logic_gate_id),
-  foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id) on delete cascade
-);
-
 create table if not exists user_logic_gate_shortcuts (
   user_id uuid not null,
   company_id uuid not null,
@@ -1555,10 +1535,8 @@ create index if not exists idx_node_content_changes_node_created
   on node_content_changes(company_id, node_id, created_timestamp, change_id);
 create index if not exists idx_node_content_change_seen_user
   on node_content_change_seen(company_id, user_id, change_id);
-create index if not exists idx_node_map_positions_company_updated on node_map_positions(company_id, updated_timestamp desc);
 create index if not exists idx_node_relationships_a on node_relationships(company_id, node_id_a);
 create index if not exists idx_node_relationships_b on node_relationships(company_id, node_id_b);
-create index if not exists idx_logic_gate_map_positions_company_updated on logic_gate_map_positions(company_id, updated_timestamp desc);
 create index if not exists idx_logic_gate_relationships_a on logic_gate_relationships(company_id, logic_gate_id_a);
 create index if not exists idx_logic_gate_relationships_b on logic_gate_relationships(company_id, logic_gate_id_b);
 create index if not exists idx_kanban_board_projection_hot_read
@@ -1861,10 +1839,6 @@ returns table(scope text, resource_key text) as $$
   select *
   from (values
     ('workspace-snapshot:full', ''),
-    ('workspace-snapshot:node_map', ''),
-    ('workspace-snapshot:node_map_window', ''),
-    ('workspace-snapshot:logic_gate_map', ''),
-    ('workspace-snapshot:logic_gate_map_window', ''),
     ('workspace-snapshot:company_explorer', ''),
     ('workspace-snapshot:company_explorer', 'folder_kind:node'),
     ('workspace-snapshot:company_explorer', 'folder_kind:logic_gate'),
@@ -1876,10 +1850,6 @@ returns table(scope text, resource_key text) as $$
     ('node-relationships', ''),
     ('logic-gates', ''),
     ('logic-gate-relationships', ''),
-    ('map-layout:node', ''),
-    ('map-layout:node-window', ''),
-    ('map-layout:logic_gate', ''),
-    ('map-layout:logic_gate-window', ''),
     ('kanban-boards', '')
   ) as keys(scope, resource_key)
 $$ language sql immutable;
@@ -1912,8 +1882,6 @@ begin
   ]::text[]) then
     return query select v.scope, v.resource_key from (values
       ('nodes', ''),
-      ('workspace-snapshot:node_map', ''),
-      ('workspace-snapshot:node_map_window', ''),
       ('workspace-snapshot:company_explorer', ''),
       ('workspace-snapshot:company_explorer', 'folder_kind:node')
     ) as v(scope, resource_key);
@@ -1928,33 +1896,13 @@ begin
 
   if p_event_type = any(array['relationship_created', 'relationship_deleted', 'node_deleted']::text[]) then
     return query select v.scope, v.resource_key from (values
-      ('node-relationships', ''),
-      ('workspace-snapshot:node_map', ''),
-      ('workspace-snapshot:node_map_window', '')
-    ) as v(scope, resource_key);
-  end if;
-
-  if p_event_type = 'node_map_positions_updated' then
-    return query select v.scope, v.resource_key from (values
-      ('map-layout:node', ''),
-      ('map-layout:node-window', ''),
-      ('workspace-snapshot:node_map', ''),
-      ('workspace-snapshot:node_map_window', '')
-    ) as v(scope, resource_key);
-  end if;
-
-  if p_event_type = 'node_deleted' then
-    return query select v.scope, v.resource_key from (values
-      ('map-layout:node', ''),
-      ('map-layout:node-window', '')
+      ('node-relationships', '')
     ) as v(scope, resource_key);
   end if;
 
   if p_event_type = any(array['logic_gate_created', 'logic_gate_updated', 'logic_gate_deleted', 'logic_gate_raci_updated', 'logic_gate_permissions_updated']::text[]) then
     return query select v.scope, v.resource_key from (values
       ('logic-gates', ''),
-      ('workspace-snapshot:logic_gate_map', ''),
-      ('workspace-snapshot:logic_gate_map_window', ''),
       ('workspace-snapshot:company_explorer', ''),
       ('workspace-snapshot:company_explorer', 'folder_kind:logic_gate')
     ) as v(scope, resource_key);
@@ -1971,6 +1919,8 @@ begin
     'project_created',
     'project_updated',
     'project_deleted',
+    'project_information_created',
+    'project_information_deleted',
     'project_relationship_upserted',
     'project_relationship_deleted',
     'project_permissions_updated'
@@ -1991,25 +1941,7 @@ begin
 
   if p_event_type = any(array['logic_gate_relationship_created', 'logic_gate_relationship_deleted', 'logic_gate_deleted']::text[]) then
     return query select v.scope, v.resource_key from (values
-      ('logic-gate-relationships', ''),
-      ('workspace-snapshot:logic_gate_map', ''),
-      ('workspace-snapshot:logic_gate_map_window', '')
-    ) as v(scope, resource_key);
-  end if;
-
-  if p_event_type = 'logic_gate_map_positions_updated' then
-    return query select v.scope, v.resource_key from (values
-      ('map-layout:logic_gate', ''),
-      ('map-layout:logic_gate-window', ''),
-      ('workspace-snapshot:logic_gate_map', ''),
-      ('workspace-snapshot:logic_gate_map_window', '')
-    ) as v(scope, resource_key);
-  end if;
-
-  if p_event_type = 'logic_gate_deleted' then
-    return query select v.scope, v.resource_key from (values
-      ('map-layout:logic_gate', ''),
-      ('map-layout:logic_gate-window', '')
+      ('logic-gate-relationships', '')
     ) as v(scope, resource_key);
   end if;
 
@@ -2022,9 +1954,6 @@ begin
   ]::text[]) then
     if folder_kind = 'node' then
       return query select v.scope, v.resource_key from (values
-        ('workspace-snapshot:node_map', ''),
-        ('workspace-snapshot:node_map_window', ''),
-        ('map-layout:node-window', ''),
         ('workspace-snapshot:company_explorer', ''),
         ('workspace-snapshot:company_explorer', 'folder_kind:node'),
         ('company-explorer-folder-items', ''),
@@ -2032,9 +1961,6 @@ begin
       ) as v(scope, resource_key);
     elsif folder_kind = 'logic_gate' then
       return query select v.scope, v.resource_key from (values
-        ('workspace-snapshot:logic_gate_map', ''),
-        ('workspace-snapshot:logic_gate_map_window', ''),
-        ('map-layout:logic_gate-window', ''),
         ('workspace-snapshot:company_explorer', ''),
         ('workspace-snapshot:company_explorer', 'folder_kind:logic_gate'),
         ('company-explorer-folder-items', ''),
@@ -2057,9 +1983,6 @@ begin
   if p_event_type = any(array['company_explorer_folder_item_assigned', 'company_explorer_folder_item_removed']::text[]) then
     if item_type = 'node' then
       return query select v.scope, v.resource_key from (values
-        ('workspace-snapshot:node_map', ''),
-        ('workspace-snapshot:node_map_window', ''),
-        ('map-layout:node-window', ''),
         ('workspace-snapshot:company_explorer', ''),
         ('workspace-snapshot:company_explorer', 'folder_kind:node'),
         ('company-explorer-folder-items', ''),
@@ -2067,9 +1990,6 @@ begin
       ) as v(scope, resource_key);
     elsif item_type = 'logic_gate' then
       return query select v.scope, v.resource_key from (values
-        ('workspace-snapshot:logic_gate_map', ''),
-        ('workspace-snapshot:logic_gate_map_window', ''),
-        ('map-layout:logic_gate-window', ''),
         ('workspace-snapshot:company_explorer', ''),
         ('workspace-snapshot:company_explorer', 'folder_kind:logic_gate'),
         ('company-explorer-folder-items', ''),

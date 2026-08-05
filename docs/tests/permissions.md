@@ -1,3 +1,14 @@
+# Process Story: Permissions stay resource-based after canvas removal
+
+A user requests a Node, Logic Gate, relationship, Editor document, Explorer row, or Kanban item
+↓
+Company membership and the existing resource permission policy determine edit or no access
+↓
+Set-based list and snapshot filtering hides inaccessible resources and relationships
+↓
+Mutations require edit access and keep the existing folder, relationship, attachment, email, recycle, and collaboration authorization rules
+↓
+No position row participates in access decisions or public responses
 Last updated: 2026-07-22
 
 # Permissions Tests
@@ -26,7 +37,7 @@ P14 - Reading entity permission settings requires manager/admin authority and ed
 P15 - Updating entity permission settings requires dev admin, company admin, or company manager authority with edit access to the entity.
 P16 - Permission setting responses include default access, explicit user/group permission rows, legacy override user IDs, effective access, can-edit-permissions, and can-edit-manager-permissions.
 P17 - Visible node, logic gate, project, and Explorer reads are filtered by effective edit access.
-P18 - Map positions and relationship rows are filtered by the viewer's access to the related resources.
+P18 - Relationship rows are filtered by the viewer's access to the related resources.
 P19 - Kanban board and card access derives from the access level of the owning logic gate.
 P20 - Regular users cannot load or update permission settings even when they have resource edit access; company manager/admin authority is a separate settings-management gate.
 P21 - Malformed or unknown resource IDs do not crash visibility checks.
@@ -176,7 +187,7 @@ Given:
 
 Expected:
 - Node, logic gate, project, and Explorer reads hide inaccessible resources.
-- Map positions and relationship rows hide inaccessible related resources.
+- Relationship rows hide inaccessible related resources.
 - Kanban board/card visibility follows the owning Logic Gate access.
 - Opening a node from a Kanban card checks node-level access and shows "You do not have permission to see this." when the node itself is inaccessible.
 - Malformed resource IDs are ignored or handled without crashing.

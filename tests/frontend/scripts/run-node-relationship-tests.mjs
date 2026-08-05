@@ -52,22 +52,12 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/app/timelineState.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/committedTitleCacheReconciliation.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/linkingGraph.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/map/mapMode.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/relationshipProjection.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/logic-gate-map/relationshipProjection.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/relationshipSelection.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/NodeMapControls.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/deleteKeyboardRouting.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/nodeMapLayout.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/mapGridBackground.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/relationshipDeleteSummary.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/NodeRecordStore.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/nodeMapCommands.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/nodeInlineComments.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/editorCanvasKeydownRouting.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/nodes/relationshipRules.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/nodes/nodeRelationshipStructure.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/nodes/nodeRecordStore.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/companyExplorerStore.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/companyExplorerGVICVisibility.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/explorerSync.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/selectionSync.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/treePresentation.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/folders/companyExplorerFolders.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/contextSyncContract.test.js"),
@@ -158,18 +148,11 @@ run(`"${process.execPath}" "${tscEntrypoint}" -p tests/frontend/config/tsconfig.
 
 for (const testFile of testFiles) {
   let contents = readFileSync(testFile, "utf8");
-  contents = contents.replaceAll('"../../../../frontend/src/modules/node-map/relationshipProjection"', '"../../../../frontend/src/modules/node-map/relationshipProjection.js"');
-  contents = contents.replaceAll('"../../../../frontend/src/modules/node-map/relationshipDeleteSummary"', '"../../../../frontend/src/modules/node-map/relationshipDeleteSummary.js"');
-  contents = contents.replaceAll('"../../../../frontend/src/modules/node-map/nodeMapCommands"', '"../../../../frontend/src/modules/node-map/nodeMapCommands.js"');
-  contents = contents.replaceAll('"../../../../frontend/src/modules/node-map/nodeInlineComments"', '"../../../../frontend/src/modules/node-map/nodeInlineComments.js"');
-  contents = contents.replaceAll('"../../../../frontend/src/modules/node-map/NodeMapControls"', '"../../../../frontend/src/modules/node-map/NodeMapControls.js"');
-  contents = contents.replaceAll('"../../../../frontend/src/modules/node-map/shared"', '"../../../../frontend/src/modules/node-map/shared.js"');
-  contents = contents.replaceAll('"../../../../frontend/src/modules/logic-gate-map/shared"', '"../../../../frontend/src/modules/logic-gate-map/shared.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/folders/companyExplorerFolders"', '"../../../../frontend/src/modules/folders/companyExplorerFolders.js"');
   contents = contents.replaceAll('"../../../frontend/src/modules/linkingGraph"', '"../../../frontend/src/modules/linkingGraph.js"');
   contents = contents.replaceAll('"../../../frontend/src/app/frameLinking"', '"../../../frontend/src/app/frameLinking.js"');
   contents = contents.replaceAll('"../../../frontend/src/types"', '"../../../frontend/src/types.js"');
-  contents = contents.replaceAll('"../../../../frontend/src/modules/company-explorer/explorerSync"', '"../../../../frontend/src/modules/company-explorer/explorerSync.js"');
+  contents = contents.replaceAll('"../../../../frontend/src/modules/company-explorer/selectionSync"', '"../../../../frontend/src/modules/company-explorer/selectionSync.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/company-explorer/treePresentation"', '"../../../../frontend/src/modules/company-explorer/treePresentation.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/kanban/shared"', '"../../../../frontend/src/modules/kanban/shared.js"');
   contents = contents.replaceAll('"../../../../frontend/src/pages/home/myWorkGrouping"', '"../../../../frontend/src/pages/home/myWorkGrouping.js"');

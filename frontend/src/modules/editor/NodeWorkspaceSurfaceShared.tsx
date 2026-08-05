@@ -1,6 +1,6 @@
 import React from "react";
 import type { EmailAddress, EmailMessage } from "../communications/communicationsApi";
-import type { NodeProjectionItem } from "../node-map/NodeRecordStore";
+import type { NodeProjectionItem } from "../nodes/nodeRecordStore";
 import {
   uploadMangoAttachment,
   type AttachmentRequestJSON,

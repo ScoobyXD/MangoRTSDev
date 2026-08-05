@@ -1,3 +1,14 @@
+# Process Story: Node work continues without canvas storage
+
+A user creates or opens a Node from Home, Explorer, Kanban, Project, Updates, an entity link, or a direct route
+↓
+The canonical Node, relationships, permissions, GVIC, and final textbox projection load through surviving APIs and caches
+↓
+Editing records authored additions/deletions and preserves each viewer's unread count and seen baseline
+↓
+Manual Save records saving-user history, and History/Restore keeps stable textbox identities and current highlight behavior
+↓
+Attachments, exact email ownership, chats, collaboration, deletion, recycle, and restore continue without any coordinate payload or position row
 # Process Story: Node content lives in final purpose-built storage
 
 A user creates or edits a Node textbox, attaches an exact email, uploads a file, or creates a chat
@@ -130,7 +141,7 @@ N87 - Node saved-version history is not loaded during ordinary node open. It loa
 N88 - Node-open reference reads use StrictMode-safe shared ownership: node resource-attachment metadata is one node-scope cached request with explicit mutation invalidation, project relationships are singleflight/cached with invalidation before relationship refresh, and company accounts/users/group reference data is shared across editor instances with mutation/auth-scope invalidation.
 N89 - `GET /v2/nodes/{node_id}/view` authorizes first, then reads dedicated shared and actor-specific node-view versions to calculate a salted ETag before building the consolidated payload. A matching request returns `304` without loading/serializing/hash-building the full view, without reading `event_rows`, and without writing seen state; ordinary `200` reads are also write-free.
 N90 - Establishing the first-clean-view projection baseline is an explicit idempotent bulk node-changes command outside the canonical GET. It anchors only current text projections that have no unseen other-actor change, derives each baseline from the observed projection update timestamp rather than wall-clock time, uses one bulk repository operation, and never consumes genuinely unseen changes. Clean-anchor snapshot writes do not bump the actor node-view version because the response body is unchanged. The frontend tracks a bounded last-success ETag per cache key and retries failures with bounded same-generation backoff.
-N91 - Every successful Node rename entry point covered by RW15 publishes the concrete committed-title event after the HTTP command succeeds, and applicable same-window Node labels converge under RW15 without server fan-out. An actively edited Editor or Node Map title defers the event without changing its draft/caret; passive dock/pin updates do not change recency or write pin rows.
+N91 - Every successful Node rename entry point covered by RW15 publishes the concrete committed-title event after the HTTP command succeeds, and applicable same-window Node labels converge under RW15 without server fan-out. An actively edited Editor title defers the event without changing its draft/caret; passive dock/pin updates do not change recency or write pin rows.
 N92 - Mounted Node chat performs one single-flight canonical durable-chat refresh on first subscription acceptance and every reconnect acceptance, with at most one queued final read and no overlap/invalidation. A later local handler joining the already accepted Node scope receives immediate acceptance. This closes each mount's load-to-subscribe race without replay/generalized history or dirty editor-text replacement.
 N93 - A node editor header keeps Editor, Permissions, the shared formatting toolbar, Outline Styles/Automatic Numbering, and the immediately adjacent More control on one nonwrapping line. Relationships, Metadata, History, Save Settings, save-version/related-node commands, and supported opener-specific secondary actions remain available in the accessible **More editor actions** overflow menu with their existing permission and disabled state.
 N94 - Node popups/panels, permissions and email dialogs, and image/attachment/email previews mount through the shared body-level overlay portal above Key Views, Explorer, Search Explorer, and feature-local stacking contexts. Blocking modal modes trap focus and restore prior focus on close; anchored Kanban editor panels may remain modeless until fullscreen. The Project Logic Gates / Nodes inline editor remains in document flow and does not use the overlay portal.
@@ -606,7 +617,7 @@ Business logic covered:
 - N92
 
 Given:
-- The same Node is visible in multiple applicable RW15 consumers, and an Editor or Node Map title is actively edited.
+- The same Node is visible in multiple applicable RW15 consumers, and an Editor title is actively edited.
 - The Node is renamed successfully from each supported rename entry point.
 - Mounted Node chat has completed its initial load and then receives first subscription acceptance or reconnect acceptance while a read is slow; another local handler may join the accepted scope.
 

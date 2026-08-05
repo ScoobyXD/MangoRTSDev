@@ -47,8 +47,6 @@ type MemoryRepo struct {
 	companyExplorerV2Subscriptions map[string]memoryCompanyExplorerV2Subscription
 	folderShares                   map[string]domain.CompanyExplorerFolderShare
 	defaultFolderSeed              map[string]bool
-	nodeMapPositions               map[string]domain.NodeMapPosition
-	logicMapPositions              map[string]domain.LogicGateMapPosition
 	kanbanBoards                   map[string]domain.KanbanBoard
 	kanbanColumns                  map[string][]domain.KanbanColumn
 	kanbanCards                    map[string][]domain.KanbanCard
@@ -146,8 +144,6 @@ func NewMemoryRepo() *MemoryRepo {
 		companyExplorerV2Subscriptions: map[string]memoryCompanyExplorerV2Subscription{},
 		folderShares:                   map[string]domain.CompanyExplorerFolderShare{},
 		defaultFolderSeed:              map[string]bool{},
-		nodeMapPositions:               map[string]domain.NodeMapPosition{},
-		logicMapPositions:              map[string]domain.LogicGateMapPosition{},
 		kanbanBoards:                   map[string]domain.KanbanBoard{},
 		kanbanColumns:                  map[string][]domain.KanbanColumn{},
 		kanbanCards:                    map[string][]domain.KanbanCard{},

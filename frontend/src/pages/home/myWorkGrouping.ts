@@ -1,5 +1,5 @@
 import type { Account } from "../../modules/accounts/accountsApi.js";
-import type { LogicGateGVICRole } from "../../modules/logic-gate-map/shared.js";
+import type { LogicGateGVICRole } from "../../modules/logic-gates/types.js";
 import { buildUniversalNestedGroups, computeUniversalDefaultExpandedGroupIDs, type UniversalGroupValue, type UniversalNestedGroup } from "../../modules/grouping/universalGrouping.js";
 import { getUniversalStatusGroupValue } from "../../modules/grouping/universalStatusGrouping.js";
 

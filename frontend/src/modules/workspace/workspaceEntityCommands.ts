@@ -2,14 +2,12 @@ export type WorkspaceEntityCommandRequest = <T>(path: string, init?: RequestInit
 
 export type WorkspaceEntityBatchKind = "node" | "logic_gate";
 export type WorkspaceEntityBatchCreatorLogicGateGVICRole = "generated" | "verified" | "consulted" | "informed";
-export type WorkspaceEntityBatchMutationOrigin = "company_explorer" | "node_map" | "logic_gate_map" | "matrix" | "kanban" | "editor";
+export type WorkspaceEntityBatchMutationOrigin = "company_explorer" | "matrix" | "kanban" | "editor";
 
 export type WorkspaceEntityBatchItem = {
   client_id: string;
   name?: string;
   title?: string;
-  x: number;
-  y: number;
   position?: number;
 };
 
@@ -52,14 +50,7 @@ export async function createWorkspaceEntityBatchCommand<TResponse>(args: {
     items: args.items,
     relationships: args.relationships ?? [],
   };
-  if (args.entityKind === "logic_gate" && args.creatorLogicGateGVICRole) {
-    body.creator_logic_gate_gvic_role = args.creatorLogicGateGVICRole;
-  }
-  if (args.mutationOrigin) {
-    body.mutation_origin = args.mutationOrigin;
-  }
-  return args.requestJSON<TResponse>("/v1/workspace/entity-batches", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  if (args.entityKind === "logic_gate" && args.creatorLogicGateGVICRole) body.creator_logic_gate_gvic_role = args.creatorLogicGateGVICRole;
+  if (args.mutationOrigin) body.mutation_origin = args.mutationOrigin;
+  return args.requestJSON<TResponse>("/v1/workspace/entity-batches", { method: "POST", body: JSON.stringify(body) });
 }

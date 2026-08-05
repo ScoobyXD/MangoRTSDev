@@ -1,10 +1,10 @@
 import type { CommittedEntityTitleUpdate } from "../realtime/committedEntityTitleUpdates.js";
-import type { LogicGateRecord } from "../logic-gate-map/shared.js";
-import type { NodeRecord } from "../node-map/shared.js";
+import type { LogicGateRecord } from "../logic-gates/types.js";
+import type { NodeRecord } from "../nodes/types.js";
 import {
   reconcileCommittedLogicGateRecordTitles,
   reconcileCommittedNodeTitleInSnapshot,
-} from "../map/committedTitleSnapshotReconciliation.js";
+} from "../realtime/committedTitleSnapshotReconciliation.js";
 
 type ProjectManagementWorkspaceTitleState = {
   nodes: NodeRecord[];

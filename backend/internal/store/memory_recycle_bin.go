@@ -36,8 +36,6 @@ type memoryRecycleBinSnapshot struct {
 	folders                       map[string]domain.CompanyExplorerFolder
 	folderItems                   map[string]domain.CompanyExplorerFolderItem
 	folderShares                  map[string]domain.CompanyExplorerFolderShare
-	nodeMapPositions              map[string]domain.NodeMapPosition
-	logicMapPositions             map[string]domain.LogicGateMapPosition
 	kanbanBoards                  map[string]domain.KanbanBoard
 	kanbanColumns                 map[string][]domain.KanbanColumn
 	kanbanCards                   map[string][]domain.KanbanCard
@@ -232,8 +230,6 @@ func (r *MemoryRepo) snapshotRecycleStateLocked() memoryRecycleBinSnapshot {
 		folders:                       cloneMap(r.folders),
 		folderItems:                   cloneMap(r.folderItems),
 		folderShares:                  cloneMap(r.folderShares),
-		nodeMapPositions:              cloneMap(r.nodeMapPositions),
-		logicMapPositions:             cloneMap(r.logicMapPositions),
 		kanbanBoards:                  cloneMap(r.kanbanBoards),
 		kanbanColumns:                 cloneSliceMap(r.kanbanColumns),
 		kanbanCards:                   cloneSliceMap(r.kanbanCards),
@@ -271,8 +267,6 @@ func (r *MemoryRepo) restoreRecycleSnapshotLocked(snapshot memoryRecycleBinSnaps
 	r.folders = cloneMap(snapshot.folders)
 	r.folderItems = cloneMap(snapshot.folderItems)
 	r.folderShares = cloneMap(snapshot.folderShares)
-	r.nodeMapPositions = cloneMap(snapshot.nodeMapPositions)
-	r.logicMapPositions = cloneMap(snapshot.logicMapPositions)
 	r.kanbanBoards = cloneMap(snapshot.kanbanBoards)
 	r.kanbanColumns = cloneSliceMap(snapshot.kanbanColumns)
 	r.kanbanCards = cloneSliceMap(snapshot.kanbanCards)

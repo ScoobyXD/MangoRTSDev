@@ -443,7 +443,6 @@ export function resolveExplorerPublishedSelection(input: {
   selectedKanbanBoardID: string;
   selectedFolderID: string;
   selectedFolderKind?: CompanyExplorerFolderKind;
-  targetFrameKind?: string | null;
 }): ExplorerPublishedSelection {
   const treeID = input.selectedTreeID.trim();
   let entityKind: ExplorerPublishedSelectionKind = "folder";
@@ -476,8 +475,7 @@ export function resolveExplorerPublishedSelection(input: {
   const selectedLogicGateID = entityKind === "logic_gate" ? entityID : "";
   const selectedKanbanBoardID = entityKind === "kanban" ? entityID : "";
   const isLogicGateContext = entityKind === "logic_gate"
-    || (entityKind === "folder" && input.selectedFolderKind === "logic_gate")
-    || (entityKind === "folder" && input.targetFrameKind === "logic-map");
+    || (entityKind === "folder" && input.selectedFolderKind === "logic_gate");
 
   return {
     entityKind,
@@ -618,42 +616,6 @@ export function buildExplorerFindSelection(input: {
     primaryEntity,
     expandedTreeIDs,
   };
-}
-
-export function shouldAcceptMapSelectionAfterExplorerSelection(input: {
-  incomingDomain: "node" | "logic_gate";
-  currentDomain: ExplorerSelectionDomain;
-  localSelectionChangedAt: number;
-  incomingChangedAt?: number;
-  now: number;
-  localIntentHoldMs?: number;
-  staleWindowMs?: number;
-}): boolean {
-  const localIntentHoldMs = input.localIntentHoldMs ?? 180;
-  const staleWindowMs = input.staleWindowMs ?? 750;
-  if (input.localSelectionChangedAt <= 0) return true;
-  if (input.now - input.localSelectionChangedAt <= localIntentHoldMs) return false;
-
-  // Map selection events are asynchronous. After any local Explorer click,
-  // older map events are echoes, even when they are in the same node/gate
-  // domain. This keeps rapid Explorer navigation from briefly reselecting the
-  // previous map item.
-  if (typeof input.incomingChangedAt === "number" && input.incomingChangedAt > 0) {
-    return input.incomingChangedAt > input.localSelectionChangedAt;
-  }
-  return input.now - input.localSelectionChangedAt > staleWindowMs;
-}
-
-export function shouldAcceptClearedMapSelectionAfterExplorerSelection(input: {
-  currentDomain: ExplorerSelectionDomain;
-  localSelectionChangedAt: number;
-  incomingChangedAt?: number;
-  now: number;
-  staleWindowMs?: number;
-}): boolean {
-  if (input.localSelectionChangedAt <= 0 || input.currentDomain === "root") return true;
-  if (typeof input.incomingChangedAt === "number" && input.incomingChangedAt > 0 && input.incomingChangedAt <= input.localSelectionChangedAt) return false;
-  return input.now - input.localSelectionChangedAt > (input.staleWindowMs ?? 750);
 }
 
 export function getExplorerScrollTopForRow(input: {

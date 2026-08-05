@@ -257,10 +257,8 @@ var recycleSnapshotTables = map[string]bool{
 	"project_textbox_chats":        true,
 	"node_content_changes":         true,
 	"node_content_change_seen":     true,
-	"node_map_positions":           true,
 	"node_account_assignments":     true,
 	"node_relationships":           true,
-	"logic_gate_map_positions":     true,
 	"logic_gate_relationships":     true,
 	"user_logic_gate_shortcuts":    true,
 
@@ -293,8 +291,6 @@ var recycleRestoreTableOrder = []string{
 	"project_textboxes_history",
 	"project_textbox_chats",
 	"company_explorer_folders",
-	"node_map_positions",
-	"logic_gate_map_positions",
 	"node_content_changes",
 	"node_content_change_seen",
 	"node_account_assignments",
@@ -455,7 +451,7 @@ func postgresSnapshotRecyclePayloadWithCacheTx(ctx context.Context, tx *sql.Tx, 
 		}
 	}
 	if len(nodeIDs) > 0 {
-		for _, tableName := range []string{"nodes", "node_textboxes", "node_textboxes_history", "node_textbox_chats", "node_textbox_seen_snapshots", "node_map_positions", "node_account_assignments"} {
+		for _, tableName := range []string{"nodes", "node_textboxes", "node_textboxes_history", "node_textbox_chats", "node_textbox_seen_snapshots", "node_account_assignments"} {
 			if err := addTable(tableName, `company_id=$1::uuid and node_id = any(string_to_array($2, ',')::uuid[])`, companyID, nodeIDCSV); err != nil {
 				return nil, err
 			}
@@ -471,7 +467,7 @@ func postgresSnapshotRecyclePayloadWithCacheTx(ctx context.Context, tx *sql.Tx, 
 		}
 	}
 	if len(logicGateIDs) > 0 {
-		for _, tableName := range []string{"logic_gates", "logic_gate_textboxes", "logic_gate_textboxes_history", "logic_gate_map_positions"} {
+		for _, tableName := range []string{"logic_gates", "logic_gate_textboxes", "logic_gate_textboxes_history"} {
 			if err := addTable(tableName, `company_id=$1::uuid and logic_gate_id = any(string_to_array($2, ',')::uuid[])`, companyID, logicGateIDCSV); err != nil {
 				return nil, err
 			}

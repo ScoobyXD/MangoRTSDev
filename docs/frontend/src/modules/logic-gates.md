@@ -1,134 +1,34 @@
-# Logic Gate Map Module
+# Logic Gates Frontend Module
 
-Status update (2026-05-03): new workspaces should use the unified `Map` module instead of adding a separate Logic Gate Map module. The implementation below remains as the logic-gate rendering/persistence path behind that unified map and as a compatibility path for saved `logic-map` frames.
+Last updated: 2026-08-05
 
 ## Purpose
-Logic Gate Map is the dedicated visual workspace for creating and connecting `logic_gates`.
-Gate cards use a flat-left, rounded-right AND-gate silhouette. This is a visual UI convention only; it does not change relationship semantics or require multiple inputs.
 
-It intentionally mirrors Node Map interaction patterns so users do not learn a second canvas model:
-- create logic gates on the canvas,
-- create linked logic gates with `+` side controls on the left and right sides,
-- connect existing gates with relationship side controls,
-- drag, resize, pan, zoom, multi-select, and delete gates or relationship lines,
-- link selection context into Company Explorer and Editor.
-- keep one selected gate active when clicking blank canvas so linked Editors do
-  not lose context; blank-canvas clicks clear only multi-select batches, and
-  only when the gesture stays a click rather than becoming a drag.
-- pointer-down on an already selected gate batch keeps the full batch available
-  for drag. If that gesture does not move past the click threshold, it clears
-  the batch instead.
-- right-click a selected gate batch and choose `Find on Company Explorer` to
-  highlight those gate rows in Explorer, auto-expand their ancestor folders, and
-  scroll the primary row into view.
+Logic Gates remain first-class workspace records with an Editor, Input/Output relationships, GVIC presentation, Kanban/Arena workflows, manual saved versions, permissions, attachments, exact email ownership, recycle, and restore behavior.
 
-## Backend/API Contract
-Logic Gate Map is API-first so future headless agents can perform the same workflows as the UI.
+## Module ownership
 
-Endpoints used:
-- `GET /v1/workspace/snapshot?company_id=...`
-  - returns `logic_gates` and `logic_gate_relationships` in the bulk hot-path snapshot.
-- `GET /v1/logic-gates?company_id=...`
-- `POST /v1/logic-gates`
-  - payload: `{ company_id, header }`
-- `GET /v1/logic-gates/:logic_gate_id?company_id=...`
-- `PUT /v1/logic-gates/:logic_gate_id`
-  - payload: `{ company_id, header }`
-- `DELETE /v1/logic-gates/:logic_gate_id?company_id=...`
-- `POST /v1/logic-gates/:logic_gate_id/information`
-  - payload: `{ company_id, type, information, information_id? }`
-  - `information` must contain non-whitespace text; blank editor blurs are rejected by the API and DB guard.
-  - Under the V1 Mango Attachment System, pasted/dropped editor images are represented by Mango attachment references in `information`; the endpoint must not persist data URLs or base64 file bytes.
-- `GET /v1/logic-gate-relationships?company_id=...`
-- `POST /v1/logic-gate-relationships`
-  - payload: `{ company_id, logic_gate_id_a, logic_gate_id_b, a_position, b_position }`
-- `DELETE /v1/logic-gate-relationships/:logic_gate_relationship_id?company_id=...`
-- `GET/POST /v1/company-explorer/folders`
-  - `folder_kind` must be `logic_gate` for Logic Gate Map organization.
-- `PUT /v1/company-explorer/folders/:folder_id`
-  - moves a logic-gate folder under another compatible folder or back to the Logic Gates root.
-- `GET/POST/DELETE /v1/company-explorer/folder-items`
-  - `item_type` must be `logic_gate` when moving gates into explorer folders.
-- `GET /v1/map-layout?company_id=...&map_type=logic_gate`
-  - reads canonical shared logic-gate canvas positions.
-- `PUT /v1/map-layout`
-  - bulk upserts changed logic-gate positions with `{ company_id, map_type: "logic_gate", positions: [{ entity_id, x, y }] }`.
+- `frontend/src/modules/logic-gates/types.ts` owns shared Logic Gate record, relationship, details, permission, and Editor projection types.
+- `frontend/src/modules/logic-gates/logicGateRecordStore.ts` owns coalesced details, projection, and GVIC reads.
+- `frontend/src/modules/logic-gates/logicGateRelationshipGraph.ts` owns the in-memory full-workspace Logic Gate and relationship snapshot used by surviving consumers.
+- `frontend/src/modules/logic-gates/gvicPresentation.ts` owns GVIC label and presentation rules.
+- Committed-title snapshot reconciliation lives in `frontend/src/modules/realtime/committedTitleSnapshotReconciliation.ts`.
 
-`DELETE /v1/logic-gates/:logic_gate_id` also removes Kanban card placements for
-that gate and clears operation pointers while preserving operation history. This
-keeps the same command safe for UI users and headless agents.
+## API and persistence contracts
 
-## Relationship Semantics
-Logic gate relationships are not parent/child/peer.
+- Logic Gate list, detail, update, permission, GVIC, relationship, deletion, recycle, and restore commands keep their existing APIs.
+- `/v1/workspace/entity-batches` creates Logic Gates, `logic_gate_relationships`, folder items, creator GVIC assignments, and client-to-entity mappings. Items contain identity, title, and optional Explorer position only.
+- Logic Gate relationships continue using Input/Output endpoint semantics and canonical `logic_gate_relationships` storage.
+- Workspace snapshots expose Logic Gates and relationships only through retained `full`, `company_explorer`, and `kanban` scopes.
+- Committed title updates keep Editor, Kanban/Arena, Home, Explorer, Project, and dock/pin labels consistent while preserving active drafts.
 
-The only valid positions are:
-- `Input`
-- `Output`
+## Editor, history, and restore
 
-The only valid row pairs are:
-- `Input -> Output`
-- `Output -> Input`
+- The current document lives in `logic_gate_textboxes` and uses the authenticated JSON Editor contract.
+- Manual Save appends one batch to `logic_gate_textboxes_history` with saving-user identity.
+- History listing and Restore keep the current document identity.
+- Permissions, attachments, exact email relationships, normal revisions/collaboration, deletion, recycle, and restore retain their existing behavior.
 
-Self-relationships are rejected.
+## Verification
 
-Side convention:
-- `left` is the only `Input` port.
-- `top`, `right`, and `bottom` are `Output` ports.
-- New linked gates and relationship drafts can only start from `left` or `right`.
-- During an active relationship draft, an input source can attach to `top`, `right`, or `bottom` output sides.
-- During an active relationship draft, an output source can attach only to the target `left` input side.
-
-Junior engineer note:
-- The source gate is always written as `logic_gate_id_a`.
-- The target gate is always written as `logic_gate_id_b`.
-- `a_position` is decided from the target side.
-- `b_position` is decided from the source side.
-
-## Hot Path Behavior
-Logic Gate Map follows the latency architecture rules:
-- initial graph load comes from one bulk workspace snapshot,
-- the workspace snapshot includes `logic_gate_map_positions` for one hot read,
-- local create/update/delete operations apply optimistic graph-cache updates,
-- SSE deltas converge the cache without polling loops,
-- unchanged snapshot responses use ETag/304,
-- visible gate rendering uses the same viewport culling strategy as Node Map,
-- the visual background uses the shared repeated SVG plus-grid, which adapts tile size by zoom without creating per-cell DOM,
-- the major plus layer is aligned to the minor grid axes so scale cues stay readable during pan and zoom,
-- layout geometry is a backend projection in `logic_gate_map_positions`; browser storage keeps only small viewport/selection cache data.
-- relationship role colors are enabled by default. Turning the toggle off makes
-  every relationship line use the map accent color only, even while gates are
-  selected.
-- map notification badges, including group-selection count and status/errors,
-  are anchored to the bottom-left viewport corner.
-- Company Explorer folder selection filters the cached snapshot in memory. A selected folder includes descendant folders, and relationship lines render only when both gates are inside that active scope.
-- Selecting an individual gate from inside a Company Explorer folder keeps that folder scope active while selecting the gate.
-- New logic gates created while a folder scope is active are assigned to that folder through the folder-items API.
-- Moving a logic gate to a different Company Explorer folder level through the folder-items API removes relationships touching that gate. Logic Gate Map prunes those relationship lines locally from the committed response and confirms later state through canonical HTTP reloads; the map does not own a backend cross-user realtime stream.
-
-Junior engineer note:
-- A position update is not a new logic-gate relationship and does not change gate semantics.
-- It is a shared UI projection row keyed by `(company_id, logic_gate_id)` so agents and browsers can coordinate on the same layout through APIs.
-
-## Linking Behavior
-Frame linking uses the existing `frame-module-links-v1` graph. New frames use the unified `map` kind; legacy saved layouts may still use `logic-map`.
-
-Linked behavior:
-- Logic Gate Map publishes `mangorts:logic-gate-map-selection-updated`.
-- Company Explorer shows real logic gates under the Logic Gates tree and can drive linked Logic Gate Map selection.
-- Editor follows linked Logic Gate Map selection and labels the header `Logic Gate:` instead of `Node:`.
-- When the unified Map receives logic-gate Explorer context, it renders this logic-gate path and writes `logic-gate-map-state-v1:<companyID>:<mapWidgetID>` using the same frame ID.
-- Linked Company Explorer treats `selectedLogicGateID`/`selectedNodeID` in the selection event as fresher than debounced `logic-gate-map-state-v1:*` storage. Storage is used only when a gap-recovery event lacks an entity payload, which keeps Explorer selection stable after Explorer-driven map updates.
-- Logic Gate Map tags Explorer-caused selection events with `sourceExplorerID`; the originating Explorer ignores those self-echoes, while real map clicks and other explorers still propagate. Empty Explorer context clears logic-gate folder scope and selection instead of preserving a previous child gate.
-- Logic Gate Map suppresses cached selection emission while a newer Explorer context is pending, so unified Map mode switches do not echo an old gate before the Explorer click is applied.
-- Logic Gate Map preserves an Explorer-selected gate ID while folder scope filtering catches up. It does not fall back to the first visible gate unless the selected gate is absent from the known graph snapshot, preventing first-click cross-folder selection bounce.
-- During startup, the async graph load reads the latest live Explorer-selected gate and folder scope before restoring cached map state. The first Explorer click after opening the Vite URL should therefore select the intended gate on the map.
-- Logic-gate graph cache deltas must preserve `logic_gate_map_positions`; only deleting a gate should remove its own position. Bulk remount placement uses the stable grid bootstrap rather than the viewport insertion point.
-- Delete key and gate context-menu delete resolve the full current multi-selection. Right-clicking a selected gate must not collapse selection before the menu opens.
-
-## File Ownership
-Primary files:
-- `frontend/src/modules/logic-gate-map/LogicGateMapContent.tsx`
-- `frontend/src/modules/logic-gate-map/LogicGateRelationshipGraph.ts`
-- `frontend/src/modules/logic-gate-map/relationshipProjection.ts`
-- `frontend/src/modules/logic-gate-map/shared.ts`
-- `frontend/src/modules/logic-gate-map/LogicGateRecordStore.ts`
+Focused coverage lives in the Logic Gate HTTP/store/history/recycle/permission suites, the Editor suites, `tests/frontend/app/committedTitleCacheReconciliation.test.ts`, and the Kanban/Arena frontend suites.

@@ -1,4 +1,4 @@
-export type LinkableKind = "map" | "editor" | "explorer" | "logic-map" | "kanban";
+export type LinkableKind = "editor" | "explorer" | "kanban";
 
 export const FRAME_LINKS_KEY = "frame-module-links-v1";
 export const FRAME_REGISTRY_KEY = "frame-module-registry-v1";
@@ -23,11 +23,8 @@ function edgeKey(a: string, b: string): string {
 }
 
 export function classifyFrameKind(kind: string): LinkableKind | null {
-  if (kind === "map") return "map";
-  if (kind === "nodes" || kind === "nodes-map") return "map";
   if (kind === "editor" || kind === "node-doc") return "editor";
   if (kind === "company-explorer") return "explorer";
-  if (kind === "logic-map") return "logic-map";
   if (kind === "kanban") return "kanban";
   return null;
 }

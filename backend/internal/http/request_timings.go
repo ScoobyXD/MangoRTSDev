@@ -131,8 +131,6 @@ func normalizeTimingLabel(label string) string {
 		return "delete.node.rows.kanban_projection"
 	case "repo.postgresDeleteNodeRowsTx.node_projection_delete":
 		return "delete.node.rows.node_projection"
-	case "repo.postgresDeleteNodeRowsTx.node_map_positions_delete":
-		return "delete.node.rows.node_map_positions"
 	case "repo.postgresDeleteNodeRowsTx.resource_permissions_delete":
 		return "delete.node.rows.resource_permissions"
 	case "repo.postgresDeleteNodeRowsTx.node_delete":
@@ -185,8 +183,6 @@ func normalizeTimingLabel(label string) string {
 		return "explorer.folder_item_read"
 	case "repo.nextCompanyExplorerSQLRowPosition":
 		return "explorer.folder_position_read"
-	case "repo.CreateWorkspaceEntityBatch.map_position_writes":
-		return "map.position_write"
 	case "repo.CreateWorkspaceEntityBatch.creator_assignee_read":
 		return "reread.assignment"
 	case "repo.assignNodeToLogicGateStatusTx.logic_gate_read":

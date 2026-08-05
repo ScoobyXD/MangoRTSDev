@@ -15,7 +15,7 @@ import {
   updateNode as defaultUpdateNode,
 } from "../../modules/communications/communicationsApi.js";
 import { requestJSON as defaultRequestJSON, type RequestJSONInit } from "../../modules/api/requestJSON.js";
-import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
+import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gates/types.js";
 import type {
   CompanyUser,
   ArchiveEmailMessagesBatchResult,
@@ -47,7 +47,7 @@ import {
 } from "../../modules/kanban/shared.js";
 import { editorBodyHasEmailContent, serializeEditorBodyForEmailHTML } from "../../modules/editor/richTextEditing.js";
 import { buildForwardedComposeBody } from "./emailForwarding.js";
-import type { NodeRecord } from "../../modules/node-map/shared.js";
+import type { NodeRecord } from "../../modules/nodes/types.js";
 import {
   moveMyWorkNodeToCell as defaultMoveMyWorkNodeToCell,
   type MyWorkNodeMoveResult,
@@ -510,8 +510,6 @@ export async function createHomeNodeCommand(args: {
     items: [{
       client_id: createWorkspaceEntityBatchClientID("home-node"),
       name: args.name?.trim() || "new node",
-      x: 120,
-      y: 120,
     }],
     requestJSON: bindHomeEntityCreateRequest(args.apiBase, requestJSON),
   });
@@ -536,8 +534,6 @@ export async function createHomeLogicGateCommand(args: {
     items: [{
       client_id: createWorkspaceEntityBatchClientID("home-logic-gate"),
       title: args.title?.trim() || "new logic gate",
-      x: 120,
-      y: 120,
     }],
     requestJSON: bindHomeEntityCreateRequest(args.apiBase, requestJSON),
   });

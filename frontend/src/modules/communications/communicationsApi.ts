@@ -2,8 +2,8 @@ import { apiFetchJSON, getApiAccessToken, getAuthSessionCacheGeneration, readAut
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 import type { CompanyExplorerV2Row } from "../company-explorer/companyExplorerLazyApi.js";
 import { logicGateKanbanBoardID, type KanbanBoard, type KanbanCard } from "../kanban/shared.js";
-import type { NodeRecord } from "../node-map/shared.js";
-import type { LogicGateGVICAssignment, LogicGateGVICRole, LogicGateGVICPrincipalType, LogicGateRecord } from "../logic-gate-map/shared.js";
+import type { NodeRecord } from "../nodes/types.js";
+import type { LogicGateGVICAssignment, LogicGateGVICRole, LogicGateGVICPrincipalType, LogicGateRecord } from "../logic-gates/types.js";
 import type { ProjectRelationshipProjection } from "../project-management/projectManagementApi.js";
 import { markWorkspaceSnapshotScopeStale } from "../workspace/workspaceSnapshotCache.js";
 import { scheduleOutboundEmailDispatch } from "./outboundEmailUndo.js";
@@ -2408,13 +2408,13 @@ function markWorkspacePanelSnapshotScopeStale(companyID: string, options: Parame
 }
 
 function markNodeWorkspaceSnapshotScopesStale(companyID: string): void {
-  markWorkspacePanelSnapshotScopeStale(companyID, { scope: "node_map" });
+  markWorkspacePanelSnapshotScopeStale(companyID, { scope: "full" });
   markWorkspacePanelSnapshotScopeStale(companyID, { scope: "company_explorer" });
 }
 
 function markLogicGateWorkspaceSnapshotScopesStale(companyID: string, logicGateID: string): void {
   const cleanLogicGateID = logicGateID.trim();
-  markWorkspacePanelSnapshotScopeStale(companyID, { scope: "logic_gate_map" });
+  markWorkspacePanelSnapshotScopeStale(companyID, { scope: "full" });
   markWorkspacePanelSnapshotScopeStale(companyID, { scope: "company_explorer" });
   if (cleanLogicGateID) markWorkspacePanelSnapshotScopeStale(companyID, { scope: "kanban", boardID: logicGateKanbanBoardID(cleanLogicGateID) });
 }

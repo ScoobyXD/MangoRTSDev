@@ -190,14 +190,6 @@ psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME 
 
 Company Explorer final-tree storage must not allow node placements. The current `company_explorer_items.target_type` constraint is `project` or `logic_gate` only; nodes are source-of-truth workspace resources that may appear in search or Logic Gate/Kanban work views, not as Company Explorer rows. If a database ever received the removed `20260706_company_explorer_email_node_items.sql` migration, remove any `target_type='node'` rows and restore `company_explorer_items_target_type_chk` to `('project', 'logic_gate')` before using final Explorer reads.
 
-For existing databases that were created before shared map layout persistence was added, run:
-
-```powershell
-psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME sslmode=$env:DB_SSLMODE" -f .\db\migrations\20260502_map_layout_positions.sql
-```
-
-These tables store the latest shared Node Map and Logic Gate Map positions by company/entity so UI users and headless agents read and write the same canonical layout.
-
 For existing databases that may contain multiple editor `Text box` projection rows for the same node or logic gate, run:
 
 ```powershell
@@ -234,9 +226,7 @@ Communications invitation response:
 - `GET /v1/company-explorer/folder-items?company_id={uuid}&folder_id={uuid}&item_type=node|logic_gate`
 - `POST /v1/company-explorer/folder-items` (assign/move item; moving to a different folder level deletes relationships touching that node or logic gate)
 - `DELETE /v1/company-explorer/folder-items?company_id={uuid}&item_type=node|logic_gate&item_id={uuid}`
-- `GET /v1/map-layout?company_id={uuid}&map_type=node|logic_gate`
-- `PUT /v1/map-layout`
-- `POST /v1/map-entity-batches` (create node/logic-gate map entities with optional folder placement, relationships, and positions in one command)
+- `POST /v1/workspace/entity-batches` (create Nodes or Logic Gates with optional relationships, Explorer placement, GVIC assignment, and client/entity mappings)
 - `GET /v1/kanban/boards?company_id={uuid}&after_position=0&limit=100`
 - `POST /v1/kanban/boards`
 - `PUT /v1/kanban/boards/{board_id}`
@@ -250,8 +240,7 @@ Communications invitation response:
 - `DELETE /v1/kanban/cards/{card_id}?company_id={uuid}&board_id={board_id}`
 
 Node and logic-gate deletes are API-first cleanup commands. `DELETE /v1/nodes/{node_id}`
-and `DELETE /v1/logic-gates/{logic_gate_id}` remove relationships, explorer placements,
-map positions, projections, and any Kanban card placements for that item.
+and `DELETE /v1/logic-gates/{logic_gate_id}` remove relationships, Explorer placements, projections, and any Kanban card placements for that item.
 
 ### Request examples
 
@@ -350,40 +339,8 @@ curl "http://localhost:8080/v1/kanban/cards?company_id=11111111-1111-1111-1111-1
 Kanban cards are intentionally node-only and minimal: `node_id`, `node_title`, optional `description_snapshot`, position, and timestamps. Keep the hot path bounded with `company_id`, `board_id`, optional `column_id`, `after_position`, and `limit`. The previous grouped/filter query endpoint and card metadata columns were removed so filtering can be rebuilt deliberately one capability at a time.
 Saved Kanban boards are metadata rows. Board contents and settings remain in the column/card APIs so UI users and headless agents operate the same model.
 
-Kanban cards are node-only through the API. Logic gates should stay in Logic Gate Map and Company Explorer workflows, not Kanban boards.
+Kanban cards are node-only through the API. Logic Gates use Logic Gate Arena and Company Explorer workflows, not Kanban cards.
 
-### Shared map layout contract
+### Workspace entity batch contract
 
-Node Map and Logic Gate Map geometry is persisted as a read-optimized projection, not as browser-only state.
-
-Read layout:
-
-```bash
-curl "http://localhost:8080/v1/map-layout?company_id=11111111-1111-1111-1111-111111111111&map_type=node"
-```
-
-Write layout:
-
-```bash
-curl -X PUT http://localhost:8080/v1/map-layout \
-  -H 'content-type: application/json' \
-  -d '{"company_id":"11111111-1111-1111-1111-111111111111","map_type":"node","positions":[{"entity_id":"<node_id>","x":240,"y":360}]}'
-```
-
-Use `map_type:"logic_gate"` with `entity_id:"<logic_gate_id>"` for Logic Gate Map positions. Writes are intentionally bulk and capped per request so clients can debounce drag interactions and agents can batch operations without forcing full-map rewrites.
-
-Create a map batch:
-
-```bash
-curl -X POST http://localhost:8080/v1/map-entity-batches \
-  -H 'content-type: application/json' \
-  -d '{
-    "company_id":"11111111-1111-1111-1111-111111111111",
-    "entity_kind":"logic_gate",
-    "folder_id":"<optional_logic_gate_folder_id>",
-    "items":[{"client_id":"gate-a","title":"Validate intake","x":240,"y":360}],
-    "relationships":[{"entity_id_a":"<existing_gate_id>","client_id_b":"gate-a","a_position":"Input","b_position":"Output"}]
-  }'
-```
-
-`client_id` is request-local only. The response returns `entity_mappings`, created entities, created relationships, optional folder-item rows, and saved map positions so UI clients and headless agents can apply one durable command without follow-up layout or Explorer assignment writes.
+`POST /v1/workspace/entity-batches` creates Nodes or Logic Gates together with optional relationships, Company Explorer folder items, creator GVIC assignment, and request-local `client_id` to durable entity mappings. Item payloads contain `client_id`, the entity title field, and optional Explorer `position`. Coordinates are rejected as unknown fields. The response contains no geometry results.

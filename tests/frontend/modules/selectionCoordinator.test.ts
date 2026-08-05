@@ -8,8 +8,8 @@ function selection(overrides: Partial<LiveSelectionChange> = {}): LiveSelectionC
     entityKind: "node",
     entityID: "node-a",
     label: "Node A",
-    sourceFrameID: "map-1",
-    sourceModule: "node-map",
+    sourceFrameID: "explorer-1",
+    sourceModule: "company-explorer",
     targetFrameIDs: ["editor-1"],
     sequence: 10,
     changedAt: 1000,
@@ -33,12 +33,12 @@ test("accepts newer same-source selections after a remount sequence reset", () =
 
 test("rejects older cross-source selections so delayed echoes cannot win", () => {
   const current = selection({ sourceFrameID: "explorer-1", sourceModule: "company-explorer", changedAt: 2000 });
-  const delayedEcho = selection({ sourceFrameID: "map-1", sourceModule: "node-map", changedAt: 1500, sequence: 999 });
+  const delayedEcho = selection({ sourceFrameID: "editor-1", sourceModule: "editor", changedAt: 1500, sequence: 999 });
   assert.equal(shouldAcceptLiveSelection(current, delayedEcho), false);
 });
 
 test("accepts same-millisecond cross-source selections by arrival order", () => {
-  const current = selection({ sourceFrameID: "map-1", sourceModule: "logic-gate-map", changedAt: 2000, sequence: 999 });
+  const current = selection({ sourceFrameID: "kanban-1", sourceModule: "kanban", changedAt: 2000, sequence: 999 });
   const explorerClick = selection({ sourceFrameID: "explorer-1", sourceModule: "company-explorer", changedAt: 2000, sequence: 1 });
   assert.equal(shouldAcceptLiveSelection(current, explorerClick), true);
 });
@@ -52,7 +52,7 @@ test("publishes selected entity directly to target frames without storing source
     label: "Gate 1",
     sourceFrameID: "explorer-1",
     sourceModule: "company-explorer",
-    targetFrameIDs: ["map-1", "editor-1", "explorer-1"],
+    targetFrameIDs: ["kanban-1", "editor-1", "explorer-1"],
     selectedTreeID: "logic-gate-gate-1",
     selectedTreeIDs: ["logic-gate-gate-1", "logic-gate-gate-2", "logic-gate-gate-1"],
     selectedEntityIDs: ["gate-1", "gate-2", "gate-1"],

@@ -12,8 +12,6 @@ export type WorkspaceSnapshotPayload = {
   logic_gate_relationships?: unknown[];
   folders?: unknown[];
   folder_items?: unknown[];
-  node_map_positions?: unknown[];
-  logic_gate_map_positions?: unknown[];
   kanban_boards?: unknown[];
   columns?: unknown[];
   cards?: unknown[];
@@ -33,7 +31,7 @@ type WorkspaceSnapshotEntry = {
   inflight?: Promise<WorkspaceSnapshotResult>;
 };
 
-export type WorkspaceSnapshotScope = "company_explorer" | "node_map" | "logic_gate_map" | "kanban" | "full";
+export type WorkspaceSnapshotScope = "company_explorer" | "kanban" | "full";
 
 type FetchWorkspaceSnapshotOptions = {
   force?: boolean;

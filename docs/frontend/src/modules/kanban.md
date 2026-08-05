@@ -50,7 +50,7 @@ Users can:
 ## Linkable Frame Behavior
 Kanban board is a linkable frame kind (`kanban`).
 
-It participates in the same `frame-module-links-v1` graph as Explorer, Node Map, Logic Gate Map, and Editor. Parent/Child Frame behavior remains owned by the app layer:
+It participates in the same `frame-module-links-v1` graph as Explorer and Editor. Parent/Child Frame behavior remains owned by the app layer:
 - dropping a frame into another frame creates the existing child-frame relationship,
 - parent/child frame groups are auto-linked by the frame link plan,
 - a child Kanban board can therefore receive linked Explorer context without adding a second link model.

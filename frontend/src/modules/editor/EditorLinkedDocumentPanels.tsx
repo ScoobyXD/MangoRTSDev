@@ -6,12 +6,12 @@ import { normalizeNodeDueDateDraft } from "./editorDates";
 import { AccountFilterControl } from "../accounts/AccountFilterControl";
 import type { Account } from "../accounts/accountsApi";
 import { createOneShotBlurSuppression } from "../realtime/committedEntityTitleUpdates";
-import type { LogicGateGVICAssignment, LogicGateGVICRole, LogicGateGVICPrincipalType } from "../logic-gate-map/shared";
+import type { LogicGateGVICAssignment, LogicGateGVICRole, LogicGateGVICPrincipalType } from "../logic-gates/types";
 import {
   LOGIC_GATE_GVIC_ROLE_PRESENTATIONS,
   logicGateGVICRaisedSurfaceStyle,
   logicGateGVICRolePresentation,
-} from "../logic-gate-map/gvicPresentation.js";
+} from "../logic-gates/gvicPresentation.js";
 import {
   KANBAN_LOGIC_GATE_BACKLOG_COLOR,
   KANBAN_LOGIC_GATE_DONE_COLOR,

@@ -10,13 +10,11 @@ import (
 )
 
 type workspaceEntityBatchItemRequest struct {
-	ClientID string  `json:"client_id"`
-	Name     string  `json:"name"`
-	Title    string  `json:"title"`
-	Header   string  `json:"header"`
-	X        float64 `json:"x"`
-	Y        float64 `json:"y"`
-	Position int     `json:"position"`
+	ClientID string `json:"client_id"`
+	Name     string `json:"name"`
+	Title    string `json:"title"`
+	Header   string `json:"header"`
+	Position int    `json:"position"`
 }
 
 type workspaceEntityBatchRelationshipRequest struct {
@@ -26,14 +24,6 @@ type workspaceEntityBatchRelationshipRequest struct {
 	ClientIDB string `json:"client_id_b"`
 	APosition string `json:"a_position"`
 	BPosition string `json:"b_position"`
-}
-
-func (s *Server) handleMapEntityBatches(w http.ResponseWriter, r *http.Request) {
-	if !s.legacyMapRoutesEnabled {
-		writeLegacyMapRoutesDisabled(w)
-		return
-	}
-	s.handleWorkspaceEntityBatches(w, r)
 }
 
 func (s *Server) handleWorkspaceEntityBatches(w http.ResponseWriter, r *http.Request) {
@@ -61,7 +51,9 @@ func (s *Server) handleWorkspaceEntityBatches(w http.ResponseWriter, r *http.Req
 		Relationships            []workspaceEntityBatchRelationshipRequest `json:"relationships"`
 	}
 	stop := timings.observeAccounted("request.decode")
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
 		stop()
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
@@ -149,6 +141,9 @@ func buildWorkspaceEntityBatchInput(
 		MutationOrigin:           store.NormalizeMutationOrigin(mutationOrigin),
 		CreatorLogicGateGVICRole: strings.TrimSpace(creatorLogicGateGVICRole),
 	}
+	if strings.TrimSpace(mutationOrigin) != "" && input.MutationOrigin == "" {
+		return store.WorkspaceEntityBatchInput{}, false
+	}
 	if input.CompanyID == "" || (input.EntityKind != "node" && input.EntityKind != "logic_gate") {
 		return store.WorkspaceEntityBatchInput{}, false
 	}
@@ -181,7 +176,7 @@ func buildWorkspaceEntityBatchInput(
 				title = strings.TrimSpace(item.Header)
 			}
 		}
-		if clientID == "" || title == "" || !validMapLayoutCoordinate(item.X) || !validMapLayoutCoordinate(item.Y) {
+		if clientID == "" || title == "" {
 			return store.WorkspaceEntityBatchInput{}, false
 		}
 		if _, exists := clientIDs[clientID]; exists {
@@ -191,8 +186,6 @@ func buildWorkspaceEntityBatchInput(
 		input.Items = append(input.Items, store.WorkspaceEntityBatchItemInput{
 			ClientID: clientID,
 			Title:    title,
-			X:        item.X,
-			Y:        item.Y,
 			Position: item.Position,
 		})
 	}
@@ -261,23 +254,11 @@ func publishWorkspaceEntityBatchEvents(s *Server, result store.WorkspaceEntityBa
 	for _, item := range result.LogicGates {
 		appendEvent("logic_gate_created", map[string]any{"logic_gate_id": item.LogicGateID, "logic_gate": item})
 	}
-	if len(result.NodeMapPositions) > 0 {
-		appendEvent("node_map_positions_updated", map[string]any{"positions": result.NodeMapPositions})
-	}
-	if len(result.LogicGateMapPositions) > 0 {
-		appendEvent("logic_gate_map_positions_updated", map[string]any{"positions": result.LogicGateMapPositions})
-	}
 	deferredTasks := make([]store.WorkspaceDerivedProjectionTask, 0,
-		len(result.DeferredFolderItems)+len(result.DeferredNodeMapPositions)+len(result.DeferredLogicGateMapPositions),
+		len(result.DeferredFolderItems),
 	)
 	for _, item := range result.DeferredFolderItems {
 		deferredTasks = append(deferredTasks, store.DeferredCompanyExplorerFolderItemAssignTask(item.FolderID, item.SystemFolderKey, item.ItemType, item.ItemID, item.Position))
-	}
-	for _, position := range result.DeferredNodeMapPositions {
-		deferredTasks = append(deferredTasks, store.DeferredNodeMapPositionUpsertTask(position))
-	}
-	for _, position := range result.DeferredLogicGateMapPositions {
-		deferredTasks = append(deferredTasks, store.DeferredLogicGateMapPositionUpsertTask(position))
 	}
 	if len(deferredTasks) > 0 {
 		inputs = append(inputs, store.WorkspaceDerivedProjectionRequestedEventInput(result.CompanyID, deferredTasks, ""))

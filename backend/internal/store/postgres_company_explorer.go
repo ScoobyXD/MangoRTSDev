@@ -1141,16 +1141,6 @@ func postgresDeleteNodeRowsTx(ctx context.Context, tx *sql.Tx, companyID, nodeID
 		}
 		stop()
 	}
-	stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.node_map_positions_delete")
-	if _, err := tx.ExecContext(ctx,
-		`delete from node_map_positions
-		 where company_id=$1 and node_id=$2`,
-		companyID, nodeID,
-	); err != nil {
-		stop()
-		return err
-	}
-	stop()
 	stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.resource_permissions_delete")
 	if err := execOptionalPostgresShapeCleanupTx(tx, "resource_permissions",
 		`delete from resource_permissions
@@ -1266,13 +1256,6 @@ func postgresDeleteLogicGateRowsTx(ctx context.Context, tx *sql.Tx, companyID, l
 	}
 	if _, err := tx.ExecContext(ctx, `delete from email_relationships
 where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`, companyID, logicGateID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`delete from logic_gate_map_positions
-		 where company_id=$1 and logic_gate_id=$2`,
-		companyID, logicGateID,
-	); err != nil {
 		return err
 	}
 	if err := execOptionalPostgresShapeCleanupTx(tx, "resource_permissions",

@@ -1,6 +1,6 @@
 import type { FrameDataModel } from "../types.js";
 
-type LinkableKind = "map" | "editor" | "explorer" | "logic-map" | "kanban";
+type LinkableKind = "editor" | "explorer" | "kanban";
 
 export const FRAME_LINKS_KEY = "frame-module-links-v1";
 
@@ -15,11 +15,8 @@ export interface LinkPlan {
 }
 
 export function classifyFrameKind(kind: string): LinkableKind | null {
-  if (kind === "map") return "map";
-  if (kind === "nodes" || kind === "nodes-map") return "map";
   if (kind === "editor" || kind === "node-doc") return "editor";
   if (kind === "company-explorer") return "explorer";
-  if (kind === "logic-map") return "logic-map";
   if (kind === "kanban") return "kanban";
   return null;
 }
@@ -131,33 +128,6 @@ export function resolveLinkedFrameByKind(args: {
     }
   }
   return "";
-}
-
-export function deriveLegacyMapLinks(frames: FrameDataModel[], edges: FrameLinkEdge[]) {
-  const editorLinks: Record<string, string> = {};
-  const explorerLinks: Record<string, string> = {};
-  for (const frame of frames) {
-    const kind = classifyFrameKind(frame.kind);
-    if (kind === "editor") {
-      const mapID = resolveLinkedFrameByKind({
-        startFrameID: frame.id,
-        targetKind: "map",
-        frames,
-        edges,
-      });
-      if (mapID) editorLinks[frame.id] = mapID;
-    }
-    if (kind === "explorer") {
-      const mapID = resolveLinkedFrameByKind({
-        startFrameID: frame.id,
-        targetKind: "map",
-        frames,
-        edges,
-      });
-      if (mapID) explorerLinks[frame.id] = mapID;
-    }
-  }
-  return { editorLinks, explorerLinks };
 }
 
 export function sanitizeFrameLinks(value: unknown): FrameLinkEdge[] {

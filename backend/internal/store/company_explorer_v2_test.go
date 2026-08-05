@@ -828,7 +828,7 @@ func TestMemoryCompanyExplorerDefaultPlacementAndExplicitRootException(t *testin
 	nodeBatch, err := repo.CreateWorkspaceEntityBatch(WorkspaceEntityBatchInput{
 		CompanyID:      companyID,
 		EntityKind:     EntityTypeNode,
-		MutationOrigin: MutationOriginNodeMap,
+		MutationOrigin: MutationOriginEditor,
 		CreatorUserID:  user.UserID,
 		Items:          []WorkspaceEntityBatchItemInput{{ClientID: "node-1", Title: "Bare Node"}},
 	})
@@ -907,7 +907,7 @@ func TestMemoryCompanyExplorerSearchOrdersTypesAndReturnsLocationPath(t *testing
 	gateBatch, err := repo.CreateWorkspaceEntityBatch(WorkspaceEntityBatchInput{
 		CompanyID:      companyID,
 		EntityKind:     EntityTypeLogicGate,
-		MutationOrigin: MutationOriginLogicGateMap,
+		MutationOrigin: MutationOriginEditor,
 		CreatorUserID:  user.UserID,
 		Items:          []WorkspaceEntityBatchItemInput{{ClientID: "gate", Title: "Search Alpha"}},
 	})
@@ -917,7 +917,7 @@ func TestMemoryCompanyExplorerSearchOrdersTypesAndReturnsLocationPath(t *testing
 	nodeBatch, err := repo.CreateWorkspaceEntityBatch(WorkspaceEntityBatchInput{
 		CompanyID:      companyID,
 		EntityKind:     EntityTypeNode,
-		MutationOrigin: MutationOriginNodeMap,
+		MutationOrigin: MutationOriginEditor,
 		CreatorUserID:  user.UserID,
 		Items:          []WorkspaceEntityBatchItemInput{{ClientID: "node", Title: "Search Alpha"}},
 	})
@@ -1041,7 +1041,7 @@ func TestMemoryCompanyExplorerEditorSearchPrioritizesActiveThenDoneEntities(t *t
 	}
 
 	nodes, err := repo.CreateWorkspaceEntityBatch(WorkspaceEntityBatchInput{
-		CompanyID: companyID, EntityKind: EntityTypeNode, MutationOrigin: MutationOriginNodeMap, CreatorUserID: user.UserID,
+		CompanyID: companyID, EntityKind: EntityTypeNode, MutationOrigin: MutationOriginEditor, CreatorUserID: user.UserID,
 		Items: []WorkspaceEntityBatchItemInput{
 			{ClientID: "active-node", Title: "Priority Needle Active Node"},
 			{ClientID: "done-node", Title: "Priority Needle Done Node"},
@@ -1058,7 +1058,7 @@ func TestMemoryCompanyExplorerEditorSearchPrioritizesActiveThenDoneEntities(t *t
 	}
 
 	gates, err := repo.CreateWorkspaceEntityBatch(WorkspaceEntityBatchInput{
-		CompanyID: companyID, EntityKind: EntityTypeLogicGate, MutationOrigin: MutationOriginLogicGateMap, CreatorUserID: user.UserID,
+		CompanyID: companyID, EntityKind: EntityTypeLogicGate, MutationOrigin: MutationOriginEditor, CreatorUserID: user.UserID,
 		Items: []WorkspaceEntityBatchItemInput{{ClientID: "gate", Title: "Priority Needle Logic Gate"}},
 	})
 	if err != nil {

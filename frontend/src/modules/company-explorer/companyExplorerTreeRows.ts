@@ -1,5 +1,5 @@
-import { type NodeRecord } from "../node-map/shared.js";
-import { getNodeTitle as getLogicGateTitle, type NodeRecord as LogicGateRecord } from "../logic-gate-map/shared.js";
+import { type NodeRecord } from "../nodes/types.js";
+import { getLogicGateTitle, type LogicGateViewRecord as LogicGateRecord } from "../logic-gates/types.js";
 import { hasCompanyExplorerFolderPermissionRules, type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind } from "../folders/companyExplorerFolders.js";
 import type { KanbanBoard } from "../kanban/shared.js";
 import type { ProjectRecord } from "../project-management/projectManagementApi.js";

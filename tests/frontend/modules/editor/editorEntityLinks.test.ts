@@ -140,7 +140,6 @@ test("selection Node creation normalizes the exact title and returns a durable e
         }],
         relationships: [],
         folder_items: [],
-        node_map_positions: [],
       } as T;
     },
   }, "  Create\n this   Node  ");

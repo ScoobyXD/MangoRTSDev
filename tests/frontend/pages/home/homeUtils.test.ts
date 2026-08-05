@@ -4,8 +4,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { CommunicationsSharedInbox, EmailMessage } from "../../../../frontend/src/modules/communications/communicationsApi.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../../../frontend/src/modules/folders/companyExplorerFolders.js";
-import type { LogicGateRecord } from "../../../../frontend/src/modules/logic-gate-map/shared.js";
-import type { NodeRecord } from "../../../../frontend/src/modules/node-map/shared.js";
+import type { LogicGateRecord } from "../../../../frontend/src/modules/logic-gates/types.js";
+import type { NodeRecord } from "../../../../frontend/src/modules/nodes/types.js";
 import {
   buildMyLogicGateGroups,
   buildMyNodeGroups,

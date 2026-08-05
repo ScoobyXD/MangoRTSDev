@@ -119,23 +119,6 @@ func TestV4MiniAccessDeniedSemanticsAndOmission(t *testing.T) {
 		t.Fatalf("snapshot folders = %+v, want visible folder only", snapshot.Folders)
 	}
 
-	nodeMapReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID+"&scope=node_map", nil)
-	nodeMapReq = requestWithLogicGateWorkActorForTest(nodeMapReq, viewer, companyID)
-	nodeMapRec := httptest.NewRecorder()
-	handler.ServeHTTP(nodeMapRec, nodeMapReq)
-	if nodeMapRec.Code != http.StatusOK {
-		t.Fatalf("node map workspace snapshot status = %d body=%s", nodeMapRec.Code, nodeMapRec.Body.String())
-	}
-	var nodeMapSnapshot struct {
-		Folders []domain.CompanyExplorerFolder `json:"folders"`
-	}
-	if err := json.NewDecoder(nodeMapRec.Body).Decode(&nodeMapSnapshot); err != nil {
-		t.Fatalf("decode node map workspace snapshot: %v", err)
-	}
-	if len(nodeMapSnapshot.Folders) != 0 {
-		t.Fatalf("node map snapshot folders = %+v, want no company explorer folders", nodeMapSnapshot.Folders)
-	}
-
 	hiddenReq := httptest.NewRequest(http.MethodGet, "/v1/nodes/"+hiddenNode.NodeID+"?company_id="+companyID, nil)
 	hiddenReq = requestWithLogicGateWorkActorForTest(hiddenReq, viewer, companyID)
 	hiddenRec := httptest.NewRecorder()
@@ -232,23 +215,6 @@ func TestV4MiniOldV1SurfacePolicy(t *testing.T) {
 		}
 	}
 
-	mapReq := httptest.NewRequest(http.MethodGet, "/v1/map-layout?company_id="+companyID+"&map_type=node", nil)
-	mapReq = requestWithLogicGateWorkActorForTest(mapReq, viewer, companyID)
-	mapRec := httptest.NewRecorder()
-	handler.ServeHTTP(mapRec, mapReq)
-	if mapRec.Code != http.StatusNotFound || !strings.Contains(mapRec.Body.String(), "legacy_map_routes_disabled") {
-		t.Fatalf("disabled map-layout status = %d body=%s", mapRec.Code, mapRec.Body.String())
-	}
-
-	legacyBatchReq := httptest.NewRequest(http.MethodPost, "/v1/map-entity-batches", strings.NewReader(`{"company_id":"`+companyID+`","entity_kind":"node","items":[]}`))
-	legacyBatchReq.Header.Set("Content-Type", "application/json")
-	legacyBatchReq = requestWithLogicGateWorkActorForTest(legacyBatchReq, viewer, companyID)
-	legacyBatchRec := httptest.NewRecorder()
-	handler.ServeHTTP(legacyBatchRec, legacyBatchReq)
-	if legacyBatchRec.Code != http.StatusNotFound || !strings.Contains(legacyBatchRec.Body.String(), "legacy_map_routes_disabled") {
-		t.Fatalf("disabled map-entity-batches status = %d body=%s", legacyBatchRec.Code, legacyBatchRec.Body.String())
-	}
-
 	batchReq := httptest.NewRequest(http.MethodPost, "/v1/workspace/entity-batches", strings.NewReader(`{"company_id":"`+companyID+`","entity_kind":"node","items":[]}`))
 	batchReq.Header.Set("Content-Type", "application/json")
 	batchReq = requestWithLogicGateWorkActorForTest(batchReq, viewer, companyID)
@@ -269,7 +235,7 @@ func TestV4MiniOldV1SurfacePolicy(t *testing.T) {
 	if err := json.NewDecoder(fullRec.Body).Decode(&raw); err != nil {
 		t.Fatalf("decode full workspace snapshot: %v", err)
 	}
-	for _, key := range []string{"node_map_positions", "logic_gate_map_positions", "kanban_boards"} {
+	for _, key := range []string{"kanban_boards"} {
 		if _, ok := raw[key]; ok {
 			t.Fatalf("full workspace snapshot unexpectedly included %q", key)
 		}

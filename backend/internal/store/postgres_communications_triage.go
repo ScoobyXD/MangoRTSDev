@@ -336,11 +336,6 @@ insert into nodes (company_id, node_id, name, priority, created_timestamp)
 values ($1, $2, $3, $4::smallint, now())`, input.CompanyID, nodeID, nodeTitle, *input.Priority); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		if _, err := tx.ExecContext(ctx, `
-insert into node_map_positions (company_id, node_id, x, y, updated_timestamp)
-values ($1, $2, $3, $4, now())`, input.CompanyID, nodeID, 120+float64(index*28), 120+float64(index*28)); err != nil {
-			return CommunicationsTriageConversionResult{}, err
-		}
 
 		cardID := newUUIDv7String()
 		position := nextPosition + index*1000
@@ -539,7 +534,7 @@ func (r *PostgresRepo) convertCommunicationsTriageItemsToExplorerTargetTx(ctx co
 	}
 
 	result := CommunicationsTriageConversionResult{Target: input.Target}
-	for index, messageID := range input.MessageIDs {
+	for _, messageID := range input.MessageIDs {
 		var rawMessage []byte
 		if err := tx.QueryRowContext(ctx, `
 select message
@@ -561,11 +556,6 @@ for update`, input.UserID, messageID).Scan(&rawMessage); errors.Is(err, sql.ErrN
 		if _, err := tx.ExecContext(ctx, `
 insert into nodes (company_id, node_id, name, priority, created_timestamp)
 values ($1, $2, $3, $4::smallint, now())`, input.CompanyID, nodeID, nodeTitle, *input.Priority); err != nil {
-			return CommunicationsTriageConversionResult{}, err
-		}
-		if _, err := tx.ExecContext(ctx, `
-insert into node_map_positions (company_id, node_id, x, y, updated_timestamp)
-values ($1, $2, $3, $4, now())`, input.CompanyID, nodeID, 120+float64(index*28), 120+float64(index*28)); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 		emailInput := input

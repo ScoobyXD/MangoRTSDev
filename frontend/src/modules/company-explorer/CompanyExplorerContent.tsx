@@ -4,12 +4,12 @@ import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { buildContextualNodeRoute, openAppPathInNewTab } from "../../app/resourceLinks";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
-import { type NodeRecord } from "../node-map/shared";
-import { getNodeTitle as getLogicGateRecordTitle, toLogicGateCanvasRecord, type LogicGateGVICRole, type LogicGateRecord as LogicGateApiRecord, type NodeRecord as LogicGateCanvasRecord } from "../logic-gate-map/shared";
-import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../node-map/eventbus";
-import { removeCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph } from "../node-map/NodeRelationshipGraph";
-import { removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
-import { type ExplorerSelectionState } from "./explorerSync";
+import { type NodeRecord } from "../nodes/types";
+import { getLogicGateTitle as getLogicGateRecordTitle, toLogicGateViewRecord, type LogicGateGVICRole, type LogicGateRecord as LogicGateApiRecord, type LogicGateViewRecord } from "../logic-gates/types";
+import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../dashboardEvents";
+import { removeCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph } from "../nodes/nodeRelationshipGraph";
+import { removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gates/logicGateRelationshipGraph";
+import { emptyExplorerSelectionState, type ExplorerSelectionState } from "./selectionSync";
 import { hasCompanyExplorerFolderPermissionRules, type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind, type CompanyExplorerFolderScopeType, type CompanyExplorerItemType, type CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders";
 import { invalidateKanbanBoardListCache, listKanbanBoards, type GVICMatrixProjectionRow } from "../kanban/kanbanApi";
 import { EVENT_KANBAN_BOARDS_UPDATED, logicGateKanbanBoardID, type ExplorerEntityDragItem, type KanbanBoardsUpdatedDetail } from "../kanban/shared";
@@ -123,7 +123,7 @@ const companyExplorerTriageDropSuccessStyle: React.CSSProperties = {
 const HIDDEN_MAIN_EXPLORER_ROOT_FOLDER_LABELS = ["logic gates by function", "logic gates by person"] as const;
 const HIDDEN_MAIN_EXPLORER_ROOT_FOLDER_NAMES = new Set<string>(HIDDEN_MAIN_EXPLORER_ROOT_FOLDER_LABELS);
 type CompanyExplorerScopeView = "mine" | "team" | "company";
-type ExplorerLogicGateRecord = LogicGateCanvasRecord & Partial<Pick<LogicGateApiRecord, "gvic_assignments">>;
+type ExplorerLogicGateRecord = LogicGateViewRecord & Partial<Pick<LogicGateApiRecord, "gvic_assignments">>;
 type CompanyExplorerGVICFolderRole = LogicGateGVICRole | "other";
 type GVICProjectionCacheEntry = GVICProjectionTitleCacheEntry<ExplorerLogicGateRecord>;
 type ExplorerUserSummary = { userID: string; label: string; email?: string };
@@ -287,7 +287,7 @@ function sortExplorerUsers(users: ExplorerUserSummary[]): ExplorerUserSummary[] 
 
 function projectedLogicGateRecordForUser(logicGate: WorkItemLogicGateInboxItem, userID: string, companyID: string): ExplorerLogicGateRecord {
   const cleanUserID = cleanExplorerID(userID);
-  const record = toLogicGateCanvasRecord(logicGate) as ExplorerLogicGateRecord;
+  const record = toLogicGateViewRecord(logicGate) as ExplorerLogicGateRecord;
   record.gvic_assignments = (logicGate.roles ?? []).filter(isLogicGateGVICRole).map((role) => ({
     company_id: companyID,
     logic_gate_id: logicGate.logic_gate_id,
@@ -1255,7 +1255,7 @@ function getRowsTopOffsetInScrollContainer(viewport: HTMLElement, scrollContaine
   return rowsStart.getBoundingClientRect().top - scrollContainer.getBoundingClientRect().top + scrollContainer.scrollTop;
 }
 
-// Company Explorer module: tree navigation + node context handoff into Node Map and Editor.
+// Company Explorer module: tree navigation and entity context handoff to linked modules.
 export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   accent,
   widgetId,
@@ -1323,14 +1323,9 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const [deleteBlockedMessage, setDeleteBlockedMessage] = useState("");
   const [deleteFolderAcknowledged, setDeleteFolderAcknowledged] = useState(false);
   const effectiveExplorerSearchQuery = externalSearchQuery ?? "";
-  const [linkRevision, setLinkRevision] = useState(0);
-  const [linkedMapFrameID, setLinkedMapFrameID] = useState("");
-  const [linkedLogicMapFrameID, setLinkedLogicMapFrameID] = useState("");
-  const lastMapSelectionRevisionRef = useRef(0);
-  const lastLogicMapSelectionRevisionRef = useRef(0);
   const suppressNextExplorerBroadcastRef = useRef(false);
-  const previousBroadcastSelectionRef = useRef({ selectedNodeID: "", selectedTreeID: "" });
-  const latestSelectionRef = useRef<ExplorerSelectionState>({ selectedNodeID: "", selectedTreeID: "" });
+  const previousBroadcastSelectionRef = useRef<ExplorerSelectionState>(emptyExplorerSelectionState());
+  const latestSelectionRef = useRef<ExplorerSelectionState>(emptyExplorerSelectionState());
   const latestLogicGateSelectionRef = useRef({ selectedLogicGateID: "", selectedTreeID: "" });
   const latestExplorerDomainRef = useRef<ExplorerSelectionDomain>("root");
   const lastLocalExplorerSelectionRef = useRef<{ domain: ExplorerSelectionDomain; changedAt: number }>({ domain: "root", changedAt: 0 });
@@ -2103,7 +2098,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   }, [baseTreeRows, companyExplorerBranchKey, companyExplorerBranchParentEntityID, effectiveExpanded, loadCompanyExplorerChildren, refreshCompanyExplorerBranch]);
 
   useEffect(() => {
-    latestSelectionRef.current = { selectedNodeID, selectedTreeID };
+    latestSelectionRef.current = { ...emptyExplorerSelectionState(), selectedNodeID, selectedTreeID };
   }, [selectedNodeID, selectedTreeID]);
 
   useEffect(() => {
@@ -2500,15 +2495,13 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         items: [{
           client_id: createWorkspaceEntityBatchClientID("explorer-logic-gate"),
           title: "new logic gate",
-          x: 120,
-          y: 120,
           position,
         }],
         requestJSON,
       });
       const created = response.logic_gates?.[0];
       if (!created) throw new Error("logic_gate_batch_create_missing_gate");
-      const logicGate = toLogicGateCanvasRecord(created) as ExplorerLogicGateRecord;
+      const logicGate = toLogicGateViewRecord(created) as ExplorerLogicGateRecord;
       logicGate.gvic_assignments = created.gvic_assignments ?? [];
       for (const item of response.folder_items ?? []) upsertOptimisticFolderItem(item);
       let createdFolderID = response.folder_items?.find((item) => item.item_type === "logic_gate" && item.item_id === logicGate.logic_gate_id)?.folder_id ?? parentFolderID;
@@ -2820,7 +2813,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           }),
           (result) => ({ companyID, entityType: "logic_gate", resourceID: result.logic_gate_id, title: result.header }),
         );
-        const logicGate = toLogicGateCanvasRecord(updated);
+        const logicGate = toLogicGateViewRecord(updated);
         dispatchExplorerStore({ type: "replaceLogicGate", logicGate });
         upsertLogicGateRelationshipGraphNode(apiBase, companyID, logicGate);
       }
@@ -3462,8 +3455,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   useCompanyExplorerSelectionBridge({
     companyID,
     scope,
-    linkedMapFrameID,
-    linkedLogicMapFrameID,
     selectedNodeID,
     selectedLogicGateID,
     selectedKanbanBoardID,
@@ -3475,9 +3466,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     selectedTreeIDs,
     selectedTree,
     selectionTargetFrameIDs: normalizedSelectionTargetFrameIDs,
-    linkRevision,
-    lastMapSelectionRevisionRef,
-    lastLogicMapSelectionRevisionRef,
     suppressNextExplorerBroadcastRef,
     previousBroadcastSelectionRef,
     latestSelectionRef,
@@ -3486,9 +3474,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     lastLocalExplorerSelectionRef,
     pendingExplorerSelectionIntentRef,
     explorerContextSequenceRef,
-    setLinkedMapFrameID,
-    setLinkedLogicMapFrameID,
-    setLinkRevision,
     setSelectedTreeID,
     setSelectedTreeIDs,
     setSelectionAnchorTreeID,

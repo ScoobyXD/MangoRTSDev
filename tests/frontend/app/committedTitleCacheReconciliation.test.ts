@@ -27,7 +27,7 @@ import {
   getNodeRelationshipGraphSnapshot,
   hasNodeRelationshipGraphSnapshot,
   refreshNodeRelationshipGraphSnapshot,
-} from "../../../frontend/src/modules/node-map/NodeRelationshipGraph.js";
+} from "../../../frontend/src/modules/nodes/nodeRelationshipGraph.js";
 import { invalidateWorkspaceSnapshot } from "../../../frontend/src/modules/workspace/workspaceSnapshotCache.js";
 
 test("Node title publication invalidates Home and PM reads and patches cached Kanban cards", async () => {

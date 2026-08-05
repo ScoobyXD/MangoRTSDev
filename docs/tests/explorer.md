@@ -1,3 +1,14 @@
+# Process Story: Explorer selects surviving workspace surfaces
+
+A user opens Home and selects a Node, Logic Gate, Project, Kanban board, folder, or communications row in Explorer
+↓
+Explorer resolves the exact accessible tree row and publishes semantic selection only to directly linked surviving frames
+↓
+Editor or Kanban consumes the entity context without reading browser geometry or position state
+↓
+Folder ordering, permissions, search, Find, rename, deletion, and drag/drop keep their existing backend contracts
+↓
+A reload restores supported frames and discards any retired canvas frame instead of translating it
 Last updated: 2026-07-16
 
 # Explorer Tests
@@ -49,7 +60,6 @@ E38 - The default Unfiled folder and its Projects, Logic Gates, and Nodes child 
 E39 - While the Explorer search box contains text, the left sidebar hides non-Explorer sections and uses the remaining column for Explorer search results; clearing the search restores the normal sidebar. Explorer/Search Explorer remains beneath the shared body-level blocking modal layer and cannot paint or receive interaction above a node/editor popup, dialog, preview, or expanded/fullscreen panel; closing that surface preserves the existing search query.
 E40 - Once a resource is visible anywhere in Company Explorer, no project relationship branch may create a second visible instance of that resource.
 E41 - Company Explorer has no cross-user realtime subscription. It patches the initiating browser from committed command results and otherwise reloads canonical branches on navigation or explicit refresh.
-E42 - Node-map folder-scoped queries return no ordinary nodes for non-root Company Explorer folders. A query scoped to the exact protected Unfiled/Nodes folder may return only authorized email-collaboration Nodes placed there; another folder may not surface those Nodes through relationship fallback.
 E43 - Placing or moving a project or Logic Gate into an Explorer folder copies that folder's current permission policy to the project or Logic Gate.
 E44 - Reordering or re-saving a project or Logic Gate under the same Explorer folder preserves the resource's own permissions.
 E45 - Moving a project or Logic Gate out of a folder to the company root preserves the resource's own permissions.
@@ -168,7 +178,7 @@ Given:
 
 Expected:
 - The committed response or concrete same-window committed-title event patches matching Explorer Logic Gate rows, Node search results, and materialized/scoped GVIC-mode Node and Logic Gate names in the initiating browser.
-- Editor, Kanban, Node Map, and Logic Gate Map labels converge from that same event as applicable.
+- Editor, Kanban, Home, Project, dock/pin, and Explorer labels converge from that same event as applicable.
 - Failed renames publish no title event; no generalized server fan-out or full reload is required.
 - Durable domain facts may retain the affected parent entity ID for independently required consumers, but no Company Explorer or workspace browser event is published.
 - Another browser's changes can remain stale until navigation, branch reopen, or explicit refresh performs the canonical branch read.
@@ -257,7 +267,6 @@ Expected:
 - Project relationship edges are not rendered as nested Project child rows or reused as Company Explorer placement edges.
 - Dragging or placing nodes through Company Explorer is rejected.
 - Nodes continue to be found by search through source-of-truth relationships.
-- Folder-scoped node-map queries return no ordinary nodes for non-root Company Explorer folders; the exact protected Nodes scope may return only its authorized collaboration Nodes.
 
 ### Scenario E-S7: Email Drop Onto Explorer Logic Gate
 

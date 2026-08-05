@@ -53,7 +53,6 @@ All other tables are excluded from dev-to-prod row copying by default:
 - `node_content_changes`
 - `node_content_change_seen`
 - `node_projection_seen_snapshots`
-- `node_map_positions`
 - `logic_gates`
 - `projects`
 - `project_critical_path_steps`
@@ -71,7 +70,6 @@ All other tables are excluded from dev-to-prod row copying by default:
 - `logic_gate_relationships`
 - `logic_gate_information`
 - `logic_gate_projection_table`
-- `logic_gate_map_positions`
 - `user_logic_gate_shortcuts`
 - `node_logic_gate_assignments`
 - `kanban_board_projection`

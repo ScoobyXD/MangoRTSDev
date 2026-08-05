@@ -244,34 +244,6 @@ func filterNodeRelationshipsByVisibleNodes(items []domain.NodeRelationship, ids 
 	return out
 }
 
-func filterNodeMapPositionsByVisibleNodes(items []domain.NodeMapPosition, ids map[string]bool) []domain.NodeMapPosition {
-	out := make([]domain.NodeMapPosition, 0, len(items))
-	for _, item := range items {
-		if ids[item.NodeID] {
-			out = append(out, item)
-		}
-	}
-	return out
-}
-
-func (s *Server) filterVisibleNodeMapPositions(r *http.Request, companyID string, items []domain.NodeMapPosition) ([]domain.NodeMapPosition, error) {
-	nodeIDs := make([]string, 0, len(items))
-	for _, item := range items {
-		nodeIDs = append(nodeIDs, item.NodeID)
-	}
-	visible, err := s.visibleEntityIDSet(r, companyID, store.EntityTypeNode, nodeIDs)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]domain.NodeMapPosition, 0, len(items))
-	for _, item := range items {
-		if visible[item.NodeID] {
-			out = append(out, item)
-		}
-	}
-	return out, nil
-}
-
 func filterLogicGateRelationshipsByVisibleGates(items []domain.LogicGateRelationship, ids map[string]bool) []domain.LogicGateRelationship {
 	out := make([]domain.LogicGateRelationship, 0, len(items))
 	for _, item := range items {
@@ -280,34 +252,6 @@ func filterLogicGateRelationshipsByVisibleGates(items []domain.LogicGateRelation
 		}
 	}
 	return out
-}
-
-func filterLogicGateMapPositionsByVisibleGates(items []domain.LogicGateMapPosition, ids map[string]bool) []domain.LogicGateMapPosition {
-	out := make([]domain.LogicGateMapPosition, 0, len(items))
-	for _, item := range items {
-		if ids[item.LogicGateID] {
-			out = append(out, item)
-		}
-	}
-	return out
-}
-
-func (s *Server) filterVisibleLogicGateMapPositions(r *http.Request, companyID string, items []domain.LogicGateMapPosition) ([]domain.LogicGateMapPosition, error) {
-	logicGateIDs := make([]string, 0, len(items))
-	for _, item := range items {
-		logicGateIDs = append(logicGateIDs, item.LogicGateID)
-	}
-	visible, err := s.visibleEntityIDSet(r, companyID, store.EntityTypeLogicGate, logicGateIDs)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]domain.LogicGateMapPosition, 0, len(items))
-	for _, item := range items {
-		if visible[item.LogicGateID] {
-			out = append(out, item)
-		}
-	}
-	return out, nil
 }
 
 func filterCompanyExplorerItemsForVisibleEntities(items []domain.CompanyExplorerFolderItem, nodeIDs map[string]bool, logicGateIDs map[string]bool, projectIDs map[string]bool) []domain.CompanyExplorerFolderItem {

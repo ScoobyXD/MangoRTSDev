@@ -1,7 +1,6 @@
 import React from "react";
 import { readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph.js";
-import { NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared.js";
-import { publishLiveSelection } from "../selectionCoordinator.js";
+import { publishLiveSelection, readLiveSelectionForFrame } from "../selectionCoordinator.js";
 import type { KanbanCardDropPlacement } from "./shared.js";
 export type HighlightedEntity = { nodeID: string } | null;
 
@@ -261,19 +260,9 @@ export const KanbanCheckIcon: React.FC<{ color: string }> = ({ color }) => (
   </svg>
 );
 
-export function readLinkedExplorerSelection(companyID: string, scope: string): HighlightedEntity {
-  try {
-    const nodeRaw = localStorage.getItem(`${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`);
-    if (nodeRaw) {
-      const parsed = JSON.parse(nodeRaw) as { selectedNodeID?: unknown };
-      if (typeof parsed.selectedNodeID === "string" && parsed.selectedNodeID.trim()) {
-        return { nodeID: parsed.selectedNodeID.trim() };
-      }
-    }
-  } catch {
-    return null;
-  }
-  return null;
+export function readLinkedExplorerSelection(companyID: string, frameID: string): HighlightedEntity {
+  const selection = readLiveSelectionForFrame(companyID, frameID);
+  return selection?.entityKind === "node" && selection.entityID ? { nodeID: selection.entityID } : null;
 }
 
 export function publishKanbanSelectionToLinkedFrames(companyID: string, sourceFrameID: string, nodeID: string, nodeTitle: string, selectedNodeIDs: string[] = [nodeID]): void {

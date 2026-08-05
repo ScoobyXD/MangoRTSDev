@@ -62,14 +62,6 @@ func (r *PostgresRepo) ProjectWorkspaceDerivedDomainEvent(event domain.DomainEve
 		task := workspaceDerivedPayloadCopy(event.Payload)
 		task["kind"] = WorkspaceDerivedTaskCompanyExplorerFolderItemAssign
 		return r.projectWorkspaceDerivedTasks(event, []map[string]any{task})
-	case WorkspaceDeferredNodeMapPositionUpsertEventType:
-		task := workspaceDerivedPayloadCopy(event.Payload)
-		task["kind"] = WorkspaceDerivedTaskNodeMapPositionUpsert
-		return r.projectWorkspaceDerivedTasks(event, []map[string]any{task})
-	case WorkspaceDeferredLogicMapPositionUpsertEventType:
-		task := workspaceDerivedPayloadCopy(event.Payload)
-		task["kind"] = WorkspaceDerivedTaskLogicGateMapPositionUpsert
-		return r.projectWorkspaceDerivedTasks(event, []map[string]any{task})
 	default:
 		return nil, nil
 	}
@@ -96,10 +88,6 @@ func (r *PostgresRepo) projectWorkspaceDerivedTasks(event domain.DomainEvent, ta
 		switch workspaceDerivedPayloadString(task, "kind") {
 		case WorkspaceDerivedTaskCompanyExplorerFolderItemAssign:
 			eventInput, err = r.projectDeferredCompanyExplorerFolderItemTx(ctx, tx, event, task, index)
-		case WorkspaceDerivedTaskNodeMapPositionUpsert:
-			eventInput, err = r.projectDeferredNodeMapPositionTx(ctx, tx, event, task, index)
-		case WorkspaceDerivedTaskLogicGateMapPositionUpsert:
-			eventInput, err = r.projectDeferredLogicGateMapPositionTx(ctx, tx, event, task, index)
 		default:
 			err = ErrInvalid
 		}
@@ -154,66 +142,6 @@ func (r *PostgresRepo) projectDeferredCompanyExplorerFolderItemTx(ctx context.Co
 	})
 	eventInput.ActorUserID = workspaceDerivedEventActor(event)
 	eventInput.IdempotencyKey = workspaceDerivedTaskIdempotencyKey(event, index, "folder-item")
-	return &eventInput, nil
-}
-
-func (r *PostgresRepo) projectDeferredNodeMapPositionTx(ctx context.Context, tx *sql.Tx, event domain.DomainEvent, payload map[string]any, index int) (*DomainEventInput, error) {
-	companyID := strings.TrimSpace(event.CompanyID)
-	nodeID := workspaceDerivedPayloadString(payload, "node_id")
-	x, xOK := workspaceDerivedPayloadFloat(payload, "x")
-	y, yOK := workspaceDerivedPayloadFloat(payload, "y")
-	if companyID == "" || nodeID == "" || !xOK || !yOK {
-		return nil, ErrInvalid
-	}
-
-	var position domain.NodeMapPosition
-	err := tx.QueryRowContext(ctx, `
-insert into node_map_positions (company_id, node_id, x, y, updated_timestamp)
-select $1::uuid, $2::uuid, $3, $4, now()
-where exists(select 1 from nodes where company_id=$1::uuid and node_id=$2::uuid)
-on conflict (company_id, node_id) do nothing
-returning company_id::text, node_id::text, x, y, updated_timestamp`,
-		companyID, nodeID, x, y,
-	).Scan(&position.CompanyID, &position.NodeID, &position.X, &position.Y, &position.UpdatedTimestamp)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	eventInput := workspaceDomainEventInput(companyID, "node_map_positions_updated", map[string]any{"positions": []domain.NodeMapPosition{position}})
-	eventInput.ActorUserID = workspaceDerivedEventActor(event)
-	eventInput.IdempotencyKey = workspaceDerivedTaskIdempotencyKey(event, index, "node-map-position")
-	return &eventInput, nil
-}
-
-func (r *PostgresRepo) projectDeferredLogicGateMapPositionTx(ctx context.Context, tx *sql.Tx, event domain.DomainEvent, payload map[string]any, index int) (*DomainEventInput, error) {
-	companyID := strings.TrimSpace(event.CompanyID)
-	logicGateID := workspaceDerivedPayloadString(payload, "logic_gate_id")
-	x, xOK := workspaceDerivedPayloadFloat(payload, "x")
-	y, yOK := workspaceDerivedPayloadFloat(payload, "y")
-	if companyID == "" || logicGateID == "" || !xOK || !yOK {
-		return nil, ErrInvalid
-	}
-
-	var position domain.LogicGateMapPosition
-	err := tx.QueryRowContext(ctx, `
-insert into logic_gate_map_positions (company_id, logic_gate_id, x, y, updated_timestamp)
-select $1::uuid, $2::uuid, $3, $4, now()
-where exists(select 1 from logic_gates where company_id=$1::uuid and logic_gate_id=$2::uuid)
-on conflict (company_id, logic_gate_id) do nothing
-returning company_id::text, logic_gate_id::text, x, y, updated_timestamp`,
-		companyID, logicGateID, x, y,
-	).Scan(&position.CompanyID, &position.LogicGateID, &position.X, &position.Y, &position.UpdatedTimestamp)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	eventInput := workspaceDomainEventInput(companyID, "logic_gate_map_positions_updated", map[string]any{"positions": []domain.LogicGateMapPosition{position}})
-	eventInput.ActorUserID = workspaceDerivedEventActor(event)
-	eventInput.IdempotencyKey = workspaceDerivedTaskIdempotencyKey(event, index, "logic-gate-map-position")
 	return &eventInput, nil
 }
 

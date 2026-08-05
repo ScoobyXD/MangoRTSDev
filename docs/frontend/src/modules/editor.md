@@ -44,7 +44,6 @@ Search and creation retain the current company/workspace scope and existing effe
 - Shared behavior does not mean shared persistence. Node, Logic Gate, project, personal mailbox, and shared mailbox saves must continue to use their own domain adapters and authorization scopes.
 - Chat panes inside node/project text boxes are conversation UI and must remain outside the unified rich editor contract.
 - Node/project email pickers are attach/select surfaces only; compose/reply bodies belong in real mail compose/reply surfaces and should use the unified editor.
-- Legacy Map behavior is outside the V1 unifying editor project unless a live non-map editor surface imports a helper that must change for the shared contract.
 
 ## Unified Editor Implementation Update (2026-07-08)
 - `frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts` is the shared rich editor behavior source for keyboard routing, paste cleanup, deletion, lists/checklists, font sizing, bold/underline, links, tables, selection, undo/redo, and sanitized serialization.
@@ -95,47 +94,30 @@ Search and creation retain the current company/workspace scope and existing effe
 - Terraform contains the private-bucket CORS, task-role, and incomplete-multipart lifecycle configuration needed by this flow, but source code is not a deployment claim. Existing singleton bucket CORS/lifecycle settings must be inventoried and reconciled/imported before an explicitly approved apply.
 
 ## Key Responsibilities
-- Resolve which Node Map frame this editor is linked to through the frame-link graph + frame registry.
-- Resolve which Logic Gate Map frame this editor is linked to through the same frame-link graph + frame registry.
-- Read the currently selected node from linked Node Map local state.
-- Read the currently selected logic gate from linked Logic Gate Map local state.
-- Load selected node details and latest `Text box` projection rows.
-- Load the existing projection-shaped Node/Logic Gate response assembled from final textbox storage.
-- Render a single rich document editor surface that supports normal click-to-place caret, blinking insertion point, typing, spacing, tabs, links, per-selection font sizing, and scroll overflow.
-- Persist document edits through the editor JSON API with a stable document/textbox ID.
-- Clear a document by saving the empty canonical JSON document instead of writing a legacy projection/history row.
-- Surface node context from the same selected node (metadata summary, history timeline, and non-text info preview).
-- Support generic node title updates directly from editor context header (`PUT /v1/nodes/:node_id`), including inline rename UX.
+- Consume generic live Node or Logic Gate selection from directly linked surviving frames.
+- Load selected entity details and projection-shaped document rows assembled from final storage.
+- Render the shared rich document surface with native caret, selection, scrolling, formatting, attachment, entity-link, and collaboration behavior.
+- Persist document edits through the authenticated editor JSON API with a stable document/textbox ID.
+- Preserve Node authored-change annotations, author labels, unread counts, seen baselines, and mark-seen behavior.
+- Keep manual Save, saving-user identity, History, and Restore through `node_textboxes_history` and `logic_gate_textboxes_history`.
+- Support canonical Node and Logic Gate title updates without overwriting an active draft.
 
 ## Important Data/Integration Paths
-- **Input from Node Map:** selected node state (`node-map-state-v1:<company_id>:<map_widget_id>`).
-- **Linking source:** generic frame-link graph (`frame-module-links-v1`) + frame registry (`frame-module-registry-v1`) with graph traversal to nearest linked map frame.
-- **Explorer fallback context source:** editor can read explorer-driven node selection from `node-map-explorer-context-v1:<company_id>:<editor_widget_id>` when no direct map-state context is available.
-- **Backend read path:** `GET /v1/nodes/:node_id?company_id=...`.
+- **Selection input:** `selectionCoordinator.ts` semantic events targeted through `frame-module-links-v1`.
+- **Node read path:** Node detail/view and projection-shaped APIs, including protected unread fields and ETags.
 - **Node document write path:** `POST /v1/editor-json/node/:node_id/documents/:document_id?company_id=...`.
 - **Logic Gate document write path:** `POST /v1/editor-json/logic_gate/:logic_gate_id/documents/:document_id?company_id=...`.
-- **Backend Node document clear path:** save the empty canonical JSON document through the same editor JSON document path.
-- **Backend Logic Gate document clear path:** save the empty canonical JSON document through the same editor JSON document path; the legacy projection-delete path is not a document writer.
-- **Backend node-title update path:** `PUT /v1/nodes/:node_id` with `{ company_id, title }`.
-- **Backend logic-gate header update path:** `PUT /v1/logic-gates/:logic_gate_id` with `{ company_id, header }`.
-- **Backend projection read path:** `GET /v1/nodes/:node_id/projection?company_id=...` (typed node projection rows for hot editor loads).
-- **Backend Logic Gate projection read path:** `GET /v1/logic-gates/:logic_gate_id/projection?company_id=...` (existing response shape synthesized from `logic_gate_textboxes` and final relationships).
-- **Event sync hooks:** `EVENT_FRAME_LINK_GRAPH_UPDATED`, `EVENT_NODE_MAP_SELECTION_UPDATED`, `EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED`, `EVENT_EXPLORER_CONTEXT_UPDATED`, and `storage` events.
+- **Document clear path:** save the empty canonical JSON document through the same editor JSON path.
+- **Title paths:** canonical Node and Logic Gate update endpoints, followed by committed-title cache reconciliation.
+- **Authored-change paths:** `/v1/nodes/{node}/changes` reads and mark-seen commands remain unchanged.
 
-## Unified Map + Rename Sync Update (2026-05-03)
-- The Editor can follow the single `map` module for both node and logic-gate context. For logic-gate selection it reads `logic-gate-map-state-v1:<company_id>:<map_widget_id>` from the same linked map frame when no legacy `logic-map` frame exists.
-- The Editor subscribes to the node and logic-gate graph caches while an entity is selected. If Map or Company Explorer renames that entity, the Editor title updates from the cache immediately.
-- Editor-origin title edits still write through canonical APIs first, then patch the shared graph cache so Map and Company Explorer update without waiting for SSE or a full snapshot refresh.
+## Logic Gate Context
+- A selected Logic Gate uses the `Logic Gate:` context header and the same shared text surface as a Node document.
+- Ordinary saves update `logic_gate_textboxes`; manual saved versions use `logic_gate_textboxes_history`.
+- Projection-shaped reads are synthesized from final textbox and relationship storage.
+- Blank documents use the editor JSON contract and never create legacy information/projection rows.
 
-## Logic Gate Context Update (2026-05-01)
-- When Editor is linked to a Logic Gate Map, the context header says `Logic Gate:` instead of `Node:`.
-- Logic Gate documents use the same text surface as node documents. Ordinary saves update `logic_gate_textboxes`; manual saved versions use `logic_gate_textboxes_history`.
-- Editor loads the latest Logic Gate document from `GET /v1/logic-gates/:logic_gate_id/projection`; the backend preserves that response shape while reading final tables.
-- Blank documents follow the editor JSON contract. No current request creates or selects a legacy Logic Gate information/projection row.
-- Headless callers use the same editor JSON document contract as the UI; the legacy information endpoint is not a compatibility writer.
-
-## Document Editing Reliability Update (2026-05-04)
-- The body editor uses a constrained rich `contentEditable` surface so selected text can carry inline formatting while the frame still owns scroll, autosave, and document context.
+## Document Editing Reliability Update (2026-05-04)- The body editor uses a constrained rich `contentEditable` surface so selected text can carry inline formatting while the frame still owns scroll, autosave, and document context.
 - While focus is inside the rich document, browser-native rich text shortcuts such as `Ctrl/Cmd + B`, `Ctrl/Cmd + U`, undo, and redo stay inside the editor. Dashboard frame shortcuts only run when focus is outside editable text.
 - Rich documents are stored in `Text box` information with a `mango-editor-html-v1` marker. Existing plain text documents load as escaped text and pasted URLs are converted into safe blue underlined links.
 - Typing schedules a debounced save. Blur, node switch, and unmount flush the latest pending value so edits do not wait for a manual save action.
@@ -167,16 +149,14 @@ Search and creation retain the current company/workspace scope and existing effe
 - The editor no longer persists document geometry. Frame geometry remains dashboard layout state; document text remains semantic data.
 - This removes hot-path JSON geometry reconstruction work while preserving fast local layout interaction.
 
-## Latency hardening update (2026-04-26)
-- Editor no longer depends on legacy editor->map localStorage mapping updates.
-- Link-resolution refresh is now triggered by dedicated graph-change events (or frame-link storage key changes), not by unrelated app layout churn.
-- Node map selection sync now consumes semantic selection events (with revision metadata) rather than high-frequency full map-state event fanout.
+## Latency hardening update (2026-08-05)
+- Editor selection uses the generic live coordinator and direct frame-link targets.
+- Link-resolution refresh is triggered by dedicated graph-change events or the frame-link storage key, not unrelated layout churn.
+- Entity record and relationship caches coalesce reads and fence stale in-flight title responses.
 
-## Editor persistence + reload correctness update (2026-04-26)
-- Text box blur-save now commits the current document value directly, preventing stale state snapshots that could previously persist blank/old text and then rehydrate incorrectly after node switches.
+## Editor persistence + reload correctness update (2026-04-26)- Text box blur-save now commits the current document value directly, preventing stale state snapshots that could previously persist blank/old text and then rehydrate incorrectly after node switches.
 - Blur-save now short-circuits when document text has not changed, and also skips creating a brand-new projection row for empty content. This prevents accidental blank projection/history rows when a node is selected but never edited.
 - Empty double-click box creation no longer writes an immediate blank persistence row; persistence starts once there is user-entered content or subsequent geometry/text save action.
-- Semantic event precedence update: when map/explorer selection events arrive, Editor applies selected-node IDs directly from event context instead of waiting for debounced map-state storage reads, preventing stale-node display during explorer-driven selection changes.
 
 ## Projection identity hardening update (2026-04-28)
 - Every newly created editor textbox now gets a stable client-generated UUID `information_id` immediately (before first network save).
