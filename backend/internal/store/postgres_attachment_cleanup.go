@@ -16,7 +16,7 @@ where attachment.deleted_timestamp is not null
       and relationship.attachment_id=attachment.attachment_id
       and relationship.deleted_timestamp is null
   )
-order by attachment.company_id`)
+order by attachment.company_id::text`)
 	if err != nil {
 		return nil, err
 	}

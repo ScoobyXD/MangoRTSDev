@@ -63,7 +63,7 @@ func (s *Server) cleanupPendingAttachmentDeletions(ctx context.Context) {
 	}
 	companyIDs, err := repo.ListPendingAttachmentDeletionCompanyIDs(ctx)
 	if err != nil {
-		log.Printf("attachment_deletion_cleanup status=company_list_failed")
+		log.Printf("attachment_deletion_cleanup status=company_list_failed err=%v", err)
 		return
 	}
 	for _, companyID := range companyIDs {

@@ -44,3 +44,17 @@ func TestPostgresAttachmentReadsUseOneContentQueryAndBatchedMetadataVariants(t *
 		t.Fatal("ListAttachmentResourceLinks must preserve existing-with-no-links semantics in one query")
 	}
 }
+
+func TestPendingAttachmentDeletionCompanyQueryOrdersBySelectedExpression(t *testing.T) {
+	source, err := os.ReadFile("postgres_attachment_cleanup.go")
+	if err != nil {
+		t.Fatalf("read postgres_attachment_cleanup.go: %v", err)
+	}
+	text := string(source)
+	if !strings.Contains(text, "select distinct attachment.company_id::text") {
+		t.Fatal("pending attachment deletion query must select company ID as text")
+	}
+	if !strings.Contains(text, "order by attachment.company_id::text") {
+		t.Fatal("SELECT DISTINCT query must order by its selected company ID expression")
+	}
+}
