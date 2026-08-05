@@ -9,6 +9,8 @@ The existing projection-shaped response is assembled from permanent textbox, att
 Manual saves create one batch in the matching `node_textboxes_history`, `project_textboxes_history`, or `logic_gate_textboxes_history`
 ↓
 Recycle snapshots and restores order the owner before its final textbox/history rows; Node and Project then restore their supported textbox chats, email relationships, and attachment relationships in dependency order
+↓
+At the final Node maintenance boundary, writers pause; any active legacy textbox still missing from final storage is copied with the same ID, and only ownerless legacy seen rows are discarded before the remaining baselines move to final storage
 
 ## What the user does
 
@@ -63,6 +65,24 @@ including Mango's UUIDv7 IDs. A UUID version describes how an ID was generated;
 it is not an editor schema version and is not a reason to rewrite or reject an
 existing identity. The migration stops only when a legacy Node resource or
 document ID cannot be stored as a PostgreSQL UUID at all.
+
+## Final Node writer-paused delta rule
+
+The final Node migration closes writes that occurred after the earlier additive
+textbox copy without adding a compatibility path:
+
+- It inserts an active legacy `Text box` only when that exact
+  `company_id/node_id/information_id` is absent from `node_textboxes`.
+- The stable `information_id` becomes the final `textbox_id`. Existing final
+  textboxes are never overwritten by the legacy projection.
+- A legacy seen snapshot is stale only when its current Node still exists and
+  its exact `node_projection_table` row, `node_textboxes` row, history, and
+  content changes are all absent. Only that proven orphan is deleted.
+- Every remaining seen snapshot must have an exact text projection and final
+  textbox, and is copied to `node_textbox_seen_snapshots`.
+- Conversion, ownership, schema, and identity checks share one transaction.
+  Any refusal rolls back the textbox inserts, stale cleanup, baseline copy, and
+  content-change column cutover together.
 
 ## Deleted and recycled resource rule
 

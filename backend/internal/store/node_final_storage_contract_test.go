@@ -95,6 +95,8 @@ func TestNodeForwardMigrationAndOperatorAreStrictAndDBeaverSafe(t *testing.T) {
 		"node_information exact unordered column set drifted",
 		"node_projection_table exact unordered column set drifted",
 		"node_projection_seen_snapshots exact unordered column set drifted",
+		"ready_for_paused_writer_final_delta", "active_legacy_textboxes_to_copy",
+		"stale_seen_snapshots_to_remove", "seen_snapshots_to_migrate_after_copy",
 	} {
 		if !strings.Contains(preflight, required) {
 			t.Errorf("Node final preflight missing %q", required)
@@ -105,13 +107,39 @@ func TestNodeForwardMigrationAndOperatorAreStrictAndDBeaverSafe(t *testing.T) {
 	}
 	migration := readNodeFinalContractFile(t, "..", "..", "db", "migrations", "20260804_zzzzzz_node_final_storage_cutover.sql")
 	for _, required := range []string{
-		"server_version_num", "lock table node_content_changes", "rename column information_id to textbox_id",
+		"server_version_num", "lock table node_projection_table in share mode",
+		"lock table node_projection_seen_snapshots in share row exclusive mode",
+		"lock table node_content_changes", "rename column information_id to textbox_id",
 		"node_textbox_seen_snapshots", "seen-snapshot identity copy did not reconcile exactly",
 		"textbox_revision", "node_content_changes_textbox_fk",
+		"mangorts_node_projection_body", "mangorts_node_final_textbox_delta",
+		"insert into node_textboxes", "stale_seen_snapshots_removed",
+		"active_legacy_textboxes_copied", "delta_seen_snapshots_migrated",
+		"total_legacy_seen_snapshots_migrated",
 	} {
 		if !strings.Contains(migration, required) {
 			t.Errorf("forward migration missing %q", required)
 		}
+	}
+	deleteStart := strings.Index(migration, "delete from node_projection_seen_snapshots seen")
+	if deleteStart < 0 {
+		t.Fatal("forward migration missing bounded stale seen-snapshot delete")
+	}
+	deleteEnd := strings.Index(migration[deleteStart:], "returning 1")
+	if deleteEnd < 0 {
+		t.Fatal("forward migration missing bounded stale seen-snapshot delete")
+	}
+	deleteClause := migration[deleteStart : deleteStart+deleteEnd]
+	if strings.Count(deleteClause, "not exists(") < 4 ||
+		!strings.Contains(deleteClause, "from node_projection_table") ||
+		!strings.Contains(deleteClause, "from node_textboxes") ||
+		!strings.Contains(deleteClause, "from node_information") ||
+		!strings.Contains(deleteClause, "from node_content_changes") ||
+		!strings.Contains(deleteClause, "from nodes parent") {
+		t.Error("stale seen-snapshot delete must require a current Node plus no exact projection, final textbox, history, or content change")
+	}
+	if strings.Contains(migration, "update node_textboxes") {
+		t.Error("writer-paused delta must not overwrite textboxes already present in final storage")
 	}
 	operator := readNodeFinalContractFile(t, "..", "..", "db", "operator_migrations", "20260805_retire_node_legacy_storage.sql")
 	for _, required := range []string{
