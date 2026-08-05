@@ -174,6 +174,29 @@ func TestCleanupPartialFailureLeavesDatabaseForRetry(t *testing.T) {
 	}
 }
 
+func TestCleanupFinalizeFailureLeavesPendingRowForRetry(t *testing.T) {
+	item := orphanWork(ObjectRef{Bucket: "bucket", Key: "original"})
+	repository := &fakeRepository{
+		work:          []WorkItem{item},
+		eligible:      map[string]bool{item.AttachmentID: true},
+		shared:        map[string]bool{},
+		finalizeError: errors.New("temporary Postgres failure"),
+	}
+	storage := &fakeStorage{bucket: "bucket", outcomes: map[string][]error{}}
+	first := runApply(t, repository, storage)
+	if first.FailureCount() != 1 || first.Items[0].FailureStage != "finalize_database" ||
+		first.Items[0].Finalized || len(repository.finalized) != 0 {
+		t.Fatalf("first=%+v finalized=%v", first, repository.finalized)
+	}
+
+	repository.finalizeError = nil
+	second := runApply(t, repository, storage)
+	if second.FailureCount() != 0 || second.FinalizedCount() != 1 ||
+		len(storage.calls) != 2 {
+		t.Fatalf("second=%+v delete calls=%v", second, storage.calls)
+	}
+}
+
 func TestCleanupMultipleSurvivingRelationshipsSkipsDeletion(t *testing.T) {
 	item := orphanWork(ObjectRef{Bucket: "bucket", Key: "original"})
 	repository := &fakeRepository{

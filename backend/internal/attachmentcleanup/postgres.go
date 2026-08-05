@@ -173,8 +173,12 @@ select exists(
 	}
 	if _, err := tx.ExecContext(ctx, `
 delete from attachment_relationships
-where company_id=$1::uuid and attachment_id=$2::uuid;
-delete from attachment_previews where attachment_id=$2::uuid`, item.CompanyID, item.AttachmentID); err != nil {
+where company_id=$1::uuid and attachment_id=$2::uuid`, item.CompanyID, item.AttachmentID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from attachment_previews
+where attachment_id=$1::uuid`, item.AttachmentID); err != nil {
 		return err
 	}
 	result, err := tx.ExecContext(ctx, `

@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"log"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 	"miraeopus/backend/internal/attachmentcleanup"
 	"miraeopus/backend/internal/store"
-	"time"
 )
 
 const (
@@ -45,12 +48,14 @@ func (s *Server) runAttachmentDeletionCleanup(ctx context.Context, companyID str
 		Storage:    attachmentDeletionStorage{storage: storage},
 	}).Run(ctx, attachmentcleanup.Options{CompanyID: companyID, Limit: limit, Apply: true})
 	if err != nil {
-		log.Printf("attachment_deletion_cleanup status=failed company_id=%s", companyID)
+		logAttachmentDeletionCleanupFailure("failed", companyID, "", "list_work", err)
 		return attachmentcleanup.Result{}
 	}
 	for _, item := range result.Items {
 		if item.Err != nil {
-			log.Printf("attachment_deletion_cleanup status=item_failed company_id=%s attachment_id=%s", companyID, item.AttachmentID)
+			logAttachmentDeletionCleanupFailure(
+				"item_failed", companyID, item.AttachmentID, item.FailureStage, item.Err,
+			)
 		}
 	}
 	return result
@@ -63,7 +68,7 @@ func (s *Server) cleanupPendingAttachmentDeletions(ctx context.Context) {
 	}
 	companyIDs, err := repo.ListPendingAttachmentDeletionCompanyIDs(ctx)
 	if err != nil {
-		log.Printf("attachment_deletion_cleanup status=company_list_failed err=%v", err)
+		logAttachmentDeletionCleanupFailure("company_list_failed", "", "", "company_list", err)
 		return
 	}
 	for _, companyID := range companyIDs {
@@ -71,6 +76,73 @@ func (s *Server) cleanupPendingAttachmentDeletions(ctx context.Context) {
 			return
 		}
 		s.runAttachmentDeletionCleanup(ctx, companyID, attachmentDeletionCleanupBatch)
+	}
+}
+
+func logAttachmentDeletionCleanupFailure(status, companyID, attachmentID, stage string, err error) {
+	category, sqlState, safeErr := attachmentDeletionCleanupErrorDiagnostic(stage, err)
+	message := "attachment_deletion_cleanup status=" + status
+	if companyID != "" {
+		message += " company_id=" + companyID
+	}
+	if attachmentID != "" {
+		message += " attachment_id=" + attachmentID
+	}
+	log.Printf("%s stage=%s error_category=%s sqlstate=%s err=%q", message, stage, category, sqlState, safeErr)
+}
+
+func attachmentDeletionCleanupErrorDiagnostic(stage string, err error) (category, sqlState, safeErr string) {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		sqlState = strings.TrimSpace(pgErr.Code)
+		if sqlState == "" {
+			sqlState = "unknown"
+		}
+		switch sqlState {
+		case "42601":
+			if strings.Contains(strings.ToLower(pgErr.Message), "multiple commands") {
+				return "invalid_sql_statement", sqlState, "multiple commands are not allowed in one prepared statement"
+			}
+			return "invalid_sql_statement", sqlState, "invalid PostgreSQL statement"
+		case "23503":
+			return "foreign_key_violation", sqlState, "database row is still referenced"
+		case "42501":
+			return "insufficient_privilege", sqlState, "database permission denied"
+		case "42P01":
+			return "undefined_table", sqlState, "required database table is missing"
+		case "42703":
+			return "undefined_column", sqlState, "required database column is missing"
+		default:
+			return "postgres_error", sqlState, "PostgreSQL operation failed"
+		}
+	}
+	if errors.Is(err, context.Canceled) {
+		return "context_canceled", "none", "cleanup was canceled"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "deadline_exceeded", "none", "cleanup deadline was exceeded"
+	}
+	if errors.Is(err, attachmentcleanup.ErrStillOwned) {
+		return "attachment_still_owned", "none", "attachment still has a surviving relationship"
+	}
+	if errors.Is(err, ErrAttachmentStorageUnavailable) {
+		return "storage_unavailable", "none", "attachment storage is unavailable"
+	}
+	switch stage {
+	case "company_scope":
+		return "invalid_company_scope", "none", "repository returned work for another company"
+	case "validate_work_item":
+		return "invalid_work_item", "none", "cleanup work item is invalid"
+	case "validate_object_reference":
+		return "invalid_object_reference", "none", "database object reference is incomplete"
+	case "validate_storage_bucket":
+		return "storage_bucket_mismatch", "none", "database object bucket does not match configured attachment bucket"
+	case "delete_storage_object":
+		return "storage_error", "none", "attachment storage request failed"
+	case "company_list", "list_work", "recheck_eligibility", "check_retained_references", "finalize_database":
+		return "database_error", "none", "database operation failed"
+	default:
+		return "cleanup_error", "none", "attachment cleanup failed"
 	}
 }
 
