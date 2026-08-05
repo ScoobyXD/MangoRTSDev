@@ -29,14 +29,32 @@ func TestPostgresProjectFinalTextboxChatAndEmailStorage(t *testing.T) {
 	projectID := projectResult.Project.ProjectID
 	textboxID := "00000000-0000-4000-8000-000000000301"
 	ref := EditorJSONDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeProject, ResourceID: projectID, DocumentID: textboxID}
-	if _, err := repo.EnsureEditorJSONCollaborationDocument(ref); err != nil {
+	var textboxExists bool
+	if err := db.QueryRow(`select exists(
+		select 1 from project_textboxes where company_id=$1::uuid and project_id=$2::uuid and textbox_id=$3
+	)`, company.CompanyID, projectID, textboxID).Scan(&textboxExists); err != nil {
 		t.Fatal(err)
+	}
+	if textboxExists {
+		t.Fatal("new Project textbox unexpectedly existed before its first metadata save")
 	}
 	if _, err := repo.UpdateEditorJSONMetadata(EditorJSONMetadataInput{
 		Document: EditorDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeProject, ResourceID: projectID, DocumentID: textboxID},
 		Title:    "Final Project Notes",
 	}); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := repo.EnsureEditorJSONCollaborationDocument(ref); err != nil {
+		t.Fatal(err)
+	}
+	var storedTitle, bodyFormat string
+	if err := db.QueryRow(`select title,body_json->>'format'
+		from project_textboxes where company_id=$1::uuid and project_id=$2::uuid and textbox_id=$3`,
+		company.CompanyID, projectID, textboxID).Scan(&storedTitle, &bodyFormat); err != nil {
+		t.Fatal(err)
+	}
+	if storedTitle != "Final Project Notes" || bodyFormat != MangoTiptapFormat {
+		t.Fatalf("metadata-first Project textbox title=%q body format=%q", storedTitle, bodyFormat)
 	}
 
 	emailThreadID := "00000000-0000-4000-8000-000000000302"

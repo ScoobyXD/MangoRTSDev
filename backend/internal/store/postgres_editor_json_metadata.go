@@ -67,6 +67,19 @@ func (r *PostgresRepo) UpdateEditorJSONMetadata(input EditorJSONMetadataInput) (
 				information=excluded.information, is_deleted=false, revision=logic_gate_projection_table.revision+1, updated_timestamp=excluded.updated_timestamp
 			returning revision`, input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID, information, now).Scan(&revision)
 	case EntityTypeProject:
+		textboxRef := EditorJSONDocumentRef{
+			CompanyID:    input.Document.CompanyID,
+			ResourceType: input.Document.ResourceType,
+			ResourceID:   input.Document.ResourceID,
+			DocumentID:   input.Document.DocumentID,
+		}
+		storage, ok := postgresEditorTextboxStorageFor(textboxRef)
+		if !ok {
+			return EditorJSONMetadataCommit{}, ErrInvalid
+		}
+		if err = insertEmptyPostgresEditorTextboxTx(ctx, tx, storage, textboxRef); err != nil {
+			return EditorJSONMetadataCommit{}, err
+		}
 		err = tx.QueryRowContext(ctx, `
 			update project_textboxes
 			set title=$4,email_message_id=$5,email_accent=$6,

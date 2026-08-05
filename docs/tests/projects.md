@@ -4,6 +4,8 @@ A user opens a Project
 ↓
 The backend reads textbox bodies and Project-owned metadata from `project_textboxes`, rebuilds the existing textbox API payload, and reads textbox files through active `attachment_relationships`
 ↓
+A user can create a textbox even when its metadata request reaches the backend before its first document-body request; the metadata transaction creates the empty final textbox row and the later body request reuses it
+↓
 The backend reads, creates, edits, replies to, and deletes textbox chats in `project_textbox_chats`; each chat keeps its stable former projection ID and belongs to one exact Project textbox
 ↓
 An attached email creates one exact `email_relationships` row for the selected final `email_messages.email_message_id` and the owning Project textbox
@@ -91,6 +93,7 @@ P63 - New Project attached-email writes require an active Project textbox, the e
 P64 - Project textbox titles and supported email display metadata are copied once into `project_textboxes` before backend deployment. Attachment arrays are not copied into another metadata column; they are rebuilt from active final relationships.
 P65 - Project resource and chat deletion use the shared attachment unlink and last-owner cleanup lifecycle. A shared file survives while another active relationship exists.
 P66 - The deployment must refuse readiness when `project_textbox_chats` or the final Project textbox metadata columns are missing. No request performs DDL and no compatibility reader falls back to the legacy Project tables.
+P67 - The first Project textbox metadata save must idempotently create its empty `project_textboxes` row when the document-body request has not created it yet. A later document ensure/save reuses that same stable row and preserves its metadata; this ordering rule never recreates a deleted textbox or writes a legacy Project table.
 ## Scenarios
 
 ### Scenario P-S1: Inline Critical-Path Node Window
@@ -444,17 +447,19 @@ Business logic covered:
 - P64
 - P65
 - P66
+- P67
 
 Given:
 - The audited Project chat copy has 16 final chats, the exact six Project email relationships exist, and all 25 active Project textboxes have matching final rows.
 - The additive schema migration and guarded textbox-metadata copy have completed while Project writers are paused.
 
 When:
-- A user reloads the Project, edits a textbox title/body, creates and edits a chat, attaches and removes an email, deletes a textbox, and later deletes a Project that shares one file with another valid owner.
+- A user reloads the Project, creates a textbox whose metadata request arrives before its first document-body request, edits its title/body, creates and edits a chat, attaches and removes an email, deletes a textbox, and later deletes a Project that shares one file with another valid owner.
 
 Expected:
 - The existing frontend receives the same textbox/chat/email projection-shaped payload and stable IDs.
 - All Project runtime SQL uses only `project_textboxes`, `project_textbox_chats`, final email tables, and final attachment tables.
+- The metadata-first request creates one empty final textbox row, and the later body request reuses that row without losing its stable ID or title.
 - The chat remains bound to its exact textbox; the email relationship uses the exact internal email message identity.
 - Textbox deletion removes its chats, textbox-scoped email relationships, and attachment owner links while normalized email content survives.
 - Project deletion keeps a shared file under its remaining owner and marks a file for cleanup only after its final relationship disappears.
