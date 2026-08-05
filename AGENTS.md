@@ -149,6 +149,7 @@ Do not use made-up words that you just invent on the fly to describe something. 
 9. Prefer established, well-maintained libraries when they reduce overall complexity or improve reliability. Do not reimplement common functionality without a clear reason.
 10. Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
 11. Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
+12. Before designing or changing any relationship, assignment, owner link, permission/GVIC link, email relationship, attachment relationship, polymorphic resource reference, or related deletion/recycle behavior, read and follow `docs/tests/relationships.md`. Its numbered Relationship Business Logic Laws are mandatory. Do not introduce a central resource registry, translated/surrogate resource identity, untyped generic edge, or compatibility identity layer. Any intentional change to those laws must update that file's Process Story and numbered laws in the same change.
 
 
 ## PostgreSQL and operator SQL rules
