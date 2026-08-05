@@ -1,6 +1,6 @@
 # Process Story
 
-A Mango user creates a Node and adds textboxes. Textbox bodies are stored only in `node_textboxes`, and textbox-owned comments and seen markers disappear when their textbox no longer exists. If a comment's author account was deleted, the comment and captured display name remain while its relational user ID becomes null. When an email is downloaded, Mango stores one thread for the exact personal email account or shared email account and stores each message once inside that thread. `email_relationships` connects a selected message to a Node, Project, Logic Gate, or one of their textboxes. Deleting that connection removes only the relationship: normalized email, email draft content, and normalized email attachment links survive independently. Converting an email into a Node is an ordinary workflow: store the email, create the Node, create the relationship, and use normal resource permissions. A resource-shared email draft is stored in `email_drafts` and receives access from the related resource instead of a special collaboration-participant subsystem. No current Node editor content is written to `node_information` or `node_projection_table` after the Node cutover. The implemented Project cutover likewise reads and writes only `project_textboxes`, `project_textbox_chats`, exact final email relationships/messages, and final attachment tables; it does not use `project_information` or `project_projection_table`.
+A Mango user creates a Node and adds textboxes. Textbox bodies are stored only in `node_textboxes`, and textbox-owned comments and seen markers disappear when their textbox no longer exists. If a comment's author account was deleted, the comment and captured display name remain while its relational user ID becomes null. When an email is downloaded, Mango stores one thread for the exact personal email account or shared email account and stores each message once inside that thread. `email_relationships` connects a selected message to a Node, Project, Logic Gate, or one of their textboxes. Deleting that connection removes only the relationship: normalized email, email draft content, and normalized email attachment links survive independently. Converting an email into a Node is an ordinary workflow: store the email, create the Node, create the relationship, and use normal resource permissions. A resource-shared email draft is stored in `email_drafts` and receives access from the related resource instead of a special collaboration-participant subsystem. No current Node editor content is written to `node_information` or `node_projection_table` after the Node cutover. The implemented Project cutover likewise reads and writes only `project_textboxes`, `project_textbox_chats`, exact final email relationships/messages, and final attachment tables; it does not use `project_information` or `project_projection_table`. The implemented Logic Gate cutover uses its one `logic_gate_textboxes` document, `logic_gate_textboxes_history`, exact final email relationships/messages, and final attachment tables; it does not create a speculative chat table or use `logic_gate_information` or `logic_gate_projection_table`.
 
 A Mango file has one record in `attachments` and one or more ownership links in `attachment_relationships`. A Node-owned file can remember that it came from a textbox without making that textbox its owner. Removing one link never deletes a file that still has another live link. When the final live link is removed, Mango marks the attachment for deletion, deletes the original and every generated preview from S3, and then removes the database records. Sent-email files remain available because sending creates an `email_message` attachment relationship before the email draft is removed.
 
@@ -25,8 +25,9 @@ An agent must not apply the migration to a live database. Repository agents may 
 | Email | `email_threads`, `email_messages`, `email_relationships`, `email_drafts`, and `email_signatures` | The final data copy reconciled 223 threads, 678 messages, 228 relationships, 49 drafts, and 9 signatures. The final-table backend was deployed in development and Jonat reported the smoke checks successful. | Snapshot/soak evidence and later legacy email-table retirement. |
 | Attachments | `attachments`, `attachment_relationships`, `attachment_upload_jobs`, `attachment_upload_parts`, and `attachment_previews` | Step 1 cleanup completed, the multipart boundary moved six part rows to `upload_job_id`, and backend commit `c8a08085` was deployed. The final sync reported 491 upload jobs, 842 previews, and 1,080 relationships; Jonat reported the smoke checks successful. | Post-cutover reconciliation, snapshot/soak evidence, and separately approved Step 3 legacy-table retirement. |
 | Project textboxes/chats/email links | `project_textboxes`, `project_textbox_chats`, `email_relationships`, `email_messages`, and `email_threads` | The guarded chat copy completed with 16 chats, 3 replies, and zero review rows. The backend merged into local `main` in merge commit `336b09de` and synthesizes the existing Project payload from final tables with no Project legacy-table reader/writer. | Apply the additive schema migration, run the guarded 25-textbox metadata copy, deploy this matching backend during the writer pause, smoke test, reconcile, and soak before separately approving legacy Project table retirement. |
+| Logic Gate document/history/email links | `logic_gate_textboxes`, `logic_gate_textboxes_history`, `email_relationships`, `email_messages`, and `email_threads` | The application cutover is implemented in this branch. The current product has one Logic Gate document and no chat surface; projection-shaped reads are synthesized from final tables, editor JSON is the only document writer, manual history is final, and delete/recycle paths no longer use the two legacy tables. | Run the read-only preflight, apply the additive metadata migration, run the guarded copy, deploy and smoke test the matching backend, reconcile and soak, then separately approve legacy Logic Gate table retirement. |
 
-No legacy reader, writer, fallback, or dual-write path remains for the completed Node textbox, Node textbox chat, email, or attachment contracts. The Project cutover is merged into local `main` but is not a deployed checkpoint until its schema, metadata-copy, deployment, smoke, and reconciliation steps finish. Logic Gate legacy information/projection storage remains outside this completed set. This status does not authorize dropping any preserved legacy table.
+No legacy reader, writer, fallback, or dual-write path remains for the completed Node textbox, Node textbox chat, email, attachment, Project, or Logic Gate runtime contracts in this branch. The Project application cutover is merged into local `main`; the Logic Gate application cutover is implemented on this worker. Neither is a deployed database checkpoint until its own schema/copy, deployment, smoke, reconciliation, and soak gates finish. This status does not authorize dropping any preserved live legacy table.
 
 ## Current implementation: Project final-storage cutover ready for operation
 
@@ -91,14 +92,79 @@ The exact human-run order is:
    and run a separately reviewed destructive retirement script only after exact
    dependency and no-current-writer checks pass.
 
-The current retirement candidate set is exactly `project_information` and
-`project_projection_table`. They remain in the canonical schema and no drop
+The current Project retirement candidate set is exactly `project_information`
+and `project_projection_table`. They remain in the canonical schema and no drop
 script is included in this phase because the matching backend has not yet been
 deployed and soaked. `projects`, `project_textboxes`,
 `project_textboxes_history`, `project_textbox_chats`,
 `project_relationships`, `project_relationship_projection`, all final email
 tables, all final attachment tables, provider connection plumbing, archive/
-triage/job tables, and Logic Gate legacy storage are retained.
+and triage/job tables are retained.
+
+## Current implementation: Logic Gate final-storage cutover ready for operation
+
+The Logic Gate product has one independently editable document. Inspection of
+the current frontend and backend found no Logic Gate textbox-chat pane, chat
+route, or supported chat behavior, so this cutover does not invent a
+`logic_gate_textbox_chats` table.
+
+The final runtime contract is:
+
+- `logic_gate_textboxes` stores the one current JSON document plus its stable ID,
+  title/display metadata, revision, metadata revision, and timestamps.
+- `logic_gate_textboxes_history` stores manual saved-version batches and is the
+  only source for listing or restoring Logic Gate document history.
+- `GET /v1/logic-gates/{id}/projection` keeps its public response shape but is
+  assembled from final textbox, attachment, and exact email relationship rows.
+- Ordinary document writes use `/v1/editor-json/logic_gate/...`. The old
+  information endpoint directs text callers to editor JSON and rejects every
+  unsupported legacy type; it creates no compatibility row or dual write.
+- Exact attached-email identity and access come from active
+  `email_relationships` joined to `email_messages` and `email_threads`, plus
+  normal Logic Gate permission. This change adds no new attach-email surface.
+- Files use only `attachments` and `attachment_relationships`. Logic Gate
+  deletion removes its relationships through the shared last-owner cleanup.
+- Recycle capture/restore uses the final textbox/history tables and exact final
+  relationships. It does not snapshot or restore either legacy Logic Gate table.
+- The canonical schema no longer creates `logic_gate_information` or
+  `logic_gate_projection_table`. Existing databases retain them until the
+  separately approved operator retirement step.
+
+The exact human-run order is:
+
+1. With writers still running, execute
+   `scripts/v3_logic_gate_final_runtime_preflight.sql` using a read-only
+   connection in DBeaver. Continue only on PostgreSQL 17.x and `READY_FOR_LOGIC_GATE_SCHEMA_AND_COPY`.
+2. Pause Logic Gate document/history, exact email relationship, attachment,
+   delete, and recycle writers. Take and retain the agreed pre-cutover snapshot.
+3. Apply
+   `backend/db/migrations/20260805_logic_gate_final_runtime_storage.sql` through
+   the reviewed migration workflow. It only adds the final textbox metadata
+   columns and constraints; it does not drop legacy tables.
+4. While writers remain paused, run
+   `scripts/v3_logic_gate_final_runtime_copy_verify.sql` in DBeaver. It copies
+   only supported current textbox display metadata, is rerunnable, and refuses
+   unsupported active legacy types, missing/multiple final documents, email
+   identity mismatch, history mismatch, or exact-schema drift.
+5. Deploy this matching backend and require readiness to pass before resuming
+   writers.
+6. Smoke test Logic Gate open/reload, typing, metadata save, manual save/history
+   restore, inline attachment, exact attached-email read where existing product
+   data has one, resource deletion, shared-file retention, and recycle/restore.
+7. Rerun the read-only preflight/reconciliation and prove the deployed artifact
+   has no legacy Logic Gate reader/writer. Resume writers only on clean evidence.
+8. Observe the agreed soak and take the separately agreed retirement snapshot.
+9. Review `backend/db/operator_migrations/20260805_retire_logic_gate_legacy_storage.sql`.
+   Set all five approval booleans only after their evidence exists. The script
+   refuses drift, active unsupported types, copy/history mismatch, current
+   writers, or surviving views/functions/FKs and drops without `CASCADE`.
+
+The exact Logic Gate retirement set is `logic_gate_information` and
+`logic_gate_projection_table`. Retain `logic_gates`, `logic_gate_textboxes`,
+`logic_gate_textboxes_history`, all final email and attachment tables, resource
+permissions, provider connection plumbing, archive/triage/job tables, and every
+other current product table.
+
 ## Historical incident: the first V3 cutover was rolled back
 
 The 2026-08-02 V3 attempt is abandoned. Do not revive or run the removed migration as-is.
@@ -874,22 +940,27 @@ Requirements:
 - Logic Gate work views update when relevant email relationships change.
 - Email relationship validation must reject missing resources, mismatched resource types, missing textboxes, and textboxes belonging to the wrong resource.
 
-## Tables explicitly staying unchanged in this work
+## Final tables retained and legacy tables awaiting separate retirement
 
 ```text
 node_textboxes
 node_textboxes_history
 project_textboxes
 project_textboxes_history
+project_textbox_chats
 logic_gate_textboxes
 logic_gate_textboxes_history
-project_information
-project_projection_table
-logic_gate_information
-logic_gate_projection_table
 node_content_change_seen
 attachments
+attachment_relationships
+attachment_upload_jobs
 attachment_upload_parts
+attachment_previews
+email_threads
+email_messages
+email_relationships
+email_drafts
+email_signatures
 user_email_connections
 company_email_connections
 communications_email_archive_jobs
@@ -897,7 +968,12 @@ communications_email_archive_job_items
 communications_triage_items
 ```
 
-The `information_type` enum remains because Project and Logic Gate information/projection tables still use it.
+`project_information` and `project_projection_table` remain only until their
+separate Project retirement gates pass. Existing databases may likewise retain
+`logic_gate_information` and `logic_gate_projection_table` until the Logic Gate
+operator retirement step, but the canonical schema and current Logic Gate
+runtime no longer create or use them. The `information_type` enum remains while
+Project legacy storage and other current enum consumers still require it.
 
 ## Required application cutover
 

@@ -261,8 +261,6 @@ var recycleSnapshotTables = map[string]bool{
 	"node_map_positions":             true,
 	"node_account_assignments":       true,
 	"node_relationships":             true,
-	"logic_gate_information":         true,
-	"logic_gate_projection_table":    true,
 	"logic_gate_map_positions":       true,
 	"logic_gate_relationships":       true,
 	"user_logic_gate_shortcuts":      true,
@@ -295,8 +293,6 @@ var recycleRestoreTableOrder = []string{
 	"company_explorer_folders",
 	"node_information",
 	"node_projection_table",
-	"logic_gate_information",
-	"logic_gate_projection_table",
 
 	"node_map_positions",
 	"logic_gate_map_positions",
@@ -466,7 +462,7 @@ func postgresSnapshotRecyclePayloadWithCacheTx(ctx context.Context, tx *sql.Tx, 
 		}
 	}
 	if len(logicGateIDs) > 0 {
-		for _, tableName := range []string{"logic_gates", "logic_gate_textboxes", "logic_gate_textboxes_history", "logic_gate_information", "logic_gate_projection_table", "logic_gate_map_positions"} {
+		for _, tableName := range []string{"logic_gates", "logic_gate_textboxes", "logic_gate_textboxes_history", "logic_gate_map_positions"} {
 			if err := addTable(tableName, `company_id=$1::uuid and logic_gate_id = any(string_to_array($2, ',')::uuid[])`, companyID, logicGateIDCSV); err != nil {
 				return nil, err
 			}

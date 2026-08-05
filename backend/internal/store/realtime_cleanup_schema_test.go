@@ -26,7 +26,7 @@ func TestRealtimeCleanupCanonicalSchemaAndForwardMigration(t *testing.T) {
 		"create table if not exists realtime_outbox",
 		"idx_realtime_outbox_claim",
 		"idx_realtime_outbox_published_sequence",
-		"drop index if exists idx_logic_gate_projection_table_one_text_box",
+		"create table if not exists logic_gate_textboxes",
 	} {
 		if !strings.Contains(schema, required) {
 			t.Fatalf("canonical schema missing unified realtime storage %q", required)

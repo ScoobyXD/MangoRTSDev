@@ -478,18 +478,6 @@ func updateSourcePayload(ctx context.Context, tx *sql.Tx, location migration.Pay
 		}
 		_, err := tx.ExecContext(ctx, `update node_content_changes set text=$3 where company_id=$1::uuid and change_id=$2::uuid`, parts[0], parts[1], payload)
 		return err
-	case "logic_gate_projection_table":
-		if len(parts) != 3 {
-			return fmt.Errorf("invalid source pk for %s: %s", location.Table, location.SourcePK)
-		}
-		_, err := tx.ExecContext(ctx, `update logic_gate_projection_table set information=$4, updated_timestamp=now() where company_id=$1::uuid and logic_gate_id=$2::uuid and information_id=$3::uuid`, parts[0], parts[1], parts[2], payload)
-		return err
-	case "logic_gate_information":
-		if len(parts) != 2 {
-			return fmt.Errorf("invalid source pk for %s: %s", location.Table, location.SourcePK)
-		}
-		_, err := tx.ExecContext(ctx, `update logic_gate_information set information=$3, updated_timestamp=now() where company_id=$1::uuid and information_id=$2::uuid`, parts[0], parts[1], payload)
-		return err
 	case "email_messages":
 		if len(parts) != 2 {
 			return fmt.Errorf("invalid source pk for %s: %s", location.Table, location.SourcePK)
@@ -584,28 +572,6 @@ from node_content_changes
 where (nullif($1, '')::uuid is null or company_id=nullif($1, '')::uuid)
   and ` + pred("text") + `
 order by created_timestamp desc
-limit $2`,
-		},
-		{
-			Table:  "logic_gate_projection_table",
-			Column: "information",
-			Query: `select company_id::text || '|' || logic_gate_id::text || '|' || information_id::text,
-       company_id::text, 'logic_gate', logic_gate_id::text, information_id::text, '', information
-from logic_gate_projection_table
-where (nullif($1, '')::uuid is null or company_id=nullif($1, '')::uuid)
-  and ` + pred("information") + `
-order by updated_timestamp desc
-limit $2`,
-		},
-		{
-			Table:  "logic_gate_information",
-			Column: "information",
-			Query: `select company_id::text || '|' || information_id::text,
-       company_id::text, 'logic_gate', logic_gate_id::text, information_id::text, '', information
-from logic_gate_information
-where (nullif($1, '')::uuid is null or company_id=nullif($1, '')::uuid)
-  and ` + pred("information") + `
-order by updated_timestamp desc
 limit $2`,
 		},
 		{

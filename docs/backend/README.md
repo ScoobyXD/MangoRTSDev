@@ -152,21 +152,23 @@ These guards enforce:
 - only Parent<->Child or Peer<->Peer relationship position pairs
 - no self-relationships (`node_id_a <> node_id_b`)
 
-For existing databases that were created before blank-information guards were added, run:
+The 2026-05 blank-information and Logic Gate projection migrations are historical.
+Do not run those individual scripts to create new legacy storage. The canonical
+schema stores the current Logic Gate document in `logic_gate_textboxes` and manual
+history in `logic_gate_textboxes_history`.
 
-```powershell
-psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME sslmode=$env:DB_SSLMODE" -f .\db\migrations\20260501_nonblank_information_guards.sql
-```
+For an existing PostgreSQL 17 development database, the Logic Gate cutover is a
+human-operated boundary:
 
-These guards reject new whitespace-only `node_information`, `node_projection_table`,
-`logic_gate_information`, and `logic_gate_projection_table` rows while leaving any old
-accidental blank rows untouched.
+1. Run `scripts/v3_logic_gate_final_runtime_preflight.sql` read-only in DBeaver.
+2. Apply `db/migrations/20260805_logic_gate_final_runtime_storage.sql` through the reviewed migration workflow.
+3. Pause the matching Logic Gate writers and run `scripts/v3_logic_gate_final_runtime_copy_verify.sql` in DBeaver.
+4. Deploy the matching backend, smoke test document save/history/restore, delete, recycle, email, and attachments, then reconcile and soak.
+5. Only after a retained snapshot and no-current-writer/dependency proof, review and explicitly approve `db/operator_migrations/20260805_retire_logic_gate_legacy_storage.sql`.
 
-For existing databases that were created before logic-gate information projections were added, run:
-
-```powershell
-psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME sslmode=$env:DB_SSLMODE" -f .\db\migrations\20260501_logic_gate_projection_table.sql
-```
+The retirement script is intentionally outside `db/migrations`; the normal
+migration runner must not drop the legacy tables automatically. Repository agents
+do not apply these scripts to a live database.
 
 For existing databases that were created before Company Explorer folders were added, run:
 

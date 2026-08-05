@@ -15,7 +15,7 @@ select to_regclass('public.nodes') as nodes,
        to_regclass('public.node_information') as node_information,
        to_regclass('public.node_projection_table') as node_projection_table,
        to_regclass('public.logic_gates') as logic_gates,
-       to_regclass('public.logic_gate_projection_table') as logic_gate_projection_table,
+       to_regclass('public.logic_gate_textboxes') as logic_gate_textboxes,
        to_regclass('public.company_explorer_folders') as company_explorer_folders,
        to_regclass('public.communications_shared_inbox_folders') as communications_shared_inbox_folders,
        to_regclass('public.communications_shared_inbox_raci_assignments') as communications_shared_inbox_raci_assignments,
@@ -33,7 +33,8 @@ begin
      or to_regclass('public.node_information') is null
      or to_regclass('public.node_projection_table') is null
      or to_regclass('public.logic_gates') is null
-     or to_regclass('public.logic_gate_projection_table') is null then
+     or to_regclass('public.logic_gate_textboxes') is null
+     or to_regclass('public.logic_gate_textboxes_history') is null then
     raise exception 'canonical schema tables are missing; run apply_canonical_schema first';
   end if;
   if not exists (select 1 from pg_constraint where conname = 'node_relationships_position_pair_chk') then

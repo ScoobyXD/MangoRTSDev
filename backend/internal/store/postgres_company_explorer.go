@@ -1241,9 +1241,6 @@ func postgresDeleteLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logic
 }
 
 func postgresDeleteLogicGateRowsTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, deleteProjectionRows bool) error {
-	if err := retireLogicGateChatAttachmentRelationshipsTx(ctx, tx, companyID, logicGateID); err != nil {
-		return err
-	}
 	if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, EntityTypeLogicGate, logicGateID); err != nil {
 		return err
 	}
@@ -1287,18 +1284,8 @@ func postgresDeleteLogicGateRowsTx(ctx context.Context, tx *sql.Tx, companyID, l
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx,
-		`delete from logic_gate_information
-		 where company_id=$1 and logic_gate_id=$2`,
-		companyID, logicGateID,
-	); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`delete from logic_gate_projection_table
-		 where company_id=$1 and logic_gate_id=$2`,
-		companyID, logicGateID,
-	); err != nil {
+	if _, err := tx.ExecContext(ctx, `delete from email_relationships
+where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`, companyID, logicGateID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,

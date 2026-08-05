@@ -184,8 +184,8 @@ func TestLogicGateCRUDRelationshipAndInformationAPI(t *testing.T) {
 	infoReq.Header.Set("Content-Type", "application/json")
 	infoRec := httptest.NewRecorder()
 	handler.ServeHTTP(infoRec, infoReq)
-	if infoRec.Code != http.StatusCreated {
-		t.Fatalf("POST logic gate information status = %d, want %d body=%s", infoRec.Code, http.StatusCreated, infoRec.Body.String())
+	if infoRec.Code != http.StatusConflict || !strings.Contains(infoRec.Body.String(), "editor_collaboration_required") {
+		t.Fatalf("legacy Logic Gate information status = %d body=%s, want collaboration-required conflict", infoRec.Code, infoRec.Body.String())
 	}
 
 	getReq := httptest.NewRequest(http.MethodGet, "/v1/logic-gates/"+firstID+"?company_id="+companyID, nil)
@@ -201,8 +201,8 @@ func TestLogicGateCRUDRelationshipAndInformationAPI(t *testing.T) {
 	if err := json.NewDecoder(getRec.Body).Decode(&details); err != nil {
 		t.Fatalf("decode details: %v", err)
 	}
-	if len(details.Information) != 1 || len(details.Relationships) != 1 {
-		t.Fatalf("details counts = information:%d relationships:%d, want 1/1", len(details.Information), len(details.Relationships))
+	if len(details.Information) != 0 || len(details.Relationships) != 1 {
+		t.Fatalf("details counts = information:%d relationships:%d, want 0/1", len(details.Information), len(details.Relationships))
 	}
 }
 
@@ -344,7 +344,7 @@ func TestLogicGateGVICAssignmentsAPIAndReadModel(t *testing.T) {
 	}
 }
 
-func TestLogicGateInformationProjectionAPIKeepsLatestValueAndHistory(t *testing.T) {
+func TestLogicGateLegacyInformationAPIRequiresCollaboration(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -369,8 +369,8 @@ func TestLogicGateInformationProjectionAPIKeepsLatestValueAndHistory(t *testing.
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusCreated {
-			t.Fatalf("POST logic-gate information status = %d, want %d body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "editor_collaboration_required") {
+			t.Fatalf("legacy Logic Gate information status = %d body=%s", rec.Code, rec.Body.String())
 		}
 	}
 
@@ -392,22 +392,16 @@ func TestLogicGateInformationProjectionAPIKeepsLatestValueAndHistory(t *testing.
 	if err := json.NewDecoder(projectionRec.Body).Decode(&projectionPayload); err != nil {
 		t.Fatalf("decode projection: %v", err)
 	}
-	if len(projectionPayload.Items) != 1 {
-		t.Fatalf("projection item count = %d, want 1", len(projectionPayload.Items))
-	}
-	if projectionPayload.Items[0].InformationID != "66666666-6666-4666-8666-666666666666" {
-		t.Fatalf("projection information_id = %q, want stable key", projectionPayload.Items[0].InformationID)
-	}
-	if projectionPayload.Items[0].Information != "second logic gate note" {
-		t.Fatalf("projection information = %q, want latest value", projectionPayload.Items[0].Information)
+	if len(projectionPayload.Items) != 0 {
+		t.Fatalf("projection item count = %d, want 0", len(projectionPayload.Items))
 	}
 
 	details, err := repo.GetLogicGateDetails(companyID, logicGate.LogicGateID)
 	if err != nil {
 		t.Fatalf("GetLogicGateDetails() error = %v", err)
 	}
-	if len(details.Information) != 2 {
-		t.Fatalf("logic gate history row count = %d, want 2", len(details.Information))
+	if len(details.Information) != 0 {
+		t.Fatalf("logic gate information row count = %d, want 0", len(details.Information))
 	}
 }
 

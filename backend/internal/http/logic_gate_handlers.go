@@ -269,40 +269,7 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 				writeError(w, http.StatusConflict, "editor_collaboration_required")
 				return
 			}
-			actorUserID, actorLabel := nodeChangeActorPayload(r)
-			item, err := s.repo.UpsertLogicGateProjection(store.LogicGateProjectionInput{
-				CompanyID:        req.CompanyID,
-				LogicGateID:      logicGateID,
-				Type:             req.Type,
-				Information:      req.Information,
-				InformationID:    req.InformationID,
-				ActorUserID:      actorUserID,
-				ActorDisplayName: actorLabel,
-				ExpectedRevision: req.ExpectedRevision,
-			})
-			var revisionConflict *store.ProjectionRevisionConflictError
-			if errors.As(err, &revisionConflict) {
-				writeProjectionRevisionConflict(w, revisionConflict)
-				return
-			}
-			if errors.Is(err, store.ErrProjectionRevisionRequired) {
-				writeError(w, http.StatusBadRequest, "expected_revision_required")
-				return
-			}
-			if errors.Is(err, store.ErrNotFound) {
-				writeError(w, http.StatusNotFound, "logic_gate_not_found")
-				return
-			}
-			if errors.Is(err, store.ErrInvalid) {
-				writeError(w, http.StatusBadRequest, "invalid_projection")
-				return
-			}
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed_to_save_logic_gate_projection")
-				return
-			}
-			s.recordMentionNotifications(r, req.CompanyID, "logic_gate", logicGateID, req.InformationID, req.Type, req.Information)
-			writeJSON(w, http.StatusOK, item)
+			writeError(w, http.StatusBadRequest, "logic_gate_information_type_not_supported")
 			return
 		}
 		if r.Method != http.MethodGet {
@@ -576,22 +543,11 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 		if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
 			return
 		}
-		item, err := s.repo.AddLogicGateInformation(req.CompanyID, logicGateID, req.Type, req.Information, req.InformationID)
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "logic_gate_not_found")
+		if strings.EqualFold(strings.TrimSpace(req.Type), "Text box") {
+			writeError(w, http.StatusConflict, "editor_collaboration_required")
 			return
 		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_add_logic_gate_information")
-			return
-		}
-		s.publishWorkspaceEvent(req.CompanyID, "logic_gate_information_created", map[string]any{"logic_gate_id": logicGateID, "information_id": item.InformationID})
-		mentionInformationID := strings.TrimSpace(req.InformationID)
-		if mentionInformationID == "" {
-			mentionInformationID = item.InformationID
-		}
-		s.recordMentionNotifications(r, req.CompanyID, "logic_gate", logicGateID, mentionInformationID, req.Type, req.Information)
-		writeJSON(w, http.StatusCreated, item)
+		writeError(w, http.StatusBadRequest, "logic_gate_information_type_not_supported")
 		return
 	}
 

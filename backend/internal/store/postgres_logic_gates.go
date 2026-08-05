@@ -1224,113 +1224,8 @@ func (r *PostgresRepo) DeleteLogicGateRelationship(companyID, relationshipID str
 }
 
 func (r *PostgresRepo) AddLogicGateInformation(companyID, logicGateID, infoType, information, informationID string) (domain.LogicGateInformation, error) {
-	ctx := context.Background()
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return domain.LogicGateInformation{}, err
-	}
-	defer tx.Rollback()
-
-	var exists bool
-	if err := tx.QueryRowContext(ctx,
-		`select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`,
-		companyID, logicGateID,
-	).Scan(&exists); err != nil {
-		return domain.LogicGateInformation{}, err
-	}
-	if !exists {
-		return domain.LogicGateInformation{}, ErrNotFound
-	}
-
-	item := domain.LogicGateInformation{
-		CompanyID:     companyID,
-		InformationID: newUUIDv7String(),
-		LogicGateID:   logicGateID,
-		Type:          infoType,
-		Information:   information,
-	}
-	if err := tx.QueryRowContext(ctx,
-		`insert into logic_gate_information
-		 (company_id, information_id, logic_gate_id, type, information, created_timestamp, updated_timestamp)
-		 values ($1, $2, $3, $4::information_type, $5, now(), now())
-		 returning company_id, information_id, logic_gate_id, type::text, information, created_timestamp, updated_timestamp`,
-		item.CompanyID, item.InformationID, item.LogicGateID, item.Type, item.Information,
-	).Scan(
-		&item.CompanyID,
-		&item.InformationID,
-		&item.LogicGateID,
-		&item.Type,
-		&item.Information,
-		&item.CreatedTimestamp,
-		&item.UpdatedTimestamp,
-	); err != nil {
-		return domain.LogicGateInformation{}, err
-	}
-
-	projectionID := informationID
-	if projectionID == "" {
-		projectionID = item.InformationID
-	}
-	var projection domain.LogicGateProjection
-	if isEditorTextBoxType(item.Type) {
-		// Logic gates keep the legacy one-document editor contract. The new
-		// multi-block timeline/chat/email workspace is node-only.
-		if err := tx.QueryRowContext(ctx,
-			`insert into logic_gate_projection_table
-			 (company_id, logic_gate_id, information_id, type, information, created_timestamp, updated_timestamp)
-			 values ($1, $2, $3, $4::information_type, $5, now(), now())
-			 on conflict (company_id, logic_gate_id, information_id)
-			 do update set
-			   information=excluded.information,
-			   is_deleted=false,
-			   revision=logic_gate_projection_table.revision+1,
-			   updated_timestamp=now()
-			 returning company_id, logic_gate_id, information_id, type::text, information, created_timestamp, updated_timestamp`,
-			item.CompanyID, item.LogicGateID, projectionID, item.Type, item.Information,
-		).Scan(
-			&projection.CompanyID,
-			&projection.LogicGateID,
-			&projection.InformationID,
-			&projection.Type,
-			&projection.Information,
-			&projection.CreatedTimestamp,
-			&projection.UpdatedTimestamp,
-		); err != nil {
-			return domain.LogicGateInformation{}, err
-		}
-	} else {
-		if err := tx.QueryRowContext(ctx,
-			`insert into logic_gate_projection_table
-			 (company_id, logic_gate_id, information_id, type, information, created_timestamp, updated_timestamp)
-			 values ($1, $2, $3, $4::information_type, $5, now(), now())
-			 on conflict (company_id, logic_gate_id, information_id)
-			 do update set
-			   type=excluded.type,
-			   information=excluded.information,
-			   is_deleted=false,
-			   revision=logic_gate_projection_table.revision+1,
-			   updated_timestamp=now()
-			 returning company_id, logic_gate_id, information_id, type::text, information, created_timestamp, updated_timestamp`,
-			item.CompanyID, item.LogicGateID, projectionID, item.Type, item.Information,
-		).Scan(
-			&projection.CompanyID,
-			&projection.LogicGateID,
-			&projection.InformationID,
-			&projection.Type,
-			&projection.Information,
-			&projection.CreatedTimestamp,
-			&projection.UpdatedTimestamp,
-		); err != nil {
-			return domain.LogicGateInformation{}, err
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return domain.LogicGateInformation{}, err
-	}
-	return item, nil
+	return domain.LogicGateInformation{}, ErrInvalid
 }
-
 func (r *PostgresRepo) ListLogicGateProjections(companyID, logicGateID string) ([]domain.LogicGateProjection, error) {
 	ctx := context.Background()
 	var exists bool
@@ -1343,53 +1238,8 @@ func (r *PostgresRepo) ListLogicGateProjections(companyID, logicGateID string) (
 	if !exists {
 		return nil, ErrNotFound
 	}
-
-	rows, err := r.db.QueryContext(ctx,
-		`with ranked as (
-		   select company_id, logic_gate_id, information_id, type, information, is_deleted, revision, created_timestamp, updated_timestamp,
-		          row_number() over (
-		            partition by type
-		            order by updated_timestamp desc, created_timestamp desc, information_id desc
-		          ) as rn
-		   from logic_gate_projection_table
-		   where company_id=$1 and logic_gate_id=$2
-		     and not is_deleted
-		 )
-		 select company_id, logic_gate_id, information_id, type::text, information, is_deleted, revision, created_timestamp, updated_timestamp
-		 from ranked
-		 where type <> 'Text box'::information_type or rn = 1
-		 order by updated_timestamp asc`,
-		companyID, logicGateID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	items := make([]domain.LogicGateProjection, 0)
-	for rows.Next() {
-		var item domain.LogicGateProjection
-		if err := rows.Scan(
-			&item.CompanyID,
-			&item.LogicGateID,
-			&item.InformationID,
-			&item.Type,
-			&item.Information,
-			&item.IsDeleted,
-			&item.Revision,
-			&item.CreatedTimestamp,
-			&item.UpdatedTimestamp,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+	return listPostgresLogicGateFinalProjections(ctx, r.db, companyID, logicGateID)
 }
-
 func (r *PostgresRepo) DeleteLogicGateProjection(input LogicGateProjectionDeleteInput) error {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -1411,19 +1261,10 @@ func (r *PostgresRepo) DeleteLogicGateProjection(input LogicGateProjectionDelete
 	if !exists {
 		return ErrNotFound
 	}
-	previous, previousFound, err := postgresLogicGateProjectionTx(ctx, tx, companyID, logicGateID, informationID)
-	if err != nil {
-		return err
-	}
-	if (previousFound && isEditorTextBoxType(previous.Type)) || (!previousFound && input.ExpectedRevision != nil) {
-		return deletePostgresLogicGateTextProjection(ctx, tx, input, previous, previousFound)
-	}
-	if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, "logic_gate_chat_message", informationID); err != nil {
-		return err
-	}
 	deleted, err := tx.ExecContext(ctx,
-		`delete from logic_gate_projection_table
-		 where company_id=$1 and logic_gate_id=$2 and information_id=$3`,
+		`delete from email_relationships
+		 where company_id=$1::uuid and resource_type='logic_gate'
+		   and resource_id=$2::uuid and email_relationship_id=$3::uuid`,
 		companyID, logicGateID, informationID,
 	)
 	if err != nil {
@@ -1431,11 +1272,11 @@ func (r *PostgresRepo) DeleteLogicGateProjection(input LogicGateProjectionDelete
 	}
 	if affected, err := deleted.RowsAffected(); err != nil {
 		return err
-	} else if affected > 0 {
+	} else if affected == 0 {
+		return ErrInvalid
 	}
 	return tx.Commit()
 }
-
 func (r *PostgresRepo) GetLogicGateDetails(companyID, logicGateID string) (domain.LogicGateDetails, error) {
 	logicGate, err := r.GetLogicGate(companyID, logicGateID)
 	if err != nil {
@@ -1443,36 +1284,13 @@ func (r *PostgresRepo) GetLogicGateDetails(companyID, logicGateID string) (domai
 	}
 
 	ctx := context.Background()
-	infoRows, err := r.db.QueryContext(ctx,
-		`select company_id, information_id, logic_gate_id, type::text, information, created_timestamp, updated_timestamp
-		 from logic_gate_information
-		 where company_id=$1 and logic_gate_id=$2
-		 order by created_timestamp asc`,
-		companyID, logicGateID,
-	)
+	projections, err := listPostgresLogicGateFinalProjections(ctx, r.db, companyID, logicGateID)
 	if err != nil {
 		return domain.LogicGateDetails{}, err
 	}
-	defer infoRows.Close()
-
-	information := make([]domain.LogicGateInformation, 0)
-	for infoRows.Next() {
-		var item domain.LogicGateInformation
-		if err := infoRows.Scan(
-			&item.CompanyID,
-			&item.InformationID,
-			&item.LogicGateID,
-			&item.Type,
-			&item.Information,
-			&item.CreatedTimestamp,
-			&item.UpdatedTimestamp,
-		); err != nil {
-			return domain.LogicGateDetails{}, err
-		}
-		information = append(information, item)
-	}
-	if err := infoRows.Err(); err != nil {
-		return domain.LogicGateDetails{}, err
+	information := make([]domain.LogicGateInformation, 0, len(projections))
+	for _, projection := range projections {
+		information = append(information, logicGateProjectionAsInformation(projection))
 	}
 
 	relRows, err := r.db.QueryContext(ctx,
