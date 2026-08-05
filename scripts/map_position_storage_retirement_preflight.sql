@@ -2,6 +2,10 @@
 -- Open and execute this whole file in DBeaver before the separately approved
 -- scripts/retire_map_position_storage.sql transaction. This script writes nothing.
 
+begin transaction isolation level repeatable read read only;
+
+set local statement_timeout = '5min';
+
 select current_setting('server_version') as server_version,
        current_setting('server_version_num')::integer as server_version_num,
        current_setting('transaction_read_only') as transaction_read_only,
@@ -10,10 +14,6 @@ select current_setting('server_version') as server_version,
            then 'POSTGRESQL_17_SUPPORTED'
          else 'STOP_UNSUPPORTED_POSTGRESQL_VERSION'
        end as version_status;
-
-begin transaction isolation level repeatable read read only;
-
-set local statement_timeout = '5min';
 
 -- Report historical map work relative to the durable derived-projection checkpoint.
 with map_projection_events as (
@@ -162,45 +162,68 @@ begin
     where event.stream_type = 'workspace'
       and event.stream_id = event.company_id::text
       and (
-        event.event_type in ('node_map_position_upsert_requested','logic_gate_map_position_upsert_requested')
+        event.event_type in (
+          'node_map_position_upsert_requested',
+          'logic_gate_map_position_upsert_requested'
+        )
         or (
           event.event_type = 'workspace_derived_projection_requested'
           and exists (
             select 1
             from jsonb_array_elements(
-              case when jsonb_typeof(event.payload->'tasks') = 'array'
-                then event.payload->'tasks' else '[]'::jsonb end
+              case
+                when jsonb_typeof(event.payload->'tasks') = 'array'
+                  then event.payload->'tasks'
+                else '[]'::jsonb
+              end
             ) task
-            where task->>'kind' in ('node_map_position_upsert','logic_gate_map_position_upsert')
+            where task->>'kind' in (
+              'node_map_position_upsert',
+              'logic_gate_map_position_upsert'
+            )
           )
         )
       )
       and (
         checkpoint.company_id is null
         or event.created_timestamp > checkpoint.checkpoint_timestamp
-        or (event.created_timestamp = checkpoint.checkpoint_timestamp
-          and event.event_id::text > checkpoint.checkpoint_event_id::text)
+        or (
+          event.created_timestamp = checkpoint.checkpoint_timestamp
+          and event.event_id::text > checkpoint.checkpoint_event_id::text
+        )
       )
   ) then
     raise exception 'STOP: a historical map projection task is still beyond its company checkpoint';
   end if;
 
   if exists (
-    select 1 from pg_constraint
+    select 1
+    from pg_constraint
     where contype = 'f'
-      and confrelid in ('public.node_map_positions'::regclass,'public.logic_gate_map_positions'::regclass)
+      and confrelid in (
+        'public.node_map_positions'::regclass,
+        'public.logic_gate_map_positions'::regclass
+      )
   ) then
     raise exception 'STOP: a foreign key still references map position storage';
   end if;
 
   if exists (
-      select 1 from pg_views
+      select 1
+      from pg_views
       where schemaname not in ('pg_catalog','information_schema')
-        and (definition ilike '%node_map_positions%' or definition ilike '%logic_gate_map_positions%')
+        and (
+          definition ilike '%node_map_positions%'
+          or definition ilike '%logic_gate_map_positions%'
+        )
     ) or exists (
-      select 1 from pg_matviews
+      select 1
+      from pg_matviews
       where schemaname not in ('pg_catalog','information_schema')
-        and (definition ilike '%node_map_positions%' or definition ilike '%logic_gate_map_positions%')
+        and (
+          definition ilike '%node_map_positions%'
+          or definition ilike '%logic_gate_map_positions%'
+        )
     ) then
     raise exception 'STOP: a view still depends on map position storage';
   end if;
@@ -210,19 +233,27 @@ begin
   join pg_namespace namespace on namespace.oid = procedure.pronamespace
   where namespace.nspname not in ('pg_catalog','information_schema')
     and procedure.prokind in ('f','p')
-    and (pg_get_functiondef(procedure.oid) ilike '%node_map_positions%'
-      or pg_get_functiondef(procedure.oid) ilike '%logic_gate_map_positions%');
+    and (
+      pg_get_functiondef(procedure.oid) ilike '%node_map_positions%'
+      or pg_get_functiondef(procedure.oid) ilike '%logic_gate_map_positions%'
+    );
+
   if dependency_count <> 0 then
-    raise exception 'STOP: % function or procedure definitions still reference map position storage', dependency_count;
+    raise exception 'STOP: % function or procedure definitions still reference map position storage',
+      dependency_count;
   end if;
 
   if exists (
     select 1
     from (values
-      ('node_relationships'),('logic_gate_relationships'),
-      ('node_textboxes_history'),('logic_gate_textboxes_history'),
-      ('node_content_changes'),('node_content_change_seen'),
-      ('node_textbox_seen_snapshots'),('node_view_user_versions')
+      ('node_relationships'),
+      ('logic_gate_relationships'),
+      ('node_textboxes_history'),
+      ('logic_gate_textboxes_history'),
+      ('node_content_changes'),
+      ('node_content_change_seen'),
+      ('node_textbox_seen_snapshots'),
+      ('node_view_user_versions')
     ) protected(name)
     where to_regclass('public.' || protected.name) is null
   ) then
