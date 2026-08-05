@@ -1919,6 +1919,8 @@ begin
     'project_created',
     'project_updated',
     'project_deleted',
+    'project_information_created',
+    'project_information_deleted',
     'project_relationship_upserted',
     'project_relationship_deleted',
     'project_permissions_updated'

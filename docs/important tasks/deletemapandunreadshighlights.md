@@ -155,6 +155,7 @@ Using the approved inventory:
 - Preserved all shipped historical migrations, dated audits, and `docs/important tasks/Old Stuff/**` unchanged.
 - Production frontend/backend/canonical-schema search has no map runtime reference. Remaining names are confined to shipped historical records, this tracker, the new forward migration, the preflight/operator scripts, and tests that enforce removal.
 - Verification passed: `node tests/frontend/scripts/run-node-relationship-tests.mjs`, `go test ./...`, and `node scripts/run_all_tests.mjs` (frontend tests, production build, backend tests, and infrastructure contract tests).
+- Follow-up audit restored the retained `project_information_created` and `project_information_deleted` read-version mappings in both the forward migration and canonical schema, with a regression contract against the latest shipped function.
 Production code must have zero readers, writers, fallbacks, runtime schema checks, response fields, cache scopes, or realtime events for the two map-position tables before Step 3 can begin. Production code must continue using the three unread/highlight tables.
 
 Agents must not apply SQL to a live database.
