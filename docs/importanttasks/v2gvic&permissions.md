@@ -1,0 +1,1017 @@
+# Process Story
+
+A Mango company organizes work as a resource tree. A Company Explorer folder can contain subfolders, Projects, and Logic Gates; a Logic Gate can contain assigned Nodes. Shared Triage folders can contain subfolders and shared inboxes. Every resource has a GVIC assignment mode and a permission mode. Each mode is either `inherited` or `customized`.
+
+An inherited resource points to its immediate parent's effective policy. Inheritance continues one parent at a time until Mango reaches the nearest active customized policy. A customized resource remains a child in the resource tree, but it owns a complete policy and blocks ordinary inheritance through that branch. Descendants that remain inherited use that customized resource as their policy source.
+
+A parent has two descendant actions. `Apply to inherited descendants` changes the policy seen by inherited branches and stops at active customized boundaries. It requires no descendant writes because inherited descendants already resolve through their immediate parents. `Overwrite all descendants, including customized` is the explicit force action. It records one monotonic reset sequence at the parent instead of rewriting every descendant. The reset makes older customized policies beneath that parent inactive. A descendant customized after the reset becomes independent again. A subtree created or moved beneath the parent after an older reset is not retroactively overwritten by that reset.
+
+GVIC and permissions remain separate systems. `resource_gvic_assignments` stores customized GVIC edges from a resource to a user or user group. `resource_permissions` stores customized permission edges from a resource to a user or user group. GVIC never grants resource access. Permission authorization first selects one effective permission policy through the inheritance rules, then resolves direct user, nested group, and default access inside that policy. Group membership is live source data and is never copied into permanent per-user policy rows.
+
+The final product model has exactly four policy tables: `resource_gvic_settings`, `resource_gvic_assignments`, `resource_permission_settings`, and `resource_permissions`. The settings tables distinguish inherited from intentionally empty customized policies and hold the sequence values needed for scalable force-overwrite behavior. The assignment tables hold the actual customized user/group edges. There is no permanent effective-assignment table, descendant fan-out table, policy-application history table, or duplicated default-access authority.
+
+# V2 GVIC and Permissions
+
+## Purpose and status
+
+This document is the authoritative product, database, API, migration, and verification contract for the V2 GVIC and permission system.
+
+It replaces the current pointer/application design after the three separately completed steps below:
+
+1. Create and populate the V2 storage without changing current application readers or writers.
+2. Cut application reads and writes over to the four final tables.
+3. Complete testing, soak, snapshot, and separately approved retirement of old storage.
+
+This document does not authorize an agent to apply SQL to a live database. Repository agents may create schema, migration, preflight, copy, verification, and retirement files, but a human controls every live-database operation.
+
+## Final decisions
+
+The following decisions are not open implementation choices:
+
+1. Use the words `inherited` and `customized`. Do not use `local` for the product or database mode.
+2. GVIC and permissions have separate settings tables, separate assignment tables, separate sequences, separate APIs, and separate business rules.
+3. A resource inherits one complete policy from its immediate parent chain. Policies from multiple resource levels are not merged.
+4. A customized resource is still a normal child in the resource tree. Only its policy becomes independent.
+5. Ordinary parent changes affect inherited branches and stop at active customized boundaries.
+6. The force action crosses customized boundaries by recording one reset sequence at the selected parent. It never performs descendant fan-out writes.
+7. A later descendant customization wins over an older force reset.
+8. A force reset applies only across parent links that existed when that reset was recorded. A resource or subtree moved under the parent later is not affected by the older reset.
+9. Group assignments remain group edges. Effective users are resolved from current group hierarchy and membership.
+10. GVIC never grants view or edit permission.
+11. Current policy resolution does not depend on audit history, timestamps, a projection table, or old application rows.
+12. Database timestamps are audit/display fields. Monotonic sequences decide overwrite ordering.
+13. The final policy schema contains exactly four tables. PostgreSQL sequences, indexes, constraint functions, and triggers are not additional product-state tables.
+14. No compatibility reader, fallback reader, dual writer, or request-time schema repair remains after Step 3.
+
+## Terminology
+
+### Stored mode
+
+The value physically stored in a settings row:
+
+- `inherited`: the resource has no active customized policy of its own.
+- `customized`: the resource has a complete customized policy stored in its assignment table and settings row.
+
+### Active customized policy
+
+A stored customized policy that has not been invalidated by a newer eligible ancestor force reset.
+
+A settings row may still say `customized` after a force reset. In that case its old assignment rows remain dormant until the user customizes that resource again. The API must expose that it is currently inherited because an ancestor overwrite superseded the stored customization.
+
+### Effective policy
+
+The one complete GVIC or permission policy selected after walking the immediate-parent chain and applying force-reset rules.
+
+### Immediate parent
+
+The direct parent supplied by the canonical resource hierarchy. Policy tables do not duplicate parent IDs.
+
+### Inherited-only apply
+
+The user action labeled `Apply to inherited descendants`. Because inheritance is live, this changes no descendant policy rows. It confirms that inherited branches use the selected resource's effective policy and that customized boundaries remain protected.
+
+### Force overwrite
+
+The user action labeled `Overwrite all descendants, including customized`. It advances the selected resource's descendant reset sequence and invalidates older customized policies beneath it.
+
+## Supported resource hierarchy
+
+The final policy resource types are:
+
+```text
+node
+logic_gate
+project
+company_explorer_folder
+shared_inbox_folder
+shared_inbox
+```
+
+The old GVIC spelling `shared_triage_folder` is not a final resource type. Step 1 converts it to `shared_inbox_folder`.
+
+Immediate parents are resolved only from canonical hierarchy tables:
+
+| Child resource | Immediate policy parent |
+| --- | --- |
+| Company Explorer subfolder | Its `company_explorer_folders.parent_folder_id` folder |
+| Company Explorer root folder | None |
+| Logic Gate | Its containing Company Explorer folder |
+| Project | Its containing Company Explorer folder |
+| Node assigned to a Logic Gate | Its current Logic Gate from `node_logic_gate_assignments` |
+| Node without a Logic Gate | None |
+| Shared Inbox subfolder | Its `shared_inbox_folders.parent_folder_id` folder |
+| Shared Inbox root folder | None |
+| Shared inbox/mailbox | Its containing Shared Inbox folder |
+
+Hierarchy ownership remains in the existing resource tables. Do not add `parent_resource_type` or `parent_resource_id` to the four policy tables.
+
+Resource-tree cycles must be rejected before policy resolution. A root resource cannot remain inherited because it has no parent; roots must have a customized policy, even when that customized policy is empty.
+
+## Final database schema
+
+The final clean database creates two sequences and exactly four policy tables.
+
+### Sequences
+
+```sql
+create sequence if not exists resource_gvic_change_sequence;
+create sequence if not exists resource_permission_change_sequence;
+```
+
+Each policy mutation obtains its sequence inside the same transaction as its state change. Rolled-back transactions may leave gaps. Gaps are harmless. Sequence ordering, not timestamps, controls force-overwrite precedence.
+
+### `resource_gvic_settings`
+
+One row exists for every GVIC-capable resource.
+
+```sql
+create table resource_gvic_settings (
+  company_id uuid not null,
+  resource_type text not null,
+  resource_id uuid not null,
+  assignment_mode text not null,
+  customized_sequence bigint,
+  parent_link_sequence bigint not null,
+  descendant_reset_sequence bigint not null default 0,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  primary key (company_id, resource_type, resource_id),
+  foreign key (company_id) references companies(company_id) on delete cascade,
+  check (resource_type in (
+    'node',
+    'logic_gate',
+    'project',
+    'company_explorer_folder',
+    'shared_inbox_folder',
+    'shared_inbox'
+  )),
+  check (assignment_mode in ('inherited', 'customized')),
+  check (
+    (assignment_mode = 'inherited' and customized_sequence is null)
+    or
+    (assignment_mode = 'customized' and customized_sequence is not null and customized_sequence > 0)
+  ),
+  check (parent_link_sequence >= 0),
+  check (descendant_reset_sequence >= 0)
+);
+```
+
+Field meaning:
+
+- `assignment_mode`: stored `inherited` or `customized` choice.
+- `customized_sequence`: sequence of the last explicit customization. It is null while stored mode is inherited.
+- `parent_link_sequence`: sequence allocated when the current immediate-parent link was created. It is zero for a root.
+- `descendant_reset_sequence`: sequence of the latest force overwrite initiated at this resource. It applies only to proper descendants, never to this row itself.
+
+Required indexes:
+
+```sql
+create index on resource_gvic_settings
+  (company_id, resource_type, resource_id, customized_sequence);
+
+create index on resource_gvic_settings
+  (company_id, resource_type, resource_id, descendant_reset_sequence)
+  where descendant_reset_sequence > 0;
+```
+
+### `resource_gvic_assignments`
+
+This is the customized GVIC graph. It contains no inherited copies and no expanded group-member rows.
+
+```sql
+create table resource_gvic_assignments (
+  company_id uuid not null,
+  resource_type text not null,
+  resource_id uuid not null,
+  role text not null,
+  principal_type text not null,
+  principal_id uuid not null,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  primary key (
+    company_id,
+    resource_type,
+    resource_id,
+    role,
+    principal_type,
+    principal_id
+  ),
+  foreign key (company_id, resource_type, resource_id)
+    references resource_gvic_settings(company_id, resource_type, resource_id)
+    on delete cascade,
+  check (role in ('generated', 'verified', 'consulted', 'informed')),
+  check (principal_type in ('user', 'group')),
+  check (role not in ('generated', 'verified') or principal_type = 'user')
+);
+```
+
+Additional required constraints and indexes:
+
+```sql
+create unique index on resource_gvic_assignments
+  (company_id, resource_type, resource_id, principal_type, principal_id);
+
+create unique index on resource_gvic_assignments
+  (company_id, resource_type, resource_id)
+  where role = 'generated';
+
+create index on resource_gvic_assignments
+  (company_id, principal_type, principal_id, role, resource_type, resource_id);
+```
+
+Uniform GVIC validation applies to every supported resource type so a folder policy can be inherited by a Logic Gate or Node without becoming invalid:
+
+- Generated: zero or one user; groups are forbidden.
+- Verified: zero or more users; groups are forbidden.
+- Consulted: users and groups are allowed.
+- Informed: users and groups are allowed.
+- One principal may have only one source role in one customized resource policy.
+
+### `resource_permission_settings`
+
+One row exists for every permission-capable resource.
+
+```sql
+create table resource_permission_settings (
+  company_id uuid not null,
+  resource_type text not null,
+  resource_id uuid not null,
+  permission_mode text not null,
+  default_access text,
+  customized_sequence bigint,
+  parent_link_sequence bigint not null,
+  descendant_reset_sequence bigint not null default 0,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  primary key (company_id, resource_type, resource_id),
+  foreign key (company_id) references companies(company_id) on delete cascade,
+  check (resource_type in (
+    'node',
+    'logic_gate',
+    'project',
+    'company_explorer_folder',
+    'shared_inbox_folder',
+    'shared_inbox'
+  )),
+  check (permission_mode in ('inherited', 'customized')),
+  check (default_access is null or default_access in ('edit', 'no_access')),
+  check (
+    (
+      permission_mode = 'inherited'
+      and customized_sequence is null
+      and default_access is null
+    )
+    or
+    (
+      permission_mode = 'customized'
+      and customized_sequence is not null
+      and customized_sequence > 0
+      and default_access in ('edit', 'no_access')
+    )
+  ),
+  check (parent_link_sequence >= 0),
+  check (descendant_reset_sequence >= 0)
+);
+```
+
+`resource_permission_settings.default_access` becomes the only permission-default authority. After Step 3, old `default_access` columns on resource tables must be removed if repository inspection proves they have no separate non-permission meaning.
+
+Required indexes:
+
+```sql
+create index on resource_permission_settings
+  (company_id, resource_type, resource_id, customized_sequence);
+
+create index on resource_permission_settings
+  (company_id, resource_type, resource_id, descendant_reset_sequence)
+  where descendant_reset_sequence > 0;
+```
+
+### `resource_permissions`
+
+This is the customized permission graph. It contains no inherited copies and no expanded group-member rows.
+
+```sql
+create table resource_permissions (
+  company_id uuid not null,
+  resource_type text not null,
+  resource_id uuid not null,
+  subject_type text not null,
+  subject_id uuid not null,
+  access_level text not null,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  primary key (
+    company_id,
+    resource_type,
+    resource_id,
+    subject_type,
+    subject_id
+  ),
+  foreign key (company_id, resource_type, resource_id)
+    references resource_permission_settings(company_id, resource_type, resource_id)
+    on delete cascade,
+  check (subject_type in ('user', 'group')),
+  check (access_level in ('edit', 'no_access'))
+);
+```
+
+Required reverse lookup index:
+
+```sql
+create index on resource_permissions
+  (company_id, subject_type, subject_id, access_level, resource_type, resource_id);
+```
+
+The old redundant `resource_permissions.user_id` column is not part of V2.
+
+### Database-enforced integrity
+
+Because resource and principal identities are polymorphic, ordinary foreign keys cannot enforce every target. Final schema constraint triggers must reject:
+
+- a resource settings row whose company/resource does not exist;
+- a user principal without membership in the same company;
+- a group principal without a group in the same company;
+- assignment rows while the stored settings mode is inherited;
+- an inherited root resource;
+- a resource-tree cycle;
+- a negative or malformed sequence;
+- an unsupported legacy resource type such as `shared_triage_folder`.
+
+Resource deletion must delete both settings rows. Cascades then delete assignment edges. No orphan policy, revision, application, or effective rows may survive.
+
+## Effective-policy resolution
+
+GVIC and permissions use the same traversal algorithm but read their separate settings, assignment, and sequence domains.
+
+### Base rule without force overwrite
+
+Starting at the requested resource:
+
+1. If its stored mode is inherited, move to its immediate parent.
+2. If its stored mode is customized and active, use that complete policy.
+3. Continue until a customized policy is found.
+4. A root must provide the final customized policy.
+
+The nearest active customized resource wins. A newer ordinary write at a distant ancestor does not cross a customized boundary.
+
+### Eligible force overwrite
+
+A force overwrite at ancestor A with sequence S is eligible for descendant T only when:
+
+1. A is a strict ancestor of T.
+2. Every parent link on the path from A to T existed at sequence S; equivalently, every corresponding `parent_link_sequence` is less than or equal to S.
+
+If any path edge has a newer `parent_link_sequence`, that subtree entered A after the overwrite and the old overwrite cannot cross that edge.
+
+When several force overwrites are eligible, the one with the greatest reset sequence is authoritative.
+
+### Resolution with force overwrite
+
+Let A/S be the newest eligible force overwrite for target T.
+
+1. Walk from T toward A, excluding A.
+2. A customized policy below A remains active only when its `customized_sequence` is greater than S.
+3. Use the nearest such later customization if one exists.
+4. Otherwise resolve A's own effective policy. A's reset never invalidates A itself.
+5. Resolving A may itself be subject to a newer eligible overwrite from an ancestor above A.
+
+This provides the intended limited latest-write rule:
+
+- a force overwrite beats older descendant customizations;
+- a later descendant customization beats that force overwrite;
+- ordinary parent edits never beat a customized child merely because their sequence is newer;
+- immediate-parent proximity chooses between active customized policies.
+
+### Intentionally empty customized policies
+
+An empty assignment table does not mean inherited.
+
+- GVIC `customized` plus zero GVIC rows means intentionally nobody is assigned.
+- Permission `customized` plus zero permission rows means the customized `default_access` applies to everyone without exceptions.
+
+The settings row is therefore required even when the graph table contains no rows.
+
+## The two descendant actions
+
+### Action 1: Apply to inherited descendants
+
+User-facing label:
+
+```text
+Apply to inherited descendants
+```
+
+Rules:
+
+1. Save the selected resource's policy if it changed.
+2. Do not update descendant settings or assignment rows.
+3. Every inherited branch already resolves through its immediate parents and sees the new effective policy.
+4. Stop at every active customized boundary.
+5. Descendants below that boundary continue inheriting from the customized resource, not from the selected ancestor.
+6. An unchanged inherited-only Apply may write an audit event, but it must not manufacture policy state or fan out descendant writes.
+
+Example:
+
+```text
+Folder A: customized
+  Folder B: inherited          receives Folder A changes
+    Logic Gate C: customized   protected boundary
+      Node D: inherited        continues using Logic Gate C
+```
+
+### Action 2: Overwrite all descendants, including customized
+
+User-facing label:
+
+```text
+Overwrite all descendants, including customized
+```
+
+Rules:
+
+1. Resolve and validate the selected parent's current effective policy.
+2. Allocate one new sequence.
+3. Set only the selected parent's `descendant_reset_sequence` for that policy type.
+4. Do not rewrite descendant settings or graph rows.
+5. Every eligible older customization below the parent becomes inactive.
+6. Descendants effectively inherit through the selected parent again.
+7. A descendant customized later receives a newer sequence and becomes independent again.
+8. A subtree attached after the reset is protected by its newer `parent_link_sequence` until a later force overwrite occurs.
+9. The old customized rows remain dormant. Customizing the resource again must replace them with a fresh copy of the then-current parent policy before applying edits; it must not silently resurrect the dormant policy.
+
+Example:
+
+```text
+Folder customization                 sequence 100
+Logic Gate customization             sequence 120
+Folder ordinary save                 sequence 130
+```
+
+The Logic Gate remains customized. The ordinary save does not cross it.
+
+```text
+Folder force overwrite               sequence 140
+```
+
+The older Logic Gate customization becomes inactive.
+
+```text
+Logic Gate customized again          sequence 150
+```
+
+The Logic Gate becomes independent again.
+
+## Create, customize, inherit, move, detach, and delete
+
+### Create
+
+1. A resource with an immediate parent starts inherited unless a creation workflow explicitly requires a customized rule.
+2. A root starts customized with a complete valid policy, even when that policy contains no edges.
+3. Allocate `parent_link_sequence` when the parent relationship is created.
+4. An inherited child receives no copied graph rows.
+5. A workflow that must assign a creator directly, such as an email-derived Node Generated assignment, first customizes from the current effective parent policy and then applies the creator rule.
+
+### Customize
+
+1. Resolve the current effective parent policy.
+2. Replace the resource's GVIC or permission graph rows with a complete copy of that policy.
+3. Apply the user's changes to the copied policy.
+4. Set stored mode to customized.
+5. Allocate a new `customized_sequence`.
+6. Perform all steps in one transaction.
+
+Customization is copy-on-customize for one resource only. It is never descendant fan-out copying.
+
+### Return one resource to inherited
+
+1. Delete that resource's customized graph rows for the selected policy type.
+2. Set its stored mode to inherited.
+3. Set `customized_sequence` to null.
+4. Retain its descendant reset sequence because that row records an explicit past force action initiated at this resource. A separate product action may clear that reset only if later product requirements explicitly define it.
+5. The resource immediately resolves through its current immediate parent.
+
+### Move within the resource tree
+
+1. The canonical hierarchy writer changes the parent relationship.
+2. Allocate a new `parent_link_sequence` for GVIC and permissions on the moved resource.
+3. Do not rewrite the moved resource's descendants.
+4. An inherited moved resource immediately uses its new parent chain.
+5. A customized moved resource remains customized.
+6. The new parent-link sequence blocks force overwrites that happened before the move from retroactively invalidating the moved subtree.
+7. A later force overwrite from the new ancestry may cross the new link.
+
+### Node Logic Gate assignment and detach
+
+1. Assigning or moving a Node to a Logic Gate changes its immediate parent and advances both parent-link sequences.
+2. An inherited Node uses the new Logic Gate immediately.
+3. A customized Node remains customized after the move.
+4. Detaching a Node removes its immediate parent. An inherited Node cannot remain inherited without a parent, so detach must convert its currently effective GVIC and permission policies into customized policies in the same transaction.
+
+### Delete
+
+1. Delete the resource's two settings rows through the shared resource-deletion lifecycle.
+2. Assignment rows cascade from the settings rows.
+3. Deleting a parent follows the resource tree's existing child move/delete rules before policy cleanup.
+4. No policy row may retain a missing resource, user, or group identity.
+
+## GVIC-specific rules
+
+1. Roles are Generated, Verified, Consulted, and Informed.
+2. Generated allows at most one user and no groups.
+3. Verified allows multiple users and no groups.
+4. Consulted and Informed allow users and groups.
+5. One source principal has only one role in one customized policy.
+6. Nested groups expand from `company_user_groups` and `company_user_group_members` at read time.
+7. If one effective user reaches several roles through overlapping groups, the effective user role is selected deterministically in this order: Generated, Verified, Consulted, Informed.
+8. A group membership or group-parent change changes effective GVIC immediately without rewriting policy rows.
+9. GVIC controls assignment, My Work, update routing, and notification targeting only. It never grants resource access.
+10. My Work must still require effective Edit permission to the returned resource.
+
+## Permission-specific rules
+
+After selecting one effective permission policy through inheritance:
+
+1. Dev admins and company admins receive the existing administrative bypass.
+2. Company managers do not receive that bypass.
+3. A direct user rule beats every group rule and the default.
+4. A matching group rule beats the default.
+5. Among matching nested groups, the nearest group membership depth wins.
+6. At equal group depth, `no_access` beats `edit`.
+7. If no user or group rule applies, use `resource_permission_settings.default_access` from the effective customized policy.
+8. GVIC assignments are never considered by permission authorization.
+9. Permission-setting reads and writes retain the existing manager/admin authorization boundary. Managers must also have effective Edit access to the target; admins retain their bypass.
+10. Runtime authorization resolves current group hierarchy from source group tables. It does not depend on `company_user_group_closure` or another required derived table.
+
+## Group changes
+
+1. Adding or removing a user from a group changes effective GVIC and permission results immediately.
+2. Moving a group under another group changes nested membership immediately.
+3. Deleting a group removes direct graph edges referencing that group from both graph tables.
+4. Group deletion must not leave blank-label or stale UUID policy assignments.
+5. Group changes do not allocate resource policy customization sequences because the resource policy itself was not edited.
+6. Cache fingerprints must include the company group-membership version so stale authorization or My Work data cannot survive a group change.
+
+## API and JSON contract
+
+V2 removes legacy specialized GVIC writers and uses one resource-shaped JSON contract per domain.
+
+### GVIC read response
+
+```json
+{
+  "company_id": "uuid",
+  "resource_type": "logic_gate",
+  "resource_id": "uuid",
+  "assignment_mode": "customized",
+  "effective_assignment_mode": "customized",
+  "effective_source": {
+    "resource_type": "logic_gate",
+    "resource_id": "uuid"
+  },
+  "overwritten_by_ancestor": null,
+  "gvic_assignments": [
+    {
+      "role": "generated",
+      "principal_type": "user",
+      "principal_id": "uuid"
+    }
+  ],
+  "effective_assignments": [
+    {
+      "role": "generated",
+      "user_id": "uuid",
+      "source_principal_type": "user",
+      "source_principal_id": "uuid"
+    }
+  ]
+}
+```
+
+`gvic_assignments` contains stored customized edges only. It is empty for stored inherited mode. `effective_assignments` contains the resolved user-level result for the current request and is not read from a permanent effective table.
+
+### GVIC write request
+
+```json
+{
+  "company_id": "uuid",
+  "assignment_mode": "customized",
+  "gvic_assignments": [
+    {
+      "role": "consulted",
+      "principal_type": "group",
+      "principal_id": "uuid"
+    }
+  ],
+  "descendant_action": "inherited_only"
+}
+```
+
+`descendant_action` is optional and accepts only:
+
+```text
+inherited_only
+including_customized
+```
+
+When `assignment_mode` is inherited, the request must omit assignments or send an empty array.
+
+### Permission read response
+
+```json
+{
+  "company_id": "uuid",
+  "resource_type": "company_explorer_folder",
+  "resource_id": "uuid",
+  "permission_mode": "customized",
+  "effective_permission_mode": "customized",
+  "effective_source": {
+    "resource_type": "company_explorer_folder",
+    "resource_id": "uuid"
+  },
+  "overwritten_by_ancestor": null,
+  "default_access": "edit",
+  "permissions": [
+    {
+      "subject_type": "group",
+      "subject_id": "uuid",
+      "access_level": "no_access"
+    }
+  ]
+}
+```
+
+### Permission write request
+
+```json
+{
+  "company_id": "uuid",
+  "permission_mode": "customized",
+  "default_access": "edit",
+  "permissions": [
+    {
+      "subject_type": "user",
+      "subject_id": "uuid",
+      "access_level": "no_access"
+    }
+  ],
+  "descendant_action": "including_customized"
+}
+```
+
+When `permission_mode` is inherited, `default_access` must be null/omitted and `permissions` must be omitted or empty.
+
+### Write response and concurrency
+
+Every write returns the canonical stored and effective response plus an ETag/revision fingerprint. Mutations must reject a stale expected revision instead of silently interleaving two complete-policy replacements.
+
+Within a transaction:
+
+1. Lock the resource settings row.
+2. Validate company, resource, principal, and authorization.
+3. Allocate the sequence.
+4. Replace graph rows precisely.
+5. Update settings.
+6. Append the normal audit/domain event.
+7. Commit before publishing any external/realtime signal.
+
+Idempotency keys must deduplicate the command itself, not only its notification event.
+
+## Scale and performance contract
+
+The design must work when a folder has 100,000 or 10,000,000 descendants.
+
+### Write complexity
+
+- Parent policy save: O(number of rules on that parent).
+- Apply to inherited descendants: O(number of rules on that parent), with zero descendant policy writes.
+- Force overwrite including customized: O(1) settings update plus audit event.
+- Customize one child: O(number of rules in the one copied policy).
+- Move one subtree: O(1) policy-settings updates at the moved root; no descendant policy writes.
+- Group membership change: O(group source change); no resource-policy fan-out.
+
+No synchronous request may enumerate every descendant merely to change policy state.
+
+### Point authorization
+
+Permission checks perform work proportional to:
+
+- resource ancestry depth;
+- number of rules in the selected customized policy;
+- relevant nested group depth.
+
+They must not perform work proportional to the total number of descendants.
+
+### My Work and reverse GVIC lookup
+
+My Work reads from canonical GVIC settings/assignments, canonical hierarchy, current group membership, and current permissions.
+
+Requirements:
+
+1. Results are paginated and deterministically ordered.
+2. Queries start from user/group assignment roots and indexed hierarchy relationships rather than scanning every company resource.
+3. Active customized boundaries and eligible force resets are applied during scope resolution.
+4. My Work never requires synchronous descendant materialization after a policy write.
+5. If a disposable search cache is later proven necessary, it must be rebuildable from the four tables and hierarchy, clearly named as a cache, and never used as policy authority.
+
+### Cache and ETag behavior
+
+Do not bump millions of Node or Logic Gate version rows after a parent change.
+
+The authorization/read fingerprint for one resource must include:
+
+- effective customized source resource identity;
+- effective customized sequence;
+- authoritative eligible reset resource identity and sequence, when present;
+- relevant parent-link sequence boundary;
+- company group-membership version;
+- actor identity and effective edit result where the response exposes edit capability.
+
+Authorization is evaluated before returning HTTP 304.
+
+### Notifications and realtime
+
+1. A parent save or force overwrite must not synchronously create one notification/event per descendant.
+2. Emit one committed resource-scoped policy event containing the parent, policy type, action, and sequence.
+3. Clients invalidate and reread affected scopes through the compact event.
+4. If product later requires descendant notifications, use an explicitly bounded background aggregation job, not the policy write transaction.
+5. GVIC notification recipients are newly assigned users or users whose highest effective role changed, excluding the actor. Removed users do not receive an assignment notification.
+
+## Three-step implementation and rollout
+
+The three steps are separate work items and separate release gates. Do not combine schema expansion, application cutover, and destructive retirement into one automatic migration.
+
+## Step 1: create V2 storage and copy required data
+
+### Goal
+
+Create the V2 destination, build repeatable read-only preflight/reconciliation, and copy every required current effective policy without changing deployed readers or writers.
+
+### Required repository work
+
+1. Add V2 schema expansion and clean-database schema support for the two settings tables, two sequences, validation functions/triggers, and migration staging needed for the two graph tables.
+2. Because `resource_gvic_assignments` and `resource_permissions` already exist under their final names, use clearly named migration-only staging tables while the old application remains deployed. Do not mutate old source meaning during the additive phase.
+3. Build a DBeaver-compatible PostgreSQL 17.x read-only preflight. It must use plain SQL, report server version, and return STOP on unsupported version or schema drift.
+4. Build a separately operated, restartable copy/reconciliation script. Do not apply it to a live database from an agent task.
+5. Update the canonical schema in the phase-appropriate form needed for fresh database tests. Step 3 must leave the canonical schema creating only the final four tables.
+6. Add schema contract and disposable PostgreSQL integration tests for first run, rerun, drift refusal, and rollback on mismatch. Static SQL-string tests alone are insufficient.
+
+### Source-of-truth copy rule
+
+The Step 1 copy must resolve the current effective policy from the old source, revision, and subtree-application system. It must not blindly copy `resource_gvic_effective_assignments`, because that table is derived and the old PostgreSQL materialization path may disagree with the latest snapshot boundary.
+
+For every resource and both policy types:
+
+1. Resolve old current policy with the correct latest-snapshot and direct-revision rules.
+2. Compare that result with old materialized/read responses.
+3. Treat any disagreement as a reported blocker until classified.
+4. Copy the resolved complete policy into V2 staging graph rows.
+5. Copy the resolved permission default into V2 permission settings.
+6. Normalize `shared_triage_folder` GVIC identities to `shared_inbox_folder`.
+7. Validate every resource and principal identity.
+8. Report orphans and invalid role shapes; do not guess replacement resources or principals.
+
+### Initial mode decision
+
+Existing storage does not reliably prove whether an equal-looking child policy was intentionally customized or merely captured from a parent. Equality is not proof of inheritance.
+
+Therefore the safe initial conversion is:
+
+- every existing resource with a policy becomes `customized` in V2;
+- roots are customized;
+- current effective rows are materialized into that resource's V2 graph rows;
+- all initial `descendant_reset_sequence` values are zero;
+- all initial parent links receive the migration baseline sequence;
+- new V2 sequences start strictly above the migration baseline.
+
+This preserves visible behavior without inventing inheritance. After cutover, users can explicitly return resources to inherited mode or use the force-overwrite action to reset a subtree.
+
+### Preflight requirements
+
+The read-only preflight must report at least:
+
+- PostgreSQL server version and exact schema shape;
+- counts by resource type for both old policy systems;
+- every resource with source, revision, subtree-application, effective, or projection rows;
+- missing resources, users, groups, company memberships, or parent relationships;
+- current inherited/resolved permission default and edge counts;
+- current resolved GVIC role/principal counts;
+- invalid Generated/Verified group rows or multiple Generated users;
+- one-principal/multiple-role conflicts;
+- old application snapshot/tombstone usage;
+- old source versus resolved versus effective-table disagreements;
+- old shared-triage resource-type aliases;
+- current projection rows that cannot be reproduced from canonical policy and hierarchy;
+- the exact proposed V2 disposition for every source identity;
+- READY or STOP as a clear final row.
+
+### Step 1 exit gate
+
+Step 1 is complete only when:
+
+- schema and integration tests pass;
+- copy is restartable and exact-conflict safe;
+- every source identity has one disposition;
+- source-to-V2 counts and fingerprints reconcile;
+- no current application reader or writer has been switched;
+- no old table has been dropped;
+- the work reports the human-run order but does not operate on a live database.
+
+## Step 2: application cutover to the four final tables
+
+### Goal
+
+Change backend and frontend behavior so every policy read, write, authorization decision, My Work query, notification decision, cache fingerprint, create/move/delete workflow, and group-change workflow uses only the V2 contract.
+
+### Required cutover order
+
+1. Complete Step 1 and review its evidence.
+2. Pause policy, hierarchy, group, Node-placement, and resource-deletion writers for the shortest practical maintenance window.
+3. Rerun the final Step 1 delta copy and reconciliation.
+4. Atomically place the V2 graph tables under the final canonical names while retaining old tables under explicit temporary legacy names for rollback evidence.
+5. Deploy the matching Step 2 backend and frontend.
+6. Run readiness and smoke tests before resuming writers.
+7. Resume writers only after all new reads and writes are proven to use the four final tables.
+
+### Backend scope
+
+Step 2 must replace:
+
+- generic GVIC source/effective readers and writers;
+- old Logic Gate GVIC command handlers and repository methods;
+- old Shared Inbox GVIC writers;
+- permission authorization SQL and settings CRUD;
+- Node Logic Gate placement, cross-gate move, and detach behavior;
+- Company Explorer and Shared Triage create/move/delete behavior;
+- group membership and group hierarchy effects;
+- My Work GVIC queries;
+- notification target resolution;
+- Logic Gate and Node read fingerprints/ETags;
+- workspace version/event behavior;
+- any compatibility or no-op effective-access helpers.
+
+No old reader, fallback, or dual writer may remain in the deployed Step 2 application.
+
+### Frontend scope
+
+Step 2 must provide:
+
+- clear `Inherited` and `Customized` controls for both GVIC and permissions;
+- the effective source resource name/type;
+- an explanation when a stored customization is inactive because an ancestor force-overwrite superseded it;
+- `Apply to inherited descendants`;
+- a separately styled and confirmed `Overwrite all descendants, including customized` action;
+- canonical response reconciliation and stale-request protection;
+- no optimistic UI that pretends millions of descendants were individually rewritten.
+
+### Step 2 exit gate
+
+Step 2 is complete only when:
+
+- every application read and write uses the V2 tables;
+- the old table names have zero deployed readers and writers;
+- point authorization and My Work return correct results;
+- force overwrite performs constant-size policy writes;
+- smoke tests cover create, customize, inherit, both overwrite options, move, detach, group change, delete, My Work, notifications, and ETags;
+- old storage remains frozen only as rollback/audit evidence.
+
+## Step 3: test, soak, snapshot, and retire old storage
+
+### Goal
+
+Prove the V2 runtime is authoritative, then remove every old policy table, column, trigger, function, code path, test assumption, and migration-only staging object.
+
+### Required verification
+
+1. Run the complete repository gate.
+2. Run disposable PostgreSQL integration tests against a fresh schema and a realistic converted schema.
+3. Reconcile every V2 effective result with the expected hierarchy rules.
+4. Prove no deployed SQL references old tables.
+5. Exercise large generated trees and verify write counts do not grow with descendant count.
+6. Complete the agreed soak period.
+7. Take and verify the agreed restorable database snapshot.
+8. Run a separately reviewed read-only retirement preflight.
+9. Run separately approved DBeaver retirement SQL without `CASCADE`.
+
+### Retirement candidates
+
+The final retirement set is expected to include:
+
+```text
+resource_gvic_effective_assignments
+resource_gvic_policy_revisions
+resource_gvic_subtree_applications
+resource_permission_policy_revisions
+resource_permission_subtree_applications
+company_user_group_closure
+gvic_matrix_projection_table
+resource_policy_sequence
+all migration-only V2 staging and legacy-renamed policy tables
+old resource default_access columns after exact reader proof
+```
+
+Repository inspection during Steps 1-3 may add obsolete policy triggers, functions, indexes, handlers, and helpers to the retirement set. It may not silently add unrelated product tables.
+
+### Step 3 final state
+
+After retirement:
+
+- `backend/db/schema.sql` directly creates only the four final policy tables and two sequences;
+- no create-then-drop legacy history remains in the canonical schema;
+- no old reader, writer, fallback, compatibility alias, or dual write remains;
+- no permanent effective, projection, closure, revision, or subtree-application table is required for correctness;
+- all current behavior is reproducible from the four policy tables, canonical hierarchy, canonical group source tables, and ordinary audit/version infrastructure.
+
+## Required business scenarios and automated tests
+
+The implementation must map these scenarios into `docs/tests/gvic.md`, `docs/tests/permissions.md`, and automated tests during the corresponding behavior-changing step.
+
+### Inheritance scenarios
+
+1. Root customized → child inherited → grandchild inherited: all use root policy.
+2. Root customized → child customized → grandchild inherited: child and grandchild use child policy.
+3. Ordinary root save changes inherited branches but not the customized child branch.
+4. An intentionally empty customized GVIC policy blocks inheritance.
+5. An intentionally empty customized permission exception set still uses its customized default.
+6. A root cannot be inherited.
+
+### Overwrite scenarios
+
+1. Inherited-only Apply performs no descendant policy writes.
+2. Inherited-only Apply stops at customized boundaries.
+3. Force overwrite invalidates older customized descendants with one parent settings update.
+4. Force overwrite reaches descendants beneath an invalidated customized boundary.
+5. A later child customization becomes active again.
+6. An ordinary parent save after the child re-customizes does not cross that boundary.
+7. Nested force overwrites select the greatest eligible reset sequence.
+8. A reset never invalidates the resource that owns the reset.
+
+### Create and move scenarios
+
+1. New child defaults to inherited.
+2. New root defaults to a valid customized policy.
+3. Customizing copies the current effective parent policy once.
+4. Returning to inherited removes current customized edges.
+5. Moving an inherited resource changes its effective parent immediately.
+6. Moving a customized resource preserves its customized policy.
+7. A subtree moved after an older force reset is protected by its newer parent-link sequence.
+8. A later force reset from the new parent crosses that link.
+9. Detaching an inherited Node materializes its current effective policy as customized.
+10. Moving a Node between Logic Gates follows inherited/customized mode instead of unconditionally replacing both policies.
+
+### GVIC scenarios
+
+1. Generated accepts at most one user.
+2. Verified accepts multiple users but no groups.
+3. Consulted and Informed accept users and groups.
+4. Overlapping groups resolve one effective user role using the documented role order.
+5. Group membership changes affect effective users without resource-policy writes.
+6. GVIC does not grant resource access.
+7. My Work includes only resources where the user has both effective GVIC and effective Edit permission.
+
+### Permission scenarios
+
+1. Direct user beats group and default.
+2. Nearest matching group beats more distant matching groups.
+3. Equal-depth `no_access` beats `edit`.
+4. Default applies when no direct or group rule matches.
+5. Admin bypass and manager non-bypass remain correct.
+6. Authorization occurs before HTTP 304.
+7. Group changes invalidate permission fingerprints without descendant policy writes.
+
+### Scale and concurrency scenarios
+
+1. Apply to inherited descendants performs a constant number of policy writes for 1, 100,000, and 10,000,000 modeled descendants.
+2. Force overwrite performs a constant number of policy writes regardless of descendant count.
+3. Point authorization cost depends on ancestry/rule depth, not descendant count.
+4. Concurrent complete-policy writes reject stale expected revisions.
+5. Command idempotency prevents repeated force sequences for one retried request.
+6. A committed event is never published for a rolled-back policy transaction.
+7. My Work pagination is stable under concurrent policy changes.
+
+## Documentation requirements
+
+Step 2 changes business behavior and must update the business-rule files with a distinct Process Story at the top:
+
+- `docs/tests/gvic.md`
+- `docs/tests/permissions.md`
+- `docs/tests/my-work.md`
+- `docs/tests/nodes.md`
+- `docs/tests/users-and-user-groups.md`
+- any Company Explorer or Shared Triage process document whose inheritance behavior changes
+
+Stale rules saying a Node always snapshots a Logic Gate on entry, a linked Node always uses live gate GVIC regardless of mode, or a generic Apply physically replaces every child must be removed rather than preserved as compatibility wording.
+
+## Step 1 worker boundary
+
+The worker assigned Step 1 must:
+
+- read this entire document before inspecting implementation details;
+- implement Step 1 only;
+- not change runtime readers or writers;
+- not drop or retire old storage;
+- not apply SQL to a live database;
+- provide read-only preflight, additive/restartable copy, exact reconciliation, schema tests, and disposable PostgreSQL integration tests;
+- document every discovered source-shape discrepancy instead of guessing;
+- commit all intended repository changes on its worker branch;
+- stop without merging, pushing, or opening a pull request.
