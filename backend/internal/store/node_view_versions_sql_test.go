@@ -46,12 +46,12 @@ func TestNodeViewVersionAndAnchorQueriesStayOffRealtimeSequences(t *testing.T) {
 		"left join node_view_versions shared",
 		"left join node_view_user_versions actor",
 		"select set_config('mangorts.node_view_anchor_clean', '1', true)",
-		"insert into node_projection_seen_snapshots as snapshot",
-		"projection.updated_timestamp",
+		"insert into node_textbox_seen_snapshots as snapshot",
+		"textbox.updated_timestamp",
 		"not exists (",
 		"from node_content_changes change",
 		"from node_content_change_seen seen_change",
-		"on conflict (company_id, node_id, information_id, user_id)",
+		"on conflict (company_id, node_id, textbox_id, user_id)",
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("node-view repository source missing %q", required)

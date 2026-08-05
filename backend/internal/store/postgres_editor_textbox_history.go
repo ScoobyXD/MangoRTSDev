@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -282,41 +281,6 @@ func restorePostgresEditorTextboxHistory(r *PostgresRepo, input EditorSaveVersio
 		if version.SaveID == batchID {
 			return version, nil
 		}
-	}
-	return domain.EditorSaveVersion{}, ErrNotFound
-}
-
-func listPostgresEditorTextboxHistoryCompatible(r *PostgresRepo, companyID, resourceType, resourceID string) ([]domain.EditorSaveVersion, error) {
-	current, err := listPostgresEditorTextboxHistory(r, companyID, resourceType, resourceID)
-	if err != nil {
-		return nil, err
-	}
-	legacy, err := r.listEditorSaveVersions(companyID, resourceType, resourceID)
-	if err != nil {
-		return nil, err
-	}
-	seen := make(map[string]struct{}, len(current))
-	for _, version := range current {
-		seen[version.SaveID] = struct{}{}
-	}
-	for _, version := range legacy {
-		if _, migrated := seen[version.SaveID]; !migrated {
-			current = append(current, version)
-		}
-	}
-	sort.SliceStable(current, func(i, j int) bool {
-		return current[i].CreatedTimestamp.After(current[j].CreatedTimestamp)
-	})
-	return current, nil
-}
-
-func restorePostgresEditorTextboxHistoryCompatible(r *PostgresRepo, input EditorSaveVersionRestoreInput, resourceType string) (domain.EditorSaveVersion, error) {
-	version, err := restorePostgresEditorTextboxHistory(r, input, resourceType)
-	if err == nil {
-		return version, nil
-	}
-	if !errors.Is(err, ErrNotFound) {
-		return domain.EditorSaveVersion{}, err
 	}
 	return domain.EditorSaveVersion{}, ErrNotFound
 }

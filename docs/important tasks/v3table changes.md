@@ -4,7 +4,7 @@ A Mango user creates a Node and adds textboxes. Textbox bodies are stored only i
 
 A Mango file has one record in `attachments` and one or more ownership links in `attachment_relationships`. A Node-owned file can remember that it came from a textbox without making that textbox its owner. Removing one link never deletes a file that still has another live link. When the final live link is removed, Mango marks the attachment for deletion, deletes the original and every generated preview from S3, and then removes the database records. Sent-email files remain available because sending creates an `email_message` attachment relationship before the email draft is removed.
 
-The Node textbox, Node textbox chat, email, and attachment application cutovers are now deployed in development. Each rollout used operator-gated phases: create the permanent destinations, copy without deleting valid legacy sources, reconcile the copy, switch the application during a short writer pause, observe a soak period, and retire legacy storage only in a later release. The old Node, email, and attachment tables remain only as rollback/audit evidence until the separately approved retirement phase.
+The Node textbox, Node textbox chat, email, and attachment application cutovers are complete in repository code. The development database has already retired the 19 email, attachment, Project, and Logic Gate objects listed below. Node runtime code now uses only final textbox/chat/email/attachment/content-change tables. The remaining database operation is the separately gated retirement of the three legacy Node tables after the final Node forward migration, matching backend deploy, smoke tests, soak, and snapshot.
 
 # V3 table changes implementation handoff
 
@@ -16,20 +16,77 @@ The implementation must update the canonical schema, provide separately operated
 
 An agent must not apply the migration to a live database. Repository agents may inspect a live database only with the designated database-enforced read-only credential. Never retrieve or print writer/admin credentials or unrelated secrets.
 
+## Final completion record (2026-08-04)
+
+The final Node runtime model is:
+
+- `node_textboxes` owns current TipTap JSON and stable textbox IDs.
+- `node_textboxes_history` owns manual and automatic saved batches.
+- `node_textbox_chats` owns exact textbox chats and email-selection references.
+- `node_content_changes.textbox_id` points directly to `node_textboxes`; `node_content_change_seen` keeps per-change acknowledgement.
+- `node_textbox_seen_snapshots` stores the viewer's exact TipTap JSON baseline, textbox revision, and timestamps.
+- `email_threads`, `email_messages`, and `email_relationships` own durable email content and exact Node/textbox placement.
+- `attachments`, `attachment_relationships`, `attachment_upload_jobs`, `attachment_upload_parts`, and `attachment_previews` own files and their lifecycle.
+- Public `information_id` response fields remain stable IDs synthesized from the final rows. No database `node_information` or `node_projection_table` reader, writer, fallback, or dual write remains.
+
+The following 19 objects have already been retired in the development database and are absent from the canonical fresh-database schema:
+
+1. `communications_email_drafts`
+2. `communications_email_collaboration_participants`
+3. `communications_email_collaborations`
+4. `communications_email_node_attachments`
+5. `communications_email_nodes`
+6. `communications_node_email_threads`
+7. `communications_email_thread_download_jobs`
+8. `communications_email_messages`
+9. `communications_email_signatures`
+10. `communications_email_threads`
+11. `attachment_migration_items`
+12. `attachment_migration_runs`
+13. `attachment_variants`
+14. `resource_attachments`
+15. `attachment_upload_intents`
+16. `project_projection_table`
+17. `project_information`
+18. `logic_gate_projection_table`
+19. `logic_gate_information`
+
+The migration-only `v3_node_textbox_chat_source_v1` view is also retired and must not be recreated.
+
+The final Node retirement set is exactly:
+
+1. `node_projection_seen_snapshots`
+2. `node_projection_table`
+3. `node_information`
+
+Human-run order:
+
+1. Take and verify a restorable snapshot; keep application writers running while the read-only `scripts/v3_node_final_runtime_preflight.sql` is reviewed.
+2. Pause all Node/editor writers.
+3. Apply `backend/db/migrations/20260804_zzzzzz_node_final_storage_cutover.sql`. It copies/reconciles seen baselines, renames `node_content_changes.information_id` to `textbox_id`, installs final constraints/triggers, and rolls back fully on refusal.
+4. Deploy the matching backend while writers remain paused, then resume writers.
+5. Run Node textbox/chat, exact email access, shared/last-owner attachment, delete/recycle/restore, and saved-history smoke tests.
+6. Prove no current writer uses the legacy tables, complete the agreed soak, and take the retirement snapshot.
+7. In `backend/db/operator_migrations/20260805_retire_node_legacy_storage.sql`, change all five approvals to `true` only when their evidence exists and run the whole transaction in DBeaver. It supports PostgreSQL 17.x only, refuses drift or dependencies, uses no `CASCADE`, and drops exactly the three Node tables.
+8. Run readiness and smoke checks again. Do not rerun the strict retirement transaction after success; its already-retired refusal is intentional.
+
 ## Development rollout status
 
 | Area | Current application authority | Completed development evidence | Remaining work |
 | --- | --- | --- | --- |
-| Node textboxes | `node_textboxes` | 32 legacy HTML-envelope textboxes were converted and inserted; 113 orphan content-change rows were removed; current editor bodies no longer use the old Node information/projection tables. | Soak and later legacy Node storage retirement. |
-| Node textbox chats | `node_textbox_chats` | 667 chats were copied and deployed on 2026-08-03; the one missing-parent reply was deliberately preserved as a top-level chat. | Soak and later legacy chat-row retirement. |
-| Email | `email_threads`, `email_messages`, `email_relationships`, `email_drafts`, and `email_signatures` | The final data copy reconciled 223 threads, 678 messages, 228 relationships, 49 drafts, and 9 signatures. The final-table backend was deployed in development and Jonat reported the smoke checks successful. | Snapshot/soak evidence and later legacy email-table retirement. |
-| Attachments | `attachments`, `attachment_relationships`, `attachment_upload_jobs`, `attachment_upload_parts`, and `attachment_previews` | Step 1 cleanup completed, the multipart boundary moved six part rows to `upload_job_id`, and backend commit `c8a08085` was deployed. The final sync reported 491 upload jobs, 842 previews, and 1,080 relationships; Jonat reported the smoke checks successful. | Post-cutover reconciliation, snapshot/soak evidence, and separately approved Step 3 legacy-table retirement. |
-| Project textboxes/chats/email links | `project_textboxes`, `project_textbox_chats`, `email_relationships`, `email_messages`, and `email_threads` | The guarded chat copy completed with 16 chats, 3 replies, and zero review rows. The backend merged into local `main` in merge commit `336b09de` and synthesizes the existing Project payload from final tables with no Project legacy-table reader/writer. | Apply the additive schema migration, run the guarded 25-textbox metadata copy, deploy this matching backend during the writer pause, smoke test, reconcile, and soak before separately approving legacy Project table retirement. |
-| Logic Gate document/history/email links | `logic_gate_textboxes`, `logic_gate_textboxes_history`, `email_relationships`, `email_messages`, and `email_threads` | The application cutover is implemented in this branch. The current product has one Logic Gate document and no chat surface; projection-shaped reads are synthesized from final tables, editor JSON is the only document writer, manual history is final, and delete/recycle paths no longer use the two legacy tables. | Run the read-only preflight, apply the additive metadata migration, run the guarded copy, deploy and smoke test the matching backend, reconcile and soak, then separately approve legacy Logic Gate table retirement. |
+| Node textboxes and chats | `node_textboxes`, `node_textbox_chats`, `node_textbox_seen_snapshots` | Textboxes and 667 chats are in final storage; the backend now reads and writes only final Node tables. | Run the final forward migration, deploy, smoke test, soak, snapshot, then run the exact three-table Node retirement gate. |
+| Email | `email_threads`, `email_messages`, `email_relationships`, `email_drafts`, and `email_signatures` | The final data copy and application cutover completed; the ten retired `communications_email_*` tables are already dropped in development. | None for this Node retirement. Preserve the recorded evidence. |
+| Attachments | `attachments`, `attachment_relationships`, `attachment_upload_jobs`, `attachment_upload_parts`, and `attachment_previews` | The final sync and application cutover completed; the five retired attachment tables are already dropped in development. | None for this Node retirement. Preserve last-owner cleanup monitoring. |
+| Project textboxes/chats/email links | `project_textboxes`, `project_textbox_chats`, final email tables | The final application cutover completed; `project_information` and `project_projection_table` are already dropped in development. | None for this Node retirement. |
+| Logic Gate document/history/email links | `logic_gate_textboxes`, `logic_gate_textboxes_history`, final email tables | The final application cutover completed; `logic_gate_information` and `logic_gate_projection_table` are already dropped in development. | None for this Node retirement. |
 
-No legacy reader, writer, fallback, or dual-write path remains for the completed Node textbox, Node textbox chat, email, attachment, Project, or Logic Gate runtime contracts in this branch. The Project application cutover is merged into local `main`; the Logic Gate application cutover is implemented on this worker. Neither is a deployed database checkpoint until its own schema/copy, deployment, smoke, reconciliation, and soak gates finish. This status does not authorize dropping any preserved live legacy table.
+No legacy reader, writer, fallback, or dual-write path remains for the completed Node textbox, Node textbox chat, email, attachment, Project, or Logic Gate runtime contracts. The 19-table retirement is complete in development. Only the separately gated three-table Node retirement remains, and this repository change does not authorize running it without all operator evidence.
 
-## Current implementation: Project final-storage cutover ready for operation
+## Historical rollout record: Project and Logic Gate cutovers
+
+The sections below preserve the rollout sequence and measured evidence. They are not current operator instructions. Project and Logic Gate cutover and retirement are complete in development; the completion record and human-run Node order at the top of this file supersede older statements below that say those legacy tables remain.
+
+### Historical Project final-storage rollout
 
 The Project runtime cutover is implemented without a compatibility reader or
 dual write. It preserves the current HTTP/frontend projection shape while
@@ -101,7 +158,7 @@ deployed and soaked. `projects`, `project_textboxes`,
 tables, all final attachment tables, provider connection plumbing, archive/
 and triage/job tables are retained.
 
-## Current implementation: Logic Gate final-storage cutover ready for operation
+### Historical Logic Gate final-storage rollout
 
 The Logic Gate product has one independently editable document. Inspection of
 the current frontend and backend found no Logic Gate textbox-chat pane, chat
@@ -232,7 +289,7 @@ On 2026-08-04 Jonat ran the email preflight and complete create/copy/reconcile e
 - One soft-deleted compose draft has a stale source ID and no usable source snapshot. Step 2 keeps that draft but leaves its final source-message foreign key null.
 - The live read-only attachment audit found 213 validly shaped legacy file links whose exact email draft/message/relationship target no longer exists. The completed email-only Step 2 safely left every old `resource_attachments` row untouched, recorded these rows as `retained_orphan_evidence`, and created only the 1,134 relationships with exactly one surviving target. Jonat later approved deleting those 213 proven broken legacy relationships during the separately operated attachment data phase. That later phase may delete an underlying file only when the file has zero surviving valid relationships.
 - The full Step 2 entry point passed a first run, an identical rerun, and a forced-drift rollback test on a disposable PostgreSQL 18 database. `backend/internal/store/v3_email_migration_test.go` protects the additive and non-destructive contract.
-- `backend/db/schema.sql` can create the final tables on a clean database. The deployed backend uses the final contracts; the old tables remain only for rollback and audit evidence.
+- `backend/db/schema.sql` creates only the final tables on a clean database and does not recreate the 19 already-retired objects or the final three-table Node retirement set.
 
 The development email cutover is complete. Durable imports, download jobs, relationships, drafts, signatures, attachment authorization, chat selections, permissions, and realtime fan-out now use the final V3 contracts. Ordinary personal and shared mailbox list/detail and provider mutation paths remain Nylas-backed and do not create durable V3 rows. Request-time draft DDL and the special collaboration participant path are removed. The remaining email work is to preserve post-cutover evidence, take the agreed database snapshot, complete the soak period, and approve legacy-table retirement as a separate task.
 
@@ -299,7 +356,7 @@ The sequence below is evidence for the next implementation, not a checklist to r
 - Email threads and messages are not added to `resource_permissions`. Direct access comes from the exact personal email account or shared email account; attached access comes through `email_relationships` and the normal permissions of the related resource.
 - The final attachment tables are `attachments`, `attachment_relationships`, `attachment_upload_jobs`, `attachment_upload_parts`, and `attachment_previews`. Do not add attachment blobs to chat, message, or relationship tables and do not create another attachment ownership table.
 - Textbox-owned chats, their attachment links, and seen snapshots are discarded when no permanent host textbox survives; a surviving reply with no surviving same-textbox parent becomes a top-level comment.
-- Deleting a Node or textbox removes its email relationship, not the normalized `email_threads` or `email_messages` content.
+- Deleting a Node removes its email relationships but not normalized `email_threads` or `email_messages`. Deleting only a Node textbox removes its chats and seen state; Node-owned email relationships remain available from the Node header, with `resource_textbox_id` retained only as the deleted origin identity.
 - Email drafts and normalized email attachment links survive a deleted email relationship. A stored incoming-email file targets its exact normalized `email_message`, never an `email_relationship_id`.
 - Keep email drafts and signatures when their personal email account or shared email account is disconnected. They become unusable for sending until that exact same email account reconnects; Mango never silently switches them to another email account.
 - Application requests must never create, alter, or drop database schema. Schema changes belong only in operator-controlled migration SQL.
@@ -1396,7 +1453,7 @@ Exit check: every retained attachment has at least one valid relationship; every
 
 #### Step 2: backend cutover
 
-Development completion status: Step 2 is implemented, tested, and deployed. Application SQL uses only the five final tables; the old tables remain for the Step 3 snapshot/retirement decision. Supported owner deletions run through one last-relationship check, cleanup is retryable and deletes S3 before Postgres, and shared-draft attachments are promoted to the exact persisted `email_message` before draft links are retired.
+Development completion status: all attachment rollout and retirement steps are complete. Application SQL and the canonical schema use only the five final tables. Supported owner deletions run through one last-relationship check, cleanup is retryable and deletes S3 before Postgres, and shared-draft attachments are promoted to the exact persisted `email_message` before draft links are retired.
 
 The completed operator run reported:
 

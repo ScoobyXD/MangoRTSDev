@@ -67,6 +67,19 @@ func TestRetiredDatabaseStorageIsAbsentFromCanonicalSchemaAndStrictlyDropped(t *
 			t.Errorf("Logic Gate operator retirement does not strictly drop %s", table)
 		}
 	}
+	nodeRetirementBytes, err := os.ReadFile("../../db/operator_migrations/20260805_retire_node_legacy_storage.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeRetirement := strings.ToLower(string(nodeRetirementBytes))
+	for _, table := range []string{"node_information", "node_projection_table", "node_projection_seen_snapshots"} {
+		if strings.Contains(schema, "create table if not exists "+table) {
+			t.Errorf("canonical schema creates retired Node table %s", table)
+		}
+		if !strings.Contains(nodeRetirement, "drop table "+table+";") {
+			t.Errorf("Node operator retirement does not strictly drop %s", table)
+		}
+	}
 	if strings.Contains(logicGateRetirement, "drop table if exists") || strings.Contains(logicGateRetirement, "drop table logic_gate_information cascade") {
 		t.Error("Logic Gate retirement must refuse drift and must not use CASCADE")
 	}
@@ -106,10 +119,8 @@ func TestRetiredDatabaseStorageIsAbsentFromCanonicalSchemaAndStrictlyDropped(t *
 		"body_json jsonb not null",
 		"revision bigint not null default 0",
 		"display_order bigint not null default 0",
-		"create table if not exists node_information",
-		"create table if not exists node_projection_table",
-		"create table if not exists project_information",
-		"create table if not exists project_projection_table",
+		"create table if not exists node_textbox_seen_snapshots",
+		"create table if not exists node_textboxes_history",
 	} {
 		if !strings.Contains(schema, required) {
 			t.Errorf("canonical schema missing retained structure %q", required)

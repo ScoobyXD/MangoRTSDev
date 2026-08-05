@@ -237,10 +237,53 @@ func extractNodeTextBlockDocumentText(information string) string {
 		}
 		document = payload.Document
 	}
+	if text, ok := extractTiptapDocumentText([]byte(document)); ok {
+		return normalizeStoredEditorText(text)
+	}
 	if strings.HasPrefix(document, editorRichTextPrefix) {
 		return normalizeStoredEditorText(editorHTMLToText(document[len(editorRichTextPrefix):]))
 	}
 	return normalizeStoredEditorText(document)
+}
+
+func extractTiptapDocumentText(value []byte) (string, bool) {
+	var root any
+	if json.Unmarshal(value, &root) != nil {
+		return "", false
+	}
+	if object, ok := root.(map[string]any); ok {
+		if wrapped, exists := object["document"]; exists {
+			root = wrapped
+		}
+	}
+	var out strings.Builder
+	var visit func(any)
+	visit = func(value any) {
+		object, ok := value.(map[string]any)
+		if !ok {
+			return
+		}
+		if nodeType, _ := object["type"].(string); nodeType == "text" {
+			if text, _ := object["text"].(string); text != "" {
+				out.WriteString(text)
+			}
+		} else if nodeType == "hardBreak" {
+			out.WriteByte('\n')
+		}
+		if content, ok := object["content"].([]any); ok {
+			for _, child := range content {
+				visit(child)
+			}
+			if nodeType, _ := object["type"].(string); nodeType == "paragraph" || nodeType == "heading" || nodeType == "listItem" {
+				current := out.String()
+				if current != "" && !strings.HasSuffix(current, "\n") {
+					out.WriteByte('\n')
+				}
+			}
+		}
+	}
+	visit(root)
+	return strings.TrimRight(out.String(), "\n"), true
 }
 
 func normalizeStoredEditorText(value string) string {

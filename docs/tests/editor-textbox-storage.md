@@ -1,14 +1,14 @@
 # Process Story: Editor Textboxes and Manual History
 
-A Project user opens a textbox, or a Logic Gate user opens its one document
+A Node or Project user opens a textbox, or a Logic Gate user opens its one document
 ↓
-The current body and metadata come from the exact `project_textboxes` or `logic_gate_textboxes` row
+The current body comes from the exact `node_textboxes`, `project_textboxes`, or `logic_gate_textboxes` row
 ↓
 The existing projection-shaped response is assembled from permanent textbox, attachment, chat where the product supports it, and exact email relationships instead of a stored legacy projection row
 ↓
-Manual saves create one batch in `project_textboxes_history` or `logic_gate_textboxes_history`
+Manual saves create one batch in the matching `node_textboxes_history`, `project_textboxes_history`, or `logic_gate_textboxes_history`
 ↓
-Recycle snapshots and restores order the owner before its final textbox/history rows; Project also restores its supported `project_textbox_chats`
+Recycle snapshots and restores order the owner before its final textbox/history rows; Node and Project then restore their supported textbox chats, email relationships, and attachment relationships in dependency order
 
 ## What the user does
 
@@ -133,9 +133,9 @@ Project runtime storage has completed the next phase:
 - The backend rebuilds the existing Project projection-shaped API response from those final tables.
 - No production Project request reads or writes `project_information` or `project_projection_table`.
 
-The two legacy Project tables remain unchanged only until the separately gated
-snapshot, soak, dependency check, and destructive retirement. Node retirement
-remains separate and is not implied by the Project change.
+The two legacy Project tables are retired and absent from fresh-database schema.
+Node now uses the same final-storage rule, while its separate three-table operator
+retirement remains gated by copy, no-writer, smoke, soak, and snapshot evidence.
 
 Logic Gate runtime storage has now completed its application cutover:
 

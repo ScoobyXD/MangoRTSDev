@@ -1,4 +1,8 @@
-Last updated: 2026-07-13
+# Process Story: browser bytes go directly to final attachment storage
+
+A user selects a file, Mango creates an `attachment_upload_jobs` row, and the browser uploads bounded chunks directly to private S3. Completion creates the `attachments` row and an exact `attachment_relationships` owner link. Removing one owner preserves shared content; removing the last owner marks it pending, deletes S3 originals/previews first, then deletes PostgreSQL rows with retry-safe cleanup.
+
+Last updated: 2026-08-04
 
 # Attachment Transfer And Streaming Tests
 
@@ -12,7 +16,7 @@ AST3 - Browser files through and including 64 MiB use one presigned PUT. Larger 
 
 AST4 - The configurable browser limit defaults to 1 GiB (1,073,741,824 bytes) per file. The old 12 MiB aggregate-per-text-box limit does not apply to direct browser upload. Each file succeeds or fails independently, and only completed attachments enter normal lists/counts.
 
-AST5 - Browser upload intents and multipart part state are durable and idempotent. Retry refreshes an expired URL for the same intent/part; resume reconciles accepted S3 parts; cancel aborts active requests and best-effort aborts the intent; expiry cleanup aborts multipart work or deletes an unfinalized single-PUT object. Natural TTL expiry remains `expired`, while only an explicit abort/cancel records `aborted`. S3 AbortIncompleteMultipartUpload lifecycle is a backstop, not the primary cleanup path.
+AST5 - Browser upload jobs and multipart part state are durable and idempotent. Retry refreshes an expired URL for the same job/part; resume reconciles accepted S3 parts; cancel aborts active requests and best-effort aborts the job; expiry cleanup aborts multipart work or deletes an unfinalized single-PUT object. Natural TTL expiry remains `expired`, while only an explicit abort/cancel records `aborted`. The retired `attachment_upload_intents` table is never used or recreated. S3 AbortIncompleteMultipartUpload lifecycle is a backstop, not the primary cleanup path.
 
 AST6 - `attachments.sha256` always means raw file-content SHA-256. S3 checksum algorithm/value/type and SHA verification provenance are separate fields: single PUT may be `s3_full`, backend streaming is `server_stream`, and multipart raw SHA remains `client_reported` unless a trusted processor later verifies it. ETag and multipart composite checksums never replace raw SHA-256.
 

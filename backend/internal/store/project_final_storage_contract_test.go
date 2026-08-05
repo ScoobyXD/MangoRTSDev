@@ -24,7 +24,6 @@ func TestProjectProductionStorageDoesNotUseLegacyInformationTables(t *testing.T)
 		"postgres_editor_textboxes.go",
 		"attachment_relationship_cleanup.go",
 		"postgres_recycle_bin.go",
-		filepath.Join("..", "..", "cmd", "mango-attachment-migrate", "main.go"),
 	}
 	for _, path := range paths {
 		body := readProjectFinalContractFile(t, path)

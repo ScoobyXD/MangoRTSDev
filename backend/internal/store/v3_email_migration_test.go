@@ -43,11 +43,19 @@ func TestV3EmailExpansionIsAdditiveAndOperatorGated(t *testing.T) {
 			"create table if not exists attachment_relationships",
 			"email_account_type in ('personal_email_account','shared_email_account')",
 			"references email_relationships(company_id,email_relationship_id) on delete set null",
-			"attachment_relationship_id uuid not null", "retained_orphan_evidence",
+			"attachment_relationship_id uuid not null",
 		} {
 			if !strings.Contains(strings.ReplaceAll(sqlText, " ", ""), strings.ReplaceAll(required, " ", "")) {
 				t.Errorf("schema expansion is missing %q", required)
 			}
+		}
+	}
+	if !strings.Contains(expand, "retained_orphan_evidence") {
+		t.Error("historical email copy component lost its explicit orphan disposition")
+	}
+	for _, migrationOnly := range []string{"create table if not exists v3_email_migration_runs", "create table if not exists v3_email_migration_items"} {
+		if strings.Contains(schema, migrationOnly) {
+			t.Errorf("canonical final schema recreates migration-only object %q", migrationOnly)
 		}
 	}
 	for _, forbidden := range []string{

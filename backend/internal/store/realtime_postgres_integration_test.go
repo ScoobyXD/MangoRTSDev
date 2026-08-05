@@ -215,7 +215,7 @@ where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid and 
 		if _, err := repo.AddNodeInformationWithActor(input); err == nil {
 			t.Fatal("chat create succeeded with forced outbox failure")
 		}
-		if got := countPostgresRows(t, db, "select count(*) from node_information where company_id=$1::uuid and information_id=$2::uuid", company.CompanyID, input.InformationID); got != 0 {
+		if got := countPostgresRows(t, db, "select count(*) from node_textbox_chats where company_id=$1::uuid and chat_id=$2::uuid", company.CompanyID, input.InformationID); got != 0 {
 			t.Fatalf("rolled-back chat rows = %d", got)
 		}
 		forceRealtimeOutboxEvent(t, db, "chat.message.created", false)

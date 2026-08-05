@@ -242,28 +242,27 @@ where company_id=$1::uuid
 }
 
 var recycleSnapshotTables = map[string]bool{
-	"company_explorer_folders":       true,
-	"nodes":                          true,
-	"logic_gates":                    true,
-	"projects":                       true,
-	"node_textboxes":                 true,
-	"node_textboxes_history":         true,
-	"logic_gate_textboxes":           true,
-	"logic_gate_textboxes_history":   true,
-	"project_textboxes":              true,
-	"project_textboxes_history":      true,
-	"project_textbox_chats":          true,
-	"node_information":               true,
-	"node_projection_table":          true,
-	"node_content_changes":           true,
-	"node_content_change_seen":       true,
-	"node_projection_seen_snapshots": true,
-	"node_map_positions":             true,
-	"node_account_assignments":       true,
-	"node_relationships":             true,
-	"logic_gate_map_positions":       true,
-	"logic_gate_relationships":       true,
-	"user_logic_gate_shortcuts":      true,
+	"company_explorer_folders":     true,
+	"nodes":                        true,
+	"logic_gates":                  true,
+	"projects":                     true,
+	"node_textboxes":               true,
+	"node_textboxes_history":       true,
+	"node_textbox_chats":           true,
+	"node_textbox_seen_snapshots":  true,
+	"logic_gate_textboxes":         true,
+	"logic_gate_textboxes_history": true,
+	"project_textboxes":            true,
+	"project_textboxes_history":    true,
+	"project_textbox_chats":        true,
+	"node_content_changes":         true,
+	"node_content_change_seen":     true,
+	"node_map_positions":           true,
+	"node_account_assignments":     true,
+	"node_relationships":           true,
+	"logic_gate_map_positions":     true,
+	"logic_gate_relationships":     true,
+	"user_logic_gate_shortcuts":    true,
 
 	"project_relationships":                  true,
 	"project_relationship_projection":        true,
@@ -277,6 +276,7 @@ var recycleSnapshotTables = map[string]bool{
 	"company_explorer_items":                 true,
 	"email_relationships":                    true,
 	"email_drafts":                           true,
+	"attachment_relationships":               true,
 }
 
 var recycleRestoreTableOrder = []string{
@@ -285,26 +285,25 @@ var recycleRestoreTableOrder = []string{
 	"projects",
 	"node_textboxes",
 	"node_textboxes_history",
+	"node_textbox_chats",
+	"node_textbox_seen_snapshots",
 	"logic_gate_textboxes",
 	"logic_gate_textboxes_history",
 	"project_textboxes",
 	"project_textboxes_history",
 	"project_textbox_chats",
 	"company_explorer_folders",
-	"node_information",
-	"node_projection_table",
-
 	"node_map_positions",
 	"logic_gate_map_positions",
 	"node_content_changes",
 	"node_content_change_seen",
-	"node_projection_seen_snapshots",
 	"node_account_assignments",
 	"resource_gvic_assignments",
 	"resource_permissions",
 	"user_logic_gate_shortcuts",
 	"email_relationships",
 	"email_drafts",
+	"attachment_relationships",
 	"node_logic_gate_assignments",
 	"node_relationships",
 	"logic_gate_relationships",
@@ -334,6 +333,16 @@ func postgresRestoreRecycleTableTx(ctx context.Context, tx *sql.Tx, tableName st
 		return nil
 	}
 	columnList := strings.Join(columns, ", ")
+	if tableName == "attachment_relationships" {
+		if _, err := tx.ExecContext(ctx, `
+update attachment_relationships existing
+set deleted_timestamp=restored.deleted_timestamp
+from jsonb_populate_recordset(null::attachment_relationships,coalesce($1::jsonb,'[]'::jsonb)) restored
+where existing.company_id=restored.company_id
+  and existing.attachment_relationship_id=restored.attachment_relationship_id`, string(rows)); err != nil {
+			return err
+		}
+	}
 	query := fmt.Sprintf(`
 insert into %s (%s) overriding system value
 select %s
@@ -446,7 +455,7 @@ func postgresSnapshotRecyclePayloadWithCacheTx(ctx context.Context, tx *sql.Tx, 
 		}
 	}
 	if len(nodeIDs) > 0 {
-		for _, tableName := range []string{"nodes", "node_textboxes", "node_textboxes_history", "node_information", "node_projection_table", "node_projection_seen_snapshots", "node_map_positions", "node_account_assignments"} {
+		for _, tableName := range []string{"nodes", "node_textboxes", "node_textboxes_history", "node_textbox_chats", "node_textbox_seen_snapshots", "node_map_positions", "node_account_assignments"} {
 			if err := addTable(tableName, `company_id=$1::uuid and node_id = any(string_to_array($2, ',')::uuid[])`, companyID, nodeIDCSV); err != nil {
 				return nil, err
 			}
@@ -518,6 +527,17 @@ func postgresSnapshotRecyclePayloadWithCacheTx(ctx context.Context, tx *sql.Tx, 
 			if err := addTable("project_relationship_projection", projectionWhere, projectionArgs...); err != nil {
 				return nil, err
 			}
+		}
+	}
+	if len(nodeIDs) > 0 {
+		if err := addTable("attachment_relationships", `company_id=$1::uuid and (
+  (resource_type='node' and resource_id = any(string_to_array($2, ',')::text[]))
+  or (resource_type='node_chat_message' and resource_id in (
+    select chat_id::text from node_textbox_chats
+    where company_id=$1::uuid and node_id = any(string_to_array($2, ',')::uuid[])
+  ))
+)`, companyID, nodeIDCSV); err != nil {
+			return nil, err
 		}
 	}
 	if len(nodeIDs) > 0 || len(logicGateIDs) > 0 || len(projectIDs) > 0 {

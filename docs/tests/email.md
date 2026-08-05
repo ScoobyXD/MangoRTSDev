@@ -10,7 +10,7 @@ The 1,134 attachment-relationship count is the historical email-copy checkpoint.
 
 The copy found 213 old file links whose email draft, email message, or attached-email relationship no longer exists. Mango treated those links as orphan evidence: the email migration did not invent a replacement owner or create a broken `attachment_relationships` row. The later, separately approved attachment cleanup exact-verified and removed those broken legacy links, then deleted only files proven to have no surviving valid owner.
 
-The application cutover is now implemented and deployed in development for durable email data: explicitly imported email threads/messages, relationships, jobs, drafts, signatures, files, chats, realtime events, recycle-bin references, and backup ordering use the final V3 contracts. Ordinary personal and shared mailbox lists/details remain provider-backed and do not create durable V3 email rows. Operators completed the writer pause and final-delta rerun before deploying application commit `c8a08085`, and Jonat reported the smoke checks successful. The old email tables remain unchanged for rollback and audit until the snapshot/soak gate passes and a later retirement task is explicitly approved.
+The application cutover is implemented for durable email data: explicitly imported email threads/messages, relationships, jobs, drafts, signatures, files, chats, realtime events, recycle-bin references, and backup ordering use the final V3 contracts. Ordinary personal and shared mailbox lists/details remain provider-backed and do not create durable V3 email rows. The ten retired `communications_email_*` source tables are absent from the canonical schema and must not be restored. Node attachment/access always uses the exact `email_relationships.email_message_id`; a textbox link also carries the exact `resource_textbox_id`.
 
 Last updated: 2026-08-04
 
@@ -18,7 +18,7 @@ Last updated: 2026-08-04
 
 Coverage Status:
 
-- Business Logic Covered By Scenarios: The V3 schema, data-copy checkpoint, final-delta rerun, application cutover, deployment, and smoke checks are complete in development. The scenarios below cover provider-backed mailbox reads without persistence, explicit-import-only V3 storage, internal message IDs, exact account scope, ordinary resource permissions, normalized file ownership, relationship-only deletion, durable draft send recovery, and read-only schema readiness. Snapshot/soak evidence and later legacy-table retirement remain pending.
+- Business Logic Covered By Scenarios: The V3 schema, data-copy checkpoint, final-delta rerun, application cutover, deployment, smoke checks, and legacy email-table retirement are complete in development. The scenarios below cover provider-backed mailbox reads without persistence, explicit-import-only V3 storage, internal message IDs, exact account scope, ordinary resource permissions, normalized file ownership, relationship-only deletion, durable draft send recovery, and read-only schema readiness.
 - Exact mailbox hardening is covered by `homeMailboxRealtime.test.ts`, `unifiedRichEditorContract.test.ts`, `communications_singleflight_cancellation_test.go`, `realtime_audience_hardening_test.go`, `nylas_webhook_receipts_test.go`, and focused communications/store tests for retry-safe open receipts and exact-account migration ordering.
 - Business Logic Covered By Automated Tests: Partial (`tests/frontend/pages/home/homeCommands.test.ts` covers send payload construction, Mango attachment references, and mailbox-scoped signature save ordering; `tests/frontend/pages/home/homeMailboxRealtime.test.ts` covers exact active targets, first/reconnect acceptance, event mapping, coalescing, queued-final work, and navigation cancellation; `tests/frontend/pages/home/homeMailDrafts.test.ts` covers provider/auth error retention versus exact revocation purge, out-of-order loads, local save/delete fencing, multiple personal accounts, and live-draft preparation before attachment upload; `tests/frontend/modules/editor/richTextEditing.test.ts` and `unifiedRichEditorContract.test.ts` cover rich email behavior. Backend communications/realtime/attachment tests cover exact mailbox routing, provider send boundaries, S3 attachment resolution, live email-draft attachment authorization, deleted-draft denial, sent-message survival, and durable inline-byte rejection. Broader mounted compose/signature endpoint coverage remains partial.)
 - Outbound attachment tests in `backend/internal/http/communications_handlers_test.go` and `backend/internal/http/nylas_client_test.go` cover early validation, tenant/link authorization, the complete metadata limit preflight, lazy exact-length multipart streaming, inline CID fields, cancellation, provider rejection, and body cleanup.
@@ -141,7 +141,7 @@ V3EMAIL41 - Disconnecting an email account keeps its signatures, but Mango may n
 
 #### Attachments
 
-V3EMAIL42 - `attachments` is the actual Mango file table. Rename `resource_attachments` to `attachment_relationships`; do not create a third file-association table.
+V3EMAIL42 - `attachments` is the actual Mango file table. `attachment_relationships` is the only ownership table; the retired `resource_attachments` table must not be recreated.
 
 V3EMAIL43 - `attachment_relationships` is the only authority for which Mango record a real stored file belongs to.
 
@@ -231,7 +231,7 @@ Expected:
 - The completed copy is preserved as the data checkpoint, and the later deployment is recorded separately as the backend cutover.
 - The 213 proven orphan links remain audit evidence and do not create broken final relationships.
 - The short writer freeze and exact Step 1/Step 2 final-delta rerun complete before deployment.
-- Cutover tests and deployed durable writers use only the V3 tables, while the old tables remain untouched for rollback and the later database snapshot.
+- Cutover tests and deployed durable writers use only the V3 tables. Retired email tables are absent from the canonical schema.
 
 ### Existing Pre-V3 Rules And Scenarios
 

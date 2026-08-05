@@ -506,7 +506,6 @@ func TestLogicGateWorkFastPathMigrationMatchesCanonicalSchema(t *testing.T) {
 			"trg_logic_gate_work_version_assignments",
 			"trg_logic_gate_work_version_projection",
 			"trg_logic_gate_work_version_nodes",
-			"trg_logic_gate_work_version_email_origin",
 		} {
 			if !strings.Contains(normalized, required) {
 				t.Fatalf("%s missing Logic Gate fast-path contract %q", path, required)

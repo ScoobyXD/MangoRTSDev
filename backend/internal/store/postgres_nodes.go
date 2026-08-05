@@ -882,41 +882,19 @@ func (r *PostgresRepo) getNodeDetails(companyID, nodeID string, includeInformati
 	information := make([]domain.NodeInformation, 0)
 	informationCount := 0
 	if includeInformation {
-		infoRows, err := r.db.QueryContext(ctx,
-			`select company_id, information_id, node_id, type::text, information, created_timestamp, updated_timestamp
-			 from node_information
-			 where company_id=$1 and node_id=$2
-			 order by created_timestamp asc`,
-			companyID, nodeID,
-		)
+		projections, err := listPostgresNodeFinalProjections(ctx, r.db, companyID, nodeID)
 		if err != nil {
 			return domain.NodeDetails{}, err
 		}
-		defer infoRows.Close()
-
-		for infoRows.Next() {
-			var item domain.NodeInformation
-			if err := infoRows.Scan(
-				&item.CompanyID,
-				&item.InformationID,
-				&item.NodeID,
-				&item.Type,
-				&item.Information,
-				&item.CreatedTimestamp,
-				&item.UpdatedTimestamp,
-			); err != nil {
-				return domain.NodeDetails{}, err
-			}
-			information = append(information, item)
-		}
-		if err := infoRows.Err(); err != nil {
-			return domain.NodeDetails{}, err
+		for _, projection := range projections {
+			information = append(information, nodeProjectionAsInformation(projection))
 		}
 		informationCount = len(information)
 	} else if err := r.db.QueryRowContext(ctx,
-		`select count(*)
-		   from node_information
-		  where company_id=$1 and node_id=$2`,
+		`select
+		  (select count(*) from node_textboxes where company_id=$1::uuid and node_id=$2::uuid and deleted_timestamp is null)
+		+ (select count(*) from node_textbox_chats where company_id=$1::uuid and node_id=$2::uuid and deleted_timestamp is null)
+		+ (select count(*) from email_relationships where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid)`,
 		companyID, nodeID,
 	).Scan(&informationCount); err != nil {
 		return domain.NodeDetails{}, err
@@ -999,7 +977,6 @@ func (r *PostgresRepo) addNodeInformation(input NodeInformationInput) (domain.No
 	if !exists {
 		return domain.NodeInformation{}, ErrNotFound
 	}
-
 	if isNodeTextboxChatType(infoType) {
 		chatID := cleanUUIDText(informationID)
 		if chatID == "" {
@@ -1038,92 +1015,18 @@ func (r *PostgresRepo) addNodeInformation(input NodeInformationInput) (domain.No
 		return item, nil
 	}
 
-	item := domain.NodeInformation{
-		CompanyID:     companyID,
-		InformationID: newUUIDv7String(),
-		NodeID:        nodeID,
-		Type:          infoType,
-		Information:   input.Information,
+	if !strings.EqualFold(infoType, "Attached email") {
+		return domain.NodeInformation{}, ErrInvalid
 	}
-	if err := tx.QueryRowContext(ctx,
-		`insert into node_information
-		 (company_id, information_id, node_id, type, information, created_timestamp, updated_timestamp)
-		 values ($1, $2, $3, $4::information_type, $5, now(), now())
-		 returning company_id, information_id, node_id, type::text, information, created_timestamp, updated_timestamp`,
-		item.CompanyID, item.InformationID, item.NodeID, item.Type, item.Information,
-	).Scan(
-		&item.CompanyID,
-		&item.InformationID,
-		&item.NodeID,
-		&item.Type,
-		&item.Information,
-		&item.CreatedTimestamp,
-		&item.UpdatedTimestamp,
-	); err != nil {
-		return domain.NodeInformation{}, err
-	}
-	keyValue := informationID
+	keyValue := cleanUUIDText(informationID)
 	if keyValue == "" {
-		keyValue = item.InformationID
+		keyValue = newUUIDv7String()
 	}
-	previous, previousFound, err := postgresNodeProjectionTx(ctx, tx, companyID, nodeID, keyValue)
+	projection, err := addPostgresNodeEmailRelationshipTx(ctx, tx, input, keyValue)
 	if err != nil {
 		return domain.NodeInformation{}, err
 	}
-	var projection domain.NodeProjection
-	if err := tx.QueryRowContext(ctx,
-		`insert into node_projection_table
-		 (company_id, node_id, information_id, type, information, created_timestamp, updated_timestamp)
-		 values ($1, $2, $3, $4::information_type, $5, now(), now())
-		 on conflict (company_id, node_id, information_id)
-		 do update set
-		   type=excluded.type,
-		   information=excluded.information,
-		   is_deleted=false,
-		   revision=node_projection_table.revision+1,
-		   updated_timestamp=now()
-		 returning company_id, node_id, information_id, type::text, information, created_timestamp, updated_timestamp`,
-		item.CompanyID, item.NodeID, keyValue, item.Type, input.Information,
-	).Scan(
-		&projection.CompanyID,
-		&projection.NodeID,
-		&projection.InformationID,
-		&projection.Type,
-		&projection.Information,
-		&projection.CreatedTimestamp,
-		&projection.UpdatedTimestamp,
-	); err != nil {
-		return domain.NodeInformation{}, err
-	}
-	if strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "" {
-		actor := normalizeNodeContentChangeActor(cleanUUIDText(input.ActorUserID), input.ActorDisplayName)
-		var previousPtr *domain.NodeProjection
-		if previousFound {
-			previousPtr = &previous
-		}
-		if err := insertNodeContentChangesTx(ctx, tx, buildNodeContentChanges(
-			companyID,
-			nodeID,
-			keyValue,
-			infoType,
-			previousPtr,
-			input.Information,
-			actor,
-			time.Now().UTC(),
-		)); err != nil {
-			return domain.NodeInformation{}, err
-		}
-	}
-
-	if strings.EqualFold(infoType, "Text block chat") {
-		outboxInput, err := nodeChatCreatedOutboxInput(item, keyValue)
-		if err != nil {
-			return domain.NodeInformation{}, err
-		}
-		if _, err := r.enqueueRealtimeOutboxTx(ctx, tx, outboxInput); err != nil {
-			return domain.NodeInformation{}, err
-		}
-	}
+	item := nodeProjectionAsInformation(projection)
 	if err := tx.Commit(); err != nil {
 		return domain.NodeInformation{}, err
 	}
@@ -1131,30 +1034,7 @@ func (r *PostgresRepo) addNodeInformation(input NodeInformationInput) (domain.No
 }
 
 func postgresNodeProjectionTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, informationID string) (domain.NodeProjection, bool, error) {
-	var item domain.NodeProjection
-	err := tx.QueryRowContext(ctx,
-		`select company_id, node_id, information_id, type::text, information, is_deleted, revision, created_timestamp, updated_timestamp
-		   from node_projection_table
-		  where company_id=$1 and node_id=$2 and information_id=$3`,
-		companyID, nodeID, informationID,
-	).Scan(
-		&item.CompanyID,
-		&item.NodeID,
-		&item.InformationID,
-		&item.Type,
-		&item.Information,
-		&item.IsDeleted,
-		&item.Revision,
-		&item.CreatedTimestamp,
-		&item.UpdatedTimestamp,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return domain.NodeProjection{}, false, nil
-	}
-	if err != nil {
-		return domain.NodeProjection{}, false, err
-	}
-	return item, true, nil
+	return postgresNodeFinalProjectionTx(ctx, tx, companyID, nodeID, informationID)
 }
 
 func insertNodeContentChangesTx(ctx context.Context, tx *sql.Tx, changes []domain.NodeContentChange) error {
@@ -1164,7 +1044,7 @@ func insertNodeContentChangesTx(ctx context.Context, tx *sql.Tx, changes []domai
 	for _, change := range changes {
 		if _, err := tx.ExecContext(ctx, `
 insert into node_content_changes
-  (company_id, change_id, node_id, information_id, change_type, text, start_offset, end_offset, actor_user_id, actor_display_name, created_timestamp)
+  (company_id, change_id, node_id, textbox_id, change_type, text, start_offset, end_offset, actor_user_id, actor_display_name, created_timestamp)
 values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, nullif($9::text, '')::uuid, $10, $11)`,
 			change.CompanyID,
 			change.ChangeID,
@@ -1209,114 +1089,7 @@ func (r *PostgresRepo) ListNodeProjections(companyID, nodeID string) ([]domain.N
 		return nil, ErrNotFound
 	}
 
-	rows, err := r.db.QueryContext(ctx,
-		`select company_id, node_id, information_id, type::text, information, is_deleted, revision, created_timestamp, updated_timestamp
-		   from node_projection_table
-		  where company_id=$1 and node_id=$2
-		    and not is_deleted
-		    and type <> 'Text block chat'::information_type
-		  order by created_timestamp asc, information_id asc`,
-		companyID, nodeID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	items := make([]domain.NodeProjection, 0)
-	for rows.Next() {
-		var item domain.NodeProjection
-		if err := rows.Scan(
-			&item.CompanyID,
-			&item.NodeID,
-			&item.InformationID,
-			&item.Type,
-			&item.Information,
-			&item.IsDeleted,
-			&item.Revision,
-			&item.CreatedTimestamp,
-			&item.UpdatedTimestamp,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	emailItems, err := listPostgresNodeEmailRelationshipProjections(ctx, r.db, companyID, nodeID)
-	if err != nil {
-		return nil, err
-	}
-	items = append(items, emailItems...)
-	chatItems, err := listPostgresNodeTextboxChatProjections(ctx, r.db, companyID, nodeID)
-	if err != nil {
-		return nil, err
-	}
-	items = append(items, chatItems...)
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
-			return items[i].InformationID < items[j].InformationID
-		}
-		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
-	})
-	return items, nil
-}
-
-func listPostgresNodeEmailRelationshipProjections(ctx context.Context, queryer *sql.DB, companyID, nodeID string) ([]domain.NodeProjection, error) {
-	rows, err := queryer.QueryContext(ctx, `
-select relationship.company_id::text,
-       relationship.resource_id::text,
-       relationship.email_relationship_id::text,
-       jsonb_build_object(
-         'block_id', relationship.email_relationship_id::text,
-         'collaboration_id', relationship.email_relationship_id::text,
-         'message_id', message.provider_message_id,
-         'email_message_id', message.email_message_id::text,
-         'thread_id', thread.provider_thread_id,
-         'email_thread_id', thread.email_thread_id::text,
-         'shared_inbox_id', coalesce(thread.shared_inbox_id::text, ''),
-         'account_email', thread.email_account_email,
-         'created_from_email', true,
-         'subject', message.subject,
-         'snippet', message.snippet,
-         'from', coalesce(nullif(message.sender_snapshot->0->>'name', ''), message.sender_snapshot->0->>'email', ''),
-         'date', case when message.message_timestamp is null then null else floor(extract(epoch from message.message_timestamp))::bigint end,
-         'attached_timestamp', relationship.created_timestamp
-       )::text,
-       relationship.created_timestamp
-from email_relationships relationship
-join email_messages message
-  on message.company_id=relationship.company_id
- and message.email_thread_id=relationship.email_thread_id
- and message.email_message_id=relationship.email_message_id
-join email_threads thread
-  on thread.company_id=message.company_id
- and thread.email_thread_id=message.email_thread_id
-where relationship.company_id=$1::uuid
-  and relationship.resource_type='node'
-  and relationship.resource_id=$2::uuid
-  and relationship.resource_textbox_id is null
-order by relationship.created_timestamp, relationship.email_relationship_id`, companyID, nodeID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := make([]domain.NodeProjection, 0)
-	for rows.Next() {
-		var item domain.NodeProjection
-		if err := rows.Scan(&item.CompanyID, &item.NodeID, &item.InformationID, &item.Information, &item.CreatedTimestamp); err != nil {
-			return nil, err
-		}
-		item.Type = "Attached email"
-		item.Revision = 1
-		item.UpdatedTimestamp = item.CreatedTimestamp
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+	return listPostgresNodeFinalProjections(ctx, r.db, companyID, nodeID)
 }
 func (r *PostgresRepo) DeleteNodeProjection(companyID, nodeID, informationID string) error {
 	return r.deleteNodeProjection(NodeProjectionDeleteInput{
@@ -1397,43 +1170,7 @@ where company_id=$1::uuid
 	if (previousFound && isEditorTextBoxType(previous.Type)) || (!previousFound && input.ExpectedRevision != nil) {
 		return deletePostgresNodeTextProjection(ctx, tx, input, previous, previousFound)
 	}
-	if previousFound && (strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "") {
-		previousCopy := previous
-		if err := insertNodeContentChangesTx(ctx, tx, buildNodeContentChanges(
-			companyID,
-			nodeID,
-			informationID,
-			previous.Type,
-			&previousCopy,
-			"",
-			normalizeNodeContentChangeActor(cleanUUIDText(input.ActorUserID), input.ActorDisplayName),
-			time.Now().UTC(),
-		)); err != nil {
-			return err
-		}
-	}
-	deleted, err := tx.ExecContext(ctx,
-		`delete from node_projection_table
-		 where company_id=$1 and node_id=$2 and information_id=$3`,
-		companyID, nodeID, informationID,
-	)
-	if err != nil {
-		return err
-	}
-	affected, err := deleted.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected > 0 && previousFound && strings.EqualFold(strings.TrimSpace(previous.Type), "Text block chat") {
-		outboxInput, err := nodeChatDeletedOutboxInput(previous)
-		if err != nil {
-			return err
-		}
-		if _, err := r.enqueueRealtimeOutboxTx(ctx, tx, outboxInput); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
+	return ErrNotFound
 }
 
 func (r *PostgresRepo) ListUnseenNodeContentChanges(input NodeContentChangeListInput) ([]domain.NodeContentChange, error) {
@@ -1458,7 +1195,7 @@ func (r *PostgresRepo) ListUnseenNodeContentChanges(input NodeContentChangeListI
 select change.company_id::text,
        change.change_id::text,
        change.node_id::text,
-       change.information_id::text,
+       change.textbox_id::text,
        change.change_type,
        change.text,
        change.start_offset,
@@ -1466,16 +1203,16 @@ select change.company_id::text,
        coalesce(change.actor_user_id::text, ''),
        coalesce(change.actor_display_name, ''),
        change.created_timestamp,
-       coalesce(seen.information, '')
+       coalesce(seen.body_json::text, '')
 from node_content_changes change
-join node_projection_table projection
-  on projection.company_id=change.company_id
- and projection.node_id=change.node_id
- and projection.information_id=change.information_id
-left join node_projection_seen_snapshots seen
+join node_textboxes textbox
+  on textbox.company_id=change.company_id
+ and textbox.node_id=change.node_id
+ and textbox.textbox_id=change.textbox_id
+left join node_textbox_seen_snapshots seen
   on seen.company_id=change.company_id
  and seen.node_id=change.node_id
- and seen.information_id=change.information_id
+ and seen.textbox_id=change.textbox_id
  and seen.user_id=$3::uuid
 left join node_content_change_seen seen_change
   on seen_change.company_id=change.company_id
@@ -1483,7 +1220,7 @@ left join node_content_change_seen seen_change
  and seen_change.user_id=$3::uuid
 where change.company_id=$1::uuid
   and change.node_id=$2::uuid
-  and projection.type='Text box'::information_type
+  and textbox.deleted_timestamp is null
   and change.actor_user_id is distinct from $3::uuid
   and seen_change.change_id is null
   and (seen.seen_timestamp is null or change.created_timestamp >= seen.seen_timestamp)
@@ -1579,7 +1316,7 @@ select change.company_id, change.change_id, $4::uuid, now()
 from node_content_changes change
 where change.company_id=$1::uuid
   and change.node_id=$2::uuid
-  and change.information_id=$3::uuid
+  and change.textbox_id=$3::uuid
 on conflict (company_id, change_id, user_id) do nothing`, companyID, nodeID, informationID, userID); err != nil {
 			return 0, err
 		}
@@ -1635,19 +1372,20 @@ on conflict (company_id, change_id, user_id) do nothing`, companyID, nodeID, use
 func markNodeProjectionSeenSnapshotsTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, informationID, userID string) (int, error) {
 	if informationID != "" {
 		result, err := tx.ExecContext(ctx, `
-insert into node_projection_seen_snapshots
-  (company_id, node_id, information_id, user_id, information, projection_updated_timestamp, seen_timestamp)
-select projection.company_id, projection.node_id, projection.information_id, $4::uuid,
-       projection.information, projection.updated_timestamp, now()
-  from node_projection_table projection
- where projection.company_id=$1::uuid
-   and projection.node_id=$2::uuid
-   and projection.information_id=$3::uuid
-   and projection.type='Text box'::information_type
-on conflict (company_id, node_id, information_id, user_id)
+insert into node_textbox_seen_snapshots
+  (company_id, node_id, textbox_id, user_id, body_json, textbox_revision, textbox_updated_timestamp, seen_timestamp)
+select textbox.company_id, textbox.node_id, textbox.textbox_id, $4::uuid,
+       textbox.body_json, textbox.revision, textbox.updated_timestamp, now()
+  from node_textboxes textbox
+ where textbox.company_id=$1::uuid
+   and textbox.node_id=$2::uuid
+   and textbox.textbox_id=$3::uuid
+   and textbox.deleted_timestamp is null
+on conflict (company_id, node_id, textbox_id, user_id)
 do update set
-  information=excluded.information,
-  projection_updated_timestamp=excluded.projection_updated_timestamp,
+  body_json=excluded.body_json,
+  textbox_revision=excluded.textbox_revision,
+  textbox_updated_timestamp=excluded.textbox_updated_timestamp,
   seen_timestamp=excluded.seen_timestamp`, companyID, nodeID, informationID, userID)
 		if err != nil {
 			return 0, err
@@ -1660,18 +1398,19 @@ do update set
 	}
 
 	result, err := tx.ExecContext(ctx, `
-insert into node_projection_seen_snapshots
-  (company_id, node_id, information_id, user_id, information, projection_updated_timestamp, seen_timestamp)
-select projection.company_id, projection.node_id, projection.information_id, $3::uuid,
-       projection.information, projection.updated_timestamp, now()
-  from node_projection_table projection
- where projection.company_id=$1::uuid
-   and projection.node_id=$2::uuid
-   and projection.type='Text box'::information_type
-on conflict (company_id, node_id, information_id, user_id)
+insert into node_textbox_seen_snapshots
+  (company_id, node_id, textbox_id, user_id, body_json, textbox_revision, textbox_updated_timestamp, seen_timestamp)
+select textbox.company_id, textbox.node_id, textbox.textbox_id, $3::uuid,
+       textbox.body_json, textbox.revision, textbox.updated_timestamp, now()
+  from node_textboxes textbox
+ where textbox.company_id=$1::uuid
+   and textbox.node_id=$2::uuid
+   and textbox.deleted_timestamp is null
+on conflict (company_id, node_id, textbox_id, user_id)
 do update set
-  information=excluded.information,
-  projection_updated_timestamp=excluded.projection_updated_timestamp,
+  body_json=excluded.body_json,
+  textbox_revision=excluded.textbox_revision,
+  textbox_updated_timestamp=excluded.textbox_updated_timestamp,
   seen_timestamp=excluded.seen_timestamp`, companyID, nodeID, userID)
 	if err != nil {
 		return 0, err

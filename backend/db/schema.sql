@@ -16,29 +16,6 @@ begin
   end if;
 end $$;
 
-do $$
-begin
-  if not exists (select 1 from pg_type where typname = 'information_type') then
-    create type information_type as enum (
-      'Text box',
-      'Checklist',
-      'Status',
-      'Due date',
-      'Employee name',
-      'PDF',
-      'PNG',
-      'MOV',
-      'Hyperlink',
-      'Text block chat',
-      'Attached email'
-    );
-  end if;
-end $$;
-
-alter type information_type add value if not exists 'Text block chat';
-alter type information_type add value if not exists 'Attached email';
-alter type information_type add value if not exists 'Saved version';
-
 create table if not exists users (
   user_id uuid not null,
   cognito_subject text not null,
@@ -321,84 +298,6 @@ create index if not exists idx_communications_message_read_receipt_summaries_thr
   on communications_message_read_receipt_summaries(receipt_scope_type, receipt_scope_id, thread_id)
   where thread_id <> '';
 
-create table if not exists communications_email_drafts (
-  company_id uuid not null,
-  draft_id text not null,
-  personal_user_id uuid,
-  personal_account_email text,
-  shared_inbox_id uuid,
-  created_by_user_id uuid,
-  updated_by_user_id uuid,
-  kind text not null default 'compose',
-  source_message_id text not null default '',
-  account_email text not null default '',
-  to_recipients text not null default '',
-  cc_recipients text not null default '',
-  bcc_recipients text not null default '',
-  subject text not null default '',
-  body_editor_html text not null default '',
-  reply_to_message jsonb not null default '{}'::jsonb,
-  scheduled_send_timestamp timestamptz,
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  deleted_timestamp timestamptz,
-  constraint communications_email_drafts_draft_id_chk check (btrim(draft_id) <> ''),
-  constraint communications_email_drafts_kind_chk check (kind in ('compose', 'reply', 'forward')),
-  constraint communications_email_drafts_account_email_chk check (account_email = '' or account_email = lower(btrim(account_email))),
-  constraint communications_email_drafts_personal_account_email_chk check (personal_account_email is null or (btrim(personal_account_email) <> '' and personal_account_email = lower(btrim(personal_account_email)))),
-  constraint communications_email_drafts_scope_chk check (
-    (personal_user_id is not null and personal_account_email is not null and shared_inbox_id is null)
-    or (personal_user_id is null and personal_account_email is null and shared_inbox_id is not null)
-  ),
-  primary key (company_id, draft_id),
-  foreign key (company_id) references companies(company_id) on delete cascade,
-  foreign key (created_by_user_id) references users(user_id) on delete set null,
-  foreign key (updated_by_user_id) references users(user_id) on delete set null
-);
-
-create index if not exists idx_communications_email_drafts_personal_updated
-  on communications_email_drafts(company_id, personal_user_id, personal_account_email, updated_timestamp desc)
-  where deleted_timestamp is null and personal_user_id is not null;
-
-create index if not exists idx_communications_email_drafts_shared_updated
-  on communications_email_drafts(company_id, shared_inbox_id, updated_timestamp desc)
-  where deleted_timestamp is null and shared_inbox_id is not null;
-
-create table if not exists communications_email_signatures (
-  company_id uuid not null,
-  signature_id text not null,
-  personal_user_id uuid,
-  personal_account_email text,
-  shared_inbox_id uuid,
-  name text not null default 'Default',
-  body_editor_html text not null default '',
-  is_default boolean not null default true,
-  created_by_user_id uuid,
-  updated_by_user_id uuid,
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  constraint communications_email_signatures_signature_id_chk check (btrim(signature_id) <> ''),
-  constraint communications_email_signatures_name_chk check (btrim(name) <> ''),
-  constraint communications_email_signatures_personal_account_email_chk check (personal_account_email is null or (btrim(personal_account_email) <> '' and personal_account_email = lower(btrim(personal_account_email)))),
-  constraint communications_email_signatures_scope_chk check (
-    (personal_user_id is not null and personal_account_email is not null and shared_inbox_id is null)
-    or (personal_user_id is null and personal_account_email is null and shared_inbox_id is not null)
-  ),
-  primary key (company_id, signature_id),
-  foreign key (company_id) references companies(company_id) on delete cascade,
-  foreign key (personal_user_id, personal_account_email) references user_email_connections(user_id, account_email) on delete cascade,
-  foreign key (created_by_user_id) references users(user_id) on delete set null,
-  foreign key (updated_by_user_id) references users(user_id) on delete set null
-);
-
-create unique index if not exists idx_communications_email_signatures_personal_scope
-  on communications_email_signatures(company_id, personal_user_id, personal_account_email)
-  where personal_user_id is not null;
-
-create unique index if not exists idx_communications_email_signatures_shared_scope
-  on communications_email_signatures(company_id, shared_inbox_id)
-  where shared_inbox_id is not null;
-
 create table if not exists auth_external_identity_deletions (
   provider text not null,
   external_subject text not null,
@@ -495,106 +394,6 @@ create index if not exists idx_attachments_company_created
 create index if not exists idx_attachments_company_sha256
   on attachments(company_id, sha256);
 
-create table if not exists attachment_upload_intents (
-  upload_intent_id uuid primary key,
-  company_id uuid not null,
-  actor_user_id uuid not null,
-  client_request_id text not null,
-  attachment_id uuid not null,
-  resource_attachment_id uuid,
-  original_filename text not null,
-  mime_type text not null,
-  size_bytes bigint not null,
-  sha256 text not null,
-  sha256_verification_method text not null default 'client_reported',
-  storage_checksum_algorithm text not null default '',
-  storage_checksum_value text not null default '',
-  storage_checksum_type text not null default '',
-  resource_type text not null,
-  resource_id text not null,
-  information_id uuid,
-  message_id text not null default '',
-  editor_surface text not null default '',
-  relationship_kind text not null,
-  source_kind text not null,
-  source_provider text not null default '',
-  original_width integer,
-  original_height integer,
-  storage_bucket text not null,
-  storage_key text not null,
-  multipart_upload_id text not null default '',
-  strategy text not null,
-  part_size_bytes bigint not null default 0,
-  part_count integer not null default 0,
-  status text not null default 'pending',
-  failure_code text not null default '',
-  version bigint not null default 1,
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  expires_timestamp timestamptz not null,
-  completed_timestamp timestamptz,
-  constraint attachment_upload_intents_client_request_nonblank_chk check (btrim(client_request_id) <> ''),
-  constraint attachment_upload_intents_filename_nonblank_chk check (btrim(original_filename) <> ''),
-  constraint attachment_upload_intents_mime_nonblank_chk check (btrim(mime_type) <> ''),
-  constraint attachment_upload_intents_size_chk check (size_bytes >= 0),
-  constraint attachment_upload_intents_sha256_chk check (sha256 ~ '^[0-9a-f]{64}$'),
-  constraint attachment_upload_intents_sha256_method_chk check (sha256_verification_method in ('s3_full', 'server_stream', 'client_reported')),
-  constraint attachment_upload_intents_storage_checksum_provenance_chk check (
-    storage_checksum_algorithm in ('', 'SHA256')
-    and storage_checksum_type in ('', 'FULL_OBJECT', 'COMPOSITE')
-    and ((storage_checksum_algorithm = '') = (storage_checksum_value = ''))
-    and ((storage_checksum_algorithm = '') = (storage_checksum_type = ''))
-  ),
-  constraint attachment_upload_intents_resource_nonblank_chk check (btrim(resource_type) <> '' and btrim(resource_id) <> ''),
-  constraint attachment_upload_intents_resource_type_chk check (resource_type in (
-    'node', 'logic_gate', 'project', 'node_chat_message', 'logic_gate_chat_message', 'project_chat_message',
-    'email_message', 'email_draft', 'email_signature', 'attached_email', 'shared_inbox',
-    'company_explorer_folder', 'shared_inbox_folder'
-  )),
-  constraint attachment_upload_intents_relationship_chk check (relationship_kind in (
-    'inline_image', 'file_attachment', 'chat_attachment', 'email_attachment',
-    'email_inline_attachment', 'migrated_inline_image'
-  )),
-  constraint attachment_upload_intents_source_chk check (source_kind in (
-    'user_upload', 'editor_paste', 'chat_upload', 'email_incoming', 'email_outgoing', 'migration_inline_image'
-  )),
-  constraint attachment_upload_intents_storage_nonblank_chk check (btrim(storage_bucket) <> '' and btrim(storage_key) <> ''),
-  constraint attachment_upload_intents_strategy_chk check (
-    (strategy = 'single' and size_bytes <= 67108864 and multipart_upload_id = '' and part_size_bytes = 0 and part_count = 0)
-    or (strategy = 'multipart' and size_bytes > 67108864 and btrim(multipart_upload_id) <> ''
-      and part_size_bytes = 16777216 and part_count = ((size_bytes + 16777215) / 16777216)::integer
-      and part_count between 1 and 10000)
-  ),
-  constraint attachment_upload_intents_status_chk check (status in ('pending', 'uploading', 'completing', 'completed', 'failed', 'aborted', 'expired')),
-  constraint attachment_upload_intents_completed_timestamp_chk check (
-    (status = 'completed' and completed_timestamp is not null)
-    or (status <> 'completed' and completed_timestamp is null)
-  ),
-  constraint attachment_upload_intents_dimensions_chk check (
-    (original_width is null or original_width > 0) and (original_height is null or original_height > 0)
-  ),
-  unique (company_id, actor_user_id, client_request_id),
-  unique (attachment_id),
-  unique (storage_bucket, storage_key),
-  foreign key (company_id) references companies(company_id) on delete cascade,
-  foreign key (actor_user_id) references users(user_id) on delete cascade
-);
-
-create index if not exists idx_attachment_upload_intents_expiry
-  on attachment_upload_intents(expires_timestamp, upload_intent_id)
-  where status in ('pending', 'uploading', 'completing', 'failed');
-
-create index if not exists idx_attachment_upload_intents_status_expiry
-  on attachment_upload_intents(status, expires_timestamp);
-
-create index if not exists idx_attachment_upload_intents_resource
-  on attachment_upload_intents(company_id, resource_type, resource_id);
-
-create index if not exists idx_attachment_upload_intents_actor
-  on attachment_upload_intents(company_id, actor_user_id, updated_timestamp desc);
-
--- The legacy upload-intent table remains through Step 3 as rollback evidence.
--- New application work uses attachment_upload_jobs only.
 create table if not exists attachment_upload_jobs (
   upload_job_id uuid primary key,
   company_id uuid not null,
@@ -716,35 +515,6 @@ create table if not exists attachment_upload_parts (
   foreign key (upload_job_id) references attachment_upload_jobs(upload_job_id) on delete cascade
 );
 
-create table if not exists attachment_variants (
-  attachment_id uuid not null,
-  variant_type text not null,
-  mime_type text not null,
-  byte_size bigint not null,
-  sha256 text,
-  generation_version integer,
-  width integer,
-  height integer,
-  storage_bucket text not null,
-  storage_key text not null,
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  constraint attachment_variants_type_chk check (variant_type in ('original', 'display', 'thumbnail', 'email_send')),
-  constraint attachment_variants_mime_type_nonblank_chk check (btrim(mime_type) <> ''),
-  constraint attachment_variants_byte_size_chk check (byte_size >= 0),
-  constraint attachment_variants_sha256_chk check (sha256 is null or sha256 ~ '^[0-9a-f]{64}$'),
-  constraint attachment_variants_generation_version_chk check (generation_version is null or generation_version > 0),
-  constraint attachment_variants_dimensions_chk check (
-    (width is null or width > 0)
-    and (height is null or height > 0)
-  ),
-  constraint attachment_variants_storage_bucket_nonblank_chk check (btrim(storage_bucket) <> ''),
-  constraint attachment_variants_storage_key_nonblank_chk check (btrim(storage_key) <> ''),
-  primary key (attachment_id, variant_type),
-  unique (storage_bucket, storage_key),
-  foreign key (attachment_id) references attachments(attachment_id) on delete cascade
-);
-
 create table if not exists attachment_previews (
   attachment_id uuid not null,
   preview_type text not null,
@@ -773,124 +543,6 @@ create table if not exists attachment_previews (
   unique (storage_bucket, storage_key),
   foreign key (attachment_id) references attachments(attachment_id) on delete cascade
 );
-
-create table if not exists resource_attachments (
-  resource_attachment_id uuid not null,
-  company_id uuid not null,
-  resource_type text not null,
-  resource_id text not null,
-  attachment_id uuid not null,
-  information_id uuid,
-  message_id text not null default '',
-  editor_surface text not null default '',
-  relationship_kind text not null,
-  created_by_user_id uuid,
-  created_timestamp timestamptz not null default now(),
-  deleted_timestamp timestamptz,
-  constraint resource_attachments_type_chk check (
-    resource_type in (
-      'node',
-      'logic_gate',
-      'project',
-      'node_chat_message',
-      'logic_gate_chat_message',
-      'project_chat_message',
-      'email_message',
-      'email_draft',
-      'email_signature',
-      'attached_email',
-      'shared_inbox',
-      'company_explorer_folder',
-      'shared_inbox_folder'
-    )
-  ),
-  constraint resource_attachments_resource_id_nonblank_chk check (btrim(resource_id) <> ''),
-  constraint resource_attachments_relationship_kind_chk check (
-    relationship_kind in (
-      'inline_image',
-      'file_attachment',
-      'chat_attachment',
-      'email_attachment',
-      'email_inline_attachment',
-      'migrated_inline_image'
-    )
-  ),
-  primary key (resource_attachment_id),
-  foreign key (company_id) references companies(company_id) on delete cascade,
-  foreign key (company_id, attachment_id) references attachments(company_id, attachment_id) on delete cascade,
-  foreign key (created_by_user_id) references users(user_id) on delete set null
-);
-
-create index if not exists idx_resource_attachments_resource
-  on resource_attachments(company_id, resource_type, resource_id, deleted_timestamp, created_timestamp desc);
-
-create index if not exists idx_resource_attachments_attachment
-  on resource_attachments(company_id, attachment_id, deleted_timestamp);
-
-create unique index if not exists idx_resource_attachments_active_unique
-  on resource_attachments(
-    company_id,
-    resource_type,
-    resource_id,
-    attachment_id,
-    relationship_kind,
-    coalesce(information_id::text, ''),
-    coalesce(message_id, ''),
-    coalesce(editor_surface, '')
-  )
-  where deleted_timestamp is null;
-
-create table if not exists attachment_migration_runs (
-  migration_run_id uuid not null,
-  company_id uuid not null,
-  status text not null default 'pending',
-  dry_run boolean not null default true,
-  started_by_user_id uuid,
-  source_scope text not null default '',
-  summary jsonb not null default '{}'::jsonb,
-  started_timestamp timestamptz not null default now(),
-  completed_timestamp timestamptz,
-  constraint attachment_migration_runs_status_chk check (status in ('pending', 'running', 'completed', 'failed')),
-  constraint attachment_migration_runs_summary_object_chk check (jsonb_typeof(summary) = 'object'),
-  primary key (migration_run_id),
-  foreign key (company_id) references companies(company_id) on delete cascade,
-  foreign key (started_by_user_id) references users(user_id) on delete set null
-);
-
-create index if not exists idx_attachment_migration_runs_company_started
-  on attachment_migration_runs(company_id, started_timestamp desc, migration_run_id);
-
-create table if not exists attachment_migration_items (
-  migration_item_id uuid not null,
-  migration_run_id uuid not null,
-  company_id uuid not null,
-  source_table text not null,
-  source_pk text not null,
-  resource_type text not null,
-  resource_id text not null,
-  information_id uuid,
-  message_id text not null default '',
-  attachment_id uuid,
-  embedded_sha256 text not null default '',
-  status text not null default 'pending',
-  error text not null default '',
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  constraint attachment_migration_items_source_table_chk check (btrim(source_table) <> ''),
-  constraint attachment_migration_items_source_pk_chk check (btrim(source_pk) <> ''),
-  constraint attachment_migration_items_resource_id_chk check (btrim(resource_id) <> ''),
-  constraint attachment_migration_items_status_chk check (status in ('pending', 'migrated', 'skipped', 'failed')),
-  primary key (migration_item_id),
-  foreign key (migration_run_id) references attachment_migration_runs(migration_run_id) on delete cascade,
-  foreign key (company_id) references companies(company_id) on delete cascade,
-  foreign key (company_id, attachment_id) references attachments(company_id, attachment_id) on delete set null
-);
-
-create index if not exists idx_attachment_migration_items_run_status
-  on attachment_migration_items(migration_run_id, status, migration_item_id);
-
-create index if not exists idx_attachment_migration_items_resource
-  on attachment_migration_items(company_id, resource_type, resource_id);
 
 create table if not exists nodes (
   company_id uuid not null,
@@ -976,47 +628,11 @@ create table if not exists node_relationships (
   foreign key (company_id, node_id_b) references nodes (company_id, node_id)
 );
 
-create table if not exists node_information (
-  company_id uuid not null,
-  information_id uuid not null,
-  node_id uuid not null,
-  type information_type not null,
-  information text not null,
-  save_batch_id uuid,
-  save_kind text not null default 'legacy',
-  saved_by_user_id uuid,
-  saved_by_display_name text not null default '',
-  source_information_id uuid,
-  created_timestamp timestamptz not null,
-  updated_timestamp timestamptz not null,
-  constraint node_information_save_kind_chk check (save_kind in ('legacy', 'manual', 'auto')),
-  constraint node_information_nonblank_chk check (btrim(information) <> ''),
-  primary key (company_id, information_id),
-  foreign key (saved_by_user_id) references users (user_id) on delete set null,
-  foreign key (company_id, node_id) references nodes (company_id, node_id)
-);
-
-create table if not exists node_projection_table (
-  company_id uuid not null,
-  node_id uuid not null,
-  information_id uuid not null,
-  type information_type not null,
-  information text not null,
-  is_deleted boolean not null default false,
-  revision bigint not null default 1,
-  created_timestamp timestamptz not null,
-  updated_timestamp timestamptz not null,
-  constraint node_projection_table_nonblank_chk check (btrim(information) <> ''),
-  constraint node_projection_table_revision_chk check (revision > 0),
-  primary key (company_id, node_id, information_id),
-  foreign key (company_id, node_id) references nodes (company_id, node_id)
-);
-
 create table if not exists node_content_changes (
   company_id uuid not null,
   change_id uuid not null,
   node_id uuid not null,
-  information_id uuid not null,
+  textbox_id uuid not null,
   change_type text not null,
   text text not null,
   start_offset integer not null,
@@ -1086,19 +702,6 @@ create table if not exists node_content_change_seen (
   seen_timestamp timestamptz not null default now(),
   primary key (company_id, change_id, user_id),
   foreign key (company_id, change_id) references node_content_changes (company_id, change_id) on delete cascade,
-  foreign key (user_id) references users (user_id) on delete cascade
-);
-
-create table if not exists node_projection_seen_snapshots (
-  company_id uuid not null,
-  node_id uuid not null,
-  information_id uuid not null,
-  user_id uuid not null,
-  information text not null,
-  projection_updated_timestamp timestamptz not null,
-  seen_timestamp timestamptz not null default now(),
-  primary key (company_id, node_id, information_id, user_id),
-  foreign key (company_id, node_id) references nodes (company_id, node_id) on delete cascade,
   foreign key (user_id) references users (user_id) on delete cascade
 );
 
@@ -1248,38 +851,6 @@ create index if not exists idx_entity_field_assignments_resource
 
 create index if not exists idx_entity_field_assignments_field
   on entity_field_assignments(company_id, field_id, resource_type, resource_id);
-
-create table if not exists project_information (
-  company_id uuid not null,
-  information_id uuid not null,
-  project_id uuid not null,
-  type information_type not null,
-  information text not null,
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  constraint project_information_nonblank_chk check (btrim(information) <> ''),
-  primary key (company_id, information_id),
-  foreign key (company_id, project_id) references projects(company_id, project_id) on delete cascade
-);
-
-create index if not exists idx_project_information_project
-  on project_information(company_id, project_id, created_timestamp, information_id);
-
-create table if not exists project_projection_table (
-  company_id uuid not null,
-  project_id uuid not null,
-  information_id uuid not null,
-  type information_type not null,
-  information text not null,
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  constraint project_projection_table_nonblank_chk check (btrim(information) <> ''),
-  primary key (company_id, project_id, information_id),
-  foreign key (company_id, project_id) references projects(company_id, project_id) on delete cascade
-);
-
-create index if not exists idx_project_projection_table_project_created
-  on project_projection_table(company_id, project_id, type, created_timestamp desc, information_id);
 
 create table if not exists project_relationships (
   company_id uuid not null,
@@ -1980,20 +1551,10 @@ create index if not exists idx_gvic_matrix_projection_leaf_project
 
 create index if not exists idx_gvic_matrix_projection_leaf_logic_gate
   on gvic_matrix_projection_table(company_id, logic_gate_id);
-create index if not exists idx_node_information_node on node_information(company_id, node_id);
-create index if not exists idx_node_information_save_batch
-  on node_information(company_id, node_id, save_batch_id, created_timestamp desc)
-  where save_batch_id is not null;
-create index if not exists idx_node_projection_table_node_updated on node_projection_table(company_id, node_id, updated_timestamp desc);
-drop index if exists idx_node_projection_table_one_text_box;
-create index if not exists idx_node_projection_table_node_type_created
-  on node_projection_table(company_id, node_id, type, created_timestamp, information_id);
 create index if not exists idx_node_content_changes_node_created
   on node_content_changes(company_id, node_id, created_timestamp, change_id);
 create index if not exists idx_node_content_change_seen_user
   on node_content_change_seen(company_id, user_id, change_id);
-create index if not exists idx_node_projection_seen_user
-  on node_projection_seen_snapshots(company_id, user_id, node_id, information_id);
 create index if not exists idx_node_map_positions_company_updated on node_map_positions(company_id, updated_timestamp desc);
 create index if not exists idx_node_relationships_a on node_relationships(company_id, node_id_a);
 create index if not exists idx_node_relationships_b on node_relationships(company_id, node_id_b);
@@ -2009,58 +1570,6 @@ create index if not exists idx_kanban_board_projection_node
   on kanban_board_projection(company_id, node_id);
 create index if not exists idx_kanban_board_projection_updated
   on kanban_board_projection(company_id, logic_gate_id, projection_updated_timestamp desc, node_id);
-
-create table if not exists communications_email_nodes (
-  company_id uuid not null,
-  user_id uuid not null,
-  message_id text not null,
-  node_id uuid not null,
-  board_id text not null,
-  card_id uuid not null,
-  logic_gate_id uuid not null,
-  message jsonb not null,
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  constraint communications_email_nodes_message_id_nonblank_chk check (btrim(message_id) <> ''),
-  primary key (company_id, node_id),
-  unique (company_id, board_id, card_id),
-  foreign key (user_id) references users (user_id) on delete cascade,
-  foreign key (company_id, node_id) references nodes (company_id, node_id) on delete cascade,
-  foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id) on delete cascade
-);
-
-create index if not exists idx_communications_email_nodes_user_message
-  on communications_email_nodes(user_id, message_id);
-
-create index if not exists idx_communications_email_nodes_logic_gate
-  on communications_email_nodes(company_id, logic_gate_id, created_timestamp desc);
-
-create table if not exists communications_email_node_attachments (
-  company_id uuid not null,
-  user_id uuid not null,
-  message_id text not null,
-  node_id uuid not null,
-  board_id text not null default '',
-  card_id uuid not null,
-  logic_gate_id uuid not null,
-  message jsonb not null,
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  constraint communications_email_node_attachments_message_id_nonblank_chk check (btrim(message_id) <> ''),
-  primary key (company_id, user_id, message_id, node_id),
-  foreign key (user_id) references users (user_id) on delete cascade,
-  foreign key (company_id, node_id) references nodes (company_id, node_id) on delete cascade,
-  foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id) on delete cascade
-);
-
-create index if not exists idx_communications_email_node_attachments_user_message
-  on communications_email_node_attachments(user_id, message_id);
-
-create index if not exists idx_communications_email_node_attachments_node
-  on communications_email_node_attachments(company_id, node_id, updated_timestamp desc);
-
-create index if not exists idx_communications_email_node_attachments_logic_gate
-  on communications_email_node_attachments(company_id, logic_gate_id, updated_timestamp desc);
 
 create table if not exists company_explorer_folders (
   company_id uuid not null,
@@ -2131,21 +1640,6 @@ create index if not exists idx_shared_inboxes_account_email
 
 create index if not exists idx_shared_inboxes_company_email_connection
   on shared_inboxes(company_id, company_email_connection_id);
-do $$
-begin
-  if to_regclass('public.communications_email_signatures') is not null
-     and not exists (
-       select 1 from pg_constraint
-       where conname = 'communications_email_signatures_shared_inbox_fkey'
-         and conrelid = 'communications_email_signatures'::regclass
-     ) then
-    alter table communications_email_signatures
-      add constraint communications_email_signatures_shared_inbox_fkey
-      foreign key (company_id, shared_inbox_id)
-      references shared_inboxes(company_id, shared_inbox_id) on delete cascade;
-  end if;
-end $$;
-
 create table if not exists communications_email_archive_jobs (
   archive_job_id uuid primary key,
   actor_user_id uuid not null references users(user_id) on delete cascade,
@@ -2362,16 +1856,6 @@ alter table logic_gate_relationships
     or (a_position = 'Output'::logic_gate_relationship_position and b_position = 'Input'::logic_gate_relationship_position)
   ) not valid;
 
-alter table node_information
-  drop constraint if exists node_information_nonblank_chk;
-alter table node_information
-  add constraint node_information_nonblank_chk check (btrim(information) <> '') not valid;
-
-alter table node_projection_table
-  drop constraint if exists node_projection_table_nonblank_chk;
-alter table node_projection_table
-  add constraint node_projection_table_nonblank_chk check (btrim(information) <> '') not valid;
-
 create or replace function workspace_static_read_version_keys()
 returns table(scope text, resource_key text) as $$
   select *
@@ -2487,8 +1971,6 @@ begin
     'project_created',
     'project_updated',
     'project_deleted',
-    'project_information_created',
-    'project_information_deleted',
     'project_relationship_upserted',
     'project_relationship_deleted',
     'project_permissions_updated'
@@ -3445,9 +2927,6 @@ for each row execute function mangorts_trg_bump_logic_gate_work_from_gate_row();
 drop trigger if exists trg_logic_gate_work_version_nodes on nodes;
 create trigger trg_logic_gate_work_version_nodes after update of name, due_date, priority on nodes
 for each row execute function mangorts_trg_bump_logic_gate_work_from_node();
-drop trigger if exists trg_logic_gate_work_version_email_origin on communications_email_nodes;
-create trigger trg_logic_gate_work_version_email_origin after insert or update or delete on communications_email_nodes
-for each row execute function mangorts_trg_bump_logic_gate_work_from_gate_row();
 
 -- Cheap, canonical node-view validators. Do not apply from an agent session.
 
@@ -3762,12 +3241,6 @@ drop trigger if exists trg_node_view_version_node on nodes;
 create trigger trg_node_view_version_node after update on nodes
 for each row execute function mangorts_trg_bump_node_view_from_node();
 
-drop trigger if exists trg_node_view_version_information on node_information;
-create trigger trg_node_view_version_information after insert or update or delete on node_information
-for each row execute function mangorts_trg_bump_node_view_from_direct_node();
-drop trigger if exists trg_node_view_version_projection on node_projection_table;
-create trigger trg_node_view_version_projection after insert or update or delete on node_projection_table
-for each row execute function mangorts_trg_bump_node_view_from_direct_node();
 drop trigger if exists trg_node_view_version_content_changes on node_content_changes;
 create trigger trg_node_view_version_content_changes after insert or update or delete on node_content_changes
 for each row execute function mangorts_trg_bump_node_view_from_direct_node();
@@ -3795,9 +3268,6 @@ for each row execute function mangorts_trg_bump_node_view_user_from_change_seen(
 drop trigger if exists trg_node_view_user_version_change_seen_delete on node_content_change_seen;
 create trigger trg_node_view_user_version_change_seen_delete before delete on node_content_change_seen
 for each row execute function mangorts_trg_bump_node_view_user_from_change_seen();
-drop trigger if exists trg_node_view_user_version_snapshots on node_projection_seen_snapshots;
-create trigger trg_node_view_user_version_snapshots after insert or update or delete on node_projection_seen_snapshots
-for each row execute function mangorts_trg_bump_node_view_user_from_snapshot();
 
 drop trigger if exists trg_node_view_version_accounts_update on accounts;
 create trigger trg_node_view_version_accounts_update after update on accounts
@@ -3834,190 +3304,6 @@ alter table company_explorer_items
 alter table company_explorer_items
   add constraint company_explorer_items_target_type_chk
   check (target_type in ('project', 'logic_gate', 'node'));
-
-create table if not exists communications_email_collaborations (
-  company_id uuid not null,
-  collaboration_id uuid not null,
-  node_id uuid not null,
-  attached_email_information_id uuid not null,
-  scope_type varchar not null,
-  personal_user_id uuid,
-  personal_account_email text,
-  shared_inbox_id uuid,
-  account_email text not null,
-  provider_thread_id text not null default '',
-  root_message_id text not null,
-  latest_message_id text not null,
-  message_snapshot jsonb not null default '{}'::jsonb,
-  created_by_user_id uuid,
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  constraint communications_email_collaborations_scope_type_chk check (scope_type in ('personal', 'shared')),
-  constraint communications_email_collaborations_scope_chk check (
-    (scope_type='personal' and personal_user_id is not null and personal_account_email is not null and shared_inbox_id is null)
-    or (scope_type='shared' and personal_user_id is null and personal_account_email is null and shared_inbox_id is not null)
-  ),
-  constraint communications_email_collaborations_account_email_chk check (btrim(account_email) <> '' and account_email=lower(btrim(account_email))),
-  constraint communications_email_collaborations_personal_account_email_chk check (personal_account_email is null or (btrim(personal_account_email) <> '' and personal_account_email=lower(btrim(personal_account_email)))),
-  constraint communications_email_collaborations_root_message_chk check (btrim(root_message_id) <> ''),
-  constraint communications_email_collaborations_latest_message_chk check (btrim(latest_message_id) <> ''),
-  constraint communications_email_collaborations_snapshot_object_chk check (jsonb_typeof(message_snapshot)='object'),
-  primary key (company_id, collaboration_id),
-  unique (company_id, node_id),
-  foreign key (company_id) references companies(company_id) on delete cascade,
-  foreign key (company_id, node_id) references nodes(company_id, node_id) on delete cascade,
-  foreign key (created_by_user_id) references users(user_id) on delete set null
-);
--- Keep immutable mailbox identifiers and the shared snapshot after a source mailbox is disconnected.
-do $$
-declare
-  source_fk record;
-begin
-  for source_fk in
-    select conname
-    from pg_constraint
-    where conrelid = 'communications_email_collaborations'::regclass
-      and contype = 'f'
-      and confrelid in ('user_email_connections'::regclass, 'shared_inboxes'::regclass)
-  loop
-    execute format('alter table communications_email_collaborations drop constraint %I', source_fk.conname);
-  end loop;
-end $$;
-
-create unique index if not exists idx_email_collaborations_personal_thread
-  on communications_email_collaborations(
-    company_id,
-    personal_user_id,
-    personal_account_email,
-    (case when provider_thread_id <> '' then 'thread:' || provider_thread_id else 'message:' || root_message_id end)
-  ) where scope_type='personal';
-
-create unique index if not exists idx_email_collaborations_shared_thread
-  on communications_email_collaborations(
-    company_id,
-    shared_inbox_id,
-    (case when provider_thread_id <> '' then 'thread:' || provider_thread_id else 'message:' || root_message_id end)
-  ) where scope_type='shared';
-
-create index if not exists idx_email_collaborations_latest_message
-  on communications_email_collaborations(company_id, latest_message_id);
-
-create table if not exists communications_email_collaboration_participants (
-  company_id uuid not null,
-  collaboration_id uuid not null,
-  user_id uuid not null,
-  added_by_user_id uuid,
-  added_via_type text not null,
-  added_via_id uuid,
-  created_timestamp timestamptz not null default now(),
-  constraint communications_email_collaboration_participants_via_chk check (added_via_type in ('creator', 'user', 'group')),
-  constraint communications_email_collaboration_participants_via_id_chk check ((added_via_type='creator' and added_via_id is null) or (added_via_type in ('user', 'group') and added_via_id is not null)),
-  primary key (company_id, collaboration_id, user_id),
-  foreign key (company_id, collaboration_id) references communications_email_collaborations(company_id, collaboration_id) on delete cascade,
-  foreign key (company_id, user_id) references company_memberships(company_id, user_id) on delete cascade,
-  foreign key (added_by_user_id) references users(user_id) on delete set null
-);
-
-create index if not exists idx_email_collaboration_participants_user
-  on communications_email_collaboration_participants(company_id, user_id, created_timestamp desc);
-
-alter table communications_email_drafts
-  add column if not exists collaboration_id uuid,
-  add column if not exists is_shared boolean not null default false,
-  add column if not exists revision bigint not null default 1,
-  add column if not exists send_state text not null default 'draft',
-  add column if not exists send_claim_token text not null default '',
-  add column if not exists send_idempotency_key text not null default '',
-  add column if not exists send_idempotency_grant_id text not null default '',
-  add column if not exists send_idempotency_timestamp timestamptz,
-  add column if not exists send_claimed_revision bigint not null default 0,
-  add column if not exists send_claimed_timestamp timestamptz,
-  add column if not exists sent_message_id text not null default '';
-
-alter table communications_email_drafts
-  drop constraint if exists communications_email_drafts_shared_collaboration_chk;
-alter table communications_email_drafts
-  add constraint communications_email_drafts_shared_collaboration_chk
-  check ((is_shared and collaboration_id is not null) or (not is_shared and collaboration_id is null));
-
-alter table communications_email_drafts
-  drop constraint if exists communications_email_drafts_revision_chk;
-alter table communications_email_drafts
-  add constraint communications_email_drafts_revision_chk check (revision > 0);
-
--- Shared collaboration drafts keep their immutable source identifiers and send-recovery
--- state after a mailbox source is removed. Ordinary private drafts retain their former
--- source-delete cleanup semantics through the two source-table triggers below.
-do $$
-declare
-  source_fk record;
-begin
-  for source_fk in
-    select conname
-    from pg_constraint
-    where conrelid = 'communications_email_drafts'::regclass
-      and contype = 'f'
-      and confrelid in ('user_email_connections'::regclass, 'shared_inboxes'::regclass)
-  loop
-    execute format('alter table communications_email_drafts drop constraint %I', source_fk.conname);
-  end loop;
-end $$;
-
-create or replace function mangorts_cleanup_private_personal_email_drafts()
-returns trigger language plpgsql as $$
-begin
-  delete from communications_email_drafts
-  where not is_shared
-    and personal_user_id = old.user_id
-    and personal_account_email = old.account_email;
-  return old;
-end;
-$$;
-
-drop trigger if exists trg_cleanup_private_email_drafts_personal_source on user_email_connections;
-create trigger trg_cleanup_private_email_drafts_personal_source
-before delete on user_email_connections
-for each row execute function mangorts_cleanup_private_personal_email_drafts();
-
-create or replace function mangorts_cleanup_private_shared_email_drafts()
-returns trigger language plpgsql as $$
-begin
-  delete from communications_email_drafts
-  where not is_shared
-    and company_id = old.company_id
-    and shared_inbox_id = old.shared_inbox_id;
-  return old;
-end;
-$$;
-
-drop trigger if exists trg_cleanup_private_email_drafts_shared_source on shared_inboxes;
-create trigger trg_cleanup_private_email_drafts_shared_source
-before delete on shared_inboxes
-for each row execute function mangorts_cleanup_private_shared_email_drafts();
-
-do $$
-begin
-  if not exists (
-    select 1 from pg_constraint
-    where conrelid='communications_email_drafts'::regclass
-      and conname='communications_email_drafts_collaboration_fkey'
-  ) then
-    alter table communications_email_drafts
-      add constraint communications_email_drafts_collaboration_fkey
-      foreign key (company_id, collaboration_id)
-      references communications_email_collaborations(company_id, collaboration_id)
-      on delete cascade;
-  end if;
-end $$;
-
-create index if not exists idx_communications_email_drafts_collaboration_updated
-  on communications_email_drafts(company_id, collaboration_id, updated_timestamp desc)
-  where deleted_timestamp is null and collaboration_id is not null;
-
-create unique index if not exists idx_communications_email_drafts_active_shared_source
-  on communications_email_drafts(company_id, collaboration_id, source_message_id)
-  where is_shared and deleted_timestamp is null and source_message_id <> '';
-
 
 -- Unified realtime collaboration durable spine.
 -- Apply before deploying application instances that publish collaboration deltas.
@@ -4062,203 +3348,6 @@ create index if not exists idx_realtime_outbox_scope_sequence
   on realtime_outbox(company_id, scope, outbox_sequence);
 
 
--- Durable provider-independent email snapshots for Node and collaboration reads.
--- Provider credentials, attachment bytes, object URLs, and presigned URLs are
--- excluded; attachment bytes live in Mango's private attachment object storage.
-create table if not exists communications_email_threads (
-  company_id uuid not null,
-  email_thread_id uuid not null,
-  scope_type varchar(16) not null,
-  personal_user_id uuid,
-  personal_account_email text,
-  shared_inbox_id uuid,
-  account_email text not null,
-  provider_thread_key text not null,
-  provider_thread_id text not null default '',
-  root_provider_message_id text not null,
-  download_status text not null default 'partial',
-  history_complete boolean not null default false,
-  fetched_at timestamptz,
-  last_download_error text not null default '',
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  constraint communications_email_threads_scope_type_chk check (scope_type in ('personal', 'shared')),
-  constraint communications_email_threads_scope_chk check (
-    (scope_type='personal' and personal_user_id is not null and personal_account_email is not null and shared_inbox_id is null)
-    or
-    (scope_type='shared' and personal_user_id is null and personal_account_email is null and shared_inbox_id is not null)
-  ),
-  constraint communications_email_threads_account_email_chk check (btrim(account_email) <> '' and account_email=lower(btrim(account_email))),
-  constraint communications_email_threads_personal_account_email_chk check (
-    personal_account_email is null or (btrim(personal_account_email) <> '' and personal_account_email=lower(btrim(personal_account_email)))
-  ),
-  constraint communications_email_threads_provider_key_chk check (btrim(provider_thread_key) <> ''),
-  constraint communications_email_threads_root_message_chk check (btrim(root_provider_message_id) <> ''),
-  constraint communications_email_threads_download_status_chk check (
-    download_status in ('partial', 'downloading', 'complete', 'failed') and (not history_complete or download_status in ('downloading', 'complete', 'failed'))
-  ),
-  primary key (company_id, email_thread_id),
-  foreign key (company_id) references companies(company_id) on delete cascade,
-  foreign key (company_id, personal_user_id) references company_memberships(company_id, user_id) on delete cascade,
-  foreign key (company_id, shared_inbox_id) references shared_inboxes(company_id, shared_inbox_id) on delete cascade
-);
-
-create unique index if not exists idx_communications_email_threads_personal_provider
-  on communications_email_threads(company_id, personal_user_id, personal_account_email, provider_thread_key)
-  where scope_type='personal';
-
-create unique index if not exists idx_communications_email_threads_shared_provider
-  on communications_email_threads(company_id, shared_inbox_id, provider_thread_key)
-  where scope_type='shared';
-
-create table if not exists communications_email_messages (
-  company_id uuid not null,
-  email_message_id uuid not null,
-  email_thread_id uuid not null,
-  provider_message_id text not null,
-  provider_thread_id text not null default '',
-  message_order integer not null,
-  subject text not null default '',
-  sender_snapshot jsonb not null default '[]'::jsonb,
-  to_snapshot jsonb not null default '[]'::jsonb,
-  cc_snapshot jsonb not null default '[]'::jsonb,
-  bcc_snapshot jsonb not null default '[]'::jsonb,
-  reply_to_snapshot jsonb not null default '[]'::jsonb,
-  message_timestamp bigint not null default 0,
-  rich_html_body text not null default '',
-  text_fallback text not null default '',
-  snippet text not null default '',
-  unread boolean not null default false,
-  starred boolean not null default false,
-  folder_snapshot jsonb not null default '[]'::jsonb,
-  folder_id_snapshot jsonb not null default '[]'::jsonb,
-  attachment_metadata jsonb not null default '[]'::jsonb,
-  download_complete boolean not null default false,
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  constraint communications_email_messages_provider_message_chk check (btrim(provider_message_id) <> ''),
-  constraint communications_email_messages_order_chk check (message_order >= 0),
-  constraint communications_email_messages_json_chk check (
-    jsonb_typeof(sender_snapshot)='array'
-    and jsonb_typeof(to_snapshot)='array'
-    and jsonb_typeof(cc_snapshot)='array'
-    and jsonb_typeof(bcc_snapshot)='array'
-    and jsonb_typeof(reply_to_snapshot)='array'
-    and jsonb_typeof(folder_snapshot)='array'
-    and jsonb_typeof(folder_id_snapshot)='array'
-    and jsonb_typeof(attachment_metadata)='array'
-  ),
-  primary key (company_id, email_message_id),
-  unique (company_id, email_thread_id, provider_message_id),
-  foreign key (company_id, email_thread_id)
-    references communications_email_threads(company_id, email_thread_id) on delete cascade
-);
-
-create index if not exists idx_communications_email_messages_thread_order
-  on communications_email_messages(company_id, email_thread_id, message_order, provider_message_id);
-
-create table if not exists communications_node_email_threads (
-  company_id uuid not null,
-  node_id uuid not null,
-  information_id uuid not null,
-  email_thread_id uuid not null,
-  selected_provider_message_id text not null,
-  created_by_user_id uuid,
-  created_timestamp timestamptz not null default now(),
-  constraint communications_node_email_threads_selected_message_chk check (btrim(selected_provider_message_id) <> ''),
-  primary key (company_id, node_id, information_id),
-  unique (company_id, node_id, email_thread_id),
-  foreign key (company_id, node_id) references nodes(company_id, node_id) on delete cascade,
-  foreign key (company_id, email_thread_id)
-    references communications_email_threads(company_id, email_thread_id) on delete cascade,
-  foreign key (created_by_user_id) references users(user_id) on delete set null
-);
-
-create index if not exists idx_communications_node_email_threads_read
-  on communications_node_email_threads(company_id, node_id, email_thread_id);
-
-create table if not exists communications_email_thread_download_jobs (
-  download_job_id uuid primary key,
-  company_id uuid not null,
-  email_thread_id uuid not null,
-  download_scope text not null,
-  requested_provider_message_id text not null default '',
-  requested_by_user_id uuid,
-  status text not null default 'pending',
-  attempt_count integer not null default 0,
-  last_error text not null default '',
-  available_at timestamptz not null default now(),
-  processing_started_at timestamptz,
-  completed_timestamp timestamptz,
-  failed_timestamp timestamptz,
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  constraint communications_email_thread_download_jobs_scope_chk check (
-    (download_scope='full_thread' and requested_provider_message_id='')
-    or (download_scope='message' and btrim(requested_provider_message_id)<>'')
-  ),
-  constraint communications_email_thread_download_jobs_status_chk check (status in ('pending','processing','retry','completed','failed')),
-  constraint communications_email_thread_download_jobs_attempt_chk check (attempt_count >= 0),
-  foreign key (company_id, email_thread_id)
-    references communications_email_threads(company_id, email_thread_id) on delete cascade,
-  foreign key (requested_by_user_id) references users(user_id) on delete set null
-);
-
-create unique index if not exists idx_communications_email_thread_download_jobs_active_full
-  on communications_email_thread_download_jobs(company_id, email_thread_id)
-  where download_scope='full_thread' and status in ('pending','processing','retry');
-
-create unique index if not exists idx_communications_email_thread_download_jobs_active_message
-  on communications_email_thread_download_jobs(company_id, email_thread_id, requested_provider_message_id)
-  where download_scope='message' and status in ('pending','processing','retry');
-
-create index if not exists idx_communications_email_thread_download_jobs_claim
-  on communications_email_thread_download_jobs(status, available_at, created_timestamp)
-  where status in ('pending','processing','retry');
-
-alter table communications_email_collaborations
-  add column if not exists email_thread_id uuid;
-
-alter table communications_email_nodes
-  add column if not exists email_thread_id uuid;
-
-alter table communications_email_node_attachments
-  add column if not exists email_thread_id uuid;
-
-do $$
-begin
-  if not exists (
-    select 1 from pg_constraint
-    where conrelid='communications_email_collaborations'::regclass
-      and conname='communications_email_collaborations_email_thread_fk'
-  ) then
-    alter table communications_email_collaborations
-      add constraint communications_email_collaborations_email_thread_fk
-      foreign key (company_id, email_thread_id)
-      references communications_email_threads(company_id, email_thread_id) on delete restrict;
-  end if;
-  if not exists (
-    select 1 from pg_constraint
-    where conrelid='communications_email_nodes'::regclass
-      and conname='communications_email_nodes_email_thread_fk'
-  ) then
-    alter table communications_email_nodes
-      add constraint communications_email_nodes_email_thread_fk
-      foreign key (company_id, email_thread_id)
-      references communications_email_threads(company_id, email_thread_id) on delete restrict;
-  end if;
-  if not exists (
-    select 1 from pg_constraint
-    where conrelid='communications_email_node_attachments'::regclass
-      and conname='communications_email_node_attachments_email_thread_fk'
-  ) then
-    alter table communications_email_node_attachments
-      add constraint communications_email_node_attachments_email_thread_fk
-      foreign key (company_id, email_thread_id)
-      references communications_email_threads(company_id, email_thread_id) on delete restrict;
-  end if;
-end
-$$;
 -- Permanent TipTap JSON storage for Node text boxes.
 create table if not exists node_textboxes (
   company_id uuid not null,
@@ -4297,6 +3386,36 @@ comment on table node_textboxes is
   'Permanent current TipTap JSON document storage for Node text boxes.';
 comment on column node_textboxes.display_order is
   'User-controlled Node workspace order.';
+
+alter table node_content_changes
+  add constraint node_content_changes_textbox_fk
+  foreign key (company_id, node_id, textbox_id)
+  references node_textboxes(company_id, node_id, textbox_id) on delete cascade;
+
+create table if not exists node_textbox_seen_snapshots (
+  company_id uuid not null,
+  node_id uuid not null,
+  textbox_id uuid not null,
+  user_id uuid not null,
+  body_json jsonb not null,
+  textbox_revision bigint not null,
+  textbox_updated_timestamp timestamptz not null,
+  seen_timestamp timestamptz not null default now(),
+  primary key (company_id, node_id, textbox_id, user_id),
+  foreign key (company_id, node_id, textbox_id)
+    references node_textboxes(company_id, node_id, textbox_id) on delete cascade,
+  foreign key (user_id) references users(user_id) on delete cascade,
+  constraint node_textbox_seen_snapshots_body_json_chk check (
+    body_json->>'format' = 'mango-tiptap-json'
+    and body_json->>'schema_version' = '1'
+    and body_json->'document'->>'type' = 'doc'
+    and jsonb_typeof(body_json->'annotations') = 'array'
+  ),
+  constraint node_textbox_seen_snapshots_revision_chk check (textbox_revision >= 0)
+);
+
+create index if not exists idx_node_textbox_seen_snapshots_user
+  on node_textbox_seen_snapshots(company_id, user_id, node_id, textbox_id);
 
 -- Permanent comments owned by an exact Node textbox.
 create table if not exists node_textbox_chats (
@@ -4502,8 +3621,7 @@ create table if not exists logic_gate_textboxes (
 create index if not exists idx_logic_gate_textboxes_gate
   on logic_gate_textboxes(company_id, logic_gate_id, updated_timestamp desc, textbox_id)
   where deleted_timestamp is null;
--- Additive V3 email expansion. Legacy communications_email_* and
--- resource_attachments tables remain until the backend cutover has passed.
+-- Final provider-independent email storage.
 create table if not exists email_threads (
   company_id uuid not null,
   email_thread_id uuid not null,
@@ -5067,9 +4185,8 @@ create unique index if not exists idx_attachment_relationships_active_unique
     coalesce(information_id::text,''),coalesce(message_id,''),coalesce(editor_surface,'')
   ) where deleted_timestamp is null;
 
--- Active links take a row lock on the attachment and reject any attachment
--- already marked for cleanup. This closes the relink-versus-cleanup race while
--- the legacy and final relationship writers coexist during Step 1.
+-- Active final links take a row lock on the attachment and reject any attachment
+-- already marked for cleanup. This closes the relink-versus-cleanup race.
 create or replace function mangorts_reject_pending_attachment_link()
 returns trigger language plpgsql as $$
 begin
@@ -5089,11 +4206,6 @@ begin
 end;
 $$;
 
-drop trigger if exists trg_resource_attachments_reject_pending on resource_attachments;
-create trigger trg_resource_attachments_reject_pending
-before insert or update of company_id,attachment_id,deleted_timestamp
-on resource_attachments for each row
-execute function mangorts_reject_pending_attachment_link();
 
 -- Final relationships additionally prove that each active owner exists. Legacy
 -- structured email identifiers are normalized before they reach this table.
@@ -5194,38 +4306,14 @@ before insert or update of company_id,attachment_id,resource_type,resource_id,de
 on attachment_relationships for each row
 execute function mangorts_validate_attachment_relationship_owner();
 
-create table if not exists v3_email_migration_runs (
-  run_id uuid primary key,
-  mapping_version integer not null,
-  status text not null,
-  summary jsonb not null default '{}'::jsonb,
-  started_timestamp timestamptz not null default now(),
-  completed_timestamp timestamptz,
-  constraint v3_email_migration_runs_version_chk check (mapping_version > 0),
-  constraint v3_email_migration_runs_status_chk check (status in ('running','complete')),
-  constraint v3_email_migration_runs_summary_chk check (jsonb_typeof(summary)='object')
-);
-create table if not exists v3_email_migration_items (
-  run_id uuid not null,
-  source_table text not null,
-  company_id uuid not null,
-  source_key text not null,
-  target_table text not null,
-  target_key text not null,
-  disposition text not null,
-  source_checksum text not null,
-  recorded_timestamp timestamptz not null default now(),
-  primary key (run_id,source_table,company_id,source_key),
-  foreign key (run_id) references v3_email_migration_runs(run_id) on delete cascade,
-  constraint v3_email_migration_items_source_chk check (btrim(source_table)<>''),
-  constraint v3_email_migration_items_source_key_chk check (btrim(source_key)<>''),
-  constraint v3_email_migration_items_target_chk check (btrim(target_table)<>''),
-  constraint v3_email_migration_items_target_key_chk check (btrim(target_key)<>''),
-  constraint v3_email_migration_items_disposition_chk check (
-    disposition in ('copied','updated','consolidated_duplicate','retained_without_source_link',
-      'retained_orphan_evidence')
-  ),
-  constraint v3_email_migration_items_checksum_chk check (
-    source_checksum ~ '^[0-9a-f]{32}$'
-  )
-);
+drop trigger if exists trg_node_view_version_textboxes on node_textboxes;
+create trigger trg_node_view_version_textboxes after insert or update or delete on node_textboxes
+for each row execute function mangorts_trg_bump_node_view_from_direct_node();
+
+drop trigger if exists trg_node_view_version_textbox_chats on node_textbox_chats;
+create trigger trg_node_view_version_textbox_chats after insert or update or delete on node_textbox_chats
+for each row execute function mangorts_trg_bump_node_view_from_direct_node();
+
+drop trigger if exists trg_node_view_user_version_snapshots on node_textbox_seen_snapshots;
+create trigger trg_node_view_user_version_snapshots after insert or update or delete on node_textbox_seen_snapshots
+for each row execute function mangorts_trg_bump_node_view_user_from_snapshot();

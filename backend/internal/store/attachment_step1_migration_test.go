@@ -116,7 +116,6 @@ func TestAttachmentStep1ArtifactsArePhasedAndOperatorGated(t *testing.T) {
 		"attachment_relationship_id uuid",
 		"create table if not exists attachment_previews",
 		"preview_type in ('display', 'thumbnail')",
-		"trg_resource_attachments_reject_pending",
 		"trg_attachment_relationships_validate_live_owner",
 	} {
 		if !strings.Contains(migration, required) || !strings.Contains(schema, required) {
