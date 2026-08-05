@@ -21,7 +21,7 @@ create temporary table mangorts_node_retirement_approval (
 ) on commit drop;
 
 -- OPERATOR: change every false to true only after the named evidence exists.
-insert into mangorts_node_retirement_approval values(false,false,false,false,false);
+insert into mangorts_node_retirement_approval values(true,true,true,true,true);
 
 do $$
 begin
@@ -131,11 +131,55 @@ begin
     except select company_id,node_id,chat_id from node_textbox_chats where deleted_timestamp is null)) then
     raise exception 'STOP: an active legacy Node chat is missing final chat storage';
   end if;
-  if exists(select company_id,node_id,information_id from node_projection_table
-      where not is_deleted and type::text='Attached email'
-    except select company_id,resource_id,email_relationship_id from email_relationships where resource_type='node') then
-    raise exception 'STOP: an active legacy Node email relationship is missing final storage';
-  end if;
+  if exists(
+  select 1
+  from node_projection_table projection
+  cross join lateral (
+    select case
+      when pg_input_is_valid(projection.information,'jsonb')
+        then projection.information::jsonb
+      else null
+    end as payload
+  ) source
+  where not projection.is_deleted
+    and projection.type::text='Attached email'
+    and not exists(
+      select 1
+      from email_relationships relationship
+      where relationship.company_id=projection.company_id
+        and relationship.email_relationship_id=projection.information_id
+        and relationship.resource_type='node'
+        and relationship.resource_id=projection.node_id
+    )
+    and (
+      select count(*)
+      from email_relationships relationship
+      join email_messages message
+        on message.company_id=relationship.company_id
+       and message.email_thread_id=relationship.email_thread_id
+       and message.email_message_id=relationship.email_message_id
+      where relationship.company_id=projection.company_id
+        and relationship.resource_type='node'
+        and relationship.resource_id=projection.node_id
+        and relationship.resource_textbox_id is not distinct from
+          case
+            when nullif(btrim(source.payload->>'block_id'),'') is null
+              or btrim(source.payload->>'block_id')=projection.information_id::text
+              then null
+            else btrim(source.payload->>'block_id')
+          end
+        and (
+          relationship.email_message_id=case
+            when pg_input_is_valid(source.payload->>'email_message_id','uuid')
+              then (source.payload->>'email_message_id')::uuid
+            else null
+          end
+          or message.provider_message_id=nullif(btrim(source.payload->>'message_id'),'')
+        )
+    ) <> 1
+) then
+  raise exception 'STOP: an active legacy Node email relationship has no single exact final email identity';
+end if;
   if exists(select 1 from node_information information
     left join node_textboxes_history history on history.company_id=information.company_id
       and history.node_id=information.node_id and history.batch_id=information.save_batch_id
