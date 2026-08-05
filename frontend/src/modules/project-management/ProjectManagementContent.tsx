@@ -9,7 +9,7 @@ import { fetchCurrentUser } from "../../auth/cognitoAuth.js";
 import { getActiveCompanyID } from "../../auth/currentCompany.js";
 import { AccountFilterControl, useCompanyAccounts } from "../accounts/AccountFilterControl.js";
 import { entityMatchesAccountFilter } from "../accounts/accountsApi.js";
-import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons.js";
+import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../icons/index.js";
 import { EXPLORER_DRAG_MIME, readExplorerDragPayload } from "../company-explorer/companyExplorerDragDrop.js";
 import { buildCompanyExplorerTreeRows } from "../company-explorer/companyExplorerTreeRows.js";
 import {

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { fetchCurrentUser } from "../../auth/cognitoAuth.js";
 import { getActiveCompanyID } from "../../auth/currentCompany.js";
-import { ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons.js";
+import { ExplorerRowIcon } from "../../icons/index.js";
 import { resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation.js";
 import { listCompanyUserGroups, listCompanyUsers, type CompanyUser, type CompanyUserGroup, type CompanyUserGroupMember } from "../../modules/communications/communicationsApi.js";
 import {

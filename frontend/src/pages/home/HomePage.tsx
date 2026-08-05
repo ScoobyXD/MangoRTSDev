@@ -8,7 +8,7 @@ import { getActiveCompanyID } from "../../auth/currentCompany";
 import { AppModalPortal } from "../../app/AppModalPortal";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import { requestAppDockTab } from "../../app/appDockTabs";
-import { MangoWordmark } from "../../app/MangoLogo";
+import { MangoWordmark } from "../../icons/index.js";
 import { preloadLogicGateArenaSurface, preloadProjectManagementSurface } from "../../app/preloadDashboardModules";
 import {
   addLogicGateGVICAssignments,

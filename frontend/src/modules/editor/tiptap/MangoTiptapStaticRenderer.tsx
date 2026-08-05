@@ -2,7 +2,7 @@ import React from "react";
 import type { JSONContent } from "@tiptap/core";
 import { needsMangoTiptapLegacyDateHeadingBreak, type MangoTiptapDocument } from "./mangoTiptapDocument.js";
 import type { MangoTiptapAnnotation } from "./mangoTiptapAnnotations.js";
-import { ExplorerEntityIcon } from "../../company-explorer/CompanyExplorerEntityIcon.js";
+import { ExplorerEntityIcon } from "../../../icons/index.js";
 import { editorEntityRoute, editorEntityTypeLabel, isEditorEntityType, openEditorEntityLink } from "../editorEntityLinks.js";
 import "./mangoTiptap.css";
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
+import { ExplorerRowIcon } from "../icons/index.js";
 import { EXPLORER_DRAG_MIME, readExplorerDragPayload } from "../modules/company-explorer/companyExplorerDragDrop";
 import { getExplorerDropPayloadItems } from "../modules/company-explorer/treePresentation";
 import { EXPLORER_ENTITY_DRAG_MIME, parseExplorerEntityDragItems } from "../modules/kanban/shared";

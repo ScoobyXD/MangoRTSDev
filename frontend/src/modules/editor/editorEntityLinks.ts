@@ -1,5 +1,5 @@
 import { buildLogicGateRoute, buildNodeRoute, buildProjectRoute, parseDeepLinkRoute } from "../../app/deepLinkRoutes.js";
-import { createExplorerEntityIconElement } from "../company-explorer/CompanyExplorerEntityIcon.js";
+import { createExplorerEntityIconElement } from "../../icons/index.js";
 import { createNodeFromSelectionTitle, normalizeSelectedTextForNodeTitle } from "../nodes/selectionNodeCreation.js";
 
 export type EditorEntityType = "node" | "logic_gate" | "project";

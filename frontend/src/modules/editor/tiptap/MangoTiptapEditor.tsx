@@ -10,7 +10,7 @@ import {
 import { realtimeEditorJSONScope, subscribeRealtimeScope } from "../../realtime/realtimeWebSocket";
 import type { MentionableCompanyUser } from "../editorMentions";
 import { EditorImagePreviewModal } from "../EditorImagePreviewModal.js";
-import { EditorSelectionNodeIcon } from "../EditorSelectionNodeIcon.js";
+import { EditorSelectionNodeIcon } from "../../../icons/index.js";
 import { ChatIcon } from "../NodeWorkspaceSurfaceShared.js";
 import {
   createNodeEntityFromSelection,

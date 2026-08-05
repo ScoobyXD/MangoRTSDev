@@ -7,7 +7,7 @@ import {
   getKanbanBoardDisplayTitle,
   type KanbanBoard,
 } from "./shared";
-import { KanbanBoardIcon } from "./KanbanBoardIcon";
+import { KanbanBoardIcon } from "../../icons/index.js";
 import {
   contextMenuHoverHandlers,
   KANBAN_ACTIVE_SURFACE,

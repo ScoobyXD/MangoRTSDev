@@ -1,5 +1,5 @@
 import React from "react";
-import { HeaderRecycleBinIcon } from "../../app/HeaderIcons";
+import { HeaderRecycleBinIcon } from "../../icons/index.js";
 import { MinimizeToLineIcon, OpenInNewTabIcon, PinToSidebarIcon } from "../../app/nodeEditorPopupControls";
 import {
   UNIFIED_NODE_SHELL_BEHAVIOR_SOURCE,

@@ -1,10 +1,10 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { HeaderAccountManagerIcon, HeaderFieldsIcon, HeaderHomeIcon, HeaderLogicGateArenaIcon, HeaderProjectManagementIcon, HeaderTeamsIcon } from "./HeaderIcons";
+import { HeaderAccountManagerIcon, HeaderFieldsIcon, HeaderHomeIcon, HeaderLogicGateArenaIcon, HeaderProjectManagementIcon, HeaderTeamsIcon } from "../icons/index.js";
 import type { CurrentUserResponse } from "../auth/cognitoAuth";
 import { getActiveCompanyID } from "../auth/currentCompany";
 import FrameCanvas from "./framecanvas";
 import FrameRightClickMenu from "./framerightclickmenu";
-import { MangoWordmark } from "./MangoLogo";
+import { MangoWordmark } from "../icons/index.js";
 import ModulePickerMenu from "./menus/ModulePickerMenu";
 import { MODULE_LIBRARY as FRAME_MODULE_LIBRARY, preloadModuleKind } from "../modules";
 import type { FrameDataModel, DragState } from "../types";

@@ -22,7 +22,7 @@ import {
   readCommittedEntityTitleVersion,
   subscribeCommittedEntityTitleUpdates,
 } from "../realtime/committedEntityTitleUpdates.js";
-import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons.js";
+import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../icons/index.js";
 import { CompanyExplorerSearchBox } from "../company-explorer/CompanyExplorerSearchBox.js";
 import { fetchCompanyExplorerSearchResults, type CompanyExplorerSearchResult } from "../company-explorer/companyExplorerLazyApi.js";
 import { reconcileCompanyExplorerSearchResultTitles } from "../company-explorer/companyExplorerStore.js";

@@ -95,7 +95,7 @@ import {
   type ActiveMentionDraft,
   type MentionableCompanyUser,
 } from "./editorMentions";
-import { ExplorerEntityIcon } from "../company-explorer/CompanyExplorerEntityIcon.js";
+import { ExplorerEntityIcon } from "../../icons/index.js";
 import {
   createEditorEntityLinkElement,
   createNodeEntityFromSelection,
@@ -109,7 +109,7 @@ import {
   type EditorEntityLink,
   type EditorEntityLinkContext,
 } from "./editorEntityLinks.js";
-import { EditorSelectionNodeIcon } from "./EditorSelectionNodeIcon.js";
+import { EditorSelectionNodeIcon } from "../../icons/index.js";
 import { calculateEditorSelectionActionPosition } from "./editorSelectionActions.js";
 import {
   EDITOR_IMAGE_NODE_ATTRIBUTE,

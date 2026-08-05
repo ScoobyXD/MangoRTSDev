@@ -7,7 +7,7 @@ import { humanLabelOrFallback } from "../entityLabels.js";
 import { getLogicGateRecordSingleFlight } from "../logic-gates/logicGateRecordStore.js";
 import type { LogicGateRecord } from "../logic-gates/types";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../dashboardEvents";
-import { ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons";
+import { ExplorerRowIcon } from "../../icons/index.js";
 import { CompanyExplorerSearchBox } from "../company-explorer/CompanyExplorerSearchBox";
 import { fetchCompanyExplorerSearchResults, type CompanyExplorerSearchResult } from "../company-explorer/companyExplorerLazyApi";
 import { reconcileCompanyExplorerSearchResultTitles } from "../company-explorer/companyExplorerStore";

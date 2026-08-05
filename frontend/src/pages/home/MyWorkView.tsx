@@ -5,7 +5,7 @@ import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { openAppPathInNewTab } from "../../app/resourceLinks";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import type { CompanyUser, CompanyUserGroup, CompanyUserGroupMember } from "../../modules/communications/communicationsApi";
-import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
+import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../icons/index.js";
 import { readCommittedEntityTitleVersion, subscribeCommittedEntityTitleUpdates } from "../../modules/realtime/committedEntityTitleUpdates";
 import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gates/types";
 import type { NodeRecord } from "../../modules/nodes/types";

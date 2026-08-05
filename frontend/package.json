@@ -8,6 +8,7 @@
     "start": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "icons:export": "node scripts/export_icon_catalog.mjs",
     "test:node-relationships": "node ../tests/frontend/scripts/run-node-relationship-tests.contract.test.mjs && node ../tests/frontend/scripts/run-node-relationship-tests.mjs"
   },
   "dependencies": {

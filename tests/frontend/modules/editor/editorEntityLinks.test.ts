@@ -80,7 +80,7 @@ test("highlighted-text actions keep the square-plus button immediately right of 
   });
   assert.deepEqual(scrolledChat, { left: 138, top: 336 });
 
-  const iconSource = readFileSync("frontend/src/modules/editor/EditorSelectionNodeIcon.tsx", "utf8");
+  const iconSource = readFileSync("frontend/src/icons/EditorSelectionNodeIcon.tsx", "utf8");
   assert.match(iconSource, /<rect x="5" y="5" width="14" height="14"/);
   assert.match(iconSource, /<path d="M9 12h6M12 9v6"/);
 });

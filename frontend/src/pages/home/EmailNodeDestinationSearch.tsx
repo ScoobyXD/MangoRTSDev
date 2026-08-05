@@ -1,5 +1,5 @@
 import React from "react";
-import { ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
+import { ExplorerRowIcon } from "../../icons/index.js";
 import type { LogicGateRecord } from "../../modules/logic-gates/types";
 import type { NodeRecord } from "../../modules/nodes/types";
 import {

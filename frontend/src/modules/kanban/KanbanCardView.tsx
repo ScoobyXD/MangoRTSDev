@@ -4,7 +4,7 @@ import {
   hexToRgba,
   type KanbanCard,
 } from "./shared";
-import { ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons";
+import { ExplorerRowIcon } from "../../icons/index.js";
 import { KANBAN_EDGE_FRAME } from "./KanbanContentModel";
 
 const NodeDocumentIcon: React.FC<{ color: string }> = ({ color }) => (

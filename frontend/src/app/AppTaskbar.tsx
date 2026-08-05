@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
+import { ExplorerRowIcon } from "../icons/index.js";
 import { EXPLORER_DRAG_MIME } from "../modules/company-explorer/companyExplorerDragDrop";
 import type { AppDockTab } from "./appDockTabs";
 import { AppTimeline } from "./AppTimeline";

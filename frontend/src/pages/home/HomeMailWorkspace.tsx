@@ -1,7 +1,7 @@
 import React from "react";
 import { confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import type { CommunicationsEmailCollaboration, CompanyUser, CompanyUserGroup, CompanyUserGroupMember, EmailMailbox, EmailMessage, EmailProvider } from "../../modules/communications/communicationsApi";
-import { ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
+import { ExplorerRowIcon } from "../../icons/index.js";
 import type { NodeRecord } from "../../modules/nodes/types";
 import type { LogicGateRecord } from "../../modules/logic-gates/types";
 import type { ComposeState, HomeViewID, MessageSelectionModifiers } from "./homeTypes";

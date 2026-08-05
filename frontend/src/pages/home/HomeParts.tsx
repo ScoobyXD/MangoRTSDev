@@ -41,7 +41,7 @@ import type { EditorHighlightColor } from "../../modules/editor/richTextEditing"
 import type { EditorInlineStyleCommand, EditorSelectionInlineFormatState, EditorTextAlignment } from "../../modules/editor/useEditorDocumentSurfaceHandlers";
 import { EDITOR_DOCUMENT_FONT_SIZE_PX } from "../../modules/editor/useEditorPreferences";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
-import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
+import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../icons/index.js";
 import type { NodeRecord, NodeRelationship } from "../../modules/nodes/types";
 import { buildNodeRelationshipHierarchyRows } from "../../modules/nodes/nodeRelationshipStructure";
 import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gates/types";

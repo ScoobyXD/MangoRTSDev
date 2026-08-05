@@ -80,7 +80,7 @@ import { subscribeRealtimeScope } from "../realtime/realtimeWebSocket";
 import { assignNodeToLogicGateStatus, moveLogicGateAssignment } from "../kanban/kanbanApi";
 import { EntityPermissionsPanel } from "../permissions/EntityPermissionsDialog";
 import { listProjectRelationshipsForResource, type ProjectRelationshipProjection } from "../project-management/projectManagementApi";
-import { ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons";
+import { ExplorerRowIcon } from "../../icons/index.js";
 import { commitEntityTitleMutation, createCommittedTitleEditBuffer, foldCommittedEntityTitlesSince, readCommittedEntityTitleVersion, subscribeCommittedEntityTitleUpdates } from "../realtime/committedEntityTitleUpdates";
 import { preferResolvedEntityLabel } from "../entityLabels.js";
 import { createCoalescedCanonicalRefresh } from "../realtime/coalescedCanonicalRefresh";

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { Account } from "../accounts/accountsApi.js";
 import type { CompanyUserGroup } from "../communications/communicationsApi.js";
-import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons.js";
+import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../icons/index.js";
 import type { EntityField } from "../fields/entityFieldsApi.js";
 import { buildUniversalNestedGroups, type UniversalGroupValue, type UniversalGroupingSetting, type UniversalNestedGroup } from "../grouping/universalGrouping.js";
 import type { ProjectHealth, ProjectRecord } from "./projectManagementApi.js";

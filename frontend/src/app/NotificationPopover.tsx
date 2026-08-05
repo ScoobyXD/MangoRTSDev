@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import FrameRightClickMenu from "./framerightclickmenu";
-import { ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
+import { ExplorerRowIcon } from "../icons/index.js";
 import type { NotificationItem } from "../modules/notifications/notificationsApi";
 import { formatNotificationTimestamp } from "../modules/notifications/notificationTime";
 

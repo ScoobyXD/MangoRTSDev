@@ -8,7 +8,7 @@ import {
 } from "../kanban/shared";
 import type { SelectionIntent } from "../selectionCoordinator";
 import { hasTriageMessageDrag, readTriageMessageDrag } from "../../pages/home/homeUtils";
-import { ExplorerDisclosureIcon, ExplorerRowIcon } from "./CompanyExplorerIcons";
+import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../icons/index.js";
 import {
   EXPLORER_DRAG_MIME,
   getExplorerDragPayloadForSelection,

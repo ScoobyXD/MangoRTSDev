@@ -1,7 +1,7 @@
 import React from "react";
-import { KanbanBoardIcon } from "../kanban/KanbanBoardIcon";
-import { ExplorerEntityIcon } from "./CompanyExplorerEntityIcon";
-import type { ExplorerTreeNode } from "./companyExplorerTypes";
+import { KanbanBoardIcon } from "./KanbanBoardIcon.js";
+import { ExplorerEntityIcon } from "./EntityIcons.js";
+import type { ExplorerTreeNode } from "../modules/company-explorer/companyExplorerTypes.js";
 
 type ExplorerRowIconTone = "default" | "inverse" | "orange";
 

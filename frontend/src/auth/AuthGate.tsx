@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../app/ConfirmActionMenu";
 import { preloadAccountManagerSurface, preloadFieldsSurface, preloadHomeSurface, preloadLikelyDashboardModules, preloadLogicGateArenaSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "../app/preloadDashboardModules";
-import { HeaderRecycleBinIcon, HeaderSettingsIcon } from "../app/HeaderIcons";
-import { MangoWordmark } from "../app/MangoLogo";
+import { HeaderRecycleBinIcon, HeaderSettingsIcon } from "../icons/index.js";
+import { MangoWordmark } from "../icons/index.js";
 import { getActiveCompanyID, getStoredActiveCompanyID, setActiveCompanyID } from "./currentCompany";
 import {
   acceptInvitation,
