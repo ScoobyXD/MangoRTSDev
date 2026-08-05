@@ -1,6 +1,6 @@
 # Delete Node Map and Logic Gate Map
 
-Status: Step 1 inventory and Step 2 application/source removal are complete. Step 3 live retirement remains a separately approved human operation.
+Status: Steps 1-3 are complete for the development environment. Jonat reported the separately approved human retirement operation completed on 2026-08-05.
 
 ## Goal
 
@@ -162,7 +162,15 @@ Agents must not apply SQL to a live database.
 
 ## Step 3: Verify, Then Retire the Two Position Tables
 
-Status: Application/source verification is complete. Live deployment, read-only database preflight, smoke testing, snapshot approval, and human-run table retirement remain pending.
+Status: Complete for the development environment based on Jonat's 2026-08-05 operator report. The agent did not apply SQL to a live database.
+
+### Step 3 Operator Completion Record — 2026-08-05
+
+- Jonat manually ran the corrected PostgreSQL 17 read-only preflight and reported its READY result.
+- Jonat then ran the separately approval-gated retirement transaction and reported successful completion.
+- The operation dropped only `node_map_positions` and `logic_gate_map_positions`, without `CASCADE`, and recorded the operator migration.
+- The canonical schema already omits both tables, and current application runtime code has no reader, writer, payload, route, event, cache, or fallback for them.
+- The following sequence remains the required runbook for any other environment.
 
 Before table retirement:
 

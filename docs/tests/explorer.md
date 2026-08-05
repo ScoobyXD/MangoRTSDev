@@ -1,4 +1,4 @@
-# Process Story: Explorer selects surviving workspace surfaces
+# Process Story: Explorer works after Node Map and Logic Gate Map retirement
 
 A user opens Home and selects a Node, Logic Gate, Project, Kanban board, folder, or communications row in Explorer
 ↓
@@ -6,10 +6,13 @@ Explorer resolves the exact accessible tree row and publishes semantic selection
 ↓
 Editor or Kanban consumes the entity context without reading browser geometry or position state
 ↓
+No Map frame, Map selection bridge, coordinate payload, or position-storage dependency exists
+↓
 Folder ordering, permissions, search, Find, rename, deletion, and drag/drop keep their existing backend contracts
 ↓
-A reload restores supported frames and discards any retired canvas frame instead of translating it
-Last updated: 2026-07-16
+A reload restores supported frames and discards any retired Map frame instead of translating it
+
+Last updated: 2026-08-05
 
 # Explorer Tests
 
@@ -173,7 +176,7 @@ Business logic covered:
 
 Given:
 - A user has several Explorer branches loaded.
-- The user commits a folder or project mutation, or successfully renames a Node or Logic Gate from each supported Editor, Kanban, map, Home/My Work, or Company Explorer entry point.
+- The user commits a folder or project mutation, or successfully renames a Node or Logic Gate from each supported Editor, Kanban, Home/My Work, or Company Explorer entry point.
 - Another browser may change an Explorer resource while this browser remains open.
 
 Expected:

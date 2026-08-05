@@ -1,14 +1,17 @@
-# Process Story: Editor context stays intact after canvas removal
+# Process Story: Editors survive complete Node Map and Logic Gate Map retirement
 
 A user selects a Node or Logic Gate from Explorer, Home, Kanban, Project, or a direct route
 ↓
 The generic live-selection and route contracts open the exact existing Editor document
+↓
+Neither Map route, frame, module, selection bridge, coordinate payload, nor position store exists
 ↓
 The Editor preserves normal collaboration, attachments, emails, chats, permissions, title updates, and revision behavior
 ↓
 Manual Save, saving-user identity, History, and Restore continue through the final history tables
 ↓
 For Nodes, authored additions/deletions, author labels, unread counts, seen baselines, and mark-seen behavior remain unchanged
+
 # Editor Process Map
 
 ## Process Story: Logic Gate editor uses final storage
@@ -267,7 +270,7 @@ ED7 - Legacy plain text loaded into a unified rich editor surface must load thro
 ED8 - Email compose/reply bodies using the unified editor must send sanitized rich HTML and preserve sanitized block indentation, including indent/outdent and blockquote-style indentation.
 ED9 - Chat panes inside node/project text boxes are conversation UI, not unified editor surfaces; chat textareas must not inherit rich editor toolbar, indentation, paste, or delete semantics unless a future chat-specific rule explicitly adds that behavior. They share the rich-editor people suggestion component and accepted @mentions/!urgent mentions remain principal entities while rendering as visible normal/urgent chips in the composer and sent message.
 ED10 - Node/project email pickers are attach/select surfaces only and must not expose compose, send, scheduled send, or draft-save behavior.
-ED11 - Map and legacy map-specific editing behavior is outside the V1 unified editor project unless a live non-map editor surface imports a helper that must be changed for the shared contract.
+ED11 - Node Map and Logic Gate Map are retired product features. No editor surface, title editor, route, frame, or compatibility helper may depend on either retired Map.
 ED12 - Any future change to unified editor semantics must update one shared behavior or formatting-controller test plus adapter/mount coverage proving each target surface receives the shared behavior.
 ED13 - The shared rich editor behavior source is `useEditorDocumentSurfaceHandlers`; the shared formatting-command source is `useEditorDocumentFormattingController`; and `EditorDocumentSurface` is the only reusable rich `contentEditable` host. Target adapters may preserve their own persistence/send callbacks, but must not render another rich editable DOM host or reimplement a local formatting controller.
 ED14 - Mail compose/reply, attached-email reply, and email signature editing must expose the shared editor format/outline toolbar controls for font size, bold, underline, italic, strikethrough, highlight color, left/center/right alignment, the outline-style dropdown, and table insertion where supported. Wrapper-specific controls may add commands, but must call the shared formatting controller instead of local DOM commands.
@@ -280,7 +283,7 @@ ED20 - Shared Triage email compose and reply bodies are unified editor surfaces.
 ED21 - Attached-email reply bodies opened from an email attached to a node or project are unified editor surfaces when that reply sends or drafts real mail. Node replies use their attached-email resource context; project replies use the project resource plus the originating project text-block information ID, so file and inline-image tools remain durable on both hosts.
 ED22 - The shared `ChatPane` used by node, project, My Triage, Shared Triage, and email-collaboration chat is explicitly not a unified editor surface; it is conversation UI with chat-specific behavior, including Tab acceptance of the highlighted people suggestion and visible composer entity chips. A painted accepted mention must use the same text metrics and inline advance as the transparent textarea that owns input, so its native collapsed caret remains immediately after the accepted token and later typing paints at the caret instead of appearing in a different position.
 ED23 - Node and project email pickers are explicitly not compose editor surfaces; they may search, filter, scroll, drag, and attach existing email, but they must not contain compose, send, scheduled send, draft-save, or rich body editing behavior.
-ED24 - Map and legacy map-specific editor surfaces are explicitly outside the V1 unified editor contract unless they import a helper that is actively shared by a live non-map unified editor surface.
+ED24 - Shared editor helpers live under surviving editor, Node, Logic Gate, relationship, or generic event modules; no shared editor behavior may be restored under a retired Map module.
 ED25 - Shared editing behavior does not collapse all product domains into one table: Node, Logic Gate, and Project document identities remain distinct, while mail compose/draft/signature storage remains mailbox-owned. The shared collaboration engine, outbox spine, socket, health, and recovery protocol are reused only by the approved collaborative document surfaces.
 ED26 - Rich-editor pasted or dropped inline images in unified editor surfaces must follow the global attachment contract in `docs/tests/attachments.md`: temporary previews are allowed, durable editor/email content stores attachment references instead of data URLs or base64 bytes, copying an existing attachment-backed image links that attachment to the target editor resource before insertion, and email adapters convert those references to CID attachments only at the backend send boundary. An asynchronous image upload/link may commit only while the original editor root, document target, and attachment resource context remain current; a target switch or unmount must not mutate the next document. In the active Tiptap JSON editor, a saved insertion bookmark is mapped through intervening ProseMirror transactions so ordinary typing while image imports are running does not cancel or discard the paste.
 ED27 - Chat attachments remain outside the unified rich-editor contract; they must use the global attachment contract as chat attachments rather than inheriting rich-editor body semantics.
@@ -576,18 +579,20 @@ Expected:
 - The picker does not allow composing a new email.
 - The picker does not send email, schedule email, save drafts, or mount a compose body editor.
 
-### Scenario ED-S6: Map Is Out Of Scope
+### Scenario ED-S6: Retired Maps Cannot Host Editors
 
 Business logic covered:
 - ED11
 - ED24
 
 Given:
-- A V1 unified editor implementation pass is changing rich editor behavior.
+- A user opens a Node, Logic Gate, or Project editor from any supported route or surviving workspace surface.
+- Old browser state may still contain a retired Map frame identifier.
 
 Expected:
-- The pass does not spend implementation or verification time on legacy Map behavior.
-- Map code is touched only if a shared helper used by live non-map editor surfaces requires a compatible update.
+- The editor opens through a surviving route and reads no Map frame, geometry, coordinate, or position state.
+- Retired Map frames are discarded rather than translated into an editor or replacement canvas.
+- No Map module, route, compatibility helper, or editor title surface is restored.
 
 ### Scenario ED-S7: Unified Rich-Editor Images Use Mango Attachments
 
@@ -655,7 +660,7 @@ Expected:
 >
 > Investigation boundary: Codex made no code changes during this audit. The local PowerShell runner failed before every process start with Windows error 1312, so Codex could not inspect uncommitted-only local differences or execute the test suite. To continue without guessing, Codex performed a read-only inspection of the connected GitHub repository, `ScoobyXD/MangoRTSDev`, at remote `main` commit `1d3a3a119d835ae78619fbc5d683459aec30592b`. Any local-only changes after or outside that commit require a follow-up comparison.
 >
-> Historical-status note: this section records the pre-remediation snapshot at that commit. Its observations about multiple rich DOM wrappers, local formatting controllers, and the native signature textarea explain the defects that prompted ED37-ED40; the required contract and surface inventory above supersede those observations for the implementation end state.
+> Historical-status note: this section records the pre-remediation snapshot at that commit. Its observations about multiple rich DOM wrappers, local formatting controllers, and the native signature textarea explain the defects that prompted ED37-ED40; the required contract and surface inventory above supersede those observations for the implementation end state. Any Map surface or Map title editor mentioned in this historical snapshot has since been deleted and is not a current product contract.
 
 ### Codex Audit Summary
 

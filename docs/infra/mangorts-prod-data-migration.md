@@ -43,6 +43,7 @@ Recommended starting classification:
 | `company_user_groups`, `company_user_group_members` | map | Rewrite user and company references. |
 | `nodes`, `node_textboxes`, `node_textboxes_history`, `node_textbox_chats`, `node_content_changes`, `node_content_change_seen`, `node_textbox_seen_snapshots`, `node_relationships` | copy or map | Core Node data in the final model; preserve exact textbox/chat IDs and copy owners before dependents. |
 | `logic_gates`, `logic_gate_textboxes`, `logic_gate_textboxes_history`, `logic_gate_relationships` | copy or map | Core Logic Gate data in the final model; preserve relationships. |
+| `node_map_positions`, `logic_gate_map_positions` | skip | Retired Map-only storage. These tables are absent from the canonical schema and must not be imported, recreated, or replaced. |
 | `node_logic_gate_assignments` | copy or map | Requires nodes and logic gates to be imported first. |
 | `projects`, `project_relationships`, `accounts` | copy or map | Core business data if real. |
 | `company_explorer_*` | copy or map | Preserve folder/item tree only after filtering dev/test content. |
