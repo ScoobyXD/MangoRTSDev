@@ -254,7 +254,7 @@ const ProjectSavedVersionsDialog: React.FC<{
       <div role="dialog" aria-modal="true" aria-label="Project saved versions" style={{ position: "fixed", inset: 0, zIndex: 1800, display: "grid", placeItems: "center", padding: 24, background: "rgba(15,23,42,0.48)" }}>
         <div style={{ width: "min(1120px, 96vw)", maxHeight: "92vh", display: "grid", gridTemplateRows: "auto minmax(0,1fr)", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: "#f8fafc", boxShadow: "0 24px 70px rgba(15,23,42,0.28)", overflow: "hidden" }}>
           <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "12px 14px", borderBottom: `1px solid ${EDITOR_NEU_SOFT_BORDER}` }}>
-            <div><strong>Project saved versions</strong><div style={{ fontSize: 10.5, color: "#64748b", marginTop: 2 }}>Manual snapshots stored in project information</div></div>
+            <div><strong>Project saved versions</strong><div style={{ fontSize: 10.5, color: "#64748b", marginTop: 2 }}>Manual snapshots stored in Project textbox history</div></div>
             <div style={{ display: "flex", gap: 7 }}>
               <button type="button" disabled={saving} onClick={onSave} style={{ minHeight: 30, border: "1px solid #60a5fa", borderRadius: 8, background: "#eff6ff", color: "#1d4ed8", padding: "0 10px", fontWeight: 900, cursor: saving ? "default" : "pointer" }}>{saving ? "Saving version" : "Save version"}</button>
               <button type="button" onClick={onClose} style={{ minHeight: 30, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: "#ffffff", padding: "0 10px", fontWeight: 850, cursor: "pointer" }}>Close</button>

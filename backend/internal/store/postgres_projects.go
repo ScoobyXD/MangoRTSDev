@@ -615,106 +615,41 @@ func (r *PostgresRepo) AddProjectInformation(input ProjectInformationInput) (dom
 	if input.Type == projectSavedVersionType {
 		return r.addProjectTextboxHistory(input)
 	}
+	if input.Type != CommunicationsEmailCollaborationChatInformationType && !strings.EqualFold(input.Type, "Attached email") {
+		return domain.ProjectInformation{}, ErrInvalid
+	}
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.ProjectInformation{}, err
 	}
 	defer tx.Rollback()
-	item, err := scanProjectInformation(tx.QueryRowContext(ctx, `
-insert into project_information (company_id, information_id, project_id, type, information, created_timestamp, updated_timestamp)
-values ($1::uuid, $2::uuid, $3::uuid, $4::information_type, $5, now(), now())
-returning company_id::text, information_id::text, project_id::text, type::text, information, created_timestamp, updated_timestamp`,
-		input.CompanyID, newUUIDv7String(), input.ProjectID, input.Type, input.Information))
-	if err != nil {
-		return domain.ProjectInformation{}, err
+	var projection domain.ProjectProjection
+	if input.Type == CommunicationsEmailCollaborationChatInformationType {
+		projection, err = upsertPostgresProjectTextboxChatTx(ctx, tx, input)
+	} else {
+		projection, err = addPostgresProjectEmailRelationshipTx(ctx, tx, input)
 	}
-	_, err = scanProjectProjection(tx.QueryRowContext(ctx, `
-insert into project_projection_table (company_id, project_id, information_id, type, information, created_timestamp, updated_timestamp)
-values ($1::uuid, $2::uuid, $3::uuid, $4::information_type, $5, now(), now())
-on conflict (company_id, project_id, information_id)
-do update set
-  type=excluded.type,
-  information=excluded.information,
-  updated_timestamp=now()
-returning company_id::text, project_id::text, type::text, information, information_id::text, created_timestamp, updated_timestamp`,
-		input.CompanyID, input.ProjectID, input.InformationID, input.Type, input.Information))
 	if err != nil {
 		return domain.ProjectInformation{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.ProjectInformation{}, err
 	}
-	return item, nil
-}
-
-func scanProjectInformation(row interface{ Scan(dest ...any) error }) (domain.ProjectInformation, error) {
-	var item domain.ProjectInformation
-	err := row.Scan(&item.CompanyID, &item.InformationID, &item.ProjectID, &item.Type, &item.Information, &item.CreatedTimestamp, &item.UpdatedTimestamp)
-	return item, err
-}
-
-func scanProjectProjection(row interface{ Scan(dest ...any) error }) (domain.ProjectProjection, error) {
-	var item domain.ProjectProjection
-	err := row.Scan(&item.CompanyID, &item.ProjectID, &item.Type, &item.Information, &item.InformationID, &item.CreatedTimestamp, &item.UpdatedTimestamp)
-	return item, err
+	return projectProjectionAsInformation(projection), nil
 }
 
 func (r *PostgresRepo) listProjectInformation(companyID, projectID string) ([]domain.ProjectInformation, error) {
-	rows, err := r.db.QueryContext(context.Background(), `
-select company_id::text, information_id::text, project_id::text, type::text, information, created_timestamp, updated_timestamp
-from project_information information
-where information.company_id=$1::uuid and information.project_id=$2::uuid
-  and not (
-    information.type::text='Saved version'
-    and exists(select 1 from project_textboxes_history history
-      where history.company_id=information.company_id
-        and history.project_id=information.project_id
-        and history.batch_id=information.information_id)
-  )
-order by created_timestamp asc, information_id asc`, companyID, projectID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := make([]domain.ProjectInformation, 0)
-	for rows.Next() {
-		item, err := scanProjectInformation(rows)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	history, err := r.listProjectTextboxHistory(companyID, projectID)
-	if err != nil {
-		return nil, err
-	}
-	items = append(items, history...)
-	return items, nil
+	return r.listProjectTextboxHistory(companyID, projectID)
 }
 
 func (r *PostgresRepo) ListProjectProjections(companyID, projectID string) ([]domain.ProjectProjection, error) {
-	rows, err := r.db.QueryContext(context.Background(), `
-select company_id::text, project_id::text, type::text, information, information_id::text, created_timestamp, updated_timestamp
-from project_projection_table
-where company_id=$1::uuid and project_id=$2::uuid
-order by created_timestamp desc, information_id asc`, companyID, projectID)
-	if err != nil {
-		return nil, err
+	companyID = cleanUUIDText(companyID)
+	projectID = cleanUUIDText(projectID)
+	if companyID == "" || projectID == "" {
+		return nil, ErrInvalid
 	}
-	defer rows.Close()
-	items := make([]domain.ProjectProjection, 0)
-	for rows.Next() {
-		item, err := scanProjectProjection(rows)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
+	return listPostgresProjectFinalProjections(context.Background(), r.db, companyID, projectID)
 }
 
 func (r *PostgresRepo) DeleteProjectProjection(input ProjectProjectionDeleteInput) error {
@@ -728,10 +663,22 @@ func (r *PostgresRepo) DeleteProjectProjection(input ProjectProjectionDeleteInpu
 		return err
 	}
 	defer tx.Rollback()
-	if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, input.CompanyID, "project_chat_message", input.InformationID); err != nil {
+	deletedRelationship, err := tx.ExecContext(ctx, `delete from email_relationships
+where company_id=$1::uuid and email_relationship_id=$3::uuid
+  and resource_type='project' and resource_id=$2::uuid`, input.CompanyID, input.ProjectID, input.InformationID)
+	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `delete from project_projection_table where company_id=$1::uuid and project_id=$2::uuid and information_id=$3::uuid`, input.CompanyID, input.ProjectID, input.InformationID); err != nil {
+	if affected, err := deletedRelationship.RowsAffected(); err != nil {
+		return err
+	} else if affected > 0 {
+		return tx.Commit()
+	}
+	if err := retireProjectTextboxChatTreeRelationshipsTx(ctx, tx, input.CompanyID, input.ProjectID, input.InformationID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `delete from project_textbox_chats
+where company_id=$1::uuid and project_id=$2::uuid and chat_id=$3::uuid`, input.CompanyID, input.ProjectID, input.InformationID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -1263,6 +1210,10 @@ func postgresDeleteProjectTx(ctx context.Context, tx *sql.Tx, companyID, project
 		return err
 	}
 	if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, EntityTypeProject, projectID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `delete from email_relationships
+where company_id=$1::uuid and resource_type='project' and resource_id=$2::uuid`, companyID, projectID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `delete from company_explorer_items where company_id=$1::uuid and target_type='project' and target_id=$2::uuid`, companyID, projectID); err != nil {

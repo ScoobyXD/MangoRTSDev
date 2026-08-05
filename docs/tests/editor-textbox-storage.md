@@ -1,5 +1,15 @@
 # Process Story: Editor Textboxes and Manual History
 
+A Project user opens or edits a textbox
+↓
+The body, title, display metadata, revision, and timestamps come from the exact `project_textboxes` row
+↓
+The existing projection-shaped response is assembled from permanent textbox, attachment, chat, and email relationships instead of a stored Project projection row
+↓
+Manual Project saves continue to create one batch in `project_textboxes_history`
+↓
+Recycle snapshots and restores order the Project owner, textboxes/history, and `project_textbox_chats` so no restored child precedes its owner
+
 ## What the user does
 
 The user types in a Node, Project, or Logic Gate textbox. Ordinary typing saves
@@ -20,7 +30,7 @@ save-history button and later restore that saved batch.
 The permanent current tables are:
 
 - `node_textboxes`, keyed by `company_id`, `node_id`, and `textbox_id`.
-- `project_textboxes`, keyed by `company_id`, `project_id`, and `textbox_id`.
+- `project_textboxes`, keyed by `company_id`, `project_id`, and `textbox_id`. It also owns the Project textbox title, email display reference/accent, metadata revision, and display order. File metadata remains in final attachment tables.
 - `logic_gate_textboxes`, keyed by `company_id`, `logic_gate_id`, and
   `textbox_id`.
 
@@ -112,12 +122,21 @@ not button-pressed history, and the new history tables intentionally have no
 `save_kind` column. The converter and cleanup discard those rows instead of
 mislabeling them as manual saves.
 
-## Kept for phase 2
+## Projection cutover status
 
-`node_projection_table`, `project_projection_table`, and
-`logic_gate_projection_table` remain in use for titles, attachments, timeline
-ordering, chat/email view data, and other metadata. Search keyword columns are
-also deferred. Those projections must not be removed by this cutover.
+Project runtime storage has completed the next phase:
+
+- `project_textbox_chats` is the only current Project textbox-chat store.
+- Exact Project attached-email ownership comes from `email_relationships`.
+- Project textbox titles and supported display metadata live on `project_textboxes`.
+- Project files come from `attachments` and `attachment_relationships`.
+- The backend rebuilds the existing Project projection-shaped API response from those final tables.
+- No production Project request reads or writes `project_information` or `project_projection_table`.
+
+The two legacy Project tables remain unchanged only until the separately gated
+snapshot, soak, dependency check, and destructive retirement. Node and Logic
+Gate legacy projection retirement are separate cutovers and are not implied by
+the Project change.
 
 ## Read-only development evidence
 

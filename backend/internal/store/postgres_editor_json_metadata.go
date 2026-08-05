@@ -67,12 +67,16 @@ func (r *PostgresRepo) UpdateEditorJSONMetadata(input EditorJSONMetadataInput) (
 				information=excluded.information, is_deleted=false, revision=logic_gate_projection_table.revision+1, updated_timestamp=excluded.updated_timestamp
 			returning revision`, input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID, information, now).Scan(&revision)
 	case EntityTypeProject:
-		_, err = tx.ExecContext(ctx, `
-			insert into project_projection_table (company_id, project_id, information_id, type, information, created_timestamp, updated_timestamp)
-			values ($1::uuid, $2::uuid, $3::uuid, 'Text box'::information_type, $4, $5, $5)
-			on conflict (company_id, project_id, information_id) do update set information=excluded.information, updated_timestamp=excluded.updated_timestamp`,
-			input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID, information, now)
-		revision = 1
+		err = tx.QueryRowContext(ctx, `
+			update project_textboxes
+			set title=$4,email_message_id=$5,email_accent=$6,
+			    metadata_revision=metadata_revision+1,
+			    updated_timestamp=greatest(clock_timestamp(),created_timestamp)
+			where company_id=$1::uuid and project_id=$2::uuid and textbox_id=$3
+			  and deleted_timestamp is null
+			returning metadata_revision,updated_timestamp`,
+			input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID,
+			input.Title, input.EmailMessageID, input.EmailAccent).Scan(&revision, &now)
 	default:
 		return EditorJSONMetadataCommit{}, ErrInvalid
 	}
@@ -110,7 +114,8 @@ func deletePostgresEditorProjectionTx(ctx context.Context, tx *sql.Tx, ref Edito
 	case EntityTypeLogicGate:
 		_, err = tx.ExecContext(ctx, `update logic_gate_projection_table set is_deleted=true, revision=revision+1, updated_timestamp=$4 where company_id=$1::uuid and logic_gate_id=$2::uuid and information_id=$3::uuid`, ref.CompanyID, ref.ResourceID, ref.DocumentID, now)
 	case EntityTypeProject:
-		_, err = tx.ExecContext(ctx, `delete from project_projection_table where company_id=$1::uuid and project_id=$2::uuid and information_id=$3::uuid`, ref.CompanyID, ref.ResourceID, ref.DocumentID)
+		// Project textbox metadata lives on project_textboxes and is retired with the textbox row.
+		err = nil
 	default:
 		return ErrInvalid
 	}
