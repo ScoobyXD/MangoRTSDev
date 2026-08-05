@@ -330,8 +330,8 @@ export async function addProjectInformation(input: {
   informationID: string;
   type: string;
   information: string;
-}): Promise<{ information: ProjectInformation; projection: ProjectProjection }> {
-  return apiFetchJSON<{ information: ProjectInformation; projection: ProjectProjection }>(`/v1/projects/${encodeURIComponent(input.projectID)}/information`, {
+}): Promise<ProjectInformation> {
+  return apiFetchJSON<ProjectInformation>(`/v1/projects/${encodeURIComponent(input.projectID)}/information`, {
     method: "POST",
     body: JSON.stringify({
       company_id: input.companyID,

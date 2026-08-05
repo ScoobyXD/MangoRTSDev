@@ -1,4 +1,19 @@
-Last updated: 2026-07-23
+# Process Story: Project textboxes, chats, and attached emails use final storage
+
+A user opens a Project
+↓
+The backend reads textbox bodies and Project-owned metadata from `project_textboxes`, rebuilds the existing textbox API payload, and reads textbox files through active `attachment_relationships`
+↓
+The backend reads, creates, edits, replies to, and deletes textbox chats in `project_textbox_chats`; each chat keeps its stable former projection ID and belongs to one exact Project textbox
+↓
+An attached email creates one exact `email_relationships` row for the selected final `email_messages.email_message_id` and the owning Project textbox
+↓
+Deleting one chat, email relationship, textbox, or Project removes only that owner's relationships; shared files and normalized email content survive under their other valid owners
+↓
+Project manual save history continues in `project_textboxes_history`
+↓
+No Project request reads or writes `project_information` or `project_projection_table`; those tables remain unchanged only for the separately gated retirement decision
+Last updated: 2026-08-04
 
 # Projects Tests
 
@@ -23,11 +38,11 @@ P12 - Empty critical-path resource cells use an Add node action, not a drag/drop
 P13 - Add node opens a Company Explorer node search picker that uses Company Explorer search results and visibility rules.
 P14 - Selecting a node search result creates or reuses the project node relationship and saves that relationship onto the critical-path step.
 P15 - Project text boxes participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, italic, text highlight/No highlight, left/center/right alignment, and table semantics must apply to project text boxes.
-P16 - Project text-box document bodies commit through their exact Project collaboration documents; title and attachment metadata remain Project-owned, and Node documents opened inside Projects remain Node-owned.
+P16 - Project text-box document bodies, title, email accent/reference metadata, display order, revisions, and timestamps live in `project_textboxes`. Attachment metadata is rebuilt from active final attachment relationships; Node documents opened inside Projects remain Node-owned.
 P17 - Project critical-path inline node windows use the unified node shell and unified node text-box editor semantics, while mutations inside that inline node window remain node editor mutations instead of project critical-path data mutations.
 P18 - The project email picker is attach/select only and must not expose compose, send, scheduled send, or draft-save behavior.
 P19 - Project critical-path inline node windows mount `UnifiedNodeShell`; the inline window may keep project row selection/close state in Project Management, but shell actions and body metadata come from the shared node-shell source.
-P20 - Project text-box inline images and project text-block attachment arrays must follow `docs/tests/attachments.md`: durable project information/projection payloads store attachment references, not data URLs, base64 file bytes, or embedded file payloads.
+P20 - Project text-box inline images and files follow `docs/tests/attachments.md`: `attachments` plus `attachment_relationships` are the durable file authority, and the existing Project projection-shaped API response is rebuilt without storing file bytes or a legacy Project projection row.
 P21 - Project chat attachments use Mango attachment references, and project critical-path inline node windows inherit node attachment behavior while preserving node-owned persistence for node edits.
 P22 - In the Project Logic Gates / Nodes tab, clicking a node row expands that node's Project-owned unified node editor directly below the row. Clicking the same row again collapses it; the row does not open the app/sidebar popup or replace the Project page.
 P23 - Nodes opened in the Project Logic Gates / Nodes panel use the unified node shell, unified node text-box editor semantics, node information/projection persistence, attached-email behavior, and separate chat-pane behavior of the standard node editor. Project state owns only which node panel is open; it does not own node content persistence.
@@ -59,7 +74,7 @@ P48 - Logic Gates / Nodes provides an Add control with an elevated Company Explo
 
 P49 - Project Field, Status, Health, Account, and Team dropdowns commit and close on the selected option. They do not display Apply or Cancel actions; multi-value controls toggle the clicked assignment without discarding other selected IDs, and Not set clears the control.
 P50 - When the generic Field list column is enabled for the active company, Project Summary shows a matching **Fields** dropdown immediately left of Status and reads/writes the same project field assignments.
-P51 - Every Project chat comment authored by the current user exposes the shared inline Edit action after send. Saving uses the stable Project projection ID, replaces only trimmed text and resolved mention IDs, records an edit timestamp, and preserves author, original creation time, attachments, reply/source-selection context, text-box ownership, and thread order. Project Edit access never permits editing or deleting another author's comment, and legacy information POST requests cannot overwrite a chat projection even when they disguise the replacement as another information type.
+P51 - Every Project chat comment authored by the current user exposes the shared inline Edit action after send. Saving uses the stable `project_textbox_chats.chat_id`, replaces only trimmed text and resolved mention IDs, records an edit timestamp, and preserves author, original creation time, attachments, reply/source-selection context, text-box ownership, and thread order. Project Edit access never permits editing or deleting another author's comment, and generic information POST requests cannot overwrite an existing chat when they disguise the replacement as another information type.
 P52 - A Node may have at most one active Logic Gate assignment. A Node must have that assignment before it can be related to a Project.
 P53 - A Node may be related to at most one Project. Re-adding it to that same Project reuses its relationship, but attempting to add it to another Project is rejected without changing any existing relationship. The UI explains: **This Node is already in another Project. A Node can belong to only one Project. Remove it from its current Project before adding it here.**
 P54 - Adding a Node to a Project implicitly creates or reuses a separate Logic Gate relationship for that exact Project and the Node's current Logic Gate.
@@ -70,6 +85,12 @@ P58 - Users do not add a Logic Gate directly to a Project. The supported command
 P59 - Node-based Project context in My Work, Updates, and other derived views comes only from that Node's direct Project relationship. A Logic Gate's membership in multiple Projects must never make all Nodes in that Logic Gate appear in every one of those Projects.
 P60 - Production PostgreSQL realtime audience resolution treats a Project as a supported exact editor resource. Each Project editor publication resolves only current effective Edit recipients for that Project, so authorized remote text-box changes stream promptly without refresh and revoked, missing, or cross-company targets receive nothing.
 
+P61 - The Project view and projection-list API keep their current public payload shape, but every textbox row is synthesized from `project_textboxes`, every chat row from `project_textbox_chats`, and every attached-email row from exact `email_relationships` joined to `email_messages` and `email_threads`.
+P62 - A Project textbox owns its chats and textbox-scoped email relationships. Deleting the textbox removes those rows and their owner links without deleting normalized email content.
+P63 - New Project attached-email writes require an active Project textbox, the exact internal `email_message_id`, and current access to that message's personal email account or shared email account. Provider message IDs are display/provider metadata, never the relationship identity.
+P64 - Project textbox titles and supported email display metadata are copied once into `project_textboxes` before backend deployment. Attachment arrays are not copied into another metadata column; they are rebuilt from active final relationships.
+P65 - Project resource and chat deletion use the shared attachment unlink and last-owner cleanup lifecycle. A shared file survives while another active relationship exists.
+P66 - The deployment must refuse readiness when `project_textbox_chats` or the final Project textbox metadata columns are missing. No request performs DDL and no compatibility reader falls back to the legacy Project tables.
 ## Scenarios
 
 ### Scenario P-S1: Inline Critical-Path Node Window
@@ -411,3 +432,31 @@ Expected:
 - A direct Logic Gate addition and a Project Node without a Logic Gate assignment are rejected.
 
 Focused coverage lives in `backend/internal/store/project_relationship_rules_test.go`, `backend/internal/store/project_relationship_schema_test.go`, `backend/internal/store/project_relationship_postgres_integration_test.go`, `backend/internal/store/work_item_reads_test.go`, and `backend/internal/http/notification_handlers_test.go`.
+### Scenario P-S17: Final Project Storage Cutover
+
+Business logic covered:
+- P16
+- P20
+- P51
+- P61
+- P62
+- P63
+- P64
+- P65
+- P66
+
+Given:
+- The audited Project chat copy has 16 final chats, the exact six Project email relationships exist, and all 25 active Project textboxes have matching final rows.
+- The additive schema migration and guarded textbox-metadata copy have completed while Project writers are paused.
+
+When:
+- A user reloads the Project, edits a textbox title/body, creates and edits a chat, attaches and removes an email, deletes a textbox, and later deletes a Project that shares one file with another valid owner.
+
+Expected:
+- The existing frontend receives the same textbox/chat/email projection-shaped payload and stable IDs.
+- All Project runtime SQL uses only `project_textboxes`, `project_textbox_chats`, final email tables, and final attachment tables.
+- The chat remains bound to its exact textbox; the email relationship uses the exact internal email message identity.
+- Textbox deletion removes its chats, textbox-scoped email relationships, and attachment owner links while normalized email content survives.
+- Project deletion keeps a shared file under its remaining owner and marks a file for cleanup only after its final relationship disappears.
+- Startup refuses an incomplete schema instead of issuing request-time DDL or reading a legacy table.
+- A production-source audit finds no Project database reader or writer for `project_information` or `project_projection_table`.

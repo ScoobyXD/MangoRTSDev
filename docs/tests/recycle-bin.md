@@ -3,15 +3,17 @@
 A user deletes a Node, Project, or Logic Gate that contains current textboxes and
 manual history. Before the owner rows are deleted, the Recycle Bin payload copies
 the matching current and history rows from the six permanent editor tables.
-Restoring the item recreates the owner first, restores its textbox/history rows,
-and then restores the remaining projections and relationships. Permanent delete
-removes the payload, including those editor copies.
+For a Project it also copies `project_textbox_chats` and exact final email
+relationships, never the legacy Project information/projection tables. Restoring
+the item recreates the owner first, restores its textbox/history rows, then
+restores Project chats and the remaining relationships. Permanent delete removes
+the payload, including those editor copies.
 
 Old recycle payloads created before the six-table cutover are converted in place.
 Their HTML-era textboxes and manual saves must pass the same text-preserving
 HTML-to-Tiptap converter before legacy editor tables can be removed.
 
-Last updated: 2026-07-20
+Last updated: 2026-08-04
 
 # Recycle Bin Tests
 
@@ -33,7 +35,7 @@ RB9 - A cross-user restore attempt returns not found and must not restore the un
 RB10 - Permanently deleting recycle-bin items requires at least one recycle-bin item ID.
 RB11 - Permanent delete is destructive purge and requires dev admin or company admin authority.
 RB12 - Non-admin permanent delete attempts return forbidden and must not remove recycle-bin rows.
-RB13 - Company Explorer target deletion creates recycle-bin rows before deleting the underlying objects in that target's actual deletion scope. Deleting a project removes the project and its project-owned associations, critical-path rows, placement, information, and projection data, but it must not delete related nodes, Logic Gates, their node assignments, or their Kanban boards.
+RB13 - Company Explorer target deletion creates recycle-bin rows before deleting the underlying objects in that target's actual deletion scope. Deleting a Project removes the Project and its Project-owned associations, critical-path rows, placement, final textboxes/chats/email relationships, and attachment owner links, but it must not delete related Nodes, Logic Gates, their Node assignments, normalized email content, shared files with another owner, or their Kanban boards.
 RB14 - Recycle-bin rows preserve the deleted root object's kind, ID, label, folder kind when relevant, deleter user ID, deletion timestamp, restore payload, and contained-item summary.
 RB15 - Deleting a folder or logic gate records objects that are actually contained in its deletion scope so the UI can explain what will return with a restore. A project recycle item does not describe related nodes or Logic Gates as contained because those resources remain active.
 RB16 - Restoring one or more recycle-bin items merges their restore payloads and restores the underlying objects, relationships, placements, and related data captured at delete time. PostgreSQL restore inserts only writable stored columns; generated columns are omitted and recomputed by PostgreSQL so an affected historical payload remains restorable.
@@ -50,6 +52,7 @@ RB26 - Dev admins and company admins list all recycle-bin rows for the company, 
 RB27 - Admin permanent delete can purge any selected recycle-bin row in the company, regardless of which user originally deleted it.
 RB28 - Restore remains scoped to the deleting user; an admin aggregate view must not imply that an admin can restore another user's recycle-bin item unless a future rule explicitly allows it.
 RB29 - Recycle payloads preserve current and manual-history rows from node_textboxes, project_textboxes, logic_gate_textboxes, and their three _history tables. Old payloads must be converted before editor cleanup; disabled automatic snapshots are not manual history and are excluded.
+RB30 - A new Project recycle payload stores `project_textbox_chats` after its Project textbox owners and stores exact `email_relationships` in relationship order. It does not store `project_information` or `project_projection_table`.
 
 ## Scenarios
 

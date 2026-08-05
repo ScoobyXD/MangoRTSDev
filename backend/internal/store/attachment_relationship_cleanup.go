@@ -284,11 +284,114 @@ order by information_id`, companyID, logicGateID)
 	return nil
 }
 
+func retireProjectTextboxChatTreeRelationshipsTx(ctx context.Context, tx *sql.Tx, companyID, projectID, rootChatID string) error {
+	rows, err := tx.QueryContext(ctx, `
+with recursive deleted_chats(chat_id) as (
+  select chat_id from project_textbox_chats
+  where company_id=$1::uuid and project_id=$2::uuid and chat_id=$3::uuid
+  union all
+  select child.chat_id
+  from project_textbox_chats child
+  join deleted_chats parent on child.parent_chat_id=parent.chat_id
+  where child.company_id=$1::uuid and child.project_id=$2::uuid
+)
+select chat_id::text from deleted_chats order by chat_id`, companyID, projectID, rootChatID)
+	if err != nil {
+		return err
+	}
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, "project_chat_message", id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func retireProjectTextboxAttachmentRelationshipsTx(ctx context.Context, tx *sql.Tx, companyID, projectID, textboxID string) error {
+	rows, err := tx.QueryContext(ctx, `
+select attachment.attachment_id::text
+from attachments attachment
+where attachment.company_id=$1::uuid
+  and exists (
+    select 1 from attachment_relationships relationship
+    where relationship.company_id=attachment.company_id
+      and relationship.attachment_id=attachment.attachment_id
+      and relationship.resource_type='project'
+      and relationship.resource_id=$2
+      and relationship.information_id=$3::uuid
+      and relationship.deleted_timestamp is null
+  )
+order by attachment.attachment_id
+for update of attachment`, companyID, projectID, textboxID)
+	if err != nil {
+		return err
+	}
+	attachmentIDs := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		attachmentIDs = append(attachmentIDs, id)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+update attachment_relationships
+set deleted_timestamp=coalesce(deleted_timestamp,clock_timestamp())
+where company_id=$1::uuid and resource_type='project' and resource_id=$2
+  and information_id=$3::uuid and deleted_timestamp is null`, companyID, projectID, textboxID); err != nil {
+		return err
+	}
+	if err := markUnownedAttachmentsPendingTx(ctx, tx, companyID, attachmentIDs); err != nil {
+		return err
+	}
+	rows, err = tx.QueryContext(ctx, `
+select chat_id::text from project_textbox_chats
+where company_id=$1::uuid and project_id=$2::uuid and textbox_id=$3
+order by chat_id`, companyID, projectID, textboxID)
+	if err != nil {
+		return err
+	}
+	chatIDs := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		chatIDs = append(chatIDs, id)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, id := range chatIDs {
+		if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, "project_chat_message", id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func retireProjectChatAttachmentRelationshipsTx(ctx context.Context, tx *sql.Tx, companyID, projectID string) error {
 	rows, err := tx.QueryContext(ctx, `
-select information_id::text from project_projection_table
-where company_id=$1::uuid and project_id=$2::uuid and type='Text block chat'::information_type
-order by information_id`, companyID, projectID)
+select chat_id::text from project_textbox_chats
+where company_id=$1::uuid and project_id=$2::uuid
+order by chat_id`, companyID, projectID)
 	if err != nil {
 		return err
 	}

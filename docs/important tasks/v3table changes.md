@@ -1,6 +1,6 @@
 # Process Story
 
-A Mango user creates a Node and adds textboxes. Textbox bodies are stored only in `node_textboxes`, and textbox-owned comments and seen markers disappear when their textbox no longer exists. If a comment's author account was deleted, the comment and captured display name remain while its relational user ID becomes null. When an email is downloaded, Mango stores one thread for the exact personal email account or shared email account and stores each message once inside that thread. `email_relationships` connects a selected message to a Node, Project, Logic Gate, or one of their textboxes. Deleting that connection removes only the relationship: normalized email, email draft content, and normalized email attachment links survive independently. Converting an email into a Node is an ordinary workflow: store the email, create the Node, create the relationship, and use normal resource permissions. A resource-shared email draft is stored in `email_drafts` and receives access from the related resource instead of a special collaboration-participant subsystem. No current Node editor content is written to `node_information` or `node_projection_table` after the cutover.
+A Mango user creates a Node and adds textboxes. Textbox bodies are stored only in `node_textboxes`, and textbox-owned comments and seen markers disappear when their textbox no longer exists. If a comment's author account was deleted, the comment and captured display name remain while its relational user ID becomes null. When an email is downloaded, Mango stores one thread for the exact personal email account or shared email account and stores each message once inside that thread. `email_relationships` connects a selected message to a Node, Project, Logic Gate, or one of their textboxes. Deleting that connection removes only the relationship: normalized email, email draft content, and normalized email attachment links survive independently. Converting an email into a Node is an ordinary workflow: store the email, create the Node, create the relationship, and use normal resource permissions. A resource-shared email draft is stored in `email_drafts` and receives access from the related resource instead of a special collaboration-participant subsystem. No current Node editor content is written to `node_information` or `node_projection_table` after the Node cutover. The implemented Project cutover likewise reads and writes only `project_textboxes`, `project_textbox_chats`, exact final email relationships/messages, and final attachment tables; it does not use `project_information` or `project_projection_table`.
 
 A Mango file has one record in `attachments` and one or more ownership links in `attachment_relationships`. A Node-owned file can remember that it came from a textbox without making that textbox its owner. Removing one link never deletes a file that still has another live link. When the final live link is removed, Mango marks the attachment for deletion, deletes the original and every generated preview from S3, and then removes the database records. Sent-email files remain available because sending creates an `email_message` attachment relationship before the email draft is removed.
 
@@ -24,9 +24,81 @@ An agent must not apply the migration to a live database. Repository agents may 
 | Node textbox chats | `node_textbox_chats` | 667 chats were copied and deployed on 2026-08-03; the one missing-parent reply was deliberately preserved as a top-level chat. | Soak and later legacy chat-row retirement. |
 | Email | `email_threads`, `email_messages`, `email_relationships`, `email_drafts`, and `email_signatures` | The final data copy reconciled 223 threads, 678 messages, 228 relationships, 49 drafts, and 9 signatures. The final-table backend was deployed in development and Jonat reported the smoke checks successful. | Snapshot/soak evidence and later legacy email-table retirement. |
 | Attachments | `attachments`, `attachment_relationships`, `attachment_upload_jobs`, `attachment_upload_parts`, and `attachment_previews` | Step 1 cleanup completed, the multipart boundary moved six part rows to `upload_job_id`, and backend commit `c8a08085` was deployed. The final sync reported 491 upload jobs, 842 previews, and 1,080 relationships; Jonat reported the smoke checks successful. | Post-cutover reconciliation, snapshot/soak evidence, and separately approved Step 3 legacy-table retirement. |
+| Project textboxes/chats/email links | `project_textboxes`, `project_textbox_chats`, `email_relationships`, `email_messages`, and `email_threads` | The guarded chat copy completed with 16 chats, 3 replies, and zero review rows. The worker backend now synthesizes the existing Project payload from final tables and contains no Project legacy-table reader/writer. | Apply the additive schema migration, run the guarded 25-textbox metadata copy, deploy this matching backend during the writer pause, smoke test, reconcile, and soak before separately approving legacy Project table retirement. |
 
-No legacy reader, writer, fallback, or dual-write path remains for the completed Node textbox, Node textbox chat, email, or attachment contracts. Project and Logic Gate legacy information/projection storage is outside this completed set and is the subject of the next separately reviewed cutover. This status does not authorize dropping any preserved legacy table.
+No legacy reader, writer, fallback, or dual-write path remains for the completed Node textbox, Node textbox chat, email, or attachment contracts. The Project cutover is implemented in this worker but is not a deployed checkpoint until its schema, metadata-copy, deployment, smoke, and reconciliation steps finish. Logic Gate legacy information/projection storage remains outside this completed set. This status does not authorize dropping any preserved legacy table.
 
+## Current implementation: Project final-storage cutover ready for operation
+
+The Project runtime cutover is implemented without a compatibility reader or
+dual write. It preserves the current HTTP/frontend projection shape while
+changing the database authority underneath it:
+
+- `project_textboxes` stores the current textbox body, title, email display
+  reference/accent, display order, current revision, metadata revision, and
+  timestamps.
+- `project_textbox_chats` stores each current Project textbox chat under its
+  stable former projection `information_id`. Parent rows must belong to the
+  same Project textbox.
+- Project attached emails are exact `email_relationships` rows joined to final
+  `email_messages` and `email_threads`. New relationships require an active
+  Project textbox, the internal `email_message_id`, and normal mailbox access.
+- Project textbox and chat files are rebuilt from `attachments` plus active
+  `attachment_relationships`. Project resource, textbox, and chat deletion use
+  the common unlink/last-owner cleanup lifecycle.
+- Project manual history remains in `project_textboxes_history`.
+- Recycle snapshots/restores use `project_textboxes`,
+  `project_textboxes_history`, `project_textbox_chats`, and exact final email
+  relationships. They no longer snapshot the two legacy Project tables.
+- The attachment-owner trigger validates Project chat links against
+  `project_textbox_chats`.
+- Application readiness refuses a database that lacks the final Project chat
+  table or textbox metadata columns. Application requests perform no DDL.
+
+The guarded live copy already completed with 16 source/final chats, 3 replies,
+and zero review rows. The earlier read-only audit found 25 active final Project
+textboxes matching 25 current legacy textbox projections and six exact final
+Project email relationships. The one orphan legacy Project textbox projection
+and all six recycle rows were explicitly removed by Jonat before the chat copy.
+
+The exact human-run order is:
+
+1. Pause Project editor, chat, attached-email, attachment, recycle, and resource
+   deletion writers.
+2. Take and retain the agreed pre-cutover database snapshot.
+3. While writers are still paused and before adding the textbox metadata columns,
+   rerun `scripts/v3_project_textbox_chats_create_copy_verify.sql`. Continue only
+   when it reports `COPY_COMPLETE`, 16 source/final chats, three replies, and zero
+   review rows. This is the final legacy-chat delta gate and intentionally checks
+   the pre-migration `project_textboxes` schema.
+4. Apply
+   `backend/db/migrations/20260804_zzz_project_final_runtime_storage.sql`.
+   This is additive: it adds the Project textbox metadata columns, creates the
+   final chat table on a clean database/rerun, and changes Project chat
+   attachment validation to the final table.
+5. Run `scripts/v3_project_final_runtime_metadata_copy_verify.sql` in DBeaver.
+   Continue only when PostgreSQL reports 17.x and the final row says
+   `COPY_COMPLETE`, 25 textboxes, 16 chats, six Project email relationships,
+   and zero rows needing review.
+6. Immediately deploy the matching backend. Its readiness check must pass before
+   writers resume.
+7. Smoke test Project reload, body/title save, chat create/edit/reply/delete,
+   attached-email add/remove and email-selection chat, textbox deletion,
+   shared-file retention, Project deletion, and recycle/restore.
+8. Rerun read-only reconciliation and prove no deployed SQL writes the legacy
+   Project tables. Resume writers only after that evidence is clean.
+9. Observe the agreed soak. Then take the separately agreed retirement snapshot
+   and run a separately reviewed destructive retirement script only after exact
+   dependency and no-current-writer checks pass.
+
+The current retirement candidate set is exactly `project_information` and
+`project_projection_table`. They remain in the canonical schema and no drop
+script is included in this phase because the matching backend has not yet been
+deployed and soaked. `projects`, `project_textboxes`,
+`project_textboxes_history`, `project_textbox_chats`,
+`project_relationships`, `project_relationship_projection`, all final email
+tables, all final attachment tables, provider connection plumbing, archive/
+triage/job tables, and Logic Gate legacy storage are retained.
 ## Historical incident: the first V3 cutover was rolled back
 
 The 2026-08-02 V3 attempt is abandoned. Do not revive or run the removed migration as-is.

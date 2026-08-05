@@ -24,6 +24,7 @@ func (r *PostgresRepo) CheckApplicationSchemaReadiness() error {
 		"communications_message_read_receipt_summaries", "communications_message_read_receipt_signals",
 		"email_threads", "email_messages", "email_relationships", "email_drafts",
 		"email_signatures", "email_thread_download_jobs", "attachments", "attachment_relationships",
+		"project_textboxes", "project_textbox_chats",
 	}
 	for _, table := range requiredTables {
 		var exists bool
@@ -44,6 +45,11 @@ func (r *PostgresRepo) CheckApplicationSchemaReadiness() error {
 		{"email_drafts", "sent_email_message_id"},
 		{"attachment_relationships", "resource_type"},
 		{"attachment_relationships", "resource_id"},
+		{"project_textboxes", "title"},
+		{"project_textboxes", "email_message_id"},
+		{"project_textboxes", "email_accent"},
+		{"project_textboxes", "metadata_revision"},
+		{"project_textbox_chats", "chat_id"},
 	}
 	for _, required := range requiredColumns {
 		var exists bool
