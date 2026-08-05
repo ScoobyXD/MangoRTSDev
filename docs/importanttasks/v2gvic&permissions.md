@@ -817,6 +817,52 @@ Step 1 is complete only when:
 - no old table has been dropped;
 - the work reports the human-run order but does not operate on a live database.
 
+### Step 1 implementation and operator record
+
+Step 1 repository implementation was completed and verified on August 5, 2026. It is additive only: the old GVIC and permission tables, functions, triggers, readers, and writers remain active and unchanged. No SQL was applied to a live database, and no application cutover was performed.
+
+Apply these repository migrations in filename order:
+
+1. `backend/db/migrations/20260805_zzz_v2_gvic_permissions_step1.sql`
+2. `backend/db/migrations/20260805_zzza_v2_gvic_permissions_step1_resolvers.sql`
+3. `backend/db/migrations/20260805_zzzb_v2_gvic_permissions_step1_preflight_report.sql`
+
+Then operate these scripts separately and in this order:
+
+1. `scripts/v2_gvic_permissions_step1_preflight.sql`
+2. `scripts/v2_gvic_permissions_step1_copy_reconcile.sql`
+
+The production target is PostgreSQL 17.x. The SQL also accepts PostgreSQL 18.x so the same artifacts can run against the repository's disposable local test server. Other major versions return or raise `STOP`. The scripts are plain PostgreSQL SQL that runs directly in DBeaver and does not use psql commands or variables.
+
+#### Human-run order
+
+1. Confirm the intended database, current PostgreSQL server version, normal backup policy, and deployment change record.
+2. Apply the three additive migrations with the normal migration runner. Do not paste only part of a migration. Each migration must commit fully or roll back fully.
+3. In DBeaver, run `scripts/v2_gvic_permissions_step1_preflight.sql` as a script. It opens a read-only transaction. Review all `STOP` rows and the last `FINAL` row.
+4. Do not run the copy unless the final preflight row is `READY`. A source/effective/projection disagreement is a blocker that must be classified; do not edit the SQL to ignore it.
+5. Run `scripts/v2_gvic_permissions_step1_copy_reconcile.sql` separately. It writes only the V2 settings tables, V2 staging graph tables, and two V2 sequences. It does not update or delete old policy storage.
+6. Confirm the copy's final row is `READY`, review each resource-type count and fingerprint, and rerun the read-only preflight.
+7. Rerun the copy whenever a later exact delta is needed. The copy is restartable and replaces the V2 baseline with the policy resolved from one repeatable-read source snapshot.
+8. If DBeaver reports an exception during the copy, run `rollback;` on that connection before retrying. Fix or classify the reported source/schema mismatch first.
+9. Stop after Step 1. Do not rename graph tables, switch application readers or writers, or retire old storage. Those actions require the separately approved Step 2 and Step 3 work.
+
+#### Baseline conversion
+
+Step 1 never guesses that equal parent and child policies were inherited. Every existing supported resource receives:
+
+- stored mode `customized`;
+- its fully resolved current policy in V2 staging;
+- `descendant_reset_sequence = 0`;
+- `parent_link_sequence` equal to the migration baseline for children and zero for roots;
+- a customization sequence equal to the migration baseline;
+- separate GVIC and permission sequences whose next values are strictly above the baseline.
+
+The copy normalizes old GVIC `shared_triage_folder` identities to `shared_inbox_folder`. Missing resources or principals, invalid GVIC role shapes, hierarchy cycles, unresolved permission defaults, old effective-table disagreements, and My Work projection disagreements stop the copy instead of being guessed or silently repaired.
+
+#### Verification record
+
+The schema contract and disposable-PostgreSQL integration tests cover first application, restartable rerun, schema-drift refusal, and transactional rollback. The copy was verified against one repeatable-read source snapshot, including latest snapshot and direct-revision boundaries, exact counts, and policy fingerprints. The complete repository verification gate passed with the real disposable PostgreSQL path enabled.
+
 ## Step 2: application cutover to the four final tables
 
 ### Goal
