@@ -97,7 +97,9 @@ create function mangorts_trg_bump_node_view_user_from_snapshot() returns trigger
 begin if tg_op='DELETE' then return old; end if; return new; end $$;
 create function mangorts_trg_bump_node_view_from_direct_node() returns trigger language plpgsql as $$
 begin if tg_op='DELETE' then return old; end if; return new; end $$;
-insert into users values('00000000-0000-4000-8000-000000000601');
+insert into users values
+  ('00000000-0000-4000-8000-000000000601'),
+  ('00000000-0000-4000-8000-000000000606');
 insert into nodes values('00000000-0000-4000-8000-000000000602','00000000-0000-4000-8000-000000000603');
 insert into node_textboxes values(
   '00000000-0000-4000-8000-000000000602','00000000-0000-4000-8000-000000000603',
@@ -109,9 +111,25 @@ insert into node_projection_table values(
   '00000000-0000-4000-8000-000000000604','Text box',
   '<!-- mango-node-text-block-v1 -->{"document":"{\"type\":\"doc\",\"content\":[]}"}',
   false,7,now(),now());
+insert into node_projection_table values(
+  '00000000-0000-4000-8000-000000000602','00000000-0000-4000-8000-000000000603',
+  '00000000-0000-4000-8000-000000000607','Text box',
+  '<!-- mango-node-text-block-v1 -->{"document":"{\"type\":\"doc\",\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"late writer delta\"}]}]}"}',
+  false,1,now(),now());
 insert into node_projection_seen_snapshots
 select company_id,node_id,information_id,'00000000-0000-4000-8000-000000000601',information,
   updated_timestamp,updated_timestamp from node_projection_table;
+insert into node_projection_seen_snapshots
+select company_id,node_id,information_id,'00000000-0000-4000-8000-000000000606',information,
+  updated_timestamp,updated_timestamp from node_projection_table
+where information_id='00000000-0000-4000-8000-000000000607';
+insert into node_projection_seen_snapshots values
+  ('00000000-0000-4000-8000-000000000602','00000000-0000-4000-8000-000000000603',
+   '00000000-0000-4000-8000-000000000608','00000000-0000-4000-8000-000000000601',
+   'stale baseline',now(),now()),
+  ('00000000-0000-4000-8000-000000000602','00000000-0000-4000-8000-000000000603',
+   '00000000-0000-4000-8000-000000000608','00000000-0000-4000-8000-000000000606',
+   'stale baseline',now(),now());
 insert into node_content_changes values(
   '00000000-0000-4000-8000-000000000602','00000000-0000-4000-8000-000000000605',
   '00000000-0000-4000-8000-000000000603','00000000-0000-4000-8000-000000000604',
@@ -125,11 +143,54 @@ insert into node_content_changes values(
 		t.Fatalf("forward Node cutover: %v", err)
 	}
 	var snapshotRevision int64
-	if err := db.QueryRow(`select textbox_revision from node_textbox_seen_snapshots`).Scan(&snapshotRevision); err != nil {
+	if err := db.QueryRow(`select textbox_revision from node_textbox_seen_snapshots
+where textbox_id='00000000-0000-4000-8000-000000000604'`).Scan(&snapshotRevision); err != nil {
 		t.Fatal(err)
 	}
 	if snapshotRevision != 7 {
 		t.Fatalf("migrated seen revision=%d, want 7", snapshotRevision)
+	}
+	var copiedBody string
+	var copiedRevision int64
+	if err := db.QueryRow(`select body_json::text,revision
+from node_textboxes
+where company_id='00000000-0000-4000-8000-000000000602'
+  and node_id='00000000-0000-4000-8000-000000000603'
+  and textbox_id='00000000-0000-4000-8000-000000000607'`).Scan(&copiedBody, &copiedRevision); err != nil {
+		t.Fatal(err)
+	}
+	if copiedRevision != 1 || !strings.Contains(copiedBody, "late writer delta") {
+		t.Fatalf("copied writer delta revision=%d body=%s", copiedRevision, copiedBody)
+	}
+	var staleLegacyRows, copiedLegacySeenRows, copiedFinalSeenRows, copiedProjectionRows int
+	var copiedMinSeenRevision, copiedMaxSeenRevision int64
+	if err := db.QueryRow(`select
+  (select count(*) from node_projection_seen_snapshots
+    where information_id='00000000-0000-4000-8000-000000000608'),
+  (select count(*) from node_projection_seen_snapshots
+    where information_id='00000000-0000-4000-8000-000000000607'),
+  (select count(*) from node_textbox_seen_snapshots
+    where textbox_id='00000000-0000-4000-8000-000000000607'),
+  (select min(textbox_revision) from node_textbox_seen_snapshots
+    where textbox_id='00000000-0000-4000-8000-000000000607'),
+  (select max(textbox_revision) from node_textbox_seen_snapshots
+    where textbox_id='00000000-0000-4000-8000-000000000607'),
+  (select count(*) from node_projection_table
+    where information_id='00000000-0000-4000-8000-000000000607')`).Scan(
+		&staleLegacyRows, &copiedLegacySeenRows, &copiedFinalSeenRows,
+		&copiedMinSeenRevision, &copiedMaxSeenRevision, &copiedProjectionRows,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if staleLegacyRows != 0 {
+		t.Fatalf("stale legacy seen rows=%d, want 0", staleLegacyRows)
+	}
+	if copiedLegacySeenRows != 2 || copiedFinalSeenRows != 2 ||
+		copiedMinSeenRevision != 1 || copiedMaxSeenRevision != 1 || copiedProjectionRows != 1 {
+		t.Fatalf(
+			"real delta preservation legacy seen=%d final seen=%d revisions=%d..%d projection rows=%d",
+			copiedLegacySeenRows, copiedFinalSeenRows, copiedMinSeenRevision, copiedMaxSeenRevision, copiedProjectionRows,
+		)
 	}
 	var finalColumn, oldColumn bool
 	if err := db.QueryRow(`select

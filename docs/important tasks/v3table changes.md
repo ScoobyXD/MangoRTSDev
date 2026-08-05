@@ -6,6 +6,12 @@ A Mango file has one record in `attachments` and one or more ownership links in 
 
 The Node textbox, Node textbox chat, email, and attachment application cutovers are complete in repository code. The development database has already retired the 19 email, attachment, Project, and Logic Gate objects listed below. Node runtime code now uses only final textbox/chat/email/attachment/content-change tables. The remaining database operation is the separately gated retirement of the three legacy Node tables after the final Node forward migration, matching backend deploy, smoke tests, soak, and snapshot.
 
+At the writer-paused Node boundary, the forward migration closes only the proven
+legacy-writer delta: it copies active legacy textboxes absent from final storage,
+keeps their stable IDs and seen rows, and deletes a seen row only when its
+current Node exists and its exact legacy projection, final textbox, history,
+and content changes are all absent.
+
 # V3 table changes implementation handoff
 
 ## Purpose
@@ -59,16 +65,35 @@ The final Node retirement set is exactly:
 2. `node_projection_table`
 3. `node_information`
 
+### Development final-delta evidence (2026-08-04)
+
+The read-only blocker export was inspected row by row:
+
+- 22 legacy seen rows across 18 textbox IDs had neither an exact
+  `node_projection_table` row nor an exact `node_textboxes` row. They had no
+  textbox history or content-change rows. These are stale baselines and are the
+  only rows the forward migration deletes.
+- 14 legacy seen rows across 10 textbox IDs had an active exact `Text box`
+  projection, a current Node owner, and no final textbox. Each baseline matched
+  the current legacy projection. The 10 projections were created after the
+  earlier additive copy, so the forward migration copies all 10 with stable IDs
+  and then migrates all 14 baselines.
+- The script does not overwrite any textbox already present in
+  `node_textboxes`. The 10 legacy projections and their 14 source baselines
+  remain intact until the later, separately approved three-table retirement;
+  their final copies survive that retirement.
+
 Human-run order:
 
 1. Take and verify a restorable snapshot; keep application writers running while the read-only `scripts/v3_node_final_runtime_preflight.sql` is reviewed.
 2. Pause all Node/editor writers.
-3. Apply `backend/db/migrations/20260804_zzzzzz_node_final_storage_cutover.sql`. It copies/reconciles seen baselines, renames `node_content_changes.information_id` to `textbox_id`, installs final constraints/triggers, and rolls back fully on refusal.
-4. Deploy the matching backend while writers remain paused, then resume writers.
-5. Run Node textbox/chat, exact email access, shared/last-owner attachment, delete/recycle/restore, and saved-history smoke tests.
-6. Prove no current writer uses the legacy tables, complete the agreed soak, and take the retirement snapshot.
-7. In `backend/db/operator_migrations/20260805_retire_node_legacy_storage.sql`, change all five approvals to `true` only when their evidence exists and run the whole transaction in DBeaver. It supports PostgreSQL 17.x only, refuses drift or dependencies, uses no `CASCADE`, and drops exactly the three Node tables.
-8. Run readiness and smoke checks again. Do not rerun the strict retirement transaction after success; its already-retired refusal is intentional.
+3. Rerun `scripts/v3_node_final_runtime_preflight.sql` while writers are paused. For the inspected development data, confirm it reports 10 active legacy textboxes to copy, 22 stale seen rows across 18 textbox IDs, and 14 seen rows to migrate after the copy. Stop if those counts changed unexpectedly.
+4. Apply `backend/db/migrations/20260804_zzzzzz_node_final_storage_cutover.sql`. For that same development data its final result must report 22 stale seen snapshots removed, 10 active legacy textboxes copied, and 14 delta seen snapshots migrated. It separately reports the total legacy seen snapshots migrated, including rows that were already paired with final textboxes. It renames `node_content_changes.information_id` to `textbox_id`, installs final constraints/triggers, and rolls back fully on refusal.
+5. Deploy the matching backend while writers remain paused, then resume writers.
+6. Run Node textbox/chat, exact email access, shared/last-owner attachment, delete/recycle/restore, and saved-history smoke tests.
+7. Prove no current writer uses the legacy tables, complete the agreed soak, and take the retirement snapshot.
+8. In `backend/db/operator_migrations/20260805_retire_node_legacy_storage.sql`, change all five approvals to `true` only when their evidence exists and run the whole transaction in DBeaver. It supports PostgreSQL 17.x only, refuses drift or dependencies, uses no `CASCADE`, and drops exactly the three Node tables.
+9. Run readiness and smoke checks again. Do not rerun the strict retirement transaction after success; its already-retired refusal is intentional.
 
 ## Development rollout status
 

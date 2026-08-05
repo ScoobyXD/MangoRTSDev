@@ -7,6 +7,8 @@ The backend stores TipTap JSON in `node_textboxes`, chat rows in `node_textbox_c
 Content changes and viewer baselines use `node_content_changes.textbox_id`, `node_content_change_seen`, and `node_textbox_seen_snapshots`; the API keeps the stable public `information_id` by assembling projection-shaped responses from those final rows
 ↓
 Deleting a textbox removes its owned chats and retires those chats' file links. Node-owned file and email relationships remain available from the Node header even when their recorded textbox origin is deleted; deleting the final file owner follows pending-delete, S3-before-Postgres, retry-safe cleanup
+↓
+During the one-time writer-paused final cutover, an active legacy textbox absent from `node_textboxes` is copied with its exact stable ID. A legacy seen row is discarded only when its current Node still exists and its exact legacy projection, exact final textbox, history, and content changes are all absent; every seen row for a real textbox is migrated.
 
 The production Node path must never query or write `node_information`, `node_projection_table`, or `node_projection_seen_snapshots`. Textbox creation and editing use the JSON editor API; the old projection-shaped text writer is rejected rather than translated or dual-written.
 
@@ -714,6 +716,8 @@ N130 - Every stored-email and attachment read authorizes the company, Node, and 
 
 N131 - `node_textbox_chats` is the authority for current Node textbox comments after cutover. Deleting a textbox deletes all chats owned by it, including chats with an email selection, and tombstones their chat-attachment links; the normalized email message/thread and email attachments remain. Legacy `Text block chat` rows remain rollback evidence but are excluded from runtime reads and receive no new writes.
 
+N132 - With Node/editor writers paused, the final storage migration copies only active legacy `Text box` projections whose exact stable ID is absent from `node_textboxes`; it never overwrites a final textbox. It removes a legacy seen snapshot only when its current Node exists and no exact legacy projection, final textbox, history, or content change exists. It migrates every remaining seen snapshot, reconciles identities exactly, and rolls the entire transaction back on conversion, ownership, schema, or reconciliation failure.
+
 ### Scenario N-S23: Email, Editor, And Chat Column Correction
 
 Business logic covered:
@@ -798,3 +802,27 @@ Expected:
 - Both chats and any reply descendants are removed from `node_textbox_chats`.
 - Their active `node_chat_message` attachment links are tombstoned without deleting the underlying attachment content.
 - The normalized email message, thread, and email attachments remain, and the deleted textbox's chats no longer appear in Node reads.
+
+### Scenario N-S27: Final Delta Keeps Real Textboxes and Removes Only Orphaned Seen Rows
+
+Business logic covered:
+- N132
+
+Given:
+- Writers are paused.
+- Some active legacy `Text box` projections were created after the earlier additive copy and therefore have no exact `node_textboxes` row.
+- Their legacy seen snapshots still point to those real projections.
+- Other legacy seen snapshots belong to current Nodes but have no exact projection, final textbox, history, or content change.
+
+When:
+- The PostgreSQL 17 final Node storage migration runs.
+
+Expected:
+- Each missing real textbox is converted to final TipTap JSON and inserted with its original textbox ID, revision, and timestamps. Existing final textboxes are not updated.
+- Seen snapshots for those real textboxes are retained in the legacy source and copied to `node_textbox_seen_snapshots`.
+- Only snapshots with a current Node but no exact projection, final textbox, history, or content change are deleted as stale.
+- The migration reports copied, removed, and migrated counts and commits only after exact reconciliation.
+
+Automated coverage:
+- `backend/internal/store/node_final_storage_contract_test.go`
+- `backend/internal/store/postgres_node_retirement_integration_test.go`
