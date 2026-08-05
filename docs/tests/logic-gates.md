@@ -1,14 +1,17 @@
-# Process Story: Logic Gate work continues without canvas storage
+# Process Story: Logic Gate work continues after Logic Gate Map retirement
 
 A user creates or opens a Logic Gate from Explorer, Home, Logic Gate Arena, Kanban, or a direct route
 ↓
 The canonical Logic Gate record, Input/Output relationships, permissions, and GVIC assignments load through surviving APIs and caches
+↓
+No Logic Gate Map route, frame, coordinate payload, position store, or compatibility reader exists
 ↓
 The Editor saves the one current final textbox document and manual Save appends saving-user history
 ↓
 Rename, relationship, deletion, recycle, restore, attachment, email, and collaboration behavior publish the same retained domain effects
 ↓
 No request or response reads, writes, or returns entity coordinates
+
 # Process Story: Logic Gate documents use final storage
 
 A user opens a Logic Gate and reads or edits its one document
@@ -21,7 +24,7 @@ Deleting or recycling the Logic Gate cleans up exact final email and attachment 
 ↓
 The two legacy Logic Gate tables may be retired only after the guarded copy, deployment, smoke, reconciliation, soak, snapshot, dependency, and operator-approval gates pass
 
-Last updated: 2026-08-04
+Last updated: 2026-08-05
 
 # Logic Gates Tests
 
@@ -62,7 +65,7 @@ LG25 - Pressing the Logic Gate editor's apply-to-assigned-nodes action opens an 
 LG26 - Logic Gate editor surfaces participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, italic, strikethrough, text highlight/No highlight, left/center/right alignment, table, and people-suggestion/entity-boundary semantics must apply to Logic Gate editor text wherever it is opened. The `@`/`!` people picker uses stable, visible per-user profile colors rather than gray-only rows.
 LG27 - Logic Gate editor inline images/files must follow `docs/tests/attachments.md`: rich-editor paste/drop uses the shared editor image path, `logic_gate_textboxes.body_json` stores attachment references, and file ownership comes only from `attachments` plus `attachment_relationships`; no durable row stores data URLs or base64 file bytes.
 LG28 - The Logic Gate editor toolbar must use the shared rich-editor toolbar source and shared formatting controller. Font-size minus/value/plus, Bold, Underline, Italic, Strikethrough, the Highlight split button with **No highlight**, left/center/right alignment, table insertion, and the outline-style dropdown must match node text boxes, project text boxes, mail editor surfaces, and email signatures. The highlight main hitbox applies the chosen color without opening the picker, while the arrow only opens the picker. Vibrant active styling applies only to the individual hitbox and remains distinct from hover, focus, and disabled state.
-LG29 - A Logic Gate permissions view opened from the editor, map, Company Explorer, or another Logic Gate entry point always displays **Save** when editable. Saving persists the current selection without closing; denied views remain dismissible and do not attempt a write. This permission action is distinct from editor saved-version Save.
+LG29 - A Logic Gate permissions view opened from the editor, Company Explorer, Home, Logic Gate Arena, Kanban, or another surviving Logic Gate entry point always displays **Save** when editable. Saving persists the current selection without closing; denied views remain dismissible and do not attempt a write. This permission action is distinct from editor saved-version Save.
 LG30 - When a personal or Shared Triage email is converted into a node/card assigned to a Logic Gate, the created attached-email projection retains the source account email and, for shared mail, the shared-inbox ID. Later node email reads and mutations use that stored mailbox scope.
 LG31 - Logic Gate Arena work loads use one cache-first, cancelable, single-flight loader whether the gate came from forced Arena props or the current selection.
 LG32 - Changing the selected Logic Gate aborts the obsolete request, and selection generation prevents a late A response from overwriting B or a newer A selection.
@@ -266,7 +269,7 @@ Business logic covered:
 - LG29
 
 Given:
-- A manager or administrator opens permissions for the same Logic Gate from the editor, map, and Company Explorer.
+- A manager or administrator opens permissions for the same Logic Gate from the editor, Logic Gate Arena, and Company Explorer.
 - A second viewer can open the Logic Gate but cannot edit permission settings.
 
 Expected:

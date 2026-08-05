@@ -51,6 +51,14 @@ The app layout keeps compatibility for persisted payloads:
 - Runtime entry is now directly `main.tsx` -> `app/applayout.tsx`.
 - widget/module compatibility shims were removed from `src/widgets`.
 
+## Node Map and Logic Gate Map retirement (2026-08-05)
+
+- Node Map and Logic Gate Map are deleted product features, not hidden modules.
+- Home is the default active primary page after Map removal.
+- The module picker, headers, tab actions, linking graph, selection coordination, and route handling expose no Map entry point.
+- Persisted Map frames are discarded during restore; they are not translated, emulated, or read through a compatibility module.
+- App layout state stores no Map coordinates, viewport, inline-comment, clipboard, or position payload.
+
 ## Optional follow-up (non-blocking)
 
 `applayout` is functionally correct but still large. Future quality refactor can extract:
@@ -112,7 +120,7 @@ The app layout keeps compatibility for persisted payloads:
 - Root frames can be selected from the header section, and the full header section starts frame movement in edit mode and non-edit mode.
 - Child frames can be selected from the header section and dragged within their parent frame from that full header section.
 - Right-clicking anywhere in the header section opens the frame action menu with Duplicate, Link modules, Delink modules, color choices, and Delete.
-- Dragging no longer starts from the general section; the body remains available for text editing, Kanban card work, map selection, explorer rows, and other module interactions.
+- Dragging no longer starts from the general section; the body remains available for text editing, Kanban card work, Explorer rows, and other surviving module interactions.
 - Selected frames render a persistent Mango orange frame ring using `FRAME_SELECTION_COLOR`, confirming which frame is active for link, delete, copy, and related frame-level actions.
 
 ## Mango wordmark and lighter label update (2026-05-10)
@@ -125,7 +133,7 @@ The app layout keeps compatibility for persisted payloads:
 
 - The visible dashboard header is now a Mango-gradient strip with a rounded translucent taskbar surface layered on top.
 - The top-level Edit and add-frame buttons were removed from the header; frame creation and edit mode remain available from the canvas context menu.
-- The default center header order is Communication, Logic Gate Arena, then Map, each with an icon on the left.
+- Map is absent from the center header. Home is the default active primary page, while Communication and Logic Gate Arena remain available surviving destinations.
 - The right header account chrome is reserved for the person icon + user name and Settings.
 - The visible new-tab plus button was removed from the header; new view tabs remain available from the header context menu.
 - Hard UI rule: authenticated pages must use this same rounded Mango taskbar header instead of standalone page-specific headers.

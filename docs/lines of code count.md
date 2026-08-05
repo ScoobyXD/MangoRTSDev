@@ -2,6 +2,8 @@
 
 ## 2026-07-31 (do this exact same analysis for each new timestamp when you are tasked with doing another code audit on a new timestamp and we will grow a historical list)
 
+Historical snapshot note: this count predates the 2026-08-05 deletion of Node Map and Logic Gate Map. Rows naming `frontend/src/modules/map`, `frontend/src/modules/node-map`, `frontend/src/modules/logic-gate-map`, or files inside them describe the old snapshot only; those production directories and features no longer exist.
+
 The history table keeps the summary from each audit. The area, subcategory, and
 large-file tables below show the latest snapshot only.
 

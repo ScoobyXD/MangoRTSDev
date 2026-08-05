@@ -56,7 +56,7 @@ It participates in the same `frame-module-links-v1` graph as Explorer and Editor
 - a child Kanban board can therefore receive linked Explorer context without adding a second link model.
 
 Linked Explorer selection highlights matching cards on the board.
-Linked Explorer selection of a Kanban board opens that board in the linked Kanban frame. Kanban board selections are ignored by Map and Editor modules.
+Linked Explorer selection of a Kanban board opens that board in the linked Kanban frame. Kanban board selections are ignored by Editor modules; no Node Map or Logic Gate Map module exists.
 
 ## Drag Contract
 Company Explorer writes drag payloads using:

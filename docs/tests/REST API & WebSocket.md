@@ -1,4 +1,4 @@
-# Process Story: Realtime carries only surviving product changes
+# Process Story: Realtime remains map-free after complete Map retirement
 
 A committed Node, Logic Gate, Editor, Explorer, Kanban, communications, Project, permission, or notification mutation appends its retained domain event
 ↓
@@ -8,7 +8,8 @@ Frontend caches invalidate or reconcile the affected surviving entity and title 
 ↓
 Node authored-change annotations and unread/seen ETags keep their existing routes and state transitions
 ↓
-No geometry event, workspace scope, or derived position task is produced or consumed
+No Node Map or Logic Gate Map route, API, workspace scope, geometry event, coordinate payload, read-version scope, or derived position task exists
+
 # Process Story: Logic Gate document commands use final storage
 
 A UI or headless caller loads the current Logic Gate document
@@ -21,7 +22,7 @@ Legacy information/projection commands cannot write a compatibility row
 ↓
 Committed revision events keep the existing exact realtime behavior
 
-Last updated: 2026-08-04
+Last updated: 2026-08-05
 
 # REST API & WebSocket Tests
 
@@ -92,6 +93,7 @@ RW57 - An otherwise healthy realtime WebSocket remains connected while idle. The
 RW58 - Node and Project chat edits use author-checked `PATCH .../projection/{projection_id}` commands. The request may replace trimmed message text and resolved mention IDs but cannot replace the stored author, created timestamp, source selection, reply context, attachments, text-box ownership, or arbitrary payload fields. Node edits enqueue a durable compact `chat.message.updated` event on `chat:node:{node_id}`; mounted clients respond with one canonical projection refresh. The existing exact-scope authorization, current-audience resolution, retry/outbox behavior, and no-project-chat-subscription boundary remain unchanged.
 RW59 - Logic Gate document writes use `/v1/editor-json/logic_gate/{logic_gate_id}/documents/{document_id}` and `logic_gate_textboxes`. A legacy text information write returns `editor_collaboration_required`; every unsupported legacy information type returns `logic_gate_information_type_not_supported`; neither path writes `logic_gate_information` or `logic_gate_projection_table`.
 RW60 - `project_information_created` and `project_information_deleted` advance the `projects`, unfiltered Company Explorer, and Project-folder Company Explorer read-version scopes. Conditional reads after either event must not reuse an older ETag or return an incorrect `304`.
+RW61 - Node Map and Logic Gate Map are fully retired. The backend exposes no Map layout or Map workspace route, accepts or returns no Map coordinates or position results, creates no Map-derived task, publishes no Map realtime event, and maintains no Map read-version scope or cache key. Historical shipped migrations remain records only.
 
 ## Scenarios
 
@@ -193,6 +195,20 @@ Expected:
 - First acceptance and reconnect use only that active surface's coalesced canonical HTTP read; Updates fetches its feed only while open and mail reconciles only while the exact mailbox is active.
 - Ordinary workspace, Explorer, graph, My Work, Project Management, broad communications, permission, and document mutations emit no product socket message.
 
+### Scenario RW-S4B: Retired Map Contracts Stay Absent
+
+Business logic covered:
+- RW61
+
+Given:
+- A caller attempts a retired Map layout or Map workspace request, or old browser state names a retired Map scope.
+- A normal Node, Logic Gate, relationship, Editor, Explorer, or Kanban mutation commits.
+
+Expected:
+- No Map route or compatibility handler accepts the request, and no response contains Map coordinates or position results.
+- No Map realtime event, read-version scope, cache key, or derived position task is created.
+- Surviving product mutations continue through their exact non-Map contracts without querying Map position storage.
+
 ### Scenario RW-S5: Same-Window Node And Logic Gate Titles Converge
 
 Business logic covered:
@@ -204,7 +220,7 @@ Business logic covered:
 
 Given:
 - The same Node or Logic Gate is visible in concurrently mounted Editor, Kanban/Arena, Company Explorer, Home, My Work, Updates, AppLayout dock/popup/sidebar pins, AppTimeline, and Project Management caches as applicable.
-- Each supported rename entry point successfully commits once; one editor document is dirty/in flight and one Editor or map title `contentEditable` has a live draft and caret.
+- Each supported rename entry point successfully commits once; one editor document is dirty/in flight and one Editor title `contentEditable` has a live draft and caret.
 
 Expected:
 - Each successful HTTP rename publishes one concrete committed-title event after commit.

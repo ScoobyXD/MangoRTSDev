@@ -81,16 +81,16 @@ The following tab actions are required:
 
 - Rename View
 - Delete View
-- Map
-- Default Company Explorer View
+- Logic Gate Arena
+- Home
 - Save Current as Template
 
 Preset behavior:
 
-- `Map` opens the hardcoded baseline Node workspace.
-- `Default Company Explorer View` opens hardcoded baseline Explorer workspace.
-- Both can be edited by users after opening.
-- `Save Current as Template` captures current nested arrangement and module placement for reuse.
+- `Home` opens the surviving Home primary page and is the default active primary page.
+- `Logic Gate Arena` opens its surviving Editor-and-Kanban workspace.
+- Node Map and Logic Gate Map presets do not exist. Persisted Map frames are discarded rather than translated.
+- `Save Current as Template` captures the current supported nested arrangement and module placement for reuse.
 
 ---
 
