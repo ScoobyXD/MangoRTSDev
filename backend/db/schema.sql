@@ -4237,3 +4237,1093 @@ for each row execute function mangorts_trg_bump_node_view_from_direct_node();
 drop trigger if exists trg_node_view_user_version_snapshots on node_textbox_seen_snapshots;
 create trigger trg_node_view_user_version_snapshots after insert or update or delete on node_textbox_seen_snapshots
 for each row execute function mangorts_trg_bump_node_view_user_from_snapshot();
+
+-- BEGIN V2 GVIC AND PERMISSIONS STEP 1 PHASE-APPROPRIATE SCHEMA
+
+-- V2 GVIC and permissions Step 1: additive destination storage only.
+-- Runtime readers/writers continue to use the legacy policy tables until Step 2.
+
+do $$
+declare
+  spec record;
+  actual_count integer;
+  missing_count integer;
+  extra_count integer;
+begin
+  if current_setting('server_version_num')::integer < 170000
+     or current_setting('server_version_num')::integer >= 190000 then
+    raise exception 'v2_policy_step1_unsupported_postgresql_version:%', current_setting('server_version');
+  end if;
+
+  for spec in
+    select key as table_name, value as expected_columns
+    from jsonb_each($shape$
+      {
+        "companies":["company_id","name","created_timestamp","updated_timestamp"],
+        "users":["user_id","cognito_subject","email","display_name","created_timestamp","updated_timestamp"],
+        "company_memberships":["company_id","user_id","role","created_timestamp","updated_timestamp"],
+        "company_user_groups":["company_id","group_id","parent_group_id","name","position","created_timestamp","updated_timestamp"],
+        "company_user_group_members":["company_id","group_id","user_id","created_timestamp","updated_timestamp"],
+        "nodes":["company_id","node_id","name","status","due_date","priority","default_access","created_timestamp"],
+        "logic_gates":["company_id","logic_gate_id","header","default_access","created_timestamp"],
+        "projects":["company_id","project_id","name","status","health","default_access","created_timestamp","updated_timestamp"],
+        "company_explorer_folders":["company_id","folder_id","parent_folder_id","name","default_access","position","created_by_user_id","created_timestamp","updated_timestamp"],
+        "company_explorer_items":["company_id","item_id","parent_folder_id","target_type","target_id","position","created_by_user_id","created_timestamp","updated_timestamp"],
+        "shared_inbox_folders":["company_id","folder_id","parent_folder_id","name","default_access","position","created_timestamp","updated_timestamp"],
+        "shared_inboxes":["company_id","shared_inbox_id","parent_folder_id","name","account_email","company_email_connection_id","default_access","position","created_timestamp","updated_timestamp"],
+        "node_logic_gate_assignments":["assignment_id","company_id","node_id","logic_gate_id","status_key","column_id","is_issue","position","compatibility_board_id","compatibility_card_id","requested_by_user_id","placed_by_user_id","version","created_timestamp","updated_timestamp"],
+        "resource_gvic_assignments":["company_id","resource_type","resource_id","role","principal_type","principal_id","created_timestamp","updated_timestamp"],
+        "resource_gvic_effective_assignments":["company_id","resource_type","resource_id","role","user_id","source_resource_type","source_resource_id","source_principal_type","source_principal_id","inheritance_type","updated_timestamp"],
+        "resource_gvic_policy_revisions":["company_id","resource_type","resource_id","policy_sequence","updated_timestamp"],
+        "resource_gvic_subtree_applications":["application_id","policy_sequence","company_id","ancestor_resource_type","ancestor_resource_id","role","principal_type","principal_id","deleted","snapshot","created_timestamp"],
+        "resource_permissions":["company_id","resource_type","resource_id","subject_type","subject_id","user_id","access_level","created_timestamp","updated_timestamp"],
+        "resource_permission_policy_revisions":["company_id","resource_type","resource_id","policy_sequence","updated_timestamp"],
+        "resource_permission_subtree_applications":["application_id","policy_sequence","company_id","ancestor_resource_type","ancestor_resource_id","rule_key","subject_type","subject_id","access_level","deleted","created_timestamp"],
+        "gvic_matrix_projection_table":["company_id","projection_row_id","user_id","node_name","gvic_assignment","priority","project_id","project_name","logic_gate_id","logic_gate_name","node_id","status","due_date","accounts","created_timestamp","updated_timestamp","sort_order"]
+      }
+    $shape$::jsonb)
+  loop
+    if to_regclass('public.' || spec.table_name) is null then
+      raise exception 'v2_policy_step1_missing_source_table:%', spec.table_name;
+    end if;
+    select count(*) into actual_count
+    from information_schema.columns
+    where table_schema='public' and table_name=spec.table_name;
+    select count(*) into missing_count
+    from jsonb_array_elements_text(spec.expected_columns) expected(column_name)
+    where not exists (
+      select 1 from information_schema.columns actual
+      where actual.table_schema='public'
+        and actual.table_name=spec.table_name
+        and actual.column_name=expected.column_name
+    );
+    select count(*) into extra_count
+    from information_schema.columns actual
+    where actual.table_schema='public'
+      and actual.table_name=spec.table_name
+      and not exists (
+        select 1 from jsonb_array_elements_text(spec.expected_columns) expected(column_name)
+        where expected.column_name=actual.column_name
+      );
+    if actual_count <> jsonb_array_length(spec.expected_columns)
+       or missing_count <> 0 or extra_count <> 0 then
+      raise exception 'v2_policy_step1_source_schema_drift:%:expected=%:actual=%:missing=%:extra=%',
+        spec.table_name, jsonb_array_length(spec.expected_columns), actual_count, missing_count, extra_count;
+    end if;
+  end loop;
+
+  for spec in
+    select key as table_name, value as expected_columns
+    from jsonb_each($shape$
+      {
+        "resource_gvic_settings":["company_id","resource_type","resource_id","assignment_mode","customized_sequence","parent_link_sequence","descendant_reset_sequence","created_timestamp","updated_timestamp"],
+        "resource_permission_settings":["company_id","resource_type","resource_id","permission_mode","default_access","customized_sequence","parent_link_sequence","descendant_reset_sequence","created_timestamp","updated_timestamp"],
+        "resource_gvic_assignments_v2_staging":["company_id","resource_type","resource_id","role","principal_type","principal_id","created_timestamp","updated_timestamp"],
+        "resource_permissions_v2_staging":["company_id","resource_type","resource_id","subject_type","subject_id","access_level","created_timestamp","updated_timestamp"]
+      }
+    $shape$::jsonb)
+  loop
+    if to_regclass('public.' || spec.table_name) is not null then
+      select count(*) into actual_count
+      from information_schema.columns
+      where table_schema='public' and table_name=spec.table_name;
+      select count(*) into missing_count
+      from jsonb_array_elements_text(spec.expected_columns) expected(column_name)
+      where not exists (
+        select 1 from information_schema.columns actual
+        where actual.table_schema='public'
+          and actual.table_name=spec.table_name
+          and actual.column_name=expected.column_name
+      );
+      select count(*) into extra_count
+      from information_schema.columns actual
+      where actual.table_schema='public'
+        and actual.table_name=spec.table_name
+        and not exists (
+          select 1 from jsonb_array_elements_text(spec.expected_columns) expected(column_name)
+          where expected.column_name=actual.column_name
+        );
+      if actual_count <> jsonb_array_length(spec.expected_columns)
+         or missing_count <> 0 or extra_count <> 0 then
+        raise exception 'v2_policy_step1_destination_schema_drift:%:expected=%:actual=%:missing=%:extra=%',
+          spec.table_name, jsonb_array_length(spec.expected_columns), actual_count, missing_count, extra_count;
+      end if;
+    end if;
+  end loop;
+end;
+$$;
+
+create sequence if not exists resource_gvic_change_sequence;
+create sequence if not exists resource_permission_change_sequence;
+
+create table if not exists resource_gvic_settings (
+  company_id uuid not null,
+  resource_type text not null,
+  resource_id uuid not null,
+  assignment_mode text not null,
+  customized_sequence bigint,
+  parent_link_sequence bigint not null,
+  descendant_reset_sequence bigint not null default 0,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  primary key (company_id, resource_type, resource_id),
+  foreign key (company_id) references companies(company_id) on delete cascade,
+  constraint resource_gvic_settings_resource_type_chk check (resource_type in (
+    'node','logic_gate','project','company_explorer_folder','shared_inbox_folder','shared_inbox'
+  )),
+  constraint resource_gvic_settings_assignment_mode_chk check (assignment_mode in ('inherited','customized')),
+  constraint resource_gvic_settings_mode_shape_chk check (
+    (assignment_mode='inherited' and customized_sequence is null)
+    or (assignment_mode='customized' and customized_sequence is not null and customized_sequence > 0)
+  ),
+  constraint resource_gvic_settings_parent_sequence_chk check (parent_link_sequence >= 0),
+  constraint resource_gvic_settings_reset_sequence_chk check (descendant_reset_sequence >= 0)
+);
+
+create index if not exists idx_resource_gvic_settings_customized_sequence
+  on resource_gvic_settings(company_id,resource_type,resource_id,customized_sequence);
+create index if not exists idx_resource_gvic_settings_reset_sequence
+  on resource_gvic_settings(company_id,resource_type,resource_id,descendant_reset_sequence)
+  where descendant_reset_sequence > 0;
+
+create table if not exists resource_permission_settings (
+  company_id uuid not null,
+  resource_type text not null,
+  resource_id uuid not null,
+  permission_mode text not null,
+  default_access text,
+  customized_sequence bigint,
+  parent_link_sequence bigint not null,
+  descendant_reset_sequence bigint not null default 0,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  primary key (company_id, resource_type, resource_id),
+  foreign key (company_id) references companies(company_id) on delete cascade,
+  constraint resource_permission_settings_resource_type_chk check (resource_type in (
+    'node','logic_gate','project','company_explorer_folder','shared_inbox_folder','shared_inbox'
+  )),
+  constraint resource_permission_settings_permission_mode_chk check (permission_mode in ('inherited','customized')),
+  constraint resource_permission_settings_default_access_chk check (default_access is null or default_access in ('edit','no_access')),
+  constraint resource_permission_settings_mode_shape_chk check (
+    (permission_mode='inherited' and customized_sequence is null and default_access is null)
+    or (
+      permission_mode='customized'
+      and customized_sequence is not null and customized_sequence > 0
+      and default_access in ('edit','no_access')
+    )
+  ),
+  constraint resource_permission_settings_parent_sequence_chk check (parent_link_sequence >= 0),
+  constraint resource_permission_settings_reset_sequence_chk check (descendant_reset_sequence >= 0)
+);
+
+create index if not exists idx_resource_permission_settings_customized_sequence
+  on resource_permission_settings(company_id,resource_type,resource_id,customized_sequence);
+create index if not exists idx_resource_permission_settings_reset_sequence
+  on resource_permission_settings(company_id,resource_type,resource_id,descendant_reset_sequence)
+  where descendant_reset_sequence > 0;
+
+create table if not exists resource_gvic_assignments_v2_staging (
+  company_id uuid not null,
+  resource_type text not null,
+  resource_id uuid not null,
+  role text not null,
+  principal_type text not null,
+  principal_id uuid not null,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  primary key (company_id,resource_type,resource_id,role,principal_type,principal_id),
+  foreign key (company_id,resource_type,resource_id)
+    references resource_gvic_settings(company_id,resource_type,resource_id) on delete cascade,
+  constraint resource_gvic_assignments_v2_staging_role_chk
+    check (role in ('generated','verified','consulted','informed')),
+  constraint resource_gvic_assignments_v2_staging_principal_type_chk
+    check (principal_type in ('user','group')),
+  constraint resource_gvic_assignments_v2_staging_user_only_role_chk
+    check (role not in ('generated','verified') or principal_type='user')
+);
+
+create unique index if not exists idx_resource_gvic_assignments_v2_one_role_per_principal
+  on resource_gvic_assignments_v2_staging(company_id,resource_type,resource_id,principal_type,principal_id);
+create unique index if not exists idx_resource_gvic_assignments_v2_one_generated
+  on resource_gvic_assignments_v2_staging(company_id,resource_type,resource_id)
+  where role='generated';
+create index if not exists idx_resource_gvic_assignments_v2_principal
+  on resource_gvic_assignments_v2_staging(company_id,principal_type,principal_id,role,resource_type,resource_id);
+
+create table if not exists resource_permissions_v2_staging (
+  company_id uuid not null,
+  resource_type text not null,
+  resource_id uuid not null,
+  subject_type text not null,
+  subject_id uuid not null,
+  access_level text not null,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  primary key (company_id,resource_type,resource_id,subject_type,subject_id),
+  foreign key (company_id,resource_type,resource_id)
+    references resource_permission_settings(company_id,resource_type,resource_id) on delete cascade,
+  constraint resource_permissions_v2_staging_subject_type_chk check (subject_type in ('user','group')),
+  constraint resource_permissions_v2_staging_access_level_chk check (access_level in ('edit','no_access'))
+);
+
+create index if not exists idx_resource_permissions_v2_subject
+  on resource_permissions_v2_staging(company_id,subject_type,subject_id,access_level,resource_type,resource_id);
+
+create or replace function mangorts_v2_policy_resource_exists(
+  p_company_id uuid,
+  p_resource_type text,
+  p_resource_id uuid
+)
+returns boolean
+language sql
+stable
+set search_path=public,pg_temp
+as $$
+  select case p_resource_type
+    when 'node' then exists(select 1 from nodes where company_id=p_company_id and node_id=p_resource_id)
+    when 'logic_gate' then exists(select 1 from logic_gates where company_id=p_company_id and logic_gate_id=p_resource_id)
+    when 'project' then exists(select 1 from projects where company_id=p_company_id and project_id=p_resource_id)
+    when 'company_explorer_folder' then exists(select 1 from company_explorer_folders where company_id=p_company_id and folder_id=p_resource_id)
+    when 'shared_inbox_folder' then exists(select 1 from shared_inbox_folders where company_id=p_company_id and folder_id=p_resource_id)
+    when 'shared_inbox' then exists(select 1 from shared_inboxes where company_id=p_company_id and shared_inbox_id=p_resource_id)
+    else false
+  end;
+$$;
+
+create or replace function mangorts_v2_policy_parent(
+  p_company_id uuid,
+  p_resource_type text,
+  p_resource_id uuid
+)
+returns table(parent_resource_type text,parent_resource_id uuid)
+language sql
+stable
+set search_path=public,pg_temp
+as $$
+  select 'logic_gate'::text, assignment.logic_gate_id
+  from node_logic_gate_assignments assignment
+  where p_resource_type='node'
+    and assignment.company_id=p_company_id
+    and assignment.node_id=p_resource_id
+  union all
+  select 'company_explorer_folder'::text, item.parent_folder_id
+  from company_explorer_items item
+  where p_resource_type in ('logic_gate','project')
+    and item.company_id=p_company_id
+    and item.target_type=p_resource_type
+    and item.target_id=p_resource_id
+    and item.parent_folder_id is not null
+  union all
+  select 'company_explorer_folder'::text, folder.parent_folder_id
+  from company_explorer_folders folder
+  where p_resource_type='company_explorer_folder'
+    and folder.company_id=p_company_id
+    and folder.folder_id=p_resource_id
+    and folder.parent_folder_id is not null
+  union all
+  select 'shared_inbox_folder'::text, folder.parent_folder_id
+  from shared_inbox_folders folder
+  where p_resource_type='shared_inbox_folder'
+    and folder.company_id=p_company_id
+    and folder.folder_id=p_resource_id
+    and folder.parent_folder_id is not null
+  union all
+  select 'shared_inbox_folder'::text, inbox.parent_folder_id
+  from shared_inboxes inbox
+  where p_resource_type='shared_inbox'
+    and inbox.company_id=p_company_id
+    and inbox.shared_inbox_id=p_resource_id
+    and inbox.parent_folder_id is not null;
+$$;
+
+create or replace function mangorts_v2_policy_resource_has_cycle(
+  p_company_id uuid,
+  p_resource_type text,
+  p_resource_id uuid
+)
+returns boolean
+language plpgsql
+stable
+set search_path=public,pg_temp
+as $$
+declare
+  current_type text := p_resource_type;
+  current_id uuid := p_resource_id;
+  next_type text;
+  next_id uuid;
+  path text[] := array[]::text[];
+  steps integer := 0;
+begin
+  loop
+    if current_type || ':' || current_id::text = any(path) then
+      return true;
+    end if;
+    path := array_append(path,current_type || ':' || current_id::text);
+    select parent_resource_type,parent_resource_id into next_type,next_id
+    from mangorts_v2_policy_parent(p_company_id,current_type,current_id);
+    if not found then
+      return false;
+    end if;
+    current_type := next_type;
+    current_id := next_id;
+    steps := steps + 1;
+    if steps > 1000 then
+      return true;
+    end if;
+  end loop;
+end;
+$$;
+
+create or replace function mangorts_v2_validate_policy_settings()
+returns trigger
+language plpgsql
+set search_path=public,pg_temp
+as $$
+declare
+  parent_type text;
+  parent_id uuid;
+  stored_mode text;
+begin
+  if not mangorts_v2_policy_resource_exists(new.company_id,new.resource_type,new.resource_id) then
+    raise exception 'v2_policy_resource_missing:%:%:%', new.company_id,new.resource_type,new.resource_id
+      using errcode='23503';
+  end if;
+  if mangorts_v2_policy_resource_has_cycle(new.company_id,new.resource_type,new.resource_id) then
+    raise exception 'v2_policy_resource_cycle:%:%:%', new.company_id,new.resource_type,new.resource_id
+      using errcode='23514';
+  end if;
+  select parent_resource_type,parent_resource_id into parent_type,parent_id
+  from mangorts_v2_policy_parent(new.company_id,new.resource_type,new.resource_id);
+  stored_mode := to_jsonb(new)->>(case when tg_table_name='resource_gvic_settings'
+    then 'assignment_mode' else 'permission_mode' end);
+  if found then
+    if new.parent_link_sequence <= 0 then
+      raise exception 'v2_policy_child_parent_link_sequence_required:%:%',new.resource_type,new.resource_id
+        using errcode='23514';
+    end if;
+  else
+    if new.parent_link_sequence <> 0 then
+      raise exception 'v2_policy_root_parent_link_sequence_must_be_zero:%:%',new.resource_type,new.resource_id
+        using errcode='23514';
+    end if;
+    if stored_mode='inherited' then
+      raise exception 'v2_policy_root_cannot_be_inherited:%:%',new.resource_type,new.resource_id
+        using errcode='23514';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_resource_gvic_settings_validate on resource_gvic_settings;
+create trigger trg_resource_gvic_settings_validate
+before insert or update on resource_gvic_settings
+for each row execute function mangorts_v2_validate_policy_settings();
+
+drop trigger if exists trg_resource_permission_settings_validate on resource_permission_settings;
+create trigger trg_resource_permission_settings_validate
+before insert or update on resource_permission_settings
+for each row execute function mangorts_v2_validate_policy_settings();
+
+create or replace function mangorts_v2_validate_policy_edge()
+returns trigger
+language plpgsql
+set search_path=public,pg_temp
+as $$
+declare
+  principal_kind text;
+  principal_value uuid;
+  customized boolean;
+begin
+  if tg_table_name='resource_gvic_assignments_v2_staging' then
+    principal_kind := new.principal_type;
+    principal_value := new.principal_id;
+    select assignment_mode='customized' into customized
+    from resource_gvic_settings
+    where company_id=new.company_id and resource_type=new.resource_type and resource_id=new.resource_id;
+  else
+    principal_kind := new.subject_type;
+    principal_value := new.subject_id;
+    select permission_mode='customized' into customized
+    from resource_permission_settings
+    where company_id=new.company_id and resource_type=new.resource_type and resource_id=new.resource_id;
+  end if;
+  if customized is distinct from true then
+    raise exception 'v2_policy_edge_requires_customized_settings:%:%',new.resource_type,new.resource_id
+      using errcode='23514';
+  end if;
+  if principal_kind='user' and not exists (
+    select 1 from company_memberships
+    where company_id=new.company_id and user_id=principal_value
+  ) then
+    raise exception 'v2_policy_user_not_company_member:%:%',new.company_id,principal_value
+      using errcode='23503';
+  end if;
+  if principal_kind='group' and not exists (
+    select 1 from company_user_groups
+    where company_id=new.company_id and group_id=principal_value
+  ) then
+    raise exception 'v2_policy_group_missing:%:%',new.company_id,principal_value
+      using errcode='23503';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_resource_gvic_assignments_v2_validate on resource_gvic_assignments_v2_staging;
+create trigger trg_resource_gvic_assignments_v2_validate
+before insert or update on resource_gvic_assignments_v2_staging
+for each row execute function mangorts_v2_validate_policy_edge();
+
+drop trigger if exists trg_resource_permissions_v2_validate on resource_permissions_v2_staging;
+create trigger trg_resource_permissions_v2_validate
+before insert or update on resource_permissions_v2_staging
+for each row execute function mangorts_v2_validate_policy_edge();
+
+-- Migration-only legacy resolvers for V2 GVIC and permissions Step 1.
+-- These reproduce deployed latest-snapshot and direct-revision behavior.
+
+create or replace function mangorts_v2_step1_resolved_gvic(
+  p_company_id uuid,
+  p_resource_type text,
+  p_resource_id uuid
+)
+returns table(
+  role text,
+  principal_type text,
+  principal_id uuid,
+  created_timestamp timestamptz,
+  updated_timestamp timestamptz
+)
+language sql
+stable
+set search_path=public,pg_temp
+as $$
+  with requested(company_id,resource_type,legacy_resource_type,resource_id) as (
+    select p_company_id,
+           p_resource_type,
+           case when p_resource_type='shared_inbox_folder' then 'shared_triage_folder' else p_resource_type end,
+           p_resource_id
+  ),
+  direct_sequence(policy_sequence) as (
+    select coalesce((
+      select revision.policy_sequence
+      from resource_gvic_policy_revisions revision
+      join requested req
+        on revision.company_id=req.company_id
+       and revision.resource_type=req.legacy_resource_type
+       and revision.resource_id=req.resource_id
+    ),0)
+  ),
+  resource_policy_ancestors(resource_type,resource_id) as (
+    select 'logic_gate'::text, assignment.logic_gate_id
+    from node_logic_gate_assignments assignment
+    join requested req
+      on req.resource_type='node'
+     and assignment.company_id=req.company_id
+     and assignment.node_id=req.resource_id
+  ),
+  latest_snapshot_application(policy_sequence) as (
+    select max(app.policy_sequence)
+    from resource_gvic_subtree_applications app
+    join resource_policy_ancestors ancestor
+      on ancestor.resource_type=app.ancestor_resource_type
+     and ancestor.resource_id=app.ancestor_resource_id
+    join requested req on app.company_id=req.company_id
+    join direct_sequence cutoff on app.policy_sequence > cutoff.policy_sequence
+    where app.snapshot
+  ),
+  direct_assignments as (
+    select assignment.role,
+           assignment.principal_type,
+           assignment.principal_id,
+           assignment.created_timestamp,
+           assignment.updated_timestamp,
+           assignment.role || ':' || assignment.principal_type || ':' || assignment.principal_id::text as rule_key
+    from resource_gvic_assignments assignment
+    join requested req
+      on assignment.company_id=req.company_id
+     and assignment.resource_type=req.legacy_resource_type
+     and assignment.resource_id=req.resource_id
+  ),
+  application_rules as (
+    select distinct on (app.role,app.principal_type,app.principal_id)
+           app.role,
+           app.principal_type,
+           app.principal_id,
+           app.deleted,
+           app.created_timestamp,
+           app.created_timestamp as updated_timestamp,
+           app.role || ':' || app.principal_type || ':' || app.principal_id::text as rule_key
+    from resource_gvic_subtree_applications app
+    join resource_policy_ancestors ancestor
+      on ancestor.resource_type=app.ancestor_resource_type
+     and ancestor.resource_id=app.ancestor_resource_id
+    join requested req on app.company_id=req.company_id
+    join direct_sequence cutoff on app.policy_sequence > cutoff.policy_sequence
+    where not app.snapshot
+      and app.policy_sequence >= coalesce((select policy_sequence from latest_snapshot_application),0)
+    order by app.role,app.principal_type,app.principal_id,app.policy_sequence desc,app.application_id desc
+  ),
+  merged_assignments as (
+    select direct.role,direct.principal_type,direct.principal_id,direct.created_timestamp,direct.updated_timestamp
+    from direct_assignments direct
+    where not exists (select 1 from latest_snapshot_application where policy_sequence is not null)
+      and not exists (select 1 from application_rules app where app.rule_key=direct.rule_key)
+    union all
+    select app.role,app.principal_type,app.principal_id,app.created_timestamp,app.updated_timestamp
+    from application_rules app
+    where not app.deleted
+  )
+  select merged.role,merged.principal_type,merged.principal_id,
+         merged.created_timestamp,merged.updated_timestamp
+  from merged_assignments merged
+  order by merged.role,merged.principal_type,merged.principal_id;
+$$;
+
+create or replace function mangorts_v2_step1_resolved_permission_default(
+  p_company_id uuid,
+  p_resource_type text,
+  p_resource_id uuid
+)
+returns text
+language sql
+stable
+set search_path=public,pg_temp
+as $$
+  with recursive requested(company_id,resource_type,resource_id) as (
+    select p_company_id,p_resource_type,p_resource_id
+  ),
+  direct_default(default_access) as (
+    select node.default_access from nodes node,requested req
+    where req.resource_type='node' and node.company_id=req.company_id and node.node_id=req.resource_id
+    union all
+    select gate.default_access from logic_gates gate,requested req
+    where req.resource_type='logic_gate' and gate.company_id=req.company_id and gate.logic_gate_id=req.resource_id
+    union all
+    select project.default_access from projects project,requested req
+    where req.resource_type='project' and project.company_id=req.company_id and project.project_id=req.resource_id
+    union all
+    select folder.default_access from company_explorer_folders folder,requested req
+    where req.resource_type='company_explorer_folder' and folder.company_id=req.company_id and folder.folder_id=req.resource_id
+    union all
+    select folder.default_access from shared_inbox_folders folder,requested req
+    where req.resource_type='shared_inbox_folder' and folder.company_id=req.company_id and folder.folder_id=req.resource_id
+    union all
+    select inbox.default_access from shared_inboxes inbox,requested req
+    where req.resource_type='shared_inbox' and inbox.company_id=req.company_id and inbox.shared_inbox_id=req.resource_id
+  ),
+  direct_sequence(policy_sequence) as (
+    select coalesce((
+      select revision.policy_sequence from resource_permission_policy_revisions revision,requested req
+      where revision.company_id=req.company_id
+        and revision.resource_type=req.resource_type
+        and revision.resource_id=req.resource_id
+    ),0)
+  ),
+  node_logic_gate_ancestors(logic_gate_id) as (
+    select assignment.logic_gate_id
+    from node_logic_gate_assignments assignment,requested req
+    where req.resource_type='node'
+      and assignment.company_id=req.company_id
+      and assignment.node_id=req.resource_id
+  ),
+  folder_seeds(folder_id) as (
+    select folder.parent_folder_id
+    from company_explorer_folders folder,requested req
+    where req.resource_type='company_explorer_folder'
+      and folder.company_id=req.company_id
+      and folder.folder_id=req.resource_id
+      and folder.parent_folder_id is not null
+    union
+    select item.parent_folder_id
+    from company_explorer_items item,requested req
+    where req.resource_type in ('project','logic_gate')
+      and item.company_id=req.company_id
+      and item.target_type=req.resource_type
+      and item.target_id=req.resource_id
+      and item.parent_folder_id is not null
+    union
+    select item.parent_folder_id
+    from company_explorer_items item
+    join node_logic_gate_ancestors gate
+      on item.target_type='logic_gate' and item.target_id=gate.logic_gate_id
+    join requested req on item.company_id=req.company_id
+    where item.parent_folder_id is not null
+  ),
+  folder_ancestors(folder_id,path) as (
+    select folder_id,array[folder_id] from folder_seeds
+    union all
+    select parent.parent_folder_id,ancestor.path || parent.parent_folder_id
+    from folder_ancestors ancestor
+    join requested req on true
+    join company_explorer_folders parent
+      on parent.company_id=req.company_id and parent.folder_id=ancestor.folder_id
+    where parent.parent_folder_id is not null
+      and not parent.parent_folder_id=any(ancestor.path)
+  ),
+  resource_policy_ancestors(resource_type,resource_id) as (
+    select 'logic_gate'::text,logic_gate_id from node_logic_gate_ancestors
+    union
+    select 'company_explorer_folder'::text,folder_id from folder_ancestors
+  ),
+  latest_snapshot_application(policy_sequence) as (
+    select max(app.policy_sequence)
+    from resource_permission_subtree_applications app
+    join resource_policy_ancestors ancestor
+      on ancestor.resource_type=app.ancestor_resource_type and ancestor.resource_id=app.ancestor_resource_id
+    join requested req on app.company_id=req.company_id
+    join direct_sequence cutoff on app.policy_sequence > cutoff.policy_sequence
+    where app.rule_key='__snapshot__'
+  ),
+  latest_default_application(access_level) as (
+    select app.access_level
+    from resource_permission_subtree_applications app
+    join resource_policy_ancestors ancestor
+      on ancestor.resource_type=app.ancestor_resource_type and ancestor.resource_id=app.ancestor_resource_id
+    join requested req on app.company_id=req.company_id
+    join direct_sequence cutoff on app.policy_sequence > cutoff.policy_sequence
+    where app.rule_key='__default__'
+      and app.policy_sequence >= coalesce((select policy_sequence from latest_snapshot_application),0)
+    order by app.policy_sequence desc,app.application_id desc
+    limit 1
+  )
+  select coalesce((select access_level from latest_default_application),(select default_access from direct_default limit 1));
+$$;
+
+create or replace function mangorts_v2_step1_resolved_permissions(
+  p_company_id uuid,
+  p_resource_type text,
+  p_resource_id uuid
+)
+returns table(
+  subject_type text,
+  subject_id uuid,
+  access_level text,
+  created_timestamp timestamptz,
+  updated_timestamp timestamptz
+)
+language sql
+stable
+set search_path=public,pg_temp
+as $$
+  with recursive requested(company_id,resource_type,resource_id) as (
+    select p_company_id,p_resource_type,p_resource_id
+  ),
+  direct_sequence(policy_sequence) as (
+    select coalesce((
+      select revision.policy_sequence from resource_permission_policy_revisions revision,requested req
+      where revision.company_id=req.company_id
+        and revision.resource_type=req.resource_type
+        and revision.resource_id=req.resource_id
+    ),0)
+  ),
+  node_logic_gate_ancestors(logic_gate_id) as (
+    select assignment.logic_gate_id
+    from node_logic_gate_assignments assignment,requested req
+    where req.resource_type='node'
+      and assignment.company_id=req.company_id
+      and assignment.node_id=req.resource_id
+  ),
+  folder_seeds(folder_id) as (
+    select folder.parent_folder_id
+    from company_explorer_folders folder,requested req
+    where req.resource_type='company_explorer_folder'
+      and folder.company_id=req.company_id
+      and folder.folder_id=req.resource_id
+      and folder.parent_folder_id is not null
+    union
+    select item.parent_folder_id
+    from company_explorer_items item,requested req
+    where req.resource_type in ('project','logic_gate')
+      and item.company_id=req.company_id
+      and item.target_type=req.resource_type
+      and item.target_id=req.resource_id
+      and item.parent_folder_id is not null
+    union
+    select item.parent_folder_id
+    from company_explorer_items item
+    join node_logic_gate_ancestors gate
+      on item.target_type='logic_gate' and item.target_id=gate.logic_gate_id
+    join requested req on item.company_id=req.company_id
+    where item.parent_folder_id is not null
+  ),
+  folder_ancestors(folder_id,path) as (
+    select folder_id,array[folder_id] from folder_seeds
+    union all
+    select parent.parent_folder_id,ancestor.path || parent.parent_folder_id
+    from folder_ancestors ancestor
+    join requested req on true
+    join company_explorer_folders parent
+      on parent.company_id=req.company_id and parent.folder_id=ancestor.folder_id
+    where parent.parent_folder_id is not null
+      and not parent.parent_folder_id=any(ancestor.path)
+  ),
+  resource_policy_ancestors(resource_type,resource_id) as (
+    select 'logic_gate'::text,logic_gate_id from node_logic_gate_ancestors
+    union
+    select 'company_explorer_folder'::text,folder_id from folder_ancestors
+  ),
+  latest_snapshot_application(policy_sequence) as (
+    select max(app.policy_sequence)
+    from resource_permission_subtree_applications app
+    join resource_policy_ancestors ancestor
+      on ancestor.resource_type=app.ancestor_resource_type and ancestor.resource_id=app.ancestor_resource_id
+    join requested req on app.company_id=req.company_id
+    join direct_sequence cutoff on app.policy_sequence > cutoff.policy_sequence
+    where app.rule_key='__snapshot__'
+  ),
+  direct_assignments as (
+    select access.subject_type,access.subject_id,access.access_level,
+           access.created_timestamp,access.updated_timestamp,
+           access.subject_type || ':' || access.subject_id::text as rule_key
+    from resource_permissions access,requested req
+    where access.company_id=req.company_id
+      and access.resource_type=req.resource_type
+      and access.resource_id=req.resource_id
+  ),
+  application_rules as (
+    select distinct on (app.rule_key)
+           app.rule_key,app.subject_type,app.subject_id,app.access_level,app.deleted,
+           app.created_timestamp,app.created_timestamp as updated_timestamp
+    from resource_permission_subtree_applications app
+    join resource_policy_ancestors ancestor
+      on ancestor.resource_type=app.ancestor_resource_type and ancestor.resource_id=app.ancestor_resource_id
+    join requested req on app.company_id=req.company_id
+    join direct_sequence cutoff on app.policy_sequence > cutoff.policy_sequence
+    where app.rule_key not in ('__default__','__snapshot__')
+      and app.policy_sequence >= coalesce((select policy_sequence from latest_snapshot_application),0)
+    order by app.rule_key,app.policy_sequence desc,app.application_id desc
+  ),
+  merged_assignments as (
+    select direct.subject_type,direct.subject_id,direct.access_level,direct.created_timestamp,direct.updated_timestamp
+    from direct_assignments direct
+    where not exists (select 1 from latest_snapshot_application where policy_sequence is not null)
+      and not exists (select 1 from application_rules app where app.rule_key=direct.rule_key)
+    union all
+    select app.subject_type,app.subject_id,app.access_level,app.created_timestamp,app.updated_timestamp
+    from application_rules app
+    where not app.deleted
+  )
+  select merged.subject_type,merged.subject_id,merged.access_level,
+         merged.created_timestamp,merged.updated_timestamp
+  from merged_assignments merged
+  order by merged.subject_type,merged.subject_id;
+$$;
+
+-- Read-only report function used only by the Step 1 operator preflight.
+
+create or replace function mangorts_v2_step1_preflight_report()
+returns table(
+  report_order bigint,
+  section text,
+  identity text,
+  status text,
+  details jsonb
+)
+language sql
+stable
+set search_path=public,pg_temp
+as $$
+  with recursive all_resources(company_id,resource_type,resource_id) as materialized (
+    select company_id,'node'::text,node_id from nodes
+    union all select company_id,'logic_gate',logic_gate_id from logic_gates
+    union all select company_id,'project',project_id from projects
+    union all select company_id,'company_explorer_folder',folder_id from company_explorer_folders
+    union all select company_id,'shared_inbox_folder',folder_id from shared_inbox_folders
+    union all select company_id,'shared_inbox',shared_inbox_id from shared_inboxes
+  ),
+  source_identities(source_name,company_id,resource_type,resource_id) as materialized (
+    select 'gvic_assignment',company_id,
+           case when resource_type='shared_triage_folder' then 'shared_inbox_folder' else resource_type end,
+           resource_id from resource_gvic_assignments
+    union all
+    select 'gvic_revision',company_id,
+           case when resource_type='shared_triage_folder' then 'shared_inbox_folder' else resource_type end,
+           resource_id from resource_gvic_policy_revisions
+    union all
+    select 'gvic_application',company_id,
+           case when ancestor_resource_type='shared_triage_folder' then 'shared_inbox_folder' else ancestor_resource_type end,
+           ancestor_resource_id from resource_gvic_subtree_applications
+    union all
+    select 'gvic_effective_target',company_id,
+           case when resource_type='shared_triage_folder' then 'shared_inbox_folder' else resource_type end,
+           resource_id from resource_gvic_effective_assignments
+    union all
+    select 'gvic_effective_source',company_id,
+           case when source_resource_type='shared_triage_folder' then 'shared_inbox_folder' else source_resource_type end,
+           source_resource_id from resource_gvic_effective_assignments
+    union all
+    select 'permission_assignment',company_id,resource_type,resource_id from resource_permissions
+    union all
+    select 'permission_revision',company_id,resource_type,resource_id from resource_permission_policy_revisions
+    union all
+    select 'permission_application',company_id,ancestor_resource_type,ancestor_resource_id
+    from resource_permission_subtree_applications
+    union all
+    select 'projection_node',company_id,'node',node_id from gvic_matrix_projection_table
+    union all
+    select 'projection_logic_gate',company_id,'logic_gate',logic_gate_id
+    from gvic_matrix_projection_table where logic_gate_id is not null
+    union all
+    select 'projection_project',company_id,'project',project_id
+    from gvic_matrix_projection_table where project_id is not null
+  ),
+  source_dispositions as materialized (
+    select source.source_name,source.company_id,source.resource_type,source.resource_id,
+           mangorts_v2_policy_resource_exists(source.company_id,source.resource_type,source.resource_id) as resource_exists
+    from source_identities source
+  ),
+  resolved_gvic as materialized (
+    select resource.company_id,resource.resource_type,resource.resource_id,
+           edge.role,edge.principal_type,edge.principal_id
+    from all_resources resource
+    cross join lateral mangorts_v2_step1_resolved_gvic(
+      resource.company_id,resource.resource_type,resource.resource_id
+    ) edge
+  ),
+  resolved_permissions as materialized (
+    select resource.company_id,resource.resource_type,resource.resource_id,
+           edge.subject_type,edge.subject_id,edge.access_level
+    from all_resources resource
+    cross join lateral mangorts_v2_step1_resolved_permissions(
+      resource.company_id,resource.resource_type,resource.resource_id
+    ) edge
+  ),
+  resolved_defaults as materialized (
+    select resource.*,
+           mangorts_v2_step1_resolved_permission_default(
+             resource.company_id,resource.resource_type,resource.resource_id
+           ) as default_access
+    from all_resources resource
+  ),
+  principal_rows(domain_name,company_id,principal_type,principal_id) as materialized (
+    select 'resolved_gvic',company_id,principal_type,principal_id from resolved_gvic
+    union all
+    select 'resolved_permission',company_id,subject_type,subject_id from resolved_permissions
+    union all
+    select 'gvic_source',company_id,principal_type,principal_id from resource_gvic_assignments
+    union all
+    select 'gvic_application',company_id,principal_type,principal_id
+    from resource_gvic_subtree_applications where principal_id is not null
+    union all
+    select 'permission_source',company_id,subject_type,subject_id from resource_permissions
+    union all
+    select 'permission_application',company_id,subject_type,subject_id
+    from resource_permission_subtree_applications where subject_id is not null
+  ),
+  invalid_principals as materialized (
+    select principal.*
+    from principal_rows principal
+    where (principal.principal_type='user' and not exists (
+             select 1 from company_memberships membership
+             where membership.company_id=principal.company_id and membership.user_id=principal.principal_id
+           ))
+       or (principal.principal_type='group' and not exists (
+             select 1 from company_user_groups user_group
+             where user_group.company_id=principal.company_id and user_group.group_id=principal.principal_id
+           ))
+       or principal.principal_type not in ('user','group')
+  ),
+  group_tree(company_id,ancestor_group_id,descendant_group_id,path) as (
+    select company_id,group_id,group_id,array[group_id] from company_user_groups
+    union all
+    select tree.company_id,tree.ancestor_group_id,child.group_id,tree.path || child.group_id
+    from group_tree tree
+    join company_user_groups child
+      on child.company_id=tree.company_id and child.parent_group_id=tree.descendant_group_id
+    where not child.group_id=any(tree.path)
+  ),
+  expected_effective as materialized (
+    select edge.company_id,edge.resource_type,edge.resource_id,edge.role,
+           edge.principal_id as user_id,edge.principal_type as source_principal_type,
+           edge.principal_id as source_principal_id
+    from resolved_gvic edge
+    join company_memberships membership
+      on edge.principal_type='user'
+     and membership.company_id=edge.company_id and membership.user_id=edge.principal_id
+    union
+    select edge.company_id,edge.resource_type,edge.resource_id,edge.role,
+           member.user_id,edge.principal_type,edge.principal_id
+    from resolved_gvic edge
+    join group_tree tree
+      on edge.principal_type='group'
+     and tree.company_id=edge.company_id and tree.ancestor_group_id=edge.principal_id
+    join company_user_group_members member
+      on member.company_id=tree.company_id and member.group_id=tree.descendant_group_id
+  ),
+  actual_effective as materialized (
+    select company_id,
+           case when resource_type='shared_triage_folder' then 'shared_inbox_folder' else resource_type end as resource_type,
+           resource_id,role,user_id,source_principal_type,source_principal_id
+    from resource_gvic_effective_assignments
+  ),
+  effective_disagreements as materialized (
+    (select * from expected_effective except select * from actual_effective)
+    union all
+    (select * from actual_effective except select * from expected_effective)
+  ),
+  expected_projection as materialized (
+    select distinct company_id,resource_id as node_id,user_id,role
+    from expected_effective where resource_type='node'
+  ),
+  actual_projection as materialized (
+    select distinct company_id,node_id,user_id,gvic_assignment as role
+    from gvic_matrix_projection_table
+  ),
+  projection_disagreements as materialized (
+    (select * from actual_projection except select * from expected_projection)
+  ),
+  invalid_gvic_shape as materialized (
+    select company_id,resource_type,resource_id,'generated_or_verified_group'::text as problem
+    from resolved_gvic where role in ('generated','verified') and principal_type='group'
+    union all
+    select company_id,resource_type,resource_id,'multiple_generated_users'
+    from resolved_gvic where role='generated'
+    group by company_id,resource_type,resource_id having count(*) > 1
+    union all
+    select company_id,resource_type,resource_id,'principal_has_multiple_roles'
+    from resolved_gvic
+    group by company_id,resource_type,resource_id,principal_type,principal_id
+    having count(distinct role) > 1
+  ),
+  blockers(section,identity,details) as materialized (
+    select 'SOURCE_IDENTITY',source_name || ':' || company_id || ':' || resource_type || ':' || resource_id,
+           jsonb_build_object('reason','missing_resource')
+    from source_dispositions where not resource_exists
+    union all
+    select 'PRINCIPAL',domain_name || ':' || company_id || ':' || principal_type || ':' || principal_id,
+           jsonb_build_object('reason','missing_same_company_principal')
+    from invalid_principals
+    union all
+    select 'GVIC_SHAPE',company_id || ':' || resource_type || ':' || resource_id,
+           jsonb_build_object('reason',problem)
+    from invalid_gvic_shape
+    union all
+    select 'RESOURCE_CYCLE',company_id || ':' || resource_type || ':' || resource_id,
+           jsonb_build_object('reason','policy_parent_cycle')
+    from all_resources
+    where mangorts_v2_policy_resource_has_cycle(company_id,resource_type,resource_id)
+    union all
+    select 'PARENT_RELATIONSHIP',resource.company_id || ':' || resource.resource_type || ':' || resource.resource_id,
+           jsonb_build_object('reason','missing_required_immediate_parent')
+    from all_resources resource
+    left join lateral mangorts_v2_policy_parent(resource.company_id,resource.resource_type,resource.resource_id) parent on true
+    where resource.resource_type in ('logic_gate','project','shared_inbox') and parent.parent_resource_id is null
+    union all
+    select 'PERMISSION_DEFAULT',company_id || ':' || resource_type || ':' || resource_id,
+           jsonb_build_object('reason','unresolved_default_access')
+    from resolved_defaults where default_access not in ('edit','no_access')
+    union all
+    select 'GVIC_EFFECTIVE_DISAGREEMENT',company_id || ':' || resource_type || ':' || resource_id,
+           jsonb_build_object('role',role,'user_id',user_id,'source_principal_type',source_principal_type,'source_principal_id',source_principal_id)
+    from effective_disagreements
+    union all
+    select 'GVIC_PROJECTION_DISAGREEMENT',company_id || ':node:' || node_id,
+           jsonb_build_object('role',role,'user_id',user_id)
+    from projection_disagreements
+  ),
+  information_rows(section,identity,details) as materialized (
+    select 'OLD_POLICY_COUNT','gvic:' || type.resource_type,jsonb_build_object(
+      'source_rows',(select count(*) from resource_gvic_assignments source
+        where (case when source.resource_type='shared_triage_folder' then 'shared_inbox_folder' else source.resource_type end)=type.resource_type),
+      'revision_rows',(select count(*) from resource_gvic_policy_revisions revision
+        where (case when revision.resource_type='shared_triage_folder' then 'shared_inbox_folder' else revision.resource_type end)=type.resource_type),
+      'subtree_application_rows',(select count(*) from resource_gvic_subtree_applications app
+        where (case when app.ancestor_resource_type='shared_triage_folder' then 'shared_inbox_folder' else app.ancestor_resource_type end)=type.resource_type),
+      'effective_rows',(select count(*) from resource_gvic_effective_assignments effective
+        where (case when effective.resource_type='shared_triage_folder' then 'shared_inbox_folder' else effective.resource_type end)=type.resource_type),
+      'projection_rows',(select count(*) from gvic_matrix_projection_table where type.resource_type='node')
+    )
+    from (values
+      ('node'::text),('logic_gate'),('project'),('company_explorer_folder'),('shared_inbox_folder'),('shared_inbox')
+    ) type(resource_type)
+    union all
+    select 'OLD_POLICY_COUNT','permission:' || type.resource_type,jsonb_build_object(
+      'source_rows',(select count(*) from resource_permissions source where source.resource_type=type.resource_type),
+      'revision_rows',(select count(*) from resource_permission_policy_revisions revision where revision.resource_type=type.resource_type),
+      'subtree_application_rows',(select count(*) from resource_permission_subtree_applications app where app.ancestor_resource_type=type.resource_type)
+    )
+    from (values
+      ('node'::text),('logic_gate'),('project'),('company_explorer_folder'),('shared_inbox_folder'),('shared_inbox')
+    ) type(resource_type)
+    union all
+    select 'RESOURCE_COUNT','gvic:' || resource_type,
+           jsonb_build_object('resource_count',count(*),'resolved_edge_count',(
+             select count(*) from resolved_gvic edge where edge.resource_type=resource.resource_type
+           ))
+    from all_resources resource group by resource_type
+    union all
+    select 'RESOURCE_COUNT','permission:' || resource_type,
+           jsonb_build_object('resource_count',count(*),'resolved_edge_count',(
+             select count(*) from resolved_permissions edge where edge.resource_type=resource.resource_type
+           ),'resolved_default_count',(
+             select count(*) from resolved_defaults defaults
+             where defaults.resource_type=resource.resource_type and defaults.default_access in ('edit','no_access')
+           ))
+    from all_resources resource group by resource_type
+    union all
+    select 'LEGACY_USAGE','gvic_snapshots_and_tombstones',jsonb_build_object(
+      'snapshot_rows',(select count(*) from resource_gvic_subtree_applications where snapshot),
+      'tombstone_rows',(select count(*) from resource_gvic_subtree_applications where deleted)
+    )
+    union all
+    select 'LEGACY_USAGE','permission_snapshots_and_tombstones',jsonb_build_object(
+      'snapshot_rows',(select count(*) from resource_permission_subtree_applications where rule_key='__snapshot__'),
+      'tombstone_rows',(select count(*) from resource_permission_subtree_applications where deleted)
+    )
+    union all
+    select 'LEGACY_USAGE','shared_triage_aliases',jsonb_build_object(
+      'assignment_rows',(select count(*) from resource_gvic_assignments where resource_type='shared_triage_folder'),
+      'revision_rows',(select count(*) from resource_gvic_policy_revisions where resource_type='shared_triage_folder'),
+      'application_rows',(select count(*) from resource_gvic_subtree_applications where ancestor_resource_type='shared_triage_folder')
+    )
+    union all
+    select 'TARGET_COUNT','v2_storage',jsonb_build_object(
+      'gvic_settings',(select count(*) from resource_gvic_settings),
+      'gvic_staging_edges',(select count(*) from resource_gvic_assignments_v2_staging),
+      'permission_settings',(select count(*) from resource_permission_settings),
+      'permission_staging_edges',(select count(*) from resource_permissions_v2_staging)
+    )
+  ),
+  disposition_rows(section,identity,status,details) as materialized (
+    select 'SOURCE_DISPOSITION',
+           source_name || ':' || company_id || ':' || resource_type || ':' || resource_id,
+           case when resource_exists then 'READY' else 'STOP' end,
+           jsonb_build_object(
+             'source_name',source_name,'company_id',company_id,'resource_type',resource_type,
+             'resource_id',resource_id,'v2_mode',case when resource_exists then 'customized' else null end,
+             'disposition',case when resource_exists then 'copy_resolved_complete_policy' else 'block_missing_resource' end
+           )
+    from source_dispositions
+  ),
+  rows_before_final(section,identity,status,details) as (
+    select section,identity,'INFO',details from information_rows
+    union all
+    select section,identity,status,details from disposition_rows
+    union all
+    select section,identity,'STOP',details from blockers
+  ),
+  ordered as (
+    select row_number() over(order by section,identity,details::text) as report_order,
+           section,identity,status,details
+    from rows_before_final
+  )
+  select report_order,section,identity,status,details from ordered
+  union all
+  select coalesce((select max(report_order) from ordered),0)+1,
+         'FINAL','v2_gvic_permissions_step1_preflight',
+         case when exists(select 1 from blockers) then 'STOP' else 'READY' end,
+         jsonb_build_object(
+           'blocker_count',(select count(*) from blockers),
+           'resource_count',(select count(*) from all_resources),
+           'resolved_gvic_edge_count',(select count(*) from resolved_gvic),
+           'resolved_permission_edge_count',(select count(*) from resolved_permissions),
+           'resolved_permission_default_count',(select count(*) from resolved_defaults where default_access in ('edit','no_access')),
+           'effective_disagreement_count',(select count(*) from effective_disagreements),
+           'projection_disagreement_count',(select count(*) from projection_disagreements)
+         )
+  order by report_order;
+$$;
+
+-- END V2 GVIC AND PERMISSIONS STEP 1 PHASE-APPROPRIATE SCHEMA
