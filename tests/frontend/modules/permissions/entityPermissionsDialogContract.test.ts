@@ -13,6 +13,7 @@ test("permission dialog saves pending changes before closing without duplicate w
   assert.match(source, /const \[hasUnsavedChanges, setHasUnsavedChanges\] = useState\(false\);/);
   assert.match(source, /const closeWithSave = \(\) => \{[\s\S]*?effectiveReadOnly \|\| permissionsLoadFailed \|\| !hasUnsavedChanges[\s\S]*?onClose\(\);[\s\S]*?void save\(true\);[\s\S]*?\};/);
   assert.match(source, /setPolicyRevision\(payload\.revision\);\s*setHasUnsavedChanges\(false\);\s*setSaved\(true\);/);
+  assert.equal(source.includes("invalidateResourcePolicyDependentCaches(apiBase, companyID);"), true);
   assert.match(source, /onClick=\{closeWithSave\} disabled=\{busy\}[\s\S]*?aria-label="Close permissions"/);
   assert.match(source, /<AppModalPortal onRequestClose=\{busy \? undefined : closeWithSave\}>/);
   assert.match(source, /onClick=\{\(\) => \{ void save\(false, "inherited_only"\); \}\}[\s\S]*Apply to inherited descendants/);

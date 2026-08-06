@@ -75,6 +75,7 @@ import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from 
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { invalidateWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
+import { invalidateResourcePolicyDependentCaches } from "../permissions/resourcePolicyCaches";
 import { subscribeRealtimeScope } from "../realtime/realtimeWebSocket";
 import { assignNodeToLogicGateStatus, moveLogicGateAssignment } from "../kanban/kanbanApi";
 import { EntityPermissionsPanel } from "../permissions/EntityPermissionsDialog";
@@ -1423,11 +1424,12 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         descendant_action: descendantAction,
       }),
     });
+    invalidateResourcePolicyDependentCaches(apiBase, companyID);
     setGVICPolicyMode(payload.assignment_mode);
     setGVICPolicyOverwrittenByAncestor(payload.overwritten_by_ancestor ?? null);
     setGVICPolicyRevision(payload.revision);
     return payload;
-  }, [companyID, gvicPolicyMode, gvicPolicyRevision, requestJSON]);
+  }, [apiBase, companyID, gvicPolicyMode, gvicPolicyRevision, requestJSON]);
 
   const commandResourceGVICAssignments = useCallback(async (
     resourceType: "node" | "logic_gate",
@@ -2624,6 +2626,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           <div className="mango-editor-hover-highlight" style={{ position: "absolute", top: documentTopPx, left: 12, right: 12, bottom: 12, zIndex: 2, pointerEvents: "auto", minHeight: 0 }}>
             <EntityPermissionsPanel
               requestJSON={requestJSON}
+              apiBase={apiBase}
               companyID={companyID}
               entityType={linkedEntityKind}
               entityID={linkedNodeID}

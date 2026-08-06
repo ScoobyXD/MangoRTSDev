@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { AppModalPortal } from "../../app/AppModalPortal";
 import type { BoundRequestJSON } from "../api/requestJSON";
 import { listCompanyUsers } from "../communications/communicationsApi";
+import { invalidateResourcePolicyDependentCaches } from "./resourcePolicyCaches";
 
 type PermissionEntityType = "node" | "logic_gate" | "project" | "company_explorer_folder" | "shared_inbox_folder" | "shared_inbox";
 type PermissionSubjectType = "user" | "group";
@@ -42,6 +43,7 @@ type PermissionSelectionKey = `${PermissionSubjectType}:${string}`;
 
 type EntityPermissionsPanelProps = {
   requestJSON: BoundRequestJSON;
+  apiBase: string;
   companyID: string;
   entityType: PermissionEntityType;
   entityID: string;
@@ -153,6 +155,7 @@ function DefaultAccessToggle({
 
 export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   requestJSON,
+  apiBase,
   companyID,
   entityType,
   entityID,
@@ -356,6 +359,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
           : { company_id: companyID, permission_mode: "customized", default_access: defaultAccess, permissions, descendant_action: descendantAction }),
       });
       const nextDefault = (payload.default_access ?? payload.effective_default_access) === "no_access" ? "no_access" : "edit";
+      invalidateResourcePolicyDependentCaches(apiBase, companyID);
       const nextPermissions = payload.effective_permission_mode === "inherited"
         ? payload.effective_permissions ?? []
         : payload.permissions ?? [];

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"miraeopus/backend/internal/domain"
 	"strings"
 )
@@ -550,14 +551,14 @@ func (r *PostgresRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignment
 
 	assignment, err := nodeLogicGateAssignmentByNodeSQL(ctx, tx, input.CompanyID, input.NodeID, "")
 	if err != nil {
-		return LogicGateNodeAssignmentResult{}, err
+		return LogicGateNodeAssignmentResult{}, fmt.Errorf("move canonical assignment lookup: %w", err)
 	}
 	sourceAssignment := assignment
 	if _, err := scanLogicGateKanbanSource(tx.QueryRowContext(ctx, `
 select company_id::text, logic_gate_id::text, header, created_timestamp
 from logic_gates
 where company_id=$1::uuid and logic_gate_id=$2::uuid`, input.CompanyID, input.LogicGateID)); errors.Is(err, sql.ErrNoRows) {
-		return LogicGateNodeAssignmentResult{}, ErrNotFound
+		return LogicGateNodeAssignmentResult{}, fmt.Errorf("move target logic gate lookup: %w", ErrNotFound)
 	} else if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
@@ -566,7 +567,7 @@ where company_id=$1::uuid and logic_gate_id=$2::uuid`, input.CompanyID, input.Lo
 	crossLogicGateMove := assignment.LogicGateID != input.LogicGateID
 	column, err := logicGateWorkColumnForCommand(input.CompanyID, targetBoardID, input.ColumnID, input.Status, assignment.StatusKey)
 	if err != nil {
-		return LogicGateNodeAssignmentResult{}, err
+		return LogicGateNodeAssignmentResult{}, fmt.Errorf("move target status resolution: %w", err)
 	}
 
 	var nodePriority sql.NullInt64
@@ -574,7 +575,7 @@ where company_id=$1::uuid and logic_gate_id=$2::uuid`, input.CompanyID, input.Lo
 select priority
 from nodes
 where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&nodePriority); err != nil {
-		return LogicGateNodeAssignmentResult{}, err
+		return LogicGateNodeAssignmentResult{}, fmt.Errorf("move node priority read: %w", err)
 	}
 	if input.PrioritySet {
 		priority, ok := logicGateAssignmentInputPriority(LogicGateNodeAssignmentInput{Priority: input.Priority, PrioritySet: true})
@@ -585,7 +586,7 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&nodePr
 update nodes
 set priority=$3::smallint
 where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); err != nil {
-			return LogicGateNodeAssignmentResult{}, err
+			return LogicGateNodeAssignmentResult{}, fmt.Errorf("move node priority write: %w", err)
 		}
 	} else if !nodePriority.Valid || nodePriority.Int64 < 1 || nodePriority.Int64 > 5 {
 		return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
@@ -597,7 +598,7 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 	} else if crossLogicGateMove || column.ColumnID != logicGateWorkStatusKeyOrDefault(assignment.StatusKey, LogicGateWorkStatusPending) {
 		position, err = nextLogicGateAssignmentPositionTx(ctx, tx, input.CompanyID, input.LogicGateID, column.ColumnID)
 		if err != nil {
-			return LogicGateNodeAssignmentResult{}, err
+			return LogicGateNodeAssignmentResult{}, fmt.Errorf("move target position read: %w", err)
 		}
 	}
 	cardID := strings.TrimSpace(assignment.CompatibilityCardID)
@@ -624,18 +625,10 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 		PlacedByUserID:       placedByUserID,
 	})
 	if err != nil {
-		return LogicGateNodeAssignmentResult{}, err
+		return LogicGateNodeAssignmentResult{}, fmt.Errorf("move canonical assignment write: %w", err)
 	}
 	if err := syncNodeStatusFromLogicGateAssignmentTx(ctx, tx, assignment); err != nil {
-		return LogicGateNodeAssignmentResult{}, err
-	}
-	if crossLogicGateMove {
-		if err := updatePostgresCommunicationsEmailNodeReferenceForNodeTx(ctx, tx, input.CompanyID, input.NodeID, targetBoardID, cardID, input.LogicGateID); err != nil {
-			return LogicGateNodeAssignmentResult{}, err
-		}
-		if err := updatePostgresCommunicationsEmailAttachmentReferencesForNodeTx(ctx, tx, input.CompanyID, input.NodeID, targetBoardID, cardID, input.LogicGateID); err != nil {
-			return LogicGateNodeAssignmentResult{}, err
-		}
+		return LogicGateNodeAssignmentResult{}, fmt.Errorf("move node status synchronization: %w", err)
 	}
 	err = syncNodeLogicGateAssignmentProjectionDependenciesTx(ctx, tx, NodeLogicGateAssignmentProjectionDependencyInput{
 		CompanyID:    input.CompanyID,
@@ -643,25 +636,25 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 		NodeID:       input.NodeID,
 	})
 	if err != nil {
-		return LogicGateNodeAssignmentResult{}, err
+		return LogicGateNodeAssignmentResult{}, fmt.Errorf("move projection dependency synchronization: %w", err)
 	}
-	card, err := kanbanBoardProjectionCardByNodeTx(ctx, tx, input.CompanyID, input.NodeID, input.LogicGateID)
+	card, err := nodeLogicGateAssignmentCardSQL(ctx, tx, assignment)
 	if err != nil {
-		return LogicGateNodeAssignmentResult{}, err
+		return LogicGateNodeAssignmentResult{}, fmt.Errorf("move compatibility card read: %w", err)
 	}
 	node, err := nodeForLogicGateAssignmentResultTx(ctx, tx, input.CompanyID, input.NodeID)
 	if err != nil {
-		return LogicGateNodeAssignmentResult{}, err
+		return LogicGateNodeAssignmentResult{}, fmt.Errorf("move node result read: %w", err)
 	}
 	result := LogicGateNodeAssignmentResult{Card: card, Node: node, Assignment: assignment}
 	events, err := r.appendDomainEventsTx(ctx, tx, logicGateAssignmentMovedWorkspaceEventInputs(result, sourceAssignment, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
 	if err != nil {
-		return LogicGateNodeAssignmentResult{}, err
+		return LogicGateNodeAssignmentResult{}, fmt.Errorf("move workspace event append: %w", err)
 	}
 	result.Events = events
 	if crossLogicGateMove {
 		if _, err := insertLogicGateTransferTimelineEventTx(ctx, tx, input.CompanyID, input.NodeID, input.ActorUserID, sourceAssignment.LogicGateID, input.LogicGateID); err != nil {
-			return LogicGateNodeAssignmentResult{}, err
+			return LogicGateNodeAssignmentResult{}, fmt.Errorf("move transfer timeline append: %w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {

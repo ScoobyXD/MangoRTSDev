@@ -2436,6 +2436,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       {permissionsOpen && (
         <EntityPermissionsDialog
           requestJSON={permissionsRequestJSON}
+          apiBase={apiBase}
           companyID={companyID}
           entityType="project"
           entityID={projectID}

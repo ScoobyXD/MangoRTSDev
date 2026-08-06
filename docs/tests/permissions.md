@@ -12,7 +12,7 @@ Moves, resets, group changes, and ETags resolve current state without descendant
 ↓
 An editable dialog saves pending changes before closing; denied, read-only, unchanged, and already-saved dialogs close without writing
 ↓
-A successful embedded save invalidates the workspace snapshot so descendant views refetch the new live policy result
+A successful permission save invalidates the workspace snapshot and cached Node and Logic Gate records so descendant views refetch the new live policy result
 
 Last updated: 2026-08-05
 
@@ -21,7 +21,7 @@ Last updated: 2026-08-05
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
 - Explicit Save visibility is covered by `tests/frontend/modules/editor/emailViewerContract.test.ts`; close-with-save, denied/read-only dismissal, and duplicate-write prevention are covered by `tests/frontend/modules/permissions/entityPermissionsDialogContract.test.ts`.
-- Business Logic Covered By Automated Tests: backend, HTTP, frontend contract, disposable PostgreSQL, scale, and regression coverage for V2 defaults, complete policies, inheritance, force resets, moves, detach, live groups, authorization, and ETags. Rule ID mapping remains partial.
+- Business Logic Covered By Automated Tests: backend, HTTP, frontend contract, Node/Logic Gate record-store cache regression, disposable PostgreSQL, scale, and regression coverage for V2 defaults, complete policies, inheritance, force resets, moves, detach, live groups, authorization, and ETags. Rule ID mapping remains partial.
 
 ## Business Logic
 
@@ -92,7 +92,7 @@ P64 - A committed direct user mention or resolved user-group mention snapshots e
 P65 - Collaboration participant membership and its mandatory Node edit binding are append-only for the collaboration lifetime. The collaboration Node policy is system-managed: generic Node permission mutation cannot add a grant, remove/downgrade/replace a participant binding, or change its default away from `no_access`; only the accepted mention-participant path may add a binding. Deleting the mention message has no permission effect.
 P66 - A generic Node permission grant alone does not create email collaboration participation, a triage row, source-mailbox access, or shared-draft access. The existing dev-admin/company-admin bypass remains an administrative access rule but does not silently add the administrator to participant lists, mention notifications, or My Drafts.
 P67 - Chat mutation authorization is the intersection of normal entity Edit permission and exact stored comment authorship. An administrator, manager, collaborator, or other editor may read and reply according to existing access but may not edit or delete another user's comment. Missing or mismatched stored `author_id` fails closed, and legacy POST upsert paths cannot bypass the author-only PATCH boundary.
-P68 - After an embedded editor permission save, the workspace snapshot is invalidated so inherited and overwritten descendants refetch their live effective permission policy instead of continuing to show a stale cached result.
+P68 - After any successful permission save, the company workspace snapshot and cached Node and Logic Gate records are invalidated so inherited and overwritten descendants refetch their live effective permission policy instead of continuing to show a stale cached result. This invalidation changes no descendant policy rows.
 
 ## Scenarios
 
@@ -241,6 +241,7 @@ Expected:
 - Project permission changes do not cascade into related Logic Gates or nodes.
 - Inherited-only Apply adds no descendant state because inherited branches already resolve live.
 - Overwrite-all changes one reset sequence and can make eligible older customized policies inactive without deleting their dormant rows.
+- After a successful parent permission save, cached Node and Logic Gate descendants refetch their live effective result instead of reusing a stale record payload.
 - A later descendant customization becomes active again; an ordinary later parent save cannot cross it.
 - A subtree moved after a reset is protected by its newer parent-link sequence until a later reset from its new ancestry.
 - Point authorization reads only the canonical settings/rules, hierarchy, and current nested groups.

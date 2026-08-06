@@ -1,4 +1,4 @@
-import type { CommunicationsSharedInbox, EmailAddress, EmailFolder, EmailMailbox, EmailMessage, EmailReadStatus, UserLogicGateShortcut } from "../../modules/communications/communicationsApi.js";
+import { mergeEmailMessageIntoMessageList, sortEmailMessagesByDateDescending, type CommunicationsSharedInbox, type EmailAddress, type EmailFolder, type EmailMailbox, type EmailMessage, type EmailReadStatus, type UserLogicGateShortcut } from "../../modules/communications/communicationsApi.js";
 import { normalizeEmailContentID } from "../../modules/communications/emailAttachments.js";
 export {
   emailAttachmentContentIDKeys,
@@ -15,6 +15,35 @@ import { getExplorerDropPayloadItems } from "../../modules/company-explorer/tree
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes.js";
 import { humanLabelOrFallback } from "../../modules/entityLabels.js";
 import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gates/types.js";
+
+export function mergeEmailMessageIntoScopedMessageList(
+  current: EmailMessage[],
+  message: EmailMessage,
+  params: Parameters<typeof mergeEmailMessageIntoMessageList>[2],
+  options?: Parameters<typeof mergeEmailMessageIntoMessageList>[3],
+): EmailMessage[] {
+  const targetScopeKey = message.client_source_scope_key?.trim() ?? "";
+  if (!targetScopeKey) {
+    return mergeEmailMessageIntoMessageList(current, message, params, options);
+  }
+
+  const targetRowKey = emailMessageRowKey(message);
+  const protectedRows = current.filter((candidate) => (
+    candidate.id === message.id
+    && Boolean(candidate.client_source_scope_key?.trim())
+    && emailMessageRowKey(candidate) !== targetRowKey
+  ));
+  if (protectedRows.length === 0) {
+    return mergeEmailMessageIntoMessageList(current, message, params, options);
+  }
+
+  const protectedRowKeys = new Set(protectedRows.map(emailMessageRowKey));
+  const scopedRows = current.filter((candidate) => !protectedRowKeys.has(emailMessageRowKey(candidate)));
+  return sortEmailMessagesByDateDescending([
+    ...mergeEmailMessageIntoMessageList(scopedRows, message, params, options),
+    ...protectedRows,
+  ]);
+}
 import { getNodeTitle, type NodeRecord } from "../../modules/nodes/types.js";
 import { attachStackedDragPreview, EXPLORER_ENTITY_DRAG_MIME, KANBAN_LOGIC_GATE_DONE_COLOR, KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR, KANBAN_LOGIC_GATE_PENDING_COLOR, KANBAN_LOGIC_GATE_REVIEW_COLOR, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../../modules/kanban/shared.js";
 import { editorEmailDisplayDocument } from "../../modules/editor/richTextEditing.js";
