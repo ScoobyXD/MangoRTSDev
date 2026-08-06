@@ -1,3 +1,15 @@
+# Process Story: a copied editor image pastes outside Mango
+
+A user clicks an attachment image in an active Node, Project, or Logic Gate editor and presses Copy
+↓
+Mango recognizes the Tiptap image node selection instead of exporting its private attachment element
+↓
+The synchronous copy event keeps Mango round-trip HTML and filename text while the system clipboard receives the authorized original image bytes plus portable data-image HTML
+↓
+The user can paste the image into another application that accepts image bytes or rich HTML
+↓
+Copying is read-only: it does not upload, duplicate, relink, save, or otherwise mutate the document or attachment relationship
+
 # Process Story: rich editor interactions work on the first action
 
 A user opens a fresh Node, Project, or Logic Gate editor and clicks the exact place they want to type
@@ -252,6 +264,12 @@ Coverage Status:
 
 ## Business Logic
 
+### 2026-08-06 Portable Tiptap Image Copy
+
+- Copying a selected attachment image in the active Tiptap editor must not leave the clipboard with only the private `mango-attachment-image` serialization, because external applications cannot render that element.
+- The copy event writes an immediate Mango HTML/text fallback and starts the standards-based system clipboard write during the same user action. The system item reloads the authorized original attachment bytes, exposes the supported image MIME when the browser permits it, embeds those bytes as a data image in `text/html`, and uses the filename for `text/plain`.
+- Image copy is read-only. It never creates an attachment, changes attachment ownership or relationships, duplicates the editor node, changes the document revision, or schedules a save.
+
 ### 2026-08-05 Tiptap Interaction Semantics
 
 - First pointer activation may replace a sleeping renderer with the live Tiptap surface, but Mango must wait until that live DOM is attached before resolving the pointer position and focusing it. The first click places the caret, keeps the exact text-box scroll offset, and does not require a second click.
@@ -411,6 +429,7 @@ ED116 - Current Tiptap JSON snapshots omit only attributes equal to defaults in 
 ED117 - `node_textbox_chats` is the current authority for Node textbox chats. Reads, creates, replies, edits, and deletes use that table and must not create new legacy `Text block chat` information or projection rows. Deleting a textbox deletes every chat it owns, including email-selection chats, and removes each chat's attachment relationships. The normalized email message, thread, and email attachments remain. Existing legacy chat rows are ignored by current reads and retained only as rollback and audit evidence until a separately approved retirement.
 ED118 - A canonical empty TipTap document has one explicit empty paragraph inside the document root; `document.content=[]` is invalid. The forward repair may replace only that exact bad converted shape in `node_textboxes`, `node_textboxes_history`, `node_textbox_seen_snapshots`, and the same arrays inside Recycle Bin restore payloads. It preserves textbox and owner IDs, revisions, annotations, ordering, timestamps, saved-user identity, deletion state, array order, and every unrelated JSON field. The repair never rewrites the shipped cutover migration and never treats the representation correction as a user edit.
 ED119 - The active Node, Project, and Logic Gate Tiptap editor must honor the shared Outline Style on its first user action. First-click activation waits for the live editor DOM before placing focus/caret and preserves scroll. Ordinary Tab/Shift+Tab changes only the current paragraph or heading indent; structural list Tab/Shift+Tab changes only the active list item and remains editor-owned in tables. Empty-row Enter starts the selected numbered, bullet, or checklist structure, whose depth markers follow the documented four-level cycles. Indentation guide lines paint only in Indent Guides mode. The visible image frame starts a real node drag, and table-cell right-click exposes create/delete row/column and delete-table commands through the same revisioned document path.
+ED120 - Copying a selected attachment image in an active Node, Project, or Logic Gate Tiptap editor replaces the private ProseMirror image-node clipboard with portable output. The synchronous event clipboard retains Mango round-trip HTML and filename text, while the system clipboard reloads authorized original bytes and publishes a supported image MIME plus data-image HTML and filename text. Copy is read-only and must not upload, duplicate, relink, save, or mutate document or attachment state.
 
 ### Required Unified Rich-Editor Surface Inventory
 

@@ -241,6 +241,32 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
   installGlobal("indexedDB", fakeIndexedDB, restores);
   installGlobal("IDBKeyRange", IDBKeyRange, restores);
   installGlobal("IS_REACT_ACT_ENVIRONMENT", true, restores);
+  const systemClipboardItems: TestClipboardItem[] = [];
+  class TestClipboardItem {
+    static supports(type: string) { return ["image/png", "text/html", "text/plain"].includes(type); }
+    constructor(readonly data: Record<string, Blob | Promise<Blob>>) {}
+  }
+  class TestFileReader {
+    result: string | ArrayBuffer | null = null;
+    error: DOMException | null = null;
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    readAsDataURL() {
+      this.result = "data:image/png;base64,aW1hZ2UtYnl0ZXM=";
+      queueMicrotask(() => this.onload?.());
+    }
+  }
+  installGlobal("ClipboardItem", TestClipboardItem, restores);
+  installGlobal("FileReader", TestFileReader, restores);
+  const clipboardDescriptor = Object.getOwnPropertyDescriptor(dom.window.navigator, "clipboard");
+  Object.defineProperty(dom.window.navigator, "clipboard", {
+    configurable: true,
+    value: { write: async (items: TestClipboardItem[]) => { systemClipboardItems.push(...items); } },
+  });
+  restores.push(() => {
+    if (clipboardDescriptor) Object.defineProperty(dom.window.navigator, "clipboard", clipboardDescriptor);
+    else delete (dom.window.navigator as Navigator & { clipboard?: Clipboard }).clipboard;
+  });
   const imageFetchURLs: string[] = [];
   const NativeResponse = globalThis.Response;
   installGlobal("fetch", async (input: RequestInfo | URL) => {
@@ -556,6 +582,24 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     await waitFor(() => activeImageFrame.dataset.selected === "true", "the persisted image alignment must preserve its node selection");
     assert.equal(activeImageFrame.closest(".node-mangoAttachmentImage")?.getAttribute("draggable"), "true", "the selected inline image remains movable through Tiptap drag and drop");
     assert.equal(activeImageFrame.querySelector('[data-mango-tiptap-image-frame="true"]')?.getAttribute("draggable"), "true", "dragging the visible image frame starts a real node move");
+    const copiedEventData = new Map<string, string>();
+    const copyClipboardData = {
+      setData: (type: string, copiedValue: string) => { copiedEventData.set(type, copiedValue); },
+      getData: (type: string) => copiedEventData.get(type) ?? "",
+    } as unknown as DataTransfer;
+    const originalImageRequestsBeforeCopy = imageFetchURLs.filter((url) => url.includes("variant=original")).length;
+    const imageCopyEvent = new dom.window.Event("copy", { bubbles: true, cancelable: true });
+    Object.defineProperty(imageCopyEvent, "clipboardData", { configurable: true, value: copyClipboardData });
+    await act(async () => { activeProseMirror.dispatchEvent(imageCopyEvent); });
+    assert.equal(imageCopyEvent.defaultPrevented, true, "copying a selected Tiptap image must replace the private ProseMirror node clipboard");
+    assert.match(copiedEventData.get("text/html") ?? "", /data-mango-editor-image="true"/, "the synchronous clipboard keeps a Mango round-trip fallback");
+    assert.equal(copiedEventData.get("text/plain"), "image.png");
+    await waitFor(() => systemClipboardItems.length === 1, "selected image copy should publish a portable system clipboard item");
+    const portableImagePayload = systemClipboardItems[0].data;
+    assert.equal((await portableImagePayload["image/png"]).type, "image/png", "the system clipboard receives actual image bytes");
+    assert.match(await (await portableImagePayload["text/html"]).text(), /<img src="data:image\/png;base64,aW1hZ2UtYnl0ZXM="/, "portable HTML embeds image bytes instead of a Mango attachment reference");
+    assert.equal(await (await portableImagePayload["text/plain"]).text(), "image.png");
+    assert.ok(imageFetchURLs.filter((url) => url.includes("variant=original")).length > originalImageRequestsBeforeCopy, "copy reloads the authorized original attachment bytes");
     assert.equal(activeImageFrame.style.cursor, "pointer", "inline images use the hand-selection cursor instead of the editor text caret");
     assert.ok(activeImageFrame.querySelector('[data-mango-inline-image-download="true"]'), "the selected image exposes an icon-only download control attached to its frame");
     assert.ok(activeImageFrame.querySelector('[data-mango-tiptap-image-comment="true"]'), "the selected image exposes the same comment icon action as selected text");

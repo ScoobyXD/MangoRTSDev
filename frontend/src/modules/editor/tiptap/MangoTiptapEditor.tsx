@@ -1,14 +1,16 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Editor, type AnyExtension } from "@tiptap/core";
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from "@tiptap/react";
-import { TextSelection, type Transaction } from "@tiptap/pm/state";
+import { NodeSelection, TextSelection, type Transaction } from "@tiptap/pm/state";
 import {
   downloadMangoAttachment,
+  fetchMangoAttachmentBlob,
   loadMangoAttachmentObjectURL,
   uploadMangoAttachment,
 } from "../../attachments/attachmentApi";
 import { realtimeEditorJSONScope, subscribeRealtimeScope } from "../../realtime/realtimeWebSocket";
 import type { MentionableCompanyUser } from "../editorMentions";
+import { createEditorImageClipboardHTML, writeEditorImageToSystemClipboard, writeImageClipboardData, type EditorImageData } from "../editorImages.js";
 import { EditorImagePreviewModal } from "../EditorImagePreviewModal.js";
 import { EditorSelectionNodeIcon } from "../../../icons/index.js";
 import { ChatIcon } from "../NodeWorkspaceSurfaceShared.js";
@@ -190,6 +192,72 @@ function normalizedMentionUsers(users: readonly MentionableCompanyUser[]) {
       email: user.email?.trim(),
     }];
   });
+}
+
+function selectedMangoTiptapImageData(editor: Editor): EditorImageData | null {
+  const selection = editor.state.selection;
+  if (!(selection instanceof NodeSelection) || selection.node.type.name !== "mangoAttachmentImage") return null;
+  const attributes = selection.node.attrs as MangoAttachmentImageAttributes;
+  const nodeDOM = editor.view.nodeDOM(selection.from);
+  const renderedImage = nodeDOM instanceof HTMLImageElement
+    ? nodeDOM
+    : nodeDOM instanceof Element
+      ? nodeDOM.querySelector<HTMLImageElement>("img")
+      : null;
+  const width = Math.max(1, Math.round(
+    Number(attributes.displayWidth)
+      || Number(attributes.width)
+      || renderedImage?.naturalWidth
+      || 1,
+  ));
+  const height = Math.max(1, Math.round(
+    Number(attributes.displayHeight)
+      || Number(attributes.height)
+      || renderedImage?.naturalHeight
+      || 1,
+  ));
+  return {
+    src: renderedImage?.getAttribute("src")?.trim() || "",
+    alt: attributes.alt?.trim() || attributes.filename?.trim() || "Image",
+    attachmentID: attributes.attachmentId?.trim() || undefined,
+    filename: attributes.filename?.trim() || "Image",
+    mimeType: attributes.mimeType?.trim() || undefined,
+    width,
+    height,
+    floatSide: attributes.alignment === "right" ? "right" : "left",
+  };
+}
+
+function copySelectedMangoTiptapImage(
+  editor: Editor,
+  event: ClipboardEvent,
+  attachmentContext?: EditorImageAttachmentContext,
+): boolean {
+  const data = selectedMangoTiptapImageData(editor);
+  if (!data) return false;
+  const ownerDocument = editor.view.dom.ownerDocument;
+  const eventHTML = createEditorImageClipboardHTML(ownerDocument, data);
+  const wroteEventClipboard = event.clipboardData
+    ? writeImageClipboardData(event.clipboardData, data.src, eventHTML, data.filename)
+    : false;
+  const attachmentID = data.attachmentID?.trim() || "";
+  const context = attachmentContext?.apiBase.trim() && attachmentContext.companyID.trim()
+    ? attachmentContext
+    : undefined;
+  const wroteSystemClipboard = writeEditorImageToSystemClipboard(
+    ownerDocument,
+    data,
+    attachmentID && context
+      ? () => fetchMangoAttachmentBlob(context.apiBase, context.companyID, attachmentID, "original")
+      : data.src.startsWith("blob:") ? async () => {
+        const response = await fetch(data.src);
+        if (!response.ok) throw new Error("failed_to_read_editor_image");
+        return response.blob();
+      } : undefined,
+  );
+  if (!wroteEventClipboard && !wroteSystemClipboard) return false;
+  event.preventDefault();
+  return true;
 }
 
 export type AuthenticatedImageProps = {
@@ -1216,6 +1284,11 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           return event.shiftKey ? outdentMangoTiptapSelection(current) : indentMangoTiptapSelection(current);
         },
         handleDOMEvents: {
+          copy: (_view, event) => {
+            const current = editorRef.current;
+            if (!current) return false;
+            return copySelectedMangoTiptapImage(current, event as ClipboardEvent, attachmentContextRef.current);
+          },
           contextmenu: (view, event) => {
             const target = event.target instanceof Element ? event.target : null;
             const cell = target?.closest("td,th");
