@@ -793,7 +793,7 @@ func (r *MemoryRepo) ListCommunicationsEmailPlacements(userID, companyID string,
 
 	placements := make([]domain.CommunicationsEmailPlacement, 0)
 	for _, link := range r.emailNodeLinks {
-		if link.UserID != userID || link.CompanyID != companyID || !idSet[link.MessageID] {
+		if (link.UserID != "" && link.UserID != userID) || link.CompanyID != companyID || !idSet[link.MessageID] {
 			continue
 		}
 		placements = append(placements, domain.CommunicationsEmailPlacement{
@@ -806,6 +806,58 @@ func (r *MemoryRepo) ListCommunicationsEmailPlacements(userID, companyID string,
 			LogicGateID:      link.LogicGateID,
 			CreatedTimestamp: link.CreatedTimestamp,
 			UpdatedTimestamp: link.UpdatedTimestamp,
+		})
+	}
+	sort.Slice(placements, func(i, j int) bool {
+		if !placements[i].CreatedTimestamp.Equal(placements[j].CreatedTimestamp) {
+			return placements[i].CreatedTimestamp.After(placements[j].CreatedTimestamp)
+		}
+		if placements[i].MessageID != placements[j].MessageID {
+			return placements[i].MessageID < placements[j].MessageID
+		}
+		return placements[i].LogicGateID < placements[j].LogicGateID
+	})
+	return placements, nil
+}
+
+func (r *MemoryRepo) ListCommunicationsEmailPlacementsForConnection(userID, companyID, emailConnectionID string, messageIDs []string) ([]domain.CommunicationsEmailPlacement, error) {
+	userID = strings.TrimSpace(userID)
+	companyID = strings.TrimSpace(companyID)
+	emailConnectionID = strings.TrimSpace(emailConnectionID)
+	if userID == "" || companyID == "" || emailConnectionID == "" {
+		return nil, ErrInvalid
+	}
+	ids := normalizeUniqueStrings(messageIDs, 0)
+	if len(ids) == 0 {
+		return []domain.CommunicationsEmailPlacement{}, nil
+	}
+	idSet := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		idSet[id] = true
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	placements := make([]domain.CommunicationsEmailPlacement, 0)
+	for _, link := range r.emailNodeLinks {
+		if (link.UserID != "" && link.UserID != userID) || link.CompanyID != companyID || !idSet[link.MessageID] {
+			continue
+		}
+		var linkConnectionID string
+		if link.SharedInboxID != "" {
+			if folder, ok := r.folders[key(companyID, link.SharedInboxID)]; ok {
+				linkConnectionID = folder.CompanyEmailConnectionID
+			}
+		} else if connection, ok := r.emailConnections[emailConnectionKey(link.UserID, link.AccountEmail)]; ok {
+			linkConnectionID = connection.EmailConnectionID
+		}
+		if linkConnectionID != emailConnectionID {
+			continue
+		}
+		placements = append(placements, domain.CommunicationsEmailPlacement{
+			CompanyID: link.CompanyID, UserID: link.UserID, MessageID: link.MessageID,
+			NodeID: link.NodeID, BoardID: link.BoardID, CardID: link.CardID, LogicGateID: link.LogicGateID,
+			CreatedTimestamp: link.CreatedTimestamp, UpdatedTimestamp: link.UpdatedTimestamp,
 		})
 	}
 	sort.Slice(placements, func(i, j int) bool {

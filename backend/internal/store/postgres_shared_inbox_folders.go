@@ -265,9 +265,10 @@ func (r *PostgresRepo) CreateCommunicationsSharedInboxFolder(companyID, parentFo
 	var companyEmailConnectionID sql.NullString
 	if accountEmail != "" {
 		if err := tx.QueryRowContext(ctx, `
-select company_email_connection_id::text
-from company_email_connections
+select email_connection_id::text
+from email_connections
 where company_id=$1::uuid
+  and connection_type='shared'
   and account_email=$2
   and status='connected'
 limit 1`, companyID, accountEmail).Scan(&companyEmailConnectionID); err != nil {
@@ -822,9 +823,11 @@ where company_id=$1::uuid and folder_id = any(string_to_array($2, ',')::uuid[])`
 		if deleteCompanyConnections && len(companyEmailConnectionIDs) > 0 {
 			connectionIDList := strings.Join(companyEmailConnectionIDs, ",")
 			if _, err := tx.ExecContext(ctx, `
-delete from company_email_connections
+update email_connections
+set status='disconnected',updated_timestamp=now()
 where company_id=$1::uuid
-  and company_email_connection_id = any(string_to_array($2, ',')::uuid[])`, companyID, connectionIDList); err != nil && !isPostgresUndefinedTable(err, "company_email_connections") {
+  and connection_type='shared'
+  and email_connection_id = any(string_to_array($2, ',')::uuid[])`, companyID, connectionIDList); err != nil && !isPostgresUndefinedTable(err, "email_connections") {
 				return err
 			}
 		}
@@ -900,9 +903,11 @@ where company_id=$1::uuid
 	}
 	if deleteCompanyConnections && companyEmailConnectionID.Valid {
 		if _, err := tx.ExecContext(ctx, `
-delete from company_email_connections
+update email_connections
+set status='disconnected',updated_timestamp=now()
 where company_id=$1::uuid
-  and company_email_connection_id=$2::uuid`, companyID, companyEmailConnectionID.String); err != nil && !isPostgresUndefinedTable(err, "company_email_connections") {
+  and connection_type='shared'
+  and email_connection_id=$2::uuid`, companyID, companyEmailConnectionID.String); err != nil && !isPostgresUndefinedTable(err, "email_connections") {
 			return err
 		}
 	}
@@ -949,9 +954,10 @@ for update`, companyID, folderID).Scan(new(int)); errors.Is(err, sql.ErrNoRows) 
 	}
 	var companyEmailConnectionID string
 	if err := tx.QueryRowContext(ctx, `
-select company_email_connection_id::text
-from company_email_connections
+select email_connection_id::text
+from email_connections
 where company_id=$1::uuid
+  and connection_type='shared'
   and account_email=$2
   and status='connected'
 limit 1`, companyID, accountEmail).Scan(&companyEmailConnectionID); err != nil {

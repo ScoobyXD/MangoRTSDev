@@ -779,13 +779,71 @@ order by relationship.created_timestamp desc,message.provider_message_id,relatio
 	return placements, rows.Err()
 }
 
-func emailProjectionMailboxScopeSQL(ctx context.Context, tx *sql.Tx, companyID, nodeID, messageID string) (string, string, error) {
-	var sharedInboxID, accountEmail string
-	err := tx.QueryRowContext(ctx, `
-select coalesce(thread.shared_inbox_id::text,''),thread.email_account_email
+func (r *PostgresRepo) ListCommunicationsEmailPlacementsForConnection(userID, companyID, emailConnectionID string, messageIDs []string) ([]domain.CommunicationsEmailPlacement, error) {
+	userID, companyID, emailConnectionID = cleanUUIDText(userID), cleanUUIDText(companyID), cleanUUIDText(emailConnectionID)
+	if userID == "" || companyID == "" || emailConnectionID == "" {
+		return nil, ErrInvalid
+	}
+	ids := normalizeUniqueStrings(messageIDs, 0)
+	if len(ids) == 0 {
+		return []domain.CommunicationsEmailPlacement{}, nil
+	}
+	args := []any{userID, companyID, emailConnectionID}
+	placeholders := make([]string, 0, len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+		placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+	}
+	rows, err := r.db.Query(`
+select relationship.company_id::text,$1::text,message.provider_message_id,
+       relationship.resource_id::text,
+       coalesce(assignment.compatibility_board_id,''),
+       coalesce(assignment.compatibility_card_id::text,''),
+       coalesce(assignment.logic_gate_id::text,''),
+       relationship.created_timestamp,
+       greatest(relationship.created_timestamp,message.updated_timestamp)
 from email_relationships relationship
 join email_threads thread on thread.company_id=relationship.company_id
  and thread.email_thread_id=relationship.email_thread_id
+join email_messages message on message.company_id=relationship.company_id
+ and message.email_thread_id=relationship.email_thread_id
+ and message.email_message_id=relationship.email_message_id
+left join node_logic_gate_assignments assignment on assignment.company_id=relationship.company_id
+ and assignment.node_id=relationship.resource_id
+where relationship.company_id=$2::uuid
+ and thread.email_connection_id=$3::uuid
+ and relationship.resource_type='node'
+ and relationship.resource_textbox_id is null
+ and message.provider_message_id in (`+strings.Join(placeholders, ",")+`)
+ and mangorts_user_can_access_resource(relationship.company_id,'node',
+     relationship.resource_id,$1::uuid,'edit')
+order by relationship.created_timestamp desc,message.provider_message_id,relationship.resource_id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	placements := make([]domain.CommunicationsEmailPlacement, 0)
+	for rows.Next() {
+		placement, scanErr := scanCommunicationsEmailPlacement(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		placements = append(placements, placement)
+	}
+	return placements, rows.Err()
+}
+
+func emailProjectionMailboxScopeSQL(ctx context.Context, tx *sql.Tx, companyID, nodeID, messageID string) (string, string, error) {
+	var sharedInboxID, accountEmail string
+	err := tx.QueryRowContext(ctx, `
+select coalesce(inbox.shared_inbox_id::text,''),connection.account_email
+from email_relationships relationship
+join email_threads thread on thread.company_id=relationship.company_id
+ and thread.email_thread_id=relationship.email_thread_id
+join email_connections connection on connection.company_id=thread.company_id
+ and connection.email_connection_id=thread.email_connection_id
+left join shared_inboxes inbox on inbox.company_id=thread.company_id
+ and inbox.company_email_connection_id=thread.email_connection_id
 join email_messages message on message.company_id=relationship.company_id
  and message.email_thread_id=relationship.email_thread_id
  and message.email_message_id=relationship.email_message_id

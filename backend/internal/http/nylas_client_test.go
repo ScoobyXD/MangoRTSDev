@@ -84,14 +84,19 @@ func TestNylasRESTClientListMessagesUsesSelectedFields(t *testing.T) {
 
 	client := NewNylasRESTClient(server.URL, "api-key", "client-id")
 	starred := true
-	page, err := client.ListMessages(context.Background(), "grant-1", NylasMessageQuery{Limit: communicationsNylasMaxMessageLimit, Starred: &starred})
+	page, err := client.ListMessages(context.Background(), "grant-1", NylasMessageQuery{
+		Limit: communicationsNylasMaxMessageLimit, Starred: &starred,
+		ReceivedAfter: 123, ReceivedBefore: 456,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertURLQueryEqual(t, gotQuery, url.Values{
-		"limit":   {"12"},
-		"select":  {nylasMessageListSelect},
-		"starred": {"true"},
+		"limit":           {"12"},
+		"received_after":  {"123"},
+		"received_before": {"456"},
+		"select":          {nylasMessageListSelect},
+		"starred":         {"true"},
 	})
 	if page.NextPageToken != "next-page" {
 		t.Fatalf("next page token = %q, want next-page", page.NextPageToken)

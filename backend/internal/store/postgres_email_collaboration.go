@@ -16,12 +16,12 @@ relationship.company_id::text,
 relationship.email_relationship_id::text,
 relationship.resource_id::text,
 relationship.email_relationship_id::text,
-case thread.email_account_type when 'personal_email_account' then 'personal' else 'shared' end,
-coalesce(thread.personal_user_id::text, ''),
-coalesce(thread.personal_account_email, ''),
-coalesce(thread.shared_inbox_id::text, ''),
-thread.email_account_email,
-thread.provider,
+connection.connection_type,
+coalesce(connection.personal_user_id::text, ''),
+case when connection.connection_type='personal' then connection.account_email else '' end,
+coalesce(inbox.shared_inbox_id::text, ''),
+connection.account_email,
+connection.provider,
 thread.provider_thread_id,
 message.email_message_id::text,
 message.email_message_id::text,
@@ -40,6 +40,18 @@ jsonb_build_object(
 '',
 relationship.created_timestamp,
 greatest(thread.updated_timestamp,message.updated_timestamp)`
+
+const postgresEmailCollaborationConnectionJoins = `
+join email_connections connection on connection.company_id=thread.company_id
+ and connection.email_connection_id=thread.email_connection_id
+left join lateral (
+ select shared_inbox_id
+ from shared_inboxes
+ where company_id=thread.company_id
+   and company_email_connection_id=thread.email_connection_id
+ order by shared_inbox_id
+ limit 1
+) inbox on true`
 
 type emailCollaborationRowScanner interface{ Scan(...any) error }
 type emailCollaborationQueryer interface {
@@ -101,6 +113,7 @@ func postgresEmailCollaborationByID(ctx context.Context, q emailCollaborationQue
 select `+postgresEmailCollaborationColumns+`
 from email_relationships relationship
 join email_threads thread on thread.company_id=relationship.company_id and thread.email_thread_id=relationship.email_thread_id
+`+postgresEmailCollaborationConnectionJoins+`
 join email_messages message on message.company_id=relationship.company_id
  and message.email_thread_id=relationship.email_thread_id and message.email_message_id=relationship.email_message_id
 where relationship.company_id=$1::uuid and relationship.email_relationship_id=$2::uuid
@@ -120,12 +133,13 @@ func postgresEmailCollaborationLookup(ctx context.Context, q emailCollaborationQ
 select `+postgresEmailCollaborationColumns+`
 from email_relationships relationship
 join email_threads thread on thread.company_id=relationship.company_id and thread.email_thread_id=relationship.email_thread_id
+`+postgresEmailCollaborationConnectionJoins+`
 join email_messages message on message.company_id=relationship.company_id
  and message.email_thread_id=relationship.email_thread_id and message.email_message_id=relationship.email_message_id
 where relationship.company_id=$1::uuid and relationship.resource_type='node'
- and relationship.resource_textbox_id is null and thread.email_account_type=case $2 when 'personal' then 'personal_email_account' else 'shared_email_account' end
- and (($2='personal' and thread.personal_user_id=nullif($3,'')::uuid and thread.personal_account_email=$4)
-   or ($2='shared' and thread.shared_inbox_id=nullif($5,'')::uuid))
+ and relationship.resource_textbox_id is null and connection.connection_type=$2
+ and (($2='personal' and connection.personal_user_id=nullif($3,'')::uuid and connection.account_email=$4)
+   or ($2='shared' and inbox.shared_inbox_id=nullif($5,'')::uuid))
  and ((nullif($7,'') is not null and thread.provider_thread_id=$7)
    or (nullif($6,'') is not null and message.provider_message_id=$6))
  and (nullif($8,'')::uuid is null or mangorts_user_can_access_resource(
@@ -241,12 +255,13 @@ func (r *PostgresRepo) ListCommunicationsEmailCollaborations(input Communication
 select `+postgresEmailCollaborationColumns+`
 from email_relationships relationship
 join email_threads thread on thread.company_id=relationship.company_id and thread.email_thread_id=relationship.email_thread_id
+`+postgresEmailCollaborationConnectionJoins+`
 join email_messages message on message.company_id=relationship.company_id
  and message.email_thread_id=relationship.email_thread_id and message.email_message_id=relationship.email_message_id
 where relationship.company_id=$1::uuid and relationship.resource_type='node'
- and relationship.resource_textbox_id is null and thread.email_account_type=case $2 when 'personal' then 'personal_email_account' else 'shared_email_account' end
- and (($2='personal' and thread.personal_user_id=nullif($3,'')::uuid and thread.personal_account_email=$4)
-   or ($2='shared' and thread.shared_inbox_id=nullif($5,'')::uuid))
+ and relationship.resource_textbox_id is null and connection.connection_type=$2
+ and (($2='personal' and connection.personal_user_id=nullif($3,'')::uuid and connection.account_email=$4)
+   or ($2='shared' and inbox.shared_inbox_id=nullif($5,'')::uuid))
  and ((nullif($7,'') is not null and thread.provider_thread_id=$7)
    or (nullif($6,'') is not null and message.provider_message_id=$6))
  and mangorts_user_can_access_resource(relationship.company_id,relationship.resource_type,relationship.resource_id,$8::uuid,'edit')
