@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useAppOverlayPortalTarget } from "../../app/AppModalPortal.js";
 import { fetchSidebarPinTreeWithRequest } from "../../app/sidebarPinsApi.js";
 import { buildSidebarPinTreeRows, type SidebarPinTreeRow } from "../../app/sidebarPinTree.js";
 import type { SidebarPinTree } from "../../app/sidebarPins.js";
@@ -102,6 +103,7 @@ const categoryOptions: Array<{ type: EditorEntityType; label: string; shortcut: 
 ];
 
 export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (props) => {
+  const portalTarget = useAppOverlayPortalTarget();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const searchSequenceRef = useRef(0);
@@ -226,7 +228,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
     }
   };
 
-  if (typeof document === "undefined") return null;
+  if (!portalTarget) return null;
   return createPortal(
     <div ref={rootRef} role="dialog" aria-label="Universal picker" data-mango-universal-picker="true" data-mango-universal-picker-mode={mode} style={{
       ...pickerPanelPosition(props.anchor), zIndex: 10070, display: "grid", gridTemplateRows: "auto auto minmax(120px,1fr) auto", overflow: "hidden",
@@ -266,6 +268,6 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
         <span>↑↓ choose · Enter/Tab select · Esc close</span>
         {error && <span role="alert" style={{ marginLeft: "auto", color: "#b91c1c", fontWeight: 800 }}>{error}</span>}
       </div>
-    </div>, document.body,
+    </div>, portalTarget,
   );
 };
