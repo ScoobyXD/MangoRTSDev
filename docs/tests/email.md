@@ -1,3 +1,15 @@
+# Process Story: Email collaboration creates a standalone Node
+
+A user starts the first chat on an unassociated personal or shared email
+↓
+Mango atomically creates or reuses the exact mailbox/thread collaboration Node, attached-email link, chat ownership, participants, creator permission, and creator GVIC
+↓
+The Node remains authoritative in Node and email relationship storage with no `company_explorer_items` row and no Unfiled/Nodes folder
+↓
+Later Project or Logic Gate organization uses the existing typed relationship commands, while standalone search returns the accessible Node with an empty location path
+
+Last updated: 2026-08-06
+
 # Process Story: Exact mailbox email stays scoped and visibly stable
 
 Jonat opens My Triage or Shared Triage and selects text in an email. The selection itself opens the right comment rail; there is no separate global Chat step. If the email has no Node association, the first nonempty comment creates one floating Node with no priority and no Logic Gate. If the email is already associated with one or more Nodes, the rail shows every connected Node chat before selection; with several associations, Mango asks which Node should own the new comment or lets Jonat create another floating Node. The hashtag destination bar shows only `Create floating node (a node without a Logic Gate)` while blank, then searches Nodes, Logic Gates, and Projects as soon as text is entered.
@@ -688,7 +700,7 @@ Expected:
 - Selecting text is step 1 and immediately opens the comment rail; typing is step 2. The per-message icon opens an unanchored comment, and no global Chat click is required.
 - With no association, the first nonempty comment creates one private floating Node with no priority and no Logic Gate. A stable requested Node ID makes retry idempotent. With one association, the comment uses that Node; with several, the rail asks which Node owns the comment or offers a new floating Node.
 - A failed ensure leaves no partial durable collaboration artifacts; either failure preserves the typed composer context, never shows a saved row before acknowledgement, re-enables retry, and translates `failed_to_create_email_collaboration` or `email_collaboration_storage_not_ready` into actionable text.
-- A floating Node starts with one source-scoped attached-email projection, `priority = null`, creator Generated GVIC, private participant access, Unfiled/Nodes placement, and no Logic Gate. Later hashtag placement may assign priority and a Logic Gate or Project.
+- A floating Node starts with one source-scoped attached-email projection, `priority = null`, creator Generated GVIC, private participant access, no Company Explorer placement, and no Logic Gate. Later hashtag organization may assign priority and a Logic Gate or Project through their typed relationship commands.
 - Email detail and Node detail render the same durable chat IDs through the shared ChatPane and Node chat scope, including identical reply indentation, attachment, mention, link, delete, and refresh behavior. Posted chat images therefore expose the same right-side original download and shared fullscreen double-click preview in both mounts.
 - A selection-backed root chat stores and later navigates to the exact message, quote, and offsets; an unanchored root chat is valid, and replies retain the root's anchor instead of following the newest message.
 - A guessed collaboration or Node ID is denied before provider content is read.

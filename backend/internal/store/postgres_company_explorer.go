@@ -1411,6 +1411,7 @@ func (r *PostgresRepo) ListCompanyExplorerFolderItems(companyID, folderID, itemT
 		`select company_id::text, coalesce(parent_folder_id::text, '') as folder_id, target_type, target_id::text, position, created_timestamp, updated_timestamp
 		 from company_explorer_items
 		 where company_id=$1::uuid
+		   and target_type in ('project', 'logic_gate')
 		   and ($2::uuid is null or parent_folder_id=$2::uuid)
 		   and ($3::text is null or target_type=$3)
 		 order by position asc, created_timestamp asc`,
@@ -1465,6 +1466,7 @@ func (r *PostgresRepo) ListVisibleCompanyExplorerFolderItems(companyID, folderID
 		   on folder.company_id=item.company_id
 		  and folder.folder_id=item.parent_folder_id
 		 where item.company_id=$1::uuid
+		   and item.target_type in ('project', 'logic_gate')
 		   and ($2::uuid is null or item.parent_folder_id=$2::uuid)
 		   and ($3::text is null or item.target_type=$3)
 		   and mangorts_user_can_access_resource(item.company_id, 'company_explorer_folder', item.parent_folder_id, $4::uuid, $5)
@@ -1530,6 +1532,7 @@ select item.company_id::text, coalesce(item.parent_folder_id::text, '') as folde
 from company_explorer_items item
 join subtree folder_scope on folder_scope.folder_id=item.parent_folder_id
 where item.company_id=$1::uuid
+  and item.target_type in ('project', 'logic_gate')
   and ($3::text is null or item.target_type=$3)
 order by item.position asc, item.created_timestamp asc`, companyID, folderID, itemTypeParam)
 	if err != nil {
@@ -1593,6 +1596,7 @@ join company_explorer_folders folder
   on folder.company_id=item.company_id
  and folder.folder_id=item.parent_folder_id
 where item.company_id=$1::uuid
+  and item.target_type in ('project', 'logic_gate')
   and ($3::text is null or item.target_type=$3)
   and mangorts_user_can_access_resource(item.company_id, 'company_explorer_folder', item.parent_folder_id, $4::uuid, $5)
   and mangorts_user_can_access_resource(

@@ -118,7 +118,7 @@ func (r *PostgresRepo) projectDeferredCompanyExplorerFolderItemTx(ctx context.Co
 	if companyID == "" || itemType == "" || itemID == "" {
 		return nil, ErrInvalid
 	}
-	if itemType != "node" && itemType != "logic_gate" {
+	if itemType != EntityTypeLogicGate {
 		return nil, ErrInvalid
 	}
 	if folderID == "" {
@@ -176,14 +176,10 @@ func insertMissingCompanyExplorerFolderItemSQL(ctx context.Context, tx *sql.Tx, 
 		return domain.CompanyExplorerFolderItem{}, false, ErrNotFound
 	}
 	var exists bool
-	var existsQuery string
-	if itemType == "node" {
-		existsQuery = `select exists(select 1 from nodes where company_id=$1 and node_id=$2)`
-	} else if itemType == "logic_gate" {
-		existsQuery = `select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`
-	} else {
+	if itemType != EntityTypeLogicGate {
 		return domain.CompanyExplorerFolderItem{}, false, ErrNotFound
 	}
+	existsQuery := `select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`
 	if err := tx.QueryRowContext(ctx, existsQuery, companyID, itemID).Scan(&exists); err != nil {
 		return domain.CompanyExplorerFolderItem{}, false, err
 	}

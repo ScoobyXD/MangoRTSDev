@@ -1,3 +1,15 @@
+# Process Story: Node organization uses typed relationships, not Explorer placement
+
+A user creates a Node from Editor, chat, email collaboration, Project, or Logic Gate work
+↓
+The Node is stored once in `nodes`, while Logic Gate assignments, Project relationships, email links, attachments, chat ownership, GVIC, and permissions remain in their exact typed tables
+↓
+No Node creation or repair path inserts `target_type='node'` into `company_explorer_items`, and no Unfiled/Nodes folder is created
+↓
+Search reads the Node from its source table and derives a visible Logic Gate path first, then a visible Project path, or an empty standalone path
+
+Last updated: 2026-08-06
+
 # Process Story: Node edits retain dormant change anchors without unread highlights
 
 A user creates or opens a Node from Home, Explorer, Kanban, Project, Updates, an entity link, or a direct route
@@ -146,12 +158,12 @@ N92 - Mounted Node chat performs one single-flight canonical durable-chat refres
 N93 - A node editor header keeps Editor, Permissions, the shared formatting toolbar, Outline Styles/Automatic Numbering, and the immediately adjacent More control on one nonwrapping line. Relationships, Metadata, History, Save Settings, save-version/related-node commands, and supported opener-specific secondary actions remain available in the accessible **More editor actions** overflow menu with their existing permission and disabled state.
 N94 - Node popups/panels, permissions and email dialogs, and image/attachment/email previews mount through the shared body-level overlay portal above Key Views, Explorer, Search Explorer, and feature-local stacking contexts. Blocking modal modes trap focus and restore prior focus on close; anchored Kanban editor panels may remain modeless until fullscreen. The Project Logic Gates / Nodes inline editor remains in document flow and does not use the overlay portal.
 N95 - The Generated, Verified, Consulted, and Informed cards remain in one compact four-column horizontal row. Narrowing may clip that row beneath an adjacent pane, but must not wrap it vertically.
-N96 - The lazy EMAIL52 trigger creates one email-derived Node only after valid mandatory priority selection and provider validation. It reaches its final Unfiled/Nodes placement before copying the current effective source policies, then customizes direct creator Generated GVIC and Edit permission. Retry and later replies for the same exact mailbox/thread identity reuse that Node.
+N96 - The lazy EMAIL52 trigger creates one email-derived Node after provider validation with no Company Explorer placement. It directly customizes creator Generated GVIC and Edit permission, and retry or later replies for the same exact mailbox/thread identity reuse that Node.
 N97 - The email Node contains one protected canonical source-scoped `Attached email` projection with `created_from_email=true` plus shared `Text block chat` rows. Generic writes may add ordinary text boxes and other normal Node information but cannot overwrite/delete the canonical email projection. Saved-version, Project, Logic Gate/Kanban, GVIC, and account behavior follows normal Node contracts; whole-Node delete and generic permission replacement remain protected while collaboration source/participant records exist.
 N98 - My/Shared Triage and the email Node mount the same shared ChatPane over the same canonical chat block ID and information rows. Message IDs, parent IDs, ordering, indentation, deletion ownership, mentions, attachments, composer state, and `chat:node:{node_id}` refresh are shared data, never copied histories. The Node header shows compact durable chat-author/mention context.
 N99 - An email-selection chat persists `selection_source=email`, exact provider message ID, trimmed quote, and valid offsets. A text-box selection in the node-wide email chat additionally persists `selection_block_id`, so chat navigation can focus the originating editor while email references still open the exact reply and quote.
 N100 - The email Node keeps the effective default and complete rules copied from its final source, while the creator and accepted mention participants receive permanent direct Edit access. The permissions surface cannot add/remove/replace those system-managed grants. Mention access is Node-chat access only: it grants authorized reads of the Mango-stored email snapshot attached to that Node, without requiring the viewer to own or access the source Nylas mailbox, and never changes provider recipients, delivery, CC/BCC, or subscription.
-N101 - A Triage-comment email Node receives one protected Unfiled/Nodes Explorer placement and no initial Logic Gate assignment. Normal email conversions retain their established placement behavior, but every primary-email-origin Node shares the email layout/icon contract even when created by drag.
+N101 - A Triage-comment email Node receives no Company Explorer item and no initial Logic Gate assignment. Normal email conversions retain their established typed assignment behavior, and every primary-email-origin Node shares the email layout/icon contract even when created by drag.
 N102 - A provider message that arrives after a Node thread download does not appear automatically. Mango does not use Nylas webhooks, polling, scheduled reconciliation, or an open/read side effect to extend a Node's stored email thread. A later message joins the existing Node source only after a user explicitly imports that exact message; a genuinely different mailbox/thread attached later becomes another left-pane browser tab.
 N103 - Clicking a persisted editor annotation highlight with no active text selection opens the owning text block's chat, expands the required thread, scrolls the exact stable comment ID into view, and moves accessible focus to that comment with a visible focus state. Multiple annotations resolve independently; normal selection, editing, keyboard behavior, and chat-to-text highlighting remain unchanged.
 N104 - Attached-email message cards list every attachment not actually referenced by the message body's normalized CID set. Both conversion-to-Node and attach-to-existing-Node retain immutable source mailbox/message/thread identity, while imported bodies, inline images, signatures, and ordinary attachment bytes are stored in Mango-owned email/attachment storage. Node collaborators read those stored copies through Node authorization; provider bytes are never embedded in the editable Node JSON projection.
@@ -647,7 +659,7 @@ Given:
 Expected:
 - Highlight/read alone creates no Node; the first nonempty chat submit ensures exactly one standalone private Node outside every Logic Gate/project/work-assignment path, and retry reuses it if the following chat write fails.
 - The Node has no placeholder text box, status, priority, GVIC, card, or inherited work policy.
-- Its canonical attached-email projection preserves source mailbox/thread provenance, and only this collaboration Node appears in protected Unfiled/Nodes.
+- Its canonical attached-email projection preserves source mailbox/thread provenance, and the collaboration Node creates no Company Explorer item or default Nodes folder.
 - The email and Node mounts show the same durable chat IDs and shared ChatPane behavior, including parent indentation, anchor navigation, mentions, attachments, deletion ownership, and Node chat reconciliation.
 - The creator and mentioned participant keep direct edit access while nonparticipants are denied.
 - The future provider message does not appear in the Node merely because a webhook arrived, the mailbox refreshed, or either participant opened the Node.

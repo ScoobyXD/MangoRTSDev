@@ -680,10 +680,6 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 			continue
 		}
 		switch item.ItemType {
-		case "node":
-			if _, ok := r.nodes[key(companyID, item.ItemID)]; ok {
-				nodeIDs[item.ItemID] = true
-			}
 		case "logic_gate":
 			if _, ok := r.logicGates[key(companyID, item.ItemID)]; ok {
 				logicGateIDs[item.ItemID] = true
@@ -810,11 +806,6 @@ func (r *MemoryRepo) expandCompanyExplorerDeleteScopeLocked(companyID string, fo
 				continue
 			}
 			switch item.ItemType {
-			case "node":
-				if !nodeIDs[item.ItemID] {
-					nodeIDs[item.ItemID] = true
-					changed = true
-				}
 			case "logic_gate":
 				if !logicGateIDs[item.ItemID] {
 					logicGateIDs[item.ItemID] = true
@@ -931,17 +922,7 @@ func (r *MemoryRepo) assignCompanyExplorerFolderItemLocked(companyID, folderID, 
 	if previousFolderID != folderID {
 		// Moving an entity to another Explorer folder level gives it a new local
 		// graph context. Existing edges are no longer valid in that context.
-		if itemType == "node" {
-			next := r.nodeRels[companyID][:0]
-			for _, rel := range r.nodeRels[companyID] {
-				if rel.NodeIDA == itemID || rel.NodeIDB == itemID {
-					deletedRelationshipIDs = append(deletedRelationshipIDs, rel.NodeRelationshipID)
-					continue
-				}
-				next = append(next, rel)
-			}
-			r.nodeRels[companyID] = next
-		} else if itemType == "logic_gate" {
+		if itemType == "logic_gate" {
 			next := r.logicGateRels[companyID][:0]
 			for _, rel := range r.logicGateRels[companyID] {
 				if rel.LogicGateIDA == itemID || rel.LogicGateIDB == itemID {
@@ -1051,8 +1032,6 @@ func (r *MemoryRepo) companyExplorerFolderItemVisibleLocked(companyID, userID st
 		return false
 	}
 	switch item.ItemType {
-	case "node":
-		return r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeNode, item.ItemID, EntityPermissionEdit)
 	case "logic_gate":
 		return r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, item.ItemID, EntityPermissionEdit)
 	case EntityTypeProject:

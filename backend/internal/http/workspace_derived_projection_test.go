@@ -53,8 +53,8 @@ func TestWorkspaceDerivedReplayCheckpointsMissingTargets(t *testing.T) {
 		StreamID:   companyID,
 		Type:       store.WorkspaceDeferredFolderItemAssignEventType,
 		Payload: map[string]any{
-			"system_folder_key": "active_nodes",
-			"item_type":         "node",
+			"system_folder_key": "active_logic_gates",
+			"item_type":         "logic_gate",
 			"item_id":           "22222222-2222-4222-8222-222222222222",
 		},
 	})
@@ -150,7 +150,7 @@ func appendWorkspaceDerivedProjectionEventForTest(t *testing.T, repo *workspaceD
 		Payload: map[string]any{
 			"tasks": []map[string]any{{
 				"kind":      store.WorkspaceDerivedTaskCompanyExplorerFolderItemAssign,
-				"item_type": "node",
+				"item_type": "logic_gate",
 				"item_id":   "22222222-2222-4222-8222-222222222222",
 			}},
 		},
