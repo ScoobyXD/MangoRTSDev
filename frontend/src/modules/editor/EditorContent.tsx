@@ -30,7 +30,13 @@ import { formatNodeDueDateForEditor, normalizeNodeDueDateDraft } from "./editorD
 import { EditorTabBar } from "./EditorTabBar";
 import { editorSaveNeedsFailureAttention } from "./EditorSaveStatusIcon.js";
 import { mangoTiptapPendingStorageKey } from "./tiptap/mangoTiptapSync.js";
-import { flushMangoTiptapDocument } from "./tiptap/mangoTiptapFlushRegistry.js";
+import { flushMangoTiptapResource } from "./tiptap/mangoTiptapFlushRegistry.js";
+import {
+  markEditorHistoryChanged,
+  registerEditorHistoryExitSaver,
+  saveEditorHistory,
+  type EditorHistoryResourceRef,
+} from "./editorExitHistory.js";
 import { NodeWorkspaceSurface } from "./NodeWorkspaceSurface";
 import { NodeRelationshipsSurface } from "./NodeRelationshipsSurface";
 import {
@@ -141,9 +147,6 @@ type EditorNodeBatchResponse = {
   relationships?: NodeRelationship[];
 };
 
-const EDITOR_SAVE_VERSION_INTERVAL_OPTIONS = [5, 10, 30, 60] as const;
-const EDITOR_SAVE_VERSION_DEFAULT_INTERVAL_MINUTES = 10;
-const EDITOR_AUTO_SAVE_VERSION_CREATION_ENABLED: boolean = false;
 const LOGIC_GATE_OVERVIEW_DOCUMENT_ID = "logic-gate-overview";
 
 type EditorSaveVersionItem = {
@@ -177,20 +180,6 @@ function editorSaveVersionsPath(resourceType: "node" | "logic_gate", resourceID:
   return resourceType === "node" ? `/v1/nodes/${resourceID}/save-versions` : `/v1/logic-gates/${resourceID}/save-versions`;
 }
 
-function editorSaveSettingsStorageKey(companyID: string, resourceType: "node" | "logic_gate", resourceID: string): string {
-  return `mango-editor-save-settings-v1:${companyID}:${resourceType}:${resourceID}`;
-}
-
-function readEditorSaveIntervalMinutes(companyID: string, resourceType: "node" | "logic_gate", resourceID: string): number {
-  if (typeof localStorage === "undefined") return EDITOR_SAVE_VERSION_DEFAULT_INTERVAL_MINUTES;
-  const raw = localStorage.getItem(editorSaveSettingsStorageKey(companyID, resourceType, resourceID));
-  const parsed = Number.parseInt(raw ?? "", 10);
-  return EDITOR_SAVE_VERSION_INTERVAL_OPTIONS.includes(parsed as typeof EDITOR_SAVE_VERSION_INTERVAL_OPTIONS[number])
-    ? parsed
-    : EDITOR_SAVE_VERSION_DEFAULT_INTERVAL_MINUTES;
-}
-
-
 function formatEditorSaveVersionTimestamp(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value || "Unknown time";
@@ -201,10 +190,6 @@ function formatEditorSaveVersionTimestamp(value: string): string {
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
-}
-
-function editorSaveVersionKindLabel(kind: string): string {
-  return kind === "auto" ? "Auto save" : kind === "manual" ? "Manual save" : "Legacy save";
 }
 
 function editorSaveVersionDocumentText(information: string): string {
@@ -236,10 +221,6 @@ function editorSaveVersionPreview(version: EditorSaveVersion | null): string {
     const label = items.length > 1 ? `Text box ${index + 1}` : item.type || "Text box";
     return `${label}\n${editorSaveVersionDocumentText(item.information) || "Empty text box"}`;
   }).join("\n\n");
-}
-
-function editorSaveVersionSignature(version: EditorSaveVersion): string {
-  return JSON.stringify((version.items ?? []).map((item) => [item.source_information_id || item.information_id, item.information]));
 }
 
 function logicGateGVICAssignmentPrincipalType(assignment: LogicGateGVICAssignment): LogicGateGVICPrincipalType {
@@ -611,7 +592,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [currentUserID, setCurrentUserID] = useState("");
   const [currentUserLoaded, setCurrentUserLoaded] = useState(false);
   const [selectedSaveVersionID, setSelectedSaveVersionID] = useState("");
-  const [saveVersionIntervalMinutes, setSaveVersionIntervalMinutes] = useState(EDITOR_SAVE_VERSION_DEFAULT_INTERVAL_MINUTES);
   const [saveVersionsSortAscending, setSaveVersionsSortAscending] = useState(false);
   const [saveVersionSaving, setSaveVersionSaving] = useState(false);
   const [saveVersionRestoring, setSaveVersionRestoring] = useState(false);
@@ -664,12 +644,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const pendingEditorTypingCaretRef = useRef<EditorTypingCaretBookmark | null>(null);
   const nodeFormattingControllerRef = useRef<EditorDocumentFormattingController | null>(null);
   const logicFormattingControllerRef = useRef<EditorDocumentFormattingController | null>(null);
-  const nodeWorkspaceSaveControllerRef = useRef<NodeWorkspaceSaveController | null>(null);
-  const autoSaveVersionTimerRef = useRef<number | null>(null);
+  const nodeWorkspaceSaveControllersRef = useRef(new Map<string, NodeWorkspaceSaveController>());
   const saveVersionStatusTimerRef = useRef<number | null>(null);
   const saveVersionsRequestRef = useRef(0);
-  const autoSaveVersionBusyRef = useRef(false);
-  const lastAutoSaveVersionSignatureRef = useRef("");
   const nodePriorityRequirementTimerRef = useRef<number | null>(null);
   const nodeWorkspaceProjectionsRef = useRef<NodeProjectionItem[]>([]);
   const logicGateWorkspaceProjectionsRef = useRef<LogicGateProjectionItem[]>([]);
@@ -678,6 +655,15 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const logicGateGVICApplyToAssignedNodesRequestRef = useRef(0);
   const editorSnapshotRefreshTokenRef = useRef(0);
   const linkedEditorTargetRef = useRef<{ kind: "" | "node" | "logic_gate"; id: string }>({ kind: "", id: "" });
+  const registerNodeWorkspaceSaveController = useCallback((nodeID: string, controller: NodeWorkspaceSaveController) => {
+    const cleanNodeID = nodeID.trim();
+    nodeWorkspaceSaveControllersRef.current.set(cleanNodeID, controller);
+    return () => {
+      if (nodeWorkspaceSaveControllersRef.current.get(cleanNodeID) === controller) {
+        nodeWorkspaceSaveControllersRef.current.delete(cleanNodeID);
+      }
+    };
+  }, []);
   const linkedEntityAccessDenied = linkedEntityAccessDeniedMessage.trim().length > 0;
   const hasLinkedDocument = linkedNodeID.trim().length > 0 && !linkedEntityAccessDenied;
   const linkedEditorLoaded = linkedEntityKind === "node"
@@ -817,7 +803,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     else invalidateNodeRecordStoreCaches(apiBase, companyID, target.entityID);
   }, [apiBase, companyID]);
 
-  const { scheduleDocumentSave, flushPendingDocumentSave, saveDocumentNow } = useEditorDocumentPersistence({
+  const { scheduleDocumentSave, flushPendingDocumentSave } = useEditorDocumentPersistence({
     editorFormat: editorDataFormat.gate?.editor_format ?? "",
     apiBase,
     currentUserID,
@@ -891,12 +877,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setSelectedSaveVersionID("");
     setSaveVersionsLoading(false);
     setSaveVersionStatus("");
-    if (!companyID || !resourceType || !resourceID || linkedEntityAccessDenied) {
-      setSaveVersionIntervalMinutes(EDITOR_SAVE_VERSION_DEFAULT_INTERVAL_MINUTES);
-      return;
-    }
-    setSaveVersionIntervalMinutes(readEditorSaveIntervalMinutes(companyID, resourceType, resourceID));
-    lastAutoSaveVersionSignatureRef.current = "";
+    if (!companyID || !resourceType || !resourceID || linkedEntityAccessDenied) return;
   }, [companyID, linkedEntityAccessDenied, linkedEntityKind, linkedNodeID]);
 
   useEffect(() => {
@@ -1905,58 +1886,59 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       canonicalRefresh.dispose();
     };
   }, [apiBase, companyID, editorSnapshotLoadedScope, linkedEntityKind, linkedNodeID, refreshEditorSnapshot]);
-  const currentEditorVersionSignature = useCallback(() => {
-    if (linkedEntityKind === "node") {
-      return JSON.stringify(nodeWorkspaceProjectionsRef.current
-        .filter((item) => item.type === EDITOR_TEXT_BLOCK_TYPE)
-        .map((item) => [item.information_id, item.information]));
-    }
-    if (linkedEntityKind === "logic_gate") {
-      const element = editorDocumentRef.current;
-      return element ? serializeEditorDocumentHTML(element) : documentDraftRef.current;
-    }
-    return "";
-  }, [linkedEntityKind]);
-
   const flushCurrentEditorProjection = useCallback(async () => {
+    if (linkedEntityKind !== "node" && linkedEntityKind !== "logic_gate") return;
+    await flushMangoTiptapResource({
+      companyID,
+      resourceType: linkedEntityKind,
+      resourceID: linkedNodeID,
+    });
     if (linkedEntityKind === "node") {
-      await nodeWorkspaceSaveControllerRef.current?.flushPendingProjectionSaves();
-      return;
+      await nodeWorkspaceSaveControllersRef.current.get(linkedNodeID.trim())?.flushPendingProjectionSaves();
     }
-    if (linkedEntityKind === "logic_gate" && documentInformationIDRef.current) {
-      await flushMangoTiptapDocument({
-        companyID,
-        resourceType: "logic_gate",
-        resourceID: linkedNodeID,
-        documentID: documentInformationIDRef.current,
-      });
-    }
-  }, [companyID, editorDataFormat.gate?.editor_format, linkedEntityKind, linkedNodeID, saveDocumentNow]);
+  }, [companyID, linkedEntityKind, linkedNodeID]);
 
-  const saveCurrentEditorVersion = useCallback(async (saveKind: "manual" | "auto" = "manual") => {
+  const createCurrentEditorVersion = useCallback(async () => {
+    const resourceType = linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? linkedEntityKind : "";
+    const resourceID = linkedNodeID.trim();
+    if (!companyID || !resourceType || !resourceID) throw new Error("editor_history_resource_not_ready");
+    await flushCurrentEditorProjection();
+    return requestJSON<EditorSaveVersion>(editorSaveVersionsPath(resourceType, resourceID), {
+      method: "POST",
+      body: JSON.stringify({ company_id: companyID, save_kind: "manual" }),
+    });
+  }, [companyID, flushCurrentEditorProjection, linkedEntityKind, linkedNodeID, requestJSON]);
+
+  const saveCurrentEditorVersion = useCallback(async () => {
     const resourceType = linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? linkedEntityKind : "";
     const resourceID = linkedNodeID.trim();
     if (!companyID || !resourceType || !resourceID || !linkedEntityCanEdit) return;
+    const historyRef: EditorHistoryResourceRef = { companyID, resourceType, resourceID };
     setSaveVersionSaving(true);
     try {
       setError("");
-      await flushCurrentEditorProjection();
-      const version = await requestJSON<EditorSaveVersion>(editorSaveVersionsPath(resourceType, resourceID), {
-        method: "POST",
-        body: JSON.stringify({ company_id: companyID, save_kind: saveKind }),
-      });
+      const version = await saveEditorHistory(historyRef, createCurrentEditorVersion);
+      if (!version) return;
       setSaveVersions((current) => [version, ...current.filter((item) => item.save_id !== version.save_id)]);
       setSelectedSaveVersionID(version.save_id);
-      lastAutoSaveVersionSignatureRef.current = editorSaveVersionSignature(version) || currentEditorVersionSignature();
-      showSaveVersionStatus(`${editorSaveVersionKindLabel(saveKind)} saved at ${formatEditorSaveVersionTimestamp(version.created_timestamp)}`);
+      showSaveVersionStatus(`Manual save saved at ${formatEditorSaveVersionTimestamp(version.created_timestamp)}`);
       if (activeTabRef.current === "save-settings") void loadEditorSaveVersions();
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "failed_to_save_version";
-      if (saveKind === "manual") setError(message);
+      setError(cause instanceof Error ? cause.message : "failed_to_save_version");
     } finally {
       setSaveVersionSaving(false);
     }
-  }, [companyID, currentEditorVersionSignature, flushCurrentEditorProjection, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, loadEditorSaveVersions, requestJSON, showSaveVersionStatus]);
+  }, [companyID, createCurrentEditorVersion, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, loadEditorSaveVersions, showSaveVersionStatus]);
+
+  useEffect(() => {
+    const resourceType = linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? linkedEntityKind : "";
+    const resourceID = linkedNodeID.trim();
+    if (!companyID || !resourceType || !resourceID || !linkedEntityCanEdit || linkedEntityAccessDenied) return undefined;
+    return registerEditorHistoryExitSaver(
+      { companyID, resourceType, resourceID },
+      createCurrentEditorVersion,
+    );
+  }, [companyID, createCurrentEditorVersion, linkedEntityAccessDenied, linkedEntityCanEdit, linkedEntityKind, linkedNodeID]);
 
   const restoreEditorSaveVersion = useCallback(async (saveID: string) => {
     const resourceType = linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? linkedEntityKind : "";
@@ -2034,7 +2016,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           body: JSON.stringify({ company_id: companyID }),
         });
       }
-      lastAutoSaveVersionSignatureRef.current = "";
+      markEditorHistoryChanged({ companyID, resourceType, resourceID });
       setSelectedSaveVersionID("");
       showSaveVersionStatus("Current editor overwritten with saved version");
       await refreshEditorSnapshot();
@@ -2046,38 +2028,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     }
   }, [companyID, editorDataFormat.gate?.editor_format, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, loadEditorSaveVersions, refreshEditorSnapshot, requestJSON, saveVersions, showSaveVersionStatus]);
 
-  useEffect(() => {
-    if (autoSaveVersionTimerRef.current !== null) {
-      window.clearInterval(autoSaveVersionTimerRef.current);
-      autoSaveVersionTimerRef.current = null;
-    }
-    const resourceType = linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? linkedEntityKind : "";
-    const resourceID = linkedNodeID.trim();
-    if (!EDITOR_AUTO_SAVE_VERSION_CREATION_ENABLED) return;
-    if (!companyID || !resourceType || !resourceID || !linkedEntityCanEdit || linkedEntityAccessDenied) return;
-    const intervalMs = Math.max(1, saveVersionIntervalMinutes) * 60_000;
-    autoSaveVersionTimerRef.current = window.setInterval(() => {
-      if (autoSaveVersionBusyRef.current) return;
-      const signature = currentEditorVersionSignature();
-      if (!signature || signature === lastAutoSaveVersionSignatureRef.current) return;
-      autoSaveVersionBusyRef.current = true;
-      void saveCurrentEditorVersion("auto").finally(() => {
-        autoSaveVersionBusyRef.current = false;
-      });
-    }, intervalMs);
-    return () => {
-      if (autoSaveVersionTimerRef.current !== null) {
-        window.clearInterval(autoSaveVersionTimerRef.current);
-        autoSaveVersionTimerRef.current = null;
-      }
-    };
-  }, [companyID, currentEditorVersionSignature, linkedEntityAccessDenied, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, saveCurrentEditorVersion, saveVersionIntervalMinutes]);
-
-
   useEffect(() => () => {
     if (nodePriorityRequirementTimerRef.current !== null) window.clearTimeout(nodePriorityRequirementTimerRef.current);
     if (saveVersionStatusTimerRef.current !== null) window.clearTimeout(saveVersionStatusTimerRef.current);
-    if (autoSaveVersionTimerRef.current !== null) window.clearInterval(autoSaveVersionTimerRef.current);
   }, []);
 
   useEffect(() => () => {
@@ -2525,7 +2478,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             }}
             onCreateRelatedNode={linkedEntityKind === "node" && linkedEntityCanEdit ? createRelatedNode : undefined}
             onInsertTable={linkedEntityCanEdit ? () => currentFormattingController()?.insertTable() : undefined}
-            onSaveCurrentVersion={linkedEntityCanEdit ? () => { void saveCurrentEditorVersion("manual"); } : undefined}
+            onSaveCurrentVersion={linkedEntityCanEdit ? () => { void saveCurrentEditorVersion(); } : undefined}
             saveCurrentVersionDisabled={saveVersionRestoring}
             saveCurrentVersionBusy={saveVersionSaving}
             saveStateStorageKey={linkedEntityKind === "logic_gate" && documentInformationID ? mangoTiptapPendingStorageKey({ companyID, resourceType: "logic_gate", resourceID: linkedNodeID, documentID: documentInformationID }) : undefined}
@@ -2695,7 +2648,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             ruleColor={ruleColor}
             scrollbarAccent={scrollbarAccent}
             scrollbarTrack={scrollbarTrack}
-            onSaveNow={() => { void saveCurrentEditorVersion("manual"); }}
+            onSaveNow={() => { void saveCurrentEditorVersion(); }}
             onSelectSave={setSelectedSaveVersionID}
             onExitPreview={() => setSelectedSaveVersionID("")}
             onToggleSort={() => setSaveVersionsSortAscending((current) => !current)}
@@ -2741,9 +2694,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onSelectionHighlightColorChange={setSelectionHighlightColor}
             onSelectionTextAlignmentChange={setSelectionTextAlignment}
             onFormattingControllerAvailabilityChange={setNodeFormattingControllerAvailable}
-            onRegisterSaveController={(controller) => {
-              nodeWorkspaceSaveControllerRef.current = controller;
-            }}
+            onRegisterSaveController={registerNodeWorkspaceSaveController}
             onError={setError}
           />
         )}

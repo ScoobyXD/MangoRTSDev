@@ -103,7 +103,13 @@ import {
 } from "../editor/NodeWorkspaceSurfaceShared.js";
 import { useEditorPreferences } from "../editor/useEditorPreferences.js";
 import { useMangoEditorDataFormat } from "../editor/editorDataFormat.js";
-import { flushMangoTiptapDocument } from "../editor/tiptap/mangoTiptapFlushRegistry.js";
+import {
+  markEditorHistoryChanged,
+  registerEditorHistoryExitSaver,
+  saveEditorHistory,
+  type EditorHistoryResourceRef,
+} from "../editor/editorExitHistory.js";
+import { flushMangoTiptapDocument, flushMangoTiptapResource } from "../editor/tiptap/mangoTiptapFlushRegistry.js";
 import { setEntityFieldAssignments, type EntityField } from "../fields/entityFieldsApi.js";
 import { getScopedItemIDs, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 import { UniversalGroupingControls } from "../grouping/UniversalGroupingControls.js";
@@ -498,6 +504,10 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [projectHighlightColor, setProjectHighlightColor] = useState<EditorHighlightColor | null>(null);
   const [projectTextAlignment, setProjectTextAlignment] = useState<EditorTextAlignment>("left");
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(`project-summary-outline-style-v1:${companyID}:${projectID}`);
+  const blocksRef = useRef(blocks);
+  const projectRef = useRef(project);
+  blocksRef.current = blocks;
+  projectRef.current = project;
   const projectSaveScope = `${companyID}:${projectID.trim()}`;
   const relationshipPickerSearchText = relationshipPickerQuery.trim();
   const eligibleProjectNodeIDs = useMemo(() => new Set(
@@ -1038,6 +1048,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       && nextContent.attachments === existing.attachments
     );
     if (unchanged) return existing;
+    markEditorHistoryChanged({ companyID, resourceType: "project", resourceID: projectID });
     projectTextBlockContentRef.current.set(blockID, nextContent);
     projectTextBlockContentRevisionRef.current += 1;
     projectTextBlockSaveController.markHasChanged(blockID, nextContent);
@@ -1048,7 +1059,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       attachments: nextContent.attachments ?? [],
     } : block));
     return nextContent;
-  }, [projectTextBlockSaveController]);
+  }, [companyID, projectID, projectTextBlockSaveController]);
 
   const applyProjectSyncedDocument = useCallback((blockID: string, document: string) => {
     const existing = projectTextBlockContentRef.current.get(blockID) ?? { title: "", document: "", attachments: [] };
@@ -1070,40 +1081,41 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     await projectTextBlockSaveController.saveLatestContent(blockID);
   }, [projectTextBlockSaveController, updateProjectTextBlockContent]);
 
+  const createProjectVersion = useCallback(async () => {
+    const currentBlocks = blocksRef.current;
+    await flushMangoTiptapResource({ companyID, resourceType: "project", resourceID: projectID });
+    await projectTextBlockSaveController.flushChangedBlocks();
+    const snapshotBlocks = await Promise.all(currentBlocks.map(async (block) => {
+      const latest = projectTextBlockContentRef.current.get(block.id);
+      const path = `/v1/editor-json/project/${projectID}/documents/${block.id}?company_id=${encodeURIComponent(companyID)}`;
+      const committed = await attachmentRequestJSON<{ document: unknown; updated_timestamp?: string }>(path);
+      return {
+        ...block,
+        title: latest?.title ?? block.title,
+        document: JSON.stringify(committed.document),
+        attachments: latest?.attachments ?? block.attachments,
+        updatedTimestamp: committed.updated_timestamp ?? block.updatedTimestamp,
+      };
+    }));
+    await addProjectInformation({
+      companyID,
+      projectID,
+      informationID: generateStableInformationID(),
+      type: PROJECT_SAVED_VERSION_TYPE,
+      information: PROJECT_SAVED_VERSION_PREFIX + JSON.stringify({
+        name: projectRef.current?.name || projectID,
+        blocks: snapshotBlocks,
+      } satisfies ProjectSavedVersionSnapshot),
+    });
+  }, [attachmentRequestJSON, companyID, projectID, projectTextBlockSaveController]);
+
   const saveProjectVersion = useCallback(async () => {
     if (!companyID || !projectID || projectVersionSaving) return;
+    const historyRef: EditorHistoryResourceRef = { companyID, resourceType: "project", resourceID: projectID };
     setProjectVersionSaving(true);
     setError("");
     try {
-      await Promise.all(blocks.map((block) => flushMangoTiptapDocument({
-        companyID,
-        resourceType: "project",
-        resourceID: projectID,
-        documentID: block.id,
-      })));
-      await projectTextBlockSaveController.flushChangedBlocks();
-      const snapshotBlocks = await Promise.all(blocks.map(async (block) => {
-        const latest = projectTextBlockContentRef.current.get(block.id);
-        const path = `/v1/editor-json/project/${projectID}/documents/${block.id}?company_id=${encodeURIComponent(companyID)}`;
-        const committed = await attachmentRequestJSON<{ document: unknown; updated_timestamp?: string }>(path);
-        return {
-          ...block,
-          title: latest?.title ?? block.title,
-          document: JSON.stringify(committed.document),
-          attachments: latest?.attachments ?? block.attachments,
-          updatedTimestamp: committed.updated_timestamp ?? block.updatedTimestamp,
-        };
-      }));
-      await addProjectInformation({
-        companyID,
-        projectID,
-        informationID: generateStableInformationID(),
-        type: PROJECT_SAVED_VERSION_TYPE,
-        information: PROJECT_SAVED_VERSION_PREFIX + JSON.stringify({
-          name: project?.name || projectID,
-          blocks: snapshotBlocks,
-        } satisfies ProjectSavedVersionSnapshot),
-      });
+      await saveEditorHistory(historyRef, createProjectVersion);
       await loadProject({ showLoading: false });
       setProjectSavedVersionsOpen(true);
     } catch (saveError) {
@@ -1111,7 +1123,15 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     } finally {
       setProjectVersionSaving(false);
     }
-  }, [attachmentRequestJSON, blocks, companyID, loadProject, project?.name, projectID, projectTextBlockSaveController, projectVersionSaving]);
+  }, [companyID, createProjectVersion, loadProject, projectID, projectVersionSaving]);
+
+  useEffect(() => {
+    if (!companyID || !projectID) return undefined;
+    return registerEditorHistoryExitSaver(
+      { companyID, resourceType: "project", resourceID: projectID },
+      createProjectVersion,
+    );
+  }, [companyID, createProjectVersion, projectID]);
 
   const restoreProjectVersion = useCallback(async (version: ProjectSavedVersion) => {
     if (!companyID || !projectID || projectVersionRestoring) return;
@@ -1179,6 +1199,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       setProjectSavedVersionsOpen(false);
       setProjectDocumentRemountRevision((current) => current + 1);
       await loadProject({ showLoading: false });
+      markEditorHistoryChanged({ companyID, resourceType: "project", resourceID: projectID });
     } catch (restoreError) {
       setError(restoreError instanceof Error ? restoreError.message : "Failed to restore project version");
     } finally {
@@ -1210,8 +1231,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     setError("");
     setBlocks((current) => [nextBlock, ...current]);
     setOpenEditorBlockIDs((current) => new Set(current).add(id));
+    markEditorHistoryChanged({ companyID, resourceType: "project", resourceID: projectID });
     projectTextBlockSaveController.startLatestContentSave(id);
-  }, [editorDataFormat.gate, projectTextBlockSaveController]);
+  }, [companyID, editorDataFormat.gate, projectID, projectTextBlockSaveController]);
 
   const removeTextBlock = useCallback(async (blockID: string) => {
     if (!editorDataFormat.gate) {
@@ -1258,6 +1280,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         }),
         ...relatedProjectionIDs.map((informationID) => deleteProjectProjection({ companyID, projectID, informationID })),
       ]);
+      markEditorHistoryChanged({ companyID, resourceType: "project", resourceID: projectID });
     } catch (deleteError) {
       if (previousBlock && latestContent) {
         const restoredBlock: ProjectTextBlockDraft = {

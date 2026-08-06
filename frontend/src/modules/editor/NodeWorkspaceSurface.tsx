@@ -77,6 +77,7 @@ import { createEditorScrollMemory } from "./editorScroll";
 import { useBoundedEditorRowVirtualization } from "./editorRowVirtualization";
 import { openEditorEntityLink } from "./editorEntityLinks";
 import { useMangoEditorDataFormat } from "./editorDataFormat";
+import { markEditorHistoryChanged } from "./editorExitHistory.js";
 import { flushMangoTiptapDocument } from "./tiptap/mangoTiptapFlushRegistry.js";
 import { mangoTiptapPendingStorageKey } from "./tiptap/mangoTiptapSync.js";
 import { serializeMangoTiptapDocument } from "./tiptap/mangoTiptapDocument.js";
@@ -1399,12 +1400,17 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
   useEffect(() => {
     if (!onRegisterSaveController) return undefined;
-    onRegisterSaveController({ flushPendingProjectionSaves: flushAllTextBlockProjectionSaves });
-    return () => onRegisterSaveController(null);
-  }, [flushAllTextBlockProjectionSaves, onRegisterSaveController]);
+    const unregister = onRegisterSaveController(nodeID, { flushPendingProjectionSaves: flushAllTextBlockProjectionSaves });
+    return () => {
+      void flushAllTextBlockProjectionSaves()
+        .catch(() => undefined)
+        .finally(unregister);
+    };
+  }, [flushAllTextBlockProjectionSaves, nodeID, onRegisterSaveController]);
 
-  const scheduleTextBlockSave = useCallback((blockID: string, content: EditorTextBlockContent) => {
+  const scheduleTextBlockSave = useCallback((blockID: string, content: EditorTextBlockContent, markHistory = true) => {
     if (!editorTextCanEdit) return;
+    if (markHistory) markEditorHistoryChanged({ companyID, resourceType: "node", resourceID: nodeID });
     contentByBlockRef.current.set(blockID, content);
     textBlockProjectionSaveController.markHasChanged(blockID, content);
     const existingTimer = saveTimersRef.current.get(blockID);
@@ -1414,9 +1420,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       textBlockProjectionSaveController.startLatestContentSave(blockID);
     }, EDITOR_AUTOSAVE_DELAY_MS);
     saveTimersRef.current.set(blockID, timer);
-  }, [editorTextCanEdit, textBlockProjectionSaveController]);
+  }, [companyID, editorTextCanEdit, nodeID, textBlockProjectionSaveController]);
 
-  const createTextBlock = useCallback(() => {
+  const createTextBlock = useCallback((markHistory = true) => {
     if (!editorTextCanEdit) return;
     const now = new Date().toISOString();
     const blockID = generateStableInformationID();
@@ -1453,8 +1459,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       next.delete(blockID);
       return next;
     });
+    if (markHistory) markEditorHistoryChanged({ companyID, resourceType: "node", resourceID: nodeID });
     textBlockProjectionSaveController.startLatestContentSave(blockID);
-  }, [editorTextCanEdit, textBlockProjectionSaveController]);
+  }, [companyID, editorTextCanEdit, nodeID, textBlockProjectionSaveController]);
 
   const createEmailTextBlock = useCallback((messageID: string, quote = "") => {
     const cleanMessageID = messageID.trim();
@@ -1504,10 +1511,11 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       return next;
     });
     setActiveRowBlockID(blockID);
+    markEditorHistoryChanged({ companyID, resourceType: "node", resourceID: nodeID });
     setFocusedTextBlockID(blockID);
     textBlockProjectionSaveController.startLatestContentSave(blockID);
     return blockID;
-  }, [blocks, editorTextCanEdit, nodeAttachedEmails, textBlockProjectionSaveController]);
+  }, [blocks, companyID, editorTextCanEdit, nodeAttachedEmails, nodeID, textBlockProjectionSaveController]);
 
   useEffect(() => {
     if (!shouldCreateInitialTextBlock({
@@ -1521,10 +1529,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     })) return;
     if (autoCreatedTextBlockNodeIDsRef.current.has(nodeID)) return;
     autoCreatedTextBlockNodeIDsRef.current.add(nodeID);
-    createTextBlock();
+    createTextBlock(false);
   }, [blocks.length, canEdit, createTextBlock, editorSequence, loadedTextBlockProjections.length, nodeAttachedEmails.length, nodeID, projectionsLoaded]);
 
-  const updateTextBlockContent = useCallback((blockID: string, patch: Partial<EditorTextBlockContent>) => {
+  const updateTextBlockContent = useCallback((blockID: string, patch: Partial<EditorTextBlockContent>, markHistory = true) => {
     if (!canEdit) return;
     const existing = contentByBlockRef.current.get(blockID) ?? { title: "", document: "", attachments: [] };
     const nextContent: EditorTextBlockContent = {
@@ -1538,7 +1546,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       if (block.id !== blockID) return block;
       return { ...block, ...nextContent };
     }));
-    if (patch.title !== undefined || patch.attachments !== undefined || patch.emailMessageID !== undefined || patch.emailAccent !== undefined) scheduleTextBlockSave(blockID, nextContent);
+    if (patch.title !== undefined || patch.attachments !== undefined || patch.emailMessageID !== undefined || patch.emailAccent !== undefined) {
+      scheduleTextBlockSave(blockID, nextContent, markHistory);
+    }
   }, [canEdit, scheduleTextBlockSave]);
 
 
@@ -1564,7 +1574,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       }
     }
     for (const repair of repairs) {
-      updateTextBlockContent(repair.blockID, { emailAccent: repair.accent });
+      updateTextBlockContent(repair.blockID, { emailAccent: repair.accent }, false);
     }
   }, [blocks, editorTextCanEdit, updateTextBlockContent]);
 
@@ -1798,6 +1808,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setExpandedLinkedEmailBlockIDs(removeDeletedBlockID);
     setActiveChatBlockID((current) => current === blockID ? "" : current);
     setFocusedTextBlockID((current) => current === blockID ? "" : current);
+    markEditorHistoryChanged({ companyID, resourceType: "node", resourceID: nodeID });
     onProjectionMutation();
   }, [author.userID, blocks, canEdit, chatMessages, companyID, editorDataFormat.gate?.editor_format, nodeID, onError, onProjectionMutation, requestJSON, textBlockProjectionSaveController]);
 

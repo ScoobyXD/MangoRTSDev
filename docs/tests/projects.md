@@ -1,3 +1,17 @@
+# Process Story: A changed Project saves history when the Project is left
+
+A user edits a Project textbox body, metadata, or textbox structure
+↓
+The ordinary current-textbox save continues writing the latest final Project rows
+↓
+The user closes or switches the Project, changes routes, uses Back/Forward, or triggers browser `pagehide`
+↓
+Mango flushes only that exact Project and creates one existing-format history batch if it changed since the last successful history save
+↓
+An unchanged close creates nothing, repeated close signals share one save, and refresh or tab close remains browser best effort
+
+Last updated: 2026-08-06
+
 # Process Story: An existing Logic Gate is linked to a Project from its editor
 
 A user with Logic Gate edit access types `##` in that Logic Gate's editor and selects a Project they may edit
@@ -28,7 +42,7 @@ An attached email creates one exact `email_relationships` row for the selected f
 ↓
 Deleting one chat, email relationship, textbox, or Project removes only that owner's relationships; shared files and normalized email content survive under their other valid owners
 ↓
-Project manual save history continues in `project_textboxes_history`
+Project manual and changed-resource exit history continue in `project_textboxes_history`
 ↓
 No Project request reads or writes `project_information` or `project_projection_table`; those tables remain unchanged only for the separately gated retirement decision
 Last updated: 2026-08-04
@@ -112,6 +126,7 @@ P64 - Project textbox titles and supported email display metadata are copied onc
 P65 - Project resource and chat deletion use the shared attachment unlink and last-owner cleanup lifecycle. A shared file survives while another active relationship exists.
 P66 - The deployment must refuse readiness when `project_textbox_chats` or the final Project textbox metadata columns are missing. No request performs DDL and no compatibility reader falls back to the legacy Project tables.
 P67 - The first Project textbox metadata save must idempotently create its empty `project_textboxes` row when the document-body request has not created it yet. A later document ensure/save reuses that same stable row and preserves its metadata; this ordering rule never recreates a deleted textbox or writes a legacy Project table.
+P70 - Project exit history is action-triggered, not timer-triggered. After a history-visible textbox body, title, attachment, creation, deletion, or restore change, closing or switching the Project, changing routes, using Back/Forward, or browser `pagehide` flushes that exact Project's bodies and metadata and requests the same final history batch as manual Save. An unchanged Project creates no exit batch, repeated close signals share one in-flight save, no Project scan runs, and refresh/external navigation/tab close remain best effort.
 ## Scenarios
 
 ### Scenario P-S1: Inline Critical-Path Node Window

@@ -97,6 +97,7 @@ import {
   resolveMangoTiptapRichClipboardImage,
 } from "./mangoTiptapRichClipboard.js";
 import { MangoTiptapStaticRenderer, type MangoStaticAttachmentImageProps } from "./MangoTiptapStaticRenderer.js";
+import { markEditorHistoryChanged } from "../editorExitHistory.js";
 import { registerMangoTiptapFlusher } from "./mangoTiptapFlushRegistry.js";
 import {
   calculateMangoTiptapTableGrowth,
@@ -1526,6 +1527,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         "tiptap.callback",
         () => {
           lifecycleRef.current.markDirty();
+          markEditorHistoryChanged({ companyID, resourceType, resourceID });
           syncRef.current?.schedule(() => compactMangoTiptapDocument({
             format: "mango-tiptap-json",
             schema_version: 1,

@@ -1,3 +1,19 @@
+# Process Story: Changed editor history saves when the resource is left
+
+A user edits a Node, Logic Gate, or Project textbox
+↓
+The existing current-textbox autosave continues saving the latest JSON to the matching permanent textbox table, while Mango marks only that open resource as changed for history
+↓
+The user closes the Node window or preview, switches resources, follows another Mango URL, uses browser Back or Forward, refreshes, navigates away, or closes the tab
+↓
+Mango first asks every mounted textbox for that resource to finish its current save and then calls the same history-snapshot path used by the manual history button
+↓
+One successful history batch clears that resource's changed marker, so nested unmounts and a simultaneous manual save do not create duplicate batches
+↓
+An unchanged resource creates no exit history; a failed exit attempt stays changed for a later retry, while refresh, external navigation, and tab close remain browser best effort
+
+Last updated: 2026-08-06
+
 # Process Story: typed arrow pairs become durable editor arrows
 
 A user types `->` or `<-` in an ordinary text position in a Node, Project, or Logic Gate editor body
@@ -312,7 +328,7 @@ Coverage Status:
 - People-picker profile palette stability, fallback-key behavior, and minimum contrast are covered by `tests/frontend/modules/editor/editorMentions.test.ts`.
 - The August 2 Project compaction and Logic Gate image-paste regressions are covered by `mangoTiptapFoundation.test.ts`, `postgres_editor_textboxes_test.go`, and `mangoTiptapRichClipboard.test.ts`; they prove repeated legacy block IDs are repaired, required Node entity-link identity survives both frontend and backend compaction, stale per-textbox browser recovery is upgraded under a fresh operation without changing valid lost-ack operations, and the special Logic Gate overview alias is omitted from UUID-only attachment metadata while real UUID text-box identity remains.
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial overall. `editorTextboxSync.test.ts`, `realtimeWebSocket.test.ts`, backend sync/store/HTTP/cross-instance tests, and `unifiedRichEditorContract.test.ts` cover bounded HTML patches, deterministic disjoint-edit convergence, durable pending storage/recovery, exact subscription recovery/health, metadata isolation, and mounted Node/Logic Gate/Project adapters. `editorRowVirtualization.test.ts` covers window arithmetic, monotonic window movement, bottom reachability, fast-jump bounds, spacer geometry, and stable spacer identities across successive and pinned-row windows; `editorRowVirtualizationReact.test.tsx` renders the real Node and Project hosts to cover loaded-empty then late/incremental projections, zero-email and attached-email Node defaults, manual pane closure retention, correct editor/chat association, monotonic scrolling to the last row, handled target non-replay, mounted-row bounds, edited-row sync flush, unmount/remount preservation, exact single-message linked-email Show/Hide behavior, text-box-header navigation back to the exact message in the left thread column, rich-email chat-selection highlights, and unchanged Project defaults. `editorTextBlockChatNavigation.test.tsx` covers one explicit chat-to-source request scrolling exactly once, duplicate rerenders preserving the user's later scroll position, and a later request ID allowing one new navigation. `unifiedRichEditorContract.test.ts` records the matching parent-consumption and legacy/JSON acknowledgement wiring. Rich-editor DOM suites cover toolbar, bounded attachment hydration, formatting, and host behavior. The dedicated production-path realtime runner and browser-driven workflow coverage were removed from CI on 2026-07-28. Focused frontend, backend, and infrastructure suites remain; visible multi-user editor workflows require manual acceptance until replacement automation is added.
+- Business Logic Covered By Automated Tests: Partial overall. `editorExitHistory.test.ts` covers unchanged exits, one changed snapshot, manual/exit in-flight deduplication, failure retry, unmount triggering, pagehide behavior, and exact resource-wide textbox flushing. `editorTextboxSync.test.ts`, `realtimeWebSocket.test.ts`, backend sync/store/HTTP/cross-instance tests, and `unifiedRichEditorContract.test.ts` cover bounded HTML patches, deterministic disjoint-edit convergence, durable pending storage/recovery, exact subscription recovery/health, metadata isolation, and mounted Node/Logic Gate/Project adapters. `editorRowVirtualization.test.ts` covers window arithmetic, monotonic window movement, bottom reachability, fast-jump bounds, spacer geometry, and stable spacer identities across successive and pinned-row windows; `editorRowVirtualizationReact.test.tsx` renders the real Node and Project hosts to cover loaded-empty then late/incremental projections, zero-email and attached-email Node defaults, manual pane closure retention, correct editor/chat association, monotonic scrolling to the last row, handled target non-replay, mounted-row bounds, edited-row sync flush, unmount/remount preservation, exact single-message linked-email Show/Hide behavior, text-box-header navigation back to the exact message in the left thread column, rich-email chat-selection highlights, and unchanged Project defaults. `editorTextBlockChatNavigation.test.tsx` covers one explicit chat-to-source request scrolling exactly once, duplicate rerenders preserving the user's later scroll position, and a later request ID allowing one new navigation. `unifiedRichEditorContract.test.ts` records the matching parent-consumption and legacy/JSON acknowledgement wiring. Rich-editor DOM suites cover toolbar, bounded attachment hydration, formatting, and host behavior. The dedicated production-path realtime runner and browser-driven workflow coverage were removed from CI on 2026-07-28. Focused frontend, backend, and infrastructure suites remain; visible multi-user editor workflows require manual acceptance until replacement automation is added.
 - ED88 selected-text chat cancellation is covered by unifiedRichEditorContract.test.ts, including both the quote X and whole-chat close paths.
 
 ## Business Logic
@@ -511,14 +527,18 @@ ED122 - Automatic Numbering repeats `1.`, `a.`, `1)`, `a)` by nesting depth. The
 ED123 - The table-cell context menu uses the shared portaled right-click surface at viewport coordinates, outside editor overflow clipping. Column actions and row actions are grouped by separators, and the bottom delete row, delete column, and delete table actions use destructive red text.
 ED124 - Tables begin at intrinsic content size with equal 112-pixel columns and equal 36-pixel rows instead of filling available editor width. A selected table exposes a bottom-right growth handle; its drag previews whole nonnegative row and column additions, cancel changes nothing, and release commits the preview once while preserving equal column widths and row heights.
 ED125 - Completing `->` or `<-` by typing in an ordinary Node, Project, or Logic Gate Tiptap text position replaces that pair with one durable Unicode `U+2192` or `U+2190` and keeps the caret after it. This shared input rule applies to paragraphs, headings, list items, Checkbox items, and table cells, but not code blocks. It does not rewrite loaded or pasted ASCII pairs, and no sanitizer, clipboard path, history path, recovery path, or realtime path may convert a stored Unicode arrow back into ASCII.
+ED126 - History snapshot creation is action-triggered, never timer-triggered. A changed Node, Logic Gate, or Project requests one history snapshot when its owning editor surface unmounts because the user closes its window, panel, Project/Updates preview, switches to another resource, changes Mango routes, or uses browser Back or Forward. The browser `pagehide` event makes the same best-effort request for refresh, external navigation, and tab/window close. No interval, background scan, inactive-resource loop, unload prompt, crash recovery, OS-kill handling, or discarded-tab service may create history snapshots.
+ED127 - A resource becomes changed for exit history only after a local editable history-visible mutation: a Tiptap document transaction; a user-created Node or Project textbox or successful deletion; Node or Project textbox title/attachment metadata change; or a confirmed saved-version restore. Loading canonical data, automatically ensuring an initial empty textbox, receiving a remote refresh, focusing, selecting, scrolling, opening tabs/panes, or closing an unchanged view does not mark the resource and must create no exit-history row.
+ED128 - Manual and action-triggered history use the same permanent resource history format and existing history endpoint. Before either snapshot, Mango flushes every mounted Tiptap textbox for that exact company/resource and then flushes the resource owner's changed textbox metadata. One per-resource save coordinator shares an in-flight save across nested unmounts, repeated close signals, and a simultaneous manual click. A successful manual or exit snapshot advances the same clean baseline; edits made after that success require one later snapshot. The manual button remains available and still saves even when the resource has no new changes.
+ED129 - An action-triggered snapshot is quiet: it does not open history, block an in-app close, or display a success dialog. Save failure leaves the resource changed so a later close or manual save can retry. The history batch represents the committed canonical resource after the local flush; therefore already committed concurrent edits from another authorized user may also be present. Refresh, external navigation, and tab/window close are best effort because a browser may terminate asynchronous work, while Mango-controlled closes, resource switches, and route unmounts run while the application remains alive.
 
 ### Required Unified Rich-Editor Surface Inventory
 
 | Surface | Required runtime host | Shared toolbar/controller | Persistence boundary |
 |---|---|---|---|
-| Logic Gate editor body | `EditorContent` configures the one `EditorDocumentSurface` | `EditorTabBar` + `useEditorDocumentFormattingController` + `useEditorDocumentSurfaceHandlers` | `logic_gate_textboxes` current JSON and `logic_gate_textboxes_history` manual saves |
-| Node text box in every full node opener | `NodeTextBlockEditor` configures the one `EditorDocumentSurface` | Same shared toolbar, controller, and behavior handler | `node_textboxes` current JSON and `node_textboxes_history` manual saves |
-| Project textbox editor | Project Summary reuses `NodeTextBlockEditor` and the one `EditorDocumentSurface` | Same shared toolbar, controller, and behavior handler | `project_textboxes` current JSON and `project_textboxes_history` manual saves |
+| Logic Gate editor body | `EditorContent` configures the one `EditorDocumentSurface` | `EditorTabBar` + `useEditorDocumentFormattingController` + `useEditorDocumentSurfaceHandlers` | `logic_gate_textboxes` current JSON and `logic_gate_textboxes_history` manual/action-triggered saves |
+| Node text box in every full node opener | `NodeTextBlockEditor` configures the one `EditorDocumentSurface` | Same shared toolbar, controller, and behavior handler | `node_textboxes` current JSON and `node_textboxes_history` manual/action-triggered saves |
+| Project textbox editor | Project Summary reuses `NodeTextBlockEditor` and the one `EditorDocumentSurface` | Same shared toolbar, controller, and behavior handler | `project_textboxes` current JSON and `project_textboxes_history` manual/action-triggered saves |
 | My Triage compose/reply | `ComposePanel` mounts `UnifiedRichEditorSurface`, which mounts the one `EditorDocumentSurface` | Same shared toolbar, controller, and behavior handler | Personal mailbox draft/send |
 | Shared Triage compose/reply | The same `ComposePanel`/`UnifiedRichEditorSurface` path selects shared mailbox scope | Same shared toolbar, controller, and behavior handler | Shared mailbox draft/send |
 | Attached-email reply from a node or project | `EmailConversationPane` mounts `UnifiedRichEditorSurface`, which mounts the one `EditorDocumentSurface` | Same shared toolbar, controller, and behavior handler | Source personal/shared mailbox send scope; draft lifecycle remains domain-owned |
@@ -2032,8 +2052,28 @@ Expected:
 - The shipped historical cutover file remains unchanged.
 
 
+### Scenario ED-S24: Save Changed History When Leaving An Editor
 
-# Process Story: Editor Textboxes and Manual History
+Business Logic: ED126, ED127, ED128, ED129
+
+Given:
+- A user can edit a Node, Logic Gate, or Project and opens it through a full page, popup, Updates preview, or Project preview.
+- The existing current-textbox save may still be quiet-debounced or in flight.
+
+When:
+- The user makes a history-visible change and closes that view, switches resources, changes routes, uses Back or Forward, or refreshes the browser.
+- The same resource may emit more than one unmount/close signal, or the user may press the manual history button while an exit save is already running.
+
+Expected:
+- Every mounted textbox for only that exact company/resource flushes before the existing history snapshot runs.
+- Exactly one history batch is created for the current changed baseline, and the existing current textbox tables remain the ordinary autosave authority.
+- A successful manual or exit save prevents an immediate unchanged exit from creating another batch.
+- An unchanged close creates no history. A failed save remains eligible for retry.
+- Refresh/external navigation/tab close invoke the same path through `pagehide`, without a guarantee after browser termination and without adding a timer, prompt, scan, worker, or crash-recovery system.
+
+
+
+# Process Story: Editor Textboxes and History
 
 A Node or Project user opens a textbox, or a Logic Gate user opens its one document
 ↓
@@ -2041,7 +2081,7 @@ The current body comes from the exact `node_textboxes`, `project_textboxes`, or 
 ↓
 The existing projection-shaped response is assembled from permanent textbox, attachment, chat where the product supports it, and exact email relationships instead of a stored legacy projection row
 ↓
-Manual saves create one batch in the matching `node_textboxes_history`, `project_textboxes_history`, or `logic_gate_textboxes_history`
+Manual saves and changed-resource exit actions create one batch in the matching `node_textboxes_history`, `project_textboxes_history`, or `logic_gate_textboxes_history`
 ↓
 Recycle snapshots and restores order the owner before its final textbox/history rows; Node and Project then restore their supported textbox chats, email relationships, and attachment relationships in dependency order
 ↓
@@ -2050,8 +2090,9 @@ At the final Node maintenance boundary, writers pause; any active legacy textbox
 ## What the user does
 
 The user types in a Node, Project, or Logic Gate textbox. Ordinary typing saves
-the latest JSON document and its annotations. The user can also press the manual
-save-history button and later restore that saved batch.
+the latest JSON document and its annotations. The user can press the manual
+save-history button, and Mango also invokes that history function after the user
+changes and then leaves the resource. The user can later restore either batch.
 
 ## Ordinary save
 
@@ -2143,28 +2184,29 @@ block IDs:
 This is intentionally a small safety rule. It avoids silently throwing away
 text; it is not a full collaborative editing engine.
 
-## Manual history
+## History snapshots
 
-The permanent manual history tables are:
+The permanent history tables are:
 
 - `node_textboxes_history`
 - `project_textboxes_history`
 - `logic_gate_textboxes_history`
 
-One press of the history button creates one `batch_id`. Every active textbox is
-copied into a separate history row with that same batch ID. History rows do not
-have a user-entered save name. `saved_by_user_id` records who pressed save when
-that ID is available.
+One press of the history button, or one changed-resource exit, creates one
+`batch_id`. Every active textbox is copied into a separate history row with that
+same batch ID. History rows do not have a user-entered save name.
+`saved_by_user_id` records the saving user when that ID is available.
 
 Project history keeps the textbox title and attachment metadata inside the
 historical JSON so restoring an old batch does not lose that batch's view data.
 The project name shown in the history response is read from the Project table;
 the submitted snapshot name is not stored.
 
-Old rows marked `auto` came from a disabled automatic snapshot feature. They are
-not button-pressed history, and the new history tables intentionally have no
-`save_kind` column. The converter and cleanup discard those rows instead of
-mislabeling them as manual saves.
+Old rows marked `auto` came from the retired timer-based snapshot feature. The
+current action-triggered exit behavior uses the same final history batches as
+the manual button, and the new history tables intentionally have no `save_kind`
+column. The converter and cleanup discard the old timer rows instead of
+mislabeling them as current history.
 
 ## Projection cutover status
 
