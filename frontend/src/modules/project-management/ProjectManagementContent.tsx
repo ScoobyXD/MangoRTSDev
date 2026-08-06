@@ -1376,6 +1376,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   if (activeProjectID) {
     return (
       <ProjectSummaryContent
+        key={activeProjectID}
         projectID={activeProjectID}
         entityFields={entityFields}
         showFieldMetadata={visibleProjectFieldIDs.length > 0}

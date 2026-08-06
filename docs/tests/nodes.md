@@ -74,9 +74,9 @@ N20 - Assigning a node to a project from the node header supports project-only a
 N21 - A node with a known project relationship exposes a Go to Project action that opens the related project directly.
 N22 - When selected Node text is sent to chat as a quote/prefill, canceling with the quote X or closing that pending chat completely cancels the action: it clears the quote/prefill, removes the temporary source annotation, and collapses the editor/browser selection without sending a message. An unrelated chat draft remains intact.
 N23 - Live Node editor typing writes current TipTap JSON only to `node_textboxes`. It must not write a projection or information row.
-N24 - Node Save Settings lists saved editor versions sorted by saved timestamp, including save kind, saving user, save time, and saved text box count; automatic saved-version creation is disabled during the emergency slowness fix.
+N24 - Node Save Settings lists saved editor versions sorted by saved timestamp, including saving user, save time, and saved text box count. The manual history button remains available.
 N25 - Clicking Save flushes the current JSON document and creates one manual batch in `node_textboxes_history`.
-N26 - Node automatic saved-version creation must not run in the background during the emergency slowness fix. If auto saved versions are re-enabled later, they must only consider active nodes, must only save nodes whose editor projection has changed, and must never scan or save every node in the system.
+N26 - Node exit history is action-triggered, not background work. After a history-visible local change, closing any full Node, popup, Updates preview, or Project preview; switching resources or routes; using Back/Forward; or browser `pagehide` requests the same final history batch as manual Save after flushing that exact Node. An unchanged Node creates no exit batch, repeated close signals share one in-flight save, and no timer or Node scan is allowed. Browser refresh/external navigation/tab close remain best effort.
 N27 - Restoring a node saved version requires confirmation and overwrites the current node editor projection rows from that saved version without creating another saved-version row.
 N28 - Node text-box typing is converted to ordered 160 ms micro-batched HTML patches. One acknowledged operation is in flight per exact document/client queue; later edits remain durable pending operations and never trigger overlapping whole-document projection writes.
 N29 - Node editor text-block save state must use the vocabulary and behavior `has changed`, `has not changed`, `save in progress`, and `save needed after current save`. A block is marked `has not changed` only when the completed request's version matches the latest local version.
@@ -338,14 +338,15 @@ Business logic covered:
 Given:
 - A user has edit access to a node.
 - The user types in one or more node text boxes.
-- The user opens Save Settings, changes the auto-save interval, manually saves, waits for an auto-save interval, deletes a text box while a save may still be in progress, or closes/switches nodes while debounced edits remain.
+- The user opens Save Settings, manually saves, deletes a text box while a save may still be in progress, or closes/switches changed Nodes while debounced edits remain.
 - A newer projection value may arrive while the document or a shared toolbar control has focus.
 
 Expected:
 - Regular typing commits the final `node_textboxes` JSON row; explicit saved versions use `node_textboxes_history`. Projection-shaped API rows are assembled at read time and are not stored in a compatibility table.
-- Save Settings shows saved versions with save kind, saving user, timestamp, and text box count.
+- Save Settings shows saved versions with saving user, timestamp, and text box count.
 - Saved-version history is requested only after Save Settings activation; initial open uses the exact collaboration snapshot/ETag.
 - Manual Save flushes and acknowledges pending operations, materializes the canonical collaboration head, then writes one saved-version batch.
+- Leaving a changed Node invokes that same history path once after the exact Node's pending body and metadata saves flush; leaving an unchanged Node does not.
 - Ordinary typing renders locally, becomes a durable HTML patch, micro-batches briefly, and marks Saved only after commit acknowledgement.
 - Two tabs/users editing the same exact text box both converge automatically through server-ordered revisions; neither receives a whole-document conflict or blocks behind a local-draft modal.
 - Another Node text box and unrelated Node/company scopes receive no event. Duplicate mounted local consumers share one network subscription, and last unmount unsubscribes.

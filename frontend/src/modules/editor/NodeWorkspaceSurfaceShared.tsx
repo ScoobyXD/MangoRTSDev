@@ -60,7 +60,7 @@ export type NodeWorkspaceSurfaceProps = {
   onSelectionHighlightColorChange?: (color: EditorHighlightColor | null) => void;
   onSelectionTextAlignmentChange?: (alignment: EditorTextAlignment) => void;
   onFormattingControllerAvailabilityChange?: (available: boolean) => void;
-  onRegisterSaveController?: (controller: NodeWorkspaceSaveController | null) => void;
+  onRegisterSaveController?: (nodeID: string, controller: NodeWorkspaceSaveController) => () => void;
   onError: (message: string) => void;
 };
 

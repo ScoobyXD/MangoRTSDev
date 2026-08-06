@@ -70,9 +70,9 @@ LG14 - The Logic Gate editor font-size control applies to selected text and, for
 LG15 - Logic Gate editor Bold, Underline, Italic, and Strikethrough controls must toggle selected text or collapsed-caret typing semantics and must visually reflect the active or pending formatting at the current caret or selection. Italic selected with a collapsed caret remains pending after toolbar focus and applies to subsequently typed text.
 LG16 - Inserting a table from the shared Logic Gate editor toolbar must insert it at the current caret/selection location, not at the top-left or beginning of the editor. A table must not inject cell-level alignment-icon controls because alignment remains in the shared header toolbar.
 LG17 - Live Logic Gate editor typing writes the current JSON document to `logic_gate_textboxes.body_json`, advances its revision, and never writes `logic_gate_information` or `logic_gate_projection_table`.
-LG18 - Logic Gate Save Settings lists saved editor versions sorted by saved timestamp, including save kind, saving user, save time, and saved text box count; automatic saved-version creation is disabled during the emergency slowness fix.
+LG18 - Logic Gate Save Settings lists saved editor versions sorted by saved timestamp, including saving user, save time, and saved text box count. The manual history button remains available.
 LG19 - Clicking Save flushes and acknowledges pending collaboration operations, materializes the canonical document, then creates one manual saved version batch in `logic_gate_textboxes_history`.
-LG20 - Logic Gate automatic saved-version creation must not run in the background during the emergency slowness fix. If auto saved versions are re-enabled later, they must only consider active Logic Gates, must only save Logic Gates whose final document changed, and must never scan or save every Logic Gate in the system.
+LG20 - Logic Gate exit history is action-triggered, not background work. After a local document change, closing or switching the Logic Gate, changing routes, using Back/Forward, or browser `pagehide` requests the same final history batch as manual Save after flushing that exact Logic Gate. An unchanged Logic Gate creates no exit batch, repeated close signals share one in-flight save, and no timer or Logic Gate scan is allowed. Browser refresh/external navigation/tab close remain best effort.
 LG21 - Restoring a Logic Gate saved version requires confirmation and overwrites the current `logic_gate_textboxes` row from final history without creating another saved-version row.
 LG22 - Logic Gate typing uses ordered 160 ms structured-operation micro-batches on one exact document queue. Stable operation IDs and server revisions serialize commit acknowledgement without overlapping whole-document projection writes or cross-target queue replacement.
 LG23 - Logic Gate editor save state must use the vocabulary and behavior `has changed`, `has not changed`, `save in progress`, and `save needed after current save`. The editor is marked `has not changed` only when the completed request's version matches the latest local version.
@@ -234,13 +234,13 @@ Given:
 - A user has edit access to a Logic Gate.
 - The user types in the Logic Gate editor.
 - The user switches between exact document targets while one collaboration operation is awaiting acknowledgement.
-- The user opens Save Settings, changes the auto-save interval, manually saves, or waits for an auto-save interval.
+- The user opens Save Settings, manually saves, or leaves the Logic Gate after changing its document.
 
 Expected:
 - Regular typing renders immediately and becomes a short ordered structured-operation micro-batch on the exact Logic Gate document.
 - Backend Edit authorization, collaboration integration, next revision, canonical state, and outbox event commit atomically; only the acknowledgement marks Saved.
 - Every healthy exact subscriber, including another tab/user/backend instance, applies the committed operation once without refresh or echo-save; unrelated scopes receive nothing.
-- Manual Save flushes pending acknowledgements, materializes the canonical head, then writes one saved-version batch; automatic background version creation remains disabled.
+- Manual Save and a changed Logic Gate exit flush pending acknowledgements, materialize the canonical head, then write one saved-version batch. An unchanged exit writes none, and automatic background version creation remains prohibited.
 - Confirmed restore commits a canonical replacement and compact snapshot-required event; subscribers recover the full snapshot without a whole-body socket payload.
 - Disconnect/reconnect subscribes first, validates the full snapshot/ETag, orders buffered events, reapplies durable pending operations, and returns green only after convergence.
 - Deletion uses an exact tombstone and a late operation cannot recreate the document. No expected-revision conflict modal, server-version choice, or retained full-body draft exists.
