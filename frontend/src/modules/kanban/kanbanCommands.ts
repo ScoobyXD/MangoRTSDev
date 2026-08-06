@@ -39,6 +39,11 @@ export type KanbanCommandContext = {
   boardID: string;
 };
 
+export type KanbanCommandRequestJSON = <T>(
+  path: string,
+  init?: RequestInit & { json?: unknown },
+) => Promise<T>;
+
 export type KanbanCommandClient = {
   assignNodeToLogicGateStatus: typeof assignNodeToLogicGateStatus;
   createColumn: typeof createKanbanColumn;
@@ -436,4 +441,23 @@ export async function deleteKanbanCardsCommand(args: {
     await client.deleteCard(context.apiBase, context.companyID, context.boardID, cardID);
   }));
   return uniqueCardIDs;
+}
+
+export async function deleteKanbanNodesCommand(args: {
+  context: KanbanCommandContext;
+  nodeIDs: string[];
+  confirmationDisplayName: string;
+  requestJSON: KanbanCommandRequestJSON;
+}): Promise<string[]> {
+  const nodeIDs = Array.from(new Set(args.nodeIDs.map((nodeID) => nodeID.trim()).filter(Boolean)));
+  if (nodeIDs.length === 0) return [];
+  await args.requestJSON<{ status: string }>("/v1/company-explorer/delete-targets", {
+    method: "POST",
+    body: JSON.stringify({
+      company_id: args.context.companyID,
+      targets: nodeIDs.map((nodeID) => ({ kind: "node", id: nodeID })),
+      confirmation_display_name: args.confirmationDisplayName,
+    }),
+  });
+  return nodeIDs;
 }

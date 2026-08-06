@@ -88,6 +88,7 @@ import { useCompanyAccounts } from "../accounts/AccountFilterControl";
 import { setNodeAccountAssignments, type Account } from "../accounts/accountsApi";
 import { useMangoEditorDataFormat } from "./editorDataFormat";
 import { LogicGateTiptapEditorSurface } from "./LogicGateTiptapEditorSurface.js";
+import { scheduleTransientInformationFocus } from "./transientInformationFocus.js";
 import { parseMangoTiptapDocument } from "./tiptap/mangoTiptapDocument.js";
 
 function editorSnapshotScope(resourceType: "node" | "logic_gate", resourceID: string): string {
@@ -117,6 +118,7 @@ type EditorContentProps = {
   forcedLabel?: string;
   forcedEmptyMessage?: string;
   focusInformationID?: string;
+  focusMentionUserID?: string;
   focusEmailMessageID?: string;
   focusRequestID?: number;
   focusInformationMode?: "focus" | "scroll";
@@ -566,7 +568,7 @@ const EditorSaveSettingsSurface: React.FC<{
   );
 };
 // Editor module: linked document canvas for node or logic-gate context.
-export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "", focusInformationID, focusEmailMessageID, focusRequestID, focusInformationMode = "focus", compactLinkedDocumentHeader = false, onLogicGateTitleChange }) => {
+export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "", focusInformationID, focusMentionUserID, focusEmailMessageID, focusRequestID, focusInformationMode = "focus", compactLinkedDocumentHeader = false, onLogicGateTitleChange }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
   const scope = widgetId?.trim() ? widgetId : "global";
@@ -650,6 +652,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const queuedSaveRef = useRef<DocumentSaveRequest | null>(null);
   const saveInFlightRef = useRef(false);
   const editorRootRef = useRef<HTMLDivElement | null>(null);
+  const handledTransientFocusRequestRef = useRef("");
   const lastAppliedSelectionChangedAtRef = useRef(0);
   const shouldFocusEditorForSelectionRef = useRef(true);
   const pendingEditorFontSizeRef = useRef<number | null>(null);
@@ -2438,6 +2441,15 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setRelationshipTabAnchorCenterPx(anchor.left + (anchor.width / 2) - rootRect.left);
   }, []);
 
+  useEffect(() => {
+    const informationID = focusInformationID?.trim() ?? "";
+    if (linkedEntityKind !== "logic_gate" || !informationID || documentInformationID !== informationID) return undefined;
+    const requestKey = `${linkedNodeID}:${informationID}:${focusMentionUserID ?? ""}:${focusRequestID ?? 0}`;
+    if (handledTransientFocusRequestRef.current === requestKey) return undefined;
+    handledTransientFocusRequestRef.current = requestKey;
+    return scheduleTransientInformationFocus({ root: () => editorRootRef.current, informationID, mentionUserID: focusMentionUserID });
+  }, [documentInformationID, focusInformationID, focusMentionUserID, focusRequestID, linkedEntityKind, linkedNodeID]);
+
   return (
     <div
       ref={editorRootRef}
@@ -2675,6 +2687,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             editorSequence={0}
             hidden={documentIsolation.visibility === "hidden"}
             focusInformationID={focusInformationID}
+            focusMentionUserID={focusMentionUserID}
             focusEmailMessageID={focusEmailMessageID}
             focusRequestID={focusRequestID}
             focusInformationMode={focusInformationMode}
@@ -2709,6 +2722,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             <LogicGateTiptapEditorSurface
               key={`${companyID}:logic_gate:${linkedNodeID}:${documentInformationID}`}
               className={logicGateSaveFailed ? "mango-editor-save-failed-frame" : undefined}
+              dataAttributes={{ "data-logic-gate-information-id": documentInformationID }}
               value={documentDraftRef.current}
               editable={editorWriteEnabled}
               style={{ position: "absolute", top: documentTopPx, right: 0, bottom: 0, left: 0, overflowY: "auto", color: editorPrimaryText, fontFamily: documentFontFamily, fontSize: documentFontSize, lineHeight: EDITOR_DOCUMENT_LINE_HEIGHT }}

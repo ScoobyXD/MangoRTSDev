@@ -43,7 +43,7 @@ import { EVENT_HOME_SAVED_VIEWS_CHANGED } from "./HomeSavedViewsSidebar";
 import { resolveUpdateStatusForGrouping } from "./updateStatusGrouping";
 import { collectAllUpdateGroupIDs, collectUpdateGroupIDs, reconcileExpandedUpdateGroupIDs } from "./updatesExpansion";
 import { resolveUpdateGroupSemanticPresentation, type UpdateGroupSemanticPresentation } from "./updatesGroupPresentation.js";
-import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenPresentation, updateNotificationVisibleInView, updateSeenActionForView, updatesNotificationEventRequiresReload } from "./updatesSelection";
+import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateNavigationTarget, resolveUpdateSeenPresentation, updateNotificationVisibleInView, updateSeenActionForView, updatesNotificationEventRequiresReload } from "./updatesSelection";
 import { resolveUpdateActorLabel, resolveUpdateBodyPreview } from "./updatesActorLabel";
 import { createSeenUpdatesDateWindow, displayDateToUTCDay, moveSeenUpdatesDateWindow, seenUpdatesDateBounds, seenUpdatesDateQuery, utcDayToDisplayDate, type SeenUpdatesDateWindow } from "./updatesSeenHistory";
 import {
@@ -80,6 +80,7 @@ type UpdatesEditorContentComponent = React.FC<{
   forcedLabel?: string;
   forcedEmptyMessage?: string;
   focusInformationID?: string;
+  focusMentionUserID?: string;
   focusRequestID?: number;
   focusInformationMode?: "focus" | "scroll";
 }>;
@@ -94,8 +95,8 @@ type UpdatesViewProps = {
   companyID: string;
   currentUserID: string;
   onOpenNode: (nodeID: string, informationID?: string) => void;
-  onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string, informationID?: string) => void;
-  onOpenProject: (projectID: string, label: string, informationID?: string) => void;
+  onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string, informationID?: string, mentionUserID?: string) => void;
+  onOpenProject: (projectID: string, label: string, informationID?: string, mentionUserID?: string) => void;
   resolveNodeDetails?: (nodeID: string) => UpdateNodeDetails | null | undefined;
   resolveLogicGateDetails?: (logicGateID: string) => UpdateLogicGateDetails | null | undefined;
   resolveUserLabel?: (userID: string) => string;
@@ -156,6 +157,7 @@ type UpdatesNodePanelState = {
   nodeID: string;
   nodeTitle: string;
   focusInformationID?: string;
+  focusMentionUserID?: string;
   focusRequestID: number;
   notificationKey: string;
   row: UpdateFeedRow | null;
@@ -643,50 +645,45 @@ export function UpdatesView({
   }, []);
 
   const openUpdateNodePanel = useCallback((row: UpdateFeedRow, options: { focusRow?: boolean } = {}) => {
-    const nodeID = updateRowNodeID(row);
-    if (!nodeID) return;
-    const details = resolveNodeDetails?.(nodeID) ?? null;
-    const informationID = row.item.information_id?.trim() || undefined;
+    const target = updateRowNavigationTarget(row);
+    if (target.kind !== "node") return;
+    const details = resolveNodeDetails?.(target.id) ?? null;
     const notificationKey = updateNotificationSelectionKey(row.item);
     setActiveNodePanel({
-      nodeID,
+      nodeID: target.id,
       nodeTitle: updateRowNodeLabel(row, details),
-      focusInformationID: informationID,
+      focusInformationID: target.informationID,
+      focusMentionUserID: target.mentionUserID,
       focusRequestID: Date.now(),
       notificationKey,
       row,
     });
     if (options.focusRow !== false) focusUpdateRow(row.rowKey);
-    onOpenNode(nodeID, informationID);
+    onOpenNode(target.id, target.informationID);
   }, [focusUpdateRow, onOpenNode, resolveNodeDetails]);
   const openUpdateRow = useCallback((row: UpdateFeedRow) => {
-    const nodeID = updateRowNodeID(row);
-    if (nodeID) {
+    const target = updateRowNavigationTarget(row);
+    if (target.kind === "node") {
       openUpdateNodePanel(row);
       return;
     }
-    const informationID = row.item.information_id?.trim() || undefined;
-    const logicGateID = row.item.logic_gate_id?.trim()
-      || row.logicGate?.id.trim()
-      || (row.item.entity_type === "logic_gate" ? row.item.entity_id.trim() : "");
-    if (logicGateID) {
+    if (target.kind === "logic_gate") {
       setActiveNodePanel(null);
       onOpenLogicGate(
-        logicGateID,
+        target.id,
         resolveCurrentUpdateLogicGateLabel({
-          currentDetails: resolveLogicGateDetails?.(logicGateID),
+          currentDetails: resolveLogicGateDetails?.(target.id),
           groupedLabel: row.logicGate?.label || row.item.title,
         }),
-        row.item.node_id?.trim() || undefined,
-        informationID,
+        target.nodeID,
+        target.informationID,
+        target.mentionUserID,
       );
       return;
     }
-    const projectID = row.project?.id.trim()
-      || (row.item.entity_type === "project" ? row.item.entity_id.trim() : "");
-    if (projectID) {
+    if (target.kind === "project") {
       setActiveNodePanel(null);
-      onOpenProject(projectID, row.project?.label || row.item.title || "Project", informationID);
+      onOpenProject(target.id, row.project?.label || row.item.title || "Project", target.informationID, target.mentionUserID);
     }
   }, [onOpenLogicGate, onOpenProject, openUpdateNodePanel, resolveLogicGateDetails]);
 
@@ -1703,6 +1700,7 @@ function UpdatesNodePanel({
             forcedLabel={nodeTitle}
             forcedEmptyMessage="Select an update that points to a node."
             focusInformationID={panel.focusInformationID}
+            focusMentionUserID={panel.focusMentionUserID}
             focusRequestID={panel.focusRequestID}
             focusInformationMode="scroll"
           />
@@ -1755,10 +1753,18 @@ function extractEmailMentionSubject(item: NotificationItem): string {
   return match?.[1]?.trim() ?? "";
 }
 
+function updateRowNavigationTarget(row: UpdateFeedRow) {
+  return resolveUpdateNavigationTarget({
+    item: row.item,
+    groupedNodeID: row.node?.id,
+    groupedLogicGateID: row.logicGate?.id,
+    groupedProjectID: row.project?.id,
+  });
+}
+
 function updateRowNodeID(row: UpdateFeedRow): string {
-  return row.item.node_id?.trim()
-    || row.node?.id.trim()
-    || (row.item.entity_type === "node" ? row.item.entity_id.trim() : "");
+  const target = updateRowNavigationTarget(row);
+  return target.kind === "node" ? target.id : "";
 }
 
 function updateRowNodeLabel(row: UpdateFeedRow, details?: UpdateNodeDetails | null): string {

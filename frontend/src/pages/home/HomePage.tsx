@@ -4709,11 +4709,12 @@ export function HomePage({
     onNodeOverlayClose?.();
   }, [onNodeOverlayClose]);
 
-  const openLogicGateArena = useCallback((logicGateID: string, label: string, nodeID?: string, informationID?: string) => {
+  const openLogicGateArena = useCallback((logicGateID: string, label: string, nodeID?: string, informationID?: string, mentionUserID?: string) => {
     const cleanLogicGateID = logicGateID.trim();
     if (!cleanLogicGateID) return;
     const cleanNodeID = nodeID?.trim() ?? "";
     const cleanInformationID = informationID?.trim() ?? "";
+    const cleanMentionUserID = mentionUserID?.trim() ?? "";
     writePendingLogicGateArenaSelection({
       companyID,
       logicGateID: cleanLogicGateID,
@@ -4730,6 +4731,7 @@ export function HomePage({
       selectedTreeID: logicGateTreeID(cleanLogicGateID),
       nodeID: cleanNodeID || undefined,
       informationID: cleanInformationID || undefined,
+      mentionUserID: cleanMentionUserID || undefined,
       changedAt: Date.now(),
     });
     preloadLogicGateArenaSurface();
@@ -4738,7 +4740,7 @@ export function HomePage({
     else window.location.assign(targetPath);
   }, [companyID, isInboxMatrixView, onNavigate]);
 
-  const openProjectManagement = useCallback((projectID: string, label: string, informationID?: string) => {
+  const openProjectManagement = useCallback((projectID: string, label: string, informationID?: string, mentionUserID?: string) => {
     const cleanProjectID = projectID.trim();
     if (!cleanProjectID) return;
     const cleanLabel = label.trim() || "Project";
@@ -4749,6 +4751,7 @@ export function HomePage({
       id: cleanProjectID,
       label: cleanLabel,
       informationID: informationID?.trim() || undefined,
+      mentionUserID: mentionUserID?.trim() || undefined,
       changedAt: Date.now(),
     });
     preloadProjectManagementSurface();

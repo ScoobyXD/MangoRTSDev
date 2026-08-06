@@ -23,6 +23,7 @@ import {
   type ProjectRecord,
   type ProjectRelationshipProjection,
 } from "../project-management/projectManagementApi";
+import { scheduleTransientInformationFocus } from "./transientInformationFocus.js";
 import {
   filterMangoResourceAttachments,
   groupMangoResourceAttachmentsByInformationID,
@@ -457,11 +458,8 @@ function focusContentEditableAtEnd(element: HTMLElement | null) {
   selection.addRange(range);
 }
 
-function scrollNodeWorkspaceInformationIntoView(root: HTMLElement | null, informationID: string) {
-  const cleanInformationID = informationID.trim();
-  if (!root || !cleanInformationID) return;
-  const target = root.querySelector<HTMLElement>(`[data-node-timeline-event-id="${cleanInformationID}"], [data-node-text-block-id="${cleanInformationID}"], [data-node-chat-block-id="${cleanInformationID}"], [data-node-chat-message-id="${cleanInformationID}"]`);
-  target?.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+function scrollNodeWorkspaceInformationIntoView(root: HTMLElement | null, informationID: string, mentionUserID?: string) {
+  scheduleTransientInformationFocus({ root: () => root, informationID, mentionUserID });
 }
 
 export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
@@ -477,6 +475,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   editorSequence,
   hidden = false,
   focusInformationID,
+  focusMentionUserID,
   focusEmailMessageID,
   focusRequestID,
   focusInformationMode = "focus",
@@ -2660,7 +2659,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       : undefined;
     if (timelineTarget) {
       handledFocusRequestRef.current = requestKey;
-      window.requestAnimationFrame(() => scrollNodeWorkspaceInformationIntoView(rootRef.current, timelineTarget.event_id));
+      window.requestAnimationFrame(() => scrollNodeWorkspaceInformationIntoView(rootRef.current, timelineTarget.event_id, focusMentionUserID));
       return;
     }
 
@@ -2687,7 +2686,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           return next;
         });
         window.requestAnimationFrame(() => {
-          scrollNodeWorkspaceInformationIntoView(rootRef.current, anchoredChat.id);
+          scrollNodeWorkspaceInformationIntoView(rootRef.current, anchoredChat.id, focusMentionUserID);
         });
         return;
       }
@@ -2726,12 +2725,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       }
       window.requestAnimationFrame(() => {
         const editor = rootRef.current?.querySelector<HTMLElement>(`[data-node-text-block-id="${block.id}"]`) ?? null;
-        scrollNodeWorkspaceInformationIntoView(rootRef.current, message?.id || attachedEmail?.messageID || block.id);
+        scrollNodeWorkspaceInformationIntoView(rootRef.current, message?.id || attachedEmail?.messageID || block.id, focusMentionUserID);
         if (!message && !attachedEmail && canEdit && focusInformationMode !== "scroll") focusContentEditableAtEnd(editor);
       });
       return;
     }
-  }, [blocks, canEdit, chatMessages, chatMessagesByBlock, emailOriginChatBlockID, emailOriginChatHostBlockID, focusEmailMessageID, focusInformationID, focusInformationMode, focusRequestID, focusTargetIndex, navigateToChatMessage, nodeAttachedEmails, nodeID, projectionsLoaded, timelineEvents]);
+  }, [blocks, canEdit, chatMessages, chatMessagesByBlock, emailOriginChatBlockID, emailOriginChatHostBlockID, focusEmailMessageID, focusInformationID, focusInformationMode, focusMentionUserID, focusRequestID, focusTargetIndex, navigateToChatMessage, nodeAttachedEmails, nodeID, projectionsLoaded, timelineEvents]);
 
   const renderTextSidePaneResizeHandle = (blockID: string, pane: TextSidePaneKind, edge: "before" | "after", fallbackWidth: number, maxWidth: number) => {
     return (

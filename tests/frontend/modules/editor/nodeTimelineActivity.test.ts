@@ -41,7 +41,9 @@ test("compact timeline rows expose immutable transfer copy and recipient-only ve
   assert.match(nodeSurface, /disabled=\{!isCurrentUser \|\| completed \|\| pending\}/);
   assert.match(nodeSurface, /verification-requests\/\$\{encodeURIComponent\(cleanEventID\)\}\/complete/);
   assert.match(nodeSurface, /Could not reach the server\. Check your connection and try again\./);
-  assert.match(nodeSurface, /data-node-timeline-event-id="\$\{cleanInformationID\}"/);
+  const focusHelper = source("frontend/src/modules/editor/transientInformationFocus.ts");
+  assert.match(nodeSurface, /scheduleTransientInformationFocus\(\{ root: \(\) => root/);
+  assert.match(focusHelper, /"data-node-timeline-event-id"/);
 });
 
 test("verified supports multiple explicit people and Updates gets verification copy", () => {

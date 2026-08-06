@@ -1,4 +1,16 @@
-Last updated: 2026-07-16
+# Process Story: A deleted Kanban Node stays deleted
+
+A user confirms deletion for one or more Node cards on a Kanban board
+↓
+The board starts one local mutation window and removes those cards optimistically from both rendered and current card state
+↓
+One atomic typed-target delete request soft-deletes every confirmed Node and its owned Kanban/Logic Gate work placements
+↓
+Realtime hints and older in-flight board reads cannot restore stale cards while that mutation is active
+↓
+Success keeps the cards gone and invalidates exact caches; failure restores the local snapshot and performs one canonical board refresh
+
+Last updated: 2026-08-05
 
 # Kanban Board Tests
 
@@ -163,6 +175,7 @@ KB125 - A successful cross-Logic-Gate Node reassignment invalidates and announce
 KB126 - Deleting a Logic Gate captures its exact currently authorized local mounted-board audience before the durable delete and sends one compact `resource_deleted` tombstone after commit. The tombstone closes the mounted board even though the owning resource no longer exists, and no deleted-board event is sent to a user who lacked Edit access at capture time. Deleting a Node leaves its owning Logic Gate/board alive, so that board refresh remains an ordinary publication-time existence and permission check rather than using the tombstone audience exception.
 KB127 - Selecting a node from a Kanban card opens the normal modeless node window at near-full board size by default: 1% top/left ratios and 98% width/height ratios, with only an 8px renderer safety gutter at the board's right/bottom edge. The versioned per-company/frame geometry key resets older narrower defaults once; later user drag/resize persists under the new key, and fullscreen behavior remains separate.
 KB128 - In a route-controlled Logic Gate Arena, opening or closing a Kanban node popup produces one continuous UI transition. Local popup state must not retrigger forced-route synchronization against the previous route and briefly close a newly opened node or reopen a newly closed node.
+KB130 - Confirmed Kanban Node deletion uses one atomic typed-target delete request, participates in the board's local mutation window, and updates both rendered and current card state. Older in-flight reads and realtime refresh hints cannot restore the deleted cards. A failed request restores the optimistic snapshot and schedules one canonical board refresh.
 
 ## Scenarios
 
@@ -551,3 +564,27 @@ Expected:
 - Publication does not re-query the deleted resource, and ordinary non-tombstone board events continue to reauthorize at send time.
 
 KB129 - Every primary-email-origin Node, including a Triage-comment email Node, preserves `created_from_email=true` when later assigned/moved through Logic Gate or Kanban APIs. Immediate mutation responses and canonical reads must both render the established email icon; merely attaching an email to a normal-origin Node still does not opt it in.
+
+### Scenario KB-S13: Node deletion resists stale board refreshes
+
+Automated regression: `tests/frontend/modules/kanban/kanbanCommands.test.ts`.
+
+Business logic covered:
+- KB7
+- KB76
+- KB77
+- KB130
+
+Given:
+- A Kanban board has one or more selected Node cards.
+- An older board read or a realtime `kanban.changed` hint can overlap the confirmed deletion.
+
+When:
+- The user confirms deletion with their display name.
+
+Expected:
+- The board sends one atomic typed-target deletion request for the unique Node IDs.
+- Deleted cards disappear immediately from rendered state and the current card reference used by later mutations.
+- The local mutation window rejects older reads and defers realtime reconciliation so stale cards cannot reappear.
+- Success clears exact Node relationship/record and board caches.
+- Failure restores the prior card snapshot and performs one canonical board refresh.

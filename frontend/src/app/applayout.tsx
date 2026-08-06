@@ -122,6 +122,7 @@ type ExplorerEntityActivatedDetail = {
   label?: string;
   nodeID?: string;
   informationID?: string;
+  mentionUserID?: string;
   suppressNavigation?: boolean;
 };
 type NodeEditorPopupState = {
@@ -138,11 +139,13 @@ type LogicGateArenaTarget = {
   label: string;
   nodeID?: string;
   informationID?: string;
+  mentionUserID?: string;
   requestID: number;
 };
 type ProjectManagementTarget = {
   projectID: string;
   informationID?: string;
+  mentionUserID?: string;
   requestID: number;
 };
 
@@ -1697,6 +1700,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
           label,
           nodeID: typeof detail.nodeID === "string" && detail.nodeID.trim() ? detail.nodeID.trim() : undefined,
           informationID: typeof detail.informationID === "string" && detail.informationID.trim() ? detail.informationID.trim() : undefined,
+          mentionUserID: typeof detail.mentionUserID === "string" && detail.mentionUserID.trim() ? detail.mentionUserID.trim() : undefined,
           requestID: Date.now(),
         });
         writePendingLogicGateArenaSelection({
@@ -1735,6 +1739,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
         setProjectManagementTarget({
           projectID: id,
           informationID: typeof detail.informationID === "string" && detail.informationID.trim() ? detail.informationID.trim() : undefined,
+          mentionUserID: typeof detail.mentionUserID === "string" && detail.mentionUserID.trim() ? detail.mentionUserID.trim() : undefined,
           requestID: Date.now(),
         });
         const ensured = activatePrimaryPage("project-management");
@@ -2007,6 +2012,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
               onProjectCollapseToTab={collapseProjectManagementProjectToTab}
               targetProjectID={projectManagementTarget?.projectID}
               targetProjectInformationID={projectManagementTarget?.informationID}
+              targetProjectMentionUserID={projectManagementTarget?.mentionUserID}
               targetProjectRequestID={projectManagementTarget?.requestID}
             />
           </React.Suspense>

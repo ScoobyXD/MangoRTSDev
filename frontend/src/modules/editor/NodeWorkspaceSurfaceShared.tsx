@@ -36,6 +36,7 @@ export type NodeWorkspaceSurfaceProps = {
   editorSequence: number;
   hidden?: boolean;
   focusInformationID?: string;
+  focusMentionUserID?: string;
   focusEmailMessageID?: string;
   focusRequestID?: number;
   focusInformationMode?: "focus" | "scroll";

@@ -63,6 +63,7 @@ import {
 import { prepareTextBlockImageFile } from "../editor/nodeTextBlockImageFiles.js";
 import { generateStableInformationID } from "../editor/editorTypes.js";
 import { createEditorScrollMemory } from "../editor/editorScroll.js";
+import { scheduleTransientInformationFocus } from "../editor/transientInformationFocus.js";
 import { useBoundedEditorRowVirtualization } from "../editor/editorRowVirtualization.js";
 import { UnifiedNodeShell } from "../editor/UnifiedNodeShell.js";
 import {
@@ -173,6 +174,7 @@ type ProjectSummaryContentProps = {
   entityFields: EntityField[];
   showFieldMetadata?: boolean;
   focusInformationID?: string;
+  focusMentionUserID?: string;
   focusRequestID?: number;
   accent: string;
   refreshToken?: number;
@@ -377,6 +379,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   entityFields,
   showFieldMetadata = false,
   focusInformationID,
+  focusMentionUserID,
   focusRequestID,
   accent,
   refreshToken = 0,
@@ -951,7 +954,8 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       setFocusedTextBlockID(block.id);
       setActiveRichTextBlockID(block.id);
     }
-  }, [attachedEmails, blocks, chatMessages, focusInformationID, focusRequestID, focusTargetIndex, projectID]);
+    return scheduleTransientInformationFocus({ root: () => textBlocksScrollRef.current, informationID: targetID, mentionUserID: focusMentionUserID });
+  }, [attachedEmails, blocks, chatMessages, focusInformationID, focusMentionUserID, focusRequestID, focusTargetIndex, projectID]);
 
   const beginProjectColumnResize = useCallback((pane: "email" | "chat", event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();

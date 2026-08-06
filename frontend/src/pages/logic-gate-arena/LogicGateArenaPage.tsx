@@ -16,6 +16,7 @@ type LogicGateArenaPageProps = {
     label: string;
     nodeID?: string;
     informationID?: string;
+    mentionUserID?: string;
     requestID?: number;
   } | null;
   onCollapseToTab?: (selection: { logicGateID: string; label: string; nodeID?: string }) => void;
@@ -40,6 +41,7 @@ type ArenaLogicGateSelection = {
   emptyMessage: string;
   nodeID?: string;
   informationID?: string;
+  mentionUserID?: string;
   requestID?: number;
 };
 
@@ -56,6 +58,7 @@ const LazyArenaEditorContent = React.lazy(() => import("../../modules/editor/Edi
     forcedLabel?: string;
     forcedEmptyMessage?: string;
     focusInformationID?: string;
+    focusMentionUserID?: string;
     focusRequestID?: number;
     onLogicGateTitleChange?: (update: { logicGateID: string; label: string }) => void;
   }>,
@@ -81,6 +84,7 @@ function selectionFromTargetLogicGate(targetLogicGate: LogicGateArenaPageProps["
     emptyMessage: "",
     nodeID: targetLogicGate.nodeID,
     informationID: targetLogicGate.informationID,
+    mentionUserID: targetLogicGate.mentionUserID,
     requestID: targetLogicGate.requestID,
   };
 }
@@ -113,6 +117,7 @@ function sameArenaLogicGateSelection(current: ArenaLogicGateSelection, next: Are
     && current.emptyMessage === next.emptyMessage
     && (current.nodeID ?? "") === (next.nodeID ?? "")
     && (current.informationID ?? "") === (next.informationID ?? "")
+    && (current.mentionUserID ?? "") === (next.mentionUserID ?? "")
     && (current.requestID ?? 0) === (next.requestID ?? 0);
 }
 
@@ -380,6 +385,7 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
             forcedLabel={selectedLogicGate.label}
             forcedEmptyMessage={selectedLogicGate.emptyMessage}
             focusInformationID={selectedLogicGate.informationID}
+            focusMentionUserID={selectedLogicGate.mentionUserID}
             focusRequestID={selectedLogicGate.requestID}
             onLogicGateTitleChange={applyLogicGateTitle}
           />
