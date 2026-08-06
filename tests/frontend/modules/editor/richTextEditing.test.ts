@@ -26,6 +26,14 @@ test("editor paste linkification preserves punctuation outside the URL", () => {
   assert.match(html, /<\/a>\./);
 });
 
+test("editor HTML boundaries preserve durable Unicode arrows", () => {
+  assert.equal(linkifyEditorPlainTextToHTML("forward \u2192 backward \u2190"), "forward \u2192 backward \u2190");
+
+  const sanitized = sanitizeEditorDocumentHTML("<div>forward \u2192 backward \u2190</div>");
+  assert.match(sanitized, /forward \u2192 backward \u2190/);
+  assert.doesNotMatch(sanitized, /-&gt;|&lt;-/);
+});
+
 test("email serialization preserves editor line breaks and spacing", () => {
   const html = serializeEditorBodyForEmailHTML(`${EDITOR_RICH_TEXT_PREFIX}First line\n  1. indented\n\nNext block`);
 

@@ -1,4 +1,4 @@
-import { Extension, Node, mergeAttributes, type AnyExtension, type Editor, type Extensions, type JSONContent } from "@tiptap/core";
+import { Extension, Node, mergeAttributes, textInputRule, type AnyExtension, type Editor, type Extensions, type JSONContent } from "@tiptap/core";
 import { FileHandler } from "@tiptap/extension-file-handler";
 import Highlight from "@tiptap/extension-highlight";
 import Mention from "@tiptap/extension-mention";
@@ -490,6 +490,17 @@ export const MangoBlockIdentity = Extension.create({
   },
 });
 
+export const MangoArrowTypography = Extension.create({
+  name: "mangoArrowTypography",
+
+  addInputRules() {
+    return [
+      textInputRule({ find: /->$/, replace: "\u2192" }),
+      textInputRule({ find: /<-$/, replace: "\u2190" }),
+    ];
+  },
+});
+
 type MangoPasteLoadingMeta = {
   add?: { id: string; position: number; previewURL?: string; imageCount: number };
   remove?: string;
@@ -666,6 +677,7 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
       trailingNode: false,
       undoRedo: { depth: 200, newGroupDelay: 500 },
     }),
+    MangoArrowTypography,
     TextStyle,
     FontSize,
     Color,

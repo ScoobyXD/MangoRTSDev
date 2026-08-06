@@ -135,10 +135,6 @@ function splitURLTrailingPunctuation(value: string): { urlText: string; trailing
   };
 }
 
-function normalizeEditorArrowLigatureText(value: string): string {
-  return value.replace(/\u2192/g, "->");
-}
-
 function normalizeEditorURL(value: string): string | null {
   const withProtocol = value.toLowerCase().startsWith("www.") ? `https://${value}` : value;
   try {
@@ -173,12 +169,12 @@ export function linkifyEditorPlainTextToHTML(value: string): string {
     const matchIndex = match.index;
     const { urlText, trailingText } = splitURLTrailingPunctuation(matchedText);
     const href = normalizeEditorURL(urlText);
-    output += escapeEditorHTML(normalizeEditorArrowLigatureText(value.slice(lastIndex, matchIndex)));
+    output += escapeEditorHTML(value.slice(lastIndex, matchIndex));
     output += href ? editorLinkHTML(urlText, href) : escapeEditorHTML(urlText);
-    output += escapeEditorHTML(normalizeEditorArrowLigatureText(trailingText));
+    output += escapeEditorHTML(trailingText);
     lastIndex = matchIndex + matchedText.length;
   }
-  output += escapeEditorHTML(normalizeEditorArrowLigatureText(value.slice(lastIndex)));
+  output += escapeEditorHTML(value.slice(lastIndex));
   return output;
 }
 
@@ -824,7 +820,7 @@ function appendSanitizedHeading(element: HTMLElement, target: Node, ownerDocumen
 
 function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document) {
   if (source.nodeType === Node.TEXT_NODE) {
-    target.appendChild(ownerDocument.createTextNode(normalizeEditorArrowLigatureText(source.textContent ?? "")));
+    target.appendChild(ownerDocument.createTextNode(source.textContent ?? ""));
     return;
   }
   if (source.nodeType !== Node.ELEMENT_NODE) return;

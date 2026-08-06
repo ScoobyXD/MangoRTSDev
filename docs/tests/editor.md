@@ -1,3 +1,17 @@
+# Process Story: typed arrow pairs become durable editor arrows
+
+A user types `->` or `<-` in an ordinary text position in a Node, Project, or Logic Gate editor body
+&darr;
+The shared Tiptap input rule replaces the completed pair with one right arrow `U+2192` or one left arrow `U+2190`
+&darr;
+The caret continues immediately after that single arrow in the same paragraph, heading, list item, Checkbox item, or table cell
+&darr;
+The Unicode arrow remains unchanged in JSON saves, sleeping rendering, copy output, rich-HTML sanitization, history, recovery, and realtime snapshots
+&darr;
+Pasted or previously stored ASCII pairs are not silently rewritten, and code blocks retain literal input-rule behavior
+
+Last updated: 2026-08-06
+
 # Process Story: editor activation and table growth stay visually stable
 
 A user clicks the exact place they want to type in a sleeping Node, Project, or Logic Gate editor
@@ -303,6 +317,13 @@ Coverage Status:
 
 ## Business Logic
 
+### 2026-08-06 Bidirectional Smart Arrows
+
+- In an editable Node, Project, or Logic Gate Tiptap body, completing the typed pair `->` inserts one durable Unicode right arrow `U+2192`, and completing `<-` inserts one durable Unicode left arrow `U+2190`.
+- The rule is owned by the shared Tiptap extension set and therefore applies in ordinary paragraphs, headings, list items, Checkbox items, and table cells across all three resource editors. Code blocks retain literal typing because editor input rules do not rewrite code.
+- Conversion occurs only as the user completes a pair. Loading, pasting, canonical refresh, and sleeping rendering do not scan or rewrite existing ASCII text.
+- Unicode arrows are document text. JSON persistence, history, recovery, realtime refresh, HTML sanitization, and rich clipboard output must preserve them instead of converting them back to ASCII pairs.
+
 ### 2026-08-06 Stable Activation, Checkbox, And Table Growth
 
 - The sleeping JSON renderer remains visible until the attached live Tiptap DOM has accepted the requested pointer caret and focus. Activation preserves editor scroll and selection, performs no document mutation or save, and never creates an empty block. A canonical refresh whose parsed ProseMirror document equals the live document updates revision authority without dispatching `setContent`.
@@ -489,6 +510,7 @@ ED121 - Editor activation is selection-only. The sleeping document remains paint
 ED122 - Automatic Numbering repeats `1.`, `a.`, `1)`, `a)` by nesting depth. The user-facing option is Checkbox. Empty-row Checkbox Enter produces one unchecked Checkbox row with its caret in that row; nonempty ordinary-row Enter performs the split and conversion atomically; existing Checkbox Enter produces the next adjacent unchecked item. Checkbox nesting changes depth without changing its symbol or inserting an ordinary row.
 ED123 - The table-cell context menu uses the shared portaled right-click surface at viewport coordinates, outside editor overflow clipping. Column actions and row actions are grouped by separators, and the bottom delete row, delete column, and delete table actions use destructive red text.
 ED124 - Tables begin at intrinsic content size with equal 112-pixel columns and equal 36-pixel rows instead of filling available editor width. A selected table exposes a bottom-right growth handle; its drag previews whole nonnegative row and column additions, cancel changes nothing, and release commits the preview once while preserving equal column widths and row heights.
+ED125 - Completing `->` or `<-` by typing in an ordinary Node, Project, or Logic Gate Tiptap text position replaces that pair with one durable Unicode `U+2192` or `U+2190` and keeps the caret after it. This shared input rule applies to paragraphs, headings, list items, Checkbox items, and table cells, but not code blocks. It does not rewrite loaded or pasted ASCII pairs, and no sanitizer, clipboard path, history path, recovery path, or realtime path may convert a stored Unicode arrow back into ASCII.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -958,7 +980,7 @@ The browser sanitizer:
 - Preserves Mango mentions, image frames, tables, bullet lists, and checklists.
 - Converts native `<ul>` to Mango bullets.
 - Preserves native `<ol>` as native ordered lists.
-- Converts the Unicode right-arrow character to the two ASCII characters `->` during sanitization.
+- Preserves Unicode left- and right-arrow characters during sanitization.
 - Trims leading/trailing newline text nodes at the paste fragment boundary.
 
 It does not fully preserve common source structures:

@@ -416,6 +416,33 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
   });
   editor.registerPlugin(MangoTiptapAnnotations);
   try {
+    const typeThroughEditorInput = (value: string) => {
+      for (const character of value) {
+        const { from, to } = editor.state.selection;
+        const handled = editor.view.someProp(
+          "handleTextInput",
+          (handler) => handler(editor.view, from, to, character, () => editor.state.tr.insertText(character, from, to)),
+        ) ?? false;
+        if (!handled) editor.view.dispatch(editor.state.tr.insertText(character, from, to));
+      }
+    };
+    editor.commands.setContent({ type: "doc", content: [{ type: "paragraph" }] });
+    editor.commands.setTextSelection(1);
+    typeThroughEditorInput("forward -> backward <-");
+    assert.equal(editor.getText(), "forward \u2192 backward \u2190", "typed ASCII arrow pairs become one durable arrow in either direction");
+    assert.equal(editor.state.selection.from, "forward \u2192 backward \u2190".length + 1, "the caret remains after the converted arrow");
+    assert.deepEqual(
+      editor.state.doc.firstChild?.textContent,
+      "forward \u2192 backward \u2190",
+      "the unified arrow is stored as Unicode document text",
+    );
+
+    editor.commands.setContent({ type: "doc", content: [{ type: "codeBlock" }] });
+    editor.commands.setTextSelection(1);
+    typeThroughEditorInput("literal -> and <-");
+    assert.equal(editor.getText(), "literal -> and <-", "code blocks retain literal input-rule text");
+
+    editor.commands.setContent(richDocument("format me").document);
     editor.commands.setTextSelection({ from: 2, to: 8 });
     assert.equal(editor.chain().toggleBold().toggleItalic().toggleUnderline().toggleStrike().run(), true);
     assert.equal(editor.chain().setFontSize("22px").setColor("#112233").setHighlight({ color: "#fff59d" }).run(), true);
