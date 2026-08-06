@@ -54,6 +54,18 @@ func TestMangoTiptapJSONStrictContractAcceptsFeatureDocument(t *testing.T) {
 	}
 }
 
+func TestMangoTiptapJSONCanonicalEmptyDocumentRequiresParagraph(t *testing.T) {
+	invalid := json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[]}}`)
+	if _, err := ValidateMangoTiptapJSON(invalid); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("empty document root error=%v, want ErrInvalid", err)
+	}
+
+	valid := json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph"}]}}`)
+	if _, err := ValidateMangoTiptapJSON(valid); err != nil {
+		t.Fatalf("canonical empty paragraph rejected: %v", err)
+	}
+}
+
 func TestMangoTiptapJSONAcceptsDocumentsAndAnnotationPositionsBeyondTwoMiB(t *testing.T) {
 	largeText := strings.Repeat("x", 2*1024*1024+4096)
 	raw, err := json.Marshal(map[string]any{
