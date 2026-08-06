@@ -40,6 +40,10 @@ import {
   readMangoTiptapSelectionState,
 } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapExtensions.js";
 import {
+  calculateMangoTiptapTableGrowth,
+  growMangoTiptapTable,
+} from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapTable.js";
+import {
   MangoTiptapAnnotations,
   mergeMangoTiptapAnnotationPositions,
   navigateMangoTiptapTarget,
@@ -412,6 +416,33 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
   });
   editor.registerPlugin(MangoTiptapAnnotations);
   try {
+    const typeThroughEditorInput = (value: string) => {
+      for (const character of value) {
+        const { from, to } = editor.state.selection;
+        const handled = editor.view.someProp(
+          "handleTextInput",
+          (handler) => handler(editor.view, from, to, character, () => editor.state.tr.insertText(character, from, to)),
+        ) ?? false;
+        if (!handled) editor.view.dispatch(editor.state.tr.insertText(character, from, to));
+      }
+    };
+    editor.commands.setContent({ type: "doc", content: [{ type: "paragraph" }] });
+    editor.commands.setTextSelection(1);
+    typeThroughEditorInput("forward -> backward <-");
+    assert.equal(editor.getText(), "forward \u2192 backward \u2190", "typed ASCII arrow pairs become one durable arrow in either direction");
+    assert.equal(editor.state.selection.from, "forward \u2192 backward \u2190".length + 1, "the caret remains after the converted arrow");
+    assert.deepEqual(
+      editor.state.doc.firstChild?.textContent,
+      "forward \u2192 backward \u2190",
+      "the unified arrow is stored as Unicode document text",
+    );
+
+    editor.commands.setContent({ type: "doc", content: [{ type: "codeBlock" }] });
+    editor.commands.setTextSelection(1);
+    typeThroughEditorInput("literal -> and <-");
+    assert.equal(editor.getText(), "literal -> and <-", "code blocks retain literal input-rule text");
+
+    editor.commands.setContent(richDocument("format me").document);
     editor.commands.setTextSelection({ from: 2, to: 8 });
     assert.equal(editor.chain().toggleBold().toggleItalic().toggleUnderline().toggleStrike().run(), true);
     assert.equal(editor.chain().setFontSize("22px").setColor("#112233").setHighlight({ color: "#fff59d" }).run(), true);
@@ -423,6 +454,41 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
     assert.equal(editor.commands.undo(), true);
     assert.deepEqual(editor.getJSON(), beforeTable);
     assert.equal(editor.commands.redo(), true);
+    assert.deepEqual(calculateMangoTiptapTableGrowth({
+      startX: 100,
+      startY: 100,
+      currentX: 225,
+      currentY: 175,
+      rowHeight: 36,
+      columnWidth: 112,
+    }), { rows: 2, columns: 1 }, "table drag distance becomes whole equal-sized row and column additions");
+    let firstTableCellPosition: number | null = null;
+    editor.state.doc.descendants((node, position) => {
+      if (firstTableCellPosition != null || (node.type.name !== "tableCell" && node.type.name !== "tableHeader")) return;
+      firstTableCellPosition = position + 2;
+    });
+    assert.notEqual(firstTableCellPosition, null);
+    editor.commands.setTextSelection(firstTableCellPosition!);
+    assert.equal(editor.isActive("table"), true, "table growth starts from a selected table cell");
+    const tableBeforeGrowth = Array.from({ length: editor.state.doc.childCount }, (_, index) => editor.state.doc.child(index))
+      .find((node) => node.type.name === "table")
+      ?? null;
+    const rowsBeforeGrowth = tableBeforeGrowth?.childCount ?? 0;
+    const columnsBeforeGrowth = tableBeforeGrowth?.firstChild?.childCount ?? 0;
+    let tableGrowthTransactions = 0;
+    const countTableGrowthTransaction = () => { tableGrowthTransactions += 1; };
+    editor.on("transaction", countTableGrowthTransaction);
+    assert.equal(growMangoTiptapTable(editor, { rows: 2, columns: 1 }), true);
+    editor.off("transaction", countTableGrowthTransaction);
+    assert.equal(tableGrowthTransactions, 1, "releasing a table growth drag commits one document transaction");
+    const grownTable = Array.from({ length: editor.state.doc.childCount }, (_, index) => editor.state.doc.child(index))
+      .find((node) => node.type.name === "table")
+      ?? null;
+    assert.equal(grownTable?.type.name, "table");
+    assert.equal(grownTable?.childCount, rowsBeforeGrowth + 2, "table growth appends the requested rows");
+    for (let rowIndex = 0; rowIndex < (grownTable?.childCount ?? 0); rowIndex += 1) {
+      assert.equal(grownTable?.child(rowIndex).childCount, columnsBeforeGrowth + 1, "every grown row has the same column count");
+    }
 
     let annotationTransactions = 0;
     const countAnnotationTransaction = () => { annotationTransactions += 1; };
@@ -542,6 +608,7 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
       editor.commands.setTextSelection(1);
       assert.equal(handleMangoTiptapOutlineEnter(editor, outlineStyle), true, `Enter starts ${outlineStyle} on an empty row`);
       assert.equal(editor.state.doc.firstChild?.type.name, expectedList);
+      assert.equal(editor.state.doc.childCount, 1, `${outlineStyle} must not append a generated ordinary row`);
     }
 
     editor.commands.setContent({ type: "doc", content: [
@@ -552,6 +619,24 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
     assert.equal(editor.state.doc.child(0).textContent, "ordinary");
     assert.equal(editor.state.doc.child(1).type.name, "bulletList", "Enter starts the selected bullet mode on only the new row");
     assert.equal(editor.state.doc.child(1).textContent, " row");
+
+    editor.commands.setContent({ type: "doc", content: [
+      { type: "paragraph", content: [{ type: "text", text: "checkbox row" }] },
+    ] });
+    editor.commands.setTextSelection(9);
+    let checkboxTransactions = 0;
+    const countCheckboxTransaction = () => { checkboxTransactions += 1; };
+    editor.on("transaction", countCheckboxTransaction);
+    assert.equal(handleMangoTiptapOutlineEnter(editor, "checklist"), true);
+    editor.off("transaction", countCheckboxTransaction);
+    assert.equal(checkboxTransactions, 1, "Checkbox Enter creates its row atomically");
+    assert.equal(editor.state.doc.childCount, 2, "Checkbox Enter must not insert an intervening ordinary row");
+    assert.equal(editor.state.doc.child(0).type.name, "paragraph");
+    assert.equal(editor.state.doc.child(0).textContent, "checkbox");
+    assert.equal(editor.state.doc.child(1).type.name, "taskList");
+    assert.equal(editor.state.doc.child(1).textContent, " row");
+    assert.equal(editor.state.doc.child(1).firstChild?.attrs.checked, false, "new Checkbox rows start unchecked");
+    assert.equal(editor.state.selection.$from.parent.type.name, "paragraph", "the caret stays in the new Checkbox row");
 
     editor.commands.setContent({
       type: "doc",
@@ -578,14 +663,14 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
       ] }],
     });
     editor.commands.setTextSelection(6);
-    assert.equal(editor.commands.splitListItem("taskItem"), true, "Enter creates the next checklist row");
+    assert.equal(handleMangoTiptapOutlineEnter(editor, "checklist"), true, "Enter creates the next Checkbox row");
     const splitTaskIDs = mangoBlockIDs(editor.getJSON());
-    assert.equal(new Set(splitTaskIDs).size, splitTaskIDs.length, "splitting a checklist item must replace cloned item and paragraph IDs");
+    assert.equal(new Set(splitTaskIDs).size, splitTaskIDs.length, "splitting a Checkbox item must replace cloned item and paragraph IDs");
     assert.equal(editor.commands.insertContent("child"), true);
-    assert.equal(indentMangoTiptapSelection(editor), true, "Tab nests the newly created checklist row");
+    assert.equal(indentMangoTiptapSelection(editor), true, "Tab nests the newly created Checkbox row");
     assert.equal((JSON.stringify(editor.getJSON()).match(/"type":"taskList"/g) ?? []).length, 2);
     const nestedTaskIDs = mangoBlockIDs(editor.getJSON());
-    assert.equal(new Set(nestedTaskIDs).size, nestedTaskIDs.length, "nesting a checklist item must keep every block ID unique");
+    assert.equal(new Set(nestedTaskIDs).size, nestedTaskIDs.length, "nesting a Checkbox item must keep every block ID unique");
   } finally {
     editor.destroy();
     dom.window.close();
@@ -1445,6 +1530,7 @@ test("Node, Project, and Logic Gate editors use revisioned JSON while email stay
   const extensions = read("frontend/src/modules/editor/tiptap/mangoTiptapExtensions.ts");
   assert.match(extensions, /mangoBlockEntries\(newState\.doc, changedRanges\)/);
   assert.match(extensions, /updatedMangoBlockIDCounts/);
+  assert.match(extensions, /trailingNode:\s*false/);
   assert.doesNotMatch(extensions, /newState\.doc\.descendants/);
   const editor = read("frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx");
   assert.match(editor, /data-mango-editor-sync-mode="revisioned-json"/);
@@ -1452,7 +1538,9 @@ test("Node, Project, and Logic Gate editors use revisioned JSON while email stay
   assert.doesNotMatch(editor, /onSaveStateChange\?\.\(\{ status: "pending"/);
   assert.match(editor, /const \[activeEditor, setActiveEditor\] = useState<Editor \| null>\(null\)/);
   assert.match(editor, /useLayoutEffect\(\(\) => \{\s*if \(!isActive \|\| editorRef\.current\) return undefined;/);
-  assert.match(editor, /\{isActive && activeEditor \? <EditorContent editor=\{activeEditor\}/);
+  assert.match(editor, /\{isActive && activeEditor && \(\s*<EditorContent\s+editor=\{activeEditor\}/);
+  assert.match(editor, /data-mango-tiptap-live-ready=/);
+  assert.match(editor, /data-mango-tiptap-activation-cover/);
   assert.match(editor, /activateFromPointer/);
   assert.match(editor, /if \(event\.button !== 0\) return;\s*event\.preventDefault\(\);/);
   assert.match(editor, />Keep my version<\/button>/);

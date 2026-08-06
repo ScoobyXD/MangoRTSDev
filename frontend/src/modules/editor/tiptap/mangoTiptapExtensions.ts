@@ -1,4 +1,4 @@
-import { Extension, Node, mergeAttributes, type AnyExtension, type Editor, type Extensions, type JSONContent } from "@tiptap/core";
+import { Extension, Node, mergeAttributes, textInputRule, type AnyExtension, type Editor, type Extensions, type JSONContent } from "@tiptap/core";
 import { FileHandler } from "@tiptap/extension-file-handler";
 import Highlight from "@tiptap/extension-highlight";
 import Mention from "@tiptap/extension-mention";
@@ -278,7 +278,9 @@ function updateCurrentMangoTiptapIndent(editor: Editor, delta: -1 | 1): boolean 
  * items keep their own list kind and use Tiptap's normal Enter behavior.
  */
 export function handleMangoTiptapOutlineEnter(editor: Editor, outlineStyle: EditorOutlineStyleID): boolean {
-  if (!editor.state.selection.empty || editor.isActive("listItem") || editor.isActive("taskItem")) return false;
+  if (!editor.state.selection.empty) return false;
+  if (editor.isActive("taskItem")) return editor.commands.splitListItem("taskItem");
+  if (editor.isActive("listItem")) return editor.commands.splitListItem("listItem");
   if (!editor.isActive("paragraph") && !editor.isActive("heading")) return false;
 
   const { $from } = editor.state.selection;
@@ -293,8 +295,9 @@ export function handleMangoTiptapOutlineEnter(editor: Editor, outlineStyle: Edit
     ? editor.commands.toggleTaskList()
     : editor.commands.toggleBulletList();
   if (empty) return startList();
-  if (!editor.commands.splitBlock()) return false;
-  return startList();
+  return outlineStyle === "checklist"
+    ? editor.chain().splitBlock().toggleTaskList().run()
+    : editor.chain().splitBlock().toggleBulletList().run();
 }
 
 export type MangoAttachmentImageAttributes = {
@@ -487,6 +490,17 @@ export const MangoBlockIdentity = Extension.create({
   },
 });
 
+export const MangoArrowTypography = Extension.create({
+  name: "mangoArrowTypography",
+
+  addInputRules() {
+    return [
+      textInputRule({ find: /->$/, replace: "\u2192" }),
+      textInputRule({ find: /<-$/, replace: "\u2190" }),
+    ];
+  },
+});
+
 type MangoPasteLoadingMeta = {
   add?: { id: string; position: number; previewURL?: string; imageCount: number };
   remove?: string;
@@ -660,8 +674,10 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
         HTMLAttributes: { rel: "noopener noreferrer nofollow" },
       },
       underline: {},
+      trailingNode: false,
       undoRedo: { depth: 200, newGroupDelay: 500 },
     }),
+    MangoArrowTypography,
     TextStyle,
     FontSize,
     Color,

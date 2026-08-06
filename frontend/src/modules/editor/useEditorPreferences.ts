@@ -9,7 +9,7 @@ export const EDITOR_OUTLINE_STYLE_ITEMS: ReadonlyArray<{ id: EditorOutlineStyleI
   { id: "automatic-outline-numbering", label: "Automatic Numbering" },
   { id: "indent-guides", label: "Indent Guides" },
   { id: "bullet-list", label: "Bullet Points" },
-  { id: "checklist", label: "Checklist" },
+  { id: "checklist", label: "Checkbox" },
 ];
 
 export const EDITOR_DOCUMENT_FONT_SIZE_PX = 15;

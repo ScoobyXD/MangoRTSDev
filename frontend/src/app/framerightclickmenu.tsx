@@ -25,6 +25,7 @@ export function clampFrameRightClickMenuPosition(input: FrameRightClickMenuClamp
 export interface FrameRightClickMenuProps {
   children: React.ReactNode;
   x: number;
+  ariaLabel?: string;
   y: number;
   onClose: () => void;
   closeOnOutside?: boolean;
@@ -37,7 +38,7 @@ export interface FrameRightClickMenuProps {
 }
 
 // Floating context-menu shell used by header/canvas/frame menus throughout the dashboard.
-const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, y, onClose, closeOnOutside = true, isConfirmActionMenu = false, width, minWidth = 190, maxWidth, maxHeight = "calc(100vh - 16px)", overflow = "hidden" }) => {
+const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, y, onClose, ariaLabel, closeOnOutside = true, isConfirmActionMenu = false, width, minWidth = 190, maxWidth, maxHeight = "calc(100vh - 16px)", overflow = "hidden" }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x, y });
   const portalTarget = useAppOverlayPortalTarget();
@@ -119,6 +120,8 @@ const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, 
   return portalTarget ? createPortal(
     <div
       data-mango-confirm-action-menu={isConfirmActionMenu ? "true" : undefined}
+      role={ariaLabel ? "menu" : undefined}
+      aria-label={ariaLabel}
       className="mango-liquid-context-menu"
       ref={menuRef}
       style={{

@@ -201,15 +201,20 @@ test("static JSON renderer paints true ProseMirror ranges across blocks, lists, 
   assert.match(presentationCSS, /background:\s*linear-gradient\(135deg, rgba\(254, 255, 102, 0\.72\), rgba\(250, 232, 28, 0\.58\)\)/);
   assert.match(presentationCSS, /data-mango-legacy-leading-date-heading="true"/);
   assert.match(presentationCSS, /margin-top:\s*20px/);
-  assert.match(presentationCSS, /ol ol[^}]+list-style-type:\s*upper-alpha/s);
+  assert.match(presentationCSS, /ol ol[^}]+list-style-type:\s*lower-alpha/s);
   assert.match(presentationCSS, /ol ol ol > li::marker[^}]+counter\(list-item\) "\)  "/s);
-  assert.match(presentationCSS, /ol ol ol ol > li::marker[^}]+counter\(list-item, upper-alpha\) "\)  "/s);
-  assert.match(presentationCSS, /Automatic numbering repeats 1\., A\., 1\), A\)/);
+  assert.match(presentationCSS, /ol ol ol ol > li::marker[^}]+counter\(list-item, lower-alpha\) "\)  "/s);
+  assert.match(presentationCSS, /Automatic numbering repeats 1\., a\., 1\), a\)/);
   assert.match(presentationCSS, /Repeat the four requested bullet shapes after the fourth nesting level/);
   assert.match(presentationCSS, /\[data-mango-outline-style="indent-guides"\][\s\S]+li > (?:ul|ol)[\s\S]+border-left:\s*1px solid rgba\(100, 116, 139, 0\.3\)/);
   assert.doesNotMatch(presentationCSS, /^\.mango-tiptap-(?:static-document|prosemirror) li > (?:ul|ol),[^{]*\{[^}]*border-left:/m);
+  assert.match(presentationCSS, /\.mango-tiptap-(?:static-document|prosemirror) \.tableWrapper[^}]+width:\s*max-content/s);
   assert.match(presentationCSS, /\.mango-tiptap-prosemirror table[^}]+border-collapse:\s*collapse/s);
+  assert.match(presentationCSS, /\.mango-tiptap-prosemirror table[^}]+width:\s*auto/s);
+  assert.doesNotMatch(presentationCSS, /\.mango-tiptap-(?:static-document|prosemirror) table[^}]+width:\s*100%/s);
   assert.match(presentationCSS, /\.mango-tiptap-prosemirror td[^}]+border:\s*1px solid #94a3b8/s);
+  assert.match(presentationCSS, /\.mango-tiptap-prosemirror td[^}]+width:\s*112px/s);
+  assert.match(presentationCSS, /\.mango-tiptap-prosemirror td[^}]+height:\s*36px/s);
 });
 
 test("mounted JSON editor batches full-document work, pins pending work, and uses visible-only realtime", { timeout: 10_000 }, async () => {
@@ -289,8 +294,19 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     originalFocus.call(this, options);
   };
   restores.push(() => { dom.window.HTMLElement.prototype.focus = originalFocus; });
-  const requestFrame = (callback: FrameRequestCallback) => setTimeout(() => callback(Date.now()), 0) as unknown as number;
-  const cancelFrame = (handle: number) => clearTimeout(handle);
+  let holdAnimationFrames = false;
+  let heldFrameSequence = 0;
+  const heldAnimationFrames = new Map<number, FrameRequestCallback>();
+  const requestFrame = (callback: FrameRequestCallback) => {
+    if (!holdAnimationFrames) return setTimeout(() => callback(Date.now()), 0) as unknown as number;
+    const handle = -(heldFrameSequence += 1);
+    heldAnimationFrames.set(handle, callback);
+    return handle;
+  };
+  const cancelFrame = (handle: number) => {
+    if (handle < 0) heldAnimationFrames.delete(handle);
+    else clearTimeout(handle);
+  };
   dom.window.requestAnimationFrame = requestFrame;
   dom.window.cancelAnimationFrame = cancelFrame;
   installGlobal("requestAnimationFrame", requestFrame, restores);
@@ -507,21 +523,48 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
 
     editorRoot.scrollTop = 287;
     const activationEvent = new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, clientX: 8, clientY: 8 });
+    holdAnimationFrames = true;
     await act(async () => {
       editorRoot.dispatchEvent(activationEvent);
     });
+    assert.ok(editorRoot.querySelector('[data-mango-tiptap-activation-cover="true"]'), "the sleeping document stays painted while the live editor attaches");
+    assert.equal(editorRoot.querySelector<HTMLElement>('[data-mango-tiptap-live-surface="true"]')?.style.opacity, "0", "the unattached live surface must not replace the painted document");
     assert.equal(activationEvent.defaultPrevented, true, "activation must suppress native focus on the static renderer that is about to be replaced");
     await waitFor(() => controllerRef.current !== null, "a normal pointer click should activate a visible ProseMirror editor");
+    holdAnimationFrames = false;
+    const activationFrames = [...heldAnimationFrames.values()];
+    heldAnimationFrames.clear();
+    await act(async () => {
+      activationFrames.forEach((callback) => callback(Date.now()));
+    });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     await flushAsyncWork(2);
     assert.equal(editorRoot.scrollTop, 287, "activating a scrolled JSON document must keep its exact text-box scroll position");
     assert.ok(preventScrollEditorFocuses >= 1, "pointer activation must focus without asking the browser to scroll");
     const activeProseMirror = editorRoot.querySelector<HTMLElement>(".mango-tiptap-prosemirror");
     assert.ok(activeProseMirror);
+    assert.equal(editorRoot.dataset.mangoTiptapLiveReady, "true", "the live editor is exposed only after its DOM and caret are ready");
+    assert.equal(editorRoot.querySelector('[data-mango-tiptap-activation-cover="true"]'), null, "the static cover leaves only after the live editor is ready");
+    assert.equal(activeProseMirror.children.length, value.document.content?.length, "first-click activation must not add an editor row");
+    assert.equal(Array.from(activeProseMirror.querySelectorAll("p")).filter((paragraph) => paragraph.textContent === "").length, 1, "first-click activation preserves the one intentional empty paragraph without creating another");
     assert.equal(activeProseMirror.querySelector('[data-mango-annotation-id="annotation-image"]'), null, "dormant changes must not decorate active surfaces");
     assert.equal(activeProseMirror.parentElement?.classList.contains("mango-tiptap-active-surface"), true, "the active EditorContent wrapper must fill the full text box");
     assert.equal(activeProseMirror.getAttribute("contenteditable"), "true", "the clicked JSON document should become a real editable surface");
     assert.equal(dom.window.document.activeElement, activeProseMirror, "the first pointer activation must focus the attached editor without requiring a second click");
     assert.equal(activeProseMirror.dataset.mangoLegacyLeadingDateHeading, "true");
+
+    restartEditorTraceForTests();
+    await act(async () => { await subscriptionRecover?.(); });
+    await flushAsyncWork(3);
+    const identicalCanonicalTrace = stopEditorTraceForTests();
+    assert.equal(
+      identicalCanonicalTrace.events.filter((event) => event.name === "prosemirror.dispatch_transaction").length,
+      0,
+      "an identical canonical refresh must not replace the live ProseMirror document",
+    );
+    assert.equal(activeProseMirror.children.length, value.document.content?.length, "an identical refresh must not add an empty row");
+    assert.equal(dom.window.document.activeElement, activeProseMirror, "an identical refresh preserves the caret owner");
+    assert.equal(postStarted, false, "activation and an identical canonical refresh are read-only");
 
     const selectionPublicationsBeforeStableRerender = selectionInlineFormats.length;
     restartEditorTraceForTests();
@@ -617,16 +660,52 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     const tableContextEvent = new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: 40, clientY: 50 });
     await act(async () => { activeTableCell.dispatchEvent(tableContextEvent); });
     assert.equal(tableContextEvent.defaultPrevented, true, "right-clicking a table cell opens Mango's table menu");
-    await waitFor(() => Boolean(editorRoot.querySelector('[role="menu"][aria-label="Table actions"]')), "the table context menu should become visible");
-    const addColumnRight = Array.from(editorRoot.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+    await waitFor(() => Boolean(dom.window.document.querySelector('[role="menu"][aria-label="Table actions"]')), "the table context menu should become visible");
+    const tableMenu = dom.window.document.querySelector<HTMLElement>('[role="menu"][aria-label="Table actions"]');
+    assert.ok(tableMenu);
+    assert.equal(tableMenu.parentElement, dom.window.document.body, "the table menu is portaled above the editor scroll window");
+    assert.equal(editorRoot.contains(tableMenu), false, "the table menu must not be clipped by the editor");
+    assert.equal(tableMenu.style.position, "fixed");
+    assert.equal(tableMenu.classList.contains("mango-liquid-context-menu"), true, "the table menu uses the shared right-click surface");
+    assert.equal(tableMenu.querySelectorAll('[role="separator"]').length, 2, "table commands use the shared grouped-menu separators");
+    const deleteTableItem = Array.from(tableMenu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+      .find((button) => button.textContent?.trim() === "Delete table");
+    assert.ok(deleteTableItem?.style.color, "the bottom delete section uses destructive red text");
+    const addColumnRight = Array.from(tableMenu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
       .find((button) => button.textContent?.trim() === "Create column on the right");
     assert.ok(addColumnRight);
     await act(async () => { addColumnRight.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, button: 0 })); });
     await waitFor(() => activeProseMirror.querySelectorAll("table tr:first-child td, table tr:first-child th").length === 2, "the right-click command should add a table column");
-    assert.equal(editorRoot.querySelector('[role="menu"][aria-label="Table actions"]'), null, "a completed table command closes the context menu");
+    assert.equal(dom.window.document.querySelector('[role="menu"][aria-label="Table actions"]'), null, "a completed table command closes the context menu");
     await waitFor(() => postStarted, "the table command must use the normal durable document save");
     releasePost?.();
     await waitFor(() => editorRoot.dataset.mangoEditorPinned !== "true", "the table mutation save must receive its backend acknowledgement");
+    postStarted = false;
+    postedDocument = null;
+    releasePost = undefined;
+
+    await waitFor(() => Boolean(editorRoot.querySelector('[data-mango-tiptap-table-growth-handle="true"]')), "a selected table exposes its bottom-right growth handle");
+    const tableGrowthHandle = editorRoot.querySelector<HTMLButtonElement>('[data-mango-tiptap-table-growth-handle="true"]');
+    assert.ok(tableGrowthHandle);
+    const rowsBeforeGrowth = activeProseMirror.querySelectorAll("table tr").length;
+    const columnsBeforeGrowth = activeProseMirror.querySelectorAll("table tr:first-child td, table tr:first-child th").length;
+    await act(async () => {
+      tableGrowthHandle.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, clientX: 100, clientY: 100 }));
+      tableGrowthHandle.dispatchEvent(new dom.window.MouseEvent("pointermove", { bubbles: true, cancelable: true, buttons: 1, clientX: 225, clientY: 175 }));
+    });
+    await waitFor(() => Boolean(editorRoot.querySelector('[data-mango-tiptap-table-growth-preview="true"]')), "dragging previews equal-sized table additions");
+    const growthPreview = editorRoot.querySelector<HTMLElement>('[data-mango-tiptap-table-growth-preview="true"]');
+    assert.equal(growthPreview?.dataset.previewRows, String(rowsBeforeGrowth + 2));
+    assert.equal(growthPreview?.dataset.previewColumns, String(columnsBeforeGrowth + 1));
+    await act(async () => {
+      tableGrowthHandle.dispatchEvent(new dom.window.MouseEvent("pointerup", { bubbles: true, cancelable: true, button: 0, clientX: 225, clientY: 175 }));
+    });
+    await waitFor(() => activeProseMirror.querySelectorAll("table tr").length === rowsBeforeGrowth + 2, "releasing the handle creates the previewed rows");
+    assert.equal(activeProseMirror.querySelectorAll("table tr:first-child td, table tr:first-child th").length, columnsBeforeGrowth + 1, "releasing the handle creates the previewed columns");
+    assert.equal(editorRoot.querySelector('[data-mango-tiptap-table-growth-preview="true"]'), null, "the preview clears after its one committed change");
+    await waitFor(() => postStarted, "table growth uses the normal durable document save");
+    releasePost?.();
+    await waitFor(() => editorRoot.dataset.mangoEditorPinned !== "true", "the table growth save receives its backend acknowledgement");
     postStarted = false;
     postedDocument = null;
     releasePost = undefined;

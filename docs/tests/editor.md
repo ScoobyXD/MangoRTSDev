@@ -1,3 +1,37 @@
+# Process Story: typed arrow pairs become durable editor arrows
+
+A user types `->` or `<-` in an ordinary text position in a Node, Project, or Logic Gate editor body
+&darr;
+The shared Tiptap input rule replaces the completed pair with one right arrow `U+2192` or one left arrow `U+2190`
+&darr;
+The caret continues immediately after that single arrow in the same paragraph, heading, list item, Checkbox item, or table cell
+&darr;
+The Unicode arrow remains unchanged in JSON saves, sleeping rendering, copy output, rich-HTML sanitization, history, recovery, and realtime snapshots
+&darr;
+Pasted or previously stored ASCII pairs are not silently rewritten, and code blocks retain literal input-rule behavior
+
+Last updated: 2026-08-06
+
+# Process Story: editor activation and table growth stay visually stable
+
+A user clicks the exact place they want to type in a sleeping Node, Project, or Logic Gate editor
+↓
+The sleeping document remains painted while Mango attaches and focuses the matching live Tiptap document behind it
+↓
+Mango reveals the live document only after the caret is ready, without replacing an identical canonical document, blinking, changing scroll, saving, or creating an empty row
+↓
+Automatic Numbering uses lowercase alphabetic markers, while Checkbox Enter creates one unchecked Checkbox row with the caret beside its box and no intervening ordinary row
+↓
+A table starts at the size required by its equal cells instead of filling the editor width
+↓
+Right-clicking a cell opens the shared elevated menu above editor clipping, with grouped create actions and a red delete section
+↓
+Dragging the table's bottom-right handle previews whole equal rows and columns, then commits those additions once when the pointer is released
+↓
+Every committed text, Checkbox, or table change follows the existing revisioned JSON recovery, autosave, history, and realtime rules
+
+Last updated: 2026-08-06
+
 # Process Story: a copied editor image pastes outside Mango
 
 A user clicks an attachment image in an active Node, Project, or Logic Gate editor and presses Copy
@@ -34,13 +68,13 @@ A user opens a fresh Node, Project, or Logic Gate editor and clicks the exact pl
 ↓
 Mango finishes attaching the live Tiptap surface before it applies that pointer position, keeps the text-box scroll position, and shows the caret on the first click
 ↓
-The selected Outline Style controls future Enter and Tab behavior: Automatic Numbering continues ordered rows, Bullet Points and Checklist start on an empty row, and Indent Guides change only the current text row
+The selected Outline Style controls future Enter and Tab behavior: Automatic Numbering continues ordered rows, Bullet Points and Checkbox start on an empty row, and Indent Guides change only the current text row
 ↓
-Nested numbering rotates through `1.`, `A.`, `1)`, and `A)`; bullets rotate through solid circle, hollow circle, solid square, and hollow square; checklist boxes keep one symbol
+Nested numbering rotates through `1.`, `a.`, `1)`, and `a)`; bullets rotate through solid circle, hollow circle, solid square, and hollow square; Checkbox rows keep one checkbox symbol
 ↓
 Vertical indentation lines paint only in Indent Guides mode
 ↓
-An attachment image can be dragged from its visible frame, and right-clicking a table cell opens row/column create and delete actions
+An attachment image can be dragged from its visible frame, while a table has an elevated shared right-click menu and a bottom-right handle that grows equal rows and columns
 ↓
 Every real document mutation follows the existing revisioned JSON recovery, autosave, history, and realtime rules
 
@@ -283,6 +317,24 @@ Coverage Status:
 
 ## Business Logic
 
+### 2026-08-06 Bidirectional Smart Arrows
+
+- In an editable Node, Project, or Logic Gate Tiptap body, completing the typed pair `->` inserts one durable Unicode right arrow `U+2192`, and completing `<-` inserts one durable Unicode left arrow `U+2190`.
+- The rule is owned by the shared Tiptap extension set and therefore applies in ordinary paragraphs, headings, list items, Checkbox items, and table cells across all three resource editors. Code blocks retain literal typing because editor input rules do not rewrite code.
+- Conversion occurs only as the user completes a pair. Loading, pasting, canonical refresh, and sleeping rendering do not scan or rewrite existing ASCII text.
+- Unicode arrows are document text. JSON persistence, history, recovery, realtime refresh, HTML sanitization, and rich clipboard output must preserve them instead of converting them back to ASCII pairs.
+
+### 2026-08-06 Stable Activation, Checkbox, And Table Growth
+
+- The sleeping JSON renderer remains visible until the attached live Tiptap DOM has accepted the requested pointer caret and focus. Activation preserves editor scroll and selection, performs no document mutation or save, and never creates an empty block. A canonical refresh whose parsed ProseMirror document equals the live document updates revision authority without dispatching `setContent`.
+- Automatic Numbering uses the repeating four-depth cycle `1.`, `a.`, `1)`, `a)`. Alphabetic markers are lowercase at every repeated alphabetic depth.
+- The user-facing outline option is **Checkbox**. On an empty ordinary row, Enter converts that row to one unchecked Checkbox row and leaves the caret in its text area. On a nonempty ordinary row, the split and Checkbox conversion are one document transaction with no plain empty row between the surrounding content and the Checkbox row. Enter inside a Checkbox row creates the next adjacent unchecked Checkbox row, and Tab/Shift+Tab nest or unnest only that row without changing the checkbox symbol.
+- The active and sleeping Checkbox DOM structures must have matching label, input, and content wrappers so activating an editor cannot change row geometry.
+- A table occupies only the intrinsic width of its equal 112-pixel columns and equal 36-pixel rows. It does not expand to the full editor width merely because space is available.
+- The table-cell context menu uses the shared elevated right-click surface, is portaled to viewport coordinates outside editor overflow clipping, and follows the shared grouped pattern: column actions, a separator, row actions, a separator, then red delete actions at the bottom.
+- Selecting a table exposes one bottom-right growth handle. Pointer movement previews only whole nonnegative row and column additions using the table's equal cell geometry. Pointer cancel makes no change; pointer release commits all previewed additions in one ProseMirror transaction and clears stored column widths so every resulting column remains equal.
+- Table menu and growth mutations use the normal revisioned document save path. Neither interaction creates a separate table persistence path.
+
 ### 2026-08-06 Portable Tiptap Image Copy
 
 - Copying a selected attachment image in the active Tiptap editor must not leave the clipboard with only the private `mango-attachment-image` serialization, because external applications cannot render that element.
@@ -291,14 +343,14 @@ Coverage Status:
 
 ### 2026-08-05 Tiptap Interaction Semantics
 
-- First pointer activation may replace a sleeping renderer with the live Tiptap surface, but Mango must wait until that live DOM is attached before resolving the pointer position and focusing it. The first click places the caret, keeps the exact text-box scroll offset, and does not require a second click.
+- First pointer activation keeps the sleeping renderer painted while the live Tiptap surface attaches, resolves the pointer position, and accepts focus. The first click places the caret, keeps the exact text-box scroll offset, performs no document mutation, and does not require a second click.
 - The outline preference is shared with the active Node, Project, and Logic Gate JSON editor. Changing it controls future input and does not rewrite existing rows.
 - Tab and Shift+Tab on an ordinary Tiptap paragraph or heading change only the block containing the caret by one bounded `indentLevel`; they do not insert a tab character, replace a selected range, or change neighboring rows. Structural list Tab/Shift+Tab uses normal one-item nesting/outdent behavior and remains inside table cells.
-- Enter on an empty ordinary row starts the selected Automatic Numbering, Bullet Points, or Checklist structure. In Bullet Points or Checklist mode, Enter in a nonempty ordinary row splits at the caret and changes only the new row into the selected list. Enter in an existing list keeps that list's normal continue/exit behavior.
-- Active JSON ordered-list markers rotate by nesting depth as `1.`, `A.`, `1)`, `A)`, then repeat. Bullet markers rotate solid circle, hollow circle, solid square, hollow square, then repeat. Nested checklist items retain the checkbox marker.
-- Thin nested-list and block-indent guide lines are conditional presentation. They paint only when the current outline preference is Indent Guides and never leak into Automatic Numbering, Bullet Points, or Checklist mode.
+- Enter on an empty ordinary row starts the selected Automatic Numbering, Bullet Points, or Checkbox structure. In Bullet Points or Checkbox mode, Enter in a nonempty ordinary row splits at the caret and changes only the new row into the selected list in one transaction. Enter in an existing list keeps that list's normal continue/exit behavior.
+- Active JSON ordered-list markers rotate by nesting depth as `1.`, `a.`, `1)`, `a)`, then repeat. Bullet markers rotate solid circle, hollow circle, solid square, hollow square, then repeat. Nested Checkbox items retain the checkbox marker.
+- Thin nested-list and block-indent guide lines are conditional presentation. They paint only when the current outline preference is Indent Guides and never leak into Automatic Numbering, Bullet Points, or Checkbox mode.
 - The visible attachment-image frame is a real Tiptap drag handle. Dragging it moves the existing durable image node; it does not upload, duplicate, or change attachment ownership.
-- Right-clicking an active table cell selects that cell and opens the shared table menu for row/column creation and deletion plus table deletion. These commands mutate the same Tiptap document and use normal recovery/autosave/revision handling.
+- Right-clicking an active table cell selects that cell and opens the shared elevated table menu for row/column creation and deletion plus table deletion. Dragging the selected table's bottom-right handle previews and commits equal rows and columns. These commands mutate the same Tiptap document and use normal recovery/autosave/revision handling.
 
 ### 2026-08-02 Project Entity Links And Logic Gate Image Paste
 
@@ -353,9 +405,9 @@ ED24 - Shared editor helpers live under surviving editor, Node, Logic Gate, rela
 ED25 - Shared editing behavior does not collapse all product domains into one table: Node, Logic Gate, and Project document identities remain distinct, while mail compose/draft/signature storage remains mailbox-owned. The shared collaboration engine, outbox spine, socket, health, and recovery protocol are reused only by the approved collaborative document surfaces.
 ED26 - Rich-editor pasted or dropped inline images in unified editor surfaces must follow the global attachment contract in `docs/tests/attachments.md`: temporary previews are allowed, durable editor/email content stores attachment references instead of data URLs or base64 bytes, copying an existing attachment-backed image links that attachment to the target editor resource before insertion, and email adapters convert those references to CID attachments only at the backend send boundary. An asynchronous image upload/link may commit only while the original editor root, document target, and attachment resource context remain current; a target switch or unmount must not mutate the next document. In the active Tiptap JSON editor, a saved insertion bookmark is mapped through intervening ProseMirror transactions so ordinary typing while image imports are running does not cancel or discard the paste.
 ED27 - Chat attachments remain outside the unified rich-editor contract; they must use the global attachment contract as chat attachments rather than inheriting rich-editor body semantics.
-ED28 - Project text boxes must expose the same shared format and outline toolbar controls as node text boxes, including font-size controls, bold, underline, italic, strikethrough, highlight, left/center/right alignment, table insertion, automatic numbering, bullets, checklist, and outline-style selection; project-specific toolbar toggles must call the shared editor controller instead of defining separate semantics.
+ED28 - Project text boxes must expose the same shared format and outline toolbar controls as node text boxes, including font-size controls, bold, underline, italic, strikethrough, highlight, left/center/right alignment, table insertion, automatic numbering, bullets, Checkbox, and outline-style selection; project-specific toolbar toggles must call the shared editor controller instead of defining separate semantics.
 ED29 - The unified rich-editor toolbar source is `EditorTabBar`. Every unified rich editor surface must use the same font-size minus/value/plus, Bold, Underline, Italic, Strikethrough, Highlight, left/center/right alignment, table where supported, and outline-style controls instead of reimplementing a look-alike toolbar. Hover, focus, selected, and active styling belongs to the individual clickable hitbox, never the containing format group; hover uses a luminous cyan/light-blue-to-lavender wash with a crisp cyan edge, while active/selected uses the stronger saturated cyan-to-violet fill, persistent cyan ring, soft two-color glow, and dark high-contrast icon/text after the pointer leaves. Keyboard focus keeps a distinct cyan/violet indicator and disabled controls remain visibly subdued. Strikethrough renders as a crossed-out letter A and, like every control, retains a clear accessible name and tooltip, pressed state where applicable, and keyboard focus indicator.
-ED30 - The shared outline-style dropdown inventory is Automatic Numbering, Indent Guides, Bullet Points, and Checklist. The compact toolbar inventory used by project text boxes, mail compose/reply, attached-email reply, and email signature editing must come from one shared toolbar tab list so adding, removing, renaming, or restyling those controls changes every compact editor surface together.
+ED30 - The shared outline-style dropdown inventory is Automatic Numbering, Indent Guides, Bullet Points, and Checkbox. The compact toolbar inventory used by project text boxes, mail compose/reply, attached-email reply, and email signature editing must come from one shared toolbar tab list so adding, removing, renaming, or restyling those controls changes every compact editor surface together.
 ED31 - Font-size toolbar actions must route through the shared editor formatting controller/helper for every unified rich editor surface, including Logic Gate editor text, node text boxes, project text boxes, My Triage/Shared Triage compose and reply bodies, attached-email reply bodies, and mailbox-scoped email signatures. A surface must not keep a local font-size span mutation path behind the shared toolbar.
 ED32 - The shared formatting controller must restore the last valid editor range before toolbar actions that can move browser focus. Font size and highlight apply immediately to a restored selected range; at a collapsed caret they become visible pending typing styles, including composition/IME text, so the next typed characters use the chosen size/color. Repeated font-size minus/plus clicks preserve and update both the same selected range and the same collapsed-caret pending size; selected text increases on every click, the caret/typing height reflects the chosen size when editor focus returns, and subsequent typing keeps the chosen size until a later user command or legitimate caret-context change replaces it. The literal numeric font-size value is the compact 9px readout between the shared minus/plus controls. **No highlight** clears selected highlighting or records an unhighlighted pending typing style at a collapsed caret. Bold, Underline, Italic, and Strikethrough state must reflect the active or pending command state so activating the same control again removes the format; Italic and Strikethrough selected from a collapsed caret remain pending across toolbar focus and apply to subsequent typing. Enter in the numeric font-size input commits once, while Escape cancels the draft, keeps keyboard focus in the control, and must not let the following blur commit it. Escape from a shared popover consumes the event, closes only that popover, and restores focus to its trigger without closing the surrounding node/editor window; passive format-state reads may restore the saved range but must not force focus out of the toolbar or discard pending marks.
 ED33 - An image-only rich email body containing a durable Mango attachment image counts as sendable content. The frontend must preserve the reference without raw bytes, and the backend email adapter must authorize/resolve it and produce provider-ready CID HTML plus an inline attachment.
@@ -452,8 +504,13 @@ ED116 - Current Tiptap JSON snapshots omit only attributes equal to defaults in 
 
 ED117 - `node_textbox_chats` is the current authority for Node textbox chats. Reads, creates, replies, edits, and deletes use that table and must not create new legacy `Text block chat` information or projection rows. Deleting a textbox deletes every chat it owns, including email-selection chats, and removes each chat's attachment relationships. The normalized email message, thread, and email attachments remain. Existing legacy chat rows are ignored by current reads and retained only as rollback and audit evidence until a separately approved retirement.
 ED118 - A canonical empty TipTap document has one explicit empty paragraph inside the document root; `document.content=[]` is invalid. The forward repair may replace only that exact bad converted shape in `node_textboxes`, `node_textboxes_history`, `node_textbox_seen_snapshots`, and the same arrays inside Recycle Bin restore payloads. It preserves textbox and owner IDs, revisions, annotations, ordering, timestamps, saved-user identity, deletion state, array order, and every unrelated JSON field. The repair never rewrites the shipped cutover migration and never treats the representation correction as a user edit.
-ED119 - The active Node, Project, and Logic Gate Tiptap editor must honor the shared Outline Style on its first user action. First-click activation waits for the live editor DOM before placing focus/caret and preserves scroll. Ordinary Tab/Shift+Tab changes only the current paragraph or heading indent; structural list Tab/Shift+Tab changes only the active list item and remains editor-owned in tables. Empty-row Enter starts the selected numbered, bullet, or checklist structure, whose depth markers follow the documented four-level cycles. Indentation guide lines paint only in Indent Guides mode. The visible image frame starts a real node drag, and table-cell right-click exposes create/delete row/column and delete-table commands through the same revisioned document path.
+ED119 - The active Node, Project, and Logic Gate Tiptap editor must honor the shared Outline Style on its first user action. First-click activation keeps the sleeping document painted until the live editor DOM has accepted focus/caret and preserves scroll without mutating the document. Ordinary Tab/Shift+Tab changes only the current paragraph or heading indent; structural list Tab/Shift+Tab changes only the active list item and remains editor-owned in tables. Empty-row Enter starts the selected numbered, bullet, or Checkbox structure. Indentation guide lines paint only in Indent Guides mode. The visible image frame starts a real node drag, and every table command uses the same revisioned document path.
 ED120 - Copying a selected attachment image in an active Node, Project, or Logic Gate Tiptap editor replaces the private ProseMirror image-node clipboard with portable output. The synchronous event clipboard retains Mango round-trip HTML and filename text, while the system clipboard reloads authorized original bytes and publishes a supported image MIME plus data-image HTML and filename text. Copy is read-only and must not upload, duplicate, relink, save, or mutate document or attachment state.
+ED121 - Editor activation is selection-only. The sleeping document remains painted until the live Tiptap DOM and requested caret are ready; the reveal must not blink, change scroll, save, create a block, or add an empty row. A canonical document that is structurally equal under the active ProseMirror schema updates canonical authority without a replacement transaction.
+ED122 - Automatic Numbering repeats `1.`, `a.`, `1)`, `a)` by nesting depth. The user-facing option is Checkbox. Empty-row Checkbox Enter produces one unchecked Checkbox row with its caret in that row; nonempty ordinary-row Enter performs the split and conversion atomically; existing Checkbox Enter produces the next adjacent unchecked item. Checkbox nesting changes depth without changing its symbol or inserting an ordinary row.
+ED123 - The table-cell context menu uses the shared portaled right-click surface at viewport coordinates, outside editor overflow clipping. Column actions and row actions are grouped by separators, and the bottom delete row, delete column, and delete table actions use destructive red text.
+ED124 - Tables begin at intrinsic content size with equal 112-pixel columns and equal 36-pixel rows instead of filling available editor width. A selected table exposes a bottom-right growth handle; its drag previews whole nonnegative row and column additions, cancel changes nothing, and release commits the preview once while preserving equal column widths and row heights.
+ED125 - Completing `->` or `<-` by typing in an ordinary Node, Project, or Logic Gate Tiptap text position replaces that pair with one durable Unicode `U+2192` or `U+2190` and keeps the caret after it. This shared input rule applies to paragraphs, headings, list items, Checkbox items, and table cells, but not code blocks. It does not rewrite loaded or pasted ASCII pairs, and no sanitizer, clipboard path, history path, recovery path, or realtime path may convert a stored Unicode arrow back into ASCII.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -545,12 +602,12 @@ Expected:
 - Tests cover the shared behavior once and prove each adapter/mount uses that shared behavior.
 - Every rich target mounts the one `EditorDocumentSurface` editable host and uses `useEditorDocumentFormattingController`.
 - Mail compose/reply adapters do not call browser `document.execCommand` directly for rich editing commands when a shared editor command exists.
-- Mail compose/reply, attached-email reply, and signature adapters expose numbered list, indent, outdent, bullet list, checklist, font size, bold, underline, italic, strikethrough, highlight color, left/center/right alignment, link, and table controls where table insertion is supported.
+- Mail compose/reply, attached-email reply, and signature adapters expose numbered list, indent, outdent, bullet list, Checkbox, font size, bold, underline, italic, strikethrough, highlight color, left/center/right alignment, link, and table controls where table insertion is supported.
 - Font size, Bold, Underline, Italic, Strikethrough, Highlight, left/center/right alignment, the outline-style dropdown, and table insertion where supported are supplied by the shared editor toolbar control source rather than a compose-only, signature-only, project-only, Logic Gate-only, node-only, or attached-reply-only toolbar implementation.
 - The same visible toolbar styling is used for the format controls wherever the shared toolbar appears.
 - Hover, focus, selected, and active styling is scoped to the individual toolbar hitbox rather than painting the entire grouped toolbar; hover uses the bright shared cyan/violet wash, active/selected state uses the stronger cyan-to-violet treatment with dark high-contrast text, focus remains visibly outlined, and disabled state remains subdued.
 - Each target DOM has one attachment hydration owner; duplicate passive/layout hydration effects are forbidden, and cleanup runs before external HTML replacement or unmount.
-- The outline-style dropdown lists Automatic Numbering, Indent Guides, Bullet Points, and Checklist from the shared inventory.
+- The outline-style dropdown lists Automatic Numbering, Indent Guides, Bullet Points, and Checkbox from the shared inventory.
 - Font-size minus/value/plus actions route through the shared formatting helper/controller for selected text and sticky collapsed-caret formatting; repeated plus/minus clicks retain the saved caret, update its pending size, and format subsequent typing after focus returns.
 - Toolbar focus changes do not discard the editor range or pending marks; Bold, Underline, Italic, and Strikethrough toggle off on their second activation, including collapsed-caret Italic typing; Strikethrough uses the shared crossed-out A icon without changing its accessible name; font/highlight state follows the caret, selection, or pending collapsed-caret format; and alignment follows the current paragraph/selection or active-table context.
 - Highlight selection, **No highlight**, pending-caret typing, boundary-safe selected-run formatting, and sanitized serialization use one shared split control and command on every target: the main hitbox applies the chosen color without opening the picker, and the arrow opens the picker without applying color.
@@ -923,7 +980,7 @@ The browser sanitizer:
 - Preserves Mango mentions, image frames, tables, bullet lists, and checklists.
 - Converts native `<ul>` to Mango bullets.
 - Preserves native `<ol>` as native ordered lists.
-- Converts the Unicode right-arrow character to the two ASCII characters `->` during sanitization.
+- Preserves Unicode left- and right-arrow characters during sanitization.
 - Trims leading/trailing newline text nodes at the paste fragment boundary.
 
 It does not fully preserve common source structures:

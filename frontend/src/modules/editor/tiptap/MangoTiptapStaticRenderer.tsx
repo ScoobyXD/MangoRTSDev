@@ -31,6 +31,7 @@ type MangoTiptapStaticRendererProps = {
   style?: React.CSSProperties;
   ariaLabel?: string;
   annotations?: readonly MangoTiptapAnnotation[];
+  dataAttributes?: Record<string, string | undefined>;
   renderAttachmentImage?: (attributes: MangoStaticAttachmentImageProps) => React.ReactNode;
 };
 
@@ -166,10 +167,17 @@ function renderNode(
     case "taskList": return <ul key={key} {...blockProps} data-type="taskList">{children}</ul>;
     case "taskItem": return (
       <li key={key} {...blockProps} data-type="taskItem" data-checked={Boolean(attrs.checked)}>
-        <input type="checkbox" checked={Boolean(attrs.checked)} readOnly tabIndex={-1} aria-hidden="true" /> {children}
+        <label>
+          <input type="checkbox" checked={Boolean(attrs.checked)} readOnly tabIndex={-1} aria-hidden="true" /><span />
+        </label>
+        <div>{children}</div>
       </li>
     );
-    case "table": return <table key={key} {...blockProps} style={{ borderCollapse: "collapse", width: "100%", tableLayout: attrs.style === "fixed" ? "fixed" : undefined }}><tbody>{children}</tbody></table>;
+    case "table": return (
+      <div key={key} className="tableWrapper">
+        <table {...blockProps} style={{ borderCollapse: "collapse", tableLayout: attrs.style === "fixed" ? "fixed" : undefined }}><tbody>{children}</tbody></table>
+      </div>
+    );
     case "tableRow": return <tr key={key}>{children}</tr>;
     case "tableHeader": {
       const width = Array.isArray(attrs.colwidth) && Number(attrs.colwidth[0]) > 0 ? Number(attrs.colwidth[0]) : undefined;
@@ -221,6 +229,7 @@ function renderNode(
 
 export const MangoTiptapStaticRenderer: React.FC<MangoTiptapStaticRendererProps> = ({
   value,
+  dataAttributes,
   className,
   style,
   ariaLabel,
@@ -230,6 +239,7 @@ export const MangoTiptapStaticRenderer: React.FC<MangoTiptapStaticRendererProps>
   const visibleAnnotations = annotations.filter((annotation) => !isDormantMangoTiptapAnnotation(annotation));
   return (
     <div
+      {...dataAttributes}
       className={`mango-tiptap-document mango-tiptap-static-document${className ? ` ${className}` : ""}`}
       style={style}
       aria-label={ariaLabel}
