@@ -2676,7 +2676,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                 companyUsers={companyUsers}
                                 documentValue={block.document}
                                 documentScrollMemoryRef={projectDocumentScrollMemoryRef}
-                                contentChanges={[]}
                                 chatMessages={chatMessagesByBlockID.get(block.id) ?? []}
                                 activeChatAnchorMessageID={activeChatMessageIDs[block.id] ?? ""}
                                 chatNavigationRequest={chatNavigationRequests[block.id] ?? null}
@@ -2712,7 +2711,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                 }}
                                 onRecoveryStorageError={setError}
                                 onRecoveryStorageRecovered={() => setError("")}
-                                onChangeSeen={() => undefined}
                                 onChatHighlightActivate={(messageID) => {
                                   setFocusedTextBlockID(block.id);
                                   setActiveRichTextBlockID("");

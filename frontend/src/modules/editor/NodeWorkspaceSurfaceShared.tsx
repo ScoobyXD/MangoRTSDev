@@ -12,7 +12,6 @@ import {
 } from "../attachments/attachmentApi";
 import type { MentionableCompanyUser } from "./editorMentions";
 import type { EditorChatAttachment, EditorTextBlockChatMessage } from "./editorProjection";
-import type { NodeContentChange } from "./nodeContentChanges";
 import type { EditorOutlineStyleID } from "./plainTextEditing";
 import type { EditorHighlightColor } from "./richTextEditing";
 import type { EditorDocumentFormattingController, EditorSelectionInlineFormatState, EditorTextAlignment } from "./useEditorDocumentSurfaceHandlers";
@@ -32,7 +31,6 @@ export type NodeWorkspaceSurfaceProps = {
   nodePriorityDraft: string;
   assignedLogicGateIDs: string[];
   projections: NodeProjectionItem[];
-  unseenChanges: NodeContentChange[];
   companyUsers: MentionableCompanyUser[];
   projectionsLoaded: boolean;
   editorSequence: number;
@@ -53,8 +51,6 @@ export type NodeWorkspaceSurfaceProps = {
   formattingControllerRef?: React.MutableRefObject<EditorDocumentFormattingController | null>;
   requestJSON: RequestJSON;
   onProjectionMutation: () => void;
-  onMarkChangeSeen: (changeID: string) => void;
-  onMarkAllChangesSeen: () => void;
   onCreateNodeFromImage: (request: NodeImageNodeRequest) => Promise<void>;
   onAssignToLogicGate: (logicGateID: string) => Promise<void>;
   onRequireNodePriorityForLogicGateAssignment: () => void;

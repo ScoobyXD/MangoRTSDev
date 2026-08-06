@@ -1,25 +1,25 @@
-# Process Story: Node work resolves its own current V2 policy before any read or mutation
+# Process Story: Node edits retain dormant change anchors without unread highlights
 
 A user creates or opens a Node from Home, Explorer, Kanban, Project, Updates, an entity link, or a direct route
 ↓
 The canonical Node, relationships, final textbox data, and current inherited/customized GVIC and permission policies load through their exact APIs and actor-safe caches
 ↓
-Editing records authored additions/deletions and preserves each viewer's unread count and seen baseline
+Persisted Tiptap annotations whose kind is `change` load as dormant positional metadata: they do not render, count, navigate, activate, or call a seen API
 ↓
-Manual Save records saving-user history, and History/Restore keeps stable textbox identities and current highlight behavior
+Normal edits map each dormant range with the document transaction, and autosave, recovery, Manual Save, History, and Restore retain it with the matching JSON revision
 ↓
-Attachments, exact email ownership, chats, collaboration, deletion, recycle, and restore continue without any coordinate payload or position row
+Comments, chats, email selections, normal formatting highlights, attachments, exact email ownership, collaboration, deletion, recycle, and restore continue without an unread-change subsystem
 # Process Story: Node content lives in final purpose-built storage
 
 A user creates or edits a Node textbox, attaches an exact email, uploads a file, or creates a chat
 ↓
 The backend stores TipTap JSON in `node_textboxes`, chat rows in `node_textbox_chats`, exact email placement in `email_relationships`, and file ownership in `attachment_relationships`
 ↓
-Content changes and viewer baselines use `node_content_changes.textbox_id`, `node_content_change_seen`, and `node_textbox_seen_snapshots`; the API keeps the stable public `information_id` by assembling projection-shaped responses from those final rows
+The API keeps the stable public `information_id` by assembling projection-shaped responses from current textbox, chat, email, and attachment rows; dormant `change` annotations remain only inside textbox JSON
 ↓
 Deleting a textbox removes its owned chats and retires those chats' file links. Node-owned file and email relationships remain available from the Node header even when their recorded textbox origin is deleted; deleting the final file owner follows pending-delete, S3-before-Postgres, retry-safe cleanup
 ↓
-During the one-time writer-paused final cutover, an active legacy textbox absent from `node_textboxes` is copied with its exact stable ID. A legacy seen row is discarded only when its current Node still exists and its exact legacy projection, exact final textbox, history, and content changes are all absent; every seen row for a real textbox is migrated.
+The removed unread-change API, cache, writers, viewer baselines, and database tables are not compatibility dependencies. Deploy the table-free runtime before a human runs the strict forward retirement migration.
 
 The production Node path must never query or write `node_information`, `node_projection_table`, or `node_projection_seen_snapshots`. Textbox creation and editing use the JSON editor API; the old projection-shaped text writer is rejected rather than translated or dual-written.
 
@@ -140,7 +140,7 @@ N86 - Opening Relationships, Metadata, History, or Save Settings from the editor
 N87 - Node saved-version history is not loaded during ordinary node open. It loads on Save Settings activation, preserves manual save/restore behavior, and is cleared/reloaded for the current company/node target rather than blocking initial editor content.
 N88 - Node-open reference reads use StrictMode-safe shared ownership: node resource-attachment metadata is one node-scope cached request with explicit mutation invalidation, project relationships are singleflight/cached with invalidation before relationship refresh, and company accounts/users/group reference data is shared across editor instances with mutation/auth-scope invalidation.
 N89 - `GET /v2/nodes/{node_id}/view` authorizes first, then reads dedicated shared and actor-specific node-view versions to calculate a salted ETag before building the consolidated payload. A matching request returns `304` without loading/serializing/hash-building the full view, without reading `event_rows`, and without writing seen state; ordinary `200` reads are also write-free.
-N90 - Establishing the first-clean-view projection baseline is an explicit idempotent bulk node-changes command outside the canonical GET. It anchors only current text projections that have no unseen other-actor change, derives each baseline from the observed projection update timestamp rather than wall-clock time, uses one bulk repository operation, and never consumes genuinely unseen changes. Clean-anchor snapshot writes do not bump the actor node-view version because the response body is unchanged. The frontend tracks a bounded last-success ETag per cache key and retries failures with bounded same-generation backoff.
+N90 - A persisted Tiptap annotation with `kind: "change"` is dormant positional metadata. The editor maps it through document transactions and retains it through autosave, IndexedDB recovery, canonical recovery, Manual Save, History, Restore, and reload even when no feature owner supplies it. It must not render a decoration, count as unread, become a navigation target, activate a callback, call a seen API, or change a Node-view ETag.
 N91 - Every successful Node rename entry point covered by RW15 publishes the concrete committed-title event after the HTTP command succeeds, and applicable same-window Node labels converge under RW15 without server fan-out. An actively edited Editor title defers the event without changing its draft/caret; passive dock/pin updates do not change recency or write pin rows.
 N92 - Mounted Node chat performs one single-flight canonical durable-chat refresh on first subscription acceptance and every reconnect acceptance, with at most one queued final read and no overlap/invalidation. A later local handler joining the already accepted Node scope receives immediate acceptance. This closes each mount's load-to-subscribe race without replay/generalized history or dirty editor-text replacement.
 N93 - A node editor header keeps Editor, Permissions, the shared formatting toolbar, Outline Styles/Automatic Numbering, and the immediately adjacent More control on one nonwrapping line. Relationships, Metadata, History, Save Settings, save-version/related-node commands, and supported opener-specific secondary actions remain available in the accessible **More editor actions** overflow menu with their existing permission and disabled state.
@@ -600,15 +600,15 @@ Business logic covered:
 
 Given:
 - React StrictMode opens the same node in more than one editor instance.
-- The client has a current node-view ETag and the node contains text boxes with and without unseen other-actor changes.
+- The client has a current node-view ETag and a textbox may contain a persisted dormant `change` annotation.
 
 Expected:
 - Initial document rendering does not wait for saved-version history, and Save Settings activation loads that history once for the active target.
 - Attachment metadata, project relationships, company accounts, and company people/group references coalesce compatible in-flight reads and reuse authorized cached results.
 - Attachment and relationship mutations invalidate their cache before emitting a refresh; account/user/group mutations invalidate shared reference data before their update event.
 - The backend authorizes the conditional node view, reads one indexed shared/user version pair, and returns `304` before consolidated payload construction.
-- Neither a node-view `200` nor `304` writes projection seen snapshots or reads editor/event-row sequence state.
-- The separate clean-anchor command uses one bulk write, anchors clean text projections at their observed update timestamps, leaves unseen/later changes present, does not churn the view ETag for baseline-only writes, and is issued at most once for the successful view cache key/ETag with bounded retry after failure.
+- Neither a node-view `200` nor `304` writes seen/anchor state or reads editor/event-row sequence state.
+- The client makes no Node changes or anchor-clean request. Dormant change annotations remain in the canonical textbox JSON and do not affect view revalidation.
 
 ### Scenario N-S18: Same-Window Rename And Chat Acceptance Reconciliation
 
@@ -727,7 +727,7 @@ N130 - Every stored-email and attachment read authorizes the company, Node, and 
 
 N131 - `node_textbox_chats` is the authority for current Node textbox comments after cutover. Deleting a textbox deletes all chats owned by it, including chats with an email selection, and tombstones their chat-attachment links; the normalized email message/thread and email attachments remain. Legacy `Text block chat` rows remain rollback evidence but are excluded from runtime reads and receive no new writes.
 
-N132 - With Node/editor writers paused, the final storage migration copies only active legacy `Text box` projections whose exact stable ID is absent from `node_textboxes`; it never overwrites a final textbox. It removes a legacy seen snapshot only when its current Node exists and no exact legacy projection, final textbox, history, or content change exists. It migrates every remaining seen snapshot, reconciles identities exactly, and rolls the entire transaction back on conversion, ownership, schema, or reconciliation failure.
+N132 - After the table-free application is deployed, the operator-controlled Node unread-highlight retirement must strictly remove only the three retired feature tables and their dedicated indexes, triggers, foreign key, and functions. It must refuse unsupported PostgreSQL versions, shape drift, or unexpected dependencies; it must not use `CASCADE`, alter current/history textbox JSON, or add a fallback reader, writer, API, or replacement table.
 
 N133 - A Node assigned to a Logic Gate uses that Logic Gate as its immediate policy parent. Inherited Nodes change with the current active parent policy; customized Nodes remain independent.
 
@@ -824,25 +824,23 @@ Expected:
 - Their active `node_chat_message` attachment links are tombstoned without deleting the underlying attachment content.
 - The normalized email message, thread, and email attachments remain, and the deleted textbox's chats no longer appear in Node reads.
 
-### Scenario N-S27: Final Delta Keeps Real Textboxes and Removes Only Orphaned Seen Rows
+### Scenario N-S27: Dormant Change Anchors Survive Unread-Highlight Retirement
 
 Business logic covered:
 - N132
 
 Given:
-- Writers are paused.
-- Some active legacy `Text box` projections were created after the earlier additive copy and therefore have no exact `node_textboxes` row.
-- Their legacy seen snapshots still point to those real projections.
-- Other legacy seen snapshots belong to current Nodes but have no exact projection, final textbox, history, or content change.
+- Current and history Node textbox JSON contain valid dormant `change` annotations.
+- The old unread-highlight tables still exist, and the deployed application no longer reads or writes them.
 
 When:
-- The PostgreSQL 17 final Node storage migration runs.
+- A human compares the read-only aggregate counts and JSON checksums, runs the strict forward retirement migration, and runs the read-only verification SQL.
 
 Expected:
-- Each missing real textbox is converted to final TipTap JSON and inserted with its original textbox ID, revision, and timestamps. Existing final textboxes are not updated.
-- Seen snapshots for those real textboxes are retained in the legacy source and copied to `node_textbox_seen_snapshots`.
-- Only snapshots with a current Node but no exact projection, final textbox, history, or content change are deleted as stale.
-- The migration reports copied, removed, and migrated counts and commits only after exact reconciliation.
+- Current and history textbox row counts and JSON checksums are unchanged, including all nested dormant annotations.
+- The retired tables, indexes, triggers, and dedicated functions are absent; no unrelated Node view-version function is dropped.
+- Node open/edit/save/reload/recovery/history continue to retain mapped dormant ranges without rendering or issuing any changes/seen request.
+- Recycle and restore use only surviving owner-specific rows and ignore obsolete top-level keys in older payloads.
 
 Automated coverage:
 - `backend/internal/store/node_final_storage_contract_test.go`

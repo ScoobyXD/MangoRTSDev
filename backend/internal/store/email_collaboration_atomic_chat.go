@@ -48,8 +48,6 @@ func (r *MemoryRepo) AddEmailCollaborationNodeInformationWithActor(input NodeInf
 	nodesBefore := cloneMemoryMap(r.nodes)
 	nodeInfoBefore := cloneMemorySliceMap(r.nodeInfo)
 	nodeTextBefore := cloneMemoryNodeText(r.nodeText)
-	contentChangesBefore := cloneMemoryMap(r.nodeContentChanges)
-	contentSeenBefore := cloneMemoryMap(r.nodeContentChangeSeen)
 	readVersionsBefore := cloneMemoryMap(r.workspaceReadVersions)
 	outboxBefore := cloneMemoryMap(r.realtimeOutbox)
 	outboxSequenceBefore := r.realtimeOutboxSequence
@@ -64,8 +62,6 @@ func (r *MemoryRepo) AddEmailCollaborationNodeInformationWithActor(input NodeInf
 		r.nodes = nodesBefore
 		r.nodeInfo = nodeInfoBefore
 		r.nodeText = nodeTextBefore
-		r.nodeContentChanges = contentChangesBefore
-		r.nodeContentChangeSeen = contentSeenBefore
 		r.workspaceReadVersions = readVersionsBefore
 		r.realtimeOutbox = outboxBefore
 		r.realtimeOutboxSequence = outboxSequenceBefore
@@ -121,20 +117,13 @@ func (r *MemoryRepo) addEmailCollaborationNodeInformationLocked(input NodeInform
 		r.nodeText[k] = map[string]domain.NodeProjection{}
 	}
 	created := item.CreatedTimestamp
-	var previous *domain.NodeProjection
 	if existing, ok := r.nodeText[k][projectionID]; ok {
 		created = existing.CreatedTimestamp
-		existingCopy := existing
-		previous = &existingCopy
 	}
 	r.nodeText[k][projectionID] = domain.NodeProjection{
 		CompanyID: input.CompanyID, NodeID: input.NodeID, InformationID: projectionID,
 		Type: input.Type, Information: input.Information, CreatedTimestamp: created, UpdatedTimestamp: now,
 	}
-	r.recordNodeContentChangesLocked(buildNodeContentChanges(
-		input.CompanyID, input.NodeID, projectionID, input.Type, previous, input.Information,
-		normalizeNodeContentChangeActor(input.ActorUserID, input.ActorDisplayName), now,
-	))
 	r.bumpNodeViewVersionLocked(input.CompanyID, input.NodeID)
 	return item
 }
@@ -153,8 +142,6 @@ func (r *MemoryRepo) UpsertEmailCollaborationNodeProjectionWithActor(input NodeI
 	effectiveAccessBefore := cloneMemoryMap(r.effectiveAccess)
 	nodesBefore := cloneMemoryMap(r.nodes)
 	nodeTextBefore := cloneMemoryNodeText(r.nodeText)
-	contentChangesBefore := cloneMemoryMap(r.nodeContentChanges)
-	contentSeenBefore := cloneMemoryMap(r.nodeContentChangeSeen)
 	readVersionsBefore := cloneMemoryMap(r.workspaceReadVersions)
 	outboxBefore := cloneMemoryMap(r.realtimeOutbox)
 	outboxSequenceBefore := r.realtimeOutboxSequence
@@ -168,8 +155,6 @@ func (r *MemoryRepo) UpsertEmailCollaborationNodeProjectionWithActor(input NodeI
 		r.effectiveAccess = effectiveAccessBefore
 		r.nodes = nodesBefore
 		r.nodeText = nodeTextBefore
-		r.nodeContentChanges = contentChangesBefore
-		r.nodeContentChangeSeen = contentSeenBefore
 		r.workspaceReadVersions = readVersionsBefore
 		r.realtimeOutbox = outboxBefore
 		r.realtimeOutboxSequence = outboxSequenceBefore
@@ -212,21 +197,14 @@ func (r *MemoryRepo) upsertEmailCollaborationNodeProjectionLocked(input NodeInfo
 	}
 	now := time.Now().UTC()
 	created := now
-	var previous *domain.NodeProjection
 	if existing, ok := r.nodeText[k][input.InformationID]; ok {
 		created = existing.CreatedTimestamp
-		existingCopy := existing
-		previous = &existingCopy
 	}
 	projection := domain.NodeProjection{
 		CompanyID: input.CompanyID, NodeID: input.NodeID, InformationID: input.InformationID,
 		Type: input.Type, Information: input.Information, CreatedTimestamp: created, UpdatedTimestamp: now,
 	}
 	r.nodeText[k][input.InformationID] = projection
-	r.recordNodeContentChangesLocked(buildNodeContentChanges(
-		input.CompanyID, input.NodeID, input.InformationID, input.Type, previous, input.Information,
-		normalizeNodeContentChangeActor(input.ActorUserID, input.ActorDisplayName), now,
-	))
 	return projection
 }
 
@@ -338,15 +316,8 @@ func addEmailCollaborationNodeInformationTx(ctx context.Context, tx *sql.Tx, inp
 		if chatID == "" {
 			chatID = newUUIDv7String()
 		}
-		previous, previousFound, err := postgresNodeTextboxChatProjectionTx(ctx, tx, input.CompanyID, input.NodeID, chatID)
-		if err != nil {
-			return domain.NodeInformation{}, err
-		}
 		projection, _, err := upsertPostgresNodeTextboxChatTx(ctx, tx, input, chatID)
 		if err != nil {
-			return domain.NodeInformation{}, err
-		}
-		if err := recordEmailCollaborationNodeContentChangesTx(ctx, tx, input, chatID, previous, previousFound); err != nil {
 			return domain.NodeInformation{}, err
 		}
 		return domain.NodeInformation{
@@ -371,15 +342,12 @@ func addEmailCollaborationNodeInformationTx(ctx context.Context, tx *sql.Tx, inp
 
 func upsertEmailCollaborationNodeProjectionTx(ctx context.Context, tx *sql.Tx, input NodeInformationInput) (domain.NodeProjection, bool, error) {
 	if isNodeTextboxChatType(input.Type) {
-		previous, previousFound, err := postgresNodeTextboxChatProjectionTx(ctx, tx, input.CompanyID, input.NodeID, input.InformationID)
+		_, previousFound, err := postgresNodeTextboxChatProjectionTx(ctx, tx, input.CompanyID, input.NodeID, input.InformationID)
 		if err != nil {
 			return domain.NodeProjection{}, false, err
 		}
 		projection, _, err := upsertPostgresNodeTextboxChatTx(ctx, tx, input, input.InformationID)
 		if err != nil {
-			return domain.NodeProjection{}, false, err
-		}
-		if err := recordEmailCollaborationNodeContentChangesTx(ctx, tx, input, input.InformationID, previous, previousFound); err != nil {
 			return domain.NodeProjection{}, false, err
 		}
 		return projection, previousFound, nil
@@ -393,15 +361,4 @@ func upsertEmailCollaborationNodeProjectionTx(ctx context.Context, tx *sql.Tx, i
 	}
 	projection, err := addPostgresNodeEmailRelationshipTx(ctx, tx, input, input.InformationID)
 	return projection, found, err
-}
-
-func recordEmailCollaborationNodeContentChangesTx(ctx context.Context, tx *sql.Tx, input NodeInformationInput, informationID string, previous domain.NodeProjection, previousFound bool) error {
-	var previousPtr *domain.NodeProjection
-	if previousFound {
-		previousPtr = &previous
-	}
-	return insertNodeContentChangesTx(ctx, tx, buildNodeContentChanges(
-		input.CompanyID, input.NodeID, informationID, input.Type, previousPtr, input.Information,
-		normalizeNodeContentChangeActor(input.ActorUserID, input.ActorDisplayName), time.Now().UTC(),
-	))
 }

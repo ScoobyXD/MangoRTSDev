@@ -5,9 +5,8 @@ import {
   throwIfResourceMarkedMissing,
 } from "../api/missingResources.js";
 import { getAuthSessionCacheGeneration } from "../../auth/cognitoAuth.js";
-import { requestJSON, requestJSONWithMeta } from "../api/requestJSON.js";
+import { requestJSONWithMeta } from "../api/requestJSON.js";
 import { isHTTPNotFoundError } from "../api/requestJSON.js";
-import type { NodeContentChange } from "../editor/nodeContentChanges.js";
 import type { LogicGateGVICAssignment } from "../logic-gates/types.js";
 import type { NodeDetails, NodeRecord, NodeRelationship } from "./types.js";
 
@@ -26,7 +25,6 @@ type NodeViewResponse = NodeDetails & {
   company_id?: string;
   node_id?: string;
   projections?: NodeProjectionItem[];
-  content_changes?: NodeContentChange[];
   gvic_assignments?: LogicGateGVICAssignment[];
 };
 
@@ -35,18 +33,12 @@ const viewInflight = new Map<string, Promise<NodeViewResponse>>();
 const viewGeneration = new Map<string, number>();
 const viewETag = new Map<string, string>();
 const viewFresh = new Set<string>();
-const anchorCleanInflight = new Map<string, Promise<void>>();
-const anchorCleanSucceededETag = new Map<string, string>();
-const anchorCleanRetryState = new Map<string, { attempts: number; etag: string }>();
-const anchorCleanRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const ANCHOR_CLEAN_RETRY_DELAYS_MS = [250, 1_000] as const;
 let nodeRecordStoreAuthGeneration = getAuthSessionCacheGeneration();
 
 const detailsCache = new Map<string, NodeDetails>();
 
 const projectionCache = new Map<string, NodeProjectionItem[]>();
 
-const contentChangeCache = new Map<string, NodeContentChange[]>();
 const gvicAssignmentCache = new Map<string, LogicGateGVICAssignment[]>();
 
 function key(apiBase: string, companyID: string, nodeID: string): string {
@@ -63,14 +55,8 @@ function ensureNodeRecordStoreAuthScope(): void {
   viewGeneration.clear();
   viewETag.clear();
   viewFresh.clear();
-  anchorCleanInflight.clear();
-  anchorCleanSucceededETag.clear();
-  anchorCleanRetryState.clear();
-  anchorCleanRetryTimers.forEach((timer) => clearTimeout(timer));
-  anchorCleanRetryTimers.clear();
   detailsCache.clear();
   projectionCache.clear();
-  contentChangeCache.clear();
   gvicAssignmentCache.clear();
 }
 
@@ -87,7 +73,6 @@ function cacheNodeViewPayload(cacheKey: string, payload: NodeViewResponse): Node
   const details = nodeDetailsFromViewPayload(payload);
   detailsCache.set(cacheKey, details);
   projectionCache.set(cacheKey, payload.projections ?? []);
-  contentChangeCache.set(cacheKey, payload.content_changes ?? []);
   gvicAssignmentCache.set(cacheKey, payload.gvic_assignments ?? []);
   return details;
 }
@@ -128,9 +113,6 @@ async function getNodeViewPayloadSingleFlight(apiBase: string, companyID: string
       if (responseETag) viewETag.set(cacheKey, responseETag);
       cacheNodeViewPayload(cacheKey, payload);
       viewFresh.add(cacheKey);
-      if (responseETag && !response.notModified) {
-        scheduleNodeProjectionAnchorClean(apiBase, companyID, nodeID, cacheKey, responseETag);
-      }
       if (viewInflight.get(cacheKey) === promise) viewInflight.delete(cacheKey);
       return payload;
     })
@@ -147,44 +129,6 @@ async function getNodeViewPayloadSingleFlight(apiBase: string, companyID: string
   return promise;
 }
 
-function scheduleNodeProjectionAnchorClean(
-  apiBase: string,
-  companyID: string,
-  nodeID: string,
-  cacheKey: string,
-  etag: string,
-): void {
-  const anchorKey = `${cacheKey}\u0000${etag}`;
-  if (anchorCleanSucceededETag.get(cacheKey) === etag || anchorCleanInflight.has(anchorKey) || anchorCleanRetryTimers.has(cacheKey)) return;
-  const authGeneration = nodeRecordStoreAuthGeneration;
-  const retryState = anchorCleanRetryState.get(cacheKey);
-  if (!retryState || retryState.etag !== etag) anchorCleanRetryState.set(cacheKey, { attempts: 0, etag });
-  const promise = requestJSON<{ status?: string }>(apiBase, `/v1/nodes/${encodeURIComponent(nodeID)}/changes/anchor-clean`, {
-    method: "POST",
-    json: { company_id: companyID },
-  }).then(() => {
-    if (getAuthSessionCacheGeneration() !== authGeneration) return;
-    anchorCleanSucceededETag.set(cacheKey, etag);
-    anchorCleanRetryState.delete(cacheKey);
-  }).catch(() => {
-    if (getAuthSessionCacheGeneration() !== authGeneration || viewETag.get(cacheKey) !== etag || !viewFresh.has(cacheKey)) return;
-    const current = anchorCleanRetryState.get(cacheKey) ?? { attempts: 0, etag };
-    const retryDelay = ANCHOR_CLEAN_RETRY_DELAYS_MS[current.attempts];
-    if (retryDelay === undefined) return;
-    anchorCleanRetryState.set(cacheKey, { attempts: current.attempts + 1, etag });
-    const timer = setTimeout(() => {
-      if (anchorCleanRetryTimers.get(cacheKey) === timer) anchorCleanRetryTimers.delete(cacheKey);
-      if (getAuthSessionCacheGeneration() === authGeneration && viewETag.get(cacheKey) === etag && viewFresh.has(cacheKey)) {
-        scheduleNodeProjectionAnchorClean(apiBase, companyID, nodeID, cacheKey, etag);
-      }
-    }, retryDelay);
-    anchorCleanRetryTimers.set(cacheKey, timer);
-  }).finally(() => {
-    if (anchorCleanInflight.get(anchorKey) === promise) anchorCleanInflight.delete(anchorKey);
-  });
-  anchorCleanInflight.set(anchorKey, promise);
-}
-
 export function invalidateNodeRecordStoreCaches(apiBase: string, companyID: string, nodeID: string): void {
   const cacheKey = key(apiBase, companyID, nodeID);
   bumpViewGeneration(cacheKey);
@@ -192,7 +136,6 @@ export function invalidateNodeRecordStoreCaches(apiBase: string, companyID: stri
   viewFresh.delete(cacheKey);
   detailsCache.delete(cacheKey);
   projectionCache.delete(cacheKey);
-  contentChangeCache.delete(cacheKey);
   gvicAssignmentCache.delete(cacheKey);
 }
 
@@ -209,11 +152,6 @@ export function primeNodeRecordStoreCaches(apiBase: string, companyID: string, e
     viewCache.delete(cacheKey);
     viewETag.delete(cacheKey);
     viewFresh.delete(cacheKey);
-    anchorCleanSucceededETag.delete(cacheKey);
-    anchorCleanRetryState.delete(cacheKey);
-    const anchorRetryTimer = anchorCleanRetryTimers.get(cacheKey);
-    if (anchorRetryTimer) clearTimeout(anchorRetryTimer);
-    anchorCleanRetryTimers.delete(cacheKey);
     detailsCache.set(cacheKey, {
       node: entry.node,
       information: [],
@@ -224,7 +162,6 @@ export function primeNodeRecordStoreCaches(apiBase: string, companyID: string, e
       can_edit: entry.node.can_edit,
     });
     projectionCache.set(cacheKey, entry.projections ?? []);
-    contentChangeCache.set(cacheKey, []);
     gvicAssignmentCache.set(cacheKey, []);
   }
 }
@@ -243,14 +180,6 @@ export async function getNodeInformationProjectionSingleFlight(apiBase: string, 
   if (cached) return cached;
   const payload = await getNodeViewPayloadSingleFlight(apiBase, companyID, nodeID);
   return payload.projections ?? [];
-}
-
-export async function getNodeContentChangesSingleFlight(apiBase: string, companyID: string, nodeID: string): Promise<NodeContentChange[]> {
-  const cacheKey = key(apiBase, companyID, nodeID);
-  const cached = contentChangeCache.get(cacheKey);
-  if (cached) return cached;
-  const payload = await getNodeViewPayloadSingleFlight(apiBase, companyID, nodeID);
-  return payload.content_changes ?? [];
 }
 
 export async function getNodeGVICAssignmentsSingleFlight(apiBase: string, companyID: string, nodeID: string): Promise<LogicGateGVICAssignment[]> {

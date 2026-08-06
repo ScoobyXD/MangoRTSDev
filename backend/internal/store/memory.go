@@ -3,7 +3,6 @@ package store
 import (
 	"miraeopus/backend/internal/domain"
 	"sync"
-	"time"
 )
 
 type MemoryRepo struct {
@@ -11,11 +10,8 @@ type MemoryRepo struct {
 	nodes                          map[string]domain.Node
 	nodeInfo                       map[string][]domain.NodeInformation
 	nodeText                       map[string]map[string]domain.NodeProjection
-	nodeContentChanges             map[string]domain.NodeContentChange
 	nodeTimelineEvents             map[string]domain.NodeTimelineEvent
 	nodeTimelineVerificationSeen   map[string]string
-	nodeContentChangeSeen          map[string]time.Time
-	nodeProjectionSeen             map[string]memoryNodeProjectionSeen
 	nodeRels                       map[string][]domain.NodeRelationship
 	accounts                       map[string]domain.Account
 	accountFolders                 map[string]domain.AccountFolder
@@ -114,11 +110,8 @@ func NewMemoryRepo() *MemoryRepo {
 		nodes:                          map[string]domain.Node{},
 		nodeInfo:                       map[string][]domain.NodeInformation{},
 		nodeText:                       map[string]map[string]domain.NodeProjection{},
-		nodeContentChanges:             map[string]domain.NodeContentChange{},
 		nodeTimelineEvents:             map[string]domain.NodeTimelineEvent{},
 		nodeTimelineVerificationSeen:   map[string]string{},
-		nodeContentChangeSeen:          map[string]time.Time{},
-		nodeProjectionSeen:             map[string]memoryNodeProjectionSeen{},
 		nodeRels:                       map[string][]domain.NodeRelationship{},
 		accounts:                       map[string]domain.Account{},
 		accountFolders:                 map[string]domain.AccountFolder{},
@@ -208,19 +201,6 @@ func NewMemoryRepo() *MemoryRepo {
 
 func key(companyID, id string) string {
 	return companyID + ":" + id
-}
-
-func nodeContentChangeSeenKey(companyID, changeID, userID string) string {
-	return companyID + ":" + changeID + ":" + userID
-}
-
-type memoryNodeProjectionSeen struct {
-	information string
-	seenAt      time.Time
-}
-
-func nodeProjectionSeenKey(companyID, nodeID, informationID, userID string) string {
-	return companyID + ":" + nodeID + ":" + informationID + ":" + userID
 }
 
 func folderItemKey(companyID, itemType, itemID string) string {

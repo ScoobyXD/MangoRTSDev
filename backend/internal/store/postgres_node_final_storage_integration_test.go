@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func TestPostgresNodeFinalTextboxChatEmailUnseenAndAttachmentStorage(t *testing.T) {
+func TestPostgresNodeFinalTextboxChatEmailAndAttachmentStorage(t *testing.T) {
 	db, repo := openRealtimePostgresIntegration(t)
 	company, err := repo.CreateCompany("Node final storage integration")
 	if err != nil {
@@ -39,11 +39,6 @@ func TestPostgresNodeFinalTextboxChatEmailUnseenAndAttachmentStorage(t *testing.
 	if err != nil || commit.Revision != 1 {
 		t.Fatalf("initial Node textbox commit=%+v err=%v", commit, err)
 	}
-	if _, err := repo.MarkNodeContentChangeSeen(NodeContentChangeSeenInput{
-		CompanyID: company.CompanyID, NodeID: node.NodeID, UserID: owner.UserID,
-	}); err != nil {
-		t.Fatal(err)
-	}
 	updatedDocument := editorMergeTestDocument(t,
 		`{"type":"paragraph","attrs":{"blockId":"node-final-a"},"content":[{"type":"text","text":"first and second"}]}`)
 	if _, err := repo.CommitEditorJSONDocument(EditorJSONCommitInput{
@@ -54,23 +49,6 @@ func TestPostgresNodeFinalTextboxChatEmailUnseenAndAttachmentStorage(t *testing.
 	}); err != nil {
 		t.Fatal(err)
 	}
-	unseen, err := repo.ListUnseenNodeContentChanges(NodeContentChangeListInput{
-		CompanyID: company.CompanyID, NodeID: node.NodeID, UserID: owner.UserID,
-	})
-	if err != nil || len(unseen) == 0 || !strings.Contains(unseen[len(unseen)-1].Text, "second") ||
-		unseen[len(unseen)-1].ActorDisplayName != "Node Final Other" {
-		t.Fatalf("unseen Node changes=%+v err=%v", unseen, err)
-	}
-	var seenRevision int64
-	if err := db.QueryRow(`select textbox_revision from node_textbox_seen_snapshots
-where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid and user_id=$4::uuid`,
-		company.CompanyID, node.NodeID, textboxID, owner.UserID).Scan(&seenRevision); err != nil {
-		t.Fatal(err)
-	}
-	if seenRevision != 1 {
-		t.Fatalf("seen textbox revision=%d, want 1", seenRevision)
-	}
-
 	emailThreadID := "00000000-0000-4000-8000-000000000502"
 	emailMessageID := "00000000-0000-4000-8000-000000000503"
 	if _, err := db.Exec(`insert into email_threads(

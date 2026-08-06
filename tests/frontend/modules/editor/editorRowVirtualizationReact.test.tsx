@@ -496,7 +496,6 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
       canEdit: true,
       nodePriorityDraft: "3",
       assignedLogicGateIDs: [] as string[],
-      unseenChanges: [],
       companyUsers: [],
       editorSequence: 1,
       topPx: 0,
@@ -510,8 +509,6 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
       outlineStyle: "automatic-outline-numbering" as const,
       requestJSON: nodeRequestJSON,
       onProjectionMutation: noop,
-      onMarkChangeSeen: noop,
-      onMarkAllChangesSeen: noop,
       onCreateNodeFromImage: async () => undefined,
       onAssignToLogicGate: async () => undefined,
       onRequireNodePriorityForLogicGateAssignment: noop,
@@ -1148,19 +1145,6 @@ test("real Node, Project, and Logic Gate page hosts load JSON editors and preser
     created_timestamp: now,
     updated_timestamp: now,
   };
-  const nodeUnseenChanges = [{
-    company_id: hostCompanyID,
-    change_id: "node-page-change",
-    node_id: hostNodeID,
-    information_id: hostNodeDocumentID,
-    change_type: "addition" as const,
-    text: "Node",
-    start_offset: 1,
-    end_offset: 5,
-    actor_user_id: "remote-user",
-    actor_display_name: "Remote User",
-    created_timestamp: now,
-  }];
   const attachedEmail: NodeProjectionItem = {
     company_id: hostCompanyID,
     node_id: hostNodeID,
@@ -1344,7 +1328,6 @@ test("real Node, Project, and Logic Gate page hosts load JSON editors and preser
         nodePriorityDraft="3"
         assignedLogicGateIDs={[]}
         projections={[nodeProjection, attachedEmail]}
-        unseenChanges={nodeUnseenChanges}
         companyUsers={[]}
         projectionsLoaded
         editorSequence={1}
@@ -1359,8 +1342,6 @@ test("real Node, Project, and Logic Gate page hosts load JSON editors and preser
         outlineStyle="automatic-outline-numbering"
         requestJSON={nodeRequestJSON}
         onProjectionMutation={noop}
-        onMarkChangeSeen={noop}
-        onMarkAllChangesSeen={noop}
         onCreateNodeFromImage={async () => undefined}
         onAssignToLogicGate={async () => undefined}
         onRequireNodePriorityForLogicGateAssignment={noop}
@@ -1398,11 +1379,11 @@ test("real Node, Project, and Logic Gate page hosts load JSON editors and preser
     );
     assert.equal(websocketScopes.filter((scope) => scope.startsWith("editor-json:")).length, 0, "near-viewport preparation must not subscribe any offscreen JSON editor");
     await waitFor(
-      () => Boolean(nodeEditor.querySelector('[data-mango-annotation-id="node-page-change"]'))
+      () => (nodeEditor.textContent ?? "").includes("Node JSON text")
         && Boolean(projectEditor.querySelector('[data-mango-annotation-id="json-project-chat"]')),
-      "sleeping Node and Project page hosts should merge backend positions into their real change/chat owners",
+      "sleeping Node and Project page hosts should load dormant change metadata and render the Project chat owner",
     );
-    assert.equal(nodeEditor.querySelector('[data-mango-annotation-id="node-page-change"]')?.textContent, "Node");
+    assert.equal(nodeEditor.querySelector('[data-mango-annotation-id="node-page-change"]'), null, "dormant Node changes must not render");
     assert.equal(projectEditor.querySelector('[data-mango-annotation-id="json-project-chat"]')?.textContent, "Project");
     assert.match(logicEditor.textContent ?? "", /Logic JSON text/);
     assert.ok(requestedPaths.some((path) => path.includes(`/v1/editor-json/node/${hostNodeID}/documents/${hostNodeDocumentID}`)));
@@ -1442,10 +1423,10 @@ test("real Node, Project, and Logic Gate page hosts load JSON editors and preser
     assert.ok(nodeSocket);
     nodeSocket.emitSnapshotRequired("node", hostNodeID, hostNodeDocumentID, 2);
     await waitFor(
-      () => (nodeEditor.textContent ?? "").includes("Live Node JSON text")
-        && nodeEditor.querySelector('[data-mango-annotation-id="node-page-change"]')?.textContent === "Live",
-      "a visible sleeping page-host renderer should receive live document and highlight updates",
+      () => (nodeEditor.textContent ?? "").includes("Live Node JSON text"),
+      "a visible sleeping page-host renderer should receive live document updates",
     );
+    assert.equal(nodeEditor.querySelector('[data-mango-annotation-id="node-page-change"]'), null, "live recovery must keep dormant changes non-rendering");
 
     for (const observer of exactObservers) observer.trigger(false);
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });

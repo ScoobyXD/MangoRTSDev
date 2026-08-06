@@ -6,7 +6,7 @@ Status: **superseded before rollout on 2026-07-28**. The Node v2/Yjs/Hocuspocus 
 
 This document and the additive migrations remain historical records. They do not authorize enabling the retired path or changing a live database.
 
-Current final-storage note (2026-08-04): Node runtime reads and writes now use `node_textboxes`, `node_textbox_chats`, `node_content_changes.textbox_id`, and `node_textbox_seen_snapshots`. The canonical schema no longer creates `node_information`, `node_projection_table`, or `node_projection_seen_snapshots`. Their only remaining use is the separately gated copy/reconciliation and exact three-table retirement SQL described in `docs/important tasks/v3table changes.md`.
+Current final-storage note (2026-08-05): Node runtime reads and writes use `node_textboxes`, `node_textboxes_history`, and `node_textbox_chats`. The later unread-highlight retirement removed its separate change/seen/baseline tables; dormant `change` annotations remain inside textbox JSON. This superseded Phase 1 record and its shipped migrations remain historical evidence only.
 
 ## Completed milestone
 

@@ -1,4 +1,21 @@
+# Process Story: Dormant Node change anchors survive without unread UI
+
+A Node textbox loads persisted Tiptap annotations with `kind: "change"`
+↓
+The editor retains and position-maps those dormant ranges through edits, recovery, saves, reloads, and history
+↓
+No unread highlight, count, navigation, activation, seen request, writer, or database feature row is produced
+↓
+Comments, chats, email selections, formatting highlights, Updates Seen, email unread state, notifications, and timeline verification keep their separate behavior
+
 # Product Business Rules and Test Coverage
+
+## Dormant Node change annotations
+
+- `change` remains a valid generic persisted annotation kind, but it is dormant metadata rather than an active Node unread feature.
+- Owner-provided active annotation lists must not erase a persisted dormant change. Normal ProseMirror mapping and the revisioned JSON save/recovery/history pipeline retain its current range.
+- Dormant changes never render, count, navigate, activate, call a seen endpoint, or affect Node-view caching.
+- The old Node changes routes, writers, baselines, consolidated-view fields, recycle rows, and database tables are removed without changing other seen/read/highlight systems.
 
 ## Updates: current and seen history
 

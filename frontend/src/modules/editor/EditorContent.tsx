@@ -3,7 +3,7 @@ import { ConfirmActionMenu } from "../../app/ConfirmActionMenu";
 import { getNodeTitle, canEditResourceAccess, type NodeRecord, type NodeRelationship } from "../nodes/types";
 import { getLogicGateTitle, toLogicGateViewRecord, type LogicGateGVICAssignment, type LogicGateGVICRole, type LogicGateGVICPrincipalType, type LogicGateRecord } from "../logic-gates/types";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../dashboardEvents";
-import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, getNodeContentChangesSingleFlight, invalidateNodeRecordStoreCaches, primeNodeRecordStoreCaches, type NodeProjectionItem } from "../nodes/nodeRecordStore";
+import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, invalidateNodeRecordStoreCaches, primeNodeRecordStoreCaches, type NodeProjectionItem } from "../nodes/nodeRecordStore";
 import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertNodeRelationshipGraphRelationship } from "../nodes/nodeRelationshipGraph";
 import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand } from "../workspace/workspaceEntityCommands";
 import { buildLinkedNodePayload } from "../nodes/relationshipRules";
@@ -25,7 +25,6 @@ import {
   parseEditorTextBlockContent,
   selectCurrentEditorTextProjection,
 } from "./editorProjection";
-import { nodeContentChangeSeenGroupKey, type NodeContentChange } from "./nodeContentChanges";
 import { EditorLinkedDocumentPanels } from "./EditorLinkedDocumentPanels";
 import { formatNodeDueDateForEditor, normalizeNodeDueDateDraft } from "./editorDates";
 import { EditorTabBar } from "./EditorTabBar";
@@ -583,8 +582,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [nodeWorkspaceProjections, setNodeWorkspaceProjections] = useState<NodeProjectionItem[]>([]);
   const [logicGateWorkspaceProjections, setLogicGateWorkspaceProjections] = useState<LogicGateProjectionItem[]>([]);
   const [nodeWorkspaceLoadedNodeID, setNodeWorkspaceLoadedNodeID] = useState("");
-  const [nodeContentChanges, setNodeContentChanges] = useState<NodeContentChange[]>([]);
-  const [nodeContentChangesLoadedNodeID, setNodeContentChangesLoadedNodeID] = useState("");
   const [editorSnapshotLoadedScope, setEditorSnapshotLoadedScope] = useState("");
   const [nodeStatus, setNodeStatus] = useState("");
   const [nodePriorityDraft, setNodePriorityDraft] = useState("");
@@ -676,7 +673,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const logicGateGVICMutationSequenceRef = useRef(0);
   const logicGateGVICApplyToAssignedNodesRequestRef = useRef(0);
   const editorSnapshotRefreshTokenRef = useRef(0);
-  const nodeContentChangesRefreshTokenRef = useRef(0);
   const linkedEditorTargetRef = useRef<{ kind: "" | "node" | "logic_gate"; id: string }>({ kind: "", id: "" });
   const linkedEntityAccessDenied = linkedEntityAccessDeniedMessage.trim().length > 0;
   const hasLinkedDocument = linkedNodeID.trim().length > 0 && !linkedEntityAccessDenied;
@@ -1797,15 +1793,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setError("");
       if (resourceType === "node") {
         invalidateNodeRecordStoreCaches(apiBase, companyID, resourceID);
-        const [projections, contentChanges] = await Promise.all([
-          getNodeInformationProjectionSingleFlight(apiBase, companyID, resourceID),
-          getNodeContentChangesSingleFlight(apiBase, companyID, resourceID),
-        ]);
+        const projections = await getNodeInformationProjectionSingleFlight(apiBase, companyID, resourceID);
         if (!isCurrentTarget()) return;
         setNodeWorkspaceProjections(projections);
         setNodeWorkspaceLoadedNodeID(resourceID);
-        setNodeContentChanges(contentChanges);
-        setNodeContentChangesLoadedNodeID(resourceID);
         setEditorSnapshotLoadedScope(snapshotScope);
         return;
       }
@@ -2144,7 +2135,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       return;
     }
     const loadRefreshToken = editorSnapshotRefreshTokenRef.current;
-    nodeContentChangesRefreshTokenRef.current += 1;
     const isCurrentLinkedLoad = () => !cancelled && editorSnapshotRefreshTokenRef.current === loadRefreshToken;
     if (!linkedNodeID) {
       setLinkedEntityAccessDeniedMessage("");
@@ -2158,8 +2148,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setLogicGateWorkspaceProjections([]);
       setEditorSnapshotLoadedScope("");
       setNodeWorkspaceLoadedNodeID("");
-      setNodeContentChanges([]);
-      setNodeContentChangesLoadedNodeID("");
       setNodeStatus("");
       setNodePriorityDraft("");
       setNodeDueDateDraft("");
@@ -2197,8 +2185,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setLogicGateWorkspaceProjections([]);
     setEditorSnapshotLoadedScope("");
     setLinkedEntityCanEdit(false);
-    setNodeContentChanges([]);
-    setNodeContentChangesLoadedNodeID("");
     setNodeLogicGateIDs([]);
     setNodeAccounts([]);
     setLinkedEntityAccessDeniedMessage("");
@@ -2239,8 +2225,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           setNodeWorkspaceProjections([]);
           setLogicGateWorkspaceProjections(projections);
           setNodeWorkspaceLoadedNodeID("");
-          setNodeContentChanges([]);
-          setNodeContentChangesLoadedNodeID("");
           setEditorSnapshotLoadedScope(snapshotScope);
           const nonText = details.information.filter((item) => item.type !== EDITOR_TEXT_BLOCK_TYPE);
           const textBoxes = projections.filter((item) => item.type === EDITOR_TEXT_BLOCK_TYPE);
@@ -2271,10 +2255,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           return;
         }
         invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
-        const [details, projections, contentChanges, gvicPolicy] = await Promise.all([
+        const [details, projections, gvicPolicy] = await Promise.all([
           getNodeRecordSingleFlight(apiBase, companyID, linkedNodeID),
           getNodeInformationProjectionSingleFlight(apiBase, companyID, linkedNodeID),
-          getNodeContentChangesSingleFlight(apiBase, companyID, linkedNodeID),
           requestJSON<ResourceGVICPayload>(`/v1/resources/node/${linkedNodeID}/gvic?company_id=${encodeURIComponent(companyID)}`),
         ]);
         if (!isCurrentLinkedLoad()) return;
@@ -2302,8 +2285,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         applyLogicGateGVICAssignments([], "");
         setNodeWorkspaceProjections(projections);
         setNodeWorkspaceLoadedNodeID(linkedNodeID);
-        setNodeContentChanges(contentChanges);
-        setNodeContentChangesLoadedNodeID(linkedNodeID);
         setEditorSnapshotLoadedScope(snapshotScope);
         const currentInformation = details.information.length > 0
           ? details.information
@@ -2448,52 +2429,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const handleNodeWorkspaceProjectionMutation = useCallback(() => {
     if (linkedEntityKind !== "node" || !linkedNodeID) return;
     editorSnapshotRefreshTokenRef.current += 1;
-    nodeContentChangesRefreshTokenRef.current += 1;
     invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
     void refreshEditorSnapshot();
   }, [apiBase, companyID, linkedEntityKind, linkedNodeID, refreshEditorSnapshot]);
-  const markNodeContentChangeSeen = useCallback((changeID: string) => {
-    if (linkedEntityKind !== "node" || !linkedNodeID || !changeID.trim()) return;
-    const removedChange = nodeContentChanges.find((change) => change.change_id === changeID);
-    const removedGroupKey = removedChange ? nodeContentChangeSeenGroupKey(removedChange) : "";
-    const removedChanges = removedGroupKey
-      ? nodeContentChanges.filter((change) => nodeContentChangeSeenGroupKey(change) === removedGroupKey)
-      : removedChange ? [removedChange] : [];
-    setNodeContentChanges((current) => current.filter((change) => removedGroupKey ? nodeContentChangeSeenGroupKey(change) !== removedGroupKey : change.change_id !== changeID));
-    invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
-    void requestJSON<{ status: string }>(`/v1/nodes/${linkedNodeID}/changes/${changeID}/seen`, {
-      method: "POST",
-      body: JSON.stringify({ company_id: companyID }),
-    }).catch((cause) => {
-      if (removedChanges.length > 0) {
-        setNodeContentChanges((current) => {
-          const existingIDs = new Set(current.map((change) => change.change_id));
-          const restored = removedChanges.filter((change) => !existingIDs.has(change.change_id));
-          if (restored.length === 0) return current;
-          return [...current, ...restored].sort((a, b) => a.created_timestamp.localeCompare(b.created_timestamp) || a.change_id.localeCompare(b.change_id));
-        });
-      }
-      setError(cause instanceof Error ? cause.message : "failed_to_mark_node_change_seen");
-    });
-  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, nodeContentChanges, requestJSON]);
-  const markAllNodeContentChangesSeen = useCallback(() => {
-    if (linkedEntityKind !== "node" || !linkedNodeID || nodeContentChanges.length === 0) return;
-    const removedChanges = nodeContentChanges;
-    setNodeContentChanges([]);
-    invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
-    void requestJSON<{ status: string }>(`/v1/nodes/${linkedNodeID}/changes/seen-all`, {
-      method: "POST",
-      body: JSON.stringify({ company_id: companyID }),
-    }).catch((cause) => {
-      setNodeContentChanges((current) => {
-        const existingIDs = new Set(current.map((change) => change.change_id));
-        const restored = removedChanges.filter((change) => !existingIDs.has(change.change_id));
-        if (restored.length === 0) return current;
-        return [...current, ...restored].sort((a, b) => a.created_timestamp.localeCompare(b.created_timestamp) || a.change_id.localeCompare(b.change_id));
-      });
-      setError(cause instanceof Error ? cause.message : "failed_to_mark_node_changes_seen");
-    });
-  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, nodeContentChanges, requestJSON]);
   const updateRelationshipTabAnchor = useCallback((anchor: { left: number; width: number } | null) => {
     const root = editorRootRef.current;
     if (!anchor || !root) {
@@ -2729,7 +2667,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             nodePriorityDraft={nodePriorityDraft}
             assignedLogicGateIDs={nodeLogicGateIDs}
             projections={nodeWorkspaceProjections}
-            unseenChanges={nodeContentChangesLoadedNodeID === linkedNodeID ? nodeContentChanges : []}
             companyUsers={companyUsers}
             projectionsLoaded={nodeWorkspaceLoadedNodeID === linkedNodeID}
             editorSequence={0}
@@ -2750,8 +2687,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             formattingControllerRef={nodeFormattingControllerRef}
             requestJSON={requestJSON}
             onProjectionMutation={handleNodeWorkspaceProjectionMutation}
-            onMarkChangeSeen={markNodeContentChangeSeen}
-            onMarkAllChangesSeen={markAllNodeContentChangesSeen}
             onCreateNodeFromImage={createNodeFromImageDocument}
             onAssignToLogicGate={assignLinkedNodeToLogicGate}
             onRequireNodePriorityForLogicGateAssignment={showNodePriorityRequirementError}

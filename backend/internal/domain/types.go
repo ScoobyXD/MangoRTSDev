@@ -707,20 +707,6 @@ type NodeProjection struct {
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
 
-type NodeContentChange struct {
-	CompanyID        string    `json:"company_id"`
-	ChangeID         string    `json:"change_id"`
-	NodeID           string    `json:"node_id"`
-	InformationID    string    `json:"information_id"`
-	ChangeType       string    `json:"change_type"`
-	Text             string    `json:"text"`
-	StartOffset      int       `json:"start_offset"`
-	EndOffset        int       `json:"end_offset"`
-	ActorUserID      string    `json:"actor_user_id,omitempty"`
-	ActorDisplayName string    `json:"actor_display_name"`
-	CreatedTimestamp time.Time `json:"created_timestamp"`
-}
-
 const (
 	NodeTimelineEventLogicGateTransfer   = "logic_gate_transfer"
 	NodeTimelineEventVerificationRequest = "verification_request"
@@ -773,14 +759,12 @@ type NodeView struct {
 	Relationships        []NodeRelationship        `json:"relationships"`
 	LogicGateAssignments []NodeLogicGateAssignment `json:"logic_gate_assignments"`
 	GVICAssignments      []ResourceGVICAssignment  `json:"gvic_assignments"`
-	ContentChanges       []NodeContentChange       `json:"content_changes"`
 	TimelineEvents       []NodeTimelineEvent       `json:"timeline_events"`
 	TimelineEventCount   int                       `json:"timeline_event_count"`
 	InformationCount     int                       `json:"information_count"`
 	ProjectionCount      int                       `json:"projection_count"`
 	RelationshipsCount   int                       `json:"relationships_count"`
 	AssignmentCount      int                       `json:"assignment_count"`
-	ContentChangeCount   int                       `json:"content_change_count"`
 	EffectiveAccessFlags
 }
 

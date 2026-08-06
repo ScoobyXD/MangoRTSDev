@@ -227,7 +227,6 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
         currentUserID=""
         companyUsers={[]}
         documentValue={initialDocument}
-        contentChanges={[]}
         chatMessages={nextMessages}
         activeChatAnchorMessageID=""
         chatNavigationRequest={navigationRequest}
@@ -241,7 +240,6 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
         onBlur={noop}
         onDocumentChange={noop}
         onDocumentFlush={noop}
-        onChangeSeen={noop}
         onChatHighlightActivate={(messageID) => activatedMessageIDs.push(messageID)}
         onSelectionChatRequest={noop}
         onImageChatRequest={noop}

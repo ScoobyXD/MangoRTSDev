@@ -48,8 +48,6 @@ type memoryCommunicationsTriageConversionSnapshot struct {
 	emailCollaborationParticipants map[string]domain.CommunicationsEmailCollaborationParticipant
 	entityPermissions              map[string]domain.EntityPermission
 	effectiveAccess                map[string]domain.EffectiveResourceAccess
-	nodeContentChanges             map[string]domain.NodeContentChange
-	nodeContentChangeSeen          map[string]time.Time
 	realtimeOutbox                 map[string]RealtimeOutboxEvent
 	realtimeOutboxSequence         int64
 	workspaceReadVersions          map[string]int64
@@ -86,8 +84,6 @@ func (r *MemoryRepo) snapshotCommunicationsTriageConversionStateLocked() memoryC
 		emailCollaborationParticipants: cloneMemoryMap(r.emailCollaborationParticipants),
 		entityPermissions:              cloneMemoryMap(r.entityPermissions),
 		effectiveAccess:                cloneMemoryMap(r.effectiveAccess),
-		nodeContentChanges:             cloneMemoryMap(r.nodeContentChanges),
-		nodeContentChangeSeen:          cloneMemoryMap(r.nodeContentChangeSeen),
 		realtimeOutbox:                 cloneMemoryMap(r.realtimeOutbox),
 		realtimeOutboxSequence:         r.realtimeOutboxSequence,
 		workspaceReadVersions:          cloneMemoryMap(r.workspaceReadVersions),
@@ -124,8 +120,6 @@ func (r *MemoryRepo) restoreCommunicationsTriageConversionStateLocked(snapshot m
 	r.emailCollaborationParticipants = snapshot.emailCollaborationParticipants
 	r.entityPermissions = snapshot.entityPermissions
 	r.effectiveAccess = snapshot.effectiveAccess
-	r.nodeContentChanges = snapshot.nodeContentChanges
-	r.nodeContentChangeSeen = snapshot.nodeContentChangeSeen
 	r.realtimeOutbox = snapshot.realtimeOutbox
 	r.realtimeOutboxSequence = snapshot.realtimeOutboxSequence
 	r.workspaceReadVersions = snapshot.workspaceReadVersions

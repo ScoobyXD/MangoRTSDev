@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"miraeopus/backend/internal/domain"
-	"strings"
-	"time"
 )
 
 func upsertPostgresNodeTextProjection(context.Context, *sql.Tx, NodeInformationInput, string, string, string, string) (domain.NodeProjection, error) {
@@ -25,15 +23,6 @@ func deletePostgresNodeTextProjection(ctx context.Context, tx *sql.Tx, input Nod
 	if previous.IsDeleted || previous.Revision != *input.ExpectedRevision {
 		current := previous
 		return &ProjectionRevisionConflictError{NodeCurrent: &current}
-	}
-	if strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "" {
-		previousCopy := previous
-		if err := insertNodeContentChangesTx(ctx, tx, buildNodeContentChanges(
-			input.CompanyID, input.NodeID, input.InformationID, previous.Type, &previousCopy, "",
-			normalizeNodeContentChangeActor(cleanUUIDText(input.ActorUserID), input.ActorDisplayName), time.Now().UTC(),
-		)); err != nil {
-			return err
-		}
 	}
 	if err := retireNodeTextboxAttachmentRelationshipsTx(ctx, tx, input.CompanyID, input.NodeID, input.InformationID); err != nil {
 		return err

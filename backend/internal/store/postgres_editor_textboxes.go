@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"miraeopus/backend/internal/domain"
 	"reflect"
 	"time"
 )
@@ -17,18 +16,6 @@ type postgresEditorTextboxStorage struct {
 	textboxColumn string
 	textboxUUID   bool
 	displayOrder  bool
-}
-
-func postgresNodeContentChangeActorTx(ctx context.Context, tx *sql.Tx, userID string) (nodeContentChangeActor, error) {
-	userID = cleanUUIDText(userID)
-	if userID == "" {
-		return nodeContentChangeActor{}, nil
-	}
-	var displayName string
-	if err := tx.QueryRowContext(ctx, `select display_name from users where user_id=$1::uuid`, userID).Scan(&displayName); err != nil {
-		return nodeContentChangeActor{}, err
-	}
-	return normalizeNodeContentChangeActor(userID, displayName), nil
 }
 
 func postgresEditorTextboxStorageFor(ref EditorJSONDocumentRef) (postgresEditorTextboxStorage, bool) {
@@ -487,19 +474,6 @@ func commitPostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONCommit
 		return EditorJSONCommit{}, err
 	}
 	nextRevision, eventID := revision+1, newUUIDv7String()
-	if input.Document.ResourceType == EntityTypeNode && cleanUUIDText(input.ActorUserID) != "" {
-		actor, err := postgresNodeContentChangeActorTx(ctx, tx, input.ActorUserID)
-		if err != nil {
-			return EditorJSONCommit{}, err
-		}
-		previous := domain.NodeProjection{Type: "Text box", Information: string(currentBody)}
-		if err := insertNodeContentChangesTx(ctx, tx, buildNodeContentChanges(
-			input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID, "Text box",
-			&previous, string(nextBody), actor, now,
-		)); err != nil {
-			return EditorJSONCommit{}, err
-		}
-	}
 	if err := updatePostgresEditorTextboxTx(ctx, tx, storage, input.Document, nextBody, nextRevision, now); err != nil {
 		return EditorJSONCommit{}, err
 	}
@@ -576,19 +550,6 @@ func deletePostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONDelete
 			Annotations: annotations, CommittedAt: now, Deduplicated: true}, nil
 	}
 	nextRevision, eventID := revision+1, newUUIDv7String()
-	if input.Document.ResourceType == EntityTypeNode && cleanUUIDText(input.ActorUserID) != "" {
-		actor, err := postgresNodeContentChangeActorTx(ctx, tx, input.ActorUserID)
-		if err != nil {
-			return EditorJSONCommit{}, err
-		}
-		previous := domain.NodeProjection{Type: "Text box", Information: string(body)}
-		if err := insertNodeContentChangesTx(ctx, tx, buildNodeContentChanges(
-			input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID, "Text box",
-			&previous, "", actor, now,
-		)); err != nil {
-			return EditorJSONCommit{}, err
-		}
-	}
 	update := fmt.Sprintf(`update %s set revision=$4,deleted_timestamp=$5,updated_timestamp=$5
 		where company_id=$1::uuid and %s=$2::uuid and %s=%s`, storage.table, storage.ownerColumn,
 		storage.textboxColumn, postgresEditorTextboxIDExpression(storage, "$3"))

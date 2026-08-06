@@ -249,14 +249,11 @@ var recycleSnapshotTables = map[string]bool{
 	"node_textboxes":               true,
 	"node_textboxes_history":       true,
 	"node_textbox_chats":           true,
-	"node_textbox_seen_snapshots":  true,
 	"logic_gate_textboxes":         true,
 	"logic_gate_textboxes_history": true,
 	"project_textboxes":            true,
 	"project_textboxes_history":    true,
 	"project_textbox_chats":        true,
-	"node_content_changes":         true,
-	"node_content_change_seen":     true,
 	"node_account_assignments":     true,
 	"node_relationships":           true,
 	"logic_gate_relationships":     true,
@@ -285,15 +282,12 @@ var recycleRestoreTableOrder = []string{
 	"node_textboxes",
 	"node_textboxes_history",
 	"node_textbox_chats",
-	"node_textbox_seen_snapshots",
 	"logic_gate_textboxes",
 	"logic_gate_textboxes_history",
 	"project_textboxes",
 	"project_textboxes_history",
 	"project_textbox_chats",
 	"company_explorer_folders",
-	"node_content_changes",
-	"node_content_change_seen",
 	"node_account_assignments",
 	"resource_gvic_settings",
 	"resource_permission_settings",
@@ -453,16 +447,10 @@ func postgresSnapshotRecyclePayloadWithCacheTx(ctx context.Context, tx *sql.Tx, 
 		}
 	}
 	if len(nodeIDs) > 0 {
-		for _, tableName := range []string{"nodes", "node_textboxes", "node_textboxes_history", "node_textbox_chats", "node_textbox_seen_snapshots", "node_account_assignments"} {
+		for _, tableName := range []string{"nodes", "node_textboxes", "node_textboxes_history", "node_textbox_chats", "node_account_assignments"} {
 			if err := addTable(tableName, `company_id=$1::uuid and node_id = any(string_to_array($2, ',')::uuid[])`, companyID, nodeIDCSV); err != nil {
 				return nil, err
 			}
-		}
-		if err := addTable("node_content_changes", `company_id=$1::uuid and node_id = any(string_to_array($2, ',')::uuid[])`, companyID, nodeIDCSV); err != nil {
-			return nil, err
-		}
-		if err := addTable("node_content_change_seen", `company_id=$1::uuid and change_id in (select change_id from node_content_changes where company_id=$1::uuid and node_id = any(string_to_array($2, ',')::uuid[]))`, companyID, nodeIDCSV); err != nil {
-			return nil, err
 		}
 		if err := addTable("node_relationships", `company_id=$1::uuid and (node_id_a = any(string_to_array($2, ',')::uuid[]) or node_id_b = any(string_to_array($2, ',')::uuid[]))`, companyID, nodeIDCSV); err != nil {
 			return nil, err

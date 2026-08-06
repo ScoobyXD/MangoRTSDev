@@ -16,6 +16,12 @@ export type MangoTiptapAnnotation = {
 
 export type MangoTiptapPersistedAnnotation = Pick<MangoTiptapAnnotation, "id" | "kind" | "from" | "to">;
 
+export function isDormantMangoTiptapAnnotation(
+  annotation: Pick<MangoTiptapAnnotation, "kind">,
+): boolean {
+  return annotation.kind === "change";
+}
+
 export function durableMangoTiptapAnnotations(
   annotations: readonly MangoTiptapAnnotation[],
 ): MangoTiptapPersistedAnnotation[] {
@@ -30,10 +36,16 @@ export function mergeMangoTiptapAnnotationPositions(
 ): MangoTiptapAnnotation[] {
   if (!persisted?.length) return [...annotations];
   const positions = new Map(persisted.map((annotation) => [`${annotation.kind}:${annotation.id}`, annotation]));
-  return annotations.map((annotation) => {
+  const ownedKeys = new Set(annotations.map((annotation) => `${annotation.kind}:${annotation.id}`));
+  const merged = annotations.map((annotation) => {
     const position = positions.get(`${annotation.kind}:${annotation.id}`);
     return position ? { ...annotation, from: position.from, to: position.to } : annotation;
   });
+  persisted.forEach((annotation) => {
+    const key = `${annotation.kind}:${annotation.id}`;
+    if (isDormantMangoTiptapAnnotation(annotation) && !ownedKeys.has(key)) merged.push({ ...annotation });
+  });
+  return merged;
 }
 
 export function mangoTiptapAnnotationsEqual(
@@ -70,6 +82,7 @@ function createDecorations(document: Parameters<typeof DecorationSet.create>[0],
   if (annotations.length === 0) return DecorationSet.empty;
   const decorations: Decoration[] = [];
   annotations.forEach((annotation) => {
+    if (isDormantMangoTiptapAnnotation(annotation)) return;
     const attributes = {
       class: `mango-tiptap-annotation mango-tiptap-annotation--${annotation.kind}${annotation.active ? " is-active" : ""}`,
       "data-mango-annotation-id": annotation.id,
@@ -177,7 +190,9 @@ export function navigateMangoTiptapTarget(
   let position = target.position;
   if (target.blockID) position = findMangoTiptapBlockPosition(editor, target.blockID) ?? undefined;
   if (target.annotationID) {
-    position = readMappedMangoTiptapAnnotations(editor).find((annotation) => annotation.id === target.annotationID)?.from;
+    position = readMappedMangoTiptapAnnotations(editor).find((annotation) => (
+      !isDormantMangoTiptapAnnotation(annotation) && annotation.id === target.annotationID
+    ))?.from;
   }
   if (position === undefined || position === null) return false;
   const safePosition = Math.max(1, Math.min(editor.state.doc.content.size, Math.trunc(position)));

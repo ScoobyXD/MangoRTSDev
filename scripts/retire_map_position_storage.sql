@@ -183,12 +183,11 @@ begin
     from (values
       ('node_relationships'),('logic_gate_relationships'),
       ('node_textboxes_history'),('logic_gate_textboxes_history'),
-      ('node_content_changes'),('node_content_change_seen'),
-      ('node_textbox_seen_snapshots'),('node_view_user_versions')
+      ('node_view_user_versions')
     ) protected(name)
     where to_regclass('public.' || protected.name) is null
   ) then
-    raise exception 'STOP: a protected relationship, history, or unread/highlight table is missing';
+    raise exception 'STOP: a protected relationship, history, or Node view-version table is missing';
   end if;
 end
 $$;
@@ -208,7 +207,4 @@ select current_setting('server_version') as server_version,
        to_regclass('public.logic_gate_map_positions') is null as logic_gate_position_table_dropped,
        to_regclass('public.node_relationships') is not null as node_relationships_preserved,
        to_regclass('public.logic_gate_relationships') is not null as logic_gate_relationships_preserved,
-       to_regclass('public.node_content_changes') is not null as node_content_changes_preserved,
-       to_regclass('public.node_content_change_seen') is not null as node_content_change_seen_preserved,
-       to_regclass('public.node_textbox_seen_snapshots') is not null as node_textbox_seen_snapshots_preserved,
        to_regclass('public.node_view_user_versions') is not null as node_view_user_versions_preserved;

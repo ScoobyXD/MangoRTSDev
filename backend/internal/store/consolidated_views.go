@@ -11,7 +11,6 @@ type nodeViewLoader interface {
 	ListNodeProjections(companyID, nodeID string) ([]domain.NodeProjection, error)
 	ListNodeLogicGateAssignments(companyID, nodeID string) ([]domain.NodeLogicGateAssignment, error)
 	ListResourceGVICAssignments(companyID, resourceType, resourceID string) ([]domain.ResourceGVICAssignment, error)
-	ListUnseenNodeContentChanges(input NodeContentChangeListInput) ([]domain.NodeContentChange, error)
 	ListNodeTimelineEvents(companyID, nodeID string) ([]domain.NodeTimelineEvent, error)
 }
 
@@ -41,22 +40,15 @@ func loadNodeView(loader nodeViewLoader, input NodeViewInput) (domain.NodeView, 
 		projections     []domain.NodeProjection
 		assignments     []domain.NodeLogicGateAssignment
 		gvicAssignments []domain.ResourceGVICAssignment
-		contentChanges  = []domain.NodeContentChange{}
 		timelineEvents  = []domain.NodeTimelineEvent{}
 		detailsErr      error
 		projectionsErr  error
 		assignmentsErr  error
 		gvicErr         error
-		changesErr      error
 		timelineErr     error
 		waitGroup       sync.WaitGroup
 	)
-	userID := strings.TrimSpace(input.UserID)
-	callCount := 5
-	if userID != "" {
-		callCount++
-	}
-	waitGroup.Add(callCount)
+	waitGroup.Add(5)
 	go func() {
 		defer waitGroup.Done()
 		details, detailsErr = loader.GetNodeDetailsSummary(companyID, nodeID)
@@ -77,18 +69,8 @@ func loadNodeView(loader nodeViewLoader, input NodeViewInput) (domain.NodeView, 
 		defer waitGroup.Done()
 		timelineEvents, timelineErr = loader.ListNodeTimelineEvents(companyID, nodeID)
 	}()
-	if userID != "" {
-		go func() {
-			defer waitGroup.Done()
-			contentChanges, changesErr = loader.ListUnseenNodeContentChanges(NodeContentChangeListInput{
-				CompanyID: companyID,
-				NodeID:    nodeID,
-				UserID:    userID,
-			})
-		}()
-	}
 	waitGroup.Wait()
-	for _, err := range []error{detailsErr, projectionsErr, assignmentsErr, gvicErr, timelineErr, changesErr} {
+	for _, err := range []error{detailsErr, projectionsErr, assignmentsErr, gvicErr, timelineErr} {
 		if err != nil {
 			return domain.NodeView{}, err
 		}
@@ -118,14 +100,12 @@ func loadNodeView(loader nodeViewLoader, input NodeViewInput) (domain.NodeView, 
 		Relationships:        details.Relationships,
 		LogicGateAssignments: assignments,
 		GVICAssignments:      gvicAssignments,
-		ContentChanges:       contentChanges,
 		InformationCount:     details.InformationCount,
 		TimelineEvents:       timelineEvents,
 		TimelineEventCount:   len(timelineEvents),
 		ProjectionCount:      len(projections),
 		RelationshipsCount:   details.RelationshipsCount,
 		AssignmentCount:      len(assignments),
-		ContentChangeCount:   len(contentChanges),
 	}, nil
 }
 

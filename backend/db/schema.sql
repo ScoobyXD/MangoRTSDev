@@ -651,26 +651,6 @@ create table if not exists node_relationships (
   foreign key (company_id, node_id_b) references nodes (company_id, node_id)
 );
 
-create table if not exists node_content_changes (
-  company_id uuid not null,
-  change_id uuid not null,
-  node_id uuid not null,
-  textbox_id uuid not null,
-  change_type text not null,
-  text text not null,
-  start_offset integer not null,
-  end_offset integer not null,
-  actor_user_id uuid,
-  actor_display_name text not null default '',
-  created_timestamp timestamptz not null default now(),
-  constraint node_content_changes_type_chk check (change_type in ('addition', 'deletion')),
-  constraint node_content_changes_text_nonblank_chk check (btrim(text) <> ''),
-  constraint node_content_changes_offsets_chk check (start_offset >= 0 and end_offset >= start_offset),
-  primary key (company_id, change_id),
-  foreign key (company_id, node_id) references nodes (company_id, node_id) on delete cascade,
-  foreign key (actor_user_id) references users (user_id) on delete set null
-);
-
 create table if not exists node_timeline_events (
   company_id uuid not null,
   event_id uuid not null,
@@ -717,16 +697,6 @@ create table if not exists node_timeline_verification_recipients (
 
 create index if not exists idx_node_timeline_verification_recipient_user
   on node_timeline_verification_recipients(company_id, user_id, completed_timestamp, created_timestamp desc);
-
-create table if not exists node_content_change_seen (
-  company_id uuid not null,
-  change_id uuid not null,
-  user_id uuid not null,
-  seen_timestamp timestamptz not null default now(),
-  primary key (company_id, change_id, user_id),
-  foreign key (company_id, change_id) references node_content_changes (company_id, change_id) on delete cascade,
-  foreign key (user_id) references users (user_id) on delete cascade
-);
 
 create table if not exists logic_gates (
   company_id uuid not null,
@@ -1554,10 +1524,6 @@ create index if not exists idx_gvic_matrix_projection_leaf_project
 
 create index if not exists idx_gvic_matrix_projection_leaf_logic_gate
   on gvic_matrix_projection_table(company_id, logic_gate_id);
-create index if not exists idx_node_content_changes_node_created
-  on node_content_changes(company_id, node_id, created_timestamp, change_id);
-create index if not exists idx_node_content_change_seen_user
-  on node_content_change_seen(company_id, user_id, change_id);
 create index if not exists idx_node_relationships_a on node_relationships(company_id, node_id_a);
 create index if not exists idx_node_relationships_b on node_relationships(company_id, node_id_b);
 create index if not exists idx_logic_gate_relationships_a on logic_gate_relationships(company_id, logic_gate_id_a);
@@ -3039,53 +3005,6 @@ begin
 end;
 $$;
 
-create or replace function mangorts_trg_bump_node_view_user_from_change_seen()
-returns trigger language plpgsql as $$
-declare
-  target_node_id uuid;
-begin
-  if tg_op <> 'INSERT' then
-    select node_id into target_node_id
-    from node_content_changes
-    where company_id=old.company_id and change_id=old.change_id;
-    if target_node_id is not null then
-      perform mangorts_bump_node_view_user_version(old.company_id, target_node_id, old.user_id);
-    end if;
-  end if;
-  if tg_op <> 'DELETE' then
-    target_node_id := null;
-    select node_id into target_node_id
-    from node_content_changes
-    where company_id=new.company_id and change_id=new.change_id;
-    if target_node_id is not null then
-      perform mangorts_bump_node_view_user_version(new.company_id, target_node_id, new.user_id);
-    end if;
-    return new;
-  end if;
-  return old;
-end;
-$$;
-
-create or replace function mangorts_trg_bump_node_view_user_from_snapshot()
-returns trigger language plpgsql as $$
-begin
-  if current_setting('mangorts.node_view_anchor_clean', true) = '1' then
-    if tg_op='DELETE' then return old; end if;
-    return new;
-  end if;
-  if tg_op <> 'INSERT' then
-    perform mangorts_bump_node_view_user_version(old.company_id, old.node_id, old.user_id);
-  end if;
-  if tg_op <> 'DELETE' then
-    if tg_op='INSERT' or (new.company_id, new.node_id, new.user_id) is distinct from (old.company_id, old.node_id, old.user_id) then
-      perform mangorts_bump_node_view_user_version(new.company_id, new.node_id, new.user_id);
-    end if;
-    return new;
-  end if;
-  return old;
-end;
-$$;
-
 create or replace function mangorts_trg_bump_node_view_from_account()
 returns trigger language plpgsql as $$
 begin
@@ -3184,9 +3103,6 @@ drop trigger if exists trg_node_view_version_node on nodes;
 create trigger trg_node_view_version_node after update on nodes
 for each row execute function mangorts_trg_bump_node_view_from_node();
 
-drop trigger if exists trg_node_view_version_content_changes on node_content_changes;
-create trigger trg_node_view_version_content_changes after insert or update or delete on node_content_changes
-for each row execute function mangorts_trg_bump_node_view_from_direct_node();
 drop trigger if exists trg_node_view_version_timeline_events on node_timeline_events;
 create trigger trg_node_view_version_timeline_events after insert or update or delete on node_timeline_events
 for each row execute function mangorts_trg_bump_node_view_from_direct_node();
@@ -3204,13 +3120,6 @@ for each row execute function mangorts_trg_bump_node_view_from_direct_node();
 drop trigger if exists trg_node_view_version_account_assignments on node_account_assignments;
 create trigger trg_node_view_version_account_assignments after insert or update or delete on node_account_assignments
 for each row execute function mangorts_trg_bump_node_view_from_direct_node();
-
-drop trigger if exists trg_node_view_user_version_change_seen_mutation on node_content_change_seen;
-create trigger trg_node_view_user_version_change_seen_mutation after insert or update on node_content_change_seen
-for each row execute function mangorts_trg_bump_node_view_user_from_change_seen();
-drop trigger if exists trg_node_view_user_version_change_seen_delete on node_content_change_seen;
-create trigger trg_node_view_user_version_change_seen_delete before delete on node_content_change_seen
-for each row execute function mangorts_trg_bump_node_view_user_from_change_seen();
 
 drop trigger if exists trg_node_view_version_accounts_update on accounts;
 create trigger trg_node_view_version_accounts_update after update on accounts
@@ -3329,36 +3238,6 @@ comment on table node_textboxes is
   'Permanent current TipTap JSON document storage for Node text boxes.';
 comment on column node_textboxes.display_order is
   'User-controlled Node workspace order.';
-
-alter table node_content_changes
-  add constraint node_content_changes_textbox_fk
-  foreign key (company_id, node_id, textbox_id)
-  references node_textboxes(company_id, node_id, textbox_id) on delete cascade;
-
-create table if not exists node_textbox_seen_snapshots (
-  company_id uuid not null,
-  node_id uuid not null,
-  textbox_id uuid not null,
-  user_id uuid not null,
-  body_json jsonb not null,
-  textbox_revision bigint not null,
-  textbox_updated_timestamp timestamptz not null,
-  seen_timestamp timestamptz not null default now(),
-  primary key (company_id, node_id, textbox_id, user_id),
-  foreign key (company_id, node_id, textbox_id)
-    references node_textboxes(company_id, node_id, textbox_id) on delete cascade,
-  foreign key (user_id) references users(user_id) on delete cascade,
-  constraint node_textbox_seen_snapshots_body_json_chk check (
-    body_json->>'format' = 'mango-tiptap-json'
-    and body_json->>'schema_version' = '1'
-    and body_json->'document'->>'type' = 'doc'
-    and jsonb_typeof(body_json->'annotations') = 'array'
-  ),
-  constraint node_textbox_seen_snapshots_revision_chk check (textbox_revision >= 0)
-);
-
-create index if not exists idx_node_textbox_seen_snapshots_user
-  on node_textbox_seen_snapshots(company_id, user_id, node_id, textbox_id);
 
 -- Permanent comments owned by an exact Node textbox.
 create table if not exists node_textbox_chats (
@@ -4256,10 +4135,6 @@ for each row execute function mangorts_trg_bump_node_view_from_direct_node();
 drop trigger if exists trg_node_view_version_textbox_chats on node_textbox_chats;
 create trigger trg_node_view_version_textbox_chats after insert or update or delete on node_textbox_chats
 for each row execute function mangorts_trg_bump_node_view_from_direct_node();
-
-drop trigger if exists trg_node_view_user_version_snapshots on node_textbox_seen_snapshots;
-create trigger trg_node_view_user_version_snapshots after insert or update or delete on node_textbox_seen_snapshots
-for each row execute function mangorts_trg_bump_node_view_user_from_snapshot();
 
 -- BEGIN V2 GVIC AND PERMISSIONS STEP 1 PHASE-APPROPRIATE SCHEMA
 

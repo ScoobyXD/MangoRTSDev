@@ -26,7 +26,10 @@ func TestNodeProductionSQLUsesOnlyFinalStorage(t *testing.T) {
 			continue
 		}
 		body := readNodeFinalContractFile(t, entry.Name())
-		for _, legacy := range []string{"node_information", "node_projection_table", "node_projection_seen_snapshots"} {
+		for _, legacy := range []string{
+			"node_information", "node_projection_table", "node_projection_seen_snapshots",
+			"node_content_changes", "node_content_change_seen", "node_textbox_seen_snapshots",
+		} {
 			for _, prefix := range []string{"from ", "join ", "into ", "update ", "delete from ", "on "} {
 				if strings.Contains(body, prefix+legacy) {
 					t.Errorf("%s contains legacy SQL %q", entry.Name(), prefix+legacy)
@@ -45,9 +48,14 @@ func TestNodeProductionSQLUsesOnlyFinalStorage(t *testing.T) {
 		}
 	}
 	readiness := readNodeFinalContractFile(t, "postgres.go")
-	for _, required := range []string{"node_textboxes", "node_textbox_chats", "node_textboxes_history", "node_textbox_seen_snapshots", "textbox_revision", "node_content_changes", "textbox_id", "obsolete node_content_changes.information_id remains"} {
+	for _, required := range []string{"node_textboxes", "node_textbox_chats", "node_textboxes_history", "textbox_id"} {
 		if !strings.Contains(readiness, required) {
 			t.Errorf("application readiness missing final Node contract %q", required)
+		}
+	}
+	for _, retired := range []string{"node_content_changes", "node_content_change_seen", "node_textbox_seen_snapshots"} {
+		if strings.Contains(readiness, retired) {
+			t.Errorf("application readiness still requires retired Node unread storage %q", retired)
 		}
 	}
 }
@@ -64,6 +72,7 @@ func TestNodeFinalSchemaAndRetiredObjectContract(t *testing.T) {
 		"resource_attachments", "attachment_upload_intents", "project_projection_table",
 		"project_information", "logic_gate_projection_table", "logic_gate_information",
 		"node_information", "node_projection_table", "node_projection_seen_snapshots",
+		"node_content_changes", "node_content_change_seen", "node_textbox_seen_snapshots",
 	}
 	for _, table := range retired {
 		if strings.Contains(schema, "create table if not exists "+table) {
@@ -77,13 +86,50 @@ func TestNodeFinalSchemaAndRetiredObjectContract(t *testing.T) {
 	}
 	for _, required := range []string{
 		"create table if not exists node_textboxes", "create table if not exists node_textbox_chats",
-		"create table if not exists node_textbox_seen_snapshots", "create table if not exists node_textboxes_history",
-		"textbox_id uuid not null", "node_content_changes_textbox_fk",
+		"create table if not exists node_textboxes_history", "textbox_id uuid not null",
 		"references node_textboxes(company_id, node_id, textbox_id) on delete cascade",
-		"create index if not exists idx_node_textbox_seen_snapshots_user",
 	} {
 		if !strings.Contains(schema, required) {
 			t.Errorf("canonical schema missing %q", required)
+		}
+	}
+}
+
+func TestNodeUnreadHighlightRetirementSQLIsStrictAndDBeaverSafe(t *testing.T) {
+	migration := readNodeFinalContractFile(t, "..", "..", "db", "migrations", "20260805_zzzzz_remove_node_unread_highlights.sql")
+	for _, required := range []string{
+		"server_version_num", "exact unordered column set drifted", "unexpected foreign key",
+		"drop trigger trg_node_view_user_version_change_seen_mutation",
+		"drop trigger trg_node_view_user_version_snapshots",
+		"drop table public.node_content_change_seen;",
+		"drop table public.node_textbox_seen_snapshots;",
+		"drop constraint node_content_changes_textbox_fk;",
+		"drop table public.node_content_changes;",
+		"drop function public.mangorts_trg_bump_node_view_user_from_change_seen();",
+		"drop function public.mangorts_trg_bump_node_view_user_from_snapshot();",
+	} {
+		if !strings.Contains(migration, required) {
+			t.Errorf("Node unread-highlight retirement migration missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"\\set", "\\i", "\\copy", "drop table if exists", " cascade", "ordinal_position", "update public.node_textboxes", "delete from public.node_textboxes"} {
+		if strings.Contains(migration, forbidden) {
+			t.Errorf("Node unread-highlight retirement migration contains forbidden %q", forbidden)
+		}
+	}
+
+	preflight := readNodeFinalContractFile(t, "..", "..", "..", "scripts", "node_unread_highlights_retirement_preflight.sql")
+	verification := readNodeFinalContractFile(t, "..", "..", "..", "scripts", "node_unread_highlights_retirement_verification.sql")
+	for label, source := range map[string]string{"preflight": preflight, "verification": verification} {
+		for _, required := range []string{"repeatable read read only", "server_version_num", "current_json_checksum", "history_json_checksum", "dormant_change_annotations", "rollback;"} {
+			if !strings.Contains(source, required) {
+				t.Errorf("Node unread-highlight %s missing %q", label, required)
+			}
+		}
+		for _, forbidden := range []string{"\\set", "\\i", "\\copy", "ordinal_position"} {
+			if strings.Contains(source, forbidden) {
+				t.Errorf("Node unread-highlight %s contains forbidden %q", label, forbidden)
+			}
 		}
 	}
 }
@@ -163,12 +209,16 @@ func TestNodeForwardMigrationAndOperatorAreStrictAndDBeaverSafe(t *testing.T) {
 func TestNodeRecycleUsesFinalRowsAndRestoresAttachmentOwnershipLast(t *testing.T) {
 	source := readNodeFinalContractFile(t, "postgres_recycle_bin.go")
 	for _, required := range []string{
-		`"node_textbox_chats"`, `"node_textbox_seen_snapshots"`, `"node_content_changes"`,
-		`"node_content_change_seen"`, `"email_relationships"`, `"attachment_relationships"`,
+		`"node_textbox_chats"`, `"email_relationships"`, `"attachment_relationships"`,
 		"set deleted_timestamp=restored.deleted_timestamp",
 	} {
 		if !strings.Contains(source, required) {
 			t.Errorf("Node recycle contract missing %q", required)
+		}
+	}
+	for _, retired := range []string{`"node_textbox_seen_snapshots"`, `"node_content_changes"`, `"node_content_change_seen"`} {
+		if strings.Contains(source, retired) {
+			t.Errorf("Node recycle contract still references retired unread storage %q", retired)
 		}
 	}
 	order := []string{`"node_textboxes"`, `"node_textbox_chats"`, `"email_relationships"`, `"attachment_relationships"`}
@@ -179,13 +229,5 @@ func TestNodeRecycleUsesFinalRowsAndRestoresAttachmentOwnershipLast(t *testing.T
 			t.Fatalf("restore order missing %s", value)
 		}
 		last += next + 1
-	}
-}
-
-func TestNodeTiptapTextExtractionFeedsUnseenDiffs(t *testing.T) {
-	input := []byte(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hello"},{"type":"hardBreak"},{"type":"text","text":"world"}]}]}}`)
-	text, ok := extractTiptapDocumentText(input)
-	if !ok || text != "hello\nworld" {
-		t.Fatalf("TipTap text=%q ok=%v", text, ok)
 	}
 }

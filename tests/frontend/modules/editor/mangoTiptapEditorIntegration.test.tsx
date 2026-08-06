@@ -140,7 +140,10 @@ test("static JSON renderer paints true ProseMirror ranges across blocks, lists, 
       renderAttachmentImage={(attributes) => <span data-static-image={attributes.attachmentId}>{attributes.filename}</span>}
     />,
   );
-  for (const annotation of annotations) assert.match(html, new RegExp(`data-mango-annotation-id="${annotation.id}"`));
+  for (const annotation of annotations.filter((item) => item.kind !== "change")) {
+    assert.match(html, new RegExp(`data-mango-annotation-id="${annotation.id}"`));
+  }
+  assert.doesNotMatch(html, /data-mango-annotation-id="annotation-image"/);
   assert.match(html, /class="mango-tiptap-document mango-tiptap-static-document"/);
   assert.match(html, /mango-tiptap-annotation--chat/);
   assert.match(html, /<ul>/);
@@ -310,6 +313,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
 
   const value = largeStructuredDocument();
   const annotations = structuredAnnotations(value);
+  const ownerAnnotations = annotations.filter((annotation) => annotation.kind !== "change");
   const controllerRef: React.MutableRefObject<MangoTiptapFormattingController | null> = { current: null };
   const lifecyclePins: boolean[] = [];
   const selectionFontSizes: number[] = [];
@@ -427,7 +431,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
             subscriptions += 1;
             return () => { unsubscriptions += 1; };
           }}
-          annotations={annotations.map((annotation) => ({ ...annotation }))}
+          annotations={ownerAnnotations.map((annotation) => ({ ...annotation }))}
           formattingControllerRef={controllerRef}
           onSelectionFontSizeChange={(fontSize) => selectionFontSizes.push(fontSize)}
           onSelectionInlineFormatChange={(format) => selectionInlineFormats.push(format)}
@@ -451,9 +455,10 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     await waitFor(() => editorRoot.dataset.mangoEditorState === "sleeping", "canonical preparation should finish before visibility changes");
     assert.equal(editorRoot.dataset.mangoEditorEditable, "true", "editable sleeping JSON documents must advertise their text cursor state");
     assert.equal(subscriptions, 0, "the 600px preparation margin must not create a realtime document scope");
-    for (const annotation of annotations) {
+    for (const annotation of ownerAnnotations) {
       assert.ok(editorRoot.querySelector(`[data-mango-annotation-id="${annotation.id}"]`), `sleeping renderer should paint ${annotation.id}`);
     }
+    assert.equal(editorRoot.querySelector('[data-mango-annotation-id="annotation-image"]'), null, "dormant changes must not paint on sleeping surfaces");
 
     const exactObserver = observers.filter((observer) => observer.rootMargin === "0px" && observer.isObserving(editorRoot)).at(-1);
     assert.ok(exactObserver);
@@ -477,6 +482,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     assert.ok(preventScrollEditorFocuses >= 1, "pointer activation must focus without asking the browser to scroll");
     const activeProseMirror = editorRoot.querySelector<HTMLElement>(".mango-tiptap-prosemirror");
     assert.ok(activeProseMirror);
+    assert.equal(activeProseMirror.querySelector('[data-mango-annotation-id="annotation-image"]'), null, "dormant changes must not decorate active surfaces");
     assert.equal(activeProseMirror.parentElement?.classList.contains("mango-tiptap-active-surface"), true, "the active EditorContent wrapper must fill the full text box");
     assert.equal(activeProseMirror.getAttribute("contenteditable"), "true", "the clicked JSON document should become a real editable surface");
     assert.equal(activeProseMirror.dataset.mangoLegacyLeadingDateHeading, "true");
@@ -707,9 +713,10 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     const remountedEditorRoot = container.querySelector<HTMLElement>('[data-mango-editor-format="tiptap_json"]');
     assert.ok(remountedEditorRoot);
     await waitFor(() => remountedEditorRoot.dataset.mangoEditorState === "sleeping", "re-entered row should finish its near-viewport canonical recovery");
-    for (const annotation of canonicalAnnotations) {
+    for (const annotation of canonicalAnnotations.filter((item) => item.kind !== "change")) {
       assert.ok(remountedEditorRoot.querySelector(`[data-mango-annotation-id="${annotation.id}"]`), `persisted ${annotation.kind} position should survive remount`);
     }
+    assert.equal(remountedEditorRoot.querySelector('[data-mango-annotation-id="annotation-image"]'), null, "remounted dormant changes must remain non-rendering");
     const reentryExactObserver = observers.filter((observer) => observer.rootMargin === "0px" && observer.isObserving(remountedEditorRoot)).at(-1);
     assert.ok(reentryExactObserver);
     const subscriptionsBeforeReentry = subscriptions;
@@ -760,7 +767,6 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
       currentUserID: "user-hosts",
       companyUsers: [],
       documentValue: JSON.stringify(pageHostDocument),
-      contentChanges: [],
       chatMessages: [],
       activeChatAnchorMessageID: "",
       chatNavigationRequest: null,
@@ -773,7 +779,6 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
       onBlur: noop,
       onDocumentChange: noop,
       onDocumentFlush: noop,
-      onChangeSeen: noop,
       onSelectionChatRequest: noop,
       onImageChatRequest: noop,
       onImageNodeRequest: noop,

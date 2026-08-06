@@ -334,23 +334,6 @@
   box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.72), 0 0 18px rgba(250, 255, 0, 0.34);
 }
 
-.mango-tiptap-static-document .mango-tiptap-annotation--change,
-.mango-tiptap-prosemirror .mango-tiptap-annotation--change {
-  border-radius: 2px;
-  background: rgba(56, 189, 248, 0.2);
-  box-shadow: inset 0 -2px 0 rgba(2, 132, 199, 0.52);
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
-  cursor: pointer;
-}
-
-.mango-tiptap-static-document .mango-tiptap-annotation--change.is-active,
-.mango-tiptap-prosemirror .mango-tiptap-annotation--change.is-active {
-  background: rgba(56, 189, 248, 0.34);
-  outline: 1px solid rgba(2, 132, 199, 0.72);
-  outline-offset: 1px;
-}
-
 .mango-tiptap-mention {
   display: inline-flex;
   align-items: center;

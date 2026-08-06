@@ -3,15 +3,27 @@ package store
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
+
+var uuidTextPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 var (
 	uuidV7Mu       sync.Mutex
 	uuidV7LastMS   uint64
 	uuidV7Sequence uint16
 )
+
+func cleanUUIDText(value string) string {
+	value = strings.TrimSpace(value)
+	if !uuidTextPattern.MatchString(value) {
+		return ""
+	}
+	return strings.ToLower(value)
+}
 
 // newUUIDv7String returns an RFC9562-compatible UUIDv7 string.
 // It uses unix milliseconds plus monotonic per-millisecond sequence bits so
@@ -33,7 +45,6 @@ func newUUIDv7String() string {
 	b[3] = byte(ms >> 16)
 	b[4] = byte(ms >> 8)
 	b[5] = byte(ms)
-
 	// Set version to 7 (0111xxxx)
 	b[6] = byte(seq>>8) | 0x70
 	b[7] = byte(seq)

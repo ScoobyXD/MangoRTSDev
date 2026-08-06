@@ -11,8 +11,6 @@ type memoryProjectScopedCreateSnapshot struct {
 	nodes                         map[string]domain.Node
 	nodeInfo                      map[string][]domain.NodeInformation
 	nodeText                      map[string]map[string]domain.NodeProjection
-	nodeContentChanges            map[string]domain.NodeContentChange
-	nodeContentChangeSeen         map[string]time.Time
 	logicGates                    map[string]domain.LogicGate
 	logicGateInfo                 map[string][]domain.LogicGateInformation
 	logicGateText                 map[string]map[string]domain.LogicGateProjection
@@ -36,8 +34,6 @@ func (r *MemoryRepo) snapshotProjectScopedCreateLocked() memoryProjectScopedCrea
 		nodes:                         cloneMemoryMap(r.nodes),
 		nodeInfo:                      cloneMemorySliceMap(r.nodeInfo),
 		nodeText:                      cloneMemoryNodeText(r.nodeText),
-		nodeContentChanges:            cloneMemoryMap(r.nodeContentChanges),
-		nodeContentChangeSeen:         cloneMemoryMap(r.nodeContentChangeSeen),
 		logicGates:                    cloneMemoryMap(r.logicGates),
 		logicGateInfo:                 cloneMemorySliceMap(r.logicGateInfo),
 		logicGateText:                 cloneMemoryLogicGateText(r.logicGateText),
@@ -61,8 +57,6 @@ func (r *MemoryRepo) restoreProjectScopedCreateLocked(snapshot memoryProjectScop
 	r.nodes = snapshot.nodes
 	r.nodeInfo = snapshot.nodeInfo
 	r.nodeText = snapshot.nodeText
-	r.nodeContentChanges = snapshot.nodeContentChanges
-	r.nodeContentChangeSeen = snapshot.nodeContentChangeSeen
 	r.logicGates = snapshot.logicGates
 	r.logicGateInfo = snapshot.logicGateInfo
 	r.logicGateText = snapshot.logicGateText
@@ -304,18 +298,6 @@ func (r *MemoryRepo) addInitialNodeInformationLocked(input NodeInformationInput)
 		UpdatedTimestamp: now,
 	}
 	r.nodeText[k][keyValue] = projection
-	if strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "" {
-		r.recordNodeContentChangesLocked(buildNodeContentChanges(
-			companyID,
-			nodeID,
-			keyValue,
-			infoType,
-			nil,
-			input.Information,
-			normalizeNodeContentChangeActor(input.ActorUserID, input.ActorDisplayName),
-			now,
-		))
-	}
 	return item, nil
 }
 

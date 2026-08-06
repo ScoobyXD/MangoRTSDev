@@ -51,7 +51,6 @@ import {
 } from "./editorProjection";
 import { editorChatEntityLinkPayloads, remapEditorChatEntityLinks, trimEditorChatDraft, type EditorChatEntityLink } from "./chatEntityLinks.js";
 import { EDITOR_AUTOSAVE_DELAY_MS, generateStableInformationID } from "./editorTypes";
-import type { NodeContentChange } from "./nodeContentChanges";
 import { createTextBlockProjectionSaveController } from "./nodeTextBlockProjectionSaves";
 import {
   appendUniqueEditorAttachments,
@@ -473,7 +472,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   assignedLogicGateIDs,
   apiBase,
   projections,
-  unseenChanges,
   companyUsers,
   projectionsLoaded,
   editorSequence,
@@ -494,8 +492,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   formattingControllerRef,
   requestJSON,
   onProjectionMutation,
-  onMarkChangeSeen,
-  onMarkAllChangesSeen,
   onCreateNodeFromImage,
   onAssignToLogicGate,
   onRequireNodePriorityForLogicGateAssignment,
@@ -765,19 +761,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     return !Number.isInteger(parsed) || parsed < 1 || parsed > 5;
   }, [nodePriorityDraft]);
   const logicGateSearchQuery = logicGateSearch.trim();
-  const unseenChangesByBlockID = useMemo(() => {
-    const items = new Map<string, NodeContentChange[]>();
-    for (const change of unseenChanges) {
-      if (change.node_id !== nodeID || !change.information_id) continue;
-      const bucket = items.get(change.information_id) ?? [];
-      bucket.push(change);
-      items.set(change.information_id, bucket);
-    }
-    for (const bucket of items.values()) {
-      bucket.sort((a, b) => a.created_timestamp.localeCompare(b.created_timestamp) || a.change_id.localeCompare(b.change_id));
-    }
-    return items;
-  }, [nodeID, unseenChanges]);
   const focusTargetBlockID = useMemo(() => {
     const targetID = focusInformationID?.trim() ?? "";
     const emailMessageID = focusEmailMessageID?.trim() ?? "";
@@ -787,8 +770,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (chatMessage) {
       return chatMessage.blockID === emailOriginChatBlockID ? emailOriginChatHostBlockID : chatMessage.blockID;
     }
-    const contentChange = unseenChanges.find((change) => change.change_id === targetID && change.node_id === nodeID);
-    if (contentChange?.information_id) return contentChange.information_id;
     const attachedEmail = nodeAttachedEmails.find((email) => email.id === targetID || email.messageID === targetID || email.emailMessageID === emailMessageID);
     if (attachedEmail) {
       const linkedBlock = blocks.find((block) => block.emailMessageID === attachedEmail.emailMessageID)
@@ -797,7 +778,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     if (emailMessageID) return blocks.find((block) => block.emailMessageID === emailMessageID)?.id || emailOriginChatHostBlockID || blocks[0]?.id || "";
     return "";
-  }, [blocks, chatMessages, emailOriginChatBlockID, emailOriginChatHostBlockID, focusEmailMessageID, focusInformationID, nodeAttachedEmails, nodeID, unseenChanges]);
+  }, [blocks, chatMessages, emailOriginChatBlockID, emailOriginChatHostBlockID, focusEmailMessageID, focusInformationID, nodeAttachedEmails]);
   const focusTargetIndex = useMemo(
     () => focusTargetBlockID ? blocks.findIndex((block) => block.id === focusTargetBlockID) : -1,
     [blocks, focusTargetBlockID],
@@ -3336,32 +3317,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               Email ({nodeAttachedEmails.length})
             </button>
           )}
-          {unseenChanges.length > 0 && (
-            <button
-              type="button"
-              onClick={onMarkAllChangesSeen}
-              style={{
-                minHeight: 30,
-                borderRadius: 9,
-                border: "1px solid rgba(16,185,129,0.34)",
-                background: "linear-gradient(135deg, rgba(236,253,245,0.94), rgba(207,250,254,0.64))",
-                color: "#047857",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: "0 10px",
-                cursor: "pointer",
-                fontSize: 12,
-                fontWeight: 900,
-                letterSpacing: 0,
-                whiteSpace: "nowrap",
-                flex: "0 0 auto",
-                boxShadow: EDITOR_NEU_SHADOW,
-              }}
-            >
-              Seen all
-            </button>
-          )}
           {canEdit && (
             <button
               type="button"
@@ -3948,8 +3903,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                             currentUserID={author.userID || "local-user"}
                             companyUsers={companyUsers}
                             documentValue={block.document}
-                            contentChanges={unseenChangesByBlockID.get(block.id) ?? []}
-                            focusContentChangeID={unseenChanges.some((change) => change.change_id === focusInformationID && change.information_id === block.id) ? focusInformationID : undefined}
                             chatMessages={messages}
                             pendingChatSelectionAnchor={selectionAnchor}
                             activeChatAnchorMessageID={activeChatAnchorMessageID}
@@ -3984,7 +3937,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                             }}
                             onRecoveryStorageError={onError}
                             onRecoveryStorageRecovered={() => onError("")}
-                            onChangeSeen={onMarkChangeSeen}
                             onChatHighlightActivate={revealChatMessage}
                             onSelectionChatRequest={(selection) => openSelectionChat(selection, chatBlockID)}
                             onImageChatRequest={addImageChatComment}
