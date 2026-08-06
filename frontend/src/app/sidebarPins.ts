@@ -5,6 +5,7 @@ export type SidebarPin = {
   pinID: string;
   id: string;
   kind: SidebarPinKind;
+  parentFolderID: string;
   name: string;
   position: number;
   createdTimestamp: string;
@@ -14,6 +15,33 @@ export type SidebarPinDraft = {
   id: string;
   kind: SidebarPinKind;
   name?: string;
+  parentFolderID?: string;
+};
+
+export type SidebarPinFolder = {
+  folderID: string;
+  parentFolderID: string;
+  name: string;
+  position: number;
+  createdTimestamp: string;
+  updatedTimestamp: string;
+};
+
+export type SidebarPinTree = {
+  folders: SidebarPinFolder[];
+  pins: SidebarPin[];
+};
+
+export type SidebarPinEntryType = "folder" | "pin";
+
+export type SidebarPinEntryRef = {
+  entryType: SidebarPinEntryType;
+  entryID: string;
+};
+
+export type SidebarPinLayoutEntry = SidebarPinEntryRef & {
+  parentFolderID: string;
+  position: number;
 };
 
 export type SidebarPinRequestDetail = {

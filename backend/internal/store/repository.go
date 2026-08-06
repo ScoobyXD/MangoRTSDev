@@ -637,10 +637,14 @@ type SavedViewDeleteInput struct {
 }
 
 type UserPinRepository interface {
-	ListUserPins(input UserPinListInput) ([]domain.UserPin, error)
+	ListUserPinTree(input UserPinListInput) (domain.UserPinTree, error)
 	UpsertUserPin(input UserPinInput) (domain.UserPin, error)
 	DeleteUserPin(input UserPinDeleteInput) error
-	ReorderUserPins(input UserPinReorderInput) error
+	CreateUserPinFolder(input UserPinFolderCreateInput) (domain.UserPinFolder, error)
+	RenameUserPinFolder(input UserPinFolderRenameInput) (domain.UserPinFolder, error)
+	DeleteUserPinFolder(input UserPinFolderDeleteInput) error
+	ApplyUserPinLayout(input UserPinLayoutInput) error
+	GroupUserPins(input UserPinGroupInput) (UserPinGroupResult, error)
 }
 
 type UserPinListInput struct {
@@ -649,13 +653,15 @@ type UserPinListInput struct {
 }
 
 type UserPinInput struct {
-	CompanyID    string
-	PinID        string
-	UserID       string
-	ResourceType string
-	ResourceID   string
-	Name         string
-	Position     int
+	CompanyID       string
+	PinID           string
+	UserID          string
+	ResourceType    string
+	ResourceID      string
+	Name            string
+	ParentFolderID  string
+	ParentFolderSet bool
+	Position        int
 }
 
 type UserPinDeleteInput struct {
@@ -664,10 +670,53 @@ type UserPinDeleteInput struct {
 	PinID     string
 }
 
-type UserPinReorderInput struct {
+type UserPinFolderCreateInput struct {
+	CompanyID      string
+	UserID         string
+	FolderID       string
+	ParentFolderID string
+	Name           string
+	Position       int
+}
+
+type UserPinFolderRenameInput struct {
 	CompanyID string
 	UserID    string
-	PinIDs    []string
+	FolderID  string
+	Name      string
+}
+
+type UserPinFolderDeleteInput struct {
+	CompanyID string
+	UserID    string
+	FolderID  string
+}
+
+type UserPinLayoutEntry struct {
+	EntryType      string
+	EntryID        string
+	ParentFolderID string
+	Position       int
+}
+
+type UserPinLayoutInput struct {
+	CompanyID string
+	UserID    string
+	Entries   []UserPinLayoutEntry
+}
+
+type UserPinGroupInput struct {
+	CompanyID    string
+	UserID       string
+	FolderID     string
+	DraggedPinID string
+	TargetPinID  string
+	Name         string
+}
+
+type UserPinGroupResult struct {
+	Folder domain.UserPinFolder
+	Tree   domain.UserPinTree
 }
 
 type LogicGateWorkRepository interface {

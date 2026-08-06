@@ -5,6 +5,7 @@ import { WORKTREE_VERSION } from "./worktreeVersion";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "./ConfirmActionMenu";
 import { AppModalPortal } from "./AppModalPortal";
 import FrameRightClickMenu from "./framerightclickmenu";
+import { AppSidebarPinnedSection } from "./AppSidebarPinnedSection";
 import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderFieldsIcon, HeaderMyWorkIcon, HeaderSharedTriageIcon, HeaderTeamsIcon, HeaderTriageIcon, HeaderUpdatesIcon } from "../icons/index.js";
 import { MangoWordmark } from "../icons/index.js";
 import { UI_THEME } from "./frameLayoutTypes";
@@ -15,7 +16,13 @@ import { CompanyExplorerSearchBox } from "../modules/company-explorer/CompanyExp
 import type { CompanyExplorerTriageMessageDropHandler } from "../modules/company-explorer/CompanyExplorerContentModel";
 import { resolveExplorerClickSelection } from "../modules/company-explorer/treePresentation";
 import { subscribeCommittedEntityTitleUpdates } from "../modules/realtime/committedEntityTitleUpdates";
-import { requestAppSidebarPin, type SidebarPin } from "./sidebarPins";
+import {
+  requestAppSidebarPin,
+  type SidebarPin,
+  type SidebarPinEntryRef,
+  type SidebarPinFolder,
+  type SidebarPinTree,
+} from "./sidebarPins";
 import { resolveCurrentAppSidebarPin } from "./appCommittedTitleState";
 import { NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "./nodeEditorPopupControls";
 import {
@@ -60,12 +67,11 @@ import {
   type SharedInboxTreeRow,
 } from "../pages/home/homeUtils";
 import {
-  hasSidebarPinSectionDrop,
   readSidebarPinnedResourceDropAction,
   sidebarPinAcceptsPinnedResourceDrag,
-  type SidebarPinDropPlacement,
   type SidebarPinnedResourceDropAction,
 } from "./sidebarPinDrops";
+import type { SidebarPinDropPlacement } from "./sidebarPinTree";
 
 const SidebarCompanyExplorerContent = React.lazy(() => import("../modules/company-explorer/CompanyExplorerContent").then((module) => ({ default: module.CompanyExplorerContent })));
 const AppNodeEditorContent = React.lazy(() => import("../modules/editor/EditorContent").then((module) => ({
@@ -86,7 +92,6 @@ const PAGE_SURFACE_RADIUS = 16;
 export const SIDEBAR_EXPLORER_WIDGET_ID = "app-sidebar-explorer";
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 const SIDEBAR_SECTION_OPEN_KEY_PREFIX = "mangorts.app-sidebar-section-open.v2";
-const APP_SIDEBAR_PIN_DRAG_MIME = "application/x-mangorts-sidebar-pin";
 const NODE_EDITOR_POPUP_MIN_WIDTH = 420;
 const NODE_EDITOR_POPUP_MIN_HEIGHT = 320;
 
@@ -135,7 +140,7 @@ type AppSidebarProps = {
   activePage: AppSidebarPrimaryPage | null;
   activeHomeView: HomeKeyViewID;
   currentUserID: string;
-  pins: SidebarPin[];
+  pinTree: SidebarPinTree;
   pinDropActive: boolean;
   explorerSelectionTargetFrameIDs: string[];
   onHomeViewSelect: (view: HomeKeyViewID) => void;
@@ -143,11 +148,14 @@ type AppSidebarProps = {
   onPinOpen: (pin: SidebarPin) => void;
   onPinOpenInNewTab: (pin: SidebarPin) => void;
   onPinRemove: (pin: SidebarPin) => void;
-  onPinReorder: (moving: SidebarPin, target: SidebarPin | null, placement: "before" | "after") => void;
+  onPinCreateFolder: (parentFolderID: string) => Promise<string | null>;
+  onPinRenameFolder: (folder: SidebarPinFolder, name: string) => Promise<void>;
+  onPinDeleteFolder: (folder: SidebarPinFolder) => Promise<void>;
+  onPinMoveEntry: (moving: SidebarPinEntryRef, target: SidebarPinEntryRef | null, placement: SidebarPinDropPlacement) => void;
+  onPinGroup: (dragged: SidebarPin, target: SidebarPin) => Promise<string | null>;
+  onPinExternalDrop: (event: React.DragEvent<HTMLElement>, parentFolderID: string, target: SidebarPinEntryRef | null, placement: "before" | "after" | "inside") => void;
   onPinDragEnter: () => void;
   onPinDragLeave: () => void;
-  onPinDragOver: (event: React.DragEvent<HTMLElement>) => void;
-  onPinDrop: (event: React.DragEvent<HTMLElement>) => void;
 };
 
 function sidebarExplorerTriageConversionTarget(target: Parameters<CompanyExplorerTriageMessageDropHandler>[0]): CommunicationsTriageConversionTarget | null {
@@ -257,7 +265,7 @@ export function AppSidebar({
   activePage,
   activeHomeView,
   currentUserID,
-  pins,
+  pinTree,
   pinDropActive,
   explorerSelectionTargetFrameIDs,
   onHomeViewSelect,
@@ -265,16 +273,20 @@ export function AppSidebar({
   onPinOpen,
   onPinOpenInNewTab,
   onPinRemove,
-  onPinReorder,
+  onPinCreateFolder,
+  onPinRenameFolder,
+  onPinDeleteFolder,
+  onPinMoveEntry,
+  onPinGroup,
+  onPinExternalDrop,
   onPinDragEnter,
   onPinDragLeave,
-  onPinDragOver,
-  onPinDrop,
 }: AppSidebarProps): React.ReactElement {
   const homeActive = activePage === "home";
   const myWorkActive = (homeActive && activeHomeView === "my-work") || activePage === "project-management";
   const companyID = getActiveCompanyID();
   const apiBase = readAuthConfig().apiBase;
+  const pins = pinTree.pins;
   const notificationSummary = useNotificationSummary(companyID);
   const [sharedTriageOpen, setSharedTriageOpen] = usePersistedSidebarSectionOpen("shared-triage", false);
   const [sharedInboxes, setSharedInboxes] = useState<CommunicationsSharedInbox[]>([]);
@@ -294,8 +306,6 @@ export function AppSidebar({
   const [sharedEmailDialog, setSharedEmailDialog] = useState<{ folder: CommunicationsSharedInbox; draft: string; error: string } | null>(null);
   const [sharedDeleteDialog, setSharedDeleteDialog] = useState<SidebarSharedInboxDeleteDialogState | null>(null);
   const [sharedEmailConnectionDialog, setSharedEmailConnectionDialog] = useState<{ accountEmail: string; createIntent?: CommunicationsSharedInboxCreateIntent } | null>(null);
-  const [pinContextMenu, setPinContextMenu] = useState<{ x: number; y: number; pin: SidebarPin } | null>(null);
-  const [pinDropTarget, setPinDropTarget] = useState<{ key: string; placement: SidebarPinDropPlacement } | null>(null);
   const [explorerTriagePriorityMenu, setExplorerTriagePriorityMenu] = useState<SidebarExplorerTriagePriorityMenuState | null>(null);
   const [pinTriagePriorityMenu, setPinTriagePriorityMenu] = useState<SidebarPinTriagePriorityMenuState | null>(null);
   const [explorerTriageBusy, setExplorerTriageBusy] = useState(false);
@@ -319,11 +329,6 @@ export function AppSidebar({
     });
   }), [companyID]);
   useEffect(() => {
-    setPinContextMenu((current) => {
-      if (!current) return current;
-      const pin = resolveCurrentAppSidebarPin(pins, current.pin);
-      return pin === current.pin ? current : { ...current, pin };
-    });
     setPinTriagePriorityMenu((current) => {
       if (!current) return current;
       const pin = resolveCurrentAppSidebarPin(pins, current.action.pin);
@@ -472,10 +477,6 @@ export function AppSidebar({
     !pinnedResourceDropBusy && sidebarPinAcceptsPinnedResourceDrag(pin, dataTransfer)
   ), [pinnedResourceDropBusy]);
 
-  const pinSectionHasValidDrag = useCallback((dataTransfer: DataTransfer): boolean => (
-    hasSidebarPinSectionDrop(dataTransfer) || pins.some((pin) => pinAcceptsResourceDrag(pin, dataTransfer))
-  ), [pinAcceptsResourceDrag, pins]);
-
   const assignNodesToPinnedLogicGate = useCallback(async (action: Extract<SidebarPinnedResourceDropAction, { kind: "nodes_to_logic_gate" }>) => {
     const cleanCompanyID = companyID.trim();
     if (pinnedResourceDropBusy || !cleanCompanyID || action.nodeIDs.length === 0) return;
@@ -560,7 +561,6 @@ export function AppSidebar({
     if (!action) return false;
     event.preventDefault();
     event.stopPropagation();
-    setPinDropTarget(null);
     if (action.kind === "nodes_to_logic_gate") {
       void assignNodesToPinnedLogicGate(action);
       return true;
@@ -574,29 +574,6 @@ export function AppSidebar({
     setSelectedSharedTreeIDs((previous) => previous.size === 0 ? previous : new Set());
     setSharedSelectionAnchorTreeID("");
   }, [activeHomeView]);
-
-  const readDraggedSidebarPin = useCallback((dataTransfer: DataTransfer): SidebarPin | null => {
-    try {
-      const parsed = JSON.parse(dataTransfer.getData(APP_SIDEBAR_PIN_DRAG_MIME)) as Partial<SidebarPin>;
-      const pinID = typeof parsed.pinID === "string" ? parsed.pinID.trim() : "";
-      if (pinID) return pins.find((pin) => pin.pinID === pinID) ?? null;
-      const kind = parsed.kind === "node" || parsed.kind === "logic_gate" || parsed.kind === "project" ? parsed.kind : null;
-      const id = typeof parsed.id === "string" ? parsed.id.trim() : "";
-      if (!kind || !id) return null;
-      return pins.find((pin) => pin.kind === kind && pin.id === id) ?? null;
-    } catch {
-      return null;
-    }
-  }, [pins]);
-
-  const hasSidebarPinDrag = useCallback((dataTransfer: DataTransfer): boolean => (
-    Array.from(dataTransfer.types).includes(APP_SIDEBAR_PIN_DRAG_MIME)
-  ), []);
-
-  const getPinDropPlacement = useCallback((event: React.DragEvent<HTMLElement>): "before" | "after" => {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    return event.clientY > bounds.top + bounds.height / 2 ? "after" : "before";
-  }, []);
 
   useEffect(() => {
     if (!companyID) {
@@ -1301,112 +1278,25 @@ export function AppSidebar({
         />
       </section>
 
-      <section
-        style={appSidebarPinnedSectionStyle(pinDropActive || !!pinDropTarget)}
-        aria-label="Pinned"
-        onDragEnter={(event) => {
-          if (hasSidebarPinDrag(event.dataTransfer) || pinSectionHasValidDrag(event.dataTransfer)) {
-            onPinDragEnter();
-          }
-        }}
-        onDragOver={(event) => {
-          if (hasSidebarPinDrag(event.dataTransfer)) {
-            event.preventDefault();
-            event.dataTransfer.dropEffect = "move";
-            setPinDropTarget({ key: "__end__", placement: "after" });
-            return;
-          }
-          onPinDragOver(event);
-        }}
-        onDragLeave={(event) => {
-          const related = event.relatedTarget instanceof Node ? event.relatedTarget : null;
-          if (related && event.currentTarget.contains(related)) return;
-          setPinDropTarget(null);
-          onPinDragLeave();
-        }}
-        onDrop={(event) => {
-          const movingPin = readDraggedSidebarPin(event.dataTransfer);
-          if (movingPin) {
-            event.preventDefault();
-            onPinReorder(movingPin, null, "after");
-            setPinDropTarget(null);
-            return;
-          }
-          onPinDrop(event);
-        }}
-      >
-        <AppSidebarSectionHeader label="Pinned" />
-        {pinDropSuccess && (
-          <div role="status" style={appSidebarPinSuccessStyle}>
-            {pinDropSuccess}
-          </div>
-        )}
-        <div style={appSidebarPinListStyle}>
-          {pins.length === 0 ? (
-            <div style={appSidebarEmptyStyle}>No pins</div>
-          ) : pins.map((pin) => {
-            const pinKey = pin.pinID || `${pin.kind}:${pin.id}`;
-            const dropPlacement = pinDropTarget?.key === pinKey ? pinDropTarget.placement : null;
-            return (
-              <div
-                key={pinKey}
-                draggable
-                style={appSidebarPinRowStyle(dropPlacement)}
-                onDragStart={(event) => {
-                  event.dataTransfer.effectAllowed = "move";
-                  event.dataTransfer.setData(APP_SIDEBAR_PIN_DRAG_MIME, JSON.stringify({ pinID: pin.pinID, kind: pin.kind, id: pin.id }));
-                  event.dataTransfer.setData("text/plain", pin.name);
-                  setPinDropTarget(null);
-                }}
-                onDragEnd={() => setPinDropTarget(null)}
-                onDragLeave={(event) => {
-                  const related = event.relatedTarget instanceof Node ? event.relatedTarget : null;
-                  if (related && event.currentTarget.contains(related)) return;
-                  setPinDropTarget((current) => current?.key === pinKey ? null : current);
-                }}
-                onDragOver={(event) => {
-                  if (hasSidebarPinDrag(event.dataTransfer)) {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    event.dataTransfer.dropEffect = "move";
-                    setPinDropTarget({ key: pinKey, placement: getPinDropPlacement(event) });
-                    return;
-                  }
-                  if (!pinAcceptsResourceDrag(pin, event.dataTransfer)) return;
-                  event.preventDefault();
-                  event.stopPropagation();
-                  event.dataTransfer.dropEffect = "copy";
-                  setPinDropTarget({ key: pinKey, placement: "inside" });
-                }}
-                onDrop={(event) => {
-                  const movingPin = readDraggedSidebarPin(event.dataTransfer);
-                  if (movingPin) {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    onPinReorder(movingPin, pin, getPinDropPlacement(event));
-                    setPinDropTarget(null);
-                    return;
-                  }
-                  handlePinnedResourceDrop(pin, event);
-                }}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  setPinContextMenu({ x: event.clientX, y: event.clientY, pin });
-                }}
-              >
-                <button type="button" style={appSidebarPinButtonStyle} onClick={() => onPinOpen(pin)}>
-                  <span style={appSidebarPinIconStyle}><ExplorerRowIcon kind={pin.kind} /></span>
-                  <span style={appSidebarTextStyle}>{pin.name}</span>
-                </button>
-                <button type="button" aria-label={`Unpin ${pin.name}`} style={appSidebarPinRemoveStyle} onClick={() => onPinRemove(pin)}>
-                  X
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      </section>
+      <AppSidebarPinnedSection
+        tree={pinTree}
+        dropActive={pinDropActive}
+        dropSuccess={pinDropSuccess}
+        pinnedResourceDropBusy={pinnedResourceDropBusy}
+        onPinOpen={onPinOpen}
+        onPinOpenInNewTab={onPinOpenInNewTab}
+        onPinRemove={onPinRemove}
+        onCreateFolder={onPinCreateFolder}
+        onRenameFolder={onPinRenameFolder}
+        onDeleteFolder={onPinDeleteFolder}
+        onMoveEntry={onPinMoveEntry}
+        onGroupPins={onPinGroup}
+        onExternalDrop={onPinExternalDrop}
+        pinAcceptsResourceDrag={pinAcceptsResourceDrag}
+        onPinnedResourceDrop={handlePinnedResourceDrop}
+        onPinDragEnter={onPinDragEnter}
+        onPinDragLeave={onPinDragLeave}
+      />
 
       <section style={appSidebarNavSectionStyle} aria-label="Entities">
         <AppSidebarSectionHeader label="Entities" />
@@ -1623,30 +1513,6 @@ export function AppSidebar({
           onCancel={() => setSharedEmailConnectionDialog(null)}
           onConnect={(provider) => { void startSharedInboxEmailConnection(provider); }}
         />
-      )}
-      {pinContextMenu && (
-        <FrameRightClickMenu x={pinContextMenu.x} y={pinContextMenu.y} onClose={() => setPinContextMenu(null)}>
-          <button
-            type="button"
-            style={appSidebarContextMenuButtonStyle}
-            onClick={() => {
-              onPinOpenInNewTab(pinContextMenu.pin);
-              setPinContextMenu(null);
-            }}
-          >
-            Open in new browser tab
-          </button>
-          <button
-            type="button"
-            style={appSidebarContextMenuButtonStyle}
-            onClick={() => {
-              onPinRemove(pinContextMenu.pin);
-              setPinContextMenu(null);
-            }}
-          >
-            Unpin
-          </button>
-        </FrameRightClickMenu>
       )}
     </aside>
   );
@@ -2128,23 +1994,24 @@ function fullscreenNodeEditorPopupRect(): NodeEditorPopupRect {
   return fullscreenNodeEditorViewportRect();
 }
 
-export function AppNodeEditorPopup({ nodeID, nodeTitle, surfaceID = "app-sidebar-node-popup", focusInformationID, focusRequestID, onClose, onCollapseToTab, onOpenInNewTab, onDeleteNode }: {
+export function AppNodeEditorPopup({ nodeID, nodeTitle, surfaceID = "app-sidebar-node-popup", focusInformationID, focusRequestID, initialFullscreen = false, onClose, onCollapseToTab, onOpenInNewTab, onDeleteNode }: {
   nodeID: string;
   nodeTitle: string;
   surfaceID?: "app-sidebar-node-popup" | "dock-restored-node-popup";
   focusInformationID?: string;
   focusRequestID?: number;
+  initialFullscreen?: boolean;
   onClose: () => void;
   onCollapseToTab?: () => void;
   onOpenInNewTab?: () => void;
   onDeleteNode?: (nodeID: string, confirmationDisplayName: string) => boolean | void | Promise<boolean | void>;
 }): React.ReactElement {
-  const [popupRect, setPopupRect] = useState(defaultNodeEditorPopupRect);
-  const [popupFullscreen, setPopupFullscreen] = useState(false);
+  const [popupRect, setPopupRect] = useState(() => initialFullscreen ? fullscreenNodeEditorPopupRect() : defaultNodeEditorPopupRect());
+  const [popupFullscreen, setPopupFullscreen] = useState(initialFullscreen);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ position?: ConfirmActionMenuPosition | null } | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const popupRectRef = useRef(popupRect);
-  const restorePopupRectRef = useRef<NodeEditorPopupRect | null>(null);
+  const restorePopupRectRef = useRef<NodeEditorPopupRect | null>(initialFullscreen ? defaultNodeEditorPopupRect() : null);
 
   useEffect(() => {
     popupRectRef.current = popupRect;
@@ -2433,20 +2300,6 @@ const appSidebarSectionHeaderLineStyle: React.CSSProperties = {
   height: 1,
   background: SIDEBAR_DIVIDER,
 };
-
-function appSidebarPinnedSectionStyle(active: boolean): React.CSSProperties {
-  return {
-    flex: "0 0 auto",
-    display: "grid",
-    gridTemplateRows: "auto minmax(44px, auto)",
-    gap: 7,
-    minWidth: 0,
-    padding: "0 0 10px",
-    outline: active ? "2px solid rgba(148, 163, 184, 0.24)" : "2px solid transparent",
-    outlineOffset: 2,
-    borderRadius: 6,
-  };
-}
 
 function appSidebarCompanyExplorerSectionStyle(searchActive: boolean): React.CSSProperties {
   return {
@@ -2815,19 +2668,6 @@ const appSidebarExplorerSuccessStyle: React.CSSProperties = {
   boxShadow: "0 5px 12px rgba(22, 101, 52, 0.12)",
 };
 
-const appSidebarPinSuccessStyle: React.CSSProperties = {
-  margin: "0 2px 5px",
-  padding: "5px 7px",
-  border: "1px solid rgba(34, 197, 94, 0.36)",
-  borderRadius: 7,
-  background: "linear-gradient(135deg, rgba(220, 252, 231, 0.96), rgba(187, 247, 208, 0.9))",
-  color: "#166534",
-  fontSize: 10,
-  fontWeight: 800,
-  lineHeight: 1.25,
-  boxShadow: "0 5px 12px rgba(22, 101, 52, 0.12)",
-};
-
 function appSidebarSharedFolderRowStyle(depth: number, active: boolean, dropPlacement: SharedInboxDropPlacement | null, hovered = false): React.CSSProperties {
   const framed = active || hovered || dropPlacement === "inside";
   const frameBackground = active
@@ -2933,89 +2773,6 @@ const appSidebarPriorityMenuButtonStyle: React.CSSProperties = {
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
-};
-
-const appSidebarPinListStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: "grid",
-  alignContent: "start",
-  gap: 4,
-  padding: "0 2px",
-};
-
-const appSidebarEmptyStyle: React.CSSProperties = {
-  minHeight: 34,
-  display: "flex",
-  alignItems: "center",
-  padding: "0 6px",
-  color: "rgba(15, 23, 42, 0.48)",
-  fontSize: 11,
-  fontWeight: 600,
-};
-
-function appSidebarPinRowStyle(dropPlacement: SidebarPinDropPlacement | null): React.CSSProperties {
-  return {
-    minWidth: 0,
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) 24px",
-    alignItems: "center",
-    gap: 4,
-    cursor: "grab",
-    borderRadius: 7,
-    background: dropPlacement === "inside" ? "rgba(14, 165, 233, 0.08)" : undefined,
-    boxShadow: dropPlacement === "before"
-      ? "inset 0 2px 0 rgba(100, 116, 139, 0.58)"
-      : dropPlacement === "after"
-        ? "inset 0 -2px 0 rgba(100, 116, 139, 0.58)"
-        : dropPlacement === "inside"
-          ? "inset 0 0 0 2px rgba(14, 165, 233, 0.26)"
-          : undefined,
-  };
-}
-
-const appSidebarPinButtonStyle: React.CSSProperties = {
-  minWidth: 0,
-  minHeight: 36,
-  display: "grid",
-  gridTemplateColumns: "24px minmax(0, 1fr)",
-  alignItems: "center",
-  gap: 7,
-  border: "1px solid transparent",
-  borderRadius: 6,
-  background: `#ffffff padding-box, ${SIDEBAR_EDGE_FRAME_GRADIENT} border-box`,
-  color: SIDEBAR_ACTIVE_TEXT,
-  cursor: "pointer",
-  font: "inherit",
-  fontSize: 11.5,
-  fontWeight: 600,
-  padding: "0 8px",
-  textAlign: "left",
-  boxShadow: "0 0 0 1px rgba(120, 224, 255, 0.10), inset 1px 1px 0 rgba(255, 255, 255, 0.9)",
-};
-
-const appSidebarPinIconStyle: React.CSSProperties = {
-  width: 24,
-  height: 24,
-  display: "grid",
-  placeItems: "center",
-  color: SIDEBAR_ACTIVE_TEXT,
-  transform: "scale(1.25)",
-};
-
-const appSidebarPinRemoveStyle: React.CSSProperties = {
-  width: 24,
-  height: 24,
-  display: "grid",
-  placeItems: "center",
-  border: "1px solid rgba(100, 116, 139, 0.28)",
-  borderRadius: 5,
-  background: "#ffffff",
-  color: "rgba(15, 23, 42, 0.58)",
-  cursor: "pointer",
-  font: "inherit",
-  fontSize: 10,
-  fontWeight: 700,
-  lineHeight: 1,
 };
 
 const appSidebarExplorerFallbackStyle: React.CSSProperties = {

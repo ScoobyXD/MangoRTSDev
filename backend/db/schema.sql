@@ -117,10 +117,32 @@ create index if not exists idx_saved_views_group_principal
   on saved_views(company_id, principal_id)
   where principal = 'group';
 
+create table if not exists pin_folders (
+  folder_id uuid not null,
+  company_id uuid not null,
+  user_id uuid not null,
+  parent_folder_id uuid,
+  name text not null,
+  position integer not null default 0,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  constraint pin_folders_name_nonblank_chk check (btrim(name) <> ''),
+  constraint pin_folders_not_self_parent_chk check (parent_folder_id is distinct from folder_id),
+  primary key (folder_id),
+  unique (company_id, user_id, folder_id),
+  foreign key (company_id) references companies(company_id) on delete cascade,
+  foreign key (company_id, user_id) references company_memberships(company_id, user_id) on delete cascade,
+  foreign key (company_id, user_id, parent_folder_id) references pin_folders(company_id, user_id, folder_id) on delete cascade
+);
+
+create index if not exists idx_pin_folders_owner_parent_position
+  on pin_folders(company_id, user_id, parent_folder_id, position, created_timestamp, folder_id);
+
 create table if not exists pins (
   pin_id uuid not null,
   company_id uuid not null,
   user_id uuid not null,
+  parent_folder_id uuid,
   resource_type text not null,
   resource_id uuid not null,
   name text not null,
@@ -131,11 +153,12 @@ create table if not exists pins (
   primary key (pin_id),
   foreign key (company_id) references companies(company_id) on delete cascade,
   foreign key (company_id, user_id) references company_memberships(company_id, user_id) on delete cascade,
+  foreign key (company_id, user_id, parent_folder_id) references pin_folders(company_id, user_id, folder_id) on delete cascade,
   unique (company_id, user_id, resource_type, resource_id)
 );
 
-create index if not exists idx_pins_user_position
-  on pins(company_id, user_id, position, created_timestamp, pin_id);
+create index if not exists idx_pins_owner_parent_position
+  on pins(company_id, user_id, parent_folder_id, position, created_timestamp, pin_id);
 
 create table if not exists company_user_group_closure (
   company_id uuid not null,

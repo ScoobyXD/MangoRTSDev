@@ -1,16 +1,16 @@
 # Process Story: Mango relates resources by their exact identities
 
-A user relates an existing Node, Logic Gate, Project, email, attachment, Account, or other supported Mango resource
+A user relates or personally pins an existing Node, Logic Gate, Project, email, attachment, Account, or other supported Mango resource
 ↓
 The command carries the resource's existing canonical ID unchanged from its source record
 ↓
 The relationship subsystem stores that literal ID in a direct typed column when the endpoint type is fixed, or together with its canonical `resource_type` when the endpoint type can vary
 ↓
-The relationship remains in the table for its business meaning; only the documented Company Explorer, Logic Gate-to-Node, and Shared Triage parent links also define immediate V2 policy ancestry
+The relationship remains in the table for its business meaning, such as Node structure, Logic Gate flow, Project membership, personal pin organization, email attachment, file ownership, Account assignment, permission, or GVIC assignment; only the documented Company Explorer, Logic Gate-to-Node, and Shared Triage parent links also define immediate V2 policy ancestry
 ↓
 Reads, events, projections, recycle/restore, and permanent deletion use the same company, endpoint type, and literal resource ID; no resource registry, translated ID, or replacement identity is consulted
 ↓
-Removing one relationship removes only that edge unless the owning subsystem has a separate, explicit deletion rule
+Removing one relationship removes only that edge unless the owning subsystem has a separate, explicit deletion rule; deleting a personal pin folder removes only its descendant folder and pin records, never the pinned resources
 
 Last updated: 2026-08-05
 
@@ -212,6 +212,12 @@ Every new or changed relationship subsystem MUST test, as applicable:
 ### Law 26 — Documentation changes with business behavior
 
 Any change to relationship meaning, supported resource types, cardinality, identity, ownership, deletion, recycle/restore, authorization, or source-of-truth storage MUST update this file in the same change. The Process Story at the top must remain an accurate end-to-end description, and any more specific `docs/tests/*.md` contract must be updated as well.
+
+### Law 27 — Personal pin folders contain pin edges, not resources
+
+`pins.resource_type + pins.resource_id` stores the exact typed identity of the pinned Node, Logic Gate, or Project. `pin_folders` is a separate user-and-company-scoped organization tree, and `pins.parent_folder_id` points directly to a folder owned by that same user and company. Folder parent links must reject cycles and cross-owner IDs.
+
+Deleting a pin, pin folder, or pin folder subtree deletes only personal organization rows. It MUST NOT delete, recycle, rename, move, permission-change, or otherwise mutate the underlying pinned resources. Grouping two pins into a new folder and changing mixed folder/pin layout are atomic personal-organization commands; they do not create another resource identity or access relationship.
 
 ## Required design examples
 
