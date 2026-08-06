@@ -3,15 +3,16 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-test("permission dialog dismissal never retries a failed save", () => {
+test("permission dialog saves pending changes before closing without duplicate writes", () => {
   const source = readFileSync(
     resolve(process.cwd(), "frontend/src/modules/permissions/EntityPermissionsDialog.tsx"),
     "utf8",
   );
 
-  assert.match(source, /const closeWithoutSave = \(\) => \{[\s\S]*?onClose\(\);[\s\S]*?\};/);
-  assert.match(source, /onClick=\{closeWithoutSave\}[\s\S]*?aria-label="Close permissions"/);
-  assert.match(source, /<AppModalPortal onRequestClose=\{closeWithoutSave\}>/);
-  assert.doesNotMatch(source, /const closeWithSave/);
-  assert.doesNotMatch(source, /void save\(true\)/);
+  assert.match(source, /const \[permissionsLoadFailed, setPermissionsLoadFailed\] = useState\(false\);/);
+  assert.match(source, /const \[hasUnsavedChanges, setHasUnsavedChanges\] = useState\(false\);/);
+  assert.match(source, /const closeWithSave = \(\) => \{[\s\S]*?effectiveReadOnly \|\| permissionsLoadFailed \|\| !hasUnsavedChanges[\s\S]*?onClose\(\);[\s\S]*?void save\(true\);[\s\S]*?\};/);
+  assert.match(source, /setPolicyRevision\(payload\.revision\);\s*setHasUnsavedChanges\(false\);\s*setSaved\(true\);/);
+  assert.match(source, /onClick=\{closeWithSave\} disabled=\{busy\}[\s\S]*?aria-label="Close permissions"/);
+  assert.match(source, /<AppModalPortal onRequestClose=\{busy \? undefined : closeWithSave\}>/);
 });

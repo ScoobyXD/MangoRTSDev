@@ -985,11 +985,11 @@ Prove the V2 runtime is authoritative, then remove every old policy table, colum
 
 ### Post-retirement save incident
 
-After the one-transaction retirement script was run on August 5, 2026, the operator reported that GVIC and permission edits would not save and that the permission-dialog X retried the failed write instead of dismissing the dialog. Reproducing the same retirement set on an isolated fresh schema proved that direct writes to both final settings/edge pairs and both final resolvers still succeed after the retired tables are absent. No guessed legacy table or fallback was restored.
+After the one-transaction retirement script was run on August 5, 2026, the operator reported that GVIC and permission edits would not save and that an editable permission dialog could not close while its close-with-save write failed. The same failure reproduced on a freshly recreated local database and produced no backend handler log. Browser evidence identified the shared cause: every V2 policy PUT sends `If-Match` for stale-write protection, but the API CORS allow-list omitted `If-Match`. The browser therefore rejected the preflight before sending either the GVIC or permission PUT to Go. The retirement SQL and the four canonical policy tables were not the cause.
 
-The dialog trap was an independent frontend defect: close was implemented as close-after-save. Close, Escape, and modal dismissal now discard pending edits and remain available even when a write fails; Save remains the only commit action. Focused frontend contract coverage enforces that rule.
+The API CORS contract now allows `If-Match`, with a regression assertion in the API preflight test. This restores all canonical GVIC and permission write call sites without removing stale-write protection or adding a fallback. Permission dialogs retain the documented close-with-save rule: X, Escape, and modal dismissal save pending editable changes before closing; denied, read-only, unchanged, and already-saved dialogs close without a write; a successful explicit Save prevents a duplicate close write. Focused frontend contract coverage enforces that behavior.
 
-The live write failure itself requires the exact repository error from the historically migrated database. V2 GVIC and permission PUT failures now log company/resource identity plus the underlying error in the backend terminal. Do not rerun Step 1/Step 2, recreate retired tables, or apply a guessed live repair before that error is captured and matched to a forward-only correction.
+No database repair, legacy-table restoration, migration rerun, or schema change is required. Deploy/restart the corrected backend so browsers receive the updated preflight response; the frontend close behavior ships with the matching frontend build.
 
 ### Required verification
 

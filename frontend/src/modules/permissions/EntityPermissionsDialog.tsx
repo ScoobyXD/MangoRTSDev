@@ -177,6 +177,8 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   const [expandedGroupIDs, setExpandedGroupIDs] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [permissionsLoadFailed, setPermissionsLoadFailed] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [saved, setSaved] = useState(false);
 
   const permissionsPath = permissionsPathFor(entityType, entityID);
@@ -186,6 +188,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
     async function load() {
       setBusy(true);
       setError("");
+      setPermissionsLoadFailed(false);
       try {
         const [companyUsers, groupsPayload, permissionsPayload] = await Promise.all([
           listCompanyUsers(companyID),
@@ -211,11 +214,14 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
         setPolicyRevision(permissionsPayload.revision ?? "");
         setServerCanEditPermissions(permissionsPayload.can_edit_permissions === true);
         setServerCanEditManagerPermissions(permissionsPayload.can_edit_manager_permissions === true);
+        setPermissionsLoadFailed(false);
+        setHasUnsavedChanges(false);
         setSaved(false);
       } catch (loadError) {
         if (!cancelled) {
           console.error("Failed to load permissions", loadError);
           setError(permissionRequestErrorMessage(loadError, "view"));
+          setPermissionsLoadFailed(true);
         }
       } finally {
         if (!cancelled) setBusy(false);
@@ -264,6 +270,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
 
   const setAccess = (key: PermissionSelectionKey, accessLevel: ResourceAccessLevel) => {
     if (effectiveReadOnly) return;
+    setHasUnsavedChanges(true);
     setSaved(false);
     setAccessBySubject((previous) => {
       const next = new Map(previous);
@@ -274,6 +281,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
 
   const clearAccess = (key: PermissionSelectionKey) => {
     if (effectiveReadOnly) return;
+    setHasUnsavedChanges(true);
     setSaved(false);
     setAccessBySubject((previous) => {
       const next = new Map(previous);
@@ -284,6 +292,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
 
   const setDefaultAccessMode = (nextDefaultAccess: "edit" | "no_access") => {
     if (effectiveReadOnly || defaultAccess === nextDefaultAccess) return;
+    setHasUnsavedChanges(true);
     setSaved(false);
     setDefaultAccess(nextDefaultAccess);
   };
@@ -292,6 +301,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
     if (effectiveReadOnly) return;
     const cleanUserID = userID.trim();
     if (!cleanUserID) return;
+    setHasUnsavedChanges(true);
     setSaved(false);
     setAccessBySubject((previous) => {
       const next = new Map(previous);
@@ -355,6 +365,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
       setEffectiveSource(payload.effective_source);
       setOverwrittenByAncestor(payload.overwritten_by_ancestor ?? null);
       setPolicyRevision(payload.revision);
+      setHasUnsavedChanges(false);
       setSaved(true);
       setServerCanEditPermissions(payload.can_edit_permissions === true);
       setServerCanEditManagerPermissions(payload.can_edit_manager_permissions === true);
@@ -523,17 +534,21 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
 
   const dialogMode = variant === "dialog";
   const containerStyle = dialogMode ? permissionDialogStyle : permissionEmbeddedStyle;
-  const closeWithoutSave = () => {
+  const closeWithSave = () => {
     if (!onClose) return;
-    onClose();
+    if (effectiveReadOnly || permissionsLoadFailed || !hasUnsavedChanges) {
+      onClose();
+      return;
+    }
+    void save(true);
   };
   const actionButtons = (
     <div style={permissionHeaderActionsStyle}>
       <div style={{ display: "flex", gap: 4 }} aria-label="Permission policy mode">
-        <button type="button" style={permissionMode === "inherited" ? permissionPrimaryButtonStyle : permissionSecondaryButtonStyle} disabled={busy || effectiveReadOnly} onClick={() => { setSaved(false); setPermissionMode("inherited"); }}>Inherited</button>
-        <button type="button" style={permissionMode === "customized" ? permissionPrimaryButtonStyle : permissionSecondaryButtonStyle} disabled={busy || effectiveReadOnly} onClick={() => { setSaved(false); setPermissionMode("customized"); }}>Customized</button>
+        <button type="button" style={permissionMode === "inherited" ? permissionPrimaryButtonStyle : permissionSecondaryButtonStyle} disabled={busy || effectiveReadOnly} onClick={() => { if (permissionMode !== "inherited") { setHasUnsavedChanges(true); setSaved(false); setPermissionMode("inherited"); } }}>Inherited</button>
+        <button type="button" style={permissionMode === "customized" ? permissionPrimaryButtonStyle : permissionSecondaryButtonStyle} disabled={busy || effectiveReadOnly} onClick={() => { if (permissionMode !== "customized") { setHasUnsavedChanges(true); setSaved(false); setPermissionMode("customized"); } }}>Customized</button>
       </div>
-      <button className="mango-elevated-action" type="button" style={permissionSecondaryButtonStyle} onClick={() => { if (!effectiveReadOnly) { setSaved(false); setAccessBySubject(new Map()); } }} disabled={controlsDisabled}>Clear exceptions</button>
+      <button className="mango-elevated-action" type="button" style={permissionSecondaryButtonStyle} onClick={() => { if (!effectiveReadOnly && accessBySubject.size > 0) { setHasUnsavedChanges(true); setSaved(false); setAccessBySubject(new Map()); } }} disabled={controlsDisabled}>Clear exceptions</button>
       <DefaultAccessToggle defaultAccess={defaultAccess} disabled={controlsDisabled} onChange={setDefaultAccessMode} />
       {supportsDescendantApply && (
         <button
@@ -563,7 +578,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
       )}
       <button className="mango-elevated-action" type="button" style={permissionPrimaryButtonStyle} onClick={() => { void save(false); }} disabled={busy || effectiveReadOnly}>{busy ? "Saving" : "Save"}</button>
       {onClose && (
-        <button className="mango-elevated-action" type="button" style={permissionIconButtonStyle} onClick={closeWithoutSave} aria-label="Close permissions">x</button>
+        <button className="mango-elevated-action" type="button" style={permissionIconButtonStyle} onClick={closeWithSave} disabled={busy} aria-label="Close permissions">x</button>
       )}
     </div>
   );
@@ -631,7 +646,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
 
   if (!dialogMode) return panel;
   return (
-    <AppModalPortal onRequestClose={closeWithoutSave}>
+    <AppModalPortal onRequestClose={busy ? undefined : closeWithSave}>
       <div style={permissionBackdropStyle}>
         <div onPointerDown={(event) => event.stopPropagation()}>{panel}</div>
       </div>
