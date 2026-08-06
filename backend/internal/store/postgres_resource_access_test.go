@@ -15,12 +15,17 @@ func TestPostgresResourceAccessUsesOnlyV2ResolvedPolicy(t *testing.T) {
 	for _, required := range []string{
 		"mangorts_v2_resolve_permission_policy",
 		"mangorts_user_can_access_resource",
+		"select source_setting.default_access",
+		"join resource_permission_settings source_setting",
+		"source_setting.resource_type=resolved.source_resource_type",
+		"source_setting.resource_id=resolved.source_resource_id",
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("V2 resource access reader missing %q", required)
 		}
 	}
 	for _, forbidden := range []string{
+		"select resolved.default_access",
 		"resource_permission_policy_revisions",
 		"resource_permission_subtree_applications",
 		"effective_resource_access",

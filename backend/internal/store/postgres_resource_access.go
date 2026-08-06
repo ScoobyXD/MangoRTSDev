@@ -21,8 +21,12 @@ func postgresResourceDefaultAccess(ctx context.Context, q postgresResourceAccess
 	}
 	var access string
 	err := q.QueryRowContext(ctx, `
-select resolved.default_access
-from mangorts_v2_resolve_permission_policy($1::uuid,$2::text,$3::uuid) resolved`, companyID, resourceType, resourceID).Scan(&access)
+select source_setting.default_access
+from mangorts_v2_resolve_permission_policy($1::uuid,$2::text,$3::uuid) resolved
+join resource_permission_settings source_setting
+  on source_setting.company_id=$1::uuid
+ and source_setting.resource_type=resolved.source_resource_type
+ and source_setting.resource_id=resolved.source_resource_id`, companyID, resourceType, resourceID).Scan(&access)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
 	}

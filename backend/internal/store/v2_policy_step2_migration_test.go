@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"strings"
@@ -161,6 +162,16 @@ where g.company_id='00000000-0000-4000-8000-000000000101' and g.resource_type='n
   '00000000-0000-4000-8000-000000000101','node','00000000-0000-4000-8000-000000000112',
   '00000000-0000-4000-8000-000000000102','edit')`).Scan(&canEdit); err != nil || !canEdit {
 		t.Fatalf("detached node effective edit=%v err=%v", canEdit, err)
+	}
+	defaultAccess, err := postgresResourceDefaultAccess(
+		context.Background(),
+		db,
+		"00000000-0000-4000-8000-000000000101",
+		EntityTypeNode,
+		"00000000-0000-4000-8000-000000000112",
+	)
+	if err != nil || defaultAccess != "no_access" {
+		t.Fatalf("detached node source default access=%q err=%v", defaultAccess, err)
 	}
 	var groupEdges int
 	if err := db.QueryRow(`select count(*) from resource_gvic_assignments where principal_id='00000000-0000-4000-8000-000000000130'`).Scan(&groupEdges); err != nil || groupEdges != 0 {
