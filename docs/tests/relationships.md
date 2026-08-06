@@ -1,3 +1,17 @@
+# Process Story: Node location derives from typed organization
+
+A user searches for a Node in Company Explorer or Editor
+↓
+Mango reads the Node from `nodes` and follows the exact `node_logic_gate_assignments` and `project_relationships` rows without creating a placement copy
+↓
+A visible Logic Gate's Company Explorer folder ancestry supplies the path first; otherwise a visible Project's ancestry supplies it; otherwise an accessible standalone Node has no path
+↓
+Hidden organizational ancestry is omitted, and deleting a Company Explorer folder cannot delete a Node through a historical placement row
+↓
+`company_explorer_items` remains a typed placement table only for Projects and Logic Gates
+
+Last updated: 2026-08-06
+
 # Process Story: The universal picker dispatches exact typed relationship commands
 
 A user opens the universal picker from a resource editor and selects `##` link mode
@@ -245,6 +259,14 @@ Any change to relationship meaning, supported resource types, cardinality, ident
 `pins.resource_type + pins.resource_id` stores the exact typed identity of the pinned Node, Logic Gate, or Project. `pin_folders` is a separate user-and-company-scoped organization tree, and `pins.parent_folder_id` points directly to a folder owned by that same user and company. Folder parent links must reject cycles and cross-owner IDs.
 
 Deleting a pin, pin folder, or pin folder subtree deletes only personal organization rows. It MUST NOT delete, recycle, rename, move, permission-change, or otherwise mutate the underlying pinned resources. Grouping two pins into a new folder and changing mixed folder/pin layout are atomic personal-organization commands; they do not create another resource identity or access relationship.
+
+### Law 28 — Company Explorer placement excludes Nodes
+
+`company_explorer_items` may contain only Project and Logic Gate placement edges. No Node creation, email collaboration, chat, repair, deferred projection, or ordinary Explorer command may insert a Node placement or create a deterministic Unfiled/Nodes folder.
+
+Node search location derives only from exact source relationships: visible Logic Gate assignment and that Logic Gate's visible Company Explorer ancestry first, visible Project relationship and that Project's ancestry second, otherwise an empty path for an accessible standalone Node. A Node with only hidden organizational paths is excluded so hidden ancestry does not leak.
+
+Removing historical Node placement rows or their now-empty deterministic folder MUST NOT delete a Node, Logic Gate assignment, Project relationship, email relationship, attachment relationship, chat ownership, GVIC assignment, permission, or any other endpoint or typed edge.
 
 ## Required design examples
 

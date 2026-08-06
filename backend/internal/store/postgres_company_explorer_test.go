@@ -39,6 +39,7 @@ func TestPostgresCompanyExplorerLazyUsesFinalItemsAndNoScopedFolders(t *testing.
 		"from company_explorer_items item",
 		"item.parent_folder_id is null",
 		"item.parent_folder_id=$5::uuid",
+		"item.target_type in ('project', 'logic_gate')",
 		"item.target_type='logic_gate'",
 		"item.target_type='project'",
 		"mangorts_user_can_access_resource(item.company_id, item.target_type, item.target_id",

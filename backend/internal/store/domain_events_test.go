@@ -205,7 +205,7 @@ func TestMemoryWorkspaceReadVersionsIgnoreInternalDerivedProjectionRequests(t *t
 func TestWorkspaceDerivedProjectionRequestedEventInputUsesTaskPayload(t *testing.T) {
 	input := WorkspaceDerivedProjectionRequestedEventInput(
 		"company-1",
-		[]WorkspaceDerivedProjectionTask{DeferredCompanyExplorerFolderItemAssignTask("", "active_nodes", "node", "node-1", 0)},
+		[]WorkspaceDerivedProjectionTask{DeferredCompanyExplorerFolderItemAssignTask("", "active_logic_gates", "logic_gate", "logic-gate-1", 0)},
 		"user-1",
 	)
 	if input.Type != WorkspaceDerivedProjectionRequestedEventType {

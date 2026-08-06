@@ -37,3 +37,30 @@ func TestEmailRelationshipsUseOrdinaryHostResourceSemantics(t *testing.T) {
 		}
 	}
 }
+
+func TestEmailCollaborationAndExplorerDefaultsHaveNoNodePlacementPath(t *testing.T) {
+	for _, file := range []string{"memory_email_collaboration.go", "postgres_email_collaboration.go"} {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", file, err)
+		}
+		source := strings.ToLower(string(raw))
+		for _, forbidden := range []string{"placeemailcollaborationnode", "company_explorer_items", "unfiled_nodes"} {
+			if strings.Contains(source, forbidden) {
+				t.Fatalf("%s retains Node placement marker %q", file, forbidden)
+			}
+		}
+	}
+	for _, file := range []string{"company_explorer_defaults.go", "memory_company_explorer_search.go", "postgres_company_explorer_defaults.go"} {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", file, err)
+		}
+		source := strings.ToLower(string(raw))
+		for _, forbidden := range []string{"defaultnodes", "unfiled_nodes", "allowemailcollaborationnode", "placeemailcollaborationnode"} {
+			if strings.Contains(source, forbidden) {
+				t.Fatalf("%s retains deterministic Nodes-folder marker %q", file, forbidden)
+			}
+		}
+	}
+}

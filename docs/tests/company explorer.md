@@ -1,3 +1,17 @@
+# Process Story: Nodes stay outside Company Explorer placement storage
+
+A user creates or finds a Node from Editor, email collaboration, chat, Project, or Logic Gate work
+↓
+The Node remains authoritative in `nodes` and its typed business relationship tables; no `company_explorer_items` Node row or Unfiled/Nodes folder is created
+↓
+Company Explorer continues to organize only Projects and Logic Gates, while search reads Nodes directly from `nodes`
+↓
+Search shows a visible Logic Gate placement path first, otherwise a visible Project placement path, otherwise the accessible standalone Node with an empty path
+↓
+Hidden folder ancestry never leaks, and deleting an Explorer folder never treats a stale historical Node placement as permission to delete the Node
+
+Last updated: 2026-08-06
+
 # Process Story: Explorer hierarchy drives live V2 policy parentage
 
 A user opens Home and selects a Node, Logic Gate, Project, Kanban board, folder, or communications row in Explorer
@@ -30,7 +44,7 @@ E5 - Explorer reads return only resources where the viewer has effective edit ac
 E6 - Explorer rows include effective access so the UI can decide available actions.
 E7 - Explorer rows include has-children information for folder rows so the UI can lazy-load folder branches.
 E8 - Explorer rows sort by position, then creation time, then name, then entity ID.
-E9 - The final Company Explorer tree contains folders, subfolders, Logic Gates, and projects, plus the narrow email-collaboration Node exception under protected Unfiled/Nodes. Ordinary standalone, project-related, and Logic-Gate-assigned nodes are not Company Explorer rows.
+E9 - The final Company Explorer tree contains folders, subfolders, Logic Gates, and projects. Nodes, including email-collaboration Nodes, are never Company Explorer rows.
 E10 - Project rows are standalone leaf rows; project relationships do not render nested Explorer child rows.
 E11 - Logic Gate rows are standalone leaf rows; node assignments do not render as nested Explorer child rows.
 E12 - Creating an Explorer folder requires company, actor, permission user, parent entity, and nonblank folder name.
@@ -47,19 +61,19 @@ E22 - Explorer placement, update, and removal mutations preserve the affected pa
 E23 - Company Explorer patches concrete mounted state from the initiating command response or the concrete same-window committed-title event; other changes reconcile when the relevant canonical branch is opened or explicitly refreshed.
 E24 - Company Explorer does not use event context or parent-entity fallback to drive background branch refreshes. Canonical branch identity and parent data are resolved by the explicit branch read.
 E25 - Every company has one default root folder named Unfiled.
-E26 - Unfiled has exactly three default child folders, in this order: Projects, Logic Gates, Nodes.
+E26 - Unfiled has exactly two default child folders, in this order: Projects, Logic Gates.
 E27 - Bare projects and Logic Gates created outside Company Explorer route to Unfiled/Projects and Unfiled/Logic Gates respectively.
-E28 - Ordinary bare nodes created outside Company Explorer do not create a Company Explorer item and do not appear in the main tree. Only a Node created by the lazy email-collaboration path in EMAIL52 receives a Nodes-folder item.
-E29 - The `company_explorer_items.target_type` constraint allows `project`, `logic_gate`, and `node`; service/store authorization permits the node type only for the protected email-collaboration placement. Migration recreates the deterministic protected Nodes folder without backfilling ordinary existing nodes or resurrecting legacy arbitrary node placements.
-E30 - Creating, dragging, batch-placing, or ordinary communications-converting a node into Company Explorer remains rejected. The sole insertion path is the internal idempotent email-collaboration create transaction, which places its exact new collaboration Node directly under Unfiled/Nodes. A pre-existing ordinary Node placement is not collaboration-managed and retains normal authorized move/reorder/detach cleanup behavior.
+E28 - Every Node creation path, including email collaboration and chat, creates no Company Explorer item and no default Nodes folder. Nodes remain queryable from authoritative Node storage.
+E29 - The `company_explorer_items.target_type` constraint allows only `project` and `logic_gate`. The forward cleanup migration deletes only historical Node placement rows and the now-empty deterministic Unfiled/Nodes folders, without deleting Nodes or any business relationship.
+E30 - Creating, dragging, batch-placing, deferred-projecting, or communications-converting a Node into Company Explorer is rejected. Historical Node placement rows are neither rendered nor followed by folder deletion; only the cleanup migration removes them.
 E31 - Company Explorer search queries the whole company graph, not only branches that the lazy UI has already opened.
 E32 - Company Explorer search still returns node matches from the source of truth rather than from `company_explorer_items`.
-E33 - Node search results with Logic Gate assignments or project relationships are returned only when at least one of those organizational paths is visible to the viewer; ordinary standalone accessible nodes can still appear with no Explorer path, while an authorized email-collaboration Node reports Unfiled/Nodes as its one Explorer path.
+E33 - Node search derives location from a visible Logic Gate assignment first, otherwise a visible Project relationship, otherwise an empty path for an accessible standalone Node. A Node with organization links is excluded when every linked organizational path is hidden, so folder ancestry cannot leak.
 E34 - Company Explorer search orders result types as Logic Gates, nodes, projects, then folders.
 E35 - Company Explorer search results include resource_type, resource_id, display name, match reason, and Explorer location path.
 E36 - Search result display renders the Explorer location path as nested Explorer rows with normal icons.
 E37 - Node search result rows are open-only: they can be opened, but cannot be expanded, renamed, deleted, pinned, dragged, dropped, or used as creation targets.
-E38 - The default Unfiled folder and its Projects, Logic Gates, and Nodes child folders cannot be renamed, moved, or deleted. Projects and Logic Gates inside their folders retain normal authorized move/delete actions; collaboration Node rows under Nodes are open-only and cannot be moved, reordered, detached, or deleted through Explorer placement actions.
+E38 - The default Unfiled folder and its Projects and Logic Gates child folders cannot be renamed, moved, or deleted. Projects and Logic Gates inside their folders retain normal authorized move/delete actions.
 E39 - While the Explorer search box contains text, the left sidebar hides non-Explorer sections and uses the remaining column for Explorer search results; clearing the search restores the normal sidebar. Explorer/Search Explorer remains beneath the shared body-level blocking modal layer and cannot paint or receive interaction above a node/editor popup, dialog, preview, or expanded/fullscreen panel; closing that surface preserves the existing search query.
 E40 - Once a resource is visible anywhere in Company Explorer, no project relationship branch may create a second visible instance of that resource.
 E41 - Company Explorer has no cross-user realtime subscription. It patches the initiating browser from committed command results and otherwise reloads canonical branches on navigation or explicit refresh.
@@ -76,11 +90,11 @@ E52 - We want multi browser click-drag ability. So I can drag an email from My T
 E53 - Permissions opened from Company Explorer for folders, projects, or Logic Gates use the shared permission view and always expose a visible **Save** action when editable. Node search results remain open-only and do not gain Explorer permission actions.
 E54 - An email conversion through Company Explorer sends the exact source mailbox key and persists mailbox provenance in the created node's attached-email projection: personal/My Triage drag and conversion requests carry normalized `account_email`; Shared Triage requests carry `shared_inbox_id` and suppress a personal-account query, while the canonical projection retains both the shared inbox and its company mailbox account email. Later reads, replies, attachments, drafts, and invitation responses use that source scope.
 E55 - Every successful Node or Logic Gate rename entry point publishes the concrete committed-title event after commit. Company Explorer patches matching Logic Gate rows, Node search results, and mounted GVIC-mode Node/Logic Gate names (including scoped per-user cached rows) immediately alongside the other applicable mounted surfaces; active title drafts/carets are deferred, failed renames publish no event, and another browser still uses canonical reads.
-E56 - Every company receives one deterministic Nodes folder beneath Unfiled. Re-running default-folder repair is idempotent, preserves the same IDs/order/protection, and must not duplicate the folder or any collaboration Node item.
-E57 - A Triage-comment email Node is placed first, copies the final effective source policy once, then customizes creator/participant Edit grants and creator Generated GVIC. Folder visibility cannot leak its source thread or revoke system-managed participants.
-E58 - A collaboration Node row is a protected projection of collaboration ownership, not a general placement edge. Explorer item create/update/move/delete endpoints reject direct mutation of that row; lifecycle changes must use the collaboration/Node domain action so no orphaned chat, participant, draft, or source-thread record remains. Move/delete protection is determined by an exact same-company `communications_email_collaborations.node_id` row, never by `target_type='node'` alone, so an ordinary legacy Node edge remains movable and detachable.
-E59 - One collaboration identity has at most one Nodes-folder item. Concurrent create retries, future provider messages, or reopening from another surface reuse that row, and Company Explorer must not render the same Node under project/Logic Gate relationship branches.
-E60 - Existing email-to-Logic-Gate conversion still creates Pending work under its established path. Starting chat on an unconverted triage email instead creates one priority-bearing creator-Generated-GVIC Node in Unfiled/Nodes with no initial Logic Gate; the Node can be assigned to normal work later.
+E56 - Re-running default-folder repair is idempotent and creates or repairs only Unfiled, Projects, and Logic Gates. It never recreates Unfiled/Nodes or backfills Nodes.
+E57 - A Triage-comment email Node receives its creator/participant Edit grants and creator Generated GVIC directly as an ordinary standalone Node; its privacy never depends on Company Explorer folder placement or visibility.
+E58 - Collaboration ownership, chat, participants, drafts, source-thread links, attachments, and Node policies remain in their typed domain tables. Company Explorer has no collaboration Node projection or lifecycle edge.
+E59 - Concurrent collaboration retries and future provider messages reuse the same collaboration Node without creating a Company Explorer item or duplicate search result.
+E60 - Existing email-to-Logic-Gate conversion still creates Pending work under its established typed assignment path. Starting chat on an unconverted triage email creates a standalone creator-Generated-GVIC Node with no Company Explorer placement and no initial Logic Gate.
 E61 - Explorer policy reads explain inherited/customized mode, effective source, active reset, and inactive overwritten customization for folders, projects, and Logic Gates.
 E62 - Moving a subtree after an older force reset protects it through the new parent-link sequence; a later reset from its new ancestry may cross that link.
 E63 - Deleting an Explorer target removes both V2 settings rows and cascading policy edges; deleting only a placement follows root/detach materialization rules without deleting the target.
@@ -108,7 +122,7 @@ Business logic covered:
 - E11
 
 Given:
-- A company has Explorer folders, projects, Logic Gates, source-of-truth ordinary nodes, and an email-collaboration Node.
+- A company has Explorer folders, projects, Logic Gates, source-of-truth ordinary Nodes, and an email-collaboration Node.
 - The viewer has access to some resources but not others.
 
 Expected:
@@ -119,8 +133,8 @@ Expected:
 - Only viewable Explorer resources are returned.
 - Rows include effective access and folder has-children state.
 - Rows sort by position, creation time, name, and entity ID.
-- The final Company Explorer tree shows folders, subfolders, projects, and Logic Gates, plus only authorized email-collaboration Node rows beneath Unfiled/Nodes.
-- Ordinary standalone, project-related, and Logic-Gate-assigned nodes remain absent as tree rows.
+- The final Company Explorer tree shows folders, subfolders, projects, and Logic Gates only.
+- Every Node remains absent as a tree row, including standalone, project-related, Logic-Gate-assigned, and email-collaboration Nodes.
 - Projects render as standalone leaf rows, even when project relationships exist.
 - Logic Gates render as standalone leaf rows, even when node assignments exist.
 
@@ -164,8 +178,8 @@ Expected:
 - Deleting a placement edge does not delete the target resource.
 - Protected/default folders cannot be renamed or deleted.
 - Target deletion happens only through the explicit target deletion path.
-- `company_explorer_items` accepts project, Logic Gate, and Node target types, but service/store commands authorize Node only for internal email-collaboration creation under protected Unfiled/Nodes.
-- Any user/API attempt to create a Node placement through ordinary Company Explorer commands is rejected. Existing ordinary Node edges retain authorized move/reorder/detach behavior; only collaboration-backed Node edges reject those mutations.
+- `company_explorer_items` accepts only Project and Logic Gate target types.
+- Every user, API, deferred projection, and email-collaboration attempt to create a Node placement is rejected; stale historical Node rows are not rendered and cannot cause Node deletion through folder deletion.
 - Communications/email conversion targeting a Company Explorer folder is rejected and must not create a node, folder item, Explorer V2 row, or `company_explorer_items` row.
 
 ### Scenario E-S3: Explorer Local Reconciliation And Canonical Branch Reads
@@ -201,17 +215,17 @@ Business logic covered:
 
 Given:
 - A company has no user-created Explorer folders.
-- A project, Logic Gate, ordinary node, or email-collaboration Node is created outside Company Explorer without an explicit folder placement.
+- A project, Logic Gate, ordinary Node, or email-collaboration Node is created outside Company Explorer without an explicit folder placement.
 - Another project or Logic Gate is created explicitly at the Company Explorer root.
 
 Expected:
 - The root contains the default Unfiled folder.
-- Unfiled contains Projects, Logic Gates, and Nodes in that order.
+- Unfiled contains Projects and Logic Gates in that order.
 - Bare outside-created projects and Logic Gates appear in the matching Unfiled child folder.
 - Ordinary outside-created nodes remain queryable source-of-truth nodes but do not appear in Company Explorer.
-- The email-collaboration Node appears exactly once beneath Unfiled/Nodes, copies the final effective source once, and keeps its system-managed creator/participant rules.
+- The email-collaboration Node remains standalone, keeps its creator/participant rules, and creates no Explorer folder or item.
 - Explicit root-created projects and Logic Gates stay at the Company Explorer root and do not also appear in Unfiled.
-- Unfiled, Projects, Logic Gates, and Nodes do not expose rename/move/delete actions and direct mutation attempts are rejected.
+- Unfiled, Projects, and Logic Gates do not expose rename/move/delete actions and direct mutation attempts are rejected.
 
 ### Scenario E-S5: Whole-Company Search
 
@@ -230,17 +244,17 @@ Given:
 - A matching node is assigned to a visible Logic Gate.
 - A matching node is related to a visible project.
 - A matching source-of-truth node has no visible Explorer path.
-- A matching authorized email-collaboration Node is placed under Unfiled/Nodes.
+- A matching authorized email-collaboration Node has no Logic Gate or Project relationship.
 - Another matching resource exists under an Explorer folder the viewer cannot access.
 - A blocking node/editor popup, dialog, preview, or expanded/fullscreen panel opens while Search Explorer has a query.
 
 Expected:
 - Search returns matches from the whole company, not only loaded UI branches.
 - Search returns node matches from source-of-truth node storage, not from Company Explorer item rows.
-- Node result paths use visible Logic Gate assignment and project relationship context when available.
+- Node result paths use a visible Logic Gate assignment first and a visible Project relationship only when no visible Logic Gate path is available.
 - A node whose only Logic Gate assignment or project relationship paths are hidden from the viewer is excluded, even when the viewer has direct access to the node.
 - Standalone accessible node results can appear with an empty Explorer path.
-- An authorized email-collaboration Node reports its one Unfiled/Nodes path and is not duplicated under a relationship path.
+- An accessible standalone email-collaboration Node reports an empty path.
 - Search excludes matches whose Explorer placement or folder ancestry is not visible to the viewer.
 - Logic Gates are listed before nodes, nodes before projects, and projects before folders.
 - Each result includes resource_type, resource_id, display name, match reason, and Explorer location path.
@@ -265,7 +279,6 @@ Given:
 - A Logic Gate or node can also be related to a project through a source-of-truth project relationship.
 - A user drags a project or Logic Gate into a normal Company Explorer folder.
 - A user attempts to drag a node into a normal Company Explorer folder or onto a Logic Gate row.
-- The protected Nodes folder contains an authorized email-collaboration Node.
 
 Expected:
 - Project and Logic Gate folder drops write Company Explorer placement edges.
@@ -328,7 +341,7 @@ Expected:
 - Denied views remain dismissible and do not issue a permission mutation.
 - Node search rows remain open-only and do not expose Explorer permission or mutation controls.
 
-### Scenario E-S10: Protected Unfiled Nodes Collaboration Placement
+### Scenario E-S10: No Node Placement
 
 Business logic covered:
 - E26
@@ -344,18 +357,15 @@ Business logic covered:
 - E60
 
 Given:
-- Default-folder repair runs repeatedly for a company.
+- Default-folder repair runs repeatedly for a company that may still contain historical Unfiled/Nodes rows.
 - Two concurrent first-chat/shared-draft requests target the same previously uncollaborated email thread.
-- Users attempt to place an ordinary Node, move the collaboration Node, or drop the email onto a Logic Gate.
+- Users create ordinary and collaboration Nodes, attempt to place a Node, or drop an email onto a Logic Gate.
 
 Expected:
-- Repair leaves one deterministic Unfiled/Nodes folder after Projects and Logic Gates and never backfills arbitrary existing Nodes.
-- The collaboration create transaction yields one private standalone Node and one protected item directly beneath Nodes.
-- The row is visible only to authorized Node viewers, remains open-only, and cannot be moved, reordered, detached, or deleted through Explorer placement APIs.
-- Folder permissions neither expose the Node to nonparticipants nor replace its permanent participant grants.
-- Repeated creates and future thread messages reuse the same Node/item, and relationship branches do not duplicate it.
-- Ordinary Node placement remains rejected.
-- A pre-existing ordinary Node edge remains movable and detachable because it has no collaboration ownership row.
+- Repair leaves only deterministic Unfiled, Projects, and Logic Gates folders and never creates or backfills a Nodes folder.
+- The collaboration create transaction yields one private standalone Node and no Company Explorer item.
+- Node visibility follows Node permissions and typed Logic Gate or Project organization, never a folder placement.
+- Repeated creates and future thread messages reuse the same Node without creating an item or duplicate search result.
+- Every Node placement path remains rejected.
+- The forward migration deletes historical Node item rows and now-empty deterministic Nodes folders while preserving the Nodes and all typed relationships.
 - Email-to-Logic-Gate drop remains the separate Pending Kanban conversion in E47 through E54 and creates no Explorer Node item.
-
-E61 - The protected Unfiled/Nodes edge remains the single collaboration-owned Explorer placement. Normal node content/work/Project/Logic Gate behavior does not authorize moving or deleting that source placement independently of the collaboration lifecycle.

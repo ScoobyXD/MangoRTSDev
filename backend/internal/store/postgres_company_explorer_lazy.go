@@ -147,6 +147,7 @@ join company_explorer_folders folder
  and folder.folder_id=item.parent_folder_id
 where item.company_id=$1::uuid
   and item.parent_folder_id=$5::uuid
+  and item.target_type in ('project', 'logic_gate')
   and (
     $4::uuid is null
     or (

@@ -95,36 +95,6 @@ func TestEmailRelationshipHTTPUsesOrdinaryNodeSemanticsAndDeletesOnlyRelationshi
 	}
 }
 
-type emailCollaborationDefaultFoldersHTTPTest struct{ nodesID string }
-
-func emailCollaborationDefaultFolderIDsForHTTPTest(t *testing.T, repo *store.MemoryRepo, companyID string) emailCollaborationDefaultFoldersHTTPTest {
-	t.Helper()
-	rows, err := repo.ListCompanyExplorerV2RootRows(store.CompanyExplorerV2RowsQuery{CompanyID: companyID})
-	if err != nil {
-		t.Fatalf("ListCompanyExplorerV2RootRows: %v", err)
-	}
-	var unfiledID string
-	for _, row := range rows.Rows {
-		if row.EntityType == store.CompanyExplorerV2EntityFolder && row.Name == store.CompanyExplorerDefaultRootFolderName {
-			unfiledID = row.EntityID
-		}
-	}
-	if unfiledID == "" {
-		t.Fatal("Unfiled folder not found")
-	}
-	children, err := repo.ListCompanyExplorerV2ChildRows(store.CompanyExplorerV2RowsQuery{CompanyID: companyID, ParentEntityID: unfiledID})
-	if err != nil {
-		t.Fatalf("ListCompanyExplorerV2ChildRows Unfiled: %v", err)
-	}
-	for _, row := range children.Rows {
-		if row.EntityType == store.CompanyExplorerV2EntityFolder && row.Name == store.CompanyExplorerDefaultNodesFolderName {
-			return emailCollaborationDefaultFoldersHTTPTest{nodesID: row.EntityID}
-		}
-	}
-	t.Fatal("Unfiled/Nodes folder not found")
-	return emailCollaborationDefaultFoldersHTTPTest{}
-}
-
 func mustHTTPEmailCollaborationGuardUser(t *testing.T, repo *store.MemoryRepo, companyID, subject, email, role string) domain.User {
 	t.Helper()
 	user, err := repo.UpsertAuthUser(subject, email, subject)

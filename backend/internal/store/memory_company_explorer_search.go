@@ -74,7 +74,6 @@ func (r *MemoryRepo) ensureCompanyExplorerDefaultFoldersLocked(companyID string)
 	upsertFolder(folders.UnfiledFolderID, rootEntityID, CompanyExplorerDefaultRootFolderName, "logic_gate", 1000)
 	upsertFolder(folders.ProjectsFolderID, folders.UnfiledFolderID, CompanyExplorerDefaultProjectsFolderName, "project", 1000)
 	upsertFolder(folders.LogicGatesFolderID, folders.UnfiledFolderID, CompanyExplorerDefaultLogicGatesFolderName, "logic_gate", 2000)
-	upsertFolder(folders.NodesFolderID, folders.UnfiledFolderID, CompanyExplorerDefaultNodesFolderName, "node", 3000)
 	return folders
 }
 
@@ -94,21 +93,6 @@ func (r *MemoryRepo) backfillBareCompanyExplorerItemsLocked(companyID string) {
 }
 
 func (r *MemoryRepo) placeCompanyExplorerItemInDefaultFolderLocked(companyID, targetType, targetID string, snapshotPolicy bool) bool {
-	return r.placeCompanyExplorerItemInDefaultFolderInternalLocked(companyID, targetType, targetID, snapshotPolicy, false)
-}
-
-// placeEmailCollaborationNodeInDefaultFolderLocked is the sole Node-placement
-// exception. Generic Explorer placement keeps rejecting Nodes; the
-// collaboration lifecycle may place the freshly-created bridge Node only in
-// the deterministic Unfiled/Nodes folder.
-func (r *MemoryRepo) placeEmailCollaborationNodeInDefaultFolderLocked(companyID, nodeID string) bool {
-	return r.placeCompanyExplorerItemInDefaultFolderInternalLocked(companyID, EntityTypeNode, nodeID, false, true)
-}
-
-func (r *MemoryRepo) placeCompanyExplorerItemInDefaultFolderInternalLocked(companyID, targetType, targetID string, snapshotPolicy, allowEmailCollaborationNode bool) bool {
-	if targetType == EntityTypeNode && !allowEmailCollaborationNode {
-		return false
-	}
 	folderID, ok := companyExplorerDefaultFolderIDForTargetType(companyID, targetType)
 	if !ok || r.companyExplorerV2HasManualEdgeLocked(companyID, targetType, targetID) {
 		return false

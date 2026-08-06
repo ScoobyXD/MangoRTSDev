@@ -29,11 +29,17 @@ func TestPostgresDeferredExplorerProjectionUsesInsertIfMissingSQL(t *testing.T) 
 			t.Fatalf("insertMissingCompanyExplorerFolderItemSQL should not contain %q", forbidden)
 		}
 	}
+	for _, forbidden := range []string{`itemtype == "node"`, `itemtype != "node"`, "from nodes where"} {
+		if strings.Contains(normalizedInsert, forbidden) {
+			t.Fatalf("insertMissingCompanyExplorerFolderItemSQL retained Node placement path %q", forbidden)
+		}
+	}
 
 	projectBody := extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) projectDeferredCompanyExplorerFolderItemTx")
 	normalizedProject := strings.ToLower(strings.Join(strings.Fields(projectBody), " "))
 	for _, needle := range []string{
 		"insertmissingcompanyexplorerfolderitemsql",
+		"itemtype != entitytypelogicgate",
 		"if !inserted { return nil, nil }",
 		"company_explorer_item_placed",
 	} {

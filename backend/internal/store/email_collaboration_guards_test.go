@@ -19,6 +19,16 @@ func TestMemoryEmailRelationshipUsesOrdinaryNodePermissionsAndDeletesOnlyTheRela
 		t.Fatalf("EnsureCommunicationsEmailCollaboration: %v", err)
 	}
 	relationship := created.Collaboration
+	for _, folder := range repo.folders {
+		if folder.CompanyID == companyID && folder.Name == "Nodes" {
+			t.Fatalf("email collaboration created obsolete Company Explorer Nodes folder: %+v", folder)
+		}
+	}
+	for _, item := range repo.folderItems {
+		if item.CompanyID == companyID && item.ItemType == EntityTypeNode {
+			t.Fatalf("email collaboration created obsolete Node placement: %+v", item)
+		}
+	}
 	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
 		CompanyID: companyID, EntityType: EntityTypeNode, EntityID: relationship.NodeID,
 		DefaultAccess: ResourceDefaultAccessEdit, DefaultAccessSet: true,

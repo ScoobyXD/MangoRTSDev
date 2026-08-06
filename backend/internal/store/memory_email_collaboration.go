@@ -122,11 +122,6 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 	beforeNodes := maps.Clone(r.nodes)
 	beforeNodeText := maps.Clone(r.nodeText)
 	beforeNodeInfo := maps.Clone(r.nodeInfo)
-	beforeFolders := maps.Clone(r.folders)
-	beforeFolderItems := maps.Clone(r.folderItems)
-	beforeExplorerEntities := maps.Clone(r.companyExplorerV2Entities)
-	beforeExplorerEdges := maps.Clone(r.companyExplorerV2Edges)
-	beforeDefaultFolderSeed := maps.Clone(r.defaultFolderSeed)
 	beforeCollaborations := maps.Clone(r.emailCollaborations)
 	beforeParticipants := maps.Clone(r.emailCollaborationParticipants)
 	beforeEmailThreads := maps.Clone(r.emailThreads)
@@ -144,9 +139,6 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 	beforeWorkspaceReadVersions := maps.Clone(r.workspaceReadVersions)
 	restore := func() {
 		r.nodes, r.nodeText, r.nodeInfo = beforeNodes, beforeNodeText, beforeNodeInfo
-		r.folders, r.folderItems = beforeFolders, beforeFolderItems
-		r.companyExplorerV2Entities, r.companyExplorerV2Edges = beforeExplorerEntities, beforeExplorerEdges
-		r.defaultFolderSeed = beforeDefaultFolderSeed
 		r.emailCollaborations, r.emailCollaborationParticipants = beforeCollaborations, beforeParticipants
 		r.emailThreads = beforeEmailThreads
 		r.emailThreadScopeIDs = beforeEmailThreadScopeIDs
@@ -224,12 +216,6 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 	projection := domain.NodeProjection{CompanyID: input.CompanyID, NodeID: node.NodeID, InformationID: informationID, Type: "Attached email", Information: information, CreatedTimestamp: now, UpdatedTimestamp: now}
 	r.nodeText[key(input.CompanyID, node.NodeID)] = map[string]domain.NodeProjection{informationID: projection}
 	r.nodeInfo[key(input.CompanyID, node.NodeID)] = []domain.NodeInformation{{CompanyID: input.CompanyID, NodeID: node.NodeID, InformationID: informationID, Type: "Attached email", Information: information, CreatedTimestamp: now, UpdatedTimestamp: now}}
-	r.ensureCompanyExplorerDefaultFoldersLocked(input.CompanyID)
-	r.ensureCompanyExplorerV2NativeEntityLocked(input.CompanyID, CompanyExplorerV2EntityNode, node.NodeID, node.Title, now, now)
-	if !r.placeEmailCollaborationNodeInDefaultFolderLocked(input.CompanyID, node.NodeID) {
-		restore()
-		return CommunicationsEmailCollaborationEnsureResult{}, ErrInvalid
-	}
 	internalMessageID := internalEmailMessageIDForProvider(thread, input.Message.ID)
 	input.Message.EmailMessageID = internalMessageID
 	item := domain.CommunicationsEmailCollaboration{
