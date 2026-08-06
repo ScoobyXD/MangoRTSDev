@@ -1,3 +1,17 @@
+# Process Story: A changed Project saves history when the Project is left
+
+A user edits a Project textbox body, metadata, or textbox structure
+↓
+The ordinary current-textbox save continues writing the latest final Project rows
+↓
+The user closes or switches the Project, changes routes, uses Back/Forward, or triggers browser `pagehide`
+↓
+Mango flushes only that exact Project and creates one existing-format history batch if it changed since the last successful history save
+↓
+An unchanged close creates nothing, repeated close signals share one save, and refresh or tab close remains browser best effort
+
+Last updated: 2026-08-06
+
 # Process Story: An existing Logic Gate is linked to a Project from its editor
 
 A user with Logic Gate edit access types `##` in that Logic Gate's editor and selects a Project they may edit

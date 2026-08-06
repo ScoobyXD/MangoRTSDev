@@ -1,3 +1,17 @@
+# Process Story: A changed Node saves history when the Node is left
+
+A user edits a Node textbox, textbox metadata, or textbox structure
+↓
+The ordinary current-textbox save continues writing the latest final Node rows
+↓
+The user closes the Node or its preview, switches resources or routes, uses Back/Forward, or triggers browser `pagehide`
+↓
+Mango flushes only that exact Node and creates one existing-format history batch if it changed since the last successful history save
+↓
+An unchanged close creates nothing, repeated close signals share one save, and refresh or tab close remains browser best effort
+
+Last updated: 2026-08-06
+
 # Process Story: Node organization uses typed relationships, not Explorer placement
 
 A user creates a Node from Editor, chat, email collaboration, Project, or Logic Gate work

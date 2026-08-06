@@ -1,3 +1,17 @@
+# Process Story: A changed Logic Gate saves history when the Logic Gate is left
+
+A user edits the Logic Gate's final textbox document
+↓
+The ordinary current-document save continues writing the latest `logic_gate_textboxes` row
+↓
+The user closes or switches the Logic Gate, changes routes, uses Back/Forward, or triggers browser `pagehide`
+↓
+Mango flushes that exact Logic Gate and creates one existing-format history batch if it changed since the last successful history save
+↓
+An unchanged close creates nothing, repeated close signals share one save, and refresh or tab close remains browser best effort
+
+Last updated: 2026-08-06
+
 # Process Story: Editor link mode uses Logic Gate business commands
 
 A user types `##` in a Node editor and selects a Logic Gate, or types `##` in a Logic Gate editor and selects a Project
