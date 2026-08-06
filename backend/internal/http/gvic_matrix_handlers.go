@@ -226,11 +226,6 @@ func (s *Server) handleGVICMatrixNodeMoveV2(w http.ResponseWriter, r *http.Reque
 		stop()
 		return
 	}
-	if !mutateAssignment && input.FromLogicGateID == input.LogicGateID {
-		stop()
-		writeError(w, http.StatusBadRequest, "logic_gate_work_state_change_required")
-		return
-	}
 	stop()
 	stop = timings.observeAccounted("request.auth")
 	userID := s.entityPermissionActorUserID(r, input.CompanyID)
@@ -240,7 +235,7 @@ func (s *Server) handleGVICMatrixNodeMoveV2(w http.ResponseWriter, r *http.Reque
 		stop()
 		return
 	}
-	if input.FromLogicGateID != "" && input.FromLogicGateID != input.LogicGateID && !s.requireKanbanLogicGateEffectiveAccess(w, input.CompanyID, userID, input.FromLogicGateID, store.EntityPermissionEdit) {
+	if !s.requireLogicGateWorkExistingSourceEditAccess(w, r, input.CompanyID, input.LogicGateID, input.NodeID) {
 		stop()
 		return
 	}

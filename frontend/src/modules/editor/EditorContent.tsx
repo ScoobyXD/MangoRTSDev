@@ -591,7 +591,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [nodeGVICAssignments, setNodeGVICAssignments] = useState<LogicGateGVICAssignment[]>([]);
   const [logicGateGVICAssignments, setLogicGateGVICAssignments] = useState<LogicGateGVICAssignment[]>([]);
   const [gvicPolicyMode, setGVICPolicyMode] = useState<"inherited" | "customized">("customized");
-  const [gvicPolicyEffectiveSource, setGVICPolicyEffectiveSource] = useState<ResourceGVICPayload["effective_source"] | null>(null);
   const [gvicPolicyOverwrittenByAncestor, setGVICPolicyOverwrittenByAncestor] = useState<ResourceGVICPayload["overwritten_by_ancestor"]>(null);
   const [gvicPolicyRevision, setGVICPolicyRevision] = useState("");
   const [logicGateGVICApplyToAssignedNodesBusy, setLogicGateGVICApplyToAssignedNodesBusy] = useState(false);
@@ -1401,7 +1400,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, nodeAccounts, nodeLogicGateIDs, nodePriorityDraft, updateNodePresetPatch]);
 
   const nodeGVICIsInherited = gvicPolicyMode === "inherited";
-  const nodeGVICReadOnlyReason = nodeGVICIsInherited ? "This policy is inherited. Choose Customized to edit it." : "";
+  const nodeGVICReadOnlyReason = nodeGVICIsInherited ? "This policy is inherited. Choose GVIC policy: Customized from More editor actions to edit it." : "";
 
   const saveResourceGVICAssignments = useCallback(async (
     resourceType: "node" | "logic_gate",
@@ -1425,7 +1424,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       }),
     });
     setGVICPolicyMode(payload.assignment_mode);
-    setGVICPolicyEffectiveSource(payload.effective_source);
     setGVICPolicyOverwrittenByAncestor(payload.overwritten_by_ancestor ?? null);
     setGVICPolicyRevision(payload.revision);
     return payload;
@@ -2219,7 +2217,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           setNodeGVICAssignments([]);
           applyLogicGateGVICAssignments(displayGVICAssignments(gvicPolicy), linkedNodeID);
           setGVICPolicyMode(gvicPolicy.assignment_mode);
-          setGVICPolicyEffectiveSource(gvicPolicy.effective_source);
           setGVICPolicyOverwrittenByAncestor(gvicPolicy.overwritten_by_ancestor ?? null);
           setGVICPolicyRevision(gvicPolicy.revision);
           setNodeWorkspaceProjections([]);
@@ -2279,7 +2276,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         setNodeAccounts(details.node.accounts ?? []);
         setNodeGVICAssignments(displayGVICAssignments(gvicPolicy));
         setGVICPolicyMode(gvicPolicy.assignment_mode);
-        setGVICPolicyEffectiveSource(gvicPolicy.effective_source);
         setGVICPolicyOverwrittenByAncestor(gvicPolicy.overwritten_by_ancestor ?? null);
         setGVICPolicyRevision(gvicPolicy.revision);
         applyLogicGateGVICAssignments([], "");
@@ -2492,7 +2488,17 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             saveCurrentVersionDisabled={saveVersionRestoring}
             saveCurrentVersionBusy={saveVersionSaving}
             saveStateStorageKey={linkedEntityKind === "logic_gate" && documentInformationID ? mangoTiptapPendingStorageKey({ companyID, resourceType: "logic_gate", resourceID: linkedNodeID, documentID: documentInformationID }) : undefined}
-            secondaryActions={linkedEntityKind === "logic_gate" ? [{
+            secondaryActions={linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? [{
+              id: "use-inherited-gvic-policy",
+              label: `GVIC policy: Inherited${gvicPolicyMode === "inherited" ? " (current)" : ""}`,
+              disabled: !linkedEntityCanEdit || logicGateGVICApplyToAssignedNodesBusy || gvicPolicyMode === "inherited",
+              onSelect: () => changeCurrentGVICMode("inherited"),
+            }, {
+              id: "use-customized-gvic-policy",
+              label: `GVIC policy: Customized${gvicPolicyMode === "customized" ? " (current)" : ""}`,
+              disabled: !linkedEntityCanEdit || logicGateGVICApplyToAssignedNodesBusy || gvicPolicyMode === "customized",
+              onSelect: () => changeCurrentGVICMode("customized"),
+            }, ...(linkedEntityKind === "logic_gate" ? [{
               id: "apply-gvic-to-inherited-descendants",
               label: logicGateGVICApplyToAssignedNodesBusy ? "Applying" : "Apply to inherited descendants",
               disabled: !linkedEntityCanEdit || logicGateGVICApplyToAssignedNodesBusy,
@@ -2502,7 +2508,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               label: "Overwrite all descendants, including customized",
               disabled: !linkedEntityCanEdit || logicGateGVICApplyToAssignedNodesBusy,
               onSelect: () => setLogicGateGVICApplyConfirmationOpen(true),
-            }] : []}
+            }] : [])] : []}
             onRelationshipTabAnchorChange={updateRelationshipTabAnchor}
             reserveHeaderOffset={!forcedEntityKind}
             singleLine
@@ -2532,15 +2538,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               inherited: nodeGVICIsInherited,
               readOnlyReason: nodeGVICReadOnlyReason,
               mode: gvicPolicyMode,
-              effectiveSource: gvicPolicyEffectiveSource,
               overwrittenByAncestor: gvicPolicyOverwrittenByAncestor,
-              onModeChange: changeCurrentGVICMode,
             } : linkedEntityKind === "logic_gate" ? {
               assignments: logicGateGVICAssignments,
               mode: gvicPolicyMode,
-              effectiveSource: gvicPolicyEffectiveSource,
               overwrittenByAncestor: gvicPolicyOverwrittenByAncestor,
-              onModeChange: changeCurrentGVICMode,
             } : null}
             companyUsers={companyUsers}
             companyUserGroups={companyUserGroups}
@@ -2628,6 +2630,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               title={linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "Logic Gate" : "Node")}
               variant="embedded"
               readOnly={!linkedEntityCanEdit}
+              onSaved={() => invalidateWorkspaceSnapshot(apiBase, companyID)}
             />
           </div>
         )}

@@ -1,10 +1,14 @@
 # Process Story: A resource resolves one live GVIC policy from its hierarchy
 
-A user opens or changes a resource's GVIC policy
+A user opens a Node or Logic Gate and chooses Inherited, Customized, or a descendant action from More editor actions
 ↓
 The resource either uses its nearest active customized ancestor or owns one complete customized policy
 ↓
-Force-overwrite and parent-link sequences decide whether older customizations remain active after resets and moves
+Switching inherited policy to Customized copies the raw effective source before validating and storing the new complete policy
+↓
+Inherited descendants resolve the parent live, while a confirmed overwrite records one reset sequence that supersedes older customizations
+↓
+Cross-Logic-Gate Node moves read and authorize the canonical current assignment even when a browser source hint is stale
 ↓
 Current nested-group membership expands GVIC principals for My Work and notifications, while permissions remain a separate decision
 
@@ -44,7 +48,7 @@ GVIC23 - Notification routing resolves the current effective GVIC of the exact t
 GVIC24 - Assignment notifications are sent only for newly effective users or effective role changes; unchanged users, removals, unrelated users, and the actor receive none.
 GVIC25 - GVIC event payloads identify policy type, action, descendant action, allocated sequence, mode, and changed recipients.
 GVIC26 - Reads explain the stored mode, effective mode, source resource, active reset, and an inactive stored customization superseded by force overwrite.
-GVIC27 - The frontend provides Inherited and Customized controls, both descendant actions, the effective source, overwrite explanation, stale-write protection, and no optimistic descendant materialization.
+GVIC27 - The frontend keeps Inherited and Customized controls in More editor actions, provides both descendant actions and the overwrite explanation, protects stale writes, invalidates affected workspace reads, and performs no optimistic descendant materialization.
 GVIC28 - Fingerprints include effective source identity and sequence, eligible reset identity and sequence, the parent-link boundary, live group-membership version, and actor-specific edit result where exposed.
 GVIC29 - Point reads, My Work, notification decisions, and cache validation derive current state at read time; policy writes stay constant-size with descendant count.
 GVIC30 - Resource deletion deletes its settings row and cascades its GVIC edges. No missing resource, user, or group identity can remain.
@@ -54,7 +58,8 @@ GVIC33 - Email-derived and workspace-created resources apply creator rules only 
 GVIC34 - Stale in-flight reads cannot overwrite a newer committed policy response; ETags and policy fingerprints track the resolved V2 state.
 GVIC35 - Step 2 runtime readers and writers use only the two canonical GVIC tables. Temporarily retained legacy tables are frozen rollback evidence and have no deployed reader or writer.
 GVIC36 - All GVIC changes and their settings, graph edges, events, and read-version effects commit atomically.
-GVIC37 - The editor keeps the four role columns compact; inherited policy is read-only until Customized is selected.
+GVIC37 - The editor keeps the four role columns compact and removes the exposed policy-mode/effective-source strip; inherited policy is read-only until Customized is selected from More editor actions.
+GVIC38 - A cross-Logic-Gate Node move reads and authorizes the actual canonical one-per-Node assignment. A caller-supplied source Logic Gate is only a hint and cannot select relationship authority or cause a valid move to fail when stale.
 
 ## Scenarios
 
@@ -294,11 +299,13 @@ Business logic covered:
 Given:
 - A Node or Logic Gate editor shows the four shared GVIC role cards.
 - An adjacent pane narrows the available editor width.
-- A Logic Gate user can access the apply-to-assigned-nodes action.
+- A Node or Logic Gate user can access GVIC policy mode actions.
+- A Logic Gate user can access both descendant actions.
 
 Expected:
 - Generated, Verified, Consulted, and Informed remain in one horizontal row that may be clipped rather than wrapping vertically.
-- No apply/current-GVIC card appears in the header body.
+- No policy-mode, effective-source, apply, or current-GVIC card appears in the header body.
+- Inherited and Customized mode changes remain available in **More editor actions**.
 - The Logic Gate bulk action remains in **More editor actions** with its existing permission, disabled, busy, and error handling.
 - Selecting that action opens an explicit Yes/No confirmation.
 - Choosing No, canceling, or dismissing performs no write.
@@ -318,5 +325,19 @@ Given:
 
 Expected:
 - Node actions use the Node's current effective roles and Logic Gate actions use the Logic Gate's current effective roles.
+
+### Scenario GVIC-S12: Cross-Logic-Gate Moves Use The Canonical Assignment
+
+Business logic covered:
+- GVIC38
+
+Given:
+- A Node has one canonical Logic Gate work assignment.
+- The browser submits a move to another Logic Gate with an absent or stale `from_logic_gate_id` hint.
+
+Expected:
+- The server reads the Node's canonical assignment and authorizes the actor against that actual source Logic Gate.
+- The stale hint neither produces `logic_gate_work_assignment_not_found` nor substitutes another source relationship.
+- The one assignment moves to the target Logic Gate and its related projections and events use the same canonical Node and Logic Gate IDs.
 - Only Bob receives the assignment update; Alice, Charlie, unrelated users, and the actor do not.
 - Group-backed assignments use the same effective-user delta rule without duplicating recipients.

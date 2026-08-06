@@ -763,7 +763,7 @@ test("account-only cache helpers never patch another personal account with the s
   }
 });
 
-test("star updates keep inbox messages visible and add them to cached starred and all buckets", async () => {
+test("star updates survive a stale primary refresh and populate starred and all buckets", async () => {
   invalidateCommunicationsCache();
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -781,6 +781,11 @@ test("star updates keep inbox messages visible and add them to cached starred an
     await updateEmailMessage("msg-1", { starred: true });
 
     assert.deepEqual((await listEmailMessages({ mailbox: "primary", limit: 25 })).messages.map((item) => [item.id, item.starred]), [["msg-1", true]]);
+    assert.deepEqual(
+      (await listEmailMessages({ mailbox: "primary", limit: 25, refresh: true })).messages.map((item) => [item.id, item.starred]),
+      [["msg-1", true]],
+      "a stale provider refresh cannot undo a committed star",
+    );
     assert.deepEqual((await listEmailMessages({ mailbox: "starred", limit: 25 })).messages.map((item) => [item.id, item.starred]), [["msg-1", true]]);
     assert.deepEqual((await listEmailMessages({ mailbox: "all", limit: 25 })).messages.map((item) => [item.id, item.starred]), [["msg-1", true]]);
   } finally {
@@ -789,7 +794,7 @@ test("star updates keep inbox messages visible and add them to cached starred an
   }
 });
 
-test("unstar updates return cached inbox messages to primary and remove them from starred", async () => {
+test("unstar updates survive stale primary and starred refreshes", async () => {
   invalidateCommunicationsCache();
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -811,6 +816,8 @@ test("unstar updates return cached inbox messages to primary and remove them fro
     assert.deepEqual((await listEmailMessages({ mailbox: "primary", limit: 25 })).messages.map((item) => item.id), ["msg-1"]);
     assert.deepEqual((await listEmailMessages({ mailbox: "starred", limit: 25 })).messages.map((item) => item.id), []);
     assert.deepEqual((await listEmailMessages({ mailbox: "all", limit: 25 })).messages.map((item) => [item.id, item.starred]), [["msg-1", false]]);
+    assert.deepEqual((await listEmailMessages({ mailbox: "primary", limit: 25, refresh: true })).messages.map((item) => [item.id, item.starred]), [["msg-1", false]]);
+    assert.deepEqual((await listEmailMessages({ mailbox: "starred", limit: 25, refresh: true })).messages, []);
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();
@@ -959,6 +966,18 @@ test("realtime settlement lets canonical mail win only for the exact personal ac
       ["collision-1"],
       "a successful local star remains optimistic before a newer hint settles it",
     );
+    assert.equal(
+      (await listEmailMessages({ ...accountA, refresh: true })).messages[0]?.starred,
+      true,
+      "personal triage keeps the committed star across a stale refresh",
+    );
+    await updateEmailMessage("collision-1", { starred: true }, "shared-1", "company-1");
+    assert.equal(
+      (await listEmailMessages({ ...shared, refresh: true })).messages[0]?.starred,
+      true,
+      "shared triage keeps the committed star across a stale refresh",
+    );
+
     settleCommunicationsMailboxMessageOverlays(accountA, "collision-1");
     invalidateCommunicationsMailboxCache(accountA, { messagePages: true });
     assert.deepEqual(

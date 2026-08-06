@@ -335,6 +335,12 @@ func TestPostgresMoveLogicGateAssignmentPreservesEmailReferencesWithoutLegacyCar
 			t.Fatalf("MoveLogicGateNodeAssignment missing %s", required)
 		}
 	}
+	if !strings.Contains(body, `nodeLogicGateAssignmentByNodeSQL(ctx, tx, input.CompanyID, input.NodeID, "")`) {
+		t.Fatal("MoveLogicGateNodeAssignment does not load the canonical one-per-node assignment")
+	}
+	if strings.Contains(body, "input.FromLogicGateID") {
+		t.Fatal("MoveLogicGateNodeAssignment still trusts the caller's source Logic Gate hint")
+	}
 	for _, forbidden := range []string{
 		"takePostgresCommunicationsEmailNodeReferenceForCardTx",
 		"restorePostgresCommunicationsEmailNodeReferenceTx",

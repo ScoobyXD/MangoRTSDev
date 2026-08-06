@@ -880,14 +880,11 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 	if !ok {
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
 	}
-	sourceLogicGateID := input.LogicGateID
-	if input.FromLogicGateID != "" {
-		sourceLogicGateID = input.FromLogicGateID
-	}
-	assignment, ok := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, sourceLogicGateID)
+	assignment, ok := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, "")
 	if !ok {
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
 	}
+	sourceLogicGateID := assignment.LogicGateID
 	sourceAssignment := assignment
 	locations := r.logicGateAssignmentCardLocationsLocked(input.CompanyID, input.NodeID, sourceLogicGateID)
 	if len(locations) == 0 {

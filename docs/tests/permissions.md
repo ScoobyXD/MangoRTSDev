@@ -11,6 +11,8 @@ Reads hide inaccessible data; mutations require Edit; GVIC never grants authorit
 Moves, resets, group changes, and ETags resolve current state without descendant policy rewrites
 ↓
 An editable dialog saves pending changes before closing; denied, read-only, unchanged, and already-saved dialogs close without writing
+↓
+A successful embedded save invalidates the workspace snapshot so descendant views refetch the new live policy result
 
 Last updated: 2026-08-05
 
@@ -90,6 +92,7 @@ P64 - A committed direct user mention or resolved user-group mention snapshots e
 P65 - Collaboration participant membership and its mandatory Node edit binding are append-only for the collaboration lifetime. The collaboration Node policy is system-managed: generic Node permission mutation cannot add a grant, remove/downgrade/replace a participant binding, or change its default away from `no_access`; only the accepted mention-participant path may add a binding. Deleting the mention message has no permission effect.
 P66 - A generic Node permission grant alone does not create email collaboration participation, a triage row, source-mailbox access, or shared-draft access. The existing dev-admin/company-admin bypass remains an administrative access rule but does not silently add the administrator to participant lists, mention notifications, or My Drafts.
 P67 - Chat mutation authorization is the intersection of normal entity Edit permission and exact stored comment authorship. An administrator, manager, collaborator, or other editor may read and reply according to existing access but may not edit or delete another user's comment. Missing or mismatched stored `author_id` fails closed, and legacy POST upsert paths cannot bypass the author-only PATCH boundary.
+P68 - After an embedded editor permission save, the workspace snapshot is invalidated so inherited and overwritten descendants refetch their live effective permission policy instead of continuing to show a stale cached result.
 
 ## Scenarios
 
@@ -220,6 +223,7 @@ Business logic covered:
 - P51
 - P52
 - P53
+- P68
 
 Given:
 - A folder has a default access value and user/group permission source rows.
@@ -240,6 +244,7 @@ Expected:
 - A later descendant customization becomes active again; an ordinary later parent save cannot cross it.
 - A subtree moved after a reset is protected by its newer parent-link sequence until a later reset from its new ancestry.
 - Point authorization reads only the canonical settings/rules, hierarchy, and current nested groups.
+- After an embedded editor descendant action succeeds, the workspace snapshot is invalidated and the next descendant read shows the new live inheritance or reset result.
 - Write count is constant with descendant count, including an intentionally empty customized rule set.
 - Permission explanations identify source, direct/default/group result, reset, parent-link boundary, and inactive stored customization.
 - Group permission rules remain group pointers and are not expanded into one source row per user.

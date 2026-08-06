@@ -15,4 +15,6 @@ test("permission dialog saves pending changes before closing without duplicate w
   assert.match(source, /setPolicyRevision\(payload\.revision\);\s*setHasUnsavedChanges\(false\);\s*setSaved\(true\);/);
   assert.match(source, /onClick=\{closeWithSave\} disabled=\{busy\}[\s\S]*?aria-label="Close permissions"/);
   assert.match(source, /<AppModalPortal onRequestClose=\{busy \? undefined : closeWithSave\}>/);
+  assert.match(source, /onClick=\{\(\) => \{ void save\(false, "inherited_only"\); \}\}[\s\S]*Apply to inherited descendants/);
+  assert.match(source, /window\.confirm\([\s\S]*void save\(false, "including_customized"\)[\s\S]*Overwrite all descendants, including customized/);
 });
