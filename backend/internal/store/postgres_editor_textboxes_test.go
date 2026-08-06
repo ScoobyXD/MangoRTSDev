@@ -23,7 +23,11 @@ func TestEditorTextboxBodyStoresAnnotationsInsideJSON(t *testing.T) {
 	document := editorMergeTestDocument(t,
 		`{"type":"paragraph","attrs":{"blockId":"a"},"content":[{"type":"text","text":"hello"}]}`,
 	)
-	annotations := []EditorJSONAnnotation{{ID: "comment-1", Kind: "comment", From: 1, To: 4}}
+	annotations := []EditorJSONAnnotation{
+		{ID: "comment-1", Kind: "comment", From: 1, To: 4},
+		{ID: "dormant-change-1", Kind: "change", From: 4, To: 6},
+		{ID: "chat-1", Kind: "chat", From: 6, To: 8},
+	}
 	body, err := encodeEditorTextboxBody(document, annotations)
 	if err != nil {
 		t.Fatalf("encodeEditorTextboxBody: %v", err)

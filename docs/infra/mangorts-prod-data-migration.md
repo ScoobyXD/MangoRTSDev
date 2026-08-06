@@ -41,7 +41,8 @@ Recommended starting classification:
 | `users` | map | Prod Cognito subjects are separate; map by lowercase email. |
 | `company_memberships` | map | Import only approved real users and companies. |
 | `company_user_groups`, `company_user_group_members` | map | Rewrite user and company references. |
-| `nodes`, `node_textboxes`, `node_textboxes_history`, `node_textbox_chats`, `node_content_changes`, `node_content_change_seen`, `node_textbox_seen_snapshots`, `node_relationships` | copy or map | Core Node data in the final model; preserve exact textbox/chat IDs and copy owners before dependents. |
+| `nodes`, `node_textboxes`, `node_textboxes_history`, `node_textbox_chats`, `node_relationships` | copy or map | Core Node data in the final model; preserve exact textbox/chat IDs and nested dormant annotations, then copy owners before dependents. |
+| Retired Node unread-highlight tables | skip | Do not import or recreate the removed change/seen/baseline storage. Dormant anchors already live inside current/history textbox JSON. |
 | `logic_gates`, `logic_gate_textboxes`, `logic_gate_textboxes_history`, `logic_gate_relationships` | copy or map | Core Logic Gate data in the final model; preserve relationships. |
 | `node_map_positions`, `logic_gate_map_positions` | skip | Retired Map-only storage. These tables are absent from the canonical schema and must not be imported, recreated, or replaced. |
 | `node_logic_gate_assignments` | copy or map | Requires nodes and logic gates to be imported first. |

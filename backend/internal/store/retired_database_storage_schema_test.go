@@ -102,7 +102,6 @@ func TestRetiredDatabaseStorageIsAbsentFromCanonicalSchemaAndStrictlyDropped(t *
 		"body_json jsonb not null",
 		"revision bigint not null default 0",
 		"display_order bigint not null default 0",
-		"create table if not exists node_textbox_seen_snapshots",
 		"create table if not exists node_textboxes_history",
 	} {
 		if !strings.Contains(schema, required) {

@@ -6,9 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"miraeopus/backend/internal/domain"
-	"sort"
 	"strings"
-	"time"
 )
 
 const nodeSelectColumns = `
@@ -741,14 +739,6 @@ func (r *PostgresRepo) addNodeInformation(input NodeInformationInput) (domain.No
 		if previousFound {
 			return domain.NodeInformation{}, ErrAlreadyExists
 		}
-		if strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "" {
-			if err := insertNodeContentChangesTx(ctx, tx, buildNodeContentChanges(
-				companyID, nodeID, chatID, infoType, nil, projection.Information,
-				normalizeNodeContentChangeActor(cleanUUIDText(input.ActorUserID), input.ActorDisplayName), time.Now().UTC(),
-			)); err != nil {
-				return domain.NodeInformation{}, err
-			}
-		}
 		item := domain.NodeInformation{
 			CompanyID: projection.CompanyID, InformationID: projection.InformationID, NodeID: projection.NodeID,
 			Type: projection.Type, Information: projection.Information,
@@ -787,45 +777,6 @@ func (r *PostgresRepo) addNodeInformation(input NodeInformationInput) (domain.No
 
 func postgresNodeProjectionTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, informationID string) (domain.NodeProjection, bool, error) {
 	return postgresNodeFinalProjectionTx(ctx, tx, companyID, nodeID, informationID)
-}
-
-func insertNodeContentChangesTx(ctx context.Context, tx *sql.Tx, changes []domain.NodeContentChange) error {
-	if len(changes) == 0 {
-		return nil
-	}
-	for _, change := range changes {
-		if _, err := tx.ExecContext(ctx, `
-insert into node_content_changes
-  (company_id, change_id, node_id, textbox_id, change_type, text, start_offset, end_offset, actor_user_id, actor_display_name, created_timestamp)
-values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, nullif($9::text, '')::uuid, $10, $11)`,
-			change.CompanyID,
-			change.ChangeID,
-			change.NodeID,
-			change.InformationID,
-			change.ChangeType,
-			change.Text,
-			change.StartOffset,
-			change.EndOffset,
-			cleanUUIDText(change.ActorUserID),
-			change.ActorDisplayName,
-			change.CreatedTimestamp,
-		); err != nil {
-			return err
-		}
-		if actorUserID := cleanUUIDText(change.ActorUserID); actorUserID != "" {
-			if _, err := tx.ExecContext(ctx, `
-insert into node_content_change_seen (company_id, change_id, user_id, seen_timestamp)
-values ($1::uuid, $2::uuid, $3::uuid, now())
-on conflict (company_id, change_id, user_id) do nothing`,
-				change.CompanyID,
-				change.ChangeID,
-				actorUserID,
-			); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 func (r *PostgresRepo) ListNodeProjections(companyID, nodeID string) ([]domain.NodeProjection, error) {
@@ -901,15 +852,6 @@ where company_id=$1::uuid
 		return err
 	}
 	if chatFound {
-		if strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "" {
-			previousCopy := chatPrevious
-			if err := insertNodeContentChangesTx(ctx, tx, buildNodeContentChanges(
-				companyID, nodeID, informationID, chatPrevious.Type, &previousCopy, "",
-				normalizeNodeContentChangeActor(cleanUUIDText(input.ActorUserID), input.ActorDisplayName), time.Now().UTC(),
-			)); err != nil {
-				return err
-			}
-		}
 		outboxInput, err := nodeChatDeletedOutboxInput(chatPrevious)
 		if err != nil {
 			return err
@@ -923,252 +865,6 @@ where company_id=$1::uuid
 		return deletePostgresNodeTextProjection(ctx, tx, input, previous, previousFound)
 	}
 	return ErrNotFound
-}
-
-func (r *PostgresRepo) ListUnseenNodeContentChanges(input NodeContentChangeListInput) ([]domain.NodeContentChange, error) {
-	companyID := strings.TrimSpace(input.CompanyID)
-	nodeID := strings.TrimSpace(input.NodeID)
-	userID := cleanUUIDText(input.UserID)
-	if companyID == "" || nodeID == "" || userID == "" {
-		return nil, ErrInvalid
-	}
-	ctx := context.Background()
-	var exists bool
-	if err := r.db.QueryRowContext(ctx,
-		`select exists(select 1 from nodes where company_id=$1 and node_id=$2)`,
-		companyID, nodeID,
-	).Scan(&exists); err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, ErrNotFound
-	}
-	rows, err := r.db.QueryContext(ctx, `
-select change.company_id::text,
-       change.change_id::text,
-       change.node_id::text,
-       change.textbox_id::text,
-       change.change_type,
-       change.text,
-       change.start_offset,
-       change.end_offset,
-       coalesce(change.actor_user_id::text, ''),
-       coalesce(change.actor_display_name, ''),
-       change.created_timestamp,
-       coalesce(seen.body_json::text, '')
-from node_content_changes change
-join node_textboxes textbox
-  on textbox.company_id=change.company_id
- and textbox.node_id=change.node_id
- and textbox.textbox_id=change.textbox_id
-left join node_textbox_seen_snapshots seen
-  on seen.company_id=change.company_id
- and seen.node_id=change.node_id
- and seen.textbox_id=change.textbox_id
- and seen.user_id=$3::uuid
-left join node_content_change_seen seen_change
-  on seen_change.company_id=change.company_id
- and seen_change.change_id=change.change_id
- and seen_change.user_id=$3::uuid
-where change.company_id=$1::uuid
-  and change.node_id=$2::uuid
-  and textbox.deleted_timestamp is null
-  and change.actor_user_id is distinct from $3::uuid
-  and seen_change.change_id is null
-  and (seen.seen_timestamp is null or change.created_timestamp >= seen.seen_timestamp)
-order by change.created_timestamp asc, change.change_id asc`, companyID, nodeID, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	type unseenNodeContentChangeGroup struct {
-		seenInformation string
-		changes         []domain.NodeContentChange
-	}
-	groups := map[string]unseenNodeContentChangeGroup{}
-	groupOrder := make([]string, 0)
-	for rows.Next() {
-		var item domain.NodeContentChange
-		var seenInformation string
-		if err := rows.Scan(
-			&item.CompanyID,
-			&item.ChangeID,
-			&item.NodeID,
-			&item.InformationID,
-			&item.ChangeType,
-			&item.Text,
-			&item.StartOffset,
-			&item.EndOffset,
-			&item.ActorUserID,
-			&item.ActorDisplayName,
-			&item.CreatedTimestamp,
-			&seenInformation,
-		); err != nil {
-			return nil, err
-		}
-		group, ok := groups[item.InformationID]
-		if !ok {
-			groupOrder = append(groupOrder, item.InformationID)
-			group.seenInformation = seenInformation
-		}
-		group.changes = append(group.changes, item)
-		groups[item.InformationID] = group
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	items := make([]domain.NodeContentChange, 0, len(groups))
-	for _, informationID := range groupOrder {
-		group := groups[informationID]
-		items = append(items, buildNodeProjectionAuthoredSnapshotChanges(
-			companyID,
-			nodeID,
-			informationID,
-			group.seenInformation,
-			group.changes,
-		)...)
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
-			return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
-		}
-		return items[i].ChangeID < items[j].ChangeID
-	})
-	return items, nil
-}
-
-func (r *PostgresRepo) MarkNodeContentChangeSeen(input NodeContentChangeSeenInput) (int, error) {
-	companyID := strings.TrimSpace(input.CompanyID)
-	nodeID := strings.TrimSpace(input.NodeID)
-	changeID := strings.TrimSpace(input.ChangeID)
-	userID := cleanUUIDText(input.UserID)
-	if companyID == "" || nodeID == "" || userID == "" {
-		return 0, ErrInvalid
-	}
-	ctx := context.Background()
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-	if exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from nodes where company_id=$1::uuid and node_id=$2::uuid)`, companyID, nodeID); err != nil {
-		return 0, err
-	} else if !exists {
-		return 0, ErrNotFound
-	}
-
-	if informationID := nodeProjectionInformationIDFromContentChangeID(changeID); informationID != "" {
-		count, err := markNodeProjectionSeenSnapshotsTx(ctx, tx, companyID, nodeID, informationID, userID)
-		if err != nil {
-			return 0, err
-		}
-		if _, err := tx.ExecContext(ctx, `
-insert into node_content_change_seen (company_id, change_id, user_id, seen_timestamp)
-select change.company_id, change.change_id, $4::uuid, now()
-from node_content_changes change
-where change.company_id=$1::uuid
-  and change.node_id=$2::uuid
-  and change.textbox_id=$3::uuid
-on conflict (company_id, change_id, user_id) do nothing`, companyID, nodeID, informationID, userID); err != nil {
-			return 0, err
-		}
-		if err := tx.Commit(); err != nil {
-			return 0, err
-		}
-		return count, nil
-	}
-
-	if changeID != "" {
-		rawChangeID := cleanUUIDText(changeID)
-		if rawChangeID == "" {
-			return 0, ErrInvalid
-		}
-		if exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from node_content_changes where company_id=$1::uuid and node_id=$2::uuid and change_id=$3::uuid)`, companyID, nodeID, rawChangeID); err != nil {
-			return 0, err
-		} else if !exists {
-			return 0, ErrNotFound
-		}
-		result, err := tx.ExecContext(ctx, `
-insert into node_content_change_seen (company_id, change_id, user_id, seen_timestamp)
-values ($1::uuid, $2::uuid, $3::uuid, now())
-on conflict (company_id, change_id, user_id) do nothing`, companyID, rawChangeID, userID)
-		if err != nil {
-			return 0, err
-		}
-		if err := tx.Commit(); err != nil {
-			return 0, err
-		}
-		affected, _ := result.RowsAffected()
-		return int(affected), nil
-	}
-
-	count, err := markNodeProjectionSeenSnapshotsTx(ctx, tx, companyID, nodeID, "", userID)
-	if err != nil {
-		return 0, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-insert into node_content_change_seen (company_id, change_id, user_id, seen_timestamp)
-select change.company_id, change.change_id, $3::uuid, now()
-from node_content_changes change
-where change.company_id=$1::uuid
-  and change.node_id=$2::uuid
-on conflict (company_id, change_id, user_id) do nothing`, companyID, nodeID, userID); err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return count, nil
-}
-
-func markNodeProjectionSeenSnapshotsTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, informationID, userID string) (int, error) {
-	if informationID != "" {
-		result, err := tx.ExecContext(ctx, `
-insert into node_textbox_seen_snapshots
-  (company_id, node_id, textbox_id, user_id, body_json, textbox_revision, textbox_updated_timestamp, seen_timestamp)
-select textbox.company_id, textbox.node_id, textbox.textbox_id, $4::uuid,
-       textbox.body_json, textbox.revision, textbox.updated_timestamp, now()
-  from node_textboxes textbox
- where textbox.company_id=$1::uuid
-   and textbox.node_id=$2::uuid
-   and textbox.textbox_id=$3::uuid
-   and textbox.deleted_timestamp is null
-on conflict (company_id, node_id, textbox_id, user_id)
-do update set
-  body_json=excluded.body_json,
-  textbox_revision=excluded.textbox_revision,
-  textbox_updated_timestamp=excluded.textbox_updated_timestamp,
-  seen_timestamp=excluded.seen_timestamp`, companyID, nodeID, informationID, userID)
-		if err != nil {
-			return 0, err
-		}
-		affected, _ := result.RowsAffected()
-		if affected == 0 {
-			return 0, ErrNotFound
-		}
-		return int(affected), nil
-	}
-
-	result, err := tx.ExecContext(ctx, `
-insert into node_textbox_seen_snapshots
-  (company_id, node_id, textbox_id, user_id, body_json, textbox_revision, textbox_updated_timestamp, seen_timestamp)
-select textbox.company_id, textbox.node_id, textbox.textbox_id, $3::uuid,
-       textbox.body_json, textbox.revision, textbox.updated_timestamp, now()
-  from node_textboxes textbox
- where textbox.company_id=$1::uuid
-   and textbox.node_id=$2::uuid
-   and textbox.deleted_timestamp is null
-on conflict (company_id, node_id, textbox_id, user_id)
-do update set
-  body_json=excluded.body_json,
-  textbox_revision=excluded.textbox_revision,
-  textbox_updated_timestamp=excluded.textbox_updated_timestamp,
-  seen_timestamp=excluded.seen_timestamp`, companyID, nodeID, userID)
-	if err != nil {
-		return 0, err
-	}
-	affected, _ := result.RowsAffected()
-	return int(affected), nil
 }
 
 func (r *PostgresRepo) CreateNodeRelationship(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, error) {

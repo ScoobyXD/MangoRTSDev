@@ -9,7 +9,7 @@ import (
 	"miraeopus/backend/internal/domain"
 )
 
-func TestMemoryConsolidatedNodeViewIncludesDetailsProjectionAssignmentsAndChanges(t *testing.T) {
+func TestMemoryConsolidatedNodeViewIncludesDetailsProjectionAndAssignments(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "55555555-5555-4555-8555-555555555501"
 	repo.EnsureCompany(companyID, "Phase 5 Node View Store Co")
@@ -72,9 +72,6 @@ func TestMemoryConsolidatedNodeViewIncludesDetailsProjectionAssignmentsAndChange
 	}
 	if view.AssignmentCount != 1 || len(view.LogicGateAssignments) != 1 || view.LogicGateAssignments[0].LogicGateID != logicGate.LogicGateID {
 		t.Fatalf("node view assignments = %+v, want logic gate assignment", view.LogicGateAssignments)
-	}
-	if view.ContentChangeCount == 0 || len(view.ContentChanges) == 0 {
-		t.Fatalf("node view content changes = %+v, want unseen actor change for viewer", view.ContentChanges)
 	}
 }
 
@@ -230,14 +227,9 @@ func (loader *blockingNodeViewLoader) ListNodeTimelineEvents(_, _ string) ([]dom
 	return []domain.NodeTimelineEvent{}, nil
 }
 
-func (loader *blockingNodeViewLoader) ListUnseenNodeContentChanges(NodeContentChangeListInput) ([]domain.NodeContentChange, error) {
-	loader.enter("changes")
-	return []domain.NodeContentChange{}, nil
-}
-
 func TestLoadNodeViewRunsIndependentReadsConcurrently(t *testing.T) {
 	loader := &blockingNodeViewLoader{
-		entered: make(chan string, 6),
+		entered: make(chan string, 5),
 		release: make(chan struct{}),
 	}
 	done := make(chan error, 1)
@@ -251,7 +243,7 @@ func TestLoadNodeViewRunsIndependentReadsConcurrently(t *testing.T) {
 	}()
 
 	entered := map[string]bool{}
-	for len(entered) < 6 {
+	for len(entered) < 5 {
 		select {
 		case name := <-loader.entered:
 			entered[name] = true

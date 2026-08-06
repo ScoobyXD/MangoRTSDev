@@ -77,9 +77,6 @@ from (values
   ('logic_gate_relationships'),
   ('node_textboxes_history'),
   ('logic_gate_textboxes_history'),
-  ('node_content_changes'),
-  ('node_content_change_seen'),
-  ('node_textbox_seen_snapshots'),
   ('node_view_user_versions')
 ) target(name)
 order by name;
@@ -250,14 +247,11 @@ begin
       ('logic_gate_relationships'),
       ('node_textboxes_history'),
       ('logic_gate_textboxes_history'),
-      ('node_content_changes'),
-      ('node_content_change_seen'),
-      ('node_textbox_seen_snapshots'),
       ('node_view_user_versions')
     ) protected(name)
     where to_regclass('public.' || protected.name) is null
   ) then
-    raise exception 'STOP: a protected relationship, history, or unread/highlight table is missing';
+    raise exception 'STOP: a protected relationship, history, or Node view-version table is missing';
   end if;
 end
 $$;

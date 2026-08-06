@@ -242,7 +242,6 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
     const noop = () => undefined;
     const emptyUsers: never[] = [];
     const flushedDocuments: string[] = [];
-    const emptyChanges: never[] = [];
     const emptyMessages: never[] = [];
     const formattingControllerRef: React.MutableRefObject<EditorDocumentFormattingController | null> = { current: null };
     const baseProps = {
@@ -256,7 +255,6 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
       attachmentEditorSurface: "node_text_block",
       currentUserID: "user-1",
       companyUsers: emptyUsers,
-      contentChanges: emptyChanges,
       chatMessages: emptyMessages,
       activeChatAnchorMessageID: "",
       chatNavigationRequest: null,
@@ -270,7 +268,6 @@ test("NodeTextBlockEditor restores its attachment hydrator after StrictMode repl
       onBlur: noop,
       onDocumentChange: noop,
       onDocumentFlush: (value: string) => { flushedDocuments.push(value); },
-      onChangeSeen: noop,
       onSelectionChatRequest: noop,
       onImageChatRequest: noop,
       onImageNodeRequest: noop,

@@ -64,25 +64,13 @@ func (r *PostgresRepo) UpsertNodeProjectionWithActor(input NodeInformationInput)
 		return upsertPostgresNodeTextProjection(ctx, tx, input, companyID, nodeID, informationID, infoType)
 	}
 	if isNodeTextboxChatType(infoType) {
-		previous, previousFound, err := postgresNodeTextboxChatProjectionTx(ctx, tx, companyID, nodeID, informationID)
+		_, previousFound, err := postgresNodeTextboxChatProjectionTx(ctx, tx, companyID, nodeID, informationID)
 		if err != nil {
 			return domain.NodeProjection{}, err
 		}
 		projection, _, err := upsertPostgresNodeTextboxChatTx(ctx, tx, input, informationID)
 		if err != nil {
 			return domain.NodeProjection{}, err
-		}
-		var previousPtr *domain.NodeProjection
-		if previousFound {
-			previousPtr = &previous
-		}
-		if strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "" {
-			if err := insertNodeContentChangesTx(ctx, tx, buildNodeContentChanges(
-				companyID, nodeID, informationID, infoType, previousPtr, projection.Information,
-				normalizeNodeContentChangeActor(cleanUUIDText(input.ActorUserID), input.ActorDisplayName), time.Now().UTC(),
-			)); err != nil {
-				return domain.NodeProjection{}, err
-			}
 		}
 		if previousFound {
 			outboxInput, err := nodeChatUpdatedOutboxInput(projection)

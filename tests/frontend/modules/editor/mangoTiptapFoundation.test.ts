@@ -40,6 +40,7 @@ import {
 } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapExtensions.js";
 import {
   MangoTiptapAnnotations,
+  mergeMangoTiptapAnnotationPositions,
   navigateMangoTiptapTarget,
   readMappedMangoTiptapAnnotations,
   updateMangoTiptapAnnotations,
@@ -666,13 +667,13 @@ test("real insert/delete transactions persist moved comment, change, and chat po
     second = makeEditor("second", canonical, canonicalAnnotations);
     const expectedHighlightedText = new Map([
       ["comment-move", "beta"],
-      ["change-move", "gamma"],
       ["chat-move", "delta"],
     ]);
     for (const [id, expectedText] of expectedHighlightedText) {
       const highlight = dom.window.document.querySelector<HTMLElement>(`#second [data-mango-annotation-id="${id}"]`);
       assert.equal(highlight?.textContent, expectedText, `${id} should remount over the moved text`);
     }
+    assert.equal(dom.window.document.querySelector('#second [data-mango-annotation-id="change-move"]'), null);
 
     const movedComment = readMappedMangoTiptapAnnotations(second).find((annotation) => annotation.id === "comment-move");
     assert.ok(movedComment);
@@ -689,7 +690,7 @@ test("real insert/delete transactions persist moved comment, change, and chat po
 
     third = makeEditor("third", canonical, canonicalAnnotations as typeof initialAnnotations);
     assert.equal(dom.window.document.querySelector('#third [data-mango-annotation-id="comment-move"]'), null);
-    assert.equal(dom.window.document.querySelector<HTMLElement>('#third [data-mango-annotation-id="change-move"]')?.textContent, "gamma");
+    assert.equal(dom.window.document.querySelector('#third [data-mango-annotation-id="change-move"]'), null);
     assert.equal(dom.window.document.querySelector<HTMLElement>('#third [data-mango-annotation-id="chat-move"]')?.textContent, "delta");
     assert.equal(await readExactMangoTiptapPending(mangoTiptapPendingStorageKey(syncOptions)), null);
   } finally {
@@ -1611,4 +1612,23 @@ test("editor trace follows quiet-period scheduling through IndexedDB and save ac
       else Object.defineProperty(globalThis, key, { configurable: true, value });
     }
   }
+});
+test("persisted dormant changes survive without a feature owner", () => {
+  const merged = mergeMangoTiptapAnnotationPositions(
+    [
+      { id: "comment-owned", kind: "comment", from: 2, to: 4 },
+      { id: "chat-owned", kind: "chat", from: 5, to: 8 },
+    ],
+    [
+      { id: "comment-owned", kind: "comment", from: 3, to: 5 },
+      { id: "chat-owned", kind: "chat", from: 6, to: 9 },
+      { id: "change-dormant", kind: "change", from: 10, to: 14 },
+      { id: "comment-unowned", kind: "comment", from: 15, to: 18 },
+    ],
+  );
+  assert.deepEqual(merged, [
+    { id: "comment-owned", kind: "comment", from: 3, to: 5 },
+    { id: "chat-owned", kind: "chat", from: 6, to: 9 },
+    { id: "change-dormant", kind: "change", from: 10, to: 14 },
+  ]);
 });

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"miraeopus/backend/internal/domain"
 	"strings"
-	"time"
 )
 
 func (r *PostgresRepo) CreateNodeAssociatedWithProject(input ProjectScopedNodeCreateInput) (ProjectScopedNodeCreateResult, error) {
@@ -212,12 +211,6 @@ func (r *PostgresRepo) addInitialNodeInformationTx(ctx context.Context, tx *sql.
 	}
 	if !found {
 		return domain.NodeInformation{}, ErrNotFound
-	}
-	if cleanUUIDText(input.ActorUserID) != "" {
-		if err := insertNodeContentChangesTx(ctx, tx, buildNodeContentChanges(companyID, nodeID, keyValue,
-			"Text box", nil, string(body), normalizeNodeContentChangeActor(input.ActorUserID, input.ActorDisplayName), time.Now().UTC())); err != nil {
-			return domain.NodeInformation{}, err
-		}
 	}
 	return nodeProjectionAsInformation(projection), nil
 }

@@ -75,18 +75,6 @@ func (r *MemoryRepo) UpsertNodeProjectionWithActor(input NodeInformationInput) (
 		r.bumpNodeViewVersionLocked(companyID, nodeID)
 	}
 	r.nodeText[k][informationID] = projection
-	if strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "" {
-		r.recordNodeContentChangesLocked(buildNodeContentChanges(
-			companyID,
-			nodeID,
-			informationID,
-			infoType,
-			previous,
-			input.Information,
-			normalizeNodeContentChangeActor(input.ActorUserID, input.ActorDisplayName),
-			now,
-		))
-	}
 	return projection, nil
 }
 

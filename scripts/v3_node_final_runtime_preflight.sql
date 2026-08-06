@@ -64,18 +64,6 @@ begin
        ('display_order'),('node_id'),('revision'),('textbox_id'),('updated_timestamp')) then
     raise exception 'STOP: node_textboxes exact unordered column set drifted';
   end if;
-  if (select count(*) from pg_attribute where attrelid='public.node_content_changes'::regclass and attnum>0 and not attisdropped)<>11
-     or exists((values ('actor_display_name'),('actor_user_id'),('change_id'),('change_type'),
-       ('company_id'),('created_timestamp'),('end_offset'),('information_id'),('node_id'),
-       ('start_offset'),('text')) except
-       select attname from pg_attribute where attrelid='public.node_content_changes'::regclass and attnum>0 and not attisdropped)
-     or exists(select attname from pg_attribute where attrelid='public.node_content_changes'::regclass and attnum>0 and not attisdropped except
-       values ('actor_display_name'),('actor_user_id'),('change_id'),('change_type'),
-       ('company_id'),('created_timestamp'),('end_offset'),('information_id'),('node_id'),
-       ('start_offset'),('text')) then
-    raise exception 'STOP: node_content_changes exact pre-cutover column set drifted';
-  end if;
-
   if exists(
     select 1
     from node_projection_table projection
@@ -137,12 +125,6 @@ begin
           where history.company_id=seen.company_id
             and history.node_id=seen.node_id
             and coalesce(history.source_information_id,history.information_id)=seen.information_id
-        )
-        and not exists(
-          select 1 from node_content_changes change
-          where change.company_id=seen.company_id
-            and change.node_id=seen.node_id
-            and change.information_id=seen.information_id
         )
       )
       or (
@@ -216,12 +198,7 @@ select 'READY_FOR_PAUSED_WRITER_FINAL_DELTA' as status,
                and history.node_id=seen.node_id
                and coalesce(history.source_information_id,history.information_id)=seen.information_id
            )
-           and not exists(
-             select 1 from node_content_changes change
-             where change.company_id=seen.company_id
-               and change.node_id=seen.node_id
-               and change.information_id=seen.information_id
-           )) as stale_seen_snapshots_to_remove,
+           ) as stale_seen_snapshots_to_remove,
        (select count(distinct (seen.company_id,seen.node_id,seen.information_id))
           from node_projection_seen_snapshots seen
          where exists(
@@ -247,12 +224,7 @@ select 'READY_FOR_PAUSED_WRITER_FINAL_DELTA' as status,
                and history.node_id=seen.node_id
                and coalesce(history.source_information_id,history.information_id)=seen.information_id
            )
-           and not exists(
-             select 1 from node_content_changes change
-             where change.company_id=seen.company_id
-               and change.node_id=seen.node_id
-               and change.information_id=seen.information_id
-           )) as stale_seen_textbox_ids,
+           ) as stale_seen_textbox_ids,
        (select count(*)
           from node_projection_seen_snapshots seen
           join node_projection_table projection

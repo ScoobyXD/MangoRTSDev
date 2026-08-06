@@ -1,7 +1,7 @@
 import React from "react";
 import type { JSONContent } from "@tiptap/core";
 import { needsMangoTiptapLegacyDateHeadingBreak, type MangoTiptapDocument } from "./mangoTiptapDocument.js";
-import type { MangoTiptapAnnotation } from "./mangoTiptapAnnotations.js";
+import { isDormantMangoTiptapAnnotation, type MangoTiptapAnnotation } from "./mangoTiptapAnnotations.js";
 import { ExplorerEntityIcon } from "../../../icons/index.js";
 import { editorEntityRoute, editorEntityTypeLabel, isEditorEntityType, openEditorEntityLink } from "../editorEntityLinks.js";
 import "./mangoTiptap.css";
@@ -225,14 +225,17 @@ export const MangoTiptapStaticRenderer: React.FC<MangoTiptapStaticRendererProps>
   ariaLabel,
   annotations = [],
   renderAttachmentImage,
-}) => (
-  <div
-    className={`mango-tiptap-document mango-tiptap-static-document${className ? ` ${className}` : ""}`}
-    style={style}
-    aria-label={ariaLabel}
-    data-mango-editor-state="sleeping"
-    data-mango-legacy-leading-date-heading={needsMangoTiptapLegacyDateHeadingBreak(value) ? "true" : undefined}
-  >
-    {renderNode(value.document, "document", renderAttachmentImage, annotations, 0)}
-  </div>
-);
+}) => {
+  const visibleAnnotations = annotations.filter((annotation) => !isDormantMangoTiptapAnnotation(annotation));
+  return (
+    <div
+      className={`mango-tiptap-document mango-tiptap-static-document${className ? ` ${className}` : ""}`}
+      style={style}
+      aria-label={ariaLabel}
+      data-mango-editor-state="sleeping"
+      data-mango-legacy-leading-date-heading={needsMangoTiptapLegacyDateHeadingBreak(value) ? "true" : undefined}
+    >
+      {renderNode(value.document, "document", renderAttachmentImage, visibleAnnotations, 0)}
+    </div>
+  );
+};

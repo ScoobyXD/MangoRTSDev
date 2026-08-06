@@ -1,14 +1,14 @@
-# Process Story: Restoring Deleted Editor Textboxes
+# Process Story: Recycle restores surviving editor rows and dormant anchors
 
-A user deletes a Node, Project, or Logic Gate that contains current textboxes and manual history. Before the owner rows are deleted, the Recycle Bin payload copies the matching final current/history rows. For a Node it also copies `node_textbox_chats`, `node_content_changes`, `node_content_change_seen`, `node_textbox_seen_snapshots`, exact `email_relationships`, and final `attachment_relationships`. Neither Node, Project, nor Logic Gate copies a legacy information/projection table.
+A user deletes a Node, Project, or Logic Gate that contains current textboxes and manual history. Before the owner rows are deleted, the Recycle Bin payload copies the matching final current/history rows. For a Node it also copies `node_textbox_chats`, exact `email_relationships`, and final `attachment_relationships`. Nested textbox `body_json`, including dormant `change` annotations, is preserved. Neither Node, Project, nor Logic Gate copies a legacy information/projection or unread-highlight table.
 
-Restore recreates the owner first, then textboxes/history, chats and seen/change rows, email relationships, and finally attachment relationships. An existing soft-retired attachment relationship is reactivated from its snapshot instead of being skipped by `ON CONFLICT`. The attachment itself must still exist; permanent last-owner cleanup remains S3-before-Postgres and retry-safe. Permanent delete removes the payload, including those final editor copies.
+Restore recreates the owner first, then textboxes/history, chats, email relationships, and finally attachment relationships. Obsolete unread-highlight top-level keys in an older payload are ignored rather than restored. An existing soft-retired attachment relationship is reactivated from its snapshot instead of being skipped by `ON CONFLICT`. The attachment itself must still exist; permanent last-owner cleanup remains S3-before-Postgres and retry-safe. Permanent delete removes the payload, including those final editor copies.
 
 Old recycle payloads created before the six-table cutover are converted in place.
 Their HTML-era textboxes and manual saves must pass the same text-preserving
 HTML-to-Tiptap converter before legacy editor tables can be removed.
 
-Last updated: 2026-08-04
+Last updated: 2026-08-05
 
 # Recycle Bin Tests
 

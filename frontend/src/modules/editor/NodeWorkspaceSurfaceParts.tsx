@@ -76,7 +76,6 @@ import {
   splitTextByMentions,
   type ActiveMentionDraft,
 } from "./editorMentions";
-import type { NodeContentChange } from "./nodeContentChanges";
 import {
   ArrowRightIcon,
   avatarBackgroundForName,
@@ -329,8 +328,6 @@ type NodeTextBlockEditorProps = {
   currentUserID: string;
   companyUsers: MentionableCompanyUser[];
   documentValue: string;
-  contentChanges: NodeContentChange[];
-  focusContentChangeID?: string;
   chatMessages: EditorTextBlockChatMessage[];
   pendingChatSelectionAnchor?: TextBlockSelectionAnchor;
   activeChatAnchorMessageID: string;
@@ -351,7 +348,6 @@ type NodeTextBlockEditorProps = {
   onSaveStateChange?: (state: EditorSaveState) => void;
   onRecoveryStorageError?: (message: string) => void;
   onRecoveryStorageRecovered?: () => void;
-  onChangeSeen: (changeID: string) => void;
   onChatHighlightActivate?: (messageID: string) => void;
   onSelectionChatRequest: (selection: TextBlockSelectionDraft) => void;
   onImageChatRequest: (image: TextBlockImageDraft) => void;
@@ -486,13 +482,6 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
   );
   const gate = useMangoEditorDataFormat(props.apiBase, props.companyID, request);
   const annotations = useMemo<MangoTiptapAnnotation[]>(() => [
-    ...props.contentChanges.flatMap((change) => change.end_offset > change.start_offset ? [{
-      id: change.change_id,
-      kind: "change" as const,
-      from: change.start_offset,
-      to: change.end_offset,
-      active: change.change_id === props.focusContentChangeID,
-    }] : []),
     ...props.chatMessages.flatMap((message) => (
       message.selectionStart !== undefined
       && message.selectionEnd !== undefined
@@ -518,19 +507,14 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
   ], [
     props.activeChatAnchorMessageID,
     props.chatMessages,
-    props.contentChanges,
-    props.focusContentChangeID,
     props.pendingChatSelectionAnchor,
   ]);
   const target = useMemo(() => {
     if (props.chatNavigationRequest) {
       return { requestID: props.chatNavigationRequest.requestID, annotationID: props.chatNavigationRequest.anchorMessageID };
     }
-    if (props.focusContentChangeID) {
-      return { requestID: 1, annotationID: props.focusContentChangeID };
-    }
     return null;
-  }, [props.chatNavigationRequest, props.focusContentChangeID]);
+  }, [props.chatNavigationRequest]);
 
   if (gate.loading) {
     return <div aria-label="Preparing editor data format" style={{ minHeight: TEXT_BLOCK_MIN_HEIGHT }} />;
@@ -580,7 +564,6 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
       onRecoveryStorageError={(message) => props.onRecoveryStorageError?.(message)}
       onRecoveryStorageRecovered={() => props.onRecoveryStorageRecovered?.()}
       onAnnotationActivate={(annotation) => {
-        if (annotation.kind === "change") props.onChangeSeen(annotation.id);
         if (annotation.kind === "chat") props.onChatHighlightActivate?.(annotation.id);
       }}
       onSelectionChatRequest={(selection) => props.onSelectionChatRequest({

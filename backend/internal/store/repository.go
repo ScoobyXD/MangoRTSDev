@@ -510,9 +510,6 @@ type WorkGraphRepository interface {
 	CreateNodeEditorSaveVersion(input EditorSaveVersionInput) (domain.EditorSaveVersion, error)
 	ListNodeEditorSaveVersions(companyID, nodeID string) ([]domain.EditorSaveVersion, error)
 	RestoreNodeEditorSaveVersion(input EditorSaveVersionRestoreInput) (domain.EditorSaveVersion, error)
-	ListUnseenNodeContentChanges(input NodeContentChangeListInput) ([]domain.NodeContentChange, error)
-	MarkNodeContentChangeSeen(input NodeContentChangeSeenInput) (int, error)
-	AnchorCleanNodeProjections(input NodeProjectionAnchorInput) (int, error)
 	CurrentNodeViewVersion(companyID, nodeID, userID string) (NodeViewVersion, error)
 	CreateNodeRelationship(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, error)
 	CreateNodeRelationshipAndWorkspaceEvent(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, domain.DomainEvent, error)
@@ -2210,25 +2207,6 @@ type LogicGateProjectionDeleteInput struct {
 	LogicGateID      string
 	InformationID    string
 	ExpectedRevision *int64
-}
-
-type NodeContentChangeListInput struct {
-	CompanyID string
-	NodeID    string
-	UserID    string
-}
-
-type NodeContentChangeSeenInput struct {
-	CompanyID string
-	NodeID    string
-	ChangeID  string
-	UserID    string
-}
-
-type NodeProjectionAnchorInput struct {
-	CompanyID string
-	NodeID    string
-	UserID    string
 }
 
 type NodeViewVersion struct {

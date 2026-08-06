@@ -1,16 +1,16 @@
-# Process Story: Editors survive complete Node Map and Logic Gate Map retirement
+# Process Story: Editors preserve dormant change anchors without an unread feature
 
 A user selects a Node or Logic Gate from Explorer, Home, Kanban, Project, or a direct route
 ↓
 The generic live-selection and route contracts open the exact existing Editor document
 ↓
-Neither Map route, frame, module, selection bridge, coordinate payload, nor position store exists
+Persisted Tiptap `change` annotations load as dormant metadata and map through edits without painting, counting, navigating, activating, or calling a seen API
 ↓
 The Editor preserves normal collaboration, attachments, emails, chats, permissions, title updates, and revision behavior
 ↓
-Manual Save, saving-user identity, History, and Restore continue through the final history tables
+Autosave, recovery, Manual Save, saving-user identity, History, and Restore retain the dormant ranges through the final current/history JSON tables
 ↓
-For Nodes, authored additions/deletions, author labels, unread counts, seen baselines, and mark-seen behavior remain unchanged
+The old Node unread-highlight UI, routes, caches, writers, baselines, and database storage do not exist
 
 # Editor Process Map
 
@@ -30,9 +30,9 @@ Delete, recycle, and later operator-controlled retirement use the final ownershi
 
 A user opens or edits a Node textbox
 ↓
-The backend reads and writes the exact `node_textboxes` TipTap JSON row and records authored visible-text changes by `textbox_id`
+The backend reads and writes the exact `node_textboxes` TipTap JSON row, including valid dormant `change` annotations
 ↓
-Viewer baselines are stored in `node_textbox_seen_snapshots`, and saved batches are stored in `node_textboxes_history`
+Saved batches are stored in `node_textboxes_history`; no separate unread-change or viewer-baseline row is created
 ↓
 An empty document remains valid TipTap JSON with one explicit empty paragraph; an exact bad conversion is repaired in current, history, seen, and recycle copies without changing its identity or revision
 ↓
@@ -136,13 +136,13 @@ The Go API continues to read older snapshots that contain duplicate IDs so those
 Block navigation, comments, chats, and future collaboration code can resolve a block ID to exactly one block
 
 
-## Process Story: stable typing with comments, chats, and change highlights
+## Process Story: stable typing with comments, chats, and dormant change anchors
 
 You type one character in an active Node, Project, or Logic Gate JSON editor
 ↓
 ProseMirror applies one real document transaction and immediately paints the character
 ↓
-The annotation plugin maps existing comment, chat, and change-highlight positions through that document transaction; it does not replace the full annotation list merely because React rendered again
+The annotation plugin maps existing comment, chat, email-selection, and dormant change positions through that document transaction; dormant changes create no decoration, and an owner-provided list cannot erase them merely by omitting them
 ↓
 If the parent supplies a new annotation array whose meaningful values are identical, Mango compares its contents with the mapped annotation contents and stops. It creates no annotation replacement transaction
 ↓
@@ -1658,7 +1658,7 @@ Business logic covered:
 Given:
 - A Node or Project contains hundreds of text boxes, each with existing rich HTML, email associations, chat, images, and highlights.
 - Projection loading may report complete while the Node text-block list is still empty or partial, then deliver additional text blocks, chats, or attached emails for the same Node.
-- The user opens it normally, scrolls gradually, jumps near the end, or follows a target to a block, chat message, email message, highlight/change, or other deep row content.
+- The user opens it normally, scrolls gradually, jumps near the end, or follows a target to a block, chat message, email message, or other active deep row content.
 - The user independently closes and reopens the email, text-editor, or chat section; edits content immediately before the row leaves the mounted window; and narrows the app window.
 
 Expected:
@@ -1967,23 +1967,12 @@ it is not an editor schema version and is not a reason to rewrite or reject an
 existing identity. The migration stops only when a legacy Node resource or
 document ID cannot be stored as a PostgreSQL UUID at all.
 
-## Final Node writer-paused delta rule
+## Dormant Node change annotation retirement rule
 
-The final Node migration closes writes that occurred after the earlier additive
-textbox copy without adding a compatibility path:
-
-- It inserts an active legacy `Text box` only when that exact
-  `company_id/node_id/information_id` is absent from `node_textboxes`.
-- The stable `information_id` becomes the final `textbox_id`. Existing final
-  textboxes are never overwritten by the legacy projection.
-- A legacy seen snapshot is stale only when its current Node still exists and
-  its exact `node_projection_table` row, `node_textboxes` row, history, and
-  content changes are all absent. Only that proven orphan is deleted.
-- Every remaining seen snapshot must have an exact text projection and final
-  textbox, and is copied to `node_textbox_seen_snapshots`.
-- Conversion, ownership, schema, and identity checks share one transaction.
-  Any refusal rolls back the textbox inserts, stale cleanup, baseline copy, and
-  content-change column cutover together.
+- Generic annotation validation continues to accept `change` with a stable ID and non-empty range without requiring any database business row.
+- The editor keeps a dormant change when active comment/chat/email annotation owners publish their list, maps its positions through edits, and saves it with the matching document revision.
+- Dormant changes create no DOM decoration, unread count, navigation target, callback, or network request.
+- The operator-controlled database retirement removes only obsolete feature tables and dedicated objects after the table-free runtime is deployed. It never updates current/history textbox JSON or nested annotations.
 
 ## Deleted and recycled resource rule
 
@@ -1996,7 +1985,7 @@ The cutover converter fixes that old behavior without adding an editor table. It
 puts converted `node_textboxes` rows inside the existing recycle payload. It
 also converts current Node, Project, and Logic Gate textbox projections and
 manual history already stored in old recycle payloads. A future delete snapshots
-the six permanent current/history tables directly. Restore recreates the owner
+the surviving purpose-built current/history tables directly. Restore recreates the owner
 first and then restores those textbox rows.
 
 Verification and cleanup block when a recyclable document or old recycled

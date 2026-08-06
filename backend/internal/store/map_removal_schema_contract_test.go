@@ -129,7 +129,7 @@ func TestCanonicalSchemaOmitsRetiredPositionStorageAndKeepsProtectedNodeContract
 			t.Errorf("canonical schema still contains retired contract %q", retired)
 		}
 	}
-	for _, protected := range []string{"node_relationships", "logic_gate_relationships", "node_textboxes_history", "logic_gate_textboxes_history", "node_content_changes", "node_content_change_seen", "node_textbox_seen_snapshots", "node_view_user_versions"} {
+	for _, protected := range []string{"node_relationships", "logic_gate_relationships", "node_textboxes_history", "logic_gate_textboxes_history", "node_view_user_versions"} {
 		if !strings.Contains(schema, "create table if not exists "+protected) {
 			t.Errorf("canonical schema lost protected table %q", protected)
 		}

@@ -1,5 +1,11 @@
 # Editor Module
 
+## Dormant Node change annotations (2026-08-05)
+
+Persisted Tiptap annotations with `kind: "change"` remain valid positional metadata. `mangoTiptapAnnotations.ts` retains ownerless dormant changes, maps their ranges through ProseMirror transactions, and publishes them with the matching revisioned JSON save. Recovery, remount, static sleep/wake, reload, and history preserve them.
+
+Dormant changes never create decorations, unread counts, navigation targets, activation callbacks, seen requests, or Node-view cache work. Comment, chat, and email-selection annotations keep their normal rendering and navigation. The old Node changes API and UI are not compatibility paths.
+
 ## Purpose
 The Editor module is the linked document workspace for MangoRTS. It gives the selected node or logic gate one full-frame writing surface with native caret behavior, scrolling, and final textbox-backed persistence.
 
@@ -14,7 +20,7 @@ Empty Logic Gates use the stable `logic-gate-overview` document ID so the editor
 
 The repository now contains one reusable Tiptap/ProseMirror 3.28.0 editor core for Node, Project, and standalone Logic Gate/Editor documents. It is inactive for existing data because the company/workspace data-format gate defaults to `legacy_html/not_started`. The Tiptap chunk is lazy-loaded only after a complete JSON-ready gate is verified.
 
-`tiptap/mangoTiptapDocument.ts` defines strict schema version 1. Unknown structure, legacy HTML nodes, unsafe links, transient Blob/data URLs, and unsupported versions fail closed. `MangoTiptapEditor.tsx` owns lifecycle, native transactions/history/selection/commands, static sleeping render, mentions, tables, lists, annotations, deep links, attachments, and surface actions. JSON-mode annotation fields are genuine ProseMirror positions and are mapped through transactions; durable comment/change/chat/highlight positions are committed atomically with the matching document revision, while ephemeral local selections are not persisted. Legacy HTML surfaces retain their legacy text offsets. `mangoTiptapSync.ts` owns one exact IndexedDB pending record, quiet-period batching, retries, optimistic revision checks, stable-operation idempotency, conflicts, and visible-only exact realtime recovery.
+`tiptap/mangoTiptapDocument.ts` defines strict schema version 1. Unknown structure, legacy HTML nodes, unsafe links, transient Blob/data URLs, and unsupported versions fail closed. `MangoTiptapEditor.tsx` owns lifecycle, native transactions/history/selection/commands, static sleeping render, mentions, tables, lists, annotations, deep links, attachments, and surface actions. JSON-mode annotation fields are genuine ProseMirror positions and are mapped through transactions; durable comment, dormant-change, chat, and email-selection positions are committed atomically with the matching document revision, while ephemeral local selections are not persisted. Legacy HTML surfaces retain their legacy text offsets. `mangoTiptapSync.ts` owns one exact IndexedDB pending record, quiet-period batching, retries, optimistic revision checks, stable-operation idempotency, conflicts, and visible-only exact realtime recovery.
 
 Full-document validation, serialization, UTF-8 sizing, and persistence packaging occur at the quiet/max/flush batch boundary instead of on each React render or typed character. Recovery replays an exact stable operation before treating a revision mismatch as a conflict, which recognizes a save already accepted by the backend after a lost HTTP acknowledgement. Browser recovery-storage failures are visible and accurately state that browser recovery is unavailable; backend acknowledgement still releases dirty row pinning even when IndexedDB cleanup fails.
 
@@ -62,7 +68,7 @@ Search and creation retain the current company/workspace scope and existing effe
 ## Bounded Node And Project Rows (2026-07-17)
 
 - `editorRowVirtualization.ts` is the shared Node/Project fixed-row window. It mounts the viewport plus two-row overscan, preserves the complete list height with spacers, pins only active rows that must remain alive, and schedules raw scroll updates through one animation frame.
-- Normal opens begin at the top. Navigation first resolves a requested block, chat message, attached email, email message, or Node content change to its text-box row; the row's neighborhood mounts before scrolling or focus. An unresolved request stays pending until the needed projections arrive.
+- Normal opens begin at the top. Navigation first resolves a requested block, chat message, attached email, or email message to its text-box row; the row's neighborhood mounts before scrolling or focus. An unresolved request stays pending until the needed projections arrive.
 - Every Node and Project text-box row has one layout: email left, text editor middle, chat right. Email-created Nodes keep their original data associations but do not have a different visual row type.
 - The three header buttons independently mount or unmount email, editor, and chat. All three are open on a first open. Section data and drafts remain owned above the mounted section. An active unsent email reply is the one correctness exception: its row and reply UI remain pinned when the email column closes so the draft is not discarded.
 - Rows use the fixed `TEXT_BLOCK_ROW_HEIGHT`; editor and Node/Project chat bodies use `TEXT_BLOCK_MIN_HEIGHT`. User-controlled vertical text-box resizing is removed. Email/chat column widths remain horizontally adjustable, and a narrow viewport scrolls across the fixed columns rather than changing row height.
@@ -98,18 +104,17 @@ Search and creation retain the current company/workspace scope and existing effe
 - Load selected entity details and projection-shaped document rows assembled from final storage.
 - Render the shared rich document surface with native caret, selection, scrolling, formatting, attachment, entity-link, and collaboration behavior.
 - Persist document edits through the authenticated editor JSON API with a stable document/textbox ID.
-- Preserve Node authored-change annotations, author labels, unread counts, seen baselines, and mark-seen behavior.
+- Preserve dormant Node change annotations through edit/save/recovery/history without rendering or unread behavior.
 - Keep manual Save, saving-user identity, History, and Restore through `node_textboxes_history` and `logic_gate_textboxes_history`.
 - Support canonical Node and Logic Gate title updates without overwriting an active draft.
 
 ## Important Data/Integration Paths
 - **Selection input:** `selectionCoordinator.ts` semantic events targeted through `frame-module-links-v1`.
-- **Node read path:** Node detail/view and projection-shaped APIs, including protected unread fields and ETags.
+- **Node read path:** Node detail/view and projection-shaped APIs with ordinary Node ETags.
 - **Node document write path:** `POST /v1/editor-json/node/:node_id/documents/:document_id?company_id=...`.
 - **Logic Gate document write path:** `POST /v1/editor-json/logic_gate/:logic_gate_id/documents/:document_id?company_id=...`.
 - **Document clear path:** save the empty canonical JSON document through the same editor JSON path.
 - **Title paths:** canonical Node and Logic Gate update endpoints, followed by committed-title cache reconciliation.
-- **Authored-change paths:** `/v1/nodes/{node}/changes` reads and mark-seen commands remain unchanged.
 
 ## Logic Gate Context
 - A selected Logic Gate uses the `Logic Gate:` context header and the same shared text surface as a Node document.

@@ -59,7 +59,6 @@ function nodeViewPayload(item: NodeProjectionItem, editorSequence: number) {
     information: [],
     relationships: [],
     projections: [item],
-    content_changes: [],
     gvic_assignments: [{
       company_id: "company-1",
       resource_id: "node-1",
@@ -103,6 +102,7 @@ test("node invalidation rejects a stale in-flight record response before any con
 
     const freshItems = await getNodeInformationProjectionSingleFlight(apiBase, "company-1", "node-1");
     assert.equal(requests.filter((path) => path.includes("/view?")).length, 2);
+    assert.equal(requests.filter((path) => path.includes("/changes/")).length, 0);
     assert.equal(freshItems[0]?.information, "fresh document");
   } finally {
     globalThis.fetch = originalFetch;
@@ -116,7 +116,7 @@ async function flushPromises(): Promise<void> {
   await Promise.resolve();
 }
 
-test("node view revalidation sends ETag, reuses the retained payload on 304, and anchors once", async () => {
+test("node view revalidation sends ETag, reuses the retained payload on 304, and performs no cleanup write", async () => {
   const apiBase = "https://api.example.test/node-record-etag";
   const companyID = "company-1";
   const nodeID = "node-1";
@@ -145,7 +145,7 @@ test("node view revalidation sends ETag, reuses the retained payload on 304, and
     await flushPromises();
     assert.equal(first[0]?.information, "etag document");
     assert.equal(gvicAssignments[0]?.principal_id, "user-1");
-    assert.equal(anchorCalls, 1);
+    assert.equal(anchorCalls, 0);
 
     invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
     const revalidated = await getNodeInformationProjectionSingleFlight(apiBase, companyID, nodeID);
@@ -154,42 +154,7 @@ test("node view revalidation sends ETag, reuses the retained payload on 304, and
     assert.equal(getCalls, 2);
     assert.equal(getHeaders[0]?.get("If-None-Match"), null);
     assert.equal(getHeaders[1]?.get("If-None-Match"), '"node-v1"');
-    assert.equal(anchorCalls, 1);
-  } finally {
-    globalThis.fetch = originalFetch;
-    invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
-  }
-});
-
-test("a failed node anchor write retries from its successful 200 while a later 304 performs no anchor write", async () => {
-  const apiBase = "https://api.example.test/node-record-anchor-retry";
-  const companyID = "company-1";
-  const nodeID = "node-1";
-  const originalFetch = globalThis.fetch;
-  let getCalls = 0;
-  let anchorCalls = 0;
-  globalThis.fetch = (async (_input, init) => {
-    if (init?.method === "POST") {
-      anchorCalls += 1;
-      return anchorCalls === 1
-        ? jsonResponse({ error: "temporary_failure" }, { status: 503, statusText: "Unavailable" })
-        : jsonResponse({ status: "anchored" });
-    }
-    getCalls += 1;
-    if (getCalls === 1) {
-      return jsonResponse(nodeViewPayload(projection("available immediately", "2026-06-18T01:00:01.000Z"), 1), { headers: { ETag: '"node-v1"' } });
-    }
-    return new Response(null, { status: 304, headers: { ETag: '"node-v1"' } });
-  }) as typeof fetch;
-  invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
-  try {
-    assert.equal((await getNodeInformationProjectionSingleFlight(apiBase, companyID, nodeID))[0]?.information, "available immediately");
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    assert.equal(anchorCalls, 2);
-    invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
-    assert.equal((await getNodeInformationProjectionSingleFlight(apiBase, companyID, nodeID))[0]?.information, "available immediately");
-    await flushPromises();
-    assert.equal(anchorCalls, 2);
+    assert.equal(anchorCalls, 0);
   } finally {
     globalThis.fetch = originalFetch;
     invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
@@ -221,7 +186,7 @@ test("auth generation changes isolate retained node ETags and payloads", async (
   }
 });
 
-test("an old-auth in-flight node view cannot repopulate the new session cache or schedule cleanup", async () => {
+test("an old-auth in-flight node view cannot repopulate the new session cache or schedule a retired write", async () => {
   const apiBase = "https://api.example.test/node-record-stale-auth";
   const companyID = "company-1";
   const nodeID = "node-1";
@@ -250,7 +215,7 @@ test("an old-auth in-flight node view cannot repopulate the new session cache or
     await flushPromises();
     assert.equal((await getNodeInformationProjectionSingleFlight(apiBase, companyID, nodeID))[0]?.information, "new-session");
     assert.equal(getCalls, 2);
-    assert.equal(anchorCalls, 1);
+    assert.equal(anchorCalls, 0);
   } finally {
     globalThis.fetch = originalFetch;
     invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);

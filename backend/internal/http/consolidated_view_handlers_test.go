@@ -101,15 +101,15 @@ func TestNodeViewV2EffectiveAccessAndNoLeak(t *testing.T) {
 	defer server.Close()
 	handler := server.Routes()
 
-	view, _ := getNodeViewV2ForTest(t, handler, companyID, node.NodeID, viewer, http.StatusOK)
+	view, viewBody := getNodeViewV2ForTest(t, handler, companyID, node.NodeID, viewer, http.StatusOK)
 	if !view.CanEdit {
 		t.Fatalf("member can_edit = false, want the single positive edit outcome")
 	}
 	if view.Node.NodeID != node.NodeID || view.ProjectionCount != 1 || view.AssignmentCount != 1 {
 		t.Fatalf("node view = %+v, want summary, projection, and assignment metadata", view)
 	}
-	if view.ContentChangeCount == 0 {
-		t.Fatalf("node view content changes = %+v, want viewer unseen changes", view.ContentChanges)
+	if strings.Contains(viewBody, `"content_changes"`) || strings.Contains(viewBody, `"content_change_count"`) {
+		t.Fatalf("node view retains removed content-change fields: %s", viewBody)
 	}
 
 	editView, _ := getNodeViewV2ForTest(t, handler, companyID, node.NodeID, editor, http.StatusOK)
@@ -425,18 +425,12 @@ func (r *phase5ForbiddenLegacyAndKanbanReadsRepo) ListKanbanCards(companyID, boa
 type nodeViewReadPathCountingRepo struct {
 	store.Repository
 	getNodeViewCalls    int
-	markSeenCalls       int
 	currentVersionCalls int
 }
 
 func (repo *nodeViewReadPathCountingRepo) GetNodeView(input store.NodeViewInput) (domain.NodeView, error) {
 	repo.getNodeViewCalls++
 	return repo.Repository.GetNodeView(input)
-}
-
-func (repo *nodeViewReadPathCountingRepo) MarkNodeContentChangeSeen(input store.NodeContentChangeSeenInput) (int, error) {
-	repo.markSeenCalls++
-	return repo.Repository.MarkNodeContentChangeSeen(input)
 }
 
 func (repo *nodeViewReadPathCountingRepo) CurrentNodeViewVersion(companyID, nodeID, userID string) (store.NodeViewVersion, error) {
@@ -499,8 +493,8 @@ func TestNodeViewV2ConditionalReadSkipsPayloadBuildAndAllReadsArePure(t *testing
 	if etag == "" {
 		t.Fatal("first GET omitted ETag")
 	}
-	if countingRepo.getNodeViewCalls != 1 || countingRepo.markSeenCalls != 0 {
-		t.Fatalf("first GET calls: GetNodeView=%d MarkSeen=%d, want 1/0", countingRepo.getNodeViewCalls, countingRepo.markSeenCalls)
+	if countingRepo.getNodeViewCalls != 1 {
+		t.Fatalf("first GET calls: GetNodeView=%d, want 1", countingRepo.getNodeViewCalls)
 	}
 	afterRead, err := memoryRepo.CurrentNodeViewVersion(companyID, node.NodeID, actor.UserID)
 	if err != nil {
@@ -521,8 +515,8 @@ func TestNodeViewV2ConditionalReadSkipsPayloadBuildAndAllReadsArePure(t *testing
 	if conditionalRec.Body.Len() != 0 {
 		t.Fatalf("304 body=%q, want empty", conditionalRec.Body.String())
 	}
-	if countingRepo.getNodeViewCalls != 1 || countingRepo.markSeenCalls != 0 {
-		t.Fatalf("304 calls: GetNodeView=%d MarkSeen=%d, want 1/0 total", countingRepo.getNodeViewCalls, countingRepo.markSeenCalls)
+	if countingRepo.getNodeViewCalls != 1 {
+		t.Fatalf("304 calls: GetNodeView=%d, want 1 total", countingRepo.getNodeViewCalls)
 	}
 	if countingRepo.currentVersionCalls != 2 {
 		t.Fatalf("CurrentNodeViewVersion calls=%d, want 2", countingRepo.currentVersionCalls)
@@ -554,70 +548,28 @@ func TestNodeViewV2ConditionalReadSkipsPayloadBuildAndAllReadsArePure(t *testing
 		t.Fatalf("GetNodeView calls after mutation=%d, want 2", countingRepo.getNodeViewCalls)
 	}
 }
-func TestNodeProjectionAnchorCleanEndpointIsIdempotentAndDoesNotConsumeUnseen(t *testing.T) {
-	repo := store.NewMemoryRepo()
-	companyID := "66666666-6666-4666-8666-666666666551"
-	repo.EnsureCompany(companyID, "Node Anchor Clean Co")
-	actor := mustLogicGateWorkHTTPUser(t, repo, companyID, "node-anchor-actor")
-	viewer := mustLogicGateWorkHTTPUser(t, repo, companyID, "node-anchor-viewer")
-	node, err := repo.CreateNode(companyID, "Anchor Node")
-	if err != nil {
-		t.Fatalf("CreateNode: %v", err)
-	}
-	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: store.EntityTypeNode,
-		EntityID:   node.NodeID,
-		Permissions: []store.EntityPermissionInput{
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: actor.UserID, AccessLevel: store.EntityPermissionEdit},
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionEdit},
-		},
-	}); err != nil {
-		t.Fatalf("SetEntityPermissions: %v", err)
-	}
-	if _, err := repo.AddNodeInformationWithActor(store.NodeInformationInput{
-		CompanyID:        companyID,
-		NodeID:           node.NodeID,
-		InformationID:    "66666666-6666-4666-8666-666666666552",
-		Type:             "Text box",
-		Information:      "anchor content",
-		ActorUserID:      actor.UserID,
-		ActorDisplayName: actor.DisplayName,
-	}); err != nil {
-		t.Fatalf("AddNodeInformationWithActor: %v", err)
-	}
-	server := NewServer(repo)
+
+func TestNodeContentChangeRoutesAreAbsent(t *testing.T) {
+	server := NewServer(store.NewMemoryRepo())
 	defer server.Close()
 	handler := server.Routes()
-	path := "/v1/nodes/" + node.NodeID + "/changes/anchor-clean"
-	postAnchor := func(user domain.User) int {
-		t.Helper()
-		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{"company_id":"`+companyID+`"}`)))
-		req.Header.Set("Content-Type", "application/json")
-		req = requestWithLogicGateWorkActorForTest(req, user, companyID)
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("POST anchor-clean status=%d body=%s", rec.Code, rec.Body.String())
+	nodeID := "66666666-6666-4666-8666-666666666551"
+	companyID := "66666666-6666-4666-8666-666666666552"
+	changeID := "66666666-6666-4666-8666-666666666553"
+	requests := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/v1/nodes/" + nodeID + "/changes?company_id=" + companyID},
+		{http.MethodPost, "/v1/nodes/" + nodeID + "/changes/anchor-clean"},
+		{http.MethodPost, "/v1/nodes/" + nodeID + "/changes/seen-all"},
+		{http.MethodPost, "/v1/nodes/" + nodeID + "/changes/" + changeID + "/seen"},
+	}
+	for _, request := range requests {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(request.method, request.path, nil))
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("%s %s status=%d body=%s, want 404", request.method, request.path, recorder.Code, recorder.Body.String())
 		}
-		var response struct {
-			Anchored int `json:"anchored"`
-		}
-		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
-			t.Fatalf("decode anchor response: %v", err)
-		}
-		return response.Anchored
-	}
-	if anchored := postAnchor(viewer); anchored != 0 {
-		t.Fatalf("viewer anchor with unseen actor change=%d, want 0", anchored)
-	}
-	if changes, err := repo.ListUnseenNodeContentChanges(store.NodeContentChangeListInput{CompanyID: companyID, NodeID: node.NodeID, UserID: viewer.UserID}); err != nil || len(changes) == 0 {
-		t.Fatalf("viewer unseen changes after anchor=%+v err=%v, want preserved", changes, err)
-	}
-	if anchored := postAnchor(actor); anchored != 1 {
-		t.Fatalf("actor clean anchor=%d, want 1", anchored)
-	}
-	if anchored := postAnchor(actor); anchored != 0 {
-		t.Fatalf("actor repeated anchor=%d, want 0", anchored)
 	}
 }

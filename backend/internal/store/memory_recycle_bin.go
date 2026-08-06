@@ -17,9 +17,6 @@ type memoryRecycleBinSnapshot struct {
 	nodes                         map[string]domain.Node
 	nodeInfo                      map[string][]domain.NodeInformation
 	nodeText                      map[string]map[string]domain.NodeProjection
-	nodeContentChanges            map[string]domain.NodeContentChange
-	nodeContentChangeSeen         map[string]time.Time
-	nodeProjectionSeen            map[string]memoryNodeProjectionSeen
 	nodeRels                      map[string][]domain.NodeRelationship
 	nodeAccountAssignments        map[string]domain.NodeAccountAssignment
 	logicGates                    map[string]domain.LogicGate
@@ -211,9 +208,6 @@ func (r *MemoryRepo) snapshotRecycleStateLocked() memoryRecycleBinSnapshot {
 		nodes:                         cloneMap(r.nodes),
 		nodeInfo:                      cloneSliceMap(r.nodeInfo),
 		nodeText:                      cloneNestedMap(r.nodeText),
-		nodeContentChanges:            cloneMap(r.nodeContentChanges),
-		nodeContentChangeSeen:         cloneMap(r.nodeContentChangeSeen),
-		nodeProjectionSeen:            cloneMap(r.nodeProjectionSeen),
 		nodeRels:                      cloneSliceMap(r.nodeRels),
 		nodeAccountAssignments:        cloneMap(r.nodeAccountAssignments),
 		logicGates:                    cloneMap(r.logicGates),
@@ -248,9 +242,6 @@ func (r *MemoryRepo) restoreRecycleSnapshotLocked(snapshot memoryRecycleBinSnaps
 	r.nodes = cloneMap(snapshot.nodes)
 	r.nodeInfo = cloneSliceMap(snapshot.nodeInfo)
 	r.nodeText = cloneNestedMap(snapshot.nodeText)
-	r.nodeContentChanges = cloneMap(snapshot.nodeContentChanges)
-	r.nodeContentChangeSeen = cloneMap(snapshot.nodeContentChangeSeen)
-	r.nodeProjectionSeen = cloneMap(snapshot.nodeProjectionSeen)
 	r.nodeRels = cloneSliceMap(snapshot.nodeRels)
 	r.nodeAccountAssignments = cloneMap(snapshot.nodeAccountAssignments)
 	r.logicGates = cloneMap(snapshot.logicGates)
