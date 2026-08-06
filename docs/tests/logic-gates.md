@@ -1,3 +1,19 @@
+# Process Story: Editor link mode uses Logic Gate business commands
+
+A user types `##` in a Node editor and selects a Logic Gate, or types `##` in a Logic Gate editor and selects a Project
+↓
+For a Node source, Mango requires a valid Node priority and assigns or moves the Node into the selected Logic Gate's Requested column
+↓
+Only a cross-Logic-Gate move creates the existing immutable transfer stamp on the Node timeline; an initial or same-gate assignment does not
+↓
+For a Logic Gate source, Mango creates or reuses the exact existing Logic Gate-to-Project relationship after normal source and target permission checks
+↓
+Both paths insert a durable target reference chip after the business command succeeds
+↓
+Removing the chip changes only editor content and never reverses the assignment, transfer, or Project relationship
+
+Last updated: 2026-08-05
+
 # Process Story: Logic Gate work continues after Logic Gate Map retirement
 
 A user creates or opens a Logic Gate from Explorer, Home, Logic Gate Arena, Kanban, or a direct route
@@ -95,6 +111,11 @@ LG56 - Current Logic Gate attached-email access comes only from an exact active 
 LG57 - Legacy Logic Gate information writes are closed: text writes require the editor JSON contract, and unsupported legacy information types are rejected. There is no compatibility read, fallback, or dual write.
 LG58 - Logic Gate deletion and recycle capture use final textbox/history, exact email relationships, and modular attachment cleanup. Removing one attachment owner retains a shared file, while final-owner cleanup follows the pending-delete, S3-before-Postgres, retry-safe lifecycle.
 LG59 - Dropping `logic_gate_information` and `logic_gate_projection_table` is a separate human operation. It requires PostgreSQL 17.x, exact unordered schema evidence, a reconciled copy, no-current-writer proof, smoke/recycle verification, soak and snapshot confirmation, no surviving dependency, and explicit operator approval.
+LG60 - Universal picker link mode in a Node editor may target only a Logic Gate or Project. A Logic Gate target requires a valid priority and uses the existing assignment/move command with Requested as the destination status.
+LG61 - The picker does not define transfer history. The existing cross-Gate move command creates exactly one immutable transfer stamp; initial assignment, same-Gate assignment, status movement, and Project association create none.
+LG62 - Universal picker link mode in a Logic Gate editor may target only a Project. It creates or reuses the exact existing Logic Gate/Project relationship and does not create a Project-scoped Logic Gate.
+LG63 - Reference mode remains available for Nodes, Logic Gates, and Projects in every Logic Gate editor. Reference-chip deletion changes only the editor document and never reverses a Gate assignment, transfer, or Project association.
+LG64 - A Logic Gate-to-Project link is successful only after the normal Project relationship command commits. If authorization, target existence, or another business rule rejects it, no relationship or chip is created.
 
 ## Scenarios
 
@@ -376,3 +397,27 @@ Expected:
 - The legacy text endpoint directs the caller to editor JSON, every unsupported legacy information type is rejected, and no legacy row is written.
 - Delete and recycle paths use only final Logic Gate, email, and attachment ownership rules, including shared-file retention and last-owner cleanup.
 - Retirement refuses PostgreSQL drift, unsupported legacy rows, copy mismatch, missing approvals, or surviving dependencies and never uses `CASCADE`.
+
+### Scenario LG-S18: Universal Picker Link Commands
+
+Business logic covered:
+- LG51
+- LG52
+- LG60
+- LG61
+- LG62
+- LG63
+- LG64
+
+Given:
+- A Node with a valid priority is assigned to Logic Gate A, and the user can edit Logic Gate B and a target Project.
+
+When:
+- The user types `##` in the Node editor and selects Logic Gate B.
+- The user types `##` in Logic Gate B's editor and selects the Project twice.
+- The user later removes both inserted reference chips.
+
+Expected:
+- The Node moves to Logic Gate B Requested and receives exactly one A-to-B transfer stamp.
+- The Project keeps one stable existing-Logic-Gate relationship after both commands and no Project-scoped Logic Gate is created.
+- Removing either chip changes only the editor document; it does not move the Node back or remove the Project relationship.

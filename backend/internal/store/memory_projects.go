@@ -448,6 +448,17 @@ func (r *MemoryRepo) UpsertProjectRelationship(input ProjectRelationshipInput) (
 	if _, ok := r.projects[key(input.CompanyID, input.ProjectID)]; !ok {
 		return ProjectRelationshipMutationResult{}, ErrNotFound
 	}
+	if input.ResourceType == EntityTypeLogicGate {
+		gateProjection, err := r.upsertProjectRelationshipSourceLocked(input)
+		if err != nil {
+			return ProjectRelationshipMutationResult{}, err
+		}
+		r.syncGVICMatrixProjectionForProjectResourcesLocked(input.CompanyID, nil, []string{input.ResourceID})
+		return ProjectRelationshipMutationResult{
+			Relationship: &gateProjection,
+		}, nil
+	}
+
 	if _, ok := r.nodes[key(input.CompanyID, input.ResourceID)]; !ok {
 		return ProjectRelationshipMutationResult{}, ErrNotFound
 	}

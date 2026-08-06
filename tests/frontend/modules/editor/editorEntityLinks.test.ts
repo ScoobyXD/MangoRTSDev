@@ -124,6 +124,31 @@ test("entity search groups Nodes, Logic Gates, and Projects in product order", a
   assert.deepEqual(results.map((entity) => entity.entityType), ["node", "logic_gate", "project"]);
 });
 
+test("entity search requests and returns only the selected picker category", async () => {
+  let requestedPath = "";
+  const results = await searchEditorEntityLinks({
+    companyID: "company-1",
+    requestJSON: async <T>(path: string): Promise<T> => {
+      requestedPath = path;
+      return {
+        results: [
+          { resource_type: "node", resource_id: "node-1", display_name: "Ignored Node" },
+          { resource_type: "project", resource_id: "project-1", display_name: "Launch" },
+        ],
+      } as T;
+    },
+  }, "launch", 20, ["project"]);
+
+  const url = new URL(requestedPath, "https://mango.test");
+  assert.equal(url.searchParams.get("resource_types"), "project");
+  assert.deepEqual(results, [{
+    entityType: "project",
+    entityID: "project-1",
+    label: "Launch",
+    updatedTimestamp: undefined,
+  }]);
+});
+
 test("selection Node creation normalizes the exact title and returns a durable entity", async () => {
   let submittedBody: Record<string, unknown> | undefined;
   const entity = await createNodeEntityFromSelection({
@@ -296,7 +321,7 @@ test("legacy rich HTML sanitization retains only canonical entity-link data", ()
   }
 });
 
-test("# entity menu selects its top result with Tab and the entity participates in history", async () => {
+test("durable Tiptap entity nodes keep their identity through history and Backspace unwrapping", () => {
   const dom = new JSDOM("<!doctype html><div id=\"editor\"></div>", { url: "https://mango.test/" });
   const domGlobals = dom.window as unknown as typeof globalThis;
   const names = ["window", "document", "Node", "Element", "HTMLElement", "MutationObserver", "KeyboardEvent"] as const;
@@ -311,36 +336,17 @@ test("# entity menu selects its top result with Tab and the entity participates 
   Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: (handle: number) => clearTimeout(handle) });
   if (!domGlobals.Range.prototype.getClientRects) domGlobals.Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
   if (!domGlobals.Range.prototype.getBoundingClientRect) domGlobals.Range.prototype.getBoundingClientRect = () => new domGlobals.DOMRect();
-  const queries: string[] = [];
   const editor = new MangoTiptapEditorEngine({
     element: dom.window.document.querySelector<HTMLElement>("#editor"),
-    extensions: createMangoTiptapExtensions({
-      editable: true,
-      searchEntityLinks: async (query) => {
-        queries.push(query);
-        return [
-          { entityType: "project", entityID: "project-1", label: "Most recent project" },
-          { entityType: "node", entityID: "node-1", label: "Second Node" },
-        ];
-      },
-    }),
+    extensions: createMangoTiptapExtensions({ editable: true }),
     content: { type: "doc", content: [{ type: "paragraph" }] },
   });
   try {
     editor.commands.focus();
-    editor.commands.insertContent("#");
-    for (let index = 0; index < 50 && !dom.window.document.querySelector('[data-mango-tiptap-entity-menu="true"] [role="option"]'); index += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 2));
-    }
-    assert.deepEqual(queries, [""]);
-    const entityMenu = dom.window.document.querySelector<HTMLElement>('[data-mango-tiptap-entity-menu="true"]');
-    assert.equal(entityMenu?.dataset.side, "bottom");
-    assert.equal(entityMenu?.dataset.visibleRows, "5");
-    assert.equal(entityMenu?.style.maxHeight, "236px");
-    assert.equal(entityMenu?.classList.contains("mango-tiptap-suggestion-menu--entity"), true);
-    assert.equal(entityMenu?.querySelector('[role="option"]')?.classList.contains("mango-tiptap-suggestion-option--entity"), true);
-    assert.ok(entityMenu?.querySelector(".mango-tiptap-suggestion-product-icon"));
-    editor.view.dom.dispatchEvent(new domGlobals.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+    editor.commands.insertContent({
+      type: "mangoEntityLink",
+      attrs: { entityType: "project", entityId: "project-1", label: "Most recent project" },
+    });
     const inserted = editor.getJSON().content?.[0]?.content?.find((node) => node.type === "mangoEntityLink") as { attrs?: Record<string, unknown> } | undefined;
     assert.equal(inserted?.attrs?.entityType, "project");
     assert.equal(inserted?.attrs?.entityId, "project-1");

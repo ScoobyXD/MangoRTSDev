@@ -37,6 +37,8 @@ type UserPinTreeResponse = {
   user_pins?: UserPinRecord[];
 };
 
+export type SidebarPinTreeRequestJSON = <T>(path: string, init?: RequestInit & { json?: unknown }) => Promise<T>;
+
 type UserPinGroupResponse = UserPinTreeResponse & {
   grouped_folder?: UserPinFolderRecord;
 };
@@ -85,6 +87,13 @@ function sidebarPinTreeFromResponse(response: UserPinTreeResponse): SidebarPinTr
 
 export async function fetchSidebarPinTree(apiBase: string, companyID: string): Promise<SidebarPinTree> {
   const requestJSON = createRequestJSON(apiBase);
+  return fetchSidebarPinTreeWithRequest(requestJSON, companyID);
+}
+
+export async function fetchSidebarPinTreeWithRequest(
+  requestJSON: SidebarPinTreeRequestJSON,
+  companyID: string,
+): Promise<SidebarPinTree> {
   const response = await requestJSON<UserPinTreeResponse>(`/v1/user-pins?company_id=${encodeURIComponent(companyID)}`);
   return sidebarPinTreeFromResponse(response);
 }

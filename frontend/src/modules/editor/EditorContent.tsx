@@ -79,7 +79,7 @@ import { invalidateResourcePolicyDependentCaches } from "../permissions/resource
 import { subscribeRealtimeScope } from "../realtime/realtimeWebSocket";
 import { assignNodeToLogicGateStatus, moveLogicGateAssignment } from "../kanban/kanbanApi";
 import { EntityPermissionsPanel } from "../permissions/EntityPermissionsDialog";
-import { listProjectRelationshipsForResource, type ProjectRelationshipProjection } from "../project-management/projectManagementApi";
+import { invalidateProjectRelationshipsForResource, listProjectRelationshipsForResource, type ProjectRelationshipProjection } from "../project-management/projectManagementApi";
 import { ExplorerRowIcon } from "../../icons/index.js";
 import { commitEntityTitleMutation, createCommittedTitleEditBuffer, foldCommittedEntityTitlesSince, readCommittedEntityTitleVersion, subscribeCommittedEntityTitleUpdates } from "../realtime/committedEntityTitleUpdates";
 import { preferResolvedEntityLabel } from "../entityLabels.js";
@@ -90,6 +90,7 @@ import { setNodeAccountAssignments, type Account } from "../accounts/accountsApi
 import { useMangoEditorDataFormat } from "./editorDataFormat";
 import { LogicGateTiptapEditorSurface } from "./LogicGateTiptapEditorSurface.js";
 import { parseMangoTiptapDocument } from "./tiptap/mangoTiptapDocument.js";
+import type { EditorEntityLink } from "./editorEntityLinks.js";
 
 function editorSnapshotScope(resourceType: "node" | "logic_gate", resourceID: string): string {
   const cleanID = resourceID.trim();
@@ -1285,6 +1286,32 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     upsertNodeRelationshipGraphNode(apiBase, companyID, resultNode);
     invalidateWorkspaceSnapshot(apiBase, companyID);
   }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, linkedNodeTitle, nodeAccounts, nodeLogicGateIDs, nodePriorityDraft, preserveNodeTitle]);
+
+  const linkLogicGateEntityFromEditor = useCallback(async (entity: EditorEntityLink) => {
+    if (!linkedEntityCanEdit || linkedEntityKind !== "logic_gate" || !linkedNodeID) {
+      throw new Error("You do not have permission to edit this Logic Gate.");
+    }
+    if (entity.entityType !== "project") {
+      throw new Error("A Logic Gate can only be linked to a Project.");
+    }
+    const projectID = entity.entityID.trim();
+    if (!projectID) throw new Error("Select a Project to link.");
+    await requestJSON<unknown>(`/v1/projects/${encodeURIComponent(projectID)}/relationships`, {
+      method: "POST",
+      body: JSON.stringify({
+        company_id: companyID,
+        resource_type: "logic_gate",
+        resource_id: linkedNodeID,
+        position: 0,
+      }),
+    });
+    invalidateProjectRelationshipsForResource({
+      companyID,
+      resourceType: "logic_gate",
+      resourceID: linkedNodeID,
+    });
+    invalidateWorkspaceSnapshot(apiBase, companyID);
+  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, requestJSON]);
 
   const updateNodePresetPatch = useCallback(async (patch: Record<string, unknown>) => {
     if (!linkedEntityCanEdit) return;
@@ -2723,6 +2750,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               attachmentContext={editorImageAttachmentContext}
               mentionUsers={companyUsers}
               formattingControllerRef={logicFormattingControllerRef}
+              onEntityLink={linkLogicGateEntityFromEditor}
               onError={setError}
               onSaveStateChange={(state) => setLogicGateSaveFailed((current) => { const failed = editorSaveNeedsFailureAttention(state); return current === failed ? current : failed; })}
               onRecoveryStorageError={setError}

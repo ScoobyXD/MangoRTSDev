@@ -126,12 +126,16 @@ export async function searchEditorEntityLinks(
   context: Pick<EditorEntityLinkContext, "companyID" | "requestJSON">,
   query: string,
   limit = 20,
+  entityTypes: readonly EditorEntityType[] = ["node", "logic_gate", "project"],
 ): Promise<EditorEntityLink[]> {
+  const requestedTypes = entityTypes.filter((type, index) => entityTypes.indexOf(type) === index);
+  const requestedTypeSet = new Set(requestedTypes);
+  if (requestedTypes.length === 0) return [];
   const params = new URLSearchParams({
     company_id: context.companyID.trim(),
     q: query.trim(),
     limit: String(Math.max(1, Math.min(50, Math.round(limit)))),
-    resource_types: "node,logic_gate,project",
+    resource_types: requestedTypes.join(","),
     ranking: "editor_entities",
   });
   const response = await context.requestJSON<CompanyExplorerEntitySearchResponse>(`/v1/company-explorer/search?${params.toString()}`);
@@ -140,7 +144,7 @@ export async function searchEditorEntityLinks(
     const entityType = result.resource_type;
     const entityID = result.resource_id?.trim() ?? "";
     const label = result.display_name?.trim() ?? "";
-    if (!isEditorEntityType(entityType) || !entityID || !label) return [];
+    if (!isEditorEntityType(entityType) || !requestedTypeSet.has(entityType) || !entityID || !label) return [];
     const key = `${entityType}:${entityID}`;
     if (seen.has(key)) return [];
     seen.add(key);

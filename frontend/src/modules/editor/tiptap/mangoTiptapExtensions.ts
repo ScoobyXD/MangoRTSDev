@@ -11,7 +11,7 @@ import StarterKit from "@tiptap/starter-kit";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { NodeSelection, Plugin, PluginKey, TextSelection, type Transaction } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
-import { createEditorEntityIconElement, editorEntityTypeLabel, type EditorEntityLink } from "../editorEntityLinks.js";
+import { createEditorEntityIconElement, editorEntityTypeLabel } from "../editorEntityLinks.js";
 import { EDITOR_MENTION_MENU_VISIBLE_ROWS, mentionUserProfileColor } from "../editorMentions.js";
 import { normalizeEditorHighlightColor } from "../richTextEditing.js";
 import { getCurrentEditorTraceContext, traceEditorFunction } from "../editorTrace.js";
@@ -610,8 +610,6 @@ export type MangoTiptapExtensionOptions = {
   attachmentImageExtension?: AnyExtension;
   mentionUsers?: ReadonlyArray<{ userID: string; name: string; email?: string }>;
   getMentionUsers?: () => ReadonlyArray<{ userID: string; name: string; email?: string }>;
-  searchEntityLinks?: (query: string) => Promise<EditorEntityLink[]>;
-  onEntityLinkSearchError?: (message: string) => void;
 };
 
 export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions): Extensions {
@@ -789,8 +787,12 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
         },
       })),
     }),
-    Mention.extend({
+    Node.create({
       name: "mangoEntityLink",
+      group: "inline",
+      inline: true,
+      atom: true,
+      selectable: true,
       addKeyboardShortcuts() {
         return {
           Backspace: () => {
@@ -858,115 +860,6 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
           class: `mango-editor-entity-link mango-editor-entity-link--${entityType}`,
         }), icon, ["span", { class: "mango-editor-entity-label" }, label]];
       },
-    }).configure({
-      renderText: ({ node }) => String(node.attrs.label || "Entity"),
-      deleteTriggerWithBackspace: false,
-      suggestions: [{
-        char: "#",
-        allowSpaces: true,
-        items: async ({ query }) => {
-          if (!options.searchEntityLinks) return [];
-          try {
-            return await options.searchEntityLinks(query);
-          } catch (cause) {
-            options.onEntityLinkSearchError?.(cause instanceof Error ? cause.message : "Unable to search workspace entities");
-            return [];
-          }
-        },
-        command: ({ editor, range, props }) => {
-          const entity = props as unknown as EditorEntityLink;
-          editor.chain().focus().insertContentAt(range, [{
-            type: "mangoEntityLink",
-            attrs: { entityType: entity.entityType, entityId: entity.entityID, label: entity.label },
-          }, { type: "text", text: " " }]).run();
-        },
-        render: () => {
-          let menu: HTMLDivElement | null = null;
-          let selectedIndex = 0;
-          let current: { items: EditorEntityLink[]; command: (item: EditorEntityLink) => void; clientRect?: (() => DOMRect | null) | null } | null = null;
-          let stopFollowingAnchor: () => void = () => undefined;
-          const close = () => {
-            stopFollowingAnchor();
-            stopFollowingAnchor = () => undefined;
-            menu?.remove();
-            menu = null;
-            current = null;
-          };
-          const paint = () => {
-            if (!menu || !current) return;
-            menu.replaceChildren();
-            selectedIndex = Math.max(0, Math.min(selectedIndex, Math.max(0, current.items.length - 1)));
-            current.items.forEach((item, index) => {
-              const button = document.createElement("button");
-              button.type = "button";
-              button.setAttribute("role", "option");
-              button.setAttribute("aria-selected", index === selectedIndex ? "true" : "false");
-              button.dataset.mangoEditorEntityType = item.entityType;
-              button.className = "mango-tiptap-suggestion-option mango-tiptap-suggestion-option--entity";
-              const icon = createEditorEntityIconElement(document, item.entityType);
-              icon.classList.add("mango-tiptap-suggestion-product-icon");
-              const details = document.createElement("span");
-              details.className = "mango-tiptap-suggestion-copy";
-              const label = document.createElement("span");
-              label.className = "mango-tiptap-suggestion-label";
-              label.textContent = item.label;
-              const type = document.createElement("span");
-              type.className = "mango-tiptap-suggestion-meta";
-              type.textContent = editorEntityTypeLabel(item.entityType);
-              details.append(label, type);
-              button.append(icon, details);
-              button.addEventListener("mousedown", (event) => {
-                event.preventDefault();
-                current?.command(item);
-              });
-              menu?.appendChild(button);
-            });
-            positionSuggestionMenu(menu, 5, current.clientRect);
-          };
-          return {
-            onStart: (props) => {
-              if (typeof document === "undefined") return;
-              close();
-              current = props as unknown as typeof current;
-              menu = createSuggestionMenu("Link a Node, Logic Gate, or Project", "data-mango-tiptap-entity-menu");
-              menu.classList.add("mango-tiptap-suggestion-menu--entity");
-              suggestionMenuPortalTarget(props, document).appendChild(menu);
-              stopFollowingAnchor = followSuggestionMenuAnchor(
-                menu,
-                5,
-                () => current?.clientRect?.() ?? null,
-              );
-              paint();
-            },
-            onUpdate: (props) => {
-              current = props as unknown as typeof current;
-              selectedIndex = 0;
-              paint();
-            },
-            onKeyDown: ({ event }) => {
-              if (!current) return false;
-              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-                event.preventDefault();
-                const direction = event.key === "ArrowDown" ? 1 : -1;
-                selectedIndex = (selectedIndex + direction + current.items.length) % Math.max(1, current.items.length);
-                paint();
-                return true;
-              }
-              if ((event.key === "Enter" || (event.key === "Tab" && !event.shiftKey)) && current.items[selectedIndex]) {
-                event.preventDefault();
-                current.command(current.items[selectedIndex]);
-                return true;
-              }
-              if (event.key === "Escape") {
-                close();
-                return true;
-              }
-              return false;
-            },
-            onExit: close,
-          };
-        },
-      }],
     }),
     options.attachmentImageExtension ?? MangoAttachmentImage,
     MangoBlockIdentity,

@@ -331,6 +331,7 @@ type NodeTextBlockEditorProps = {
   chatMessages: EditorTextBlockChatMessage[];
   pendingChatSelectionAnchor?: TextBlockSelectionAnchor;
   activeChatAnchorMessageID: string;
+  onEntityLink?: (entity: EditorEntityLink) => Promise<void>;
   chatNavigationRequest: { anchorMessageID: string; requestID: number } | null;
   onChatNavigationConsumed?: (requestID: number) => void;
   surfaceText: string;
@@ -551,6 +552,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
         editorSurface: props.attachmentEditorSurface,
       } : undefined}
       mentionUsers={props.companyUsers}
+      onEntityLink={props.onEntityLink}
       annotations={annotations}
       target={target}
       onTargetHandled={props.chatNavigationRequest ? props.onChatNavigationConsumed : undefined}

@@ -22,11 +22,22 @@ func TestMemoryProjectRelationshipsRequireAssignedNodesAndImplicitlyAddLogicGate
 		t.Fatalf("CreateNode: %v", err)
 	}
 
-	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
+	directGate, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
 		CompanyID: companyID, ProjectID: projectResult.Project.ProjectID,
 		ResourceType: EntityTypeLogicGate, ResourceID: logicGate.LogicGateID,
-	}); !errors.Is(err, ErrDirectProjectLogicGate) {
-		t.Fatalf("direct Logic Gate relationship err = %v, want ErrDirectProjectLogicGate", err)
+	})
+	if err != nil || directGate.Relationship == nil || directGate.Relationship.ResourceType != EntityTypeLogicGate {
+		t.Fatalf("direct Logic Gate relationship = %+v err=%v", directGate, err)
+	}
+	readdedGate, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
+		CompanyID: companyID, ProjectID: projectResult.Project.ProjectID,
+		ResourceType: EntityTypeLogicGate, ResourceID: logicGate.LogicGateID,
+	})
+	if err != nil || readdedGate.Relationship == nil {
+		t.Fatalf("re-add direct Logic Gate relationship = %+v err=%v", readdedGate, err)
+	}
+	if readdedGate.Relationship.RelationshipID != directGate.Relationship.RelationshipID {
+		t.Fatalf("direct Logic Gate relationship ID changed: first=%s second=%s", directGate.Relationship.RelationshipID, readdedGate.Relationship.RelationshipID)
 	}
 	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
 		CompanyID: companyID, ProjectID: projectResult.Project.ProjectID,

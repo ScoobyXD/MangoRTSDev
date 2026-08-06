@@ -164,10 +164,7 @@ func NormalizeProjectRelationshipInput(input ProjectRelationshipInput) (ProjectR
 	if !ok {
 		return ProjectRelationshipInput{}, ErrInvalid
 	}
-	if resourceType == EntityTypeLogicGate {
-		return ProjectRelationshipInput{}, ErrDirectProjectLogicGate
-	}
-	if resourceType != EntityTypeNode {
+	if resourceType != EntityTypeNode && resourceType != EntityTypeLogicGate {
 		return ProjectRelationshipInput{}, ErrInvalid
 	}
 	input.ResourceType = resourceType

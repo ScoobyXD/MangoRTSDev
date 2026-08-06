@@ -1,3 +1,19 @@
+# Process Story: The universal picker dispatches exact typed relationship commands
+
+A user opens the universal picker from a resource editor and selects `##` link mode
+↓
+The source editor and chosen result provide their unchanged canonical resource types and IDs
+↓
+The picker permits only the documented source/target pair and sends those IDs to the existing business-specific command
+↓
+Node-to-Logic-Gate uses the Logic Gate work-assignment command, while Node-to-Project and Logic-Gate-to-Project use `project_relationships`
+↓
+Authorization, cardinality, idempotency, timeline stamps, projections, and events remain owned by those commands; the picker creates no generic edge or resource registry
+↓
+The inserted editor chip is a reference to the selected target, not the relationship record, so deleting the chip never unlinks the resources
+
+Last updated: 2026-08-05
+
 # Process Story: Mango relates resources by their exact identities
 
 A user relates or personally pins an existing Node, Logic Gate, Project, email, attachment, Account, or other supported Mango resource
@@ -117,6 +133,7 @@ Current examples include:
 - A Node may have at most one active Logic Gate work assignment.
 - A Node may be directly related to at most one Project.
 - A Logic Gate may be related to multiple Projects.
+- One Project/Logic-Gate pair has one stable semantic edge whether it is created directly from the Logic Gate editor or implicitly while adding an assigned Node.
 - An attachment may have multiple active owner relationships.
 
 ### Law 13 — Duplicate commands do not create duplicate semantic edges
@@ -235,6 +252,12 @@ Project membership:
   project_id   = exact projects.project_id
   resource_type = node
   resource_id   = exact nodes.node_id
+
+Direct existing Logic Gate Project membership:
+  company_id    = C
+  project_id    = exact projects.project_id
+  resource_type = logic_gate
+  resource_id   = exact logic_gates.logic_gate_id
 
 Email attachment to a Project:
   company_id        = C

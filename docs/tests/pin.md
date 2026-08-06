@@ -1,3 +1,19 @@
+# Process Story: The universal picker starts with the user's Pinned tree
+
+A user types `#` in a Node, Logic Gate, or Project editor
+↓
+The shared universal picker reads the same complete company-and-user-scoped `/v1/user-pins` tree used by the sidebar
+↓
+With no search text, folders and pins retain their stored mixed order and nested indentation in one scrollable Pinned list
+↓
+The list follows the existing pin snapshot rules, including saved names and stale pins; selecting a stale link target still fails through the normal destination relationship command
+↓
+Typing a query switches to permission-filtered workspace search, with matching pins placed first and duplicate typed resources removed
+↓
+No recent-use record, browser cache, second pin store, or database migration is created
+
+Last updated: 2026-08-05
+
 # Process Story: A user organizes personal pins into a nested tree
 
 A user with edit access pins an existing Node, Logic Gate, or Project
@@ -62,6 +78,10 @@ PIN37 - Expanded Pinned folder IDs and inline-rename state live only in current 
 PIN38 - Internal pinned-row drag identity takes precedence over email and external Node drag payloads. Pin-on-pin grouping must not invoke email conversion or Node-to-Logic-Gate assignment.
 PIN39 - The middle of a folder is an inside drop; row edges are before/after drops. External supported resources may create or move a pin into a folder or sibling location, but an arbitrary unpinned resource dropped on a pin does not auto-create a folder.
 PIN40 - Opening a Node from the Pinned section starts a fresh fullscreen Node popup instance. Opening that Node from other routes, the dock, Explorer, Home, or another existing source remains windowed unless that source independently requests fullscreen.
+PIN41 - A blank Universal picker reads the same complete `/v1/user-pins` tree as the sidebar and renders every supported pin in stored mixed order with folder nesting in one scrollable list.
+PIN42 - Universal picker pin rows preserve PIN5-PIN9 snapshot and stale-pin behavior. Opening a reference follows the normal destination route; using a pin as a link target must still pass the business command's current permission and existence checks.
+PIN43 - Typed Universal picker search may place matching pins before workspace results and deduplicates the exact `resource_type + resource_id` pair. It never changes pin position, name, folder ownership, or persistence.
+PIN44 - The Universal picker does not create recent-use data, browser pin caches, a second pin endpoint, or another database table. `/v1/user-pins` remains the only read source for its blank Pinned section.
 
 ## Scenarios
 
@@ -285,3 +305,20 @@ Expected:
 - The Pinned launch uses a fresh popup instance and starts fullscreen.
 - Toggling fullscreen off returns to normal popup geometry.
 - The non-Pinned launch keeps its established windowed default.
+
+### Scenario PIN-S12: Universal Picker Uses Pinned Instead Of Recents
+
+Business logic covered:
+- PIN41
+- PIN42
+- PIN43
+- PIN44
+
+Given:
+- The user's Pinned tree contains nested folders, Node, Logic Gate, and Project pins, including a stale saved label.
+
+Expected:
+- Typing `#` in a resource editor shows every supported pin in its stored mixed order and nesting without calculating recent usage.
+- Typing a query uses permission-filtered workspace search, keeps matching pins first, and removes duplicate typed identities.
+- A stale pin remains visible under the pin snapshot contract, while a `##` relationship command still rejects a missing or unauthorized target.
+- No pin row, browser cache, recent-use record, API, or schema is added or changed.

@@ -119,6 +119,88 @@ func TestProjectScopedNodeCreateRequiresInitialAssignmentLogicGateEditAccess(t *
 	}
 }
 
+func TestProjectRelationshipsPOSTAssociatesExistingLogicGate(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "66666666-6666-4666-8666-666666666429"
+	repo.EnsureCompany(companyID, "Project Logic Gate Link Co")
+	editor := mustLogicGateWorkHTTPUser(t, repo, companyID, "project-logic-gate-link-editor")
+	projectResult, err := repo.CreateProject(store.ProjectInput{
+		CompanyID: companyID,
+		Name:      "Linked Gate Project",
+		Status:    store.ProjectDefaultStatus,
+	})
+	if err != nil || projectResult.Project == nil {
+		t.Fatalf("CreateProject = %+v err=%v", projectResult, err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Existing Linked Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeLogicGate,
+		EntityID:         logicGate.LogicGateID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions gate no access: %v", err)
+	}
+
+	server := NewServer(repo)
+	defer server.Close()
+	payload := map[string]any{
+		"company_id":    companyID,
+		"resource_type": store.EntityTypeLogicGate,
+		"resource_id":   logicGate.LogicGateID,
+	}
+	requestPath := "/v1/projects/" + projectResult.Project.ProjectID + "/relationships"
+	req := logicGateWorkV2Request(t, http.MethodPost, requestPath, payload, editor, companyID)
+	rr := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("POST existing Logic Gate relationship without edit access status = %d body=%s, want 404", rr.Code, rr.Body.String())
+	}
+	rows, err := repo.ListProjectRelationshipProjections(companyID, projectResult.Project.ProjectID)
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("project relationships after denied attempt = %+v err=%v, want none", rows, err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeLogicGate,
+		EntityID:         logicGate.LogicGateID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   editor.UserID,
+			AccessLevel: store.EntityPermissionEdit,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions gate edit: %v", err)
+	}
+	req = logicGateWorkV2Request(t, http.MethodPost, requestPath, payload, editor, companyID)
+	rr = httptest.NewRecorder()
+	server.Routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("POST existing Logic Gate relationship status = %d body=%s, want 200", rr.Code, rr.Body.String())
+	}
+	var response struct {
+		Relationship *domain.ProjectRelationshipProjection `json:"relationship"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
+		t.Fatalf("decode relationship response: %v body=%s", err, rr.Body.String())
+	}
+	if response.Relationship == nil ||
+		response.Relationship.ResourceType != store.EntityTypeLogicGate ||
+		response.Relationship.ResourceID != logicGate.LogicGateID {
+		t.Fatalf("relationship = %+v, want existing Logic Gate", response.Relationship)
+	}
+	rows, err = repo.ListProjectRelationshipProjections(companyID, projectResult.Project.ProjectID)
+	if err != nil || len(rows) != 1 || rows[0].ResourceID != logicGate.LogicGateID {
+		t.Fatalf("project relationships = %+v err=%v, want one Logic Gate", rows, err)
+	}
+}
+
 func TestProjectRelationshipsGETFiltersTargetsForViewer(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "66666666-6666-4666-8666-666666666422"
