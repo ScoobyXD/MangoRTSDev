@@ -522,7 +522,7 @@ func (s *Server) filterVisibleKanbanCards(r *http.Request, companyID string, ite
 	return out, nil
 }
 
-func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request, entityType, entityID, notFoundCode, eventType string) {
+func (s *Server) handleEntityPermissionsLegacy(w http.ResponseWriter, r *http.Request, entityType, entityID, notFoundCode, eventType string) {
 	if r.Method == http.MethodGet {
 		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 		if companyID == "" {

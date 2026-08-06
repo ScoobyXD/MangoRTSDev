@@ -938,10 +938,7 @@ func (r *PostgresRepo) deleteCompanyExplorerTargets(companyID string, targets []
 			stop()
 			return CompanyExplorerDeleteResult{}, err
 		}
-		if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeCompanyExplorerFolder, folderID); err != nil {
-			stop()
-			return CompanyExplorerDeleteResult{}, err
-		}
+
 	}
 	stop()
 	stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.logic_gate_delete")
@@ -1089,27 +1086,17 @@ func postgresDeleteNodeRowsTx(ctx context.Context, tx *sql.Tx, companyID, nodeID
 		return err
 	}
 	defer observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.total")()
-	stop := observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.effective_facts_delete")
-	if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeNode, nodeID); err != nil {
-		stop()
-		return err
-	}
-	stop()
+
 	if deleteProjectionRows {
-		stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.gvic_matrix_projection_delete")
-		if err := deletePostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
-			stop()
-			return err
-		}
-		stop()
-		stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.project_timeline_projection_delete")
+
+		stop := observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.project_timeline_projection_delete")
 		if err := deleteProjectManagementTimelineProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
 			stop()
 			return err
 		}
 		stop()
 	}
-	stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.project_timeline_items_delete")
+	stop := observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.project_timeline_items_delete")
 	if _, err := tx.ExecContext(ctx,
 		`delete from project_management_timeline_items
 		 where company_id=$1 and node_id=$2`,
@@ -1141,16 +1128,6 @@ func postgresDeleteNodeRowsTx(ctx context.Context, tx *sql.Tx, companyID, nodeID
 		}
 		stop()
 	}
-	stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.resource_permissions_delete")
-	if err := execOptionalPostgresShapeCleanupTx(tx, "resource_permissions",
-		`delete from resource_permissions
-		 where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid`,
-		companyID, nodeID,
-	); err != nil {
-		stop()
-		return err
-	}
-	stop()
 	stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.node_delete")
 	deleted, err := tx.ExecContext(ctx,
 		`delete from nodes
@@ -1214,25 +1191,19 @@ func postgresDeleteLogicGateRowsTx(ctx context.Context, tx *sql.Tx, companyID, l
 	if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, EntityTypeLogicGate, logicGateID); err != nil {
 		return err
 	}
-	if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeLogicGate, logicGateID); err != nil {
-		return err
-	}
+
 	if deleteProjectionRows {
-		if err := deletePostgresGVICMatrixProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
-			return err
-		}
+
 		if err := deleteProjectManagementTimelineProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx,
-		`delete from project_management_timeline_items
-		 where company_id=$1 and logic_gate_id=$2`,
-		companyID, logicGateID,
-	); err != nil {
+	if _, err := tx.ExecContext(ctx, "delete from project_management_timeline_items where company_id=$1 and logic_gate_id=$2", companyID, logicGateID); err != nil {
 		return err
 	}
-	if err := deleteNodeLogicGateAssignmentsAndRecomputeVisibilityTx(ctx, tx, companyID, logicGateID); err != nil {
+	if _, err := tx.ExecContext(ctx, `
+delete from node_logic_gate_assignments
+where company_id=$1::uuid and logic_gate_id=$2::uuid`, companyID, logicGateID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,

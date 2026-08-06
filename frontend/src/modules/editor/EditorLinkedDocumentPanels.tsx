@@ -56,6 +56,10 @@ type EditorLinkedDocumentPanelsProps = {
     assignments: LogicGateGVICAssignment[];
     inherited?: boolean;
     readOnlyReason?: string;
+    mode: "inherited" | "customized";
+    effectiveSource: { resource_type: string; resource_id: string; resource_name?: string } | null;
+    overwrittenByAncestor?: { resource_type: string; resource_id: string; sequence: number } | null;
+    onModeChange: (mode: "inherited" | "customized") => void;
   } | null;
   companyUsers: Array<{ user_id: string; email?: string; display_name?: string }>;
   companyUserGroups: Array<{ group_id: string; parent_group_id?: string; name: string; position: number }>;
@@ -374,6 +378,10 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
     <GVICAssignmentBoard
       linkedEntityKind={linkedEntityKind}
       assignments={gvicFields.assignments}
+      mode={gvicFields.mode}
+      effectiveSource={gvicFields.effectiveSource}
+      overwrittenByAncestor={gvicFields.overwrittenByAncestor}
+      onModeChange={gvicFields.onModeChange}
       companyUsers={companyUsers}
       companyUserGroups={companyUserGroups}
       companyUserGroupMembers={companyUserGroupMembers}
@@ -829,6 +837,10 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
 function GVICAssignmentBoard({
   linkedEntityKind,
   assignments,
+  mode,
+  effectiveSource,
+  overwrittenByAncestor,
+  onModeChange,
   companyUsers,
   companyUserGroups,
   companyUserGroupMembers,
@@ -842,6 +854,10 @@ function GVICAssignmentBoard({
 }: {
   linkedEntityKind: "" | "node" | "logic_gate";
   assignments: LogicGateGVICAssignment[];
+  mode: "inherited" | "customized";
+  effectiveSource: { resource_type: string; resource_id: string; resource_name?: string } | null;
+  overwrittenByAncestor?: { resource_type: string; resource_id: string; sequence: number } | null;
+  onModeChange: (mode: "inherited" | "customized") => void;
   companyUsers: Array<{ user_id: string; email?: string; display_name?: string }>;
   companyUserGroups: Array<{ group_id: string; parent_group_id?: string; name: string; position: number }>;
   companyUserGroupMembers: Array<{ group_id: string; user_id: string }>;
@@ -855,6 +871,36 @@ function GVICAssignmentBoard({
 }) {
   return (
     <div style={{ minWidth: 0, width: "100%", display: "grid", gap: 6, overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 11, fontWeight: 600 }}>Policy mode</span>
+        {(["inherited", "customized"] as const).map((candidate) => (
+          <button
+            key={candidate}
+            type="button"
+            disabled={!canEdit}
+            onClick={() => onModeChange(candidate)}
+            style={{
+              border: `1px solid ${candidate === mode ? accent : ruleColor}`,
+              borderRadius: 6,
+              background: candidate === mode ? `${accent}22` : panelBackground,
+              color: "inherit",
+              padding: "4px 8px",
+              fontSize: 11,
+              cursor: canEdit ? "pointer" : "not-allowed",
+            }}
+          >
+            {candidate === "inherited" ? "Inherited" : "Customized"}
+          </button>
+        ))}
+        {effectiveSource && (
+          <span style={{ fontSize: 10, opacity: 0.78 }}>
+            Effective source: {effectiveSource.resource_name?.trim() || `${effectiveSource.resource_type} ${effectiveSource.resource_id}`}
+          </span>
+        )}
+      </div>
+      {overwrittenByAncestor && (
+        <div style={{ fontSize: 10, color: "#b45309" }}>This stored customization is inactive because an ancestor overwrite superseded it.</div>
+      )}
       <div
         aria-label="GVIC assignments"
         style={{
@@ -880,7 +926,7 @@ function GVICAssignmentBoard({
             accent={accent}
             panelBackground={panelBackground}
             ruleColor={ruleColor}
-            canEdit={canEdit}
+            canEdit={canEdit && mode === "customized"}
             disabledReason={disabledReason}
             onAddPrincipal={onAddPrincipal}
             onRemovePrincipal={onRemovePrincipal}

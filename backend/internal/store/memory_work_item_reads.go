@@ -26,6 +26,37 @@ type memoryGVICMatrixProjectionRow struct {
 	UpdatedTimestamp          time.Time
 }
 
+// rebuildV2MyWorkRowsLocked derives the transient memory read model from the
+// four V2 policy maps. The rows are never policy authority and are rebuilt at
+// each public My Work read so group membership and inheritance stay live.
+func (r *MemoryRepo) rebuildV2MyWorkRowsLocked(companyID string) {
+	for rowKey, row := range r.GVICMatrixProjectionRows {
+		if row.CompanyID == companyID {
+			delete(r.GVICMatrixProjectionRows, rowKey)
+		}
+	}
+	gateIDs := []string{}
+	for _, gate := range r.logicGates {
+		if gate.CompanyID == companyID {
+			gateIDs = append(gateIDs, gate.LogicGateID)
+		}
+	}
+	sort.Strings(gateIDs)
+	for _, gateID := range gateIDs {
+		r.syncGVICMatrixProjectionForLogicGateLocked(companyID, gateID)
+	}
+	nodeIDs := []string{}
+	for _, node := range r.nodes {
+		if node.CompanyID == companyID {
+			nodeIDs = append(nodeIDs, node.NodeID)
+		}
+	}
+	sort.Strings(nodeIDs)
+	for _, nodeID := range nodeIDs {
+		r.syncGVICMatrixProjectionForNodeLocked(companyID, nodeID)
+	}
+}
+
 func (r *MemoryRepo) ListGeneratedInboxNodes(query WorkItemInboxQuery) ([]domain.Node, error) {
 	return r.ListGeneratedInboxNodesContext(context.Background(), query)
 }
@@ -50,8 +81,9 @@ func (r *MemoryRepo) listGVICMatrixProjectedNodes(ctx context.Context, query Wor
 		return nil, err
 	}
 	query = NormalizeWorkItemInboxQuery(query)
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rebuildV2MyWorkRowsLocked(query.CompanyID)
 
 	items := make([]domain.Node, 0)
 	for _, row := range r.GVICMatrixProjectionRows {
@@ -110,8 +142,9 @@ func (r *MemoryRepo) listGVICMatrixProjectedLogicGates(ctx context.Context, quer
 		return nil, err
 	}
 	query = NormalizeWorkItemInboxQuery(query)
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rebuildV2MyWorkRowsLocked(query.CompanyID)
 
 	assignmentsByGate := r.logicGateGVICAssignmentsByGateLocked(query.CompanyID)
 	items := make([]WorkItemLogicGateInboxItem, 0)
@@ -270,6 +303,18 @@ func (r *MemoryRepo) deleteGVICMatrixProjectionForLogicGateLocked(companyID, log
 	}
 }
 
+func (r *MemoryRepo) v2MyWorkSourceTimestampLocked(companyID, resourceType, resourceID, userID string, fallback time.Time) time.Time {
+	for _, assignment := range r.gvicEffectiveAssignmentsForResourceLocked(companyID, resourceType, resourceID) {
+		if assignment.UserID == userID && assignment.UpdatedTimestamp.After(fallback) {
+			fallback = assignment.UpdatedTimestamp
+		}
+	}
+	if fallback.IsZero() {
+		return time.Unix(0, 0).UTC()
+	}
+	return fallback
+}
+
 func (r *MemoryRepo) upsertGVICMatrixProjectionNodeRowLocked(companyID string, node domain.Node, logicGateID, userID string) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -282,7 +327,7 @@ func (r *MemoryRepo) upsertGVICMatrixProjectionNodeRowLocked(companyID string, n
 		ResourceID:       node.NodeID,
 		LogicGateID:      strings.TrimSpace(logicGateID),
 		Node:             node,
-		UpdatedTimestamp: time.Now().UTC(),
+		UpdatedTimestamp: r.v2MyWorkSourceTimestampLocked(companyID, EntityTypeNode, node.NodeID, userID, node.CreatedTimestamp),
 	}
 	r.GVICMatrixProjectionRows[GVICMatrixProjectionKey(companyID, userID, GVICMatrixProjectionResourceNode, node.NodeID)] = row
 }
@@ -300,7 +345,7 @@ func (r *MemoryRepo) upsertGVICMatrixProjectionLogicGateRowLocked(companyID, log
 		LogicGateID:               logicGateID,
 		LogicGateHeader:           gate.Header,
 		LogicGateCreatedTimestamp: gate.CreatedTimestamp,
-		UpdatedTimestamp:          time.Now().UTC(),
+		UpdatedTimestamp:          r.v2MyWorkSourceTimestampLocked(companyID, EntityTypeLogicGate, logicGateID, userID, gate.CreatedTimestamp),
 	}
 	r.GVICMatrixProjectionRows[GVICMatrixProjectionKey(companyID, userID, GVICMatrixProjectionResourceLogicGate, logicGateID)] = row
 }
@@ -415,8 +460,9 @@ func (r *MemoryRepo) ListGVICMatrixProjectionRowsForResources(companyID string, 
 	if companyID == "" {
 		return nil, ErrInvalid
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rebuildV2MyWorkRowsLocked(companyID)
 	return r.GVICMatrixProjectionRowsForResourcesLocked(companyID, nodeIDs, logicGateIDs), nil
 }
 
@@ -425,8 +471,9 @@ func (r *MemoryRepo) ListGVICMatrixProjectionRowsForUser(query WorkItemInboxQuer
 	if query.CompanyID == "" || query.UserID == "" {
 		return nil, ErrInvalid
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rebuildV2MyWorkRowsLocked(query.CompanyID)
 	items := make([]GVICMatrixProjectionRow, 0)
 	for _, row := range r.GVICMatrixProjectionRows {
 		if row.CompanyID != query.CompanyID || row.UserID != query.UserID || row.ResourceType != GVICMatrixProjectionResourceNode {
@@ -473,8 +520,9 @@ func (r *MemoryRepo) ListMyWorkMatrixRows(query WorkItemInboxQuery) ([]GVICMatri
 	if query.Limit > WorkItemInboxMaxLimit {
 		query.Limit = WorkItemInboxMaxLimit
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rebuildV2MyWorkRowsLocked(query.CompanyID)
 	items := make([]GVICMatrixProjectionRow, 0)
 	for _, row := range r.GVICMatrixProjectionRows {
 		if row.CompanyID != query.CompanyID || row.UserID != query.UserID || row.ResourceType != GVICMatrixProjectionResourceNode {
@@ -666,8 +714,9 @@ func (r *MemoryRepo) ListGVICMatrixProjectionRowsForLogicGate(companyID, logicGa
 	if companyID == "" || logicGateID == "" {
 		return nil, ErrInvalid
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rebuildV2MyWorkRowsLocked(companyID)
 	return r.GVICMatrixProjectionRowsForLogicGateLocked(companyID, logicGateID), nil
 }
 

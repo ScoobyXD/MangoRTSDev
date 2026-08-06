@@ -467,7 +467,6 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 	} else if hadPreviousAssignment && previousAssignment.LogicGateID == input.LogicGateID {
 		issueValue = previousAssignment.IsIssue
 	}
-	snapshotGVICFromLogicGate := !hadPreviousAssignment || previousAssignment.LogicGateID != input.LogicGateID
 	placedByUserID := strings.TrimSpace(previousAssignment.PlacedByUserID)
 	if !hadPreviousAssignment || previousAssignment.LogicGateID != input.LogicGateID {
 		placedByUserID = strings.TrimSpace(input.ActorUserID)
@@ -497,22 +496,6 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	stop()
-	if snapshotGVICFromLogicGate {
-		stop = observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.access_policy_copy")
-		if _, err := snapshotPostgresResourceAccessPolicyTx(ctx, tx, input.CompanyID, EntityTypeLogicGate, input.LogicGateID, EntityTypeNode, input.NodeID); err != nil {
-			stop()
-			return LogicGateNodeAssignmentResult{}, err
-		}
-		stop()
-	}
-	if snapshotGVICFromLogicGate {
-		stop = observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.gvic_snapshot")
-		if err := snapshotPostgresLogicGateGVICToNodeTx(ctx, tx, input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
-			stop()
-			return LogicGateNodeAssignmentResult{}, err
-		}
-		stop()
-	}
 	stop = observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.projection_dependencies")
 	err = syncNodeLogicGateAssignmentProjectionDependenciesTx(ctx, tx, NodeLogicGateAssignmentProjectionDependencyInput{
 		CompanyID:    input.CompanyID,
@@ -651,16 +634,10 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	if crossLogicGateMove {
-		if _, err := snapshotPostgresResourceAccessPolicyTx(ctx, tx, input.CompanyID, EntityTypeLogicGate, input.LogicGateID, EntityTypeNode, input.NodeID); err != nil {
-			return LogicGateNodeAssignmentResult{}, err
-		}
 		if err := updatePostgresCommunicationsEmailNodeReferenceForNodeTx(ctx, tx, input.CompanyID, input.NodeID, targetBoardID, cardID, input.LogicGateID); err != nil {
 			return LogicGateNodeAssignmentResult{}, err
 		}
 		if err := updatePostgresCommunicationsEmailAttachmentReferencesForNodeTx(ctx, tx, input.CompanyID, input.NodeID, targetBoardID, cardID, input.LogicGateID); err != nil {
-			return LogicGateNodeAssignmentResult{}, err
-		}
-		if err := snapshotPostgresLogicGateGVICToNodeTx(ctx, tx, input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
 			return LogicGateNodeAssignmentResult{}, err
 		}
 	}

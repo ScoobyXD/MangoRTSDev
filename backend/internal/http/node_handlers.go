@@ -361,11 +361,6 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(parts) == 2 && parts[1] == "permissions" {
-		s.handleEntityPermissions(w, r, store.EntityTypeNode, nodeID, "node_not_found", "node_permissions_updated")
-		return
-	}
-
 	if len(parts) == 2 && parts[1] == "projection" {
 		if r.Method == http.MethodPost {
 			var req struct {

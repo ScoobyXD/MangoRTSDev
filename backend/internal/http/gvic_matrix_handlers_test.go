@@ -94,7 +94,7 @@ func TestGVICMatrixNodeCreateAndMoveV2(t *testing.T) {
 	}
 }
 
-func TestGVICMatrixNodeCreateInExistingLogicGateAssignsCreator(t *testing.T) {
+func TestGVICMatrixNodeCreateInExistingLogicGateInheritsCurrentPolicy(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "77777777-7777-4777-8777-777777777402"
 	repo.EnsureCompany(companyID, "GVICMatrix Matrix Creator Co")
@@ -159,10 +159,10 @@ func TestGVICMatrixNodeCreateInExistingLogicGateAssignsCreator(t *testing.T) {
 	if len(effective) != 1 ||
 		effective[0].Role != domain.GVICRoleGenerated ||
 		effective[0].UserID != responsible.UserID ||
-		effective[0].SourceResourceType != store.EntityTypeNode ||
-		effective[0].SourceResourceID != payload.Node.NodeID ||
-		effective[0].InheritanceType != store.GVICInheritanceDirect {
-		t.Fatalf("effective node GVIC = %+v, want direct generated snapshot from node", effective)
+		effective[0].SourceResourceType != store.EntityTypeLogicGate ||
+		effective[0].SourceResourceID != logicGate.LogicGateID ||
+		effective[0].InheritanceType != store.PolicyModeInherited {
+		t.Fatalf("effective node GVIC = %+v, want inherited generated assignment from Logic Gate", effective)
 	}
 }
 

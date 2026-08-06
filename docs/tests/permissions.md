@@ -1,22 +1,23 @@
-# Process Story: Permissions stay resource-based after canvas removal
+# Process Story: Authorization resolves one live V2 permission policy
 
 A user requests a Node, Logic Gate, relationship, Editor document, Explorer row, or Kanban item
 ↓
-Company membership and the existing resource permission policy determine edit or no access
+Company membership and the resource's inherited or customized V2 policy resolve Edit or No Access
 ↓
-Set-based list and snapshot filtering hides inaccessible resources and relationships
+Direct-user, nearest live nested-group, and default rules are evaluated in that order
 ↓
-Mutations require edit access and keep the existing folder, relationship, attachment, email, recycle, and collaboration authorization rules
+Reads hide inaccessible data; mutations require Edit; GVIC never grants authority
 ↓
-No position row participates in access decisions or public responses
-Last updated: 2026-07-22
+Moves, resets, group changes, and ETags resolve current state without descendant policy rewrites
+
+Last updated: 2026-08-05
 
 # Permissions Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
 - Explicit Save visibility is covered by `tests/frontend/modules/editor/emailViewerContract.test.ts`; close-with-save and duplicate-write prevention still require focused interaction coverage.
-- Business Logic Covered By Automated Tests: partial backend coverage for default/source-row semantics, group permission pointers, current-policy apply-to-descendants snapshots, manager-preservation rules, Logic Gate-to-node permission snapshots, folder-to-child permission snapshots, same-parent preservation, cross-parent overwrite behavior, and direct node access denial. Rule ID mapping is partial.
+- Business Logic Covered By Automated Tests: backend, HTTP, frontend contract, disposable PostgreSQL, scale, and regression coverage for V2 defaults, complete policies, inheritance, force resets, moves, detach, live groups, authorization, and ETags. Rule ID mapping remains partial.
 
 ## Business Logic
 
@@ -35,54 +36,54 @@ P12 - Resource mutations require edit access; a no-access actor is denied withou
 P13 - Invalid requested access levels return a bad request error.
 P14 - Reading entity permission settings requires manager/admin authority and edit access to the entity.
 P15 - Updating entity permission settings requires dev admin, company admin, or company manager authority with edit access to the entity.
-P16 - Permission setting responses include default access, explicit user/group permission rows, legacy override user IDs, effective access, can-edit-permissions, and can-edit-manager-permissions.
+P16 - Permission responses include stored/effective mode, stored/effective default and user/group rules, source resource, reset/overwrite explanation, effective access, and permission-management capabilities.
 P17 - Visible node, logic gate, project, and Explorer reads are filtered by effective edit access.
 P18 - Relationship rows are filtered by the viewer's access to the related resources.
 P19 - Kanban board and card access derives from the access level of the owning logic gate.
 P20 - Regular users cannot load or update permission settings even when they have resource edit access; company manager/admin authority is a separate settings-management gate.
 P21 - Malformed or unknown resource IDs do not crash visibility checks.
-P22 - Permission changes recompute effective access for affected users and resources, including descendants when the change is explicitly applied to descendants.
-P23 - Permission changes synchronously update effective access, canonical projection rows, and read versions for affected resources, including descendants changed by an apply-to-descendants command. Clients reconcile from the committed response or a later canonical read; no generic permission or workspace browser event is published.
+P22 - Effective access is resolved from canonical settings, rules, live hierarchy, and live nested groups at read time; no derived effective-access table is policy authority.
+P23 - Permission writes update one complete policy or one descendant-reset sequence and relevant read versions atomically. They never rewrite every descendant or publish a generic permission/workspace event.
 P24 - Company managers do not bypass resource permissions.
 P25 - Company managers can update permission exceptions for company users only; dev admins and company admins can update manager and user exceptions.
 P26 - Default access has only two states, edit and no access; `resource_permissions` stores explicit user/group source rows with their own access level.
 P27 - When a company manager changes a resource default, manager effective access is preserved while regular company users follow the new default and exceptions.
-P28 - Legacy `resource_access_grants` rows are migrated into `resource_permissions` exception rows before the legacy table is dropped.
-P29 - Runtime permission reads and writes use `resource_permissions` only; `resource_access_grants` and `entity_access_permissions` are not active permission sources.
-P30 - Parent permission policies are templates captured at create time or transfer time; they are not live inherited after the child enters the parent unless an explicit apply-to-descendants command is run.
-P31 - Creating a subfolder under a folder copies the direct parent folder's current permission policy to the new subfolder.
-P32 - Creating, placing, or moving a project or Logic Gate into a folder copies the direct target parent folder's current permission policy to that project or Logic Gate.
-P33 - Creating, assigning, or moving a node into a Logic Gate copies the direct target Logic Gate's current permission policy to that node.
-P34 - Editing a child resource's permissions changes only that child; that edited child policy becomes the template for resources created or transferred directly under that child.
-P35 - Reordering or re-saving a project, Logic Gate, or node under the same parent preserves that resource's current permissions.
-P36 - Detaching a resource from a parent or moving it to a non-template/root location preserves its current permission policy.
-P37 - Project permissions do not template Logic Gates or nodes through project relationships; folder templates apply to Explorer placement, and Logic Gate templates apply to node assignment.
+P28 - Step 1 copied reconciled legacy policy into V2 staging. Step 2 uses canonical V2 tables only and retains renamed legacy policy tables only as frozen rollback evidence for Step 3.
+P29 - Runtime permission readers and writers use only `resource_permission_settings` and canonical `resource_permissions`; no legacy, fallback, dual-write, request-repair, or derived-authority path is active.
+P30 - A non-root resource starts inherited and stores no direct rule rows unless a creation workflow explicitly customizes it. A root is customized with a complete valid policy.
+P31 - An inherited resource live-resolves the nearest active customized policy in its immediate parent chain.
+P32 - Customizing copies the current effective policy once, applies one complete replacement, and allocates a new customized sequence in the same transaction.
+P33 - Returning to inherited deletes direct rule rows and the customized sequence, then immediately exposes the current effective ancestor policy.
+P34 - Editing a parent changes only that parent. Existing inherited descendants see it live; customized descendants keep their active complete policies.
+P35 - A same-parent reorder leaves the parent-link sequence and current policy unchanged. A real move allocates a new parent-link sequence for permissions and GVIC.
+P36 - Moving an inherited resource changes its effective parent immediately; moving a customized resource preserves its policy. Detaching an inherited Node materializes its current effective permission policy as customized.
+P37 - Company Explorer folders parent contained folders, projects, and Logic Gates; Logic Gates parent assigned Nodes; Shared Triage folders parent folders and shared inboxes. Project relationships do not create policy parentage.
 P38 - Kanban board/card visibility follows the owning Logic Gate access, but opening a Kanban node detail/editor must perform a fresh node-level access check.
 P39 - Permission settings denial copy explains that only managers and admins with resource edit access can manage permissions.
 P40 - Group permission rows are pointers to the group or subgroup; adding a user to that group later makes the user's effective permission follow the group row without writing per-user rows.
-P41 - Direct user permission rows override group permission rows for that user; group rows override default access, and the nearest matching group row wins before same-depth access-rank tie breaking.
-P42 - On company Explorer folders, apply-to-descendants replaces the permission policy on all descendant folders, contained projects, contained Logic Gates, and nodes assigned to those Logic Gates with the folder's complete current default and user/group rules, even when the folder was not changed in that request.
-P43 - On Logic Gates, apply-to-descendants replaces the permission policy on nodes currently assigned to that Logic Gate with the Logic Gate's complete current default and user/group rules, even when the Logic Gate was not changed in that request.
+P41 - A direct user rule overrides groups. The nearest matching group wins; at equal depth No Access beats Edit, then stable group identity breaks ties. Default applies only when no direct or group rule matches.
+P42 - Apply to inherited descendants saves the selected policy if needed and writes no descendant policy state. Inherited branches already resolve it live, and active customized boundaries remain protected.
+P43 - Overwrite all descendants uses one reset sequence that also supersedes older customized descendants. A later descendant customization becomes active again.
 P44 - Every permissions dialog and embedded permissions view, including Company Explorer folders, nodes, Logic Gates, projects, shared inboxes, and Shared Triage entry points, exposes an explicit `Save` button in a stable action area. Save commits the current default, user/group, and descendant selections without closing. Editable dialogs retain close-with-save for pending changes, but closing after a successful explicit Save must not issue a duplicate write.
 P45 - Runtime authorization resolves group permission rows from group source tables and group membership source rows; permission checks must not require a derived group closure/projection table to be populated.
-P46 - Editing a parent without apply-to-descendants changes only that parent and the template future direct children will receive; existing descendants keep their current permission policies.
-P47 - Permission policy inheritance should be implementable as reusable policy/rule pointers or immutable rule versions, not as duplicated full permission rows per descendant.
-P48 - Creating or transferring a resource may copy resolved permission rule pointers from the direct parent, but it must not leave the child live-linked to future parent edits.
-P49 - Apply-to-descendants records one full-current-policy snapshot boundary plus the parent's current rules for the subtree instead of rewriting policy rows for every descendant; the operation must remain feasible for subtrees with hundreds of thousands of descendants.
-P50 - The snapshot boundary clears older ancestor applications and descendant-only rules; applying an empty current rule set therefore clears all descendant exception rules.
-P51 - Apply-to-descendants is a complete one-time overwrite of the current descendants, including descendant-only rules. Later descendant edits can override again until a newer ancestor apply occurs.
-P52 - Conflicting direct bindings and ancestor apply records resolve by a monotonic transaction sequence, not wall-clock time.
-P53 - Permission audit/explainability must identify whether a user's rule came from a direct resource binding, create/transfer inheritance, ancestor apply-to-descendants, or group membership, and must not report GVIC assignment as a resource-permission grant.
+P46 - Ordinary policy writes do not walk descendants. Force-overwrite work stays constant-size as the subtree grows.
+P47 - Settings contain inherited/customized mode, customized sequence, parent-link sequence, and descendant-reset sequence; direct rows exist only for a customized complete policy.
+P48 - A parent link newer than a reset blocks that older reset from retroactively crossing a moved subtree. A later reset from the new ancestry may cross it.
+P49 - Separate monotonic sequence domains are used for GVIC and permissions; wall-clock timestamps never decide policy precedence.
+P50 - A reset can make a stored customization inactive without deleting it. Reads explain both the effective source and the overwritten stored source.
+P51 - The frontend has distinct Inherited/Customized controls, Apply to inherited descendants, and separately confirmed Overwrite all descendants controls.
+P52 - Permission audit/explainability identifies direct/default/group resolution, the effective customized source, eligible reset, parent-link boundary, and overwritten customization; it never reports GVIC as an authorization grant.
+P53 - Permission fingerprints include effective source and sequence, eligible reset, parent-link boundary, group-membership version, actor identity, and actor-specific Edit result where exposed.
 P54 - Soft delete for nodes and Company Explorer delete targets requires edit access to the deleted resource or container; no access and GVIC assignments never authorize the delete.
 P55 - If a user is denied permission-settings visibility, the permissions dialog remains dismissible with the X control and must not attempt to autosave a panel that never loaded editable permission data.
 P56 - Logic Gate work reads return the single actor-specific `can_edit` resource flag while preserving default, direct-user, group, ancestor-application, and company-role authorization semantics.
 P57 - Logic Gate work authorization is evaluated before conditional ETag handling; losing edit access cannot produce a cached `304` or preserve readable board data.
-P58 - Direct Logic Gate permission/default changes, gate policy revisions, inherited Explorer permission applications, Logic Gate Explorer placement changes, and ancestor folder moves/default changes invalidate the affected Logic Gate work version.
-P59 - Company role, group membership, and group hierarchy changes that can alter actor permission flags conservatively invalidate all Logic Gate work versions in that company.
-P60 - The actor permission fingerprint is part of the ETag, so two users with different effective permissions do not share an actor-unsafe representation validator.
+P58 - Direct or inherited source changes, eligible resets, parent moves, and group-version changes alter the policy fingerprint without descendant version fanout.
+P59 - Company role, group membership, and group hierarchy changes that can alter actor permission flags update the shared group-membership version.
+P60 - Authorization is evaluated before conditional ETag handling, and the actor-specific permission result is part of the ETag so revoked or differently authorized users cannot share an unsafe validator.
 P61 - GVIC Generated/request-owner data may appear in the Logic Gate header, but GVIC assignments do not set `can_edit`.
 P62 - Permission mutations still publish no generic permission/workspace event. Instead, before a later Node-chat, mounted-board, or shared-mailbox hint reaches an already-subscribed socket, that narrow publisher resolves the exact current audience and fails closed on lookup errors. A user revoked after subscribing receives no later resource identifiers/hints without needing a reconnect.
-P63 - A newly created email Node has default access `no_access`, one system-managed direct edit binding for its creator, and creator direct Generated GVIC. It never inherits the Unfiled/Nodes folder or source shared-inbox permission policy. Later explicit Logic Gate/Project work may apply those normal resource policies, while generic permission replacement still cannot widen or remove collaboration participant grants.
+P63 - A newly created email Node first resolves and copies the effective policy from its final parent/source, then becomes customized with one system-managed direct Edit binding for its creator and direct Generated GVIC. Generic permission replacement cannot widen or remove collaboration participant grants.
 P64 - A committed direct user mention or resolved user-group mention snapshots each distinct same-company user as a collaboration participant and adds one system-managed direct edit binding for that user in the same durable transaction. These are user bindings, not live group pointers, so later group changes neither grant nor revoke collaboration access.
 P65 - Collaboration participant membership and its mandatory Node edit binding are append-only for the collaboration lifetime. The collaboration Node policy is system-managed: generic Node permission mutation cannot add a grant, remove/downgrade/replace a participant binding, or change its default away from `no_access`; only the accepted mention-participant path may add a binding. Deleting the mention message has no permission effect.
 P66 - A generic Node permission grant alone does not create email collaboration participation, a triage row, source-mailbox access, or shared-draft access. The existing dev-admin/company-admin bypass remains an administrative access rule but does not silently add the administrator to participant lists, mention notifications, or My Drafts.
@@ -160,13 +161,13 @@ Expected:
 - Invalid access level input returns bad request.
 - Permission settings can be read only by managers/admins who can edit the resource.
 - Permission settings can be updated by managers/admins with edit access to the resource.
-- Responses include default access, explicit user/group permission rows, legacy override user IDs, effective access, can-edit-permissions, and can-edit-manager-permissions.
+- Responses include stored/effective mode, stored/effective default and rules, source/reset/overwrite explanation, effective access, and permission-management capabilities.
 - Regular-user resource edit access does not allow loading or updating permission settings.
 - A non-manager/non-admin opening the permissions tab sees a manager/admin permission message instead of a generic permissions failure.
 - Company managers can change company user exceptions but cannot change other manager exceptions.
 - When a manager flips the default, manager effective access is preserved and regular company user access follows the new default plus exceptions.
 
-### Scenario P-S3: Visibility Filtering And Projection Refresh
+### Scenario P-S3: Visibility Filtering And Live V2 Resolution
 
 Business logic covered:
 - P17
@@ -224,23 +225,23 @@ Given:
 - Existing child folders, projects, Logic Gates, and nodes have their own permission policies.
 
 Expected:
-- A new subfolder, project, or Logic Gate created or moved into the folder receives a snapshot of the folder's current policy.
-- A node created, assigned, or moved into the Logic Gate receives a snapshot of the Logic Gate's current policy.
-- Editing the parent after the copy does not mutate existing children unless apply-to-descendants is set.
-- Editing the child after the copy affects only that child.
-- Reordering or saving an item under the same parent does not re-copy the parent template.
-- Moving to a different folder or Logic Gate replaces the child policy with the new parent's current template.
-- Detaching from a parent or moving to a root/non-template location preserves the child's current policy.
+- A new non-root subfolder, project, Logic Gate, or assigned Node starts inherited and stores no copied permission rows.
+- Inherited resources resolve the nearest active customized policy in their current parent chain.
+- Editing the parent changes inherited branches live and stops at active customized boundaries.
+- Customizing a child copies its current effective policy once and then applies one complete replacement.
+- Reordering under the same parent leaves its parent-link sequence and policy unchanged.
+- Moving to a different folder or Logic Gate advances the parent-link sequence; inherited policy follows the new parent and customized policy is preserved.
+- Detaching an inherited Node materializes its current effective policy as customized in the same transaction.
 - Project permission changes do not cascade into related Logic Gates or nodes.
-- Applying a folder's permissions to descendants copies the folder's complete current policy to descendant folders, contained projects, contained Logic Gates, and assigned nodes, even when the folder policy was not edited in that request.
-- Applying a Logic Gate's permissions to descendants copies the Logic Gate's complete current policy to every currently assigned node, even when the Logic Gate policy was not edited in that request.
-- A normal parent edit changes the parent and future direct children only; existing descendants are unchanged.
-- A copied child policy may be represented by policy/rule pointers or immutable rule versions instead of duplicated permission rows.
-- Apply-to-descendants records a snapshot boundary and the parent's complete current rules for the subtree instead of materializing a full policy on every descendant.
-- The apply operation replaces the complete descendant policy, so child-specific rules are removed; an empty parent rule set clears descendant exception rules.
-- Later descendant edits win over earlier ancestor applies until a newer ancestor apply is recorded.
+- Inherited-only Apply adds no descendant state because inherited branches already resolve live.
+- Overwrite-all changes one reset sequence and can make eligible older customized policies inactive without deleting their dormant rows.
+- A later descendant customization becomes active again; an ordinary later parent save cannot cross it.
+- A subtree moved after a reset is protected by its newer parent-link sequence until a later reset from its new ancestry.
+- Point authorization reads only the canonical settings/rules, hierarchy, and current nested groups.
+- Write count is constant with descendant count, including an intentionally empty customized rule set.
+- Permission explanations identify source, direct/default/group result, reset, parent-link boundary, and inactive stored customization.
 - Group permission rules remain group pointers and are not expanded into one source row per user.
-- Permission explanations identify whether access came from a direct rule, create/transfer inheritance, descendant apply, or group membership, and do not treat GVIC assignment as resource-permission access.
+- GVIC assignments never satisfy permission authorization.
 
 ### Scenario P-S5: Explicit Permission Save And Close Autosave
 

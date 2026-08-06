@@ -15,62 +15,29 @@ func (r *PostgresRepo) GetLogicGateWork(companyID, logicGateID string) (domain.L
 	}
 
 	rows, err := r.db.QueryContext(context.Background(), `
-with recursive requested(company_id, resource_type, resource_id) as (
-  select $1::uuid, 'logic_gate'::text, $2::uuid
-),
-direct_sequence(policy_sequence) as (
-  select coalesce((
-    select revision.policy_sequence
-    from resource_permission_policy_revisions revision
-    join requested req
-      on revision.company_id=req.company_id
-     and revision.resource_type=req.resource_type
-     and revision.resource_id=req.resource_id
-  ), 0)
-),
-`+postgresResourcePolicyAncestorsCTE+`,
-latest_default_application as (
-  select app.access_level
-  from resource_permission_subtree_applications app
-  join resource_policy_ancestors ancestor
-    on ancestor.resource_type=app.ancestor_resource_type
-   and ancestor.resource_id=app.ancestor_resource_id
-  join requested req on app.company_id=req.company_id
-  join direct_sequence cutoff on app.policy_sequence > cutoff.policy_sequence
-  where app.rule_key=$3
-  order by app.policy_sequence desc, app.application_id desc
-  limit 1
-),
-gate_metadata as (
+with gate_metadata as (
   select
     gate.company_id::text as company_id,
     gate.logic_gate_id::text as logic_gate_id,
     gate.header,
-    coalesce(
-      (select access_level from latest_default_application),
-      nullif(trim(gate.default_access), ''),
-      'edit'
-    ) as default_access,
+    source_setting.default_access,
     coalesce((
-      select assignment.principal_id::text
-      from resource_gvic_assignments assignment
-      join company_memberships membership
-        on membership.company_id=assignment.company_id
-       and membership.user_id=assignment.principal_id
-      where assignment.company_id=gate.company_id
-        and assignment.resource_type='logic_gate'
-        and assignment.resource_id=gate.logic_gate_id
-        and assignment.role='generated'
-        and assignment.principal_type='user'
-      order by assignment.principal_id
+      select assignment.user_id::text
+      from mangorts_v2_effective_gvic_assignments(gate.company_id,'logic_gate',gate.logic_gate_id) assignment
+      where assignment.role='generated'
+      order by assignment.user_id
       limit 1
     ), '') as request_owner_user_id,
     gate.created_timestamp
   from logic_gates gate
+  cross join lateral mangorts_v2_resolve_permission_policy(gate.company_id,'logic_gate',gate.logic_gate_id) resolved
+  join resource_permission_settings source_setting
+    on source_setting.company_id=gate.company_id
+   and source_setting.resource_type=resolved.source_resource_type
+   and source_setting.resource_id=resolved.source_resource_id
   where gate.company_id=$1::uuid
     and gate.logic_gate_id=$2::uuid
-)
-select
+)select
   gate.company_id,
   gate.logic_gate_id,
   gate.header,
@@ -114,7 +81,6 @@ order by
   projection.assignment_id asc nulls last`,
 		companyID,
 		logicGateID,
-		resourcePermissionDefaultRuleKey,
 	)
 	if err != nil {
 		return domain.LogicGateWorkView{}, err

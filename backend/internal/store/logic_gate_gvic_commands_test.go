@@ -43,8 +43,11 @@ func TestMemoryLogicGateGVICCommandsAreIdempotentAndInvalidateReadVersions(t *te
 	if !added.Changed || added.Operation != LogicGateGVICCommandAdd || len(added.GVICAssignments) != 1 || len(added.Events) != 1 {
 		t.Fatalf("added result = %+v, want one changed assignment and event", added)
 	}
-	if added.Events[0].Type != LogicGateGVICUpdatedEventType || added.Events[0].Payload["logic_gate_id"] != logicGate.LogicGateID || added.Events[0].Payload["operation"] != LogicGateGVICCommandAdd {
-		t.Fatalf("add event = %+v, want logic_gate_gvic_updated add payload", added.Events[0])
+	addPayload := added.Events[0].Payload
+	if added.Events[0].Type != LogicGateGVICUpdatedEventType || addPayload["resource_type"] != EntityTypeLogicGate || addPayload["resource_id"] != logicGate.LogicGateID ||
+		addPayload["assignment_mode"] != PolicyModeCustomized || addPayload["descendant_action"] != PolicyDescendantActionInheritedOnly ||
+		addPayload["policy_type"] != "gvic" || addPayload["action"] != PolicyDescendantActionInheritedOnly || addPayload["sequence"].(int64) <= 0 {
+		t.Fatalf("add event = %+v, want canonical V2 policy audit payload", added.Events[0])
 	}
 	assertWorkspaceEventCount(t, repo, companyID, 1)
 	assertWorkspaceReadVersion(t, repo, companyID, "logic-gates", "", 1, true)
@@ -82,8 +85,10 @@ func TestMemoryLogicGateGVICCommandsAreIdempotentAndInvalidateReadVersions(t *te
 	if !removed.Changed || removed.Operation != LogicGateGVICCommandRemove || len(removed.GVICAssignments) != 0 || len(removed.Events) != 1 {
 		t.Fatalf("removed result = %+v, want changed removal and event", removed)
 	}
-	if removed.Events[0].Payload["operation"] != LogicGateGVICCommandRemove {
-		t.Fatalf("remove event payload = %+v, want remove operation", removed.Events[0].Payload)
+	removePayload := removed.Events[0].Payload
+	if removePayload["resource_type"] != EntityTypeLogicGate || removePayload["resource_id"] != logicGate.LogicGateID ||
+		removePayload["assignment_mode"] != PolicyModeCustomized || removePayload["descendant_action"] != PolicyDescendantActionInheritedOnly {
+		t.Fatalf("remove event payload = %+v, want canonical V2 policy audit payload", removePayload)
 	}
 	assertWorkspaceEventCount(t, repo, companyID, 2)
 	assertWorkspaceReadVersion(t, repo, companyID, "logic-gates", "", 2, true)
@@ -107,7 +112,7 @@ func TestMemoryLogicGateGVICCommandsAreIdempotentAndInvalidateReadVersions(t *te
 	assertWorkspaceReadVersion(t, repo, companyID, "logic-gates", "", 2, true)
 }
 
-func TestMemoryLogicGateResourceGVICSnapshotsForLinkedNodes(t *testing.T) {
+func TestMemoryLogicGateResourceGVICResolvesInheritedAndCustomizedNodesLive(t *testing.T) {
 	t.Parallel()
 
 	repo := NewMemoryRepo()
@@ -146,7 +151,13 @@ func TestMemoryLogicGateResourceGVICSnapshotsForLinkedNodes(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
-	assertMemoryNodeGVICSnapshot(t, repo, companyID, node.NodeID, gateUser.UserID)
+	if _, _, err := repo.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{
+		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
+		AssignmentMode: PolicyModeInherited, DescendantAction: PolicyDescendantActionInheritedOnly,
+	}); err != nil {
+		t.Fatalf("PutResourceGVICPolicy node inherited: %v", err)
+	}
+	assertMemoryNodeGVICResolution(t, repo, companyID, node.NodeID, PolicyModeInherited, "", gateUser.UserID, EntityTypeLogicGate, logicGate.LogicGateID, false)
 
 	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
 		CompanyID:    companyID,
@@ -160,7 +171,7 @@ func TestMemoryLogicGateResourceGVICSnapshotsForLinkedNodes(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetResourceGVICAssignments logic gate next: %v", err)
 	}
-	assertMemoryNodeGVICSnapshot(t, repo, companyID, node.NodeID, gateUser.UserID)
+	assertMemoryNodeGVICResolution(t, repo, companyID, node.NodeID, PolicyModeInherited, "", nextGateUser.UserID, EntityTypeLogicGate, logicGate.LogicGateID, false)
 
 	nextNode := mustCreateGVICMembershipNode(t, repo, companyID, "snapshot next node")
 	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
@@ -173,7 +184,13 @@ func TestMemoryLogicGateResourceGVICSnapshotsForLinkedNodes(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus next node: %v", err)
 	}
-	assertMemoryNodeGVICSnapshot(t, repo, companyID, nextNode.NodeID, nextGateUser.UserID)
+	if _, _, err := repo.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{
+		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: nextNode.NodeID,
+		AssignmentMode: PolicyModeInherited, DescendantAction: PolicyDescendantActionInheritedOnly,
+	}); err != nil {
+		t.Fatalf("PutResourceGVICPolicy next node inherited: %v", err)
+	}
+	assertMemoryNodeGVICResolution(t, repo, companyID, nextNode.NodeID, PolicyModeInherited, "", nextGateUser.UserID, EntityTypeLogicGate, logicGate.LogicGateID, false)
 
 	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
 		CompanyID:    companyID,
@@ -187,7 +204,7 @@ func TestMemoryLogicGateResourceGVICSnapshotsForLinkedNodes(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetResourceGVICAssignments linked node direct: %v", err)
 	}
-	assertMemoryNodeGVICSnapshot(t, repo, companyID, node.NodeID, directUser.UserID)
+	assertMemoryNodeGVICResolution(t, repo, companyID, node.NodeID, PolicyModeCustomized, directUser.UserID, directUser.UserID, EntityTypeNode, node.NodeID, false)
 
 	rows, err := repo.ListMyWorkMatrixRows(WorkItemInboxQuery{CompanyID: companyID, UserID: directUser.UserID, ViewerUserID: directUser.UserID, Limit: 10})
 	if err != nil {
@@ -207,10 +224,10 @@ func TestMemoryLogicGateResourceGVICSnapshotsForLinkedNodes(t *testing.T) {
 	if _, err := repo.RemoveLogicGateNodeAssignment(LogicGateNodeAssignmentRemoveInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, NodeID: node.NodeID}); err != nil {
 		t.Fatalf("RemoveLogicGateNodeAssignment: %v", err)
 	}
-	assertMemoryNodeGVICSnapshot(t, repo, companyID, node.NodeID, directUser.UserID)
+	assertMemoryNodeGVICResolution(t, repo, companyID, node.NodeID, PolicyModeCustomized, directUser.UserID, directUser.UserID, EntityTypeNode, node.NodeID, false)
 }
 
-func TestMemoryLogicGateResourceGVICApplyToDescendantsRefreshesNodeSnapshots(t *testing.T) {
+func TestMemoryLogicGateResourceGVICIncludingCustomizedResetSupersedesDescendant(t *testing.T) {
 	t.Parallel()
 
 	repo := NewMemoryRepo()
@@ -246,7 +263,15 @@ func TestMemoryLogicGateResourceGVICApplyToDescendantsRefreshesNodeSnapshots(t *
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
-	assertMemoryNodeGVICSnapshot(t, repo, companyID, node.NodeID, initialUser.UserID)
+	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
+		Assignments: []ResourceGVICAssignmentInput{{
+			Role: domain.GVICRoleGenerated, PrincipalType: EntityPermissionSubjectUser, PrincipalID: initialUser.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("SetResourceGVICAssignments customized node: %v", err)
+	}
+	assertMemoryNodeGVICResolution(t, repo, companyID, node.NodeID, PolicyModeCustomized, initialUser.UserID, initialUser.UserID, EntityTypeNode, node.NodeID, false)
 
 	result, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
 		CompanyID:          companyID,
@@ -268,7 +293,7 @@ func TestMemoryLogicGateResourceGVICApplyToDescendantsRefreshesNodeSnapshots(t *
 	if len(result.GVICAssignments) != 1 || result.GVICAssignments[0].UserID != nextUser.UserID {
 		t.Fatalf("gate source assignments = %+v, want next generated user", result.GVICAssignments)
 	}
-	assertMemoryNodeGVICSnapshot(t, repo, companyID, node.NodeID, nextUser.UserID)
+	assertMemoryNodeGVICResolution(t, repo, companyID, node.NodeID, PolicyModeCustomized, initialUser.UserID, nextUser.UserID, EntityTypeLogicGate, logicGate.LogicGateID, true)
 }
 
 func TestMemoryLogicGateResourceGVICApplyToDescendantsUsesCurrentUnchangedSnapshot(t *testing.T) {
@@ -279,6 +304,7 @@ func TestMemoryLogicGateResourceGVICApplyToDescendantsUsesCurrentUnchangedSnapsh
 	repo.EnsureCompany(companyID, "GVIC Current Snapshot Company")
 	gateUser := mustCreateGVICMembershipUser(t, repo, "GVIC-current-snapshot-gate", companyID)
 	descendantUser := mustCreateGVICMembershipUser(t, repo, "GVIC-current-snapshot-descendant", companyID)
+	consultedUser := mustCreateGVICMembershipUser(t, repo, "GVIC-current-snapshot-consulted", companyID)
 	node := mustCreateGVICMembershipNode(t, repo, companyID, "current snapshot node")
 	logicGate, err := repo.CreateLogicGate(companyID, "Current Snapshot Gate")
 	if err != nil {
@@ -310,7 +336,7 @@ func TestMemoryLogicGateResourceGVICApplyToDescendantsUsesCurrentUnchangedSnapsh
 		ResourceID:   node.NodeID,
 		Assignments: []ResourceGVICAssignmentInput{
 			{Role: domain.GVICRoleGenerated, PrincipalType: EntityPermissionSubjectUser, PrincipalID: descendantUser.UserID},
-			{Role: domain.GVICRoleConsulted, PrincipalType: EntityPermissionSubjectUser, PrincipalID: descendantUser.UserID},
+			{Role: domain.GVICRoleConsulted, PrincipalType: EntityPermissionSubjectUser, PrincipalID: consultedUser.UserID},
 		},
 	}); err != nil {
 		t.Fatalf("SetResourceGVICAssignments descendant custom snapshot: %v", err)
@@ -331,7 +357,14 @@ func TestMemoryLogicGateResourceGVICApplyToDescendantsUsesCurrentUnchangedSnapsh
 	if !result.Changed {
 		t.Fatal("reapplying the current gate snapshot should report a descendant change")
 	}
-	assertMemoryNodeGVICSnapshot(t, repo, companyID, node.NodeID, gateUser.UserID)
+	policy, err := repo.GetResourceGVICPolicy(companyID, EntityTypeNode, node.NodeID)
+	if err != nil {
+		t.Fatalf("GetResourceGVICPolicy after reset: %v", err)
+	}
+	if policy.AssignmentMode != PolicyModeCustomized || policy.EffectiveAssignmentMode != PolicyModeInherited || policy.OverwrittenByAncestor == nil ||
+		policy.EffectiveSource.ResourceType != EntityTypeLogicGate || policy.EffectiveSource.ResourceID != logicGate.LogicGateID || len(policy.EffectiveAssignments) != 1 || policy.EffectiveAssignments[0].UserID != gateUser.UserID {
+		t.Fatalf("node policy after reset = %+v, want dormant customization superseded by gate", policy)
+	}
 
 	// An empty current gate policy is still a complete snapshot and therefore
 	// clears assignments on current descendants.
@@ -351,29 +384,39 @@ func TestMemoryLogicGateResourceGVICApplyToDescendantsUsesCurrentUnchangedSnapsh
 	}); err != nil {
 		t.Fatalf("SetResourceGVICAssignments apply empty current snapshot: %v", err)
 	}
-	if source, err := repo.ListResourceGVICAssignments(companyID, EntityTypeNode, node.NodeID); err != nil || len(source) != 0 {
-		t.Fatalf("node source after empty snapshot = %+v err = %v, want empty", source, err)
+	policy, err = repo.GetResourceGVICPolicy(companyID, EntityTypeNode, node.NodeID)
+	if err != nil {
+		t.Fatalf("GetResourceGVICPolicy after empty reset: %v", err)
 	}
-	if effective, err := repo.ListResourceGVICEffectiveAssignments(companyID, EntityTypeNode, node.NodeID); err != nil || len(effective) != 0 {
-		t.Fatalf("node effective after empty snapshot = %+v err = %v, want empty", effective, err)
+	if policy.AssignmentMode != PolicyModeCustomized || len(policy.GVICAssignments) != 1 || policy.GVICAssignments[0].UserID != descendantUser.UserID ||
+		len(policy.EffectiveAssignments) != 0 || policy.OverwrittenByAncestor == nil {
+		t.Fatalf("node policy after empty reset = %+v, want dormant source edge and empty effective policy", policy)
 	}
 }
 
-func assertMemoryNodeGVICSnapshot(t *testing.T, repo *MemoryRepo, companyID, nodeID, userID string) {
+func assertMemoryNodeGVICResolution(t *testing.T, repo *MemoryRepo, companyID, nodeID, storedMode, storedUserID, effectiveUserID, sourceType, sourceID string, overwritten bool) {
 	t.Helper()
-	source, err := repo.ListResourceGVICAssignments(companyID, EntityTypeNode, nodeID)
+	policy, err := repo.GetResourceGVICPolicy(companyID, EntityTypeNode, nodeID)
 	if err != nil {
-		t.Fatalf("ListResourceGVICAssignments node: %v", err)
+		t.Fatalf("GetResourceGVICPolicy node: %v", err)
 	}
-	if len(source) != 1 || source[0].UserID != userID || source[0].Inherited || source[0].ReadOnly || source[0].InheritanceType != "" || source[0].SourceResourceID != "" {
-		t.Fatalf("node source assignments = %+v, want editable direct source for %s", source, userID)
+	if policy.AssignmentMode != storedMode {
+		t.Fatalf("node assignment mode = %q, want %q: %+v", policy.AssignmentMode, storedMode, policy)
 	}
-	effective, err := repo.ListResourceGVICEffectiveAssignments(companyID, EntityTypeNode, nodeID)
-	if err != nil {
-		t.Fatalf("ListResourceGVICEffectiveAssignments node: %v", err)
+	if storedUserID == "" {
+		if len(policy.GVICAssignments) != 0 {
+			t.Fatalf("node stored assignments = %+v, want none", policy.GVICAssignments)
+		}
+	} else if len(policy.GVICAssignments) != 1 || policy.GVICAssignments[0].UserID != storedUserID {
+		t.Fatalf("node stored assignments = %+v, want %s", policy.GVICAssignments, storedUserID)
 	}
-	if len(effective) != 1 || effective[0].UserID != userID || effective[0].InheritanceType != GVICInheritanceDirect || effective[0].SourceResourceType != EntityTypeNode || effective[0].SourceResourceID != nodeID {
-		t.Fatalf("node effective assignments = %+v, want direct node effective for %s", effective, userID)
+	if len(policy.EffectiveAssignments) != 1 || policy.EffectiveAssignments[0].UserID != effectiveUserID ||
+		policy.EffectiveSource.ResourceType != sourceType || policy.EffectiveSource.ResourceID != sourceID ||
+		policy.EffectiveAssignments[0].SourceResourceType != sourceType || policy.EffectiveAssignments[0].SourceResourceID != sourceID {
+		t.Fatalf("node effective policy = %+v, want user %s from %s/%s", policy, effectiveUserID, sourceType, sourceID)
+	}
+	if (policy.OverwrittenByAncestor != nil) != overwritten {
+		t.Fatalf("node overwrite marker = %+v, want present=%v", policy.OverwrittenByAncestor, overwritten)
 	}
 }
 func TestMemoryLogicGateGVICCommandsReplacePrimaryUsers(t *testing.T) {
@@ -612,9 +655,12 @@ func TestMemoryLogicGateGVICCommandsRejectInvalidRoleUserAndCompany(t *testing.T
 	if !errors.Is(err, ErrPrincipalNotInCompany) {
 		t.Fatalf("outsider add err = %v, want ErrPrincipalNotInCompany", err)
 	}
-	_, err = repo.RemoveLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: outsider.UserID}}})
-	if !errors.Is(err, ErrPrincipalNotInCompany) {
-		t.Fatalf("outsider remove err = %v, want ErrPrincipalNotInCompany", err)
+	removed, err := repo.RemoveLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: outsider.UserID}}})
+	if err != nil {
+		t.Fatalf("stale outsider remove: %v", err)
+	}
+	if removed.Changed || len(removed.Events) != 0 {
+		t.Fatalf("stale outsider remove = %+v, want idempotent cleanup no-op", removed)
 	}
 	_, err = repo.AddLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{CompanyID: otherCompanyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: outsider.UserID}}})
 	if !errors.Is(err, ErrNotFound) {

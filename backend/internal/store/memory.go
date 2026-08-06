@@ -29,6 +29,11 @@ type MemoryRepo struct {
 	gvicEffectiveAssignments       map[string]domain.ResourceGVICEffectiveAssignment
 	gvicPolicyRevisions            map[string]int64
 	gvicSubtreeApplications        []resourceGVICSubtreeApplication
+	gvicV2Settings                 map[string]memoryV2PolicySetting
+	permissionV2Settings           map[string]memoryV2PolicySetting
+	gvicV2Sequence                 int64
+	permissionV2Sequence           int64
+	policyV2Idempotency            map[string]bool
 	projects                       map[string]domain.Project
 	projectAccountAssignments      map[string]bool
 	projectTeamAssignments         map[string]bool
@@ -126,6 +131,9 @@ func NewMemoryRepo() *MemoryRepo {
 		gvicEffectiveAssignments:       map[string]domain.ResourceGVICEffectiveAssignment{},
 		gvicPolicyRevisions:            map[string]int64{},
 		gvicSubtreeApplications:        []resourceGVICSubtreeApplication{},
+		gvicV2Settings:                 map[string]memoryV2PolicySetting{},
+		permissionV2Settings:           map[string]memoryV2PolicySetting{},
+		policyV2Idempotency:            map[string]bool{},
 		projects:                       map[string]domain.Project{},
 		projectAccountAssignments:      map[string]bool{},
 		projectTeamAssignments:         map[string]bool{},

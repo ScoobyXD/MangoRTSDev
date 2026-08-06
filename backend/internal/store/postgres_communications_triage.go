@@ -357,9 +357,6 @@ values ($1, $2, $3, $4::smallint, now())`, input.CompanyID, nodeID, nodeTitle, *
 		if err := syncNodeStatusFromLogicGateAssignmentTx(ctx, tx, assignment); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		if err := snapshotPostgresLogicGateGVICToNodeTx(ctx, tx, input.CompanyID, input.LogicGateID, nodeID); err != nil {
-			return CommunicationsTriageConversionResult{}, err
-		}
 		card, err := nodeLogicGateAssignmentCardSQL(ctx, tx, assignment)
 		if err != nil {
 			return CommunicationsTriageConversionResult{}, err

@@ -68,10 +68,15 @@ func (s *Server) nodeViewETag(companyID, nodeID, actorUserID string, flags domai
 	if err != nil {
 		return "", err
 	}
+	fingerprints, err := s.repo.ResourcePolicyFingerprints(companyID, store.EntityTypeNode, nodeID, actorUserID)
+	if err != nil {
+		return "", err
+	}
 	permissionKey := strconv.FormatBool(flags.CanEdit)
 	return strongETagFromString(
 		"node-view:v1:" + strings.TrimSpace(companyID) + ":" + strings.TrimSpace(nodeID) + ":" +
 			strings.TrimSpace(actorUserID) + ":" + permissionKey + ":" +
+			fingerprints.GVIC + ":" + fingerprints.Permission + ":" +
 			strconv.FormatInt(version.Shared, 10) + ":" + strconv.FormatInt(version.User, 10),
 	), nil
 }
@@ -81,11 +86,11 @@ func (s *Server) handleLogicGateViewV2(w http.ResponseWriter, r *http.Request, l
 		return
 	}
 	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
-	flags, _, ok := s.requireV2RootEffectiveAccess(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found")
+	flags, actorUserID, ok := s.requireV2RootEffectiveAccess(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found")
 	if !ok {
 		return
 	}
-	etag, err := s.consolidatedViewETag(r, companyID, "logic-gate-view:"+logicGateID)
+	etag, err := s.consolidatedViewETag(r, companyID, "logic-gate-view:"+logicGateID, store.EntityTypeLogicGate, logicGateID, actorUserID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_read_logic_gate_view_version")
 		return
@@ -139,8 +144,12 @@ func (s *Server) handleLogicGateViewV2(w http.ResponseWriter, r *http.Request, l
 	writeJSONWithPrecomputedETag(w, r, http.StatusOK, response, etag)
 }
 
-func (s *Server) consolidatedViewETag(r *http.Request, companyID, resource string) (string, error) {
-	return s.workspaceEventETagWithReadVersion(r, companyID, resource, []store.DomainEventStreamQuery{{}}, store.WorkspaceReadVersionQuery{
+func (s *Server) consolidatedViewETag(r *http.Request, companyID, resource, resourceType, resourceID, actorUserID string) (string, error) {
+	fingerprints, err := s.repo.ResourcePolicyFingerprints(companyID, resourceType, resourceID, actorUserID)
+	if err != nil {
+		return "", err
+	}
+	return s.workspaceEventETagWithReadVersion(r, companyID, resource+":"+fingerprints.GVIC+":"+fingerprints.Permission, []store.DomainEventStreamQuery{{}}, store.WorkspaceReadVersionQuery{
 		CompanyID: companyID,
 		Scope:     "workspace-snapshot:full",
 	})

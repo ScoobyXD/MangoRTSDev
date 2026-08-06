@@ -57,9 +57,11 @@ func TestNodeViewV2EffectiveAccessAndNoLeak(t *testing.T) {
 		t.Fatalf("AssignNodeToLogicGateStatus visible: %v", err)
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: store.EntityTypeNode,
-		EntityID:   node.NodeID,
+		CompanyID:        companyID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         node.NodeID,
 		Permissions: []store.EntityPermissionInput{
 			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionEdit},
 			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: editor.UserID, AccessLevel: store.EntityPermissionEdit},
@@ -69,9 +71,11 @@ func TestNodeViewV2EffectiveAccessAndNoLeak(t *testing.T) {
 		t.Fatalf("SetEntityPermissions node: %v", err)
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: store.EntityTypeLogicGate,
-		EntityID:   logicGate.LogicGateID,
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeLogicGate,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		EntityID:         logicGate.LogicGateID,
 		Permissions: []store.EntityPermissionInput{
 			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionEdit},
 			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: editor.UserID, AccessLevel: store.EntityPermissionEdit},
@@ -272,9 +276,11 @@ func TestLogicGateViewV2EffectiveAccessContextualNodesAndNoLeak(t *testing.T) {
 		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: store.EntityTypeLogicGate,
-		EntityID:   logicGate.LogicGateID,
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeLogicGate,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		EntityID:         logicGate.LogicGateID,
 		Permissions: []store.EntityPermissionInput{
 			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionEdit},
 			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: editor.UserID, AccessLevel: store.EntityPermissionEdit},

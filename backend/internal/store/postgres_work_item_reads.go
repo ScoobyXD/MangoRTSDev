@@ -29,39 +29,32 @@ func (r *PostgresRepo) listGVICMatrixProjectedNodes(ctx context.Context, query W
 		ctx = context.Background()
 	}
 	query = NormalizeWorkItemInboxQuery(query)
-	roleFilter := "and entry.logic_gate_id is null"
+	roleFilter := ""
 	if generatedOnly {
-		roleFilter = `and entry.logic_gate_id is not null
-  and exists (
-    select 1
-    from logic_gate_GVIC_users assignment
-    where assignment.company_id=entry.company_id
-      and assignment.logic_gate_id=entry.logic_gate_id
-      and assignment.user_id=entry.user_id
-      and assignment.role='generated'
-  )`
+		roleFilter = "and assignment.role='generated'"
 	}
 	rows, err := r.db.QueryContext(ctx, `
-with recursive `+postgresLogicGateGVICUsersCTE+`
 select
-  entry.company_id::text,
-  entry.resource_id::text,
-  entry.display_title,
-  entry.status,
-  entry.due_date::text,
-  entry.priority,
-  entry.resource_created_timestamp,
-  case
-    when entry.logic_gate_id is null then '[]'::jsonb
-    else jsonb_build_array(entry.logic_gate_id::text)
-  end::text as logic_gate_ids_json
-from gvic_matrix_projection_table entry
-where entry.resource_type='node'
-  and entry.company_id=$1::uuid
-  and entry.user_id=$2::uuid
+  node.company_id::text,
+  node.node_id::text,
+  node.title,
+  node.status,
+  node.due_date::text,
+  node.priority,
+  node.created_timestamp,
+  coalesce((
+    select jsonb_agg(link.logic_gate_id::text order by link.logic_gate_id::text)
+    from node_logic_gate_assignments link
+    where link.company_id=node.company_id and link.node_id=node.node_id
+  ), '[]'::jsonb)::text,
+  '[]'::jsonb::text
+from nodes node
+join lateral mangorts_v2_effective_gvic_assignments(node.company_id,'node',node.node_id) assignment
+  on assignment.user_id=$2::uuid
+where node.company_id=$1::uuid
   `+roleFilter+`
-  and mangorts_user_can_access_resource(entry.company_id, 'node', entry.resource_id, $4::uuid, 'edit')
-order by entry.resource_created_timestamp asc, entry.resource_id::text asc
+  and mangorts_user_can_access_resource(node.company_id,'node',node.node_id,$4::uuid,'edit')
+order by node.created_timestamp asc,node.node_id::text asc
 limit $3`, query.CompanyID, query.UserID, query.Limit, query.ViewerUserID)
 	if err != nil {
 		return nil, err
@@ -105,32 +98,18 @@ func (r *PostgresRepo) listGVICMatrixProjectedLogicGates(ctx context.Context, qu
 		roleFilter = "\n  and assignment.role in ('verified', 'consulted', 'informed')"
 	}
 	rows, err := r.db.QueryContext(ctx, `
-with recursive `+postgresLogicGateGVICUsersCTE+`
 select
-  entry.company_id::text,
-  entry.resource_id::text,
-  entry.display_title,
-  entry.resource_created_timestamp,
-  coalesce(jsonb_agg(assignment.role order by
-    case assignment.role
-      when 'generated' then 1
-      when 'verified' then 2
-      when 'consulted' then 3
-      when 'informed' then 4
-      else 5
-    end
-  ), '[]'::jsonb)::text as roles_json
-from gvic_matrix_projection_table entry
-join logic_gate_GVIC_users assignment
-  on assignment.company_id=entry.company_id
- and assignment.logic_gate_id=entry.resource_id
- and assignment.user_id=entry.user_id
-where entry.resource_type='logic_gate'
-  and entry.company_id=$1::uuid
-  and entry.user_id=$2::uuid`+roleFilter+`
-  and mangorts_user_can_access_resource(entry.company_id, 'logic_gate', entry.resource_id, $4::uuid, 'edit')
-group by entry.company_id, entry.resource_id, entry.display_title, entry.resource_created_timestamp
-order by lower(entry.display_title) asc, entry.resource_id::text asc
+  gate.company_id::text,
+  gate.logic_gate_id::text,
+  gate.header,
+  gate.created_timestamp,
+  jsonb_build_array(assignment.role)::text
+from logic_gates gate
+join lateral mangorts_v2_effective_gvic_assignments(gate.company_id,'logic_gate',gate.logic_gate_id) assignment
+  on assignment.user_id=$2::uuid
+where gate.company_id=$1::uuid`+roleFilter+`
+  and mangorts_user_can_access_resource(gate.company_id,'logic_gate',gate.logic_gate_id,$4::uuid,'edit')
+order by lower(gate.header) asc,gate.logic_gate_id::text asc
 limit $3`, query.CompanyID, query.UserID, query.Limit, query.ViewerUserID)
 	if err != nil {
 		return nil, err

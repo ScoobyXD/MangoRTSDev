@@ -85,24 +85,7 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 				DefaultAccess:    ResourceDefaultAccessEdit,
 				CreatedTimestamp: now,
 			}
-			if input.CreatorUserID != "" {
-				if _, ok := r.companyUserByIDLocked(input.CompanyID, input.CreatorUserID); !ok {
-					return WorkspaceEntityBatchResult{}, ErrPrincipalNotInCompany
-				}
-				assignment := r.resourceGVICAssignmentForPrincipalLocked(resourceGVICKey{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: created.NodeID}, normalizedGVICAssignmentInput{
-					role:          domain.GVICRoleGenerated,
-					principalType: EntityPermissionSubjectUser,
-					principalID:   input.CreatorUserID,
-				}, now)
-				assignment.UpdatedTimestamp = now
-				r.gvicAssignments[gvicSourceAssignmentKey(assignment.CompanyID, assignment.ResourceType, assignment.ResourceID, assignment.Role, assignment.PrincipalType, assignment.PrincipalID)] = assignment
-			}
 			r.nodes[key(input.CompanyID, created.NodeID)] = created
-			r.syncGVICMatrixProjectionForNodeLocked(input.CompanyID, created.NodeID)
-			r.syncResourceGVICEffectiveAssignmentsLocked([]resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: created.NodeID}})
-			if input.CreatorUserID != "" {
-				created.EffectiveAccess = r.effectiveAccessLevelForUserLocked(input.CompanyID, input.CreatorUserID, EntityTypeNode, created.NodeID)
-			}
 			result.Nodes = append(result.Nodes, r.withNodeReadModelLocked(created))
 			clientToEntityID[item.ClientID] = created.NodeID
 			result.EntityMappings = append(result.EntityMappings, WorkspaceEntityBatchEntityMapping{ClientID: item.ClientID, EntityID: created.NodeID})
@@ -118,23 +101,6 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 		}
 		r.logicGates[key(input.CompanyID, created.LogicGateID)] = created
 		r.ensureLogicGateKanbanBoardLocked(input.CompanyID, created.LogicGateID, created.Header)
-		if input.CreatorUserID != "" && input.CreatorLogicGateGVICRole != "" {
-			if _, ok := r.companyUserByIDLocked(input.CompanyID, input.CreatorUserID); !ok {
-				return WorkspaceEntityBatchResult{}, ErrPrincipalNotInCompany
-			}
-			assignment := r.resourceGVICAssignmentForPrincipalLocked(resourceGVICKey{companyID: input.CompanyID, resourceType: EntityTypeLogicGate, resourceID: created.LogicGateID}, normalizedGVICAssignmentInput{
-				role:          input.CreatorLogicGateGVICRole,
-				principalType: EntityPermissionSubjectUser,
-				principalID:   input.CreatorUserID,
-			}, now)
-			assignment.UpdatedTimestamp = now
-			r.gvicAssignments[gvicSourceAssignmentKey(assignment.CompanyID, assignment.ResourceType, assignment.ResourceID, assignment.Role, assignment.PrincipalType, assignment.PrincipalID)] = assignment
-			created.GVICAssignments = logicGateGVICAssignmentsFromResources([]domain.ResourceGVICAssignment{assignment})
-			r.syncResourceGVICEffectiveAssignmentsLocked([]resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeLogicGate, resourceID: created.LogicGateID}})
-		}
-		if input.CreatorUserID != "" {
-			created.EffectiveAccess = r.effectiveAccessLevelForUserLocked(input.CompanyID, input.CreatorUserID, EntityTypeLogicGate, created.LogicGateID)
-		}
 		result.LogicGates = append(result.LogicGates, created)
 		clientToEntityID[item.ClientID] = created.LogicGateID
 		result.EntityMappings = append(result.EntityMappings, WorkspaceEntityBatchEntityMapping{ClientID: item.ClientID, EntityID: created.LogicGateID})
@@ -175,6 +141,39 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 			}
 			if item, ok := r.folderItems[folderItemKey(input.CompanyID, input.EntityKind, mapping.EntityID)]; ok {
 				result.FolderItems = append(result.FolderItems, item)
+			}
+		}
+	}
+	if input.CreatorUserID != "" {
+		if _, ok := r.companyUserByIDLocked(input.CompanyID, input.CreatorUserID); !ok {
+			return WorkspaceEntityBatchResult{}, ErrPrincipalNotInCompany
+		}
+		for _, mapping := range result.EntityMappings {
+			role := domain.GVICRoleGenerated
+			if input.EntityKind == EntityTypeLogicGate {
+				role = input.CreatorLogicGateGVICRole
+			}
+			if role == "" {
+				continue
+			}
+			policy, err := r.customizeNewMemoryResourceGVICForCreatorLocked(input.CompanyID, input.EntityKind, mapping.EntityID, role, input.CreatorUserID)
+			if err != nil {
+				return WorkspaceEntityBatchResult{}, err
+			}
+			if input.EntityKind == EntityTypeNode {
+				for index := range result.Nodes {
+					if result.Nodes[index].NodeID == mapping.EntityID {
+						result.Nodes[index] = r.withNodeReadModelLocked(result.Nodes[index])
+						result.Nodes[index].EffectiveAccess = r.effectiveAccessLevelForUserLocked(input.CompanyID, input.CreatorUserID, EntityTypeNode, mapping.EntityID)
+					}
+				}
+			} else {
+				for index := range result.LogicGates {
+					if result.LogicGates[index].LogicGateID == mapping.EntityID {
+						result.LogicGates[index].GVICAssignments = logicGateGVICAssignmentsFromResources(policy.GVICAssignments)
+						result.LogicGates[index].EffectiveAccess = r.effectiveAccessLevelForUserLocked(input.CompanyID, input.CreatorUserID, EntityTypeLogicGate, mapping.EntityID)
+					}
+				}
 			}
 		}
 	}

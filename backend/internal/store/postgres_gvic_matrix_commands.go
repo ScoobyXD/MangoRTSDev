@@ -145,43 +145,12 @@ select exists(
 		if !creatorInCompany {
 			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, ErrPrincipalNotInCompany
 		}
-		stop := observeTiming(ctx, "repo.createGVICMatrixLogicGateTx.gvic_assignment_writes")
-		if _, err := tx.ExecContext(ctx, `
-insert into resource_gvic_assignments (
-  company_id,
-  resource_type,
-  resource_id,
-  role,
-  principal_type,
-  principal_id,
-  created_timestamp,
-  updated_timestamp
-) values ($1::uuid, 'logic_gate', $2::uuid, $3, 'user', $4::uuid, now(), now())
-on conflict (company_id, resource_type, resource_id, role, principal_type, principal_id)
-do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
-			input.CompanyID, created.LogicGateID, input.CreatorLogicGateGVICRole, input.ActorUserID,
-		); err != nil {
-			stop()
-			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, err
-		}
-		stop()
-		stop = observeTiming(ctx, "repo.createGVICMatrixLogicGateTx.gvic_projection_sync")
-		err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, input.CompanyID, []resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeLogicGate, resourceID: created.LogicGateID}})
-		if err != nil {
-			stop()
-			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, err
-		}
-		err = syncPostgresGVICMatrixProjectionForLogicGateAssignmentsTx(ctx, tx, input.CompanyID, created.LogicGateID, nil, nil)
-		if err != nil {
-			stop()
-			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, err
-		}
-		stop()
-		assignments, err := postgresResourceGVICAssignmentsForResource(ctx, tx, resourceGVICKey{companyID: input.CompanyID, resourceType: EntityTypeLogicGate, resourceID: created.LogicGateID})
+		policy, err := customizeNewPostgresResourceGVICForCreatorTx(ctx, tx,
+			resourceGVICKey{companyID: input.CompanyID, resourceType: EntityTypeLogicGate, resourceID: created.LogicGateID}, input.CreatorLogicGateGVICRole, input.ActorUserID)
 		if err != nil {
 			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, err
 		}
-		created.GVICAssignments = logicGateGVICAssignmentsFromResources(assignments)
+		created.GVICAssignments = logicGateGVICAssignmentsFromResources(policy.GVICAssignments)
 		created.EffectiveAccess = EntityPermissionEdit
 	}
 	var folderItem domain.CompanyExplorerFolderItem

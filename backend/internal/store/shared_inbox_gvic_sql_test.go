@@ -35,7 +35,7 @@ func TestPostgresSharedInboxGVICUsesGenericResourceTable(t *testing.T) {
 	}
 	for _, needle := range []string{
 		"CommunicationsSharedInboxGVICResourceType",
-		"postgresResourceGVICAssignmentsForResource",
+		"GetResourceGVICPolicy",
 	} {
 		if !strings.Contains(source, needle) {
 			t.Fatalf("shared inbox GVIC attachment source missing %q", needle)

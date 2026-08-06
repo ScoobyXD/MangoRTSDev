@@ -314,30 +314,32 @@ func TestMemorySharedTriagePermissionsUseDirectDefaultOverrides(t *testing.T) {
 
 	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
 		CompanyID:        companyID,
-		EntityType:       EntityTypeSharedTriageFolder,
+		EntityType:       EntityTypeSharedInboxFolder,
 		EntityID:         parent.FolderID,
 		DefaultAccess:    ResourceDefaultAccessNoAccess,
 		DefaultAccessSet: true,
-		OverrideUserIDs:  []string{pam.UserID},
+		Permissions: []EntityPermissionInput{
+			{SubjectType: EntityPermissionSubjectUser, SubjectID: pam.UserID, AccessLevel: EntityPermissionEdit},
+		},
 	}); err != nil {
 		t.Fatalf("Set parent permissions: %v", err)
 	}
-	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeSharedTriageFolder, parent.FolderID, joe.UserID, EntityPermissionEdit); err != nil || allowed {
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeSharedInboxFolder, parent.FolderID, joe.UserID, EntityPermissionEdit); err != nil || allowed {
 		t.Fatalf("joe parent no_access allowed = %v err = %v, want false", allowed, err)
 	}
-	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeSharedTriageFolder, parent.FolderID, pam.UserID, EntityPermissionEdit); err != nil || !allowed {
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeSharedInboxFolder, parent.FolderID, pam.UserID, EntityPermissionEdit); err != nil || !allowed {
 		t.Fatalf("pam parent override edit allowed = %v err = %v, want true", allowed, err)
 	}
-	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeSharedTriageFolder, child.FolderID, joe.UserID, EntityPermissionEdit); err != nil || !allowed {
-		t.Fatalf("joe child default edit allowed = %v err = %v, want true", allowed, err)
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeSharedInboxFolder, child.FolderID, joe.UserID, EntityPermissionEdit); err != nil || allowed {
+		t.Fatalf("joe child inherited no_access allowed = %v err = %v, want false", allowed, err)
 	}
-	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeSharedTriageFolder, grandchild.FolderID, pam.UserID, EntityPermissionEdit); err != nil || !allowed {
-		t.Fatalf("pam grandchild default edit allowed = %v err = %v, want true", allowed, err)
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeSharedInboxFolder, grandchild.FolderID, pam.UserID, EntityPermissionEdit); err != nil || !allowed {
+		t.Fatalf("pam grandchild inherited parent edit allowed = %v err = %v, want true", allowed, err)
 	}
 
 	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
 		CompanyID:        companyID,
-		EntityType:       EntityTypeSharedTriageFolder,
+		EntityType:       EntityTypeSharedInboxFolder,
 		EntityID:         child.FolderID,
 		DefaultAccess:    ResourceDefaultAccessNoAccess,
 		DefaultAccessSet: true,
@@ -347,22 +349,23 @@ func TestMemorySharedTriagePermissionsUseDirectDefaultOverrides(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Set child permissions: %v", err)
 	}
-	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeSharedTriageFolder, child.FolderID, joe.UserID, EntityPermissionEdit); err != nil || !allowed {
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeSharedInboxFolder, child.FolderID, joe.UserID, EntityPermissionEdit); err != nil || !allowed {
 		t.Fatalf("joe child group override edit allowed = %v err = %v, want true", allowed, err)
 	}
-	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeSharedTriageFolder, grandchild.FolderID, joe.UserID, EntityPermissionEdit); err != nil || !allowed {
-		t.Fatalf("joe grandchild remains default edit allowed = %v err = %v, want true", allowed, err)
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeSharedInboxFolder, grandchild.FolderID, joe.UserID, EntityPermissionEdit); err != nil || !allowed {
+		t.Fatalf("joe grandchild inherited child group edit allowed = %v err = %v, want true", allowed, err)
 	}
 	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
 		CompanyID:        companyID,
-		EntityType:       EntityTypeSharedTriageFolder,
+		EntityType:       EntityTypeSharedInboxFolder,
 		EntityID:         grandchild.FolderID,
 		DefaultAccess:    ResourceDefaultAccessNoAccess,
 		DefaultAccessSet: true,
+		Permissions:      []EntityPermissionInput{},
 	}); err != nil {
 		t.Fatalf("Set grandchild no_access: %v", err)
 	}
-	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeSharedTriageFolder, grandchild.FolderID, joe.UserID, EntityPermissionEdit); err != nil || allowed {
+	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeSharedInboxFolder, grandchild.FolderID, joe.UserID, EntityPermissionEdit); err != nil || allowed {
 		t.Fatalf("joe grandchild direct no_access allowed = %v err = %v, want false", allowed, err)
 	}
 }

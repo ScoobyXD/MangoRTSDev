@@ -60,6 +60,7 @@ type Repository interface {
 	ProjectRepository
 	GVICRepository
 	EntityPermissionRepository
+	V2PolicyRepository
 	EffectiveAccessRepository
 	ConsolidatedViewRepository
 	SavedViewRepository
@@ -2436,8 +2437,10 @@ func NormalizeGVICResourceType(resourceType string) (string, bool) {
 		return EntityTypeLogicGate, true
 	case EntityTypeProject:
 		return EntityTypeProject, true
-	case EntityTypeSharedTriageFolder:
-		return EntityTypeSharedTriageFolder, true
+	case EntityTypeCompanyExplorerFolder:
+		return EntityTypeCompanyExplorerFolder, true
+	case EntityTypeSharedInboxFolder:
+		return EntityTypeSharedInboxFolder, true
 	case EntityTypeSharedInbox:
 		return EntityTypeSharedInbox, true
 	default:
@@ -2466,7 +2469,7 @@ func NormalizeEntityType(entityType string) (string, bool) {
 		return EntityTypeProject, true
 	case EntityTypeCompanyExplorerFolder, "folder", "company_folder":
 		return EntityTypeCompanyExplorerFolder, true
-	case EntityTypeSharedInboxFolder, EntityTypeSharedTriageFolder, "communications_folder":
+	case EntityTypeSharedInboxFolder:
 		return EntityTypeSharedInboxFolder, true
 	case EntityTypeSharedInbox:
 		return EntityTypeSharedInbox, true

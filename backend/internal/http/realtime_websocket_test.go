@@ -372,8 +372,8 @@ func TestRealtimeWebSocketOnlyAllowsAuthorizedNotificationMailboxChatAndBoardSco
 		t.Fatal(err)
 	}
 	for _, input := range []store.EntityPermissionUpdateInput{
-		{CompanyID: companyID, EntityType: store.EntityTypeNode, EntityID: node.NodeID, Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionEdit}}},
-		{CompanyID: companyID, EntityType: store.EntityTypeLogicGate, EntityID: gate.LogicGateID, Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionEdit}}},
+		{CompanyID: companyID, EntityType: store.EntityTypeNode, EntityID: node.NodeID, DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true, Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionEdit}}},
+		{CompanyID: companyID, EntityType: store.EntityTypeLogicGate, EntityID: gate.LogicGateID, DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true, Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionEdit}}},
 		{CompanyID: companyID, EntityType: store.EntityTypeSharedInbox, EntityID: sharedInbox.FolderID, DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true, Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionEdit}}},
 		{CompanyID: companyID, EntityType: store.EntityTypeSharedInbox, EntityID: hiddenInbox.FolderID, DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true},
 	} {
@@ -816,7 +816,7 @@ func TestRealtimeKanbanCommittedEventsPublishOnlyMountedBoardScope(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{CompanyID: companyID, EntityType: store.EntityTypeLogicGate, EntityID: gate.LogicGateID, Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionEdit}}}); err != nil {
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{CompanyID: companyID, EntityType: store.EntityTypeLogicGate, EntityID: gate.LogicGateID, DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true, Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionEdit}}}); err != nil {
 		t.Fatal(err)
 	}
 	server := newRealtimeAuthServerForTest(repo, token, user)

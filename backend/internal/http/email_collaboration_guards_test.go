@@ -44,12 +44,13 @@ func TestEmailRelationshipHTTPUsesOrdinaryNodeSemanticsAndDeletesOnlyRelationshi
 
 	permissionBody, _ := json.Marshal(map[string]any{
 		"company_id": companyID, "default_access": store.ResourceDefaultAccessNoAccess,
+		"permission_mode": store.PolicyModeCustomized,
 		"permissions": []map[string]any{
 			{"subject_type": store.EntityPermissionSubjectUser, "subject_id": creator.UserID, "access_level": store.EntityPermissionEdit},
 			{"subject_type": store.EntityPermissionSubjectUser, "subject_id": target.UserID, "access_level": store.EntityPermissionEdit},
 		},
 	})
-	permissionReq := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+relationship.NodeID+"/permissions", bytes.NewReader(permissionBody))
+	permissionReq := httptest.NewRequest(http.MethodPut, "/v1/resources/node/"+relationship.NodeID+"/permissions", bytes.NewReader(permissionBody))
 	permissionReq = attachmentRequestWithActor(permissionReq, admin, companyID, domain.RoleCompanyAdmin)
 	permissionRec := httptest.NewRecorder()
 	handler.ServeHTTP(permissionRec, permissionReq)

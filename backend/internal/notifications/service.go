@@ -854,24 +854,6 @@ func mentionAliasOccurrenceStarts(text string, aliases []string, trigger string)
 	return out
 }
 
-func (s *Service) logicGateGVICRecipientIDs(companyID, logicGateID string) ([]string, error) {
-	companyID = strings.TrimSpace(companyID)
-	logicGateID = strings.TrimSpace(logicGateID)
-	if companyID == "" || logicGateID == "" {
-		return []string{}, nil
-	}
-	return s.gvicRecipientIDs(companyID, store.EntityTypeLogicGate, logicGateID)
-}
-
-func (s *Service) sharedInboxGVICRecipientIDs(companyID, folderID string) ([]string, error) {
-	companyID = strings.TrimSpace(companyID)
-	folderID = strings.TrimSpace(folderID)
-	if companyID == "" || folderID == "" {
-		return []string{}, nil
-	}
-	return s.gvicRecipientIDsWithSharedTriageFallback(companyID, folderID)
-}
-
 func (s *Service) logicGateGVICRecipientRoles(companyID, logicGateID string) (map[string]string, error) {
 	companyID = strings.TrimSpace(companyID)
 	logicGateID = strings.TrimSpace(logicGateID)
@@ -887,29 +869,14 @@ func (s *Service) sharedInboxGVICRecipientRoles(companyID, folderID string) (map
 	if companyID == "" || folderID == "" {
 		return map[string]string{}, nil
 	}
-	return s.gvicRecipientRolesWithSharedTriageFallback(companyID, folderID)
-}
-
-func (s *Service) gvicRecipientIDs(companyID, resourceType, resourceID string) ([]string, error) {
-	assignments, err := s.Repo.ListResourceGVICEffectiveAssignments(companyID, resourceType, resourceID)
+	folder, err := s.Repo.GetCommunicationsSharedInboxFolder(companyID, folderID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return []string{}, nil
+			return map[string]string{}, nil
 		}
 		return nil, err
 	}
-	seen := map[string]bool{}
-	out := make([]string, 0, len(assignments))
-	for _, assignment := range assignments {
-		userID := strings.TrimSpace(assignment.UserID)
-		if userID == "" || seen[userID] {
-			continue
-		}
-		seen[userID] = true
-		out = append(out, userID)
-	}
-	sort.Strings(out)
-	return out, nil
+	return s.gvicRecipientRoles(companyID, store.CommunicationsSharedInboxResourceType(folder), folderID)
 }
 
 func (s *Service) gvicRecipientRoles(companyID, resourceType, resourceID string) (map[string]string, error) {
@@ -929,28 +896,6 @@ func (s *Service) gvicRecipientRoles(companyID, resourceType, resourceID string)
 		out[userID] = mergeGVICRole(out[userID], assignment.Role)
 	}
 	return out, nil
-}
-
-func (s *Service) gvicRecipientIDsWithSharedTriageFallback(companyID, folderID string) ([]string, error) {
-	ids, err := s.gvicRecipientIDs(companyID, store.EntityTypeSharedTriageFolder, folderID)
-	if err != nil {
-		return nil, err
-	}
-	if len(ids) != 0 {
-		return ids, nil
-	}
-	return s.gvicRecipientIDs(companyID, store.EntityTypeSharedInbox, folderID)
-}
-
-func (s *Service) gvicRecipientRolesWithSharedTriageFallback(companyID, folderID string) (map[string]string, error) {
-	roles, err := s.gvicRecipientRoles(companyID, store.EntityTypeSharedTriageFolder, folderID)
-	if err != nil {
-		return nil, err
-	}
-	if len(roles) != 0 {
-		return roles, nil
-	}
-	return s.gvicRecipientRoles(companyID, store.EntityTypeSharedInbox, folderID)
 }
 
 func (s *Service) companyGroupMemberUserIDs(companyID string) (map[string][]string, error) {

@@ -1,3 +1,5 @@
+//go:build step1legacy
+
 package httpapi
 
 import (

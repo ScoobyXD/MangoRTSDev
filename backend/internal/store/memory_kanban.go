@@ -609,7 +609,6 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 	if board.LogicGateID != nil && !logicGateAssignmentNodeHasPriority(node.Priority) {
 		return domain.KanbanCard{}, ErrPriorityRequired
 	}
-	previousAssignment, hadPreviousAssignment := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, "")
 	if board.LogicGateID != nil {
 		for boardKeyValue, cards := range r.kanbanCards {
 			nextCards := cards[:0]
@@ -657,12 +656,6 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 		r.kanbanCards[k][index] = card
 		if card.LogicGateID != nil {
 			r.upsertNodeLogicGateAssignmentFromCardLocked(card)
-			if !hadPreviousAssignment || previousAssignment.LogicGateID != *card.LogicGateID {
-				if _, err := r.snapshotResourceAccessPolicyLocked(input.CompanyID, EntityTypeLogicGate, *card.LogicGateID, EntityTypeNode, input.NodeID); err != nil {
-					return domain.KanbanCard{}, err
-				}
-				r.snapshotLogicGateGVICToNodeLocked(input.CompanyID, *card.LogicGateID, input.NodeID)
-			}
 		}
 		r.syncNodeStatusFromKanbanCardLocked(card)
 		r.syncGVICMatrixProjectionForNodeLocked(input.CompanyID, input.NodeID)
@@ -695,12 +688,6 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 	r.kanbanCards[k] = append(r.kanbanCards[k], card)
 	if card.LogicGateID != nil {
 		r.upsertNodeLogicGateAssignmentFromCardLocked(card)
-		if !hadPreviousAssignment || previousAssignment.LogicGateID != *card.LogicGateID {
-			if _, err := r.snapshotResourceAccessPolicyLocked(input.CompanyID, EntityTypeLogicGate, *card.LogicGateID, EntityTypeNode, input.NodeID); err != nil {
-				return domain.KanbanCard{}, err
-			}
-			r.snapshotLogicGateGVICToNodeLocked(input.CompanyID, *card.LogicGateID, input.NodeID)
-		}
 	}
 	r.syncNodeStatusFromKanbanCardLocked(card)
 	return card, nil
@@ -778,10 +765,7 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	if !hadPreviousAssignment || previousAssignment.LogicGateID != input.LogicGateID {
-		if _, err := r.snapshotResourceAccessPolicyLocked(input.CompanyID, EntityTypeLogicGate, input.LogicGateID, EntityTypeNode, input.NodeID); err != nil {
-			r.restoreWorkItemAssignmentEventStateLocked(snapshot)
-			return LogicGateNodeAssignmentResult{}, err
-		}
+
 	}
 	r.syncGVICResourceKeysLocked(input.CompanyID, []resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: input.NodeID}})
 
@@ -1018,11 +1002,6 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 			r.kanbanCards[targetKey] = append(r.kanbanCards[targetKey], resultCard)
 		}
 		r.moveEmailNodeLinksForKanbanCardLocked(input.CompanyID, input.NodeID, card.BoardID, card.CardID, resultCard.BoardID, resultCard.CardID, input.LogicGateID, resultCard.UpdatedTimestamp)
-		if _, err := r.snapshotResourceAccessPolicyLocked(input.CompanyID, EntityTypeLogicGate, input.LogicGateID, EntityTypeNode, input.NodeID); err != nil {
-			r.restoreWorkItemAssignmentEventStateLocked(snapshot)
-			return LogicGateNodeAssignmentResult{}, err
-		}
-		r.snapshotLogicGateGVICToNodeLocked(input.CompanyID, input.LogicGateID, input.NodeID)
 	} else {
 		r.kanbanCards[location.mapKey][location.index] = resultCard
 	}

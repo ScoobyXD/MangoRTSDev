@@ -123,12 +123,12 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 	beforePermissions := maps.Clone(r.entityPermissions)
 	beforeEffectiveAccess := maps.Clone(r.effectiveAccess)
 	beforeGVICAssignments := maps.Clone(r.gvicAssignments)
-	beforeGVICEffectiveAssignments := maps.Clone(r.gvicEffectiveAssignments)
 	beforeGVICMatrixProjectionRows := maps.Clone(r.GVICMatrixProjectionRows)
-	beforeGVICPolicyRevisions := maps.Clone(r.gvicPolicyRevisions)
-	beforePermissionRevisions := maps.Clone(r.resourcePermissionRevisions)
+	beforeGVICV2Settings := maps.Clone(r.gvicV2Settings)
+	beforePermissionV2Settings := maps.Clone(r.permissionV2Settings)
+	beforeGVICV2Sequence := r.gvicV2Sequence
+	beforePermissionV2Sequence := r.permissionV2Sequence
 	beforeWorkspaceReadVersions := maps.Clone(r.workspaceReadVersions)
-	beforeResourcePolicySequence := r.resourcePolicySequence
 	restore := func() {
 		r.nodes, r.nodeText, r.nodeInfo = beforeNodes, beforeNodeText, beforeNodeInfo
 		r.folders, r.folderItems = beforeFolders, beforeFolderItems
@@ -140,10 +140,10 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 		r.nodeEmailThreads = beforeNodeEmailThreads
 		r.emailThreadDownloadJobs = beforeEmailThreadDownloadJobs
 		r.entityPermissions, r.effectiveAccess = beforePermissions, beforeEffectiveAccess
-		r.gvicAssignments, r.gvicEffectiveAssignments = beforeGVICAssignments, beforeGVICEffectiveAssignments
-		r.GVICMatrixProjectionRows, r.gvicPolicyRevisions = beforeGVICMatrixProjectionRows, beforeGVICPolicyRevisions
-		r.resourcePermissionRevisions, r.workspaceReadVersions = beforePermissionRevisions, beforeWorkspaceReadVersions
-		r.resourcePolicySequence = beforeResourcePolicySequence
+		r.gvicAssignments = beforeGVICAssignments
+		r.GVICMatrixProjectionRows = beforeGVICMatrixProjectionRows
+		r.gvicV2Settings, r.permissionV2Settings = beforeGVICV2Settings, beforePermissionV2Settings
+		r.gvicV2Sequence, r.permissionV2Sequence, r.workspaceReadVersions = beforeGVICV2Sequence, beforePermissionV2Sequence, beforeWorkspaceReadVersions
 	}
 	if _, ok := r.companies[input.CompanyID]; !ok {
 		return CommunicationsEmailCollaborationEnsureResult{}, ErrNotFound
@@ -234,17 +234,14 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 		}
 	}
 
-	if err := r.grantCollaborationNodeEditLocked(input.CompanyID, node.NodeID, input.CreatedByUserID, now); err != nil {
+	if _, err := r.customizeNewMemoryResourcePermissionForCreatorLocked(input.CompanyID, EntityTypeNode, node.NodeID, input.CreatedByUserID); err != nil {
 		restore()
 		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}
-	gvicKey := resourceGVICKey{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: node.NodeID}
-	gvicAssignment := r.resourceGVICAssignmentForPrincipalLocked(gvicKey, normalizedGVICAssignmentInput{
-		role: domain.GVICRoleGenerated, principalType: EntityPermissionSubjectUser, principalID: input.CreatedByUserID,
-	}, now)
-	r.gvicAssignments[gvicSourceAssignmentKey(gvicAssignment.CompanyID, gvicAssignment.ResourceType, gvicAssignment.ResourceID, gvicAssignment.Role, gvicAssignment.PrincipalType, gvicAssignment.PrincipalID)] = gvicAssignment
-	r.setDirectGVICPolicySequenceLocked(input.CompanyID, EntityTypeNode, node.NodeID, r.nextResourcePolicySequenceLocked())
-	r.syncGVICResourceKeysLocked(input.CompanyID, []resourceGVICKey{gvicKey})
+	if _, err := r.customizeNewMemoryResourceGVICForCreatorLocked(input.CompanyID, EntityTypeNode, node.NodeID, domain.GVICRoleGenerated, input.CreatedByUserID); err != nil {
+		restore()
+		return CommunicationsEmailCollaborationEnsureResult{}, err
+	}
 	r.bumpNodeViewVersionLocked(input.CompanyID, node.NodeID)
 	if _, err := r.appendDomainEventLocked(workspaceDomainEventInput(input.CompanyID, "node_created", map[string]any{
 		"node_id": node.NodeID, "email_collaboration_id": item.CollaborationID,
@@ -263,14 +260,35 @@ func (r *MemoryRepo) grantCollaborationNodeEditLocked(companyID, nodeID, userID 
 	if !ok {
 		return ErrNotFound
 	}
-	node.DefaultAccess = ResourceDefaultAccessNoAccess
-	r.nodes[key(companyID, nodeID)] = node
-	permission := domain.EntityPermission{CompanyID: companyID, EntityType: EntityTypeNode, EntityID: nodeID, SubjectType: EntityPermissionSubjectUser, SubjectID: userID, Permission: EntityPermissionEdit, AccessLevel: EntityPermissionEdit, CreatedTimestamp: now}
-	r.entityPermissions[entityPermissionKey(companyID, EntityTypeNode, nodeID, EntityPermissionSubjectUser, userID, EntityPermissionEdit)] = permission
-	if err := r.recomputeDirectGrantEffectiveAccessForResourceLocked(companyID, EntityTypeNode, nodeID); err != nil {
-		return err
+	_ = node
+	if !r.ensureV2PolicySettingsLocked(companyID, EntityTypeNode, nodeID) {
+		return ErrNotFound
 	}
-	return r.recomputeCompanyMemberDefaultEffectiveAccessForResourceLocked(companyID, EntityTypeNode, nodeID)
+	resolved := r.resolveV2PolicyLocked(companyID, EntityTypeNode, nodeID, false)
+	sourceType, sourceID := EntityTypeNode, nodeID
+	if resolved.SourceID != "" && (resolved.SourceType != EntityTypeNode || resolved.SourceID != nodeID || resolved.OverwrittenBy != nil) {
+		sourceType, sourceID = resolved.SourceType, resolved.SourceID
+	}
+	sourceSetting := r.permissionV2Settings[resourcePolicyKey(companyID, sourceType, sourceID)]
+	permissions := r.directMemoryPermissionEdgesLocked(companyID, sourceType, sourceID)
+	settingKey := resourcePolicyKey(companyID, EntityTypeNode, nodeID)
+	setting := r.permissionV2Settings[settingKey]
+	setting.Mode = PolicyModeCustomized
+	setting.DefaultAccess = sourceSetting.DefaultAccess
+	setting.CustomizedSequence = r.nextPermissionV2SequenceLocked()
+	r.permissionV2Settings[settingKey] = setting
+	replaced := false
+	for index := range permissions {
+		if permissions[index].SubjectType == EntityPermissionSubjectUser && permissions[index].SubjectID == userID {
+			permissions[index].AccessLevel, permissions[index].Permission = EntityPermissionEdit, EntityPermissionEdit
+			replaced = true
+		}
+	}
+	if !replaced {
+		permissions = append(permissions, domain.EntityPermission{SubjectType: EntityPermissionSubjectUser, SubjectID: userID, AccessLevel: EntityPermissionEdit, Permission: EntityPermissionEdit, CreatedTimestamp: now})
+	}
+	r.replaceMemoryPermissionEdgesLocked(companyID, EntityTypeNode, nodeID, permissions)
+	return nil
 }
 
 func (r *MemoryRepo) ResolveCommunicationsEmailCollaboration(input CommunicationsEmailCollaborationResolveInput) (domain.CommunicationsEmailCollaboration, error) {

@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"reflect"
 	"testing"
 
@@ -99,15 +100,15 @@ func TestMemoryEmailConversionCommandCreatesAssignedWorkItemWithProvenanceAndEve
 	if err != nil {
 		t.Fatalf("ListDomainEventsAfter: %v", err)
 	}
-	wantTypes := []string{WorkItemEmailConvertedEventType, "node_created", WorkItemLogicGateAssignmentSavedEventType, "kanban_card_upserted", "node_updated"}
+	wantTypes := []string{LogicGateGVICUpdatedEventType, WorkItemEmailConvertedEventType, "node_created", WorkItemLogicGateAssignmentSavedEventType, "kanban_card_upserted", "node_updated"}
 	if gotTypes := domainEventTypes(durable); !reflect.DeepEqual(gotTypes, wantTypes) {
 		t.Fatalf("durable event types = %+v, want %+v", gotTypes, wantTypes)
 	}
-	if durable[0].Payload["message_id"] != message.ID || durable[0].Payload["thread_id"] != message.ThreadID || durable[0].Payload["idempotency_key"] != "email-convert-1" {
-		t.Fatalf("email conversion event payload = %+v", durable[0].Payload)
+	if durable[1].Payload["message_id"] != message.ID || durable[1].Payload["thread_id"] != message.ThreadID || durable[1].Payload["idempotency_key"] != "email-convert-1" {
+		t.Fatalf("email conversion event payload = %+v", durable[1].Payload)
 	}
-	if durable[0].ActorUserID == nil || *durable[0].ActorUserID != user.UserID {
-		t.Fatalf("email conversion actor = %+v, want %s", durable[0].ActorUserID, user.UserID)
+	if durable[1].ActorUserID == nil || *durable[1].ActorUserID != user.UserID {
+		t.Fatalf("email conversion actor = %+v, want %s", durable[1].ActorUserID, user.UserID)
 	}
 }
 
@@ -144,8 +145,8 @@ func TestMemoryEmailConversionCommandCanCreateNewLogicGate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListDomainEventsAfter: %v", err)
 	}
-	if len(durable) == 0 || durable[0].Type != "logic_gate_created" || durable[1].Type != WorkItemEmailConvertedEventType {
-		t.Fatalf("durable events = %+v, want logic gate created then email converted", domainEventTypes(durable))
+	if len(durable) < 3 || durable[0].Type != LogicGateGVICUpdatedEventType || durable[1].Type != "logic_gate_created" || durable[2].Type != WorkItemEmailConvertedEventType {
+		t.Fatalf("durable events = %+v, want policy audit, logic gate created, then email converted", domainEventTypes(durable))
 	}
 }
 
@@ -610,11 +611,12 @@ func TestMemoryEmailConversionCommandRollsBackPartialWork(t *testing.T) {
 		if _, err := repo.UpsertCommunicationsTriageItem(user.UserID, message); err != nil {
 			t.Fatalf("UpsertCommunicationsTriageItem: %v", err)
 		}
+		beforeEvents := maps.Clone(repo.domainEvents)
 		_, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{UserID: user.UserID, CompanyID: companyID, AccountEmail: user.Email, LogicGateID: logicGate.LogicGateID, MessageIDs: []string{message.ID, "missing-message"}})
 		if !errors.Is(err, ErrNotFound) {
 			t.Fatalf("err = %v, want ErrNotFound", err)
 		}
-		assertEmailConversionRolledBack(t, repo, companyID, user.UserID, message.ID)
+		assertEmailConversionRolledBack(t, repo, companyID, user.UserID, message.ID, beforeEvents)
 	})
 
 	t.Run("workspace event append failure", func(t *testing.T) {
@@ -626,12 +628,13 @@ func TestMemoryEmailConversionCommandRollsBackPartialWork(t *testing.T) {
 		if _, err := repo.UpsertCommunicationsTriageItem(user.UserID, message); err != nil {
 			t.Fatalf("UpsertCommunicationsTriageItem: %v", err)
 		}
+		beforeEvents := maps.Clone(repo.domainEvents)
 		repo.domainEventAppendErr = errAppend
 		_, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{UserID: user.UserID, CompanyID: companyID, AccountEmail: user.Email, LogicGateID: logicGate.LogicGateID, MessageIDs: []string{message.ID}})
 		if !errors.Is(err, errAppend) {
 			t.Fatalf("err = %v, want append failure", err)
 		}
-		assertEmailConversionRolledBack(t, repo, companyID, user.UserID, message.ID)
+		assertEmailConversionRolledBack(t, repo, companyID, user.UserID, message.ID, beforeEvents)
 	})
 	t.Run("transactional outbox failure", func(t *testing.T) {
 		repo := NewMemoryRepo()
@@ -642,6 +645,7 @@ func TestMemoryEmailConversionCommandRollsBackPartialWork(t *testing.T) {
 		if _, err := repo.UpsertCommunicationsTriageItem(user.UserID, message); err != nil {
 			t.Fatalf("UpsertCommunicationsTriageItem: %v", err)
 		}
+		beforeEvents := maps.Clone(repo.domainEvents)
 		forced := errors.New("forced outbox failure")
 		repo.realtimeOutboxErr = forced
 		_, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
@@ -651,9 +655,9 @@ func TestMemoryEmailConversionCommandRollsBackPartialWork(t *testing.T) {
 		if !errors.Is(err, forced) {
 			t.Fatalf("err = %v, want outbox failure", err)
 		}
-		assertEmailConversionRolledBack(t, repo, companyID, user.UserID, message.ID)
-		if len(repo.domainEvents) != 0 || len(repo.realtimeOutbox) != 0 {
-			t.Fatalf("split conversion state domain_events=%d outbox=%d", len(repo.domainEvents), len(repo.realtimeOutbox))
+		assertEmailConversionRolledBack(t, repo, companyID, user.UserID, message.ID, beforeEvents)
+		if len(repo.realtimeOutbox) != 0 {
+			t.Fatalf("split conversion outbox entries=%d, want none", len(repo.realtimeOutbox))
 		}
 	})
 }
@@ -727,7 +731,7 @@ func setupEmailConversionUserAndGate(t *testing.T, repo *MemoryRepo, companyID s
 	return user, logicGate
 }
 
-func assertEmailConversionRolledBack(t *testing.T, repo *MemoryRepo, companyID, userID, messageID string) {
+func assertEmailConversionRolledBack(t *testing.T, repo *MemoryRepo, companyID, userID, messageID string, beforeEvents map[string]domain.DomainEvent) {
 	t.Helper()
 	items := communicationsTriageItemsForTest(repo, userID)
 	if len(items) != 1 || items[0].MessageID != messageID {
@@ -745,7 +749,9 @@ func assertEmailConversionRolledBack(t *testing.T, repo *MemoryRepo, companyID, 
 	if err != nil || len(placements) != 0 {
 		t.Fatalf("placements after failed conversion = %+v err=%v, want none", placements, err)
 	}
-	assertNoWorkspaceEvents(t, repo, companyID)
+	if !reflect.DeepEqual(repo.domainEvents, beforeEvents) {
+		t.Fatalf("events changed after failed conversion: got %+v want %+v", repo.domainEvents, beforeEvents)
+	}
 }
 
 func communicationsTriageItemsForTest(repo *MemoryRepo, userID string) []domain.CommunicationsTriageItem {

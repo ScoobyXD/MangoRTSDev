@@ -1,71 +1,60 @@
-Last updated: 2026-07-22
+# Process Story: A resource resolves one live GVIC policy from its hierarchy
+
+A user opens or changes a resource's GVIC policy
+↓
+The resource either uses its nearest active customized ancestor or owns one complete customized policy
+↓
+Force-overwrite and parent-link sequences decide whether older customizations remain active after resets and moves
+↓
+Current nested-group membership expands GVIC principals for My Work and notifications, while permissions remain a separate decision
+
+Last updated: 2026-08-05
 
 # GVIC Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: partial backend coverage for role validation, Logic Gate-to-node GVIC snapshots, unchanged current-policy and empty-policy apply-to-descendants behavior, linked node editing, detach preservation, effective-row stability, group membership changes, and projection sync. Rule ID mapping is partial.
+- Business Logic Covered By Automated Tests: backend, HTTP, frontend contract, disposable PostgreSQL, scale, and regression coverage for V2 role validation, inherited/customized resolution, force resets, moves, detach, group changes, My Work, notifications, and fingerprints. Rule ID mapping remains partial.
 
 ## Business Logic
 
-GVIC1 - GVIC supports the generated, verified, consulted, and informed roles.
-GVIC2 - GVIC role input is normalized before validation.
-GVIC3 - GVIC resource types include node, logic gate, project, shared triage folder, and shared inbox resources where that surface supports GVIC.
-GVIC4 - GVIC principal types include user and group.
-GVIC5 - A GVIC assignment requires company, resource type, resource ID, principal type, principal ID, and role.
-GVIC6 - Generated and verified assignments identify GVIC responsibility/notification roles only; they do not imply edit permission, delete permission, or any other resource authorization.
-GVIC7 - Consulted and informed assignments identify GVIC visibility/notification roles only; they do not imply edit permission or any other resource authorization.
-GVIC8 - Group GVIC assignments expand into effective user assignments for group members.
-GVIC9 - Effective GVIC assignment records preserve enough source/inheritance data to explain whether access came from a direct or group assignment.
-GVIC10 - Updating logic gate GVIC applies precise effective-assignment deltas for the logic gate; unchanged effective rows must not be deleted, rewritten, or retimestamped.
-GVIC11 - Updating logic gate GVIC updates the logic gate's GVIC template/effective rows only by default; it must not fan out to nodes that already have a node-level snapshot unless apply-to-descendants is set.
-GVIC12 - Updating project, node, or shared resource GVIC applies precise effective GVIC and projection-row changes for affected users without rebuilding unaffected rows.
-GVIC13 - My Work reads active work from the GVIC matrix projection table, not by guessing from UI state.
-GVIC14 - My Work/GVIC has no product realtime scope or projection sequence; canonical reads return the current transactionally maintained rows.
-GVIC15 - My Work loads canonical GVIC matrix rows on open/navigation/manual refresh; temporary cross-user staleness until then is accepted.
-GVIC16 - GVIC assignment changes maintain canonical projections and independently required notification/domain-event consumers; they do not publish My Work or workspace browser events.
-GVIC17 - Removing a user from a group removes the user's effective GVIC access that came only from that group.
-GVIC18 - Removing a GVIC assignment removes the effective access/projection rows that were produced only by that assignment.
-GVIC19 - A resource can have multiple GVIC roles across different principals without collapsing the role meaning.
-GVIC20 - Shared inbox GVIC assignments must remain GVIC assignments and must not be converted into ordinary resource permission grants.
-GVIC21 - A person or group can only have one GVIC assignment per each node or for each logic gate. So the same person/group can not be in, for example, Generated and Informed for the same node (same rule applies for logic gates). A node assigned to a logic gate owns its node-level GVIC snapshot after entry.
-GVIC22 - Node and Logic Gate Generated is a single-user slot. Verified accepts multiple user principals but no group principal, while Consulted and Informed can still use users or groups.
-GVIC23 - GVIC write commands update source assignments and projection/effective read models in the same transaction using precise row changes, not broad table or subsection rebuilds.
-GVIC24 - GVIC editor caches are patched from the canonical source-shaped write response for the edited resource; broad cached payloads must not overwrite newer GVIC assignments.
-GVIC25 - Source-shaped assignment responses patch editable GVIC chips for the initiating browser. My Work and other non-live projection-backed views read canonical state when opened or refreshed.
-GVIC26 - Stale in-flight reads or browser cache entries must not repopulate older Logic Gate GVIC data after a successful POST or PUT.
-GVIC27 - Logic Gate GVIC and Node GVIC must follow the same cache freshness contract; Logic Gate GVIC must not depend on stale broad Logic Gate payloads when Node GVIC uses fresh resource GVIC data.
-GVIC28 - Logic Gate GVIC is a template for nodes only at the moment a node enters that logic gate.
-GVIC29 - Ordinary standalone nodes and ordinary linked nodes both own editable node GVIC source assignments.
-GVIC30 - A node inside a logic gate displays and edits its node-level GVIC snapshot; it must not be read-only merely because it is linked to a logic gate.
-GVIC31 - Creating a node inside a logic gate, placing a standalone node into a logic gate, or moving a node between logic gates replaces the node's GVIC source assignments with a snapshot of the target logic gate's current GVIC template.
-GVIC32 - Detaching a node from a logic gate preserves the node-level GVIC snapshot.
-GVIC33 - Existing linked nodes receive a one-time backfill snapshot from their current logic gate so current behavior is preserved, then the node decouples from future logic gate GVIC changes.
-GVIC34 - Projects have their own GVIC for project visibility and updates, but logic gates and nodes do not inherit GVIC from projects.
-GVIC35 - My Work membership is based on node effective GVIC only; project and logic gate data decorate and group visible node rows but do not hide or reveal node rows.
-GVIC36 - Updates visibility is target-based: node events use node effective GVIC/access, logic gate events use logic gate GVIC/access, and project events use project GVIC/access.
-GVIC37 - Group membership, group parent moves, and group deletion update effective GVIC for any resource that directly references the affected group, including Logic Gate templates and node snapshots.
-GVIC38 - Logic Gate GVIC apply-to-descendants is an explicit one-shot bulk action available only from the shared **More editor actions** menu, not a persistent toggle, header-body control, or fifth GVIC card. The action opens an explicit Yes/No confirmation; No, cancel, or dismissal makes no change, while only Yes applies the Logic Gate's current GVIC template to nodes currently assigned to that Logic Gate by replacing each assigned node snapshot and refreshing affected node effective/projection rows.
-GVIC39 - GVIC inheritance, overrides, transfers, and apply-to-descendants follow the same business semantics as permissions for every supported parent-child GVIC relationship.
-GVIC40 - A parent GVIC policy is a template captured at create time or transfer time; existing children do not live-inherit future parent GVIC edits unless apply-to-descendants is set.
-GVIC41 - Creating or transferring a GVIC-managed resource copies the direct target parent's current GVIC policy, not the root ancestor's policy.
-GVIC42 - Editing a child resource's GVIC changes only that child; that edited child GVIC becomes the template for resources created or transferred directly under that child.
-GVIC43 - Editing a parent GVIC without apply-to-descendants changes only that parent and future direct children; existing descendants keep their current GVIC policies.
-GVIC44 - GVIC inheritance should be implementable as reusable policy/rule pointers or immutable rule versions, not as duplicated full GVIC assignment rows per descendant.
-GVIC45 - GVIC apply-to-descendants records one full-current-policy snapshot boundary plus the Logic Gate's current assignments for the subtree instead of rewriting assignments for every descendant; the operation must remain feasible for Logic Gates with hundreds of thousands of assigned nodes.
-GVIC46 - The GVIC snapshot boundary clears older applications and node-only assignments; applying an empty current Logic Gate policy therefore clears GVIC on its current assigned nodes.
-GVIC47 - Apply-to-descendants is a complete one-time replacement of every currently assigned node's GVIC snapshot, even when the Logic Gate was not edited in that request. Later node edits can override again until a newer Logic Gate apply occurs.
-GVIC48 - Conflicting direct GVIC bindings and ancestor apply records resolve by a monotonic transaction sequence, not wall-clock time.
-GVIC49 - Group GVIC assignments remain group pointers and must not be expanded into one source row per user.
-GVIC50 - GVIC audit/explainability must identify whether a user's role came from a direct resource binding, create/transfer inheritance, ancestor apply-to-descendants, or group membership.
-GVIC51 - Logic Gate Kanban work derives `request_owner_user_id` from the Logic Gate Generated user and does not serialize the full GVIC assignment collection.
-GVIC52 - A direct Logic Gate GVIC assignment or Logic Gate GVIC policy revision invalidates that Logic Gate's dedicated work version so cached header/request-owner data cannot remain stale.
-GVIC53 - The committed GVIC response patches or revalidates the initiating browser's cached Logic Gate work snapshot; a stale in-flight work response cannot overwrite a newer Generated-user change.
-GVIC54 - The minimal Logic Gate work request-owner field is display/workflow metadata only and does not imply `can_edit`.
-GVIC55 - Email-derived Nodes use normal editable Node GVIC semantics. First-comment creation atomically assigns the creator as direct Generated GVIC; accepted mention participation remains a separate collaboration access grant and does not itself add a GVIC role. Later authorized GVIC add/set/remove follows the ordinary Node contract.
-GVIC56 - Shared Node and Logic Gate GVIC editors keep Generated, Verified, Consulted, and Informed in one compact four-column horizontal row. Narrow layouts may clip the row beneath an adjacent pane, but must not wrap cards vertically; the bulk Logic Gate action remains in More.
-GVIC57 - Notification routing follows the editor/resource where the action occurs: Node editor mentions, urgent mentions, chat, and work-field updates use current effective Node GVIC; Logic Gate editor mentions and urgent mentions use current effective Logic Gate GVIC. Parent or neighboring resource GVIC never substitutes.
-GVIC58 - A Node or Logic Gate GVIC mutation creates an assignment notification only for a user whose effective assignment was newly added or whose effective role changed. Unchanged existing users, removed users, unrelated users, and the actor receive no assignment notification.
+GVIC1 - GVIC supports Generated, Verified, Consulted, and Informed roles and normalizes input before validation.
+GVIC2 - Generated accepts at most one user and no group; Verified accepts users but no groups; Consulted and Informed accept users or groups.
+GVIC3 - One source principal can have only one role in one customized policy.
+GVIC4 - Canonical GVIC resource types are node, logic_gate, project, company_explorer_folder, shared_inbox_folder, and shared_inbox. `shared_triage_folder` is rejected after cutover.
+GVIC5 - `resource_gvic_settings` stores mode and sequences; `resource_gvic_assignments` stores only the complete customized graph. No effective, revision, snapshot, or projection table is policy authority.
+GVIC6 - Every root is customized, including an empty policy. A non-root resource starts inherited unless its creation workflow explicitly customizes it.
+GVIC7 - An inherited resource stores no GVIC edges. Its effective policy is the nearest active customized resource in its live parent chain.
+GVIC8 - Customizing copies the current effective policy once, applies the requested complete replacement, and allocates a new customized sequence in one transaction.
+GVIC9 - Returning to inherited deletes the resource's customized edges and customized sequence, then immediately exposes its current effective ancestor.
+GVIC10 - An ordinary policy save changes only that resource. It does not rewrite descendants.
+GVIC11 - Apply to inherited descendants saves the selected policy if needed and writes no descendant policy state. Inherited branches already resolve it live, and active customized boundaries remain protected.
+GVIC12 - Overwrite all descendants records one ancestor reset sequence that also supersedes older active customized policies below that resource. The UI requires a separate confirmation.
+GVIC13 - A customization made after a reset becomes active again because its customized sequence is newer.
+GVIC14 - A parent relationship created or changed receives a new parent-link sequence for both policy domains. A link newer than a reset blocks that older reset from crossing the moved edge.
+GVIC15 - Moving an inherited resource changes its effective policy immediately; moving a customized resource preserves that customization. Descendants are not rewritten.
+GVIC16 - A Node assigned to a Logic Gate uses that Logic Gate as its immediate parent. Detaching an inherited Node materializes its current effective GVIC as a customized Node policy in the same transaction.
+GVIC17 - A creator rule, including an email-derived Generated assignment, first copies the final effective parent policy and then changes the new resource to customized.
+GVIC18 - Group assignments remain group pointers. Current nested membership expands at read time, and cycles are rejected.
+GVIC19 - Group membership, parent-group, and deletion changes affect effective GVIC immediately without rewriting resource policies. Deleting a group removes its direct policy edges.
+GVIC20 - If one user reaches several roles, the deterministic order is Generated, Verified, Consulted, then Informed; direct and shallower sources break equal-role ties.
+GVIC21 - GVIC never grants Edit access. Authorization reads only the separate permission policy.
+GVIC22 - My Work includes a resource only when the actor has both effective GVIC and effective Edit permission, resolved from the four canonical tables, live hierarchy, and live groups.
+GVIC23 - Notification routing resolves the current effective GVIC of the exact target resource. Parent or neighboring resource GVIC never substitutes.
+GVIC24 - Assignment notifications are sent only for newly effective users or effective role changes; unchanged users, removals, unrelated users, and the actor receive none.
+GVIC25 - GVIC event payloads identify policy type, action, descendant action, allocated sequence, mode, and changed recipients.
+GVIC26 - Reads explain the stored mode, effective mode, source resource, active reset, and an inactive stored customization superseded by force overwrite.
+GVIC27 - The frontend provides Inherited and Customized controls, both descendant actions, the effective source, overwrite explanation, stale-write protection, and no optimistic descendant materialization.
+GVIC28 - Fingerprints include effective source identity and sequence, eligible reset identity and sequence, the parent-link boundary, live group-membership version, and actor-specific edit result where exposed.
+GVIC29 - Point reads, My Work, notification decisions, and cache validation derive current state at read time; policy writes stay constant-size with descendant count.
+GVIC30 - Resource deletion deletes its settings row and cascades its GVIC edges. No missing resource, user, or group identity can remain.
+GVIC31 - Shared inbox folder and shared inbox GVIC use their exact canonical resource identities and remain separate from permissions and mailbox credentials.
+GVIC32 - Logic Gate work may expose its effective Generated user as request-owner metadata, but that field never implies permission.
+GVIC33 - Email-derived and workspace-created resources apply creator rules only after their final parent placement so copied policy comes from the correct source.
+GVIC34 - Stale in-flight reads cannot overwrite a newer committed policy response; ETags and policy fingerprints track the resolved V2 state.
+GVIC35 - Step 2 runtime readers and writers use only the two canonical GVIC tables. Temporarily retained legacy tables are frozen rollback evidence and have no deployed reader or writer.
+GVIC36 - All GVIC changes and their settings, graph edges, events, and read-version effects commit atomically.
+GVIC37 - The editor keeps the four role columns compact; inherited policy is read-only until Customized is selected.
 
 ## Scenarios
 
@@ -114,12 +103,12 @@ Expected:
 - Group assignments expand into effective user assignments for current group members.
 - Effective records preserve whether access came from direct or group source.
 - Removing the user from the group removes only the group-derived effective access.
-- Removing the GVIC assignment removes only effective access/projection rows produced by that assignment.
-- Unchanged effective rows keep their original updated timestamps.
-- Sync code may derive the desired effective set for comparison, but it must not delete and reinsert unchanged rows.
-- Logic Gate templates and node snapshots that directly reference affected groups update through the same scoped group-resource delta path.
+- Removing the GVIC edge removes that source principal from future effective resolution.
+- No permanent effective or projection row is updated or retimestamped.
+- Current nested membership is expanded on each canonical read.
+- Group membership or parent changes update the company group fingerprint without changing resource customization sequences.
 
-### Scenario GVIC-S3: Transactional Projection Without Realtime
+### Scenario GVIC-S3: Canonical Resolution Without Descendant Materialization
 
 Business logic covered:
 - GVIC10
@@ -129,26 +118,26 @@ Business logic covered:
 - GVIC14
 - GVIC15
 - GVIC16
-- GVIC38
+- GVIC35
 
 Given:
-- A logic gate has assigned nodes, node GVIC snapshots, and GVIC template assignments.
-- A regular logic gate GVIC edit is saved.
-- The user separately runs the one-shot apply-to-descendants action for that logic gate.
+- A Logic Gate has inherited and customized Node descendants.
+- A regular Logic Gate GVIC edit is saved with inherited-only Apply.
+- The user separately runs overwrite-all for that Logic Gate.
 - A user later opens or refreshes My Work after GVIC assignments change.
 - Another browser may retain stale My Work state until navigation or refresh.
 
 Expected:
-- Logic gate GVIC updates apply precise effective-assignment row changes for the gate template.
-- Regular logic gate GVIC edits do not mutate existing assigned node snapshots or assigned-node matrix rows.
-- The one-shot apply-to-descendants action updates currently assigned node snapshots and refreshes affected node effective/projection rows.
-- Project, node, and supported shared resource GVIC changes apply precise GVIC/projection row changes for affected users.
-- My Work reads from the GVIC matrix projection table.
-- No GVIC/My Work realtime scope, event row, or projection sequence is created.
-- My Work sees current rows on its next canonical load.
+- A regular edit updates one complete Logic Gate policy; inherited Nodes see it and active customized Nodes do not.
+- Inherited-only Apply adds no descendant state or graph writes.
+- Overwrite-all updates one descendant-reset sequence and makes eligible older Node customizations inactive without walking assigned Nodes.
+- Project, Node, and shared-resource policy writes remain scoped to one settings row and one complete edge set.
+- My Work derives current rows from V2 policy, hierarchy, live groups, permissions, and work metadata.
+- No GVIC/My Work realtime policy scope or permanent effective/projection authority is created.
+- My Work sees current effective state on its next canonical load.
 - Independently required notification/domain-event consumers remain, but no generic browser refresh event is published.
 
-### Scenario GVIC-S4: Shared Inbox GVIC Compatibility
+### Scenario GVIC-S4: Shared Inbox GVIC And Permission Separation
 
 Business logic covered:
 - GVIC20
@@ -160,7 +149,7 @@ Expected:
 - GVIC assignment reads and writes preserve GVIC records.
 - Updating shared inbox access does not convert GVIC assignments into ordinary permission grants.
 
-### Scenario GVIC-S5: Precise Writes And Logic Gate Cache Freshness
+### Scenario GVIC-S5: Complete Writes And Logic Gate Cache Freshness
 
 Business logic covered:
 - GVIC23
@@ -169,28 +158,28 @@ Business logic covered:
 - GVIC26
 - GVIC27
 - GVIC28
-- GVIC38
+- GVIC34
 
 Given:
 - A logic gate has generated, verified, consulted, and informed GVIC assignments.
-- A user adds or removes one assignment through POST or PUT.
-- The user separately invokes the one-shot apply-to-descendants action for the current Logic Gate GVIC template.
+- A user adds or removes one assignment through the canonical complete-policy PUT.
+- The user separately invokes inherited-only Apply or overwrite-all.
 - A broad Logic Gate payload or workspace list request may already be cached or in flight.
-- A node is assigned to the logic gate and receives a node-level GVIC snapshot from the logic gate's current template.
+- An inherited Node is assigned to the Logic Gate and another Node owns an active customization.
 
 Expected:
-- The write changes source assignments and affected projection/effective rows in one transaction.
-- Effective assignment maintenance deletes only disappeared rows and inserts only new rows.
-- Effective rows that still represent the same user, resource, role, source, and inheritance identity are not rewritten and keep their updated timestamps.
-- Editable GVIC chips are patched from the source-shaped write response.
-- My Work and other non-live projection-backed views load the current rows on open or refresh.
+- The write replaces one complete customized edge set and its sequence in one transaction.
+- Inherited-only Apply writes no descendant state; overwrite-all changes one reset sequence.
+- No permanent effective or My Work authority rows are maintained.
+- Editable GVIC chips and mode/source explanations reconcile from the canonical response.
+- My Work and other non-live views resolve current state on open or refresh.
 - Stale broad Logic Gate payloads, stale workspace list cache entries, and stale in-flight reads cannot overwrite newer Logic Gate GVIC assignments.
 - Logic Gate and Node GVIC follow the same freshness contract.
-- Linked node effective access resolves through the node's own copied snapshot rows after the node enters the logic gate.
-- Regular Logic Gate GVIC add, remove, and set edits are template edits only for existing assigned nodes.
-- When the explicit apply-to-descendants action runs, the same source-shaped write response remains authoritative for the edited Logic Gate; affected node snapshots are current on subsequent canonical reads.
+- The inherited Node resolves the Logic Gate live; the customized Node remains independent until an eligible overwrite-all reset.
+- Parent-link, reset, group-version, actor, and effective-source fingerprints prevent unsafe 304 responses.
+- The canonical response remains authoritative without pretending descendants were individually rewritten.
 
-### Scenario GVIC-S6: Node Logic Gate GVIC Snapshots, My Work, And Updates
+### Scenario GVIC-S6: Node Logic Gate Inheritance, Detach, My Work, And Updates
 
 Business logic covered:
 - GVIC21
@@ -203,71 +192,70 @@ Business logic covered:
 - GVIC34
 - GVIC35
 - GVIC36
-- GVIC38
+- GVIC29
 
 Given:
-- A standalone node has its own GVIC assignments.
-- The node is placed into a logic gate that has different GVIC assignments.
-- The logic gate GVIC changes after the node has entered.
-- The logic gate GVIC change is saved as a regular template edit.
-- The one-shot apply-to-descendants action may be run after the template edit.
-- A second node enters after the logic gate GVIC changes.
-- The node is later detached from the logic gate.
+- A standalone customized Node has its own GVIC policy.
+- An inherited Node and the customized Node are placed into a Logic Gate with a different policy.
+- The Logic Gate GVIC changes after both Nodes have entered.
+- The Logic Gate change is saved normally and may later be force-overwritten through descendants.
+- One subtree is moved after an older reset.
+- The inherited Node is later detached from the Logic Gate.
 - Project, logic gate, and node updates are shown in Updates.
 
 Expected:
-- Before placement, the standalone node GVIC is editable and controls the node's My Work visibility.
-- When the node is placed into the logic gate, the node's GVIC assignments are replaced with a snapshot of the logic gate's current GVIC template.
-- While the node is inside the logic gate, the node GVIC editor shows editable node-level assignments.
-- Changing the parent logic gate GVIC as a regular template edit does not change the existing node's GVIC or My Work visibility.
-- Running the explicit apply-to-descendants action updates existing assigned node snapshots and My Work visibility for affected users.
-- Nodes created in or transferred into the logic gate after that change receive the logic gate's new GVIC template.
+- Placing either Node advances its parent-link sequence without replacing an active customized policy.
+- The inherited Node follows the Logic Gate live; the customized Node stays independent on an ordinary parent edit.
+- Selecting Customized on an inherited Node copies the raw effective source once, preserving group pointers, before edits.
+- Overwrite-all changes one Logic Gate reset sequence and can supersede older customized descendants without row fanout.
+- A parent link created after an older reset protects the moved subtree until a later reset.
+- Detaching the inherited Node materializes its current effective policy as a customized Node policy in the same transaction.
 - My Work shows the node only when the user's effective node GVIC includes that node; parent project or logic gate GVIC only provides grouping and context.
-- Detaching the node preserves the node-level GVIC snapshot.
 - Project GVIC does not flow down into logic gates or nodes.
 - Updates visibility uses the GVIC/access rules of the updated target: project updates use project GVIC, logic gate updates use logic gate GVIC, and node updates use node effective GVIC.
 
-### Scenario GVIC-S7: GVIC Parent Templates And Pointer-Scaled Descendant Apply
+### Scenario GVIC-S7: Live Inheritance And Sequence-Scaled Descendant Actions
 
 Business logic covered:
-- GVIC39
-- GVIC40
-- GVIC41
-- GVIC42
-- GVIC43
-- GVIC44
-- GVIC45
-- GVIC46
-- GVIC47
-- GVIC48
-- GVIC49
-- GVIC50
+- GVIC6
+- GVIC7
+- GVIC8
+- GVIC10
+- GVIC11
+- GVIC12
+- GVIC13
+- GVIC14
+- GVIC15
+- GVIC18
+- GVIC26
+- GVIC28
+- GVIC29
 
 Given:
 - A parent resource has configured GVIC assignments.
-- Existing descendants have their own GVIC policies.
-- A child GVIC policy has been edited to differ from the parent.
-- A parent GVIC edit is saved without apply-to-descendants, a child is edited to differ, and the unchanged current parent policy is then applied to descendants.
+- Some descendants are inherited and one child has a different customization.
+- The parent is saved normally, inherited-only Apply is selected, then overwrite-all is separately confirmed.
+- The child is customized again after the reset and another subtree is moved after the reset.
 
 Expected:
-- New or transferred resources receive the direct target parent's current GVIC policy.
-- Editing a child GVIC affects only that child and future resources directly created or transferred under that child.
-- Saving a parent GVIC edit without apply-to-descendants changes only the parent and future direct children.
-- Applying the parent's current GVIC to descendants completely replaces every current supported descendant policy, even when the parent was unchanged in that request.
-- A copied child GVIC policy may be represented by policy/rule pointers or immutable rule versions instead of duplicated GVIC assignment rows.
-- Apply-to-descendants records a snapshot boundary and the parent's complete current assignments for the subtree instead of materializing a full GVIC policy on every descendant.
-- The apply operation removes child-specific GVIC assignments that are absent from the parent, and an empty parent policy clears descendant GVIC assignments.
-- Later descendant GVIC edits win over earlier ancestor applies until a newer ancestor apply is recorded.
+- New non-root resources start inherited and store no copied GVIC edges.
+- Editing a parent changes inherited branches live and stops at the active customized child.
+- Inherited-only Apply adds no policy state and performs no descendant writes.
+- Overwrite-all changes one reset sequence and makes eligible older customizations inactive without deleting their dormant rows.
+- A later child customization copies the then-current effective source, applies its changes, and becomes independent again.
+- A subtree moved after the reset is protected by its newer parent-link sequence.
+- Point reads explain the effective source, eligible reset, and any inactive stored customization.
+- Write count stays constant as modeled descendant count grows.
 - Group GVIC assignments remain group pointers and are not expanded into one source row per user.
-- GVIC explanations identify whether a role came from a direct rule, create/transfer inheritance, descendant apply, or group membership.
+- GVIC explanations identify source policy, direct/group principal, live membership, reset, and parent-link boundary.
 
 ### Scenario GVIC-S8: Minimal Logic Gate Work Request Owner
 
 Business logic covered:
-- GVIC51
-- GVIC52
-- GVIC53
-- GVIC54
+- GVIC21
+- GVIC28
+- GVIC32
+- GVIC34
 
 Given:
 - A Logic Gate has one Generated user and an Arena work snapshot is cached.
@@ -284,7 +272,8 @@ Expected:
 
 Business logic covered:
 - GVIC29
-- GVIC55
+- GVIC17
+- GVIC33
 
 Given:
 - An ordinary standalone Node and an email-collaboration Node both exist.
@@ -298,8 +287,9 @@ Expected:
 ### Scenario GVIC-S10: Narrow Entity Headers Preserve The Compact GVIC Row And More-Owned Bulk Action
 
 Business logic covered:
-- GVIC38
-- GVIC56
+- GVIC12
+- GVIC27
+- GVIC37
 
 Given:
 - A Node or Logic Gate editor shows the four shared GVIC role cards.
@@ -312,14 +302,14 @@ Expected:
 - The Logic Gate bulk action remains in **More editor actions** with its existing permission, disabled, busy, and error handling.
 - Selecting that action opens an explicit Yes/No confirmation.
 - Choosing No, canceling, or dismissing performs no write.
-- Only choosing Yes applies the current Logic Gate GVIC assignment snapshot to all currently assigned nodes.
+- Only choosing Yes records the overwrite-all reset sequence; no assigned Node policy rows are individually rewritten.
 
 ### Scenario GVIC-S11: Editor-Owned Routing And Target-Only Assignment Updates
 
 Business logic covered:
 - GVIC36
-- GVIC57
-- GVIC58
+- GVIC23
+- GVIC24
 
 Given:
 - A Node is inside a Logic Gate and their current GVIC assignments differ.

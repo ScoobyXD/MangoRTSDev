@@ -165,10 +165,10 @@ func TestMemoryVisibleExplorerSharedTriageAndWorkItemReadsDoNotLeak(t *testing.T
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, visibleGate.LogicGateID, viewer.UserID, EntityPermissionEdit)
 	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeLogicGate, hiddenGate.LogicGateID, viewer.UserID, EntityPermissionNoAccess)
 	for _, folderID := range []string{sharedParent.FolderID, sharedChild.FolderID, hiddenShared.FolderID} {
-		mustSetVisibleQueryDefaultAccess(t, repo, companyID, EntityTypeSharedTriageFolder, folderID, ResourceDefaultAccessNoAccess)
+		mustSetVisibleQueryDefaultAccess(t, repo, companyID, EntityTypeSharedInboxFolder, folderID, ResourceDefaultAccessNoAccess)
 	}
-	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeSharedTriageFolder, sharedParent.FolderID, viewer.UserID, EntityPermissionEdit)
-	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeSharedTriageFolder, sharedChild.FolderID, viewer.UserID, EntityPermissionEdit)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeSharedInboxFolder, sharedParent.FolderID, viewer.UserID, EntityPermissionEdit)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeSharedInboxFolder, sharedChild.FolderID, viewer.UserID, EntityPermissionEdit)
 
 	responsibleGate := mustCreateVisibleQueryGate(t, repo, companyID, "Work item responsible")
 	responsibleNode := mustCreateVisibleQueryNode(t, repo, companyID, "Work item responsible node")
@@ -232,8 +232,8 @@ func TestMemorySharedTriageVisibilityUsesPermissionsNotGVIC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateCommunicationsSharedInboxFolder: %v", err)
 	}
-	mustSetVisibleQueryDefaultAccess(t, repo, companyID, EntityTypeSharedTriageFolder, folder.FolderID, ResourceDefaultAccessNoAccess)
-	mustSetInboxReadResourceGVIC(t, repo, companyID, EntityTypeSharedTriageFolder, folder.FolderID, domain.GVICRoleGenerated, viewer.UserID)
+	mustSetVisibleQueryDefaultAccess(t, repo, companyID, EntityTypeSharedInboxFolder, folder.FolderID, ResourceDefaultAccessNoAccess)
+	mustSetInboxReadResourceGVIC(t, repo, companyID, EntityTypeSharedInboxFolder, folder.FolderID, domain.GVICRoleGenerated, viewer.UserID)
 
 	folders, err := repo.ListVisibleCommunicationsSharedInboxFolders(companyID, viewer.UserID)
 	if err != nil {
@@ -241,7 +241,7 @@ func TestMemorySharedTriageVisibilityUsesPermissionsNotGVIC(t *testing.T) {
 	}
 	assertVisibleQueryFoldersDoNotContain(t, folders, folder.FolderID)
 
-	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeSharedTriageFolder, folder.FolderID, viewer.UserID, EntityPermissionEdit)
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeSharedInboxFolder, folder.FolderID, viewer.UserID, EntityPermissionEdit)
 	folders, err = repo.ListVisibleCommunicationsSharedInboxFolders(companyID, viewer.UserID)
 	if err != nil {
 		t.Fatalf("ListVisibleCommunicationsSharedInboxFolders permission view: %v", err)
@@ -441,15 +441,15 @@ func TestPostgresVisibleQueriesUseDynamicPermissions(t *testing.T) {
 	}
 	workItemSource := visibleQueryNormalizeSource(string(workItemRaw))
 	for _, needle := range []string{
-		"from gvic_matrix_projection_table entry",
-		"mangorts_user_can_access_resource(entry.company_id, 'node', entry.resource_id, $4::uuid, 'edit')",
-		"mangorts_user_can_access_resource(entry.company_id, 'logic_gate', entry.resource_id, $4::uuid, 'edit')",
+		"mangorts_v2_effective_gvic_assignments(node.company_id,'node',node.node_id)",
+		"mangorts_user_can_access_resource(node.company_id,'node',node.node_id,$4::uuid,'edit')",
+		"mangorts_user_can_access_resource(gate.company_id,'logic_gate',gate.logic_gate_id,$4::uuid,'edit')",
 	} {
 		if !strings.Contains(workItemSource, needle) {
 			t.Fatalf("Postgres visible work item query missing %q", needle)
 		}
 	}
-	for _, forbidden := range []string{"listaccessibleentityids", "effective_" + "resource_" + "access"} {
+	for _, forbidden := range []string{"listaccessibleentityids", "effective_" + "resource_" + "access", "gvic_matrix_projection_table"} {
 		if strings.Contains(workItemSource, forbidden) {
 			t.Fatalf("Postgres visible work item query should not use %q", forbidden)
 		}
@@ -477,22 +477,13 @@ func mustCreateVisibleQueryGate(t *testing.T, repo *MemoryRepo, companyID, heade
 func mustSetVisibleQueryPermission(t *testing.T, repo *MemoryRepo, companyID, entityType, entityID, userID, accessLevel string) {
 	t.Helper()
 	input := EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: entityType,
-		EntityID:   entityID,
-	}
-	if usesDefaultResourceAccessPolicy(entityType) {
-		input.DefaultAccess = ResourceDefaultAccessNoAccess
-		input.DefaultAccessSet = true
-		if accessLevel != EntityPermissionNoAccess {
-			input.OverrideUserIDs = []string{userID}
-		}
-	} else {
-		input.Permissions = []EntityPermissionInput{{
+		CompanyID: companyID, EntityType: entityType, EntityID: entityID,
+		DefaultAccess: ResourceDefaultAccessNoAccess, DefaultAccessSet: true,
+		Permissions: []EntityPermissionInput{{
 			SubjectType: EntityPermissionSubjectUser,
 			SubjectID:   userID,
 			AccessLevel: accessLevel,
-		}}
+		}},
 	}
 	if _, err := repo.SetEntityPermissions(input); err != nil {
 		t.Fatalf("SetEntityPermissions %s/%s: %v", entityType, entityID, err)

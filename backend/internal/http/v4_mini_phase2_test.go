@@ -39,9 +39,11 @@ func TestV4MiniAccessDeniedSemanticsAndOmission(t *testing.T) {
 		t.Fatalf("CreateCompanyExplorerFolder hidden: %v", err)
 	}
 	if _, err := base.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: store.EntityTypeNode,
-		EntityID:   visibleNode.NodeID,
+		CompanyID:        companyID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         visibleNode.NodeID,
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   viewer.UserID,

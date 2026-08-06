@@ -1,4 +1,14 @@
-Last updated: 2026-07-28
+# Process Story: Shared Triage uses exact inherited folder and inbox policies
+
+A user opens a Shared Triage folder or mailbox
+↓
+The exact shared_inbox_folder or shared_inbox resource resolves its current permission and GVIC sources
+↓
+Only effective Edit permission opens mailbox data or permits mutations; GVIC routes work and notifications separately
+↓
+Moves, force resets, live groups, deletion, and cache fingerprints follow the same V2 hierarchy contract as other resources
+
+Last updated: 2026-08-05
 
 # Shared Triage Tests
 
@@ -16,25 +26,25 @@ ST1 - Shared Triage shows shared inbox folders and mailboxes that are visible to
 ST2 - Normal `company_user` users only see shared inbox folders where effective access grants at least edit access, and this folder-listing path must work without relying on a dev-admin or company-admin bypass.
 ST3 - Dev admins and company admins resolve all shared inbox folders to edit access; company managers and normal users follow Shared Triage resource policy from default access, direct user grants, and group grants.
 ST4 - Creating a Shared Triage folder or mailbox-capable shared inbox requires manager/admin authority, a nonblank name, and edit access to the selected parent when the item is nested.
-ST5 - Creating a Shared Triage folder or mailbox-capable shared inbox does not create private creator grants; access remains controlled by the resource default and `resource_permissions` exception rows.
+ST5 - A nested Shared Triage folder or shared inbox starts inherited with no copied edges; a root starts customized with a complete valid policy. Creation does not add a private creator grant.
 ST6 - Shared inbox folders and mailbox entries use the same tree model, with mailbox-capable entries identified by a shared inbox entry type, account email, and company email connection link.
 ST7 - Renaming or moving a Shared Triage folder requires edit access; creating or changing mailbox linkage also requires manager/admin authority.
 ST8 - Deleting a shared inbox folder requires edit access.
 ST9 - Protected shared inbox folders cannot be renamed or deleted.
-ST10 - Deleting a mailbox-capable shared inbox is destructive: it removes the Shared Triage work surface, any Shared Triage mailbox rows sharing the same company email connection, shared inbox permissions/GVIC rows, and the linked company_email_connections credential.
+ST10 - Deleting a mailbox-capable shared inbox is destructive: it removes the Shared Triage work surface, any Shared Triage mailbox rows sharing the same company email connection, both V2 settings rows and cascading policy edges, and the linked company_email_connections credential.
 ST11 - Reading shared inbox folders and messages uses the company-owned shared mailbox grant instead of the viewer's personal mailbox grant.
 ST12 - Shared mailbox caches are scoped by shared account/grant so one shared mailbox does not leak into another.
 ST13 - Sending mail from a shared inbox requires edit access to that shared inbox.
 ST14 - Shared inbox content and send actions both require edit access; a no-access user receives no mailbox content.
-ST15 - Reading shared inbox access settings requires manager/admin authority and edit access to the shared inbox.
-ST16 - Updating shared inbox access settings requires manager/admin authority and edit access to the shared inbox.
-ST17 - Shared inbox access settings return default access, explicit access grants, GVIC assignments, effective access, whether the actor can edit permissions, and whether the actor can edit manager permissions.
-ST18 - Updating shared inbox access changes `resource_permissions` exception rows/default access and must not convert GVIC assignments into permission grants; GVIC assignments are notification/My Work/update routing data and must not grant Shared Triage edit access or authorize delete/mutation actions.
-ST19 - Shared inbox access grants support user and group principals, and group grants resolve from `company_user_groups` and `company_user_group_members` source data instead of requiring a derived group closure/projection table to be populated after schema reset.
+ST15 - Reading a shared inbox or folder permission policy uses the canonical generic permission endpoint and requires manager/admin authority plus effective Edit access.
+ST16 - Updating a shared inbox or folder permission policy uses the canonical generic permission endpoint, complete-policy replacement, If-Match protection, and the same management gate.
+ST17 - Permission responses expose inherited/customized mode, effective source/default/rules, reset/overwrite explanation, effective access, and permission-management capabilities. GVIC is read separately from its canonical endpoint.
+ST18 - Permission and GVIC writes remain exact and separate. GVIC is notification/My Work/update routing data and never grants Shared Triage Edit access or authorizes delete/mutation actions.
+ST19 - Shared inbox and folder group edges remain group pointers and resolve through current nested `company_user_groups` and `company_user_group_members` data without a derived closure or effective table.
 ST20 - If required Shared Triage access or folder-list storage is unavailable, access and folder-list endpoints return service unavailable with `shared_inbox_storage_unavailable`, not a silent success or generic `failed_to_list_shared_inboxes` error.
-ST21 - Shared inbox GVIC assignment APIs apply only to mailbox/shared inbox resources, not plain organizational folders.
+ST21 - Canonical GVIC supports exact `shared_inbox_folder` and `shared_inbox` resources. Both use inherited/customized policy semantics; mailbox credentials are never policy principals.
 ST22 - Shared Triage must not show private personal mailbox messages unless they were explicitly added through a shared inbox path.
-ST23 - Shared inbox access and tree changes update canonical rows and read versions; other clients see them on navigation or refresh, not through workspace browser events.
+ST23 - Policy/tree changes update canonical rows and fingerprints. Parent moves advance parent-link sequences; inherited-only Apply writes no descendant state; overwrite-all records one reset sequence; other clients resolve the result on navigation or refresh.
 ST24 - Company-owned shared mailbox credentials are stored in company_email_connections, not as permission-bearing users.
 ST25 - A mailbox address used by a shared inbox does not need to be a Mango user and does not need company membership.
 ST26 - Each mailbox-capable shared inbox stores a company_email_connection_id foreign key that points to the company-owned mailbox credential used for mail operations.
@@ -47,8 +57,8 @@ ST32 - Users with view or edit permission to a shared inbox can open the shared 
 ST33 - If a company-owned shared connection is missing or expired, normal permitted users see a repair-required state and do not receive a personal OAuth prompt.
 ST34 - If a company-owned shared connection is missing or expired, managers/admins who can edit that shared inbox can start shared inbox OAuth reconnect for the company-owned credential.
 ST35 - Shared inbox mail actions use the company-owned grant but are authorized and audited as the currently logged-in user.
-ST36 - Shared inbox permissions remain stored on resource_permissions with resource_type = shared_inbox and resource_id = shared_inboxes.shared_inbox_id; Shared Triage folder permissions use resource_type = shared_inbox_folder, and `shared_triage_folder` may appear only as a legacy resource-type alias, not as a table name.
-ST37 - Shared inbox GVIC assignments remain stored on resource_gvic_assignments with resource_type = shared_inbox and resource_id = shared_inboxes.shared_inbox_id.
+ST36 - Shared inbox permissions use `resource_permission_settings` plus canonical `resource_permissions` with resource_type `shared_inbox`; folder permissions use exact type `shared_inbox_folder`. `shared_triage_folder` is rejected after cutover.
+ST37 - Shared inbox and folder GVIC use `resource_gvic_settings` plus canonical `resource_gvic_assignments` under their exact resource IDs.
 ST38 - Email connection records do not receive Shared Triage permissions or GVIC assignments; permissions and GVIC are assigned to the shared inbox work surface.
 ST39 - Plain Shared Triage folders are organizational containers only; selecting one clears mail state and must not call email folder, message list, message detail, prefetch, or load-more endpoints.
 ST40 - Shared Triage consumes compact, permission-checked `mailbox:shared:<shared_inbox_id>` hints for only the exact selected mail-bearing shared inbox. First acceptance and reconnect acceptance invalidate reusable cache state but start zero provider reads. External message/folder hints use one-active/one-queued-final coordination only for metadata and directly identified detail; event payloads never insert or replace rows and no mail polling is used.

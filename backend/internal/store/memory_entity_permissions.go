@@ -247,11 +247,6 @@ func (r *MemoryRepo) SetCompanyUserGroupMembers(companyID, groupID string, userI
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
-	userGroupMembersSnapshot := cloneMemoryMap(r.userGroupMembers)
-	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
-	gvicEffectiveSnapshot := cloneMemoryMap(r.gvicEffectiveAssignments)
-	GVICMatrixProjectionRowsSnapshot := cloneMemoryMap(r.GVICMatrixProjectionRows)
 	if _, ok := r.userGroups[userGroupKey(companyID, groupID)]; !ok {
 		return nil, ErrNotFound
 	}
@@ -286,427 +281,55 @@ func (r *MemoryRepo) SetCompanyUserGroupMembers(companyID, groupID string, userI
 		r.userGroupMembers[userGroupMemberKey(companyID, groupID, userID)] = member
 		items = append(items, r.withCompanyUserGroupMemberUserLocked(member))
 	}
-	if err := r.recomputeGroupDependentEffectiveAccessForGroupsLocked(companyID, []string{groupID}); err != nil {
-		r.userGroupMembers = userGroupMembersSnapshot
-		r.effectiveAccess = effectiveAccessSnapshot
-		r.gvicEffectiveAssignments = gvicEffectiveSnapshot
-		r.GVICMatrixProjectionRows = GVICMatrixProjectionRowsSnapshot
-		return nil, err
-	}
 	sortCompanyUserGroupMembers(items)
 	return items, nil
 }
 
 func (r *MemoryRepo) ListEntityPermissions(companyID, entityType, entityID string) ([]domain.EntityPermission, error) {
-	companyID = strings.TrimSpace(companyID)
-	entityID = strings.TrimSpace(entityID)
-	normalizedEntityType, ok := NormalizeEntityType(entityType)
-	if companyID == "" || entityID == "" || !ok {
-		return nil, ErrInvalid
+	policy, err := r.GetResourcePermissionPolicy(companyID, entityType, entityID)
+	if err != nil {
+		return nil, err
 	}
-
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	if !r.entityExistsLocked(companyID, normalizedEntityType, entityID) {
-		return nil, ErrNotFound
-	}
-	if usesDefaultResourceAccessPolicy(normalizedEntityType) {
-		return r.resolvedEntityPermissionsLocked(companyID, normalizedEntityType, entityID), nil
-	}
-	items := make([]domain.EntityPermission, 0)
-	for _, permission := range r.entityPermissions {
-		if permission.CompanyID == companyID && permission.EntityType == normalizedEntityType && permission.EntityID == entityID {
-			items = append(items, r.withEntityPermissionSubjectLocked(permission))
-		}
-	}
-	sortEntityPermissions(items)
-	return items, nil
+	return policy.Permissions, nil
 }
 
 func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]domain.EntityPermission, error) {
-	companyID := strings.TrimSpace(input.CompanyID)
-	entityID := strings.TrimSpace(input.EntityID)
-	entityType, ok := NormalizeEntityType(input.EntityType)
-	if companyID == "" || entityID == "" || !ok || len(input.Permissions) > EntityPermissionMaxAssignments {
-		return nil, ErrInvalid
+	current, err := r.GetResourcePermissionPolicy(input.CompanyID, input.EntityType, input.EntityID)
+	if err != nil {
+		return nil, err
 	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if usesDefaultResourceAccessPolicy(entityType) {
-		return r.setDefaultResourceAccessPolicyLocked(input, companyID, entityType, entityID)
-	}
-
-	permissionsSnapshot := cloneMemoryMap(r.entityPermissions)
-	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
-	nodesSnapshot := cloneMemoryMap(r.nodes)
-	logicGatesSnapshot := cloneMemoryMap(r.logicGates)
-	if !r.entityExistsLocked(companyID, entityType, entityID) {
-		return nil, ErrNotFound
-	}
-	type normalizedPermission struct {
-		subjectType string
-		subjectID   string
-		permission  string
-	}
-	normalized := make([]normalizedPermission, 0, len(input.Permissions))
-	seen := map[string]bool{}
-	for _, item := range input.Permissions {
-		subjectType, ok := NormalizeEntityPermissionSubjectType(item.SubjectType)
-		if !ok {
-			return nil, ErrInvalid
-		}
-		rawAccessLevel := strings.TrimSpace(item.AccessLevel)
-		if rawAccessLevel == "" {
-			rawAccessLevel = item.Permission
-		}
-		permission, ok := NormalizeEntityPermission(rawAccessLevel)
-		if !ok {
-			return nil, ErrInvalid
-		}
-		subjectID := strings.TrimSpace(item.SubjectID)
-		if subjectID == "" {
-			return nil, ErrInvalid
-		}
-		if subjectType == EntityPermissionSubjectUser {
-			membership, ok := r.memberships[membershipKey(companyID, subjectID)]
-			if !ok {
-				return nil, ErrPrincipalNotInCompany
-			}
-			if (entityType == EntityTypeNode || entityType == EntityTypeLogicGate) && permission == EntityPermissionNoAccess && domain.CanBypassResourcePermissions(membership.Role) {
-				continue
-			}
-		} else if _, ok := r.userGroups[userGroupKey(companyID, subjectID)]; !ok {
-			return nil, ErrNotFound
-		}
-		key := subjectType + ":" + subjectID
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		normalized = append(normalized, normalizedPermission{subjectType: subjectType, subjectID: subjectID, permission: permission})
-	}
-	if usesDefaultResourceAccessPolicy(entityType) {
-		defaultAccess := ResourceDefaultAccessEdit
-		if len(normalized) > 0 {
-			defaultAccess = ResourceDefaultAccessNoAccess
-		}
-		switch entityType {
-		case EntityTypeNode:
-			node := r.nodes[key(companyID, entityID)]
-			node.DefaultAccess = defaultAccess
-			r.nodes[key(companyID, entityID)] = node
-		case EntityTypeLogicGate:
-			gate := r.logicGates[key(companyID, entityID)]
-			gate.DefaultAccess = defaultAccess
-			r.logicGates[key(companyID, entityID)] = gate
-		}
-	}
-	targetEntityIDs := []string{entityID}
-	targetEntityIDSet := make(map[string]bool, len(targetEntityIDs))
-	for _, targetEntityID := range targetEntityIDs {
-		targetEntityIDSet[targetEntityID] = true
-	}
-	for permissionKey, permission := range r.entityPermissions {
-		if permission.CompanyID == companyID && permission.EntityType == entityType && targetEntityIDSet[permission.EntityID] {
-			delete(r.entityPermissions, permissionKey)
-		}
-	}
-	now := time.Now().UTC()
-	out := make([]domain.EntityPermission, 0, len(normalized))
-	for _, targetEntityID := range targetEntityIDs {
-		for _, item := range normalized {
-			permission := domain.EntityPermission{
-				CompanyID:        companyID,
-				EntityType:       entityType,
-				EntityID:         targetEntityID,
-				SubjectType:      item.subjectType,
-				SubjectID:        item.subjectID,
-				Permission:       item.permission,
-				AccessLevel:      item.permission,
-				CreatedTimestamp: now,
-			}
-			r.entityPermissions[entityPermissionKey(companyID, entityType, targetEntityID, item.subjectType, item.subjectID, item.permission)] = permission
-			if targetEntityID == entityID {
-				out = append(out, r.withEntityPermissionSubjectLocked(permission))
-			}
-		}
-	}
-	for _, targetEntityID := range targetEntityIDs {
-		if err := r.recomputeDirectGrantEffectiveAccessForResourceLocked(companyID, entityType, targetEntityID); err != nil {
-			r.entityPermissions = permissionsSnapshot
-			r.effectiveAccess = effectiveAccessSnapshot
-			r.nodes = nodesSnapshot
-			r.logicGates = logicGatesSnapshot
-			return nil, err
-		}
-		if entityType == EntityTypeNode || entityType == EntityTypeLogicGate {
-			if err := r.recomputeCompanyMemberDefaultEffectiveAccessForResourceLocked(companyID, entityType, targetEntityID); err != nil {
-				r.entityPermissions = permissionsSnapshot
-				r.effectiveAccess = effectiveAccessSnapshot
-				r.nodes = nodesSnapshot
-				r.logicGates = logicGatesSnapshot
-				return nil, err
-			}
-		}
-	}
-	if entityType == EntityTypeLogicGate {
-		if err := r.recomputeLogicGateAssignedNodeVisibilityLocked(companyID, []string{entityID}, nil); err != nil {
-			r.entityPermissions = permissionsSnapshot
-			r.effectiveAccess = effectiveAccessSnapshot
-			r.nodes = nodesSnapshot
-			r.logicGates = logicGatesSnapshot
-			return nil, err
-		}
-	}
-	sortEntityPermissions(out)
-	return out, nil
-}
-
-func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermissionUpdateInput, companyID, entityType, entityID string) ([]domain.EntityPermission, error) {
-	permissionsSnapshot := cloneMemoryMap(r.entityPermissions)
-	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
-	nodesSnapshot := cloneMemoryMap(r.nodes)
-	logicGatesSnapshot := cloneMemoryMap(r.logicGates)
-	projectsSnapshot := cloneMemoryMap(r.projects)
-	foldersSnapshot := cloneMemoryMap(r.folders)
-	resourcePolicySequenceSnapshot := r.resourcePolicySequence
-	resourcePermissionRevisionsSnapshot := cloneMemoryMap(r.resourcePermissionRevisions)
-	resourcePermissionApplicationsSnapshot := clonePermissionApplications(r.resourcePermissionApplications)
-	restore := func() {
-		r.entityPermissions = permissionsSnapshot
-		r.effectiveAccess = effectiveAccessSnapshot
-		r.nodes = nodesSnapshot
-		r.logicGates = logicGatesSnapshot
-		r.projects = projectsSnapshot
-		r.folders = foldersSnapshot
-		r.resourcePolicySequence = resourcePolicySequenceSnapshot
-		r.resourcePermissionRevisions = resourcePermissionRevisionsSnapshot
-		r.resourcePermissionApplications = resourcePermissionApplicationsSnapshot
-	}
-	if !r.entityExistsLocked(companyID, entityType, entityID) {
-		return nil, ErrNotFound
-	}
-	beforePolicy, ok := r.resolvedResourcePermissionPolicyLocked(companyID, entityType, entityID)
-	if !ok {
-		return nil, ErrNotFound
-	}
-	defaultAccess := beforePolicy.DefaultAccess
-	directDefaultAccess, ok := r.defaultAccessForResourceLocked(companyID, entityType, entityID)
-	if !ok {
-		return nil, ErrNotFound
-	}
-	oldDefaultAccess := beforePolicy.DefaultAccess
-
-	canMutateManagerOverrides := true
-	if strings.TrimSpace(input.ActorUserID) != "" {
-		canMutateManagerOverrides = r.userCanMutateManagerResourceOverridesLocked(companyID, input.ActorUserID)
-	}
-	defaultAccessChanged := false
-	if input.DefaultAccessSet {
-		nextDefaultAccess, ok := NormalizeResourceDefaultAccess(input.DefaultAccess)
-		if !ok {
-			return nil, ErrInvalid
-		}
-		defaultAccess = nextDefaultAccess
-		defaultAccessChanged = true
-	} else if len(input.OverrideUserIDs) == 0 {
-		inferredDefaultAccess, inferred, err := inferredResourceDefaultAccessFromPermissions(input.Permissions)
-		if err != nil {
-			return nil, err
-		}
-		if inferred {
-			defaultAccess = inferredDefaultAccess
-			defaultAccessChanged = true
-		}
-	}
-	if defaultAccessChanged || directDefaultAccess != defaultAccess {
-		if err := r.setResourceDefaultAccessLocked(companyID, entityType, entityID, defaultAccess); err != nil {
-			restore()
-			return nil, err
-		}
-	}
-
-	assignments := map[string]domain.EntityPermission{}
-	addAssignment := func(subjectType, subjectID, accessLevel string) error {
-		subjectType, ok := NormalizeEntityPermissionSubjectType(subjectType)
-		if !ok {
-			return ErrInvalid
-		}
-		accessLevel, ok = NormalizeEntityPermission(accessLevel)
-		if !ok {
-			return ErrInvalid
-		}
-		subjectID = strings.TrimSpace(subjectID)
-		if subjectID == "" {
-			return ErrInvalid
-		}
-		switch subjectType {
-		case EntityPermissionSubjectUser:
-			membership, ok := r.memberships[membershipKey(companyID, subjectID)]
-			if !ok {
-				return ErrPrincipalNotInCompany
-			}
-			role := domain.NormalizeRole(membership.Role)
-			if domain.CanBypassResourcePermissions(role) {
-				return nil
-			}
-			if role == domain.RoleCompanyManager && !canMutateManagerOverrides {
-				return nil
-			}
-		case EntityPermissionSubjectGroup:
-			if !canMutateManagerOverrides {
-				return ErrInvalid
-			}
-			if _, ok := r.userGroups[userGroupKey(companyID, subjectID)]; !ok {
-				return ErrNotFound
-			}
-		default:
-			return ErrInvalid
-		}
-		assignments[subjectType+":"+subjectID] = domain.EntityPermission{
-			CompanyID:   companyID,
-			EntityType:  entityType,
-			EntityID:    entityID,
-			SubjectType: subjectType,
-			SubjectID:   subjectID,
-			Permission:  accessLevel,
-			AccessLevel: accessLevel,
-		}
-		return nil
-	}
-
-	if len(input.OverrideUserIDs) > 0 && len(input.Permissions) == 0 {
-		overrideAccess := OppositeResourceDefaultAccess(defaultAccess)
-		for _, userID := range input.OverrideUserIDs {
-			if err := addAssignment(EntityPermissionSubjectUser, userID, overrideAccess); err != nil {
-				return nil, err
-			}
-		}
-	} else {
-		for _, raw := range input.Permissions {
-			subjectType, ok := NormalizeEntityPermissionSubjectType(raw.SubjectType)
-			if !ok {
-				return nil, ErrInvalid
-			}
-			subjectID := strings.TrimSpace(raw.SubjectID)
-			if subjectID == "" {
-				return nil, ErrInvalid
-			}
-			rawAccessLevel := permissionInputAccessLevel(raw)
-			accessLevel := ""
-			if strings.TrimSpace(rawAccessLevel) != "" {
-				var accessOK bool
-				accessLevel, accessOK = NormalizeEntityPermission(rawAccessLevel)
-				if !accessOK {
-					return nil, ErrInvalid
-				}
-			}
-			if accessLevel == "" {
-				return nil, ErrInvalid
-			}
-			if err := addAssignment(subjectType, subjectID, accessLevel); err != nil {
-				return nil, err
-			}
-		}
-	}
-	if !canMutateManagerOverrides {
-		for _, membership := range r.memberships {
-			if membership.CompanyID != companyID || domain.NormalizeRole(membership.Role) != domain.RoleCompanyManager {
-				continue
-			}
-			effectiveAccess := oldDefaultAccess
-			if directAccess, ok := r.directResourcePermissionAccessLevelLocked(companyID, entityType, entityID, membership.UserID); ok {
-				effectiveAccess = directAccess
-			}
-			if effectiveAccess != defaultAccess {
-				assignments[EntityPermissionSubjectUser+":"+membership.UserID] = domain.EntityPermission{
-					CompanyID:   companyID,
-					EntityType:  entityType,
-					EntityID:    entityID,
-					SubjectType: EntityPermissionSubjectUser,
-					SubjectID:   membership.UserID,
-					Permission:  effectiveAccess,
-					AccessLevel: effectiveAccess,
-				}
-			}
-		}
-	}
-
-	for permissionKey, permission := range r.entityPermissions {
-		if permission.CompanyID == companyID && permission.EntityType == entityType && permission.EntityID == entityID {
-			delete(r.entityPermissions, permissionKey)
-		}
-	}
-	now := time.Now().UTC()
-	out := make([]domain.EntityPermission, 0, len(assignments))
-	for _, permission := range assignments {
-		permission.CreatedTimestamp = now
-		r.entityPermissions[entityPermissionKey(companyID, entityType, entityID, permission.SubjectType, permission.SubjectID, "")] = permission
-		out = append(out, r.withEntityPermissionSubjectLocked(permission))
-	}
-	policySequence := r.nextResourcePolicySequenceLocked()
-	r.setDirectResourcePolicySequenceLocked(companyID, entityType, entityID, policySequence)
-	changedTargets := []resourcePermissionTarget{{ResourceType: entityType, ResourceID: entityID}}
+	action := PolicyDescendantActionInheritedOnly
 	if input.ApplyToDescendants {
-		afterPolicy, ok := r.resolvedResourcePermissionPolicyLocked(companyID, entityType, entityID)
-		if !ok {
-			restore()
-			return nil, ErrNotFound
-		}
-		descendantTargets, err := r.applyResourcePermissionPolicyToDescendantsLocked(input, policySequence, afterPolicy.DefaultAccess, afterPolicy.Assignments)
-		if err != nil {
-			restore()
-			return nil, err
-		}
-		changedTargets = append(changedTargets, descendantTargets...)
+		action = PolicyDescendantActionIncludingCustomized
 	}
-	for _, target := range changedTargets {
-		if err := r.recomputeDirectGrantEffectiveAccessForResourceLocked(companyID, target.ResourceType, target.ResourceID); err != nil {
-			restore()
-			return nil, err
-		}
-		if target.ResourceType == EntityTypeLogicGate {
-			if err := r.recomputeLogicGateAssignedNodeVisibilityLocked(companyID, []string{target.ResourceID}, nil); err != nil {
-				restore()
-				return nil, err
-			}
-		}
+	var defaultAccess *string
+	if input.DefaultAccessSet {
+		value := input.DefaultAccess
+		defaultAccess = &value
+	} else {
+		defaultAccess = &current.EffectiveDefaultAccess
 	}
-	sortEntityPermissions(out)
-	return out, nil
-}
-
-func (r *MemoryRepo) userCanMutateManagerResourceOverridesLocked(companyID, userID string) bool {
-	companyID = strings.TrimSpace(companyID)
-	userID = strings.TrimSpace(userID)
-	if companyID == "" || userID == "" {
-		return false
+	updated, _, err := r.PutResourcePermissionPolicy(ResourcePermissionPolicyUpdateInput{
+		CompanyID: input.CompanyID, ResourceType: input.EntityType, ResourceID: input.EntityID,
+		PermissionMode: PolicyModeCustomized, DefaultAccess: defaultAccess, Permissions: input.Permissions,
+		DescendantAction: action, ExpectedRevision: current.Revision, ActorUserID: input.ActorUserID,
+	})
+	if err != nil {
+		return nil, err
 	}
-	for _, membership := range r.memberships {
-		if membership.UserID == userID && domain.NormalizeRole(membership.Role) == domain.RoleDevAdmin {
-			return true
-		}
-	}
-	membership, ok := r.memberships[membershipKey(companyID, userID)]
-	return ok && domain.NormalizeRole(membership.Role) == domain.RoleCompanyAdmin
+	return updated.Permissions, nil
 }
 
 func (r *MemoryRepo) ListAccessibleEntityIDs(companyID, entityType, userID, accessLevel string, entityIDs []string) (map[string]bool, error) {
 	companyID = strings.TrimSpace(companyID)
 	userID = strings.TrimSpace(userID)
-	normalizedEntityType, ok := NormalizeEntityType(entityType)
+	entityType, typeOK := NormalizeEntityType(entityType)
 	accessLevel, accessOK := NormalizeEntityPermission(accessLevel)
-	if companyID == "" || userID == "" || !ok || !accessOK {
+	if companyID == "" || userID == "" || !typeOK || !accessOK || !usesDefaultResourceAccessPolicy(entityType) {
 		return nil, ErrInvalid
 	}
 
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	out := map[string]bool{}
+	cleanIDs := make([]string, 0, len(entityIDs))
 	seen := map[string]bool{}
 	for _, rawID := range entityIDs {
 		entityID := strings.TrimSpace(rawID)
@@ -714,14 +337,12 @@ func (r *MemoryRepo) ListAccessibleEntityIDs(companyID, entityType, userID, acce
 			continue
 		}
 		seen[entityID] = true
-		if !r.entityExistsLocked(companyID, normalizedEntityType, entityID) {
-			continue
-		}
-		if r.userCanAccessEntityLocked(companyID, normalizedEntityType, entityID, userID, accessLevel) {
-			out[entityID] = true
-		}
+		cleanIDs = append(cleanIDs, entityID)
 	}
-	return out, nil
+	if len(cleanIDs) == 0 {
+		return map[string]bool{}, nil
+	}
+	return r.ListEffectiveResourceIDsForUser(companyID, userID, entityType, accessLevel, cleanIDs)
 }
 
 func (r *MemoryRepo) UserCanAccessEntity(companyID, entityType, entityID, userID, accessLevel string) (bool, error) {
@@ -786,60 +407,6 @@ func (r *MemoryRepo) resourceHasDirectEntityPermissionsLocked(companyID, entityT
 	return false
 }
 
-func (r *MemoryRepo) userHasSharedTriagePermissionLocked(companyID, entityID, userID, accessLevel string) bool {
-	requiredRank := entityPermissionRank(accessLevel)
-	if requiredRank == 0 {
-		return false
-	}
-	entityIDs := []string{entityID}
-	entityIDs = r.sharedTriageFolderAncestryLocked(companyID, entityID)
-	type matchedGrant struct {
-		depth       int
-		subjectRank int
-		accessRank  int
-	}
-	best := matchedGrant{depth: len(entityIDs) + 1, subjectRank: -1, accessRank: -1}
-	found := false
-	for depth, currentEntityID := range entityIDs {
-		for _, permission := range r.entityPermissions {
-			if permission.CompanyID != companyID || permission.EntityType != EntityTypeSharedTriageFolder || permission.EntityID != currentEntityID {
-				continue
-			}
-			subjectRank := 0
-			switch permission.SubjectType {
-			case EntityPermissionSubjectUser:
-				if permission.SubjectID != userID {
-					continue
-				}
-				subjectRank = 2
-			case EntityPermissionSubjectGroup:
-				groupIDs := companyUserGroupSubtreeIDsLocked(r.userGroups, companyID, permission.SubjectID)
-				matchedGroup := false
-				for groupID := range groupIDs {
-					if _, ok := r.userGroupMembers[userGroupMemberKey(companyID, groupID, userID)]; ok {
-						matchedGroup = true
-						break
-					}
-				}
-				if !matchedGroup {
-					continue
-				}
-				subjectRank = 3
-			default:
-				continue
-			}
-			candidate := matchedGrant{depth: depth, subjectRank: subjectRank, accessRank: entityPermissionRank(permission.Permission)}
-			if !found || candidate.depth < best.depth ||
-				(candidate.depth == best.depth && candidate.subjectRank > best.subjectRank) ||
-				(candidate.depth == best.depth && candidate.subjectRank == best.subjectRank && candidate.accessRank > best.accessRank) {
-				best = candidate
-				found = true
-			}
-		}
-	}
-	return found && best.accessRank >= requiredRank
-}
-
 func (r *MemoryRepo) userHasRoleAdminAccessLocked(companyID, userID string) bool {
 	for _, membership := range r.memberships {
 		if membership.UserID == userID && membership.Role == domain.RoleDevAdmin {
@@ -852,26 +419,6 @@ func (r *MemoryRepo) userHasRoleAdminAccessLocked(companyID, userID string) bool
 
 func entityPermissionRank(accessLevel string) int {
 	return EntityPermissionRank(accessLevel)
-}
-
-func (r *MemoryRepo) sharedTriageFolderAncestryLocked(companyID, folderID string) []string {
-	ids := []string{folderID}
-	seen := map[string]bool{folderID: true}
-	currentID := folderID
-	for {
-		folder, ok := r.folders[key(companyID, currentID)]
-		if !ok || folder.FolderKind != "communications" || folder.ParentFolderID == nil {
-			break
-		}
-		parentID := strings.TrimSpace(*folder.ParentFolderID)
-		if parentID == "" || seen[parentID] {
-			break
-		}
-		seen[parentID] = true
-		ids = append(ids, parentID)
-		currentID = parentID
-	}
-	return ids
 }
 
 func (r *MemoryRepo) sharedTriagePermissionTargetIDsLocked(companyID, folderID string) []string {
@@ -1286,13 +833,7 @@ func (r *MemoryRepo) snapshotResourceAccessPolicyLocked(companyID, sourceType, s
 		r.entityPermissions[entityPermissionKey(companyID, targetType, targetID, assignment.SubjectType, assignment.SubjectID, "")] = permission
 	}
 	r.setDirectResourcePolicySequenceLocked(companyID, targetType, targetID, r.nextResourcePolicySequenceLocked())
-	if err := r.recomputeDirectGrantEffectiveAccessForResourceLocked(companyID, targetType, targetID); err != nil {
-		return false, err
-	}
 	if targetType == EntityTypeLogicGate {
-		if err := r.recomputeLogicGateAssignedNodeVisibilityLocked(companyID, []string{targetID}, nil); err != nil {
-			return false, err
-		}
 	}
 	return changed, nil
 }

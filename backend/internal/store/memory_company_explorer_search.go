@@ -137,9 +137,7 @@ func (r *MemoryRepo) placeCompanyExplorerItemInDefaultFolderInternalLocked(compa
 		if childResourceID == "" {
 			childResourceID = child.EntityID
 		}
-		if _, err := r.snapshotResourceAccessPolicyLocked(companyID, EntityTypeCompanyExplorerFolder, folderID, targetType, childResourceID); err != nil {
-			return false
-		}
+
 	}
 	return true
 }

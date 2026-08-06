@@ -105,7 +105,7 @@ func TestPostgresEmailRelationshipCreationUsesFinalTablesAndOrdinaryPermissions(
 		t.Fatal("could not isolate EnsureCommunicationsEmailCollaboration source")
 	}
 	ensureSource := source[start:end]
-	for _, required := range []string{"upsertPostgresCommunicationsEmailThreadTx", "linkPostgresCommunicationsEmailThreadToNodeTx", "insertPostgresResourcePermissionTx", "resource_gvic_assignments"} {
+	for _, required := range []string{"upsertPostgresCommunicationsEmailThreadTx", "linkPostgresCommunicationsEmailThreadToNodeTx", "customizeNewPostgresResourcePermissionForCreatorTx", "customizeNewPostgresResourceGVICForCreatorTx"} {
 		if !strings.Contains(ensureSource, required) {
 			t.Fatalf("final email relationship creation missing %q", required)
 		}

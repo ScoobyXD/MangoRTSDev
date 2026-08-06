@@ -96,7 +96,6 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateNode aci: %v", err)
 	}
-	mustSetWorkItemReadNodeGVIC(t, repo, companyID, aciNode.NodeID, user.UserID)
 	standaloneNode, err := repo.CreateNode(companyID, "Read API standalone node")
 	if err != nil {
 		t.Fatalf("CreateNode standalone: %v", err)

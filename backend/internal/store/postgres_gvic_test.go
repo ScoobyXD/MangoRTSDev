@@ -6,84 +6,72 @@ import (
 	"testing"
 )
 
-func TestPostgresSetCompanyUserGroupMembersUsesAffectedGroupGVICSync(t *testing.T) {
+func TestPostgresGroupMembershipWritesDoNotFanOutPolicyState(t *testing.T) {
 	raw, err := os.ReadFile("postgres_entity_permissions.go")
 	if err != nil {
-		t.Fatalf("ReadFile postgres_entity_permissions.go: %v", err)
+		t.Fatal(err)
 	}
-	body := extractFunctionSourceForTest(t, string(raw), "func (r *PostgresRepo) SetCompanyUserGroupMembers")
-	normalized := strings.ToLower(strings.Join(strings.Fields(body), " "))
-
-	if !strings.Contains(normalized, "recomputegroupdependenteffectiveaccessforgroupstx(ctx, tx, companyid, []string{groupid})") {
-		t.Fatalf("SetCompanyUserGroupMembers does not use affected-group GVIC sync")
-	}
-	if strings.Contains(normalized, "recomputegroupdependenteffectiveaccessforcompanytx") {
-		t.Fatalf("SetCompanyUserGroupMembers still calls the company-wide group GVIC recompute")
+	for _, signature := range []string{
+		"func (r *PostgresRepo) SetCompanyUserGroupMembers",
+		"func (r *PostgresRepo) UpdateCompanyUserGroup",
+	} {
+		body := strings.ToLower(extractFunctionSourceForTest(t, string(raw), signature))
+		for _, forbidden := range []string{
+			"resource_gvic_assignments",
+			"resource_permissions",
+			"effective_resource_access",
+			"gvic_matrix_projection",
+			"recompute",
+		} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s fans out policy state through %q", signature, forbidden)
+			}
+		}
 	}
 }
 
-func TestPostgresAffectedGroupGVICResourceKeyQueryIsScoped(t *testing.T) {
-	raw, err := os.ReadFile("postgres_gvic.go")
+func TestPostgresV2GVICExpandsNestedGroupsOnlyAtReadTime(t *testing.T) {
+	raw, err := os.ReadFile("../../db/migrations/20260805_zzzc_v2_gvic_permissions_step2_cutover.sql")
 	if err != nil {
-		t.Fatalf("ReadFile postgres_gvic.go: %v", err)
+		t.Fatal(err)
 	}
-	source := string(raw)
-	ancestorBody := extractFunctionSourceForTest(t, source, "func gvicAncestorGroupIDsForGroupsTx")
-	exactBody := extractFunctionSourceForTest(t, source, "func gvicResourceKeysForGroupPrincipalIDsTx")
-	wrapperBody := extractFunctionSourceForTest(t, source, "func gvicResourceKeysForAffectedGroupsTx")
-	ancestor := strings.ToLower(strings.Join(strings.Fields(ancestorBody), " "))
-	exact := strings.ToLower(strings.Join(strings.Fields(exactBody), " "))
-	wrapper := strings.ToLower(strings.Join(strings.Fields(wrapperBody), " "))
-
-	for _, needle := range []string{
-		"input_groups(group_id) as ( select distinct unnest($2::text[])::uuid )",
-		"join input_groups input_group on closure.descendant_group_id=input_group.group_id",
-		"select distinct closure.ancestor_group_id::text",
+	source := strings.ToLower(string(raw))
+	for _, required := range []string{
+		"create or replace function mangorts_v2_effective_gvic_assignments",
+		"group_tree(role,source_principal_id,group_id,depth,path,updated_timestamp)",
+		"company_user_groups",
+		"company_user_group_members",
+		"mangorts_v2_group_membership_version",
 	} {
-		if !strings.Contains(ancestor, needle) {
-			t.Fatalf("gvicAncestorGroupIDsForGroupsTx missing scoped SQL fragment %q", needle)
-		}
-	}
-	for _, needle := range []string{
-		"input_groups(group_id) as ( select distinct unnest($2::text[])::uuid )",
-		"join input_groups input_group on assignment.principal_id=input_group.group_id",
-		"assignment.company_id=$1::uuid and assignment.principal_type='group'",
-	} {
-		if !strings.Contains(exact, needle) {
-			t.Fatalf("gvicResourceKeysForGroupPrincipalIDsTx missing scoped SQL fragment %q", needle)
+		if !strings.Contains(source, required) {
+			t.Fatalf("V2 live group resolver missing %q", required)
 		}
 	}
 	for _, forbidden := range []string{
-		"join node_logic_gate_assignments link",
-		"union select link.company_id, 'node'::text as resource_type, link.node_id as resource_id",
+		"insert into resource_gvic_effective_assignments",
+		"update resource_gvic_effective_assignments",
 	} {
-		if strings.Contains(exact, forbidden) {
-			t.Fatalf("gvicResourceKeysForGroupPrincipalIDsTx still expands Logic Gate GVIC to child node keys via %q", forbidden)
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("Step 2 migration materializes group expansion through %q", forbidden)
 		}
-	}
-	for _, needle := range []string{
-		"gvicancestorgroupidsforgroupstx",
-		"gvicresourcekeysforgroupprincipalidstx",
-	} {
-		if !strings.Contains(wrapper, needle) {
-			t.Fatalf("gvicResourceKeysForAffectedGroupsTx missing wrapper call %q", needle)
-		}
-	}
-	if strings.Contains(exact, "from resource_gvic_assignments where company_id=$1::uuid and principal_type='group'") {
-		t.Fatalf("exact group-principal helper contains the broad company group-assignment scan")
 	}
 }
 
-func TestPostgresBroadGroupGVICSyncIsNotUsedByMembershipWrites(t *testing.T) {
+func TestPostgresGVICRuntimeHasNoGroupRepairOrEffectiveProjection(t *testing.T) {
 	raw, err := os.ReadFile("postgres_gvic.go")
 	if err != nil {
-		t.Fatalf("ReadFile postgres_gvic.go: %v", err)
+		t.Fatal(err)
 	}
-	source := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
-	if !strings.Contains(source, "func syncpostgresgvicforallgroupassignmentstx") {
-		t.Fatalf("broad group GVIC repair helper not found")
-	}
-	if !strings.Contains(source, "group membership and hierarchy writes should use targeted group-principal helpers instead") {
-		t.Fatalf("broad group GVIC helper is not documented as a repair/backfill path")
+	source := strings.ToLower(string(raw))
+	for _, forbidden := range []string{
+		"syncpostgresgvic",
+		"gvicresourcekeysforaffectedgroups",
+		"resource_gvic_effective_assignments",
+		"resource_gvic_subtree_applications",
+		"gvic_matrix_projection",
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("V2 GVIC runtime retained Step 1 path %q", forbidden)
+		}
 	}
 }
