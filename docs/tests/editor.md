@@ -34,6 +34,8 @@ The backend reads and writes the exact `node_textboxes` TipTap JSON row and reco
 ↓
 Viewer baselines are stored in `node_textbox_seen_snapshots`, and saved batches are stored in `node_textboxes_history`
 ↓
+An empty document remains valid TipTap JSON with one explicit empty paragraph; an exact bad conversion is repaired in current, history, seen, and recycle copies without changing its identity or revision
+↓
 The frontend keeps its stable projection-shaped `information_id`, assembled from final textbox, email, chat, and attachment rows
 ↓
 The old Node information/projection writer is rejected; there is no fallback or dual write
@@ -380,6 +382,7 @@ ED115 - Annotation arrays are compared by their meaningful values, not by JavaSc
 ED116 - Current Tiptap JSON snapshots omit only attributes equal to defaults in the active schema. Stable block IDs, intentional empty paragraphs, hard breaks, custom node/mark attributes, and attachment identity/metadata/dimensions/accessibility text remain explicit. ProseMirror hydration and the sleeping static renderer must apply the same omitted defaults. The backend compacts the matching known defaults before storage and canonical reads, and stale-edit merge must treat an older expanded block and a compact block as equal instead of duplicating either one. The required top-level format, schema version, document root, and annotations array remain unchanged; no database migration is required.
 
 ED117 - `node_textbox_chats` is the current authority for Node textbox chats. Reads, creates, replies, edits, and deletes use that table and must not create new legacy `Text block chat` information or projection rows. Deleting a textbox deletes every chat it owns, including email-selection chats, and removes each chat's attachment relationships. The normalized email message, thread, and email attachments remain. Existing legacy chat rows are ignored by current reads and retained only as rollback and audit evidence until a separately approved retirement.
+ED118 - A canonical empty TipTap document has one explicit empty paragraph inside the document root; `document.content=[]` is invalid. The forward repair may replace only that exact bad converted shape in `node_textboxes`, `node_textboxes_history`, `node_textbox_seen_snapshots`, and the same arrays inside Recycle Bin restore payloads. It preserves textbox and owner IDs, revisions, annotations, ordering, timestamps, saved-user identity, deletion state, array order, and every unrelated JSON field. The repair never rewrites the shipped cutover migration and never treats the representation correction as a user edit.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -1874,6 +1877,25 @@ Expected:
 - Chat attachment relationships are removed with the deleted chats.
 - The normalized email message, thread, and email attachments remain.
 - Existing legacy chat rows remain unchanged and are ignored by current reads.
+
+### Scenario ED-S23: Repair Exact Empty Node Documents
+
+Business logic covered:
+- ED118
+
+Given:
+- The final Node conversion stored an otherwise valid Mango TipTap envelope whose document root has an empty `content` array.
+- The exact body may exist in a current or deleted textbox, manual history, a seen baseline, or one of those arrays in a Recycle Bin restore payload.
+
+When:
+- An operator runs the read-only repair preflight and then applies the reviewed forward migration.
+
+Expected:
+- Only the exact bad shape becomes a document containing one empty paragraph.
+- Current, history, seen, and recycled copies all remain loadable and restorable.
+- IDs, revisions, annotations, order, timestamps, saved-user identity, deletion state, and unrelated payload data remain unchanged.
+- Re-running the migration repairs zero rows, and a fresh database remains a no-op.
+- The shipped historical cutover file remains unchanged.
 
 
 

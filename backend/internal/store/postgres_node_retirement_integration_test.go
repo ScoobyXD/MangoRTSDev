@@ -92,6 +92,11 @@ create table email_relationships(
   company_id uuid not null,email_relationship_id uuid not null,email_thread_id uuid not null,
   email_message_id uuid not null,resource_type text not null,resource_id uuid not null,
   resource_textbox_id text,created_timestamp timestamptz not null);
+create table recycle_bin_items(
+  company_id uuid not null,recycle_bin_item_id uuid not null,object_kind text not null,object_id uuid not null,
+  object_label text not null,object_folder_kind text not null,restore_payload jsonb not null,
+  deleted_by_user_id uuid,deleted_timestamp timestamptz not null,
+  primary key(company_id,recycle_bin_item_id));
 create table schema_migrations(version text primary key);
 create function mangorts_trg_bump_node_view_user_from_snapshot() returns trigger language plpgsql as $$
 begin if tg_op='DELETE' then return old; end if; return new; end $$;
@@ -130,6 +135,16 @@ insert into node_projection_seen_snapshots values
   ('00000000-0000-4000-8000-000000000602','00000000-0000-4000-8000-000000000603',
    '00000000-0000-4000-8000-000000000608','00000000-0000-4000-8000-000000000606',
    'stale baseline',now(),now());
+insert into node_textboxes_history values(
+  '00000000-0000-4000-8000-000000000602','00000000-0000-4000-8000-000000000603',
+  '00000000-0000-4000-8000-000000000604','00000000-0000-4000-8000-000000000609',
+  '{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[]},"annotations":[]}',
+  0,'00000000-0000-4000-8000-000000000601',now());
+insert into recycle_bin_items values(
+  '00000000-0000-4000-8000-000000000602','00000000-0000-4000-8000-000000000610',
+  'node','00000000-0000-4000-8000-000000000603','Recycled fixture','recycle_bin',
+  '{"marker":"preserve","node_textboxes":[{"body_json":{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[]},"annotations":[]},"revision":11}],"node_textboxes_history":[{"body_json":{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[]},"annotations":[]},"saved_by_user_id":"00000000-0000-4000-8000-000000000601"}],"node_textbox_seen_snapshots":[{"body_json":{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[]},"annotations":[]},"textbox_revision":11}]}',
+  null,now());
 insert into node_content_changes values(
   '00000000-0000-4000-8000-000000000602','00000000-0000-4000-8000-000000000605',
   '00000000-0000-4000-8000-000000000603','00000000-0000-4000-8000-000000000604',
@@ -142,6 +157,51 @@ insert into node_content_changes values(
 	if _, err := db.Exec(forward); err != nil {
 		t.Fatalf("forward Node cutover: %v", err)
 	}
+
+	repair := readNodeRetirementIntegrationSQL(t, "..", "..", "db", "migrations", "20260805_zzzd_repair_empty_node_textbox_documents.sql")
+	if _, err := db.Exec(repair); err != nil {
+		t.Fatalf("empty Node document repair: %v", err)
+	}
+	if _, err := db.Exec(repair); err != nil {
+		t.Fatalf("idempotent empty Node document repair: %v", err)
+	}
+
+	var currentInvalid, historyInvalid, seenInvalid, recycledInvalid int
+	if err := db.QueryRow(`select
+  (select count(*) from node_textboxes where body_json->'document'->'content'='[]'::jsonb),
+  (select count(*) from node_textboxes_history where body_json->'document'->'content'='[]'::jsonb),
+  (select count(*) from node_textbox_seen_snapshots where body_json->'document'->'content'='[]'::jsonb),
+  (select count(*)
+   from recycle_bin_items item
+   cross join lateral (values ('node_textboxes'),('node_textboxes_history'),('node_textbox_seen_snapshots')) expected(payload_key)
+   cross join lateral jsonb_array_elements(item.restore_payload->expected.payload_key) saved(row_value)
+   where saved.row_value->'body_json'->'document'->'content'='[]'::jsonb)`).Scan(
+		&currentInvalid, &historyInvalid, &seenInvalid, &recycledInvalid,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if currentInvalid != 0 || historyInvalid != 0 || seenInvalid != 0 || recycledInvalid != 0 {
+		t.Fatalf("invalid empty documents remain current=%d history=%d seen=%d recycled=%d",
+			currentInvalid, historyInvalid, seenInvalid, recycledInvalid)
+	}
+
+	var currentRevision, savedDisplayOrder int64
+	var savedByUserID, recycleMarker string
+	if err := db.QueryRow(`select
+  (select revision from node_textboxes where textbox_id='00000000-0000-4000-8000-000000000604'),
+  (select display_order from node_textboxes_history where batch_id='00000000-0000-4000-8000-000000000609'),
+  (select saved_by_user_id::text from node_textboxes_history where batch_id='00000000-0000-4000-8000-000000000609'),
+  (select restore_payload->>'marker' from recycle_bin_items where recycle_bin_item_id='00000000-0000-4000-8000-000000000610')`).Scan(
+		&currentRevision, &savedDisplayOrder, &savedByUserID, &recycleMarker,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if currentRevision != 7 || savedDisplayOrder != 0 ||
+		savedByUserID != "00000000-0000-4000-8000-000000000601" || recycleMarker != "preserve" {
+		t.Fatalf("repair changed metadata revision=%d order=%d saved_by=%s marker=%s",
+			currentRevision, savedDisplayOrder, savedByUserID, recycleMarker)
+	}
+
 	var snapshotRevision int64
 	if err := db.QueryRow(`select textbox_revision from node_textbox_seen_snapshots
 where textbox_id='00000000-0000-4000-8000-000000000604'`).Scan(&snapshotRevision); err != nil {

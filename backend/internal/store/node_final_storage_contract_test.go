@@ -160,6 +160,55 @@ func TestNodeForwardMigrationAndOperatorAreStrictAndDBeaverSafe(t *testing.T) {
 	}
 }
 
+func TestNodeEmptyDocumentRepairIsForwardOnlyAndDBeaverSafe(t *testing.T) {
+	preflight := readNodeFinalContractFile(t, "..", "..", "..", "scripts", "repair_empty_node_textbox_documents_preflight.sql")
+	for _, required := range []string{
+		"repeatable read read only", "postgresql 17.x only",
+		"node_textboxes exact unordered column set drifted",
+		"node_textboxes_history exact unordered column set drifted",
+		"node_textbox_seen_snapshots exact unordered column set drifted",
+		"recycle_bin_items exact unordered column set drifted",
+		"ready_to_repair", "no_repair_needed", "rollback;",
+	} {
+		if !strings.Contains(preflight, required) {
+			t.Errorf("empty-document preflight missing %q", required)
+		}
+	}
+
+	migration := readNodeFinalContractFile(t, "..", "..", "db", "migrations", "20260805_zzzd_repair_empty_node_textbox_documents.sql")
+	for _, required := range []string{
+		"begin;", "share row exclusive mode",
+		"pg_temp.mangorts_repair_empty_node_document",
+		"pg_temp.mangorts_repair_recycled_node_documents",
+		`'[{"type":"paragraph"}]'::jsonb`,
+		"'node_textboxes'", "'node_textboxes_history'", "'node_textbox_seen_snapshots'",
+		"with ordinality", "order by saved.ordinality",
+		"item.restore_payload is distinct from candidate.repaired_payload",
+		"empty-document repair did not reconcile", "commit;",
+	} {
+		if !strings.Contains(migration, required) {
+			t.Errorf("empty-document repair migration missing %q", required)
+		}
+	}
+
+	for name, body := range map[string]string{"preflight": preflight, "migration": migration} {
+		for _, forbidden := range []string{"\\set", "\\i", "\\copy", "\\echo", "ordinal_position", ":variable"} {
+			if strings.Contains(body, forbidden) {
+				t.Errorf("%s contains forbidden DBeaver/operator SQL %q", name, forbidden)
+			}
+		}
+	}
+	for _, forbidden := range []string{
+		"set revision=", "set revision =", "set updated_timestamp=", "set updated_timestamp =",
+		"set saved_timestamp=", "set saved_timestamp =", "set textbox_revision=", "set textbox_revision =",
+		"update node_information", "update node_projection_table", "update node_projection_seen_snapshots",
+	} {
+		if strings.Contains(migration, forbidden) {
+			t.Errorf("empty-document repair must preserve metadata and legacy evidence; found %q", forbidden)
+		}
+	}
+}
+
 func TestNodeRecycleUsesFinalRowsAndRestoresAttachmentOwnershipLast(t *testing.T) {
 	source := readNodeFinalContractFile(t, "postgres_recycle_bin.go")
 	for _, required := range []string{
