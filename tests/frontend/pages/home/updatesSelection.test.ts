@@ -52,20 +52,28 @@ test("Updates resolves Node, Logic Gate, and Project row targets with exact ment
   assert.deepEqual(resolveUpdateNavigationTarget({ item: {} }), { kind: "none" });
 });
 
-test("Updates scrolls and transiently highlights the exact mentioned chip", () => {
+test("Updates scrolls to the exact mention and flashes the whole editor textbox yellow", () => {
   const dom = new JSDOM('<!doctype html><div id="root"><section data-node-text-block-id="block-1"><span data-mango-user-id="user-1">@User</span></section></div>');
   const root = dom.window.document.getElementById("root");
+  const section = root?.querySelector<HTMLElement>("[data-node-text-block-id]") ?? null;
   const mention = root?.querySelector<HTMLElement>("[data-mango-user-id]") ?? null;
+  assert.ok(section);
   assert.ok(mention);
-  let scrolled = false;
-  let animated = false;
-  Object.defineProperty(mention, "scrollIntoView", { value: () => { scrolled = true; } });
-  Object.defineProperty(mention, "animate", { value: () => { animated = true; return {}; } });
+  let mentionScrolled = false;
+  let sectionScrolled = false;
+  let mentionFrames: Keyframe[] = [];
+  let sectionFrames: Keyframe[] = [];
+  Object.defineProperty(mention, "scrollIntoView", { value: () => { mentionScrolled = true; } });
+  Object.defineProperty(section, "scrollIntoView", { value: () => { sectionScrolled = true; } });
+  Object.defineProperty(mention, "animate", { value: (frames: Keyframe[]) => { mentionFrames = frames; return {}; } });
+  Object.defineProperty(section, "animate", { value: (frames: Keyframe[]) => { sectionFrames = frames; return {}; } });
 
   assert.equal(resolveTransientInformationFocusTarget({ root, informationID: "block-1", mentionUserID: "user-1" }), mention);
   assert.equal(transientlyFocusInformation({ root, informationID: "block-1", mentionUserID: "user-1" }), mention);
-  assert.equal(scrolled, true);
-  assert.equal(animated, true);
+  assert.equal(mentionScrolled, true);
+  assert.equal(sectionScrolled, false);
+  assert.deepEqual(sectionFrames, mentionFrames);
+  assert.equal(sectionFrames?.[1]?.backgroundColor, "rgba(254, 240, 138, 0.96)");
 });
 
 test("Updates falls back to the referenced section when a mention chip is unavailable", () => {

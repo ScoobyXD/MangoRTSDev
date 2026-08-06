@@ -661,6 +661,7 @@ func (s *Server) handleCompanyExplorerDeleteTargets(w http.ResponseWriter, r *ht
 		return
 	}
 	if err != nil {
+		log.Printf("company explorer delete targets: failed company_id=%s target_count=%d: %v", req.CompanyID, len(deleteTargets), err)
 		writeError(w, http.StatusInternalServerError, "failed_to_delete_company_explorer_targets")
 		return
 	}

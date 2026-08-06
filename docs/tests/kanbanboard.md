@@ -4,13 +4,15 @@ A user confirms deletion for one or more Node cards on a Kanban board
 ↓
 The board starts one local mutation window and removes those cards optimistically from both rendered and current card state
 ↓
-One atomic typed-target delete request soft-deletes every confirmed Node and its owned Kanban/Logic Gate work placements
+One atomic typed-target delete request recycles every confirmed Node and removes its owned Kanban/Logic Gate work placements
+↓
+Database cleanup removes the deleted Node's exact GVIC and permission rows without running surviving-Node detach materialization during assignment cascades
 ↓
 Realtime hints and older in-flight board reads cannot restore stale cards while that mutation is active
 ↓
 Success keeps the cards gone and invalidates exact caches; failure restores the local snapshot and performs one canonical board refresh
 
-Last updated: 2026-08-05
+Last updated: 2026-08-06
 
 # Kanban Board Tests
 
@@ -176,6 +178,7 @@ KB126 - Deleting a Logic Gate captures its exact currently authorized local moun
 KB127 - Selecting a node from a Kanban card opens the normal modeless node window at near-full board size by default: 1% top/left ratios and 98% width/height ratios, with only an 8px renderer safety gutter at the board's right/bottom edge. The versioned per-company/frame geometry key resets older narrower defaults once; later user drag/resize persists under the new key, and fullscreen behavior remains separate.
 KB128 - In a route-controlled Logic Gate Arena, opening or closing a Kanban node popup produces one continuous UI transition. Local popup state must not retrigger forced-route synchronization against the previous route and briefly close a newly opened node or reopen a newly closed node.
 KB130 - Confirmed Kanban Node deletion uses one atomic typed-target delete request, participates in the board's local mutation window, and updates both rendered and current card state. Older in-flight reads and realtime refresh hints cannot restore the deleted cards. A failed request restores the optimistic snapshot and schedules one canonical board refresh.
+KB131 - Deleting an assigned Node through the typed-target transaction recycles the Node and removes its assignment, GVIC policy, and permission policy in one transaction. Assignment and parent-link delete triggers skip surviving-resource detach materialization only when the Node endpoint no longer exists; explicitly detaching an assignment from a surviving Node still materializes customized root policy.
 
 ## Scenarios
 
@@ -574,6 +577,7 @@ Business logic covered:
 - KB76
 - KB77
 - KB130
+- KB131
 
 Given:
 - A Kanban board has one or more selected Node cards.
@@ -588,3 +592,26 @@ Expected:
 - The local mutation window rejects older reads and defers realtime reconciliation so stale cards cannot reappear.
 - Success clears exact Node relationship/record and board caches.
 - Failure restores the prior card snapshot and performs one canonical board refresh.
+
+### Scenario KB-S14: Assigned Node deletion completes policy cleanup
+
+Automated regression: backend/internal/store/v2_policy_node_delete_migration_test.go.
+
+Business logic covered:
+
+- KB131
+
+Given:
+
+- A Node is assigned to a Logic Gate and has inherited GVIC and permission policy rows.
+- The same database triggers also support explicitly detaching a surviving Node.
+
+When:
+
+- The typed-target deletion transaction recycles the assigned Node.
+
+Expected:
+
+- The Node, Logic Gate assignment, GVIC policy, and permission policy rows are removed atomically, and one Node recycle-bin item is written.
+- Cascading assignment cleanup does not try to materialize policy for the Node that is already being deleted.
+- Explicitly removing an assignment from a surviving Node still materializes customized root GVIC and permission policy.
