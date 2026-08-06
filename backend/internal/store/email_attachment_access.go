@@ -35,9 +35,14 @@ func (r *PostgresRepo) GetEmailAttachmentResourceAccess(input EmailAttachmentRes
 	case "email_message":
 		err = r.db.QueryRowContext(ctx, `
 select (
-  thread.personal_user_id=$2::uuid
-  or (thread.shared_inbox_id is not null and mangorts_user_can_access_resource(
-    message.company_id,'shared_inbox',thread.shared_inbox_id,$2::uuid,$4::text))
+  (connection.connection_type='personal' and connection.personal_user_id=$2::uuid)
+  or exists (
+    select 1 from shared_inboxes inbox
+    where inbox.company_id=thread.company_id
+      and inbox.company_email_connection_id=thread.email_connection_id
+      and mangorts_user_can_access_resource(
+        message.company_id,'shared_inbox',inbox.shared_inbox_id,$2::uuid,$4::text)
+  )
   or exists (
     select 1 from email_relationships relationship
     where relationship.company_id=message.company_id
@@ -48,6 +53,8 @@ select (
 )
 from email_messages message
 join email_threads thread on thread.company_id=message.company_id and thread.email_thread_id=message.email_thread_id
+join email_connections connection on connection.company_id=thread.company_id
+ and connection.email_connection_id=thread.email_connection_id
 where message.company_id=$1::uuid and message.email_message_id=$3::uuid`,
 			input.CompanyID, input.UserID, input.ResourceID, input.AccessLevel).Scan(&result.Allowed)
 	case "email_draft":

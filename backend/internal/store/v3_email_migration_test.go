@@ -39,7 +39,6 @@ func TestV3EmailExpansionIsAdditiveAndOperatorGated(t *testing.T) {
 			"create table if not exists email_relationships",
 			"create table if not exists email_drafts",
 			"create table if not exists email_signatures",
-			"create table if not exists email_thread_download_jobs",
 			"create table if not exists attachment_relationships",
 			"email_account_type in ('personal_email_account','shared_email_account')",
 			"references email_relationships(company_id,email_relationship_id) on delete set null",
@@ -49,6 +48,12 @@ func TestV3EmailExpansionIsAdditiveAndOperatorGated(t *testing.T) {
 				t.Errorf("schema expansion is missing %q", required)
 			}
 		}
+	}
+	if !strings.Contains(expand, "create table if not exists email_thread_download_jobs") {
+		t.Error("historical expansion lost the original download job table")
+	}
+	if !strings.Contains(schema, "create table if not exists email_ingestion_jobs") {
+		t.Error("canonical schema is missing the ingestion job table")
 	}
 	if !strings.Contains(expand, "retained_orphan_evidence") {
 		t.Error("historical email copy component lost its explicit orphan disposition")
@@ -113,6 +118,38 @@ func TestV3EmailExpansionIsAdditiveAndOperatorGated(t *testing.T) {
 	} {
 		if strings.Contains(allCopy, forbidden) {
 			t.Errorf("copy phase mutates legacy data with %q", forbidden)
+		}
+	}
+}
+
+func TestEmailIngestionCutoverRenamesInPlaceAndPreservesCheckpoints(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "20260806_zzz_email_ingestion_engine.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := strings.ToLower(strings.ReplaceAll(string(raw), "\r\n", "\n"))
+	for _, required := range []string{
+		"transaction_timestamp()",
+		"alter table company_email_connections rename to email_connections",
+		"alter table email_thread_download_jobs rename to email_ingestion_jobs",
+		"ingestion_started_at=rollout_at",
+		"last_successful_scan_at=rollout_at",
+		"drop table user_email_connections",
+		"partition by company_id,email_connection_id,provider_message_id",
+		"superseded_by_email_ingestion_cutover",
+		"on email_ingestion_jobs(status,priority,available_at,created_timestamp)",
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("email ingestion cutover is missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"drop table email_threads",
+		"drop table email_thread_download_jobs",
+		"truncate ",
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("email ingestion cutover contains destructive replacement %q", forbidden)
 		}
 	}
 }

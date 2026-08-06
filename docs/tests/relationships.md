@@ -1,3 +1,17 @@
+# Process Story: A completed email message inherits exact Node-wide destinations
+
+A qualifying Inbox arrival reconciles a stored email thread
+↓
+Mango identifies the exact newly completed `email_messages.email_message_id`
+↓
+Inside that message transaction, Mango reads the distinct current Node-wide `email_relationships` destinations for the same company/thread
+↓
+Only missing typed Node relationships are inserted idempotently for the new message
+↓
+No endpoint is guessed, no access is granted, no textbox placement is copied, and an unplaced thread remains unplaced
+
+Last updated: 2026-08-06
+
 # Process Story: Node location derives from typed organization
 
 A user searches for a Node in Company Explorer or Editor
@@ -267,6 +281,12 @@ Deleting a pin, pin folder, or pin folder subtree deletes only personal organiza
 Node search location derives only from exact source relationships: visible Logic Gate assignment and that Logic Gate's visible Company Explorer ancestry first, visible Project relationship and that Project's ancestry second, otherwise an empty path for an accessible standalone Node. A Node with only hidden organizational paths is excluded so hidden ancestry does not leak.
 
 Removing historical Node placement rows or their now-empty deterministic folder MUST NOT delete a Node, Logic Gate assignment, Project relationship, email relationship, attachment relationship, chat ownership, GVIC assignment, permission, or any other endpoint or typed edge.
+
+### Law 29 — New email messages inherit only exact Node-wide thread destinations
+
+When a provider message becomes completely stored under an existing `email_thread_id`, Mango MUST atomically create only the missing `email_relationships` rows for the distinct current destinations where the same company/thread already has `resource_type='node'` and `resource_textbox_id is null`. The new relationship MUST use the exact stored `email_message_id`, exact Node ID, exact company, and canonical `node` type.
+
+This propagation is idempotent and MUST NOT recopy an existing message, invent or choose a Node for an unplaced thread, copy Project/Logic-Gate/textbox destinations, grant permissions or GVIC, create a chat/draft, or treat a relationship as provider-thread membership authority. The message upsert and its missing Node-wide relationships commit or roll back together.
 
 ## Required design examples
 

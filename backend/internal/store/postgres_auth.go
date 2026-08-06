@@ -324,7 +324,7 @@ func (r *PostgresRepo) ListCompanyUserOnboarding(companyID string) ([]domain.Com
 		return nil, ErrInvalid
 	}
 
-	hasEmailConnections, err := r.postgresTableExists("user_email_connections")
+	hasEmailConnections, err := r.postgresTableExists("email_connections")
 	if err != nil {
 		return nil, err
 	}
@@ -343,8 +343,10 @@ func (r *PostgresRepo) ListCompanyUserOnboarding(companyID string) ([]domain.Com
 	connectionAccountEmail := `''::text`
 	memberUpdatedTimestamp := `greatest(cm.updated_timestamp, u.updated_timestamp, coalesce(li.updated_timestamp, cm.updated_timestamp))`
 	if hasEmailConnections {
-		connectionJoin = `left join user_email_connections connection
-		  on connection.user_id = u.user_id
+		connectionJoin = `left join email_connections connection
+		  on connection.personal_user_id = u.user_id
+		 and connection.connection_type = 'personal'
+		 and connection.company_id = cm.company_id
 		 and connection.account_email = lower(btrim(u.email))`
 		connectionStatus = `case
 		       when connection.provider = 'google' and connection.status = 'connected' then 'connected'
@@ -739,7 +741,7 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 	); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if err = optionalCleanup("delete user email connections", "user_email_connections", `delete from user_email_connections where user_id = $1::uuid`, userID); err != nil {
+	if err = optionalCleanup("delete user email connections", "email_connections", `delete from email_connections where personal_user_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
 	if err = optionalCleanup("delete all gvic assignments for user", "resource_gvic_assignments", `delete from resource_gvic_assignments where principal_type = 'user' and principal_id = $1::uuid`, userID); err != nil {

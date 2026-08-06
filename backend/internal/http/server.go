@@ -67,6 +67,7 @@ type Server struct {
 	metrics                                             MetricsRecorder
 	communicationsEmailThreadDownloadWorkerCancel       context.CancelFunc
 	communicationsEmailThreadDownloadWorkerWake         chan struct{}
+	communicationsEmailConnectionScannerWake            chan struct{}
 	communicationsEmailThreadDownloadWorkerInterval     time.Duration
 	communicationsEmailThreadDownloadWorkerBatchLimit   int
 	communicationsEmailThreadDownloadWorkerLeaseTimeout time.Duration
@@ -219,6 +220,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		communicationsArchiveWorkerLeaseTimeout:             communicationsArchiveWorkerLeaseTimeout,
 		communicationsArchiveWorkerDisabled:                 options.DisableCommunicationsArchiveWorker,
 		communicationsEmailThreadDownloadWorkerWake:         make(chan struct{}, 1),
+		communicationsEmailConnectionScannerWake:            make(chan struct{}, 1),
 		communicationsEmailThreadDownloadWorkerInterval:     communicationsEmailThreadDownloadWorkerInterval,
 		communicationsEmailThreadDownloadWorkerBatchLimit:   communicationsEmailThreadDownloadWorkerBatchLimit,
 		communicationsEmailThreadDownloadWorkerLeaseTimeout: communicationsEmailThreadDownloadWorkerLeaseTimeout,

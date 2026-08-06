@@ -1067,6 +1067,7 @@ func TestDeleteCompanyUserWithRemainingMembershipKeepsIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		CompanyID:    otherCompanyID,
 		UserID:       target.UserID,
 		Provider:     "google",
 		AccountEmail: targetEmail,

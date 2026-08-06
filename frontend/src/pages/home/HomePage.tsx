@@ -2779,7 +2779,7 @@ export function HomePage({
     setBusy(provider);
     setError("");
     try {
-      const authURL = await fetchCommunicationsAuthURL(provider);
+      const authURL = await fetchCommunicationsAuthURL(provider, undefined, undefined, companyID);
       window.location.assign(authURL);
     } catch (connectError) {
       setError(formatError(connectError, "Failed to start email connection"));

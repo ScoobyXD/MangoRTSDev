@@ -57,6 +57,34 @@ func (r *MemoryRepo) communicationsEmailThreadProviderLocked(input Communication
 	return connection.Provider, nil
 }
 
+func (r *MemoryRepo) emailConnectionIDForScopeLocked(companyID string, scope communicationsEmailCollaborationScope) string {
+	if scope.scopeType == CommunicationsEmailCollaborationScopePersonal {
+		connection, ok := r.emailConnections[emailConnectionKey(scope.personalUserID, scope.personalAccountEmail)]
+		if ok && connection.CompanyID == companyID {
+			return connection.EmailConnectionID
+		}
+		return ""
+	}
+	folder, ok := r.folders[key(companyID, scope.sharedInboxID)]
+	if !ok {
+		return ""
+	}
+	connection, ok := r.companyEmailConnections[companyEmailConnectionKey(companyID, folder.CompanyEmailConnectionID)]
+	if !ok {
+		return ""
+	}
+	return connection.EmailConnectionID
+}
+
+func (r *MemoryRepo) emailConnectionIDForThreadLocked(thread domain.CommunicationsEmailThread) string {
+	scope := communicationsEmailCollaborationScope{
+		scopeType: thread.ScopeType, personalUserID: thread.PersonalUserID,
+		personalAccountEmail: thread.PersonalAccountEmail, sharedInboxID: thread.SharedInboxID,
+		accountEmail: thread.AccountEmail,
+	}
+	return r.emailConnectionIDForScopeLocked(thread.CompanyID, scope)
+}
+
 func (r *MemoryRepo) upsertCommunicationsEmailThreadLocked(input CommunicationsEmailThreadUpsertInput) (domain.CommunicationsEmailThread, error) {
 	input, scope, err := normalizeCommunicationsEmailThreadInput(input)
 	if err != nil {
@@ -93,15 +121,23 @@ func (r *MemoryRepo) upsertCommunicationsEmailThreadLocked(input CommunicationsE
 			return domain.CommunicationsEmailThread{}, ErrInvalid
 		}
 		threadID = newUUIDv7String()
+		connectionID := r.emailConnectionIDForScopeLocked(input.CompanyID, scope)
+		if connectionID == "" {
+			connectionID = newUUIDv7String()
+		}
 		thread = domain.CommunicationsEmailThread{
 			CompanyID: input.CompanyID, EmailThreadID: threadID, ScopeType: scope.scopeType,
-			PersonalUserID: scope.personalUserID, PersonalAccountEmail: scope.personalAccountEmail,
+			EmailConnectionID: connectionID,
+			PersonalUserID:    scope.personalUserID, PersonalAccountEmail: scope.personalAccountEmail,
 			SharedInboxID: scope.sharedInboxID, AccountEmail: scope.accountEmail, Provider: input.Provider,
 			ProviderThreadID: input.ProviderThreadID, RootProviderMessageID: input.SelectedMessageID,
 			DownloadStatus:   CommunicationsEmailThreadDownloadPartial,
 			CreatedTimestamp: now,
 		}
 		r.emailThreadScopeIDs[scopeKey] = threadID
+	}
+	if thread.EmailConnectionID == "" {
+		thread.EmailConnectionID = r.emailConnectionIDForScopeLocked(input.CompanyID, scope)
 	}
 	if thread.Provider == "" {
 		thread.Provider = input.Provider
@@ -132,6 +168,23 @@ func (r *MemoryRepo) upsertCommunicationsEmailThreadLocked(input CommunicationsE
 			Message: snapshot, CreatedTimestamp: now, UpdatedTimestamp: now,
 		})
 	}
+	for _, snapshot := range input.Messages {
+		if !snapshot.DownloadComplete {
+			continue
+		}
+		for _, placement := range r.nodeEmailThreads {
+			if placement.CompanyID != input.CompanyID || placement.EmailThreadID != threadID {
+				continue
+			}
+			userID := thread.PersonalUserID
+			link := communicationsEmailNodeLink{
+				CompanyID: input.CompanyID, UserID: userID, SharedInboxID: thread.SharedInboxID,
+				AccountEmail: thread.AccountEmail, MessageID: snapshot.ID, NodeID: placement.NodeID,
+				Message: snapshot, CreatedTimestamp: now, UpdatedTimestamp: now,
+			}
+			r.emailNodeLinks[emailNodeAttachmentLinkKey(input.CompanyID, userID, snapshot.ID, placement.NodeID)] = link
+		}
+	}
 	sort.Slice(thread.Messages, func(i, j int) bool {
 		left, right := thread.Messages[i], thread.Messages[j]
 		if left.Message.Date != right.Message.Date {
@@ -144,10 +197,10 @@ func (r *MemoryRepo) upsertCommunicationsEmailThreadLocked(input CommunicationsE
 		thread.Messages[index].Message.EmailMessageID = thread.Messages[index].EmailMessageID
 	}
 	thread.HistoryComplete = thread.HistoryComplete || input.HistoryComplete
-	if thread.HistoryComplete {
+	if input.HistoryComplete {
 		thread.DownloadStatus = CommunicationsEmailThreadDownloadComplete
 		thread.LastDownloadError = ""
-	} else {
+	} else if thread.DownloadStatus != CommunicationsEmailThreadDownloadDownloading {
 		thread.DownloadStatus = CommunicationsEmailThreadDownloadPartial
 		thread.LastDownloadError = input.LastDownloadError
 	}

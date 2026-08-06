@@ -107,10 +107,14 @@ func (r *PostgresRepo) UpsertCommunicationsEmailDraft(input CommunicationsEmailD
 select distinct message.email_message_id::text
 from email_messages message
 join email_threads thread on thread.company_id=message.company_id and thread.email_thread_id=message.email_thread_id
+join email_connections connection on connection.company_id=thread.company_id
+ and connection.email_connection_id=thread.email_connection_id
+left join shared_inboxes inbox on inbox.company_id=thread.company_id
+ and inbox.company_email_connection_id=thread.email_connection_id
 where message.company_id=$1::uuid and message.email_message_id=$2::uuid
- and (($3='personal' and thread.email_account_type='personal_email_account'
-       and thread.personal_user_id=nullif($4,'')::uuid and thread.personal_account_email=$5)
-   or ($3='shared' and thread.email_account_type='shared_email_account' and thread.shared_inbox_id=nullif($6,'')::uuid))
+ and (($3='personal' and connection.connection_type='personal'
+       and connection.personal_user_id=nullif($4,'')::uuid and connection.account_email=$5)
+   or ($3='shared' and connection.connection_type='shared' and inbox.shared_inbox_id=nullif($6,'')::uuid))
 limit 2`, draft.CompanyID, draft.SourceMessageID, draft.ScopeType,
 			draft.PersonalUserID, draft.PersonalAccountEmail, draft.SharedInboxID)
 		if err != nil {

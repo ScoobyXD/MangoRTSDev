@@ -24,6 +24,7 @@ type nylasOAuthStatePayload struct {
 	UserEmail                 string `json:"user_email,omitempty"`
 	Provider                  string `json:"provider"`
 	StrictEmail               bool   `json:"strict_email,omitempty"`
+	CompanyID                 string `json:"company_id,omitempty"`
 	SharedInboxCompanyID      string `json:"shared_inbox_company_id,omitempty"`
 	SharedInboxID             string `json:"shared_inbox_id,omitempty"`
 	SharedInboxParentFolderID string `json:"shared_inbox_parent_folder_id,omitempty"`
@@ -37,6 +38,7 @@ func signNylasOAuthState(secret string, payload nylasOAuthStatePayload, now time
 	payload.Email = strings.TrimSpace(strings.ToLower(payload.Email))
 	payload.UserEmail = strings.TrimSpace(strings.ToLower(payload.UserEmail))
 	payload.Provider = normalizeCommunicationsProvider(payload.Provider)
+	payload.CompanyID = strings.TrimSpace(payload.CompanyID)
 	payload.SharedInboxCompanyID = strings.TrimSpace(payload.SharedInboxCompanyID)
 	payload.SharedInboxID = strings.TrimSpace(payload.SharedInboxID)
 	payload.SharedInboxParentFolderID = strings.TrimSpace(payload.SharedInboxParentFolderID)
@@ -83,6 +85,7 @@ func parseNylasOAuthState(secret, rawState string, now time.Time) (nylasOAuthSta
 	payload.Email = strings.TrimSpace(strings.ToLower(payload.Email))
 	payload.UserEmail = strings.TrimSpace(strings.ToLower(payload.UserEmail))
 	payload.Provider = normalizeCommunicationsProvider(payload.Provider)
+	payload.CompanyID = strings.TrimSpace(payload.CompanyID)
 	payload.SharedInboxCompanyID = strings.TrimSpace(payload.SharedInboxCompanyID)
 	payload.SharedInboxID = strings.TrimSpace(payload.SharedInboxID)
 	payload.SharedInboxParentFolderID = strings.TrimSpace(payload.SharedInboxParentFolderID)
