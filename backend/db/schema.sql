@@ -3155,7 +3155,7 @@ alter table company_explorer_items
   drop constraint if exists company_explorer_items_target_type_chk;
 alter table company_explorer_items
   add constraint company_explorer_items_target_type_chk
-  check (target_type in ('project', 'logic_gate', 'node'));
+  check (target_type in ('project', 'logic_gate'));
 
 -- Unified realtime collaboration durable spine.
 -- Apply before deploying application instances that publish collaboration deltas.

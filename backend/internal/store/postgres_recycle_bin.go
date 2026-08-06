@@ -927,8 +927,6 @@ where company_id=$1::uuid
 			return err
 		}
 		switch itemType {
-		case EntityTypeNode:
-			scope.NodeIDs[itemID] = true
 		case EntityTypeLogicGate:
 			scope.LogicGateIDs[itemID] = true
 		case EntityTypeProject:

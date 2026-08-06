@@ -204,9 +204,6 @@ func (r *PostgresRepo) EnsureCommunicationsEmailCollaboration(input Communicatio
 values($1::uuid,$2::uuid,$3,$4,'no_access',now())`, input.CompanyID, nodeID, communicationsEmailCollaborationTitle(input.Message), input.Priority); err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}
-	if _, _, err := placeEmailCollaborationNodeInDefaultFolderTx(ctx, tx, input.CompanyID, nodeID, input.CreatedByUserID); err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
-	}
 	if err := linkPostgresCommunicationsEmailThreadToNodeTx(ctx, tx, input.CompanyID, nodeID, relationshipID, thread.EmailThreadID, input.Message.ID, input.CreatedByUserID); err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}
