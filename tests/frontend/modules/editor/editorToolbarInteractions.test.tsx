@@ -47,6 +47,9 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
   }
   installGlobal("getComputedStyle", dom.window.getComputedStyle.bind(dom.window), restores);
   installGlobal("IS_REACT_ACT_ENVIRONMENT", true, restores);
+  const legacyInputPrototype = dom.window.HTMLElement.prototype as unknown as { attachEvent?: () => void; detachEvent?: () => void };
+  if (!legacyInputPrototype.attachEvent) legacyInputPrototype.attachEvent = () => undefined;
+  if (!legacyInputPrototype.detachEvent) legacyInputPrototype.detachEvent = () => undefined;
 
   let frameID = 0;
   const requestFrame = () => ++frameID;
@@ -86,11 +89,12 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
 
   let mountedRoot: { unmount(): void } | null = null;
   try {
-    const [{ createRoot }, { UnifiedRichEditorSurface }, { EditorTabBar }, { AppModalPortal }] = await Promise.all([
+    const [{ createRoot }, { UnifiedRichEditorSurface }, { EditorTabBar }, { AppModalPortal }, { UniversalEntityPicker }] = await Promise.all([
       import("react-dom/client"),
       import("../../../../frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"),
       import("../../../../frontend/src/modules/editor/EditorTabBar.tsx"),
       import("../../../../frontend/src/app/AppModalPortal.tsx"),
+      import("../../../../frontend/src/modules/editor/UniversalEntityPicker.tsx"),
     ]);
     const controllerRef = { current: null as any };
     const savedDocuments: string[] = [];
@@ -666,6 +670,29 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     assert.equal(tableDashSpace.defaultPrevented, true, "table-cell dash shortcuts also use the real Space key path");
     assert.ok(dashCell.querySelector('ul[data-mango-editor-list="bullet"]'), "dash-space creates a structural bullet inside a table cell");
     assert.ok(dashCell.contains(dom.window.document.getSelection()?.anchorNode ?? null));
+
+    await act(async () => root.render(
+      <AppModalPortal ownerDocument={dom.window.document}>
+        <UniversalEntityPicker
+          companyID="company-1"
+          requestJSON={async <T,>(): Promise<T> => ({ user_pin_folders: [], user_pins: [] }) as T}
+          sourceType="node"
+          linkTargetTypes={["logic_gate", "project"]}
+          anchor={{ left: 24, top: 24 }}
+          onChoose={async () => undefined}
+          onCancel={noop}
+        />
+      </AppModalPortal>,
+    ));
+    await flushAsyncWork();
+    const modalPicker = dom.window.document.querySelector<HTMLElement>('[data-mango-universal-picker="true"]');
+    const activeModalLayer = dom.window.document.querySelector<HTMLElement>('[data-mango-modal-layer="true"]');
+    const modalPickerInput = modalPicker?.querySelector<HTMLInputElement>('input[aria-label="Search resources to reference"]');
+    assert.ok(modalPicker);
+    assert.ok(activeModalLayer);
+    assert.ok(modalPickerInput);
+    assert.equal(modalPicker.closest('[data-mango-modal-layer="true"]'), activeModalLayer, "a Node-modal picker must portal inside its active elevated layer");
+    assert.equal(dom.window.document.activeElement, modalPickerInput, "the Node-modal picker keeps focus instead of losing it to the outer modal trap");
 
   } finally {
     if (mountedRoot) await act(async () => mountedRoot?.unmount());
