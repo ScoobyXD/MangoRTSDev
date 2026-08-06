@@ -258,7 +258,7 @@ func (s *Server) handleWorkItemMyWorkMatrixNodeMove(w http.ResponseWriter, r *ht
 		stop()
 		return
 	}
-	if fromLogicGateID != "" && fromLogicGateID != logicGateID && !s.requireKanbanLogicGateEffectiveAccess(w, companyID, actorUserID, fromLogicGateID, store.EntityPermissionEdit) {
+	if logicGateID != "" && !s.requireLogicGateWorkExistingSourceEditAccess(w, r, companyID, logicGateID, nodeID) {
 		stop()
 		return
 	}
@@ -579,7 +579,7 @@ func (s *Server) handleWorkItemLogicGateAssignmentMove(w http.ResponseWriter, r 
 	if !s.requireKanbanLogicGateEffectiveAccess(w, input.CompanyID, userID, input.LogicGateID, store.EntityPermissionEdit) {
 		return
 	}
-	if input.FromLogicGateID != "" && input.FromLogicGateID != input.LogicGateID && !s.requireKanbanLogicGateEffectiveAccess(w, input.CompanyID, userID, input.FromLogicGateID, store.EntityPermissionEdit) {
+	if !s.requireLogicGateWorkExistingSourceEditAccess(w, r, input.CompanyID, input.LogicGateID, input.NodeID) {
 		return
 	}
 

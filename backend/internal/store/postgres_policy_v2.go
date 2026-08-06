@@ -188,31 +188,31 @@ func (r *PostgresRepo) PutResourceGVICPolicy(input ResourceGVICPolicyUpdateInput
 	if expected := cleanPolicyRevision(input.ExpectedRevision); expected != "" && expected != current.Revision {
 		return ResourceGVICPolicy{}, nil, ErrVersionConflict
 	}
-	for _, assignment := range normalized {
-		if mode == PolicyModeCustomized && input.Assignments == nil {
-			sourceKey := resourceGVICKey{
-				companyID:    keyValue.companyID,
-				resourceType: current.EffectiveSource.ResourceType,
-				resourceID:   current.EffectiveSource.ResourceID,
-			}
-			sourceEdges, err := postgresDirectResourceGVICAssignmentsForResource(ctx, tx, sourceKey)
-			if err != nil {
-				return ResourceGVICPolicy{}, nil, err
-			}
-			inputs := make([]ResourceGVICAssignmentInput, 0, len(sourceEdges))
-			for _, edge := range sourceEdges {
-				inputs = append(inputs, ResourceGVICAssignmentInput{
-					Role: edge.Role, PrincipalType: edge.PrincipalType, PrincipalID: edge.PrincipalID,
-				})
-			}
-			normalized, err = normalizeResourceGVICAssignmentInputs(inputs)
-			if err != nil {
-				return ResourceGVICPolicy{}, nil, err
-			}
-			if err := validateResourceGVICAssignmentInputsForOperation(keyValue, normalized, GVICAssignmentCommandSet); err != nil {
-				return ResourceGVICPolicy{}, nil, err
-			}
+	if mode == PolicyModeCustomized && input.Assignments == nil {
+		sourceKey := resourceGVICKey{
+			companyID:    keyValue.companyID,
+			resourceType: current.EffectiveSource.ResourceType,
+			resourceID:   current.EffectiveSource.ResourceID,
 		}
+		sourceEdges, err := postgresDirectResourceGVICAssignmentsForResource(ctx, tx, sourceKey)
+		if err != nil {
+			return ResourceGVICPolicy{}, nil, err
+		}
+		inputs := make([]ResourceGVICAssignmentInput, 0, len(sourceEdges))
+		for _, edge := range sourceEdges {
+			inputs = append(inputs, ResourceGVICAssignmentInput{
+				Role: edge.Role, PrincipalType: edge.PrincipalType, PrincipalID: edge.PrincipalID,
+			})
+		}
+		normalized, err = normalizeResourceGVICAssignmentInputs(inputs)
+		if err != nil {
+			return ResourceGVICPolicy{}, nil, err
+		}
+		if err := validateResourceGVICAssignmentInputsForOperation(keyValue, normalized, GVICAssignmentCommandSet); err != nil {
+			return ResourceGVICPolicy{}, nil, err
+		}
+	}
+	for _, assignment := range normalized {
 		if err := validatePostgresGVICPrincipalTx(ctx, tx, keyValue.companyID, assignment.principalType, assignment.principalID); err != nil {
 			return ResourceGVICPolicy{}, nil, err
 		}

@@ -793,11 +793,14 @@ test("editor header keeps primary controls visible and preserves all secondary o
   assert.match(editorTabBar, /onCreateRelatedNode\(kind as EditorRelatedNodeCreationKind\)/);
   assert.match(editorContent, /onCreateRelatedNode=/);
   assert.match(editorContent, /onSaveCurrentVersion=/);
-  assert.match(editorContent, /secondaryActions=\{linkedEntityKind === "logic_gate" \? \[\{[\s\S]*id: "apply-gvic-to-inherited-descendants"[\s\S]*onSelect: applyLogicGateGVICToInheritedDescendants[\s\S]*id: "overwrite-gvic-descendants"[\s\S]*onSelect: \(\) => setLogicGateGVICApplyConfirmationOpen\(true\)[\s\S]*singleLine/);
+  assert.match(editorContent, /secondaryActions=\{linkedEntityKind === "node" \|\| linkedEntityKind === "logic_gate" \? \[\{[\s\S]*id: "use-inherited-gvic-policy"[\s\S]*changeCurrentGVICMode\("inherited"\)[\s\S]*id: "use-customized-gvic-policy"[\s\S]*changeCurrentGVICMode\("customized"\)[\s\S]*id: "apply-gvic-to-inherited-descendants"[\s\S]*onSelect: applyLogicGateGVICToInheritedDescendants[\s\S]*id: "overwrite-gvic-descendants"[\s\S]*onSelect: \(\) => setLogicGateGVICApplyConfirmationOpen\(true\)[\s\S]*singleLine/);
   assert.match(editorContent, /logicGateGVICApplyConfirmationOpen && linkedEntityKind === "logic_gate"[\s\S]*<ConfirmActionMenu[\s\S]*title="Overwrite all descendants, including customized\?"[\s\S]*confirmLabel="Overwrite"[\s\S]*cancelLabel="No"[\s\S]*onConfirm=\{\(\) => \{[\s\S]*setLogicGateGVICApplyConfirmationOpen\(false\);[\s\S]*applyLogicGateGVICToAssignedNodes\(\)[\s\S]*onCancel=\{\(\) => setLogicGateGVICApplyConfirmationOpen\(false\)\}/);
   assert.match(gvicPresentation, /LOGIC_GATE_GVIC_ROLE_PRESENTATIONS[\s\S]*role: "generated"[\s\S]*accent: "#0891b2"[\s\S]*role: "verified"[\s\S]*accent: "#db2777"[\s\S]*role: "consulted"[\s\S]*accent: "#7c3aed"[\s\S]*role: "informed"[\s\S]*accent: "#059669"/);
   assert.match(linkedDocumentPanels, /const GVIC_ROLES = LOGIC_GATE_GVIC_ROLE_PRESENTATIONS[\s\S]*gridTemplateColumns: "repeat\(4, minmax\(145px, 1fr\)\)"[\s\S]*\{GVIC_ROLES\.map/);
   assert.doesNotMatch(linkedDocumentPanels, /Apply GVIC to assigned nodes|Current GVIC|Apply GVIC to all descendants/);
+  assert.doesNotMatch(linkedDocumentPanels, />Policy mode<|Effective source:/);
+  assert.match(editorContent, /<EntityPermissionsPanel[\s\S]*readOnly=\{!linkedEntityCanEdit\}[\s\S]*onSaved=\{\(\) => invalidateWorkspaceSnapshot\(apiBase, companyID\)\}/);
+  assert.match(editorContent, /descendant_action: descendantAction/);
   assert.match(projectSummary, /visibleTabIDs=\{EDITOR_PRIMARY_HEADER_TAB_IDS\}/);
   for (const projectAction of ["assignments", "open-project-tab", "minimize-project"]) {
     assert.match(projectSummary, new RegExp(`id: "${projectAction}"`));

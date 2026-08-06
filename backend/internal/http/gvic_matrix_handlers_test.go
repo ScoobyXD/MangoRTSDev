@@ -10,7 +10,7 @@ import (
 	"miraeopus/backend/internal/store"
 )
 
-func TestGVICMatrixNodeCreateAndMoveV2(t *testing.T) {
+func TestGVICMatrixNodeCreateAndMoveV2IgnoresStaleSourceHint(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "77777777-7777-4777-8777-777777777401"
 	repo.EnsureCompany(companyID, "GVICMatrix Matrix HTTP Co")
@@ -72,7 +72,7 @@ func TestGVICMatrixNodeCreateAndMoveV2(t *testing.T) {
 	moveRec := httptest.NewRecorder()
 	moveReq := logicGateWorkV2Request(t, http.MethodPost, "/v2/gvic-matrix/nodes/"+createPayload.Node.NodeID+"/move", map[string]any{
 		"company_id":         companyID,
-		"from_logic_gate_id": createPayload.LogicGate.LogicGateID,
+		"from_logic_gate_id": "77777777-7777-4777-8777-777777777499",
 		"to_logic_gate_id":   targetGate.LogicGate.LogicGateID,
 		"status":             "done",
 		"priority":           4,

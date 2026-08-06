@@ -1,6 +1,8 @@
 package store
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	"miraeopus/backend/internal/domain"
@@ -62,5 +64,24 @@ func TestMemoryV2GVICCustomizeWithoutAssignmentsCopiesRawEffectiveSource(t *test
 	assignment := customized.GVICAssignments[0]
 	if assignment.Role != domain.GVICRoleConsulted || assignment.PrincipalType != EntityPermissionSubjectGroup || assignment.PrincipalID != group.GroupID {
 		t.Fatalf("copied assignment = %+v, want raw group pointer", assignment)
+	}
+}
+
+func TestPostgresV2GVICCustomizeCopiesEffectiveSourceBeforePrincipalValidation(t *testing.T) {
+	raw, err := os.ReadFile("postgres_policy_v2.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := extractFunctionSourceForTest(t, string(raw), "func (r *PostgresRepo) PutResourceGVICPolicy")
+	copySource := strings.Index(body, "if mode == PolicyModeCustomized && input.Assignments == nil")
+	validateAssignments := strings.Index(body, "for _, assignment := range normalized")
+	if copySource < 0 {
+		t.Fatal("Postgres V2 GVIC customize no longer copies the raw effective source when assignments are omitted")
+	}
+	if validateAssignments < 0 {
+		t.Fatal("Postgres V2 GVIC customize no longer validates normalized assignments")
+	}
+	if copySource > validateAssignments {
+		t.Fatal("Postgres V2 GVIC customize validates an empty assignment slice before copying the effective source")
 	}
 }

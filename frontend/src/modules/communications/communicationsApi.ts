@@ -821,8 +821,7 @@ export async function updateEmailMessage(messageID: string, update: { unread?: b
     ...(update.starred !== undefined ? { starred: update.starred } : {}),
   });
   const scope = { companyID, sharedInboxID, accountEmail };
-  if (update.starred === true) rememberRecentlyStarredMessage(message, scope);
-  if (update.starred === false) recentStarredMessages.delete(scopedMessageCacheKey(message.id, scope));
+  if (update.starred !== undefined) rememberRecentlyStarredMessage(message, scope);
   applyEmailMessageToCachedPages(message, {
     ...(update.starred !== undefined ? { prependIfMissing: true } : {}),
     ...scope,
@@ -2071,34 +2070,31 @@ function mergeExistingMessageForList(previous: EmailMessage, next: EmailMessage,
 function applyLocalMessageOverlaysToPage(page: MessagePage, params: ListMessagesParams): MessagePage {
   pruneRecentMessages();
   const mailbox = params.mailbox ?? "primary";
-  if (params.pageToken) return page;
+  const withRecentStarMutations = (messages: EmailMessage[]) => messages.map((message) => (
+    recentStarredMessages.get(scopedMessageCacheKey(message.id, params))?.value ?? cloneMessage(message)
+  ));
+
+  if (params.pageToken) {
+    return {
+      ...page,
+      messages: withRecentStarMutations(page.messages),
+    };
+  }
 
   const archivedIDs = new Set(recentMessagesForScope(recentArchivedMessages, params).map((entry) => entry.value.id));
   if (mailbox === "primary") {
-    const messages = page.messages.filter((message) => !archivedIDs.has(message.id)).map(cloneMessage);
-    const withRecent = prependRecentMessages(messages, recentPrimaryMessages, params);
+    let messages = page.messages.filter((message) => !archivedIDs.has(message.id)).map(cloneMessage);
+    messages = prependRecentMessages(messages, recentPrimaryMessages, params);
+    messages = withRecentStarMutations(messages);
     return {
       ...page,
-      messages: withRecent,
+      messages,
     };
   }
 
   if (mailbox === "starred") {
-    const messages = page.messages.map((message) => recentStarredMessages.get(scopedMessageCacheKey(message.id, params))?.value ?? cloneMessage(message));
-    const withRecent = prependRecentMessages(messages, recentStarredMessages, params);
-    return {
-      ...page,
-      messages: withRecent,
-    };
-  }
-
-  if (mailbox === "all") {
-    let messages = page.messages.map((message) => (
-      recentArchivedMessages.get(scopedMessageCacheKey(message.id, params))?.value
-      ?? recentStarredMessages.get(scopedMessageCacheKey(message.id, params))?.value
-      ?? cloneMessage(message)
-    ));
-    messages = prependRecentMessages(messages, recentArchivedMessages, params);
+    let messages = withRecentStarMutations(page.messages);
+    messages = messages.filter((message) => emailMessageMatchesListFilters(message, params));
     messages = prependRecentMessages(messages, recentStarredMessages, params);
     return {
       ...page,
@@ -2106,12 +2102,30 @@ function applyLocalMessageOverlaysToPage(page: MessagePage, params: ListMessages
     };
   }
 
-  if (mailbox !== "archive") return page;
-  const messages = page.messages.map(cloneMessage);
-  const withRecent = prependRecentMessages(messages, recentArchivedMessages, params);
+  if (mailbox === "all") {
+    let messages = page.messages.map((message) => (
+      recentArchivedMessages.get(scopedMessageCacheKey(message.id, params))?.value
+      ?? cloneMessage(message)
+    ));
+    messages = prependRecentMessages(messages, recentArchivedMessages, params);
+    messages = withRecentStarMutations(messages);
+    messages = prependRecentMessages(messages, recentStarredMessages, params);
+    return {
+      ...page,
+      messages,
+    };
+  }
+
+  if (mailbox !== "archive") return {
+    ...page,
+    messages: withRecentStarMutations(page.messages),
+  };
+  let messages = page.messages.map(cloneMessage);
+  messages = prependRecentMessages(messages, recentArchivedMessages, params);
+  messages = withRecentStarMutations(messages);
   return {
     ...page,
-    messages: withRecent,
+    messages,
   };
 }
 
@@ -2148,7 +2162,7 @@ function rememberRecentlyArchivedMessage(message: EmailMessage, scope: LocalEmai
 
 function rememberRecentlyStarredMessage(message: EmailMessage, scope: LocalEmailReplyScope = {}): void {
   const cleanMessageID = message.id.trim();
-  if (!cleanMessageID || !message.starred) return;
+  if (!cleanMessageID) return;
   recentStarredMessages.set(scopedMessageCacheKey(cleanMessageID, scope), scopedMessageCacheEntry(message, scope));
 }
 

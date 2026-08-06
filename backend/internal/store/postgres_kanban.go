@@ -548,11 +548,7 @@ func (r *PostgresRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignment
 	}
 	defer tx.Rollback()
 
-	sourceLogicGateID := input.LogicGateID
-	if input.FromLogicGateID != "" {
-		sourceLogicGateID = input.FromLogicGateID
-	}
-	assignment, err := nodeLogicGateAssignmentByNodeSQL(ctx, tx, input.CompanyID, input.NodeID, sourceLogicGateID)
+	assignment, err := nodeLogicGateAssignmentByNodeSQL(ctx, tx, input.CompanyID, input.NodeID, "")
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
