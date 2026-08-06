@@ -134,9 +134,10 @@ function assertSharedToolbarControls(editorTabBarSource: string, preferencesSour
   for (const label of SHARED_EDITOR_TAB_BAR_CONTROL_LABELS) {
     assert.match(editorTabBarSource, new RegExp(`aria-label="${label}"`));
   }
-  for (const label of ["Automatic Numbering", "Indent Guides", "Bullet Points", "Checklist"]) {
+  for (const label of ["Automatic Numbering", "Indent Guides", "Bullet Points", "Checkbox"]) {
     assert.match(preferencesSource, new RegExp(label));
   }
+  assert.doesNotMatch(preferencesSource, /label: "Checklist"/);
   assert.match(editorTabBarSource, /data-mango-unified-editor-toolbar="true"/);
   assert.match(editorTabBarSource, /data-mango-unified-editor-toolbar-tabs=/);
   assert.match(editorTabBarSource, /hoveredFormatControl/);

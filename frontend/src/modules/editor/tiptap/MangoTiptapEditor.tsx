@@ -1,5 +1,8 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Editor, type AnyExtension } from "@tiptap/core";
+import FrameRightClickMenu from "../../../app/framerightclickmenu.js";
+import { menuBtnBase } from "../../../app/frameLayoutTypes.js";
+import { Editor, type AnyExtension, type JSONContent } from "@tiptap/core";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from "@tiptap/react";
 import { NodeSelection, TextSelection, type Transaction } from "@tiptap/pm/state";
 import {
@@ -95,6 +98,13 @@ import {
 } from "./mangoTiptapRichClipboard.js";
 import { MangoTiptapStaticRenderer, type MangoStaticAttachmentImageProps } from "./MangoTiptapStaticRenderer.js";
 import { registerMangoTiptapFlusher } from "./mangoTiptapFlushRegistry.js";
+import {
+  calculateMangoTiptapTableGrowth,
+  growMangoTiptapTable,
+  readActiveMangoTiptapTableFrame,
+  type MangoTiptapTableFrame,
+  type MangoTiptapTableGrowth,
+} from "./mangoTiptapTable.js";
 import { MangoTiptapSync, type MangoTiptapConflict, type MangoTiptapResourceType, type MangoTiptapSaveState } from "./mangoTiptapSync.js";
 
 let pasteLoadingSequence = 0;
@@ -125,6 +135,14 @@ export type MangoTiptapImageAction = {
   height: number;
   x: number;
   y: number;
+};
+
+type MangoTiptapTableGrowthDrag = {
+  pointerID: number;
+  startX: number;
+  startY: number;
+  frame: MangoTiptapTableFrame;
+  growth: MangoTiptapTableGrowth;
 };
 
 export type MangoTiptapEditorProps = {
@@ -188,6 +206,28 @@ type UniversalPickerDraft = {
 function documentWithUniqueBlockIDs(document: MangoTiptapDocument): MangoTiptapDocument {
   const normalized = normalizeMangoTiptapBlockIDs(document.document);
   return normalized === document.document ? document : { ...document, document: normalized };
+}
+
+function documentWithCurrentMissingBlockIDs(document: MangoTiptapDocument, currentDocument: ProseMirrorNode): MangoTiptapDocument {
+  const preserve = (node: JSONContent, currentNode: ProseMirrorNode | undefined): JSONContent => {
+    if (!currentNode || node.type !== currentNode.type.name) return node;
+    const incomingBlockID = typeof node.attrs?.blockId === "string" ? node.attrs.blockId.trim() : "";
+    const currentBlockID = typeof currentNode.attrs.blockId === "string" ? currentNode.attrs.blockId.trim() : "";
+    const attrs = !incomingBlockID && currentBlockID
+      ? { ...(node.attrs ?? {}), blockId: currentBlockID }
+      : node.attrs;
+    const content = node.content?.map((child, index) => preserve(
+      child,
+      index < currentNode.childCount ? currentNode.child(index) : undefined,
+    ));
+    if (attrs === node.attrs && content === node.content) return node;
+    return {
+      ...node,
+      ...(attrs ? { attrs } : {}),
+      ...(content ? { content } : {}),
+    };
+  };
+  return { ...document, document: preserve(document.document, currentDocument) };
 }
 
 function initialDocument(value?: string): { document: MangoTiptapDocument; error?: string } {
@@ -770,6 +810,8 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   }
   const dirtyMetricReleaseRef = useRef<(() => void) | null>(null);
   const [editorActive, setEditorActive] = useState(false);
+  const [liveSurfaceReady, setLiveSurfaceReady] = useState(false);
+  const pointerActivationPendingRef = useRef(false);
   const [document, setDocument] = useState(initial.document);
   const [error, setError] = useState(initial.error ?? "");
   const [recoveryStorageError, setRecoveryStorageError] = useState("");
@@ -783,8 +825,11 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const [creatingSelectionNode, setCreatingSelectionNode] = useState(false);
   const [renderedAnnotations, setRenderedAnnotations] = useState<readonly MangoTiptapAnnotation[]>(annotations);
   const [tableActive, setTableActive] = useState(false);
+  const [activeTableFrame, setActiveTableFrame] = useState<MangoTiptapTableFrame | null>(null);
+  const [tableGrowthDrag, setTableGrowthDrag] = useState<MangoTiptapTableGrowthDrag | null>(null);
+  const tableGrowthDragRef = useRef<MangoTiptapTableGrowthDrag | null>(null);
   const [universalPickerDraft, setUniversalPickerDraft] = useState<UniversalPickerDraft | null>(null);
-  const [tableContextMenu, setTableContextMenu] = useState<{ left: number; top: number } | null>(null);
+  const [tableContextMenu, setTableContextMenu] = useState<{ x: number; y: number } | null>(null);
   const latestTargetRequestRef = useRef(0);
   const callbacksRef = useRef({
     onFocus, onBlur, onConflict, onError, onSaveStateChange,
@@ -880,7 +925,9 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
 
   const updateSelectionState = useCallback((editor: Editor) => traceEditorFunction(traceContext, "editor.update_selection_state", "editor.selection", () => {
     const state = readMangoTiptapSelectionState(editor);
-    setTableActive(editor.isActive("table"));
+    const tableFrame = rootRef.current ? readActiveMangoTiptapTableFrame(editor, rootRef.current) : null;
+    setTableActive(Boolean(tableFrame));
+    setActiveTableFrame(tableFrame);
     callbacksRef.current.onSelectionFontSizeChange?.(state.fontSize);
     callbacksRef.current.onSelectionHighlightColorChange?.(state.highlightColor);
     callbacksRef.current.onSelectionTextAlignmentChange?.(state.textAlignment);
@@ -966,12 +1013,20 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         });
       }),
       onDocument: (canonical) => {
-        const normalizedCanonical = documentWithUniqueBlockIDs(canonical);
+        const editor = editorRef.current;
+        const stableCanonical = editor ? documentWithCurrentMissingBlockIDs(canonical, editor.state.doc) : canonical;
+        const normalizedCanonical = documentWithUniqueBlockIDs(stableCanonical);
+        if (editor) {
+          const canonicalNode = editor.schema.nodeFromJSON(normalizedCanonical.document);
+          if (editor.state.doc.eq(canonicalNode)) {
+            currentDocumentRef.current = normalizedCanonical;
+            setError("");
+            return;
+          }
+          editor.commands.setContent(normalizedCanonical.document, { emitUpdate: false, errorOnInvalidContent: true });
+        }
         setDocument(normalizedCanonical);
         currentDocumentRef.current = normalizedCanonical;
-        if (editorRef.current) {
-          editorRef.current.commands.setContent(normalizedCanonical.document, { emitUpdate: false, errorOnInvalidContent: true });
-        }
         setError("");
       },
       onAnnotations: (canonicalAnnotations) => publishAnnotationPositions(canonicalAnnotations),
@@ -1097,6 +1152,8 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const activateFromPointer = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     event.preventDefault();
+    pointerActivationPendingRef.current = true;
+    setLiveSurfaceReady(false);
     const coordinates = { left: event.clientX, top: event.clientY };
     const root = event.currentTarget;
     const preservedScrollTop = root.scrollTop;
@@ -1108,6 +1165,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         if (!editor || !root.contains(editor.view.dom)) {
           attempts += 1;
           if (attempts < 8) window.requestAnimationFrame(focusAtPointer);
+          else pointerActivationPendingRef.current = false;
           return;
         }
         root.scrollTop = preservedScrollTop;
@@ -1117,6 +1175,8 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         (editor.view.dom as HTMLElement).focus({ preventScroll: true });
         root.scrollTop = preservedScrollTop;
         root.scrollLeft = preservedScrollLeft;
+        pointerActivationPendingRef.current = false;
+        setLiveSurfaceReady(true);
         window.requestAnimationFrame(() => {
           root.scrollTop = preservedScrollTop;
           root.scrollLeft = preservedScrollLeft;
@@ -1291,6 +1351,19 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const isActive = editorActive;
 
   useLayoutEffect(() => {
+    if (!activeEditor || pointerActivationPendingRef.current) return undefined;
+    const view = rootRef.current?.ownerDocument.defaultView;
+    if (!view) {
+      setLiveSurfaceReady(true);
+      return undefined;
+    }
+    const frameID = view.requestAnimationFrame(() => {
+      if (editorRef.current === activeEditor && rootRef.current?.contains(activeEditor.view.dom)) setLiveSurfaceReady(true);
+    });
+    return () => view.cancelAnimationFrame(frameID);
+  }, [activeEditor]);
+
+  useLayoutEffect(() => {
     if (!isActive || editorRef.current) return undefined;
     const releaseActive = trackEditorRuntimeResource("active_editors");
     const editor = traceEditorFunction(
@@ -1383,11 +1456,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
             } catch {
               return false;
             }
-            const rootRect = root.getBoundingClientRect();
-            setTableContextMenu({
-              left: event.clientX - rootRect.left + root.scrollLeft,
-              top: event.clientY - rootRect.top + root.scrollTop,
-            });
+            setTableContextMenu({ x: event.clientX, y: event.clientY });
             return true;
           },
         },
@@ -1550,6 +1619,11 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       if (formattingControllerRef?.current === controller) formattingControllerRef.current = null;
       if (formattingControllerInstanceRef.current === controller) formattingControllerInstanceRef.current = null;
       editorRef.current = null;
+      pointerActivationPendingRef.current = false;
+      tableGrowthDragRef.current = null;
+      setLiveSurfaceReady(false);
+      setActiveTableFrame(null);
+      setTableGrowthDrag(null);
       setActiveEditor((current) => current === editor ? null : current);
       editor.destroy();
       releaseActive();
@@ -1682,20 +1756,102 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   }, []);
 
   useEffect(() => {
-    if (!tableContextMenu) return undefined;
-    const ownerDocument = rootRef.current?.ownerDocument;
-    if (!ownerDocument) return undefined;
-    const closeFromOutside = (event: PointerEvent) => {
-      const target = event.target instanceof Element ? event.target : null;
-      if (!target?.closest('[data-mango-tiptap-table-context-menu="true"]')) setTableContextMenu(null);
+    if (!activeEditor || !tableActive) return undefined;
+    const root = rootRef.current;
+    const ownerWindow = root?.ownerDocument.defaultView;
+    if (!root || !ownerWindow) return undefined;
+    let frameID = 0;
+    const update = () => {
+      ownerWindow.cancelAnimationFrame(frameID);
+      frameID = ownerWindow.requestAnimationFrame(() => {
+        if (editorRef.current === activeEditor) setActiveTableFrame(readActiveMangoTiptapTableFrame(activeEditor, root));
+      });
     };
-    ownerDocument.addEventListener("pointerdown", closeFromOutside, true);
-    return () => ownerDocument.removeEventListener("pointerdown", closeFromOutside, true);
-  }, [tableContextMenu]);
+    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    resizeObserver?.observe(activeEditor.view.dom);
+    root.addEventListener("scroll", update, { passive: true });
+    ownerWindow.addEventListener("resize", update);
+    ownerWindow.addEventListener("scroll", update, true);
+    update();
+    return () => {
+      ownerWindow.cancelAnimationFrame(frameID);
+      resizeObserver?.disconnect();
+      root.removeEventListener("scroll", update);
+      ownerWindow.removeEventListener("resize", update);
+      ownerWindow.removeEventListener("scroll", update, true);
+    };
+  }, [activeEditor, tableActive]);
+
+  const beginTableGrowth = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0 || !activeTableFrame) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setTableContextMenu(null);
+    const pointerID = Number.isFinite(event.pointerId) ? event.pointerId : 1;
+    const drag: MangoTiptapTableGrowthDrag = {
+      pointerID,
+      startX: event.clientX,
+      startY: event.clientY,
+      frame: activeTableFrame,
+      growth: { rows: 0, columns: 0 },
+    };
+    tableGrowthDragRef.current = drag;
+    setTableGrowthDrag(drag);
+    try { event.currentTarget.setPointerCapture?.(pointerID); } catch { /* Pointer capture is optional. */ }
+  }, [activeTableFrame]);
+
+  const updateTableGrowth = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = tableGrowthDragRef.current;
+    if (!drag || (Number.isFinite(event.pointerId) && event.pointerId !== drag.pointerID)) return;
+    event.preventDefault();
+    const growth = calculateMangoTiptapTableGrowth({
+      startX: drag.startX,
+      startY: drag.startY,
+      currentX: event.clientX,
+      currentY: event.clientY,
+      rowHeight: drag.frame.rowHeight,
+      columnWidth: drag.frame.columnWidth,
+    });
+    if (growth.rows === drag.growth.rows && growth.columns === drag.growth.columns) return;
+    const next = { ...drag, growth };
+    tableGrowthDragRef.current = next;
+    setTableGrowthDrag(next);
+  }, []);
+
+  const finishTableGrowth = useCallback((event: React.PointerEvent<HTMLButtonElement>, cancelled = false) => {
+    const drag = tableGrowthDragRef.current;
+    if (!drag || (Number.isFinite(event.pointerId) && event.pointerId !== drag.pointerID)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    tableGrowthDragRef.current = null;
+    setTableGrowthDrag(null);
+    try { event.currentTarget.releasePointerCapture?.(drag.pointerID); } catch { /* Pointer capture is optional. */ }
+    const editor = editorRef.current;
+    const root = rootRef.current;
+    if (cancelled || !editor || (drag.growth.rows === 0 && drag.growth.columns === 0)) return;
+    const preservedScrollTop = root?.scrollTop ?? 0;
+    const preservedScrollLeft = root?.scrollLeft ?? 0;
+    if (!growMangoTiptapTable(editor, drag.growth)) return;
+    (editor.view.dom as HTMLElement).focus({ preventScroll: true });
+    if (root) {
+      root.scrollTop = preservedScrollTop;
+      root.scrollLeft = preservedScrollLeft;
+    }
+    editor.view.dom.ownerDocument.defaultView?.requestAnimationFrame(() => {
+      if (editorRef.current === editor && rootRef.current) setActiveTableFrame(readActiveMangoTiptapTableFrame(editor, rootRef.current));
+    });
+  }, []);
 
   const renderStaticAttachment = useCallback((attributes: MangoStaticAttachmentImageProps) => (
     <MangoAuthenticatedImage attributes={attributes} attachmentContext={attachmentContext} />
   ), [attachmentContext]);
+  const tableHandleFrame = tableGrowthDrag?.frame ?? activeTableFrame;
+  const tablePreviewWidth = tableHandleFrame
+    ? tableHandleFrame.width + (tableGrowthDrag?.growth.columns ?? 0) * tableHandleFrame.columnWidth
+    : 0;
+  const tablePreviewHeight = tableHandleFrame
+    ? tableHandleFrame.height + (tableGrowthDrag?.growth.rows ?? 0) * tableHandleFrame.rowHeight
+    : 0;
 
   return (
     <div
@@ -1709,15 +1865,25 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       data-mango-editor-state={lifecycleRef.current.getSnapshot().state}
       data-mango-editor-pinned={lifecycleRef.current.getSnapshot().pinned || undefined}
       data-mango-editor-sync-mode="revisioned-json"
+      data-mango-tiptap-live-ready={isActive && activeEditor && liveSurfaceReady ? "true" : undefined}
       onPointerDown={!isActive ? activateFromPointer : undefined}
       onFocusCapture={!isActive ? activate : undefined}
       onDoubleClick={!isActive ? activate : undefined}
     >
-      {isActive && activeEditor ? <EditorContent editor={activeEditor} className="mango-tiptap-active-surface" /> : (
+      {isActive && activeEditor && (
+        <EditorContent
+          editor={activeEditor}
+          className="mango-tiptap-active-surface"
+          data-mango-tiptap-live-surface="true"
+          style={liveSurfaceReady ? undefined : { position: "absolute", inset: 0, zIndex: 1, opacity: 0 }}
+        />
+      )}
+      {(!isActive || !activeEditor || !liveSurfaceReady) && (
         <MangoTiptapStaticRenderer
           value={document}
           annotations={renderedAnnotations}
           ariaLabel={ariaLabel}
+          dataAttributes={isActive ? { "data-mango-tiptap-activation-cover": "true" } : undefined}
           style={{ minHeight: style?.minHeight ?? 80 }}
           renderAttachmentImage={renderStaticAttachment}
         />
@@ -1741,34 +1907,86 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         </div>
       ) : (error || recoveryStorageError) && <div role="alert" style={{ color: "#b91c1c", fontSize: 12, padding: "4px 8px" }}>{error || recoveryStorageError}</div>}
       {isActive && editable && tableContextMenu && (
-        <div
-          role="menu"
-          aria-label="Table actions"
-          data-mango-tiptap-table-context-menu="true"
-          contentEditable={false}
-          onPointerDown={(event) => event.preventDefault()}
-          style={{ position: "absolute", left: tableContextMenu.left, top: tableContextMenu.top, zIndex: 14, display: "grid", minWidth: 190, gap: 2, padding: 5, border: "1px solid #94a3b8", borderRadius: 9, background: "#ffffff", boxShadow: "0 12px 30px rgba(15,23,42,0.2)" }}
+        <FrameRightClickMenu
+          x={tableContextMenu.x}
+          y={tableContextMenu.y}
+          ariaLabel="Table actions"
+          width={224}
+          minWidth={224}
+          overflow="visible"
+          onClose={() => setTableContextMenu(null)}
         >
           {([
             ["add-column-before", "Create column on the left"],
             ["add-column-after", "Create column on the right"],
             ["add-row-before", "Create row above"],
             ["add-row-after", "Create row below"],
+          ] as const).map(([command, label], index) => (
+            <React.Fragment key={command}>
+              {index === 2 && <div role="separator" style={{ height: 1, margin: "4px 10px", background: "rgba(100,116,139,0.20)" }} />}
+              <button type="button" role="menuitem" onClick={() => runTableContextCommand(command)} style={menuBtnBase}>{label}</button>
+            </React.Fragment>
+          ))}
+          <div role="separator" style={{ height: 1, margin: "4px 10px", background: "rgba(100,116,139,0.20)" }} />
+          {([
             ["delete-row", "Delete row"],
             ["delete-column", "Delete column"],
             ["delete-table", "Delete table"],
           ] as const).map(([command, label]) => (
-            <button
-              key={command}
-              type="button"
-              role="menuitem"
-              onClick={() => runTableContextCommand(command)}
-              style={{ padding: "6px 9px", border: 0, borderRadius: 6, background: "transparent", color: command.startsWith("delete") ? "#dc2626" : "#0f172a", font: "inherit", textAlign: "left", cursor: "pointer" }}
-            >
-              {label}
-            </button>
+            <button key={command} type="button" role="menuitem" onClick={() => runTableContextCommand(command)} style={{ ...menuBtnBase, color: "#dc2626" }}>{label}</button>
           ))}
-        </div>
+        </FrameRightClickMenu>
+      )}
+      {isActive && editable && tableHandleFrame && (
+        <>
+          {tableGrowthDrag && (tableGrowthDrag.growth.rows > 0 || tableGrowthDrag.growth.columns > 0) && (
+            <div
+              aria-hidden="true"
+              data-mango-tiptap-table-growth-preview="true"
+              data-preview-rows={tableHandleFrame.rows + tableGrowthDrag.growth.rows}
+              data-preview-columns={tableHandleFrame.columns + tableGrowthDrag.growth.columns}
+              style={{
+                position: "absolute",
+                left: tableHandleFrame.left,
+                top: tableHandleFrame.top,
+                zIndex: 9,
+                width: tablePreviewWidth,
+                height: tablePreviewHeight,
+                boxSizing: "border-box",
+                pointerEvents: "none",
+                border: "2px solid rgba(14,165,233,0.78)",
+                backgroundColor: "rgba(224,242,254,0.18)",
+                backgroundImage: "linear-gradient(to right, rgba(14,165,233,0.28) 1px, transparent 1px), linear-gradient(to bottom, rgba(14,165,233,0.28) 1px, transparent 1px)",
+                backgroundSize: `${tableHandleFrame.columnWidth}px ${tableHandleFrame.rowHeight}px`,
+              }}
+            />
+          )}
+          <button
+            type="button"
+            aria-label="Drag to add table rows and columns"
+            title="Drag to add table rows and columns"
+            data-mango-tiptap-table-growth-handle="true"
+            onPointerDown={beginTableGrowth}
+            onPointerMove={updateTableGrowth}
+            onPointerUp={(event) => finishTableGrowth(event)}
+            onPointerCancel={(event) => finishTableGrowth(event, true)}
+            style={{
+              position: "absolute",
+              left: tableHandleFrame.left + tablePreviewWidth - 10,
+              top: tableHandleFrame.top + tablePreviewHeight - 10,
+              zIndex: 10,
+              width: 20,
+              height: 20,
+              padding: 0,
+              border: "2px solid #ffffff",
+              borderRadius: 6,
+              background: "linear-gradient(135deg, #22d3ee, #7c3aed)",
+              boxShadow: "0 4px 12px rgba(15,23,42,0.28)",
+              cursor: "nwse-resize",
+              touchAction: "none",
+            }}
+          />
+        </>
       )}
       {isActive && editable && tableActive && (
         <div role="toolbar" aria-label="Table controls" contentEditable={false} style={{ position: "absolute", right: 8, top: 8, zIndex: 11, display: "flex", flexWrap: "wrap", gap: 4, padding: 4, border: "1px solid #bae6fd", borderRadius: 8, background: "#ffffff" }}>

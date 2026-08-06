@@ -112,18 +112,38 @@
 .mango-tiptap-static-document ul[data-type="taskList"],
 .mango-tiptap-prosemirror ul[data-type="taskList"] {
   padding-inline-start: 0;
+  margin: 2px 0;
   list-style: none;
 }
 
 .mango-tiptap-static-document li[data-type="taskItem"],
 .mango-tiptap-prosemirror li[data-type="taskItem"] {
   display: flex;
+  align-items: flex-start;
   gap: 0.45em;
   padding-inline-start: 0;
+  margin: 1px 0;
   list-style: none;
 }
 
-/* Match the legacy Node text-box list geometry and four-level marker sequence. */
+.mango-tiptap-static-document li[data-type="taskItem"] > label,
+.mango-tiptap-prosemirror li[data-type="taskItem"] > label {
+  flex: 0 0 auto;
+  line-height: 20px;
+  user-select: none;
+}
+
+.mango-tiptap-static-document li[data-type="taskItem"] > div,
+.mango-tiptap-prosemirror li[data-type="taskItem"] > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.mango-tiptap-prosemirror li[data-type="taskItem"] > label input {
+  cursor: pointer;
+}
+
+/* Match the Node text-box list geometry and four-level marker sequence. */
 .mango-tiptap-static-document ul:not([data-type="taskList"]),
 .mango-tiptap-prosemirror ul:not([data-type="taskList"]) {
   margin: 2px 0;
@@ -230,7 +250,7 @@
 .mango-tiptap-static-document ol ol,
 .mango-tiptap-prosemirror ol ol {
   padding-inline-start: 28px;
-  list-style-type: upper-alpha;
+  list-style-type: lower-alpha;
 }
 
 .mango-tiptap-static-document ol ol ol,
@@ -245,15 +265,15 @@
 
 .mango-tiptap-static-document ol ol ol ol,
 .mango-tiptap-prosemirror ol ol ol ol {
-  list-style-type: upper-alpha;
+  list-style-type: lower-alpha;
 }
 
 .mango-tiptap-static-document ol ol ol ol > li::marker,
 .mango-tiptap-prosemirror ol ol ol ol > li::marker {
-  content: counter(list-item, upper-alpha) ")  ";
+  content: counter(list-item, lower-alpha) ")  ";
 }
 
-/* Automatic numbering repeats 1., A., 1), A) at deeper levels. */
+/* Automatic numbering repeats 1., a., 1), a) at deeper levels. */
 .mango-tiptap-static-document ol ol ol ol ol,
 .mango-tiptap-prosemirror ol ol ol ol ol {
   list-style-type: decimal;
@@ -266,7 +286,7 @@
 
 .mango-tiptap-static-document ol ol ol ol ol ol,
 .mango-tiptap-prosemirror ol ol ol ol ol ol {
-  list-style-type: upper-alpha;
+  list-style-type: lower-alpha;
 }
 
 .mango-tiptap-static-document ol ol ol ol ol ol > li::marker,
@@ -286,12 +306,12 @@
 
 .mango-tiptap-static-document ol ol ol ol ol ol ol ol,
 .mango-tiptap-prosemirror ol ol ol ol ol ol ol ol {
-  list-style-type: upper-alpha;
+  list-style-type: lower-alpha;
 }
 
 .mango-tiptap-static-document ol ol ol ol ol ol ol ol > li::marker,
 .mango-tiptap-prosemirror ol ol ol ol ol ol ol ol > li::marker {
-  content: counter(list-item, upper-alpha) ")  ";
+  content: counter(list-item, lower-alpha) ")  ";
 }
 
 .mango-tiptap-static-document ol > li,
@@ -318,14 +338,16 @@
 
 .mango-tiptap-static-document .tableWrapper,
 .mango-tiptap-prosemirror .tableWrapper {
-  width: 100%;
+  width: max-content;
+  max-width: none;
   margin: 8px 0;
-  overflow-x: auto;
+  overflow: visible;
 }
 
 .mango-tiptap-static-document table,
 .mango-tiptap-prosemirror table {
-  width: 100%;
+  width: auto;
+  min-width: 0;
   margin: 8px 0;
   border: 1px solid #94a3b8;
   border-collapse: collapse;
@@ -335,6 +357,7 @@
 
 .mango-tiptap-static-document .tableWrapper table,
 .mango-tiptap-prosemirror .tableWrapper table {
+  width: auto;
   margin: 0;
 }
 
@@ -343,9 +366,12 @@
 .mango-tiptap-prosemirror th,
 .mango-tiptap-prosemirror td {
   position: relative;
-  min-width: 80px;
-  height: 28px;
+  width: 112px;
+  min-width: 112px;
+  max-width: 112px;
+  height: 36px;
   padding: 5px 7px;
+  box-sizing: border-box;
   border: 1px solid #94a3b8;
   vertical-align: top;
   background: #ffffff;
