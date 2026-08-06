@@ -23,9 +23,9 @@ MangoRTS is a Windows-friendly Go + Vite/React app with a Go API backend and fro
 
 ## Windows execution and sandbox defaults
 
-- On Jonat's Windows machine, Windows Application Control routinely blocks newly built unsigned Go executables, and the restricted sandbox frequently cannot enforce the worktree's split writable roots.
-- For Go commands on Windows, default to `go run ...` instead of building a temporary `.exe` and launching it directly. Keep CI and Linux production-binary paths unchanged unless the task specifically requires otherwise.
-- When an in-scope command fails because the Windows sandbox cannot start or Application Control blocks a freshly built executable, use the approved unsandboxed execution path and the trusted Go toolchain instead of repeatedly retrying the blocked executable.
+- On Jonat's Windows machine, Windows Application Control blocks newly built unsigned Go test executables. Run backend Go tests through the installed WSL2 Ubuntu distribution and `/usr/local/go/bin/go`; do not invoke Windows `go test`.
+- `node scripts\run_all_tests.mjs` automatically uses WSL2 Ubuntu for its backend Go step on Windows. Launch the full runner through the approved outside-sandbox execution path on the first attempt because the native Windows sandbox cannot access the WSL service. Do not first retry it inside the sandbox.
+- For targeted backend Go tests on Windows, use the approved outside-sandbox execution path with WSL2 Ubuntu on the first attempt. Keep CI and non-Windows Go test paths native.
 - Do not disable Windows Security, weaken App Control, or add broad allow rules unless Jonat explicitly requests it.
 
 ## App worktree task creation, completion, and integration
@@ -80,7 +80,7 @@ npm ci
 
 # Backend tests
 cd C:\Users\<user>\MangoRTSDev\backend
-go test ./...
+wsl.exe --distribution Ubuntu --cd C:\Users\<user>\MangoRTSDev\backend --exec /usr/local/go/bin/go test ./...
 
 # Full repo verification
 cd C:\Users\<user>\MangoRTSDev
