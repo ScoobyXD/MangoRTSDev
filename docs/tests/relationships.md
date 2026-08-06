@@ -6,6 +6,8 @@ The command carries the resource's existing canonical ID unchanged from its sour
 ↓
 For a move, Mango re-reads the existing canonical edge and authorizes its actual source instead of trusting a stale browser source hint
 ↓
+Moving a Node between Logic Gates changes only that canonical assignment and its projections; email and attachment relationships stay attached to the exact Node and are neither required nor rewritten
+↓
 The relationship subsystem stores that literal ID in a direct typed column when the endpoint type is fixed, or together with its canonical `resource_type` when the endpoint type can vary
 ↓
 The relationship remains in the table for its business meaning, such as Node structure, Logic Gate flow, Project membership, personal pin organization, email attachment, file ownership, Account assignment, permission, or GVIC assignment; only the documented Company Explorer, Logic Gate-to-Node, and Shared Triage parent links also define immediate V2 policy ancestry
@@ -96,7 +98,7 @@ Every create command MUST carry the actual endpoint ID from the authoritative so
 
 The write path MUST establish that the endpoint belongs to the same company, is an allowed type, exists for the operation, and is usable by the actor. This may be enforced with a normal foreign key, a validation query in the command transaction, or a database trigger; the enforcement method MUST NOT change the literal ID.
 
-For a mutation of an existing relationship, including a cross-Logic-Gate Node move, the server MUST read the canonical current edge and authorize its actual endpoints. A caller-supplied previous/source endpoint may assist presentation or concurrency diagnostics, but it MUST NOT select relationship authority, replace the canonical edge, or make a valid relationship appear missing merely because the hint is stale.
+For a mutation of an existing relationship, including a cross-Logic-Gate Node move, the server MUST read the canonical current edge and authorize its actual endpoints. A caller-supplied previous/source endpoint may assist presentation or concurrency diagnostics, but it MUST NOT select relationship authority, replace the canonical edge, or make a valid relationship appear missing merely because the hint is stale. Moving the canonical Logic Gate assignment MUST NOT require, rewrite, or remove an independent email or attachment relationship; those relationships remain attached to their exact Node identity.
 
 ### Law 11 — Company scope is part of identity
 

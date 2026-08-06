@@ -801,6 +801,7 @@ test("editor header keeps primary controls visible and preserves all secondary o
   assert.doesNotMatch(linkedDocumentPanels, />Policy mode<|Effective source:/);
   assert.match(editorContent, /<EntityPermissionsPanel[\s\S]*readOnly=\{!linkedEntityCanEdit\}[\s\S]*onSaved=\{\(\) => invalidateWorkspaceSnapshot\(apiBase, companyID\)\}/);
   assert.match(editorContent, /descendant_action: descendantAction/);
+  assert.equal(editorContent.includes("invalidateResourcePolicyDependentCaches(apiBase, companyID);"), true);
   assert.match(projectSummary, /visibleTabIDs=\{EDITOR_PRIMARY_HEADER_TAB_IDS\}/);
   for (const projectAction of ["assignments", "open-project-tab", "minimize-project"]) {
     assert.match(projectSummary, new RegExp(`id: "${projectAction}"`));

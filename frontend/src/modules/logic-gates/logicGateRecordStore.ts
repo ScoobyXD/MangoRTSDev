@@ -106,6 +106,19 @@ export function invalidateLogicGateRecordStoreCaches(apiBase: string, companyID:
   projectionCache.delete(cacheKey);
 }
 
+export function invalidateLogicGateRecordStorePolicyCachesForCompany(apiBase: string, companyID: string): void {
+  const prefix = key(apiBase, companyID, "");
+  const cacheKeys = new Set([...viewCache.keys(), ...viewInflight.keys(), ...viewGeneration.keys(), ...detailsCache.keys(), ...projectionCache.keys()]);
+  for (const cacheKey of cacheKeys) {
+    if (!cacheKey.startsWith(prefix)) continue;
+    bumpViewGeneration(cacheKey);
+    viewInflight.delete(cacheKey);
+    viewCache.delete(cacheKey);
+    detailsCache.delete(cacheKey);
+    projectionCache.delete(cacheKey);
+  }
+}
+
 export function patchLogicGateRecordStoreGVICAssignments(
   apiBase: string,
   companyID: string,

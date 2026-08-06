@@ -8,7 +8,9 @@ Switching inherited policy to Customized copies the raw effective source before 
 ↓
 Inherited descendants resolve the parent live, while a confirmed overwrite records one reset sequence that supersedes older customizations
 ↓
-Cross-Logic-Gate Node moves read and authorize the canonical current assignment even when a browser source hint is stale
+Successful policy saves invalidate cached Node and Logic Gate records so descendant views refetch the live effective result
+↓
+Cross-Logic-Gate Node moves read and authorize the canonical current assignment even when a browser source hint is stale, without requiring or rewriting unrelated email relationships
 ↓
 Current nested-group membership expands GVIC principals for My Work and notifications, while permissions remain a separate decision
 
@@ -59,7 +61,8 @@ GVIC34 - Stale in-flight reads cannot overwrite a newer committed policy respons
 GVIC35 - Step 2 runtime readers and writers use only the two canonical GVIC tables. Temporarily retained legacy tables are frozen rollback evidence and have no deployed reader or writer.
 GVIC36 - All GVIC changes and their settings, graph edges, events, and read-version effects commit atomically.
 GVIC37 - The editor keeps the four role columns compact and removes the exposed policy-mode/effective-source strip; inherited policy is read-only until Customized is selected from More editor actions.
-GVIC38 - A cross-Logic-Gate Node move reads and authorizes the actual canonical one-per-Node assignment. A caller-supplied source Logic Gate is only a hint and cannot select relationship authority or cause a valid move to fail when stale.
+GVIC38 - A cross-Logic-Gate Node move reads and authorizes the actual canonical one-per-Node assignment. A caller-supplied source Logic Gate is only a hint and cannot select relationship authority or cause a valid move to fail when stale. The move changes the canonical Logic Gate assignment and its projections; it neither requires nor rewrites optional email or attachment relationships owned by the same Node.
+GVIC39 - After any successful GVIC policy write, the company workspace snapshot and cached Node and Logic Gate records are invalidated. A descendant view must refetch its live effective policy instead of displaying a stale record cache; inherited-only Apply still writes no descendant policy rows, and overwrite-all still uses one reset sequence instead of materializing descendants.
 
 ## Scenarios
 
@@ -164,6 +167,7 @@ Business logic covered:
 - GVIC27
 - GVIC28
 - GVIC34
+- GVIC39
 
 Given:
 - A logic gate has generated, verified, consulted, and informed GVIC assignments.
@@ -178,7 +182,7 @@ Expected:
 - No permanent effective or My Work authority rows are maintained.
 - Editable GVIC chips and mode/source explanations reconcile from the canonical response.
 - My Work and other non-live views resolve current state on open or refresh.
-- Stale broad Logic Gate payloads, stale workspace list cache entries, and stale in-flight reads cannot overwrite newer Logic Gate GVIC assignments.
+- Stale broad Logic Gate payloads, stale workspace list cache entries, cached Node/Logic Gate records, and stale in-flight reads cannot overwrite newer Logic Gate GVIC assignments or descendant effective policy.
 - Logic Gate and Node GVIC follow the same freshness contract.
 - The inherited Node resolves the Logic Gate live; the customized Node remains independent until an eligible overwrite-all reset.
 - Parent-link, reset, group-version, actor, and effective-source fingerprints prevent unsafe 304 responses.
@@ -334,10 +338,12 @@ Business logic covered:
 Given:
 - A Node has one canonical Logic Gate work assignment.
 - The browser submits a move to another Logic Gate with an absent or stale `from_logic_gate_id` hint.
+- The Node may have no email relationship, or may have email and attachment relationships that remain owned by the Node.
 
 Expected:
 - The server reads the Node's canonical assignment and authorizes the actor against that actual source Logic Gate.
 - The stale hint neither produces `logic_gate_work_assignment_not_found` nor substitutes another source relationship.
 - The one assignment moves to the target Logic Gate and its related projections and events use the same canonical Node and Logic Gate IDs.
+- The move succeeds without an email relationship, and any existing Node email or attachment relationships remain unchanged.
 - Only Bob receives the assignment update; Alice, Charlie, unrelated users, and the actor do not.
 - Group-backed assignments use the same effective-user delta rule without duplicating recipients.

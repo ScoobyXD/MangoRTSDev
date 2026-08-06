@@ -3716,6 +3716,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       {folderPermissionsTarget && (
         <EntityPermissionsDialog
           requestJSON={requestJSON}
+          apiBase={apiBase}
           companyID={companyID}
           entityType="company_explorer_folder"
           entityID={folderPermissionsTarget.folderID}

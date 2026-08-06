@@ -9,6 +9,8 @@ import {
   invalidateNodeRecordStoreCaches,
   type NodeProjectionItem,
 } from "../../../../frontend/src/modules/nodes/nodeRecordStore.js";
+import { getLogicGateRecordSingleFlight, invalidateLogicGateRecordStoreCaches } from "../../../../frontend/src/modules/logic-gates/logicGateRecordStore.js";
+import { invalidateResourcePolicyDependentCaches } from "../../../../frontend/src/modules/permissions/resourcePolicyCaches.js";
 import { logout } from "../../../../frontend/src/auth/cognitoAuth.js";
 
 type Deferred<T> = {
@@ -250,5 +252,68 @@ test("node view 404 is terminal for that resource until explicit clear", async (
     globalThis.fetch = originalFetch;
     clearResourceMissing({ apiBase, companyID, resourceType: "node", resourceID: nodeID });
     invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
+  }
+});
+
+test("resource policy invalidation refetches cached node and logic gate descendants", async () => {
+  const apiBase = "https://api.example.test/resource-policy-cache";
+  const companyID = "company-1";
+  const originalFetch = globalThis.fetch;
+  let policyVersion = 1;
+  let nodeCalls = 0;
+  let logicGateCalls = 0;
+  globalThis.fetch = (async (input) => {
+    const path = String(input);
+    if (path.includes("/v2/nodes/")) {
+      nodeCalls += 1;
+      return jsonResponse({
+        node: {
+          company_id: companyID,
+          node_id: "node-policy",
+          name: "Node policy " + policyVersion,
+          created_timestamp: "2026-06-18T01:00:00.000Z",
+        },
+        information: [],
+        relationships: [],
+        projections: [],
+        gvic_assignments: [],
+      });
+    }
+    if (path.includes("/v2/logic-gates/")) {
+      logicGateCalls += 1;
+      return jsonResponse({
+        logic_gate: {
+          company_id: companyID,
+          logic_gate_id: "gate-policy",
+          header: "Gate policy " + policyVersion,
+          created_timestamp: "2026-06-18T01:00:00.000Z",
+        },
+        information: [],
+        relationships: [],
+        projections: [],
+      });
+    }
+    throw new Error("unexpected_fetch:" + path);
+  }) as typeof fetch;
+
+  invalidateNodeRecordStoreCaches(apiBase, companyID, "node-policy");
+  invalidateLogicGateRecordStoreCaches(apiBase, companyID, "gate-policy");
+  try {
+    assert.equal((await getNodeRecordSingleFlight(apiBase, companyID, "node-policy")).node.name, "Node policy 1");
+    assert.equal((await getLogicGateRecordSingleFlight(apiBase, companyID, "gate-policy")).logic_gate.header, "Gate policy 1");
+    policyVersion = 2;
+    assert.equal((await getNodeRecordSingleFlight(apiBase, companyID, "node-policy")).node.name, "Node policy 1");
+    assert.equal((await getLogicGateRecordSingleFlight(apiBase, companyID, "gate-policy")).logic_gate.header, "Gate policy 1");
+    assert.deepEqual([nodeCalls, logicGateCalls], [1, 1]);
+
+    invalidateResourcePolicyDependentCaches(apiBase, companyID);
+
+    assert.equal((await getNodeRecordSingleFlight(apiBase, companyID, "node-policy")).node.name, "Node policy 2");
+    assert.equal((await getLogicGateRecordSingleFlight(apiBase, companyID, "gate-policy")).logic_gate.header, "Gate policy 2");
+    assert.deepEqual([nodeCalls, logicGateCalls], [2, 2]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateNodeRecordStoreCaches(apiBase, companyID, "node-policy");
+    invalidateLogicGateRecordStoreCaches(apiBase, companyID, "gate-policy");
   }
 });

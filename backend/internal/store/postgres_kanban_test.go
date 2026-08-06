@@ -287,8 +287,11 @@ func TestPostgresKanbanProjectionHelpersUseBoundedSynchronization(t *testing.T) 
 	if !strings.Contains(assignBody, "upsertNodeLogicGateAssignmentSQL") || !strings.Contains(assignBody, "syncNodeLogicGateAssignmentProjectionDependenciesTx") || !strings.Contains(assignBody, "kanbanBoardProjectionCardByNodeTx") {
 		t.Fatal("assignNodeToLogicGateStatusTx does not write source assignment, synchronize dependent projections, and reread the Kanban projection")
 	}
-	if !strings.Contains(moveBody, "upsertNodeLogicGateAssignmentSQL") || !strings.Contains(moveBody, "syncNodeLogicGateAssignmentProjectionDependenciesTx") || !strings.Contains(moveBody, "kanbanBoardProjectionCardByNodeTx") {
-		t.Fatal("MoveLogicGateNodeAssignment does not write source assignment, synchronize dependent projections, and reread the Kanban projection")
+	if !strings.Contains(moveBody, "upsertNodeLogicGateAssignmentSQL") || !strings.Contains(moveBody, "syncNodeLogicGateAssignmentProjectionDependenciesTx") || !strings.Contains(moveBody, "nodeLogicGateAssignmentCardSQL") {
+		t.Fatal("MoveLogicGateNodeAssignment does not write the canonical assignment, synchronize dependent projections, and return a compatibility card with canonical fallback")
+	}
+	if strings.Contains(moveBody, "kanbanBoardProjectionCardByNodeTx") {
+		t.Fatal("MoveLogicGateNodeAssignment must not roll back a canonical move only because the derived projection reread is temporarily absent")
 	}
 	if !strings.Contains(removeBody, "syncNodeLogicGateAssignmentProjectionDependenciesTx") || strings.Contains(removeBody, "delete from kanban_cards") {
 		t.Fatal("RemoveLogicGateNodeAssignment should synchronize dependent projections without deleting legacy Kanban cards")
@@ -320,20 +323,14 @@ func TestPostgresCommunicationsTriageConversionSynchronizesProjectionDependencie
 	}
 }
 
-func TestPostgresMoveLogicGateAssignmentPreservesEmailReferencesWithoutLegacyCards(t *testing.T) {
+func TestPostgresMoveLogicGateAssignmentLeavesCanonicalEmailRelationshipsUntouched(t *testing.T) {
 	raw, err := os.ReadFile("postgres_kanban.go")
 	if err != nil {
 		t.Fatalf("ReadFile postgres_kanban.go: %v", err)
 	}
 	body := postgresKanbanFunctionBodyForTest(t, strings.ReplaceAll(string(raw), "\r\n", "\n"), "func (r *PostgresRepo) MoveLogicGateNodeAssignment")
-	for _, required := range []string{
-		"updatePostgresCommunicationsEmailNodeReferenceForNodeTx",
-		"updatePostgresCommunicationsEmailAttachmentReferencesForNodeTx",
-		"syncNodeLogicGateAssignmentProjectionDependenciesTx",
-	} {
-		if !strings.Contains(body, required) {
-			t.Fatalf("MoveLogicGateNodeAssignment missing %s", required)
-		}
+	if !strings.Contains(body, "syncNodeLogicGateAssignmentProjectionDependenciesTx") {
+		t.Fatal("MoveLogicGateNodeAssignment must synchronize derived projections")
 	}
 	if !strings.Contains(body, `nodeLogicGateAssignmentByNodeSQL(ctx, tx, input.CompanyID, input.NodeID, "")`) {
 		t.Fatal("MoveLogicGateNodeAssignment does not load the canonical one-per-node assignment")
@@ -343,6 +340,8 @@ func TestPostgresMoveLogicGateAssignmentPreservesEmailReferencesWithoutLegacyCar
 	}
 	for _, forbidden := range []string{
 		"takePostgresCommunicationsEmailNodeReferenceForCardTx",
+		"updatePostgresCommunicationsEmailNodeReferenceForNodeTx",
+		"updatePostgresCommunicationsEmailAttachmentReferencesForNodeTx",
 		"restorePostgresCommunicationsEmailNodeReferenceTx",
 		"delete from kanban_cards",
 		"update kanban_cards",

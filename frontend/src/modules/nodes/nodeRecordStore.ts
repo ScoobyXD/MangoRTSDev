@@ -139,6 +139,20 @@ export function invalidateNodeRecordStoreCaches(apiBase: string, companyID: stri
   gvicAssignmentCache.delete(cacheKey);
 }
 
+export function invalidateNodeRecordStorePolicyCachesForCompany(apiBase: string, companyID: string): void {
+  const prefix = key(apiBase, companyID, "");
+  const cacheKeys = new Set([...viewCache.keys(), ...viewInflight.keys(), ...viewGeneration.keys(), ...viewETag.keys(), ...detailsCache.keys(), ...projectionCache.keys(), ...gvicAssignmentCache.keys()]);
+  for (const cacheKey of cacheKeys) {
+    if (!cacheKey.startsWith(prefix)) continue;
+    bumpViewGeneration(cacheKey);
+    viewInflight.delete(cacheKey);
+    viewFresh.delete(cacheKey);
+    detailsCache.delete(cacheKey);
+    projectionCache.delete(cacheKey);
+    gvicAssignmentCache.delete(cacheKey);
+  }
+}
+
 export function primeNodeRecordStoreCaches(apiBase: string, companyID: string, entries: Array<{
   node: NodeRecord;
   relationships?: NodeRelationship[];

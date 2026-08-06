@@ -127,24 +127,6 @@ select exists(select 1 from email_relationships
 	return nil
 }
 
-func updatePostgresCommunicationsEmailNodeReferenceForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, boardID, cardID, logicGateID string) error {
-	var exists bool
-	if err := tx.QueryRowContext(ctx, `
-select exists(select 1 from email_relationships
- where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid)`,
-		companyID, nodeID).Scan(&exists); err != nil {
-		return err
-	}
-	if !exists {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func updatePostgresCommunicationsEmailAttachmentReferencesForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, boardID, cardID, logicGateID string) error {
-	return updatePostgresCommunicationsEmailNodeReferenceForNodeTx(ctx, tx, companyID, nodeID, boardID, cardID, logicGateID)
-}
-
 func (r *PostgresRepo) UpsertCommunicationsTriageItem(userID string, message domain.EmailMessageSnapshot) (domain.CommunicationsTriageItem, error) {
 	userID = strings.TrimSpace(userID)
 	message = normalizeEmailMessageSnapshot(message)

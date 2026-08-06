@@ -4,7 +4,7 @@ Alice opens a three-message conversation through her personal email account. My 
 
 A shared email account follows the same rules: Shared Triage reads Nylas without storing the mailbox, explicit resource attachment/import creates the durable V3 thread, message, relationship, and files, and ordinary resource permissions govern attached access. Mango never guesses or merges across accounts.
 
-When Alice stars a My Triage row—or a teammate stars a Shared Triage row—the successful exact-mailbox command remains visible across a stale provider refresh. Mango overlays that committed star or unstar only in the matching personal or shared email account until a newer exact-scope settlement arrives; a colliding provider message ID in another mailbox never changes.
+When Alice stars a My Triage row—or a teammate stars a Shared Triage row—the successful exact-mailbox command remains visible across a stale provider refresh. Mango overlays that committed star or unstar only in the matching personal or shared email account until a newer exact-scope settlement arrives. If the visible row was loaded before its source-scope key was attached, the committed response updates that unscoped row; only a row with an explicit different mailbox scope is protected from the update.
 
 The development V3 email copy has now completed. The read-only preflight reported `READY_TO_COPY`, and the complete Step 2 file committed in DBeaver as one plain PostgreSQL transaction. It created 223 threads, 678 messages, 228 email relationships, 49 email drafts, 9 signatures, and 1,134 attachment relationships. The file does not depend on `psql` backslash commands or separately included files.
 
@@ -21,7 +21,7 @@ Last updated: 2026-08-05
 Coverage Status:
 
 - Business Logic Covered By Scenarios: The V3 schema, data-copy checkpoint, final-delta rerun, application cutover, deployment, smoke checks, and legacy email-table retirement are complete in development. The scenarios below cover provider-backed mailbox reads without persistence, explicit-import-only V3 storage, internal message IDs, exact account scope, ordinary resource permissions, normalized file ownership, relationship-only deletion, durable draft send recovery, and read-only schema readiness.
-- Exact mailbox hardening is covered by `homeMailboxRealtime.test.ts`, `unifiedRichEditorContract.test.ts`, `communications_singleflight_cancellation_test.go`, `realtime_audience_hardening_test.go`, `nylas_webhook_receipts_test.go`, and focused communications/store tests for retry-safe open receipts and exact-account migration ordering.
+- Exact mailbox hardening is covered by `homeMailboxRealtime.test.ts`, `homeUtils.test.ts`, `unifiedRichEditorContract.test.ts`, `communications_singleflight_cancellation_test.go`, `realtime_audience_hardening_test.go`, `nylas_webhook_receipts_test.go`, and focused communications/store tests for retry-safe open receipts and exact-account migration ordering.
 - Business Logic Covered By Automated Tests: Partial (`tests/frontend/pages/home/homeCommands.test.ts` covers send payload construction, Mango attachment references, and mailbox-scoped signature save ordering; `tests/frontend/pages/home/homeMailboxRealtime.test.ts` covers exact active targets, first/reconnect acceptance, event mapping, coalescing, queued-final work, and navigation cancellation; `tests/frontend/pages/home/homeMailDrafts.test.ts` covers provider/auth error retention versus exact revocation purge, out-of-order loads, local save/delete fencing, multiple personal accounts, and live-draft preparation before attachment upload; `tests/frontend/modules/editor/richTextEditing.test.ts` and `unifiedRichEditorContract.test.ts` cover rich email behavior. Backend communications/realtime/attachment tests cover exact mailbox routing, provider send boundaries, S3 attachment resolution, live email-draft attachment authorization, deleted-draft denial, sent-message survival, and durable inline-byte rejection. Broader mounted compose/signature endpoint coverage remains partial.)
 - Outbound attachment tests in `backend/internal/http/communications_handlers_test.go` and `backend/internal/http/nylas_client_test.go` cover early validation, tenant/link authorization, the complete metadata limit preflight, lazy exact-length multipart streaming, inline CID fields, cancellation, provider rejection, and body cleanup.
 - Mailbox query-mode tests in `backend/internal/http/communications_handlers_test.go`, `backend/internal/http/nylas_client_test.go`, and `tests/frontend/modules/communications/communicationsApi.test.ts` cover exact Google Primary bucketing, native/structured parameter exclusivity, thread precedence, preview-only response normalization, Primary cache-overlay exclusions, and exact-scope committed star state across stale personal/shared refreshes.
@@ -375,7 +375,8 @@ EMAIL119 - Every ordinary attachment, inline CID image, and signature asset refe
 EMAIL120 - Stored messages are ordered by provider timestamp ascending with immutable Nylas message ID as the deterministic tie-breaker; UI reversal is presentation-only. `history_complete=true` means the provider thread was completely downloaded as observed by that specific user-initiated import job, not that the external thread can never receive another message. A later explicit import may append a newer, older, or same-timestamp message and recomputes order without changing stable Mango message IDs.
 EMAIL121 - Nylas message/folder webhooks remain mailbox-list invalidation hints only. They may refresh a user's own Inbox/Shared Triage view, but they never create or update a durable Node email message, enqueue a Node thread job, or reveal later mail to collaborators. There is no periodic Node-thread reconciliation in this version. The sole trigger for adding later mail is an authorized user's explicit hashtag destination submission or equivalent email-chat import command.
 EMAIL122 - After a successful mailbox-scoped star or unstar command, that committed value overlays stale provider list responses in the exact personal email account or shared email account across Primary, Starred, All, and other visible mailbox pages. A stale refresh cannot reverse the visible result; Starred membership follows the overlaid value. The overlay is removed only by an exact-scope settlement hint or its bounded expiry, and it never crosses another personal account or shared inbox even when provider message IDs collide.
-EMAIL122 - The Node-wide email column is bounded to the available Node workspace height and scrolls long email content inside its own pane. Opening a long email never increases the outer virtualized timeline height, hides unrelated text boxes below it, or creates a blank right side; the outer Node scroll remains driven by the text-box rows.
+EMAIL123 - Triage star reconciliation treats an unscoped visible row with the same provider message ID as the current exact mailbox scope when the committed command response supplies that scope. The committed response updates that row, while preserving only same-ID rows that explicitly identify a different personal or shared mailbox scope.
+EMAIL124 - The Node-wide email column is bounded to the available Node workspace height and scrolls long email content inside its own pane. Opening a long email never increases the outer virtualized timeline height, hides unrelated text boxes below it, or creates a blank right side; the outer Node scroll remains driven by the text-box rows.
 
 ## Scenarios
 
@@ -958,7 +959,7 @@ Expected:
 
 Business logic covered:
 - EMAIL109 through EMAIL111
-- EMAIL122
+- EMAIL124
 
 Given:
 - A user opens either My Triage or Shared Triage on a message that may be a standalone email, a reply in a larger thread, or a thread already attached to a Node.
@@ -1057,10 +1058,12 @@ Expected:
 Business logic covered:
 - EMAIL75
 - EMAIL122
+- EMAIL123
 
 Given:
 - The same provider message ID may appear under separate personal and shared mailbox scopes.
 - A provider list refresh can briefly return the pre-mutation star value after a successful update.
+- A visible list row may not yet carry its source-scope key even though the committed command response does.
 
 When:
 - A user stars or unstars a row in My Triage or Shared Triage.
@@ -1068,6 +1071,7 @@ When:
 Expected:
 - The successful command response fixes the requested star value for that exact mailbox scope.
 - Primary and other visible mailbox rows retain that value across a stale refresh instead of flashing back.
+- An unscoped visible copy of the exact message is replaced by the scoped committed response.
 - Starred includes a committed star and excludes a committed unstar while the provider catches up.
-- Colliding message IDs in another personal account or shared inbox remain unchanged.
+- Colliding message IDs with an explicit different personal-account or shared-inbox scope remain unchanged.
 - An exact-scope newer settlement or bounded expiry allows the later canonical provider value to win.

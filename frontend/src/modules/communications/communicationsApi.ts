@@ -6,6 +6,7 @@ import type { NodeRecord } from "../nodes/types.js";
 import type { LogicGateGVICAssignment, LogicGateGVICRole, LogicGateGVICPrincipalType, LogicGateRecord } from "../logic-gates/types.js";
 import type { ProjectRelationshipProjection } from "../project-management/projectManagementApi.js";
 import { markWorkspaceSnapshotScopeStale } from "../workspace/workspaceSnapshotCache.js";
+import { invalidateResourcePolicyDependentCaches } from "../permissions/resourcePolicyCaches.js";
 import { scheduleOutboundEmailDispatch } from "./outboundEmailUndo.js";
 
 export type EmailProvider = "google" | "microsoft";
@@ -1327,6 +1328,7 @@ export async function updateLogicGateGVICAssignments(
   });
   invalidateWorkspacePanelCache(companyID);
   markLogicGateWorkspaceSnapshotScopesStale(companyID, logicGateID);
+  invalidateResourcePolicyDependentCaches(readAuthConfig().apiBase, companyID);
   return cloneResourceGVICAssignmentsAsLogicGate(payload.gvic_assignments ?? [], logicGateID);
 }
 
@@ -1380,6 +1382,7 @@ async function commandLogicGateGVICAssignments(
   });
   invalidateWorkspacePanelCache(companyID);
   markLogicGateWorkspaceSnapshotScopesStale(companyID, logicGateID);
+  invalidateResourcePolicyDependentCaches(readAuthConfig().apiBase, companyID);
   return cloneResourceGVICAssignmentsAsLogicGate(payload.gvic_assignments ?? [], logicGateID);
 }
 

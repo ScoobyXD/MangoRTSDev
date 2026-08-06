@@ -39,6 +39,7 @@ import {
   getInboxMatrixGridTemplateColumnsWithoutSidebar,
   mailboxCountsFromFolders,
   mailboxForHomeView,
+  mergeEmailMessageIntoScopedMessageList,
   missingEmailThreadMessageIDs,
   nextEmailMessageAfterRemoval,
   nodeDragItemsFromExplorerRows,
@@ -461,6 +462,44 @@ test("triage row and thread identity isolate identical provider ids across mailb
     unreadEmailThreadMessagesForSelection([personal, shared, olderPersonal], personal).map((message) => message.id),
     ["same-message", "older-personal"],
   );
+});
+
+test("scoped star updates replace the unscoped row loaded by the triage list", () => {
+  const visible = emailMessage("same-message", "thread-1", 100, { starred: false });
+  const updated = emailMessage("same-message", "thread-1", 100, {
+    client_source_scope_key: "personal:owner@example.test",
+    starred: true,
+  });
+
+  const merged = mergeEmailMessageIntoScopedMessageList([visible], updated, { mailbox: "primary", limit: 25 });
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0]?.starred, true);
+  assert.equal(merged[0]?.client_source_scope_key, "personal:owner@example.test");
+});
+
+test("scoped star updates preserve an explicit same-id row from another mailbox source", () => {
+  const target = emailMessage("same-message", "thread-1", 100, {
+    client_source_scope_key: "personal:owner@example.test",
+    starred: false,
+  });
+  const protectedMessage = emailMessage("same-message", "thread-2", 90, {
+    client_source_scope_key: "shared:team-inbox",
+    starred: false,
+  });
+  const updated = emailMessage("same-message", "thread-1", 100, {
+    client_source_scope_key: "personal:owner@example.test",
+    starred: true,
+  });
+
+  const merged = mergeEmailMessageIntoScopedMessageList([target, protectedMessage], updated, { mailbox: "primary", limit: 25 });
+  const targetRow = merged.find((message) => emailMessageRowKey(message) === emailMessageRowKey(target));
+  const protectedRow = merged.find((message) => emailMessageRowKey(message) === emailMessageRowKey(protectedMessage));
+
+  assert.equal(merged.length, 2);
+  assert.equal(targetRow?.starred, true);
+  assert.equal(protectedRow?.starred, false);
+  assert.equal(protectedRow?.thread_id, "thread-2");
 });
 
 test("unread-only email cards stay visible when selected", () => {
