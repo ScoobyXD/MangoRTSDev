@@ -56,7 +56,6 @@ func (r *MemoryRepo) createNodeWithIDLocked(companyID, nodeID, title string) (do
 	}
 	r.nodes[key(companyID, n.NodeID)] = n
 	r.bumpNodeViewVersionLocked(companyID, n.NodeID)
-	r.syncGVICMatrixProjectionForNodeLocked(companyID, n.NodeID)
 	return r.withNodeReadModelLocked(n), nil
 }
 

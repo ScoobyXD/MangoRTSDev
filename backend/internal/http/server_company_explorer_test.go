@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"miraeopus/backend/internal/domain"
@@ -496,7 +497,8 @@ func TestCommunicationsSharedInboxGVICAPI(t *testing.T) {
 		t.Fatalf("CreateCommunicationsSharedInboxFolder error = %v", err)
 	}
 	body, _ := json.Marshal(map[string]any{
-		"company_id": companyID,
+		"company_id":      companyID,
+		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{
 			{"role": domain.GVICRoleGenerated, "principal_type": store.EntityPermissionSubjectUser, "principal_id": generated.UserID},
 			{"role": domain.GVICRoleVerified, "principal_type": store.EntityPermissionSubjectUser, "principal_id": verified.UserID},
@@ -585,7 +587,7 @@ func TestCommunicationsSharedInboxGVICAPI(t *testing.T) {
 	t.Fatalf("folder %s not found in list payload", folder.FolderID)
 }
 
-func TestCommunicationsSharedTriageGVICDoesNotInheritFromParent(t *testing.T) {
+func TestCommunicationsSharedInboxFolderGVICInheritanceAndCustomization(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -619,12 +621,22 @@ func TestCommunicationsSharedTriageGVICDoesNotInheritFromParent(t *testing.T) {
 	}
 
 	parentBody, _ := json.Marshal(map[string]any{
-		"company_id": companyID,
+		"company_id":      companyID,
+		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{
 			{"role": domain.GVICRoleGenerated, "principal_type": store.EntityPermissionSubjectUser, "principal_id": parentUser.UserID},
 		},
 	})
-	parentReq := httptest.NewRequest(http.MethodPut, "/v1/resources/"+store.EntityTypeSharedTriageFolder+"/"+parent.FolderID+"/gvic", bytes.NewReader(parentBody))
+	legacyReq := httptest.NewRequest(http.MethodPut, "/v1/resources/"+store.EntityTypeSharedTriageFolder+"/"+parent.FolderID+"/gvic", bytes.NewReader(parentBody))
+	legacyReq = requestWithActorForTest(legacyReq, parentUser, companyID)
+	legacyReq.Header.Set("Content-Type", "application/json")
+	legacyRec := httptest.NewRecorder()
+	handler.ServeHTTP(legacyRec, legacyReq)
+	if legacyRec.Code != http.StatusBadRequest || !strings.Contains(legacyRec.Body.String(), "invalid_resource_type") {
+		t.Fatalf("PUT unsupported shared_triage_folder status = %d body=%s, want invalid_resource_type", legacyRec.Code, legacyRec.Body.String())
+	}
+
+	parentReq := httptest.NewRequest(http.MethodPut, "/v1/resources/"+store.EntityTypeSharedInboxFolder+"/"+parent.FolderID+"/gvic", bytes.NewReader(parentBody))
 	parentReq = requestWithActorForTest(parentReq, parentUser, companyID)
 	parentReq.Header.Set("Content-Type", "application/json")
 	parentRec := httptest.NewRecorder()
@@ -633,13 +645,33 @@ func TestCommunicationsSharedTriageGVICDoesNotInheritFromParent(t *testing.T) {
 		t.Fatalf("PUT parent folder GVIC status = %d, want %d body=%s", parentRec.Code, http.StatusOK, parentRec.Body.String())
 	}
 
+	inheritedReq := httptest.NewRequest(http.MethodGet, "/v1/resources/"+store.EntityTypeSharedInboxFolder+"/"+child.FolderID+"/gvic?company_id="+companyID, nil)
+	inheritedReq = requestWithActorForTest(inheritedReq, childUser, companyID)
+	inheritedRec := httptest.NewRecorder()
+	handler.ServeHTTP(inheritedRec, inheritedReq)
+	if inheritedRec.Code != http.StatusOK {
+		t.Fatalf("GET inherited child GVIC status = %d body=%s", inheritedRec.Code, inheritedRec.Body.String())
+	}
+	var inheritedPayload struct {
+		AssignmentMode       string                                   `json:"assignment_mode"`
+		EffectiveSource      store.PolicySource                       `json:"effective_source"`
+		EffectiveAssignments []domain.ResourceGVICEffectiveAssignment `json:"effective_assignments"`
+	}
+	if err := json.NewDecoder(inheritedRec.Body).Decode(&inheritedPayload); err != nil {
+		t.Fatalf("decode inherited child GVIC: %v", err)
+	}
+	if inheritedPayload.AssignmentMode != store.PolicyModeInherited || inheritedPayload.EffectiveSource.ResourceID != parent.FolderID || len(inheritedPayload.EffectiveAssignments) != 1 || inheritedPayload.EffectiveAssignments[0].UserID != parentUser.UserID {
+		t.Fatalf("inherited child policy = %+v, want parent generated policy", inheritedPayload)
+	}
+
 	childBody, _ := json.Marshal(map[string]any{
-		"company_id": companyID,
+		"company_id":      companyID,
+		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{
 			{"role": domain.GVICRoleVerified, "principal_type": store.EntityPermissionSubjectUser, "principal_id": childUser.UserID},
 		},
 	})
-	childReq := httptest.NewRequest(http.MethodPut, "/v1/resources/"+store.EntityTypeSharedTriageFolder+"/"+child.FolderID+"/gvic", bytes.NewReader(childBody))
+	childReq := httptest.NewRequest(http.MethodPut, "/v1/resources/"+store.EntityTypeSharedInboxFolder+"/"+child.FolderID+"/gvic", bytes.NewReader(childBody))
 	childReq = requestWithActorForTest(childReq, childUser, companyID)
 	childReq.Header.Set("Content-Type", "application/json")
 	childRec := httptest.NewRecorder()
@@ -895,7 +927,11 @@ func TestCommunicationsSharedInboxVisibleListUsesDefaultAccessOverrides(t *testi
 		EntityID:         visible.FolderID,
 		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
 		DefaultAccessSet: true,
-		OverrideUserIDs:  []string{user.UserID},
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   user.UserID,
+			AccessLevel: store.EntityPermissionEdit,
+		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions visible override error = %v", err)
 	}
@@ -955,15 +991,14 @@ func TestCompanyExplorerCommunicationsFolderListDoesNotApplyGVICFiltering(t *tes
 	if err != nil {
 		t.Fatalf("CreateCommunicationsSharedInboxFolder assigned error = %v", err)
 	}
-	if _, err := repo.SetCommunicationsSharedInboxGVICAssignments(store.SharedInboxGVICAssignmentUpdateInput{
-		CompanyID: companyID,
-		FolderID:  assigned.FolderID,
-		Assignments: []store.SharedInboxGVICAssignmentInput{{
-			Role:   domain.GVICRoleGenerated,
-			UserID: assignedUser.UserID,
+	if _, _, err := repo.PutResourceGVICPolicy(store.ResourceGVICPolicyUpdateInput{
+		CompanyID: companyID, ResourceType: store.EntityTypeSharedInbox, ResourceID: assigned.FolderID,
+		AssignmentMode: store.PolicyModeCustomized, DescendantAction: store.PolicyDescendantActionInheritedOnly,
+		Assignments: []store.ResourceGVICAssignmentInput{{
+			Role: domain.GVICRoleGenerated, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: assignedUser.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("SetCommunicationsSharedInboxGVICAssignments assigned error = %v", err)
+		t.Fatalf("PutResourceGVICPolicy assigned error = %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/communications/shared-inboxes?company_id="+companyID, nil)
@@ -1477,10 +1512,11 @@ func TestRecycleBinHandlersScopeItemsToDeletingUser(t *testing.T) {
 		t.Fatalf("CreateNode B: %v", err)
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:     companyID,
-		EntityType:    store.EntityTypeNode,
-		EntityID:      nodeA.NodeID,
-		DefaultAccess: store.EntityPermissionNoAccess,
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         nodeA.NodeID,
+		DefaultAccess:    store.EntityPermissionNoAccess,
+		DefaultAccessSet: true,
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   userA.UserID,
@@ -1490,10 +1526,11 @@ func TestRecycleBinHandlersScopeItemsToDeletingUser(t *testing.T) {
 		t.Fatalf("SetEntityPermissions A: %v", err)
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:     companyID,
-		EntityType:    store.EntityTypeNode,
-		EntityID:      nodeB.NodeID,
-		DefaultAccess: store.EntityPermissionNoAccess,
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         nodeB.NodeID,
+		DefaultAccess:    store.EntityPermissionNoAccess,
+		DefaultAccessSet: true,
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   userB.UserID,

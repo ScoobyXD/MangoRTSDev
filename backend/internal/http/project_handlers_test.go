@@ -71,7 +71,11 @@ func TestProjectScopedNodeCreateRequiresInitialAssignmentLogicGateEditAccess(t *
 		EntityID:         logicGate.LogicGateID,
 		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
 		DefaultAccessSet: true,
-		OverrideUserIDs:  []string{editor.UserID},
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   editor.UserID,
+			AccessLevel: store.EntityPermissionEdit,
+		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions gate edit: %v", err)
 	}

@@ -1,0 +1,66 @@
+package store
+
+import (
+	"testing"
+
+	"miraeopus/backend/internal/domain"
+)
+
+func TestMemoryV2GVICCustomizeWithoutAssignmentsCopiesRawEffectiveSource(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "a1000000-0000-4000-8000-000000000001"
+	repo.EnsureCompany(companyID, "Customize Source Co")
+	group, err := repo.CreateCompanyUserGroup(companyID, "", "Consulted team")
+	if err != nil {
+		t.Fatalf("CreateCompanyUserGroup: %v", err)
+	}
+	gate, err := repo.CreateLogicGate(companyID, "Source gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Inherited node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	priority := 1
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID: companyID, LogicGateID: gate.LogicGateID, NodeID: node.NodeID,
+		Status: "pending", Priority: &priority, PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	if _, _, err := repo.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{
+		CompanyID: companyID, ResourceType: EntityTypeLogicGate, ResourceID: gate.LogicGateID,
+		AssignmentMode: PolicyModeCustomized, DescendantAction: PolicyDescendantActionInheritedOnly,
+		Assignments: []ResourceGVICAssignmentInput{{
+			Role: domain.GVICRoleConsulted, PrincipalType: EntityPermissionSubjectGroup, PrincipalID: group.GroupID,
+		}},
+	}); err != nil {
+		t.Fatalf("customize gate: %v", err)
+	}
+	if _, _, err := repo.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{
+		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
+		AssignmentMode: PolicyModeInherited, DescendantAction: PolicyDescendantActionInheritedOnly,
+	}); err != nil {
+		t.Fatalf("inherit node: %v", err)
+	}
+	current, err := repo.GetResourceGVICPolicy(companyID, EntityTypeNode, node.NodeID)
+	if err != nil {
+		t.Fatalf("GetResourceGVICPolicy: %v", err)
+	}
+	customized, _, err := repo.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{
+		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
+		AssignmentMode: PolicyModeCustomized, DescendantAction: PolicyDescendantActionInheritedOnly,
+		ExpectedRevision: current.Revision,
+	})
+	if err != nil {
+		t.Fatalf("customize inherited node: %v", err)
+	}
+	if customized.AssignmentMode != PolicyModeCustomized || len(customized.GVICAssignments) != 1 {
+		t.Fatalf("customized policy = %+v", customized)
+	}
+	assignment := customized.GVICAssignments[0]
+	if assignment.Role != domain.GVICRoleConsulted || assignment.PrincipalType != EntityPermissionSubjectGroup || assignment.PrincipalID != group.GroupID {
+		t.Fatalf("copied assignment = %+v, want raw group pointer", assignment)
+	}
+}

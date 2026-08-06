@@ -127,11 +127,7 @@ returning company_id::text, coalesce(parent_folder_id::text, '') as folder_id, t
 	if err != nil {
 		return domain.CompanyExplorerFolderItem{}, false, err
 	}
-	if snapshotPolicy {
-		if _, err := snapshotPostgresResourceAccessPolicyTx(ctx, tx, companyID, EntityTypeCompanyExplorerFolder, folderID, targetType, targetID); err != nil {
-			return domain.CompanyExplorerFolderItem{}, false, err
-		}
-	}
+	_ = snapshotPolicy // V2 child policy mode is initialized by the database trigger.
 	return item, true, nil
 }
 

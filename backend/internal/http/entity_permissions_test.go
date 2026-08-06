@@ -54,10 +54,11 @@ func TestNodePermissionsFilterListsAndDirectReads(t *testing.T) {
 		t.Fatalf("SetEntityPermissions open: %v", err)
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:     companyID,
-		EntityType:    store.EntityTypeNode,
-		EntityID:      restrictedNode.NodeID,
-		DefaultAccess: store.EntityPermissionNoAccess,
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         restrictedNode.NodeID,
+		DefaultAccess:    store.EntityPermissionNoAccess,
+		DefaultAccessSet: true,
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   allowedUser.UserID,
@@ -131,10 +132,11 @@ func TestNodeDeleteRequiresEditAndMovesToActorRecycleBin(t *testing.T) {
 		t.Fatalf("CreateNode: %v", err)
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:     companyID,
-		EntityType:    store.EntityTypeNode,
-		EntityID:      node.NodeID,
-		DefaultAccess: store.EntityPermissionNoAccess,
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    store.EntityPermissionNoAccess,
+		DefaultAccessSet: true,
 		Permissions: []store.EntityPermissionInput{
 			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: editor.UserID, AccessLevel: store.EntityPermissionEdit},
 			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionNoAccess},
@@ -201,14 +203,16 @@ func TestDevAdminPermissionUpdatesRoundTrip(t *testing.T) {
 	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key)}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", "permission-dev-admin", "dev-admin@example.com")
 	body, _ := json.Marshal(map[string]any{
-		"company_id": companyID,
+		"company_id":      companyID,
+		"permission_mode": store.PolicyModeCustomized,
+		"default_access":  store.ResourceDefaultAccessNoAccess,
 		"permissions": []map[string]string{{
 			"subject_type": "user",
 			"subject_id":   targetUser.UserID,
 			"access_level": store.EntityPermissionEdit,
 		}},
 	})
-	putReq := httptest.NewRequest(http.MethodPut, "/v1/logic-gates/"+logicGate.LogicGateID+"/permissions", strings.NewReader(string(body)))
+	putReq := httptest.NewRequest(http.MethodPut, "/v1/resources/logic_gate/"+logicGate.LogicGateID+"/permissions", strings.NewReader(string(body)))
 	putReq.Header.Set("Authorization", token)
 	putReq.Header.Set("Content-Type", "application/json")
 	putRes := httptest.NewRecorder()
@@ -217,7 +221,7 @@ func TestDevAdminPermissionUpdatesRoundTrip(t *testing.T) {
 		t.Fatalf("PUT permissions status = %d, want %d body=%s", putRes.Code, http.StatusOK, strings.TrimSpace(putRes.Body.String()))
 	}
 
-	getReq := httptest.NewRequest(http.MethodGet, "/v1/logic-gates/"+logicGate.LogicGateID+"/permissions?company_id="+companyID, nil)
+	getReq := httptest.NewRequest(http.MethodGet, "/v1/resources/logic_gate/"+logicGate.LogicGateID+"/permissions?company_id="+companyID, nil)
 	getReq.Header.Set("Authorization", token)
 	getRes := httptest.NewRecorder()
 	handler.ServeHTTP(getRes, getReq)
@@ -232,6 +236,14 @@ func TestDevAdminPermissionUpdatesRoundTrip(t *testing.T) {
 	}
 	if len(payload.Permissions) != 1 || payload.Permissions[0].SubjectID != targetUser.UserID || payload.Permissions[0].AccessLevel != store.EntityPermissionEdit {
 		t.Fatalf("permissions = %+v, want saved edit grant for target", payload.Permissions)
+	}
+
+	legacyReq := httptest.NewRequest(http.MethodGet, "/v1/logic-gates/"+logicGate.LogicGateID+"/permissions?company_id="+companyID, nil)
+	legacyReq.Header.Set("Authorization", token)
+	legacyRes := httptest.NewRecorder()
+	handler.ServeHTTP(legacyRes, legacyReq)
+	if legacyRes.Code != http.StatusNotFound {
+		t.Fatalf("obsolete permissions route status = %d, want %d body=%s", legacyRes.Code, http.StatusNotFound, strings.TrimSpace(legacyRes.Body.String()))
 	}
 }
 
@@ -283,7 +295,7 @@ func TestResourceEditorCannotManagePermissionRules(t *testing.T) {
 	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key)}).Routes()
 	resourceEditorToken := "Bearer " + testJWT(t, key, "kid", "permission-resource-editor", "resource-editor@example.com")
 
-	getReq := httptest.NewRequest(http.MethodGet, "/v1/logic-gates/"+logicGate.LogicGateID+"/permissions?company_id="+companyID, nil)
+	getReq := httptest.NewRequest(http.MethodGet, "/v1/resources/logic_gate/"+logicGate.LogicGateID+"/permissions?company_id="+companyID, nil)
 	getReq.Header.Set("Authorization", resourceEditorToken)
 	getRes := httptest.NewRecorder()
 	handler.ServeHTTP(getRes, getReq)
@@ -292,14 +304,16 @@ func TestResourceEditorCannotManagePermissionRules(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(map[string]any{
-		"company_id": companyID,
+		"company_id":      companyID,
+		"permission_mode": store.PolicyModeCustomized,
+		"default_access":  store.ResourceDefaultAccessEdit,
 		"permissions": []map[string]string{{
 			"subject_type": "user",
 			"subject_id":   targetUser.UserID,
 			"access_level": store.EntityPermissionEdit,
 		}},
 	})
-	putReq := httptest.NewRequest(http.MethodPut, "/v1/logic-gates/"+logicGate.LogicGateID+"/permissions", strings.NewReader(string(body)))
+	putReq := httptest.NewRequest(http.MethodPut, "/v1/resources/logic_gate/"+logicGate.LogicGateID+"/permissions", strings.NewReader(string(body)))
 	putReq.Header.Set("Authorization", resourceEditorToken)
 	putReq.Header.Set("Content-Type", "application/json")
 	putRes := httptest.NewRecorder()
@@ -309,21 +323,19 @@ func TestResourceEditorCannotManagePermissionRules(t *testing.T) {
 	}
 
 	companyAdminToken := "Bearer " + testJWT(t, key, "kid", "permission-company-admin", "company-admin@example.com")
-	companyGetReq := httptest.NewRequest(http.MethodGet, "/v1/logic-gates/"+logicGate.LogicGateID+"/permissions?company_id="+companyID, nil)
+	companyGetReq := httptest.NewRequest(http.MethodGet, "/v1/resources/logic_gate/"+logicGate.LogicGateID+"/permissions?company_id="+companyID, nil)
 	companyGetReq.Header.Set("Authorization", companyAdminToken)
 	companyGetRes := httptest.NewRecorder()
 	handler.ServeHTTP(companyGetRes, companyGetReq)
 	if companyGetRes.Code != http.StatusOK {
 		t.Fatalf("company admin GET permissions status = %d, want %d body=%s", companyGetRes.Code, http.StatusOK, strings.TrimSpace(companyGetRes.Body.String()))
 	}
-	var companyPayload struct {
-		CanEditPermissions bool `json:"can_edit_permissions"`
-	}
+	var companyPayload store.ResourcePermissionPolicy
 	if err := json.Unmarshal(companyGetRes.Body.Bytes(), &companyPayload); err != nil {
 		t.Fatalf("decode company permissions: %v", err)
 	}
-	if !companyPayload.CanEditPermissions {
-		t.Fatalf("company admin can_edit_permissions = false, want true")
+	if companyPayload.CompanyID != companyID || companyPayload.ResourceType != store.EntityTypeLogicGate || companyPayload.ResourceID != logicGate.LogicGateID || companyPayload.PermissionMode != store.PolicyModeCustomized {
+		t.Fatalf("company admin canonical permission policy = %+v", companyPayload)
 	}
 }
 
@@ -363,42 +375,50 @@ func TestCompanyManagerCanEditUserPermissionsButNotManagerRows(t *testing.T) {
 	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key)}).Routes()
 	managerToken := "Bearer " + testJWT(t, key, "kid", "permission-manager", "manager@example.com")
 
-	getReq := httptest.NewRequest(http.MethodGet, "/v1/logic-gates/"+logicGate.LogicGateID+"/permissions?company_id="+companyID, nil)
+	getReq := httptest.NewRequest(http.MethodGet, "/v1/resources/logic_gate/"+logicGate.LogicGateID+"/permissions?company_id="+companyID, nil)
 	getReq.Header.Set("Authorization", managerToken)
 	getRes := httptest.NewRecorder()
 	handler.ServeHTTP(getRes, getReq)
 	if getRes.Code != http.StatusOK {
 		t.Fatalf("manager GET permissions status = %d, want %d body=%s", getRes.Code, http.StatusOK, strings.TrimSpace(getRes.Body.String()))
 	}
-	var getPayload struct {
-		CanEditPermissions        bool `json:"can_edit_permissions"`
-		CanEditManagerPermissions bool `json:"can_edit_manager_permissions"`
-	}
+	var getPayload store.ResourcePermissionPolicy
 	if err := json.Unmarshal(getRes.Body.Bytes(), &getPayload); err != nil {
 		t.Fatalf("decode manager permissions: %v", err)
 	}
-	if !getPayload.CanEditPermissions {
-		t.Fatalf("manager can_edit_permissions = false, want true")
-	}
-	if getPayload.CanEditManagerPermissions {
-		t.Fatalf("manager can_edit_manager_permissions = true, want false")
+	if getPayload.ResourceID != logicGate.LogicGateID || getPayload.PermissionMode != store.PolicyModeCustomized || getPayload.EffectiveDefaultAccess != store.ResourceDefaultAccessEdit {
+		t.Fatalf("manager canonical permission policy = %+v", getPayload)
 	}
 
 	body, _ := json.Marshal(map[string]any{
-		"company_id":     companyID,
-		"default_access": store.ResourceDefaultAccessEdit,
-		"override_user_ids": []string{
-			peerManager.UserID,
-			targetUser.UserID,
+		"company_id":      companyID,
+		"permission_mode": store.PolicyModeCustomized,
+		"default_access":  store.ResourceDefaultAccessEdit,
+		"permissions": []map[string]string{
+			{"subject_type": "user", "subject_id": peerManager.UserID, "access_level": store.EntityPermissionNoAccess},
+			{"subject_type": "user", "subject_id": targetUser.UserID, "access_level": store.EntityPermissionNoAccess},
 		},
 	})
-	putReq := httptest.NewRequest(http.MethodPut, "/v1/logic-gates/"+logicGate.LogicGateID+"/permissions", strings.NewReader(string(body)))
+	putReq := httptest.NewRequest(http.MethodPut, "/v1/resources/logic_gate/"+logicGate.LogicGateID+"/permissions", strings.NewReader(string(body)))
 	putReq.Header.Set("Authorization", managerToken)
 	putReq.Header.Set("Content-Type", "application/json")
 	putRes := httptest.NewRecorder()
 	handler.ServeHTTP(putRes, putReq)
+	if putRes.Code != http.StatusForbidden || !strings.Contains(putRes.Body.String(), "company_admin_required") {
+		t.Fatalf("manager PUT containing manager row status = %d body=%s, want company_admin_required", putRes.Code, strings.TrimSpace(putRes.Body.String()))
+	}
+
+	body, _ = json.Marshal(map[string]any{
+		"company_id": companyID, "permission_mode": store.PolicyModeCustomized, "default_access": store.ResourceDefaultAccessEdit,
+		"permissions": []map[string]string{{"subject_type": "user", "subject_id": targetUser.UserID, "access_level": store.EntityPermissionNoAccess}},
+	})
+	putReq = httptest.NewRequest(http.MethodPut, "/v1/resources/logic_gate/"+logicGate.LogicGateID+"/permissions", strings.NewReader(string(body)))
+	putReq.Header.Set("Authorization", managerToken)
+	putReq.Header.Set("Content-Type", "application/json")
+	putRes = httptest.NewRecorder()
+	handler.ServeHTTP(putRes, putReq)
 	if putRes.Code != http.StatusOK {
-		t.Fatalf("manager PUT permissions status = %d, want %d body=%s", putRes.Code, http.StatusOK, strings.TrimSpace(putRes.Body.String()))
+		t.Fatalf("manager canonical user-only PUT status = %d, want %d body=%s", putRes.Code, http.StatusOK, strings.TrimSpace(putRes.Body.String()))
 	}
 	if access, err := repo.UserCanAccessEntity(companyID, store.EntityTypeLogicGate, logicGate.LogicGateID, peerManager.UserID, store.EntityPermissionEdit); err != nil || !access {
 		t.Fatalf("peer manager access = %v err=%v, want true", access, err)
@@ -454,29 +474,25 @@ func TestEntityPermissionsEffectiveAccessReportsNoAccess(t *testing.T) {
 	}
 
 	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key)}).Routes()
-	getReq := httptest.NewRequest(http.MethodGet, "/v1/logic-gates/"+logicGate.LogicGateID+"/permissions?company_id="+companyID, nil)
+	getReq := httptest.NewRequest(http.MethodGet, "/v1/resources/logic_gate/"+logicGate.LogicGateID+"/permissions?company_id="+companyID, nil)
 	getReq.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", "permission-effective-admin", "admin@example.com"))
 	getRes := httptest.NewRecorder()
 	handler.ServeHTTP(getRes, getReq)
 	if getRes.Code != http.StatusOK {
 		t.Fatalf("GET permissions status = %d, want %d body=%s", getRes.Code, http.StatusOK, strings.TrimSpace(getRes.Body.String()))
 	}
-	var payload struct {
-		EffectiveAccess []struct {
-			UserID      string `json:"user_id"`
-			AccessLevel string `json:"access_level"`
-		} `json:"effective_access"`
-	}
+	var payload store.ResourcePermissionPolicy
 	if err := json.Unmarshal(getRes.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode permissions: %v", err)
 	}
-	for _, item := range payload.EffectiveAccess {
-		if item.UserID == targetUser.UserID {
-			if item.AccessLevel != store.EntityPermissionNoAccess {
-				t.Fatalf("target effective access = %q, want no_access", item.AccessLevel)
-			}
-			return
-		}
+	if payload.EffectiveDefaultAccess != store.ResourceDefaultAccessEdit || len(payload.EffectivePermissions) != 1 || payload.EffectivePermissions[0].SubjectID != targetUser.UserID || payload.EffectivePermissions[0].AccessLevel != store.EntityPermissionNoAccess {
+		t.Fatalf("canonical effective permission policy = %+v, want target no_access exception", payload)
 	}
-	t.Fatalf("effective_access missing target user: %+v", payload.EffectiveAccess)
+	allowed, err := repo.UserCanAccessEntity(companyID, store.EntityTypeLogicGate, logicGate.LogicGateID, targetUser.UserID, store.EntityPermissionEdit)
+	if err != nil {
+		t.Fatalf("UserCanAccessEntity target: %v", err)
+	}
+	if allowed {
+		t.Fatalf("target effective edit access = true, want false")
+	}
 }

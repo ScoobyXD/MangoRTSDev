@@ -257,9 +257,7 @@ func (r *MemoryRepo) deleteCommunicationsSharedInboxFolder(companyID, folderID s
 		for id := range toDelete {
 			delete(r.folders, key(companyID, id))
 			delete(r.sharedInboxGVIC, sharedInboxGVICKey(companyID, id))
-			if err := r.deleteEffectiveFactsForResourceLocked(companyID, EntityTypeSharedInbox, id); err != nil {
-				return err
-			}
+
 		}
 		for permissionKey, permission := range r.entityPermissions {
 			if permission.CompanyID == companyID && permission.EntityType == EntityTypeSharedInbox && toDelete[permission.EntityID] {
@@ -326,16 +324,12 @@ func (r *MemoryRepo) deleteCommunicationsSharedInboxFolder(companyID, folderID s
 	for id := range toDelete {
 		delete(r.folders, key(companyID, id))
 		delete(r.sharedInboxGVIC, sharedInboxGVICKey(companyID, id))
-		if err := r.deleteEffectiveFactsForResourceLocked(companyID, EntityTypeSharedInboxFolder, id); err != nil {
-			return err
-		}
+
 	}
 	for id := range sharedInboxesToDelete {
 		delete(r.folders, key(companyID, id))
 		delete(r.sharedInboxGVIC, sharedInboxGVICKey(companyID, id))
-		if err := r.deleteEffectiveFactsForResourceLocked(companyID, EntityTypeSharedInbox, id); err != nil {
-			return err
-		}
+
 	}
 	if deleteCompanyConnections {
 		for connectionID := range companyEmailConnectionIDs {

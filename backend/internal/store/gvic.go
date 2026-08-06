@@ -69,25 +69,28 @@ func normalizeResourceGVICAssignmentInputs(assignments []ResourceGVICAssignmentI
 }
 
 func validateResourceGVICAssignmentInputsForOperation(keyValue resourceGVICKey, assignments []normalizedGVICAssignmentInput, operation string) error {
-	if !isSingleUserPrimaryGVICResourceType(keyValue.resourceType) || operation == GVICAssignmentCommandRemove {
+	if operation == GVICAssignmentCommandRemove {
 		return nil
 	}
 	roleCounts := map[string]int{}
+	principalRoles := map[string]string{}
 	for _, assignment := range assignments {
-		if assignment.role == domain.GVICRoleVerified && assignment.principalType != EntityPermissionSubjectUser {
+		if (assignment.role == domain.GVICRoleGenerated || assignment.role == domain.GVICRoleVerified) && assignment.principalType != EntityPermissionSubjectUser {
 			return ErrInvalid
 		}
-		if !isSingleUserPrimaryGVICRole(assignment.role) {
-			continue
-		}
-		if assignment.principalType != EntityPermissionSubjectUser {
+		principalKey := assignment.principalType + ":" + assignment.principalID
+		if existingRole, exists := principalRoles[principalKey]; exists && existingRole != assignment.role {
 			return ErrInvalid
 		}
-		roleCounts[assignment.role]++
-		if roleCounts[assignment.role] > 1 {
-			return ErrInvalid
+		principalRoles[principalKey] = assignment.role
+		if assignment.role == domain.GVICRoleGenerated {
+			roleCounts[assignment.role]++
+			if roleCounts[assignment.role] > 1 {
+				return ErrInvalid
+			}
 		}
 	}
+	_ = keyValue
 	return nil
 }
 

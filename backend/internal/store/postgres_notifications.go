@@ -100,7 +100,7 @@ const notificationRecipientVisibilityConditionSQL = `(
           notifications.recipient_user_id,
           'edit'
         )
-        when entity_type in ('shared_triage_folder', 'communications_folder', 'shared_inbox_folder', 'shared_inbox') then mangorts_user_can_access_resource(
+        when entity_type in ('shared_inbox_folder', 'shared_inbox') then mangorts_user_can_access_resource(
           notifications.company_id,
           case when entity_type='shared_inbox' then 'shared_inbox' else 'shared_inbox_folder' end,
           notifications.entity_id::uuid,

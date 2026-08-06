@@ -150,10 +150,10 @@ where company_id=$1::uuid and node_id=$2::uuid and event_type='verification_requ
 		return NodeTimelineMutationResult{}, err
 	}
 
-	rows, err := tx.QueryContext(ctx, postgresDerivedResourceGVICEffectiveAssignmentsCTE+`
+	rows, err := tx.QueryContext(ctx, `
 select distinct derived.user_id::text,
        coalesce(nullif(app_user.display_name, ''), nullif(app_user.email, ''), 'Unknown user')
-from derived
+from mangorts_v2_effective_gvic_assignments($1::uuid,$2,$3::uuid) derived
 join users app_user on app_user.user_id=derived.user_id
 where derived.role='verified'
 order by 2, 1`, input.CompanyID, EntityTypeNode, input.NodeID)

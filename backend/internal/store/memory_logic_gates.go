@@ -472,66 +472,22 @@ func (r *MemoryRepo) GetLogicGate(companyID, logicGateID string) (domain.LogicGa
 }
 
 func (r *MemoryRepo) SetLogicGateGVICAssignments(input LogicGateGVICAssignmentUpdateInput) ([]domain.LogicGateGVICAssignment, error) {
-	companyID := strings.TrimSpace(input.CompanyID)
-	logicGateID := strings.TrimSpace(input.LogicGateID)
-	if companyID == "" || logicGateID == "" {
-		return nil, ErrInvalid
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if _, ok := r.logicGates[key(companyID, logicGateID)]; !ok {
-		return nil, ErrNotFound
-	}
-	now := time.Now().UTC()
-	seen := map[string]bool{}
-	assignments := make([]domain.LogicGateGVICAssignment, 0, len(input.Assignments))
-	normalizedAssignments := make([]normalizedLogicGateGVICCommandAssignment, 0, len(input.Assignments))
-	for _, inputAssignment := range input.Assignments {
-		normalized, err := normalizeLogicGateGVICAssignmentInput(inputAssignment)
+	assignments := make([]ResourceGVICAssignmentInput, 0, len(input.Assignments))
+	for _, item := range input.Assignments {
+		normalized, err := normalizeLogicGateGVICAssignmentInput(item)
 		if err != nil {
 			return nil, err
 		}
-		if err := r.validateGVICPrincipalLocked(companyID, normalized.principalType, normalized.principalID); err != nil {
-			return nil, err
-		}
-		normalizedAssignments = append(normalizedAssignments, normalized)
+		assignments = append(assignments, ResourceGVICAssignmentInput{Role: normalized.role, PrincipalType: normalized.principalType, PrincipalID: normalized.principalID})
 	}
-	if err := validateLogicGateGVICCommandAssignments(normalizedAssignments, GVICAssignmentCommandSet); err != nil {
+	result, err := r.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+		CompanyID: input.CompanyID, ResourceType: EntityTypeLogicGate, ResourceID: input.LogicGateID,
+		Assignments: assignments,
+	})
+	if err != nil {
 		return nil, err
 	}
-	for _, normalized := range normalizedAssignments {
-		assignmentKey := normalized.role + ":" + normalized.principalType + ":" + normalized.principalID
-		if seen[assignmentKey] {
-			continue
-		}
-		seen[assignmentKey] = true
-		assignment, err := r.logicGateGVICAssignmentForPrincipalLocked(companyID, logicGateID, normalized.role, normalized.principalType, normalized.principalID, now)
-		if err != nil {
-			return nil, err
-		}
-		assignments = append(assignments, assignment)
-	}
-	sortLogicGateGVICAssignments(assignments)
-	before := r.logicGateGVICAssignmentsAsLogicGateGVICLocked(companyID, logicGateID)
-	for sourceKey, assignment := range r.gvicAssignments {
-		if assignment.CompanyID == companyID && assignment.ResourceType == EntityTypeLogicGate && assignment.ResourceID == logicGateID {
-			delete(r.gvicAssignments, sourceKey)
-		}
-	}
-	sourceKeyValue := resourceGVICKey{companyID: companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID}
-	for _, normalized := range normalizedAssignments {
-		item := r.resourceGVICAssignmentForPrincipalLocked(sourceKeyValue, normalizedGVICAssignmentInput{
-			role:          normalized.role,
-			principalType: normalized.principalType,
-			principalID:   normalized.principalID,
-		}, now)
-		r.gvicAssignments[gvicSourceAssignmentKey(item.CompanyID, item.ResourceType, item.ResourceID, item.Role, item.PrincipalType, item.PrincipalID)] = item
-	}
-	r.logicGateGVIC[key(companyID, logicGateID)] = assignments
-	r.syncGVICMatrixProjectionForLogicGateAssignmentsLocked(companyID, logicGateID, before, assignments)
-	return append([]domain.LogicGateGVICAssignment{}, assignments...), nil
+	return logicGateGVICAssignmentsFromResources(result.GVICAssignments), nil
 }
 
 func (r *MemoryRepo) DeleteLogicGate(companyID, logicGateID string) error {

@@ -83,34 +83,6 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 				return WorkspaceEntityBatchResult{}, err
 			}
 			stop()
-			if input.CreatorUserID != "" {
-				if _, err := tx.ExecContext(ctx, `
-insert into resource_gvic_assignments (
-  company_id,
-  resource_type,
-  resource_id,
-  role,
-  principal_type,
-  principal_id,
-  created_timestamp,
-  updated_timestamp
-) values ($1::uuid, 'node', $2::uuid, 'generated', 'user', $3::uuid, now(), now())
-on conflict (company_id, resource_type, resource_id, role, principal_type, principal_id)
-do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
-					input.CompanyID, created.NodeID, input.CreatorUserID); err != nil {
-					return WorkspaceEntityBatchResult{}, err
-				}
-			}
-			if err := syncPostgresGVICMatrixProjectionForNewNodeTx(ctx, tx, input.CompanyID, created.NodeID); err != nil {
-				return WorkspaceEntityBatchResult{}, err
-			}
-			err = syncResourceGVICEffectiveAssignmentsTx(ctx, tx, input.CompanyID, []resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: created.NodeID}})
-			if err != nil {
-				return WorkspaceEntityBatchResult{}, err
-			}
-			if input.CreatorUserID != "" {
-				created.EffectiveAccess, _ = r.effectiveAccessLevelForUserTx(ctx, tx, input.CompanyID, input.CreatorUserID, EntityTypeNode, created.NodeID)
-			}
 			created.LogicGateIDs = []string{}
 			result.Nodes = append(result.Nodes, created)
 			clientToEntityID[item.ClientID] = created.NodeID
@@ -135,46 +107,6 @@ do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
 			return WorkspaceEntityBatchResult{}, err
 		}
 		stop()
-		if input.CreatorUserID != "" && input.CreatorLogicGateGVICRole != "" {
-			stop := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.gvic_assignment_writes")
-			if _, err := tx.ExecContext(ctx, `
-insert into resource_gvic_assignments (
-  company_id,
-  resource_type,
-  resource_id,
-  role,
-  principal_type,
-  principal_id,
-  created_timestamp,
-  updated_timestamp
-) values ($1::uuid, 'logic_gate', $2::uuid, $3, 'user', $4::uuid, now(), now())
-on conflict (company_id, resource_type, resource_id, role, principal_type, principal_id)
-do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
-				input.CompanyID,
-				created.LogicGateID,
-				input.CreatorLogicGateGVICRole,
-				input.CreatorUserID,
-			); err != nil {
-				stop()
-				return WorkspaceEntityBatchResult{}, err
-			}
-			stop()
-			stop = observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.gvic_projection_sync")
-			err = syncResourceGVICEffectiveAssignmentsTx(ctx, tx, input.CompanyID, []resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeLogicGate, resourceID: created.LogicGateID}})
-			if err != nil {
-				stop()
-				return WorkspaceEntityBatchResult{}, err
-			}
-			stop()
-			assignments, err := postgresResourceGVICAssignmentsForResource(ctx, tx, resourceGVICKey{companyID: input.CompanyID, resourceType: EntityTypeLogicGate, resourceID: created.LogicGateID})
-			if err != nil {
-				return WorkspaceEntityBatchResult{}, err
-			}
-			created.GVICAssignments = logicGateGVICAssignmentsFromResources(assignments)
-		}
-		if input.CreatorUserID != "" {
-			created.EffectiveAccess, _ = r.effectiveAccessLevelForUserTx(ctx, tx, input.CompanyID, input.CreatorUserID, EntityTypeLogicGate, created.LogicGateID)
-		}
 		result.LogicGates = append(result.LogicGates, created)
 		clientToEntityID[item.ClientID] = created.LogicGateID
 		result.EntityMappings = append(result.EntityMappings, WorkspaceEntityBatchEntityMapping{ClientID: item.ClientID, EntityID: created.LogicGateID})
@@ -232,6 +164,37 @@ do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
 			}
 			if inserted {
 				result.FolderItems = append(result.FolderItems, item)
+			}
+		}
+	}
+	if input.CreatorUserID != "" {
+		for _, mapping := range result.EntityMappings {
+			role := domain.GVICRoleGenerated
+			if input.EntityKind == EntityTypeLogicGate {
+				role = input.CreatorLogicGateGVICRole
+			}
+			if role == "" {
+				continue
+			}
+			policy, err := customizeNewPostgresResourceGVICForCreatorTx(ctx, tx, resourceGVICKey{
+				companyID: input.CompanyID, resourceType: input.EntityKind, resourceID: mapping.EntityID,
+			}, role, input.CreatorUserID)
+			if err != nil {
+				return WorkspaceEntityBatchResult{}, err
+			}
+			if input.EntityKind == EntityTypeNode {
+				for index := range result.Nodes {
+					if result.Nodes[index].NodeID == mapping.EntityID {
+						result.Nodes[index].EffectiveAccess, _ = r.effectiveAccessLevelForUserTx(ctx, tx, input.CompanyID, input.CreatorUserID, EntityTypeNode, mapping.EntityID)
+					}
+				}
+			} else {
+				for index := range result.LogicGates {
+					if result.LogicGates[index].LogicGateID == mapping.EntityID {
+						result.LogicGates[index].GVICAssignments = logicGateGVICAssignmentsFromResources(policy.GVICAssignments)
+						result.LogicGates[index].EffectiveAccess, _ = r.effectiveAccessLevelForUserTx(ctx, tx, input.CompanyID, input.CreatorUserID, EntityTypeLogicGate, mapping.EntityID)
+					}
+				}
 			}
 		}
 	}

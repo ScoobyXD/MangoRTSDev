@@ -190,12 +190,6 @@ func (r *PostgresRepo) AddCompanyMembership(cognitoSubject, companyID, role stri
 	if err != nil {
 		return domain.CompanyMembership{}, err
 	}
-	if err := recomputeCompanyAdminEffectiveAccessForUserTx(ctx, tx, membership.UserID); err != nil {
-		return domain.CompanyMembership{}, err
-	}
-	if err := recomputeCompanyMemberDefaultEffectiveAccessForUserTx(ctx, tx, companyID, membership.UserID); err != nil {
-		return domain.CompanyMembership{}, err
-	}
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyMembership{}, err
 	}
@@ -685,15 +679,7 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 	if err = optionalCleanup("delete company gvic assignments for user", "resource_gvic_assignments", `delete from resource_gvic_assignments where company_id = $1::uuid and principal_type = 'user' and principal_id = $2::uuid`, companyID, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if len(gvicKeys) > 0 {
-		if err = syncResourceGVICEffectiveAssignmentsTx(context.Background(), tx, companyID, gvicKeys); err != nil {
-			return DeleteCompanyUserResult{}, fmt.Errorf("sync company gvic assignments for user: %w", err)
-		}
-	}
-	if err = optionalCleanup("delete company resource permissions for user", "resource_permissions", `delete from resource_permissions where company_id = $1::uuid and user_id = $2::uuid`, companyID, userID); err != nil {
-		return DeleteCompanyUserResult{}, err
-	}
-	if err = optionalCleanup("delete company GVICMatrix matrix projection rows for user", "gvic_matrix_projection_table", `delete from gvic_matrix_projection_table where company_id = $1::uuid and user_id = $2::uuid`, companyID, userID); err != nil {
+	if err = optionalCleanup("delete company resource permissions for user", "resource_permissions", `delete from resource_permissions where company_id = $1::uuid and subject_type = 'user' and subject_id = $2::uuid`, companyID, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
 	if err = clearCompanyLogicGateAssignmentMemberRefs(companyID, userID); err != nil {
@@ -701,12 +687,6 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 	}
 	if _, err = tx.Exec(`delete from company_memberships where company_id = $1::uuid and user_id = $2::uuid`, companyID, userID); err != nil {
 		return DeleteCompanyUserResult{}, fmt.Errorf("delete company membership: %w", err)
-	}
-	if err = recomputeCompanyAdminEffectiveAccessForUserTx(context.Background(), tx, userID); err != nil {
-		return DeleteCompanyUserResult{}, fmt.Errorf("recompute company admin access for user: %w", err)
-	}
-	if err = deleteEffectiveFactsForCompanyUserTx(context.Background(), tx, companyID, userID); err != nil {
-		return DeleteCompanyUserResult{}, fmt.Errorf("delete effective access facts for company user: %w", err)
 	}
 
 	var hasRemainingMembership bool
@@ -765,19 +745,10 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 	if err = optionalCleanup("delete all gvic assignments for user", "resource_gvic_assignments", `delete from resource_gvic_assignments where principal_type = 'user' and principal_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if err = optionalCleanup("delete all effective gvic assignments for user", "resource_gvic_effective_assignments", `delete from resource_gvic_effective_assignments where user_id = $1::uuid`, userID); err != nil {
-		return DeleteCompanyUserResult{}, err
-	}
 	if err = optionalCleanup("clear project timeline created-by references for user", "project_management_timeline_items", `update project_management_timeline_items set created_by_user_id = null where created_by_user_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if err = optionalCleanup("delete all resource permissions for user", "resource_permissions", `delete from resource_permissions where user_id = $1::uuid`, userID); err != nil {
-		return DeleteCompanyUserResult{}, err
-	}
-	if err = optionalCleanup("delete resource permissions assigned by user", "resource_permissions", `delete from resource_permissions where assigned_by_user_id = $1::uuid`, userID); err != nil {
-		return DeleteCompanyUserResult{}, err
-	}
-	if err = optionalCleanup("delete all GVICMatrix matrix projection rows for user", "gvic_matrix_projection_table", `delete from gvic_matrix_projection_table where user_id = $1::uuid`, userID); err != nil {
+	if err = optionalCleanup("delete all resource permissions for user", "resource_permissions", `delete from resource_permissions where subject_type = 'user' and subject_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
 	if err = clearAllLogicGateAssignmentMemberRefs(userID); err != nil {
@@ -1196,12 +1167,6 @@ func (r *PostgresRepo) AcceptInvitation(token, cognitoSubject, email, displayNam
 		invitation.Role,
 	)
 	if err != nil {
-		return domain.Invitation{}, err
-	}
-	if err = recomputeCompanyAdminEffectiveAccessForUserTx(context.Background(), tx, user.UserID); err != nil {
-		return domain.Invitation{}, err
-	}
-	if err = recomputeCompanyMemberDefaultEffectiveAccessForUserTx(context.Background(), tx, invitation.CompanyID, user.UserID); err != nil {
 		return domain.Invitation{}, err
 	}
 

@@ -66,9 +66,11 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 		t.Fatalf("AssignNodeToLogicGateStatus hidden: %v", err)
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: store.EntityTypeLogicGate,
-		EntityID:   logicGate.LogicGateID,
+		CompanyID:        companyID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		EntityType:       store.EntityTypeLogicGate,
+		EntityID:         logicGate.LogicGateID,
 		Permissions: []store.EntityPermissionInput{
 			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionEdit},
 			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: editor.UserID, AccessLevel: store.EntityPermissionEdit},

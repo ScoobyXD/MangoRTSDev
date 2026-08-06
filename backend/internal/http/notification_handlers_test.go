@@ -1572,7 +1572,8 @@ func TestNodeGVICAssignmentAndFieldChangesUseCurrentNodeRole(t *testing.T) {
 	}
 
 	gvicBody, _ := json.Marshal(map[string]any{
-		"company_id": companyID,
+		"company_id":      companyID,
+		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{{
 			"role":           domain.GVICRoleConsulted,
 			"principal_type": store.EntityPermissionSubjectUser,

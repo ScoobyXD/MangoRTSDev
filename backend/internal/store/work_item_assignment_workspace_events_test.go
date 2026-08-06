@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"reflect"
 	"testing"
 
@@ -68,6 +69,7 @@ func TestMemoryWorkItemAssignmentWorkspaceEventsAreAtomicAndSemantic(t *testing.
 		t.Fatalf("ListDomainEventsAfter: %v", err)
 	}
 	wantTypes := []string{
+		LogicGateGVICUpdatedEventType,
 		WorkItemLogicGateAssignmentSavedEventType, "kanban_card_upserted", "node_updated",
 		WorkItemLogicGateAssignmentMovedEventType, "kanban_card_moved", "node_updated",
 		WorkItemLogicGateIssueToggledEventType, "kanban_card_moved", "node_updated",
@@ -143,12 +145,13 @@ func TestMemoryWorkItemAssignmentEventAppendFailureRollsBackState(t *testing.T) 
 	t.Run("assign", func(t *testing.T) {
 		repo, companyID, logicGate, node, _ := setupWorkItemAssignmentEventTest(t, "bbbbbbbbbbba")
 		priority := 5
+		beforeEvents := maps.Clone(repo.domainEvents)
 		repo.domainEventAppendErr = errAppend
 		_, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, NodeID: node.NodeID, Status: "done", Priority: &priority, PrioritySet: true})
 		if !errors.Is(err, errAppend) {
 			t.Fatalf("err = %v, want append failure", err)
 		}
-		assertNoWorkspaceEvents(t, repo, companyID)
+		assertMemoryDomainEventsUnchanged(t, repo.domainEvents, beforeEvents)
 		assertNoLogicGateAssignmentForStoreTest(t, repo, companyID, node.NodeID)
 		cards, err := repo.ListKanbanCards(companyID, LogicGateKanbanBoardID(logicGate.LogicGateID), KanbanCardQuery{Limit: 10})
 		if err != nil || len(cards) != 0 {
@@ -162,12 +165,13 @@ func TestMemoryWorkItemAssignmentEventAppendFailureRollsBackState(t *testing.T) 
 		if err != nil {
 			t.Fatalf("AssignNodeToLogicGateStatus setup: %v", err)
 		}
+		beforeEvents := maps.Clone(repo.domainEvents)
 		repo.domainEventAppendErr = errAppend
 		_, err = repo.MoveLogicGateNodeAssignment(LogicGateNodeAssignmentMoveInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, NodeID: node.NodeID, Status: "done"})
 		if !errors.Is(err, errAppend) {
 			t.Fatalf("err = %v, want append failure", err)
 		}
-		assertWorkspaceEventCount(t, repo, companyID, 3)
+		assertMemoryDomainEventsUnchanged(t, repo.domainEvents, beforeEvents)
 		assignment := assertOneLogicGateAssignmentForStoreTest(t, repo, companyID, node.NodeID)
 		if assignment.ColumnID != assigned.Card.ColumnID || assignment.StatusKey != assigned.Assignment.StatusKey {
 			t.Fatalf("assignment after failed move = %+v, want original %+v", assignment, assigned.Assignment)
@@ -180,12 +184,13 @@ func TestMemoryWorkItemAssignmentEventAppendFailureRollsBackState(t *testing.T) 
 		if err != nil {
 			t.Fatalf("AssignNodeToLogicGateStatus setup: %v", err)
 		}
+		beforeEvents := maps.Clone(repo.domainEvents)
 		repo.domainEventAppendErr = errAppend
 		_, err = repo.RemoveLogicGateNodeAssignment(LogicGateNodeAssignmentRemoveInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, NodeID: node.NodeID})
 		if !errors.Is(err, errAppend) {
 			t.Fatalf("err = %v, want append failure", err)
 		}
-		assertWorkspaceEventCount(t, repo, companyID, 3)
+		assertMemoryDomainEventsUnchanged(t, repo.domainEvents, beforeEvents)
 		assignment := assertOneLogicGateAssignmentForStoreTest(t, repo, companyID, node.NodeID)
 		if assignment.AssignmentID != assigned.Assignment.AssignmentID {
 			t.Fatalf("assignment after failed remove = %+v, want original %+v", assignment, assigned.Assignment)
@@ -197,17 +202,25 @@ func TestMemoryWorkItemAssignmentEventAppendFailureRollsBackState(t *testing.T) 
 		if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, NodeID: node.NodeID, Status: "pending", Priority: testPriority(3), PrioritySet: true}); err != nil {
 			t.Fatalf("AssignNodeToLogicGateStatus setup: %v", err)
 		}
+		beforeEvents := maps.Clone(repo.domainEvents)
 		repo.domainEventAppendErr = errAppend
 		_, err := repo.SetLogicGateNodeAssignmentIssue(LogicGateNodeAssignmentIssueInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, NodeID: node.NodeID, IsIssue: true})
 		if !errors.Is(err, errAppend) {
 			t.Fatalf("err = %v, want append failure", err)
 		}
-		assertWorkspaceEventCount(t, repo, companyID, 3)
+		assertMemoryDomainEventsUnchanged(t, repo.domainEvents, beforeEvents)
 		assignment := assertOneLogicGateAssignmentForStoreTest(t, repo, companyID, node.NodeID)
 		if assignment.IsIssue {
 			t.Fatalf("assignment after failed issue toggle = %+v, want is_issue false", assignment)
 		}
 	})
+}
+
+func assertMemoryDomainEventsUnchanged(t *testing.T, got, want map[string]domain.DomainEvent) {
+	t.Helper()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("domain events changed across failed mutation: got %+v want %+v", got, want)
+	}
 }
 
 func setupWorkItemAssignmentEventTest(t *testing.T, suffix string) (*MemoryRepo, string, domain.LogicGate, domain.Node, string) {

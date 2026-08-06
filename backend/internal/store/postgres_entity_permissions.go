@@ -147,9 +147,6 @@ returning company_id::text, group_id::text, parent_group_id::text, name, positio
 	if err != nil {
 		return domain.CompanyUserGroup{}, err
 	}
-	if err := syncCompanyUserGroupClosureTx(ctx, tx, companyID); err != nil {
-		return domain.CompanyUserGroup{}, err
-	}
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyUserGroup{}, err
 	}
@@ -245,17 +242,6 @@ select exists(select 1 from descendants where group_id=$3)`, companyID, groupID,
 		}
 	}
 
-	oldAffectedGroupIDs := []string(nil)
-	if parentChanged {
-		if err := syncCompanyUserGroupClosureTx(ctx, tx, companyID); err != nil {
-			return domain.CompanyUserGroup{}, err
-		}
-		oldAffectedGroupIDs, err = gvicAncestorGroupIDsForGroupsTx(ctx, tx, companyID, []string{groupID})
-		if err != nil {
-			return domain.CompanyUserGroup{}, err
-		}
-	}
-
 	item, err := scanCompanyUserGroup(tx.QueryRowContext(ctx, `
 update company_user_groups
 set parent_group_id=$3,
@@ -268,23 +254,6 @@ returning company_id::text, group_id::text, parent_group_id::text, name, positio
 	))
 	if err != nil {
 		return domain.CompanyUserGroup{}, err
-	}
-	if parentChanged {
-		if err := syncCompanyUserGroupClosureTx(ctx, tx, companyID); err != nil {
-			return domain.CompanyUserGroup{}, err
-		}
-		newAffectedGroupIDs, err := gvicAncestorGroupIDsForGroupsTx(ctx, tx, companyID, []string{groupID})
-		if err != nil {
-			return domain.CompanyUserGroup{}, err
-		}
-		affectedGroupIDs := cleanUUIDTextSlice(append(oldAffectedGroupIDs, newAffectedGroupIDs...))
-		affectedKeys, err := gvicResourceKeysForGroupPrincipalIDsTx(ctx, tx, companyID, affectedGroupIDs)
-		if err != nil {
-			return domain.CompanyUserGroup{}, err
-		}
-		if err := syncPostgresGVICForResourceKeysTx(ctx, tx, companyID, affectedKeys); err != nil {
-			return domain.CompanyUserGroup{}, err
-		}
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyUserGroup{}, err
@@ -343,30 +312,18 @@ from subtree`, companyID, groupID)
 		return ErrNotFound
 	}
 
-	if err := syncCompanyUserGroupClosureTx(ctx, tx, companyID); err != nil {
-		return err
-	}
-	affectedGroupIDs, err := gvicAncestorGroupIDsForGroupsTx(ctx, tx, companyID, groupIDs)
-	if err != nil {
-		return err
-	}
-	affectedKeys, err := gvicResourceKeysForGroupPrincipalIDsTx(ctx, tx, companyID, affectedGroupIDs)
-	if err != nil {
-		return err
-	}
-
 	if _, err := tx.ExecContext(ctx, `
 delete from resource_gvic_assignments
 where company_id=$1::uuid
   and principal_type='group'
-  and principal_id::text = any($2::text[])`, companyID, groupIDs); err != nil && !isPostgresUndefinedTable(err, "resource_gvic_assignments") {
+  and principal_id::text = any($2::text[])`, companyID, groupIDs); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
 delete from resource_permissions
 where company_id=$1::uuid
   and subject_type='group'
-  and subject_id::text = any($2::text[])`, companyID, groupIDs); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") {
+  and subject_id::text = any($2::text[])`, companyID, groupIDs); err != nil {
 		return err
 	}
 	deleted, err := tx.ExecContext(ctx, `
@@ -381,12 +338,6 @@ where company_id=$1::uuid and group_id=$2::uuid`, companyID, groupID)
 	}
 	if affected == 0 {
 		return ErrNotFound
-	}
-	if err := syncCompanyUserGroupClosureTx(ctx, tx, companyID); err != nil {
-		return err
-	}
-	if err := syncPostgresGVICForResourceKeysTx(ctx, tx, companyID, affectedKeys); err != nil {
-		return err
 	}
 	return tx.Commit()
 }
@@ -495,9 +446,6 @@ set updated_timestamp=now()`, companyID, groupID, cleanUserIDs); err != nil {
 			return nil, err
 		}
 	}
-	if err := recomputeGroupDependentEffectiveAccessForGroupsTx(ctx, tx, companyID, []string{groupID}); err != nil {
-		return nil, err
-	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -516,125 +464,44 @@ set updated_timestamp=now()`, companyID, groupID, cleanUserIDs); err != nil {
 }
 
 func (r *PostgresRepo) ListEntityPermissions(companyID, entityType, entityID string) ([]domain.EntityPermission, error) {
-	companyID = strings.TrimSpace(companyID)
-	entityID = strings.TrimSpace(entityID)
-	entityType, ok := NormalizeEntityType(entityType)
-	if companyID == "" || entityID == "" || !ok {
-		return nil, ErrInvalid
-	}
-	ctx := context.Background()
-	if exists, err := r.postgresEntityExists(ctx, companyID, entityType, entityID); err != nil {
+	policy, err := r.GetResourcePermissionPolicy(companyID, entityType, entityID)
+	if err != nil {
 		return nil, err
-	} else if !exists {
-		return nil, ErrNotFound
 	}
-
-	if usesDefaultResourceAccessPolicy(entityType) {
-		assignments, err := postgresResourcePermissionAssignmentsTx(ctx, r.db, companyID, entityType, entityID)
-		if err != nil {
-			return nil, err
-		}
-		if len(assignments) == 0 {
-			return []domain.EntityPermission{}, nil
-		}
-		subjectTypes := make([]string, 0, len(assignments))
-		subjectIDs := make([]string, 0, len(assignments))
-		accessLevels := make([]string, 0, len(assignments))
-		for _, assignment := range assignments {
-			subjectTypes = append(subjectTypes, assignment.SubjectType)
-			subjectIDs = append(subjectIDs, assignment.SubjectID)
-			accessLevels = append(accessLevels, assignment.AccessLevel)
-		}
-		rows, err := r.db.QueryContext(ctx, `
-with access as (
-  select *
-  from unnest(
-    string_to_array($4, ',')::text[],
-    string_to_array($5, ',')::uuid[],
-    string_to_array($6, ',')::text[]
-  ) with ordinality as access(subject_type, subject_id, access_level, ordinal)
-)
-select $1::uuid::text,
-       $2::text,
-       $3::uuid::text,
-       access.subject_type,
-       access.subject_id::text,
-       coalesce(nullif(user_group.name, ''), nullif(app_user.display_name, ''), nullif(app_user.email, '')),
-       nullif(app_user.email, ''),
-       access.access_level,
-       now()
-from access
-left join users app_user
-  on access.subject_type='user'
- and app_user.user_id=access.subject_id
-left join company_user_groups user_group
-  on access.subject_type='group'
- and user_group.company_id=$1::uuid
- and user_group.group_id=access.subject_id
-order by access.subject_type asc,
-         lower(coalesce(nullif(user_group.name, ''), nullif(app_user.display_name, ''), nullif(app_user.email, ''), access.subject_id::text)) asc,
-         access.subject_id::text asc`, companyID, entityType, entityID, strings.Join(subjectTypes, ","), strings.Join(subjectIDs, ","), strings.Join(accessLevels, ","))
-		if err != nil {
-			return nil, err
-		}
-		defer rows.Close()
-		items := make([]domain.EntityPermission, 0)
-		for rows.Next() {
-			item, err := scanEntityPermission(rows)
-			if err != nil {
-				return nil, err
-			}
-			items = append(items, item)
-		}
-		return items, rows.Err()
-	}
-
-	return nil, ErrInvalid
+	return policy.Permissions, nil
 }
 
 func (r *PostgresRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]domain.EntityPermission, error) {
-	companyID := strings.TrimSpace(input.CompanyID)
-	entityID := strings.TrimSpace(input.EntityID)
+	companyID, entityID := strings.TrimSpace(input.CompanyID), strings.TrimSpace(input.EntityID)
 	entityType, ok := NormalizeEntityType(input.EntityType)
-	if companyID == "" || entityID == "" || !ok || len(input.Permissions) > EntityPermissionMaxAssignments || len(input.OverrideUserIDs) > EntityPermissionMaxAssignments {
+	if companyID == "" || entityID == "" || !ok || len(input.Permissions) > EntityPermissionMaxAssignments {
 		return nil, ErrInvalid
 	}
-
-	if usesDefaultResourceAccessPolicy(entityType) {
-		ctx := context.Background()
-		tx, err := r.db.BeginTx(ctx, nil)
-		if err != nil {
-			return nil, err
-		}
-		defer tx.Rollback()
-
-		policySequence, err := setPostgresResourceAccessPolicyTx(ctx, tx, input, entityType, entityID)
-		if err != nil {
-			return nil, err
-		}
-		changedTargets := []resourcePermissionTarget{{ResourceType: entityType, ResourceID: entityID}}
-		if input.ApplyToDescendants {
-			afterDefaultAccess, err := postgresResourceDefaultAccess(ctx, tx, companyID, entityType, entityID)
-			if err != nil {
-				return nil, err
-			}
-			afterAssignments, err := postgresResourcePermissionAssignmentsTx(ctx, tx, companyID, entityType, entityID)
-			if err != nil {
-				return nil, err
-			}
-			descendantTargets, err := applyPostgresResourcePermissionPolicyToDescendantsTx(ctx, tx, input, policySequence, afterDefaultAccess, afterAssignments)
-			if err != nil {
-				return nil, err
-			}
-			changedTargets = append(changedTargets, descendantTargets...)
-		}
-		if err := tx.Commit(); err != nil {
-			return nil, err
-		}
-		return r.ListEntityPermissions(companyID, entityType, entityID)
+	current, err := r.GetResourcePermissionPolicy(companyID, entityType, entityID)
+	if err != nil {
+		return nil, err
 	}
-
-	return nil, ErrInvalid
+	var defaultAccess *string
+	if input.DefaultAccessSet {
+		value := input.DefaultAccess
+		defaultAccess = &value
+	} else {
+		defaultAccess = &current.EffectiveDefaultAccess
+	}
+	action := PolicyDescendantActionInheritedOnly
+	if input.ApplyToDescendants {
+		action = PolicyDescendantActionIncludingCustomized
+	}
+	policy, _, err := r.PutResourcePermissionPolicy(ResourcePermissionPolicyUpdateInput{
+		CompanyID: companyID, ResourceType: entityType, ResourceID: entityID,
+		PermissionMode: PolicyModeCustomized, DefaultAccess: defaultAccess,
+		Permissions: input.Permissions, DescendantAction: action, ExpectedRevision: current.Revision,
+		ActorUserID: input.ActorUserID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return policy.Permissions, nil
 }
 
 func (r *PostgresRepo) ListAccessibleEntityIDs(companyID, entityType, userID, accessLevel string, entityIDs []string) (map[string]bool, error) {

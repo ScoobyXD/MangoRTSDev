@@ -58,10 +58,6 @@ func (s *Server) handleCommunicationsSharedInboxByID(w http.ResponseWriter, r *h
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	if len(parts) == 2 && parts[1] == "access" {
-		s.handleCommunicationsSharedInboxAccess(w, r, folderID)
-		return
-	}
 	if len(parts) != 1 {
 		writeError(w, http.StatusNotFound, "not_found")
 		return

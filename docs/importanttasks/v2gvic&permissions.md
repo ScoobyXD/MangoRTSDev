@@ -921,6 +921,58 @@ Step 2 is complete only when:
 - smoke tests cover create, customize, inherit, both overwrite options, move, detach, group change, delete, My Work, notifications, and ETags;
 - old storage remains frozen only as rollback/audit evidence.
 
+### Step 2 implementation and operator record
+
+Step 2 repository implementation was completed and verified on August 5, 2026. No SQL was applied to a live database, no production secret or database writer credential was accessed, and no cloud resource was changed. Step 3 retirement was not performed.
+
+The Step 2 database artifacts are:
+
+- `backend/db/migrations/20260805_zzzc_v2_gvic_permissions_step2_cutover.sql`: the one atomic cutover transaction;
+- the `V2_GVIC_PERMISSIONS_STEP2_BEGIN/END` block in `backend/db/schema.sql`: the matching fresh-database schema state;
+- `scripts/v2_gvic_permissions_step2_preflight.sql`: DBeaver-safe read-only pre-cutover validation;
+- `scripts/v2_gvic_permissions_step2_readiness.sql`: DBeaver-safe read-only post-deploy readiness validation.
+
+The cutover migration locks the old final-name graph tables, the two staging graph tables, and both settings tables. In one transaction it:
+
+1. verifies PostgreSQL 17.x/18.x and exact unordered table shapes;
+2. requires the final Step 1 reconciliation report to be READY;
+3. renames old `resource_gvic_assignments` to `resource_gvic_assignments_step2_legacy`;
+4. renames old `resource_permissions` to `resource_permissions_step2_legacy`;
+5. renames the two reconciled V2 staging graph tables to `resource_gvic_assignments` and `resource_permissions`;
+6. installs the V2 resolvers, authorization, fingerprints, initialization, hierarchy-parent, detach, deletion, and group-version/cleanup functions and triggers;
+7. checks settings coverage and commits as one unit.
+
+The temporarily renamed legacy graph tables and all other Step 1 legacy policy storage remain frozen rollback/audit evidence. The migration does not drop them. The two staging names disappear only because those exact tables become the canonical final graph tables.
+
+#### Human-run operator order
+
+Use a designated database operator and ordinary DBeaver PostgreSQL SQL execution. Do not use an application agent or any request-time repair path.
+
+1. Review the completed Step 1 evidence and confirm a tested rollback plan.
+2. Pause policy, hierarchy, group, Node-placement, and resource-deletion writers.
+3. Rerun the Step 1 read-only preflight, final delta copy, and exact reconciliation until each final result is READY.
+4. Run `scripts/v2_gvic_permissions_step2_preflight.sql`. It reports the connected server version, compares exact unordered column-name sets plus counts, includes the Step 1 final reconciliation, and must return `FINAL / READY`. STOP means do not run the cutover.
+5. Run `backend/db/migrations/20260805_zzzc_v2_gvic_permissions_step2_cutover.sql` once. Any error rolls back the entire rename and V2 runtime installation.
+6. Deploy the matching Step 2 backend and frontend while writers remain paused.
+7. Run `scripts/v2_gvic_permissions_step2_readiness.sql`. It must return READY for server version, the four final exact table shapes, both temporary legacy graph tables, absence of the old staging names, and complete settings coverage.
+8. Run smoke checks for create, customize, inherit, both descendant actions, move, Node detach, group membership/hierarchy/delete, point authorization, My Work, notifications, and actor-safe ETags.
+9. Resume writers only after readiness and smoke checks pass.
+10. Keep the temporary legacy tables and remaining legacy functions/triggers/columns untouched until the separately approved Step 3 soak, snapshot, retirement preflight, and retirement SQL.
+
+#### Implemented runtime behavior
+
+The deployed Step 2 build reads and writes only the four canonical policy tables. It resolves inherited/customized policies, inactive overwritten customizations, parent-link reset boundaries, live nested groups, exact GVIC/permission separation, Node detach materialization, final-parent creator rules, current My Work, current notification targets, and actor-safe policy fingerprints. Legacy readers are excluded from the deployed build and no fallback, compatibility reader, dual writer, or request-time schema repair was added.
+
+The frontend uses only the canonical `/v1/resources/{resource_type}/{resource_id}/gvic` and `/permissions` endpoints. The obsolete Node, Logic Gate, Project, and Company Explorer permission URL shapes are no longer routed. GVIC and permission surfaces expose Inherited/Customized mode, effective source, overwritten-customization explanation, inherited-only Apply, separately confirmed overwrite-all, If-Match stale-write protection, and canonical response reconciliation. Selecting Customized without an explicit GVIC replacement asks the backend to copy the raw effective source policy once, preserving group pointers; an explicit empty array remains an intentionally empty customization.
+
+#### Verification evidence
+
+The guarded disposable PostgreSQL integration test upgraded a realistic Step 1 fixture through the atomic cutover, exercised inheritance, force reset, move-after-reset protection, Node detach materialization, permission authorization, group cleanup, final/legacy table names, and then reset and created a fresh database from the canonical Step 2 schema. It passed on isolated PostgreSQL 18; the SQL itself accepts supported PostgreSQL 17.x and 18.x and uses no PostgreSQL 18-only requirement.
+
+Focused backend store, HTTP, and notification suites passed. The frontend TypeScript and production build passed. The complete repository verification gate passed after the final diff review and formatting checks.
+
+Fresh databases create the four final policy tables directly in their Step 2 state while retaining the broader legacy objects required only for Step 3 rollback evidence. Step 3 must remove that retained evidence only after soak, restorable snapshot, and a separately reviewed retirement operation.
+
 ## Step 3: test, soak, snapshot, and retire old storage
 
 ### Goal

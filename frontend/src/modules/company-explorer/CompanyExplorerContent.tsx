@@ -3421,7 +3421,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       ? {
         folderID: row.folderID,
         label: row.label,
-        permissionsPath: row.entityType === "folder" ? `/v1/company-explorer/folders/${encodeURIComponent(row.folderID)}/permissions` : undefined,
       }
       : null;
     setExplorerContextMenu({
@@ -3723,7 +3722,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           title={folderPermissionsTarget.label}
           onClose={() => setFolderPermissionsTarget(null)}
           onSaved={() => void refreshCompanyExplorerSnapshot()}
-          permissionsPath={folderPermissionsTarget.permissionsPath}
         />
       )}
 

@@ -49,107 +49,83 @@ func TestLogicGateGVICAddRemoveCommandAPI(t *testing.T) {
 		t.Fatalf("AddCompanyMembership outsider: %v", err)
 	}
 
+	removedWriterBody := map[string]any{
+		"company_id":       companyID,
+		"assignment_mode":  store.PolicyModeCustomized,
+		"gvic_assignments": []map[string]string{{"role": domain.GVICRoleGenerated, "principal_type": store.EntityPermissionSubjectUser, "principal_id": responsible.UserID}},
+	}
+	for _, operation := range []string{store.GVICAssignmentCommandAdd, store.GVICAssignmentCommandRemove} {
+		response := postResourceGVICCommandForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, operation, removedWriterBody)
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("POST removed GVIC %s writer status = %d body=%s, want 404", operation, response.Code, response.Body.String())
+		}
+	}
+
 	addBody := map[string]any{
-		"company_id": companyID,
+		"company_id":      companyID,
+		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{
 			{"role": domain.GVICRoleGenerated, "principal_type": store.EntityPermissionSubjectUser, "principal_id": responsible.UserID},
 			{"role": domain.GVICRoleGenerated, "principal_type": store.EntityPermissionSubjectUser, "principal_id": responsible.UserID},
 		},
+		"idempotency_key": "canonical-add-normalization",
 	}
-	add := postResourceGVICCommandForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, store.GVICAssignmentCommandAdd, addBody)
+	add := putResourceGVICPolicyForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, addBody)
 	if add.Code != http.StatusOK {
-		t.Fatalf("POST GVIC add status = %d body=%s", add.Code, add.Body.String())
+		t.Fatalf("canonical add replacement status = %d body=%s", add.Code, add.Body.String())
 	}
 	addPayload := decodeResourceGVICCommandPayloadForTest(t, add)
-	if !addPayload.Changed || addPayload.Operation != store.GVICAssignmentCommandAdd || len(addPayload.Assignments) != 1 || len(addPayload.EffectiveAssignments) != 1 {
-		t.Fatalf("add payload = %+v, want changed single assignment", addPayload)
+	if len(addPayload.Assignments) != 1 || len(addPayload.EffectiveAssignments) != 1 {
+		t.Fatalf("canonical add replacement payload = %+v, want one deduplicated assignment", addPayload)
 	}
-
-	duplicateAdd := postResourceGVICCommandForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, store.GVICAssignmentCommandAdd, addBody)
-	if duplicateAdd.Code != http.StatusOK {
-		t.Fatalf("duplicate POST GVIC add status = %d body=%s", duplicateAdd.Code, duplicateAdd.Body.String())
-	}
+	duplicateAdd := putResourceGVICPolicyForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, addBody)
 	duplicateAddPayload := decodeResourceGVICCommandPayloadForTest(t, duplicateAdd)
-	if duplicateAddPayload.Changed || len(duplicateAddPayload.Assignments) != 1 {
-		t.Fatalf("duplicate add payload = %+v, want no-op with existing assignment", duplicateAddPayload)
+	if duplicateAdd.Code != http.StatusOK || duplicateAddPayload.Revision != addPayload.Revision || len(duplicateAddPayload.Assignments) != 1 {
+		t.Fatalf("idempotent canonical add = %+v status=%d, want unchanged revision", duplicateAddPayload, duplicateAdd.Code)
 	}
 
-	removeBody := map[string]any{
-		"company_id": companyID,
-		"gvic_assignments": []map[string]string{{
-			"role":           domain.GVICRoleGenerated,
-			"principal_type": store.EntityPermissionSubjectUser,
-			"principal_id":   responsible.UserID,
-		}},
-	}
-	removed := postResourceGVICCommandForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, store.GVICAssignmentCommandRemove, removeBody)
-	if removed.Code != http.StatusOK {
-		t.Fatalf("POST GVIC remove status = %d body=%s", removed.Code, removed.Body.String())
-	}
+	removeBody := map[string]any{"company_id": companyID, "assignment_mode": store.PolicyModeCustomized, "gvic_assignments": []map[string]string{}, "idempotency_key": "canonical-empty-replacement"}
+	removed := putResourceGVICPolicyForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, removeBody)
 	removedPayload := decodeResourceGVICCommandPayloadForTest(t, removed)
-	if !removedPayload.Changed || removedPayload.Operation != store.GVICAssignmentCommandRemove || len(removedPayload.Assignments) != 0 || len(removedPayload.EffectiveAssignments) != 0 {
-		t.Fatalf("remove payload = %+v, want changed empty assignments", removedPayload)
+	if removed.Code != http.StatusOK || len(removedPayload.Assignments) != 0 || len(removedPayload.EffectiveAssignments) != 0 {
+		t.Fatalf("canonical empty replacement = %+v status=%d", removedPayload, removed.Code)
 	}
-
-	missingRemove := postResourceGVICCommandForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, store.GVICAssignmentCommandRemove, removeBody)
-	if missingRemove.Code != http.StatusOK {
-		t.Fatalf("missing POST GVIC remove status = %d body=%s", missingRemove.Code, missingRemove.Body.String())
-	}
+	missingRemove := putResourceGVICPolicyForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, removeBody)
 	missingRemovePayload := decodeResourceGVICCommandPayloadForTest(t, missingRemove)
-	if missingRemovePayload.Changed || len(missingRemovePayload.Assignments) != 0 {
-		t.Fatalf("missing remove payload = %+v, want intentional no-op", missingRemovePayload)
+	if missingRemove.Code != http.StatusOK || missingRemovePayload.Revision != removedPayload.Revision || len(missingRemovePayload.Assignments) != 0 {
+		t.Fatalf("idempotent empty replacement = %+v status=%d, want unchanged revision", missingRemovePayload, missingRemove.Code)
 	}
 
-	fullReplaceBody, _ := json.Marshal(map[string]any{
-		"company_id": companyID,
-		"gvic_assignments": []map[string]string{
-			{"role": domain.GVICRoleVerified, "principal_type": store.EntityPermissionSubjectUser, "principal_id": accountable.UserID},
-		},
-	})
-	fullReplaceReq := httptest.NewRequest(http.MethodPut, "/v1/resources/logic_gate/"+logicGate.LogicGateID+"/gvic", bytes.NewReader(fullReplaceBody))
-	fullReplaceReq.Header.Set("Content-Type", "application/json")
-	fullReplaceRec := httptest.NewRecorder()
-	handler.ServeHTTP(fullReplaceRec, fullReplaceReq)
-	if fullReplaceRec.Code != http.StatusOK {
-		t.Fatalf("PUT GVIC full replace status = %d body=%s", fullReplaceRec.Code, fullReplaceRec.Body.String())
-	}
-	fullReplacePayload := decodeResourceGVICCommandPayloadForTest(t, fullReplaceRec)
-	if len(fullReplacePayload.Assignments) != 1 || fullReplacePayload.Assignments[0].Role != domain.GVICRoleVerified {
-		t.Fatalf("full replace payload = %+v, want accountable assignment", fullReplacePayload.Assignments)
+	for _, role := range []string{"owner", "responsible"} {
+		invalidRole := putResourceGVICPolicyForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, map[string]any{
+			"company_id": companyID, "assignment_mode": store.PolicyModeCustomized,
+			"gvic_assignments": []map[string]string{{"role": role, "principal_type": store.EntityPermissionSubjectUser, "principal_id": responsible.UserID}},
+		})
+		if invalidRole.Code != http.StatusBadRequest || !strings.Contains(invalidRole.Body.String(), "invalid_policy") {
+			t.Fatalf("invalid role %q status = %d body=%s, want invalid_policy", role, invalidRole.Code, invalidRole.Body.String())
+		}
 	}
 
-	invalidRole := postResourceGVICCommandForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, store.GVICAssignmentCommandAdd, map[string]any{
-		"company_id": companyID,
-		"gvic_assignments": []map[string]string{{
-			"role":           "owner",
-			"principal_type": store.EntityPermissionSubjectUser,
-			"principal_id":   responsible.UserID,
-		}},
+	fullReplace := putResourceGVICPolicyForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, map[string]any{
+		"company_id": companyID, "assignment_mode": store.PolicyModeCustomized,
+		"gvic_assignments": []map[string]string{{"role": domain.GVICRoleVerified, "principal_type": store.EntityPermissionSubjectUser, "principal_id": accountable.UserID}},
 	})
-	if invalidRole.Code != http.StatusBadRequest || !strings.Contains(invalidRole.Body.String(), "invalid_gvic_assignments") {
-		t.Fatalf("invalid role status = %d body=%s, want invalid_gvic_assignments", invalidRole.Code, invalidRole.Body.String())
+	fullReplacePayload := decodeResourceGVICCommandPayloadForTest(t, fullReplace)
+	if fullReplace.Code != http.StatusOK || len(fullReplacePayload.Assignments) != 1 || fullReplacePayload.Assignments[0].Role != domain.GVICRoleVerified {
+		t.Fatalf("full replacement status=%d payload=%+v, want verified assignment", fullReplace.Code, fullReplacePayload)
 	}
-	legacyRole := postResourceGVICCommandForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, store.GVICAssignmentCommandAdd, map[string]any{
-		"company_id": companyID,
-		"gvic_assignments": []map[string]string{{
-			"role":           "responsible",
-			"principal_type": store.EntityPermissionSubjectUser,
-			"principal_id":   responsible.UserID,
-		}},
-	})
-	if legacyRole.Code != http.StatusBadRequest || !strings.Contains(legacyRole.Body.String(), "invalid_gvic_assignments") {
-		t.Fatalf("legacy role status = %d body=%s, want invalid_gvic_assignments", legacyRole.Code, legacyRole.Body.String())
-	}
-	outsiderAdd := postResourceGVICCommandForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, store.GVICAssignmentCommandAdd, map[string]any{
-		"company_id": companyID,
+
+	outsiderAdd := putResourceGVICPolicyForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, map[string]any{
+		"company_id":      companyID,
+		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{{
 			"role":           domain.GVICRoleGenerated,
 			"principal_type": store.EntityPermissionSubjectUser,
 			"principal_id":   outsider.UserID,
 		}},
 	})
-	if outsiderAdd.Code != http.StatusBadRequest || !strings.Contains(outsiderAdd.Body.String(), "gvic_principal_not_in_company") {
-		t.Fatalf("outsider add status = %d body=%s, want gvic_principal_not_in_company", outsiderAdd.Code, outsiderAdd.Body.String())
+	if outsiderAdd.Code != http.StatusBadRequest || !strings.Contains(outsiderAdd.Body.String(), "policy_principal_not_in_company") {
+		t.Fatalf("outsider replacement status = %d body=%s, want policy_principal_not_in_company", outsiderAdd.Code, outsiderAdd.Body.String())
 	}
 }
 
@@ -158,6 +134,7 @@ type resourceGVICCommandPayloadForTest struct {
 	Changed              bool                                     `json:"changed"`
 	Assignments          []domain.ResourceGVICAssignment          `json:"gvic_assignments"`
 	EffectiveAssignments []domain.ResourceGVICEffectiveAssignment `json:"effective_assignments"`
+	Revision             string                                   `json:"revision"`
 }
 
 func postResourceGVICCommandForTest(t *testing.T, handler http.Handler, resourceType, resourceID, operation string, payload map[string]any) *httptest.ResponseRecorder {
@@ -183,4 +160,13 @@ func decodeResourceGVICCommandPayloadForTest(t *testing.T, rec *httptest.Respons
 		payload.EffectiveAssignments = []domain.ResourceGVICEffectiveAssignment{}
 	}
 	return payload
+}
+func putResourceGVICPolicyForTest(t *testing.T, handler http.Handler, resourceType, resourceID string, payload map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPut, "/v1/resources/"+resourceType+"/"+resourceID+"/gvic", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	return rec
 }

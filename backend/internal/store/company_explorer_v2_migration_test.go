@@ -140,6 +140,20 @@ func TestCompanyExplorerAccessHelperCutoverUsesFinalFolderStorage(t *testing.T) 
 			t.Fatalf("read %s: %v", path, err)
 		}
 		normalized := extractAccessHelperSQLForCompanyExplorerV2Test(t, normalizeSQLForCompanyExplorerV2Test(string(raw)))
+		if strings.HasSuffix(filepath.ToSlash(path), "db/schema.sql") {
+			for _, want := range []string{
+				"from mangorts_v2_resolve_permission_policy",
+				"direct_rule as",
+				"member_groups(group_id,depth,path) as",
+				"group_rule as",
+				"when (select allowed from admin_actor) then true",
+			} {
+				if !strings.Contains(normalized, want) {
+					t.Fatalf("%s missing V2 access helper marker %q", path, want)
+				}
+			}
+			continue
+		}
 		for _, want := range []string{
 			"create or replace function mangorts_user_can_access_resource",
 			"from company_explorer_folders folder",
@@ -183,6 +197,10 @@ func extractAccessHelperSQLForCompanyExplorerV2Test(t *testing.T, sql string) st
 	}
 	sql = sql[start:]
 	end := strings.Index(sql, "$$ language sql stable;")
+	v2End := strings.Index(sql, "$$;")
+	if end < 0 || (v2End >= 0 && v2End < end) {
+		end = v2End
+	}
 	if end < 0 {
 		t.Fatalf("missing mangorts_user_can_access_resource terminator")
 	}

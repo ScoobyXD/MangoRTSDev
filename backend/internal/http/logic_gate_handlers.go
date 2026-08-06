@@ -229,11 +229,6 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if len(parts) == 2 && parts[1] == "permissions" {
-		s.handleEntityPermissions(w, r, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found", "logic_gate_permissions_updated")
-		return
-	}
-
 	if len(parts) == 2 && parts[1] == "projection" {
 		if r.Method == http.MethodPost {
 			var req struct {

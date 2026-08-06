@@ -210,26 +210,10 @@ values($1::uuid,$2::uuid,$3,$4,'no_access',now())`, input.CompanyID, nodeID, com
 			return CommunicationsEmailCollaborationEnsureResult{}, err
 		}
 	}
-	if err := insertPostgresResourcePermissionTx(ctx, tx, input.CompanyID, EntityTypeNode, nodeID, resourcePermissionAssignment{SubjectType: EntityPermissionSubjectUser, SubjectID: input.CreatedByUserID, AccessLevel: EntityPermissionEdit}); err != nil {
+	if _, err := customizeNewPostgresResourcePermissionForCreatorTx(ctx, tx, input.CompanyID, EntityTypeNode, nodeID, input.CreatedByUserID); err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `insert into resource_gvic_assignments(company_id,resource_type,resource_id,role,principal_type,principal_id,created_timestamp,updated_timestamp)
-values($1::uuid,'node',$2::uuid,$3,'user',$4::uuid,now(),now())
-on conflict(company_id,resource_type,resource_id,role,principal_type,principal_id) do nothing`, input.CompanyID, nodeID, domain.GVICRoleGenerated, input.CreatedByUserID); err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
-	}
-	seq, err := nextPostgresResourcePolicySequenceTx(ctx, tx)
-	if err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
-	}
-	if err := setPostgresResourceGVICPolicyRevisionTx(ctx, tx, input.CompanyID, EntityTypeNode, nodeID, seq); err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
-	}
-	key := resourceGVICKey{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: nodeID}
-	if err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, input.CompanyID, []resourceGVICKey{key}); err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
-	}
-	if err := syncPostgresGVICMatrixProjectionForNodeTx(ctx, tx, input.CompanyID, nodeID); err != nil {
+	if _, err := customizeNewPostgresResourceGVICForCreatorTx(ctx, tx, resourceGVICKey{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: nodeID}, domain.GVICRoleGenerated, input.CreatedByUserID); err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}
 	item, err := postgresEmailCollaborationByID(ctx, tx, input.CompanyID, relationshipID, input.CreatedByUserID)
@@ -322,6 +306,15 @@ func addPostgresEmailCollaborationParticipantsTx(ctx context.Context, tx *sql.Tx
 	if !allowed {
 		return CommunicationsEmailCollaborationParticipantResult{}, ErrNotFound
 	}
+	policy, err := postgresV2PermissionPolicy(ctx, tx, input.CompanyID, EntityTypeNode, t.NodeID)
+	if err != nil {
+		return CommunicationsEmailCollaborationParticipantResult{}, err
+	}
+	permissionInputs := map[string]EntityPermissionInput{}
+	for _, permission := range policy.EffectivePermissions {
+		item := EntityPermissionInput{SubjectType: permission.SubjectType, SubjectID: permission.SubjectID, AccessLevel: permission.AccessLevel}
+		permissionInputs[item.SubjectType+":"+item.SubjectID] = item
+	}
 	mentioned := map[string]bool{}
 	for _, userID := range input.MentionedUserIDs {
 		var member bool
@@ -331,9 +324,7 @@ func addPostgresEmailCollaborationParticipantsTx(ctx context.Context, tx *sql.Tx
 		if !member {
 			return CommunicationsEmailCollaborationParticipantResult{}, ErrPrincipalNotInCompany
 		}
-		if err := insertPostgresResourcePermissionTx(ctx, tx, input.CompanyID, EntityTypeNode, t.NodeID, resourcePermissionAssignment{SubjectType: EntityPermissionSubjectUser, SubjectID: userID, AccessLevel: EntityPermissionEdit}); err != nil {
-			return CommunicationsEmailCollaborationParticipantResult{}, err
-		}
+		permissionInputs[EntityPermissionSubjectUser+":"+userID] = EntityPermissionInput{SubjectType: EntityPermissionSubjectUser, SubjectID: userID, AccessLevel: EntityPermissionEdit}
 		mentioned[userID] = true
 	}
 	for _, groupID := range input.MentionedGroupIDs {
@@ -344,9 +335,7 @@ func addPostgresEmailCollaborationParticipantsTx(ctx context.Context, tx *sql.Tx
 		if !exists {
 			return CommunicationsEmailCollaborationParticipantResult{}, ErrInvalid
 		}
-		if err := insertPostgresResourcePermissionTx(ctx, tx, input.CompanyID, EntityTypeNode, t.NodeID, resourcePermissionAssignment{SubjectType: EntityPermissionSubjectGroup, SubjectID: groupID, AccessLevel: EntityPermissionEdit}); err != nil {
-			return CommunicationsEmailCollaborationParticipantResult{}, err
-		}
+		permissionInputs[EntityPermissionSubjectGroup+":"+groupID] = EntityPermissionInput{SubjectType: EntityPermissionSubjectGroup, SubjectID: groupID, AccessLevel: EntityPermissionEdit}
 		rows, err := tx.QueryContext(ctx, `with recursive subtree as(select group_id from company_user_groups where company_id=$1::uuid and group_id=$2::uuid union all select child.group_id from company_user_groups child join subtree parent on child.parent_group_id=parent.group_id where child.company_id=$1::uuid)
 select distinct member.user_id::text from company_user_group_members member join subtree on subtree.group_id=member.group_id where member.company_id=$1::uuid`, input.CompanyID, groupID)
 		if err != nil {
@@ -363,6 +352,13 @@ select distinct member.user_id::text from company_user_group_members member join
 		if err := rows.Close(); err != nil {
 			return CommunicationsEmailCollaborationParticipantResult{}, err
 		}
+	}
+	completePermissions := make([]EntityPermissionInput, 0, len(permissionInputs))
+	for _, permission := range permissionInputs {
+		completePermissions = append(completePermissions, permission)
+	}
+	if _, err := customizeResourcePermissionPolicyTx(ctx, tx, input.CompanyID, EntityTypeNode, t.NodeID, policy.EffectiveDefaultAccess, completePermissions); err != nil {
+		return CommunicationsEmailCollaborationParticipantResult{}, err
 	}
 	ids := make([]string, 0, len(mentioned))
 	for id := range mentioned {

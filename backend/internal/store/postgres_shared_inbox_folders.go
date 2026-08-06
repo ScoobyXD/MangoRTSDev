@@ -111,10 +111,7 @@ func CommunicationsSharedInboxResourceType(item domain.CompanyExplorerFolder) st
 }
 
 func CommunicationsSharedInboxGVICResourceType(item domain.CompanyExplorerFolder) string {
-	if normalizeCommunicationsSharedInboxEntryType(item.EntryType, item.AccountEmail != nil || item.SharedInboxID != "") == CommunicationsSharedInboxEntryTypeSharedInbox {
-		return EntityTypeSharedInbox
-	}
-	return EntityTypeSharedTriageFolder
+	return CommunicationsSharedInboxResourceType(item)
 }
 
 func communicationsSharedInboxResourceType(entryType string, hasAccountEmail bool) string {

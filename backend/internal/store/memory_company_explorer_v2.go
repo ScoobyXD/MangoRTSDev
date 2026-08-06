@@ -289,9 +289,6 @@ func (r *MemoryRepo) CreateCompanyExplorerV2Folder(input CompanyExplorerV2Folder
 
 	r.shadowCompanyExplorerV2FolderToLegacyLocked(parent, entity, edge)
 	if parent.EntityType == CompanyExplorerV2EntityFolder {
-		if _, err := r.snapshotResourceAccessPolicyLocked(input.CompanyID, EntityTypeCompanyExplorerFolder, parent.EntityID, EntityTypeCompanyExplorerFolder, entity.EntityID); err != nil {
-			return CompanyExplorerV2Row{}, err
-		}
 		entity = r.companyExplorerV2Entities[key(entity.CompanyID, entity.EntityID)]
 	}
 	return r.companyExplorerV2RowLocked(CompanyExplorerV2RowsQuery{CompanyID: input.CompanyID, PermissionUserID: input.PermissionUserID}, entity, &edge), nil
@@ -401,9 +398,6 @@ func (r *MemoryRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeInpu
 		if childResourceID == "" {
 			childResourceID = child.EntityID
 		}
-		if _, err := r.snapshotResourceAccessPolicyLocked(input.CompanyID, EntityTypeCompanyExplorerFolder, parent.EntityID, child.EntityType, childResourceID); err != nil {
-			return CompanyExplorerV2Row{}, err
-		}
 	}
 	return r.companyExplorerV2RowLocked(CompanyExplorerV2RowsQuery{CompanyID: input.CompanyID, PermissionUserID: input.PermissionUserID}, child, &edge), nil
 }
@@ -450,9 +444,6 @@ func (r *MemoryRepo) MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdgeIn
 		childResourceID := child.ResourceID
 		if childResourceID == "" {
 			childResourceID = child.EntityID
-		}
-		if _, err := r.snapshotResourceAccessPolicyLocked(input.CompanyID, EntityTypeCompanyExplorerFolder, parent.EntityID, child.EntityType, childResourceID); err != nil {
-			return CompanyExplorerV2Row{}, err
 		}
 	}
 	return r.companyExplorerV2RowLocked(CompanyExplorerV2RowsQuery{CompanyID: input.CompanyID, PermissionUserID: input.PermissionUserID}, child, &edge), nil
@@ -634,9 +625,7 @@ func (r *MemoryRepo) DeleteCompanyExplorerV2Folder(companyID, entityID string) e
 	}
 	for id := range folderIDs {
 		delete(r.companyExplorerV2Entities, key(companyID, id))
-		if err := r.deleteEffectiveFactsForResourceLocked(companyID, EntityTypeCompanyExplorerFolder, id); err != nil {
-			return err
-		}
+
 		delete(r.folders, key(companyID, id))
 		delete(r.sharedInboxGVIC, sharedInboxGVICKey(companyID, id))
 	}

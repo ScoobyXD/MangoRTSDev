@@ -3,7 +3,7 @@ import { ConfirmActionMenu } from "../../app/ConfirmActionMenu";
 import { getNodeTitle, canEditResourceAccess, type NodeRecord, type NodeRelationship } from "../nodes/types";
 import { getLogicGateTitle, toLogicGateViewRecord, type LogicGateGVICAssignment, type LogicGateGVICRole, type LogicGateGVICPrincipalType, type LogicGateRecord } from "../logic-gates/types";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../dashboardEvents";
-import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, getNodeContentChangesSingleFlight, getNodeGVICAssignmentsSingleFlight, invalidateNodeRecordStoreCaches, primeNodeRecordStoreCaches, type NodeProjectionItem } from "../nodes/nodeRecordStore";
+import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, getNodeContentChangesSingleFlight, invalidateNodeRecordStoreCaches, primeNodeRecordStoreCaches, type NodeProjectionItem } from "../nodes/nodeRecordStore";
 import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertNodeRelationshipGraphRelationship } from "../nodes/nodeRelationshipGraph";
 import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand } from "../workspace/workspaceEntityCommands";
 import { buildLinkedNodePayload } from "../nodes/relationshipRules";
@@ -259,8 +259,31 @@ type EditorGVICAssignmentInput = {
 };
 
 type ResourceGVICPayload = {
+  assignment_mode: "inherited" | "customized";
+  effective_assignment_mode: "inherited" | "customized";
+  effective_source: { resource_type: string; resource_id: string; resource_name?: string };
+  overwritten_by_ancestor?: { resource_type: string; resource_id: string; sequence: number } | null;
   gvic_assignments?: LogicGateGVICAssignment[];
+  effective_assignments?: Array<{
+    role: LogicGateGVICRole;
+    user_id: string;
+    source_principal_type: LogicGateGVICPrincipalType;
+    source_principal_id: string;
+  }>;
+  revision: string;
 };
+
+function displayGVICAssignments(payload: ResourceGVICPayload): LogicGateGVICAssignment[] {
+  if (payload.effective_assignment_mode === "customized") return payload.gvic_assignments ?? [];
+  return (payload.effective_assignments ?? []).map((assignment) => ({
+    company_id: "",
+    created_timestamp: "",
+    role: assignment.role,
+    principal_type: "user",
+    principal_id: assignment.user_id,
+    user_id: assignment.user_id,
+  }));
+}
 
 function toResourceGVICAssignmentInput(assignment: EditorGVICAssignmentInput): {
   role: LogicGateGVICRole;
@@ -570,6 +593,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [nodeAccounts, setNodeAccounts] = useState<Account[]>([]);
   const [nodeGVICAssignments, setNodeGVICAssignments] = useState<LogicGateGVICAssignment[]>([]);
   const [logicGateGVICAssignments, setLogicGateGVICAssignments] = useState<LogicGateGVICAssignment[]>([]);
+  const [gvicPolicyMode, setGVICPolicyMode] = useState<"inherited" | "customized">("customized");
+  const [gvicPolicyEffectiveSource, setGVICPolicyEffectiveSource] = useState<ResourceGVICPayload["effective_source"] | null>(null);
+  const [gvicPolicyOverwrittenByAncestor, setGVICPolicyOverwrittenByAncestor] = useState<ResourceGVICPayload["overwritten_by_ancestor"]>(null);
+  const [gvicPolicyRevision, setGVICPolicyRevision] = useState("");
   const [logicGateGVICApplyToAssignedNodesBusy, setLogicGateGVICApplyToAssignedNodesBusy] = useState(false);
   const [logicGateGVICApplyConfirmationOpen, setLogicGateGVICApplyConfirmationOpen] = useState(false);
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
@@ -1377,49 +1404,61 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     });
   }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, nodeAccounts, nodeLogicGateIDs, nodePriorityDraft, updateNodePresetPatch]);
 
-  const nodeGVICIsInherited = false;
-  const nodeGVICReadOnlyReason = "";
+  const nodeGVICIsInherited = gvicPolicyMode === "inherited";
+  const nodeGVICReadOnlyReason = nodeGVICIsInherited ? "This policy is inherited. Choose Customized to edit it." : "";
 
-  const saveResourceGVICAssignments = useCallback(async (resourceType: "node" | "logic_gate", resourceID: string, nextAssignments: LogicGateGVICAssignment[], applyToDescendants = false) => {
+  const saveResourceGVICAssignments = useCallback(async (
+    resourceType: "node" | "logic_gate",
+    resourceID: string,
+    nextAssignments: LogicGateGVICAssignment[] | undefined,
+    descendantAction: "inherited_only" | "including_customized" = "inherited_only",
+    assignmentMode: "inherited" | "customized" = gvicPolicyMode,
+  ) => {
     const cleanResourceID = resourceID.trim();
-    if (!cleanResourceID) return [];
+    if (!cleanResourceID) return null;
     const payload = await requestJSON<ResourceGVICPayload>(`/v1/resources/${resourceType}/${cleanResourceID}/gvic`, {
       method: "PUT",
+      headers: gvicPolicyRevision ? { "If-Match": gvicPolicyRevision } : undefined,
       body: JSON.stringify({
         company_id: companyID,
-        gvic_assignments: nextAssignments.map(toResourceGVICAssignmentInput),
-        ...(resourceType === "logic_gate" && applyToDescendants ? { apply_to_descendants: true } : {}),
+        assignment_mode: assignmentMode,
+        ...(assignmentMode === "customized" && nextAssignments !== undefined
+          ? { gvic_assignments: nextAssignments.map(toResourceGVICAssignmentInput) }
+          : {}),
+        descendant_action: descendantAction,
       }),
     });
-    return payload.gvic_assignments ?? [];
-  }, [companyID, requestJSON]);
+    setGVICPolicyMode(payload.assignment_mode);
+    setGVICPolicyEffectiveSource(payload.effective_source);
+    setGVICPolicyOverwrittenByAncestor(payload.overwritten_by_ancestor ?? null);
+    setGVICPolicyRevision(payload.revision);
+    return payload;
+  }, [companyID, gvicPolicyMode, gvicPolicyRevision, requestJSON]);
 
   const commandResourceGVICAssignments = useCallback(async (
     resourceType: "node" | "logic_gate",
     resourceID: string,
     operation: "add" | "remove",
     assignments: EditorGVICAssignmentInput[],
-    applyToDescendants = false,
   ) => {
-    const cleanResourceID = resourceID.trim();
-    if (!cleanResourceID) return [];
-    const payload = await requestJSON<ResourceGVICPayload>(`/v1/resources/${resourceType}/${cleanResourceID}/gvic/${operation}`, {
-      method: "POST",
-      body: JSON.stringify({
-        company_id: companyID,
-        gvic_assignments: assignments.map(toResourceGVICAssignmentInput),
-        ...(resourceType === "logic_gate" && applyToDescendants ? { apply_to_descendants: true } : {}),
-      }),
-    });
-    return payload.gvic_assignments ?? [];
-  }, [companyID, requestJSON]);
+    const changedKeys = new Set(assignments.map((assignment) => {
+      const normalized = toResourceGVICAssignmentInput(assignment);
+      return `${normalized.role}:${normalized.principal_type}:${normalized.principal_id}`;
+    }));
+    const current = resourceType === "logic_gate" ? logicGateGVICAssignmentsRef.current : nodeGVICAssignments;
+    const next = operation === "remove"
+      ? current.filter((assignment) => !changedKeys.has(`${assignment.role}:${logicGateGVICAssignmentPrincipalType(assignment)}:${logicGateGVICAssignmentPrincipalID(assignment)}`))
+      : [...current, ...assignments.map((assignment) => ({ ...assignment, company_id: companyID, created_timestamp: new Date().toISOString(), principal_type: assignment.principal_type ?? "user", principal_id: assignment.principal_id ?? assignment.user_id ?? "", user_id: assignment.user_id ?? "" }))];
+    return saveResourceGVICAssignments(resourceType, resourceID, next, "inherited_only", "customized");
+  }, [companyID, nodeGVICAssignments, saveResourceGVICAssignments]);
 
   const saveNodeGVICAssignments = useCallback(async (nextAssignments: LogicGateGVICAssignment[]) => {
     if (!linkedNodeID || linkedEntityKind !== "node" || nodeGVICIsInherited) return;
     setError("");
     try {
-      const assignments = await saveResourceGVICAssignments("node", linkedNodeID, nextAssignments);
-      setNodeGVICAssignments(assignments);
+      const policy = await saveResourceGVICAssignments("node", linkedNodeID, nextAssignments, "inherited_only", "customized");
+      if (!policy) return;
+      setNodeGVICAssignments(displayGVICAssignments(policy));
       invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
       invalidateWorkspaceSnapshot(apiBase, companyID);
     } catch (err) {
@@ -1430,18 +1469,19 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const commandLogicGateGVICAssignments = useCallback((
     operation: "add" | "remove",
     assignment: EditorGVICAssignmentInput,
-    optimisticAssignments: LogicGateGVICAssignment[],
+    _optimisticAssignments?: LogicGateGVICAssignment[],
   ) => {
     const logicGateID = linkedNodeID.trim();
     if (!logicGateID || linkedEntityKind !== "logic_gate") return;
     const previousAssignments = logicGateGVICAssignmentsRef.current;
     const mutationSequence = ++logicGateGVICMutationSequenceRef.current;
     editorSnapshotRefreshTokenRef.current += 1;
-    applyLogicGateGVICAssignments(optimisticAssignments, logicGateID);
     setError("");
-    void commandResourceGVICAssignments("logic_gate", logicGateID, operation, [assignment]).then((assignments) => {
+    void commandResourceGVICAssignments("logic_gate", logicGateID, operation, [assignment]).then((policy) => {
       const currentTarget = linkedEditorTargetRef.current;
       if (logicGateGVICMutationSequenceRef.current !== mutationSequence || currentTarget.kind !== "logic_gate" || currentTarget.id !== logicGateID) return;
+      if (!policy) return;
+      const assignments = displayGVICAssignments(policy);
       applyLogicGateGVICAssignments(assignments, logicGateID);
       patchLogicGateRecordStoreGVICAssignments(apiBase, companyID, logicGateID, assignments);
       patchLogicGateGVICAssignmentsInCommunicationsWorkspaceCache(companyID, logicGateID, assignments);
@@ -1463,9 +1503,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     editorSnapshotRefreshTokenRef.current += 1;
     setLogicGateGVICApplyToAssignedNodesBusy(true);
     setError("");
-    void saveResourceGVICAssignments("logic_gate", logicGateID, logicGateGVICAssignmentsRef.current, true).then((assignments) => {
+    void saveResourceGVICAssignments("logic_gate", logicGateID, logicGateGVICAssignmentsRef.current, "including_customized", "customized").then((policy) => {
       const currentTarget = linkedEditorTargetRef.current;
       if (logicGateGVICMutationSequenceRef.current !== mutationSequence || currentTarget.kind !== "logic_gate" || currentTarget.id !== logicGateID) return;
+      if (!policy) return;
+      const assignments = displayGVICAssignments(policy);
       applyLogicGateGVICAssignments(assignments, logicGateID);
       patchLogicGateRecordStoreGVICAssignments(apiBase, companyID, logicGateID, assignments);
       patchLogicGateGVICAssignmentsInCommunicationsWorkspaceCache(companyID, logicGateID, assignments);
@@ -1478,6 +1520,47 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       }
     });
   }, [apiBase, applyLogicGateGVICAssignments, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, logicGateGVICApplyToAssignedNodesBusy, saveResourceGVICAssignments]);
+
+  const changeCurrentGVICMode = useCallback((nextMode: "inherited" | "customized") => {
+    const resourceType = linkedEntityKind === "node" ? "node" : linkedEntityKind === "logic_gate" ? "logic_gate" : null;
+    const resourceID = linkedNodeID.trim();
+    if (!resourceType || !resourceID || !linkedEntityCanEdit || nextMode === gvicPolicyMode) return;
+    setError("");
+    void saveResourceGVICAssignments(resourceType, resourceID, undefined, "inherited_only", nextMode).then((policy) => {
+      if (!policy) return;
+      const assignments = displayGVICAssignments(policy);
+      if (resourceType === "node") setNodeGVICAssignments(assignments);
+      else applyLogicGateGVICAssignments(assignments, resourceID);
+      invalidateWorkspaceSnapshot(apiBase, companyID);
+    }).catch((err) => {
+      setError(err instanceof Error ? err.message : "failed_to_change_gvic_mode");
+    });
+  }, [apiBase, applyLogicGateGVICAssignments, companyID, gvicPolicyMode, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, saveResourceGVICAssignments]);
+
+  const applyLogicGateGVICToInheritedDescendants = useCallback(() => {
+    const logicGateID = linkedNodeID.trim();
+    if (!logicGateID || linkedEntityKind !== "logic_gate" || !linkedEntityCanEdit || logicGateGVICApplyToAssignedNodesBusy) return;
+    const applyRequestID = ++logicGateGVICApplyToAssignedNodesRequestRef.current;
+    setLogicGateGVICApplyToAssignedNodesBusy(true);
+    setError("");
+    void saveResourceGVICAssignments(
+      "logic_gate",
+      logicGateID,
+      gvicPolicyMode === "customized" ? logicGateGVICAssignmentsRef.current : undefined,
+      "inherited_only",
+      gvicPolicyMode,
+    ).then((policy) => {
+      if (!policy) return;
+      applyLogicGateGVICAssignments(displayGVICAssignments(policy), logicGateID);
+      invalidateWorkspaceSnapshot(apiBase, companyID);
+    }).catch((err) => {
+      setError(err instanceof Error ? err.message : "failed_to_apply_inherited_gvic");
+    }).finally(() => {
+      if (logicGateGVICApplyToAssignedNodesRequestRef.current === applyRequestID) {
+        setLogicGateGVICApplyToAssignedNodesBusy(false);
+      }
+    });
+  }, [apiBase, applyLogicGateGVICAssignments, companyID, gvicPolicyMode, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, logicGateGVICApplyToAssignedNodesBusy, saveResourceGVICAssignments]);
 
   const addNodeGVICPrincipal = useCallback((role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => {
     if (nodeGVICIsInherited) return;
@@ -2124,9 +2207,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       try {
         setError("");
         if (linkedEntityKind === "logic_gate") {
-          const [details, projections] = await Promise.all([
+          const [details, projections, gvicPolicy] = await Promise.all([
             getLogicGateRecordSingleFlight(apiBase, companyID, linkedNodeID),
             getLogicGateInformationProjectionSingleFlight(apiBase, companyID, linkedNodeID),
+            requestJSON<ResourceGVICPayload>(`/v1/resources/logic_gate/${linkedNodeID}/gvic?company_id=${encodeURIComponent(companyID)}`),
           ]);
           const snapshotScope = editorSnapshotScope("logic_gate", linkedNodeID);
           if (!isCurrentLinkedLoad()) return;
@@ -2147,7 +2231,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           setNodeLogicGateIDs([]);
           setNodeAccounts([]);
           setNodeGVICAssignments([]);
-          applyLogicGateGVICAssignments(details.logic_gate.gvic_assignments ?? [], linkedNodeID);
+          applyLogicGateGVICAssignments(displayGVICAssignments(gvicPolicy), linkedNodeID);
+          setGVICPolicyMode(gvicPolicy.assignment_mode);
+          setGVICPolicyEffectiveSource(gvicPolicy.effective_source);
+          setGVICPolicyOverwrittenByAncestor(gvicPolicy.overwritten_by_ancestor ?? null);
+          setGVICPolicyRevision(gvicPolicy.revision);
           setNodeWorkspaceProjections([]);
           setLogicGateWorkspaceProjections(projections);
           setNodeWorkspaceLoadedNodeID("");
@@ -2183,11 +2271,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           return;
         }
         invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
-        const [details, projections, contentChanges, gvicAssignments] = await Promise.all([
+        const [details, projections, contentChanges, gvicPolicy] = await Promise.all([
           getNodeRecordSingleFlight(apiBase, companyID, linkedNodeID),
           getNodeInformationProjectionSingleFlight(apiBase, companyID, linkedNodeID),
           getNodeContentChangesSingleFlight(apiBase, companyID, linkedNodeID),
-          getNodeGVICAssignmentsSingleFlight(apiBase, companyID, linkedNodeID),
+          requestJSON<ResourceGVICPayload>(`/v1/resources/node/${linkedNodeID}/gvic?company_id=${encodeURIComponent(companyID)}`),
         ]);
         if (!isCurrentLinkedLoad()) return;
         const snapshotScope = editorSnapshotScope("node", linkedNodeID);
@@ -2206,7 +2294,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         setNodeDueDateDraft(formatNodeDueDateForEditor(details.node.due_date));
         setNodeLogicGateIDs(details.node.logic_gate_ids ?? []);
         setNodeAccounts(details.node.accounts ?? []);
-        setNodeGVICAssignments(gvicAssignments);
+        setNodeGVICAssignments(displayGVICAssignments(gvicPolicy));
+        setGVICPolicyMode(gvicPolicy.assignment_mode);
+        setGVICPolicyEffectiveSource(gvicPolicy.effective_source);
+        setGVICPolicyOverwrittenByAncestor(gvicPolicy.overwritten_by_ancestor ?? null);
+        setGVICPolicyRevision(gvicPolicy.revision);
         applyLogicGateGVICAssignments([], "");
         setNodeWorkspaceProjections(projections);
         setNodeWorkspaceLoadedNodeID(linkedNodeID);
@@ -2463,8 +2555,13 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             saveCurrentVersionBusy={saveVersionSaving}
             saveStateStorageKey={linkedEntityKind === "logic_gate" && documentInformationID ? mangoTiptapPendingStorageKey({ companyID, resourceType: "logic_gate", resourceID: linkedNodeID, documentID: documentInformationID }) : undefined}
             secondaryActions={linkedEntityKind === "logic_gate" ? [{
-              id: "apply-gvic-to-assigned-nodes",
-              label: logicGateGVICApplyToAssignedNodesBusy ? "Applying GVIC to assigned nodes" : "Apply GVIC to assigned nodes",
+              id: "apply-gvic-to-inherited-descendants",
+              label: logicGateGVICApplyToAssignedNodesBusy ? "Applying" : "Apply to inherited descendants",
+              disabled: !linkedEntityCanEdit || logicGateGVICApplyToAssignedNodesBusy,
+              onSelect: applyLogicGateGVICToInheritedDescendants,
+            }, {
+              id: "overwrite-gvic-descendants",
+              label: "Overwrite all descendants, including customized",
               disabled: !linkedEntityCanEdit || logicGateGVICApplyToAssignedNodesBusy,
               onSelect: () => setLogicGateGVICApplyConfirmationOpen(true),
             }] : []}
@@ -2482,7 +2579,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             linkedNodeMetadataRows={linkedNodeMetadataRows}
             linkedNodeHistoryRows={linkedNodeHistoryRows}
             canEdit={linkedEntityCanEdit}
-            canEditGVIC={Boolean(linkedNodeID) && (linkedEntityKind === "logic_gate" || (linkedEntityKind === "node" && !nodeGVICIsInherited))}
+            canEditGVIC={Boolean(linkedNodeID) && linkedEntityCanEdit}
             compactHeader={compactLinkedDocumentHeader}
             nodePresetFields={linkedEntityKind === "node" ? {
               status: nodeStatus || "",
@@ -2496,8 +2593,16 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               assignments: nodeGVICAssignments,
               inherited: nodeGVICIsInherited,
               readOnlyReason: nodeGVICReadOnlyReason,
+              mode: gvicPolicyMode,
+              effectiveSource: gvicPolicyEffectiveSource,
+              overwrittenByAncestor: gvicPolicyOverwrittenByAncestor,
+              onModeChange: changeCurrentGVICMode,
             } : linkedEntityKind === "logic_gate" ? {
               assignments: logicGateGVICAssignments,
+              mode: gvicPolicyMode,
+              effectiveSource: gvicPolicyEffectiveSource,
+              overwrittenByAncestor: gvicPolicyOverwrittenByAncestor,
+              onModeChange: changeCurrentGVICMode,
             } : null}
             companyUsers={companyUsers}
             companyUserGroups={companyUserGroups}
@@ -2526,9 +2631,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
 
         {logicGateGVICApplyConfirmationOpen && linkedEntityKind === "logic_gate" && (
           <ConfirmActionMenu
-            title="Apply GVIC to assigned nodes?"
-            detail="This replaces the GVIC assignments on every node currently assigned to this Logic Gate."
-            confirmLabel="Yes"
+            title="Overwrite all descendants, including customized?"
+            detail="This invalidates older customized GVIC policies below this resource. Later customizations remain independent."
+            confirmLabel="Overwrite"
             cancelLabel="No"
             confirmDisabled={!linkedEntityCanEdit || logicGateGVICApplyToAssignedNodesBusy}
             requireDisplayNameConfirmation={false}

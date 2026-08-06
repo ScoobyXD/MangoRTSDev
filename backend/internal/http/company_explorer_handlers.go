@@ -280,10 +280,6 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 		s.handleCompanyExplorerFolderShares(w, r, folderID)
 		return
 	}
-	if len(parts) == 2 && parts[1] == "permissions" {
-		s.handleEntityPermissions(w, r, store.EntityTypeCompanyExplorerFolder, folderID, "company_explorer_folder_not_found", "company_explorer_folder_permissions_updated")
-		return
-	}
 	if len(parts) != 1 {
 		writeError(w, http.StatusNotFound, "not_found")
 		return

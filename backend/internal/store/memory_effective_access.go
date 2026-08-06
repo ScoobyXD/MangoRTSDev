@@ -7,151 +7,6 @@ import (
 	"strings"
 )
 
-func (r *MemoryRepo) replaceEffectiveFactsForResourceSourceLocked(companyID, resourceType, resourceID, sourceType string, facts []domain.EffectiveResourceAccess) error {
-	return validateEffectiveAccessCompatibilityScope(companyID, resourceType, resourceID)
-}
-
-func (r *MemoryRepo) deleteEffectiveFactsForResourceSourceLocked(companyID, resourceType, resourceID, sourceType string) error {
-	return validateEffectiveAccessCompatibilityScope(companyID, resourceType, resourceID)
-}
-
-func (r *MemoryRepo) deleteEffectiveFactsForResourceLocked(companyID, resourceType, resourceID string) error {
-	return validateEffectiveAccessCompatibilityScope(companyID, resourceType, resourceID)
-}
-
-func (r *MemoryRepo) deleteEffectiveFactsForCompanyUserLocked(companyID, userID string) error {
-	companyID = strings.TrimSpace(companyID)
-	userID = strings.TrimSpace(userID)
-	if companyID == "" || userID == "" {
-		return ErrInvalid
-	}
-	return nil
-}
-
-func (r *MemoryRepo) replaceEffectiveFactsForSourceLocked(companyID, sourceType, sourceID string, facts []domain.EffectiveResourceAccess) error {
-	companyID = strings.TrimSpace(companyID)
-	sourceType = strings.TrimSpace(sourceType)
-	sourceID = strings.TrimSpace(sourceID)
-	if companyID == "" || sourceType == "" || sourceID == "" {
-		return ErrInvalid
-	}
-	return nil
-}
-
-func (r *MemoryRepo) deleteEffectiveFactsForSourceLocked(companyID, sourceType, sourceID string) error {
-	companyID = strings.TrimSpace(companyID)
-	sourceType = strings.TrimSpace(sourceType)
-	sourceID = strings.TrimSpace(sourceID)
-	if companyID == "" || sourceType == "" || sourceID == "" {
-		return ErrInvalid
-	}
-	return nil
-}
-
-func (r *MemoryRepo) recomputeLogicGateGVICEffectiveAccessLocked(companyID, logicGateID string) error {
-	companyID = strings.TrimSpace(companyID)
-	logicGateID = strings.TrimSpace(logicGateID)
-	if companyID == "" || logicGateID == "" {
-		return ErrInvalid
-	}
-	if _, ok := r.logicGates[key(companyID, logicGateID)]; !ok {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (r *MemoryRepo) recomputeSharedTriageGVICEffectiveAccessForResourceLocked(companyID, folderID string) error {
-	companyID = strings.TrimSpace(companyID)
-	folderID = strings.TrimSpace(folderID)
-	if companyID == "" || folderID == "" {
-		return ErrInvalid
-	}
-	folder, ok := r.folders[key(companyID, folderID)]
-	if !ok || folder.FolderKind != "communications" {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (r *MemoryRepo) recomputeSharedTriageInheritedEffectiveAccessForSubtreeLocked(companyID, folderID string) error {
-	companyID = strings.TrimSpace(companyID)
-	folderID = strings.TrimSpace(folderID)
-	if companyID == "" || folderID == "" {
-		return ErrInvalid
-	}
-	if _, ok := r.folders[key(companyID, folderID)]; !ok {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (r *MemoryRepo) recomputeLogicGateAssignedNodeVisibilityLocked(companyID string, logicGateIDs, nodeIDs []string) error {
-	companyID = strings.TrimSpace(companyID)
-	if companyID == "" {
-		return ErrInvalid
-	}
-	keys := make([]resourceGVICKey, 0)
-	for _, nodeID := range nodeIDs {
-		nodeID = strings.TrimSpace(nodeID)
-		if nodeID != "" {
-			keys = append(keys, resourceGVICKey{companyID: companyID, resourceType: EntityTypeNode, resourceID: nodeID})
-		}
-	}
-	for _, logicGateID := range logicGateIDs {
-		logicGateID = strings.TrimSpace(logicGateID)
-		if logicGateID != "" {
-			keyValue := resourceGVICKey{companyID: companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID}
-			keys = append(keys, r.affectedGVICResourceKeysLocked(keyValue)...)
-		}
-	}
-	r.syncResourceGVICEffectiveAssignmentsLocked(keys)
-	return nil
-}
-
-func (r *MemoryRepo) recomputeGroupDependentEffectiveAccessForCompanyLocked(companyID string) error {
-	if strings.TrimSpace(companyID) == "" {
-		return ErrInvalid
-	}
-	r.syncGVICGroupDependentResourcesLocked(companyID)
-	return nil
-}
-
-func (r *MemoryRepo) recomputeGroupDependentEffectiveAccessForGroupsLocked(companyID string, groupIDs []string) error {
-	if strings.TrimSpace(companyID) == "" {
-		return ErrInvalid
-	}
-	r.syncGVICGroupDependentResourcesForGroupsLocked(companyID, groupIDs)
-	return nil
-}
-
-func (r *MemoryRepo) recomputeDirectGrantEffectiveAccessForResourceLocked(companyID, resourceType, resourceID string) error {
-	return validateEffectiveAccessCompatibilityScope(companyID, resourceType, resourceID)
-}
-
-func (r *MemoryRepo) recomputeCompanyAdminEffectiveAccessForUserLocked(userID string) error {
-	if strings.TrimSpace(userID) == "" {
-		return ErrInvalid
-	}
-	return nil
-}
-
-func (r *MemoryRepo) recomputeCompanyAdminEffectiveAccessForResourceLocked(companyID, resourceType, resourceID string) error {
-	return validateEffectiveAccessCompatibilityScope(companyID, resourceType, resourceID)
-}
-
-func (r *MemoryRepo) recomputeCompanyMemberDefaultEffectiveAccessForResourceLocked(companyID, resourceType, resourceID string) error {
-	return validateEffectiveAccessCompatibilityScope(companyID, resourceType, resourceID)
-}
-
-func (r *MemoryRepo) recomputeCompanyMemberDefaultEffectiveAccessForUserLocked(companyID, userID string) error {
-	companyID = strings.TrimSpace(companyID)
-	userID = strings.TrimSpace(userID)
-	if companyID == "" || userID == "" {
-		return ErrInvalid
-	}
-	return nil
-}
-
 func (r *MemoryRepo) UserHasEffectiveAccess(companyID, userID, resourceType, resourceID, accessLevel string) (bool, error) {
 	companyID = strings.TrimSpace(companyID)
 	userID = strings.TrimSpace(userID)
@@ -162,8 +17,8 @@ func (r *MemoryRepo) UserHasEffectiveAccess(companyID, userID, resourceType, res
 		return false, ErrInvalid
 	}
 
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	if !r.entityExistsLocked(companyID, resourceType, resourceID) {
 		return false, ErrNotFound
@@ -191,8 +46,8 @@ func (r *MemoryRepo) ListEffectiveResourceIDsForUser(companyID, userID, resource
 		return map[string]bool{}, nil
 	}
 
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	out := map[string]bool{}
 	for resourceID := range filter {
@@ -212,8 +67,8 @@ func (r *MemoryRepo) ListEffectiveUsersForResource(companyID, resourceType, reso
 		return nil, ErrInvalid
 	}
 
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	if !r.entityExistsLocked(companyID, resourceType, resourceID) {
 		return nil, ErrNotFound
@@ -238,8 +93,8 @@ func (r *MemoryRepo) ResolveEffectiveUsersForResource(ctx context.Context, compa
 
 	candidateUserIDs = cleanUUIDTextSlice(candidateUserIDs)
 
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return false, nil, err
 	}
@@ -294,22 +149,27 @@ func (r *MemoryRepo) userHasResourcePermissionLocked(companyID, userID, resource
 	if r.userHasRoleAdminAccessLocked(companyID, userID) {
 		return true
 	}
-	switch resourceType {
-	case EntityTypeNode, EntityTypeLogicGate, EntityTypeProject, EntityTypeCompanyExplorerFolder, EntityTypeSharedInboxFolder, EntityTypeSharedInbox:
-		if _, ok := r.memberships[membershipKey(companyID, userID)]; !ok {
-			return false
-		}
-		resolvedAccess, ok := r.resolvedResourcePermissionAccessLevelForUserLocked(companyID, userID, resourceType, resourceID)
-		if !ok {
-			return false
-		}
-		if EntityPermissionRank(resolvedAccess) == 0 {
-			return false
-		}
-		return EntityPermissionSatisfies(resolvedAccess, accessLevel)
-	default:
+	if _, ok := r.memberships[membershipKey(companyID, userID)]; !ok {
 		return false
 	}
+	if !r.ensureV2PolicySettingsLocked(companyID, resourceType, resourceID) {
+		return false
+	}
+	resolved := r.resolveV2PolicyLocked(companyID, resourceType, resourceID, false)
+	if resolved.SourceID == "" {
+		return false
+	}
+	edges := r.directMemoryPermissionEdgesLocked(companyID, resolved.SourceType, resolved.SourceID)
+	assignments := make([]resourcePermissionAssignment, 0, len(edges))
+	for _, edge := range edges {
+		assignments = append(assignments, resourcePermissionAssignment{SubjectType: edge.SubjectType, SubjectID: edge.SubjectID, AccessLevel: edge.AccessLevel})
+	}
+	resolvedAccess, matched := r.permissionAccessLevelForUserFromAssignmentsLocked(companyID, userID, assignments)
+	if !matched {
+		setting := r.permissionV2Settings[resourcePolicyKey(companyID, resolved.SourceType, resolved.SourceID)]
+		resolvedAccess = setting.DefaultAccess
+	}
+	return EntityPermissionSatisfies(resolvedAccess, accessLevel)
 }
 func (r *MemoryRepo) userHasDefaultResourceAccessLocked(companyID, userID, resourceType, resourceID string) bool {
 	return r.userHasResourcePermissionLocked(companyID, userID, resourceType, resourceID, EntityPermissionEdit)
@@ -457,14 +317,4 @@ func (r *MemoryRepo) userGroupPermissionDepthLocked(companyID, userID, ancestorG
 		}
 	}
 	return 0, false
-}
-
-func validateEffectiveAccessCompatibilityScope(companyID, resourceType, resourceID string) error {
-	companyID = strings.TrimSpace(companyID)
-	resourceID = strings.TrimSpace(resourceID)
-	_, typeOK := NormalizeEntityType(resourceType)
-	if companyID == "" || resourceID == "" || !typeOK {
-		return ErrInvalid
-	}
-	return nil
 }

@@ -388,7 +388,8 @@ func TestPhase4LogicGateWorkSourceShape(t *testing.T) {
 	}
 	for _, required := range []string{
 		"email_relationships",
-		"resource_gvic_assignments",
+		"mangorts_v2_effective_gvic_assignments",
+		"mangorts_v2_resolve_permission_policy",
 		"projection.status_rank",
 	} {
 		if !strings.Contains(normalizedPostgres, required) {

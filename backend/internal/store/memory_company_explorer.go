@@ -744,11 +744,6 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 	result.Events = events
 	r.createRecycleBinItemsLocked(companyID, deletedByUserID, result.Targets, recycleSnapshot)
 
-	for folderID := range folderIDs {
-		if err := r.deleteEffectiveFactsForResourceLocked(companyID, EntityTypeCompanyExplorerFolder, folderID); err != nil {
-			return CompanyExplorerDeleteResult{}, err
-		}
-	}
 	for logicGateID := range logicGateIDs {
 		if err := r.deleteLogicGateLocked(companyID, logicGateID); err != nil {
 			return CompanyExplorerDeleteResult{}, err

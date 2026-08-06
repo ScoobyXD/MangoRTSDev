@@ -53,27 +53,11 @@ func syncNodeProjectionDependenciesTx(ctx context.Context, tx *sql.Tx, input Nod
 		if err := deleteKanbanBoardProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
 			return err
 		}
-		if err := deletePostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `
-delete from resource_gvic_effective_assignments
-where company_id=$1::uuid
-  and resource_type='node'
-  and resource_id=$2::uuid`, companyID, nodeID); err != nil {
-			return err
-		}
 		if err := deleteProjectManagementTimelineProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
 			return err
 		}
 	} else {
 		if err := syncKanbanBoardProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
-			return err
-		}
-		if err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, []resourceGVICKey{{companyID: companyID, resourceType: EntityTypeNode, resourceID: nodeID}}); err != nil {
-			return err
-		}
-		if err := syncPostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
 			return err
 		}
 		if err := syncProjectManagementTimelineProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
@@ -116,30 +100,10 @@ func syncLogicGateProjectionDependenciesTx(ctx context.Context, tx *sql.Tx, inpu
 		if err := deleteKanbanBoardProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
 			return err
 		}
-		if err := deletePostgresGVICMatrixProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `
-delete from resource_gvic_effective_assignments
-where company_id=$1::uuid
-  and source_resource_type='logic_gate'
-  and source_resource_id=$2::uuid`, companyID, logicGateID); err != nil {
-			return err
-		}
 		if err := deleteProjectManagementTimelineProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
 			return err
 		}
 	} else {
-		affected, err := postgresAffectedGVICResourceKeysTx(ctx, tx, resourceGVICKey{companyID: companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID})
-		if err != nil {
-			return err
-		}
-		if err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, affected); err != nil {
-			return err
-		}
-		if err := syncPostgresGVICMatrixProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
-			return err
-		}
 		if err := syncProjectManagementTimelineProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
 			return err
 		}
@@ -203,27 +167,7 @@ func syncProjectRelationshipProjectionDependenciesTx(ctx context.Context, tx *sq
 			return err
 		}
 	}
-	gvicNodeSet := map[string]bool{}
-	gvicLogicGateSet := map[string]bool{}
-	addProjectRelationshipGVICMatrixResourceIDs(gvicNodeSet, gvicLogicGateSet, before)
-	if nodeID != "" {
-		gvicNodeSet[nodeID] = true
-	}
-	if logicGateID != "" {
-		gvicLogicGateSet[logicGateID] = true
-	}
-	if relationshipID != "" && !input.Delete {
-		resourceType, resourceID, err := projectRelationshipSourceResourceTx(ctx, tx, companyID, relationshipID)
-		if err != nil {
-			return err
-		}
-		switch resourceType {
-		case EntityTypeNode:
-			gvicNodeSet[resourceID] = true
-		case EntityTypeLogicGate:
-			gvicLogicGateSet[resourceID] = true
-		}
-	}
+	_ = before // Retained for callers that capture relationship state before a delete.
 
 	switch {
 	case input.Delete:
@@ -267,28 +211,7 @@ func syncProjectRelationshipProjectionDependenciesTx(ctx context.Context, tx *sq
 		return ErrInvalid
 	}
 
-	after, err := projectRelationshipProjectionRowsAfterDependencyTx(ctx, tx, companyID, relationshipID, nodeID, logicGateID, assignmentID, before)
-	if err != nil {
-		return err
-	}
-	addProjectRelationshipGVICMatrixResourceIDs(gvicNodeSet, gvicLogicGateSet, after)
-	return syncPostgresGVICMatrixProjectionForProjectResourcesTx(ctx, tx, companyID, mapKeys(gvicNodeSet), mapKeys(gvicLogicGateSet))
-}
-func addProjectRelationshipGVICMatrixResourceIDs(nodeSet, logicGateSet map[string]bool, rows []ProjectRelationshipProjectionRow) {
-	for _, row := range rows {
-		resourceType := strings.TrimSpace(row.ResourceType)
-		resourceID := strings.TrimSpace(row.ResourceID)
-		switch resourceType {
-		case EntityTypeNode:
-			if resourceID != "" {
-				nodeSet[resourceID] = true
-			}
-		case EntityTypeLogicGate:
-			if resourceID != "" {
-				logicGateSet[resourceID] = true
-			}
-		}
-	}
+	return nil
 }
 
 func projectRelationshipSourceResourceTx(ctx context.Context, tx *sql.Tx, companyID, relationshipID string) (string, string, error) {

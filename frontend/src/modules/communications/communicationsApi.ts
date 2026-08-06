@@ -169,7 +169,7 @@ export type ResourceAccessLevel = "no_access" | "edit";
 
 export type ResourceAccessGrant = {
   company_id: string;
-  entity_type?: "node" | "logic_gate" | "shared_triage_folder";
+  entity_type?: "node" | "logic_gate" | "shared_inbox_folder" | "shared_inbox" | "company_explorer_folder" | "project";
   entity_id?: string;
   subject_type: "user" | "group";
   subject_id: string;
@@ -1261,10 +1261,17 @@ export async function updateCommunicationsSharedInboxGVICAssignments(
 ): Promise<CommunicationsSharedInboxGVICAssignment[]> {
   const cleanCompanyID = companyID.trim();
   const cleanFolderID = folderID.trim();
-  const payload = await apiFetchJSON<{ gvic_assignments?: CommunicationsSharedInboxGVICAssignment[] }>(`/v1/resources/shared_inbox/${encodeURIComponent(cleanFolderID)}/gvic`, {
+  const path = `/v1/resources/shared_inbox/${encodeURIComponent(cleanFolderID)}/gvic`;
+  const current = await apiFetchJSON<{ revision: string }>(
+    `${path}?company_id=${encodeURIComponent(cleanCompanyID)}`,
+  );
+  const payload = await apiFetchJSON<{ gvic_assignments?: CommunicationsSharedInboxGVICAssignment[] }>(path, {
     method: "PUT",
+    headers: { "If-Match": current.revision },
     body: JSON.stringify({
+      assignment_mode: "customized",
       company_id: cleanCompanyID,
+      descendant_action: "inherited_only",
       gvic_assignments: assignments.map(toResourceGVICAssignmentInput),
     }),
   });
@@ -1304,13 +1311,19 @@ export async function updateLogicGateGVICAssignments(
   assignments: Array<{ role: LogicGateGVICRole; user_id?: string; principal_type?: LogicGateGVICPrincipalType; principal_id?: string }>,
   applyToDescendants = false,
 ): Promise<LogicGateGVICAssignment[]> {
-  const body: { company_id: string; gvic_assignments: ReturnType<typeof toResourceGVICAssignmentInput>[]; apply_to_descendants?: boolean } = {
+  const body = {
     company_id: companyID,
+    assignment_mode: "customized",
     gvic_assignments: assignments.map(toResourceGVICAssignmentInput),
+    descendant_action: applyToDescendants ? "including_customized" : "inherited_only",
   };
-  if (applyToDescendants) body.apply_to_descendants = true;
-  const payload = await apiFetchJSON<{ gvic_assignments?: LogicGateGVICAssignment[] }>(`/v1/resources/logic_gate/${encodeURIComponent(logicGateID)}/gvic`, {
+  const path = `/v1/resources/logic_gate/${encodeURIComponent(logicGateID)}/gvic`;
+  const current = await apiFetchJSON<{ revision: string }>(
+    `${path}?company_id=${encodeURIComponent(companyID)}`,
+  );
+  const payload = await apiFetchJSON<{ gvic_assignments?: LogicGateGVICAssignment[] }>(path, {
     method: "PUT",
+    headers: { "If-Match": current.revision },
     body: JSON.stringify(body),
   });
   invalidateWorkspacePanelCache(companyID);
@@ -1334,14 +1347,37 @@ async function commandLogicGateGVICAssignments(
   assignments: Array<{ role: LogicGateGVICRole; user_id?: string; principal_type?: LogicGateGVICPrincipalType; principal_id?: string }>,
   applyToDescendants = false,
 ): Promise<LogicGateGVICAssignment[]> {
-  const body: { company_id: string; gvic_assignments: ReturnType<typeof toResourceGVICAssignmentInput>[]; apply_to_descendants?: boolean } = {
-    company_id: companyID,
-    gvic_assignments: assignments.map(toResourceGVICAssignmentInput),
-  };
-  if (applyToDescendants) body.apply_to_descendants = true;
-  const payload = await apiFetchJSON<LogicGateGVICAssignmentCommandResult>(`/v1/resources/logic_gate/${encodeURIComponent(logicGateID)}/gvic/${operation}`, {
-    method: "POST",
-    body: JSON.stringify(body),
+  const path = `/v1/resources/logic_gate/${encodeURIComponent(logicGateID)}/gvic`;
+  const current = await apiFetchJSON<{ revision: string; gvic_assignments?: LogicGateGVICAssignment[] }>(
+    `${path}?company_id=${encodeURIComponent(companyID)}`,
+  );
+  let next = (current.gvic_assignments ?? []).map(toResourceGVICAssignmentInput);
+  for (const assignment of assignments.map(toResourceGVICAssignmentInput)) {
+    const matches = (candidate: ReturnType<typeof toResourceGVICAssignmentInput>) => (
+      candidate.role === assignment.role
+      && candidate.principal_type === assignment.principal_type
+      && candidate.principal_id === assignment.principal_id
+    );
+    if (operation === "remove") {
+      next = next.filter((candidate) => !matches(candidate));
+      continue;
+    }
+    if (assignment.role === "generated") {
+      next = next.filter((candidate) => candidate.role !== "generated");
+    } else {
+      next = next.filter((candidate) => !matches(candidate));
+    }
+    next.push(assignment);
+  }
+  const payload = await apiFetchJSON<{ gvic_assignments?: LogicGateGVICAssignment[] }>(path, {
+    method: "PUT",
+    headers: { "If-Match": current.revision },
+    body: JSON.stringify({
+      company_id: companyID,
+      assignment_mode: "customized",
+      gvic_assignments: next,
+      descendant_action: applyToDescendants ? "including_customized" : "inherited_only",
+    }),
   });
   invalidateWorkspacePanelCache(companyID);
   markLogicGateWorkspaceSnapshotScopesStale(companyID, logicGateID);

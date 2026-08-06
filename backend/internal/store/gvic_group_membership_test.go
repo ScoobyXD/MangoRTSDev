@@ -63,6 +63,7 @@ func TestMemoryGroupMembershipGVICSyncIsAffectedGroupScoped(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
+	mustSetGVICMembershipInherited(t, repo, companyID, EntityTypeNode, linkedNode.NodeID)
 
 	mustSetGVICMembershipGroupAssignment(t, repo, companyID, EntityTypeNode, parentNode.NodeID, parent.GroupID, domain.GVICRoleConsulted)
 	mustSetGVICMembershipGroupAssignment(t, repo, companyID, EntityTypeNode, childNode.NodeID, child.GroupID, domain.GVICRoleInformed)
@@ -71,7 +72,7 @@ func TestMemoryGroupMembershipGVICSyncIsAffectedGroupScoped(t *testing.T) {
 	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, parentNode.NodeID, []string{first.UserID}, GVICInheritanceDirect)
 	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, childNode.NodeID, []string{first.UserID}, GVICInheritanceDirect)
 	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, logicGate.LogicGateID, []string{first.UserID}, GVICInheritanceDirect)
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, linkedNode.NodeID, []string{first.UserID}, GVICInheritanceDirect)
+	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, linkedNode.NodeID, []string{first.UserID}, "inherited")
 
 	unrelatedBefore := mustListGVICMembershipEffective(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID)
 	if len(unrelatedBefore) != 1 || unrelatedBefore[0].UserID != unrelatedUser.UserID {
@@ -87,7 +88,7 @@ func TestMemoryGroupMembershipGVICSyncIsAffectedGroupScoped(t *testing.T) {
 	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, parentNode.NodeID, []string{next.UserID}, GVICInheritanceDirect)
 	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, childNode.NodeID, []string{next.UserID}, GVICInheritanceDirect)
 	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, logicGate.LogicGateID, []string{next.UserID}, GVICInheritanceDirect)
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, linkedNode.NodeID, []string{next.UserID}, GVICInheritanceDirect)
+	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, linkedNode.NodeID, []string{next.UserID}, "inherited")
 
 	unrelatedAfter := mustListGVICMembershipEffective(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID)
 	if len(unrelatedAfter) != 1 || unrelatedAfter[0].UserID != unrelatedUser.UserID || !unrelatedAfter[0].UpdatedTimestamp.Equal(unrelatedUpdatedAt) {
@@ -275,7 +276,7 @@ func TestMemoryGroupParentMoveGVICSyncUsesOldAndNewAncestors(t *testing.T) {
 	_, unrelatedNode := mustCreateGVICMembershipGateWithNodeSnapshot(t, repo, companyID, "unrelated gate", "unrelated node", unrelatedGroup.GroupID, domain.GVICRoleConsulted)
 
 	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, oldGate.LogicGateID, []string{movedUser.UserID}, GVICInheritanceDirect)
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, oldNode.NodeID, []string{movedUser.UserID}, GVICInheritanceDirect)
+	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, oldNode.NodeID, []string{movedUser.UserID}, "inherited")
 	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, newGate.LogicGateID, nil, GVICInheritanceDirect)
 	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, newNode.NodeID, nil, GVICInheritanceDirect)
 
@@ -294,7 +295,7 @@ func TestMemoryGroupParentMoveGVICSyncUsesOldAndNewAncestors(t *testing.T) {
 	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, oldGate.LogicGateID, nil, GVICInheritanceDirect)
 	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, oldNode.NodeID, nil, GVICInheritanceDirect)
 	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, newGate.LogicGateID, []string{movedUser.UserID}, GVICInheritanceDirect)
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, newNode.NodeID, []string{movedUser.UserID}, GVICInheritanceDirect)
+	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, newNode.NodeID, []string{movedUser.UserID}, "inherited")
 
 	unrelatedAfter := mustListGVICMembershipEffective(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID)
 	if len(unrelatedAfter) != 1 || unrelatedAfter[0].UserID != unrelatedUser.UserID || !unrelatedAfter[0].UpdatedTimestamp.Equal(unrelatedEffectiveUpdatedAt) {
@@ -374,82 +375,24 @@ func TestMemoryGroupDeleteGVICSyncClearsDeletedAndAncestorResources(t *testing.T
 	}
 }
 
-func TestPostgresGroupHierarchyGVICSyncUsesScopedHelpers(t *testing.T) {
+func TestPostgresGroupHierarchyUsesLiveV2ResolutionWithoutFanout(t *testing.T) {
 	entityRaw, err := os.ReadFile("postgres_entity_permissions.go")
 	if err != nil {
-		t.Fatalf("ReadFile postgres_entity_permissions.go: %v", err)
+		t.Fatal(err)
 	}
-	entitySource := strings.ReplaceAll(string(entityRaw), "\r\n", "\n")
+	entitySource := string(entityRaw)
 	updateBody := extractFunctionSourceForTest(t, entitySource, "func (r *PostgresRepo) UpdateCompanyUserGroup")
 	deleteBody := extractFunctionSourceForTest(t, entitySource, "func (r *PostgresRepo) DeleteCompanyUserGroup")
-	for name, body := range map[string]string{
-		"UpdateCompanyUserGroup": updateBody,
-		"DeleteCompanyUserGroup": deleteBody,
-	} {
-		if strings.Contains(body, "recomputeGroupDependentEffectiveAccessForCompanyTx") {
-			t.Fatalf("%s should not call broad company GVIC recompute", name)
-		}
-		for _, needle := range []string{
-			"gvicAncestorGroupIDsForGroupsTx",
-			"gvicResourceKeysForGroupPrincipalIDsTx",
-			"syncPostgresGVICForResourceKeysTx",
-		} {
-			if !strings.Contains(body, needle) {
-				t.Fatalf("%s missing scoped helper %q", name, needle)
+	for name, body := range map[string]string{"update": updateBody, "delete": deleteBody} {
+		for _, forbidden := range []string{"syncPostgresGVIC", "resource_gvic_effective_assignments", "gvic_matrix_projection", "recomputeGroupDependent"} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("group %s retained Step 1 fanout %q", name, forbidden)
 			}
 		}
 	}
-	keysIndex := strings.Index(deleteBody, "gvicResourceKeysForGroupPrincipalIDsTx")
-	deleteSourceIndex := strings.Index(deleteBody, "delete from resource_gvic_assignments")
-	if keysIndex < 0 || deleteSourceIndex < 0 || keysIndex > deleteSourceIndex {
-		t.Fatalf("DeleteCompanyUserGroup should collect affected GVIC keys before deleting source assignments")
-	}
-
-	gvicRaw, err := os.ReadFile("postgres_gvic.go")
-	if err != nil {
-		t.Fatalf("ReadFile postgres_gvic.go: %v", err)
-	}
-	gvicSource := strings.ReplaceAll(string(gvicRaw), "\r\n", "\n")
-	syncBody := extractFunctionSourceForTest(t, gvicSource, "func syncPostgresGVICForResourceKeysTx")
-	for _, needle := range []string{
-		"syncResourceGVICEffectiveAssignmentsTx",
-		"syncPostgresGVICMatrixProjectionForNodeTx",
-		"syncPostgresGVICMatrixProjectionForLogicGateAssignmentsTx",
-	} {
-		if !strings.Contains(syncBody, needle) {
-			t.Fatalf("syncPostgresGVICForResourceKeysTx missing %q", needle)
-		}
-	}
-	projectionRaw, err := os.ReadFile("postgres_gvic_matrix_projection.go")
-	if err != nil {
-		t.Fatalf("ReadFile postgres_gvic_matrix_projection.go: %v", err)
-	}
-	projectionSource := strings.ReplaceAll(string(projectionRaw), "\r\n", "\n")
-	if !strings.Contains(projectionSource, "and effective.resource_type='node'\n   and effective.resource_id=node_row.node_id") {
-		t.Fatalf("Logic Gate matrix projection should read assigned-node users from node GVIC snapshots")
-	}
-	if strings.Contains(projectionSource, "and effective.resource_type='logic_gate'\n   and effective.resource_id=node_row.logic_gate_id") {
-		t.Fatalf("Logic Gate matrix projection should not fan out template GVIC to assigned nodes")
-	}
-	affectedBody := extractFunctionSourceForTest(t, gvicSource, "func syncPostgresGVICForAffectedGroupsTx")
-	if !strings.Contains(affectedBody, "syncPostgresGVICForResourceKeysTx") || strings.Contains(affectedBody, "syncResourceGVICEffectiveAssignmentsTx") {
-		t.Fatalf("syncPostgresGVICForAffectedGroupsTx should delegate to resource-key GVIC+matrix sync, body:\n%s", affectedBody)
-	}
-	effectiveSyncBody := extractFunctionSourceForTest(t, gvicSource, "func syncDerivedResourceGVICEffectiveAssignmentsTx")
-	for _, needle := range []string{
-		"not exists",
-		"do nothing",
-	} {
-		if !strings.Contains(effectiveSyncBody, needle) {
-			t.Fatalf("syncDerivedResourceGVICEffectiveAssignmentsTx missing incremental sync marker %q", needle)
-		}
-	}
-	for _, forbidden := range []string{
-		"delete from resource_gvic_effective_assignments\nwhere company_id=$1::uuid",
-		"do update set updated_timestamp=now()",
-	} {
-		if strings.Contains(effectiveSyncBody, forbidden) {
-			t.Fatalf("syncDerivedResourceGVICEffectiveAssignmentsTx contains rebuild/retimestamp pattern %q", forbidden)
+	for _, required := range []string{"delete from resource_gvic_assignments", "delete from resource_permissions"} {
+		if !strings.Contains(deleteBody, required) {
+			t.Fatalf("group delete missing direct V2 graph cleanup %q", required)
 		}
 	}
 }
@@ -494,6 +437,7 @@ func mustCreateGVICMembershipGateWithNodeSnapshot(t *testing.T, repo *MemoryRepo
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus %s/%s: %v", logicGate.LogicGateID, node.NodeID, err)
 	}
+	mustSetGVICMembershipInherited(t, repo, companyID, EntityTypeNode, node.NodeID)
 	return logicGate, node
 }
 
@@ -510,6 +454,21 @@ func mustSetGVICMembershipGroupAssignment(t *testing.T, repo *MemoryRepo, compan
 		}},
 	}); err != nil {
 		t.Fatalf("SetResourceGVICAssignments %s/%s: %v", resourceType, resourceID, err)
+	}
+}
+
+func mustSetGVICMembershipInherited(t *testing.T, repo *MemoryRepo, companyID, resourceType, resourceID string) {
+	t.Helper()
+	current, err := repo.GetResourceGVICPolicy(companyID, resourceType, resourceID)
+	if err != nil {
+		t.Fatalf("GetResourceGVICPolicy %s/%s: %v", resourceType, resourceID, err)
+	}
+	if _, _, err := repo.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{
+		CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID,
+		AssignmentMode: PolicyModeInherited, DescendantAction: PolicyDescendantActionInheritedOnly,
+		ExpectedRevision: current.Revision,
+	}); err != nil {
+		t.Fatalf("PutResourceGVICPolicy inherited %s/%s: %v", resourceType, resourceID, err)
 	}
 }
 

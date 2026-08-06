@@ -266,9 +266,10 @@ var recycleSnapshotTables = map[string]bool{
 	"project_relationship_projection":        true,
 	"node_logic_gate_assignments":            true,
 	"kanban_board_projection":                true,
-	"gvic_matrix_projection_table":           true,
 	"project_management_timeline_items":      true,
 	"project_management_timeline_projection": true,
+	"resource_gvic_settings":                 true,
+	"resource_permission_settings":           true,
 	"resource_gvic_assignments":              true,
 	"resource_permissions":                   true,
 	"company_explorer_items":                 true,
@@ -294,6 +295,8 @@ var recycleRestoreTableOrder = []string{
 	"node_content_changes",
 	"node_content_change_seen",
 	"node_account_assignments",
+	"resource_gvic_settings",
+	"resource_permission_settings",
 	"resource_gvic_assignments",
 	"resource_permissions",
 	"user_logic_gate_shortcuts",
@@ -308,7 +311,6 @@ var recycleRestoreTableOrder = []string{
 	"project_management_timeline_items",
 	"project_management_timeline_projection",
 	"kanban_board_projection",
-	"gvic_matrix_projection_table",
 	"company_explorer_items",
 }
 
@@ -546,22 +548,25 @@ func postgresSnapshotRecyclePayloadWithCacheTx(ctx context.Context, tx *sql.Tx, 
 				return nil, err
 			}
 		}
-		GVICMatrixWhere, GVICMatrixArgs := recycleGVICMatrixProjectionWhere(companyID, nodeIDs, logicGateIDs)
-		if GVICMatrixWhere != "" {
-			if err := addTable("gvic_matrix_projection_table", GVICMatrixWhere, GVICMatrixArgs...); err != nil {
-				return nil, err
-			}
-		}
 	}
 	accessNodeIDs := nodeIDs
 	accessLogicGateIDs := logicGateIDs
 	accessProjectIDs := projectIDs
 	accessFolderIDs := communicationsFolderIDs(scope)
-	if len(accessNodeIDs) > 0 || len(accessLogicGateIDs) > 0 || len(accessProjectIDs) > 0 || len(accessFolderIDs) > 0 {
+	explorerFolderIDs := companyExplorerPolicyFolderIDs(scope)
+	if len(accessNodeIDs) > 0 || len(accessLogicGateIDs) > 0 || len(accessProjectIDs) > 0 || len(accessFolderIDs) > 0 || len(explorerFolderIDs) > 0 {
 		accessWhere, accessArgs := recycleTypedResourceWhere(companyID, accessNodeIDs, accessLogicGateIDs, accessProjectIDs, "resource_type", "resource_id")
 		if accessWhere != "" {
-			for _, tableName := range []string{"resource_gvic_assignments"} {
+			for _, tableName := range []string{"resource_gvic_settings", "resource_permission_settings", "resource_gvic_assignments", "resource_permissions"} {
 				if err := addTable(tableName, accessWhere, accessArgs...); err != nil {
+					return nil, err
+				}
+			}
+		}
+		if len(explorerFolderIDs) > 0 {
+			folderAccessWhere, folderAccessArgs := recycleSingleTypedResourceWhere(companyID, EntityTypeCompanyExplorerFolder, explorerFolderIDs, "resource_type", "resource_id")
+			for _, tableName := range []string{"resource_gvic_settings", "resource_permission_settings", "resource_gvic_assignments", "resource_permissions"} {
+				if err := addTable(tableName, folderAccessWhere, folderAccessArgs...); err != nil {
 					return nil, err
 				}
 			}
@@ -569,19 +574,14 @@ func postgresSnapshotRecyclePayloadWithCacheTx(ctx context.Context, tx *sql.Tx, 
 		if len(accessFolderIDs) > 0 {
 			for _, resourceType := range []string{EntityTypeSharedInboxFolder, EntityTypeSharedInbox} {
 				folderAccessWhere, folderAccessArgs := recycleSingleTypedResourceWhere(companyID, resourceType, accessFolderIDs, "resource_type", "resource_id")
-				for _, tableName := range []string{"resource_gvic_assignments", "resource_permissions"} {
+				for _, tableName := range []string{"resource_gvic_settings", "resource_permission_settings", "resource_gvic_assignments", "resource_permissions"} {
 					if err := addTable(tableName, folderAccessWhere, folderAccessArgs...); err != nil {
 						return nil, err
 					}
 				}
 			}
 		}
-		permissionWhere, permissionArgs := recycleTypedResourceWhere(companyID, accessNodeIDs, accessLogicGateIDs, accessProjectIDs, "resource_type", "resource_id")
-		if permissionWhere != "" {
-			if err := addTable("resource_permissions", permissionWhere, permissionArgs...); err != nil {
-				return nil, err
-			}
-		}
+
 	}
 
 	encoded, err := json.Marshal(payload)

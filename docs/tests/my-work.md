@@ -1,14 +1,24 @@
-Last updated: 2026-07-18
+# Process Story: My Work resolves current policy instead of reading a policy projection
+
+A user opens Me, My Team, or All
+↓
+The backend starts from that audience's direct and live nested-group GVIC roots
+↓
+Active Node work is resolved through current hierarchy, force-reset boundaries, and Node Edit permission
+↓
+The API returns paginated, deterministic rows with project and Logic Gate display context
+
+Last updated: 2026-08-05
 
 # My Work Rules
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: core read path, projection sync, and permission filtering have backend coverage. `tests/frontend/pages/home/myWorkGrouping.test.ts` and `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` cover the My Work grouping model and exact shared status order. `tests/frontend/pages/home/myWorkMatrixLoader.test.ts` covers matching Node and Logic Gate title patches, existing-cache convergence, version-gated pre-commit in-flight reconciliation, post-commit canonical authority, and a projection/drop result that merges only newer title commits. Rule ID mapping is partial.
+- Business Logic Covered By Automated Tests: canonical V2 reverse lookup, current group membership, inherited/reset boundaries, permission filtering, pagination, stable ordering, grouping, and title reconciliation have backend and frontend coverage. Rule ID mapping remains partial.
 
 ## Definitions
 
-My Work row: One `gvic_matrix_projection_table` row for one user, one GVIC role, one priority bucket, one node leaf, and one project/logic-gate path context.
+My Work row: One derived response row for one user, one effective GVIC role, one priority bucket, one Node leaf, and one project/Logic Gate path context.
 
 Node leaf: The actual work item. `node_id` is the resource that opens as work. Projects and logic gates are never My Work leaves by themselves.
 
@@ -16,7 +26,7 @@ Path context: `project_id/project_name` and `logic_gate_id/logic_gate_name` are 
 
 Active work: A standalone node is active when its node status is not `Done`. A node in a relationship with an active project, directly or through a logic gate, remains active while the project is active even if the node status is `Done`. A project is active when its project status is not `Done`. Logic gates do not add their own active status.
 
-Projection identity: `projection_row_id` is the row identity used by canonical reads and frontend reconciliation.
+Row identity: A deterministic response identity is derived for frontend reconciliation; it is not a stored policy or access authority.
 
 ## Business Logic
 
@@ -36,14 +46,14 @@ MW13 - Role buckets sort generated, verified, consulted, then informed.
 MW14 - Priority buckets sort 1, 2, 3, 4, 5, then no priority.
 MW15 - Projects and logic gates are display/path context only; they must not appear as standalone My Work leaves.
 MW16 - `node_id` is the actual work item for every My Work row.
-MW17 - If a node is assigned to a logic gate, My Work uses the logic gate GVIC assignment for that node path.
-MW18 - If a node is not assigned to a logic gate, My Work uses the node GVIC assignment.
-MW19 - A person or group can have only one GVIC assignment per node or logic gate.
-MW20 - My Work GET reads flat projection rows directly from `gvic_matrix_projection_table`.
-MW21 - The backend must not recursively build a tree for My Work reads.
-MW22 - The frontend must not lazy-fetch My Work branches to derive the matrix.
-MW23 - The projection row carries denormalized `node_name`, path context, row status, due date, accounts, timestamps, and `sort_order`.
-MW24 - Hidden work is filtered out: the viewer needs node work access and edit access to any projected project or logic-gate context.
+MW17 - Every row uses the Node's current effective GVIC policy. An inherited assigned Node resolves through its Logic Gate; an active customized Node resolves itself.
+MW18 - A standalone Node must be a customized root and resolves its own complete policy.
+MW19 - One source principal has one role in one customized resource policy; overlapping live groups resolve one effective user role using the documented deterministic order.
+MW20 - My Work GET derives rows from canonical V2 GVIC settings/assignments, current hierarchy, current nested-group membership, current permissions, and work metadata.
+MW21 - Reverse lookup starts from indexed user/group assignment roots and traverses only candidate hierarchy scopes; it does not scan every company resource or materialize descendants on writes.
+MW22 - The frontend receives paginated flat rows and must not lazy-fetch policy branches to reconstruct authority.
+MW23 - Each derived row carries Node name, path context, status, due date, accounts, timestamps, stable response identity, and sort order.
+MW24 - Hidden work is filtered out: the target user needs effective Node GVIC and current effective Node Edit permission. Project and Logic Gate data are display context, not a substitute authorization grant.
 MW25 - My Work grouping supports account, due date, logic gate, person, project, status, and team fields.
 MW26 - The default My Work grouping is project ascending.
 MW27 - Saved grouping settings are scoped by company and current user.
@@ -51,10 +61,10 @@ MW28 - Malformed or duplicate saved grouping settings are normalized before use.
 MW29 - Opening a My Work row routes to the node, with project and logic-gate context available for display/navigation.
 MW30 - Expanding/collapsing grouping rows is separate from opening the work item.
 MW31 - Drag/drop or empty-cell creation from My Work carries the selected priority and creator GVIC role into the created node.
-MW32 - Semantic backend mutations write canonical/source rows and update affected hot projection rows in the same transaction.
-MW33 - Normal mutations prefer exact projection row upsert/delete over broad rebuilds.
-MW34 - Large fanout changes update the projection transactionally; the next canonical My Work load returns the current rows.
-MW35 - My Work does not receive cross-user projection deltas. Read-time permission filtering is authoritative, and temporary cross-user staleness until navigation or refresh is accepted.
+MW32 - Semantic mutations write canonical work, hierarchy, GVIC, and permission rows; My Work derives the committed result on its next read.
+MW33 - Policy changes never upsert/delete per-user My Work authority rows and never rebuild a descendant projection.
+MW34 - Force overwrite remains a constant-size sequence write even for large subtrees; the next paginated My Work read resolves current boundaries.
+MW35 - My Work has no cross-user policy delta stream. Read-time GVIC and permission resolution is authoritative, including current group membership.
 MW36 - My Work pulls only active work. Standalone nodes are active when they are not in `Done` status. Projects are active when they are not in `Done` status. A node marked `Done` remains active when it is in a relationship with an active project, either directly or through a logic gate, because the parent project is still going. Logic gates do not add their own active status.
     a. standalone Done nodes are excluded from My Work
     b. Done nodes under an active project are included
@@ -78,24 +88,15 @@ MW51 - My Work Status grouping consumes the shared universal status contract als
 MW52 - The app-wide committed-title registry records the company/entity key and monotonic title-commit version; My Work consumes that shared state rather than maintaining a second registry. A matching Node rename updates current work-row titles, and a matching Logic Gate rename updates path/group labels. The app-lifetime coordinator patches existing My Work matrix caches immediately. A matrix request applies only title commits newer than the version captured when that request began, so a pre-commit in-flight result cannot restore an old label while a request begun after the commit remains authoritative canonical truth. Node-drop projection responses capture the shared title version before the request and merge only newer local Node or Logic Gate title commits while still applying assignment, priority, and other non-title fields, including for newly introduced rows. This does not create a My Work WebSocket subscription or trigger a canonical reload; other companies and unrelated resources remain unchanged.
 MW53 - Projects is the first fixed subview under My Work in the Key Views sidebar and no longer appears as a top-level Entities button. Selecting it opens the Project Management page. It is available to every user, cannot be dragged, renamed, edited, or deleted, and all user-created My Work saved views remain ordered below it.
 
-## Projection Maintenance
+## Canonical V2 resolution
 
-The hot projection is updated transactionally for these source mutations:
-- node rename, status, due date, priority, accounts, deletion, or inactive status changes
-- logic gate rename, GVIC assignment changes, node move into/out of a logic gate, deletion, or inactive status changes
-- project rename, project relationship changes, deletion, or inactive status changes
-- node GVIC assignment changes
-- permission changes affecting the node or path context
+My Work reads from the four canonical V2 policy tables plus hierarchy, live group membership, and work metadata. The query starts from direct user assignments and group assignments reachable from the requested users, applies active customized boundaries and eligible resets, then requires current effective Node Edit permission.
 
-Node rename/status/due date/priority/accounts changed: update/rebuild rows where node_id = X.
-Logic gate renamed: update all rows where logic_gate_id = X.
-Project renamed: update all rows where project_id = X.
-Node moved into/out of a logic gate: rebuild all projection rows for that node.
-Logic gate GVIC assignment changed: rebuild rows for all current nodes in that logic gate.
-Node GVIC assignment changed: rebuild rows for that node, but only matters when the node is not deferring to a logic gate.
-Project relationship changed: rebuild affected node rows under that project/gate relationship.
-Project/logic gate/node deleted or archived/done: delete or rebuild affected rows.
-No My Work WebSocket message is emitted. The initiating command patches or reloads its concrete local surface; other sessions see the projection on their next open or refresh.
+Node, Logic Gate, project, status, priority, account, due-date, relationship, group, GVIC, permission, move, detach, and deletion changes need no My Work policy projection maintenance. The next canonical read derives the current result.
+
+Results are paginated and deterministically ordered. Policy writes do not synchronously walk or rewrite all affected descendants.
+
+No My Work WebSocket policy message is emitted. The initiating command patches or reloads its concrete local surface; other sessions resolve current state on their next open or refresh.
 
 
 ## Scenarios
@@ -190,21 +191,21 @@ Expected:
 - Deleting a My Work node hides it optimistically, restores it on failure, and refreshes My Work on success.
 - Updates grouping supports Project, Logic Gate, and Status as ordinary grouping choices while staying separate from My Work active-work grouping.
 
-### Scenario MW-S4: Transactional Projection Without Realtime
+### Scenario MW-S4: Canonical V2 Resolution Without Realtime
 
 Business logic covered:
 - MW32 through MW35
 
 Given:
-- A semantic backend mutation changes canonical/source My Work data.
-- The mutation affects one or more node leaf projection rows.
-- A later reader may or may not have permission to see those rows.
+- A semantic backend mutation changes canonical work, hierarchy, group, GVIC, or permission data.
+- The change can affect one or many descendant Node leaves.
+- A later reader may or may not have current GVIC and Edit permission.
 
 Expected:
-- Canonical/source rows and exact affected projection rows are updated in the same transaction.
-- Canonical projection rows preserve stable `projection_row_id` identities.
+- Only canonical source rows and constant-size reset metadata are written.
+- The next paginated read derives deterministic row identities and current source explanations.
 - No GVIC/My Work realtime event or `event_rows` record is emitted.
-- The next open, navigation, or explicit refresh reads the current projection.
+- The next open, navigation, or explicit refresh resolves current V2 policy and hierarchy.
 - Unauthorized readers do not receive hidden nodes or hidden path contexts from the canonical API.
 
 ### Scenario MW-S5: Same-Window Committed Titles Patch Mounted Rows

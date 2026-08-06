@@ -6,7 +6,7 @@ The command carries the resource's existing canonical ID unchanged from its sour
 ↓
 The relationship subsystem stores that literal ID in a direct typed column when the endpoint type is fixed, or together with its canonical `resource_type` when the endpoint type can vary
 ↓
-The relationship remains in the table for its business meaning, such as Node structure, Logic Gate flow, Project membership, email attachment, file ownership, Account assignment, permission, or GVIC assignment
+The relationship remains in the table for its business meaning; only the documented Company Explorer, Logic Gate-to-Node, and Shared Triage parent links also define immediate V2 policy ancestry
 ↓
 Reads, events, projections, recycle/restore, and permanent deletion use the same company, endpoint type, and literal resource ID; no resource registry, translated ID, or replacement identity is consulted
 ↓
@@ -125,6 +125,12 @@ A relationship row MUST NOT automatically bypass the normal authorization rules 
 
 For email and attachment links, knowing an email ID, attachment ID, object key, or relationship ID is never sufficient by itself. Access is checked through the exact owning resource and relationship scope.
 
+
+The only relationships that define V2 GVIC and permission parentage are the exact hierarchy contracts in `docs/importanttasks/v2gvic&permissions.md`: Company Explorer folders parent contained folders, Projects, and Logic Gates; a Logic Gate parents its assigned Nodes; Shared Triage folders parent contained folders and shared inboxes. Project membership, Node-to-Node structure, email, attachment, Account, and other relationships do not become policy parents.
+
+Creating or moving one of those parent links advances separate GVIC and permission parent-link sequences. The relationship does not copy policy rows or grant access by itself; an inherited child resolves its current parent policy, while a customized child remains independent. Removing the only Node-to-Logic-Gate parent materializes an inherited Node's current effective policies before detach so a root never remains inherited.
+
+A relationship reader or writer MUST NOT translate resource identity, use an untyped generic edge, or consult a central registry to resolve policy ancestry. The canonical relationship rows and literal typed resource IDs are the hierarchy authority.
 ### Law 15 — Relationship creation is atomic with its command
 
 When a business command creates a resource and its required relationships together, those writes MUST commit or roll back as one transaction. The system MUST NOT expose a successful resource creation while silently losing a required relationship, or expose a relationship whose newly created endpoint rolled back.

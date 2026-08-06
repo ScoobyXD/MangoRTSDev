@@ -79,12 +79,14 @@ func TestCommunicationsSharedInboxRoutesManageFoldersAndAccess(t *testing.T) {
 	}
 
 	accessBody, _ := json.Marshal(map[string]any{
-		"company_id": companyID,
+		"company_id":      companyID,
+		"permission_mode": store.PolicyModeCustomized,
+		"default_access":  store.ResourceDefaultAccessNoAccess,
 		"permissions": []map[string]string{
 			{"subject_type": store.EntityPermissionSubjectUser, "subject_id": user.UserID, "access_level": store.EntityPermissionEdit},
 		},
 	})
-	accessReq := httptest.NewRequest(http.MethodPut, "/v1/communications/shared-inboxes/"+created.FolderID+"/access", bytes.NewReader(accessBody))
+	accessReq := httptest.NewRequest(http.MethodPut, "/v1/resources/shared_inbox/"+created.FolderID+"/permissions", bytes.NewReader(accessBody))
 	accessReq.Header.Set("Content-Type", "application/json")
 	accessRec := httptest.NewRecorder()
 	handler.ServeHTTP(accessRec, accessReq)
@@ -92,17 +94,17 @@ func TestCommunicationsSharedInboxRoutesManageFoldersAndAccess(t *testing.T) {
 		t.Fatalf("PUT shared inbox access status = %d, want %d body=%s", accessRec.Code, http.StatusOK, accessRec.Body.String())
 	}
 	var accessPayload struct {
-		AccessGrants []struct {
+		Permissions []struct {
 			EntityID    string `json:"entity_id"`
 			SubjectID   string `json:"subject_id"`
 			AccessLevel string `json:"access_level"`
-		} `json:"access_grants"`
+		} `json:"permissions"`
 	}
 	if err := json.NewDecoder(accessRec.Body).Decode(&accessPayload); err != nil {
 		t.Fatalf("decode access payload: %v", err)
 	}
-	if len(accessPayload.AccessGrants) != 1 || accessPayload.AccessGrants[0].EntityID != created.FolderID || accessPayload.AccessGrants[0].AccessLevel != store.EntityPermissionEdit || accessPayload.AccessGrants[0].SubjectID != user.UserID {
-		t.Fatalf("access grants = %+v", accessPayload.AccessGrants)
+	if len(accessPayload.Permissions) != 1 || accessPayload.Permissions[0].EntityID != created.FolderID || accessPayload.Permissions[0].AccessLevel != store.EntityPermissionEdit || accessPayload.Permissions[0].SubjectID != user.UserID {
+		t.Fatalf("permissions = %+v", accessPayload.Permissions)
 	}
 
 	listReq := httptest.NewRequest(http.MethodGet, "/v1/communications/shared-inboxes?company_id="+companyID, nil)
@@ -315,17 +317,8 @@ func TestCommunicationsSharedInboxAccessRouteDoesNotConvertGVICAssignmentsToPerm
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("PUT shared inbox access status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-	var payload struct {
-		AccessGrants []domain.EntityPermission `json:"access_grants"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode access payload: %v", err)
-	}
-	if len(payload.AccessGrants) != 0 {
-		t.Fatalf("assignments-only access update created compatibility grants: %+v", payload.AccessGrants)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("PUT removed shared inbox access route status = %d, want %d body=%s", rec.Code, http.StatusNotFound, rec.Body.String())
 	}
 	allowed, err := repo.UserHasEffectiveAccess(companyID, user.UserID, store.EntityTypeSharedInboxFolder, folder.FolderID, store.EntityPermissionEdit)
 	if err != nil {
@@ -369,18 +362,24 @@ func TestCommunicationsSharedInboxManagerCanManageAccess(t *testing.T) {
 		EntityID:         folder.FolderID,
 		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
 		DefaultAccessSet: true,
-		OverrideUserIDs:  []string{managerUser.UserID},
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   managerUser.UserID,
+			AccessLevel: store.EntityPermissionEdit,
+		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions manager error = %v", err)
 	}
 
 	body, _ := json.Marshal(map[string]any{
-		"company_id": companyID,
+		"company_id":      companyID,
+		"permission_mode": store.PolicyModeCustomized,
+		"default_access":  store.ResourceDefaultAccessNoAccess,
 		"permissions": []map[string]string{
 			{"subject_type": store.EntityPermissionSubjectUser, "subject_id": targetUser.UserID, "access_level": store.EntityPermissionEdit},
 		},
 	})
-	req := httptest.NewRequest(http.MethodPut, "/v1/communications/shared-inboxes/"+folder.FolderID+"/access", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/v1/resources/shared_inbox_folder/"+folder.FolderID+"/permissions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), actorContextKey{}, ActorContext{
 		User: managerUser,
@@ -455,7 +454,11 @@ func TestCommunicationsSharedInboxListFiltersToGrantedFoldersOnly(t *testing.T) 
 		EntityID:         child.FolderID,
 		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
 		DefaultAccessSet: true,
-		OverrideUserIDs:  []string{currentUser.UserID},
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   currentUser.UserID,
+			AccessLevel: store.EntityPermissionEdit,
+		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions child error = %v", err)
 	}
@@ -465,7 +468,11 @@ func TestCommunicationsSharedInboxListFiltersToGrantedFoldersOnly(t *testing.T) 
 		EntityID:         unrelated.FolderID,
 		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
 		DefaultAccessSet: true,
-		OverrideUserIDs:  []string{otherUser.UserID},
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   otherUser.UserID,
+			AccessLevel: store.EntityPermissionEdit,
+		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions unrelated error = %v", err)
 	}
@@ -540,7 +547,7 @@ func TestCommunicationsSharedInboxListReportsStorageUnavailable(t *testing.T) {
 	}
 }
 
-func TestCommunicationsSharedInboxAccessReportsStorageUnavailable(t *testing.T) {
+func TestCommunicationsSharedInboxLegacyAccessRouteIsRemoved(t *testing.T) {
 	t.Parallel()
 
 	repo := sharedInboxListErrorRepo{Repository: store.NewMemoryRepo(), err: store.ErrSharedInboxStorageUnavailable}
@@ -549,16 +556,7 @@ func TestCommunicationsSharedInboxAccessReportsStorageUnavailable(t *testing.T) 
 	req := httptest.NewRequest(http.MethodGet, "/v1/communications/shared-inboxes/folder-1/access?company_id=11111111-1111-1111-1111-111111111111", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("GET shared inbox access status = %d, want %d body=%s", rec.Code, http.StatusServiceUnavailable, rec.Body.String())
-	}
-	var payload struct {
-		Error string `json:"error"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode error payload: %v", err)
-	}
-	if payload.Error != "shared_inbox_storage_unavailable" {
-		t.Fatalf("error = %q, want shared_inbox_storage_unavailable", payload.Error)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("GET removed shared inbox access route status = %d, want %d body=%s", rec.Code, http.StatusNotFound, rec.Body.String())
 	}
 }

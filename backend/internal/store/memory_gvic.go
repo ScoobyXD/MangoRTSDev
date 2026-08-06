@@ -2,7 +2,6 @@ package store
 
 import (
 	"miraeopus/backend/internal/domain"
-	"sort"
 	"strings"
 	"time"
 )
@@ -18,232 +17,106 @@ func gvicSourceAssignmentKey(companyID, resourceType, resourceID, role, principa
 	}, ":")
 }
 
-func gvicEffectiveAssignmentKey(item domain.ResourceGVICEffectiveAssignment) string {
-	return strings.Join([]string{
-		strings.TrimSpace(item.CompanyID),
-		strings.TrimSpace(item.ResourceType),
-		strings.TrimSpace(item.ResourceID),
-		strings.TrimSpace(item.Role),
-		strings.TrimSpace(item.UserID),
-		strings.TrimSpace(item.SourceResourceType),
-		strings.TrimSpace(item.SourceResourceID),
-		strings.TrimSpace(item.SourcePrincipalType),
-		strings.TrimSpace(item.SourcePrincipalID),
-		strings.TrimSpace(item.InheritanceType),
-	}, ":")
-}
-
 func (r *MemoryRepo) ListResourceGVICAssignments(companyID, resourceType, resourceID string) ([]domain.ResourceGVICAssignment, error) {
-	keyValue, err := normalizeResourceGVICKey(companyID, resourceType, resourceID)
+	policy, err := r.GetResourceGVICPolicy(companyID, resourceType, resourceID)
 	if err != nil {
 		return nil, err
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if !r.gvicResourceExistsLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID) {
-		return nil, ErrNotFound
-	}
-	items := r.gvicAssignmentsForResourceLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID)
-	return cloneResourceGVICAssignments(items), nil
+	return cloneResourceGVICAssignments(policy.GVICAssignments), nil
 }
 
 func (r *MemoryRepo) SetResourceGVICAssignments(input ResourceGVICAssignmentUpdateInput) (ResourceGVICAssignmentMutationResult, error) {
-	command := ResourceGVICAssignmentCommandInput{
-		CompanyID:          input.CompanyID,
-		ResourceType:       input.ResourceType,
-		ResourceID:         input.ResourceID,
-		Assignments:        input.Assignments,
-		ActorUserID:        input.ActorUserID,
-		IdempotencyKey:     input.IdempotencyKey,
-		ApplyToDescendants: input.ApplyToDescendants,
+	current, err := r.GetResourceGVICPolicy(input.CompanyID, input.ResourceType, input.ResourceID)
+	if err != nil {
+		return ResourceGVICAssignmentMutationResult{}, err
 	}
-	return r.applyResourceGVICAssignmentCommand(command, GVICAssignmentCommandSet)
+	action := PolicyDescendantActionInheritedOnly
+	if input.ApplyToDescendants {
+		action = PolicyDescendantActionIncludingCustomized
+	}
+	policy, events, err := r.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{
+		CompanyID: input.CompanyID, ResourceType: input.ResourceType, ResourceID: input.ResourceID,
+		AssignmentMode: PolicyModeCustomized, Assignments: append([]ResourceGVICAssignmentInput{}, input.Assignments...),
+		DescendantAction: action, ExpectedRevision: current.Revision, ActorUserID: input.ActorUserID, IdempotencyKey: input.IdempotencyKey,
+	})
+	if err != nil {
+		return ResourceGVICAssignmentMutationResult{}, err
+	}
+	return ResourceGVICAssignmentMutationResult{
+		CompanyID: policy.CompanyID, ResourceType: policy.ResourceType, ResourceID: policy.ResourceID,
+		Operation: GVICAssignmentCommandSet, Changed: current.Revision != policy.Revision,
+		GVICAssignments: policy.GVICAssignments, EffectiveAssignments: policy.EffectiveAssignments, Events: events,
+	}, nil
 }
 
 func (r *MemoryRepo) AddResourceGVICAssignments(input ResourceGVICAssignmentCommandInput) (ResourceGVICAssignmentMutationResult, error) {
-	return r.applyResourceGVICAssignmentCommand(input, GVICAssignmentCommandAdd)
+	current, err := r.GetResourceGVICPolicy(input.CompanyID, input.ResourceType, input.ResourceID)
+	if err != nil {
+		return ResourceGVICAssignmentMutationResult{}, err
+	}
+	items := v2GVICAssignmentsForEdit(current)
+	before := append([]ResourceGVICAssignmentInput{}, items...)
+	byPrincipal := map[string]ResourceGVICAssignmentInput{}
+	for _, item := range items {
+		byPrincipal[item.PrincipalType+":"+item.PrincipalID] = item
+	}
+	for _, item := range input.Assignments {
+		if strings.TrimSpace(item.Role) == domain.GVICRoleGenerated {
+			for principalKey, existing := range byPrincipal {
+				if existing.Role == domain.GVICRoleGenerated {
+					delete(byPrincipal, principalKey)
+				}
+			}
+		}
+		byPrincipal[strings.TrimSpace(item.PrincipalType)+":"+strings.TrimSpace(item.PrincipalID)] = item
+	}
+	items = items[:0]
+	for _, item := range byPrincipal {
+		items = append(items, item)
+	}
+	if v2GVICInputSetsEqual(before, items) {
+		return unchangedV2GVICMutation(current, GVICAssignmentCommandAdd), nil
+	}
+	result, err := r.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+		CompanyID: input.CompanyID, ResourceType: input.ResourceType, ResourceID: input.ResourceID, Assignments: items,
+		ActorUserID: input.ActorUserID, IdempotencyKey: input.IdempotencyKey, ApplyToDescendants: input.ApplyToDescendants,
+	})
+	result.Operation = GVICAssignmentCommandAdd
+	return result, err
 }
 
 func (r *MemoryRepo) RemoveResourceGVICAssignments(input ResourceGVICAssignmentCommandInput) (ResourceGVICAssignmentMutationResult, error) {
-	return r.applyResourceGVICAssignmentCommand(input, GVICAssignmentCommandRemove)
-}
-
-func (r *MemoryRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssignmentCommandInput, operation string) (ResourceGVICAssignmentMutationResult, error) {
-	keyValue, err := normalizeResourceGVICKey(input.CompanyID, input.ResourceType, input.ResourceID)
+	current, err := r.GetResourceGVICPolicy(input.CompanyID, input.ResourceType, input.ResourceID)
 	if err != nil {
 		return ResourceGVICAssignmentMutationResult{}, err
 	}
-	assignments, err := normalizeResourceGVICAssignmentInputs(input.Assignments)
-	if err != nil {
-		return ResourceGVICAssignmentMutationResult{}, err
+	remove := map[string]bool{}
+	for _, item := range input.Assignments {
+		remove[strings.TrimSpace(item.Role)+":"+strings.TrimSpace(item.PrincipalType)+":"+strings.TrimSpace(item.PrincipalID)] = true
 	}
-	if err := validateResourceGVICAssignmentInputsForOperation(keyValue, assignments, operation); err != nil {
-		return ResourceGVICAssignmentMutationResult{}, err
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if !r.gvicResourceExistsLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID) {
-		return ResourceGVICAssignmentMutationResult{}, ErrNotFound
-	}
-	for _, assignment := range assignments {
-		if err := r.validateGVICPrincipalLocked(keyValue.companyID, assignment.principalType, assignment.principalID); err != nil {
-			return ResourceGVICAssignmentMutationResult{}, err
+	items := []ResourceGVICAssignmentInput{}
+	for _, item := range v2GVICAssignmentsForEdit(current) {
+		if !remove[item.Role+":"+item.PrincipalType+":"+item.PrincipalID] {
+			items = append(items, item)
 		}
 	}
-	assignmentsSnapshot := cloneMemoryMap(r.gvicAssignments)
-	effectiveSnapshot := cloneMemoryMap(r.gvicEffectiveAssignments)
-	GVICMatrixProjectionSnapshot := cloneMemoryMap(r.GVICMatrixProjectionRows)
-	resourcePolicySequenceSnapshot := r.resourcePolicySequence
-	gvicPolicyRevisionsSnapshot := cloneMemoryMap(r.gvicPolicyRevisions)
-	gvicApplicationsSnapshot := cloneGVICApplications(r.gvicSubtreeApplications)
-	restore := func() {
-		r.gvicAssignments = assignmentsSnapshot
-		r.gvicEffectiveAssignments = effectiveSnapshot
-		r.GVICMatrixProjectionRows = GVICMatrixProjectionSnapshot
-		r.resourcePolicySequence = resourcePolicySequenceSnapshot
-		r.gvicPolicyRevisions = gvicPolicyRevisionsSnapshot
-		r.gvicSubtreeApplications = gvicApplicationsSnapshot
+	if v2GVICInputSetsEqual(v2GVICAssignmentsForEdit(current), items) {
+		return unchangedV2GVICMutation(current, GVICAssignmentCommandRemove), nil
 	}
-
-	before := r.gvicAssignmentsForResourceLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID)
-	beforeEffective := r.gvicEffectiveAssignmentsForResourceLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID)
-	changed := false
-	now := time.Now().UTC()
-	switch operation {
-	case GVICAssignmentCommandSet:
-		for sourceKey, assignment := range r.gvicAssignments {
-			if assignment.CompanyID == keyValue.companyID && assignment.ResourceType == keyValue.resourceType && assignment.ResourceID == keyValue.resourceID {
-				delete(r.gvicAssignments, sourceKey)
-				changed = true
-			}
-		}
-		for _, assignment := range assignments {
-			item := r.resourceGVICAssignmentForPrincipalLocked(keyValue, assignment, now)
-			r.gvicAssignments[gvicSourceAssignmentKey(item.CompanyID, item.ResourceType, item.ResourceID, item.Role, item.PrincipalType, item.PrincipalID)] = item
-		}
-	case GVICAssignmentCommandAdd:
-		for _, assignment := range assignments {
-			if keyValue.resourceType == EntityTypeNode || keyValue.resourceType == EntityTypeLogicGate {
-				for sourceKey, existing := range r.gvicAssignments {
-					if existing.CompanyID == keyValue.companyID && existing.ResourceType == keyValue.resourceType && existing.ResourceID == keyValue.resourceID && existing.PrincipalType == assignment.principalType && existing.PrincipalID == assignment.principalID && existing.Role != assignment.role {
-						delete(r.gvicAssignments, sourceKey)
-						changed = true
-					}
-				}
-			}
-			if isSingleUserPrimaryGVICResourceType(keyValue.resourceType) && isSingleUserPrimaryGVICRole(assignment.role) {
-				for sourceKey, existing := range r.gvicAssignments {
-					if existing.CompanyID == keyValue.companyID && existing.ResourceType == keyValue.resourceType && existing.ResourceID == keyValue.resourceID && existing.Role == assignment.role && (existing.PrincipalType != assignment.principalType || existing.PrincipalID != assignment.principalID) {
-						delete(r.gvicAssignments, sourceKey)
-						changed = true
-					}
-				}
-			}
-
-			item := r.resourceGVICAssignmentForPrincipalLocked(keyValue, assignment, now)
-			sourceKey := gvicSourceAssignmentKey(item.CompanyID, item.ResourceType, item.ResourceID, item.Role, item.PrincipalType, item.PrincipalID)
-			if _, ok := r.gvicAssignments[sourceKey]; ok {
-				continue
-			}
-			r.gvicAssignments[sourceKey] = item
-			changed = true
-		}
-	case GVICAssignmentCommandRemove:
-		for _, assignment := range assignments {
-			sourceKey := gvicSourceAssignmentKey(keyValue.companyID, keyValue.resourceType, keyValue.resourceID, assignment.role, assignment.principalType, assignment.principalID)
-			if _, ok := r.gvicAssignments[sourceKey]; ok {
-				delete(r.gvicAssignments, sourceKey)
-				changed = true
-			}
-		}
-	default:
-		return ResourceGVICAssignmentMutationResult{}, ErrInvalid
-	}
-	policySequence := r.nextResourcePolicySequenceLocked()
-	r.setDirectGVICPolicySequenceLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID, policySequence)
-	after := r.gvicAssignmentsForResourceLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID)
-	if !changed && len(before) != len(after) {
-		changed = true
-	}
-
-	affected := []resourceGVICKey{keyValue}
-	if input.ApplyToDescendants {
-		descendantAffected, descendantChanged, err := r.applyResourceGVICCommandToDescendantsLocked(keyValue, policySequence, after)
-		if err != nil {
-			restore()
-			return ResourceGVICAssignmentMutationResult{}, err
-		}
-		affected = append(affected, descendantAffected...)
-		changed = changed || descendantChanged
-	}
-	if keyValue.resourceType != EntityTypeLogicGate {
-		affected = r.affectedGVICResourceKeysLocked(keyValue)
-	}
-	r.syncGVICResourceKeysLocked(keyValue.companyID, affected)
-	effective := r.gvicEffectiveAssignmentsForResourceLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID)
-	if keyValue.resourceType == EntityTypeNode && changed {
-		r.bumpNodeViewVersionLocked(keyValue.companyID, keyValue.resourceID)
-	}
-	result := ResourceGVICAssignmentMutationResult{
-		CompanyID:            keyValue.companyID,
-		ResourceType:         keyValue.resourceType,
-		ResourceID:           keyValue.resourceID,
-		Operation:            operation,
-		Changed:              changed,
-		GVICAssignments:      cloneResourceGVICAssignments(after),
-		EffectiveAssignments: cloneResourceGVICEffectiveAssignments(effective),
-		Events:               []domain.DomainEvent{},
-	}
-	if eventInput, ok := resourceGVICUpdatedWorkspaceEventInput(result, beforeEffective, input.ActorUserID, input.IdempotencyKey); ok {
-		event, err := r.appendDomainEventLocked(eventInput)
-		if err != nil {
-			restore()
-			return ResourceGVICAssignmentMutationResult{}, err
-		}
-		result.Events = []domain.DomainEvent{event}
-	}
-	return result, nil
-}
-
-func (r *MemoryRepo) applyResourceGVICCommandToDescendantsLocked(keyValue resourceGVICKey, policySequence int64, currentAssignments []domain.ResourceGVICAssignment) ([]resourceGVICKey, bool, error) {
-	if keyValue.resourceType != EntityTypeLogicGate {
-		return []resourceGVICKey{}, false, nil
-	}
-	nodeIDs := []string{}
-	seen := map[string]bool{}
-	for _, assignment := range r.nodeLogicGateAssignments {
-		if assignment.CompanyID != keyValue.companyID || assignment.LogicGateID != keyValue.resourceID || seen[assignment.NodeID] {
-			continue
-		}
-		seen[assignment.NodeID] = true
-		nodeIDs = append(nodeIDs, assignment.NodeID)
-	}
-	sort.Strings(nodeIDs)
-	if len(nodeIDs) == 0 {
-		return []resourceGVICKey{}, false, nil
-	}
-	changed := r.recordGVICSubtreeApplicationsLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID, policySequence, currentAssignments)
-	affected := make([]resourceGVICKey, 0, len(nodeIDs))
-	for _, nodeID := range nodeIDs {
-		affected = append(affected, resourceGVICKey{companyID: keyValue.companyID, resourceType: EntityTypeNode, resourceID: nodeID})
-	}
-	return affected, changed, nil
+	result, err := r.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+		CompanyID: input.CompanyID, ResourceType: input.ResourceType, ResourceID: input.ResourceID, Assignments: items,
+		ActorUserID: input.ActorUserID, IdempotencyKey: input.IdempotencyKey, ApplyToDescendants: input.ApplyToDescendants,
+	})
+	result.Operation = GVICAssignmentCommandRemove
+	return result, err
 }
 
 func (r *MemoryRepo) ListResourceGVICEffectiveAssignments(companyID, resourceType, resourceID string) ([]domain.ResourceGVICEffectiveAssignment, error) {
-	keyValue, err := normalizeResourceGVICKey(companyID, resourceType, resourceID)
+	policy, err := r.GetResourceGVICPolicy(companyID, resourceType, resourceID)
 	if err != nil {
 		return nil, err
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if !r.gvicResourceExistsLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID) {
-		return nil, ErrNotFound
-	}
-	items := r.gvicEffectiveAssignmentsForResourceLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID)
-	return cloneResourceGVICEffectiveAssignments(items), nil
+	return cloneResourceGVICEffectiveAssignments(policy.EffectiveAssignments), nil
 }
 
 func (r *MemoryRepo) validateGVICPrincipalLocked(companyID, principalType, principalID string) error {
@@ -262,48 +135,19 @@ func (r *MemoryRepo) validateGVICPrincipalLocked(companyID, principalType, princ
 	return nil
 }
 
-func (r *MemoryRepo) gvicResourceExistsLocked(companyID, resourceType, resourceID string) bool {
-	switch resourceType {
-	case EntityTypeNode:
-		_, ok := r.nodes[key(companyID, resourceID)]
-		return ok
-	case EntityTypeLogicGate:
-		_, ok := r.logicGates[key(companyID, resourceID)]
-		return ok
-	case EntityTypeProject:
-		_, ok := r.projects[key(companyID, resourceID)]
-		return ok
-	case EntityTypeSharedInbox:
-		_, ok := r.folders[key(companyID, resourceID)]
-		return ok
-	case EntityTypeSharedTriageFolder:
-		_, ok := r.folders[key(companyID, resourceID)]
-		return ok
-	default:
-		return false
-	}
-}
-
 func (r *MemoryRepo) resourceGVICAssignmentForPrincipalLocked(keyValue resourceGVICKey, input normalizedGVICAssignmentInput, now time.Time) domain.ResourceGVICAssignment {
 	item := domain.ResourceGVICAssignment{
-		CompanyID:        keyValue.companyID,
-		ResourceType:     keyValue.resourceType,
-		ResourceID:       keyValue.resourceID,
-		Role:             input.role,
-		PrincipalType:    input.principalType,
-		PrincipalID:      input.principalID,
-		CreatedTimestamp: now,
-		UpdatedTimestamp: now,
+		CompanyID: keyValue.companyID, ResourceType: keyValue.resourceType, ResourceID: keyValue.resourceID,
+		Role: input.role, PrincipalType: input.principalType, PrincipalID: input.principalID,
+		CreatedTimestamp: now, UpdatedTimestamp: now,
 	}
 	switch input.principalType {
 	case EntityPermissionSubjectUser:
 		if user, ok := r.companyUserByIDLocked(keyValue.companyID, input.principalID); ok {
-			item.UserID = user.UserID
-			item.UserDisplayName = strings.TrimSpace(user.DisplayName)
-			item.UserEmail = strings.TrimSpace(user.Email)
-			item.PrincipalName = strings.TrimSpace(user.DisplayName)
+			item.UserID, item.UserDisplayName, item.UserEmail = user.UserID, strings.TrimSpace(user.DisplayName), strings.TrimSpace(user.Email)
+			item.PrincipalName = item.UserDisplayName
 			if item.PrincipalName == "" {
-				item.PrincipalName = strings.TrimSpace(user.Email)
+				item.PrincipalName = item.UserEmail
 			}
 		}
 	case EntityPermissionSubjectGroup:
@@ -314,211 +158,39 @@ func (r *MemoryRepo) resourceGVICAssignmentForPrincipalLocked(keyValue resourceG
 	return item
 }
 
+// gvicAssignmentsForResourceLocked returns the graph edges from the V2 source
+// that currently governs the resource. It does not read or maintain a derived
+// effective-assignment table.
 func (r *MemoryRepo) gvicAssignmentsForResourceLocked(companyID, resourceType, resourceID string) []domain.ResourceGVICAssignment {
-	return r.resolvedResourceGVICAssignmentsLocked(companyID, resourceType, resourceID)
-}
-func (r *MemoryRepo) clearNodeResourceGVICAssignmentsLocked(companyID, nodeID string) bool {
-	changed := false
-	for sourceKey, assignment := range r.gvicAssignments {
-		if assignment.CompanyID == companyID && assignment.ResourceType == EntityTypeNode && assignment.ResourceID == nodeID {
-			delete(r.gvicAssignments, sourceKey)
-			changed = true
-		}
+	if !r.ensureV2PolicySettingsLocked(companyID, resourceType, resourceID) {
+		return []domain.ResourceGVICAssignment{}
 	}
-	for effectiveKey, assignment := range r.gvicEffectiveAssignments {
-		if assignment.CompanyID == companyID && assignment.ResourceType == EntityTypeNode && assignment.ResourceID == nodeID {
-			delete(r.gvicEffectiveAssignments, effectiveKey)
-			changed = true
-		}
-	}
-	return changed
-}
-
-func (r *MemoryRepo) snapshotLogicGateGVICToNodeLocked(companyID, logicGateID, nodeID string) bool {
-	companyID = strings.TrimSpace(companyID)
-	logicGateID = strings.TrimSpace(logicGateID)
-	nodeID = strings.TrimSpace(nodeID)
-	if companyID == "" || logicGateID == "" || nodeID == "" {
-		return false
-	}
-	changed := r.clearNodeResourceGVICAssignmentsLocked(companyID, nodeID)
-	now := time.Now().UTC()
-	for _, source := range r.gvicAssignmentsForResourceLocked(companyID, EntityTypeLogicGate, logicGateID) {
-		item := source
-		item.ResourceType = EntityTypeNode
-		item.ResourceID = nodeID
-		item.SourceResourceType = ""
-		item.SourceResourceID = ""
-		item.InheritanceType = ""
-		item.Inherited = false
-		item.ReadOnly = false
-		item.CreatedTimestamp = now
-		item.UpdatedTimestamp = now
-		sourceKey := gvicSourceAssignmentKey(item.CompanyID, item.ResourceType, item.ResourceID, item.Role, item.PrincipalType, item.PrincipalID)
-		if _, ok := r.gvicAssignments[sourceKey]; !ok {
-			changed = true
-		}
-		r.gvicAssignments[sourceKey] = item
-	}
-	r.setDirectGVICPolicySequenceLocked(companyID, EntityTypeNode, nodeID, r.nextResourcePolicySequenceLocked())
-	return changed
+	resolved := r.resolveV2PolicyLocked(companyID, resourceType, resourceID, true)
+	return r.directMemoryGVICEdgesLocked(companyID, resolved.SourceType, resolved.SourceID)
 }
 
 func (r *MemoryRepo) gvicEffectiveAssignmentsForResourceLocked(companyID, resourceType, resourceID string) []domain.ResourceGVICEffectiveAssignment {
-	items := make([]domain.ResourceGVICEffectiveAssignment, 0)
-	for _, assignment := range r.gvicEffectiveAssignments {
-		if assignment.CompanyID == companyID && assignment.ResourceType == resourceType && assignment.ResourceID == resourceID {
-			items = append(items, assignment)
-		}
+	if !r.ensureV2PolicySettingsLocked(companyID, resourceType, resourceID) {
+		return []domain.ResourceGVICEffectiveAssignment{}
 	}
-	sortResourceGVICEffectiveAssignments(items)
-	return items
-}
-func (r *MemoryRepo) affectedGVICResourceKeysLocked(keyValue resourceGVICKey) []resourceGVICKey {
-	seen := map[resourceGVICKey]bool{keyValue: true}
-	out := make([]resourceGVICKey, 0, len(seen))
-	for item := range seen {
-		out = append(out, item)
-	}
-	return out
+	resolved := r.resolveV2PolicyLocked(companyID, resourceType, resourceID, true)
+	return r.memoryV2EffectiveGVICLocked(companyID, resourceType, resourceID, resolved)
 }
 
-func (r *MemoryRepo) syncResourceGVICEffectiveAssignmentsLocked(keys []resourceGVICKey) {
-	for _, keyValue := range keys {
-		next := r.deriveResourceGVICEffectiveAssignmentsLocked(keyValue, time.Now().UTC())
-		nextByKey := make(map[string]domain.ResourceGVICEffectiveAssignment, len(next))
-		for _, assignment := range next {
-			nextByKey[gvicEffectiveAssignmentKey(assignment)] = assignment
-		}
-		for effectiveKey, assignment := range r.gvicEffectiveAssignments {
-			if assignment.CompanyID != keyValue.companyID || assignment.ResourceType != keyValue.resourceType || assignment.ResourceID != keyValue.resourceID {
-				continue
-			}
-			if _, ok := nextByKey[effectiveKey]; !ok {
-				delete(r.gvicEffectiveAssignments, effectiveKey)
-			}
-		}
-		for effectiveKey, assignment := range nextByKey {
-			if _, ok := r.gvicEffectiveAssignments[effectiveKey]; !ok {
-				r.gvicEffectiveAssignments[effectiveKey] = assignment
-			}
-		}
-	}
-}
-func (r *MemoryRepo) deriveResourceGVICEffectiveAssignmentsLocked(keyValue resourceGVICKey, now time.Time) []domain.ResourceGVICEffectiveAssignment {
-	sourceType := keyValue.resourceType
-	sourceID := keyValue.resourceID
-	inheritance := GVICInheritanceDirect
-
-	outByKey := map[string]domain.ResourceGVICEffectiveAssignment{}
-	for _, assignment := range r.gvicAssignmentsForResourceLocked(keyValue.companyID, sourceType, sourceID) {
-		userIDs := []string{}
-		switch assignment.PrincipalType {
-		case EntityPermissionSubjectUser:
-			userIDs = append(userIDs, assignment.PrincipalID)
-		case EntityPermissionSubjectGroup:
-			userIDs, _ = r.logicGateGVICUserIDsForGroupLocked(keyValue.companyID, assignment.PrincipalID)
-		}
-		for _, userID := range userIDs {
-			user, ok := r.companyUserByIDLocked(keyValue.companyID, userID)
-			if !ok {
-				continue
-			}
-			item := domain.ResourceGVICEffectiveAssignment{
-				CompanyID:           keyValue.companyID,
-				ResourceType:        keyValue.resourceType,
-				ResourceID:          keyValue.resourceID,
-				Role:                assignment.Role,
-				UserID:              user.UserID,
-				SourceResourceType:  sourceType,
-				SourceResourceID:    sourceID,
-				SourcePrincipalType: assignment.PrincipalType,
-				SourcePrincipalID:   assignment.PrincipalID,
-				InheritanceType:     inheritance,
-				UserDisplayName:     strings.TrimSpace(user.DisplayName),
-				UserEmail:           strings.TrimSpace(user.Email),
-				UpdatedTimestamp:    now,
-			}
-			outByKey[gvicEffectiveAssignmentKey(item)] = item
-		}
-	}
-	out := make([]domain.ResourceGVICEffectiveAssignment, 0, len(outByKey))
-	for _, item := range outByKey {
-		out = append(out, item)
-	}
-	sortResourceGVICEffectiveAssignments(out)
-	return out
-}
-func (r *MemoryRepo) syncGVICGroupDependentResourcesLocked(companyID string) {
-	r.syncGVICGroupDependentResourcesForGroupSetLocked(companyID, nil)
-}
-
-func (r *MemoryRepo) syncGVICGroupDependentResourcesForGroupsLocked(companyID string, groupIDs []string) {
-	affectedGroupIDs := companyUserGroupAncestorIDsLocked(r.userGroups, companyID, groupIDs)
-	if len(affectedGroupIDs) == 0 {
-		return
-	}
-	r.syncGVICGroupDependentResourcesForGroupSetLocked(companyID, affectedGroupIDs)
-}
-
-func (r *MemoryRepo) syncGVICGroupDependentResourcesForGroupSetLocked(companyID string, affectedGroupIDs map[string]bool) {
-	keys := r.gvicResourceKeysForGroupSetLocked(companyID, affectedGroupIDs)
-	r.syncGVICResourceKeysLocked(companyID, keys)
-}
-func (r *MemoryRepo) gvicResourceKeysForGroupSetLocked(companyID string, affectedGroupIDs map[string]bool) []resourceGVICKey {
-	seen := map[resourceGVICKey]bool{}
-	for _, assignment := range r.gvicAssignments {
-		if assignment.CompanyID != companyID || assignment.PrincipalType != EntityPermissionSubjectGroup {
-			continue
-		}
-		if affectedGroupIDs != nil && !affectedGroupIDs[assignment.PrincipalID] {
-			continue
-		}
-		keyValue := resourceGVICKey{companyID: assignment.CompanyID, resourceType: assignment.ResourceType, resourceID: assignment.ResourceID}
-		seen[keyValue] = true
-	}
-	keys := make([]resourceGVICKey, 0, len(seen))
-	for keyValue := range seen {
-		keys = append(keys, keyValue)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].resourceType != keys[j].resourceType {
-			return keys[i].resourceType < keys[j].resourceType
-		}
-		return keys[i].resourceID < keys[j].resourceID
-	})
-	return keys
+// V2 resolves nested group membership and policy inheritance live. These
+// retained call sites therefore need no policy projection refresh.
+func (r *MemoryRepo) syncGVICGroupDependentResourcesLocked(string)                             {}
+func (r *MemoryRepo) syncGVICGroupDependentResourcesForGroupsLocked(string, []string)          {}
+func (r *MemoryRepo) syncGVICGroupDependentResourcesForGroupSetLocked(string, map[string]bool) {}
+func (r *MemoryRepo) gvicResourceKeysForGroupSetLocked(string, map[string]bool) []resourceGVICKey {
+	return nil
 }
 func (r *MemoryRepo) syncGVICResourceKeysLocked(companyID string, keys []resourceGVICKey) {
-	companyID = strings.TrimSpace(companyID)
-	seen := map[resourceGVICKey]bool{}
 	for _, keyValue := range keys {
-		keyValue.companyID = strings.TrimSpace(keyValue.companyID)
-		keyValue.resourceType = strings.TrimSpace(keyValue.resourceType)
-		keyValue.resourceID = strings.TrimSpace(keyValue.resourceID)
-		if companyID == "" || keyValue.companyID != companyID || keyValue.resourceType == "" || keyValue.resourceID == "" {
-			continue
+		if keyValue.companyID != "" {
+			companyID = keyValue.companyID
 		}
-		seen[keyValue] = true
-	}
-	ordered := make([]resourceGVICKey, 0, len(seen))
-	for keyValue := range seen {
-		ordered = append(ordered, keyValue)
-	}
-	sort.Slice(ordered, func(i, j int) bool {
-		if ordered[i].resourceType != ordered[j].resourceType {
-			return ordered[i].resourceType < ordered[j].resourceType
-		}
-		return ordered[i].resourceID < ordered[j].resourceID
-	})
-
-	r.syncResourceGVICEffectiveAssignmentsLocked(ordered)
-	for _, keyValue := range ordered {
-		switch keyValue.resourceType {
-		case EntityTypeNode:
-			r.syncGVICMatrixProjectionForNodeLocked(keyValue.companyID, keyValue.resourceID)
-		case EntityTypeLogicGate:
-			r.syncGVICMatrixProjectionForLogicGateAssignmentsLocked(keyValue.companyID, keyValue.resourceID, nil, nil)
-		}
+		r.ensureV2PolicySettingsLocked(companyID, keyValue.resourceType, keyValue.resourceID)
 	}
 }
+func (r *MemoryRepo) syncResourceGVICEffectiveAssignmentsLocked([]resourceGVICKey) {}

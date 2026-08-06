@@ -508,10 +508,13 @@ func TestProcessDomainEventNodeMentionsUseCurrentNodeGVICAndSkipUnassignedAndAct
 		t.Fatalf("SetResourceGVICAssignments node: %v", err)
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: store.EntityTypeNode,
-		EntityID:   node.NodeID,
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
 		Permissions: []store.EntityPermissionInput{
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: allowed.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
 			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: actor.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
 		},
 	}); err != nil {
@@ -705,7 +708,9 @@ func TestProcessDomainEventNodeAssignmentRevocationBeforeProcessingSuppresses(t 
 		EntityID:         node.NodeID,
 		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
 		DefaultAccessSet: true,
-		OverrideUserIDs:  []string{assignee.UserID},
+		Permissions: []store.EntityPermissionInput{
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: assignee.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
+		},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions grant: %v", err)
 	}
@@ -884,9 +889,11 @@ func TestProcessDomainEventSharedTriageAccessRevocationBeforeProcessingSuppresse
 		t.Fatalf("CreateCommunicationsSharedInboxFolder: %v", err)
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: store.EntityTypeSharedTriageFolder,
-		EntityID:   folder.FolderID,
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeSharedInboxFolder,
+		EntityID:         folder.FolderID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   user.UserID,
@@ -896,7 +903,7 @@ func TestProcessDomainEventSharedTriageAccessRevocationBeforeProcessingSuppresse
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions grant: %v", err)
 	}
-	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{CompanyID: companyID, EntityType: store.EntityTypeSharedTriageFolder, EntityID: folder.FolderID}); err != nil {
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{CompanyID: companyID, EntityType: store.EntityTypeSharedInboxFolder, EntityID: folder.FolderID, DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true}); err != nil {
 		t.Fatalf("SetEntityPermissions revoke: %v", err)
 	}
 
@@ -1000,7 +1007,9 @@ func TestNotificationRevocationAfterDeliveryHidesRowsAtReadTime(t *testing.T) {
 		EntityID:         node.NodeID,
 		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
 		DefaultAccessSet: true,
-		OverrideUserIDs:  []string{assignee.UserID},
+		Permissions: []store.EntityPermissionInput{
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: assignee.UserID, AccessLevel: store.EntityPermissionEdit, Permission: store.EntityPermissionEdit},
+		},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions grant: %v", err)
 	}

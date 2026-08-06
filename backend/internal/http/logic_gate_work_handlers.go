@@ -85,9 +85,14 @@ func (s *Server) logicGateWorkETag(_ *http.Request, companyID, logicGateID, acto
 		return "", err
 	}
 	permissionKey := strconv.FormatBool(flags.CanEdit)
+	fingerprints, err := s.repo.ResourcePolicyFingerprints(companyID, store.EntityTypeLogicGate, logicGateID, actorUserID)
+	if err != nil {
+		return "", err
+	}
 	return strongETagFromString(
 		"logic-gate-work:v3:" + strings.TrimSpace(companyID) + ":" + strings.TrimSpace(logicGateID) + ":" +
-			strings.TrimSpace(actorUserID) + ":" + permissionKey + ":" + strconv.FormatInt(version, 10),
+			strings.TrimSpace(actorUserID) + ":" + permissionKey + ":" +
+			fingerprints.GVIC + ":" + fingerprints.Permission + ":" + strconv.FormatInt(version, 10),
 	), nil
 }
 

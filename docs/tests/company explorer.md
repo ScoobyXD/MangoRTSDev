@@ -1,14 +1,14 @@
-# Process Story: Explorer works after Node Map and Logic Gate Map retirement
+# Process Story: Explorer hierarchy drives live V2 policy parentage
 
 A user opens Home and selects a Node, Logic Gate, Project, Kanban board, folder, or communications row in Explorer
 ↓
-Explorer resolves the exact accessible tree row and publishes semantic selection only to directly linked surviving frames
+Explorer resolves the exact accessible row through current folder hierarchy, V2 GVIC, and V2 Edit permission, then publishes semantic selection only to directly linked surviving frames
 ↓
 Editor or Kanban consumes the entity context without reading browser geometry or position state
 ↓
 No Map frame, Map selection bridge, coordinate payload, or position-storage dependency exists
 ↓
-Folder ordering, permissions, search, Find, rename, deletion, and drag/drop keep their existing backend contracts
+Folder ordering, inherited/customized policy, search, Find, rename, deletion, and drag/drop use canonical hierarchy and parent-link sequences
 ↓
 A reload restores supported frames and discards any retired Map frame instead of translating it
 
@@ -18,7 +18,7 @@ Last updated: 2026-08-05
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: partial backend coverage exists for V2 tree reads, placement/delete behavior, protected default folders, and folder permission template snapshots. `tests/frontend/modules/company-explorer/companyExplorerStore.test.ts` covers E55 committed-title publication/registry helpers and Explorer, search, and GVIC title reconcilers. Rule ID mapping is partial.
+- Business Logic Covered By Automated Tests: backend coverage exists for V2 tree reads, placement/delete behavior, protected default folders, inherited/customized policy, move boundaries, and force resets. `tests/frontend/modules/company-explorer/companyExplorerStore.test.ts` covers E55 committed-title publication/registry helpers and Explorer, search, and GVIC title reconcilers. Rule ID mapping remains partial.
 
 ## Business Logic
 
@@ -34,7 +34,7 @@ E9 - The final Company Explorer tree contains folders, subfolders, Logic Gates, 
 E10 - Project rows are standalone leaf rows; project relationships do not render nested Explorer child rows.
 E11 - Logic Gate rows are standalone leaf rows; node assignments do not render as nested Explorer child rows.
 E12 - Creating an Explorer folder requires company, actor, permission user, parent entity, and nonblank folder name.
-E13 - New root Explorer folders default to edit access unless a no-access default is explicitly requested; new subfolders copy the parent folder's current permission policy as a snapshot.
+E13 - New root Explorer folders own complete customized GVIC and permission policies; new subfolders start inherited with no copied policy edges and resolve their current parent live.
 E14 - Explorer folders can be created only under the company root or another folder.
 E15 - Creating a folder under a non-folder resource is rejected.
 E16 - Renaming an Explorer folder requires edit access to that folder.
@@ -63,10 +63,10 @@ E38 - The default Unfiled folder and its Projects, Logic Gates, and Nodes child 
 E39 - While the Explorer search box contains text, the left sidebar hides non-Explorer sections and uses the remaining column for Explorer search results; clearing the search restores the normal sidebar. Explorer/Search Explorer remains beneath the shared body-level blocking modal layer and cannot paint or receive interaction above a node/editor popup, dialog, preview, or expanded/fullscreen panel; closing that surface preserves the existing search query.
 E40 - Once a resource is visible anywhere in Company Explorer, no project relationship branch may create a second visible instance of that resource.
 E41 - Company Explorer has no cross-user realtime subscription. It patches the initiating browser from committed command results and otherwise reloads canonical branches on navigation or explicit refresh.
-E43 - Placing or moving a project or Logic Gate into an Explorer folder copies that folder's current permission policy to the project or Logic Gate.
+E43 - Placing or moving a project or Logic Gate into an Explorer folder advances both parent-link sequences. Inherited policy follows the target folder immediately; customized policy remains independent.
 E44 - Reordering or re-saving a project or Logic Gate under the same Explorer folder preserves the resource's own permissions.
-E45 - Moving a project or Logic Gate out of a folder to the company root preserves the resource's own permissions.
-E46 - Editing an Explorer folder's permissions after placement does not fan out to existing subfolders, projects, or Logic Gates.
+E45 - Moving a project or Logic Gate to the company root converts an inherited effective policy to a complete customized root policy and preserves an existing customized policy.
+E46 - Editing an Explorer folder changes inherited descendants live but does not cross active customized boundaries. Inherited-only Apply adds no descendant state; overwrite-all records one reset sequence without walking or rewriting descendants.
 E47 - Dropping a My Triage or Shared Triage email onto a Company Explorer Logic Gate row uses the communications conversion path to create a Pending direct email-created node/card in that Logic Gate's Kanban/work path, not a Company Explorer placement. The created node/card must not appear as a Company Explorer row and must not be inserted into `company_explorer_items`.
 E48 - A successful Company Explorer email-to-Logic-Gate drop updates Home triage state once from the committed conversion result, keeps the source row visible, and patches its Logic Gate icon without a broad conversion/workspace WebSocket event, broad cache invalidation, stale prefetched-page reuse, post-removal fill, message-length prefetch, list blanking, or repeated mail GETs. A later exact-mailbox provider update may independently cause one canonical active-list reconciliation.
 E49 - A successful Company Explorer email-to-Logic-Gate drop shows a temporary green success banner over the Company Explorer sidebar section.
@@ -77,10 +77,13 @@ E53 - Permissions opened from Company Explorer for folders, projects, or Logic G
 E54 - An email conversion through Company Explorer sends the exact source mailbox key and persists mailbox provenance in the created node's attached-email projection: personal/My Triage drag and conversion requests carry normalized `account_email`; Shared Triage requests carry `shared_inbox_id` and suppress a personal-account query, while the canonical projection retains both the shared inbox and its company mailbox account email. Later reads, replies, attachments, drafts, and invitation responses use that source scope.
 E55 - Every successful Node or Logic Gate rename entry point publishes the concrete committed-title event after commit. Company Explorer patches matching Logic Gate rows, Node search results, and mounted GVIC-mode Node/Logic Gate names (including scoped per-user cached rows) immediately alongside the other applicable mounted surfaces; active title drafts/carets are deferred, failed renames publish no event, and another browser still uses canonical reads.
 E56 - Every company receives one deterministic Nodes folder beneath Unfiled. Re-running default-folder repair is idempotent, preserves the same IDs/order/protection, and must not duplicate the folder or any collaboration Node item.
-E57 - A Triage-comment email Node keeps default `no_access` plus direct creator/participant grants and does not copy Nodes-folder permission policy. Folder visibility cannot leak its source thread or revoke participants.
+E57 - A Triage-comment email Node is placed first, copies the final effective source policy once, then customizes creator/participant Edit grants and creator Generated GVIC. Folder visibility cannot leak its source thread or revoke system-managed participants.
 E58 - A collaboration Node row is a protected projection of collaboration ownership, not a general placement edge. Explorer item create/update/move/delete endpoints reject direct mutation of that row; lifecycle changes must use the collaboration/Node domain action so no orphaned chat, participant, draft, or source-thread record remains. Move/delete protection is determined by an exact same-company `communications_email_collaborations.node_id` row, never by `target_type='node'` alone, so an ordinary legacy Node edge remains movable and detachable.
 E59 - One collaboration identity has at most one Nodes-folder item. Concurrent create retries, future provider messages, or reopening from another surface reuse that row, and Company Explorer must not render the same Node under project/Logic Gate relationship branches.
 E60 - Existing email-to-Logic-Gate conversion still creates Pending work under its established path. Starting chat on an unconverted triage email instead creates one priority-bearing creator-Generated-GVIC Node in Unfiled/Nodes with no initial Logic Gate; the Node can be assigned to normal work later.
+E61 - Explorer policy reads explain inherited/customized mode, effective source, active reset, and inactive overwritten customization for folders, projects, and Logic Gates.
+E62 - Moving a subtree after an older force reset protects it through the new parent-link sequence; a later reset from its new ancestry may cross that link.
+E63 - Deleting an Explorer target removes both V2 settings rows and cascading policy edges; deleting only a placement follows root/detach materialization rules without deleting the target.
 
 
 ## Bug History
@@ -150,14 +153,14 @@ Given:
 Expected:
 - Creating a folder requires the required company, actor, permission user, parent, and name fields.
 - Root folders default to edit access unless no-access is requested.
-- Subfolders copy the parent folder's current permission policy at creation time.
+- Subfolders start inherited and live-resolve the parent folder's current policy.
 - Folders can be created under the company root or another folder, but not under arbitrary non-folder resources.
 - Rename requires edit access.
 - Moving resolves the parent and target and changes placement without duplicating the target.
-- Placing or moving a project or Logic Gate into a folder copies that folder's current permission policy to the resource.
+- Placing or moving a project or Logic Gate into a folder advances parent-link sequences; inherited policy follows the new folder and customized policy is preserved.
 - Reordering or re-saving a project or Logic Gate under the same folder preserves the resource's own permissions.
-- Moving a project or Logic Gate to the company root preserves the resource's own permissions.
-- Later folder permission edits do not mutate existing subfolders, projects, or Logic Gates.
+- Moving an inherited project or Logic Gate to the company root materializes its effective policy as customized.
+- Later folder edits affect inherited descendants live; customized descendants change only after an eligible force overwrite.
 - Deleting a placement edge does not delete the target resource.
 - Protected/default folders cannot be renamed or deleted.
 - Target deletion happens only through the explicit target deletion path.
@@ -206,7 +209,7 @@ Expected:
 - Unfiled contains Projects, Logic Gates, and Nodes in that order.
 - Bare outside-created projects and Logic Gates appear in the matching Unfiled child folder.
 - Ordinary outside-created nodes remain queryable source-of-truth nodes but do not appear in Company Explorer.
-- The email-collaboration Node appears exactly once beneath Unfiled/Nodes and keeps its private participant permissions rather than copying folder permissions.
+- The email-collaboration Node appears exactly once beneath Unfiled/Nodes, copies the final effective source once, and keeps its system-managed creator/participant rules.
 - Explicit root-created projects and Logic Gates stay at the Company Explorer root and do not also appear in Unfiled.
 - Unfiled, Projects, Logic Gates, and Nodes do not expose rename/move/delete actions and direct mutation attempts are rejected.
 

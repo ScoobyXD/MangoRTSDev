@@ -346,6 +346,7 @@ test("shared inbox helpers use communications shared inbox endpoints", async () 
   invalidateCommunicationsCache();
   const calls: Array<{ path: string; method: string; body: unknown }> = [];
   const originalFetch = globalThis.fetch;
+  let sharedGVICAssignments: Array<{ role: string; principal_type: string; principal_id: string }> = [];
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = input.toString();
     calls.push({
@@ -356,21 +357,13 @@ test("shared inbox helpers use communications shared inbox endpoints", async () 
     if (path.startsWith("/v1/communications/shared-inboxes?")) {
       return jsonResponse({ shared_inboxes: [sharedInbox("shared-1", { name: "Business" })] });
     }
-    if (path === "/v1/resources/shared_inbox/shared-1/gvic") {
-      return jsonResponse({
-        gvic_assignments: [
-          {
-            company_id: "company-1",
-            resource_type: "shared_inbox",
-            resource_id: "shared-1",
-            role: "generated",
-            principal_type: "user",
-            principal_id: "user-1",
-            user_id: "user-1",
-            created_timestamp: "2026-05-20T00:00:00.000Z",
-          },
-        ],
-      });
+    if (path === "/v1/resources/shared_inbox/shared-1/gvic" && (init?.method ?? "GET") === "GET") {
+      return jsonResponse({ revision: "shared-revision-1", gvic_assignments: sharedGVICAssignments });
+    }
+    if (path === "/v1/resources/shared_inbox/shared-1/gvic" && init?.method === "PUT") {
+      const body = JSON.parse(String(init.body)) as { gvic_assignments?: typeof sharedGVICAssignments };
+      sharedGVICAssignments = body.gvic_assignments ?? [];
+      return jsonResponse({ revision: "shared-revision-2", gvic_assignments: sharedGVICAssignments });
     }
     if (init?.method === "DELETE") {
       return jsonResponse({ status: "deleted" });
@@ -406,9 +399,14 @@ test("shared inbox helpers use communications shared inbox endpoints", async () 
         body: { company_id: "company-1", name: "Client Facing" },
       },
       {
+        path: "/v1/resources/shared_inbox/shared-1/gvic?company_id=company-1",
+        method: "GET",
+        body: undefined,
+      },
+      {
         path: "/v1/resources/shared_inbox/shared-1/gvic",
         method: "PUT",
-        body: { company_id: "company-1", gvic_assignments: [{ role: "generated", principal_type: "user", principal_id: "user-1" }] },
+        body: { company_id: "company-1", assignment_mode: "customized", descendant_action: "inherited_only", gvic_assignments: [{ role: "generated", principal_type: "user", principal_id: "user-1" }] },
       },
       {
         path: "/v1/communications/shared-inboxes/shared-1?company_id=company-1",
@@ -1732,61 +1730,55 @@ test("message page cache is scoped to the active auth session", async () => {
   }
 });
 
-test("logic gate GVIC helpers call add and remove command endpoints", async () => {
+test("logic gate GVIC helpers read then replace one complete V2 policy", async () => {
   invalidateCommunicationsCache();
   const calls: Array<{ path: string; method: string; body: unknown }> = [];
   const originalFetch = globalThis.fetch;
+  let currentAssignments: Array<{ role: string; principal_type: string; principal_id: string }> = [];
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = input.toString();
     calls.push({
-      path: input.toString(),
+      path,
       method: init?.method ?? "GET",
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     });
-    return jsonResponse({
-      operation: input.toString().endsWith("/remove") ? "remove" : "add",
-      changed: true,
-      gvic_assignments: [
-        {
-          company_id: "company-1",
-          resource_type: "logic_gate",
-          resource_id: "gate 1",
-          role: "generated",
-          principal_type: "user",
-          principal_id: "user-1",
-          user_id: "user-1",
-          created_timestamp: "2026-05-20T00:00:00.000Z",
-        },
-      ],
-    });
+    if ((init?.method ?? "GET") === "GET") return jsonResponse({ revision: `revision-${calls.length}`, gvic_assignments: currentAssignments });
+    const body = JSON.parse(String(init?.body)) as { gvic_assignments?: typeof currentAssignments };
+    currentAssignments = body.gvic_assignments ?? [];
+    return jsonResponse({ revision: `revision-${calls.length}`, gvic_assignments: currentAssignments });
   };
   try {
     const addResult = await addLogicGateGVICAssignments("company-1", "gate 1", [{ role: "generated", user_id: "user-1" }]);
     const removeResult = await removeLogicGateGVICAssignments("company-1", "gate 1", [{ role: "generated", user_id: "user-1" }]);
     await addLogicGateGVICAssignments("company-1", "gate 1", [{ role: "consulted", principal_type: "group", principal_id: "group-1" }], true);
     assert.deepEqual(calls, [
+      { path: "/v1/resources/logic_gate/gate%201/gvic?company_id=company-1", method: "GET", body: undefined },
       {
-        path: "/v1/resources/logic_gate/gate%201/gvic/add",
-        method: "POST",
-        body: { company_id: "company-1", gvic_assignments: [{ role: "generated", principal_type: "user", principal_id: "user-1" }] },
+        path: "/v1/resources/logic_gate/gate%201/gvic",
+        method: "PUT",
+        body: { company_id: "company-1", assignment_mode: "customized", descendant_action: "inherited_only", gvic_assignments: [{ role: "generated", principal_type: "user", principal_id: "user-1" }] },
       },
+      { path: "/v1/resources/logic_gate/gate%201/gvic?company_id=company-1", method: "GET", body: undefined },
       {
-        path: "/v1/resources/logic_gate/gate%201/gvic/remove",
-        method: "POST",
-        body: { company_id: "company-1", gvic_assignments: [{ role: "generated", principal_type: "user", principal_id: "user-1" }] },
+        path: "/v1/resources/logic_gate/gate%201/gvic",
+        method: "PUT",
+        body: { company_id: "company-1", assignment_mode: "customized", descendant_action: "inherited_only", gvic_assignments: [] },
       },
+      { path: "/v1/resources/logic_gate/gate%201/gvic?company_id=company-1", method: "GET", body: undefined },
       {
-        path: "/v1/resources/logic_gate/gate%201/gvic/add",
-        method: "POST",
-        body: { company_id: "company-1", gvic_assignments: [{ role: "consulted", principal_type: "group", principal_id: "group-1" }], apply_to_descendants: true },
+        path: "/v1/resources/logic_gate/gate%201/gvic",
+        method: "PUT",
+        body: { company_id: "company-1", assignment_mode: "customized", descendant_action: "including_customized", gvic_assignments: [{ role: "consulted", principal_type: "group", principal_id: "group-1" }] },
       },
     ]);
     assert.deepEqual(addResult.map((item) => [item.role, item.user_id]), [["generated", "user-1"]]);
-    assert.deepEqual(removeResult.map((item) => [item.role, item.user_id]), [["generated", "user-1"]]);
+    assert.deepEqual(removeResult.map((item) => [item.role, item.user_id]), []);
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();
   }
 });
+
 function message(id: string, patch: Partial<EmailMessage> = {}): EmailMessage {
   return {
     id,

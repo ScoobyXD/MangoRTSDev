@@ -240,7 +240,8 @@ func TestLogicGateGVICAssignmentsAPIAndReadModel(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(map[string]any{
-		"company_id": companyID,
+		"company_id":      companyID,
+		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{
 			{"role": domain.GVICRoleGenerated, "principal_type": store.EntityPermissionSubjectUser, "principal_id": responsible.UserID},
 			{"role": domain.GVICRoleVerified, "principal_type": store.EntityPermissionSubjectUser, "principal_id": accountable.UserID},
@@ -312,7 +313,8 @@ func TestLogicGateGVICAssignmentsAPIAndReadModel(t *testing.T) {
 	}
 
 	outsiderBody, _ := json.Marshal(map[string]any{
-		"company_id": companyID,
+		"company_id":      companyID,
+		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{
 			{"role": domain.GVICRoleConsulted, "principal_type": store.EntityPermissionSubjectUser, "principal_id": outsider.UserID},
 		},
@@ -321,12 +323,13 @@ func TestLogicGateGVICAssignmentsAPIAndReadModel(t *testing.T) {
 	outsiderReq.Header.Set("Content-Type", "application/json")
 	outsiderRec := httptest.NewRecorder()
 	handler.ServeHTTP(outsiderRec, outsiderReq)
-	if outsiderRec.Code != http.StatusBadRequest || !strings.Contains(outsiderRec.Body.String(), "gvic_principal_not_in_company") {
-		t.Fatalf("PUT outsider GVIC status = %d body=%s, want gvic_principal_not_in_company", outsiderRec.Code, outsiderRec.Body.String())
+	if outsiderRec.Code != http.StatusBadRequest || !strings.Contains(outsiderRec.Body.String(), "policy_principal_not_in_company") {
+		t.Fatalf("PUT outsider GVIC status = %d body=%s, want policy_principal_not_in_company", outsiderRec.Code, outsiderRec.Body.String())
 	}
 
 	legacyRoleBody, _ := json.Marshal(map[string]any{
-		"company_id": companyID,
+		"company_id":      companyID,
+		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{
 			{"role": "responsible", "principal_type": store.EntityPermissionSubjectUser, "principal_id": responsible.UserID},
 		},
@@ -335,8 +338,8 @@ func TestLogicGateGVICAssignmentsAPIAndReadModel(t *testing.T) {
 	legacyRoleReq.Header.Set("Content-Type", "application/json")
 	legacyRoleRec := httptest.NewRecorder()
 	handler.ServeHTTP(legacyRoleRec, legacyRoleReq)
-	if legacyRoleRec.Code != http.StatusBadRequest || !strings.Contains(legacyRoleRec.Body.String(), "invalid_gvic_assignments") {
-		t.Fatalf("PUT legacy role GVIC status = %d body=%s, want invalid_gvic_assignments", legacyRoleRec.Code, legacyRoleRec.Body.String())
+	if legacyRoleRec.Code != http.StatusBadRequest || !strings.Contains(legacyRoleRec.Body.String(), "invalid_policy") {
+		t.Fatalf("PUT legacy role GVIC status = %d body=%s, want invalid_policy", legacyRoleRec.Code, legacyRoleRec.Body.String())
 	}
 }
 
@@ -757,7 +760,8 @@ func TestUpdateNodeGVICGeneratedRequiresCompanyMembership(t *testing.T) {
 	}
 
 	assignBody, _ := json.Marshal(map[string]any{
-		"company_id": companyID,
+		"company_id":      companyID,
+		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{{
 			"role":           domain.GVICRoleGenerated,
 			"principal_type": store.EntityPermissionSubjectUser,
@@ -787,7 +791,8 @@ func TestUpdateNodeGVICGeneratedRequiresCompanyMembership(t *testing.T) {
 	}
 
 	outsiderBody, _ := json.Marshal(map[string]any{
-		"company_id": companyID,
+		"company_id":      companyID,
+		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{{
 			"role":           domain.GVICRoleGenerated,
 			"principal_type": store.EntityPermissionSubjectUser,
@@ -798,12 +803,13 @@ func TestUpdateNodeGVICGeneratedRequiresCompanyMembership(t *testing.T) {
 	outsiderReq.Header.Set("Content-Type", "application/json")
 	outsiderRec := httptest.NewRecorder()
 	handler.ServeHTTP(outsiderRec, outsiderReq)
-	if outsiderRec.Code != http.StatusBadRequest || !strings.Contains(outsiderRec.Body.String(), "gvic_principal_not_in_company") {
-		t.Fatalf("PUT outsider GVIC status = %d body=%s, want gvic_principal_not_in_company", outsiderRec.Code, outsiderRec.Body.String())
+	if outsiderRec.Code != http.StatusBadRequest || !strings.Contains(outsiderRec.Body.String(), "policy_principal_not_in_company") {
+		t.Fatalf("PUT outsider GVIC status = %d body=%s, want policy_principal_not_in_company", outsiderRec.Code, outsiderRec.Body.String())
 	}
 
 	clearBody, _ := json.Marshal(map[string]any{
 		"company_id":       companyID,
+		"assignment_mode":  store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{},
 	})
 	clearReq := httptest.NewRequest(http.MethodPut, "/v1/resources/node/"+node.NodeID+"/gvic", bytes.NewReader(clearBody))

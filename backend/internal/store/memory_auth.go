@@ -228,7 +228,6 @@ func (r *MemoryRepo) AddCompanyMembership(cognitoSubject, companyID, role string
 	}
 	membershipKeyValue := membershipKey(companyID, user.UserID)
 	existingMembership, hadExistingMembership := r.memberships[membershipKeyValue]
-	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	now := time.Now().UTC()
 	membership := domain.CompanyMembership{
 		CompanyID:        companyID,
@@ -241,24 +240,6 @@ func (r *MemoryRepo) AddCompanyMembership(cognitoSubject, companyID, role string
 		membership.CreatedTimestamp = existingMembership.CreatedTimestamp
 	}
 	r.memberships[membershipKeyValue] = membership
-	if err := r.recomputeCompanyAdminEffectiveAccessForUserLocked(user.UserID); err != nil {
-		if hadExistingMembership {
-			r.memberships[membershipKeyValue] = existingMembership
-		} else {
-			delete(r.memberships, membershipKeyValue)
-		}
-		r.effectiveAccess = effectiveAccessSnapshot
-		return domain.CompanyMembership{}, err
-	}
-	if err := r.recomputeCompanyMemberDefaultEffectiveAccessForUserLocked(companyID, user.UserID); err != nil {
-		if hadExistingMembership {
-			r.memberships[membershipKeyValue] = existingMembership
-		} else {
-			delete(r.memberships, membershipKeyValue)
-		}
-		r.effectiveAccess = effectiveAccessSnapshot
-		return domain.CompanyMembership{}, err
-	}
 	return membership, nil
 }
 
@@ -623,18 +604,12 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 			r.sharedInboxGVIC[GVICKey] = filtered
 		}
 	}
-	if err := r.recomputeCompanyAdminEffectiveAccessForUserLocked(userID); err != nil {
-		restore()
-		return DeleteCompanyUserResult{}, err
-	}
+
 	if r.effectiveAccessErr != nil {
 		restore()
 		return DeleteCompanyUserResult{}, r.effectiveAccessErr
 	}
-	if err := r.deleteEffectiveFactsForCompanyUserLocked(companyID, userID); err != nil {
-		restore()
-		return DeleteCompanyUserResult{}, err
-	}
+
 	for rowKey, row := range r.GVICMatrixProjectionRows {
 		if row.CompanyID == companyID && row.UserID == userID {
 			delete(r.GVICMatrixProjectionRows, rowKey)

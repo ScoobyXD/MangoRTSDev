@@ -8,7 +8,7 @@ import (
 	"miraeopus/backend/internal/domain"
 )
 
-func TestMemoryRepoGVICMatrixProjectionMaintainedByWrites(t *testing.T) {
+func TestMemoryRepoMyWorkRowsAreDerivedFromV2PolicyAtReadTime(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "22222222-2222-4222-8222-222222222451"
 	repo.EnsureCompany(companyID, "GVICMatrix Projection Co")
@@ -48,11 +48,17 @@ func TestMemoryRepoGVICMatrixProjectionMaintainedByWrites(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus responsible: %v", err)
 	}
+	if _, _, err := repo.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{
+		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: responsibleNode.NodeID,
+		AssignmentMode: PolicyModeInherited, DescendantAction: PolicyDescendantActionInheritedOnly,
+	}); err != nil {
+		t.Fatalf("PutResourceGVICPolicy responsible node inherited: %v", err)
+	}
 
 	aciGate := mustCreateInboxReadLogicGate(t, repo, companyID, "ACI gate")
 	mustSetInboxReadLogicGateGVIC(t, repo, companyID, aciGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleVerified, UserID: user.UserID}})
 
-	assertMemoryGVICMatrixProjectionCounts(t, repo, companyID, 2, 2)
+	assertMemoryGVICMatrixProjectionCounts(t, repo, companyID, 0, 0)
 
 	query := WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, Limit: 20}
 	myNodes, err := repo.ListMyNodes(query)
@@ -62,6 +68,7 @@ func TestMemoryRepoGVICMatrixProjectionMaintainedByWrites(t *testing.T) {
 	if len(myNodes) != 1 || myNodes[0].NodeID != standaloneNode.NodeID {
 		t.Fatalf("my nodes = %+v, want only standalone assignee node", myNodes)
 	}
+	assertMemoryGVICMatrixProjectionCounts(t, repo, companyID, 2, 2)
 
 	responsibleNodes, err := repo.ListGeneratedInboxNodes(query)
 	if err != nil {
@@ -144,9 +151,10 @@ func TestGVICMatrixProjectionSchemaAndPostgresReadsUseTargetedProjection(t *test
 	}
 	postgresReads := normalizeProjectionSource(string(postgresReadRaw))
 	for _, needle := range []string{
-		"from gvic_matrix_projection_table entry",
-		"mangorts_user_can_access_resource(entry.company_id, 'node', entry.resource_id, $4::uuid, 'edit')",
-		"mangorts_user_can_access_resource(entry.company_id, 'logic_gate', entry.resource_id, $4::uuid, 'edit')",
+		"mangorts_v2_effective_gvic_assignments(node.company_id,'node',node.node_id)",
+		"mangorts_v2_effective_gvic_assignments(gate.company_id,'logic_gate',gate.logic_gate_id)",
+		"mangorts_user_can_access_resource(node.company_id,'node',node.node_id,$4::uuid,'edit')",
+		"mangorts_user_can_access_resource(gate.company_id,'logic_gate',gate.logic_gate_id,$4::uuid,'edit')",
 	} {
 		if !strings.Contains(postgresReads, needle) {
 			t.Fatalf("Postgres GVICMatrix reads missing %q", needle)

@@ -177,12 +177,6 @@ func (s *Server) handleProjectSubresource(w http.ResponseWriter, r *http.Request
 		return
 	}
 	switch parts[1] {
-	case "permissions":
-		if len(parts) != 2 {
-			writeError(w, http.StatusNotFound, "not_found")
-			return
-		}
-		s.handleEntityPermissions(w, r, store.EntityTypeProject, projectID, "project_not_found", "project_permissions_updated")
 	case "information":
 		if len(parts) != 2 {
 			writeError(w, http.StatusNotFound, "not_found")
