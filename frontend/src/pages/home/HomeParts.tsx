@@ -6282,7 +6282,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
     </article>
   );
 }
-export function MessageDetail({ message, threadMessages = [], companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, chatOpen, actionNotice = "", emailNodeDestinationSearch, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onToggleChat, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onCommentOnMessage, onOpenCollaborationNode }: {
+export function MessageDetail({ message, threadMessages = [], companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, actionNotice = "", emailNodeDestinationSearch, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onCommentOnMessage, onOpenCollaborationNode }: {
   message: EmailMessage;
   threadMessages?: EmailMessage[];
   companyID: string;
@@ -6294,7 +6294,6 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
   busy: boolean;
   deleteAvailable: boolean;
   chatAvailable: boolean;
-  chatOpen: boolean;
   actionNotice?: string;
   emailNodeDestinationSearch: React.ReactNode;
   selectionNavigation?: EmailCollaborationNavigation | null;
@@ -6302,7 +6301,6 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
   onReply: (message: EmailMessage) => void;
   onReplyAll: (message: EmailMessage) => void;
   onCreateSharedDraft: (message: EmailMessage) => void;
-  onToggleChat: () => void;
   onForward: (message: EmailMessage) => void;
   onArchive: () => void;
   onDelete: () => void;
@@ -6465,21 +6463,6 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
         {chatAvailable && (
           <div data-email-node-actions="true" aria-label="Email node actions" style={{ marginLeft: "auto", flex: "0 0 auto", display: "flex", flexWrap: "nowrap", alignItems: "center", justifyContent: "flex-end", gap: 6, paddingLeft: 8, borderLeft: "1px solid rgba(51,221,213,0.28)", whiteSpace: "nowrap" }}>
             {emailNodeDestinationSearch}
-            <button
-              type="button"
-              aria-controls="email-collaboration-chat"
-              aria-expanded={chatOpen}
-              aria-pressed={chatOpen}
-              title={chatOpen ? "Close email chat" : "Open email chat"}
-              style={{
-                ...mailPanelSmallButtonStyle,
-                borderColor: chatOpen ? "rgba(249,115,22,0.72)" : mailPanelSmallButtonStyle.borderColor,
-                color: chatOpen ? "#c2410c" : mailPanelSmallButtonStyle.color,
-              }}
-              onClick={onToggleChat}
-            >
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><ChatIcon color={chatOpen ? "#f97316" : "rgba(71,85,105,0.85)"} />Chat</span>
-            </button>
           </div>
         )}
       </div>

@@ -10,7 +10,7 @@ import { HomeColumnResizeHandle, ComposePanel, DeleteMessagesConfirmationModal, 
 import { EmailCollaborationChatSurface, type EmailCollaborationSelection } from "./EmailCollaborationChatSurface";
 import { EmailNodeDestinationSearch } from "./EmailNodeDestinationSearch";
 import { emailMessageRowKey } from "./homeUtils";
-import { emailCollaborationChatSessionMounted, emailCollaborationChatSessionVisible, nextEmailCollaborationActionRequest, nextEmailNodeDestinationRequest, reconcileEmailCollaborationChatSession, toggleEmailCollaborationChatSession, type EmailCollaborationActionRequest, type EmailCollaborationChatSession, type EmailNodeDestination } from "./emailCollaborationChat";
+import { emailCollaborationChatSessionMounted, emailCollaborationChatSessionVisible, nextEmailNodeDestinationRequest, reconcileEmailCollaborationChatSession, type EmailCollaborationActionRequest, type EmailCollaborationChatSession, type EmailNodeDestination } from "./emailCollaborationChat";
 import type { EmailNodeAttachmentChange } from "./emailCollaborationRows";
 import { OutboundEmailUndoBanner } from "../../modules/communications/OutboundEmailUndoBanner";
 import { MessageReadReceiptChip } from "./MessageReadReceiptChip";
@@ -414,26 +414,26 @@ export function HomeMailWorkspace({
   const clearEmailActionRequest = React.useCallback(() => setEmailActionRequest(null), []);
   const emailNavigationSequenceRef = React.useRef(0);
   const clearEmailSelection = React.useCallback(() => setEmailSelection(null), []);
+  const suppressAssociationAutoOpenKeyRef = React.useRef("");
   const navigateToEmailSelection = React.useCallback((selection: EmailCollaborationSelection) => {
     emailNavigationSequenceRef.current += 1;
     setEmailNavigation({ ...selection, requestID: emailNavigationSequenceRef.current });
   }, []);
-  const toggleEmailChat = React.useCallback(() => {
-    if (!emailChatKey) return;
-    if (!emailChatVisible) {
-      if (selectedMessage) setEmailSelection({ messageID: selectedMessage.id, quote: "", startOffset: 0, endOffset: 0 });
-      setEmailActionRequest((current) => nextEmailCollaborationActionRequest(current, "chat"));
-    }
-    setEmailChatSession((current) => toggleEmailCollaborationChatSession(current, emailChatKey));
-  }, [emailChatKey, emailChatVisible, selectedMessage]);
+  const closeEmailChat = React.useCallback(() => setEmailChatSession(null), []);
   const sendEmailToNodeDestination = React.useCallback((destination: EmailNodeDestination) => {
     if (!selectedMessage) return;
     setEmailSelection({ messageID: selectedMessage.id, quote: "", startOffset: 0, endOffset: 0 });
+    suppressAssociationAutoOpenKeyRef.current = emailChatKey;
     setEmailActionRequest((current) => nextEmailNodeDestinationRequest(current, destination));
-  }, [selectedMessage]);
+  }, [emailChatKey, selectedMessage]);
   const commentOnEmailReply = React.useCallback((message: EmailMessage) => {
     if (!emailChatKey) return;
     setEmailSelection({ messageID: message.id, quote: "", startOffset: 0, endOffset: 0 });
+    setEmailChatSession({ key: emailChatKey, visible: true });
+  }, [emailChatKey]);
+  const commentOnEmailSelection = React.useCallback((selection: EmailCollaborationSelection) => {
+    if (!emailChatKey) return;
+    setEmailSelection(selection);
     setEmailChatSession({ key: emailChatKey, visible: true });
   }, [emailChatKey]);
   const showEmailActionNotice = React.useCallback((message: string) => {
@@ -452,6 +452,15 @@ export function HomeMailWorkspace({
     setEmailCollaborationError("");
     setEmailActionNotice(null);
   }, [activeViewID, emailChatKey, selectedMessageRowKey]);
+  React.useEffect(() => {
+    if (!emailChatKey || !(selectedMessage?.collaboration_id?.trim() || selectedMessage?.collaboration_node_id?.trim())) return;
+    if (suppressAssociationAutoOpenKeyRef.current === emailChatKey) {
+      suppressAssociationAutoOpenKeyRef.current = "";
+      return;
+    }
+    setEmailChatSession({ key: emailChatKey, visible: true });
+  }, [emailChatKey, selectedMessage?.collaboration_id, selectedMessage?.collaboration_node_id]);
+
   const triageAdvanceEnabled = isArchivableListView && mailbox === "primary";
   const advanceDisabled = !canAdvanceTriagePage || !!busy || loadingMessages || loadingMoreMessages || messages.length === 0;
   const allDropdownActive = mailbox === "all" || mailbox === "spam";
@@ -944,7 +953,6 @@ export function HomeMailWorkspace({
                 archiveLabel={archiveLabel}
                 busy={!!busy}
                 chatAvailable={emailChatAvailable}
-                chatOpen={emailChatVisible}
                 actionNotice={emailActionNotice?.message ?? ""}
                 emailNodeDestinationSearch={(
                   <EmailNodeDestinationSearch
@@ -958,7 +966,6 @@ export function HomeMailWorkspace({
                     onError={setEmailCollaborationError}
                   />
                 )}
-                onToggleChat={toggleEmailChat}
                 onLoadMessageBody={onLoadMessageBody}
                 onReply={onOpenReply}
                 onReplyAll={onOpenReplyAll}
@@ -969,7 +976,7 @@ export function HomeMailWorkspace({
                 deleteAvailable={archiveAvailable}
                 onToggleRead={onToggleRead}
                 onToggleStar={onToggleStar}
-                onEmailSelection={setEmailSelection}
+                onEmailSelection={commentOnEmailSelection}
                 onCommentOnMessage={commentOnEmailReply}
                 selectionNavigation={emailNavigation}
                 onOpenCollaborationNode={onOpenCollaborationNode}
@@ -977,6 +984,7 @@ export function HomeMailWorkspace({
             )}
             {(emailChatMounted || emailActionRequest) && (
               <EmailCollaborationChatSurface
+                onClose={closeEmailChat}
                 active={emailChatVisible}
                 id="email-collaboration-chat"
                 companyID={companyID}
@@ -989,7 +997,6 @@ export function HomeMailWorkspace({
                 companyUserGroups={companyUserGroups}
                 companyUserGroupMembers={companyUserGroupMembers}
                 nodes={nodes}
-                logicGates={logicGates}
                 actionRequest={emailActionRequest}
                 selection={emailSelection}
                 onClearSelection={clearEmailSelection}

@@ -32,6 +32,7 @@ type CommunicationsEmailCollaborationEnsureInput struct {
 	AccountEmail         string
 	Provider             string
 	CreatedByUserID      string
+	RequestedNodeID      string
 	Priority             *int
 	Message              domain.EmailMessageSnapshot
 }
@@ -41,7 +42,7 @@ type CommunicationsEmailCollaborationEnsureResult struct {
 	Created       bool                                    `json:"created"`
 }
 
-type CommunicationsEmailCollaborationResolveInput struct {
+type CommunicationsEmailCollaborationListInput struct {
 	CompanyID            string
 	ParticipantUserID    string
 	PersonalUserID       string
@@ -143,7 +144,11 @@ func normalizeCommunicationsEmailCollaborationEnsureInput(input CommunicationsEm
 	}
 	message := normalizeEmailMessageSnapshot(input.Message)
 	creatorID := cleanUUIDText(input.CreatedByUserID)
+	requestedNodeID := cleanUUIDText(input.RequestedNodeID)
 	if creatorID == "" || message.ID == "" {
+		return CommunicationsEmailCollaborationEnsureInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
+	}
+	if strings.TrimSpace(input.RequestedNodeID) != "" && requestedNodeID == "" {
 		return CommunicationsEmailCollaborationEnsureInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
 	}
 	if input.Priority != nil && (*input.Priority < 1 || *input.Priority > 5) {
@@ -159,11 +164,12 @@ func normalizeCommunicationsEmailCollaborationEnsureInput(input CommunicationsEm
 		return CommunicationsEmailCollaborationEnsureInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
 	}
 	input.CreatedByUserID = creatorID
+	input.RequestedNodeID = requestedNodeID
 	input.Message = message
 	return input, scope, nil
 }
 
-func normalizeCommunicationsEmailCollaborationResolveInput(input CommunicationsEmailCollaborationResolveInput) (CommunicationsEmailCollaborationResolveInput, communicationsEmailCollaborationScope, error) {
+func normalizeCommunicationsEmailCollaborationListInput(input CommunicationsEmailCollaborationListInput) (CommunicationsEmailCollaborationListInput, communicationsEmailCollaborationScope, error) {
 	accountEmail := input.PersonalAccountEmail
 	if strings.TrimSpace(input.SharedInboxID) != "" {
 		// Shared resolution is keyed by the immutable shared inbox id; its
@@ -172,7 +178,7 @@ func normalizeCommunicationsEmailCollaborationResolveInput(input CommunicationsE
 	}
 	companyID, scope, err := normalizeCommunicationsEmailCollaborationScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID, accountEmail)
 	if err != nil {
-		return CommunicationsEmailCollaborationResolveInput{}, communicationsEmailCollaborationScope{}, err
+		return CommunicationsEmailCollaborationListInput{}, communicationsEmailCollaborationScope{}, err
 	}
 	input.CompanyID = companyID
 	input.PersonalUserID = scope.personalUserID
@@ -182,7 +188,7 @@ func normalizeCommunicationsEmailCollaborationResolveInput(input CommunicationsE
 	input.MessageID = strings.TrimSpace(input.MessageID)
 	input.ThreadID = strings.TrimSpace(input.ThreadID)
 	if input.ParticipantUserID == "" || (input.MessageID == "" && input.ThreadID == "") {
-		return CommunicationsEmailCollaborationResolveInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
+		return CommunicationsEmailCollaborationListInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
 	}
 	return input, scope, nil
 }

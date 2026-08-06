@@ -478,7 +478,7 @@ export type CommunicationsEmailCollaboration = {
   updated_timestamp?: string;
 };
 
-export type ResolveCommunicationsEmailCollaborationInput = {
+export type ListCommunicationsEmailCollaborationsInput = {
   companyID: string;
   messageID?: string;
   threadID?: string;
@@ -486,9 +486,10 @@ export type ResolveCommunicationsEmailCollaborationInput = {
   accountEmail?: string;
 };
 
-export type EnsureCommunicationsEmailCollaborationInput = ResolveCommunicationsEmailCollaborationInput & {
+export type EnsureCommunicationsEmailCollaborationInput = ListCommunicationsEmailCollaborationsInput & {
   message: EmailMessage;
-  priority: number;
+  newNodeID?: string;
+  priority?: number;
 };
 
 export type CommunicationsEmailCollaborationThread = {
@@ -963,7 +964,7 @@ export async function listEmailDrafts(companyID: string, scope: CommunicationsEm
   return (payload.drafts ?? []).map(cloneCommunicationsEmailDraft);
 }
 
-function emailCollaborationQuery(input: ResolveCommunicationsEmailCollaborationInput): URLSearchParams {
+function emailCollaborationQuery(input: ListCommunicationsEmailCollaborationsInput): URLSearchParams {
   const query = new URLSearchParams({ company_id: input.companyID.trim() });
   if (input.messageID?.trim()) query.set("message_id", input.messageID.trim());
   if (input.threadID?.trim()) query.set("thread_id", input.threadID.trim());
@@ -973,17 +974,12 @@ function emailCollaborationQuery(input: ResolveCommunicationsEmailCollaborationI
 }
 
 
-export async function resolveEmailCollaboration(input: ResolveCommunicationsEmailCollaborationInput): Promise<CommunicationsEmailCollaboration | null> {
-  if (!input.companyID.trim() || (!input.messageID?.trim() && !input.threadID?.trim())) return null;
-  try {
-    const payload = await apiFetchJSON<{ collaboration?: CommunicationsEmailCollaboration | null }>(
-      "/v1/communications/email-collaborations?" + emailCollaborationQuery(input).toString(),
-    );
-    return payload.collaboration ? cloneCommunicationsEmailCollaboration(payload.collaboration) : null;
-  } catch (cause) {
-    if ((cause as { status?: unknown } | null)?.status === 404) return null;
-    throw cause;
-  }
+export async function listEmailCollaborations(input: ListCommunicationsEmailCollaborationsInput): Promise<CommunicationsEmailCollaboration[]> {
+  if (!input.companyID.trim() || (!input.messageID?.trim() && !input.threadID?.trim())) return [];
+  const payload = await apiFetchJSON<{ collaborations?: CommunicationsEmailCollaboration[] }>(
+    "/v1/communications/email-collaborations?" + emailCollaborationQuery(input).toString(),
+  );
+  return (payload.collaborations ?? []).map(cloneCommunicationsEmailCollaboration);
 }
 
 export async function getEmailCollaboration(companyID: string, collaborationID: string): Promise<CommunicationsEmailCollaboration | null> {
@@ -1058,6 +1054,7 @@ export async function ensureEmailCollaboration(input: EnsureCommunicationsEmailC
         thread_id: input.threadID?.trim() || input.message.thread_id?.trim() || undefined,
         shared_inbox_id: input.sharedInboxID?.trim() || undefined,
         account_email: input.sharedInboxID?.trim() ? undefined : input.accountEmail?.trim().toLowerCase() || undefined,
+        new_node_id: input.newNodeID?.trim() || undefined,
         priority: input.priority,
         message: input.message,
       }),

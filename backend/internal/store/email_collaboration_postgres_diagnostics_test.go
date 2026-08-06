@@ -100,7 +100,7 @@ func TestPostgresEmailRelationshipCreationUsesFinalTablesAndOrdinaryPermissions(
 	}
 	source := string(raw)
 	start := strings.Index(source, "func (r *PostgresRepo) EnsureCommunicationsEmailCollaboration")
-	end := strings.Index(source, "func (r *PostgresRepo) ResolveCommunicationsEmailCollaboration")
+	end := strings.Index(source, "func (r *PostgresRepo) ListCommunicationsEmailCollaborations")
 	if start < 0 || end <= start {
 		t.Fatal("could not isolate EnsureCommunicationsEmailCollaboration source")
 	}
