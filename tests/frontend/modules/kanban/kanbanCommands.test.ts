@@ -1,10 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   addExplorerNodesToKanbanColumnCommand,
   convertTriageMessagesToKanbanColumnCommand,
   createKanbanColumnCommand,
   deleteKanbanCardsCommand,
+  deleteKanbanNodesCommand,
   moveKanbanCardsToPriorityGroupCommand,
   reorderKanbanCardsCommand,
   reorderKanbanColumnsCommand,
@@ -460,4 +463,45 @@ test("deleteKanbanCardsCommand trims and dedupes card API deletes", async () => 
 
   assert.deepEqual(deleted, ["card-a", "card-b"]);
   assert.deepEqual(calls.deleteCard, ["card-a", "card-b"]);
+});
+
+test("deleteKanbanNodesCommand sends one atomic canonical target delete", async () => {
+  const calls: Array<{ path: string; init?: RequestInit & { json?: unknown } }> = [];
+  const deleted = await deleteKanbanNodesCommand({
+    context,
+    nodeIDs: [" node-a ", "node-a", "", "node-b"],
+    confirmationDisplayName: "Test User",
+    requestJSON: async <T,>(path: string, init?: RequestInit & { json?: unknown }) => {
+      calls.push({ path, init });
+      return { status: "deleted" } as T;
+    },
+  });
+
+  assert.deepEqual(deleted, ["node-a", "node-b"]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.path, "/v1/company-explorer/delete-targets");
+  assert.equal(calls[0]?.init?.method, "POST");
+  assert.deepEqual(JSON.parse(String(calls[0]?.init?.body)), {
+    company_id: "company-1",
+    targets: [
+      { kind: "node", id: "node-a" },
+      { kind: "node", id: "node-b" },
+    ],
+    confirmation_display_name: "Test User",
+  });
+});
+
+test("Kanban node deletion participates in the local mutation race guard", () => {
+  const source = readFileSync(resolve(process.cwd(), "frontend/src/modules/kanban/KanbanContent.tsx"), "utf8");
+  const start = source.indexOf("const removeNodes = useCallback");
+  const end = source.indexOf("useEffect(() => {", start);
+  assert.ok(start >= 0 && end > start);
+  const deletion = source.slice(start, end);
+  assert.ok(deletion.includes("beginLocalBoardMutation"));
+  assert.ok(deletion.includes("applyCards((current) => current.filter"));
+  assert.ok(deletion.includes("deleteKanbanNodesCommand"));
+  assert.ok(deletion.includes("finally"));
+  assert.ok(deletion.includes("endMutation()"));
+  assert.ok(deletion.includes("refreshBoard(mutationBoardID)"));
+  assert.ok(!deletion.includes("Promise.all"));
 });

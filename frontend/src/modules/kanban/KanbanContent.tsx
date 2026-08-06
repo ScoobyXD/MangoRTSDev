@@ -40,6 +40,7 @@ import {
   convertTriageMessagesToKanbanColumnCommand,
   createKanbanColumnCommand,
   deleteKanbanCardsCommand,
+  deleteKanbanNodesCommand,
   moveKanbanCardsToPriorityGroupCommand,
   persistKanbanColumnLayoutCommand,
   reorderKanbanCardsCommand,
@@ -2052,30 +2053,39 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const removeNodes = useCallback(async (nodeIDs: string[], confirmationDisplayName: string) => {
     const ids = new Set(nodeIDs.map((nodeID) => nodeID.trim()).filter(Boolean));
     if (ids.size === 0) return;
-    const previousCards = cards;
-    const removedCardIDs = new Set(cards.filter((card) => ids.has(card.node_id)).map((card) => card.card_id));
-    setCards((current) => current.filter((card) => !ids.has(card.node_id)));
+    const mutationBoardID = boardID;
+    const endMutation = beginLocalBoardMutation(mutationBoardID, logicGateIDFromKanbanBoardID(mutationBoardID));
+    const previousCards = cardsRef.current;
+    const removedCardIDs = new Set(previousCards.filter((card) => ids.has(card.node_id)).map((card) => card.card_id));
+    let shouldRefresh = false;
+    applyCards((current) => current.filter((card) => !ids.has(card.node_id)));
     setSelectedCardIDs((current) => new Set(Array.from(current).filter((cardID) => !removedCardIDs.has(cardID))));
     setSelectionAnchorCardID((current) => (removedCardIDs.has(current) ? "" : current));
     setCardContextMenu(null);
     setError("");
     try {
-      await Promise.all(Array.from(ids).map((nodeID) => requestJSON<{ status: string }>(`/v1/nodes/${encodeURIComponent(nodeID)}?company_id=${encodeURIComponent(companyID)}`, {
-        method: "DELETE",
-        headers: { "X-Mango-Confirmation-Display-Name": confirmationDisplayName },
-      })));
+      await deleteKanbanNodesCommand({
+        context: kanbanCommandContext,
+        nodeIDs: Array.from(ids),
+        confirmationDisplayName,
+        requestJSON,
+      });
       for (const nodeID of ids) {
         invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
         removeNodeRelationshipGraphNode(apiBase, companyID, nodeID);
       }
-      invalidateKanbanBoardContentsCache(apiBase, companyID, boardID);
+      invalidateKanbanBoardContentsCache(apiBase, companyID, mutationBoardID);
       setHighlightedEntity((current) => (current && ids.has(current.nodeID) ? null : current));
       setNodeEditorOverlay((current) => (current && ids.has(current.nodeID) ? null : current));
     } catch {
       setError("Node delete failed");
-      setCards(previousCards);
+      applyCards(previousCards);
+      shouldRefresh = true;
+    } finally {
+      endMutation();
     }
-  }, [apiBase, boardID, cards, companyID, requestJSON]);
+    if (shouldRefresh) void refreshBoard(mutationBoardID);
+  }, [apiBase, applyCards, beginLocalBoardMutation, boardID, companyID, kanbanCommandContext, refreshBoard, requestJSON]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

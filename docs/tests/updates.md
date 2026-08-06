@@ -1,4 +1,16 @@
-Last updated: 2026-07-29
+# Process Story: An Update opens the exact thing that changed
+
+A user activates an Updates row
+↓
+The row resolves one canonical Node, Logic Gate, or Project target plus its information ID
+↓
+The matching editor opens the referenced text block, chat message, email, or timeline event and scrolls it into view
+↓
+Mention updates prefer the exact recipient mention chip inside that information; other updates use the referenced section itself
+↓
+The target flashes briefly through an in-memory animation only, so refreshing the page never repeats or preserves the highlight
+
+Last updated: 2026-08-05
 
 # Updates Tests
 
@@ -106,6 +118,7 @@ U95 - A verification update stores the stamp ID as its information target. Activ
 U96 - Retrying the same verification-request idempotency key sends no duplicate update, and the requesting actor receives no self-notification even when included in the stamp's recipient snapshot.
 U92 - The Updates row-detail Node panel exposes the unified Node-shell fullscreen action in its top-right controls. Activating it moves the complete selected Node panel into the shared body-level blocking overlay with the standard 8px vertical and 12px horizontal viewport insets, hides conflicting app chrome, traps focus, and preserves the selected update, Node editor, and chat context. The same control, Escape, or backdrop restores the existing Updates split-panel layout and its saved ratio; closing still closes the Node panel.
 U97 - The selected saved Updates grouping view is the user's default Updates presentation. Refreshing, leaving and returning to Updates, clicking the Updates tab, and opening an Updates notification filter restore that saved view instead of clearing it or replacing it with the built-in grouping. If no stored selection exists or it references a deleted view, the first saved Updates view becomes the default; the built-in grouping is used only when no saved Updates views exist. A transient saved-view load failure does not erase the stored selection.
+U98 - Activating an Updates row resolves one canonical supported resource target: Node first when Node context exists, otherwise Logic Gate, otherwise Project. Its information ID opens and scrolls the exact text block, chat message, attached email, or timeline event. Mention updates transiently highlight the recipient's exact mention chip when rendered and otherwise highlight the referenced section. Non-mention updates highlight the referenced section. This focus state is in memory only and must not persist or replay after refresh.
 
 ## Update Row Copy And Visual Language
 
@@ -641,3 +654,28 @@ Expected:
 - The red close action still closes the Node panel from either mode.
 
 Focused structural coverage lives in `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`.
+
+### Scenario U-S18: Exact Update Navigation And Transient Highlight
+
+Automated regression: `tests/frontend/pages/home/updatesSelection.test.ts`.
+
+Business logic covered:
+- U68
+- U71
+- U79
+- U95
+- U98
+
+Given:
+- Updates contains authorized rows targeting Node, Logic Gate, and Project information.
+- A mention row identifies both an information block/message and the recipient user.
+
+When:
+- The user activates a row.
+
+Expected:
+- Node targets open in the Updates Node panel; Logic Gate and Project targets open their existing product pages.
+- The target editor opens and scrolls the exact information ID into view.
+- A rendered mention chip for the recipient is the highlight target; if it is unavailable, the containing referenced section is highlighted.
+- Chat messages, attached emails, text blocks, and timeline stamps use their exact rendered target when available.
+- The highlight animates once from navigation state and is never written to browser storage, a URL, or backend state, so refresh does not preserve it.

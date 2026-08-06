@@ -1,3 +1,43 @@
+export type UpdateNavigationTarget =
+  | { kind: "node"; id: string; informationID?: string; mentionUserID?: string }
+  | { kind: "logic_gate"; id: string; nodeID?: string; informationID?: string; mentionUserID?: string }
+  | { kind: "project"; id: string; informationID?: string; mentionUserID?: string }
+  | { kind: "none" };
+
+export function resolveUpdateNavigationTarget(input: {
+  item: {
+    type?: string;
+    recipient_user_id?: string;
+    entity_type?: string;
+    entity_id?: string;
+    node_id?: string;
+    logic_gate_id?: string;
+    information_id?: string;
+  };
+  groupedNodeID?: string;
+  groupedLogicGateID?: string;
+  groupedProjectID?: string;
+}): UpdateNavigationTarget {
+  const informationID = input.item.information_id?.trim() || undefined;
+  const mentionUserID = input.item.type === "mention.created" || input.item.type === "mention.urgent_created"
+    ? input.item.recipient_user_id?.trim() || undefined
+    : undefined;
+  const nodeID = input.item.node_id?.trim()
+    || input.groupedNodeID?.trim()
+    || (input.item.entity_type === "node" ? input.item.entity_id?.trim() : "");
+  if (nodeID) return { kind: "node", id: nodeID, informationID, mentionUserID };
+
+  const logicGateID = input.item.logic_gate_id?.trim()
+    || input.groupedLogicGateID?.trim()
+    || (input.item.entity_type === "logic_gate" ? input.item.entity_id?.trim() : "");
+  if (logicGateID) return { kind: "logic_gate", id: logicGateID, informationID, mentionUserID };
+
+  const projectID = input.groupedProjectID?.trim()
+    || (input.item.entity_type === "project" ? input.item.entity_id?.trim() : "");
+  if (projectID) return { kind: "project", id: projectID, informationID, mentionUserID };
+  return { kind: "none" };
+}
+
 export function resolveUpdateClickSelection(input: {
   orderedIDs: string[];
   previousSelectedIDs: Set<string>;

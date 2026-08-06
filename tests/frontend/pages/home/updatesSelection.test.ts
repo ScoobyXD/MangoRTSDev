@@ -2,12 +2,92 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import { JSDOM } from "jsdom";
 
-import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenPresentation, resolveUpdateSeenSuccessor, updateNotificationVisibleInView, updateSeenActionForView, updatesNotificationEventRequiresReload } from "../../../../frontend/src/pages/home/updatesSelection.js";
+import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateNavigationTarget, resolveUpdateSeenPresentation, resolveUpdateSeenSuccessor, updateNotificationVisibleInView, updateSeenActionForView, updatesNotificationEventRequiresReload } from "../../../../frontend/src/pages/home/updatesSelection.js";
+import { resolveTransientInformationFocusTarget, transientlyFocusInformation } from "../../../../frontend/src/modules/editor/transientInformationFocus.js";
 import { resolveCurrentUpdateLogicGateGroupValue, resolveCurrentUpdateLogicGateLabel, resolveUpdateLogicGateID } from "../../../../frontend/src/pages/home/updatesCurrentEntityLabels.js";
 import { resolveUpdateActorLabel, resolveUpdateBodyPreview } from "../../../../frontend/src/pages/home/updatesActorLabel.js";
 import { createSeenUpdatesDateWindow, displayDateToUTCDay, moveSeenUpdatesDateWindow, seenUpdatesDateBounds, seenUpdatesDateQuery, utcDayToDisplayDate } from "../../../../frontend/src/pages/home/updatesSeenHistory.js";
 import { consumeRequestedUpdatesFilter, requestUpdatesFilter, updatesFilterFromRequestEvent } from "../../../../frontend/src/modules/notifications/updatesFilterRequests.js";
+
+test("Updates resolves Node, Logic Gate, and Project row targets with exact mention context", () => {
+  assert.deepEqual(resolveUpdateNavigationTarget({
+    item: {
+      type: "mention.created",
+      recipient_user_id: " user-1 ",
+      entity_type: "node",
+      entity_id: "node-entity",
+      node_id: " node-current ",
+      information_id: " block-1 ",
+    },
+  }), {
+    kind: "node",
+    id: "node-current",
+    informationID: "block-1",
+    mentionUserID: "user-1",
+  });
+  assert.deepEqual(resolveUpdateNavigationTarget({
+    item: {
+      type: "mention.urgent_created",
+      recipient_user_id: "user-2",
+      entity_type: "logic_gate",
+      entity_id: " gate-1 ",
+      information_id: " gate-document ",
+    },
+  }), {
+    kind: "logic_gate",
+    id: "gate-1",
+    informationID: "gate-document",
+    mentionUserID: "user-2",
+  });
+  assert.deepEqual(resolveUpdateNavigationTarget({
+    item: { type: "project.changed", entity_type: "project", entity_id: "project-1", information_id: "project-block" },
+  }), {
+    kind: "project",
+    id: "project-1",
+    informationID: "project-block",
+    mentionUserID: undefined,
+  });
+  assert.deepEqual(resolveUpdateNavigationTarget({ item: {} }), { kind: "none" });
+});
+
+test("Updates scrolls and transiently highlights the exact mentioned chip", () => {
+  const dom = new JSDOM('<!doctype html><div id="root"><section data-node-text-block-id="block-1"><span data-mango-user-id="user-1">@User</span></section></div>');
+  const root = dom.window.document.getElementById("root");
+  const mention = root?.querySelector<HTMLElement>("[data-mango-user-id]") ?? null;
+  assert.ok(mention);
+  let scrolled = false;
+  let animated = false;
+  Object.defineProperty(mention, "scrollIntoView", { value: () => { scrolled = true; } });
+  Object.defineProperty(mention, "animate", { value: () => { animated = true; return {}; } });
+
+  assert.equal(resolveTransientInformationFocusTarget({ root, informationID: "block-1", mentionUserID: "user-1" }), mention);
+  assert.equal(transientlyFocusInformation({ root, informationID: "block-1", mentionUserID: "user-1" }), mention);
+  assert.equal(scrolled, true);
+  assert.equal(animated, true);
+});
+
+test("Updates falls back to the referenced section when a mention chip is unavailable", () => {
+  const dom = new JSDOM('<!doctype html><div id="root"><section data-project-text-box-row="project-block"></section></div>');
+  const root = dom.window.document.getElementById("root");
+  const section = root?.querySelector<HTMLElement>("[data-project-text-box-row]") ?? null;
+  assert.ok(section);
+  Object.defineProperty(section, "scrollIntoView", { value: () => undefined });
+  Object.defineProperty(section, "animate", { value: () => ({}) });
+  assert.equal(transientlyFocusInformation({ root, informationID: "project-block", mentionUserID: "missing-user" }), section);
+});
+
+test("Updates navigation carries transient mention focus through every supported editor surface", () => {
+  const updatesSource = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/UpdatesView.tsx"), "utf8");
+  const appSource = readFileSync(resolve(process.cwd(), "frontend/src/app/applayout.tsx"), "utf8");
+  const logicGateSource = readFileSync(resolve(process.cwd(), "frontend/src/pages/logic-gate-arena/LogicGateArenaPage.tsx"), "utf8");
+  const projectSource = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
+  assert.ok(updatesSource.includes("focusMentionUserID={panel.focusMentionUserID}"));
+  assert.ok(appSource.includes("mentionUserID: typeof detail.mentionUserID"));
+  assert.ok(logicGateSource.includes("focusMentionUserID={selectedLogicGate.mentionUserID}"));
+  assert.ok(projectSource.includes("scheduleTransientInformationFocus({ root: () => textBlocksScrollRef.current"));
+});
 
 test("update selection uses single-click, ctrl-click, and additive shift-click semantics", () => {
   const orderedIDs = ["a", "b", "c", "d"];
