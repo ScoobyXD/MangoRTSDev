@@ -10,6 +10,7 @@ declare
   seen_rel regclass := to_regclass('public.node_content_change_seen');
   snapshot_rel regclass := to_regclass('public.node_textbox_seen_snapshots');
   unexpected_count bigint;
+  unexpected_routines text;
 begin
   if server_num < 170000 or server_num >= 190000 then
     raise exception 'STOP: Node unread-highlight retirement supports PostgreSQL 17.x and 18.x; connected server_version_num=%', server_num;
@@ -127,17 +128,24 @@ begin
     raise exception 'STOP: a view still depends on Node unread-highlight storage';
   end if;
 
-  select count(*) into unexpected_count
+  select string_agg(
+           format('%I.%I(%s)', namespace_row.nspname, routine.proname,
+                  pg_get_function_identity_arguments(routine.oid)),
+           ', ' order by namespace_row.nspname, routine.proname, routine.oid
+         )
+  into unexpected_routines
   from pg_proc routine
   join pg_namespace namespace_row on namespace_row.oid=routine.pronamespace
   where namespace_row.nspname not in ('pg_catalog', 'information_schema')
+    and namespace_row.oid <> pg_my_temp_schema()
+    and not pg_is_other_temp_schema(namespace_row.oid)
     and routine.oid not in (
       'public.mangorts_trg_bump_node_view_user_from_change_seen()'::regprocedure,
       'public.mangorts_trg_bump_node_view_user_from_snapshot()'::regprocedure
     )
     and lower(routine.prosrc) ~ 'node_content_changes|node_content_change_seen|node_textbox_seen_snapshots';
-  if unexpected_count <> 0 then
-    raise exception 'STOP: a surviving routine still references Node unread-highlight storage';
+  if unexpected_routines is not null then
+    raise exception 'STOP: surviving routine(s) still reference Node unread-highlight storage: %', unexpected_routines;
   end if;
 end;
 $$;

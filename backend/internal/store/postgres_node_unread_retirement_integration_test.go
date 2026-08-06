@@ -29,6 +29,8 @@ func openNodeUnreadRetirementPostgresIntegration(t *testing.T) *sql.DB {
 	}
 	config.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 	db := stdlib.OpenDB(*config)
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 	var version int
 	if err := db.QueryRow(`select current_setting('server_version_num')::integer`).Scan(&version); err != nil {
@@ -120,6 +122,17 @@ insert into recycle_bin_items values(
 	if _, err := db.Exec(fixture); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.Exec(`
+create function pg_temp.mangorts_repair_recycled_node_documents(input_payload jsonb)
+returns jsonb language sql immutable as $$
+  select input_payload || jsonb_build_object('node_textbox_seen_snapshots', jsonb_build_array())
+$$;
+create function unexpected_unread_routine(input_payload jsonb)
+returns jsonb language sql immutable as $$
+  select input_payload || jsonb_build_object('node_content_changes', jsonb_build_array())
+$$;`); err != nil {
+		t.Fatal(err)
+	}
 
 	var currentBefore, historyBefore string
 	if err := db.QueryRow(`select body_json::text from node_textboxes`).Scan(&currentBefore); err != nil {
@@ -129,8 +142,15 @@ insert into recycle_bin_items values(
 		t.Fatal(err)
 	}
 	preflight := readNodeRetirementIntegrationSQL(t, "..", "..", "..", "scripts", "node_unread_highlights_retirement_preflight.sql")
+	if _, err := db.Exec(preflight); err == nil || !strings.Contains(err.Error(), "public.unexpected_unread_routine(input_payload jsonb)") {
+		t.Fatalf("preflight did not name the persistent routine dependency: %v", err)
+	}
+	_, _ = db.Exec(`rollback`)
+	if _, err := db.Exec(`drop function unexpected_unread_routine(jsonb)`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Exec(preflight); err != nil {
-		t.Fatalf("Node unread-highlight preflight: %v", err)
+		t.Fatalf("Node unread-highlight preflight rejected a session-local temporary routine: %v", err)
 	}
 
 	migration := readNodeRetirementIntegrationSQL(t, "..", "..", "db", "migrations", "20260805_zzzzz_remove_node_unread_highlights.sql")
