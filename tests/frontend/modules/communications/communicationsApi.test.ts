@@ -41,7 +41,7 @@ import {
   removeCommunicationsSharedInbox,
   removeLogicGateGVICAssignments,
   respondToCalendarInvite,
-  resolveEmailCollaboration,
+  listEmailCollaborations,
   saveEmailSignature,
   saveEmailDraft,
   sendEmail,
@@ -79,7 +79,7 @@ test("communications folder query scopes shared inbox folder reads", () => {
   assert.equal(createFolderQuery({ companyID: " company-1 ", sharedInboxID: " shared-1 " }), "?company_id=company-1&shared_inbox_id=shared-1");
 });
 
-test("email collaboration resolve is read-only while ensure sends the complete source snapshot", async () => {
+test("email collaboration list is read-only while floating-node ensure sends a retry-safe node identity", async () => {
   const calls: Array<{ path: string; method: string; body?: Record<string, unknown> }> = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -88,17 +88,18 @@ test("email collaboration resolve is read-only while ensure sends the complete s
       method: init?.method ?? "GET",
       body: init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined,
     });
-    return jsonResponse({
-      collaboration: {
-        company_id: "company-1",
-        collaboration_id: "collab-1",
-        node_id: "node-1",
-        attached_email_information_id: "email-info-1",
-      },
-    });
+    const collaboration = {
+      company_id: "company-1",
+      collaboration_id: "collab-1",
+      node_id: "node-1",
+      attached_email_information_id: "email-info-1",
+    };
+    return jsonResponse((init?.method ?? "GET") === "GET"
+      ? { collaborations: [collaboration] }
+      : { collaboration });
   };
   try {
-    await resolveEmailCollaboration({
+    const listed = await listEmailCollaborations({
       companyID: "company-1",
       messageID: "message-1",
       threadID: "thread-1",
@@ -109,14 +110,16 @@ test("email collaboration resolve is read-only while ensure sends the complete s
       messageID: "message-1",
       threadID: "thread-1",
       accountEmail: "ME@Example.test",
-      priority: 4,
+      newNodeID: "node-new",
       message: { id: "message-1", thread_id: "thread-1", subject: "Review", body: "Full body", unread: false, starred: false },
     });
+    assert.equal(listed.length, 1);
     assert.equal(calls[0]?.method, "GET");
     assert.equal(calls[0]?.path, "/v1/communications/email-collaborations?company_id=company-1&message_id=message-1&thread_id=thread-1&account_email=me%40example.test");
     assert.equal(calls[1]?.method, "POST");
     assert.equal(calls[1]?.path, "/v1/communications/email-collaborations");
-    assert.equal(calls[1]?.body?.priority, 4);
+    assert.equal(calls[1]?.body?.new_node_id, "node-new");
+    assert.equal("priority" in (calls[1]?.body ?? {}), false);
     assert.equal((calls[1]?.body?.message as { body?: string }).body, "Full body");
   } finally {
     globalThis.fetch = originalFetch;

@@ -29,13 +29,13 @@ export type EmailCollaborationChatSession = {
   visible: boolean;
 } | null;
 
-export type EmailCollaborationPanelAction = "chat" | "create" | "import";
+export type EmailCollaborationPanelAction = "create" | "import";
 
 export type EmailNodeDestination =
   | { kind: "node"; nodeID: string }
   | { kind: "logic_gate"; logicGateID: string; priority: number }
   | { kind: "project"; projectID: string; logicGateID: string; priority: number }
-  | { kind: "standalone"; priority: number };
+  | { kind: "standalone" };
 
 export type EmailNodeDestinationSearchOption = {
   key: string;
@@ -51,12 +51,6 @@ export type EmailCollaborationActionRequest = {
   destination?: EmailNodeDestination;
 } | null;
 
-export function nextEmailCollaborationActionRequest(
-  current: EmailCollaborationActionRequest,
-  action: EmailCollaborationPanelAction,
-): NonNullable<EmailCollaborationActionRequest> {
-  return { action, requestID: (current?.requestID ?? 0) + 1 };
-}
 
 export function nextEmailNodeDestinationRequest(
   current: EmailCollaborationActionRequest,
@@ -98,6 +92,15 @@ export function buildEmailNodeDestinationSearchOptions(input: {
   limit?: number;
 }): EmailNodeDestinationSearchOption[] {
   const query = emailNodeDestinationQuery(input.query);
+  const floatingNodeOption: EmailNodeDestinationSearchOption = {
+    key: "standalone:new",
+    kind: "standalone",
+    id: "new",
+    label: "Create floating node (a node without a Logic Gate)",
+    detail: "Create without priority or Logic Gate placement",
+  };
+  if (!query) return [floatingNodeOption];
+
   const currentNodeID = input.currentNodeID?.trim() ?? "";
   const currentNode = currentNodeID
     ? input.nodes.find((node) => node.node_id.trim() === currentNodeID)
@@ -110,14 +113,6 @@ export function buildEmailNodeDestinationSearchOptions(input: {
       id: currentNodeID,
       label: currentNode?.name?.trim() || "Current email Node",
       detail: "Open the Node already linked to this email",
-    });
-  } else {
-    options.push({
-      key: "standalone:new",
-      kind: "standalone",
-      id: "new",
-      label: "New standalone Node",
-      detail: "Create an email Node without a Logic Gate",
     });
   }
   options.push(...input.nodes
@@ -147,6 +142,7 @@ export function buildEmailNodeDestinationSearchOptions(input: {
       label: project.name?.trim() || project.project_id,
       detail: "Create an email Node in this project",
     })));
+  options.push(floatingNodeOption);
 
   const kindOrder: Record<EmailNodeDestinationSearchOption["kind"], number> = {
     current: 0,
@@ -169,15 +165,6 @@ export function buildEmailNodeDestinationSearchOptions(input: {
     .slice(0, Math.max(1, input.limit ?? 12));
 }
 
-export function toggleEmailCollaborationChatSession(
-  current: EmailCollaborationChatSession,
-  key: string,
-): EmailCollaborationChatSession {
-  if (!key) return null;
-  return current?.key === key
-    ? { ...current, visible: !current.visible }
-    : { key, visible: true };
-}
 
 export function reconcileEmailCollaborationChatSession(
   current: EmailCollaborationChatSession,

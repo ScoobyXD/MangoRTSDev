@@ -15,6 +15,7 @@ type communicationsEmailCollaborationRequest struct {
 	CompanyID     string                      `json:"company_id"`
 	SharedInboxID string                      `json:"shared_inbox_id"`
 	AccountEmail  string                      `json:"account_email"`
+	NewNodeID     string                      `json:"new_node_id"`
 	Priority      *int                        `json:"priority"`
 	Message       domain.EmailMessageSnapshot `json:"message"`
 }
@@ -46,7 +47,7 @@ func (s *Server) handleCommunicationsEmailCollaborations(w http.ResponseWriter, 
 		if !ok {
 			return
 		}
-		item, err := s.repo.ResolveCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationResolveInput{
+		items, err := s.repo.ListCommunicationsEmailCollaborations(store.CommunicationsEmailCollaborationListInput{
 			CompanyID: companyID, ParticipantUserID: actor.User.UserID,
 			PersonalUserID: scope.personalUserID, PersonalAccountEmail: scope.personalAccountEmail,
 			SharedInboxID: scope.sharedInboxID, MessageID: messageID, ThreadID: threadID,
@@ -55,7 +56,7 @@ func (s *Server) handleCommunicationsEmailCollaborations(w http.ResponseWriter, 
 			s.writeEmailCollaborationStoreError(w, err, "failed_to_resolve_email_collaboration")
 			return
 		}
-		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"collaboration": item})
+		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"collaborations": items})
 	case http.MethodPost:
 		var req communicationsEmailCollaborationRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -63,11 +64,11 @@ func (s *Server) handleCommunicationsEmailCollaborations(w http.ResponseWriter, 
 			return
 		}
 		req.CompanyID = strings.TrimSpace(req.CompanyID)
-		if req.CompanyID == "" || strings.TrimSpace(req.Message.ID) == "" || req.Priority == nil {
-			writeError(w, http.StatusBadRequest, "company_id_message_and_priority_required")
+		if req.CompanyID == "" || strings.TrimSpace(req.Message.ID) == "" {
+			writeError(w, http.StatusBadRequest, "company_id_and_message_required")
 			return
 		}
-		if *req.Priority < 1 || *req.Priority > 5 {
+		if req.Priority != nil && (*req.Priority < 1 || *req.Priority > 5) {
 			writeError(w, http.StatusBadRequest, "invalid_email_node_priority")
 			return
 		}
@@ -106,7 +107,8 @@ func (s *Server) handleCommunicationsEmailCollaborations(w http.ResponseWriter, 
 		result, err := s.repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
 			CompanyID: req.CompanyID, PersonalUserID: scope.personalUserID,
 			PersonalAccountEmail: scope.personalAccountEmail, SharedInboxID: scope.sharedInboxID,
-			AccountEmail: scope.accountEmail, Provider: connection.Provider, CreatedByUserID: actor.User.UserID, Priority: req.Priority, Message: providerSnapshot,
+			AccountEmail: scope.accountEmail, Provider: connection.Provider, CreatedByUserID: actor.User.UserID,
+			RequestedNodeID: req.NewNodeID, Priority: req.Priority, Message: providerSnapshot,
 		})
 		if err != nil {
 			scopeType := "personal"

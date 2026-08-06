@@ -115,7 +115,7 @@ where relationship.company_id=$1::uuid and relationship.email_relationship_id=$2
 	return item, err
 }
 
-func postgresEmailCollaborationLookup(ctx context.Context, q emailCollaborationQueryer, companyID string, scope communicationsEmailCollaborationScope, messageID, threadID, participantUserID string) (domain.CommunicationsEmailCollaboration, error) {
+func postgresEmailCollaborationLookup(ctx context.Context, q emailCollaborationQueryer, companyID string, scope communicationsEmailCollaborationScope, messageID, threadID, participantUserID, nodeID string) (domain.CommunicationsEmailCollaboration, error) {
 	item, err := scanPostgresEmailCollaboration(q.QueryRowContext(ctx, `
 select `+postgresEmailCollaborationColumns+`
 from email_relationships relationship
@@ -130,8 +130,9 @@ where relationship.company_id=$1::uuid and relationship.resource_type='node'
    or (nullif($6,'') is not null and message.provider_message_id=$6))
  and (nullif($8,'')::uuid is null or mangorts_user_can_access_resource(
    relationship.company_id,relationship.resource_type,relationship.resource_id,nullif($8,'')::uuid,'edit'))
+ and (nullif($9,'')::uuid is null or relationship.resource_id=nullif($9,'')::uuid)
 order by relationship.created_timestamp desc limit 1`, companyID, scope.scopeType, scope.personalUserID,
-		scope.personalAccountEmail, scope.sharedInboxID, messageID, threadID, participantUserID))
+		scope.personalAccountEmail, scope.sharedInboxID, messageID, threadID, participantUserID, nodeID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.CommunicationsEmailCollaboration{}, ErrNotFound
 	}
@@ -144,12 +145,12 @@ order by relationship.created_timestamp desc limit 1`, companyID, scope.scopeTyp
 
 func postgresEmailCollaborationLookupForEnsure(ctx context.Context, q emailCollaborationQueryer, input CommunicationsEmailCollaborationEnsureInput, scope communicationsEmailCollaborationScope) (domain.CommunicationsEmailCollaboration, error) {
 	if input.Message.ThreadID != "" {
-		item, err := postgresEmailCollaborationLookup(ctx, q, input.CompanyID, scope, "", input.Message.ThreadID, "")
+		item, err := postgresEmailCollaborationLookup(ctx, q, input.CompanyID, scope, "", input.Message.ThreadID, "", input.RequestedNodeID)
 		if err == nil || !errors.Is(err, ErrNotFound) {
 			return item, err
 		}
 	}
-	return postgresEmailCollaborationLookup(ctx, q, input.CompanyID, scope, input.Message.ID, "", "")
+	return postgresEmailCollaborationLookup(ctx, q, input.CompanyID, scope, input.Message.ID, "", "", input.RequestedNodeID)
 }
 
 func (r *PostgresRepo) EnsureCommunicationsEmailCollaboration(input CommunicationsEmailCollaborationEnsureInput) (CommunicationsEmailCollaborationEnsureResult, error) {
@@ -194,7 +195,11 @@ func (r *PostgresRepo) EnsureCommunicationsEmailCollaboration(input Communicatio
 	} else if !errors.Is(lookupErr, ErrNotFound) {
 		return CommunicationsEmailCollaborationEnsureResult{}, lookupErr
 	}
-	nodeID, relationshipID := newUUIDv7String(), newUUIDv7String()
+	nodeID := input.RequestedNodeID
+	if nodeID == "" {
+		nodeID = newUUIDv7String()
+	}
+	relationshipID := newUUIDv7String()
 	if _, err := tx.ExecContext(ctx, `insert into nodes(company_id,node_id,name,priority,default_access,created_timestamp)
 values($1::uuid,$2::uuid,$3,$4,'no_access',now())`, input.CompanyID, nodeID, communicationsEmailCollaborationTitle(input.Message), input.Priority); err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, err
@@ -229,12 +234,54 @@ values($1::uuid,$2::uuid,$3,$4,'no_access',now())`, input.CompanyID, nodeID, com
 	return CommunicationsEmailCollaborationEnsureResult{Collaboration: item, Created: true}, nil
 }
 
-func (r *PostgresRepo) ResolveCommunicationsEmailCollaboration(input CommunicationsEmailCollaborationResolveInput) (domain.CommunicationsEmailCollaboration, error) {
-	input, scope, err := normalizeCommunicationsEmailCollaborationResolveInput(input)
+func (r *PostgresRepo) ListCommunicationsEmailCollaborations(input CommunicationsEmailCollaborationListInput) ([]domain.CommunicationsEmailCollaboration, error) {
+	input, scope, err := normalizeCommunicationsEmailCollaborationListInput(input)
 	if err != nil {
-		return domain.CommunicationsEmailCollaboration{}, err
+		return nil, err
 	}
-	return postgresEmailCollaborationLookup(context.Background(), r.db, input.CompanyID, scope, input.MessageID, input.ThreadID, input.ParticipantUserID)
+	ctx := context.Background()
+	rows, err := r.db.QueryContext(ctx, `
+select `+postgresEmailCollaborationColumns+`
+from email_relationships relationship
+join email_threads thread on thread.company_id=relationship.company_id and thread.email_thread_id=relationship.email_thread_id
+join email_messages message on message.company_id=relationship.company_id
+ and message.email_thread_id=relationship.email_thread_id and message.email_message_id=relationship.email_message_id
+where relationship.company_id=$1::uuid and relationship.resource_type='node'
+ and relationship.resource_textbox_id is null and thread.email_account_type=case $2 when 'personal' then 'personal_email_account' else 'shared_email_account' end
+ and (($2='personal' and thread.personal_user_id=nullif($3,'')::uuid and thread.personal_account_email=$4)
+   or ($2='shared' and thread.shared_inbox_id=nullif($5,'')::uuid))
+ and ((nullif($7,'') is not null and thread.provider_thread_id=$7)
+   or (nullif($6,'') is not null and message.provider_message_id=$6))
+ and mangorts_user_can_access_resource(relationship.company_id,relationship.resource_type,relationship.resource_id,$8::uuid,'edit')
+order by relationship.created_timestamp desc,relationship.email_relationship_id`, input.CompanyID, scope.scopeType, scope.personalUserID,
+		scope.personalAccountEmail, scope.sharedInboxID, input.MessageID, input.ThreadID, input.ParticipantUserID)
+	if err != nil {
+		return nil, err
+	}
+	items := []domain.CommunicationsEmailCollaboration{}
+	for rows.Next() {
+		item, scanErr := scanPostgresEmailCollaboration(rows)
+		if scanErr != nil {
+			rows.Close()
+			return nil, scanErr
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for index := range items {
+		participants, participantErr := listPostgresEmailCollaborationParticipants(ctx, r.db, input.CompanyID, items[index].CollaborationID)
+		if participantErr != nil {
+			return nil, participantErr
+		}
+		items[index].Participants = participants
+	}
+	return items, nil
 }
 func (r *PostgresRepo) GetCommunicationsEmailCollaboration(companyID, collaborationID, participantUserID string) (domain.CommunicationsEmailCollaboration, error) {
 	companyID, collaborationID, participantUserID = cleanUUIDText(companyID), cleanUUIDText(collaborationID), cleanUUIDText(participantUserID)

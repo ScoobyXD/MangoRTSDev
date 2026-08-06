@@ -93,7 +93,7 @@ function destinationKindLabel(kind: EmailNodeDestinationSearchOption["kind"]): s
     case "node": return "Node";
     case "logic_gate": return "Logic Gate";
     case "project": return "Project";
-    case "standalone": return "New Node";
+    case "standalone": return "Floating Node";
     default: return "Destination";
   }
 }
@@ -131,6 +131,7 @@ export function EmailNodeDestinationSearch({
   const [projects, setProjects] = React.useState<ProjectRecord[]>([]);
   const [projectsLoading, setProjectsLoading] = React.useState(false);
   const [projectsCompanyID, setProjectsCompanyID] = React.useState("");
+  const hasSearchText = query.trim().replace(/^#+\s*/, "").trim().length > 0;
 
   React.useEffect(() => {
     setProjects([]);
@@ -138,7 +139,7 @@ export function EmailNodeDestinationSearch({
   }, [companyID]);
 
   React.useEffect(() => {
-    if (!open || !companyID || projectsCompanyID === companyID || projectsLoading) return;
+    if (!open || !hasSearchText || !companyID || projectsCompanyID === companyID || projectsLoading) return;
     let cancelled = false;
     setProjectsLoading(true);
     void listProjects(companyID)
@@ -156,7 +157,7 @@ export function EmailNodeDestinationSearch({
         if (!cancelled) setProjectsLoading(false);
       });
     return () => { cancelled = true; };
-  }, [companyID, onError, open, projectsCompanyID]);
+  }, [companyID, hasSearchText, onError, open, projectsCompanyID]);
 
   React.useEffect(() => {
     if (!open) return undefined;
@@ -193,6 +194,7 @@ export function EmailNodeDestinationSearch({
   const selectionReady = Boolean(selectedOption) && (
     selectedOption?.kind === "current"
     || selectedOption?.kind === "node"
+    || selectedOption?.kind === "standalone"
     || (
       Number.isInteger(selectedPriority)
       && selectedPriority >= 1
@@ -238,6 +240,11 @@ export function EmailNodeDestinationSearch({
       onSubmit({ kind: "node", nodeID: option.id });
       return;
     }
+    if (option.kind === "standalone") {
+      resetSearch();
+      onSubmit({ kind: "standalone" });
+      return;
+    }
     if (!Number.isInteger(activePriority) || activePriority < 1 || activePriority > 5) {
       chooseOption(option);
       return;
@@ -261,8 +268,6 @@ export function EmailNodeDestinationSearch({
       });
       return;
     }
-    resetSearch();
-    onSubmit({ kind: "standalone", priority: activePriority });
   }, [busy, chooseOption, onOpenCurrentNode, onSubmit, projectLogicGateID, resetSearch, selectedPriority]);
 
   const submitCurrentSearch = React.useCallback(() => {
@@ -272,7 +277,7 @@ export function EmailNodeDestinationSearch({
     }
     const highlighted = options[highlightedIndex];
     if (!highlighted) return;
-    if (highlighted.kind === "current" || highlighted.kind === "node") runOption(highlighted);
+    if (highlighted.kind === "current" || highlighted.kind === "node" || highlighted.kind === "standalone") runOption(highlighted);
     else chooseOption(highlighted);
   }, [chooseOption, highlightedIndex, options, runOption, selectedOption]);
 
@@ -400,7 +405,7 @@ export function EmailNodeDestinationSearch({
           }}
         >
           <div style={{ color: "#64748b", fontSize: 10, fontWeight: 800, lineHeight: 1.35 }}>
-            Click a Node to send. New destinations send when their required choices are complete.
+            Create a floating node now, or type to search Nodes, Logic Gates, and projects.
           </div>
           <div className="editor-document-scroll" style={{ maxHeight: selectedOption ? 154 : 220, overflowY: "auto", display: "grid", gap: 4 }}>
             {options.map((option, index) => {
@@ -416,7 +421,7 @@ export function EmailNodeDestinationSearch({
                   aria-selected={selected}
                   onMouseEnter={() => setHighlightedIndex(index)}
                   onClick={() => {
-                    if (option.kind === "current" || option.kind === "node") runOption(option);
+                    if (option.kind === "current" || option.kind === "node" || option.kind === "standalone") runOption(option);
                     else chooseOption(option);
                   }}
                   style={{
@@ -450,7 +455,7 @@ export function EmailNodeDestinationSearch({
             {!projectsLoading && options.length === 0 && <div style={{ color: "#64748b", fontSize: 10.5, padding: 6 }}>No matching destinations</div>}
           </div>
 
-          {selectedOption && selectedOption.kind !== "current" && selectedOption.kind !== "node" && (
+          {selectedOption && (selectedOption.kind === "logic_gate" || selectedOption.kind === "project") && (
             <div data-email-node-destination-details="true" style={{ display: "grid", gridTemplateColumns: selectedOption.kind === "project" ? "minmax(0, 0.9fr) minmax(0, 1.1fr)" : "minmax(0, 1fr)", gap: 7, alignItems: "start" }}>
               <section aria-label="Email Node priority" style={{ minWidth: 0, display: "grid", gap: 4, color: "#64748b", fontSize: 9.5, fontWeight: 850 }}>
                 <span>Choose priority</span>
