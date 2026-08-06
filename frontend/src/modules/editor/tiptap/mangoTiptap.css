@@ -185,6 +185,35 @@
   background: transparent;
 }
 
+/* Repeat the four requested bullet shapes after the fourth nesting level. */
+.mango-tiptap-static-document ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) > li::before,
+.mango-tiptap-prosemirror ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) > li::before {
+  border: 0;
+  border-radius: 999px;
+  background: #000000;
+}
+
+.mango-tiptap-static-document ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) > li::before,
+.mango-tiptap-prosemirror ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) > li::before {
+  border: 1px solid #000000;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.mango-tiptap-static-document ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) > li::before,
+.mango-tiptap-prosemirror ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) > li::before {
+  border: 0;
+  border-radius: 1px;
+  background: #000000;
+}
+
+.mango-tiptap-static-document ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) > li::before,
+.mango-tiptap-prosemirror ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) > li::before {
+  border: 1px solid #000000;
+  border-radius: 1px;
+  background: transparent;
+}
+
 .mango-tiptap-static-document ol,
 .mango-tiptap-prosemirror ol {
   box-sizing: border-box;
@@ -201,7 +230,7 @@
 .mango-tiptap-static-document ol ol,
 .mango-tiptap-prosemirror ol ol {
   padding-inline-start: 28px;
-  list-style-type: lower-alpha;
+  list-style-type: upper-alpha;
 }
 
 .mango-tiptap-static-document ol ol ol,
@@ -216,12 +245,53 @@
 
 .mango-tiptap-static-document ol ol ol ol,
 .mango-tiptap-prosemirror ol ol ol ol {
-  list-style-type: lower-alpha;
+  list-style-type: upper-alpha;
 }
 
 .mango-tiptap-static-document ol ol ol ol > li::marker,
 .mango-tiptap-prosemirror ol ol ol ol > li::marker {
-  content: counter(list-item, lower-alpha) ")  ";
+  content: counter(list-item, upper-alpha) ")  ";
+}
+
+/* Automatic numbering repeats 1., A., 1), A) at deeper levels. */
+.mango-tiptap-static-document ol ol ol ol ol,
+.mango-tiptap-prosemirror ol ol ol ol ol {
+  list-style-type: decimal;
+}
+
+.mango-tiptap-static-document ol ol ol ol ol > li::marker,
+.mango-tiptap-prosemirror ol ol ol ol ol > li::marker {
+  content: normal;
+}
+
+.mango-tiptap-static-document ol ol ol ol ol ol,
+.mango-tiptap-prosemirror ol ol ol ol ol ol {
+  list-style-type: upper-alpha;
+}
+
+.mango-tiptap-static-document ol ol ol ol ol ol > li::marker,
+.mango-tiptap-prosemirror ol ol ol ol ol ol > li::marker {
+  content: normal;
+}
+
+.mango-tiptap-static-document ol ol ol ol ol ol ol,
+.mango-tiptap-prosemirror ol ol ol ol ol ol ol {
+  list-style-type: decimal;
+}
+
+.mango-tiptap-static-document ol ol ol ol ol ol ol > li::marker,
+.mango-tiptap-prosemirror ol ol ol ol ol ol ol > li::marker {
+  content: counter(list-item) ")  ";
+}
+
+.mango-tiptap-static-document ol ol ol ol ol ol ol ol,
+.mango-tiptap-prosemirror ol ol ol ol ol ol ol ol {
+  list-style-type: upper-alpha;
+}
+
+.mango-tiptap-static-document ol ol ol ol ol ol ol ol > li::marker,
+.mango-tiptap-prosemirror ol ol ol ol ol ol ol ol > li::marker {
+  content: counter(list-item, upper-alpha) ")  ";
 }
 
 .mango-tiptap-static-document ol > li,
@@ -231,12 +301,18 @@
   padding-inline-start: 4px;
 }
 
-.mango-tiptap-static-document li > ul,
-.mango-tiptap-static-document li > ol,
-.mango-tiptap-static-document li[data-type="taskItem"] > div > ul[data-type="taskList"],
-.mango-tiptap-prosemirror li > ul,
-.mango-tiptap-prosemirror li > ol,
-.mango-tiptap-prosemirror li[data-type="taskItem"] > div > ul[data-type="taskList"] {
+[data-mango-outline-style="indent-guides"] .mango-tiptap-static-document li > ul,
+[data-mango-outline-style="indent-guides"] .mango-tiptap-static-document li > ol,
+[data-mango-outline-style="indent-guides"] .mango-tiptap-static-document li[data-type="taskItem"] > div > ul[data-type="taskList"],
+[data-mango-outline-style="indent-guides"] .mango-tiptap-prosemirror li > ul,
+[data-mango-outline-style="indent-guides"] .mango-tiptap-prosemirror li > ol,
+[data-mango-outline-style="indent-guides"] .mango-tiptap-prosemirror li[data-type="taskItem"] > div > ul[data-type="taskList"] {
+  border-left: 1px solid rgba(100, 116, 139, 0.3);
+}
+
+[data-mango-outline-style="indent-guides"] .mango-tiptap-static-document [data-indent-level]:not([data-indent-level="0"]),
+[data-mango-outline-style="indent-guides"] .mango-tiptap-prosemirror [data-indent-level]:not([data-indent-level="0"]) {
+  padding-left: 8px;
   border-left: 1px solid rgba(100, 116, 139, 0.3);
 }
 

@@ -530,6 +530,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
       key={`${props.companyID}:${props.surfaceKind}:${props.surfaceKind === "project" ? props.attachmentResourceID ?? props.nodeID : props.nodeID}:${props.blockID}`}
       value={props.documentValue}
       editable={props.editable}
+      outlineStyle={props.outlineStyle}
       ariaLabel={`${props.surfaceKind === "project" ? "Project" : "Node"} text box`}
       dataAttributes={{
         "data-node-text-block-id": props.surfaceKind === "project" ? undefined : props.blockID,

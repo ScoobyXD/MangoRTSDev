@@ -1,14 +1,16 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Editor, type AnyExtension } from "@tiptap/core";
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from "@tiptap/react";
-import { TextSelection, type Transaction } from "@tiptap/pm/state";
+import { NodeSelection, TextSelection, type Transaction } from "@tiptap/pm/state";
 import {
   downloadMangoAttachment,
+  fetchMangoAttachmentBlob,
   loadMangoAttachmentObjectURL,
   uploadMangoAttachment,
 } from "../../attachments/attachmentApi";
 import { realtimeEditorJSONScope, subscribeRealtimeScope } from "../../realtime/realtimeWebSocket";
 import type { MentionableCompanyUser } from "../editorMentions";
+import { createEditorImageClipboardHTML, writeEditorImageToSystemClipboard, writeImageClipboardData, type EditorImageData } from "../editorImages.js";
 import { EditorImagePreviewModal } from "../EditorImagePreviewModal.js";
 import { EditorSelectionNodeIcon } from "../../../icons/index.js";
 import { ChatIcon } from "../NodeWorkspaceSurfaceShared.js";
@@ -51,6 +53,7 @@ import {
   EDITOR_DOCUMENT_MAX_FONT_SIZE_PX,
   EDITOR_DOCUMENT_MIN_FONT_SIZE_PX,
 } from "../useEditorPreferences";
+import { DEFAULT_EDITOR_OUTLINE_STYLE, type EditorOutlineStyleID } from "../plainTextEditing.js";
 import {
   MangoTiptapAnnotations,
   durableMangoTiptapAnnotations,
@@ -71,6 +74,7 @@ import {
 } from "./mangoTiptapDocument.js";
 import {
   createMangoTiptapExtensions,
+  handleMangoTiptapOutlineEnter,
   indentMangoTiptapSelection,
   MangoAttachmentImage,
   hideMangoTiptapPasteLoading,
@@ -126,6 +130,7 @@ export type MangoTiptapImageAction = {
 export type MangoTiptapEditorProps = {
   value?: string;
   editable?: boolean;
+  outlineStyle?: EditorOutlineStyleID;
   ariaLabel: string;
   placeholder?: string;
   dataAttributes?: Record<string, string | undefined>;
@@ -203,6 +208,72 @@ function normalizedMentionUsers(users: readonly MentionableCompanyUser[]) {
       email: user.email?.trim(),
     }];
   });
+}
+
+function selectedMangoTiptapImageData(editor: Editor): EditorImageData | null {
+  const selection = editor.state.selection;
+  if (!(selection instanceof NodeSelection) || selection.node.type.name !== "mangoAttachmentImage") return null;
+  const attributes = selection.node.attrs as MangoAttachmentImageAttributes;
+  const nodeDOM = editor.view.nodeDOM(selection.from);
+  const renderedImage = nodeDOM instanceof HTMLImageElement
+    ? nodeDOM
+    : nodeDOM instanceof Element
+      ? nodeDOM.querySelector<HTMLImageElement>("img")
+      : null;
+  const width = Math.max(1, Math.round(
+    Number(attributes.displayWidth)
+      || Number(attributes.width)
+      || renderedImage?.naturalWidth
+      || 1,
+  ));
+  const height = Math.max(1, Math.round(
+    Number(attributes.displayHeight)
+      || Number(attributes.height)
+      || renderedImage?.naturalHeight
+      || 1,
+  ));
+  return {
+    src: renderedImage?.getAttribute("src")?.trim() || "",
+    alt: attributes.alt?.trim() || attributes.filename?.trim() || "Image",
+    attachmentID: attributes.attachmentId?.trim() || undefined,
+    filename: attributes.filename?.trim() || "Image",
+    mimeType: attributes.mimeType?.trim() || undefined,
+    width,
+    height,
+    floatSide: attributes.alignment === "right" ? "right" : "left",
+  };
+}
+
+function copySelectedMangoTiptapImage(
+  editor: Editor,
+  event: ClipboardEvent,
+  attachmentContext?: EditorImageAttachmentContext,
+): boolean {
+  const data = selectedMangoTiptapImageData(editor);
+  if (!data) return false;
+  const ownerDocument = editor.view.dom.ownerDocument;
+  const eventHTML = createEditorImageClipboardHTML(ownerDocument, data);
+  const wroteEventClipboard = event.clipboardData
+    ? writeImageClipboardData(event.clipboardData, data.src, eventHTML, data.filename)
+    : false;
+  const attachmentID = data.attachmentID?.trim() || "";
+  const context = attachmentContext?.apiBase.trim() && attachmentContext.companyID.trim()
+    ? attachmentContext
+    : undefined;
+  const wroteSystemClipboard = writeEditorImageToSystemClipboard(
+    ownerDocument,
+    data,
+    attachmentID && context
+      ? () => fetchMangoAttachmentBlob(context.apiBase, context.companyID, attachmentID, "original")
+      : data.src.startsWith("blob:") ? async () => {
+        const response = await fetch(data.src);
+        if (!response.ok) throw new Error("failed_to_read_editor_image");
+        return response.blob();
+      } : undefined,
+  );
+  if (!wroteEventClipboard && !wroteSystemClipboard) return false;
+  event.preventDefault();
+  return true;
 }
 
 export type AuthenticatedImageProps = {
@@ -484,6 +555,7 @@ export const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
         ref={frameRef}
         data-mango-tiptap-image-frame="true"
         data-drag-handle={editable ? "true" : undefined}
+        draggable={editable}
         style={{ position: "relative", display: "inline-block", maxWidth: attributes.layout === "wide" ? "100%" : "min(100%, 840px)", lineHeight: 0, cursor: "pointer" }}
       >
         {objectURL ? (
@@ -623,6 +695,7 @@ function attachmentNodeViewExtension(
 export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   value,
   editable = true,
+  outlineStyle = DEFAULT_EDITOR_OUTLINE_STYLE,
   ariaLabel,
   placeholder,
   dataAttributes,
@@ -685,6 +758,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const mentionUsersRef = useRef(normalizedMentionUsers(mentionUsers));
   const entityLinkActionRef = useRef(onEntityLink);
   const universalPickerDraftRef = useRef<UniversalPickerDraft | null>(null);
+  const outlineStyleRef = useRef(outlineStyle);
   mentionUsersRef.current = normalizedMentionUsers(mentionUsers);
   const currentDocumentRef = useRef(initial.document);
   const ownerAnnotationsRef = useRef<readonly MangoTiptapAnnotation[]>(annotations);
@@ -710,6 +784,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const [renderedAnnotations, setRenderedAnnotations] = useState<readonly MangoTiptapAnnotation[]>(annotations);
   const [tableActive, setTableActive] = useState(false);
   const [universalPickerDraft, setUniversalPickerDraft] = useState<UniversalPickerDraft | null>(null);
+  const [tableContextMenu, setTableContextMenu] = useState<{ left: number; top: number } | null>(null);
   const latestTargetRequestRef = useRef(0);
   const callbacksRef = useRef({
     onFocus, onBlur, onConflict, onError, onSaveStateChange,
@@ -732,6 +807,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   formattingControllerActiveRef.current = formattingControllerActive;
   ownerAnnotationsRef.current = annotations;
   entityLinkActionRef.current = onEntityLink;
+  outlineStyleRef.current = outlineStyle;
 
   useLayoutEffect(() => {
     recordEditorTraceDuration(traceContext, "react.mango_tiptap_editor.commit", "react.commit", traceRenderStartedAt, {
@@ -1029,7 +1105,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       let attempts = 0;
       const focusAtPointer = () => {
         const editor = editorRef.current;
-        if (!editor) {
+        if (!editor || !root.contains(editor.view.dom)) {
           attempts += 1;
           if (attempts < 8) window.requestAnimationFrame(focusAtPointer);
           return;
@@ -1273,13 +1349,47 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
               return true;
             }
           }
-          if (event.key !== "Tab") return false;
-          if (typeof window !== "undefined" && window.document.querySelector('[data-mango-tiptap-mention-menu="true"], [data-mango-universal-picker="true"]')) return false;
           const current = editorRef.current;
-          if (!current) return false;
-          if (current.isActive("table")) return false;
+          if (event.key === "Escape") {
+            setTableContextMenu(null);
+            return false;
+          }
+          const suggestionOpen = typeof window !== "undefined"
+            && Boolean(window.document.querySelector('[data-mango-tiptap-mention-menu="true"], [data-mango-universal-picker="true"]'));
+          if (suggestionOpen && (event.key === "Enter" || event.key === "Tab")) return false;
+          if (current && event.key === "Enter" && !event.shiftKey && handleMangoTiptapOutlineEnter(current, outlineStyleRef.current)) {
+            event.preventDefault();
+            return true;
+          }
+          if (event.key !== "Tab" || !current) return false;
           event.preventDefault();
           return event.shiftKey ? outdentMangoTiptapSelection(current) : indentMangoTiptapSelection(current);
+        },
+        handleDOMEvents: {
+          copy: (_view, event) => {
+            const current = editorRef.current;
+            if (!current) return false;
+            return copySelectedMangoTiptapImage(current, event as ClipboardEvent, attachmentContextRef.current);
+          },
+          contextmenu: (view, event) => {
+            const target = event.target instanceof Element ? event.target : null;
+            const cell = target?.closest("td,th");
+            const root = rootRef.current;
+            if (!cell || !root || !view.dom.contains(cell)) return false;
+            event.preventDefault();
+            try {
+              const position = Math.min(view.state.doc.content.size, view.posAtDOM(cell, 0) + 1);
+              view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(position))));
+            } catch {
+              return false;
+            }
+            const rootRect = root.getBoundingClientRect();
+            setTableContextMenu({
+              left: event.clientX - rootRect.left + root.scrollLeft,
+              top: event.clientY - rootRect.top + root.scrollTop,
+            });
+            return true;
+          },
         },
         handleClickOn: (_view, _pos, node, _nodePos, event) => {
           if (node.type.name !== "mangoEntityLink") return false;
@@ -1557,6 +1667,32 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     }
   }, [companyID, creatingSelectionNode, requestJSON, selectionAction]);
 
+  const runTableContextCommand = useCallback((command: "add-row-before" | "add-row-after" | "add-column-before" | "add-column-after" | "delete-row" | "delete-column" | "delete-table") => {
+    const editor = editorRef.current;
+    setTableContextMenu(null);
+    if (!editor) return;
+    const chain = editor.chain().focus();
+    if (command === "add-row-before") chain.addRowBefore().run();
+    else if (command === "add-row-after") chain.addRowAfter().run();
+    else if (command === "add-column-before") chain.addColumnBefore().run();
+    else if (command === "add-column-after") chain.addColumnAfter().run();
+    else if (command === "delete-row") chain.deleteRow().run();
+    else if (command === "delete-column") chain.deleteColumn().run();
+    else chain.deleteTable().run();
+  }, []);
+
+  useEffect(() => {
+    if (!tableContextMenu) return undefined;
+    const ownerDocument = rootRef.current?.ownerDocument;
+    if (!ownerDocument) return undefined;
+    const closeFromOutside = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target?.closest('[data-mango-tiptap-table-context-menu="true"]')) setTableContextMenu(null);
+    };
+    ownerDocument.addEventListener("pointerdown", closeFromOutside, true);
+    return () => ownerDocument.removeEventListener("pointerdown", closeFromOutside, true);
+  }, [tableContextMenu]);
+
   const renderStaticAttachment = useCallback((attributes: MangoStaticAttachmentImageProps) => (
     <MangoAuthenticatedImage attributes={attributes} attachmentContext={attachmentContext} />
   ), [attachmentContext]);
@@ -1569,6 +1705,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       style={{ position: "relative", minWidth: 0, minHeight: 0, ...style }}
       data-mango-editor-format="tiptap_json"
       data-mango-editor-editable={editable || undefined}
+      data-mango-outline-style={outlineStyle}
       data-mango-editor-state={lifecycleRef.current.getSnapshot().state}
       data-mango-editor-pinned={lifecycleRef.current.getSnapshot().pinned || undefined}
       data-mango-editor-sync-mode="revisioned-json"
@@ -1603,6 +1740,36 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           <button type="button" disabled={resolvingConflict} onClick={() => void pendingConflict.resolve("use-canonical").catch(() => undefined)}>Use saved version</button>
         </div>
       ) : (error || recoveryStorageError) && <div role="alert" style={{ color: "#b91c1c", fontSize: 12, padding: "4px 8px" }}>{error || recoveryStorageError}</div>}
+      {isActive && editable && tableContextMenu && (
+        <div
+          role="menu"
+          aria-label="Table actions"
+          data-mango-tiptap-table-context-menu="true"
+          contentEditable={false}
+          onPointerDown={(event) => event.preventDefault()}
+          style={{ position: "absolute", left: tableContextMenu.left, top: tableContextMenu.top, zIndex: 14, display: "grid", minWidth: 190, gap: 2, padding: 5, border: "1px solid #94a3b8", borderRadius: 9, background: "#ffffff", boxShadow: "0 12px 30px rgba(15,23,42,0.2)" }}
+        >
+          {([
+            ["add-column-before", "Create column on the left"],
+            ["add-column-after", "Create column on the right"],
+            ["add-row-before", "Create row above"],
+            ["add-row-after", "Create row below"],
+            ["delete-row", "Delete row"],
+            ["delete-column", "Delete column"],
+            ["delete-table", "Delete table"],
+          ] as const).map(([command, label]) => (
+            <button
+              key={command}
+              type="button"
+              role="menuitem"
+              onClick={() => runTableContextCommand(command)}
+              style={{ padding: "6px 9px", border: 0, borderRadius: 6, background: "transparent", color: command.startsWith("delete") ? "#dc2626" : "#0f172a", font: "inherit", textAlign: "left", cursor: "pointer" }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       {isActive && editable && tableActive && (
         <div role="toolbar" aria-label="Table controls" contentEditable={false} style={{ position: "absolute", right: 8, top: 8, zIndex: 11, display: "flex", flexWrap: "wrap", gap: 4, padding: 4, border: "1px solid #bae6fd", borderRadius: 8, background: "#ffffff" }}>
           <button type="button" onClick={() => editorRef.current?.chain().focus().addRowAfter().run()}>Add row</button>

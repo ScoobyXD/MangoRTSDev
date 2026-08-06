@@ -117,6 +117,7 @@ function renderNode(
   const children = renderChildren(node, renderAttachmentImage, annotations, position);
   const blockProps = {
     "data-mango-block-id": attrs.blockId ? String(attrs.blockId) : undefined,
+    "data-indent-level": attrs.indentLevel ? String(attrs.indentLevel) : undefined,
   };
   const style: React.CSSProperties = {
     textAlign: attrs.textAlign as React.CSSProperties["textAlign"],

@@ -31,6 +31,7 @@ import {
 } from "../../../../frontend/src/modules/editor/editorDataFormat.js";
 import {
   createMangoTiptapExtensions,
+  handleMangoTiptapOutlineEnter,
   indentMangoTiptapSelection,
   MangoTiptapEditorEngine,
   normalizeMangoTiptapBlockIDs,
@@ -520,13 +521,37 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
       "moving past the first unformatted character clears the toolbar state",
     );
 
-    editor.commands.setContent({ type: "doc", content: [{ type: "paragraph", attrs: { indentLevel: 0 }, content: [{ type: "text", text: "plain" }] }] });
+    editor.commands.setContent({ type: "doc", content: [
+      { type: "paragraph", attrs: { blockId: "indent-current", indentLevel: 0 }, content: [{ type: "text", text: "plain" }] },
+      { type: "paragraph", attrs: { blockId: "indent-neighbor", indentLevel: 0 }, content: [{ type: "text", text: "neighbor" }] },
+    ] });
     editor.commands.setTextSelection(3);
     assert.equal(indentMangoTiptapSelection(editor), true);
-    assert.equal(editor.state.doc.textContent, "pl\tain");
-    assert.equal(editor.getAttributes("paragraph").indentLevel, 0, "plain Tab must not indent the entire paragraph block");
+    assert.equal(editor.state.doc.textContent, "plainneighbor", "Tab changes block indentation without inserting a tab character");
+    assert.equal(editor.state.doc.child(0).attrs.indentLevel, 1, "Tab indents only the row containing the caret");
+    assert.equal(editor.state.doc.child(1).attrs.indentLevel, 0, "Tab leaves the neighboring row unchanged");
     assert.equal(outdentMangoTiptapSelection(editor), true);
-    assert.equal(editor.state.doc.textContent, "plain");
+    assert.equal(editor.state.doc.child(0).attrs.indentLevel, 0);
+
+    for (const [outlineStyle, expectedList] of [
+      ["automatic-outline-numbering", "orderedList"],
+      ["bullet-list", "bulletList"],
+      ["checklist", "taskList"],
+    ] as const) {
+      editor.commands.setContent({ type: "doc", content: [{ type: "paragraph" }] });
+      editor.commands.setTextSelection(1);
+      assert.equal(handleMangoTiptapOutlineEnter(editor, outlineStyle), true, `Enter starts ${outlineStyle} on an empty row`);
+      assert.equal(editor.state.doc.firstChild?.type.name, expectedList);
+    }
+
+    editor.commands.setContent({ type: "doc", content: [
+      { type: "paragraph", content: [{ type: "text", text: "ordinary row" }] },
+    ] });
+    editor.commands.setTextSelection(9);
+    assert.equal(handleMangoTiptapOutlineEnter(editor, "bullet-list"), true);
+    assert.equal(editor.state.doc.child(0).textContent, "ordinary");
+    assert.equal(editor.state.doc.child(1).type.name, "bulletList", "Enter starts the selected bullet mode on only the new row");
+    assert.equal(editor.state.doc.child(1).textContent, " row");
 
     editor.commands.setContent({
       type: "doc",

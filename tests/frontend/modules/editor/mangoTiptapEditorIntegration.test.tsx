@@ -201,10 +201,13 @@ test("static JSON renderer paints true ProseMirror ranges across blocks, lists, 
   assert.match(presentationCSS, /background:\s*linear-gradient\(135deg, rgba\(254, 255, 102, 0\.72\), rgba\(250, 232, 28, 0\.58\)\)/);
   assert.match(presentationCSS, /data-mango-legacy-leading-date-heading="true"/);
   assert.match(presentationCSS, /margin-top:\s*20px/);
-  assert.match(presentationCSS, /ol ol[^}]+list-style-type:\s*lower-alpha/s);
+  assert.match(presentationCSS, /ol ol[^}]+list-style-type:\s*upper-alpha/s);
   assert.match(presentationCSS, /ol ol ol > li::marker[^}]+counter\(list-item\) "\)  "/s);
-  assert.match(presentationCSS, /ol ol ol ol > li::marker[^}]+counter\(list-item, lower-alpha\) "\)  "/s);
-  assert.match(presentationCSS, /li > (?:ul|ol)[\s\S]+border-left:\s*1px solid rgba\(100, 116, 139, 0\.3\)/);
+  assert.match(presentationCSS, /ol ol ol ol > li::marker[^}]+counter\(list-item, upper-alpha\) "\)  "/s);
+  assert.match(presentationCSS, /Automatic numbering repeats 1\., A\., 1\), A\)/);
+  assert.match(presentationCSS, /Repeat the four requested bullet shapes after the fourth nesting level/);
+  assert.match(presentationCSS, /\[data-mango-outline-style="indent-guides"\][\s\S]+li > (?:ul|ol)[\s\S]+border-left:\s*1px solid rgba\(100, 116, 139, 0\.3\)/);
+  assert.doesNotMatch(presentationCSS, /^\.mango-tiptap-(?:static-document|prosemirror) li > (?:ul|ol),[^{]*\{[^}]*border-left:/m);
   assert.match(presentationCSS, /\.mango-tiptap-prosemirror table[^}]+border-collapse:\s*collapse/s);
   assert.match(presentationCSS, /\.mango-tiptap-prosemirror td[^}]+border:\s*1px solid #94a3b8/s);
 });
@@ -238,6 +241,32 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
   installGlobal("indexedDB", fakeIndexedDB, restores);
   installGlobal("IDBKeyRange", IDBKeyRange, restores);
   installGlobal("IS_REACT_ACT_ENVIRONMENT", true, restores);
+  const systemClipboardItems: TestClipboardItem[] = [];
+  class TestClipboardItem {
+    static supports(type: string) { return ["image/png", "text/html", "text/plain"].includes(type); }
+    constructor(readonly data: Record<string, Blob | Promise<Blob>>) {}
+  }
+  class TestFileReader {
+    result: string | ArrayBuffer | null = null;
+    error: DOMException | null = null;
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    readAsDataURL() {
+      this.result = "data:image/png;base64,aW1hZ2UtYnl0ZXM=";
+      queueMicrotask(() => this.onload?.());
+    }
+  }
+  installGlobal("ClipboardItem", TestClipboardItem, restores);
+  installGlobal("FileReader", TestFileReader, restores);
+  const clipboardDescriptor = Object.getOwnPropertyDescriptor(dom.window.navigator, "clipboard");
+  Object.defineProperty(dom.window.navigator, "clipboard", {
+    configurable: true,
+    value: { write: async (items: TestClipboardItem[]) => { systemClipboardItems.push(...items); } },
+  });
+  restores.push(() => {
+    if (clipboardDescriptor) Object.defineProperty(dom.window.navigator, "clipboard", clipboardDescriptor);
+    else delete (dom.window.navigator as Navigator & { clipboard?: Clipboard }).clipboard;
+  });
   const imageFetchURLs: string[] = [];
   const NativeResponse = globalThis.Response;
   installGlobal("fetch", async (input: RequestInfo | URL) => {
@@ -491,6 +520,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     assert.equal(activeProseMirror.querySelector('[data-mango-annotation-id="annotation-image"]'), null, "dormant changes must not decorate active surfaces");
     assert.equal(activeProseMirror.parentElement?.classList.contains("mango-tiptap-active-surface"), true, "the active EditorContent wrapper must fill the full text box");
     assert.equal(activeProseMirror.getAttribute("contenteditable"), "true", "the clicked JSON document should become a real editable surface");
+    assert.equal(dom.window.document.activeElement, activeProseMirror, "the first pointer activation must focus the attached editor without requiring a second click");
     assert.equal(activeProseMirror.dataset.mangoLegacyLeadingDateHeading, "true");
 
     const selectionPublicationsBeforeStableRerender = selectionInlineFormats.length;
@@ -556,6 +586,25 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     assert.ok(activeImageFrame);
     await waitFor(() => activeImageFrame.dataset.selected === "true", "the persisted image alignment must preserve its node selection");
     assert.equal(activeImageFrame.closest(".node-mangoAttachmentImage")?.getAttribute("draggable"), "true", "the selected inline image remains movable through Tiptap drag and drop");
+    assert.equal(activeImageFrame.querySelector('[data-mango-tiptap-image-frame="true"]')?.getAttribute("draggable"), "true", "dragging the visible image frame starts a real node move");
+    const copiedEventData = new Map<string, string>();
+    const copyClipboardData = {
+      setData: (type: string, copiedValue: string) => { copiedEventData.set(type, copiedValue); },
+      getData: (type: string) => copiedEventData.get(type) ?? "",
+    } as unknown as DataTransfer;
+    const originalImageRequestsBeforeCopy = imageFetchURLs.filter((url) => url.includes("variant=original")).length;
+    const imageCopyEvent = new dom.window.Event("copy", { bubbles: true, cancelable: true });
+    Object.defineProperty(imageCopyEvent, "clipboardData", { configurable: true, value: copyClipboardData });
+    await act(async () => { activeProseMirror.dispatchEvent(imageCopyEvent); });
+    assert.equal(imageCopyEvent.defaultPrevented, true, "copying a selected Tiptap image must replace the private ProseMirror node clipboard");
+    assert.match(copiedEventData.get("text/html") ?? "", /data-mango-editor-image="true"/, "the synchronous clipboard keeps a Mango round-trip fallback");
+    assert.equal(copiedEventData.get("text/plain"), "image.png");
+    await waitFor(() => systemClipboardItems.length === 1, "selected image copy should publish a portable system clipboard item");
+    const portableImagePayload = systemClipboardItems[0].data;
+    assert.equal((await portableImagePayload["image/png"]).type, "image/png", "the system clipboard receives actual image bytes");
+    assert.match(await (await portableImagePayload["text/html"]).text(), /<img src="data:image\/png;base64,aW1hZ2UtYnl0ZXM="/, "portable HTML embeds image bytes instead of a Mango attachment reference");
+    assert.equal(await (await portableImagePayload["text/plain"]).text(), "image.png");
+    assert.ok(imageFetchURLs.filter((url) => url.includes("variant=original")).length > originalImageRequestsBeforeCopy, "copy reloads the authorized original attachment bytes");
     assert.equal(activeImageFrame.style.cursor, "pointer", "inline images use the hand-selection cursor instead of the editor text caret");
     assert.ok(activeImageFrame.querySelector('[data-mango-inline-image-download="true"]'), "the selected image exposes an icon-only download control attached to its frame");
     assert.ok(activeImageFrame.querySelector('[data-mango-tiptap-image-comment="true"]'), "the selected image exposes the same comment icon action as selected text");
@@ -563,6 +612,24 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     assert.equal(activeImageFrame.querySelectorAll("[data-mango-tiptap-image-resize-handle]").length, 8, "the selected image can resize from every edge and corner");
     assert.equal(Array.from(activeImageFrame.querySelectorAll("button")).some((button) => ["Move", "Delete", "Download", "Preview", "Left", "Center", "Right", "Wide", "Resize"].includes(button.textContent?.trim() ?? "")), false, "the detached labeled image button strip is removed");
     assert.equal(editorRoot.querySelector('[aria-label="Highlighted text actions"]'), null, "image node selections must not open the text-selection toolbar");
+    const activeTableCell = activeProseMirror.querySelector<HTMLElement>("td");
+    assert.ok(activeTableCell);
+    const tableContextEvent = new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: 40, clientY: 50 });
+    await act(async () => { activeTableCell.dispatchEvent(tableContextEvent); });
+    assert.equal(tableContextEvent.defaultPrevented, true, "right-clicking a table cell opens Mango's table menu");
+    await waitFor(() => Boolean(editorRoot.querySelector('[role="menu"][aria-label="Table actions"]')), "the table context menu should become visible");
+    const addColumnRight = Array.from(editorRoot.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+      .find((button) => button.textContent?.trim() === "Create column on the right");
+    assert.ok(addColumnRight);
+    await act(async () => { addColumnRight.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, button: 0 })); });
+    await waitFor(() => activeProseMirror.querySelectorAll("table tr:first-child td, table tr:first-child th").length === 2, "the right-click command should add a table column");
+    assert.equal(editorRoot.querySelector('[role="menu"][aria-label="Table actions"]'), null, "a completed table command closes the context menu");
+    await waitFor(() => postStarted, "the table command must use the normal durable document save");
+    releasePost?.();
+    await waitFor(() => editorRoot.dataset.mangoEditorPinned !== "true", "the table mutation save must receive its backend acknowledgement");
+    postStarted = false;
+    postedDocument = null;
+    releasePost = undefined;
     await act(async () => {
       activeImageFrame.dispatchEvent(new dom.window.MouseEvent("dblclick", { bubbles: true, cancelable: true, button: 0 }));
     });
