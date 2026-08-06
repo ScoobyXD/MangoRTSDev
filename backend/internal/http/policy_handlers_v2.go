@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
@@ -124,6 +125,9 @@ func (s *Server) handleResourceSubresource(w http.ResponseWriter, r *http.Reques
 			ExpectedRevision: r.Header.Get("If-Match"), ActorUserID: actorUserID,
 			IdempotencyKey: policyIdempotencyKey(r, req.IdempotencyKey),
 		})
+		if err != nil {
+			log.Printf("failed to update v2 gvic policy company_id=%s resource_type=%s resource_id=%s: %v", req.CompanyID, resourceType, resourceID, err)
+		}
 		if writeV2PolicyError(w, err, "failed_to_update_gvic_policy") {
 			return
 		}
@@ -227,6 +231,9 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 		DescendantAction: req.DescendantAction, ExpectedRevision: r.Header.Get("If-Match"),
 		ActorUserID: actor.User.UserID, IdempotencyKey: policyIdempotencyKey(r, req.IdempotencyKey),
 	})
+	if err != nil {
+		log.Printf("failed to update v2 permission policy company_id=%s resource_type=%s resource_id=%s: %v", req.CompanyID, entityType, entityID, err)
+	}
 	if writeV2PolicyErrorWithNotFound(w, err, "failed_to_update_permission_policy", notFoundCode) {
 		return
 	}

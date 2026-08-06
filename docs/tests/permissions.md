@@ -9,6 +9,8 @@ Direct-user, nearest live nested-group, and default rules are evaluated in that 
 Reads hide inaccessible data; mutations require Edit; GVIC never grants authority
 ↓
 Moves, resets, group changes, and ETags resolve current state without descendant policy rewrites
+↓
+Save is explicit; closing a permission dialog always dismisses it and never traps the user behind a failed write
 
 Last updated: 2026-08-05
 
@@ -16,7 +18,7 @@ Last updated: 2026-08-05
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Explicit Save visibility is covered by `tests/frontend/modules/editor/emailViewerContract.test.ts`; close-with-save and duplicate-write prevention still require focused interaction coverage.
+- Explicit Save visibility is covered by `tests/frontend/modules/editor/emailViewerContract.test.ts`; X/Escape dismissal without save or duplicate retry is covered by `tests/frontend/modules/permissions/entityPermissionsDialogContract.test.ts`.
 - Business Logic Covered By Automated Tests: backend, HTTP, frontend contract, disposable PostgreSQL, scale, and regression coverage for V2 defaults, complete policies, inheritance, force resets, moves, detach, live groups, authorization, and ETags. Rule ID mapping remains partial.
 
 ## Business Logic
@@ -64,7 +66,7 @@ P40 - Group permission rows are pointers to the group or subgroup; adding a user
 P41 - A direct user rule overrides groups. The nearest matching group wins; at equal depth No Access beats Edit, then stable group identity breaks ties. Default applies only when no direct or group rule matches.
 P42 - Apply to inherited descendants saves the selected policy if needed and writes no descendant policy state. Inherited branches already resolve it live, and active customized boundaries remain protected.
 P43 - Overwrite all descendants uses one reset sequence that also supersedes older customized descendants. A later descendant customization becomes active again.
-P44 - Every permissions dialog and embedded permissions view, including Company Explorer folders, nodes, Logic Gates, projects, shared inboxes, and Shared Triage entry points, exposes an explicit `Save` button in a stable action area. Save commits the current default, user/group, and descendant selections without closing. Editable dialogs retain close-with-save for pending changes, but closing after a successful explicit Save must not issue a duplicate write.
+P44 - Every permissions dialog and embedded permissions view, including Company Explorer folders, nodes, Logic Gates, projects, shared inboxes, and Shared Triage entry points, exposes an explicit `Save` button in a stable action area. Save commits the current default, user/group, and descendant selections without closing. The X, Escape, and modal-dismiss actions close without saving, remain available after a failed write, and never issue a duplicate write.
 P45 - Runtime authorization resolves group permission rows from group source tables and group membership source rows; permission checks must not require a derived group closure/projection table to be populated.
 P46 - Ordinary policy writes do not walk descendants. Force-overwrite work stays constant-size as the subtree grows.
 P47 - Settings contain inherited/customized mode, customized sequence, parent-link sequence, and descendant-reset sequence; direct rows exist only for a customized complete policy.

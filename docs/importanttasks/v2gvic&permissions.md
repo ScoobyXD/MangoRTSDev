@@ -983,6 +983,14 @@ Fresh databases create the four final policy tables directly in their Step 2 sta
 
 Prove the V2 runtime is authoritative, then remove every old policy table, column, trigger, function, code path, test assumption, and migration-only staging object.
 
+### Post-retirement save incident
+
+After the one-transaction retirement script was run on August 5, 2026, the operator reported that GVIC and permission edits would not save and that the permission-dialog X retried the failed write instead of dismissing the dialog. Reproducing the same retirement set on an isolated fresh schema proved that direct writes to both final settings/edge pairs and both final resolvers still succeed after the retired tables are absent. No guessed legacy table or fallback was restored.
+
+The dialog trap was an independent frontend defect: close was implemented as close-after-save. Close, Escape, and modal dismissal now discard pending edits and remain available even when a write fails; Save remains the only commit action. Focused frontend contract coverage enforces that rule.
+
+The live write failure itself requires the exact repository error from the historically migrated database. V2 GVIC and permission PUT failures now log company/resource identity plus the underlying error in the backend terminal. Do not rerun Step 1/Step 2, recreate retired tables, or apply a guessed live repair before that error is captured and matched to a forward-only correction.
+
 ### Required verification
 
 1. Run the complete repository gate.
