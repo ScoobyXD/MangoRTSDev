@@ -16,10 +16,16 @@ import {
   createNodeEntityFromSelection,
   normalizeEditorSelectionNodeTitle,
   openEditorEntityLink,
-  searchEditorEntityLinks,
   type EditorEntityLink,
+  type EditorEntityType,
 } from "../editorEntityLinks.js";
 import { calculateEditorSelectionActionPosition } from "../editorSelectionActions.js";
+import {
+  UniversalEntityPicker,
+  type UniversalEntityPickerAnchor,
+  type UniversalEntityPickerMode,
+} from "../UniversalEntityPicker.js";
+
 import { MangoEditorLifecycle, type MangoEditorLifecycleSnapshot } from "../editorLifecycle";
 import { incrementEditorRuntimeMetric, trackEditorRuntimeResource } from "../editorRuntimeMetrics";
 import {
@@ -135,6 +141,7 @@ export type MangoTiptapEditorProps = {
   attachmentContext?: EditorImageAttachmentContext;
   mentionUsers?: MentionableCompanyUser[];
   onEntityOpen?: (entity: EditorEntityLink) => void;
+  onEntityLink?: (entity: EditorEntityLink) => Promise<void>;
   annotations?: MangoTiptapAnnotation[];
   target?: MangoTiptapTarget | null;
   onTargetHandled?: (requestID: number) => void;
@@ -163,6 +170,15 @@ export type MangoTiptapEditorProps = {
 
 const EMPTY_MENTION_USERS: readonly MentionableCompanyUser[] = [];
 const EMPTY_ANNOTATIONS: readonly MangoTiptapAnnotation[] = [];
+const NODE_LINK_TARGET_TYPES: readonly EditorEntityType[] = ["logic_gate", "project"];
+const LOGIC_GATE_LINK_TARGET_TYPES: readonly EditorEntityType[] = ["project"];
+const EMPTY_LINK_TARGET_TYPES: readonly EditorEntityType[] = [];
+
+type UniversalPickerDraft = {
+  from: number;
+  to: number;
+  anchor: UniversalEntityPickerAnchor;
+};
 
 function documentWithUniqueBlockIDs(document: MangoTiptapDocument): MangoTiptapDocument {
   const normalized = normalizeMangoTiptapBlockIDs(document.document);
@@ -622,6 +638,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   mentionUsers = EMPTY_MENTION_USERS,
   onEntityOpen,
   annotations = EMPTY_ANNOTATIONS,
+  onEntityLink,
   target,
   onTargetHandled,
   formattingControllerRef,
@@ -666,6 +683,8 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const attachmentContextRef = useRef(attachmentContext);
   const imageActionsRef = useRef({ onImageChatRequest, onImageNodeRequest });
   const mentionUsersRef = useRef(normalizedMentionUsers(mentionUsers));
+  const entityLinkActionRef = useRef(onEntityLink);
+  const universalPickerDraftRef = useRef<UniversalPickerDraft | null>(null);
   mentionUsersRef.current = normalizedMentionUsers(mentionUsers);
   const currentDocumentRef = useRef(initial.document);
   const ownerAnnotationsRef = useRef<readonly MangoTiptapAnnotation[]>(annotations);
@@ -690,6 +709,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const [creatingSelectionNode, setCreatingSelectionNode] = useState(false);
   const [renderedAnnotations, setRenderedAnnotations] = useState<readonly MangoTiptapAnnotation[]>(annotations);
   const [tableActive, setTableActive] = useState(false);
+  const [universalPickerDraft, setUniversalPickerDraft] = useState<UniversalPickerDraft | null>(null);
   const latestTargetRequestRef = useRef(0);
   const callbacksRef = useRef({
     onFocus, onBlur, onConflict, onError, onSaveStateChange,
@@ -711,6 +731,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   imageActionsRef.current = { onImageChatRequest, onImageNodeRequest };
   formattingControllerActiveRef.current = formattingControllerActive;
   ownerAnnotationsRef.current = annotations;
+  entityLinkActionRef.current = onEntityLink;
 
   useLayoutEffect(() => {
     recordEditorTraceDuration(traceContext, "react.mango_tiptap_editor.commit", "react.commit", traceRenderStartedAt, {
@@ -1129,24 +1150,67 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     return true;
   }, []);
   const hasAttachmentContext = Boolean(attachmentContext);
-  const searchEntityLinksForEditor = useCallback(
-    (query: string) => searchEditorEntityLinks({ companyID, requestJSON }, query),
-    [companyID, requestJSON],
-  );
   const openEntityLink = useCallback((entity: EditorEntityLink) => {
     openEditorEntityLink(entity, { onOpen: onEntityOpen });
   }, [onEntityOpen]);
+  const updateUniversalPickerDraft = useCallback((draft: UniversalPickerDraft | null) => {
+    universalPickerDraftRef.current = draft;
+    setUniversalPickerDraft(draft);
+  }, []);
+  const linkTargetTypes = !onEntityLink
+    ? EMPTY_LINK_TARGET_TYPES
+    : resourceType === "node"
+      ? NODE_LINK_TARGET_TYPES
+      : resourceType === "logic_gate"
+        ? LOGIC_GATE_LINK_TARGET_TYPES
+        : EMPTY_LINK_TARGET_TYPES;
+  const cancelUniversalPicker = useCallback(() => {
+    const draft = universalPickerDraftRef.current;
+    updateUniversalPickerDraft(null);
+    const editor = editorRef.current;
+    if (!draft || !editor || editor.isDestroyed) return;
+    window.requestAnimationFrame(() => {
+      if (!editor.isDestroyed) editor.commands.focus(Math.min(draft.to, editor.state.doc.content.size));
+    });
+  }, [updateUniversalPickerDraft]);
+  const chooseUniversalPickerEntity = useCallback(async (entity: EditorEntityLink, mode: UniversalEntityPickerMode) => {
+    const draft = universalPickerDraftRef.current;
+    const editor = editorRef.current;
+    if (!draft || !editor || editor.isDestroyed) throw new Error("The editor is no longer available.");
+    let relationshipCompleted = false;
+    if (mode === "link") {
+      const action = entityLinkActionRef.current;
+      if (!action) throw new Error("Link mode is not available in this editor.");
+      await action(entity);
+      relationshipCompleted = true;
+    }
+    const triggerIsCurrent = draft.from >= 0
+      && draft.to <= editor.state.doc.content.size
+      && editor.state.doc.textBetween(draft.from, draft.to, "", "") === "#";
+    if (!triggerIsCurrent) {
+      updateUniversalPickerDraft(null);
+      const message = relationshipCompleted
+        ? "The resources were linked, but the editor changed before the reference chip could be inserted."
+        : "The editor changed before the reference could be inserted. Open the picker again.";
+      setError(message);
+      callbacksRef.current.onError?.(message);
+      if (!relationshipCompleted) throw new Error(message);
+      return;
+    }
+    const inserted = editor.chain().focus().insertContentAt({ from: draft.from, to: draft.to }, [
+      { type: "mangoEntityLink", attrs: { entityType: entity.entityType, entityId: entity.entityID, label: entity.label } },
+      { type: "text", text: " " },
+    ]).run();
+    if (!inserted) throw new Error("Unable to insert the selected reference.");
+    updateUniversalPickerDraft(null);
+    setError("");
+  }, [updateUniversalPickerDraft]);
   const extensions = useMemo(() => createMangoTiptapExtensions({
     editable,
     attachmentImageExtension: attachmentExtension,
     getMentionUsers: () => mentionUsersRef.current,
-    searchEntityLinks: searchEntityLinksForEditor,
-    onEntityLinkSearchError: (message) => {
-      setError(message);
-      callbacksRef.current.onError?.(message);
-    },
     onImageFiles: hasAttachmentContext ? handleImageFiles : undefined,
-  }), [attachmentExtension, editable, handleImageFiles, hasAttachmentContext, searchEntityLinksForEditor]);
+  }), [attachmentExtension, editable, handleImageFiles, hasAttachmentContext]);
 
   const isActive = editorActive;
 
@@ -1179,7 +1243,25 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           event.preventDefault();
           return true;
         },
-        handleKeyDown: (_view, event) => {
+        handleKeyDown: (view, event) => {
+          if (event.key === "#" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.isComposing) {
+            const { selection } = view.state;
+            if (selection.empty && !universalPickerDraftRef.current) {
+              event.preventDefault();
+              const from = selection.from;
+              const transaction = view.state.tr.insertText("#", from, from).scrollIntoView();
+              view.dispatch(transaction);
+              const to = from + 1;
+              const coordinates = view.coordsAtPos(to);
+              updateUniversalPickerDraft({
+                from,
+                to,
+                anchor: { left: coordinates.left, top: coordinates.bottom + 8 },
+              });
+              setSelectionAction(null);
+              return true;
+            }
+          }
           const keyboardEntityElement = (event.target as HTMLElement | null)?.closest?.('[data-mango-entity-link="true"]') as HTMLElement | null;
           if (keyboardEntityElement && (event.key === "Enter" || event.key === " ")) {
             const entityType = keyboardEntityElement.dataset.mangoEntityType;
@@ -1192,7 +1274,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
             }
           }
           if (event.key !== "Tab") return false;
-          if (typeof window !== "undefined" && window.document.querySelector('[data-mango-tiptap-mention-menu="true"], [data-mango-tiptap-entity-menu="true"]')) return false;
+          if (typeof window !== "undefined" && window.document.querySelector('[data-mango-tiptap-mention-menu="true"], [data-mango-universal-picker="true"]')) return false;
           const current = editorRef.current;
           if (!current) return false;
           if (current.isActive("table")) return false;
@@ -1234,6 +1316,16 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         "tiptap.on_transaction",
         "tiptap.callback",
         () => {
+          const pickerDraft = universalPickerDraftRef.current;
+          if (pickerDraft && transaction.docChanged) {
+            const mappedDraft = {
+              ...pickerDraft,
+              from: transaction.mapping.map(pickerDraft.from, 1),
+              to: transaction.mapping.map(pickerDraft.to, -1),
+            };
+            universalPickerDraftRef.current = mappedDraft;
+            setUniversalPickerDraft(mappedDraft);
+          }
           if ((transaction.docChanged && !transaction.selectionSet) || transaction.storedMarksSet) {
             updateSelectionState(transactionEditor);
           }
@@ -1491,6 +1583,17 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           ariaLabel={ariaLabel}
           style={{ minHeight: style?.minHeight ?? 80 }}
           renderAttachmentImage={renderStaticAttachment}
+        />
+      )}
+      {isActive && editable && universalPickerDraft && (
+        <UniversalEntityPicker
+          companyID={companyID}
+          requestJSON={requestJSON}
+          sourceType={resourceType}
+          linkTargetTypes={linkTargetTypes}
+          anchor={universalPickerDraft.anchor}
+          onChoose={chooseUniversalPickerEntity}
+          onCancel={cancelUniversalPicker}
         />
       )}
       {pendingConflict ? (

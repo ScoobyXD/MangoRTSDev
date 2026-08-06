@@ -1,3 +1,19 @@
+# Process Story: An existing Logic Gate is linked to a Project from its editor
+
+A user with Logic Gate edit access types `##` in that Logic Gate's editor and selects a Project they may edit
+↓
+The universal picker sends the exact existing Logic Gate ID and Project ID to the typed Project relationship command
+↓
+Mango creates or reuses the stable relationship for that exact Project and Logic Gate without creating, moving, or copying the Logic Gate
+↓
+The same Logic Gate may retain separate stable relationships with other Projects
+↓
+The editor inserts a durable Project reference chip after the relationship succeeds; removing the chip does not remove the Project relationship
+↓
+Project-scoped Logic Gate creation remains prohibited, and adding a Node to a Project continues to create or reuse its current Logic Gate relationship implicitly
+
+Last updated: 2026-08-05
+
 # Process Story: Project textboxes, chats, and attached emails use final storage
 
 A user opens a Project
@@ -21,7 +37,7 @@ Last updated: 2026-08-04
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial overall. Rich-HTML collaboration, realtime transport, disposable-PostgreSQL, and unified rich-editor suites cover exact Project document identities, bounded HTML patches, durable recovery, metadata/body separation, and mounted Project host wiring. Project relationship rule tests cover one Logic Gate per node, one Project per node, implicit per-Project Logic Gate relationships, and the same Logic Gate remaining related to multiple Projects. the dedicated production-path realtime runner and its real-browser Project workflow were removed from CI on 2026-07-28; focused frontend and backend suites remain, while visible Project workflow acceptance is manual until replacement automation is added; project grouping, route, node-shell, attachment, and unrelated rich-editor behavior retain their focused coverage.
+- Business Logic Covered By Automated Tests: Partial overall. Rich-HTML collaboration, realtime transport, disposable-PostgreSQL, and unified rich-editor suites cover exact Project document identities, bounded HTML patches, durable recovery, metadata/body separation, and mounted Project host wiring. Project relationship rule and HTTP tests cover one Logic Gate per node, one Project per node, implicit per-Project Logic Gate relationships, direct existing Logic Gate association and idempotency, and the same Logic Gate remaining related to multiple Projects. The dedicated production-path realtime runner and its real-browser Project workflow were removed from CI on 2026-07-28; focused frontend and backend suites remain, while visible Project workflow acceptance is manual until replacement automation is added; project grouping, route, node-shell, attachment, and unrelated rich-editor behavior retain their focused coverage.
 
 ## Business Logic
 
@@ -72,7 +88,7 @@ P44 - Replies to email attached to a project text block use the project as attac
 P45 - The Project editor header keeps Editor, Permissions, the shared formatting toolbar, and Outline Styles/Automatic Numbering in its primary area. Assignments, Open project in new tab, and Minimize project move into one keyboard-operable **More editor actions** menu when those actions are available, without changing their permission, disabled, or navigation behavior.
 P46 - Project dialogs and previews mount through the shared body-level overlay portal above Key Views, Explorer, Search Explorer, and feature-local stacking contexts and trap/restore focus when blocking. The Logic Gates / Nodes editor remains in normal document flow beneath its selected row except while its explicit fullscreen action temporarily mounts it in that shared modal layer.
 P47 - Expanding a node in Logic Gates / Nodes removes the row-depth indentation from the editor surface so the editor spans the full relationship-panel width while the collapsed relationship row keeps its normal grouping indentation.
-P48 - Logic Gates / Nodes provides an Add control with an elevated Company Explorer search for existing Nodes that already belong to a Logic Gate. Choosing a Node creates or reuses its Project relationship and implicitly creates or reuses that Logic Gate's relationship for the same Project. Direct Logic Gate addition is not offered, and Nodes already related to the Project are marked as added and disabled.
+P48 - Logic Gates / Nodes provides an Add control with an elevated Company Explorer search for existing Nodes that already belong to a Logic Gate. Choosing a Node creates or reuses its Project relationship and implicitly creates or reuses that Logic Gate's relationship for the same Project. That Project-panel Add control does not directly add Logic Gates; an existing Logic Gate is instead associated from its own editor through Universal picker link mode. Nodes already related to the Project are marked as added and disabled.
 
 P49 - Project Field, Status, Health, Account, and Team dropdowns commit and close on the selected option. They do not display Apply or Cancel actions; multi-value controls toggle the clicked assignment without discarding other selected IDs, and Not set clears the control.
 P50 - When the generic Field list column is enabled for the active company, Project Summary shows a matching **Fields** dropdown immediately left of Status and reads/writes the same project field assignments.
@@ -83,8 +99,10 @@ P54 - Adding a Node to a Project implicitly creates or reuses a separate Logic G
 P55 - A Logic Gate may be related to any number of Projects. Relating it to a new Project must never move, overwrite, or delete its relationships with other Projects.
 P56 - Each Project/Logic Gate pair has its own stable relationship row and relationship ID. Re-adding another Node from that Logic Gate to the same Project reuses the existing Project/Logic Gate row instead of creating a duplicate.
 P57 - Removing a Node relationship does not silently remove the Logic Gate's relationship from that Project. Logic Gate relationships are persistent Project associations, including when no related Node is currently visible in that Project. A rejected cross-Project Node addition changes neither the Node relationship nor either Project's Logic Gate relationships.
-P58 - Users do not add a Logic Gate directly to a Project. The supported command adds a Node, verifies that Node's single Logic Gate assignment, and brings that Logic Gate into the Project implicitly.
+P58 - A user may directly associate an existing Logic Gate with a Project only through `##` link mode in that Logic Gate's editor. This creates or reuses a `project_relationships` row for the exact existing Gate/Project pair. It does not create a Logic Gate inside a Project; Project-scoped Logic Gate creation remains prohibited. Adding a Node remains a separate supported command that verifies the Node's single Logic Gate assignment and brings that Gate into the Project implicitly.
 P59 - Node-based Project context in My Work, Updates, and other derived views comes only from that Node's direct Project relationship. A Logic Gate's membership in multiple Projects must never make all Nodes in that Logic Gate appear in every one of those Projects.
+P68 - Direct existing Logic Gate association requires Edit access to the source Logic Gate editor, Edit access to the target Project, and current visibility of the exact Logic Gate target in the Project relationship command. Failure creates no relationship or reference chip.
+P69 - Re-adding the same existing Logic Gate to the same Project is idempotent and retains the stable relationship ID. Direct association returns no implicit Node relationship and never moves, copies, renames, or changes the Logic Gate's other Project relationships.
 P60 - Production PostgreSQL realtime audience resolution treats a Project as a supported exact editor resource. Each Project editor publication resolves only current effective Edit recipients for that Project, so authorized remote text-box changes stream promptly without refresh and revoked, missing, or cross-company targets receive nothing.
 
 P61 - The Project view and projection-list API keep their current public payload shape, but every textbox row is synthesized from `project_textboxes`, every chat row from `project_textbox_chats`, and every attached-email row from exact `email_relationships` joined to `email_messages` and `email_threads`.
@@ -413,12 +431,15 @@ Business logic covered:
 - P55
 - P56
 - P57
+- P68
+- P69
 - P58
 - P59
 
 Given:
 - One Logic Gate contains Node A and Node B.
 - Project Alpha receives Node A and Project Bravo receives Node B.
+- The user directly associates the existing Logic Gate with Project Alpha from the Logic Gate editor, then repeats the same command.
 
 When:
 - A user attempts to add Node A to Project Bravo while it still belongs to Project Alpha.
@@ -432,9 +453,10 @@ Expected:
 - Node A and its stable relationship remain in Project Alpha; Project Bravo still contains only Node B and its relationship to the shared Logic Gate.
 - Re-adding a Node to its current Project reuses the existing Node and Logic Gate relationship rows and creates no duplicates.
 - My Work and Updates keep Node A only under Project Alpha; they do not infer a Bravo Node relationship merely because the shared Logic Gate is also in Project Bravo.
-- A direct Logic Gate addition and a Project Node without a Logic Gate assignment are rejected.
+- Direct existing Logic Gate association succeeds, and repeating it reuses Alpha's stable Gate relationship without adding a Node or changing Bravo.
+- Project-scoped Logic Gate creation and adding a Project Node without a Logic Gate assignment remain rejected.
 
-Focused coverage lives in `backend/internal/store/project_relationship_rules_test.go`, `backend/internal/store/project_relationship_schema_test.go`, `backend/internal/store/project_relationship_postgres_integration_test.go`, `backend/internal/store/work_item_reads_test.go`, and `backend/internal/http/notification_handlers_test.go`.
+Focused coverage lives in `backend/internal/store/project_relationship_rules_test.go`, `backend/internal/http/project_handlers_test.go`, `backend/internal/store/project_relationship_schema_test.go`, `backend/internal/store/project_relationship_postgres_integration_test.go`, `backend/internal/store/work_item_reads_test.go`, and `backend/internal/http/notification_handlers_test.go`.
 ### Scenario P-S17: Final Project Storage Cutover
 
 Business logic covered:

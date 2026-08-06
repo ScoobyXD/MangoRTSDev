@@ -267,6 +267,10 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
   installGlobal("requestAnimationFrame", requestFrame, restores);
   installGlobal("cancelAnimationFrame", cancelFrame, restores);
   if (!dom.window.HTMLElement.prototype.scrollIntoView) dom.window.HTMLElement.prototype.scrollIntoView = () => undefined;
+  const legacyInputPrototype = dom.window.HTMLElement.prototype as unknown as { attachEvent?: () => void; detachEvent?: () => void };
+  if (!legacyInputPrototype.attachEvent) legacyInputPrototype.attachEvent = () => undefined;
+  if (!legacyInputPrototype.detachEvent) legacyInputPrototype.detachEvent = () => undefined;
+
   if (!dom.window.Range.prototype.getClientRects) dom.window.Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
   if (!dom.window.Range.prototype.getBoundingClientRect) dom.window.Range.prototype.getBoundingClientRect = () => new dom.window.DOMRect();
   if (!dom.window.document.elementFromPoint) {
@@ -330,6 +334,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
   let subscriptionRecover: (() => void | Promise<void>) | undefined;
   let conflictCallbacks = 0;
   const documentErrors: string[] = [];
+  const linkedPickerEntities: string[] = [];
   const storageErrors: string[] = [];
   let storageRecoveries = 0;
   const remoteImageImports: Array<{ path: string; body: unknown }> = [];
@@ -424,6 +429,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
             informationID: "document-1",
             editorSurface: "node",
           }}
+          onEntityLink={async (entity) => { linkedPickerEntities.push(`${entity.entityType}:${entity.entityID}`); }}
           onImageChatRequest={() => undefined}
           onImageNodeRequest={() => undefined}
           subscribeToCanonicalChange={(recover) => {
@@ -525,7 +531,6 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
         && selectionInlineFormats.at(-1)?.italic === false,
       "toolbar commands should return to the caret's original format state",
     );
-
     let activeImageFrame = activeProseMirror.querySelector<HTMLElement>('[data-mango-attachment-id="image-1"]');
     assert.ok(activeImageFrame);
     await act(async () => {
@@ -890,6 +895,38 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
       && Number(event.duration_us) >= 0
     )));
     assert.ok(!JSON.stringify(traceExport).includes("Type while image imports"));
+    const remountedProseMirror = remountedEditorRoot.querySelector<HTMLElement>(".mango-tiptap-prosemirror");
+    assert.ok(remountedProseMirror);
+    await act(async () => {
+      remountedProseMirror.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+        key: "#",
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }));
+    });
+    await waitFor(() => Boolean(dom.window.document.querySelector('[data-mango-universal-picker="true"]')), "# should open the universal picker");
+    const picker = dom.window.document.querySelector<HTMLElement>('[data-mango-universal-picker="true"]');
+    const pickerInput = picker?.querySelector<HTMLInputElement>('input[aria-label="Search resources to reference"]');
+    assert.ok(picker && pickerInput);
+    assert.equal(picker.dataset.mangoUniversalPickerMode, "reference");
+    assert.equal(dom.window.document.activeElement, pickerInput, "the universal picker search field should receive focus");
+    await act(async () => { Simulate.change(pickerInput, { target: { value: "l" } }); });
+    await flushAsyncWork(2);
+    await act(async () => { Simulate.keyDown(pickerInput, { key: "Tab" }); });
+    await flushAsyncWork(2);
+    const logicGateCategory = [...picker.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.includes("Logic Gates"));
+    assert.equal(logicGateCategory?.getAttribute("aria-pressed"), "true", "L then Tab should select Logic Gates");
+    await act(async () => { Simulate.keyDown(pickerInput, { key: "#" }); });
+    await flushAsyncWork(2);
+    assert.equal(picker.dataset.mangoUniversalPickerMode, "link", "a second # should switch to link mode");
+    const categoryButtons = [...picker.querySelectorAll<HTMLButtonElement>("button")];
+    assert.equal(categoryButtons.find((button) => button.textContent?.includes("Nodes"))?.disabled, true);
+    assert.equal(categoryButtons.find((button) => button.textContent?.includes("Logic Gates"))?.disabled, false);
+    assert.equal(categoryButtons.find((button) => button.textContent?.includes("Projects"))?.disabled, false);
+    assert.deepEqual(linkedPickerEntities, []);
+    await act(async () => { Simulate.keyDown(pickerInput, { key: "Escape" }); });
+    await waitFor(() => !dom.window.document.querySelector('[data-mango-universal-picker="true"]'), "Escape should close the universal picker");
     await act(async () => root.unmount());
     mountedRoot = null;
     assert.equal(subscriptions, 2);

@@ -885,6 +885,37 @@ func (r *PostgresRepo) UpsertProjectRelationship(input ProjectRelationshipInput)
 	}
 	defer tx.Rollback()
 
+	if input.ResourceType == EntityTypeLogicGate {
+		var exists bool
+		if err := tx.QueryRowContext(ctx, `
+select exists (
+  select 1 from logic_gates
+  where company_id=$1::uuid and logic_gate_id=$2::uuid
+)`, input.CompanyID, input.ResourceID).Scan(&exists); err != nil {
+			return ProjectRelationshipMutationResult{}, err
+		}
+		if !exists {
+			return ProjectRelationshipMutationResult{}, ErrNotFound
+		}
+		relationshipID, err := upsertProjectRelationshipSourceTx(ctx, tx, input)
+		if err != nil {
+			return ProjectRelationshipMutationResult{}, err
+		}
+		if err := syncProjectRelationshipProjectionDependenciesTx(ctx, tx, ProjectRelationshipProjectionDependencyInput{
+			CompanyID: input.CompanyID, RelationshipID: relationshipID,
+		}); err != nil {
+			return ProjectRelationshipMutationResult{}, err
+		}
+		projection, err := projectRelationshipProjectionByIDTx(ctx, tx, input.CompanyID, relationshipID)
+		if err != nil {
+			return ProjectRelationshipMutationResult{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return ProjectRelationshipMutationResult{}, err
+		}
+		return ProjectRelationshipMutationResult{Relationship: &projection}, nil
+	}
+
 	var logicGateID string
 	err = tx.QueryRowContext(ctx, `
 select logic_gate_id::text

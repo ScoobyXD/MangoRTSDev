@@ -3,6 +3,7 @@ import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { AppModalPortal, useAppFloatingMenuDismissal } from "../../app/AppModalPortal.js";
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { isAbortError } from "../api/requestJSON";
+import type { EditorEntityLink } from "./editorEntityLinks.js";
 import { humanLabelOrFallback } from "../entityLabels.js";
 import { getLogicGateRecordSingleFlight } from "../logic-gates/logicGateRecordStore.js";
 import type { LogicGateRecord } from "../logic-gates/types";
@@ -2510,6 +2511,42 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
   }, [assigningProjectID, assigningProjectLogicGateID, canEdit, companyID, loadNodeTimelineEvents, nodeID, nodePriorityUnassignedForLogicGate, onAssignToLogicGate, onError, onRequireNodePriorityForLogicGateAssignment, selectedProjectForAssignment]);
 
+  const linkEntityFromEditor = useCallback(async (entity: EditorEntityLink) => {
+    if (!canEdit) throw new Error("You do not have permission to edit this Node.");
+    if (entity.entityType === "logic_gate") {
+      if (nodePriorityUnassignedForLogicGate) {
+        onRequireNodePriorityForLogicGateAssignment();
+        throw new Error("Must give node a priority");
+      }
+      const logicGateID = entity.entityID.trim();
+      if (!logicGateID) throw new Error("Select a Logic Gate to link.");
+      await onAssignToLogicGate(logicGateID);
+      await loadNodeTimelineEvents();
+      setLastAssignedLogicGateID(logicGateID);
+      setLastAssignedLogicGateLabel(entity.label);
+      setLogicGateAssignStatus(`Assigned to Logic Gate: ${entity.label}`);
+      setProjectRelationshipRefreshKey((key) => key + 1);
+      return;
+    }
+    if (entity.entityType === "project") {
+      const projectID = entity.entityID.trim();
+      if (!projectID) throw new Error("Select a Project to link.");
+      await upsertProjectRelationship({
+        companyID,
+        projectID,
+        resourceType: "node",
+        resourceID: nodeID,
+      });
+      setProjectAssignStatus(`Project: ${entity.label}`);
+      setProjectRelationshipRefreshKey((key) => key + 1);
+      return;
+    }
+    throw new Error("A Node can only be linked to a Logic Gate or Project.");
+  }, [
+    canEdit, companyID, loadNodeTimelineEvents, nodeID, nodePriorityUnassignedForLogicGate,
+    onAssignToLogicGate, onRequireNodePriorityForLogicGateAssignment,
+  ]);
+
   const onDropEmail = useCallback((event: React.DragEvent) => {
     if (!canEdit) return;
     const email = parseDraggedEmail(event.dataTransfer);
@@ -3907,6 +3944,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                             pendingChatSelectionAnchor={selectionAnchor}
                             activeChatAnchorMessageID={activeChatAnchorMessageID}
                             chatNavigationRequest={chatNavigationRequest?.blockID === chatBlockID ? { anchorMessageID: chatNavigationRequest.anchorMessageID, requestID: chatNavigationRequest.requestID } : null}
+                            onEntityLink={linkEntityFromEditor}
                             onChatNavigationConsumed={consumeChatNavigationRequest}
                             documentScrollMemoryRef={documentScrollMemoryRef}
                             surfaceText={surfaceText}

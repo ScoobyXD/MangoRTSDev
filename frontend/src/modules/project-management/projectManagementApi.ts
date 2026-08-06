@@ -418,7 +418,7 @@ export async function deleteProjectCriticalPathStep(input: {
 export async function upsertProjectRelationship(input: {
   companyID: string;
   projectID: string;
-  resourceType: "node";
+  resourceType: "node" | "logic_gate";
   resourceID: string;
   relationshipID?: string;
   position?: number;

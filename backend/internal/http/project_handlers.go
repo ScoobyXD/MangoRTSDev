@@ -545,15 +545,15 @@ func (s *Server) handleProjectRelationships(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		resourceType, ok := store.NormalizeEntityType(req.ResourceType)
-		if ok && resourceType == store.EntityTypeLogicGate {
-			writeError(w, http.StatusBadRequest, "direct_project_logic_gate_addition_not_allowed")
-			return
-		}
-		if !ok || resourceType != store.EntityTypeNode || strings.TrimSpace(req.ResourceID) == "" {
+		if !ok || (resourceType != store.EntityTypeNode && resourceType != store.EntityTypeLogicGate) || strings.TrimSpace(req.ResourceID) == "" {
 			writeError(w, http.StatusBadRequest, "invalid_project_relationship")
 			return
 		}
-		if !s.requireEntityView(w, r, companyID, resourceType, req.ResourceID, "relationship_target_not_found") {
+		if resourceType == store.EntityTypeLogicGate {
+			if !s.requireEntityEdit(w, r, companyID, resourceType, req.ResourceID, "relationship_target_not_found") {
+				return
+			}
+		} else if !s.requireEntityView(w, r, companyID, resourceType, req.ResourceID, "relationship_target_not_found") {
 			return
 		}
 		actor, _ := authenticatedActor(r)

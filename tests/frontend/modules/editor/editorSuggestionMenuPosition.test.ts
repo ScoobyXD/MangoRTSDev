@@ -6,7 +6,7 @@ import {
   MangoTiptapEditorEngine,
 } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapExtensions.js";
 
-test("@, !, and # menus stay above a Node modal and directly below the caret row", async () => {
+test("@ and ! mention menus stay above a Node modal and directly below the caret row", async () => {
   const dom = new JSDOM(
     '<!doctype html><div data-mango-modal-layer="true"><div id="editor"></div></div>',
     { url: "https://mango.test/" },
@@ -55,7 +55,6 @@ test("@, !, and # menus stay above a Node modal and directly below the caret row
     extensions: createMangoTiptapExtensions({
       editable: true,
       getMentionUsers: () => [{ userID: "user-1", name: "Christina Phan", email: "christina@example.com" }],
-      searchEntityLinks: async () => [{ entityType: "project", entityID: "project-1", label: "Launch" }],
     }),
     content: { type: "doc", content: [{ type: "paragraph" }] },
   });
@@ -65,7 +64,6 @@ test("@, !, and # menus stay above a Node modal and directly below the caret row
     const cases = [
       { trigger: "@", selector: '[data-mango-tiptap-mention-menu="true"]' },
       { trigger: "!", selector: '[data-mango-tiptap-mention-menu="true"]' },
-      { trigger: "#", selector: '[data-mango-tiptap-entity-menu="true"]' },
     ];
     for (const item of cases) {
       decorationTop = 30;
