@@ -12,9 +12,11 @@ The relationship remains in the table for its business meaning, such as Node str
 ↓
 Reads, events, projections, recycle/restore, and permanent deletion use the same company, endpoint type, and literal resource ID; no resource registry, translated ID, or replacement identity is consulted
 ↓
-Removing one relationship removes only that edge unless the owning subsystem has a separate, explicit deletion rule; deleting a personal pin folder removes only its descendant folder and pin records, never the pinned resources
+Removing one relationship removes only that edge unless the owning subsystem has a separate, explicit deletion rule; deleting a resource removes its policies without treating cascading assignment removal as a surviving-resource detach
+↓
+Deleting a personal pin folder removes only its descendant folder and pin records, never the pinned resources
 
-Last updated: 2026-08-05
+Last updated: 2026-08-06
 
 # Relationship Business Logic Laws
 
@@ -154,6 +156,8 @@ Cleanup MUST include `resource_type`; deleting rows by UUID alone is forbidden. 
 Single deletion, batch deletion, company deletion, retention cleanup, and any background permanent-deletion worker MUST apply the same relationship cleanup rules. Adding a new deletion entry point without its relationship cleanup and regression tests is forbidden.
 
 Normal foreign-key cascades MAY perform cleanup for fixed typed columns. Generic typed references MAY use explicit transactional deletes or validated database triggers. The result, not one particular mechanism, is mandatory.
+
+When deleting a relationship endpoint causes an assignment or parent-link cascade, trigger logic MUST distinguish that endpoint deletion from detaching a surviving resource. Policy materialization or parent advancement runs for a surviving detached resource, but MUST NOT run against an endpoint that is already being deleted. The endpoint deletion still removes its exact GVIC and permission settings in the same transaction.
 
 ### Law 18 — Recycling preserves restorable relationships
 
