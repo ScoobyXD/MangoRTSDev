@@ -201,10 +201,13 @@ test("static JSON renderer paints true ProseMirror ranges across blocks, lists, 
   assert.match(presentationCSS, /background:\s*linear-gradient\(135deg, rgba\(254, 255, 102, 0\.72\), rgba\(250, 232, 28, 0\.58\)\)/);
   assert.match(presentationCSS, /data-mango-legacy-leading-date-heading="true"/);
   assert.match(presentationCSS, /margin-top:\s*20px/);
-  assert.match(presentationCSS, /ol ol[^}]+list-style-type:\s*lower-alpha/s);
+  assert.match(presentationCSS, /ol ol[^}]+list-style-type:\s*upper-alpha/s);
   assert.match(presentationCSS, /ol ol ol > li::marker[^}]+counter\(list-item\) "\)  "/s);
-  assert.match(presentationCSS, /ol ol ol ol > li::marker[^}]+counter\(list-item, lower-alpha\) "\)  "/s);
-  assert.match(presentationCSS, /li > (?:ul|ol)[\s\S]+border-left:\s*1px solid rgba\(100, 116, 139, 0\.3\)/);
+  assert.match(presentationCSS, /ol ol ol ol > li::marker[^}]+counter\(list-item, upper-alpha\) "\)  "/s);
+  assert.match(presentationCSS, /Automatic numbering repeats 1\., A\., 1\), A\)/);
+  assert.match(presentationCSS, /Repeat the four requested bullet shapes after the fourth nesting level/);
+  assert.match(presentationCSS, /\[data-mango-outline-style="indent-guides"\][\s\S]+li > (?:ul|ol)[\s\S]+border-left:\s*1px solid rgba\(100, 116, 139, 0\.3\)/);
+  assert.doesNotMatch(presentationCSS, /^\.mango-tiptap-(?:static-document|prosemirror) li > (?:ul|ol),[^{]*\{[^}]*border-left:/m);
   assert.match(presentationCSS, /\.mango-tiptap-prosemirror table[^}]+border-collapse:\s*collapse/s);
   assert.match(presentationCSS, /\.mango-tiptap-prosemirror td[^}]+border:\s*1px solid #94a3b8/s);
 });
@@ -485,6 +488,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     assert.equal(activeProseMirror.querySelector('[data-mango-annotation-id="annotation-image"]'), null, "dormant changes must not decorate active surfaces");
     assert.equal(activeProseMirror.parentElement?.classList.contains("mango-tiptap-active-surface"), true, "the active EditorContent wrapper must fill the full text box");
     assert.equal(activeProseMirror.getAttribute("contenteditable"), "true", "the clicked JSON document should become a real editable surface");
+    assert.equal(dom.window.document.activeElement, activeProseMirror, "the first pointer activation must focus the attached editor without requiring a second click");
     assert.equal(activeProseMirror.dataset.mangoLegacyLeadingDateHeading, "true");
 
     const selectionPublicationsBeforeStableRerender = selectionInlineFormats.length;
@@ -551,6 +555,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     assert.ok(activeImageFrame);
     await waitFor(() => activeImageFrame.dataset.selected === "true", "the persisted image alignment must preserve its node selection");
     assert.equal(activeImageFrame.closest(".node-mangoAttachmentImage")?.getAttribute("draggable"), "true", "the selected inline image remains movable through Tiptap drag and drop");
+    assert.equal(activeImageFrame.querySelector('[data-mango-tiptap-image-frame="true"]')?.getAttribute("draggable"), "true", "dragging the visible image frame starts a real node move");
     assert.equal(activeImageFrame.style.cursor, "pointer", "inline images use the hand-selection cursor instead of the editor text caret");
     assert.ok(activeImageFrame.querySelector('[data-mango-inline-image-download="true"]'), "the selected image exposes an icon-only download control attached to its frame");
     assert.ok(activeImageFrame.querySelector('[data-mango-tiptap-image-comment="true"]'), "the selected image exposes the same comment icon action as selected text");
@@ -558,6 +563,24 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     assert.equal(activeImageFrame.querySelectorAll("[data-mango-tiptap-image-resize-handle]").length, 8, "the selected image can resize from every edge and corner");
     assert.equal(Array.from(activeImageFrame.querySelectorAll("button")).some((button) => ["Move", "Delete", "Download", "Preview", "Left", "Center", "Right", "Wide", "Resize"].includes(button.textContent?.trim() ?? "")), false, "the detached labeled image button strip is removed");
     assert.equal(editorRoot.querySelector('[aria-label="Highlighted text actions"]'), null, "image node selections must not open the text-selection toolbar");
+    const activeTableCell = activeProseMirror.querySelector<HTMLElement>("td");
+    assert.ok(activeTableCell);
+    const tableContextEvent = new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: 40, clientY: 50 });
+    await act(async () => { activeTableCell.dispatchEvent(tableContextEvent); });
+    assert.equal(tableContextEvent.defaultPrevented, true, "right-clicking a table cell opens Mango's table menu");
+    await waitFor(() => Boolean(editorRoot.querySelector('[role="menu"][aria-label="Table actions"]')), "the table context menu should become visible");
+    const addColumnRight = Array.from(editorRoot.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+      .find((button) => button.textContent?.trim() === "Create column on the right");
+    assert.ok(addColumnRight);
+    await act(async () => { addColumnRight.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, button: 0 })); });
+    await waitFor(() => activeProseMirror.querySelectorAll("table tr:first-child td, table tr:first-child th").length === 2, "the right-click command should add a table column");
+    assert.equal(editorRoot.querySelector('[role="menu"][aria-label="Table actions"]'), null, "a completed table command closes the context menu");
+    await waitFor(() => postStarted, "the table command must use the normal durable document save");
+    releasePost?.();
+    await waitFor(() => editorRoot.dataset.mangoEditorPinned !== "true", "the table mutation save must receive its backend acknowledgement");
+    postStarted = false;
+    postedDocument = null;
+    releasePost = undefined;
     await act(async () => {
       activeImageFrame.dispatchEvent(new dom.window.MouseEvent("dblclick", { bubbles: true, cancelable: true, button: 0 }));
     });

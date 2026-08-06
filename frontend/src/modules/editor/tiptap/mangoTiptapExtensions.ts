@@ -15,6 +15,7 @@ import { createEditorEntityIconElement, editorEntityTypeLabel, type EditorEntity
 import { EDITOR_MENTION_MENU_VISIBLE_ROWS, mentionUserProfileColor } from "../editorMentions.js";
 import { normalizeEditorHighlightColor } from "../richTextEditing.js";
 import { getCurrentEditorTraceContext, traceEditorFunction } from "../editorTrace.js";
+import type { EditorOutlineStyleID } from "../plainTextEditing.js";
 import type { MangoTiptapDocument } from "./mangoTiptapDocument.js";
 
 export { Editor as MangoTiptapEditorEngine } from "@tiptap/core";
@@ -247,18 +248,53 @@ export function readMangoTiptapSelectionState(editor: Editor) {
 export function indentMangoTiptapSelection(editor: Editor): boolean {
   if (editor.isActive("taskItem")) return editor.chain().focus().sinkListItem("taskItem").run();
   if (editor.isActive("listItem")) return editor.chain().focus().sinkListItem("listItem").run();
-  return editor.chain().focus().command(({ tr, state, dispatch }) => {
-    if (dispatch) dispatch(tr.insertText("\t", state.selection.from, state.selection.to).scrollIntoView());
-    return true;
-  }).run();
+  return updateCurrentMangoTiptapIndent(editor, 1);
 }
 
 export function outdentMangoTiptapSelection(editor: Editor): boolean {
   if (editor.isActive("taskItem")) return editor.chain().focus().liftListItem("taskItem").run();
   if (editor.isActive("listItem")) return editor.chain().focus().liftListItem("listItem").run();
-  const { from, empty } = editor.state.selection;
-  if (!empty || from <= 1 || editor.state.doc.textBetween(from - 1, from, "\n", "\n") !== "\t") return false;
-  return editor.chain().focus().deleteRange({ from: from - 1, to: from }).run();
+  return updateCurrentMangoTiptapIndent(editor, -1);
+}
+
+function updateCurrentMangoTiptapIndent(editor: Editor, delta: -1 | 1): boolean {
+  const { $from } = editor.state.selection;
+  for (let depth = $from.depth; depth > 0; depth -= 1) {
+    const node = $from.node(depth);
+    if (node.type.name !== "paragraph" && node.type.name !== "heading") continue;
+    const current = Number.isFinite(Number(node.attrs.indentLevel)) ? Math.max(0, Math.trunc(Number(node.attrs.indentLevel))) : 0;
+    const next = Math.max(0, Math.min(12, current + delta));
+    if (next === current) return false;
+    const position = $from.before(depth);
+    const transaction = editor.state.tr.setNodeMarkup(position, undefined, { ...node.attrs, indentLevel: next });
+    editor.view.dispatch(transaction);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Starts the structural outline selected in the shared toolbar. Existing list
+ * items keep their own list kind and use Tiptap's normal Enter behavior.
+ */
+export function handleMangoTiptapOutlineEnter(editor: Editor, outlineStyle: EditorOutlineStyleID): boolean {
+  if (!editor.state.selection.empty || editor.isActive("listItem") || editor.isActive("taskItem")) return false;
+  if (!editor.isActive("paragraph") && !editor.isActive("heading")) return false;
+
+  const { $from } = editor.state.selection;
+  const currentBlock = $from.parent;
+  const empty = currentBlock.isTextblock && currentBlock.content.size === 0;
+  if (outlineStyle === "indent-guides") return false;
+  if (outlineStyle === "automatic-outline-numbering") {
+    return empty ? editor.commands.toggleOrderedList() : false;
+  }
+
+  const startList = () => outlineStyle === "checklist"
+    ? editor.commands.toggleTaskList()
+    : editor.commands.toggleBulletList();
+  if (empty) return startList();
+  if (!editor.commands.splitBlock()) return false;
+  return startList();
 }
 
 export type MangoAttachmentImageAttributes = {

@@ -1,3 +1,19 @@
+# Process Story: rich editor interactions work on the first action
+
+A user opens a fresh Node, Project, or Logic Gate editor and clicks the exact place they want to type
+↓
+Mango finishes attaching the live Tiptap surface before it applies that pointer position, keeps the text-box scroll position, and shows the caret on the first click
+↓
+The selected Outline Style controls future Enter and Tab behavior: Automatic Numbering continues ordered rows, Bullet Points and Checklist start on an empty row, and Indent Guides change only the current text row
+↓
+Nested numbering rotates through `1.`, `A.`, `1)`, and `A)`; bullets rotate through solid circle, hollow circle, solid square, and hollow square; checklist boxes keep one symbol
+↓
+Vertical indentation lines paint only in Indent Guides mode
+↓
+An attachment image can be dragged from its visible frame, and right-clicking a table cell opens row/column create and delete actions
+↓
+Every real document mutation follows the existing revisioned JSON recovery, autosave, history, and realtime rules
+
 # Process Story: Editors preserve dormant change anchors without an unread feature
 
 A user selects a Node or Logic Gate from Explorer, Home, Kanban, Project, or a direct route
@@ -236,6 +252,17 @@ Coverage Status:
 
 ## Business Logic
 
+### 2026-08-05 Tiptap Interaction Semantics
+
+- First pointer activation may replace a sleeping renderer with the live Tiptap surface, but Mango must wait until that live DOM is attached before resolving the pointer position and focusing it. The first click places the caret, keeps the exact text-box scroll offset, and does not require a second click.
+- The outline preference is shared with the active Node, Project, and Logic Gate JSON editor. Changing it controls future input and does not rewrite existing rows.
+- Tab and Shift+Tab on an ordinary Tiptap paragraph or heading change only the block containing the caret by one bounded `indentLevel`; they do not insert a tab character, replace a selected range, or change neighboring rows. Structural list Tab/Shift+Tab uses normal one-item nesting/outdent behavior and remains inside table cells.
+- Enter on an empty ordinary row starts the selected Automatic Numbering, Bullet Points, or Checklist structure. In Bullet Points or Checklist mode, Enter in a nonempty ordinary row splits at the caret and changes only the new row into the selected list. Enter in an existing list keeps that list's normal continue/exit behavior.
+- Active JSON ordered-list markers rotate by nesting depth as `1.`, `A.`, `1)`, `A)`, then repeat. Bullet markers rotate solid circle, hollow circle, solid square, hollow square, then repeat. Nested checklist items retain the checkbox marker.
+- Thin nested-list and block-indent guide lines are conditional presentation. They paint only when the current outline preference is Indent Guides and never leak into Automatic Numbering, Bullet Points, or Checklist mode.
+- The visible attachment-image frame is a real Tiptap drag handle. Dragging it moves the existing durable image node; it does not upload, duplicate, or change attachment ownership.
+- Right-clicking an active table cell selects that cell and opens the shared table menu for row/column creation and deletion plus table deletion. These commands mutate the same Tiptap document and use normal recovery/autosave/revision handling.
+
 ### 2026-08-02 Project Entity Links And Logic Gate Image Paste
 
 - Block IDs, mention user identity, entity-link type/ID/label, and image attachment IDs are required durable identity, not cosmetic defaults. Frontend and backend compaction may remove optional defaults, but they must never remove these required fields. In particular, `mangoEntityLink.entityType` remains explicit when it is `node`, even though the active editor schema uses `node` as its read-time default.
@@ -383,6 +410,7 @@ ED116 - Current Tiptap JSON snapshots omit only attributes equal to defaults in 
 
 ED117 - `node_textbox_chats` is the current authority for Node textbox chats. Reads, creates, replies, edits, and deletes use that table and must not create new legacy `Text block chat` information or projection rows. Deleting a textbox deletes every chat it owns, including email-selection chats, and removes each chat's attachment relationships. The normalized email message, thread, and email attachments remain. Existing legacy chat rows are ignored by current reads and retained only as rollback and audit evidence until a separately approved retirement.
 ED118 - A canonical empty TipTap document has one explicit empty paragraph inside the document root; `document.content=[]` is invalid. The forward repair may replace only that exact bad converted shape in `node_textboxes`, `node_textboxes_history`, `node_textbox_seen_snapshots`, and the same arrays inside Recycle Bin restore payloads. It preserves textbox and owner IDs, revisions, annotations, ordering, timestamps, saved-user identity, deletion state, array order, and every unrelated JSON field. The repair never rewrites the shipped cutover migration and never treats the representation correction as a user edit.
+ED119 - The active Node, Project, and Logic Gate Tiptap editor must honor the shared Outline Style on its first user action. First-click activation waits for the live editor DOM before placing focus/caret and preserves scroll. Ordinary Tab/Shift+Tab changes only the current paragraph or heading indent; structural list Tab/Shift+Tab changes only the active list item and remains editor-owned in tables. Empty-row Enter starts the selected numbered, bullet, or checklist structure, whose depth markers follow the documented four-level cycles. Indentation guide lines paint only in Indent Guides mode. The visible image frame starts a real node drag, and table-cell right-click exposes create/delete row/column and delete-table commands through the same revisioned document path.
 
 ### Required Unified Rich-Editor Surface Inventory
 

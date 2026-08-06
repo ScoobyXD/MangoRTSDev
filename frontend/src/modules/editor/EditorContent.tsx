@@ -2708,6 +2708,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               className={logicGateSaveFailed ? "mango-editor-save-failed-frame" : undefined}
               value={documentDraftRef.current}
               editable={editorWriteEnabled}
+              outlineStyle={outlineStyle}
               style={{ position: "absolute", top: documentTopPx, right: 0, bottom: 0, left: 0, overflowY: "auto", color: editorPrimaryText, fontFamily: documentFontFamily, fontSize: documentFontSize, lineHeight: EDITOR_DOCUMENT_LINE_HEIGHT }}
               companyID={companyID}
               resourceID={linkedNodeID}
