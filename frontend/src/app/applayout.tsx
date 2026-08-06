@@ -40,10 +40,37 @@ import type { HomeViewID } from "../pages/home/homeTypes";
 import { writePendingLogicGateArenaSelection } from "../pages/logic-gate-arena/logicGateArenaLaunch";
 import { NotificationRealtimeBridge } from "./NotificationRealtimeBridge";
 import { useFrameDragResize } from "./useFrameDragResize";
-import { AppNodeEditorPopup, AppSidebar, SIDEBAR_EXPLORER_WIDGET_ID, type HomeKeyViewID, type SidebarPin } from "./AppSidebarChrome";
-import { EVENT_APP_SIDEBAR_PIN_REQUESTED, sidebarPinFallbackName, type SidebarPinDraft, type SidebarPinRequestDetail } from "./sidebarPins";
-import { createSidebarPin, deleteSidebarPin, fetchSidebarPins, reorderSidebarPins } from "./sidebarPinsApi";
-import { hasMangoDragPayload, hasSidebarPinSectionDrop, isSidebarPinKind, sidebarPinsFromDrop } from "./sidebarPinDrops";
+import { AppNodeEditorPopup, AppSidebar, SIDEBAR_EXPLORER_WIDGET_ID, type HomeKeyViewID } from "./AppSidebarChrome";
+import {
+  EVENT_APP_SIDEBAR_PIN_REQUESTED,
+  sidebarPinFallbackName,
+  type SidebarPin,
+  type SidebarPinDraft,
+  type SidebarPinEntryRef,
+  type SidebarPinFolder,
+  type SidebarPinRequestDetail,
+  type SidebarPinTree,
+} from "./sidebarPins";
+import {
+  applySidebarPinLayout,
+  createSidebarPin,
+  createSidebarPinFolder,
+  deleteSidebarPin,
+  deleteSidebarPinFolder,
+  fetchSidebarPinTree,
+  groupSidebarPins,
+  renameSidebarPinFolder,
+} from "./sidebarPinsApi";
+import { hasMangoDragPayload, isSidebarPinKind, sidebarPinsFromDrop } from "./sidebarPinDrops";
+import {
+  emptySidebarPinTree,
+  planSidebarPinMove,
+  removeSidebarPinFolderSubtree,
+  upsertSidebarPin,
+  upsertSidebarPinFolder,
+  type SidebarPinDropPlacement,
+} from "./sidebarPinTree";
+import { sidebarPinNodePopupLaunch } from "./sidebarPinPopup";
 import { TextSelectionNodeCreator } from "../modules/nodes/TextSelectionNodeCreator";
 import { returnToEditorEntitySourceNode } from "../modules/editor/editorEntityLinks";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "./ConfirmActionMenu";
@@ -103,6 +130,8 @@ type NodeEditorPopupState = {
   surfaceID?: "app-sidebar-node-popup" | "dock-restored-node-popup";
   focusInformationID?: string;
   focusRequestID?: number;
+  initialFullscreen?: boolean;
+  popupInstanceID?: number;
 };
 type LogicGateArenaTarget = {
   logicGateID: string;
@@ -203,37 +232,6 @@ function saveSidebarWidth(width: number): void {
 function sidebarPinIdentity(pin: Pick<SidebarPin, "pinID" | "kind" | "id">): string {
   const pinID = pin.pinID.trim();
   return pinID ? `pin:${pinID}` : `${pin.kind}:${pin.id}`;
-}
-
-function upsertSidebarPin(items: SidebarPin[], pin: SidebarPin): SidebarPin[] {
-  const identity = sidebarPinIdentity(pin);
-  const existingIndex = items.findIndex((item) => sidebarPinIdentity(item) === identity || (item.kind === pin.kind && item.id === pin.id));
-  const next = [...items];
-  if (existingIndex >= 0) next[existingIndex] = pin;
-  else next.push(pin);
-  return next.sort((left, right) => (
-    left.position - right.position
-    || Date.parse(left.createdTimestamp) - Date.parse(right.createdTimestamp)
-    || left.pinID.localeCompare(right.pinID)
-  ));
-}
-
-function moveSidebarPin(items: SidebarPin[], moving: SidebarPin, target: SidebarPin | null, placement: "before" | "after"): SidebarPin[] {
-  const movingIdentity = sidebarPinIdentity(moving);
-  const movingIndex = items.findIndex((item) => sidebarPinIdentity(item) === movingIdentity);
-  if (movingIndex < 0) return items;
-  const movingPin = items[movingIndex];
-  const withoutMoving = items.filter((_, index) => index !== movingIndex);
-  const targetIdentity = target ? sidebarPinIdentity(target) : "";
-  const targetIndex = target ? withoutMoving.findIndex((item) => sidebarPinIdentity(item) === targetIdentity) : withoutMoving.length;
-  const insertIndex = targetIndex < 0
-    ? withoutMoving.length
-    : placement === "after"
-      ? targetIndex + 1
-      : targetIndex;
-  const next = [...withoutMoving];
-  next.splice(Math.max(0, Math.min(insertIndex, next.length)), 0, movingPin);
-  return next;
 }
 
 function pageForTab(tab: ViewTab): PrimaryPage | null {
@@ -404,8 +402,8 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     return loadFrameLinks().filter((edge) => loadedFrameIDs.has(edge.a) && loadedFrameIDs.has(edge.b));
   });
   const [appSidebarWidth, setAppSidebarWidth] = useState(readSidebarWidth);
-  const [sidebarPins, setSidebarPins] = useState<SidebarPin[]>([]);
-  const sidebarPinsRef = useRef<SidebarPin[]>([]);
+  const [sidebarPinTree, setSidebarPinTree] = useState<SidebarPinTree>(emptySidebarPinTree);
+  const sidebarPinTreeRef = useRef<SidebarPinTree>(emptySidebarPinTree());
   const [pinDropActive, setPinDropActive] = useState(false);
   const [explorerNodePopup, setExplorerNodePopup] = useState<NodeEditorPopupState | null>(() => nodePopupFromRoute(deepLink));
   const [taskbarData, setTaskbarData] = useState(() => ({
@@ -620,22 +618,22 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   useEffect(() => { saveViews(tabs, activeTabId); }, [tabs, activeTabId]);
   useEffect(() => { saveSettings({ bgColor, crossColor, headerBgColor, headerTextColor, tabBgColor, tabTextColor }); }, [bgColor, crossColor, headerBgColor, headerTextColor, tabBgColor, tabTextColor]);
   useEffect(() => { saveSidebarWidth(appSidebarWidth); }, [appSidebarWidth]);
-  useEffect(() => { sidebarPinsRef.current = sidebarPins; }, [sidebarPins]);
+  useEffect(() => { sidebarPinTreeRef.current = sidebarPinTree; }, [sidebarPinTree]);
   useEffect(() => {
     const cleanCompanyID = activeCompanyID.trim();
     if (!cleanCompanyID) {
-      setSidebarPins([]);
+      setSidebarPinTree(emptySidebarPinTree());
       return;
     }
     let cancelled = false;
-    fetchSidebarPins(apiBase, cleanCompanyID)
-      .then((pins) => {
-        if (!cancelled) setSidebarPins(foldLatestCommittedEntityTitles(pins, cleanCompanyID, reconcileAppSidebarPinTitles));
+    fetchSidebarPinTree(apiBase, cleanCompanyID)
+      .then((tree) => {
+        if (!cancelled) setSidebarPinTree({ ...tree, pins: foldLatestCommittedEntityTitles(tree.pins, cleanCompanyID, reconcileAppSidebarPinTitles) });
       })
       .catch((error) => {
         if (!cancelled) {
           console.error("Failed to load sidebar pins", error);
-          setSidebarPins([]);
+          setSidebarPinTree(emptySidebarPinTree());
         }
       });
     return () => {
@@ -666,7 +664,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     if (!isCommittedTitleUpdateForCompany(update, activeCompanyID)) return;
     setDockTabs((current) => reconcileAppDockTabTitles(current, update));
     setTimelineState((current) => reconcileAppTimelineTitles(current, update));
-    setSidebarPins((current) => reconcileAppSidebarPinTitles(current, update));
+    setSidebarPinTree((current) => ({ ...current, pins: reconcileAppSidebarPinTitles(current.pins, update) }));
     setExplorerNodePopup((current) => reconcileAppNodePopupTitle(current, update));
     setLogicGateArenaTarget((current) => reconcileAppLogicGateTargetTitle(current, update));
   }), [activeCompanyID, apiBase, setDockTabs, setTimelineState]);
@@ -1177,10 +1175,31 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     activatePrimaryPage(initialPage);
   }, [activatePrimaryPage, deepLink, initialPage, overrideContent]);
 
-  const addSidebarPins = useCallback((pins: SidebarPinDraft[]) => {
+  const commitSidebarPinTree = useCallback((tree: SidebarPinTree) => {
+    const cleanCompanyID = activeCompanyID.trim();
+    const next = {
+      ...tree,
+      pins: foldLatestCommittedEntityTitles(tree.pins, cleanCompanyID, reconcileAppSidebarPinTitles),
+    };
+    sidebarPinTreeRef.current = next;
+    setSidebarPinTree(next);
+  }, [activeCompanyID]);
+
+  const reloadSidebarPinTree = useCallback(async () => {
     const cleanCompanyID = activeCompanyID.trim();
     if (!cleanCompanyID) return;
-    const cleanPins = pins
+    const tree = await fetchSidebarPinTree(apiBase, cleanCompanyID);
+    commitSidebarPinTree(tree);
+  }, [activeCompanyID, apiBase, commitSidebarPinTree]);
+
+  const addSidebarPins = useCallback(async (
+    pins: SidebarPinDraft[],
+    target: SidebarPinEntryRef | null = null,
+    placement: SidebarPinDropPlacement = "after",
+  ) => {
+    const cleanCompanyID = activeCompanyID.trim();
+    if (!cleanCompanyID) return;
+    let cleanPins = pins
       .map((pin) => ({
         ...pin,
         id: pin.id.trim(),
@@ -1188,46 +1207,106 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       }))
       .filter((pin) => pin.id && isSidebarPinKind(pin.kind));
     if (cleanPins.length === 0) return;
-    void (async () => {
+    if (target && placement === "after" && cleanPins.length > 1) cleanPins = [...cleanPins].reverse();
+    try {
+      let working = sidebarPinTreeRef.current;
       for (const pin of cleanPins) {
-        try {
-          const saved = await createSidebarPin(apiBase, cleanCompanyID, pin);
-          setSidebarPins((previous) => foldLatestCommittedEntityTitles(upsertSidebarPin(previous, saved), cleanCompanyID, reconcileAppSidebarPinTitles));
-        } catch (error) {
-          console.error("Failed to save sidebar pin", error);
+        const saved = await createSidebarPin(apiBase, cleanCompanyID, pin);
+        working = upsertSidebarPin(working, saved);
+        if (target) {
+          const plan = planSidebarPinMove(working, { entryType: "pin", entryID: saved.pinID }, target, placement);
+          if (plan.updates.length > 0) {
+            working = await applySidebarPinLayout(apiBase, cleanCompanyID, plan.updates);
+          }
         }
+        commitSidebarPinTree(working);
       }
-    })();
-  }, [activeCompanyID, apiBase]);
+    } catch (error) {
+      console.error("Failed to save sidebar pin", error);
+      await reloadSidebarPinTree().catch(() => {});
+    }
+  }, [activeCompanyID, apiBase, commitSidebarPinTree, reloadSidebarPinTree]);
 
   const removeSidebarPin = useCallback((pin: SidebarPin) => {
     const cleanCompanyID = activeCompanyID.trim();
     const pinID = pin.pinID.trim();
-    const previousPins = sidebarPinsRef.current;
-    setSidebarPins((previous) => previous.filter((item) => sidebarPinIdentity(item) !== sidebarPinIdentity(pin)));
+    const previousTree = sidebarPinTreeRef.current;
+    commitSidebarPinTree({ ...previousTree, pins: previousTree.pins.filter((item) => sidebarPinIdentity(item) !== sidebarPinIdentity(pin)) });
     if (!cleanCompanyID || !pinID) return;
     void deleteSidebarPin(apiBase, cleanCompanyID, pinID).catch((error) => {
       console.error("Failed to remove sidebar pin", error);
-      setSidebarPins(foldLatestCommittedEntityTitles(previousPins, cleanCompanyID, reconcileAppSidebarPinTitles));
+      commitSidebarPinTree(previousTree);
     });
-  }, [activeCompanyID, apiBase]);
+  }, [activeCompanyID, apiBase, commitSidebarPinTree]);
 
-  const reorderSidebarPin = useCallback((moving: SidebarPin, target: SidebarPin | null, placement: "before" | "after") => {
+  const createPinFolder = useCallback(async (parentFolderID: string): Promise<string | null> => {
     const cleanCompanyID = activeCompanyID.trim();
-    const nextPins = moveSidebarPin(sidebarPinsRef.current, moving, target, placement);
-    setSidebarPins(foldLatestCommittedEntityTitles(nextPins, cleanCompanyID, reconcileAppSidebarPinTitles));
+    if (!cleanCompanyID) return null;
+    try {
+      const folder = await createSidebarPinFolder(apiBase, cleanCompanyID, parentFolderID);
+      commitSidebarPinTree(upsertSidebarPinFolder(sidebarPinTreeRef.current, folder));
+      return folder.folderID;
+    } catch (error) {
+      console.error("Failed to create sidebar pin folder", error);
+      return null;
+    }
+  }, [activeCompanyID, apiBase, commitSidebarPinTree]);
+
+  const renamePinFolder = useCallback(async (folder: SidebarPinFolder, name: string) => {
+    const cleanCompanyID = activeCompanyID.trim();
     if (!cleanCompanyID) return;
-    const pinIDs = nextPins.map((pin) => pin.pinID.trim()).filter(Boolean);
-    if (pinIDs.length !== nextPins.length) return;
-    void reorderSidebarPins(apiBase, cleanCompanyID, pinIDs)
-      .then((pins) => setSidebarPins(foldLatestCommittedEntityTitles(pins, cleanCompanyID, reconcileAppSidebarPinTitles)))
+    const previousTree = sidebarPinTreeRef.current;
+    commitSidebarPinTree(upsertSidebarPinFolder(previousTree, { ...folder, name }));
+    try {
+      const saved = await renameSidebarPinFolder(apiBase, cleanCompanyID, folder.folderID, name);
+      commitSidebarPinTree(upsertSidebarPinFolder(sidebarPinTreeRef.current, saved));
+    } catch (error) {
+      console.error("Failed to rename sidebar pin folder", error);
+      commitSidebarPinTree(previousTree);
+    }
+  }, [activeCompanyID, apiBase, commitSidebarPinTree]);
+
+  const deletePinFolder = useCallback(async (folder: SidebarPinFolder) => {
+    const cleanCompanyID = activeCompanyID.trim();
+    if (!cleanCompanyID) return;
+    const previousTree = sidebarPinTreeRef.current;
+    commitSidebarPinTree(removeSidebarPinFolderSubtree(previousTree, folder.folderID));
+    try {
+      commitSidebarPinTree(await deleteSidebarPinFolder(apiBase, cleanCompanyID, folder.folderID));
+    } catch (error) {
+      console.error("Failed to delete sidebar pin folder", error);
+      commitSidebarPinTree(previousTree);
+    }
+  }, [activeCompanyID, apiBase, commitSidebarPinTree]);
+
+  const moveSidebarPinEntry = useCallback((moving: SidebarPinEntryRef, target: SidebarPinEntryRef | null, placement: SidebarPinDropPlacement) => {
+    const cleanCompanyID = activeCompanyID.trim();
+    if (!cleanCompanyID) return;
+    const previousTree = sidebarPinTreeRef.current;
+    const plan = planSidebarPinMove(previousTree, moving, target, placement);
+    if (plan.updates.length === 0) return;
+    commitSidebarPinTree(plan.tree);
+    void applySidebarPinLayout(apiBase, cleanCompanyID, plan.updates)
+      .then(commitSidebarPinTree)
       .catch((error) => {
-        console.error("Failed to reorder sidebar pins", error);
-        void fetchSidebarPins(apiBase, cleanCompanyID)
-          .then((pins) => setSidebarPins(foldLatestCommittedEntityTitles(pins, cleanCompanyID, reconcileAppSidebarPinTitles)))
-          .catch(() => {});
+        console.error("Failed to update sidebar pin layout", error);
+        commitSidebarPinTree(previousTree);
       });
-  }, [activeCompanyID, apiBase]);
+  }, [activeCompanyID, apiBase, commitSidebarPinTree]);
+
+  const groupPinnedItems = useCallback(async (dragged: SidebarPin, target: SidebarPin): Promise<string | null> => {
+    const cleanCompanyID = activeCompanyID.trim();
+    if (!cleanCompanyID) return null;
+    try {
+      const result = await groupSidebarPins(apiBase, cleanCompanyID, dragged.pinID, target.pinID);
+      commitSidebarPinTree(result.tree);
+      return result.folder.folderID;
+    } catch (error) {
+      console.error("Failed to group sidebar pins", error);
+      await reloadSidebarPinTree().catch(() => {});
+      return null;
+    }
+  }, [activeCompanyID, apiBase, commitSidebarPinTree, reloadSidebarPinTree]);
 
   const upsertDockTab = useCallback((input: AppDockTabInput): string => {
     const tabID = appDockTabID(input.kind, input.entityID);
@@ -1534,7 +1613,9 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     closeMenus();
     setActiveDockTabID(null);
     routeManagedExplorerNodePopupRef.current = false;
-    setExplorerNodePopup({ nodeID: pin.id, nodeTitle: pin.name });
+    const popup = sidebarPinNodePopupLaunch(pin);
+    if (!popup) return;
+    setExplorerNodePopup(popup);
     if (onNavigate) onNavigate(buildNodeRoute(pin.id));
   }, [activatePrimaryPage, closeMenus, onNavigate]);
 
@@ -1547,18 +1628,24 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       pinID: "",
       kind: target.kind,
       id: target.id,
+      parentFolderID: "",
       name: target.label,
       position: 0,
       createdTimestamp: new Date().toISOString(),
     });
   }, [openSidebarPin]);
 
-  const handleSidebarPinDrop = useCallback((event: React.DragEvent<HTMLElement>) => {
-    const pins = sidebarPinsFromDrop(event.dataTransfer);
+  const handleSidebarPinDrop = useCallback((
+    event: React.DragEvent<HTMLElement>,
+    parentFolderID: string,
+    target: SidebarPinEntryRef | null,
+    placement: "before" | "after" | "inside",
+  ) => {
+    const pins = sidebarPinsFromDrop(event.dataTransfer, parentFolderID);
     setPinDropActive(false);
     if (pins.length === 0) return;
     event.preventDefault();
-    addSidebarPins(pins);
+    void addSidebarPins(pins, target, placement);
   }, [addSidebarPins]);
 
   useEffect(() => {
@@ -1566,7 +1653,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       const detail = (event as CustomEvent<SidebarPinRequestDetail>).detail;
       const id = typeof detail?.id === "string" ? detail.id.trim() : "";
       if (!id || !isSidebarPinKind(detail.kind)) return;
-      addSidebarPins([{
+      void addSidebarPins([{
         id,
         kind: detail.kind,
         name: typeof detail.name === "string" && detail.name.trim()
@@ -1810,7 +1897,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
           activePage={activePrimaryPage}
           activeHomeView={homeViewID}
           currentUserID={me?.user.user_id?.trim() ?? ""}
-          pins={sidebarPins}
+          pinTree={sidebarPinTree}
           pinDropActive={pinDropActive}
           explorerSelectionTargetFrameIDs={sidebarExplorerSelectionTargetFrameIDs}
           onHomeViewSelect={selectHomeKeyViewID}
@@ -1818,16 +1905,14 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
           onPinOpen={openSidebarPin}
           onPinOpenInNewTab={openSidebarPinInNewBrowserTab}
           onPinRemove={removeSidebarPin}
-          onPinReorder={reorderSidebarPin}
+          onPinCreateFolder={createPinFolder}
+          onPinRenameFolder={renamePinFolder}
+          onPinDeleteFolder={deletePinFolder}
+          onPinMoveEntry={moveSidebarPinEntry}
+          onPinGroup={groupPinnedItems}
+          onPinExternalDrop={handleSidebarPinDrop}
           onPinDragEnter={() => setPinDropActive(true)}
           onPinDragLeave={() => setPinDropActive(false)}
-          onPinDragOver={(event) => {
-            if (!hasSidebarPinSectionDrop(event.dataTransfer)) return;
-            event.preventDefault();
-            event.dataTransfer.dropEffect = "copy";
-            setPinDropActive(true);
-          }}
-          onPinDrop={handleSidebarPinDrop}
         />
         <button
           type="button"
@@ -2183,11 +2268,13 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
 
       {explorerNodePopup && (
         <AppNodeEditorPopup
+          key={explorerNodePopup.popupInstanceID ?? `${explorerNodePopup.surfaceID ?? "app-sidebar-node-popup"}:${explorerNodePopup.nodeID}`}
           nodeID={explorerNodePopup.nodeID}
           nodeTitle={explorerNodePopup.nodeTitle}
           surfaceID={explorerNodePopup.surfaceID}
           focusInformationID={explorerNodePopup.focusInformationID}
           focusRequestID={explorerNodePopup.focusRequestID}
+          initialFullscreen={explorerNodePopup.initialFullscreen}
           onClose={() => {
             const wasRouteManaged = routeManagedExplorerNodePopupRef.current || deepLink?.kind === "node";
             const returnedToSourceNode = wasRouteManaged && returnToEditorEntitySourceNode(explorerNodePopup.nodeID);

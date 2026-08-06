@@ -5,6 +5,8 @@ import { TRIAGE_MESSAGE_DRAG_MIME } from "../pages/home/homeConstants.js";
 import { readTriageMessageDrag } from "../pages/home/homeUtils.js";
 import { sidebarPinFallbackName, type SidebarPin, type SidebarPinDraft, type SidebarPinKind } from "./sidebarPins.js";
 
+export const APP_SIDEBAR_PIN_DRAG_MIME = "application/x-mangorts-sidebar-pin";
+
 export type SidebarPinnedResourceDropAction =
   | { kind: "triage_to_logic_gate"; pin: SidebarPin; logicGateID: string; messageIDs: string[]; sharedInboxID?: string; accountEmail?: string }
   | { kind: "triage_to_node"; pin: SidebarPin; nodeID: string; messageIDs: string[]; sharedInboxID?: string; accountEmail?: string }
@@ -16,7 +18,7 @@ export function isSidebarPinKind(value: unknown): value is SidebarPinKind {
   return value === "node" || value === "logic_gate" || value === "project";
 }
 
-export function sidebarPinsFromDrop(dataTransfer: DataTransfer): SidebarPinDraft[] {
+export function sidebarPinsFromDrop(dataTransfer: DataTransfer, parentFolderID?: string): SidebarPinDraft[] {
   const payload = readSidebarExplorerDragPayload(dataTransfer);
   const droppedText = dataTransfer.getData("text/plain").trim();
 
@@ -26,6 +28,7 @@ export function sidebarPinsFromDrop(dataTransfer: DataTransfer): SidebarPinDraft
       id: payload.itemID.trim(),
       kind,
       name: droppedText || sidebarPinFallbackName(kind, payload.itemID),
+      ...(parentFolderID !== undefined ? { parentFolderID } : {}),
     }];
   }
 
@@ -35,6 +38,7 @@ export function sidebarPinsFromDrop(dataTransfer: DataTransfer): SidebarPinDraft
       id: item.itemID.trim(),
       kind,
       name: sidebarPinFallbackName(kind, item.itemID),
+      ...(parentFolderID !== undefined ? { parentFolderID } : {}),
     }));
   }
 
@@ -44,6 +48,7 @@ export function sidebarPinsFromDrop(dataTransfer: DataTransfer): SidebarPinDraft
       id: item.nodeID,
       kind: "node",
       name: item.label.trim() || sidebarPinFallbackName("node", item.nodeID),
+      ...(parentFolderID !== undefined ? { parentFolderID } : {}),
     }));
   }
 
@@ -51,6 +56,7 @@ export function sidebarPinsFromDrop(dataTransfer: DataTransfer): SidebarPinDraft
 }
 
 export function readSidebarPinnedResourceDropAction(pin: SidebarPin, dataTransfer: DataTransfer): SidebarPinnedResourceDropAction | null {
+  if (hasSidebarPinDrag(dataTransfer)) return null;
   const pinID = pin.id.trim();
   if (!pinID || pin.kind === "project") return null;
 
@@ -75,6 +81,7 @@ export function sidebarPinAcceptsPinnedResourceDrop(pin: SidebarPin, dataTransfe
 }
 
 export function sidebarPinAcceptsPinnedResourceDrag(pin: SidebarPin, dataTransfer: DataTransfer): boolean {
+  if (hasSidebarPinDrag(dataTransfer)) return false;
   const pinID = pin.id.trim();
   if (!pinID || pin.kind === "project") return false;
 
@@ -85,6 +92,10 @@ export function sidebarPinAcceptsPinnedResourceDrag(pin: SidebarPin, dataTransfe
 
 export function hasSidebarPinSectionDrop(dataTransfer: DataTransfer): boolean {
   return sidebarPinsFromDrop(dataTransfer).length > 0;
+}
+
+export function hasSidebarPinDrag(dataTransfer: DataTransfer): boolean {
+  return Array.from(dataTransfer.types).includes(APP_SIDEBAR_PIN_DRAG_MIME);
 }
 
 export function hasMangoDragPayload(dataTransfer: DataTransfer): boolean {

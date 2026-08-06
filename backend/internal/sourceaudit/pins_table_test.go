@@ -17,6 +17,9 @@ func TestPinsUseCanonicalTableName(t *testing.T) {
 
 	schema := readRepoFile(t, repoRoot, "backend/db/schema.sql")
 	assertContains(t, schema, "create table if not exists pins (", "schema must create pins table")
+	assertContains(t, schema, "create table if not exists pin_folders (", "schema must create pin folders table")
+	assertContains(t, schema, "parent_folder_id uuid", "schema must store pin tree parents")
+	assertContains(t, schema, "references pin_folders(company_id, user_id, folder_id) on delete cascade", "pin tree parents must be owner scoped and cascade only pin records")
 	assertNotContains(t, schema, "user_pins", "schema must not create or reference user_pins")
 
 	store := readRepoFile(t, repoRoot, "backend/internal/store/postgres_user_pins.go")
@@ -33,6 +36,12 @@ func TestPinsUseCanonicalTableName(t *testing.T) {
 	if count := strings.Count(migration, "user_pins"); count != 1 {
 		t.Fatalf("migration should mention user_pins only for the drop statement, got %d references", count)
 	}
+
+	folderMigration := readRepoFile(t, repoRoot, "backend/db/migrations/20260805_zzzz_pinned_folders.sql")
+	assertContains(t, folderMigration, "create table pin_folders (", "folder migration must create pin_folders")
+	assertContains(t, folderMigration, "alter table pins", "folder migration must add parent_folder_id to existing pins")
+	assertContains(t, folderMigration, "foreign key (company_id, user_id, parent_folder_id)", "folder migration must enforce owner-scoped parents")
+	assertContains(t, folderMigration, "drop index if exists idx_pins_user_position;", "folder migration must retire flat pin ordering")
 }
 
 func readRepoFile(t *testing.T, repoRoot, rel string) string {

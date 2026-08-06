@@ -1,15 +1,29 @@
-Last updated: 2026-07-13
+# Process Story: A user organizes personal pins into a nested tree
+
+A user with edit access pins an existing Node, Logic Gate, or Project
+↓
+Mango stores one user-and-company-scoped pin containing the resource's exact canonical type and ID
+↓
+The user may create personal folders, nest folders, and move folders and pins through one mixed ordered tree
+↓
+Dropping one existing pinned row onto another existing pinned row atomically creates a New Folder at the target's location and places target first and dragged pin second
+↓
+Opening a pinned Node starts the Node popup fullscreen, while other Node launch sources keep their normal windowed behavior
+↓
+Deleting a pin folder deletes only that folder subtree and its contained pin rows; underlying Nodes, Logic Gates, and Projects remain unchanged
+
+Last updated: 2026-08-05
 
 # Pin Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (backend lifecycle, permission-edge coverage, canonical pins table audit, frontend DB-backed API/no-cache coverage, and frontend pin drop helper coverage exists; `tests/frontend/app/timelineState.test.ts` covers PIN29 local pin-title reconciliation and stale persisted-response overlay; frontend menu and browser DOM drag behavior still needs mapped automation)
+- Business Logic Covered By Automated Tests: Partial (backend nested-folder lifecycle, atomic grouping, owner and cycle rejection, permission-edge coverage, canonical schema audit, frontend tree planning, subtree removal, DB-backed API/no-cache behavior, internal-drag precedence, and fullscreen pinned-Node launch coverage exists; `tests/frontend/app/timelineState.test.ts` covers PIN29 local pin-title reconciliation and stale persisted-response overlay; frontend menu and browser DOM drag behavior still needs mapped automation)
 
 ## Business Logic
 
 PIN1 - Pins are stored in the database, scoped by company and user, not browser cache.
-PIN2 - The canonical database table is pins; a pin row has a single primary key pin ID plus company ID, user ID, resource type, resource ID, name, position, and created timestamp.
+PIN2 - The canonical resource-pin table is pins; a pin row has a single primary key pin ID plus company ID, user ID, optional parent folder ID, resource type, resource ID, name, position, and created timestamp.
 PIN3 - Supported pinned resource types are node, logic gate, and project.
 PIN4 - Creating a pin requires company access and current edit access to the target resource.
 PIN5 - The pin name is a snapshot resolved from the server resource name or title at pin time.
@@ -18,11 +32,11 @@ PIN7 - Listing pins reads the user's company pins directly from the pins table a
 PIN8 - Listing pins does not hide stale, deleted, renamed, or no-longer-permitted resources.
 PIN9 - Opening a pin uses the normal resource route, so missing permission is handled by the destination view with a permission denial.
 PIN10 - Unpin deletes only the current user's pin in the current company.
-PIN11 - Pin order is persisted in the database and can be changed by dragging pins within the pin section.
+PIN11 - Folder and pin sibling order is persisted in the database and can be changed by dragging rows within the Pinned section.
 PIN12 - Resource right-click menus put Open in new browser tab first and Pin second for pinnable resources.
 PIN13 - Pinned-resource right-click menus put Open in new browser tab first and Unpin second.
 PIN14 - The sidebar pin section must not read, write, hydrate, or recover pins from browser storage.
-PIN15 - The only frontend pin API surface is /v1/user-pins, /v1/user-pins/{pin_id}, and /v1/user-pins/order; legacy /v1/pins, pinsApi, SIDEBAR_PINS_KEY, label, and addedAt pin compatibility are not allowed.
+PIN15 - The canonical frontend pin API surface is /v1/user-pins, /v1/user-pins/{pin_id}, /v1/user-pins/layout, /v1/user-pin-folders, /v1/user-pin-folders/{folder_id}, and /v1/user-pin-folders/group. Legacy /v1/pins, /v1/user-pins/order, pinsApi, SIDEBAR_PINS_KEY, label, and addedAt compatibility are not allowed.
 PIN16 - The user_pins table is not canonical and must be dropped; backend storage reads and writes the pins table.
 PIN17 - Only pinned nodes and pinned logic gates are valid email drop targets; pinned projects and empty pin-section space are not email drop targets.
 PIN18 - Dropping triage or shared-triage email on a pinned logic gate uses the existing communications conversion path to create node(s) in that logic gate, including the normal priority, permission, GVIC, local cache patching, and event behavior.
@@ -37,6 +51,17 @@ PIN26 - Successful pinned or Explorer email conversion must keep converted sourc
 PIN27 - Successful pinned email conversion must set source emails to unstarred through the source mailbox scope, return `unstarred_message_ids`, and reconcile Home locally without blanking, refilling, or repeatedly reloading My Triage or Shared Triage.
 PIN28 - Pinned-node and pinned-Logic-Gate email conversions persist mailbox provenance in the resulting attached-email projection: personal mail stores `account_email`, and Shared Triage mail stores both `shared_inbox_id` and `account_email` for later scoped reads and mutations.
 PIN29 - After a successful same-window Node or Logic Gate rename, the visible matching sidebar pin name converges from the concrete committed-title event. This is a local label patch only: project pins are unaffected, no pin HTTP write occurs, and the durable pin-name snapshot/listing rules remain unchanged.
+PIN30 - The canonical personal folder table is pin_folders. Every folder belongs to one company membership and one user, may have one owner-scoped parent folder, and may nest to arbitrary depth without cycles.
+PIN31 - Folders and pins share one mixed sibling order within each parent. A complete user tree is loaded in one read; Pinned folders do not use Company Explorer lazy loading.
+PIN32 - Dropping an existing pinned row onto the middle of another existing pinned row atomically creates New Folder in the target's current parent, at the target's current position, with the target at position 1000 and dragged pin at position 2000.
+PIN33 - Pin-on-pin grouping follows the target when pins start in different folders. The dragged pin moves from its old parent; the one-pin-per-user/company/resource rule still prevents duplicates.
+PIN34 - Deleting a pin folder deletes its descendant folders and contained pin rows only. It never deletes, recycles, or changes the underlying Node, Logic Gate, or Project.
+PIN35 - Moving a folder into itself or one of its descendants is rejected atomically. Every move, reorder, and grouping command rejects cross-company and cross-user entry IDs.
+PIN36 - Creating a pin folder, nested folder, renaming a folder, and deleting a folder are personal organization actions that require company membership but do not grant or change access to pinned resources.
+PIN37 - Expanded Pinned folder IDs and inline-rename state live only in current React session state and are never stored in browser storage.
+PIN38 - Internal pinned-row drag identity takes precedence over email and external Node drag payloads. Pin-on-pin grouping must not invoke email conversion or Node-to-Logic-Gate assignment.
+PIN39 - The middle of a folder is an inside drop; row edges are before/after drops. External supported resources may create or move a pin into a folder or sibling location, but an arbitrary unpinned resource dropped on a pin does not auto-create a folder.
+PIN40 - Opening a Node from the Pinned section starts a fresh fullscreen Node popup instance. Opening that Node from other routes, the dock, Explorer, Home, or another existing source remains windowed unless that source independently requests fullscreen.
 
 ## Scenarios
 
@@ -182,3 +207,81 @@ Expected:
 - Successful drops show a short green confirmation banner in the pin section.
 - The visible Home triage list and workspace panel handle the committed conversion response locally by keeping the source email row visible and patching its Logic Gate icon state without communications cache invalidation, stale prefetched-page top-up, post-removal fill, message-length prefetch, or repeated reloads.
 - Permission, GVIC assignment, local cache patching, and event behavior come from the existing conversion and assignment paths rather than a pin-specific backend shortcut.
+
+### Scenario PIN-S8: Nested Folder Tree And Mixed Ordering
+
+Business logic covered:
+- PIN11
+- PIN15
+- PIN30
+- PIN31
+- PIN35
+- PIN36
+- PIN37
+- PIN39
+
+Given:
+- A user has root pins, root folders, nested folders, and pins inside several parents.
+
+Expected:
+- The API returns the complete personal folder-and-pin tree.
+- Root and nested folder creation use the actor's membership identity, not a request-supplied user ID.
+- Folders and pins sort together by position and stable tie breakers.
+- Middle-of-folder drops move entries inside; row-edge drops reorder before or after.
+- A folder cannot move into itself or a descendant.
+- IDs owned by another user or company are rejected without a partial move.
+- Reload preserves database layout while expansion remains current-session state only.
+
+### Scenario PIN-S9: Drag One Pin Onto Another
+
+Business logic covered:
+- PIN6
+- PIN32
+- PIN33
+- PIN35
+- PIN38
+
+Given:
+- A dragged pin and target pin may start at root, in the same folder, or in different folders.
+- A drag payload may also contain the resource MIME used by older pin drop actions.
+
+Expected:
+- The internal pin drag wins.
+- One transaction creates New Folder in the target parent at the target position.
+- Target is first and dragged pin is second.
+- The new folder expands and enters inline rename.
+- Different-parent grouping removes the dragged pin from its old parent.
+- Failure rolls back the new folder and both moves.
+- Email conversion and Node-to-Logic-Gate assignment do not run.
+
+### Scenario PIN-S10: Delete Folder Without Deleting Resources
+
+Business logic covered:
+- PIN7
+- PIN8
+- PIN10
+- PIN34
+
+Given:
+- A folder contains nested folders and pins whose resources may still exist, be stale, or no longer be permitted.
+
+Expected:
+- The user sees a confirmation explaining that contained pin records will be removed.
+- Confirming deletes the folder subtree and contained pins.
+- Underlying Nodes, Logic Gates, and Projects are not deleted, recycled, renamed, or permission-changed.
+- Pins and folders outside the subtree remain.
+
+### Scenario PIN-S11: Pinned Node Opens Fullscreen
+
+Business logic covered:
+- PIN9
+- PIN40
+
+Given:
+- A Node popup was previously used windowed.
+- The user opens a Node from Pinned and later opens the same Node from another source.
+
+Expected:
+- The Pinned launch uses a fresh popup instance and starts fullscreen.
+- Toggling fullscreen off returns to normal popup geometry.
+- The non-Pinned launch keeps its established windowed default.

@@ -4,6 +4,8 @@ import { EXPLORER_DRAG_MIME } from "../../../frontend/src/modules/company-explor
 import { EXPLORER_ENTITY_DRAG_MIME, serializeExplorerEntityDragPayload } from "../../../frontend/src/modules/kanban/shared.js";
 import { TRIAGE_MESSAGE_DRAG_MIME } from "../../../frontend/src/pages/home/homeConstants.js";
 import {
+  APP_SIDEBAR_PIN_DRAG_MIME,
+  hasSidebarPinDrag,
   readSidebarPinnedResourceDropAction,
   sidebarPinAcceptsPinnedResourceDrag,
   sidebarPinAcceptsPinnedResourceDrop,
@@ -36,6 +38,7 @@ function pin(kind: SidebarPin["kind"], id: string): SidebarPin {
     pinID: `pin-${kind}-${id}`,
     id,
     kind,
+    parentFolderID: "",
     name: kind === "logic_gate" ? "Pinned Gate" : kind === "node" ? "Pinned Node" : "Pinned Project",
     position: 1000,
     createdTimestamp: "2026-06-26T00:00:00Z",
@@ -116,6 +119,19 @@ describe("sidebar pin drops", () => {
     assert.equal(sidebarPinAcceptsPinnedResourceDrag(pin("node", "node-1"), nodeTransfer), false);
     assert.equal(sidebarPinAcceptsPinnedResourceDrag(pin("project", "project-1"), nodeTransfer), false);
     assert.equal(readSidebarPinnedResourceDropAction(pin("logic_gate", "gate-1"), nodeTransfer), null);
+  });
+
+  it("gives an internal pinned-row drag precedence over resource business actions", () => {
+    const transfer = dataTransfer();
+    transfer.setData(APP_SIDEBAR_PIN_DRAG_MIME, JSON.stringify({ entryType: "pin", entryID: "pin-node-1" }));
+    transfer.setData(EXPLORER_ENTITY_DRAG_MIME, serializeExplorerEntityDragPayload({
+      itemType: "node_batch",
+      nodes: [{ nodeID: "node-1", label: "Node One" }],
+    }));
+
+    assert.equal(hasSidebarPinDrag(transfer), true);
+    assert.equal(sidebarPinAcceptsPinnedResourceDrag(pin("logic_gate", "gate-1"), transfer), false);
+    assert.equal(readSidebarPinnedResourceDropAction(pin("logic_gate", "gate-1"), transfer), null);
   });
 
   it("keeps ordinary resource drops available for creating sidebar pins", () => {

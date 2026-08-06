@@ -115,8 +115,8 @@ test("committed titles reconcile taskbar storage and popup parent labels", () =>
   assert.equal(reconcileAppDockTabTitles(renamedTabs, update), renamedTabs, "an already reconciled dock must preserve state identity");
 
   const pins: SidebarPin[] = [
-    { pinID: "pin-node", id: "node-1", kind: "node", name: "Old node", position: 0, createdTimestamp: "2026-07-13T00:00:00Z" },
-    { pinID: "pin-gate", id: "node-1", kind: "logic_gate", name: "Unrelated gate", position: 1, createdTimestamp: "2026-07-13T00:00:00Z" },
+    { pinID: "pin-node", id: "node-1", kind: "node", parentFolderID: "", name: "Old node", position: 0, createdTimestamp: "2026-07-13T00:00:00Z" },
+    { pinID: "pin-gate", id: "node-1", kind: "logic_gate", parentFolderID: "", name: "Unrelated gate", position: 1, createdTimestamp: "2026-07-13T00:00:00Z" },
   ];
   const renamedPins = reconcileAppSidebarPinTitles(pins, update);
   assert.deepEqual(renamedPins.map((pin) => pin.name), ["Renamed node", "Unrelated gate"]);
@@ -153,8 +153,8 @@ test("committed titles reconcile taskbar storage and popup parent labels", () =>
   resetCommittedEntityTitleRegistryForTests();
   publishCommittedEntityTitleUpdate(update, new EventTarget());
   const stalePinResponse: SidebarPin[] = [
-    { pinID: "pin-node", id: "node-1", kind: "node", name: "Persisted stale node", position: 0, createdTimestamp: "2026-07-13T00:00:00Z" },
-    { pinID: "pin-project", id: "node-1", kind: "project", name: "Project stays unchanged", position: 1, createdTimestamp: "2026-07-13T00:00:00Z" },
+    { pinID: "pin-node", id: "node-1", kind: "node", parentFolderID: "", name: "Persisted stale node", position: 0, createdTimestamp: "2026-07-13T00:00:00Z" },
+    { pinID: "pin-project", id: "node-1", kind: "project", parentFolderID: "", name: "Project stays unchanged", position: 1, createdTimestamp: "2026-07-13T00:00:00Z" },
   ];
   assert.deepEqual(
     foldLatestCommittedEntityTitles(stalePinResponse, "company-1", reconcileAppSidebarPinTitles).map((pin) => pin.name),

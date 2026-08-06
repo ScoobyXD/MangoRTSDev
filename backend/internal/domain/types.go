@@ -193,11 +193,28 @@ type UserPin struct {
 	CompanyID        string    `json:"company_id"`
 	PinID            string    `json:"pin_id"`
 	UserID           string    `json:"user_id"`
+	ParentFolderID   *string   `json:"parent_folder_id"`
 	ResourceType     string    `json:"resource_type"`
 	ResourceID       string    `json:"resource_id"`
 	Name             string    `json:"name"`
 	Position         int       `json:"position"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
+}
+
+type UserPinFolder struct {
+	CompanyID        string    `json:"company_id"`
+	FolderID         string    `json:"folder_id"`
+	UserID           string    `json:"user_id"`
+	ParentFolderID   *string   `json:"parent_folder_id"`
+	Name             string    `json:"name"`
+	Position         int       `json:"position"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type UserPinTree struct {
+	PinFolders []UserPinFolder `json:"pin_folders"`
+	UserPins   []UserPin       `json:"user_pins"`
 }
 
 type EntityPermission struct {
