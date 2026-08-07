@@ -2,6 +2,7 @@ import React from "react";
 import { confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import type { CommunicationsEmailCollaboration, CompanyUser, CompanyUserGroup, CompanyUserGroupMember, EmailMailbox, EmailMessage, EmailProvider } from "../../modules/communications/communicationsApi";
 import { ExplorerRowIcon } from "../../icons/index.js";
+import type { EditorEntityLink, EditorEntityLinkRequest } from "../../modules/editor/editorEntityLinks.js";
 import type { NodeRecord } from "../../modules/nodes/types";
 import type { LogicGateRecord } from "../../modules/logic-gates/types";
 import type { ComposeState, HomeViewID, MessageSelectionModifiers } from "./homeTypes";
@@ -224,6 +225,7 @@ export function HomeMailWorkspace({
   archiveLabel,
   busy,
   companyID,
+  entityRequestJSON,
   currentUserID,
   compose,
   draftCount,
@@ -304,6 +306,7 @@ export function HomeMailWorkspace({
   onToggleUnreadOnly,
   onEmailCollaborationChange,
   onEmailNodeAttachmentChange,
+  onOpenPickerEntity,
   onOpenCollaborationNode,
 }: {
   activeViewID: HomeViewID;
@@ -312,6 +315,7 @@ export function HomeMailWorkspace({
   archiveLabel: string;
   busy: string;
   companyID: string;
+  entityRequestJSON: EditorEntityLinkRequest;
   messageListOrder: EmailConversationOrder;
   currentUserID: string;
   compose: ComposeState;
@@ -392,6 +396,7 @@ export function HomeMailWorkspace({
   onToggleUnreadOnly: (checked: boolean) => void;
   onEmailCollaborationChange: (collaboration: CommunicationsEmailCollaboration) => void;
   onEmailNodeAttachmentChange: (attachment: EmailNodeAttachmentChange) => void;
+  onOpenPickerEntity: (entity: EditorEntityLink) => void;
   onOpenCollaborationNode: (message: EmailMessage) => void;
 }) {
   const [hoveredMessageID, setHoveredMessageID] = React.useState("");
@@ -453,7 +458,7 @@ export function HomeMailWorkspace({
     setEmailActionNotice(null);
   }, [activeViewID, emailChatKey, selectedMessageRowKey]);
   React.useEffect(() => {
-    if (!emailChatKey || !(selectedMessage?.collaboration_id?.trim() || selectedMessage?.collaboration_node_id?.trim())) return;
+    if (!emailChatKey || !selectedMessage?.collaboration_node_id?.trim()) return;
     if (suppressAssociationAutoOpenKeyRef.current === emailChatKey) {
       suppressAssociationAutoOpenKeyRef.current = "";
       return;
@@ -957,12 +962,11 @@ export function HomeMailWorkspace({
                 emailNodeDestinationSearch={(
                   <EmailNodeDestinationSearch
                     companyID={companyID}
-                    nodes={nodes}
+                    requestJSON={entityRequestJSON}
                     logicGates={logicGates}
-                    currentNodeID={selectedMessage.collaboration_node_id}
                     busy={!!busy || Boolean(emailActionRequest?.destination)}
                     onSubmit={sendEmailToNodeDestination}
-                    onOpenCurrentNode={() => onOpenCollaborationNode(selectedMessage)}
+                    onOpenEntity={onOpenPickerEntity}
                     onError={setEmailCollaborationError}
                   />
                 )}

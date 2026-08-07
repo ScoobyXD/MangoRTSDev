@@ -1,8 +1,26 @@
+# Process Story: Triage email uses the universal reference and link controls
+
+A user selects a message in My Triage or Shared Triage
+↓
+The toolbar shows a separate Node-plus button for an immediate floating Node and opens the shared universal picker in `##` link mode by default
+↓
+With the picker search empty, Backspace changes `##` to `#` reference mode; pressing `#` changes it back to link mode, and the same keyboard rule works in every universal-picker host
+↓
+Reference mode opens the exact chosen Node, Logic Gate, or Project without changing the email; link mode sends the exact email and destination IDs through the established typed placement command
+↓
+An existing Node reuses the email-to-Node import, while a Logic Gate or Project creates a new email Node and assigns it through the existing Logic Gate/Project rules
+↓
+Selecting an already encountered email, meaning a row with a Node association, opens the chat column; an unencountered email does not auto-open it, and this phase changes only that UI visibility rule
+↓
+Inside the Node, the Node-wide email column remains fixed beneath the toolbar while the timeline scrolls, and the email column keeps its own independent scroll
+
+Last updated: 2026-08-06
+
 # V3 Email to Node
 
 Date: August 6, 2026
 
-Status: Approved Phase 1 implementation contract.
+Status: Approved durable-ingestion and universal email-linker contract.
 
 The complexity is support work for three simple user actions:
 Put an email somewhere useful.
@@ -33,20 +51,21 @@ The long-term product should make three actions easy:
 2. Discuss that email with other people.
 3. Create a shared draft for that email.
 
-Phase 1 implements only the storage foundation required by those actions:
+The durable foundation implements:
 
 - continuously ingest new Inbox email;
 - append missing messages to exact stored threads;
 - propagate existing Node-wide placement to newly completed messages;
 - expose the existing thread and Node indicators in My Triage and Shared Triage.
 
+The triage UI layer adds the shared universal reference/link picker, the separate floating-Node button, encountered-email chat visibility, and the fixed independently scrolling Node email column. It reuses the established placement commands and adds no chat backend behavior.
+
 ## Explicitly Out of Scope
 
-Phase 1 does not implement:
+This contract does not implement:
 
-- the universal email-to-Node picker;
-- creating Nodes, Logic Gates, Projects, or text boxes from a picker;
-- chat creation or chat-side-panel changes;
+- chat persistence, message-send, text-box ownership, or other backend chat changes beyond the existing contracts;
+- new relationship storage or a generic universal edge;
 - shared-draft creation or collaborative-draft changes;
 - automatic text-box placement;
 - automatic Project or Logic Gate placement;
@@ -215,6 +234,20 @@ E2N59 - Stored email access remains company-scoped and Node-authorized. A connec
 
 E2N60 - During the in-place job-table cutover, an old full-thread job and old message job may both map to the same new connection/message identity. Mango keeps every job row, leaves the oldest such active row active, and marks only later redundant active rows completed with superseded_by_email_ingestion_cutover. The new worker's full-thread reconciliation makes the retained job sufficient.
 
+### Universal email picker and Node presentation
+
+E2N61 - My Triage and Shared Triage use the shared universal picker. The email launcher opens in `##` link mode. On an empty picker query, Backspace changes link mode to `#` reference mode, and pressing `#` in reference mode restores `##`. Category buttons and pinned/workspace search remain the shared universal-picker implementation, not a second email-only search authority.
+
+E2N62 - Email reference mode only opens the selected exact Node, Logic Gate, or Project. It does not import the email, create a Node, add priority, assign a Logic Gate or Project, create chat, or write any relationship.
+
+E2N63 - Email link mode sends literal selected IDs through existing commands. Choosing a Node imports or reuses the exact email message on that Node. Choosing a Logic Gate creates a new email Node after priority selection and assigns it to that exact Logic Gate. Choosing a Project creates a new email Node after priority and Logic Gate selection, then uses the existing typed Project/Logic Gate rules. The picker never creates a generic edge or translated resource identity.
+
+E2N64 - Floating Node creation is a separate Node-plus button immediately left of the email universal-picker launcher. It creates the email Node without priority, Logic Gate, or Project placement. Floating creation is not a blank search result.
+
+E2N65 - Chat auto-open is a frontend presentation rule in this phase. Selecting an email row with a nonblank Node association opens the chat column. Selecting an unassociated email keeps chat closed until the existing selection or comment actions open it. A collaboration ID without a Node association is not enough to auto-open chat, and this rule adds no chat backend write, text-box creation, or messaging behavior.
+
+E2N66 - The Node-wide email column is sticky below the Node toolbar within the Node scroll viewport. Scrolling the text-box timeline does not move the email column away. The email column retains its own vertical scroller, bounded height, independent resize/focus behavior, and the existing Node-level Email toggle.
+
 ## Required Storage Shape
 
 ### email_connections
@@ -308,6 +341,11 @@ grant.expired or provider 401
 - Clicking the Node indicator opens the existing Node.
 - After ingestion commits, the Node's stored email thread includes the newly completed message.
 - List rendering never waits for thread ingestion.
+- The triage toolbar shows a separate floating-Node button and a universal picker launcher labeled `## Ready!`; opening it starts in link mode.
+- Empty-query Backspace moves from `##` link to `#` reference, and `#` moves back to link.
+- Reference opens the selected resource without email mutation. Link uses the existing typed placement commands.
+- Only a selected row with a Node association auto-opens chat; this is UI-only.
+- The Node-wide email column stays visible while the Node timeline scrolls and scrolls its own email content.
 
 ## Rollout and Verification
 

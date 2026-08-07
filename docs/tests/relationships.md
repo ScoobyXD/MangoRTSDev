@@ -40,21 +40,21 @@ Hidden organizational ancestry is omitted, and deleting a Company Explorer folde
 
 Last updated: 2026-08-06
 
-# Process Story: The universal picker dispatches exact typed relationship commands
+# Process Story: The universal picker references or links exact typed resources
 
-A user opens the universal picker from a resource editor and selects `##` link mode
+A user opens the universal picker from a resource editor or a selected My Triage/Shared Triage email
 ↓
-The source editor and chosen result provide their unchanged canonical resource types and IDs
+Single-hashtag reference mode opens or inserts the chosen exact Node, Logic Gate, or Project without creating a relationship
 ↓
-The picker permits only the documented source/target pair and sends those IDs to the existing business-specific command
+Double-hashtag link mode keeps the source and chosen result's unchanged canonical types and IDs and permits only the documented pair
+↓
+An email-to-Node choice uses the established exact-message import command; an email-to-Logic-Gate or email-to-Project choice creates the email Node and then uses the existing typed Logic Gate/Project assignment commands
 ↓
 Node-to-Logic-Gate uses the Logic Gate work-assignment command, while Node-to-Project and Logic-Gate-to-Project use `project_relationships`
 ↓
-Authorization, cardinality, idempotency, timeline stamps, projections, and events remain owned by those commands; the picker creates no generic edge or resource registry
-↓
-The inserted editor chip is a reference to the selected target, not the relationship record, so deleting the chip never unlinks the resources
+Authorization, cardinality, idempotency, timeline stamps, projections, and events remain owned by those commands; the picker creates no generic edge or resource registry, and an editor chip remains only a reference
 
-Last updated: 2026-08-05
+Last updated: 2026-08-06
 
 # Process Story: Mango relates resources by their exact identities
 

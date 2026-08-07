@@ -678,6 +678,7 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
           requestJSON={async <T,>(): Promise<T> => ({ user_pin_folders: [], user_pins: [] }) as T}
           sourceType="node"
           linkTargetTypes={["logic_gate", "project"]}
+          initialMode="link"
           anchor={{ left: 24, top: 24 }}
           onChoose={async () => undefined}
           onCancel={noop}
@@ -687,12 +688,27 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     await flushAsyncWork();
     const modalPicker = dom.window.document.querySelector<HTMLElement>('[data-mango-universal-picker="true"]');
     const activeModalLayer = dom.window.document.querySelector<HTMLElement>('[data-mango-modal-layer="true"]');
-    const modalPickerInput = modalPicker?.querySelector<HTMLInputElement>('input[aria-label="Search resources to reference"]');
+    let modalPickerInput = modalPicker?.querySelector<HTMLInputElement>('input[aria-label="Search resources to link"]');
     assert.ok(modalPicker);
     assert.ok(activeModalLayer);
     assert.ok(modalPickerInput);
+    assert.equal(modalPicker.dataset.mangoUniversalPickerMode, "link");
     assert.equal(modalPicker.closest('[data-mango-modal-layer="true"]'), activeModalLayer, "a Node-modal picker must portal inside its active elevated layer");
     assert.equal(dom.window.document.activeElement, modalPickerInput, "the Node-modal picker keeps focus instead of losing it to the outer modal trap");
+
+    await act(async () => {
+      modalPickerInput?.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true }));
+    });
+    modalPickerInput = modalPicker.querySelector<HTMLInputElement>('input[aria-label="Search resources to reference"]');
+    assert.ok(modalPickerInput);
+    assert.equal(modalPicker.dataset.mangoUniversalPickerMode, "reference", "Backspace on an empty ## picker returns to # reference mode");
+
+    await act(async () => {
+      modalPickerInput?.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "#", bubbles: true, cancelable: true }));
+    });
+    modalPickerInput = modalPicker.querySelector<HTMLInputElement>('input[aria-label="Search resources to link"]');
+    assert.ok(modalPickerInput);
+    assert.equal(modalPicker.dataset.mangoUniversalPickerMode, "link", "# on an empty reference picker enters ## link mode");
 
   } finally {
     if (mountedRoot) await act(async () => mountedRoot?.unmount());
