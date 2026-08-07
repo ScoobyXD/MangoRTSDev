@@ -16,7 +16,7 @@ function installGlobal(name: string, value: unknown, restores: Restore[]) {
   });
 }
 
-test("Pinned renders one elevated surface with recursive hairline folders, one-click rename, and a flat-row bump", async () => {
+test("Pinned renders one compact elevated surface with recursive hairline folders, one-click rename, a flat-row bump, and a red remove hover", async () => {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
     pretendToBeVisual: true,
     url: "http://localhost/",
@@ -94,7 +94,8 @@ test("Pinned renders one elevated surface with recursive hairline folders, one-c
     assert.equal(folderA.style.boxShadow, "none", "folder outlines are not elevated surfaces");
     const folderALegend = folderA.querySelector<HTMLLegendElement>("legend");
     assert.ok(folderALegend);
-    assert.equal(folderALegend.style.marginLeft, "18px", "the folder title begins after a short leading rule");
+    assert.equal(folderALegend.style.marginLeft, "11px", "the folder title begins after a short leading rule");
+    assert.equal(folderALegend.style.gap, "1px", "the disclosure arrow stays close to the folder title");
     assert.equal(folderALegend.querySelectorAll("svg").length, 1, "the legend has only its disclosure icon, not a folder icon");
 
     const folderATitle = container.querySelector<HTMLButtonElement>('button[data-pin-folder-title="folder-a"]');
@@ -108,7 +109,7 @@ test("Pinned renders one elevated surface with recursive hairline folders, one-c
     const folderAContents = container.querySelector<HTMLElement>('[data-pin-folder-contents="folder-a"]');
     const folderB = container.querySelector<HTMLFieldSetElement>('fieldset[data-pin-folder-frame="folder-b"]');
     assert.ok(folderAContents && folderB && folderAContents.contains(folderB), "nested folders render as indented recursive outlines");
-    assert.equal(folderAContents.style.paddingLeft, "12px");
+    assert.equal(folderAContents.style.paddingLeft, "10px");
 
     const pinEntry = container.querySelector<HTMLElement>('[data-pin-entry-id="pin-root"]');
     const pinButton = pinEntry?.querySelector<HTMLButtonElement>("button");
@@ -120,6 +121,15 @@ test("Pinned renders one elevated surface with recursive hairline folders, one-c
     assert.equal(pinEntry.style.transform, "translateY(-2px)");
     await act(async () => Simulate.click(pinButton));
     assert.equal(openedPinID, "pin-root");
+
+    const removeButton = pinEntry.querySelector<HTMLButtonElement>('button[aria-label="Unpin Root Node"]');
+    assert.ok(removeButton);
+    await act(async () => Simulate.mouseEnter(removeButton));
+    assert.equal(removeButton.dataset.pinRemoveActive, "true");
+    assert.equal(removeButton.style.color, "rgb(255, 32, 32)");
+    assert.equal(removeButton.style.borderColor, "rgb(255, 32, 32)");
+    await act(async () => Simulate.mouseLeave(removeButton));
+    assert.equal(removeButton.dataset.pinRemoveActive, undefined);
   } finally {
     if (mountedRoot) await act(async () => mountedRoot?.unmount());
     dom.window.close();

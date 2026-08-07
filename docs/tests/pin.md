@@ -4,11 +4,11 @@ A user opens the left sidebar Pinned section
 ↓
 One subtly elevated Pinned surface separates the personal tree from the sidebar beneath it, while individual pins and folder regions remain flat
 ↓
-Each folder uses a hairline neutral outline whose indented title interrupts the top line after a short leading segment; nested folders repeat that outline with progressively indented content and no folder icon
+Each folder uses a compact hairline neutral outline whose indented title interrupts the top line after a short leading segment; the disclosure arrow sits close to the title, and nested folders repeat that outline with progressively indented content and no folder icon
 ↓
 A single click on a folder title starts inline rename, its separate disclosure control expands or collapses it, and dragging the folder or any pin keeps the existing mixed-order reparenting behavior at arbitrary depth
 ↓
-A pinned resource row has no permanent colored frame and uses the same brief neutral lift as triage and Kanban cards when the user points to, focuses, or opens it
+A pinned resource row has no permanent colored frame and uses the same brief neutral lift as triage and Kanban cards when the user points to, focuses, or opens it; pointing to or keyboard-focusing its X turns both the X and its outline bright red
 ↓
 All organization, ownership, ordering, deletion, resource identity, API, and database rules remain unchanged
 
@@ -102,6 +102,7 @@ PIN45 - The sidebar Pinned tree is one subtly elevated surface. Folder regions, 
 PIN46 - Every Pinned folder uses one hairline neutral outline with no folder icon. Its indented title interrupts the top outline after a short leading horizontal segment, and each nested folder repeats the same treatment with progressively indented content.
 PIN47 - A single click on a Pinned folder title starts inline rename while its separate disclosure control expands or collapses the folder. Folder and pin rows remain draggable through the existing mixed-order layout commands, including moving into, out of, and between arbitrary nesting depths.
 PIN48 - Pointing to, keyboard-focusing, or opening a pinned resource gives its otherwise flat row a brief neutral two-pixel lift. Keyboard focus and valid drag placement remain temporary interaction indicators and must not restore a permanent colored item frame.
+PIN49 - Pinned folder outlines and rows use compact spacing without crowding: the top-border lead-in stays short, the disclosure arrow sits close to the folder title, and nested indentation remains clear. Pointing to or keyboard-focusing a pin's X turns the X character and its outline bright red without changing unpin behavior.
 
 ## Scenarios
 
@@ -350,6 +351,7 @@ Business logic covered:
 - PIN46
 - PIN47
 - PIN48
+- PIN49
 
 Given:
 - The user's Pinned tree contains root pins, a folder, a nested folder, and pins inside both folder depths.
@@ -358,7 +360,8 @@ Expected:
 - The whole Pinned section is one elevated surface, while pin rows and folder regions are not independently elevated.
 - Normal pin rows have no permanent colored frame and briefly lift by two pixels when pointed to, keyboard-focused, or opened.
 - Folder and subfolder boundaries are hairline-thin neutral outlines with no folder icons.
-- Each folder title starts after a short top-border lead-in, and nested folder content and titles are visibly indented from their parent.
+- Each compact folder title starts after a short top-border lead-in, its disclosure arrow sits close to the text, and nested folder content and titles remain visibly indented from their parent.
+- Pointing to or keyboard-focusing a pin's X turns both the character and its outline bright red.
 - Clicking a folder title once starts inline rename; its separate disclosure control remains responsible for expand and collapse.
 - Dragging pins or folders still reorders and reparents the existing tree through the canonical layout commands, including moves into, out of, and between nested folders.
 - No pin identity, folder ownership, deletion behavior, endpoint, database table, or database row contract changes.

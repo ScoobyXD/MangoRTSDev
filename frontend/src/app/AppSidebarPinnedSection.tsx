@@ -72,6 +72,7 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
   const [dropTarget, setDropTarget] = useState<{ key: string; placement: SidebarPinDropPlacement } | null>(null);
   const [raisedPinID, setRaisedPinID] = useState("");
   const [bumpingPinID, setBumpingPinID] = useState("");
+  const [activeRemovePinID, setActiveRemovePinID] = useState("");
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const bumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const entries = useMemo(() => buildSidebarPinTreeNodes(tree, expandedFolderIDs), [expandedFolderIDs, tree]);
@@ -312,7 +313,19 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
               <span style={rowIconStyle}><ExplorerRowIcon kind={row.pin.kind} /></span>
               <span style={rowTextStyle}>{row.pin.name}</span>
             </button>
-            <button type="button" aria-label={`Unpin ${row.pin.name}`} style={removeButtonStyle} onClick={() => onPinRemove(row.pin)}>X</button>
+            <button
+              type="button"
+              aria-label={`Unpin ${row.pin.name}`}
+              data-pin-remove-active={activeRemovePinID === row.pin.pinID ? "true" : undefined}
+              style={removeButtonStyle(activeRemovePinID === row.pin.pinID)}
+              onMouseEnter={() => setActiveRemovePinID(row.pin.pinID)}
+              onMouseLeave={() => setActiveRemovePinID((current) => current === row.pin.pinID ? "" : current)}
+              onFocus={() => setActiveRemovePinID(row.pin.pinID)}
+              onBlur={() => setActiveRemovePinID((current) => current === row.pin.pinID ? "" : current)}
+              onClick={() => onPinRemove(row.pin)}
+            >
+              X
+            </button>
           </div>
         )}
       </div>
@@ -422,11 +435,11 @@ function pinnedSectionStyle(active: boolean): React.CSSProperties {
   return {
     flex: "0 0 auto",
     display: "grid",
-    gap: 7,
+    gap: 6,
     minWidth: 0,
     boxSizing: "border-box",
     margin: "0 1px 8px",
-    padding: "8px 7px 10px",
+    padding: "8px 7px 9px",
     border: "1px solid rgba(148, 163, 184, 0.24)",
     borderRadius: 11,
     background: "linear-gradient(145deg, rgba(255,255,255,.92), rgba(248,250,252,.78))",
@@ -448,7 +461,7 @@ const headerStyle: React.CSSProperties = {
 
 const headerLineStyle: React.CSSProperties = { minWidth: 0, height: 1, background: "rgba(15, 23, 42, 0.12)" };
 const addFolderButtonStyle: React.CSSProperties = { width: 22, height: 22, border: "1px solid rgba(100,116,139,.25)", borderRadius: 5, background: "rgba(255,255,255,.74)", color: "#334155", cursor: "pointer", lineHeight: 1 };
-const pinListStyle: React.CSSProperties = { minWidth: 0, display: "grid", alignContent: "start", gap: 4 };
+const pinListStyle: React.CSSProperties = { minWidth: 0, display: "grid", alignContent: "start", gap: 3 };
 const emptyStyle: React.CSSProperties = { minHeight: 34, display: "flex", alignItems: "center", padding: "0 6px", color: "rgba(15,23,42,.48)", fontSize: 11, fontWeight: 600 };
 
 function pinEntryStyle(entryType: SidebarPinTreeNode["entryType"], placement: SidebarPinDropPlacement | null, raised: boolean): React.CSSProperties {
@@ -477,7 +490,7 @@ function folderFrameStyle(placement: SidebarPinDropPlacement | null): React.CSSP
     width: "100%",
     boxSizing: "border-box",
     margin: 0,
-    padding: "3px 5px 6px 6px",
+    padding: "2px 4px 4px 5px",
     border: `1px solid ${placement === "inside" ? "rgba(14,165,233,.42)" : "rgba(100,116,139,.28)"}`,
     borderRadius: 7,
     background: "transparent",
@@ -486,24 +499,38 @@ function folderFrameStyle(placement: SidebarPinDropPlacement | null): React.CSSP
 }
 
 const folderLegendStyle: React.CSSProperties = {
-  maxWidth: "calc(100% - 25px)",
+  maxWidth: "calc(100% - 17px)",
   minWidth: 0,
-  marginLeft: 18,
-  padding: "0 3px",
+  marginLeft: 11,
+  padding: "0 2px",
   display: "inline-grid",
-  gridTemplateColumns: "16px minmax(0, 1fr)",
+  gridTemplateColumns: "14px minmax(0, 1fr)",
   alignItems: "center",
-  gap: 3,
+  gap: 1,
   color: "#111827",
 };
-const folderContentsStyle: React.CSSProperties = { minWidth: 0, display: "grid", alignContent: "start", gap: 4, padding: "3px 0 0 12px" };
-const disclosureButtonStyle: React.CSSProperties = { width: 16, height: 22, display: "grid", placeItems: "center", border: 0, background: "transparent", cursor: "pointer", padding: 0 };
-const folderNameButtonStyle: React.CSSProperties = { minWidth: 0, maxWidth: "100%", height: 24, border: 0, background: "transparent", color: "#111827", cursor: "grab", font: "inherit", fontSize: 11.5, fontWeight: 700, textAlign: "left", padding: "0 3px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
-const pinRowStyle: React.CSSProperties = { minWidth: 0, minHeight: 31, display: "grid", gridTemplateColumns: "minmax(0,1fr) 22px", alignItems: "center", gap: 3 };
-const rowIconStyle: React.CSSProperties = { width: 22, height: 22, display: "grid", placeItems: "center", color: "#111" };
-const pinButtonStyle: React.CSSProperties = { minWidth: 0, minHeight: 31, display: "grid", gridTemplateColumns: "22px minmax(0,1fr)", alignItems: "center", gap: 5, border: 0, borderRadius: 7, background: "transparent", color: "#111", cursor: "pointer", font: "inherit", fontSize: 11.5, fontWeight: 600, padding: "0 6px", textAlign: "left" };
+const folderContentsStyle: React.CSSProperties = { minWidth: 0, display: "grid", alignContent: "start", gap: 3, padding: "2px 0 0 10px" };
+const disclosureButtonStyle: React.CSSProperties = { width: 14, height: 20, display: "grid", placeItems: "center", border: 0, background: "transparent", cursor: "pointer", padding: 0 };
+const folderNameButtonStyle: React.CSSProperties = { minWidth: 0, maxWidth: "100%", height: 22, border: 0, background: "transparent", color: "#111827", cursor: "grab", font: "inherit", fontSize: 11.5, fontWeight: 700, textAlign: "left", padding: "0 1px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+const pinRowStyle: React.CSSProperties = { minWidth: 0, minHeight: 29, display: "grid", gridTemplateColumns: "minmax(0,1fr) 22px", alignItems: "center", gap: 2 };
+const rowIconStyle: React.CSSProperties = { width: 20, height: 20, display: "grid", placeItems: "center", color: "#111" };
+const pinButtonStyle: React.CSSProperties = { minWidth: 0, minHeight: 29, display: "grid", gridTemplateColumns: "20px minmax(0,1fr)", alignItems: "center", gap: 4, border: 0, borderRadius: 7, background: "transparent", color: "#111", cursor: "pointer", font: "inherit", fontSize: 11.5, fontWeight: 600, padding: "0 5px", textAlign: "left" };
 const rowTextStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
-const removeButtonStyle: React.CSSProperties = { width: 22, height: 22, display: "grid", placeItems: "center", border: "1px solid rgba(100,116,139,.22)", borderRadius: 5, background: "rgba(255,255,255,.58)", color: "rgba(15,23,42,.52)", cursor: "pointer", fontSize: 10 };
+function removeButtonStyle(active: boolean): React.CSSProperties {
+  return {
+    width: 22,
+    height: 22,
+    display: "grid",
+    placeItems: "center",
+    border: `1px solid ${active ? "#ff2020" : "rgba(100,116,139,.22)"}`,
+    borderRadius: 5,
+    background: "rgba(255,255,255,.58)",
+    color: active ? "#ff2020" : "rgba(15,23,42,.52)",
+    cursor: "pointer",
+    fontSize: 10,
+    transition: "border-color 100ms ease, color 100ms ease",
+  };
+}
 const renameInputStyle: React.CSSProperties = { width: "100%", minWidth: 0, height: 22, boxSizing: "border-box", border: "1px solid #64748b", borderRadius: 4, background: "rgba(255,255,255,.92)", color: "#111827", font: "inherit", fontSize: 11, fontWeight: 700, padding: "0 5px", outline: "none" };
 const menuButtonStyle: React.CSSProperties = { width: "100%", minHeight: 31, border: 0, background: "transparent", color: "#111827", cursor: "pointer", font: "inherit", fontSize: 12, fontWeight: 600, textAlign: "left", padding: "0 12px" };
 const successStyle: React.CSSProperties = { margin: "0 2px 5px", padding: "5px 7px", border: "1px solid rgba(34,197,94,.36)", borderRadius: 7, background: "linear-gradient(135deg,rgba(220,252,231,.96),rgba(187,247,208,.9))", color: "#166534", fontSize: 10, fontWeight: 800, lineHeight: 1.25 };
