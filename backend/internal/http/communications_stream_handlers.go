@@ -305,6 +305,10 @@ func normalizedNylasMailboxTrigger(trigger string) string {
 		return "folder.updated"
 	case strings.HasPrefix(trigger, "folder.deleted"):
 		return "folder.deleted"
+	case strings.HasPrefix(trigger, "grant.expired"):
+		return "grant.expired"
+	case strings.HasPrefix(trigger, "grant.updated"):
+		return "grant.updated"
 	default:
 		return ""
 	}
@@ -340,6 +344,35 @@ func (s *Server) applyNylasWebhookCacheInvalidationForAccountScope(accountScope 
 }
 
 func (s *Server) applyCommunicationsWebhookChange(_ context.Context, grantContext communicationsWebhookGrantContext, change nylasWebhookChange) error {
+	if change.Trigger == "grant.expired" || change.Trigger == "grant.updated" {
+		status := "reauth_required"
+		if change.Trigger == "grant.updated" {
+			status = "connected"
+		}
+		if communicationsMessageReadStatusScopeTypeForConnection(grantContext.connection) == "shared" {
+			if _, err := s.repo.UpdateCompanyEmailConnectionStatus(grantContext.connection.CompanyID, grantContext.connection.CompanyEmailConnectionID, status); err != nil {
+				return err
+			}
+		} else if _, err := s.repo.UpdateUserEmailConnectionStatus(grantContext.connection.UserID, grantContext.connection.AccountEmail, status); err != nil {
+			return err
+		}
+		if status == "connected" {
+			s.wakeCommunicationsEmailThreadDownloadWorker()
+			s.wakeCommunicationsEmailConnectionScanner()
+		}
+		return nil
+	}
+	if change.Trigger == "message.created" && change.MessageID != "" &&
+		grantContext.connection.CompanyID != "" && grantContext.connection.EmailConnectionID != "" {
+		if _, _, err := s.repo.EnsureCommunicationsEmailIngestionJob(store.CommunicationsEmailIngestionJobInput{
+			CompanyID: grantContext.connection.CompanyID, EmailConnectionID: grantContext.connection.EmailConnectionID,
+			ProviderMessageID: change.MessageID, ProviderThreadID: change.ThreadID,
+			Priority: store.CommunicationsEmailIngestionPriorityLive,
+		}); err != nil {
+			return fmt.Errorf("queue live email ingestion: %w", err)
+		}
+		s.wakeCommunicationsEmailThreadDownloadWorker()
+	}
 	if communicationsMessageReadStatusScopeTypeForConnection(grantContext.connection) != "shared" {
 		s.applyNylasWebhookCacheInvalidation(grantContext.connection.UserID, grantContext.cacheScope, change)
 		return s.publishPersonalMailboxWebhookHint(grantContext.connection.UserID, grantContext.connection.AccountEmail, change)

@@ -687,8 +687,9 @@ func postgresCompanyHasConnectedEmailAccount(ctx context.Context, tx *sql.Tx, co
 	if err := tx.QueryRowContext(ctx, `
 select exists(
   select 1
-  from company_email_connections connection
+  from email_connections connection
   where connection.company_id = $1::uuid
+    and connection.connection_type = 'shared'
     and connection.account_email = $2
     and connection.status = 'connected'
 )`, companyID, accountEmail).Scan(&exists); err != nil {

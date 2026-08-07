@@ -188,10 +188,15 @@ select relationship.email_message_id::text
 from email_relationships relationship
 join email_messages message on message.company_id=relationship.company_id and message.email_message_id=relationship.email_message_id
 join email_threads thread on thread.company_id=relationship.company_id and thread.email_thread_id=relationship.email_thread_id
+join email_connections connection on connection.company_id=thread.company_id
+ and connection.email_connection_id=thread.email_connection_id
+left join shared_inboxes inbox on inbox.company_id=thread.company_id
+ and inbox.company_email_connection_id=thread.email_connection_id
 where relationship.company_id=$1::uuid and relationship.resource_type='node' and relationship.resource_id=$2::uuid
   and relationship.resource_textbox_id is null and message.provider_message_id=$3
-  and (($4<>'' and thread.shared_inbox_id=nullif($4,'')::uuid)
-    or ($4='' and thread.personal_user_id=$5::uuid and thread.personal_account_email=$6))
+  and (($4<>'' and inbox.shared_inbox_id=nullif($4,'')::uuid)
+    or ($4='' and connection.connection_type='personal'
+      and connection.personal_user_id=$5::uuid and connection.account_email=$6))
 order by relationship.created_timestamp desc
 limit 1`, input.CompanyID, input.NodeID, input.MessageIDs[0], input.SharedInboxID, input.UserID, normalizeEmail(input.AccountEmail)).Scan(&emailMessageID)
 	if errors.Is(err, sql.ErrNoRows) {

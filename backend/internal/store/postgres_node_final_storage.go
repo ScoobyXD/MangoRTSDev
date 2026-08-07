@@ -83,8 +83,8 @@ select relationship.company_id::text, relationship.resource_id::text,
          'collaboration_id', relationship.email_relationship_id::text,
          'message_id', message.provider_message_id, 'email_message_id', message.email_message_id::text,
          'thread_id', thread.provider_thread_id, 'email_thread_id', thread.email_thread_id::text,
-         'shared_inbox_id', coalesce(thread.shared_inbox_id::text, ''),
-         'account_email', thread.email_account_email, 'created_from_email', true,
+         'shared_inbox_id', coalesce(inbox.shared_inbox_id::text, ''),
+         'account_email', connection.account_email, 'created_from_email', true,
          'subject', message.subject, 'snippet', message.snippet,
          'from', coalesce(nullif(message.sender_snapshot->0->>'name', ''), message.sender_snapshot->0->>'email', ''),
          'date', case when message.message_timestamp is null then null else floor(extract(epoch from message.message_timestamp))::bigint end,
@@ -94,7 +94,14 @@ select relationship.company_id::text, relationship.resource_id::text,
 from email_relationships relationship
 join email_messages message on message.company_id=relationship.company_id
  and message.email_thread_id=relationship.email_thread_id and message.email_message_id=relationship.email_message_id
-join email_threads thread on thread.company_id=message.company_id and thread.email_thread_id=message.email_thread_id`
+join email_threads thread on thread.company_id=message.company_id and thread.email_thread_id=message.email_thread_id
+join email_connections connection on connection.company_id=thread.company_id
+ and connection.email_connection_id=thread.email_connection_id
+left join lateral (
+ select shared_inbox_id from shared_inboxes
+ where company_id=thread.company_id and company_email_connection_id=thread.email_connection_id
+ order by shared_inbox_id limit 1
+) inbox on true`
 
 func scanNodeProjection(row interface{ Scan(dest ...any) error }) (domain.NodeProjection, error) {
 	var item domain.NodeProjection
@@ -214,12 +221,19 @@ from email_relationships where company_id=$1::uuid and email_relationship_id=$2:
 	err := tx.QueryRowContext(ctx, `select message.email_thread_id::text
 from email_messages message
 join email_threads thread on thread.company_id=message.company_id and thread.email_thread_id=message.email_thread_id
+join email_connections connection on connection.company_id=thread.company_id
+ and connection.email_connection_id=thread.email_connection_id
 where message.company_id=$1::uuid and message.email_message_id=$2::uuid
   and ($4='' or exists(select 1 from node_textboxes textbox where textbox.company_id=$1::uuid
     and textbox.node_id=$3::uuid and textbox.textbox_id=$4::uuid and textbox.deleted_timestamp is null))
-  and ((thread.email_account_type='personal_email_account' and thread.personal_user_id=$5::uuid)
-    or (thread.email_account_type='shared_email_account' and mangorts_user_can_access_resource(
-      $1::uuid,'shared_inbox',thread.shared_inbox_id,$5::uuid,'edit')))`,
+  and ((connection.connection_type='personal' and connection.personal_user_id=$5::uuid)
+    or exists (
+      select 1 from shared_inboxes inbox
+      where inbox.company_id=thread.company_id
+        and inbox.company_email_connection_id=thread.email_connection_id
+        and mangorts_user_can_access_resource(
+          $1::uuid,'shared_inbox',inbox.shared_inbox_id,$5::uuid,'edit')
+    ))`,
 		input.CompanyID, payload.EmailMessageID, input.NodeID, payload.BlockID, actorUserID).Scan(&emailThreadID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.NodeProjection{}, ErrInvalid

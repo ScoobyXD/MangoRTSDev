@@ -20,10 +20,10 @@ func (r *PostgresRepo) CheckApplicationSchemaReadiness() error {
 		return ErrInvalid
 	}
 	requiredTables := []string{
-		"user_email_connections", "company_email_connections",
+		"email_connections",
 		"communications_message_read_receipt_summaries", "communications_message_read_receipt_signals",
 		"email_threads", "email_messages", "email_relationships", "email_drafts",
-		"email_signatures", "email_thread_download_jobs", "attachments", "attachment_relationships",
+		"email_signatures", "email_ingestion_jobs", "attachments", "attachment_relationships",
 		"node_textboxes", "node_textbox_chats", "node_textboxes_history",
 		"project_textboxes", "project_textbox_chats", "logic_gate_textboxes", "logic_gate_textboxes_history",
 	}
@@ -37,9 +37,16 @@ func (r *PostgresRepo) CheckApplicationSchemaReadiness() error {
 		}
 	}
 	requiredColumns := [][2]string{
-		{"user_email_connections", "account_email"},
-		{"email_threads", "email_account_type"},
-		{"email_threads", "email_account_email"},
+		{"email_connections", "email_connection_id"},
+		{"email_connections", "company_id"},
+		{"email_connections", "connection_type"},
+		{"email_connections", "personal_user_id"},
+		{"email_connections", "ingestion_started_at"},
+		{"email_connections", "last_successful_scan_at"},
+		{"email_threads", "email_connection_id"},
+		{"email_ingestion_jobs", "email_connection_id"},
+		{"email_ingestion_jobs", "provider_message_id"},
+		{"email_ingestion_jobs", "priority"},
 		{"email_messages", "email_message_id"},
 		{"email_relationships", "resource_textbox_id"},
 		{"email_drafts", "send_idempotency_key"},
@@ -71,16 +78,16 @@ select exists (
 			return fmt.Errorf("application schema is not ready: missing column %s.%s", required[0], required[1])
 		}
 	}
-	var obsoleteConnectionScope bool
+	var obsoleteConnectionStorage bool
 	if err := r.db.QueryRow(`
-select exists (
-  select 1 from information_schema.columns
-  where table_schema='public' and table_name='user_email_connections' and column_name='connection_scope'
-)`).Scan(&obsoleteConnectionScope); err != nil {
+select to_regclass('public.user_email_connections') is not null
+    or to_regclass('public.company_email_connections') is not null
+    or to_regclass('public.email_thread_download_jobs') is not null
+`).Scan(&obsoleteConnectionStorage); err != nil {
 		return err
 	}
-	if obsoleteConnectionScope {
-		return fmt.Errorf("application schema is not ready: obsolete user_email_connections.connection_scope remains")
+	if obsoleteConnectionStorage {
+		return fmt.Errorf("application schema is not ready: obsolete email connection or ingestion job table remains")
 	}
 	return nil
 }

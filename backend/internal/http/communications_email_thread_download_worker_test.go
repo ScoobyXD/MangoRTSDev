@@ -11,9 +11,10 @@ import (
 
 func TestCommunicationsEmailThreadDownloadWorkerStoresThreadAttachmentsAndLaterManualMessage(t *testing.T) {
 	repo, owner, _, _ := newEmailCollaborationThreadTestRepo(t)
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+	connection, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
 		UserID: owner.UserID, Provider: "google", AccountEmail: owner.Email, Scope: "personal", GrantID: "worker-grant", Status: "connected",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	created, err := repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
@@ -80,8 +81,8 @@ func TestCommunicationsEmailThreadDownloadWorkerStoresThreadAttachmentsAndLaterM
 		}
 	}
 
-	// A later provider reply is intentionally invisible until an explicit import
-	// stores that exact selected message and queues message-only work.
+	// The established explicit-import path still reconciles a selected reply
+	// through the same durable ingestion queue.
 	laterSnapshot := domain.EmailMessageSnapshot{ID: "worker-later", ThreadID: "worker-thread", Subject: "Re: Thread", Body: "<p>later selected</p>", Date: 30}
 	thread, err = repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
 		CompanyID: thread.CompanyID, PersonalUserID: thread.PersonalUserID, PersonalAccountEmail: thread.PersonalAccountEmail,
@@ -111,8 +112,40 @@ func TestCommunicationsEmailThreadDownloadWorkerStoresThreadAttachmentsAndLaterM
 		t.Fatalf("duplicate processing=%d err=%v", processed, err)
 	}
 	threadGrants, _, messageGrants, requestedIDs := client.calls()
-	if len(threadGrants) != 1 || len(messageGrants) != 3 || len(requestedIDs) != 3 {
+	if len(threadGrants) != 2 || len(messageGrants) != 3 || len(requestedIDs) != 3 {
 		t.Fatalf("provider calls threads=%v message_grants=%v message_ids=%v", threadGrants, messageGrants, requestedIDs)
+	}
+
+	// A qualifying live Inbox reply is discovered without a Mango thread ID,
+	// appended to the stored thread, and inherits its existing Node placement.
+	autoDate := time.Now().UTC().Add(time.Second).Unix()
+	client.folders = []NylasFolder{{ID: "worker-inbox", SystemFolder: "inbox"}}
+	client.threadsByID["worker-thread"] = NylasThread{ID: "worker-thread", MessageIDs: []string{"worker-root", "worker-reply", "worker-later", "worker-auto"}}
+	client.messagesByID["worker-auto"] = NylasMessage{
+		ID: "worker-auto", ThreadID: "worker-thread", Subject: "Re: Thread",
+		Body: "<p>automatic</p>", Date: autoDate, Folders: []string{"worker-inbox"},
+	}
+	if _, createdJob, err := repo.EnsureCommunicationsEmailIngestionJob(store.CommunicationsEmailIngestionJobInput{
+		CompanyID: connection.CompanyID, EmailConnectionID: connection.EmailConnectionID,
+		ProviderMessageID: "worker-auto", ProviderThreadID: "worker-thread",
+		Priority: store.CommunicationsEmailIngestionPriorityLive,
+	}); err != nil || !createdJob {
+		t.Fatalf("automatic ingestion job created=%v err=%v", createdJob, err)
+	}
+	processed, err = server.processAvailableCommunicationsEmailThreadDownloadJobs(context.Background(), 10)
+	if err != nil || processed != 1 {
+		t.Fatalf("automatic processed=%d err=%v", processed, err)
+	}
+	thread, err = repo.GetCommunicationsEmailThread(thread.CompanyID, thread.EmailThreadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(thread.Messages) != 4 || thread.Messages[3].ProviderMessageID != "worker-auto" || !thread.Messages[3].Message.DownloadComplete {
+		t.Fatalf("automatic message result = %+v", thread.Messages)
+	}
+	placements, err := repo.ListCommunicationsEmailPlacements(owner.UserID, thread.CompanyID, []string{"worker-auto"})
+	if err != nil || len(placements) != 1 || placements[0].NodeID != created.Collaboration.NodeID {
+		t.Fatalf("automatic Node placement = %+v err=%v", placements, err)
 	}
 
 	orphan, err := repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
@@ -145,5 +178,54 @@ func TestEmailMessageHasUnresolvedCIDAttachmentsIgnoresRecoveryAttemptFlag(t *te
 	unresolved.Attachments = []NylasAttachment{{ID: "provider-inline", ContentID: "signature-logo"}}
 	if emailMessageHasUnresolvedCIDAttachments(unresolved) {
 		t.Fatal("provider-downloadable signature CID was treated as unresolved")
+	}
+}
+
+func TestCommunicationsEmailConnectionScanStartsAtActivationAndQueuesRoutineWork(t *testing.T) {
+	repo, owner, _, _ := newEmailCollaborationThreadTestRepo(t)
+	connection, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		CompanyID: emailCollaborationThreadTestCompanyID, UserID: owner.UserID,
+		Provider: "google", AccountEmail: owner.Email, GrantID: "scan-grant", Status: "connected",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scanStarted := connection.LastSuccessfulScanAt.Add(time.Minute)
+	client := &fakeNylasClient{
+		folders: []NylasFolder{{ID: "scan-inbox", SystemFolder: "inbox"}},
+		messagePagesByToken: map[string]NylasMessagePage{
+			"": {Messages: []NylasMessage{
+				{ID: "scan-old", ThreadID: "scan-old-thread", Date: connection.IngestionStartedAt.Add(-time.Minute).Unix()},
+				{ID: "scan-new", ThreadID: "scan-new-thread", Date: scanStarted.Add(-time.Second).Unix()},
+			}},
+		},
+	}
+	server := NewServerWithOptions(repo, ServerOptions{
+		NylasClient: client, NylasConfig: testNylasConfig(),
+		DisableCommunicationsEmailThreadDownloadWorker: true,
+		DisableCommunicationsArchiveWorker:             true, DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
+	})
+	defer server.Close()
+	server.nylasGate = newNylasRequestGate(0)
+
+	if err := server.scanConnectedCommunicationsEmailConnection(context.Background(), connection, scanStarted); err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := repo.ClaimCommunicationsEmailThreadDownloadJobs(10, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 1 || jobs[0].ProviderMessageID != "scan-new" || jobs[0].Priority != store.CommunicationsEmailIngestionPriorityScan {
+		t.Fatalf("scan jobs = %+v", jobs)
+	}
+	client.mu.Lock()
+	query := client.lastQuery
+	client.mu.Unlock()
+	if query.FolderID != "scan-inbox" || query.ReceivedAfter > connection.IngestionStartedAt.Unix()-1 || query.ReceivedBefore != scanStarted.Unix() {
+		t.Fatalf("scan query = %+v activation=%s scan=%s", query, connection.IngestionStartedAt, scanStarted)
+	}
+	updated, err := repo.GetEmailConnectionByID(connection.CompanyID, connection.EmailConnectionID)
+	if err != nil || !updated.LastSuccessfulScanAt.Equal(scanStarted) {
+		t.Fatalf("scan checkpoint = %s err=%v, want %s", updated.LastSuccessfulScanAt, err, scanStarted)
 	}
 }

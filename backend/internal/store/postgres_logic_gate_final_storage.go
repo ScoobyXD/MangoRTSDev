@@ -69,8 +69,8 @@ select relationship.company_id::text,
          'email_message_id', message.email_message_id::text,
          'thread_id', thread.provider_thread_id,
          'email_thread_id', thread.email_thread_id::text,
-         'shared_inbox_id', coalesce(thread.shared_inbox_id::text, ''),
-         'account_email', thread.email_account_email,
+         'shared_inbox_id', coalesce(inbox.shared_inbox_id::text, ''),
+         'account_email', connection.account_email,
          'created_from_email', true,
          'subject', message.subject,
          'snippet', message.snippet,
@@ -89,7 +89,14 @@ join email_messages message
  and message.email_thread_id=relationship.email_thread_id
  and message.email_message_id=relationship.email_message_id
 join email_threads thread
-  on thread.company_id=message.company_id and thread.email_thread_id=message.email_thread_id`
+  on thread.company_id=message.company_id and thread.email_thread_id=message.email_thread_id
+join email_connections connection
+  on connection.company_id=thread.company_id and connection.email_connection_id=thread.email_connection_id
+left join lateral (
+  select shared_inbox_id from shared_inboxes
+  where company_id=thread.company_id and company_email_connection_id=thread.email_connection_id
+  order by shared_inbox_id limit 1
+) inbox on true`
 
 func scanLogicGateProjection(row interface{ Scan(dest ...any) error }) (domain.LogicGateProjection, error) {
 	var item domain.LogicGateProjection

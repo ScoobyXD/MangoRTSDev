@@ -21,11 +21,53 @@ func (r *MemoryRepo) GetUserEmailConnection(userID string) (domain.UserEmailConn
 		return domain.UserEmailConnection{}, ErrNotFound
 	}
 	connection, ok := r.emailConnections[emailConnectionKey(userID, user.Email)]
-	if ok && emailConnectionIsPersonal(connection) {
+	if ok && emailConnectionIsPersonal(connection) && connection.Status != "disconnected" {
 		connection.Scope = "personal"
 		return connection, nil
 	}
 	return domain.UserEmailConnection{}, ErrNotFound
+}
+
+func (r *MemoryRepo) GetEmailConnectionByID(companyID, connectionID string) (domain.UserEmailConnection, error) {
+	companyID = cleanUUIDText(companyID)
+	connectionID = cleanUUIDText(connectionID)
+	if companyID == "" || connectionID == "" {
+		return domain.UserEmailConnection{}, ErrInvalid
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, connection := range r.emailConnections {
+		if connection.CompanyID == companyID && connection.EmailConnectionID == connectionID {
+			return connection, nil
+		}
+	}
+	if connection, ok := r.companyEmailConnections[companyEmailConnectionKey(companyID, connectionID)]; ok {
+		return companyEmailConnectionAsUser(connection), nil
+	}
+	return domain.UserEmailConnection{}, ErrNotFound
+}
+
+func (r *MemoryRepo) ListConnectedEmailConnections() ([]domain.UserEmailConnection, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	connections := make([]domain.UserEmailConnection, 0, len(r.emailConnections)+len(r.companyEmailConnections))
+	for _, connection := range r.emailConnections {
+		if connection.Status == "connected" {
+			connections = append(connections, connection)
+		}
+	}
+	for _, connection := range r.companyEmailConnections {
+		if connection.Status == "connected" {
+			connections = append(connections, companyEmailConnectionAsUser(connection))
+		}
+	}
+	sort.Slice(connections, func(i, j int) bool {
+		if connections[i].CompanyID != connections[j].CompanyID {
+			return connections[i].CompanyID < connections[j].CompanyID
+		}
+		return connections[i].EmailConnectionID < connections[j].EmailConnectionID
+	})
+	return connections, nil
 }
 
 func (r *MemoryRepo) ListUserEmailConnections(userID string) ([]domain.UserEmailConnection, error) {
@@ -112,7 +154,7 @@ func (r *MemoryRepo) GetUserEmailConnectionByGrantID(grantID string) (domain.Use
 	defer r.mu.RUnlock()
 
 	for _, connection := range r.emailConnections {
-		if connection.GrantID == grantID && emailConnectionIsPersonal(connection) {
+		if connection.GrantID == grantID && emailConnectionIsPersonal(connection) && connection.Status != "disconnected" {
 			connection.Scope = "personal"
 			return connection, nil
 		}
@@ -136,6 +178,23 @@ func (r *MemoryRepo) UpsertUserEmailConnection(input UserEmailConnectionInput) (
 
 	if !r.userIDExistsLocked(userID) {
 		return domain.UserEmailConnection{}, ErrNotFound
+	}
+	companyID := cleanUUIDText(input.CompanyID)
+	if companyID == "" {
+		for _, membership := range r.memberships {
+			if membership.UserID != userID {
+				continue
+			}
+			if companyID != "" && companyID != membership.CompanyID {
+				return domain.UserEmailConnection{}, ErrInvalid
+			}
+			companyID = membership.CompanyID
+		}
+	}
+	if companyID == "" && len(r.companies) == 1 {
+		for candidateID := range r.companies {
+			companyID = candidateID
+		}
 	}
 
 	now := time.Now().UTC()
@@ -166,8 +225,12 @@ func (r *MemoryRepo) UpsertUserEmailConnection(input UserEmailConnectionInput) (
 	}
 	connection := r.emailConnections[connectionKey]
 	if connection.CreatedTimestamp.IsZero() {
+		connection.EmailConnectionID = newUUIDv7String()
+		connection.IngestionStartedAt = now
+		connection.LastSuccessfulScanAt = now
 		connection.CreatedTimestamp = now
 	}
+	connection.CompanyID = companyID
 	connection.UserID = userID
 	connection.Provider = provider
 	connection.AccountEmail = accountEmail
@@ -176,6 +239,9 @@ func (r *MemoryRepo) UpsertUserEmailConnection(input UserEmailConnectionInput) (
 	connection.Status = status
 	connection.UpdatedTimestamp = now
 	r.emailConnections[connectionKey] = connection
+	if connection.Status == "connected" {
+		r.wakeMemoryEmailIngestionJobsLocked(connection.CompanyID, connection.EmailConnectionID, now)
+	}
 	return connection, nil
 }
 
@@ -224,8 +290,12 @@ func (r *MemoryRepo) upsertCompanyEmailConnectionLocked(companyID, connectionID,
 	}
 	connection := r.companyEmailConnections[connectionKey]
 	if connection.CreatedTimestamp.IsZero() {
+		connection.EmailConnectionID = connectionID
+		connection.IngestionStartedAt = now
+		connection.LastSuccessfulScanAt = now
 		connection.CreatedTimestamp = now
 	}
+	connection.EmailConnectionID = connectionID
 	connection.CompanyEmailConnectionID = connectionID
 	connection.CompanyID = companyID
 	connection.Provider = provider
@@ -235,6 +305,9 @@ func (r *MemoryRepo) upsertCompanyEmailConnectionLocked(companyID, connectionID,
 	connection.ConnectedByUserID = connectedByUserID
 	connection.UpdatedTimestamp = now
 	r.companyEmailConnections[connectionKey] = connection
+	if connection.Status == "connected" {
+		r.wakeMemoryEmailIngestionJobsLocked(connection.CompanyID, connection.EmailConnectionID, now)
+	}
 	return connection
 }
 
@@ -257,6 +330,9 @@ func (r *MemoryRepo) UpdateCompanyEmailConnectionStatus(companyID, connectionID,
 	connection.Status = status
 	connection.UpdatedTimestamp = time.Now().UTC()
 	r.companyEmailConnections[connectionKey] = connection
+	if connection.Status == "connected" {
+		r.wakeMemoryEmailIngestionJobsLocked(connection.CompanyID, connection.EmailConnectionID, connection.UpdatedTimestamp)
+	}
 	return connection, nil
 }
 
@@ -278,7 +354,22 @@ func (r *MemoryRepo) UpdateUserEmailConnectionStatus(userID, accountEmail, statu
 	connection.Status = status
 	connection.UpdatedTimestamp = time.Now().UTC()
 	r.emailConnections[emailConnectionKey(userID, accountEmail)] = connection
+	if connection.Status == "connected" {
+		r.wakeMemoryEmailIngestionJobsLocked(connection.CompanyID, connection.EmailConnectionID, connection.UpdatedTimestamp)
+	}
 	return connection, nil
+}
+
+func (r *MemoryRepo) wakeMemoryEmailIngestionJobsLocked(companyID, connectionID string, now time.Time) {
+	for jobID, job := range r.emailThreadDownloadJobs {
+		if job.CompanyID != companyID || job.EmailConnectionID != connectionID ||
+			(job.Status != CommunicationsEmailThreadDownloadJobPending && job.Status != CommunicationsEmailThreadDownloadJobRetry) {
+			continue
+		}
+		job.AvailableAt = now
+		job.UpdatedTimestamp = now
+		r.emailThreadDownloadJobs[jobID] = job
+	}
 }
 
 func (r *MemoryRepo) DeleteUserEmailConnection(userID string) error {
@@ -296,10 +387,51 @@ func (r *MemoryRepo) DeleteUserEmailConnection(userID string) error {
 	}
 	key := emailConnectionKey(userID, user.Email)
 	if connection, ok := r.emailConnections[key]; ok && emailConnectionIsPersonal(connection) {
-		delete(r.emailConnections, key)
+		connection.Status = "disconnected"
+		connection.UpdatedTimestamp = time.Now().UTC()
+		r.emailConnections[key] = connection
 		return nil
 	}
 	return ErrNotFound
+}
+
+func (r *MemoryRepo) UpdateEmailConnectionScanCheckpoint(companyID, connectionID string, checkpoint time.Time) error {
+	companyID = cleanUUIDText(companyID)
+	connectionID = cleanUUIDText(connectionID)
+	checkpoint = checkpoint.UTC()
+	if companyID == "" || connectionID == "" || checkpoint.IsZero() {
+		return ErrInvalid
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for connectionKey, connection := range r.emailConnections {
+		if connection.CompanyID == companyID && connection.EmailConnectionID == connectionID {
+			connection.LastSuccessfulScanAt = checkpoint
+			connection.UpdatedTimestamp = time.Now().UTC()
+			r.emailConnections[connectionKey] = connection
+			return nil
+		}
+	}
+	connectionKey := companyEmailConnectionKey(companyID, connectionID)
+	connection, ok := r.companyEmailConnections[connectionKey]
+	if !ok {
+		return ErrNotFound
+	}
+	connection.LastSuccessfulScanAt = checkpoint
+	connection.UpdatedTimestamp = time.Now().UTC()
+	r.companyEmailConnections[connectionKey] = connection
+	return nil
+}
+
+func companyEmailConnectionAsUser(connection domain.CompanyEmailConnection) domain.UserEmailConnection {
+	return domain.UserEmailConnection{
+		EmailConnectionID: connection.EmailConnectionID, UserID: connection.ConnectedByUserID,
+		Provider: connection.Provider, AccountEmail: connection.AccountEmail, Scope: "shared",
+		CompanyID: connection.CompanyID, CompanyEmailConnectionID: connection.CompanyEmailConnectionID,
+		GrantID: connection.GrantID, Status: connection.Status, IngestionStartedAt: connection.IngestionStartedAt,
+		LastSuccessfulScanAt: connection.LastSuccessfulScanAt, CreatedTimestamp: connection.CreatedTimestamp,
+		UpdatedTimestamp: connection.UpdatedTimestamp,
+	}
 }
 
 func (r *MemoryRepo) personalEmailConnectionForUserLocked(userID string) (domain.UserEmailConnection, string, bool) {

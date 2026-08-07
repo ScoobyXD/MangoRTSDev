@@ -294,6 +294,8 @@ type NylasMessageQuery struct {
 	SharedInboxID     string
 	Unread            *bool
 	Starred           *bool
+	ReceivedAfter     int64
+	ReceivedBefore    int64
 	Refresh           bool
 }
 
@@ -570,6 +572,12 @@ func (c *NylasRESTClient) ListMessages(ctx context.Context, grantID string, quer
 		}
 		if query.Starred != nil {
 			values.Set("starred", strconv.FormatBool(*query.Starred))
+		}
+		if query.ReceivedAfter > 0 {
+			values.Set("received_after", strconv.FormatInt(query.ReceivedAfter, 10))
+		}
+		if query.ReceivedBefore > 0 {
+			values.Set("received_before", strconv.FormatInt(query.ReceivedBefore, 10))
 		}
 	}
 

@@ -212,59 +212,54 @@ create unique index if not exists idx_invitations_one_pending_company_email
 create index if not exists idx_invitations_company_status_updated
   on invitations(company_id, status, updated_timestamp desc);
 
-create table if not exists user_email_connections (
-  user_id uuid not null,
-  provider text not null,
-  account_email text not null,
-  grant_id text not null,
-  status text not null default 'connected',
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  constraint user_email_connections_provider_chk check (provider in ('google', 'microsoft')),
-  constraint user_email_connections_account_email_chk check (btrim(account_email) <> '' and account_email = lower(btrim(account_email))),
-  constraint user_email_connections_grant_id_nonblank_chk check (btrim(grant_id) <> ''),
-  constraint user_email_connections_status_chk check (status in ('connected', 'disconnected', 'reauth_required')),
-  primary key (user_id, account_email),
-  foreign key (user_id) references users (user_id) on delete cascade
-);
-
-create unique index if not exists idx_user_email_connections_grant_id
-  on user_email_connections(grant_id);
-
-create index if not exists idx_user_email_connections_user_updated
-  on user_email_connections(user_id, updated_timestamp desc);
-
-create table if not exists company_email_connections (
-  company_email_connection_id uuid not null,
+create table if not exists email_connections (
+  email_connection_id uuid not null,
   company_id uuid not null,
+  connection_type text not null,
+  personal_user_id uuid,
   provider text not null,
   account_email text not null,
   grant_id text not null,
   status text not null default 'connected',
   connected_by_user_id uuid,
+  ingestion_started_at timestamptz not null default now(),
+  last_successful_scan_at timestamptz not null default now(),
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
-  constraint company_email_connections_provider_chk check (provider in ('google', 'microsoft')),
-  constraint company_email_connections_account_email_chk check (btrim(account_email) <> '' and account_email = lower(btrim(account_email))),
-  constraint company_email_connections_grant_id_nonblank_chk check (btrim(grant_id) <> ''),
-  constraint company_email_connections_status_chk check (status in ('connected', 'disconnected', 'reauth_required')),
-  primary key (company_email_connection_id),
-  unique (company_id, company_email_connection_id),
-  unique (company_id, account_email),
-  unique (company_id, grant_id),
+  constraint email_connections_type_chk check (connection_type in ('personal', 'shared')),
+  constraint email_connections_scope_chk check (
+    (connection_type='personal' and personal_user_id is not null)
+    or (connection_type='shared' and personal_user_id is null)
+  ),
+  constraint email_connections_provider_chk check (provider in ('google', 'microsoft')),
+  constraint email_connections_account_email_chk check (btrim(account_email) <> '' and account_email = lower(btrim(account_email))),
+  constraint email_connections_grant_id_nonblank_chk check (btrim(grant_id) <> ''),
+  constraint email_connections_status_chk check (status in ('connected', 'disconnected', 'reauth_required')),
+  constraint email_connections_checkpoint_chk check (last_successful_scan_at >= ingestion_started_at),
+  primary key (email_connection_id),
+  unique (company_id, email_connection_id),
   foreign key (company_id) references companies(company_id) on delete cascade,
+  foreign key (personal_user_id) references users(user_id) on delete cascade,
   foreign key (connected_by_user_id) references users(user_id) on delete set null
 );
 
-create index if not exists idx_company_email_connections_company_status
-  on company_email_connections(company_id, status, updated_timestamp desc);
+create unique index if not exists idx_email_connections_grant_id
+  on email_connections(grant_id);
+create unique index if not exists idx_email_connections_personal
+  on email_connections(company_id,personal_user_id,account_email)
+  where connection_type='personal';
+create unique index if not exists idx_email_connections_shared
+  on email_connections(company_id,account_email)
+  where connection_type='shared';
+create index if not exists idx_email_connections_company_status
+  on email_connections(company_id,status,last_successful_scan_at);
 
 create table if not exists communications_message_read_receipt_summaries (
   receipt_scope_type varchar not null,
   receipt_scope_id varchar not null,
   user_id uuid references users(user_id) on delete cascade,
   company_id uuid references companies(company_id) on delete cascade,
-  company_email_connection_id uuid references company_email_connections(company_email_connection_id) on delete cascade,
+  company_email_connection_id uuid references email_connections(email_connection_id) on delete cascade,
   shared_inbox_id uuid,
   message_id text not null,
   thread_id text not null default '',
@@ -1596,7 +1591,7 @@ create table if not exists shared_inboxes (
   primary key (company_id, shared_inbox_id),
   foreign key (company_id) references companies (company_id) on delete cascade,
   foreign key (company_id, parent_folder_id) references shared_inbox_folders (company_id, folder_id),
-  constraint shared_inboxes_company_email_connection_fkey foreign key (company_id, company_email_connection_id) references company_email_connections(company_id, company_email_connection_id)
+  constraint shared_inboxes_company_email_connection_fkey foreign key (company_id, company_email_connection_id) references email_connections(company_id, email_connection_id)
 );
 
 create index if not exists idx_shared_inboxes_parent
@@ -1633,7 +1628,7 @@ create table if not exists communications_email_archive_jobs (
     (connection_scope = 'shared' and company_id is not null and shared_inbox_id is not null)
   ),
   foreign key (company_id, shared_inbox_id) references shared_inboxes(company_id, shared_inbox_id) on delete cascade,
-  foreign key (company_email_connection_id) references company_email_connections(company_email_connection_id) on delete set null
+  foreign key (company_email_connection_id) references email_connections(email_connection_id) on delete set null
 );
 
 create index if not exists idx_communications_email_archive_jobs_actor_created
@@ -3447,12 +3442,7 @@ create index if not exists idx_logic_gate_textboxes_gate
 create table if not exists email_threads (
   company_id uuid not null,
   email_thread_id uuid not null,
-  email_account_type text not null,
-  personal_user_id uuid,
-  personal_account_email text,
-  shared_inbox_id uuid,
-  email_account_email text not null,
-  provider text not null,
+  email_connection_id uuid not null,
   provider_thread_key text not null,
   provider_thread_id text not null default '',
   root_provider_message_id text not null,
@@ -3464,28 +3454,8 @@ create table if not exists email_threads (
   updated_timestamp timestamptz not null default now(),
   primary key (company_id, email_thread_id),
   foreign key (company_id) references companies(company_id) on delete cascade,
-  constraint email_threads_account_type_chk check (
-    email_account_type in ('personal_email_account', 'shared_email_account')
-  ),
-  constraint email_threads_account_scope_chk check (
-    (email_account_type = 'personal_email_account'
-      and personal_user_id is not null and personal_account_email is not null
-      and shared_inbox_id is null)
-    or
-    (email_account_type = 'shared_email_account'
-      and personal_user_id is null and personal_account_email is null
-      and shared_inbox_id is not null)
-  ),
-  constraint email_threads_account_email_chk check (
-    btrim(email_account_email) <> ''
-    and email_account_email = lower(btrim(email_account_email))
-  ),
-  constraint email_threads_personal_account_email_chk check (
-    personal_account_email is null
-    or (btrim(personal_account_email) <> ''
-      and personal_account_email = lower(btrim(personal_account_email)))
-  ),
-  constraint email_threads_provider_chk check (provider in ('google', 'microsoft')),
+  foreign key (company_id,email_connection_id)
+    references email_connections(company_id,email_connection_id) on delete cascade,
   constraint email_threads_provider_key_chk check (btrim(provider_thread_key) <> ''),
   constraint email_threads_root_message_chk check (btrim(root_provider_message_id) <> ''),
   constraint email_threads_download_status_chk check (
@@ -3494,14 +3464,8 @@ create table if not exists email_threads (
   )
 );
 
-create unique index if not exists idx_email_threads_personal_provider
-  on email_threads(
-    company_id, personal_user_id, personal_account_email, provider, provider_thread_key
-  ) where email_account_type = 'personal_email_account';
-
-create unique index if not exists idx_email_threads_shared_provider
-  on email_threads(company_id, shared_inbox_id, provider, provider_thread_key)
-  where email_account_type = 'shared_email_account';
+create unique index if not exists idx_email_threads_connection_provider
+  on email_threads(company_id,email_connection_id,provider_thread_key);
 
 create table if not exists email_messages (
   company_id uuid not null,
@@ -3925,13 +3889,14 @@ create unique index if not exists idx_email_signatures_shared_scope
   on email_signatures(company_id,shared_inbox_id)
   where email_account_type='shared_email_account';
 
-create table if not exists email_thread_download_jobs (
-  download_job_id uuid primary key,
+create table if not exists email_ingestion_jobs (
+  ingestion_job_id uuid primary key,
   company_id uuid not null,
-  email_thread_id uuid not null,
-  download_scope text not null,
-  requested_provider_message_id text not null default '',
-  requested_by_user_id uuid,
+  email_connection_id uuid not null,
+  email_thread_id uuid,
+  provider_message_id text not null,
+  provider_thread_id text not null default '',
+  priority smallint not null default 30,
   status text not null default 'pending',
   attempt_count integer not null default 0,
   last_error text not null default '',
@@ -3941,26 +3906,22 @@ create table if not exists email_thread_download_jobs (
   failed_timestamp timestamptz,
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
+  foreign key (company_id,email_connection_id)
+    references email_connections(company_id,email_connection_id) on delete cascade,
   foreign key (company_id,email_thread_id)
-    references email_threads(company_id,email_thread_id) on delete cascade,
-  foreign key (requested_by_user_id) references users(user_id) on delete set null,
-  constraint email_thread_download_jobs_scope_chk check (
-    (download_scope='full_thread' and requested_provider_message_id='')
-    or (download_scope='message' and btrim(requested_provider_message_id)<>'')
-  ),
-  constraint email_thread_download_jobs_status_chk check (
+    references email_threads(company_id,email_thread_id) on delete set null,
+  constraint email_ingestion_jobs_message_chk check (btrim(provider_message_id)<>''),
+  constraint email_ingestion_jobs_priority_chk check (priority between 0 and 100),
+  constraint email_ingestion_jobs_status_chk check (
     status in ('pending','processing','retry','completed','failed')
   ),
-  constraint email_thread_download_jobs_attempt_chk check (attempt_count >= 0)
+  constraint email_ingestion_jobs_attempt_chk check (attempt_count >= 0)
 );
-create unique index if not exists idx_email_thread_download_jobs_active_full
-  on email_thread_download_jobs(company_id,email_thread_id)
-  where download_scope='full_thread' and status in ('pending','processing','retry');
-create unique index if not exists idx_email_thread_download_jobs_active_message
-  on email_thread_download_jobs(company_id,email_thread_id,requested_provider_message_id)
-  where download_scope='message' and status in ('pending','processing','retry');
-create index if not exists idx_email_thread_download_jobs_claim
-  on email_thread_download_jobs(status,available_at,created_timestamp)
+create unique index if not exists idx_email_ingestion_jobs_active_message
+  on email_ingestion_jobs(company_id,email_connection_id,provider_message_id)
+  where status in ('pending','processing','retry');
+create index if not exists idx_email_ingestion_jobs_claim
+  on email_ingestion_jobs(status,priority,available_at,created_timestamp)
   where status in ('pending','processing','retry');
 create table if not exists attachment_relationships (
   attachment_relationship_id uuid not null,

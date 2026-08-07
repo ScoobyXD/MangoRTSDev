@@ -131,10 +131,13 @@ type IdentityRepository interface {
 	GetCompanyEmailConnectionByID(companyID, connectionID string) (domain.CompanyEmailConnection, error)
 	GetCompanyEmailConnectionByGrantID(grantID string) (domain.CompanyEmailConnection, error)
 	GetUserEmailConnectionByGrantID(grantID string) (domain.UserEmailConnection, error)
+	GetEmailConnectionByID(companyID, connectionID string) (domain.UserEmailConnection, error)
+	ListConnectedEmailConnections() ([]domain.UserEmailConnection, error)
 	UpsertUserEmailConnection(input UserEmailConnectionInput) (domain.UserEmailConnection, error)
 	UpsertCompanyEmailConnection(input CompanyEmailConnectionInput) (domain.CompanyEmailConnection, error)
 	UpdateCompanyEmailConnectionStatus(companyID, connectionID, status string) (domain.CompanyEmailConnection, error)
 	UpdateUserEmailConnectionStatus(userID, accountEmail, status string) (domain.UserEmailConnection, error)
+	UpdateEmailConnectionScanCheckpoint(companyID, connectionID string, checkpoint time.Time) error
 	DeleteUserEmailConnection(userID string) error
 }
 
@@ -151,9 +154,11 @@ type CommunicationsRepository interface {
 	RevertCommunicationsTriageNode(input CommunicationsTriageRevertInput) (CommunicationsTriageRevertResult, error)
 	TransferCommunicationsEmailNode(input CommunicationsEmailNodeTransferInput) (CommunicationsEmailNodeTransferResult, error)
 	ListCommunicationsEmailPlacements(userID, companyID string, messageIDs []string) ([]domain.CommunicationsEmailPlacement, error)
+	ListCommunicationsEmailPlacementsForConnection(userID, companyID, emailConnectionID string, messageIDs []string) ([]domain.CommunicationsEmailPlacement, error)
 	UpsertCommunicationsEmailThread(input CommunicationsEmailThreadUpsertInput) (domain.CommunicationsEmailThread, error)
 	GetCommunicationsEmailThread(companyID, emailThreadID string) (domain.CommunicationsEmailThread, error)
 	ListCommunicationsEmailThreadsForAccount(input CommunicationsEmailAccountReadInput) ([]domain.CommunicationsEmailThread, error)
+	EnsureCommunicationsEmailIngestionJob(input CommunicationsEmailIngestionJobInput) (CommunicationsEmailThreadDownloadJob, bool, error)
 	EnsureCommunicationsEmailThreadDownloadJob(companyID, emailThreadID, downloadScope, requestedProviderMessageID, requestedByUserID string) (CommunicationsEmailThreadDownloadJob, bool, error)
 	ClaimCommunicationsEmailThreadDownloadJobs(limit int, processingLeaseTimeout time.Duration) ([]CommunicationsEmailThreadDownloadJob, error)
 	MarkCommunicationsEmailThreadDownloadJobCompleted(downloadJobID string) error
@@ -2292,6 +2297,7 @@ type InvitationDeliveryStatusInput struct {
 }
 
 type UserEmailConnectionInput struct {
+	CompanyID    string
 	UserID       string
 	Provider     string
 	AccountEmail string

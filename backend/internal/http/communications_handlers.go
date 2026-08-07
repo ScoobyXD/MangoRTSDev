@@ -91,6 +91,7 @@ func (s *Server) handleCommunicationsAuthURL(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	requestedAccountEmail := normalizeEmailForCompare(r.URL.Query().Get("account_email"))
+	personalCompanyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 	sharedInboxCompanyID := strings.TrimSpace(r.URL.Query().Get("shared_inbox_company_id"))
 	sharedInboxID := strings.TrimSpace(r.URL.Query().Get("shared_inbox_id"))
 	sharedInboxParentFolderID := strings.TrimSpace(r.URL.Query().Get("shared_inbox_parent_folder_id"))
@@ -160,6 +161,9 @@ func (s *Server) handleCommunicationsAuthURL(w http.ResponseWriter, r *http.Requ
 			}
 		}
 	}
+	if !sharedInboxCreateRequested && personalCompanyID != "" && !requireCompanyAccess(w, r, personalCompanyID) {
+		return
+	}
 	strictEmail := true
 	state, err := signNylasOAuthState(s.nylasConfig.StateSecret, nylasOAuthStatePayload{
 		UserID:                    actor.User.UserID,
@@ -167,6 +171,7 @@ func (s *Server) handleCommunicationsAuthURL(w http.ResponseWriter, r *http.Requ
 		UserEmail:                 actor.User.Email,
 		Provider:                  provider,
 		StrictEmail:               strictEmail,
+		CompanyID:                 personalCompanyID,
 		SharedInboxCompanyID:      sharedInboxCompanyID,
 		SharedInboxID:             sharedInboxID,
 		SharedInboxParentFolderID: sharedInboxParentFolderID,
@@ -591,7 +596,7 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 			s.writeNylasError(w, r, connection, err)
 			return
 		}
-		message = s.enrichCommunicationsMessagePlacements(connection.UserID, companyID, message)
+		message = s.enrichCommunicationsMessagePlacementsForConnection(connection, companyID, message)
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"message": message})
 	case http.MethodPut:
 		var req struct {
@@ -1302,6 +1307,7 @@ func (s *Server) handleNylasOAuthCallback(w http.ResponseWriter, r *http.Request
 		connection = userConnectionForCompanyEmailConnection(companyConnection, state.UserID)
 	} else {
 		connectionInput := store.UserEmailConnectionInput{
+			CompanyID:    state.CompanyID,
 			UserID:       state.UserID,
 			Provider:     provider,
 			AccountEmail: grant.Email,
@@ -1358,6 +1364,8 @@ func (s *Server) handleNylasOAuthCallback(w http.ResponseWriter, r *http.Request
 		}
 		s.publishWorkspaceEvent(sharedInboxCompanyID, eventName, map[string]any{"folder_id": item.FolderID, "shared_inbox_id": item.SharedInboxID, "folder_kind": item.FolderKind, "resource_type": store.EntityTypeSharedInbox, "folder": item})
 	}
+	s.wakeCommunicationsEmailThreadDownloadWorker()
+	s.wakeCommunicationsEmailConnectionScanner()
 	log.Printf("nylas_oauth_callback outcome=success request_id=%s user_id=%s provider=%s account_email=%s scope=%s strict_email=%t grant=%s", requestCorrelationID(r), state.UserID, provider, normalizeEmailForCompare(grant.Email), connectionScope, state.StrictEmail, grantIDLogValue(grant.GrantID))
 	s.redirectCommunicationsSuccess(w, r, connection, createdSharedInboxID)
 }
@@ -1498,6 +1506,7 @@ func requireConnectedEmailStatus(w http.ResponseWriter, connection domain.UserEm
 
 func userConnectionForCompanyEmailConnection(connection domain.CompanyEmailConnection, actorUserID string) domain.UserEmailConnection {
 	return domain.UserEmailConnection{
+		EmailConnectionID:        connection.EmailConnectionID,
 		UserID:                   strings.TrimSpace(actorUserID),
 		Provider:                 connection.Provider,
 		AccountEmail:             connection.AccountEmail,
@@ -1506,6 +1515,8 @@ func userConnectionForCompanyEmailConnection(connection domain.CompanyEmailConne
 		CompanyEmailConnectionID: connection.CompanyEmailConnectionID,
 		GrantID:                  connection.GrantID,
 		Status:                   connection.Status,
+		IngestionStartedAt:       connection.IngestionStartedAt,
+		LastSuccessfulScanAt:     connection.LastSuccessfulScanAt,
 		CreatedTimestamp:         connection.CreatedTimestamp,
 		UpdatedTimestamp:         connection.UpdatedTimestamp,
 	}
@@ -1868,8 +1879,26 @@ func (s *Server) enrichCommunicationsMessagePage(userID, companyID string, page 
 
 func (s *Server) enrichCommunicationsMessagePageForConnection(connection domain.UserEmailConnection, companyID string, page NylasMessagePage) NylasMessagePage {
 	page = cloneNylasMessagePage(page)
+	queued := false
+	for _, message := range page.Messages {
+		if connection.EmailConnectionID == "" || strings.TrimSpace(message.ID) == "" {
+			continue
+		}
+		if _, _, err := s.repo.EnsureCommunicationsEmailIngestionJob(store.CommunicationsEmailIngestionJobInput{
+			CompanyID: companyID, EmailConnectionID: connection.EmailConnectionID,
+			ProviderMessageID: message.ID, ProviderThreadID: message.ThreadID,
+			Priority: store.CommunicationsEmailIngestionPriorityVisible,
+		}); err != nil {
+			log.Printf("failed to prioritize visible email ingestion company_id=%s connection_id=%s message_id=%s: %v", companyID, connection.EmailConnectionID, message.ID, err)
+			continue
+		}
+		queued = true
+	}
+	if queued {
+		s.wakeCommunicationsEmailThreadDownloadWorker()
+	}
 	page.Messages = s.enrichCommunicationsMessagesReadStatuses(connection, page.Messages)
-	page.Messages = s.enrichCommunicationsMessagesPlacements(connection.UserID, companyID, page.Messages)
+	page.Messages = s.enrichCommunicationsMessagesPlacementsForConnection(connection, companyID, page.Messages)
 	return page
 }
 
@@ -1933,7 +1962,25 @@ func (s *Server) enrichCommunicationsMessagePlacements(userID, companyID string,
 	return messages[0]
 }
 
+func (s *Server) enrichCommunicationsMessagePlacementsForConnection(connection domain.UserEmailConnection, companyID string, message NylasMessage) NylasMessage {
+	messages := s.enrichCommunicationsMessagesPlacementsForConnection(connection, companyID, []NylasMessage{message})
+	if len(messages) == 0 {
+		return message
+	}
+	return messages[0]
+}
+
+func (s *Server) enrichCommunicationsMessagesPlacementsForConnection(connection domain.UserEmailConnection, companyID string, messages []NylasMessage) []NylasMessage {
+	return s.enrichCommunicationsMessagesPlacementsWithConnection(
+		connection.UserID, companyID, connection.EmailConnectionID, messages,
+	)
+}
+
 func (s *Server) enrichCommunicationsMessagesPlacements(userID, companyID string, messages []NylasMessage) []NylasMessage {
+	return s.enrichCommunicationsMessagesPlacementsWithConnection(userID, companyID, "", messages)
+}
+
+func (s *Server) enrichCommunicationsMessagesPlacementsWithConnection(userID, companyID, emailConnectionID string, messages []NylasMessage) []NylasMessage {
 	companyID = strings.TrimSpace(companyID)
 	if s == nil || s.repo == nil || strings.TrimSpace(userID) == "" || companyID == "" || len(messages) == 0 {
 		return messages
@@ -1948,7 +1995,13 @@ func (s *Server) enrichCommunicationsMessagesPlacements(userID, companyID string
 	if len(messageIDs) == 0 {
 		return messages
 	}
-	placements, err := s.repo.ListCommunicationsEmailPlacements(userID, companyID, messageIDs)
+	var placements []domain.CommunicationsEmailPlacement
+	var err error
+	if strings.TrimSpace(emailConnectionID) != "" {
+		placements, err = s.repo.ListCommunicationsEmailPlacementsForConnection(userID, companyID, emailConnectionID, messageIDs)
+	} else {
+		placements, err = s.repo.ListCommunicationsEmailPlacements(userID, companyID, messageIDs)
+	}
 	if err != nil {
 		log.Printf("failed to load communications email placements user_id=%s company_id=%s message_count=%d: %v", userID, companyID, len(messageIDs), err)
 		return messages

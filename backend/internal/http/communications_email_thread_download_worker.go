@@ -17,6 +17,9 @@ import (
 const (
 	defaultCommunicationsEmailThreadDownloadWorkerInterval = 250 * time.Millisecond
 	defaultCommunicationsEmailThreadDownloadBatchLimit     = 4
+	defaultCommunicationsEmailConnectionScanInterval       = 30 * time.Second
+	communicationsEmailConnectionScanOverlap               = 5 * time.Minute
+	communicationsEmailReconnectBacklogThreshold           = 5 * time.Minute
 	communicationsEmailThreadDownloadMaxAttempts           = 8
 	communicationsEmailThreadDownloadMaxRetryDelay         = 5 * time.Minute
 )
@@ -33,6 +36,7 @@ func (s *Server) startCommunicationsEmailThreadDownloadWorker() {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.communicationsEmailThreadDownloadWorkerCancel = cancel
 	go s.runCommunicationsEmailThreadDownloadWorker(ctx)
+	go s.runCommunicationsEmailConnectionScanner(ctx)
 }
 
 func (s *Server) runCommunicationsEmailThreadDownloadWorker(ctx context.Context) {
@@ -51,6 +55,22 @@ func (s *Server) runCommunicationsEmailThreadDownloadWorker(ctx context.Context)
 	}
 }
 
+func (s *Server) runCommunicationsEmailConnectionScanner(ctx context.Context) {
+	ticker := time.NewTicker(defaultCommunicationsEmailConnectionScanInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		case <-s.communicationsEmailConnectionScannerWake:
+		}
+		if err := s.scanConnectedCommunicationsEmailConnections(ctx, time.Now().UTC()); err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("communications email connection scan failed: %v", err)
+		}
+	}
+}
+
 func (s *Server) wakeCommunicationsEmailThreadDownloadWorker() {
 	if s == nil || s.communicationsEmailThreadDownloadWorkerDisabled || s.communicationsEmailThreadDownloadWorkerWake == nil {
 		return
@@ -59,6 +79,103 @@ func (s *Server) wakeCommunicationsEmailThreadDownloadWorker() {
 	case s.communicationsEmailThreadDownloadWorkerWake <- struct{}{}:
 	default:
 	}
+}
+
+func (s *Server) wakeCommunicationsEmailConnectionScanner() {
+	if s == nil || s.communicationsEmailThreadDownloadWorkerDisabled || s.communicationsEmailConnectionScannerWake == nil {
+		return
+	}
+	select {
+	case s.communicationsEmailConnectionScannerWake <- struct{}{}:
+	default:
+	}
+}
+
+func (s *Server) scanConnectedCommunicationsEmailConnections(ctx context.Context, scanStarted time.Time) error {
+	connections, err := s.repo.ListConnectedEmailConnections()
+	if err != nil {
+		return err
+	}
+	for _, connection := range connections {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := s.scanConnectedCommunicationsEmailConnection(ctx, connection, scanStarted); err != nil {
+			normalized := s.normalizeCommunicationsEmailIngestionError(connection, err)
+			if !errors.Is(normalized, errCommunicationsEmailConnectionReauthRequired) {
+				log.Printf("communications email connection scan failed company_id=%s connection_id=%s: %v", connection.CompanyID, connection.EmailConnectionID, normalized)
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Server) scanConnectedCommunicationsEmailConnection(ctx context.Context, connection domain.UserEmailConnection, scanStarted time.Time) error {
+	if connection.Status != "connected" || connection.EmailConnectionID == "" || connection.CompanyID == "" {
+		return nil
+	}
+	var folders []NylasFolder
+	if err := s.withCommunicationsNylasGate(ctx, connection, func(callCtx context.Context) error {
+		var callErr error
+		folders, callErr = s.nylasClient.ListFolders(callCtx, connection.GrantID)
+		return callErr
+	}); err != nil {
+		return err
+	}
+	inboxID := findNylasSystemFolderID(folders, "inbox")
+	if inboxID == "" {
+		return errEmailCollaborationSourceUnavailable
+	}
+	lowerBound := connection.LastSuccessfulScanAt.UTC().Add(-communicationsEmailConnectionScanOverlap)
+	activationFloor := connection.IngestionStartedAt.UTC().Add(-time.Second)
+	if lowerBound.Before(activationFloor) {
+		lowerBound = activationFloor
+	}
+	priority := store.CommunicationsEmailIngestionPriorityScan
+	if scanStarted.Sub(connection.LastSuccessfulScanAt) > communicationsEmailReconnectBacklogThreshold {
+		priority = store.CommunicationsEmailIngestionPriorityBacklog
+	}
+	pageToken := ""
+	seenPageTokens := map[string]bool{}
+	for {
+		var page NylasMessagePage
+		err := s.withCommunicationsNylasGate(ctx, connection, func(callCtx context.Context) error {
+			var callErr error
+			page, callErr = s.nylasClient.ListMessages(callCtx, connection.GrantID, NylasMessageQuery{
+				Limit: 200, PageToken: pageToken, FolderID: inboxID,
+				ReceivedAfter: lowerBound.Unix(), ReceivedBefore: scanStarted.Unix(),
+			})
+			return callErr
+		})
+		if err != nil {
+			return err
+		}
+		for _, message := range page.Messages {
+			if message.Date < connection.IngestionStartedAt.Unix() || strings.TrimSpace(message.ID) == "" {
+				continue
+			}
+			if _, _, err := s.repo.EnsureCommunicationsEmailIngestionJob(store.CommunicationsEmailIngestionJobInput{
+				CompanyID: connection.CompanyID, EmailConnectionID: connection.EmailConnectionID,
+				ProviderMessageID: message.ID, ProviderThreadID: message.ThreadID, Priority: priority,
+			}); err != nil {
+				return err
+			}
+		}
+		next := strings.TrimSpace(page.NextPageToken)
+		if next == "" {
+			break
+		}
+		if seenPageTokens[next] {
+			return errors.New("email connection scan repeated page token")
+		}
+		seenPageTokens[next] = true
+		pageToken = next
+	}
+	if err := s.repo.UpdateEmailConnectionScanCheckpoint(connection.CompanyID, connection.EmailConnectionID, scanStarted); err != nil {
+		return err
+	}
+	s.wakeCommunicationsEmailThreadDownloadWorker()
+	return nil
 }
 
 func (s *Server) processAvailableCommunicationsEmailThreadDownloadJobs(ctx context.Context, limit int) (int, error) {
@@ -83,30 +200,83 @@ func (s *Server) processCommunicationsEmailThreadDownloadJob(ctx context.Context
 	if s.nylasClient == nil || !s.nylasConfig.IsConfigured() {
 		return s.recordCommunicationsEmailThreadDownloadFailure(job, errCommunicationsEmailThreadDownloadUnavailable)
 	}
-	thread, err := s.repo.GetCommunicationsEmailThread(job.CompanyID, job.EmailThreadID)
+	connection, err := s.repo.GetEmailConnectionByID(job.CompanyID, job.EmailConnectionID)
 	if err != nil {
 		return s.recordCommunicationsEmailThreadDownloadFailure(job, err)
 	}
-	connection, err := s.resolveEmailThreadSourceConnection(thread, job.RequestedByUserID)
-	if err != nil {
-		return s.recordCommunicationsEmailThreadDownloadFailure(job, err)
+	if connection.Status != "connected" || strings.TrimSpace(connection.GrantID) == "" {
+		return s.recordCommunicationsEmailThreadDownloadFailure(job, errCommunicationsEmailConnectionReauthRequired)
 	}
 
-	messageIDs := []string{job.RequestedProviderMessageID}
-	if job.DownloadScope == store.CommunicationsEmailThreadDownloadScopeFullThread {
+	automaticDiscovery := strings.TrimSpace(job.EmailThreadID) == ""
+	var trigger NylasMessage
+	err = s.withCommunicationsNylasGate(ctx, connection, func(callCtx context.Context) error {
+		var callErr error
+		trigger, callErr = s.nylasClient.GetMessage(callCtx, connection.GrantID, job.ProviderMessageID)
+		return callErr
+	})
+	if err != nil {
+		return s.recordCommunicationsEmailThreadDownloadFailure(job, s.normalizeCommunicationsEmailIngestionError(connection, err))
+	}
+	if strings.TrimSpace(trigger.ID) != strings.TrimSpace(job.ProviderMessageID) {
+		return s.recordCommunicationsEmailThreadDownloadFailure(job, errEmailCollaborationSourceUnavailable)
+	}
+	if automaticDiscovery {
+		if trigger.Date < connection.IngestionStartedAt.Unix() {
+			return s.repo.MarkCommunicationsEmailThreadDownloadJobCompleted(job.DownloadJobID)
+		}
+		eligible, inboxErr := s.communicationsEmailMessageIsInInbox(ctx, connection, trigger)
+		if inboxErr != nil {
+			return s.recordCommunicationsEmailThreadDownloadFailure(job, s.normalizeCommunicationsEmailIngestionError(connection, inboxErr))
+		}
+		if !eligible {
+			return s.repo.MarkCommunicationsEmailThreadDownloadJobCompleted(job.DownloadJobID)
+		}
+	}
+
+	var thread domain.CommunicationsEmailThread
+	if strings.TrimSpace(job.EmailThreadID) != "" {
+		thread, err = s.repo.GetCommunicationsEmailThread(job.CompanyID, job.EmailThreadID)
+	} else {
+		preliminary := emailMessageSnapshotFromNylas(trigger)
+		preliminary.DownloadComplete = false
+		thread, err = s.repo.UpsertCommunicationsEmailThread(
+			s.communicationsEmailThreadInputForConnection(connection, preliminary, false),
+		)
+	}
+	if err != nil {
+		return s.recordCommunicationsEmailThreadDownloadFailure(job, err)
+	}
+	if thread.EmailConnectionID != "" && thread.EmailConnectionID != job.EmailConnectionID {
+		return s.recordCommunicationsEmailThreadDownloadFailure(job, store.ErrInvalid)
+	}
+	job.EmailThreadID = thread.EmailThreadID
+	job.ProviderThreadID = firstNonBlank(thread.ProviderThreadID, trigger.ThreadID, job.ProviderThreadID)
+	attachedJob, _, attachErr := s.repo.EnsureCommunicationsEmailIngestionJob(store.CommunicationsEmailIngestionJobInput{
+		CompanyID: job.CompanyID, EmailConnectionID: job.EmailConnectionID, EmailThreadID: thread.EmailThreadID,
+		ProviderMessageID: job.ProviderMessageID, ProviderThreadID: job.ProviderThreadID, Priority: job.Priority,
+	})
+	if attachErr != nil {
+		return s.recordCommunicationsEmailThreadDownloadFailure(job, attachErr)
+	}
+	job.EmailThreadID = attachedJob.EmailThreadID
+
+	messageIDs := []string{trigger.ID}
+	if strings.TrimSpace(job.ProviderThreadID) != "" {
 		var providerThread NylasThread
 		err = s.withCommunicationsNylasGate(ctx, connection, func(callCtx context.Context) error {
 			var callErr error
-			providerThread, callErr = s.nylasClient.GetThread(callCtx, connection.GrantID, thread.ProviderThreadID)
+			providerThread, callErr = s.nylasClient.GetThread(callCtx, connection.GrantID, job.ProviderThreadID)
 			return callErr
 		})
-		if err != nil || strings.TrimSpace(providerThread.ID) != strings.TrimSpace(thread.ProviderThreadID) {
+		if err != nil || strings.TrimSpace(providerThread.ID) != strings.TrimSpace(job.ProviderThreadID) {
 			if err == nil {
 				err = errEmailCollaborationSourceUnavailable
 			}
-			return s.recordCommunicationsEmailThreadDownloadFailure(job, err)
+			return s.recordCommunicationsEmailThreadDownloadFailure(job, s.normalizeCommunicationsEmailIngestionError(connection, err))
 		}
 		messageIDs = cleanEmailCollaborationThreadMessageIDs(providerThread.MessageIDs)
+		messageIDs = cleanEmailCollaborationThreadMessageIDs(append(messageIDs, trigger.ID))
 	}
 	if len(messageIDs) == 0 {
 		return s.recordCommunicationsEmailThreadDownloadFailure(job, store.ErrInvalid)
@@ -120,14 +290,16 @@ func (s *Server) processCommunicationsEmailThreadDownloadJob(ctx context.Context
 		if storedEmailMessageDownloadComplete(thread, messageID) {
 			continue
 		}
-		var message NylasMessage
-		err = s.withCommunicationsNylasGate(ctx, connection, func(callCtx context.Context) error {
-			var callErr error
-			message, callErr = s.nylasClient.GetMessage(callCtx, connection.GrantID, messageID)
-			return callErr
-		})
+		message := trigger
+		if messageID != trigger.ID {
+			err = s.withCommunicationsNylasGate(ctx, connection, func(callCtx context.Context) error {
+				var callErr error
+				message, callErr = s.nylasClient.GetMessage(callCtx, connection.GrantID, messageID)
+				return callErr
+			})
+		}
 		if err != nil {
-			return s.recordCommunicationsEmailThreadDownloadFailure(job, err)
+			return s.recordCommunicationsEmailThreadDownloadFailure(job, s.normalizeCommunicationsEmailIngestionError(connection, err))
 		}
 		if strings.TrimSpace(message.ID) != messageID || (thread.ProviderThreadID != "" && strings.TrimSpace(message.ThreadID) != thread.ProviderThreadID) {
 			return s.recordCommunicationsEmailThreadDownloadFailure(job, errEmailCollaborationSourceUnavailable)
@@ -142,35 +314,128 @@ func (s *Server) processCommunicationsEmailThreadDownloadJob(ctx context.Context
 		if err != nil {
 			return s.recordCommunicationsEmailThreadDownloadFailure(job, err)
 		}
-		message, err = s.storeImportedEmailMessageAttachments(ctx, connection, thread, job.RequestedByUserID, message)
+		message, err = s.storeImportedEmailMessageAttachments(ctx, connection, thread, connection.UserID, message)
 		if err != nil {
 			return s.recordCommunicationsEmailThreadDownloadFailure(job, err)
 		}
 		snapshot := emailMessageSnapshotFromNylas(message)
 		snapshot.DownloadComplete = true
-		messageCompletesHistory := thread.HistoryComplete || (job.DownloadScope == store.CommunicationsEmailThreadDownloadScopeMessage && strings.TrimSpace(thread.ProviderThreadID) == "")
-		if _, err = s.repo.UpsertCommunicationsEmailThread(communicationsEmailThreadInputFromStoredThread(thread, snapshot, messageCompletesHistory)); err != nil {
+		if _, err = s.repo.UpsertCommunicationsEmailThread(communicationsEmailThreadInputFromStoredThread(thread, snapshot, false)); err != nil {
 			return s.recordCommunicationsEmailThreadDownloadFailure(job, err)
 		}
 	}
 
-	if job.DownloadScope == store.CommunicationsEmailThreadDownloadScopeFullThread {
-		thread, err = s.repo.GetCommunicationsEmailThread(job.CompanyID, job.EmailThreadID)
-		if err != nil || len(thread.Messages) == 0 {
-			if err == nil {
-				err = store.ErrInvalid
-			}
-			return s.recordCommunicationsEmailThreadDownloadFailure(job, err)
+	thread, err = s.repo.GetCommunicationsEmailThread(job.CompanyID, thread.EmailThreadID)
+	if err != nil || len(thread.Messages) == 0 {
+		if err == nil {
+			err = store.ErrInvalid
 		}
-		anchor := thread.Messages[0].Message
-		if _, err = s.repo.UpsertCommunicationsEmailThread(communicationsEmailThreadInputFromStoredThread(thread, anchor, true)); err != nil {
-			return s.recordCommunicationsEmailThreadDownloadFailure(job, err)
-		}
+		return s.recordCommunicationsEmailThreadDownloadFailure(job, err)
+	}
+	anchor := thread.Messages[0].Message
+	if _, err = s.repo.UpsertCommunicationsEmailThread(communicationsEmailThreadInputFromStoredThread(thread, anchor, true)); err != nil {
+		return s.recordCommunicationsEmailThreadDownloadFailure(job, err)
 	}
 	if err := s.repo.MarkCommunicationsEmailThreadDownloadJobCompleted(job.DownloadJobID); err != nil {
 		return err
 	}
+	s.publishCommunicationsEmailIngestionCompletion(connection, trigger.ID, job.ProviderThreadID)
 	return nil
+}
+
+func (s *Server) publishCommunicationsEmailIngestionCompletion(connection domain.UserEmailConnection, messageID, threadID string) {
+	change := nylasWebhookChange{
+		Trigger: "message.updated", MessageID: strings.TrimSpace(messageID),
+		ThreadID: strings.TrimSpace(threadID), OccurredAt: time.Now().UTC(),
+	}
+	if communicationsMessageReadStatusScopeTypeForConnection(connection) != "shared" {
+		s.applyNylasWebhookCacheInvalidation(connection.UserID, communicationsConnectionCacheScope(connection), change)
+		if err := s.publishPersonalMailboxWebhookHint(connection.UserID, connection.AccountEmail, change); err != nil {
+			log.Printf("failed to publish completed personal email ingestion hint company_id=%s connection_id=%s message_id=%s: %v", connection.CompanyID, connection.EmailConnectionID, messageID, err)
+		}
+		return
+	}
+	s.applyNylasWebhookCacheInvalidationForAccountScope(communicationsConnectionCacheScope(connection), change)
+	companyConnection := companyEmailConnectionFromUserConnectionForHTTP(connection)
+	sharedInboxIDs, err := s.communicationsSharedInboxIDsForCompanyEmailConnection(companyConnection)
+	if err != nil {
+		log.Printf("failed to resolve completed shared email ingestion audience company_id=%s connection_id=%s message_id=%s: %v", connection.CompanyID, connection.EmailConnectionID, messageID, err)
+		return
+	}
+	for _, sharedInboxID := range sharedInboxIDs {
+		if err := s.publishSharedMailboxWebhookHint(connection.CompanyID, sharedInboxID, change); err != nil {
+			log.Printf("failed to publish completed shared email ingestion hint company_id=%s connection_id=%s shared_inbox_id=%s message_id=%s: %v", connection.CompanyID, connection.EmailConnectionID, sharedInboxID, messageID, err)
+		}
+	}
+}
+
+func companyEmailConnectionFromUserConnectionForHTTP(connection domain.UserEmailConnection) domain.CompanyEmailConnection {
+	return domain.CompanyEmailConnection{
+		EmailConnectionID:        connection.EmailConnectionID,
+		CompanyEmailConnectionID: connection.CompanyEmailConnectionID,
+		CompanyID:                connection.CompanyID, Provider: connection.Provider,
+		AccountEmail: connection.AccountEmail, GrantID: connection.GrantID,
+		Status: connection.Status, ConnectedByUserID: connection.UserID,
+		IngestionStartedAt:   connection.IngestionStartedAt,
+		LastSuccessfulScanAt: connection.LastSuccessfulScanAt,
+		CreatedTimestamp:     connection.CreatedTimestamp, UpdatedTimestamp: connection.UpdatedTimestamp,
+	}
+}
+
+var errCommunicationsEmailConnectionReauthRequired = errors.New("email connection reauth required")
+
+func (s *Server) normalizeCommunicationsEmailIngestionError(connection domain.UserEmailConnection, err error) error {
+	var apiErr NylasAPIError
+	if errors.As(err, &apiErr) && (apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden) {
+		if communicationsMessageReadStatusScopeTypeForConnection(connection) == "shared" {
+			_, _ = s.repo.UpdateCompanyEmailConnectionStatus(connection.CompanyID, connection.CompanyEmailConnectionID, "reauth_required")
+		} else {
+			_, _ = s.repo.UpdateUserEmailConnectionStatus(connection.UserID, connection.AccountEmail, "reauth_required")
+		}
+		return errCommunicationsEmailConnectionReauthRequired
+	}
+	return err
+}
+
+func (s *Server) communicationsEmailMessageIsInInbox(ctx context.Context, connection domain.UserEmailConnection, message NylasMessage) (bool, error) {
+	var folders []NylasFolder
+	err := s.withCommunicationsNylasGate(ctx, connection, func(callCtx context.Context) error {
+		var callErr error
+		folders, callErr = s.nylasClient.ListFolders(callCtx, connection.GrantID)
+		return callErr
+	})
+	if err != nil {
+		return false, err
+	}
+	inboxID := strings.TrimSpace(findNylasSystemFolderID(folders, "inbox"))
+	for _, folder := range append(append([]string(nil), message.Folders...), message.FolderIDs...) {
+		folder = strings.Trim(strings.ToLower(strings.TrimSpace(folder)), "\\")
+		if folder == "inbox" || (inboxID != "" && folder == strings.ToLower(inboxID)) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (s *Server) communicationsEmailThreadInputForConnection(connection domain.UserEmailConnection, message domain.EmailMessageSnapshot, historyComplete bool) store.CommunicationsEmailThreadUpsertInput {
+	input := store.CommunicationsEmailThreadUpsertInput{
+		CompanyID: connection.CompanyID, AccountEmail: connection.AccountEmail, Provider: connection.Provider,
+		ProviderThreadID: message.ThreadID, SelectedMessageID: message.ID, Messages: []domain.EmailMessageSnapshot{message},
+		HistoryComplete: historyComplete, FetchedAt: time.Now().UTC(),
+	}
+	if communicationsMessageReadStatusScopeTypeForConnection(connection) == "shared" {
+		companyConnection := domain.CompanyEmailConnection{
+			EmailConnectionID: connection.EmailConnectionID, CompanyEmailConnectionID: connection.CompanyEmailConnectionID,
+			CompanyID: connection.CompanyID, AccountEmail: connection.AccountEmail,
+		}
+		if sharedInboxIDs, err := s.communicationsSharedInboxIDsForCompanyEmailConnection(companyConnection); err == nil && len(sharedInboxIDs) > 0 {
+			input.SharedInboxID = sharedInboxIDs[0]
+		}
+	} else {
+		input.PersonalUserID = connection.UserID
+		input.PersonalAccountEmail = connection.AccountEmail
+	}
+	return input
 }
 
 func storedEmailMessageDownloadComplete(thread domain.CommunicationsEmailThread, providerMessageID string) bool {
@@ -318,6 +583,9 @@ func (s *Server) linkImportedEmailAttachment(companyID, actorUserID, emailMessag
 }
 func (s *Server) recordCommunicationsEmailThreadDownloadFailure(job store.CommunicationsEmailThreadDownloadJob, downloadErr error) error {
 	code := communicationsMutationErrorCode(downloadErr)
+	if errors.Is(downloadErr, errCommunicationsEmailConnectionReauthRequired) {
+		code = "email_connection_reauth_required"
+	}
 	if errors.Is(downloadErr, errCommunicationsEmailAttachmentUnavailable) {
 		code = "email_attachment_download_failed"
 	}
@@ -326,10 +594,16 @@ func (s *Server) recordCommunicationsEmailThreadDownloadFailure(job store.Commun
 	}
 	final := communicationsEmailThreadDownloadFailureIsFinal(downloadErr, job.AttemptCount)
 	availableAt := time.Now().UTC().Add(communicationsEmailThreadDownloadRetryDelay(job.AttemptCount))
+	if errors.Is(downloadErr, errCommunicationsEmailConnectionReauthRequired) {
+		availableAt = time.Now().UTC().Add(5 * time.Minute)
+	}
 	return s.repo.MarkCommunicationsEmailThreadDownloadJobFailed(job.DownloadJobID, code, availableAt, final)
 }
 
 func communicationsEmailThreadDownloadFailureIsFinal(err error, attemptCount int) bool {
+	if errors.Is(err, errCommunicationsEmailConnectionReauthRequired) {
+		return false
+	}
 	if attemptCount >= communicationsEmailThreadDownloadMaxAttempts || errors.Is(err, store.ErrInvalid) || errors.Is(err, store.ErrNotFound) {
 		return true
 	}

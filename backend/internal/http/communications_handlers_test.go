@@ -1903,7 +1903,7 @@ func TestNylasCallbackTreatsStrictUserMailboxAsPersonalConnection(t *testing.T) 
 	}
 }
 
-func TestCommunicationsHandlersReadProviderWithoutPersistingMailboxMessages(t *testing.T) {
+func TestCommunicationsHandlersReadProviderAndQueueVisibleIngestion(t *testing.T) {
 	t.Parallel()
 	key := mustRSAKey(t)
 	repo := store.NewMemoryRepo()
@@ -1936,7 +1936,7 @@ func TestCommunicationsHandlersReadProviderWithoutPersistingMailboxMessages(t *t
 	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/folders?"+companyQuery, "", token, http.StatusOK)
 	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?"+companyQuery+"&limit=5&unread=true", "", token, http.StatusOK)
 	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages/message-1?"+companyQuery, "", token, http.StatusOK)
-	if nylas.messageCalls != 1 || nylas.detailCalls != 1 || nylas.lastMessageGrantID != "grant-1" || nylas.lastDetailGrantID != "grant-1" {
+	if nylas.messageCalls != 1 || nylas.detailCalls < 1 || nylas.lastMessageGrantID != "grant-1" || nylas.lastDetailGrantID != "grant-1" {
 		t.Fatalf("provider reads list=%d detail=%d list_grant=%q detail_grant=%q", nylas.messageCalls, nylas.detailCalls, nylas.lastMessageGrantID, nylas.lastDetailGrantID)
 	}
 	assertJSONStatus(t, handler, http.MethodPut, "/v1/communications/messages/message-1?"+companyQuery, `{"unread":false}`, token, http.StatusOK)
@@ -1950,7 +1950,7 @@ func TestCommunicationsHandlersReadProviderWithoutPersistingMailboxMessages(t *t
 		t.Fatal(err)
 	}
 	if len(threads) != 0 {
-		t.Fatalf("ordinary mailbox reads/updates stored %d V3 threads, want 0", len(threads))
+		t.Fatalf("the pre-activation visible message stored %d V3 threads, want 0", len(threads))
 	}
 	sendBody := `{"company_id":"` + companyID + `","to":[{"email":"friend@example.com"}],"subject":"Hi","body":"Body"}`
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/send", sendBody, token, http.StatusCreated)
@@ -2520,14 +2520,16 @@ func TestParseNylasWebhookChangesCanonicalizesMailboxTriggers(t *testing.T) {
 		"deltas": [
 			{"type": " Message.Created.Truncated ", "data": {"object": {"id": "message-1", "grant_id": "grant-1"}}},
 			{"trigger_type": "FOLDER.UPDATED.extra", "data": {"object": {"id": "folder-1", "grant_id": "grant-1"}}},
-			{"event": "thread.replied", "data": {"object": {"id": "thread-1", "grant_id": "grant-1"}}}
+			{"event": "thread.replied", "data": {"object": {"id": "thread-1", "grant_id": "grant-1"}}},
+			{"type": "GRANT.EXPIRED", "data": {"object": {"grant_id": "grant-1"}}},
+			{"type": "grant.updated.extra", "data": {"object": {"grant_id": "grant-1"}}}
 		]
 	}`))
 	if err != nil {
 		t.Fatalf("parseNylasWebhookChanges: %v", err)
 	}
-	if len(changes) != 3 {
-		t.Fatalf("changes = %d, want 3", len(changes))
+	if len(changes) != 5 {
+		t.Fatalf("changes = %d, want 5", len(changes))
 	}
 	if changes[0].Trigger != "message.created" {
 		t.Fatalf("created trigger = %q, want canonical message.created", changes[0].Trigger)
@@ -2537,6 +2539,60 @@ func TestParseNylasWebhookChangesCanonicalizesMailboxTriggers(t *testing.T) {
 	}
 	if changes[2].Trigger != "" {
 		t.Fatalf("unsupported trigger = %q, want empty", changes[2].Trigger)
+	}
+	if changes[3].Trigger != "grant.expired" || changes[4].Trigger != "grant.updated" {
+		t.Fatalf("grant triggers = %q, %q", changes[3].Trigger, changes[4].Trigger)
+	}
+}
+
+func TestNylasGrantWebhooksPauseAndResumePermanentConnection(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "71717171-7171-4171-8171-717171717170"
+	repo.EnsureCompany(companyID, "Grant lifecycle")
+	user := mustRealtimeAuthUser(t, repo, companyID, "grant-lifecycle-user", domain.RoleCompanyUser)
+	original, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		CompanyID: companyID, UserID: user.UserID, Provider: "google",
+		AccountEmail: user.Email, GrantID: "grant-lifecycle", Status: "connected",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := testNylasConfig()
+	config.WebhookSecret = "webhook-secret"
+	server := NewServerWithOptions(repo, ServerOptions{
+		NylasConfig: config, NylasClient: &fakeNylasClient{},
+		DisableCommunicationsEmailThreadDownloadWorker: true,
+	})
+	defer server.Close()
+	handler := server.Routes()
+
+	send := func(body string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
+		req.Header.Set("X-Nylas-Signature", signWebhookBody(config.WebhookSecret, body))
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("webhook status=%d body=%s", rec.Code, rec.Body.String())
+		}
+	}
+	send("{\"type\":\"grant.expired\",\"data\":{\"object\":{\"grant_id\":\"grant-lifecycle\"}}}")
+	expired, err := repo.GetEmailConnectionByID(companyID, original.EmailConnectionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expired.Status != "reauth_required" {
+		t.Fatalf("expired status=%q, want reauth_required", expired.Status)
+	}
+	send("{\"type\":\"grant.updated\",\"data\":{\"object\":{\"grant_id\":\"grant-lifecycle\"}}}")
+	resumed, err := repo.GetEmailConnectionByID(companyID, original.EmailConnectionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.Status != "connected" || resumed.EmailConnectionID != original.EmailConnectionID ||
+		!resumed.IngestionStartedAt.Equal(original.IngestionStartedAt) ||
+		!resumed.LastSuccessfulScanAt.Equal(original.LastSuccessfulScanAt) {
+		t.Fatalf("resumed connection=%+v, want stable identity and checkpoints from %+v", resumed, original)
 	}
 }
 
@@ -3138,8 +3194,8 @@ func TestNylasWebhookVerifiesSignatureDeduplicatesAndStoresReadStatus(t *testing
 	if _, ok := server.commCache.getMessage(user.UserID, cacheScope, "message-1", communicationsMaxStaleTTL, now.Add(time.Second)); ok {
 		t.Fatal("message.created webhook preserved message detail")
 	}
-	if nylas.folderCalls != 0 || nylas.messageCalls != 0 || nylas.detailCalls != 0 {
-		t.Fatalf("webhook provider calls folders=%d messages=%d details=%d, want event hint without provider polling", nylas.folderCalls, nylas.messageCalls, nylas.detailCalls)
+	if nylas.folderCalls != 0 || nylas.messageCalls != 0 || nylas.detailCalls > 1 {
+		t.Fatalf("webhook provider calls folders=%d messages=%d details=%d, want at most one asynchronous ingestion validation", nylas.folderCalls, nylas.messageCalls, nylas.detailCalls)
 	}
 	duplicateReq := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
 	duplicateReq.Header.Set("X-Nylas-Signature", signWebhookBody("webhook-secret", body))
@@ -3186,7 +3242,7 @@ func TestNylasWebhookVerifiesSignatureDeduplicatesAndStoresReadStatus(t *testing
 	}
 }
 
-func TestNylasWebhookDoesNotAdvancePersonalEmailCollaboration(t *testing.T) {
+func TestNylasWebhookQueuesLiveIngestionWithoutSynchronousCollaborationAdvance(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "71717171-7171-4171-8171-717171717171"
 	repo.EnsureCompany(companyID, "Personal collaboration live arrival")
@@ -3254,6 +3310,20 @@ func TestNylasWebhookDoesNotAdvancePersonalEmailCollaboration(t *testing.T) {
 	}
 	if nylas.detailCalls != 0 {
 		t.Fatalf("webhook triggered provider detail reads=%d, want zero", nylas.detailCalls)
+	}
+	jobs, err := repo.ClaimCommunicationsEmailThreadDownloadJobs(10, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundLive := false
+	for _, job := range jobs {
+		if job.ProviderMessageID == "collaboration-future-message" &&
+			job.Priority == store.CommunicationsEmailIngestionPriorityLive {
+			foundLive = true
+		}
+	}
+	if !foundLive {
+		t.Fatalf("live ingestion jobs=%+v", jobs)
 	}
 	collaboration, err := repo.GetCommunicationsEmailCollaboration(companyID, created.Collaboration.CollaborationID, participant.UserID)
 	if err != nil {
@@ -3614,8 +3684,8 @@ func TestNylasWebhookPublishesSharedMailboxHintOnlyToCurrentAudience(t *testing.
 	if message, ok := server.commCache.getMessage(revoked.UserID, unrelatedScope, "unrelated-message", communicationsMaxStaleTTL, now.Add(time.Second)); !ok || message.Subject != "Unrelated" {
 		t.Fatalf("shared webhook evicted unrelated grant detail: %+v present=%t", message, ok)
 	}
-	if nylas.folderCalls != 0 || nylas.messageCalls != 0 || nylas.detailCalls != 0 {
-		t.Fatalf("shared webhook provider calls folders=%d messages=%d details=%d, want event hint without provider polling", nylas.folderCalls, nylas.messageCalls, nylas.detailCalls)
+	if nylas.folderCalls != 0 || nylas.messageCalls != 0 || nylas.detailCalls > 1 {
+		t.Fatalf("shared webhook provider calls folders=%d messages=%d details=%d, want at most one asynchronous ingestion validation", nylas.folderCalls, nylas.messageCalls, nylas.detailCalls)
 	}
 
 	// Regranting access must not expose the pre-revocation cache entry. The

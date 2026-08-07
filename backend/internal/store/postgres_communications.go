@@ -9,36 +9,77 @@ import (
 	"time"
 )
 
+const postgresEmailConnectionColumns = `
+email_connection_id::text,company_id::text,connection_type,
+coalesce(personal_user_id::text,''),provider,account_email,grant_id,status,
+coalesce(connected_by_user_id::text,''),ingestion_started_at,last_successful_scan_at,
+created_timestamp,updated_timestamp`
+
+type postgresEmailConnectionScanner interface{ Scan(...any) error }
+
+func scanPostgresEmailConnection(row postgresEmailConnectionScanner) (domain.UserEmailConnection, error) {
+	var connection domain.UserEmailConnection
+	var connectionType, connectedByUserID string
+	err := row.Scan(
+		&connection.EmailConnectionID, &connection.CompanyID, &connectionType,
+		&connection.UserID, &connection.Provider, &connection.AccountEmail,
+		&connection.GrantID, &connection.Status, &connectedByUserID,
+		&connection.IngestionStartedAt, &connection.LastSuccessfulScanAt,
+		&connection.CreatedTimestamp, &connection.UpdatedTimestamp,
+	)
+	if err != nil {
+		return domain.UserEmailConnection{}, err
+	}
+	connection.Scope = connectionType
+	if connectionType == "shared" {
+		connection.CompanyEmailConnectionID = connection.EmailConnectionID
+		connection.UserID = connectedByUserID
+	}
+	return connection, nil
+}
+
+func companyEmailConnectionFromUserConnection(connection domain.UserEmailConnection) domain.CompanyEmailConnection {
+	return domain.CompanyEmailConnection{
+		EmailConnectionID: connection.EmailConnectionID, CompanyEmailConnectionID: connection.EmailConnectionID,
+		CompanyID: connection.CompanyID, Provider: connection.Provider, AccountEmail: connection.AccountEmail,
+		GrantID: connection.GrantID, Status: connection.Status, ConnectedByUserID: connection.UserID,
+		IngestionStartedAt: connection.IngestionStartedAt, LastSuccessfulScanAt: connection.LastSuccessfulScanAt,
+		CreatedTimestamp: connection.CreatedTimestamp, UpdatedTimestamp: connection.UpdatedTimestamp,
+	}
+}
+
+func scanCompanyEmailConnectionAsUser(connection domain.CompanyEmailConnection) domain.UserEmailConnection {
+	return domain.UserEmailConnection{
+		EmailConnectionID: connection.EmailConnectionID,
+		UserID:            connection.ConnectedByUserID, Provider: connection.Provider,
+		AccountEmail: connection.AccountEmail, Scope: "shared", CompanyID: connection.CompanyID,
+		CompanyEmailConnectionID: connection.CompanyEmailConnectionID, GrantID: connection.GrantID,
+		Status: connection.Status, IngestionStartedAt: connection.IngestionStartedAt,
+		LastSuccessfulScanAt: connection.LastSuccessfulScanAt,
+		CreatedTimestamp:     connection.CreatedTimestamp, UpdatedTimestamp: connection.UpdatedTimestamp,
+	}
+}
+
 func (r *PostgresRepo) GetUserEmailConnection(userID string) (domain.UserEmailConnection, error) {
-	userID = strings.TrimSpace(userID)
+	userID = cleanUUIDText(userID)
 	if userID == "" {
 		return domain.UserEmailConnection{}, ErrInvalid
 	}
-
-	var connection domain.UserEmailConnection
-	err := r.db.QueryRow(
-		`select connection.user_id, connection.provider, connection.account_email, connection.grant_id,
-		        connection.status, connection.created_timestamp, connection.updated_timestamp
-		 from user_email_connections connection
-		 join users app_user
-		   on app_user.user_id = connection.user_id
-		  and connection.account_email = lower(btrim(app_user.email))
-		 where connection.user_id = $1
-		 limit 1`,
-		userID,
-	).Scan(
-		&connection.UserID,
-		&connection.Provider,
-		&connection.AccountEmail,
-		&connection.GrantID,
-		&connection.Status,
-		&connection.CreatedTimestamp,
-		&connection.UpdatedTimestamp,
-	)
+	connection, err := scanPostgresEmailConnection(r.db.QueryRow(
+		`select `+postgresEmailConnectionColumns+`
+		 from email_connections connection
+		 where connection.connection_type='personal'
+		   and connection.personal_user_id=$1::uuid
+		   and exists (
+		     select 1 from users app_user
+		     where app_user.user_id=connection.personal_user_id
+		       and connection.account_email=lower(btrim(app_user.email))
+		   )
+		 order by connection.updated_timestamp desc
+		 limit 1`, userID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.UserEmailConnection{}, ErrNotFound
 	}
-	connection.Scope = "personal"
 	return connection, err
 }
 
@@ -57,9 +98,9 @@ func (r *PostgresRepo) ListUserEmailConnections(userID string) ([]domain.UserEma
 	}
 
 	rows, err := r.db.Query(
-		`select user_id, provider, account_email, grant_id, status, created_timestamp, updated_timestamp
-		 from user_email_connections
-		 where user_id = $1::uuid
+		`select `+postgresEmailConnectionColumns+`
+		 from email_connections
+		 where connection_type='personal' and personal_user_id=$1::uuid
 		 order by updated_timestamp desc, account_email asc`,
 		userID,
 	)
@@ -70,19 +111,10 @@ func (r *PostgresRepo) ListUserEmailConnections(userID string) ([]domain.UserEma
 
 	connections := make([]domain.UserEmailConnection, 0)
 	for rows.Next() {
-		var connection domain.UserEmailConnection
-		if err := rows.Scan(
-			&connection.UserID,
-			&connection.Provider,
-			&connection.AccountEmail,
-			&connection.GrantID,
-			&connection.Status,
-			&connection.CreatedTimestamp,
-			&connection.UpdatedTimestamp,
-		); err != nil {
+		connection, err := scanPostgresEmailConnection(rows)
+		if err != nil {
 			return nil, err
 		}
-		connection.Scope = "personal"
 		connections = append(connections, connection)
 	}
 	if err := rows.Err(); err != nil {
@@ -98,36 +130,17 @@ func (r *PostgresRepo) GetCompanyEmailConnectionByAccountEmail(companyID, accoun
 		return domain.CompanyEmailConnection{}, ErrInvalid
 	}
 
-	var connection domain.CompanyEmailConnection
-	var connectedBy sql.NullString
-	err := r.db.QueryRow(
-		`select company_email_connection_id::text, company_id::text, provider, account_email, grant_id, status,
-		        connected_by_user_id::text,
-		        connection.created_timestamp, connection.updated_timestamp
-		 from company_email_connections connection
+	connection, err := scanPostgresEmailConnection(r.db.QueryRow(
+		`select `+postgresEmailConnectionColumns+`
+		 from email_connections connection
 		 where company_id = $1::uuid
+		   and connection_type='shared'
 		   and account_email = $2
-		 limit 1`,
-		companyID,
-		accountEmail,
-	).Scan(
-		&connection.CompanyEmailConnectionID,
-		&connection.CompanyID,
-		&connection.Provider,
-		&connection.AccountEmail,
-		&connection.GrantID,
-		&connection.Status,
-		&connectedBy,
-		&connection.CreatedTimestamp,
-		&connection.UpdatedTimestamp,
-	)
+		 limit 1`, companyID, accountEmail))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.CompanyEmailConnection{}, ErrNotFound
 	}
-	if connectedBy.Valid {
-		connection.ConnectedByUserID = connectedBy.String
-	}
-	return connection, err
+	return companyEmailConnectionFromUserConnection(connection), err
 }
 
 func (r *PostgresRepo) GetCompanyEmailConnectionByID(companyID, connectionID string) (domain.CompanyEmailConnection, error) {
@@ -137,35 +150,17 @@ func (r *PostgresRepo) GetCompanyEmailConnectionByID(companyID, connectionID str
 		return domain.CompanyEmailConnection{}, ErrInvalid
 	}
 
-	var connection domain.CompanyEmailConnection
-	var connectedBy sql.NullString
-	err := r.db.QueryRow(
-		`select company_email_connection_id::text, company_id::text, provider, account_email, grant_id, status,
-		        connected_by_user_id::text, created_timestamp, updated_timestamp
-		 from company_email_connections
+	connection, err := scanPostgresEmailConnection(r.db.QueryRow(
+		`select `+postgresEmailConnectionColumns+`
+		 from email_connections
 		 where company_id = $1::uuid
-		   and company_email_connection_id = $2::uuid
-		 limit 1`,
-		companyID,
-		connectionID,
-	).Scan(
-		&connection.CompanyEmailConnectionID,
-		&connection.CompanyID,
-		&connection.Provider,
-		&connection.AccountEmail,
-		&connection.GrantID,
-		&connection.Status,
-		&connectedBy,
-		&connection.CreatedTimestamp,
-		&connection.UpdatedTimestamp,
-	)
+		   and connection_type='shared'
+		   and email_connection_id = $2::uuid
+		 limit 1`, companyID, connectionID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.CompanyEmailConnection{}, ErrNotFound
 	}
-	if connectedBy.Valid {
-		connection.ConnectedByUserID = connectedBy.String
-	}
-	return connection, err
+	return companyEmailConnectionFromUserConnection(connection), err
 }
 
 func (r *PostgresRepo) GetCompanyEmailConnectionByGrantID(grantID string) (domain.CompanyEmailConnection, error) {
@@ -174,34 +169,16 @@ func (r *PostgresRepo) GetCompanyEmailConnectionByGrantID(grantID string) (domai
 		return domain.CompanyEmailConnection{}, ErrInvalid
 	}
 
-	var connection domain.CompanyEmailConnection
-	var connectedBy sql.NullString
-	err := r.db.QueryRow(
-		`select company_email_connection_id::text, company_id::text, provider, account_email, grant_id, status,
-		        connected_by_user_id::text, created_timestamp, updated_timestamp
-		 from company_email_connections
+	connection, err := scanPostgresEmailConnection(r.db.QueryRow(
+		`select `+postgresEmailConnectionColumns+`
+		 from email_connections
 		 where grant_id = $1
-		 order by updated_timestamp desc
-		 limit 1`,
-		grantID,
-	).Scan(
-		&connection.CompanyEmailConnectionID,
-		&connection.CompanyID,
-		&connection.Provider,
-		&connection.AccountEmail,
-		&connection.GrantID,
-		&connection.Status,
-		&connectedBy,
-		&connection.CreatedTimestamp,
-		&connection.UpdatedTimestamp,
-	)
+		   and connection_type='shared'
+		 limit 1`, grantID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.CompanyEmailConnection{}, ErrNotFound
 	}
-	if connectedBy.Valid {
-		connection.ConnectedByUserID = connectedBy.String
-	}
-	return connection, err
+	return companyEmailConnectionFromUserConnection(connection), err
 }
 
 func (r *PostgresRepo) GetUserEmailConnectionByGrantID(grantID string) (domain.UserEmailConnection, error) {
@@ -210,30 +187,54 @@ func (r *PostgresRepo) GetUserEmailConnectionByGrantID(grantID string) (domain.U
 		return domain.UserEmailConnection{}, ErrInvalid
 	}
 
-	var connection domain.UserEmailConnection
-	err := r.db.QueryRow(
-		`select user_id, provider, account_email, grant_id, status, created_timestamp, updated_timestamp
-		 from user_email_connections
-		 where grant_id = $1`,
-		grantID,
-	).Scan(
-		&connection.UserID,
-		&connection.Provider,
-		&connection.AccountEmail,
-		&connection.GrantID,
-		&connection.Status,
-		&connection.CreatedTimestamp,
-		&connection.UpdatedTimestamp,
-	)
+	connection, err := scanPostgresEmailConnection(r.db.QueryRow(
+		`select `+postgresEmailConnectionColumns+`
+		 from email_connections
+		 where grant_id=$1 and connection_type='personal'`, grantID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.UserEmailConnection{}, ErrNotFound
 	}
-	connection.Scope = "personal"
 	return connection, err
 }
 
+func (r *PostgresRepo) GetEmailConnectionByID(companyID, connectionID string) (domain.UserEmailConnection, error) {
+	companyID, connectionID = cleanUUIDText(companyID), cleanUUIDText(connectionID)
+	if companyID == "" || connectionID == "" {
+		return domain.UserEmailConnection{}, ErrInvalid
+	}
+	connection, err := scanPostgresEmailConnection(r.db.QueryRow(
+		`select `+postgresEmailConnectionColumns+`
+		 from email_connections
+		 where company_id=$1::uuid and email_connection_id=$2::uuid`,
+		companyID, connectionID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.UserEmailConnection{}, ErrNotFound
+	}
+	return connection, err
+}
+
+func (r *PostgresRepo) ListConnectedEmailConnections() ([]domain.UserEmailConnection, error) {
+	rows, err := r.db.Query(`select ` + postgresEmailConnectionColumns + `
+		from email_connections where status='connected'
+		order by last_successful_scan_at,email_connection_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []domain.UserEmailConnection{}
+	for rows.Next() {
+		item, scanErr := scanPostgresEmailConnection(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (r *PostgresRepo) UpsertUserEmailConnection(input UserEmailConnectionInput) (domain.UserEmailConnection, error) {
-	userID := strings.TrimSpace(input.UserID)
+	companyID := cleanUUIDText(input.CompanyID)
+	userID := cleanUUIDText(input.UserID)
 	provider := normalizeEmailProvider(input.Provider)
 	accountEmail := normalizeEmail(input.AccountEmail)
 	scope := normalizeEmailConnectionScope(input.Scope)
@@ -249,89 +250,71 @@ func (r *PostgresRepo) UpsertUserEmailConnection(input UserEmailConnectionInput)
 	if !userExists {
 		return domain.UserEmailConnection{}, ErrNotFound
 	}
-
-	if scope == "shared" {
-		if _, bridgeErr := r.db.Exec(`
-insert into company_email_connections (
-  company_email_connection_id,
-  company_id,
-  provider,
-  account_email,
-  grant_id,
-  status,
-  connected_by_user_id,
-  created_timestamp,
-  updated_timestamp
-)
-select
-  md5('company_email_connection:' || membership.company_id::text || ':' || $3)::uuid,
-  membership.company_id,
-  $2,
-  $3,
-  $4,
-  $5,
-  $1::uuid,
-  now(),
-  now()
-from company_memberships membership
-where membership.user_id = $1::uuid
-on conflict (company_id, account_email) do update set
-  provider = excluded.provider,
-  grant_id = excluded.grant_id,
-  status = excluded.status,
-  connected_by_user_id = excluded.connected_by_user_id,
-  updated_timestamp = now()`,
-			userID,
-			provider,
-			accountEmail,
-			grantID,
-			status,
-		); bridgeErr != nil && !isPostgresUndefinedTable(bridgeErr, "company_email_connections") {
-			return domain.UserEmailConnection{}, bridgeErr
+	if companyID == "" {
+		rows, err := r.db.Query(`select company_id::text from company_memberships where user_id=$1::uuid order by company_id`, userID)
+		if err != nil {
+			return domain.UserEmailConnection{}, err
 		}
-		now := time.Now().UTC()
-		return domain.UserEmailConnection{
-			UserID:           userID,
-			Provider:         provider,
-			AccountEmail:     accountEmail,
-			Scope:            "shared",
-			GrantID:          grantID,
-			Status:           status,
-			CreatedTimestamp: now,
-			UpdatedTimestamp: now,
-		}, nil
+		defer rows.Close()
+		companyIDs := []string{}
+		for rows.Next() {
+			var candidate string
+			if err := rows.Scan(&candidate); err != nil {
+				return domain.UserEmailConnection{}, err
+			}
+			companyIDs = append(companyIDs, candidate)
+		}
+		if err := rows.Err(); err != nil {
+			return domain.UserEmailConnection{}, err
+		}
+		if len(companyIDs) == 0 {
+			return domain.UserEmailConnection{}, ErrNotFound
+		}
+		if len(companyIDs) != 1 {
+			return domain.UserEmailConnection{}, ErrInvalid
+		}
+		companyID = companyIDs[0]
+	}
+	var member bool
+	if err := r.db.QueryRow(`select exists(select 1 from company_memberships where company_id=$1::uuid and user_id=$2::uuid)`, companyID, userID).Scan(&member); err != nil {
+		return domain.UserEmailConnection{}, err
+	}
+	if !member {
+		return domain.UserEmailConnection{}, ErrPrincipalNotInCompany
 	}
 
-	var connection domain.UserEmailConnection
-	err := r.db.QueryRow(
-		`with cleared_duplicate_grant as (
-		   delete from user_email_connections
-		   where grant_id = $4
-		     and (user_id <> $1::uuid or account_email <> $3)
+	if scope == "shared" {
+		shared, err := r.UpsertCompanyEmailConnection(CompanyEmailConnectionInput{
+			CompanyID: companyID, Provider: provider, AccountEmail: accountEmail,
+			GrantID: grantID, Status: status, ConnectedByUserID: userID,
+		})
+		if err != nil {
+			return domain.UserEmailConnection{}, err
+		}
+		return scanCompanyEmailConnectionAsUser(shared), nil
+	}
+
+	connection, err := scanPostgresEmailConnection(r.db.QueryRow(
+		`insert into email_connections (
+		   email_connection_id,company_id,connection_type,personal_user_id,
+		   provider,account_email,grant_id,status,connected_by_user_id,
+		   ingestion_started_at,last_successful_scan_at,created_timestamp,updated_timestamp
 		 )
-		 insert into user_email_connections (user_id, provider, account_email, grant_id, status, created_timestamp, updated_timestamp)
-		 values ($1, $2, $3, $4, $5, now(), now())
-		 on conflict (user_id, account_email) do update set
+		 values ($1::uuid,$2::uuid,'personal',$3::uuid,$4,$5,$6,$7,$3::uuid,now(),now(),now(),now())
+		 on conflict (company_id,personal_user_id,account_email) where connection_type='personal'
+		 do update set
 		   provider = excluded.provider,
 		   grant_id = excluded.grant_id,
 		   status = excluded.status,
+		   connected_by_user_id = excluded.connected_by_user_id,
 		   updated_timestamp = now()
-		 returning user_id, provider, account_email, grant_id, status, created_timestamp, updated_timestamp`,
-		userID,
-		provider,
-		accountEmail,
-		grantID,
-		status,
-	).Scan(
-		&connection.UserID,
-		&connection.Provider,
-		&connection.AccountEmail,
-		&connection.GrantID,
-		&connection.Status,
-		&connection.CreatedTimestamp,
-		&connection.UpdatedTimestamp,
-	)
-	connection.Scope = "personal"
+		 returning `+postgresEmailConnectionColumns,
+		newUUIDv7String(), companyID, userID, provider, accountEmail, grantID, status))
+	if err == nil && status == "connected" {
+		_, err = r.db.Exec(`update email_ingestion_jobs set available_at=now(),updated_timestamp=now()
+where company_id=$1::uuid and email_connection_id=$2::uuid
+  and status in ('pending','retry')`, connection.CompanyID, connection.EmailConnectionID)
+	}
 	return connection, err
 }
 
@@ -367,40 +350,38 @@ func (r *PostgresRepo) UpsertCompanyEmailConnection(input CompanyEmailConnection
 		}
 	}
 
-	var connection domain.CompanyEmailConnection
-	var connectedBy sql.NullString
-	err := r.db.QueryRow(
+	connection, err := scanPostgresEmailConnection(r.db.QueryRow(
 		`with existing_connection as (
-		   select company_email_connection_id
-		   from company_email_connections
+		   select email_connection_id
+		   from email_connections
 		   where company_id = $1::uuid and account_email = $4
+		     and connection_type='shared'
 		   limit 1
-		 ), cleared_duplicate_grant as (
-		   delete from company_email_connections
-		   where company_id = $1::uuid
-		     and grant_id = $5
-		     and company_email_connection_id <> coalesce((select company_email_connection_id from existing_connection), $2::uuid)
 		 )
-		 insert into company_email_connections (
-		   company_email_connection_id,
+		 insert into email_connections (
+		   email_connection_id,
 		   company_id,
+		   connection_type,
+		   personal_user_id,
 		   provider,
 		   account_email,
 		   grant_id,
 		   status,
 		   connected_by_user_id,
+		   ingestion_started_at,
+		   last_successful_scan_at,
 		   created_timestamp,
 		   updated_timestamp
 		 )
-		 values (coalesce((select company_email_connection_id from existing_connection), $2::uuid), $1::uuid, $3, $4, $5, $6, nullif($7, '')::uuid, now(), now())
-		 on conflict (company_id, account_email) do update set
+		 values (coalesce((select email_connection_id from existing_connection), $2::uuid),
+		   $1::uuid,'shared',null,$3,$4,$5,$6,nullif($7,'')::uuid,now(),now(),now(),now())
+		 on conflict (company_id, account_email) where connection_type='shared' do update set
 		   provider = excluded.provider,
 		   grant_id = excluded.grant_id,
 		   status = excluded.status,
 		   connected_by_user_id = excluded.connected_by_user_id,
 		   updated_timestamp = now()
-		 returning company_email_connection_id::text, company_id::text, provider, account_email, grant_id, status,
-		           connected_by_user_id::text, created_timestamp, updated_timestamp`,
+		 returning `+postgresEmailConnectionColumns,
 		companyID,
 		connectionID,
 		provider,
@@ -408,21 +389,13 @@ func (r *PostgresRepo) UpsertCompanyEmailConnection(input CompanyEmailConnection
 		grantID,
 		status,
 		connectedByUserID,
-	).Scan(
-		&connection.CompanyEmailConnectionID,
-		&connection.CompanyID,
-		&connection.Provider,
-		&connection.AccountEmail,
-		&connection.GrantID,
-		&connection.Status,
-		&connectedBy,
-		&connection.CreatedTimestamp,
-		&connection.UpdatedTimestamp,
-	)
-	if connectedBy.Valid {
-		connection.ConnectedByUserID = connectedBy.String
+	))
+	if err == nil && status == "connected" {
+		_, err = r.db.Exec(`update email_ingestion_jobs set available_at=now(),updated_timestamp=now()
+where company_id=$1::uuid and email_connection_id=$2::uuid
+  and status in ('pending','retry')`, connection.CompanyID, connection.EmailConnectionID)
 	}
-	return connection, err
+	return companyEmailConnectionFromUserConnection(connection), err
 }
 
 func (r *PostgresRepo) UpdateCompanyEmailConnectionStatus(companyID, connectionID, status string) (domain.CompanyEmailConnection, error) {
@@ -433,37 +406,27 @@ func (r *PostgresRepo) UpdateCompanyEmailConnectionStatus(companyID, connectionI
 		return domain.CompanyEmailConnection{}, ErrInvalid
 	}
 
-	var connection domain.CompanyEmailConnection
-	var connectedBy sql.NullString
-	err := r.db.QueryRow(
-		`update company_email_connections
+	connection, err := scanPostgresEmailConnection(r.db.QueryRow(
+		`update email_connections
 		 set status = $3,
 		     updated_timestamp = now()
 		 where company_id = $1::uuid
-		   and company_email_connection_id = $2::uuid
-		 returning company_email_connection_id::text, company_id::text, provider, account_email, grant_id, status,
-		           connected_by_user_id::text, created_timestamp, updated_timestamp`,
+		   and connection_type='shared'
+		   and email_connection_id = $2::uuid
+		 returning `+postgresEmailConnectionColumns,
 		companyID,
 		connectionID,
 		status,
-	).Scan(
-		&connection.CompanyEmailConnectionID,
-		&connection.CompanyID,
-		&connection.Provider,
-		&connection.AccountEmail,
-		&connection.GrantID,
-		&connection.Status,
-		&connectedBy,
-		&connection.CreatedTimestamp,
-		&connection.UpdatedTimestamp,
-	)
+	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.CompanyEmailConnection{}, ErrNotFound
 	}
-	if connectedBy.Valid {
-		connection.ConnectedByUserID = connectedBy.String
+	if err == nil && status == "connected" {
+		_, err = r.db.Exec(`update email_ingestion_jobs set available_at=now(),updated_timestamp=now()
+where company_id=$1::uuid and email_connection_id=$2::uuid
+  and status in ('pending','retry')`, connection.CompanyID, connection.EmailConnectionID)
 	}
-	return connection, err
+	return companyEmailConnectionFromUserConnection(connection), err
 }
 
 func (r *PostgresRepo) UpdateUserEmailConnectionStatus(userID, accountEmail, status string) (domain.UserEmailConnection, error) {
@@ -474,30 +437,26 @@ func (r *PostgresRepo) UpdateUserEmailConnectionStatus(userID, accountEmail, sta
 		return domain.UserEmailConnection{}, ErrInvalid
 	}
 
-	var connection domain.UserEmailConnection
-	err := r.db.QueryRow(
-		`update user_email_connections
+	connection, err := scanPostgresEmailConnection(r.db.QueryRow(
+		`update email_connections
 		 set status = $2,
 		     updated_timestamp = now()
-		 where user_id = $1
+		 where connection_type='personal'
+		   and personal_user_id = $1::uuid
 		   and account_email = $3
-		 returning user_id, provider, account_email, grant_id, status, created_timestamp, updated_timestamp`,
+		 returning `+postgresEmailConnectionColumns,
 		userID,
 		status,
 		accountEmail,
-	).Scan(
-		&connection.UserID,
-		&connection.Provider,
-		&connection.AccountEmail,
-		&connection.GrantID,
-		&connection.Status,
-		&connection.CreatedTimestamp,
-		&connection.UpdatedTimestamp,
-	)
+	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.UserEmailConnection{}, ErrNotFound
 	}
-	connection.Scope = "personal"
+	if err == nil && status == "connected" {
+		_, err = r.db.Exec(`update email_ingestion_jobs set available_at=now(),updated_timestamp=now()
+where company_id=$1::uuid and email_connection_id=$2::uuid
+  and status in ('pending','retry')`, connection.CompanyID, connection.EmailConnectionID)
+	}
 	return connection, err
 }
 
@@ -507,13 +466,37 @@ func (r *PostgresRepo) DeleteUserEmailConnection(userID string) error {
 		return ErrInvalid
 	}
 	result, err := r.db.Exec(
-		`delete from user_email_connections connection
-		 using users app_user
-		 where app_user.user_id = connection.user_id
-		   and connection.user_id = $1
-		   and connection.account_email = lower(btrim(app_user.email))`,
+		`update email_connections connection
+		 set status='disconnected',updated_timestamp=now()
+		 from users app_user
+		 where app_user.user_id=connection.personal_user_id
+		   and connection.connection_type='personal'
+		   and connection.personal_user_id=$1::uuid
+		   and connection.account_email=lower(btrim(app_user.email))`,
 		userID,
 	)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *PostgresRepo) UpdateEmailConnectionScanCheckpoint(companyID, connectionID string, checkpoint time.Time) error {
+	companyID, connectionID = cleanUUIDText(companyID), cleanUUIDText(connectionID)
+	if companyID == "" || connectionID == "" || checkpoint.IsZero() {
+		return ErrInvalid
+	}
+	result, err := r.db.Exec(`update email_connections
+		set last_successful_scan_at=greatest(last_successful_scan_at,$3),updated_timestamp=now()
+		where company_id=$1::uuid and email_connection_id=$2::uuid and status='connected'`,
+		companyID, connectionID, checkpoint.UTC())
 	if err != nil {
 		return err
 	}

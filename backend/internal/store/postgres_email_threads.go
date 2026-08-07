@@ -16,12 +16,13 @@ type communicationsEmailThreadRowScanner interface {
 const postgresCommunicationsEmailThreadColumns = `
 t.company_id::text,
 t.email_thread_id::text,
-case t.email_account_type when 'personal_email_account' then 'personal' else 'shared' end,
-coalesce(t.personal_user_id::text, ''),
-coalesce(t.personal_account_email, ''),
-coalesce(t.shared_inbox_id::text, ''),
-t.email_account_email,
-t.provider,
+t.email_connection_id::text,
+connection.connection_type,
+coalesce(connection.personal_user_id::text, ''),
+case when connection.connection_type='personal' then connection.account_email else '' end,
+coalesce(inbox.shared_inbox_id::text, ''),
+connection.account_email,
+connection.provider,
 t.provider_thread_id,
 t.root_provider_message_id,
 t.download_status,
@@ -31,11 +32,24 @@ t.last_download_error,
 t.created_timestamp,
 t.updated_timestamp`
 
+const postgresCommunicationsEmailThreadJoins = `
+join email_connections connection
+  on connection.company_id=t.company_id
+ and connection.email_connection_id=t.email_connection_id
+left join lateral (
+  select shared_inbox_id
+  from shared_inboxes
+  where company_id=t.company_id
+    and company_email_connection_id=t.email_connection_id
+  order by shared_inbox_id
+  limit 1
+) inbox on true`
+
 func scanPostgresCommunicationsEmailThread(row communicationsEmailThreadRowScanner) (domain.CommunicationsEmailThread, error) {
 	var item domain.CommunicationsEmailThread
 	var fetchedAt sql.NullTime
 	err := row.Scan(
-		&item.CompanyID, &item.EmailThreadID, &item.ScopeType,
+		&item.CompanyID, &item.EmailThreadID, &item.EmailConnectionID, &item.ScopeType,
 		&item.PersonalUserID, &item.PersonalAccountEmail, &item.SharedInboxID,
 		&item.AccountEmail, &item.Provider, &item.ProviderThreadID, &item.RootProviderMessageID,
 		&item.DownloadStatus, &item.HistoryComplete, &fetchedAt,
@@ -119,6 +133,7 @@ func postgresCommunicationsEmailThreadByID(ctx context.Context, db interface {
 	item, err := scanPostgresCommunicationsEmailThread(db.QueryRowContext(ctx, `
 select `+postgresCommunicationsEmailThreadColumns+`
 from email_threads t
+`+postgresCommunicationsEmailThreadJoins+`
 where t.company_id=$1::uuid and t.email_thread_id=$2::uuid`, companyID, emailThreadID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.CommunicationsEmailThread{}, ErrNotFound
@@ -137,36 +152,37 @@ where t.company_id=$1::uuid and t.email_thread_id=$2::uuid`, companyID, emailThr
 	return communicationsEmailThreadForMessages(item), nil
 }
 
-func postgresEmailThreadProviderTx(ctx context.Context, tx *sql.Tx, input CommunicationsEmailThreadUpsertInput, scope communicationsEmailCollaborationScope) (string, error) {
-	if input.Provider == "google" || input.Provider == "microsoft" {
-		return input.Provider, nil
-	}
-	var provider string
+func postgresEmailThreadConnectionTx(ctx context.Context, tx *sql.Tx, input CommunicationsEmailThreadUpsertInput, scope communicationsEmailCollaborationScope) (string, string, error) {
+	var connectionID, provider string
 	var err error
 	if scope.scopeType == CommunicationsEmailCollaborationScopePersonal {
-		err = tx.QueryRowContext(ctx, `select provider
-from user_email_connections
-where user_id=$1::uuid and account_email=$2`,
-			scope.personalUserID, scope.personalAccountEmail).Scan(&provider)
+		err = tx.QueryRowContext(ctx, `select email_connection_id::text,provider
+from email_connections
+where company_id=$1::uuid and connection_type='personal'
+  and personal_user_id=$2::uuid and account_email=$3`,
+			input.CompanyID, scope.personalUserID, scope.personalAccountEmail).Scan(&connectionID, &provider)
 	} else {
-		err = tx.QueryRowContext(ctx, `select connection.provider
+		err = tx.QueryRowContext(ctx, `select connection.email_connection_id::text,connection.provider
 from shared_inboxes inbox
-join company_email_connections connection
+join email_connections connection
   on connection.company_id=inbox.company_id
- and connection.company_email_connection_id=inbox.company_email_connection_id
+ and connection.email_connection_id=inbox.company_email_connection_id
 where inbox.company_id=$1::uuid and inbox.shared_inbox_id=$2::uuid and connection.account_email=$3`,
-			input.CompanyID, scope.sharedInboxID, scope.accountEmail).Scan(&provider)
+			input.CompanyID, scope.sharedInboxID, scope.accountEmail).Scan(&connectionID, &provider)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrInvalid
+		return "", "", ErrInvalid
 	}
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if provider != "google" && provider != "microsoft" {
-		return "", ErrInvalid
+		return "", "", ErrInvalid
 	}
-	return provider, nil
+	if input.Provider != "" && input.Provider != provider {
+		return "", "", ErrInvalid
+	}
+	return connectionID, provider, nil
 }
 
 func upsertPostgresCommunicationsEmailThreadTx(ctx context.Context, tx *sql.Tx, input CommunicationsEmailThreadUpsertInput) (domain.CommunicationsEmailThread, error) {
@@ -174,17 +190,17 @@ func upsertPostgresCommunicationsEmailThreadTx(ctx context.Context, tx *sql.Tx, 
 	if err != nil {
 		return domain.CommunicationsEmailThread{}, err
 	}
-	provider, err := postgresEmailThreadProviderTx(ctx, tx, input, scope)
+	connectionID, _, err := postgresEmailThreadConnectionTx(ctx, tx, input, scope)
 	if err != nil {
 		return domain.CommunicationsEmailThread{}, err
 	}
 	providerKey := communicationsEmailThreadProviderKey(input.ProviderThreadID, input.SelectedMessageID)
-	lockKey := communicationsEmailThreadScopeKey(input.CompanyID, scope, providerKey)
+	lockKey := strings.Join([]string{input.CompanyID, connectionID, providerKey}, "\x1f")
 	if _, err := tx.ExecContext(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
 		return domain.CommunicationsEmailThread{}, err
 	}
 	var emailThreadID, existingProviderThreadID string
-	messageLockKey := communicationsEmailThreadScopeKey(input.CompanyID, scope, communicationsEmailThreadProviderKey("", input.SelectedMessageID))
+	messageLockKey := strings.Join([]string{input.CompanyID, connectionID, communicationsEmailThreadProviderKey("", input.SelectedMessageID)}, "\x1f")
 	if messageLockKey != lockKey {
 		if _, err := tx.ExecContext(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, messageLockKey); err != nil {
 			return domain.CommunicationsEmailThread{}, err
@@ -193,17 +209,15 @@ func upsertPostgresCommunicationsEmailThreadTx(ctx context.Context, tx *sql.Tx, 
 	err = tx.QueryRowContext(ctx, `
 select t.email_thread_id::text, t.provider_thread_id
 from email_threads t
-where company_id=$1::uuid and email_account_type=case $2 when 'personal' then 'personal_email_account' else 'shared_email_account' end
-  and (provider_thread_key=$6 or (root_provider_message_id=$7 and $7<>'')
+where company_id=$1::uuid and email_connection_id=$2::uuid
+  and (provider_thread_key=$3 or (root_provider_message_id=$4 and $4<>'')
        or exists (
          select 1 from email_messages m
-         where m.company_id=t.company_id and m.email_thread_id=t.email_thread_id and m.provider_message_id=$7
+         where m.company_id=t.company_id and m.email_thread_id=t.email_thread_id and m.provider_message_id=$4
        ))
-  and (($2='personal' and personal_user_id=nullif($3, '')::uuid and personal_account_email=$4)
-       or ($2='shared' and shared_inbox_id=nullif($5, '')::uuid))
-order by case when provider_thread_key=$6 then 0 else 1 end
+order by case when provider_thread_key=$3 then 0 else 1 end
 limit 1
-for update`, input.CompanyID, scope.scopeType, scope.personalUserID, scope.personalAccountEmail, scope.sharedInboxID, providerKey, input.SelectedMessageID).Scan(&emailThreadID, &existingProviderThreadID)
+for update`, input.CompanyID, connectionID, providerKey, input.SelectedMessageID).Scan(&emailThreadID, &existingProviderThreadID)
 	if errors.Is(err, sql.ErrNoRows) {
 		if !communicationsEmailThreadInputContainsSelectedMessage(input) {
 			return domain.CommunicationsEmailThread{}, ErrInvalid
@@ -211,16 +225,13 @@ for update`, input.CompanyID, scope.scopeType, scope.personalUserID, scope.perso
 		emailThreadID = newUUIDv7String()
 		_, err = tx.ExecContext(ctx, `
 insert into email_threads (
-  company_id, email_thread_id, email_account_type, personal_user_id, personal_account_email,
-  shared_inbox_id, email_account_email, provider, provider_thread_key, provider_thread_id,
+  company_id, email_thread_id, email_connection_id, provider_thread_key, provider_thread_id,
   root_provider_message_id, download_status, history_complete, fetched_timestamp,
   last_download_error, created_timestamp, updated_timestamp
 ) values (
-  $1::uuid, $2::uuid, case $3 when 'personal' then 'personal_email_account' else 'shared_email_account' end, nullif($4, '')::uuid, nullif($5, ''),
-  nullif($6, '')::uuid, $7, $8, $9, $10, $11,
-  case when $12 then 'complete' else 'partial' end, $12, $13, $14, now(), now()
-)`, input.CompanyID, emailThreadID, scope.scopeType, scope.personalUserID, scope.personalAccountEmail,
-			scope.sharedInboxID, scope.accountEmail, provider, providerKey, input.ProviderThreadID,
+  $1::uuid, $2::uuid, $3::uuid, $4, $5, $6,
+  case when $7 then 'complete' else 'partial' end, $7, $8, $9, now(), now()
+)`, input.CompanyID, emailThreadID, connectionID, providerKey, input.ProviderThreadID,
 			input.SelectedMessageID, input.HistoryComplete, input.FetchedAt, input.LastDownloadError)
 	}
 	if err != nil {
@@ -234,9 +245,9 @@ update email_threads
 set provider_thread_key=case when provider_thread_id='' and $3<>'' then $7 else provider_thread_key end,
     provider_thread_id=case when provider_thread_id='' then $3 else provider_thread_id end,
     history_complete=history_complete or $4,
-    download_status=case when history_complete or $4 then 'complete' else download_status end,
+    download_status=case when $4 then 'complete' else download_status end,
     fetched_timestamp=greatest(coalesce(fetched_timestamp, $5), $5),
-    last_download_error=case when history_complete or $4 then '' else $6 end,
+    last_download_error=case when $4 then '' else $6 end,
     updated_timestamp=now()
 where company_id=$1::uuid and email_thread_id=$2::uuid`,
 		input.CompanyID, emailThreadID, input.ProviderThreadID, input.HistoryComplete,
@@ -292,6 +303,27 @@ do update set
 			foldersJSON, folderIDsJSON, attachmentsJSON, message.DownloadComplete); err != nil {
 			return domain.CommunicationsEmailThread{}, err
 		}
+		if message.DownloadComplete {
+			if _, err := tx.ExecContext(ctx, `
+insert into email_relationships (
+  company_id,email_relationship_id,email_thread_id,email_message_id,
+  resource_type,resource_id,resource_textbox_id,created_timestamp
+)
+select target.company_id,gen_random_uuid(),target.email_thread_id,target.email_message_id,
+       'node',destination.resource_id,null,now()
+from email_messages target
+cross join (
+  select distinct resource_id
+  from email_relationships
+  where company_id=$1::uuid and email_thread_id=$2::uuid
+    and resource_type='node' and resource_textbox_id is null
+) destination
+where target.company_id=$1::uuid and target.email_thread_id=$2::uuid
+  and target.provider_message_id=$3 and target.download_complete
+on conflict do nothing`, input.CompanyID, emailThreadID, message.ID); err != nil {
+				return domain.CommunicationsEmailThread{}, err
+			}
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `
 with ordered as (
@@ -340,16 +372,33 @@ func (r *PostgresRepo) ListCommunicationsEmailThreadsForAccount(input Communicat
 		return nil, err
 	}
 	ctx := context.Background()
+	var connectionID string
+	if scope.scopeType == CommunicationsEmailCollaborationScopePersonal {
+		err = r.db.QueryRowContext(ctx, `select email_connection_id::text from email_connections
+where company_id=$1::uuid and connection_type='personal'
+  and personal_user_id=$2::uuid and account_email=$3 and provider=$4`,
+			input.CompanyID, scope.personalUserID, scope.personalAccountEmail, input.Provider).Scan(&connectionID)
+	} else {
+		err = r.db.QueryRowContext(ctx, `select connection.email_connection_id::text
+from shared_inboxes inbox
+join email_connections connection on connection.company_id=inbox.company_id
+ and connection.email_connection_id=inbox.company_email_connection_id
+where inbox.company_id=$1::uuid and inbox.shared_inbox_id=$2::uuid
+  and connection.account_email=$3 and connection.provider=$4`,
+			input.CompanyID, scope.sharedInboxID, scope.accountEmail, input.Provider).Scan(&connectionID)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
 	rows, err := r.db.QueryContext(ctx, `
 select `+postgresCommunicationsEmailThreadColumns+`
 from email_threads t
-where t.company_id=$1::uuid and t.provider=$2
-  and (($3='personal' and t.email_account_type='personal_email_account'
-        and t.personal_user_id=nullif($4,'')::uuid and t.personal_account_email=$5)
-    or ($3='shared' and t.email_account_type='shared_email_account'
-        and t.shared_inbox_id=nullif($6,'')::uuid))
-order by t.updated_timestamp desc,t.email_thread_id`, input.CompanyID, input.Provider, scope.scopeType,
-		scope.personalUserID, scope.personalAccountEmail, scope.sharedInboxID)
+`+postgresCommunicationsEmailThreadJoins+`
+where t.company_id=$1::uuid and t.email_connection_id=$2::uuid
+order by t.updated_timestamp desc,t.email_thread_id`, input.CompanyID, connectionID)
 	if err != nil {
 		return nil, err
 	}

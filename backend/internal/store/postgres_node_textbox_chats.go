@@ -189,13 +189,21 @@ func normalizeNodeTextboxChatPayload(ctx context.Context, tx *sql.Tx, companyID 
   join email_threads thread
     on thread.company_id=message.company_id
    and thread.email_thread_id=message.email_thread_id
+  join email_connections connection
+    on connection.company_id=thread.company_id
+   and connection.email_connection_id=thread.email_connection_id
   where message.company_id=$1::uuid
     and message.email_message_id=$2::uuid
     and (
-      (thread.email_account_type='personal_email_account' and thread.personal_user_id=$3::uuid)
-      or (thread.email_account_type='shared_email_account' and mangorts_user_can_access_resource(
-        $1::uuid,'shared_inbox',thread.shared_inbox_id,$3::uuid,'edit'
-      ))
+      (connection.connection_type='personal' and connection.personal_user_id=$3::uuid)
+      or exists (
+        select 1 from shared_inboxes inbox
+        where inbox.company_id=thread.company_id
+          and inbox.company_email_connection_id=thread.email_connection_id
+          and mangorts_user_can_access_resource(
+            $1::uuid,'shared_inbox',inbox.shared_inbox_id,$3::uuid,'edit'
+          )
+      )
       or exists (
         select 1
         from email_relationships relationship

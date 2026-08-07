@@ -589,11 +589,13 @@ export async function fetchCommunicationsStatus(): Promise<CommunicationsStatus>
   return cloneStatus(await request);
 }
 
-export async function fetchCommunicationsAuthURL(provider: EmailProvider, accountEmail?: string, sharedInboxCreate?: CommunicationsSharedInboxCreateIntent): Promise<string> {
+export async function fetchCommunicationsAuthURL(provider: EmailProvider, accountEmail?: string, sharedInboxCreate?: CommunicationsSharedInboxCreateIntent, personalCompanyID?: string): Promise<string> {
   const query = new URLSearchParams({ provider });
   const cleanAccountEmail = accountEmail?.trim().toLowerCase() ?? "";
   if (cleanAccountEmail) query.set("account_email", cleanAccountEmail);
   const cleanCompanyID = sharedInboxCreate?.companyID.trim() ?? "";
+  const cleanPersonalCompanyID = personalCompanyID?.trim() ?? "";
+  if (!cleanCompanyID && cleanPersonalCompanyID) query.set("company_id", cleanPersonalCompanyID);
   const cleanFolderID = sharedInboxCreate?.folderID?.trim() ?? "";
   const cleanName = sharedInboxCreate?.name?.trim() ?? "";
   if (cleanCompanyID || cleanFolderID || cleanName || sharedInboxCreate?.parentFolderID?.trim()) {

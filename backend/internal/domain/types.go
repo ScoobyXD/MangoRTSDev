@@ -406,6 +406,7 @@ type Invitation struct {
 }
 
 type UserEmailConnection struct {
+	EmailConnectionID        string    `json:"email_connection_id,omitempty"`
 	UserID                   string    `json:"user_id"`
 	Provider                 string    `json:"provider"`
 	AccountEmail             string    `json:"account_email"`
@@ -414,11 +415,14 @@ type UserEmailConnection struct {
 	CompanyEmailConnectionID string    `json:"company_email_connection_id,omitempty"`
 	GrantID                  string    `json:"-"`
 	Status                   string    `json:"status"`
+	IngestionStartedAt       time.Time `json:"ingestion_started_at,omitempty"`
+	LastSuccessfulScanAt     time.Time `json:"last_successful_scan_at,omitempty"`
 	CreatedTimestamp         time.Time `json:"created_timestamp"`
 	UpdatedTimestamp         time.Time `json:"updated_timestamp"`
 }
 
 type CompanyEmailConnection struct {
+	EmailConnectionID        string    `json:"email_connection_id,omitempty"`
 	CompanyEmailConnectionID string    `json:"company_email_connection_id"`
 	CompanyID                string    `json:"company_id"`
 	Provider                 string    `json:"provider"`
@@ -426,6 +430,8 @@ type CompanyEmailConnection struct {
 	GrantID                  string    `json:"-"`
 	Status                   string    `json:"status"`
 	ConnectedByUserID        string    `json:"connected_by_user_id,omitempty"`
+	IngestionStartedAt       time.Time `json:"ingestion_started_at,omitempty"`
+	LastSuccessfulScanAt     time.Time `json:"last_successful_scan_at,omitempty"`
 	CreatedTimestamp         time.Time `json:"created_timestamp"`
 	UpdatedTimestamp         time.Time `json:"updated_timestamp"`
 }
@@ -477,6 +483,7 @@ type EmailMessageSnapshot struct {
 type CommunicationsEmailThread struct {
 	CompanyID             string                       `json:"company_id"`
 	EmailThreadID         string                       `json:"email_thread_id"`
+	EmailConnectionID     string                       `json:"email_connection_id"`
 	ScopeType             string                       `json:"scope_type"`
 	PersonalUserID        string                       `json:"personal_user_id,omitempty"`
 	PersonalAccountEmail  string                       `json:"personal_account_email,omitempty"`
