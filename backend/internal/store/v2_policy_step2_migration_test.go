@@ -87,6 +87,9 @@ func TestRACIRoleMigrationAndSchemaContract(t *testing.T) {
 		t.Fatal("canonical RACI role block drifted from the migration")
 	}
 	lower := strings.ToLower(migration)
+	if strings.Contains(lower, "gvic_matrix_projection_table") {
+		t.Fatal("RACI migration must not depend on the retired GVIC matrix projection table")
+	}
 	for _, required := range []string{
 		"when 'generated' then 'responsible'",
 		"when 'verified' then 'accountable'",
@@ -211,6 +214,9 @@ where g.company_id='00000000-0000-4000-8000-000000000101' and g.resource_type='n
 		t.Fatalf("deleted group RACI edges=%d err=%v", groupEdges, err)
 	}
 
+	if _, err := db.Exec("drop table gvic_matrix_projection_table"); err != nil {
+		t.Fatalf("drop retired GVIC matrix projection table before RACI migration: %v", err)
+	}
 	if _, err := db.Exec(readV2PolicyStep1File(t, "..", "..", "db", "migrations", raciRoleMigration)); err != nil {
 		t.Fatalf("apply RACI role migration: %v", err)
 	}

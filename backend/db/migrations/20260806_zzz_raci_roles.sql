@@ -12,7 +12,6 @@ $$;
 
 lock table resource_gvic_assignments in access exclusive mode;
 lock table notifications in access exclusive mode;
-lock table gvic_matrix_projection_table in access exclusive mode;
 lock table recycle_bin_items in access exclusive mode;
 
 alter table resource_gvic_assignments
@@ -61,20 +60,6 @@ where role in ('generated', 'verified', 'verifier');
 alter table notifications
   add constraint notifications_role_chk
     check (role = '' or role in ('responsible', 'accountable', 'consulted', 'informed', 'other'));
-
-alter table gvic_matrix_projection_table
-  drop constraint if exists gvic_matrix_projection_gvic_assignment_chk;
-update gvic_matrix_projection_table
-set gvic_assignment = case gvic_assignment
-  when 'generated' then 'responsible'
-  when 'verified' then 'accountable'
-  when 'verifier' then 'accountable'
-  else gvic_assignment
-end
-where gvic_assignment in ('generated', 'verified', 'verifier');
-alter table gvic_matrix_projection_table
-  add constraint gvic_matrix_projection_gvic_assignment_chk
-    check (gvic_assignment in ('responsible', 'accountable', 'consulted', 'informed'));
 
 update recycle_bin_items item
 set restore_payload = jsonb_set(

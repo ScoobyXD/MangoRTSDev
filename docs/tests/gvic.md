@@ -1,3 +1,15 @@
+# Process Story: Existing RACI data converts without retired projection storage
+
+A human operator runs the reviewed RACI role migration against an existing database
+↓
+The migration locks and converts only the final live V2 policy, notification, and Recycle Bin tables
+↓
+Generated becomes Responsible, while Verified or Verifier becomes Accountable
+↓
+The migration completes without reading, locking, or recreating the retired GVIC matrix projection table
+
+Last updated: 2026-08-06
+
 # Process Story: A team assigns live RACI responsibility
 
 A manager or editor opens a Node or Logic Gate and sees Responsible, Accountable, Consulted, and Informed in that order
@@ -65,6 +77,7 @@ RACI40 - The editor presents RACI as Responsible (orange #f97316), Accountable (
 RACI41 - Role cards show direct person and group names instead of a numeric People summary; names wrap within the card, and a group name represents its live nested membership.
 RACI42 - Replacing a V2 policy notifies a non-actor user when that user's highest effective RACI role changes, even when the user was already effective before the write.
 RACI43 - Accountable is the green second role and uses the A inbox. The obsolete Verifier role, V inbox, and CVI notification surface are rejected after cutover; migration converts stored Verified or Verifier values to Accountable and CVI notifications to ACI.
+RACI44 - The RACI forward migration uses only live V2 policy, notification, and Recycle Bin storage. It must not read, lock, update, or recreate the retired `gvic_matrix_projection_table`.
 
 ## Scenarios
 
@@ -81,14 +94,17 @@ Business logic covered:
 - RACI19
 - RACI22
 - RACI43
+- RACI44
 
 Given:
 - A company assigns users and groups to nodes, logic gates, projects, and supported shared resources.
 - Requests include valid roles, aliased/cased role input, and invalid roles.
+- An existing database has the final live V2 tables and no gvic_matrix_projection_table.
 
 Expected:
 - Responsible, accountable, consulted, and informed are accepted after normalization.
 - Legacy Generated, Verified, and Verifier role values are rejected by runtime writes after the migration.
+- The forward migration converts the live role data without reading, locking, updating, or recreating the retired projection table.
 - Invalid roles, resource types, principal types, or missing IDs are rejected.
 - Responsible and Accountable do not produce edit/delete permission access.
 - Consulted and informed do not produce edit permission access.
