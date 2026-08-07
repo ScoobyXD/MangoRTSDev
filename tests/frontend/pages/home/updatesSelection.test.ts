@@ -91,10 +91,15 @@ test("Updates navigation carries transient mention focus through every supported
   const appSource = readFileSync(resolve(process.cwd(), "frontend/src/app/applayout.tsx"), "utf8");
   const logicGateSource = readFileSync(resolve(process.cwd(), "frontend/src/pages/logic-gate-arena/LogicGateArenaPage.tsx"), "utf8");
   const projectSource = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
+  const homeSource = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomePage.tsx"), "utf8");
   assert.ok(updatesSource.includes("focusMentionUserID={panel.focusMentionUserID}"));
   assert.ok(appSource.includes("mentionUserID: typeof detail.mentionUserID"));
   assert.ok(logicGateSource.includes("focusMentionUserID={selectedLogicGate.mentionUserID}"));
   assert.ok(projectSource.includes("scheduleTransientInformationFocus({ root: () => textBlocksScrollRef.current"));
+  const mailNodeOpenStart = homeSource.indexOf("const openEmailCollaborationNode");
+  const mailNodeOpen = homeSource.slice(mailNodeOpenStart, homeSource.indexOf("useEffect", mailNodeOpenStart));
+  assert.ok(mailNodeOpen.includes("openNodeEditorOverlay(node);"));
+  assert.doesNotMatch(mailNodeOpen, /collaboration_information_id|focusRequestID|message\.id/, "mailbox Node indicators must not request the Updates-only yellow flash");
 });
 
 test("update selection uses single-click, ctrl-click, and additive shift-click semantics", () => {

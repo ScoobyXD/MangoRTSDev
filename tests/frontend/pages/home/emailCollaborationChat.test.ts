@@ -229,11 +229,15 @@ test("My and Shared Triage open the simplified floating-Node comment journey", (
   assert.match(destinationSearch, /pendingLink\.entityType === "logic_gate"[\s\S]*kind: "logic_gate"/);
   assert.match(destinationSearch, /pendingLink\.entityType === "project"[\s\S]*kind: "project"/);
   assert.doesNotMatch(destinationSearch, /buildEmailNodeDestinationSearchOptions|listProjects/);
+  assert.match(destinationSearch, /data-email-action-success="true"[\s\S]*right: "calc\(100% \+ 9px\)"/);
+  assert.match(workspace, /EMAIL_NODE_INDICATOR_AFTER_NOTICE_MS[\s\S]*setEmailActionNotice[\s\S]*onEmailCollaborationChange\(delayedCollaboration\)/);
+  assert.match(surface, /const delayFloatingNodeIndicator = createNew;[\s\S]*ensureCollaboration\(priority, createNew, !delayFloatingNodeIndicator\)[\s\S]*delayFloatingNodeIndicator \? created : undefined/);
   assert.match(sharedChat, /headerTrailing\?: React\.ReactNode/);
   assert.match(surface, /<ChatPane[\s\S]*fillHeight/);
 });
 test("email-created nodes reuse canonical chat data with one node email column", () => {
   const workspace = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeMailWorkspace.tsx"), "utf8");
+  const homePage = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomePage.tsx"), "utf8");
   const detail = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
   const nodeSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
   const nodeParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
@@ -245,6 +249,10 @@ test("email-created nodes reuse canonical chat data with one node email column",
   assert.match(detail, /Open existing email node[\s\S]*onOpenCollaborationNode\(message\)/);
   assert.match(detail, /Open existing email node[\s\S]*<ExplorerRowIcon kind="node" \/>/);
   assert.doesNotMatch(detail, /<MailIcon color="#7c3aed" \/>/);
+  const mailNodeOpenStart = homePage.indexOf("const openEmailCollaborationNode");
+  const mailNodeOpen = homePage.slice(mailNodeOpenStart, homePage.indexOf("useEffect", mailNodeOpenStart));
+  assert.match(mailNodeOpen, /openNodeEditorOverlay\(node\);/);
+  assert.doesNotMatch(mailNodeOpen, /collaboration_information_id|focusRequestID|message\.id/);
   assert.match(nodeSurface, /emailOriginChatBlockID = emailOriginAttachedEmail\?\.id\.trim\(\)/);
   assert.match(nodeSurface, /data-node-email-column="true"/);
   assert.match(nodeSurface, /data-node-text-box-columns="editor-chat"/);

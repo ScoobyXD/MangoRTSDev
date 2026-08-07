@@ -4,11 +4,11 @@ A user opens a message in My Triage or Shared Triage
 ↓
 The toolbar offers a separate Node-plus floating-Node action and opens the shared universal picker in `##` link mode
 ↓
-With an empty picker search, Backspace changes to `#` reference mode and `#` changes back to link mode
+With an empty picker search, Backspace changes to `#` reference mode and `#` changes back to link mode; a pointer press outside the popup dismisses it without selection
 ↓
 Reference opens the exact chosen Node, Logic Gate, or Project without changing the email; link uses the existing exact typed email placement commands
 ↓
-An existing Node is reused, while a Logic Gate or Project choice creates a new email Node and completes the established priority and placement rules
+An existing Node is reused, while a Logic Gate or Project choice creates a new email Node and completes the established priority and placement rules; floating success shows its green notice left of the button before the Node indicator appears
 ↓
 An email already associated with a Node auto-opens the chat column; an unassociated email does not, and this phase adds no chat backend behavior
 ↓
@@ -436,6 +436,8 @@ EMAIL122 - After a successful mailbox-scoped star or unstar command, that commit
 EMAIL123 - Triage star reconciliation treats an unscoped visible row with the same provider message ID as the current exact mailbox scope when the committed command response supplies that scope. The committed response updates that row, while preserving only same-ID rows that explicitly identify a different personal or shared mailbox scope.
 EMAIL124 - The Node-wide email column is bounded to the available Node workspace height, is sticky below the Node toolbar, and scrolls long email content inside its own pane. Scrolling the outer text-box timeline leaves the email column in view. Opening a long email never increases the outer virtualized timeline height, hides unrelated text boxes below it, or creates a blank right side; the outer Node scroll remains driven by text-box rows.
 EMAIL125 - Encountered-email chat auto-open is frontend-only. Selecting a My Triage or Shared Triage row with a nonblank Node association opens the chat column. Selecting a row without a Node association does not auto-open it. This rule does not create a text box, collaboration, Node, chat, message, participant, permission, RACI assignment, or relationship, and it does not change chat submission backend behavior.
+
+EMAIL126 - Every universal picker host renders an explicit transparent outside-click dismiss layer behind the elevated popup; a pointer press on that layer closes the picker without selecting or mutating. In My Triage and Shared Triage, the compact elevated green placement notice is anchored nine pixels left of the floating-Node control. A successful standalone creation paints that notice before publishing the mailbox/reply Node indicator; the indicator follows after 450 milliseconds while the notice remains visible for its normal brief lifetime. A failed creation paints neither success nor a false indicator. Mail Node-indicator activation opens the Node without transient information focus, so the yellow target flash remains exclusive to Updates-row navigation.
 
 ## Scenarios
 

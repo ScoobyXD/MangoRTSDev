@@ -6282,7 +6282,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
     </article>
   );
 }
-export function MessageDetail({ message, threadMessages = [], companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, actionNotice = "", emailNodeDestinationSearch, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onCommentOnMessage, onOpenCollaborationNode }: {
+export function MessageDetail({ message, threadMessages = [], companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, emailNodeDestinationSearch, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onCommentOnMessage, onOpenCollaborationNode }: {
   message: EmailMessage;
   threadMessages?: EmailMessage[];
   companyID: string;
@@ -6294,7 +6294,6 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
   busy: boolean;
   deleteAvailable: boolean;
   chatAvailable: boolean;
-  actionNotice?: string;
   emailNodeDestinationSearch: React.ReactNode;
   selectionNavigation?: EmailCollaborationNavigation | null;
   onLoadMessageBody: (messageID: string) => Promise<EmailMessage | null>;
@@ -6421,11 +6420,6 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
   };
   return (
     <div style={{ ...detailStyle, position: "relative" }}>
-      {actionNotice && (
-        <div role="status" aria-live="polite" aria-atomic="true" data-email-action-success="true" style={{ position: "absolute", zIndex: 85, top: 4, right: 9, maxWidth: "min(420px, calc(100% - 18px))", border: "1px solid rgba(34,197,94,0.36)", borderRadius: 9, background: "rgba(240,253,244,0.96)", color: "#166534", padding: "7px 10px", fontSize: 11.5, fontWeight: 850, boxShadow: "0 8px 18px rgba(22,101,52,0.10)", animation: "mango-pane-enter 180ms ease-out", pointerEvents: "none" }}>
-          {actionNotice}
-        </div>
-      )}
       <div style={panelHeaderStyle}>
         <div style={{ minWidth: 0 }}>
           <h2 style={detailSubjectStyle}>{message.subject || "(no subject)"}</h2>

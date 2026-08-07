@@ -20,7 +20,9 @@ The matching editor opens the referenced text block, chat message, email, or tim
 ↓
 Mention updates prefer the exact recipient mention chip inside that information; main-editor mentions also flash the entire containing textbox with the same yellow animation
 ↓
-Other updates and non-editor targets flash the exact referenced section itself
+Other Updates rows and non-editor targets flash the exact referenced section itself
+↓
+Only an Updates-row activation supplies this transient yellow focus request; opening the same Node from a My Triage or Shared Triage email Node indicator opens normally without a flash
 ↓
 The target flashes briefly through an in-memory animation only, so refreshing the page never repeats or preserves the highlight
 
@@ -30,7 +32,7 @@ Last updated: 2026-08-06
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: saved-views API coverage exists for Updates Project, Logic Gate, and Status grouping fields. `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the exact shared status order and Updates wiring. `tests/frontend/pages/home/updatesSelection.test.ts` covers row selection, individual Seen/Unsee action resolution and successor/reload decisions, U74's pure current Logic Gate label and saved grouping-label/sort resolution, readable mention actor fallback, and strict editable Seen-history dates. `tests/frontend/pages/home/updatesGrouping.test.ts` covers U81's built-in grouping chain, U82's shared RACI/Priority group-title presentation, U83's initial full expansion with manual-collapse preservation, the U84/U85 control and sidebar layout contracts, and U97's saved-view restoration selection. `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the Updates Node panel's shared-shell fullscreen capability and adapter wiring. Current Node/Logic Gate mounted row, panel, and open-action wiring is not a mounted behavior test. Other rule IDs are not mapped to automated tests yet.
+- Business Logic Covered By Automated Tests: saved-views API coverage exists for Updates Project, Logic Gate, and Status grouping fields. `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the exact shared status order and Updates wiring. `tests/frontend/pages/home/updatesSelection.test.ts` covers row selection, Updates-only transient focus ownership against mail Node navigation, individual Seen/Unsee action resolution and successor/reload decisions, U74's pure current Logic Gate label and saved grouping-label/sort resolution, readable mention actor fallback, and strict editable Seen-history dates. `tests/frontend/pages/home/updatesGrouping.test.ts` covers U81's built-in grouping chain, U82's shared RACI/Priority group-title presentation, U83's initial full expansion with manual-collapse preservation, the U84/U85 control and sidebar layout contracts, and U97's saved-view restoration selection. `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the Updates Node panel's shared-shell fullscreen capability and adapter wiring. Current Node/Logic Gate mounted row, panel, and open-action wiring is not a mounted behavior test. Other rule IDs are not mapped to automated tests yet.
 - Automated Regression Summary: `tests/frontend/pages/home/updatesGrouping.test.ts` also covers U86's unassigned-last priority order and U87's wider title allocation within the unchanged row width.
 
 ## Business Logic
@@ -134,6 +136,8 @@ U92 - The Updates row-detail Node panel exposes the unified Node-shell fullscree
 U97 - The selected saved Updates grouping view is the user's default Updates presentation. Refreshing, leaving and returning to Updates, clicking the Updates tab, and opening an Updates notification filter restore that saved view instead of clearing it or replacing it with the built-in grouping. If no stored selection exists or it references a deleted view, the first saved Updates view becomes the default; the built-in grouping is used only when no saved Updates views exist. A transient saved-view load failure does not erase the stored selection.
 U98 - Activating an Updates row resolves one canonical supported resource target: Node first when Node context exists, otherwise Logic Gate, otherwise Project. Its information ID opens and scrolls the exact text block, chat message, attached email, or timeline event. Mention updates transiently highlight the recipient's exact mention chip when rendered and otherwise highlight the referenced section. Non-mention updates highlight the referenced section. This focus state is in memory only and must not persist or replay after refresh.
 U99 - When an exact @ or ! mention is inside a Node, Logic Gate, or Project main-editor textbox, navigation scrolls to the mention and applies the same transient yellow highlight animation to both the mention chip and the entire containing textbox. Chat, email, and timeline targets retain their exact-target highlight behavior.
+
+U100 - The transient yellow target animation belongs only to activation of an Updates or Seen Updates row carrying the exact information target. Mailbox and email-detail Node indicators in My Triage, Shared Triage, Sent, and other mail tabs must open the Node without `focusInformationID`, `focusEmailMessageID`, or `focusRequestID`; they do not scroll to, highlight, or flash a text box, chat, or email card. This presentation boundary changes no notification, email, Node, chat, or relationship data.
 
 ## Update Row Copy And Visual Language
 

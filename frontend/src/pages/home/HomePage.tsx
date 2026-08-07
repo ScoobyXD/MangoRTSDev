@@ -4668,7 +4668,7 @@ export function HomePage({
       name: message.subject?.trim() || "Email conversation",
       created_timestamp: "",
     };
-    openNodeEditorOverlay(node, message.collaboration_information_id, message.id);
+    openNodeEditorOverlay(node);
   }, [companyID, nodeByID, openNodeEditorOverlay]);
 
   useEffect(() => {

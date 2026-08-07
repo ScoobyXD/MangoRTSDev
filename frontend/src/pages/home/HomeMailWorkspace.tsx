@@ -74,6 +74,8 @@ import {
   unreadCountInlineStyle,
 } from "./homeStyles";
 
+const EMAIL_NODE_INDICATOR_AFTER_NOTICE_MS = 450;
+
 type TriageMailboxCountKey = Extract<EmailMailbox, "primary">;
 type TriageMailboxCounts = Partial<Record<TriageMailboxCountKey, number>>;
 
@@ -441,8 +443,19 @@ export function HomeMailWorkspace({
     setEmailSelection(selection);
     setEmailChatSession({ key: emailChatKey, visible: true });
   }, [emailChatKey]);
-  const showEmailActionNotice = React.useCallback((message: string) => {
+  const delayedEmailNodeIndicatorTimersRef = React.useRef<Set<number>>(new Set());
+  const showEmailActionNotice = React.useCallback((message: string, delayedCollaboration?: CommunicationsEmailCollaboration) => {
     setEmailActionNotice((current) => ({ message, requestID: (current?.requestID ?? 0) + 1 }));
+    if (!delayedCollaboration) return;
+    const timeoutID = window.setTimeout(() => {
+      delayedEmailNodeIndicatorTimersRef.current.delete(timeoutID);
+      onEmailCollaborationChange(delayedCollaboration);
+    }, EMAIL_NODE_INDICATOR_AFTER_NOTICE_MS);
+    delayedEmailNodeIndicatorTimersRef.current.add(timeoutID);
+  }, [onEmailCollaborationChange]);
+  React.useEffect(() => () => {
+    for (const timeoutID of delayedEmailNodeIndicatorTimersRef.current) window.clearTimeout(timeoutID);
+    delayedEmailNodeIndicatorTimersRef.current.clear();
   }, []);
   React.useEffect(() => {
     if (!emailActionNotice) return undefined;
@@ -958,13 +971,13 @@ export function HomeMailWorkspace({
                 archiveLabel={archiveLabel}
                 busy={!!busy}
                 chatAvailable={emailChatAvailable}
-                actionNotice={emailActionNotice?.message ?? ""}
                 emailNodeDestinationSearch={(
                   <EmailNodeDestinationSearch
                     companyID={companyID}
                     requestJSON={entityRequestJSON}
                     logicGates={logicGates}
                     busy={!!busy || Boolean(emailActionRequest?.destination)}
+                    actionNotice={emailActionNotice?.message ?? ""}
                     onSubmit={sendEmailToNodeDestination}
                     onOpenEntity={onOpenPickerEntity}
                     onError={setEmailCollaborationError}

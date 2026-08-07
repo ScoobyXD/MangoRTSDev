@@ -84,7 +84,7 @@ type EmailCollaborationChatSurfaceProps = {
   onNodeAttachmentChange?: (attachment: EmailNodeAttachmentChange) => void;
   onError: (message: string) => void;
   onSuccess: () => void;
-  onActionSuccess: (message: string) => void;
+  onActionSuccess: (message: string, delayedCollaboration?: CommunicationsEmailCollaboration) => void;
   onActionRequestHandled: () => void;
 };
 
@@ -270,7 +270,7 @@ export function EmailCollaborationChatSurface({
     setMessages(placement.messages);
   }, [apiBase, companyID, targetEmailMessageID]);
 
-  const acceptCollaboration = React.useCallback((nextCollaboration: CommunicationsEmailCollaboration | null) => {
+  const acceptCollaboration = React.useCallback((nextCollaboration: CommunicationsEmailCollaboration | null, publishToMailbox = true) => {
     collaborationRef.current = nextCollaboration;
     setCollaboration(nextCollaboration);
     if (nextCollaboration) {
@@ -278,7 +278,7 @@ export function EmailCollaborationChatSurface({
         ? current.map((item) => item.collaboration_id === nextCollaboration.collaboration_id ? nextCollaboration : item)
         : [...current, nextCollaboration]);
     }
-    if (nextCollaboration) onCollaborationChange?.(nextCollaboration);
+    if (nextCollaboration && publishToMailbox) onCollaborationChange?.(nextCollaboration);
   }, [onCollaborationChange]);
 
   const refreshCollaborationByID = React.useCallback(async (
@@ -422,7 +422,7 @@ export function EmailCollaborationChatSurface({
     };
   }, [active, apiBase, collaborationID, companyID, nodeID, onError, refreshCollaborationByID]);
 
-  const ensureCollaboration = React.useCallback(async (priority?: number, createNew = false): Promise<CommunicationsEmailCollaboration> => {
+  const ensureCollaboration = React.useCallback(async (priority?: number, createNew = false, publishToMailbox = true): Promise<CommunicationsEmailCollaboration> => {
     if (collaboration && !createNew) return collaboration;
     if (!pendingNewNodeIDRef.current) {
       pendingNewNodeIDRef.current = generateStableInformationID();
@@ -438,7 +438,7 @@ export function EmailCollaborationChatSurface({
       newNodeID,
       priority,
     });
-    acceptCollaboration(created);
+    acceptCollaboration(created, publishToMailbox);
     pendingNewNodeIDRef.current = "";
     return created;
   }, [acceptCollaboration, accountEmail, collaboration, collaborationTargetMessage, companyID, message.thread_id, sharedInboxID, targetEmailMessageID]);
@@ -744,7 +744,8 @@ export function EmailCollaborationChatSurface({
       const cleanProjectID = projectID.trim();
       if (cleanProjectID && !cleanLogicGateID) throw new Error("A Project email Node must belong to a Logic Gate.");
       if (cleanLogicGateID && !priority) throw new Error("A Logic Gate email Node requires a priority.");
-      const created = await ensureCollaboration(priority, createNew);
+      const delayFloatingNodeIndicator = createNew;
+      const created = await ensureCollaboration(priority, createNew, !delayFloatingNodeIndicator);
       const linkedTextBlockID = await ensureLinkedEmailTextBlock(created);
       if (cleanLogicGateID) {
         await assignNodeToLogicGateStatus({
@@ -767,9 +768,12 @@ export function EmailCollaborationChatSurface({
       }
       await saveCurrentDraftToCollaboration(created, linkedTextBlockID);
       onSuccess();
-      onActionSuccess(cleanProjectID
-        ? "Email Node was sent to project."
-        : cleanLogicGateID ? "Email Node was sent to Logic Gate." : "Floating node was created.");
+      onActionSuccess(
+        cleanProjectID
+          ? "Email Node was sent to project."
+          : cleanLogicGateID ? "Email Node was sent to Logic Gate." : "Floating node was created.",
+        delayFloatingNodeIndicator ? created : undefined,
+      );
       onActionRequestHandled();
     } catch (cause) {
       onError(formatEmailCollaborationChatError(cause, "Failed to create a node for this email."));
