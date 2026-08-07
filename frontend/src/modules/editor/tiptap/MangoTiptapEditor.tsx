@@ -32,6 +32,7 @@ import {
 } from "../UniversalEntityPicker.js";
 import {
   captureMangoTiptapPointerBookmark,
+  preserveMangoTiptapCaretScroll,
   resolveMangoTiptapPointerBookmark,
 } from "./mangoTiptapPointerActivation.js";
 
@@ -1495,6 +1496,12 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           return event.shiftKey ? outdentMangoTiptapSelection(current) : indentMangoTiptapSelection(current);
         },
         handleDOMEvents: {
+          mousedown: (_view, event) => {
+            if ((event as MouseEvent).button !== 0) return false;
+            const root = rootRef.current;
+            if (root) preserveMangoTiptapCaretScroll(root);
+            return false;
+          },
           copy: (_view, event) => {
             const current = editorRef.current;
             if (!current) return false;

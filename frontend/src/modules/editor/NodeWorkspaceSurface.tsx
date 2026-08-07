@@ -2804,27 +2804,25 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             </button>
           )}
           {canEdit && (
-            <div
+            <button
+              type="button"
               data-node-header-universal-linker="true"
-              role="group"
               aria-label="Link this Node"
+              aria-haspopup="dialog"
+              aria-expanded={headerLinkPickerAnchor !== null}
               onClick={(event) => {
+                if (headerLinkPickerAnchor) {
+                  setHeaderLinkPickerAnchor(null);
+                  return;
+                }
                 const rect = event.currentTarget.getBoundingClientRect();
                 setHeaderLinkPickerAnchor({ left: rect.left, top: rect.bottom + 8 });
               }}
-              style={{ height: 30, minWidth: 190, maxWidth: 330, flex: "1 1 220px", display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", alignItems: "center", gap: 6, border: "1px solid " + EDITOR_NEU_SOFT_BORDER, borderRadius: 9, background: EDITOR_NEU_SURFACE, boxShadow: EDITOR_NEU_SHADOW, padding: "0 8px", boxSizing: "border-box", cursor: "text" }}
+              style={{ height: 30, minWidth: 190, maxWidth: 330, flex: "1 1 220px", display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", alignItems: "center", gap: 7, border: headerLinkPickerAnchor ? "1px solid transparent" : "1px solid " + EDITOR_NEU_SOFT_BORDER, borderRadius: 9, background: headerLinkPickerAnchor ? EDITOR_NEU_ACTIVE_SURFACE + " padding-box, " + EDITOR_NEU_EDGE_FRAME + " border-box" : EDITOR_NEU_SURFACE, color: "#334155", boxShadow: headerLinkPickerAnchor ? "inset 2px 2px 6px rgba(174,174,192,0.16), inset -2px -2px 6px rgba(255,255,255,0.86)" : EDITOR_NEU_SHADOW, padding: "0 9px", boxSizing: "border-box", cursor: "text", textAlign: "left", font: "inherit" }}
             >
-              <span aria-hidden="true" style={{ color: accent, fontSize: 12, fontWeight: 950 }}>##</span>
-              <input
-                readOnly
-                value=""
-                aria-label="Link this Node to a Logic Gate, Project, or Email"
-                aria-haspopup="dialog"
-                aria-expanded={headerLinkPickerAnchor !== null}
-                placeholder="Link Logic Gate, Project, or Email…"
-                style={{ minWidth: 0, width: "100%", border: 0, outline: 0, background: "transparent", color: surfaceText, font: "inherit", fontSize: 11.5, fontWeight: 750, cursor: "text", padding: 0 }}
-              />
-            </div>
+              <strong aria-hidden="true" style={{ color: "#7c3aed", fontSize: 14, fontWeight: 950 }}>##</strong>
+              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: 800 }}>Ready! Open universal linker</span>
+            </button>
           )}
         </div>
         {headerLinkPickerAnchor && (

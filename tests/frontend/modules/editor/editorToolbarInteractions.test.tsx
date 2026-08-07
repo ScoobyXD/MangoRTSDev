@@ -704,6 +704,23 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     assert.ok(activeModalLayer);
     assert.ok(modalPickerInput);
     assert.equal(modalPicker.dataset.mangoUniversalPickerMode, "link");
+    assert.equal(modalPicker.style.width, "460px", "the normal universal picker stays compact while keeping all four categories on one row");
+    const pickerCategories = modalPicker.querySelector<HTMLElement>('[data-mango-universal-picker-categories="true"]');
+    assert.ok(pickerCategories);
+    assert.equal(pickerCategories.style.display, "grid");
+    assert.equal(pickerCategories.style.width, "calc(100% - 28px)");
+    assert.equal(pickerCategories.style.maxWidth, "430px", "equal category columns remain compact even when Email mode widens the results pane");
+    assert.equal(pickerCategories.style.overflowX, "", "category tabs do not use a horizontal scrollbar");
+    assert.deepEqual(
+      [...pickerCategories.querySelectorAll<HTMLButtonElement>("button")].map((button) => button.textContent?.trim()),
+      ["Nodes", "Projects", "Logic Gates", "Emails"],
+      "category tabs show only their icon and name",
+    );
+    assert.equal(pickerCategories.querySelector("kbd"), null, "category tabs do not show shortcut instructions");
+    const emailCategoryIcon = [...pickerCategories.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "Emails")
+      ?.querySelector("svg");
+    assert.equal(emailCategoryIcon?.getAttribute("viewBox"), "0 0 16 16", "Emails uses the My Triage mail icon");
     assert.equal(modalPicker.closest('[data-mango-modal-layer="true"]'), activeModalLayer, "a Node-modal picker must portal inside its active elevated layer");
     assert.equal(dom.window.document.activeElement, modalPickerInput, "the Node-modal picker keeps focus instead of losing it to the outer modal trap");
 

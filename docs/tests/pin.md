@@ -1,14 +1,42 @@
-# Process Story: Pinned folders rename explicitly and move at every depth
+# Process Story: Pins and folders lift without covering their corner marks
+
+A user scans root pins, expanded folders, and nested folders in the Pinned surface
+↓
+Every Request, Pending, In Progress, and Review square occupies the same fixed-width column whether its value has one digit, two digits, or comes from a folder total
+↓
+Pointing to an ordinary pin lifts that row, while pointing anywhere inside a folder lifts the complete folder frame and all of its visible contents
+↓
+Each folder is marked only by four small matching L-shaped corners; no full top, bottom, left, or right edge is drawn, and clicking its title never adds a gray focus rectangle
+↓
+In Progress uses exact opaque `rgba(254, 155, 70)` orange, while Review uses the Node icon's exact teal-to-blue vertical gradient
+
+Last updated: 2026-08-07
+
+# Process Story: A deliberate pin hover previews a folder before release
+
+A user drags one existing pinned resource row over the middle of another existing pinned resource row
+↓
+For the first second nothing reorganizes or saves; after one continuous second over that exact target, Pinned locally previews an expanded New Folder with the target first and dragged pin second
+↓
+Moving away, switching to an edge zone, or ending the drag immediately removes the preview and restores both rows without sending a grouping command
+↓
+Only releasing the mouse while that exact preview remains armed sends the existing atomic group command
+↓
+The committed New Folder takes the target's parent and position, expands, and enters explicit inline rename without changing either resource's typed identity, access, or underlying data
+
+Last updated: 2026-08-07
+
+# Process Story: Pinned folders move reliably with Company Explorer headers
 
 A user reaches the Pinned surface above Tower and organizes a mixed tree of personal folders and resource pins
 ↓
-Single-clicking or double-clicking a folder title never starts rename; the user right-clicks the folder and chooses Rename when they want the inline name editor
+Each folder shows the Company Explorer folder icon beside its name; clicking either the disclosure or the name expands and collapses it, while only right-click Rename starts the inline name editor
 ↓
-Each folder's visible header owns its Company-Explorer-style drop zones: the middle moves an entry inside, the top or bottom edge places it before or after, and the root end zone brings an entry out to root
+Each folder's accumulated Logic Gate totals share that same title row and interrupt the top hairline before the line resumes to their right
 ↓
-Moving a folder or pin saves the canonical mixed sibling order without changing the pinned resource, folder owner, or access
+When a drag starts, the exact nested row owns and retains its typed folder-or-pin entry without a draggable ancestor replacing it; the middle of a folder moves it inside, row edges place it before or after, and the root end zone brings it out of any parent even when the browser withholds custom drop data
 ↓
-Folder frames keep their top and bottom hairlines and short corner returns but no continuous side edges, while every status type and every X keeps one fixed right-side column across nesting depths
+The canonical mixed sibling order saves without changing the pinned resource, folder owner, access, or typed identity
 
 Last updated: 2026-08-07
 
@@ -80,7 +108,7 @@ Last updated: 2026-08-05
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (backend nested-folder lifecycle, atomic grouping, owner and cycle rejection, permission-edge coverage, canonical schema audit, frontend flat and recursive tree planning, subtree removal, DB-backed API/no-cache behavior, internal-drag precedence, fullscreen pinned-Node launch, Pinned DOM presentation/explicit context-menu rename/open-sided corners/fixed status columns coverage, and exact Logic Gate status counts, colors, zero suppression, recursive folder totals, and live refresh coverage exist; `tests/frontend/app/timelineState.test.ts` covers PIN29 local pin-title reconciliation and stale persisted-response overlay; full browser pointer drag choreography still needs mapped automation)
+- Business Logic Covered By Automated Tests: Partial (backend nested-folder lifecycle, atomic grouping, owner and cycle rejection, permission-edge coverage, canonical schema audit, frontend flat and recursive tree planning, subtree removal, DB-backed API/no-cache behavior, internal-drag precedence and retained drop identity, one-second pin-group preview/cancel/drop-only commitment, fullscreen pinned-Node launch, Pinned DOM presentation/explicit context-menu rename/click-to-toggle folder headers/four corner-only marks/pin-row and folder hover lift/exact fixed-width status columns coverage, and exact Logic Gate status counts, exact orange and Node-icon Review colors, zero suppression, recursive folder totals, and live refresh coverage exist; `tests/frontend/app/timelineState.test.ts` covers PIN29 local pin-title reconciliation and stale persisted-response overlay; full browser pointer drag choreography still needs mapped automation)
 
 ## Business Logic
 
@@ -115,7 +143,7 @@ PIN28 - Pinned-node and pinned-Logic-Gate email conversions persist mailbox prov
 PIN29 - After a successful same-window Node or Logic Gate rename, the visible matching sidebar pin name converges from the concrete committed-title event. This is a local label patch only: project pins are unaffected, no pin HTTP write occurs, and the durable pin-name snapshot/listing rules remain unchanged.
 PIN30 - The canonical personal folder table is pin_folders. Every folder belongs to one company membership and one user, may have one owner-scoped parent folder, and may nest to arbitrary depth without cycles.
 PIN31 - Folders and pins share one mixed sibling order within each parent. A complete user tree is loaded in one read; Pinned folders do not use Company Explorer lazy loading.
-PIN32 - Dropping an existing pinned row onto the middle of another existing pinned row atomically creates New Folder in the target's current parent, at the target's current position, with the target at position 1000 and dragged pin at position 2000.
+PIN32 - Holding an existing pinned row over the middle of another existing pinned row for one continuous second arms grouping. Releasing while that exact target remains armed atomically creates New Folder in the target's current parent, at the target's current position, with the target at position 1000 and dragged pin at position 2000. Releasing before the delay does not group.
 PIN33 - Pin-on-pin grouping follows the target when pins start in different folders. The dragged pin moves from its old parent; the one-pin-per-user/company/resource rule still prevents duplicates.
 PIN34 - Deleting a pin folder deletes its descendant folders and contained pin rows only. It never deletes, recycles, or changes the underlying Node, Logic Gate, or Project.
 PIN35 - Moving a folder into itself or one of its descendants is rejected atomically. Every move, reorder, and grouping command rejects cross-company and cross-user entry IDs.
@@ -128,19 +156,20 @@ PIN41 - A blank Universal picker reads the same complete `/v1/user-pins` tree as
 PIN42 - Universal picker pin rows preserve PIN5-PIN9 snapshot and stale-pin behavior. Opening a reference follows the normal destination route; using a pin as a link target must still pass the business command's current permission and existence checks.
 PIN43 - Typed Universal picker search may place matching pins before workspace results and deduplicates the exact `resource_type + resource_id` pair. It never changes pin position, name, folder ownership, or persistence.
 PIN44 - The Universal picker does not create recent-use data, browser pin caches, a second pin endpoint, or another database table. `/v1/user-pins` remains the only read source for its blank Pinned section.
-PIN45 - The sidebar Pinned tree is one subtly elevated surface. Folder regions, subfolder regions, and ordinary pin rows are not separate elevated cards and do not have permanent colored frames.
-PIN46 - Every Pinned folder has no folder icon and no continuous left or right outline. Its indented title interrupts a hairline top rule after a short leading segment; the complete top and bottom rules end in short corner returns that extend downward from the top corners and upward from the bottom corners, and every nested folder repeats the treatment.
-PIN47 - Single-clicking or double-clicking a Pinned folder title never starts inline rename. Only choosing Rename from that folder's right-click menu starts inline rename; the separate disclosure control expands or collapses the folder.
-PIN48 - Pointing to, keyboard-focusing, or opening a pinned resource gives its otherwise flat row a brief neutral two-pixel lift. Keyboard focus and valid drag placement remain temporary interaction indicators and must not restore a permanent colored item frame.
-PIN49 - Pinned folder outlines and rows use compact spacing without crowding: the top-border lead-in stays short, the disclosure arrow sits close to the folder title, and nested indentation remains clear. Request, Pending, In Progress, Review, and X each own one fixed right-side column across every nesting depth; a zero status keeps its column empty rather than shifting another square. Pointing to or keyboard-focusing a pin's X turns the X character and its outline bright red without changing unpin behavior.
+PIN45 - The sidebar Pinned tree is one subtly elevated surface. Folder regions, subfolder regions, and ordinary pin rows do not have permanent colored frames or independent resting elevation. Pointing anywhere inside one folder temporarily lifts that complete folder frame and its visible contents; pointing to an ordinary pin row temporarily lifts that row without lifting unrelated rows.
+PIN46 - Every Pinned folder shows the standard Company Explorer folder icon immediately left of its title and is marked only by four isolated L-shaped corners. Every corner has a six-pixel horizontal segment and a five-pixel vertical return; the bottom corners mirror the top corners in the proper orientation. No continuous top, bottom, left, or right edge is drawn, all corners remain inset two pixels from the containing row, and every nested folder repeats the treatment.
+PIN47 - Single-clicking a Pinned folder title expands or collapses that folder exactly like its disclosure control and never starts inline rename or draws a gray focus rectangle around the title. Double-clicking does not start rename. Only choosing Rename from that folder's right-click menu starts the inline name editor.
+PIN48 - Pinned resource rows temporarily lift by two pixels when pointed to, keyboard-focused, or opened, then return to rest. Keyboard focus and valid drag placement may also show their normal interaction indicators without restoring a permanent colored item frame.
+PIN49 - Pinned folder corner marks and rows use compact spacing without crowding: the top-left horizontal corner segment stays short, the disclosure arrow sits close to the folder title, and nested indentation remains clear. Request, Pending, In Progress, Review, and X each own one fixed right-side column across every nesting depth; every status square is exactly 17 pixels wide regardless of digit count, and a zero status keeps its column empty rather than shifting another square. Pointing to or keyboard-focusing a pin's X turns the X character and its outline bright red without changing unpin behavior.
 PIN50 - A pinned Logic Gate's status counts derive read-only from its canonical Logic Gate work cards: Request counts `requested`, Pending counts `pending`, In Progress counts `in_progress`, and Review counts `review`. Backlog and Done cards are not included in these four counters.
-PIN51 - The four counters keep Kanban's existing order and base colors but render as softer futuristic gradients: Request uses `#fffbd1` to `#fff24d` to canonical yellow `#facc15`; Pending uses super-light gray `#ffffff` to `#f1f5f9` to `#d9e0e8` over the canonical gray fallback; In Progress uses `#fff0d9` to `#ffb45c` to canonical orange `#f08a24`; Review reuses the Node icon's exact `#33ddd5` to `#19a8ff` gradient. A counter square contains only its number, and a zero counter renders no square.
+PIN51 - The four counters keep Request, Pending, In Progress, Review order. Request uses `#fffbd1` to `#fff24d` to yellow `#facc15`; Pending uses super-light gray `#ffffff` to `#f1f5f9` to `#d9e0e8`; In Progress is the exact solid opaque color `rgba(254, 155, 70)`; Review uses the Node icon's exact vertical gradient from `#33ddd5` to `#19a8ff`. A counter square contains only its number, and a zero counter renders no square.
 PIN52 - Status squares appear on pinned Logic Gate rows only. Pinned Node and Project rows never show Logic Gate work counts, and a Logic Gate with zero in all four tracked statuses keeps the normal row with no status squares.
 PIN53 - A pin folder's counters are the per-status sum of every pinned Logic Gate directly inside it and inside all descendant pin folders. Each Logic Gate contributes once to every ancestor folder; collapsed state does not change the total, and moving the pin makes its contribution follow the persisted current parent tree.
 PIN54 - Folder status squares follow the same zero suppression as Logic Gate rows. A folder whose direct and nested pins contain no accessible nonzero tracked Logic Gate work shows the normal folder UI without counters; Node pins, Project pins, root-level Logic Gates, inaccessible stale Logic Gates, Backlog, and Done add nothing to that folder.
 PIN55 - The sidebar loads each distinct pinned Logic Gate's canonical work view when the pin set or company changes, listens to the existing same-window Kanban-content event and the exact board real-time scope, and reloads only the affected Logic Gate after committed changes. Recalculation writes no pin, folder, relationship, assignment, cache fallback, or browser storage record, and a failed or forbidden work read clears that gate's displayed contribution without hiding its pin.
 PIN56 - The Pinned surface renders above Tower in the left sidebar. Moving that surface changes no persisted pin or Tower data.
-PIN57 - A Pinned folder's drag hitbox is its visible header, not the expanded descendant frame. The header middle is an inside drop; its top and bottom edges are before and after drops in the folder's parent; and the Pinned root end zone reparents an entry to root. These zones allow pins and folders to reorder, move into a folder, move between folders, or come out of any parent while the cycle and owner rules remain enforced.
+PIN57 - A Pinned folder's drag hitbox is its visible header, not the expanded descendant frame. The header middle is an inside drop; its top and bottom edges are before and after drops in the folder's parent; and the Pinned root end zone reparents an entry to root. A nested row's drag start must not bubble into and replace its typed identity with a draggable ancestor folder. Pinned retains that exact internal entry through drop, as Company Explorer retains its active drag payload, so a browser withholding custom `DataTransfer` content at release cannot turn a displayed valid target into a no-op. These zones allow pins and folders to reorder, move into a folder, move between folders, or come out of any parent while the cycle and owner rules remain enforced.
+PIN58 - After the one-second middle hover in PIN32, Pinned shows a current-session-only expanded New Folder preview at the target row, with the target first and dragged pin second. The dragged row temporarily appears only in that preview. No API, database, pin, or folder change occurs until drop. Leaving that target, entering a non-middle zone, or ending the drag cancels the timer and preview immediately and sends no grouping command; only dropping the exact dragged pin on the exact armed target may invoke the atomic group command.
 
 ## Scenarios
 
@@ -319,6 +348,7 @@ Business logic covered:
 - PIN33
 - PIN35
 - PIN38
+- PIN58
 
 Given:
 - A dragged pin and target pin may start at root, in the same folder, or in different folders.
@@ -326,6 +356,10 @@ Given:
 
 Expected:
 - The internal pin drag wins.
+- Releasing before one continuous second over the target does not group the pins.
+- After one continuous second over the target middle, Pinned previews an expanded New Folder with target first and dragged pin second without sending a command.
+- Moving away, entering an edge zone, or ending the drag removes the preview, restores both original rows, and sends no command.
+- Releasing only while the exact preview is armed invokes grouping; custom drag data may be absent at release because the retained internal identity remains authoritative.
 - One transaction creates New Folder in the target parent at the target position.
 - Target is first and dragged pin is second.
 - The new folder expands and enters inline rename.
@@ -382,7 +416,7 @@ Expected:
 - A stale pin remains visible under the pin snapshot contract, while a `##` relationship command still rejects a missing or unauthorized target.
 - No pin row, browser cache, recent-use record, API, or schema is added or changed.
 
-### Scenario PIN-S13: Elevated Pinned Surface And Outlined Folder Hierarchy
+### Scenario PIN-S13: Elevated Pinned Surface And Corner-Marked Folder Hierarchy
 
 Business logic covered:
 - PIN45
@@ -397,14 +431,16 @@ Given:
 - The user's Pinned tree contains root pins, a folder, a nested folder, and pins inside both folder depths.
 
 Expected:
-- The whole Pinned section is one elevated surface, while pin rows and folder regions are not independently elevated.
-- Normal pin rows have no permanent colored frame and briefly lift by two pixels when pointed to, keyboard-focused, or opened.
-- Folder and subfolder boundaries keep complete hairline top and bottom rules with short corner returns, no continuous left or right sides, and no folder icons.
-- Each compact folder title starts after a short top-border lead-in, its disclosure arrow sits close to the text, and nested folder content and titles remain visibly indented from their parent.
-- Pinned renders before Tower, and the four status types plus X remain in fixed right-side columns regardless of nesting or zero counts.
+- The whole Pinned section is one elevated surface, while pin rows and folder regions have no independent resting elevation.
+- Normal pin rows have no permanent colored frame and lift by two pixels when pointed to, keyboard-focused, or opened.
+- Pointing anywhere inside a folder or subfolder lifts that complete folder frame and all visible contents by two pixels until the pointer leaves it.
+- Folder and subfolder boundaries use only four inset L-shaped corner marks, each with a six-pixel horizontal segment and a five-pixel vertical return; they have no continuous edge on any side.
+- Each compact folder title starts after the short top-left corner, shows the Company Explorer folder icon immediately before its name, and keeps its disclosure arrow close; nested folder content and titles remain visibly indented from their parent.
+- A folder's nonzero accumulated status squares sit on the same horizontal row as its title and remain aligned with the pin-row status columns.
+- Pinned renders before Tower, and the four exact 17-pixel status boxes plus X remain in fixed right-side columns regardless of nesting, digit count, or zero counts.
 - Pointing to or keyboard-focusing a pin's X turns both the character and its outline bright red.
-- Clicking or double-clicking a folder title does not rename it; right-clicking that folder and choosing Rename starts the inline editor, while its separate disclosure control remains responsible for expand and collapse.
-- The visible folder header, not its expanded subtree, owns the middle/edge drop zones. Dragging pins or folders through those zones or the root end zone reorders and reparents the canonical tree, including moves into, out of, and between nested folders.
+- Clicking or focusing a folder title never draws a gray rectangle. Clicking the title or its disclosure expands or collapses it without renaming; double-clicking still does not rename it, and right-clicking that folder and choosing Rename starts the inline editor.
+- The visible folder header, not its expanded subtree, owns the middle/edge drop zones. The exact nested row owns drag start without an ancestor folder overwriting its identity, and Pinned retains that typed moving entry until release. Dragging pins or folders through those zones or the root end zone therefore reorders and reparents the canonical tree—including moves into, out of, and between nested folders—even when custom drop data is unavailable at release.
 - No pin identity, folder ownership, deletion behavior, endpoint, database table, or database row contract changes.
 
 ### Scenario PIN-S14: Live Pinned Logic Gate Counts And Recursive Folder Totals
@@ -423,7 +459,7 @@ Given:
 - A committed Node assignment, removal, or status move changes one pinned Logic Gate locally or through its board real-time scope.
 
 Expected:
-- Each Logic Gate row shows only nonzero Request, Pending, In Progress, and Review number squares in bright yellow, super-light gray, Kanban orange, and Node-gradient cyan-blue order.
+- Each Logic Gate row shows only nonzero Request, Pending, In Progress, and Review number squares in bright yellow, super-light gray, exact `rgba(254, 155, 70)` orange, and the Node icon's teal-to-blue vertical gradient order.
 - Backlog, Done, Node pins, Project pins, zero-work Logic Gates, and inaccessible stale Logic Gates show or contribute no status square.
 - The inner folder sums its direct and nested Logic Gates, and the outer folder adds that complete inner total to its direct Logic Gate totals even while either folder is collapsed.
 - Moving a Logic Gate pin to another folder makes subsequent totals follow the current pin tree without changing the Logic Gate assignment.

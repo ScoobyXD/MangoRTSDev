@@ -8,7 +8,7 @@ import TaskList from "@tiptap/extension-task-list";
 import TextAlign from "@tiptap/extension-text-align";
 import { Color, FontSize, TextStyle } from "@tiptap/extension-text-style";
 import StarterKit from "@tiptap/starter-kit";
-import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
+import { Fragment, type Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { NodeSelection, Plugin, PluginKey, TextSelection, type Transaction } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { createEditorEntityIconElement, editorEntityTypeLabel } from "../editorEntityLinks.js";
@@ -279,13 +279,13 @@ function updateCurrentMangoTiptapIndent(editor: Editor, delta: -1 | 1): boolean 
  */
 export function handleMangoTiptapOutlineEnter(editor: Editor, outlineStyle: EditorOutlineStyleID): boolean {
   if (!editor.state.selection.empty) return false;
-  if (editor.isActive("taskItem")) return editor.commands.splitListItem("taskItem");
-  if (editor.isActive("listItem")) return editor.commands.splitListItem("listItem");
-  if (!editor.isActive("paragraph") && !editor.isActive("heading")) return false;
-
   const { $from } = editor.state.selection;
   const currentBlock = $from.parent;
   const empty = currentBlock.isTextblock && currentBlock.content.size === 0;
+  if (editor.isActive("taskItem")) return empty ? false : editor.commands.splitListItem("taskItem");
+  if (editor.isActive("listItem")) return empty ? false : editor.commands.splitListItem("listItem");
+  if (!editor.isActive("paragraph") && !editor.isActive("heading")) return false;
+
   if (outlineStyle === "indent-guides") return false;
   if (outlineStyle === "automatic-outline-numbering") {
     return empty ? editor.commands.toggleOrderedList() : false;
@@ -299,6 +299,112 @@ export function handleMangoTiptapOutlineEnter(editor: Editor, outlineStyle: Edit
     ? editor.chain().splitBlock().toggleTaskList().run()
     : editor.chain().splitBlock().toggleBulletList().run();
 }
+
+/**
+ * Removes an empty list marker without letting ProseMirror lift the blocks that
+ * follow it through several list nesting levels. Older saved documents can
+ * contain those blocks as additional children of the empty list item.
+ */
+function handleMangoTiptapEmptyListItemDelete(editor: Editor): boolean {
+  const { selection } = editor.state;
+  if (!selection.empty) return false;
+  const { $from } = selection;
+  if (!$from.parent.isTextblock || $from.parent.content.size !== 0 || $from.parentOffset !== 0) return false;
+
+  let itemDepth = -1;
+  for (let depth = $from.depth - 1; depth > 0; depth -= 1) {
+    const nodeName = $from.node(depth).type.name;
+    if (nodeName === "listItem" || nodeName === "taskItem") {
+      itemDepth = depth;
+      break;
+    }
+  }
+  if (itemDepth < 1) return false;
+
+  const item = $from.node(itemDepth);
+  if ($from.index(itemDepth) !== 0 || item.firstChild !== $from.parent) return false;
+  const listDepth = itemDepth - 1;
+  const list = $from.node(listDepth);
+  const validList = item.type.name === "taskItem"
+    ? list.type.name === "taskList"
+    : list.type.name === "bulletList" || list.type.name === "orderedList";
+  if (!validList) return false;
+
+  const itemIndex = $from.index(listDepth);
+  const beforeItems: ProseMirrorNode[] = [];
+  const afterItems: ProseMirrorNode[] = [];
+  const trailingBlocks: ProseMirrorNode[] = [];
+  for (let index = 0; index < itemIndex; index += 1) beforeItems.push(list.child(index));
+  for (let index = itemIndex + 1; index < list.childCount; index += 1) afterItems.push(list.child(index));
+  for (let index = 1; index < item.childCount; index += 1) trailingBlocks.push(item.child(index));
+
+  const listStart = $from.before(listDepth);
+  const replacement: ProseMirrorNode[] = [];
+  let selectionPosition = listStart + 1;
+  let selectionBias: -1 | 1 = 1;
+  const createList = (items: ProseMirrorNode[], startOffset = 0) => {
+    const attrs = { ...list.attrs };
+    if (list.type.name === "orderedList" && startOffset > 0) {
+      attrs.start = Math.max(1, Number(list.attrs.start) || 1) + startOffset;
+    }
+    return list.type.create(attrs, Fragment.fromArray(items), list.marks);
+  };
+
+  if (trailingBlocks.length > 0 && beforeItems.length > 0) {
+    const previousItem = beforeItems[beforeItems.length - 1];
+    const previousContent: ProseMirrorNode[] = [];
+    previousItem.forEach((child) => previousContent.push(child));
+    const earlierItems = beforeItems.slice(0, -1);
+    selectionPosition = listStart
+      + earlierItems.reduce((size, node) => size + node.nodeSize, 0)
+      + previousItem.content.size
+      + 3;
+    const joinedPreviousItem = previousItem.copy(Fragment.fromArray([...previousContent, ...trailingBlocks]));
+    replacement.push(createList([...earlierItems, joinedPreviousItem, ...afterItems]));
+  } else if (trailingBlocks.length === 0) {
+    const remainingItems = [...beforeItems, ...afterItems];
+    if (remainingItems.length > 0) {
+      const remainingList = createList(remainingItems);
+      replacement.push(remainingList);
+      if (beforeItems.length > 0) {
+        selectionPosition = listStart + beforeItems.reduce((size, node) => size + node.nodeSize, 1) - 1;
+        selectionBias = -1;
+      }
+    } else {
+      const paragraph = editor.state.schema.nodes.paragraph?.createAndFill();
+      if (!paragraph) return false;
+      replacement.push(paragraph);
+    }
+  } else {
+    selectionPosition = listStart + 1;
+    replacement.push(...trailingBlocks);
+    if (afterItems.length > 0) {
+      replacement.push(createList(afterItems, itemIndex + 1));
+    }
+  }
+
+  const transaction = editor.state.tr.replaceWith(
+    listStart,
+    listStart + list.nodeSize,
+    Fragment.fromArray(replacement),
+  );
+  const boundedSelectionPosition = Math.max(0, Math.min(transaction.doc.content.size, selectionPosition));
+  transaction.setSelection(TextSelection.near(transaction.doc.resolve(boundedSelectionPosition), selectionBias));
+  editor.view.dispatch(transaction);
+  return true;
+}
+
+const MangoEmptyListItemDeletion = Extension.create({
+  name: "mangoEmptyListItemDeletion",
+  priority: 200,
+
+  addKeyboardShortcuts() {
+    return {
+      Backspace: ({ editor }) => handleMangoTiptapEmptyListItemDelete(editor),
+      Delete: ({ editor }) => handleMangoTiptapEmptyListItemDelete(editor),
+    };
+  },
+});
 
 export type MangoAttachmentImageAttributes = {
   attachmentId: string;
@@ -664,6 +770,7 @@ export type MangoTiptapExtensionOptions = {
 
 export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions): Extensions {
   const extensions: Extensions = [
+    MangoEmptyListItemDeletion,
     StarterKit.configure({
       link: {
         autolink: true,
