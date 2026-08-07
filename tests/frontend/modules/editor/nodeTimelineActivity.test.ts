@@ -51,7 +51,8 @@ test("every RACI role supports multiple people and groups while Updates keeps ve
   const editor = source("frontend/src/modules/editor/EditorContent.tsx");
   const updates = source("frontend/src/pages/home/UpdatesView.tsx");
   assert.match(gvicPanel, /inputPlaceholder = disabledReason \? "Inherited" : "Add user or team"/);
-  assert.match(gvicPanel, /assignments\.map\(RACIAssignmentLabel\)\.filter\(Boolean\)\.join\(", "\)/);
+  assert.match(gvicPanel, /const assignedLabels = assignments\.map\(RACIAssignmentLabel\)\.filter\(Boolean\)/);
+  assert.match(gvicPanel, /assignedLabels\.map\(\(assignmentLabel, index\) =>[\s\S]*data-raci-assignment-name=\{role\}[\s\S]*whiteSpace: "nowrap"/);
   assert.match(gvicPanel, /principalType: "group"[\s\S]*selectable: state\.selectable/);
   assert.doesNotMatch(gvicPanel, /primaryUserRole|singleUserOnly|People \(/);
   assert.doesNotMatch(editor, /singleUserRole|role === "accountable" && principalType !== "user"/);

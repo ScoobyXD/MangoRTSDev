@@ -106,6 +106,8 @@ test("Pinned renders one compact elevated surface with recursive hairline folder
     assert.equal(folderALegend.querySelector('[data-pin-status="pending"]'), null, "zero status squares are omitted");
     assert.equal(folderRequest?.style.backgroundColor, "rgb(250, 204, 21)");
     assert.equal(folderReview?.style.backgroundColor, "rgb(25, 168, 255)");
+    assert.equal(folderRequest?.style.backgroundImage, "linear-gradient(135deg, rgb(255, 251, 209) 0%, rgb(255, 242, 77) 42%, rgb(250, 204, 21) 100%)");
+    assert.equal(folderReview?.style.backgroundImage, "linear-gradient(135deg, rgb(51, 221, 213) 0%, rgb(25, 168, 255) 100%)", "Review reuses the Node icon gradient");
 
     const folderATitle = container.querySelector<HTMLButtonElement>('button[data-pin-folder-title="folder-a"]');
     assert.ok(folderATitle);

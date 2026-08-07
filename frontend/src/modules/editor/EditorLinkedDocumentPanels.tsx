@@ -955,12 +955,11 @@ function RACIRoleEditor({
   const inheritedReadOnly = Boolean(disabledReason) && !canEdit;
   const inputPlaceholder = disabledReason ? "Inherited" : "Add user or team";
   const pickerAriaLabel = `${label} users and teams`;
-  const assignedSummary = assignments.length === 0
+  const assignedLabels = assignments.map(RACIAssignmentLabel).filter(Boolean);
+  const assignedSummary = assignedLabels.length === 0
     ? "No assignments"
-    : assignments.map(RACIAssignmentLabel).filter(Boolean).join(", ");
-  const showAssignedButton = true;
+    : assignedLabels.join(", ");
   const assignedListVisible = assignedOpen || assignedHoverOpen;
-  const assignmentChipLabel = assignedSummary;
   const showDisabledTooltip = inheritedReadOnly && Boolean(disabledReason && disabledTooltipPosition);
   const assignedListPosition = useFloatingLayerPosition(assignedAnchorRef, assignedListVisible, { width: 320, maxHeight: 240 });
   const pickerListPosition = useFloatingLayerPosition(inputAnchorRef, canEdit && open, { width: 360, maxHeight: 290 });
@@ -1201,46 +1200,52 @@ function RACIRoleEditor({
   return (
     <div
       ref={containerRef}
+      data-raci-role-card={role}
       style={{
         ...logicGateRACIRaisedSurfaceStyle(role),
         position: "relative",
         minWidth: 0,
         display: "grid",
+        gridTemplateColumns: "minmax(0, 1fr) auto",
         gap: 4,
         alignContent: "start",
         borderRadius: 9,
         padding: "5px 6px 6px",
       }}
     >
-      <strong style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#111827" }}>
+      <strong data-raci-role-heading={role} style={{ minWidth: 0, gridColumn: 1, gridRow: 1, alignSelf: "center", display: "flex", alignItems: "center", gap: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#111827" }}>
         <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: 999, background: roleAccent, boxShadow: `0 0 10px ${hexWithAlpha(roleAccent, "66")}` }} />
         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
       </strong>
-      <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 6 }}>
-        <div ref={assignedAnchorRef} style={{ position: "relative", minHeight: 25, minWidth: 0, flex: "1 1 auto" }}>
-          {showAssignedButton ? (
+      <div style={{ display: "contents" }}>
+        <div ref={assignedAnchorRef} style={{ position: "relative", minHeight: 25, minWidth: 0, gridColumn: "1 / -1", gridRow: 2 }}>
             <button
               type="button"
+              data-raci-assignment-summary={role}
               aria-label={`${label} people and groups`}
               aria-haspopup="listbox"
               aria-expanded={assignedListVisible}
               aria-controls={`${inputID}-assigned-users`}
+              title={assignedSummary}
               onMouseEnter={showAssignedHoverPreview}
               onMouseLeave={hideAssignedHoverPreview}
               onClick={() => {
                 setAssignedOpen((current) => !current);
                 setOpen(false);
               }}
-              style={{ width: "100%", minHeight: 25, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 6, border: `1px solid ${hexWithAlpha(roleAccent, assignedListVisible ? "70" : "2f")}`, borderRadius: 999, background: assignedListVisible ? EDITOR_NEU_ACTIVE_SURFACE : EDITOR_NEU_SURFACE, color: "#111827", cursor: "pointer", padding: "2px 8px", font: "inherit", fontSize: 11, fontWeight: 800, opacity: 1, boxShadow: assignedListVisible ? `0 7px 15px ${hexWithAlpha(roleAccent, "1c")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "2px 2px 7px rgba(174,174,192,0.15), -2px -2px 7px rgba(255,255,255,0.74), inset 1px 1px 0 rgba(255,255,255,0.82)" }}
+              style={{ width: "100%", minHeight: 25, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 6, border: `1px solid ${hexWithAlpha(roleAccent, assignedListVisible ? "70" : "2f")}`, borderRadius: 10, background: assignedListVisible ? EDITOR_NEU_ACTIVE_SURFACE : EDITOR_NEU_SURFACE, color: "#111827", cursor: "pointer", padding: "4px 8px", font: "inherit", fontSize: 11, fontWeight: 800, opacity: 1, boxShadow: assignedListVisible ? `0 7px 15px ${hexWithAlpha(roleAccent, "1c")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "2px 2px 7px rgba(174,174,192,0.15), -2px -2px 7px rgba(255,255,255,0.74), inset 1px 1px 0 rgba(255,255,255,0.82)" }}
             >
-              <span style={{ minWidth: 0, textAlign: "left", whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.25 }}>{assignedSummary}</span>
+              <span data-raci-assignment-names={role} style={{ minWidth: 0, flex: "1 1 auto", display: "grid", gap: 2, textAlign: "left", lineHeight: 1.25 }}>
+                {assignedLabels.length === 0 ? (
+                  <span data-raci-assignment-empty={role} style={{ minWidth: 0, whiteSpace: "nowrap" }}>No assignments</span>
+                ) : assignedLabels.map((assignmentLabel, index) => (
+                  <span key={`${index}:${assignmentLabel}`} data-raci-assignment-name={role} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {assignmentLabel}
+                  </span>
+                ))}
+              </span>
               <span aria-hidden="true" style={{ color: roleAccent || accent, fontSize: 9, fontWeight: 900 }}>{assignedListVisible ? "^" : "v"}</span>
             </button>
-          ) : (
-            <span style={{ maxWidth: "100%", minHeight: 25, display: "inline-flex", alignItems: "center", border: `1px dashed ${hexWithAlpha(roleAccent, "32")}`, borderRadius: 999, background: "rgba(255,255,255,0.52)", color: "#64748b", padding: "2px 8px", fontSize: 11, fontWeight: 760, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {assignmentChipLabel}
-            </span>
-          )}
           {assignedListVisible && assignedListPosition && floatingPortalTarget && createPortal(
           <div
             ref={assignedListRef}
@@ -1301,10 +1306,11 @@ function RACIRoleEditor({
             setDisabledTooltipPosition({ x: event.clientX, y: event.clientY });
           }}
           onMouseLeave={() => setDisabledTooltipPosition(null)}
-          style={{ position: "relative", minWidth: 0, flex: "0 0 auto" }}
+          style={{ position: "relative", minWidth: 0, gridColumn: 2, gridRow: 1, alignSelf: "start" }}
         >
         <button
           type="button"
+          data-raci-add-principal={role}
           id={inputID}
           disabled={!canEdit}
           aria-label={`Add ${label} user or team`}

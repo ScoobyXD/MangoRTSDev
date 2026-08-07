@@ -1,3 +1,17 @@
+# Process Story: Node RACI cards show every direct assignment cleanly
+
+A user opens a Node whose Responsible, Accountable, Consulted, or Informed role has direct assignments
+↓
+Each role card uses its established role color with the same layered gradient strength as a Kanban column
+↓
+Add remains in the top-right heading row while the assignment area spans the complete card width
+↓
+`No assignments` stays on one line, and every assigned person or group gets one separate single-line row so all five names remain visible when five principals are assigned
+↓
+The display change does not alter the Node's typed RACI edges, live group expansion, role ordering, or separate permission policy
+
+Last updated: 2026-08-06
+
 # Process Story: A stored email reply appears in every existing Node destination
 
 A qualifying post-activation Inbox message identifies an exact stored email thread
@@ -14,7 +28,7 @@ Last updated: 2026-08-06
 
 A user assigns people or groups to Responsible, Accountable, Consulted, or Informed on a Node
 ↓
-Each direct person or group appears by name in the matching role card, and names wrap instead of becoming a count
+Each direct person or group appears by name on its own single-line row in the matching role card, and the card grows to keep every direct assignment visible instead of becoming a count
 ↓
 Every role accepts multiple direct people or groups, while one direct principal holds only one role on that Node
 ↓
@@ -197,7 +211,7 @@ N91 - Every successful Node rename entry point covered by RW15 publishes the con
 N92 - Mounted Node chat performs one single-flight canonical durable-chat refresh on first subscription acceptance and every reconnect acceptance, with at most one queued final read and no overlap/invalidation. A later local handler joining the already accepted Node scope receives immediate acceptance. This closes each mount's load-to-subscribe race without replay/generalized history or dirty editor-text replacement.
 N93 - A node editor header keeps Editor, Permissions, the shared formatting toolbar, Outline Styles/Automatic Numbering, and the immediately adjacent More control on one nonwrapping line. Relationships, Metadata, History, Save Settings, save-version/related-node commands, and supported opener-specific secondary actions remain available in the accessible **More editor actions** overflow menu with their existing permission and disabled state.
 N94 - Node popups/panels, permissions and email dialogs, and image/attachment/email previews mount through the shared body-level overlay portal above Key Views, Explorer, Search Explorer, and feature-local stacking contexts. Blocking modal modes trap focus and restore prior focus on close; anchored Kanban editor panels may remain modeless until fullscreen. The Project Logic Gates / Nodes inline editor remains in document flow and does not use the overlay portal.
-N95 - The Responsible, Accountable, Consulted, and Informed cards remain in one compact four-column horizontal row. Narrowing may clip that row beneath an adjacent pane, but must not wrap it vertically.
+N95 - The Responsible, Accountable, Consulted, and Informed cards remain in one compact four-column horizontal row with Kanban-strength layered gradients in their established role colors. Narrowing may clip that row beneath an adjacent pane, but must not wrap it vertically. Add occupies each card's top-right heading row; the full-width assignment surface displays `No assignments` once or one unwrapped row for every direct person and group, growing vertically to keep all assignments visible.
 N96 - The lazy EMAIL52 trigger creates one email-derived Node after provider validation with no Company Explorer placement. It directly customizes creator Responsible RACI and Edit permission, and retry or later replies for the same exact mailbox/thread identity reuse that Node.
 N97 - The email Node contains one protected canonical source-scoped `Attached email` projection with `created_from_email=true` plus shared `Text block chat` rows. Generic writes may add ordinary text boxes and other normal Node information but cannot overwrite/delete the canonical email projection. Saved-version, Project, Logic Gate/Kanban, RACI, and account behavior follows normal Node contracts; whole-Node delete and generic permission replacement remain protected while collaboration source/participant records exist.
 N98 - My/Shared Triage and the email Node mount the same shared ChatPane over the same canonical chat block ID and information rows. Message IDs, parent IDs, ordering, indentation, deletion ownership, mentions, attachments, composer state, and `chat:node:{node_id}` refresh are shared data, never copied histories. The Node header shows compact durable chat-author/mention context.
@@ -236,7 +250,9 @@ Given:
 Expected:
 - Responsible, Accountable, Consulted, and Informed each accept multiple users or groups.
 - One direct principal cannot occupy two roles on the same Node.
-- Each card shows every direct person and group name, wrapping the text instead of displaying `People (n)`.
+- Each role card keeps Add at the top and uses the stronger layered role-color gradient.
+- `No assignments` stays on one line, and five direct people or groups render as five visible single-line name rows.
+- Direct names are never replaced by `People (n)` or a comma-truncated summary.
 - Opening a card's assignment list exposes a remove action for each direct assignment.
 - Current nested group membership expands live for effective RACI.
 

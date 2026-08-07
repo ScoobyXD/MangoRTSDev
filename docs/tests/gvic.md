@@ -1,3 +1,17 @@
+# Process Story: RACI cards keep every direct assignment readable
+
+A user opens a Node or Logic Gate with Responsible, Accountable, Consulted, and Informed assignments
+↓
+The four role cards use their established orange, green, blue, and purple accents with the same layered gradient intensity as a Kanban column
+↓
+Each card keeps its Add action in the top-right heading row so the assignment area receives the full card width
+↓
+Every direct person and group occupies its own single-line name row, so one entry never becomes a two-line pill and five entries remain visible as five rows
+↓
+The assignment surface still opens the complete removable list on hover or click without changing RACI identity, membership, or permission behavior
+
+Last updated: 2026-08-06
+
 # Process Story: Existing RACI data converts without retired projection storage
 
 A human operator runs the reviewed RACI role migration against an existing database
@@ -75,8 +89,8 @@ RACI36 - All RACI changes and their settings, graph edges, events, and read-vers
 RACI37 - The editor keeps the four role columns compact and removes the exposed policy-mode/effective-source strip; inherited policy is read-only until Customized is selected from More editor actions.
 RACI38 - A cross-Logic-Gate Node move reads and authorizes the actual canonical one-per-Node assignment. A caller-supplied source Logic Gate is only a hint and cannot select relationship authority or cause a valid move to fail when stale. The move changes the canonical Logic Gate assignment and its projections; it neither requires nor rewrites optional email or attachment relationships owned by the same Node.
 RACI39 - After any successful RACI policy write, the company workspace snapshot and cached Node and Logic Gate records are invalidated. A descendant view must refetch its live effective policy instead of displaying a stale record cache; inherited-only Apply still writes no descendant policy rows, and overwrite-all still uses one reset sequence instead of materializing descendants.
-RACI40 - The editor presents RACI as Responsible (orange #f97316), Accountable (green #16a34a), Consulted (blue #2563eb), and Informed (purple #7c3aed), in that order.
-RACI41 - Role cards show direct person and group names instead of a numeric People summary; names wrap within the card, and a group name represents its live nested membership.
+RACI40 - The editor presents RACI as Responsible (orange #f97316), Accountable (green #16a34a), Consulted (blue #2563eb), and Informed (purple #7c3aed), in that order. Each card applies its role accent through the Kanban column surface formula: a 42%/24% radial highlight, a 32%/22% layered fill, an 86%/54%/24% edge gradient, and a 16% role-colored glow.
+RACI41 - Each role card keeps Add in its top-right heading row and gives the assignment surface the full card width. Zero assignments renders one unwrapped `No assignments` row; otherwise every direct person or group renders as its own unwrapped name row, all rows remain visible as the card grows, and a group name continues to represent its live nested membership.
 RACI42 - Replacing a V2 policy notifies a non-actor user when that user's highest effective RACI role changes, even when the user was already effective before the write.
 RACI43 - Accountable is the green second role and uses the A inbox. The obsolete Verifier role, V inbox, and CVI notification surface are rejected after cutover; migration converts stored Verified or Verifier values to Accountable and CVI notifications to ACI.
 RACI44 - The RACI forward migration uses only live V2 policy, notification, and Recycle Bin storage. Notification event-name conversion uses `notifications.notification_type`; the migration must not reference a nonexistent `notifications.event_type` column or read, lock, update, or recreate the retired `gvic_matrix_projection_table`.
@@ -322,6 +336,8 @@ Business logic covered:
 - RACI12
 - RACI27
 - RACI37
+- RACI40
+- RACI41
 
 Given:
 - A Node or Logic Gate editor shows the four shared RACI role cards.
@@ -331,6 +347,9 @@ Given:
 
 Expected:
 - Responsible, Accountable, Consulted, and Informed remain in one horizontal row that may be clipped rather than wrapping vertically.
+- Each role card uses the stronger Kanban-style layered gradient in its established RACI color, and Add stays in the top-right heading row.
+- `No assignments` remains one line when a role is empty.
+- Five assigned people or groups render as five visible single-line name rows in the assignment surface rather than a count, a comma-truncated summary, or one name split across two rows.
 - No policy-mode, effective-source, apply, or current-RACI card appears in the header body.
 - Inherited and Customized mode changes remain available in **More editor actions**.
 - The Logic Gate bulk action remains in **More editor actions** with its existing permission, disabled, busy, and error handling.
