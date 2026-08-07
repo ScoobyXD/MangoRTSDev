@@ -86,13 +86,11 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
   const [contextMenu, setContextMenu] = useState<PinContextMenu | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ folder: SidebarPinFolder; position: ConfirmActionMenuPosition } | null>(null);
   const [dropTarget, setDropTarget] = useState<{ key: string; placement: SidebarPinDropPlacement } | null>(null);
-  const [raisedPinID, setRaisedPinID] = useState("");
-  const [bumpingPinID, setBumpingPinID] = useState("");
+  const [raisedFolderID, setRaisedFolderID] = useState("");
   const [activeRemovePinID, setActiveRemovePinID] = useState("");
   const [focusedFolderID, setFocusedFolderID] = useState("");
   const [pinGroupPreview, setPinGroupPreview] = useState<PinGroupHover | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
-  const bumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeDraggedEntryRef = useRef<SidebarPinEntryRef | null>(null);
   const pinGroupHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pinGroupHoverCandidateRef = useRef<PinGroupHover | null>(null);
@@ -110,7 +108,6 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
   }, [renamingFolderID]);
 
   useEffect(() => () => {
-    if (bumpTimerRef.current) clearTimeout(bumpTimerRef.current);
     if (pinGroupHoverTimerRef.current) clearTimeout(pinGroupHoverTimerRef.current);
   }, []);
 
@@ -217,16 +214,6 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
     }
   };
 
-  const openPin = (pin: SidebarPin) => {
-    if (bumpTimerRef.current) clearTimeout(bumpTimerRef.current);
-    setBumpingPinID(pin.pinID);
-    bumpTimerRef.current = setTimeout(() => {
-      setBumpingPinID((current) => current === pin.pinID ? "" : current);
-      bumpTimerRef.current = null;
-    }, 180);
-    onPinOpen(pin);
-  };
-
   const renderStatusCounts = (counts: SidebarLogicGateStatusCounts | undefined, reserveEmptySlots = false): React.ReactNode => {
     const visibleCounts = visibleSidebarLogicGateStatusCounts(counts);
     if (visibleCounts.length === 0 && !reserveEmptySlots) return null;
@@ -270,8 +257,8 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
     const rowKey = `${row.entryType}:${row.entryID}`;
     const placement = dropTarget?.key === rowKey ? dropTarget.placement : null;
     const ref: SidebarPinEntryRef = { entryType: row.entryType, entryID: row.entryID };
-    const pinRaised = row.entryType === "pin" && (raisedPinID === row.pin.pinID || bumpingPinID === row.pin.pinID);
     const expanded = row.entryType === "folder" && expandedFolderIDs.has(row.folder.folderID);
+    const folderRaised = row.entryType === "folder" && raisedFolderID === row.folder.folderID;
     const folderCounts = row.entryType === "folder" ? folderStatusCountsByID[row.folder.folderID] : undefined;
     const folderHasCounts = visibleSidebarLogicGateStatusCounts(folderCounts).length > 0;
     const isPinGroupPreviewSource = row.entryType === "pin" && pinGroupPreview?.draggedPinID === row.pin.pinID;
@@ -285,9 +272,17 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
         data-pin-entry={row.entryType}
         data-pin-entry-id={row.entryID}
         data-pin-depth={row.depth}
-        data-pin-raised={pinRaised ? "true" : undefined}
         draggable={renamingFolderID !== row.entryID}
-        style={isPinGroupPreviewSource ? { display: "none" } : pinEntryStyle(row.entryType, isPinGroupPreviewTarget ? null : placement, pinRaised)}
+        style={isPinGroupPreviewSource ? { display: "none" } : pinEntryStyle(isPinGroupPreviewTarget ? null : placement)}
+        onMouseEnter={() => {
+          if (row.entryType === "folder") setRaisedFolderID(row.folder.folderID);
+        }}
+        onMouseLeave={(event) => {
+          if (row.entryType !== "folder") return;
+          const related = event.relatedTarget instanceof Element ? event.relatedTarget : null;
+          const containingFolder = related?.closest<HTMLElement>('[data-pin-entry="folder"]');
+          setRaisedFolderID(containingFolder?.dataset.pinEntryId ?? "");
+        }}
         onDragStart={(event) => {
           event.stopPropagation();
           activeDraggedEntryRef.current = ref;
@@ -371,7 +366,7 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
         }}
       >
         {isPinGroupPreviewTarget && previewDraggedPin && row.entryType === "pin" ? (
-          <fieldset data-pin-group-preview={row.pin.pinID} aria-label="New Folder preview" style={folderFrameStyle("inside")}>
+          <fieldset data-pin-group-preview={row.pin.pinID} aria-label="New Folder preview" style={folderFrameStyle("inside", false)}>
             <legend style={folderLegendStyle(false)}>
               <span aria-hidden="true" style={previewDisclosureStyle}><ExplorerDisclosureIcon open color="#475569" /></span>
               <span style={pinGroupPreviewTitleStyle}>
@@ -385,7 +380,11 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
             </div>
           </fieldset>
         ) : row.entryType === "folder" ? (
-          <fieldset data-pin-folder-frame={row.folder.folderID} style={folderFrameStyle(placement)}>
+          <fieldset
+            data-pin-folder-frame={row.folder.folderID}
+            data-pin-folder-raised={folderRaised ? "true" : undefined}
+            style={folderFrameStyle(placement, folderRaised)}
+          >
             <legend data-pin-drop-anchor={rowKey} style={folderLegendStyle(folderHasCounts)}>
               <button
                 type="button"
@@ -456,11 +455,7 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
             <button
               type="button"
               style={pinButtonStyle}
-              onMouseEnter={() => setRaisedPinID(row.pin.pinID)}
-              onMouseLeave={() => setRaisedPinID((current) => current === row.pin.pinID ? "" : current)}
-              onFocus={() => setRaisedPinID(row.pin.pinID)}
-              onBlur={() => setRaisedPinID((current) => current === row.pin.pinID ? "" : current)}
-              onClick={() => openPin(row.pin)}
+              onClick={() => onPinOpen(row.pin)}
             >
               <span style={rowIconStyle}><ExplorerRowIcon kind={row.pin.kind} /></span>
               <span style={rowTextStyle}>{row.pin.name}</span>
@@ -631,7 +626,7 @@ const addFolderButtonStyle: React.CSSProperties = { width: 22, height: 22, borde
 const pinListStyle: React.CSSProperties = { minWidth: 0, display: "grid", alignContent: "start", gap: 3 };
 const emptyStyle: React.CSSProperties = { minHeight: 34, display: "flex", alignItems: "center", padding: "0 6px", color: "rgba(15,23,42,.48)", fontSize: 11, fontWeight: 600 };
 
-function pinEntryStyle(entryType: SidebarPinTreeNode["entryType"], placement: SidebarPinDropPlacement | null, raised: boolean): React.CSSProperties {
+function pinEntryStyle(placement: SidebarPinDropPlacement | null): React.CSSProperties {
   const placementShadow = placement === "before"
     ? "inset 0 2px 0 rgba(71,85,105,.66)"
     : placement === "after"
@@ -643,40 +638,42 @@ function pinEntryStyle(entryType: SidebarPinTreeNode["entryType"], placement: Si
     position: "relative",
     minWidth: 0,
     borderRadius: 8,
-    background: placement === "inside" ? "rgba(14,165,233,.06)" : raised ? "rgba(255,255,255,.76)" : "transparent",
-    boxShadow: placementShadow ?? (raised ? "0 5px 12px rgba(100,116,139,.18), 0 1px 3px rgba(15,23,42,.08)" : "none"),
-    transform: entryType === "pin" && raised ? "translateY(-2px)" : "translateY(0)",
+    background: placement === "inside" ? "rgba(14,165,233,.06)" : "transparent",
+    boxShadow: placementShadow ?? "none",
     cursor: "grab",
-    transition: "background 120ms ease, box-shadow 140ms ease, transform 120ms ease",
+    transition: "background 120ms ease, box-shadow 140ms ease",
   };
 }
 
-function folderFrameStyle(placement: SidebarPinDropPlacement | null): React.CSSProperties {
+function folderFrameStyle(placement: SidebarPinDropPlacement | null, raised: boolean): React.CSSProperties {
   const outline = placement === "inside" ? "rgba(14,165,233,.42)" : "rgba(100,116,139,.28)";
   return {
     position: "relative",
     minWidth: 0,
-    width: "100%",
+    width: "calc(100% - 4px)",
     boxSizing: "border-box",
-    margin: 0,
+    margin: "0 2px",
     padding: "2px 4px 4px 5px",
     border: 0,
     borderTop: `1px solid ${outline}`,
     borderBottom: `1px solid ${outline}`,
     borderRadius: 0,
-    background: "transparent",
+    backgroundColor: raised ? "rgba(255,255,255,.78)" : "transparent",
     backgroundImage: `linear-gradient(${outline}, ${outline}), linear-gradient(${outline}, ${outline}), linear-gradient(${outline}, ${outline}), linear-gradient(${outline}, ${outline})`,
     backgroundPosition: "left top, right top, left bottom, right bottom",
     backgroundRepeat: "no-repeat",
     backgroundSize: "1px 5px, 1px 5px, 1px 5px, 1px 5px",
-    boxShadow: "none",
+    boxShadow: raised ? "0 7px 16px rgba(100,116,139,.18), 0 1px 4px rgba(15,23,42,.08)" : "none",
+    transform: raised ? "translateY(-2px)" : "translateY(0)",
+    zIndex: raised ? 1 : "auto",
+    transition: "background 120ms ease, box-shadow 140ms ease, transform 120ms ease",
   };
 }
 
 function folderLegendStyle(hasCounts: boolean): React.CSSProperties {
   return {
-    width: hasCounts ? "calc(100% - 35px)" : undefined,
-    maxWidth: hasCounts ? "calc(100% - 35px)" : "calc(100% - 17px)",
+    width: hasCounts ? "calc(100% - 29px)" : undefined,
+    maxWidth: hasCounts ? "calc(100% - 29px)" : "calc(100% - 11px)",
     minWidth: 0,
     marginLeft: 11,
     padding: "0 2px",
@@ -688,7 +685,7 @@ function folderLegendStyle(hasCounts: boolean): React.CSSProperties {
     boxSizing: "border-box",
   };
 }
-const folderContentsStyle: React.CSSProperties = { minWidth: 0, display: "grid", alignContent: "start", gap: 3, marginRight: -4, padding: "2px 0 0 10px" };
+const folderContentsStyle: React.CSSProperties = { minWidth: 0, display: "grid", alignContent: "start", gap: 3, marginRight: -6, padding: "2px 0 0 10px" };
 const disclosureButtonStyle: React.CSSProperties = { width: 14, height: 20, display: "grid", placeItems: "center", border: 0, background: "transparent", cursor: "pointer", padding: 0 };
 const previewDisclosureStyle: React.CSSProperties = { width: 14, height: 20, display: "grid", placeItems: "center" };
 function folderNameButtonStyle(focused: boolean): React.CSSProperties {
@@ -730,12 +727,13 @@ const statusCountSlotStyle: React.CSSProperties = { width: 17, height: 17, displ
 const folderStatusColumnStyle: React.CSSProperties = { width: 74, height: 17, display: "block" };
 function statusCountStyle(definition: SidebarLogicGateStatusCountDefinition): React.CSSProperties {
   return {
+    width: 17,
     minWidth: 17,
     height: 17,
     boxSizing: "border-box",
     display: "inline-grid",
     placeItems: "center",
-    padding: "0 3px",
+    padding: 0,
     border: `1px solid ${definition.borderColor}`,
     borderRadius: 4,
     backgroundColor: definition.color,
