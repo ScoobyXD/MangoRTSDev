@@ -65,6 +65,7 @@ test("Pinned renders one compact elevated surface with recursive hairline folder
     await act(async () => root.render(
       <AppSidebarPinnedSection
         tree={tree}
+        logicGateStatusCountsByID={{ "gate-1": { request: 1, pending: 0, inProgress: 0, review: 2 } }}
         dropActive={false}
         dropSuccess=""
         pinnedResourceDropBusy={false}
@@ -98,6 +99,14 @@ test("Pinned renders one compact elevated surface with recursive hairline folder
     assert.equal(folderALegend.style.gap, "1px", "the disclosure arrow stays close to the folder title");
     assert.equal(folderALegend.querySelectorAll("svg").length, 1, "the legend has only its disclosure icon, not a folder icon");
 
+    const folderRequest = folderALegend.querySelector<HTMLElement>('[data-pin-status="request"]');
+    const folderReview = folderALegend.querySelector<HTMLElement>('[data-pin-status="review"]');
+    assert.equal(folderRequest?.dataset.pinStatusCount, "1", "the collapsed parent shows its nested Logic Gate request total");
+    assert.equal(folderReview?.dataset.pinStatusCount, "2", "the collapsed parent shows its nested Logic Gate review total");
+    assert.equal(folderALegend.querySelector('[data-pin-status="pending"]'), null, "zero status squares are omitted");
+    assert.equal(folderRequest?.style.backgroundColor, "rgb(250, 204, 21)");
+    assert.equal(folderReview?.style.backgroundColor, "rgb(25, 168, 255)");
+
     const folderATitle = container.querySelector<HTMLButtonElement>('button[data-pin-folder-title="folder-a"]');
     assert.ok(folderATitle);
     await act(async () => Simulate.click(folderATitle));
@@ -110,6 +119,18 @@ test("Pinned renders one compact elevated surface with recursive hairline folder
     const folderB = container.querySelector<HTMLFieldSetElement>('fieldset[data-pin-folder-frame="folder-b"]');
     assert.ok(folderAContents && folderB && folderAContents.contains(folderB), "nested folders render as indented recursive outlines");
     assert.equal(folderAContents.style.paddingLeft, "10px");
+
+    const folderBLegend = folderB.querySelector<HTMLLegendElement>("legend");
+    assert.ok(folderBLegend);
+    assert.equal(folderBLegend.querySelector<HTMLElement>('[data-pin-status="request"]')?.dataset.pinStatusCount, "1");
+    const folderBDisclosure = folderB.querySelector<HTMLButtonElement>('button[aria-label="Expand Folder B"]');
+    assert.ok(folderBDisclosure);
+    await act(async () => Simulate.click(folderBDisclosure));
+    const logicGateEntry = container.querySelector<HTMLElement>('[data-pin-entry-id="pin-nested"]');
+    assert.ok(logicGateEntry, "expanding the nested folder reveals the counted Logic Gate row");
+    assert.equal(logicGateEntry.querySelector<HTMLElement>('[data-pin-status="request"]')?.dataset.pinStatusCount, "1");
+    assert.equal(logicGateEntry.querySelector<HTMLElement>('[data-pin-status="review"]')?.dataset.pinStatusCount, "2");
+    assert.equal(logicGateEntry.querySelector('[data-pin-status="pending"]'), null);
 
     const pinEntry = container.querySelector<HTMLElement>('[data-pin-entry-id="pin-root"]');
     const pinButton = pinEntry?.querySelector<HTMLButtonElement>("button");

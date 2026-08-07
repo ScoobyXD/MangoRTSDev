@@ -49,6 +49,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/app/sidebarPinsApi.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/sidebarPinDrops.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/sidebarPinTree.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/app/sidebarLogicGateStatusCounts.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/sidebarPinPopup.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/preloadDashboardPlan.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/timelineState.test.js"),

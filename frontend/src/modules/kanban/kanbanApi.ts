@@ -57,6 +57,15 @@ function markLogicGateAssignmentWorkspaceSnapshotsStale(args: { apiBase: string;
   if (args.nodeID?.trim()) markNodeWorkspaceSnapshotStale(args.apiBase, args.companyID);
 }
 
+function dispatchLogicGateWorkUpdated(companyID: string, logicGateID: string): void {
+  const cleanLogicGateID = logicGateID.trim();
+  if (typeof window === "undefined" || !cleanLogicGateID) return;
+  const boardID = logicGateKanbanBoardID(cleanLogicGateID);
+  window.dispatchEvent(new CustomEvent<KanbanBoardContentsUpdatedDetail>(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, {
+    detail: { companyID, boardID, logicGateID: cleanLogicGateID },
+  }));
+}
+
 function reconcileCommittedCrossLogicGateAssignment(args: {
   apiBase: string;
   companyID: string;
@@ -201,6 +210,7 @@ export async function upsertKanbanCard(args: {
   invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, logicGateIDFromKanbanBoardID(args.boardID));
   markKanbanWorkspaceSnapshotStale(args.apiBase, args.companyID, args.boardID);
   markNodeWorkspaceSnapshotStale(args.apiBase, args.companyID);
+  dispatchLogicGateWorkUpdated(args.companyID, logicGateIDFromKanbanBoardID(args.boardID));
   return card;
 }
 
@@ -292,6 +302,7 @@ export async function createRACIMatrixNode(args: {
     markKanbanWorkspaceSnapshotStale(args.apiBase, args.companyID, payload.card.board_id);
   }
   markNodeWorkspaceSnapshotStale(args.apiBase, args.companyID);
+  dispatchLogicGateWorkUpdated(args.companyID, payload.logic_gate?.logic_gate_id ?? payload.card?.logic_gate_id ?? args.logicGateID ?? "");
   return {
     ...payload,
     gvic_projection_rows: normalizeRACIMatrixProjectionRows(payload.gvic_projection_rows),
@@ -328,6 +339,7 @@ export async function assignNodeToLogicGateStatus(args: {
   });
   invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, args.logicGateID);
   markLogicGateAssignmentWorkspaceSnapshotsStale({ apiBase: args.apiBase, companyID: args.companyID, logicGateID: args.logicGateID, nodeID: args.nodeID });
+  dispatchLogicGateWorkUpdated(args.companyID, args.logicGateID);
   return normalizeLogicGateAssignmentCommandResult(payload);
 }
 
@@ -358,6 +370,7 @@ export async function moveLogicGateAssignment(args: {
     });
     invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, args.logicGateID);
     markLogicGateAssignmentWorkspaceSnapshotsStale({ apiBase: args.apiBase, companyID: args.companyID, logicGateID: args.logicGateID, fromLogicGateID: args.fromLogicGateID, nodeID: args.nodeID });
+    dispatchLogicGateWorkUpdated(args.companyID, args.logicGateID);
     return normalizeLogicGateAssignmentCommandResult(payload);
   }
   const payload = await requestJSON<LogicGateAssignmentCommandPayload>(args.apiBase, `/v2/gvic-matrix/nodes/${encodeURIComponent(args.nodeID)}/move`, {
@@ -401,6 +414,7 @@ export async function removeLogicGateAssignment(args: {
     });
     invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, logicGateID);
     markLogicGateAssignmentWorkspaceSnapshotsStale({ apiBase: args.apiBase, companyID: args.companyID, logicGateID, nodeID: args.nodeID });
+    dispatchLogicGateWorkUpdated(args.companyID, logicGateID);
     return normalizeLogicGateAssignmentCommandResult(payload);
   }
   const payload = await requestJSON<LogicGateAssignmentCommandPayload>(args.apiBase, "/v1/work-items/logic-gate-assignments/remove", {
@@ -414,6 +428,7 @@ export async function removeLogicGateAssignment(args: {
   });
   invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, args.logicGateID);
   markLogicGateAssignmentWorkspaceSnapshotsStale({ apiBase: args.apiBase, companyID: args.companyID, logicGateID: args.logicGateID, nodeID: args.nodeID });
+  dispatchLogicGateWorkUpdated(args.companyID, args.logicGateID ?? "");
   return normalizeLogicGateAssignmentCommandResult(payload);
 }
 
@@ -472,6 +487,7 @@ export async function moveKanbanCard(args: {
   });
   invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, logicGateIDFromKanbanBoardID(args.boardID));
   markKanbanWorkspaceSnapshotStale(args.apiBase, args.companyID, args.boardID);
+  dispatchLogicGateWorkUpdated(args.companyID, logicGateIDFromKanbanBoardID(args.boardID));
   return card;
 }
 
@@ -480,6 +496,7 @@ export async function deleteKanbanCard(apiBase: string, companyID: string, board
   await requestJSON<{ status?: string }>(apiBase, `/v1/kanban/cards/${encodeURIComponent(cardID)}?${params}`, { method: "DELETE" });
   invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateIDFromKanbanBoardID(boardID));
   markKanbanWorkspaceSnapshotStale(apiBase, companyID, boardID);
+  dispatchLogicGateWorkUpdated(companyID, logicGateIDFromKanbanBoardID(boardID));
 }
 
 export function invalidateKanbanBoardListCache(apiBase: string, companyID: string): void {

@@ -1,3 +1,19 @@
+# Process Story: Pinned Logic Gate status counts stay live through nested folders
+
+A user opens the sidebar Pinned section with one or more pinned Logic Gates
+↓
+Mango reads each distinct visible Logic Gate's canonical work view and counts assigned Nodes in Request, Pending, In Progress, and Review
+↓
+Each Logic Gate row shows only its nonzero colored status squares, using the same yellow, gray, orange, and blue as the Kanban columns
+↓
+Every containing pin folder adds the four counts from its direct and nested pinned Logic Gates, so a collapsed parent still shows the complete recursive totals
+↓
+Committed same-window Kanban changes and subscribed board real-time changes refresh only the affected pinned Logic Gate, then the folder totals recalculate without changing pins or relationships
+↓
+Zero counts, Backlogs, Done, Nodes, Projects, inaccessible stale pins, and folders without nonzero tracked work add no square
+
+Last updated: 2026-08-06
+
 # Process Story: Pinned uses one elevated surface with thin nested folder outlines
 
 A user opens the left sidebar Pinned section
@@ -50,7 +66,7 @@ Last updated: 2026-08-05
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (backend nested-folder lifecycle, atomic grouping, owner and cycle rejection, permission-edge coverage, canonical schema audit, frontend flat and recursive tree planning, subtree removal, DB-backed API/no-cache behavior, internal-drag precedence, fullscreen pinned-Node launch, and Pinned DOM presentation/one-click rename/lift coverage exist; `tests/frontend/app/timelineState.test.ts` covers PIN29 local pin-title reconciliation and stale persisted-response overlay; frontend right-click menu and browser DOM drag choreography still needs mapped automation)
+- Business Logic Covered By Automated Tests: Partial (backend nested-folder lifecycle, atomic grouping, owner and cycle rejection, permission-edge coverage, canonical schema audit, frontend flat and recursive tree planning, subtree removal, DB-backed API/no-cache behavior, internal-drag precedence, fullscreen pinned-Node launch, Pinned DOM presentation/one-click rename/lift coverage, and exact Logic Gate status counts, colors, zero suppression, recursive folder totals, and live refresh coverage exist; `tests/frontend/app/timelineState.test.ts` covers PIN29 local pin-title reconciliation and stale persisted-response overlay; frontend right-click menu and browser DOM drag choreography still needs mapped automation)
 
 ## Business Logic
 
@@ -103,6 +119,12 @@ PIN46 - Every Pinned folder uses one hairline neutral outline with no folder ico
 PIN47 - A single click on a Pinned folder title starts inline rename while its separate disclosure control expands or collapses the folder. Folder and pin rows remain draggable through the existing mixed-order layout commands, including moving into, out of, and between arbitrary nesting depths.
 PIN48 - Pointing to, keyboard-focusing, or opening a pinned resource gives its otherwise flat row a brief neutral two-pixel lift. Keyboard focus and valid drag placement remain temporary interaction indicators and must not restore a permanent colored item frame.
 PIN49 - Pinned folder outlines and rows use compact spacing without crowding: the top-border lead-in stays short, the disclosure arrow sits close to the folder title, and nested indentation remains clear. Pointing to or keyboard-focusing a pin's X turns the X character and its outline bright red without changing unpin behavior.
+PIN50 - A pinned Logic Gate's status counts derive read-only from its canonical Logic Gate work cards: Request counts `requested`, Pending counts `pending`, In Progress counts `in_progress`, and Review counts `review`. Backlog and Done cards are not included in these four counters.
+PIN51 - The four counters use Kanban's existing order and colors: Request yellow (`#facc15`), Pending gray (`#6f7b8a`), In Progress orange (`#f08a24`), and Review blue (`#19a8ff`). A counter square contains only its number, and a zero counter renders no square.
+PIN52 - Status squares appear on pinned Logic Gate rows only. Pinned Node and Project rows never show Logic Gate work counts, and a Logic Gate with zero in all four tracked statuses keeps the normal row with no status squares.
+PIN53 - A pin folder's counters are the per-status sum of every pinned Logic Gate directly inside it and inside all descendant pin folders. Each Logic Gate contributes once to every ancestor folder; collapsed state does not change the total, and moving the pin makes its contribution follow the persisted current parent tree.
+PIN54 - Folder status squares follow the same zero suppression as Logic Gate rows. A folder whose direct and nested pins contain no accessible nonzero tracked Logic Gate work shows the normal folder UI without counters; Node pins, Project pins, root-level Logic Gates, inaccessible stale Logic Gates, Backlog, and Done add nothing to that folder.
+PIN55 - The sidebar loads each distinct pinned Logic Gate's canonical work view when the pin set or company changes, listens to the existing same-window Kanban-content event and the exact board real-time scope, and reloads only the affected Logic Gate after committed changes. Recalculation writes no pin, folder, relationship, assignment, cache fallback, or browser storage record, and a failed or forbidden work read clears that gate's displayed contribution without hiding its pin.
 
 ## Scenarios
 
@@ -365,3 +387,26 @@ Expected:
 - Clicking a folder title once starts inline rename; its separate disclosure control remains responsible for expand and collapse.
 - Dragging pins or folders still reorders and reparents the existing tree through the canonical layout commands, including moves into, out of, and between nested folders.
 - No pin identity, folder ownership, deletion behavior, endpoint, database table, or database row contract changes.
+
+### Scenario PIN-S14: Live Pinned Logic Gate Counts And Recursive Folder Totals
+
+Business logic covered:
+- PIN50
+- PIN51
+- PIN52
+- PIN53
+- PIN54
+- PIN55
+
+Given:
+- An outer pin folder contains one pinned Logic Gate and an inner folder whose pinned Logic Gates have Nodes in Request, Pending, In Progress, Review, Backlog, and Done.
+- The same tree also contains Node and Project pins, a zero-work Logic Gate, and an inaccessible stale Logic Gate.
+- A committed Node assignment, removal, or status move changes one pinned Logic Gate locally or through its board real-time scope.
+
+Expected:
+- Each Logic Gate row shows only nonzero Request, Pending, In Progress, and Review number squares in yellow, gray, orange, and blue order.
+- Backlog, Done, Node pins, Project pins, zero-work Logic Gates, and inaccessible stale Logic Gates show or contribute no status square.
+- The inner folder sums its direct and nested Logic Gates, and the outer folder adds that complete inner total to its direct Logic Gate totals even while either folder is collapsed.
+- Moving a Logic Gate pin to another folder makes subsequent totals follow the current pin tree without changing the Logic Gate assignment.
+- The committed same-window event or exact board real-time message reloads only the affected pinned Logic Gate and immediately recalculates every ancestor folder.
+- No pin API write, browser storage fallback, relationship copy, translated resource identity, or database/schema change is introduced.

@@ -52,6 +52,17 @@ import { NOTIFICATION_TYPE_MENTION, NOTIFICATION_TYPE_URGENT_MENTION, type Notif
 import { useNotificationSummary } from "../modules/notifications/useNotificationSummary";
 import { requestUpdatesFilter } from "../modules/notifications/updatesFilterRequests";
 import { assignNodeToLogicGateStatus } from "../modules/kanban/kanbanApi";
+import {
+  getKanbanBoardContentsSingleFlight,
+  invalidateKanbanBoardContentsCache,
+} from "../modules/kanban/KanbanBoardContentStore";
+import {
+  EVENT_KANBAN_BOARD_CONTENTS_UPDATED,
+  logicGateIDFromKanbanBoardID,
+  logicGateKanbanBoardID,
+  type KanbanBoardContentsUpdatedDetail,
+} from "../modules/kanban/shared";
+import { subscribeRealtimeScope } from "../modules/realtime/realtimeWebSocket";
 import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../modules/editor/UnifiedNodeShell";
 import { EVENT_HOME_TRIAGE_CONVERSION_APPLIED, INBOX_PRIORITIES, type HomeTriageConversionAppliedDetail } from "../pages/home/homeConstants";
 import { convertMessagesToExplorerTargetCommand } from "../pages/home/homeCommands";
@@ -72,6 +83,11 @@ import {
   type SidebarPinnedResourceDropAction,
 } from "./sidebarPinDrops";
 import type { SidebarPinDropPlacement } from "./sidebarPinTree";
+import {
+  countSidebarLogicGateStatuses,
+  startSidebarLogicGateStatusCountSync,
+  type SidebarLogicGateStatusCounts,
+} from "./sidebarLogicGateStatusCounts";
 
 const SidebarCompanyExplorerContent = React.lazy(() => import("../modules/company-explorer/CompanyExplorerContent").then((module) => ({ default: module.CompanyExplorerContent })));
 const AppNodeEditorContent = React.lazy(() => import("../modules/editor/EditorContent").then((module) => ({
@@ -287,6 +303,12 @@ export function AppSidebar({
   const companyID = getActiveCompanyID();
   const apiBase = readAuthConfig().apiBase;
   const pins = pinTree.pins;
+  const pinnedLogicGateIDs = useMemo(
+    () => Array.from(new Set(pins.filter((pin) => pin.kind === "logic_gate").map((pin) => pin.id.trim()).filter(Boolean))).sort(),
+    [pins],
+  );
+  const pinnedLogicGateIDKey = pinnedLogicGateIDs.join("\u0000");
+  const [logicGateStatusCountsByID, setLogicGateStatusCountsByID] = useState<Record<string, SidebarLogicGateStatusCounts>>({});
   const notificationSummary = useNotificationSummary(companyID);
   const [sharedTriageOpen, setSharedTriageOpen] = usePersistedSidebarSectionOpen("shared-triage", false);
   const [sharedInboxes, setSharedInboxes] = useState<CommunicationsSharedInbox[]>([]);
@@ -319,6 +341,55 @@ export function AppSidebar({
   const sharedCreateNameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedEmailInputRef = useRef<HTMLInputElement | null>(null);
   const skipRenameBlurRef = useRef(false);
+  useEffect(() => {
+    setLogicGateStatusCountsByID({});
+    if (!companyID.trim() || pinnedLogicGateIDs.length === 0) return undefined;
+    const trackedLogicGateIDs = new Set(pinnedLogicGateIDs);
+    return startSidebarLogicGateStatusCountSync({
+      logicGateIDs: pinnedLogicGateIDs,
+      load: async (logicGateID) => {
+        const contents = await getKanbanBoardContentsSingleFlight(
+          apiBase,
+          companyID,
+          logicGateKanbanBoardID(logicGateID),
+          Number.MAX_SAFE_INTEGER,
+        );
+        return countSidebarLogicGateStatuses(contents);
+      },
+      subscribe: (onLogicGateChanged) => {
+        const refresh = (logicGateID: string, boardID = logicGateKanbanBoardID(logicGateID)) => {
+          if (!trackedLogicGateIDs.has(logicGateID)) return;
+          invalidateKanbanBoardContentsCache(apiBase, companyID, boardID);
+          onLogicGateChanged(logicGateID);
+        };
+        const onLocalBoardChange = (event: Event) => {
+          const detail = (event as CustomEvent<KanbanBoardContentsUpdatedDetail>).detail;
+          if (detail?.companyID && detail.companyID !== companyID) return;
+          const boardID = detail?.boardID?.trim() ?? "";
+          const logicGateID = detail?.logicGateID?.trim() || logicGateIDFromKanbanBoardID(boardID);
+          if (logicGateID) refresh(logicGateID, boardID || logicGateKanbanBoardID(logicGateID));
+        };
+        window.addEventListener(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, onLocalBoardChange);
+        const realtimeUnsubscribers = pinnedLogicGateIDs.map((logicGateID) => {
+          const boardID = logicGateKanbanBoardID(logicGateID);
+          return subscribeRealtimeScope(apiBase, companyID, `board:${boardID}`, {
+            onAccepted() {
+              refresh(logicGateID, boardID);
+            },
+            onKanbanChanged(message) {
+              if (message.company_id !== companyID || message.board_id !== boardID) return;
+              refresh(logicGateID, boardID);
+            },
+          });
+        });
+        return () => {
+          window.removeEventListener(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, onLocalBoardChange);
+          for (const unsubscribe of realtimeUnsubscribers) unsubscribe();
+        };
+      },
+      onChange: setLogicGateStatusCountsByID,
+    });
+  }, [apiBase, companyID, pinnedLogicGateIDKey, pinnedLogicGateIDs]);
   useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
     if (update.companyID !== companyID.trim() || update.entityType !== "logic_gate") return;
     const title = update.title.trim();
@@ -1280,6 +1351,7 @@ export function AppSidebar({
 
       <AppSidebarPinnedSection
         tree={pinTree}
+        logicGateStatusCountsByID={logicGateStatusCountsByID}
         dropActive={pinDropActive}
         dropSuccess={pinDropSuccess}
         pinnedResourceDropBusy={pinnedResourceDropBusy}
