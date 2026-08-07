@@ -577,6 +577,7 @@ export function EmailCollaborationChatSurface({
         messageID: providerMessageID,
         threadID: message.thread_id,
         informationID: attachedEmailInformationID,
+        logicGateIDs: nodes.find((node) => node.node_id === cleanNodeID)?.logic_gate_ids,
       });
       const importedCollaborations = await listEmailCollaborations({
         companyID,
@@ -603,7 +604,7 @@ export function EmailCollaborationChatSurface({
     } finally {
       setSubmitting(false);
     }
-  }, [acceptCollaboration, accountEmail, apiBase, author.name, author.userID, collaboration?.attached_email_information_id, collaborations, companyID, draft, draftAttachments, message.id, message.subject, message.thread_id, onActionRequestHandled, onActionSuccess, onClearSelection, onError, onNodeAttachmentChange, onSuccess, principals, requestJSON, selectedMentionPrincipals, selection, sharedInboxID, submitting]);
+  }, [acceptCollaboration, accountEmail, apiBase, author.name, author.userID, collaboration?.attached_email_information_id, collaborations, companyID, draft, draftAttachments, message.id, message.subject, message.thread_id, nodes, onActionRequestHandled, onActionSuccess, onClearSelection, onError, onNodeAttachmentChange, onSuccess, principals, requestJSON, selectedMentionPrincipals, selection, sharedInboxID, submitting]);
 
   const ensureLinkedEmailTextBlock = React.useCallback(async (activeCollaboration: CommunicationsEmailCollaboration): Promise<string> => {
     const activeNodeID = activeCollaboration.node_id.trim();
@@ -757,6 +758,13 @@ export function EmailCollaborationChatSurface({
           priority,
           nodeTitle: message.subject?.trim() || undefined,
         });
+        onNodeAttachmentChange?.({
+          nodeID: created.node_id,
+          messageID: targetEmailMessageID,
+          threadID: message.thread_id,
+          informationID: created.attached_email_information_id,
+          logicGateIDs: [cleanLogicGateID],
+        });
       }
       if (cleanProjectID) {
         await upsertProjectRelationship({
@@ -781,7 +789,7 @@ export function EmailCollaborationChatSurface({
     } finally {
       setSubmitting(false);
     }
-  }, [apiBase, companyID, ensureCollaboration, ensureLinkedEmailTextBlock, message.subject, onActionRequestHandled, onActionSuccess, onError, onSuccess, saveCurrentDraftToCollaboration, submitting]);
+  }, [apiBase, companyID, ensureCollaboration, ensureLinkedEmailTextBlock, message.subject, message.thread_id, onActionRequestHandled, onActionSuccess, onError, onNodeAttachmentChange, onSuccess, saveCurrentDraftToCollaboration, submitting, targetEmailMessageID]);
 
   React.useEffect(() => {
     const request = actionRequest;

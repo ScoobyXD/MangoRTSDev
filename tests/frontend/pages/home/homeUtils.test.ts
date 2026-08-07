@@ -12,11 +12,13 @@ import {
   buildRACIRoleInboxGroupsByCell,
   buildSharedInboxRows,
   condenseEmailThreadMessages,
+  emailConversationLogicGateIDs,
   emailConversationShouldShowLoadingShell,
   emailAttachmentIsReferencedInline,
   emailAttachmentHasResolvableContent,
   emailAttachmentIsInlineContent,
   emailMessageHasMultipleThreadMessages,
+  emailMessageLogicGateIDs,
   emailMessageRowAriaLabel,
   emailMessageRowKey,
   emailMailboxMessageKey,
@@ -368,6 +370,23 @@ test("mail row thread indicators and accessible activation use explicit message 
   assert.equal(isMailRowActivationKey(" "), true);
   assert.equal(isMailRowActivationKey("Spacebar"), false);
   assert.equal(isMailRowActivationKey("Escape"), false);
+});
+
+test("email entity indicators inherit Logic Gates from their attached Node across the thread", () => {
+  const nodeByID = new Map<string, Pick<NodeRecord, "logic_gate_ids">>([
+    ["node-1", { logic_gate_ids: ["gate-from-node", "gate-shared"] }],
+  ]);
+  const first = emailMessage("message-1", "thread-1", 200, {
+    collaboration_node_id: "node-1",
+    logic_gate_ids: ["gate-direct", "gate-shared"],
+  });
+  const second = emailMessage("message-2", "thread-1", 100, { logic_gate_ids: ["gate-second"] });
+
+  assert.deepEqual(emailMessageLogicGateIDs(first, nodeByID), ["gate-direct", "gate-shared", "gate-from-node"]);
+  assert.deepEqual(
+    emailConversationLogicGateIDs([first, second], nodeByID),
+    ["gate-direct", "gate-shared", "gate-from-node", "gate-second"],
+  );
 });
 
 test("known multi-message selections keep a loading shell until the conversation is ready", () => {

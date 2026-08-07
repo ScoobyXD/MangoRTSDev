@@ -256,6 +256,7 @@ test("direct existing-node attachment annotates the selected message and every l
     messageID: "message-1",
     threadID: "thread-1",
     informationID: " information-direct ",
+    logicGateIDs: [" gate-1 ", "gate-2"],
   };
   const selected = message("message-1", { thread_id: "thread-1" });
   const reply = message("message-2", { thread_id: "thread-1" });
@@ -268,6 +269,8 @@ test("direct existing-node attachment annotates the selected message and every l
   const merged = mergeEmailMessageWithNodeAttachment(reply, attachment);
   assert.equal(merged.collaboration_node_id, "node-direct");
   assert.equal(merged.collaboration_information_id, "information-direct");
+  assert.deepEqual(merged.logic_gate_ids, ["gate-1", "gate-2"]);
+  assert.equal(merged.logic_gate_count, 2);
   assert.equal(reply.collaboration_node_id, undefined);
   assert.equal(mergeEmailMessageWithNodeAttachment(unrelated, { ...attachment, nodeID: " " }), unrelated);
 });

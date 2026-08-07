@@ -434,6 +434,24 @@ export function cleanIDList(values: string[]): string[] {
   return ids;
 }
 
+export function emailMessageLogicGateIDs(
+  message: Pick<EmailMessage, "logic_gate_ids" | "collaboration_node_id">,
+  nodeByID?: ReadonlyMap<string, Pick<NodeRecord, "logic_gate_ids">>,
+): string[] {
+  const nodeID = message.collaboration_node_id?.trim() ?? "";
+  return cleanIDList([
+    ...(message.logic_gate_ids ?? []),
+    ...(nodeID ? nodeByID?.get(nodeID)?.logic_gate_ids ?? [] : []),
+  ]);
+}
+
+export function emailConversationLogicGateIDs(
+  messages: Array<Pick<EmailMessage, "logic_gate_ids" | "collaboration_node_id">>,
+  nodeByID?: ReadonlyMap<string, Pick<NodeRecord, "logic_gate_ids">>,
+): string[] {
+  return cleanIDList(messages.flatMap((message) => emailMessageLogicGateIDs(message, nodeByID)));
+}
+
 
 
 

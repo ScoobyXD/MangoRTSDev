@@ -2022,21 +2022,8 @@ export function messageThreadIconStyle(active: boolean): React.CSSProperties {
     display: "grid",
     placeItems: "center",
     flexShrink: 0,
-    color: active ? "#0284c7" : HOME_CYAN,
+    color: "#0284c7",
     filter: active ? "drop-shadow(0 0 4px rgba(25, 168, 255, 0.34))" : undefined,
-  };
-}
-
-export function messagePlacementIconStyle(active: boolean): React.CSSProperties {
-  return {
-    width: 22,
-    height: 22,
-    marginTop: 0,
-    display: "grid",
-    placeItems: "center",
-    color: active ? "#38bdf8" : HOME_CYAN,
-    filter: active ? "drop-shadow(0 0 5px rgba(183, 124, 255, 0.46)) drop-shadow(0 0 4px rgba(92, 238, 255, 0.38))" : undefined,
-    transform: "scale(1.25)",
   };
 }
 
@@ -2078,6 +2065,17 @@ export const messageReadStatusStyle: React.CSSProperties = {
   color: "#15803d",
   fontSize: 11,
   fontWeight: 800,
+  whiteSpace: "nowrap",
+};
+
+export const messageThreadCountStyle: React.CSSProperties = {
+  background: HOME_KEY_EDGE_FRAME_GRADIENT,
+  backgroundClip: "text",
+  WebkitBackgroundClip: "text",
+  color: "transparent",
+  WebkitTextFillColor: "transparent",
+  fontSize: 11,
+  fontWeight: 850,
   whiteSpace: "nowrap",
 };
 

@@ -179,7 +179,7 @@ export function EmailNodeDestinationSearch({
     <div
       ref={wrapperRef}
       data-email-node-destination-search="true"
-      style={{ position: "relative", flex: "0 1 300px", width: "clamp(205px, 28vw, 300px)", minWidth: 184, display: "grid", gridTemplateColumns: "34px minmax(0, 1fr)", gap: 6 }}
+      style={{ position: "relative", flex: "0 0 auto", width: "clamp(205px, 28vw, 300px)", minWidth: 184, display: "grid", gridTemplateColumns: "34px minmax(0, 1fr)", gap: 6 }}
     >
       {actionNotice && (
         <div

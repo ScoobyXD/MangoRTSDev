@@ -244,10 +244,10 @@ test("email-created nodes reuse canonical chat data with one node email column",
   const projection = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorProjection.ts"), "utf8");
 
   assert.match(workspace, /message\.collaboration_node_id\?\.trim\(\)[\s\S]*onOpenCollaborationNode\(message\)/);
-  assert.match(workspace, /<ExplorerRowIcon kind="node" \/>/);
+  assert.match(workspace, /<EmailEntityIconButton[\s\S]*kind="node"/);
   assert.doesNotMatch(workspace, /function EmailNodeIndicatorIcon/);
-  assert.match(detail, /Open existing email node[\s\S]*onOpenCollaborationNode\(message\)/);
-  assert.match(detail, /Open existing email node[\s\S]*<ExplorerRowIcon kind="node" \/>/);
+  assert.match(detail, /associatedNodeMessage[\s\S]*onOpenCollaborationNode\(associatedNodeMessage\)/);
+  assert.match(detail, /function EmailEntityIconButton[\s\S]*<ExplorerRowIcon kind=\{kind\} \/>/);
   assert.doesNotMatch(detail, /<MailIcon color="#7c3aed" \/>/);
   const mailNodeOpenStart = homePage.indexOf("const openEmailCollaborationNode");
   const mailNodeOpen = homePage.slice(mailNodeOpenStart, homePage.indexOf("useEffect", mailNodeOpenStart));

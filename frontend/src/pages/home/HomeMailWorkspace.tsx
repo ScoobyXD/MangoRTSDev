@@ -1,13 +1,12 @@
 import React from "react";
 import { confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import type { CommunicationsEmailCollaboration, CompanyUser, CompanyUserGroup, CompanyUserGroupMember, EmailMailbox, EmailMessage, EmailProvider } from "../../modules/communications/communicationsApi";
-import { ExplorerRowIcon } from "../../icons/index.js";
 import type { EditorEntityLink, EditorEntityLinkRequest } from "../../modules/editor/editorEntityLinks.js";
 import type { NodeRecord } from "../../modules/nodes/types";
 import type { LogicGateRecord } from "../../modules/logic-gates/types";
 import type { ComposeState, HomeViewID, MessageSelectionModifiers } from "./homeTypes";
-import { canDragTriageMessageFromMailbox, emailAttachmentIsInlineContent, emailConversationShouldShowLoadingShell, emailMessageHasMultipleThreadMessages, emailMessageRowAriaLabel, emailThreadMessageCount, formatAddressList, formatMessageDate, isMailRowActivationKey, mailboxLabel, messageReadStatusLabel, messageReadStatusTitle, type EmailConversationOrder } from "./homeUtils";
-import { HomeColumnResizeHandle, ComposePanel, DeleteMessagesConfirmationModal, MessageDetail, MessageLeadingIndicators, type EmailCollaborationNavigation } from "./HomeParts";
+import { canDragTriageMessageFromMailbox, emailConversationShouldShowLoadingShell, emailMessageHasMultipleThreadMessages, emailMessageLogicGateIDs, emailMessageRowAriaLabel, emailThreadMessageCount, formatAddressList, formatMessageDate, isMailRowActivationKey, mailboxLabel, messageReadStatusLabel, messageReadStatusTitle, type EmailConversationOrder } from "./homeUtils";
+import { EmailEntityIconButton, HomeColumnResizeHandle, ComposePanel, DeleteMessagesConfirmationModal, MessageDetail, MessageLeadingIndicators, type EmailCollaborationNavigation } from "./HomeParts";
 import { EmailCollaborationChatSurface, type EmailCollaborationSelection } from "./EmailCollaborationChatSurface";
 import { EmailNodeDestinationSearch } from "./EmailNodeDestinationSearch";
 import { emailMessageRowKey } from "./homeUtils";
@@ -49,7 +48,7 @@ import {
   mailVibrantAdvanceButtonStyle,
   messageContextMenuStyle,
   messageListStyle,
-  messageReadStatusStyle,
+  messageThreadCountStyle,
   messageReadStatusSlotStyle,
   messageRowStyle,
   messageRowTopStyle,
@@ -196,16 +195,10 @@ function MessageReadStatusText({ message }: { message: EmailMessage }) {
   return <span title={title}><MessageReadReceiptChip message={message} /></span>;
 }
 
-function MessageAttachmentCount({ message }: { message: EmailMessage }) {
-  const count = (message.attachments ?? []).filter((attachment) => !emailAttachmentIsInlineContent(attachment)).length;
-  if (count <= 0) return null;
-  return <span style={messageReadStatusStyle}>{count === 1 ? "1 file" : `${count} files`}</span>;
-}
-
 function MessageThreadCount({ message }: { message: EmailMessage }) {
   if (!emailMessageHasMultipleThreadMessages(message)) return null;
   const count = emailThreadMessageCount(message);
-  return <span style={messageReadStatusStyle} title={`${count} messages in this thread`}>{count} msgs</span>;
+  return <span style={messageThreadCountStyle} title={`${count} messages in this thread`}>{count} msgs</span>;
 }
 
 function isDraftMessage(message: EmailMessage): boolean {
@@ -410,6 +403,18 @@ export function HomeMailWorkspace({
   const [emailActionRequest, setEmailActionRequest] = React.useState<EmailCollaborationActionRequest>(null);
   const [emailCollaborationError, setEmailCollaborationError] = React.useState("");
   const [emailActionNotice, setEmailActionNotice] = React.useState<{ message: string; requestID: number } | null>(null);
+  const nodeByID = React.useMemo(() => new Map(nodes.map((node) => [node.node_id, node])), [nodes]);
+  const logicGateByID = React.useMemo(() => new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate])), [logicGates]);
+  const openEmailLogicGate = React.useCallback((logicGateID: string) => {
+    const cleanLogicGateID = logicGateID.trim();
+    if (!cleanLogicGateID) return;
+    const logicGate = logicGateByID.get(cleanLogicGateID);
+    onOpenPickerEntity({
+      entityType: "logic_gate",
+      entityID: cleanLogicGateID,
+      label: logicGate?.header?.trim() || cleanLogicGateID,
+    });
+  }, [logicGateByID, onOpenPickerEntity]);
   const emailChatAvailable = activeViewID === "my-triage" || activeViewID.startsWith("shared:");
   const emailChatKey = emailChatAvailable && selectedMessageRowKey
     ? JSON.stringify([activeViewID, mailbox, selectedMessageRowKey])
@@ -784,6 +789,7 @@ export function HomeMailWorkspace({
                 ? (sharedDraftSource ? `Shared draft · ${sharedDraftSource}` : (formatAddressList(message.to) || "Draft"))
                 : (formatAddressList(message.from) || "Unknown sender");
               const showReadStatus = mailbox === "sent" && !draftRow;
+              const messageLogicGateIDs = emailMessageLogicGateIDs(message, nodeByID);
               return (
                 <div
                   key={rowKey}
@@ -826,21 +832,28 @@ export function HomeMailWorkspace({
                       <span style={triageMessageMetaStyle}>
                         <span style={{ ...messageTimestampStatusRowStyle, ...triageMessageTimestampStyle }}>
                           {message.collaboration_node_id?.trim() && (
-                            <button
-                              type="button"
-                              data-email-node-indicator="mailbox-card"
-                              title="Open existing email node"
-                              aria-label={`Open node for ${message.subject || "email"}`}
+                            <EmailEntityIconButton
+                              kind="node"
+                              placement="mailbox-card"
+                              label={`Open node for ${message.subject || "email"}`}
                               onClick={(event) => {
                                 event.stopPropagation();
                                 onOpenCollaborationNode(message);
                               }}
-                              style={{ width: 24, height: 22, border: "1px solid rgba(51,221,213,0.3)", borderRadius: 7, background: "rgba(236,254,255,0.86)", display: "grid", placeItems: "center", cursor: "pointer", padding: 0 }}
-                            >
-                              <ExplorerRowIcon kind="node" />
-                            </button>
+                            />
                           )}
-                          <MessageAttachmentCount message={message} />
+                          {messageLogicGateIDs.map((logicGateID) => (
+                            <EmailEntityIconButton
+                              key={logicGateID}
+                              kind="logic_gate"
+                              placement="mailbox-card"
+                              label={`Open ${logicGateByID.get(logicGateID)?.header?.trim() || "Logic Gate"}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                openEmailLogicGate(logicGateID);
+                              }}
+                            />
+                          ))}
                           <MessageThreadCount message={message} />
                           <span style={triageDateStyle}>{formatMessageDate(message.date)}</span>
                         </span>
@@ -877,21 +890,28 @@ export function HomeMailWorkspace({
                         <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{rowAddressLabel}</strong>
                         <span style={messageTimestampStatusRowStyle}>
                           {message.collaboration_node_id?.trim() && (
-                            <button
-                              type="button"
-                              data-email-node-indicator="mailbox-card"
-                              title="Open existing email node"
-                              aria-label={`Open node for ${message.subject || "email"}`}
+                            <EmailEntityIconButton
+                              kind="node"
+                              placement="mailbox-card"
+                              label={`Open node for ${message.subject || "email"}`}
                               onClick={(event) => {
                                 event.stopPropagation();
                                 onOpenCollaborationNode(message);
                               }}
-                              style={{ width: 24, height: 22, border: "1px solid rgba(51,221,213,0.3)", borderRadius: 7, background: "rgba(236,254,255,0.86)", display: "grid", placeItems: "center", cursor: "pointer", padding: 0 }}
-                            >
-                              <ExplorerRowIcon kind="node" />
-                            </button>
+                            />
                           )}
-                          <MessageAttachmentCount message={message} />
+                          {messageLogicGateIDs.map((logicGateID) => (
+                            <EmailEntityIconButton
+                              key={logicGateID}
+                              kind="logic_gate"
+                              placement="mailbox-card"
+                              label={`Open ${logicGateByID.get(logicGateID)?.header?.trim() || "Logic Gate"}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                openEmailLogicGate(logicGateID);
+                              }}
+                            />
+                          ))}
                           <MessageThreadCount message={message} />
                           <span>{formatMessageDate(message.date)}</span>
                         </span>
@@ -963,6 +983,7 @@ export function HomeMailWorkspace({
               <MessageDetail
                 message={selectedMessage}
                 threadMessages={selectedThreadMessages}
+                nodes={nodes}
                 companyID={companyID}
                 sharedInboxID={selectedMessage.collaboration_shared_inbox_id || (activeViewID.startsWith("shared:") ? activeViewID.slice("shared:".length).trim() : undefined)}
                 accountEmail={selectedMessage.collaboration_account_email || accountEmail}
@@ -997,6 +1018,7 @@ export function HomeMailWorkspace({
                 onCommentOnMessage={commentOnEmailReply}
                 selectionNavigation={emailNavigation}
                 onOpenCollaborationNode={onOpenCollaborationNode}
+                onOpenLogicGate={openEmailLogicGate}
               />
             )}
             {(emailChatMounted || emailActionRequest) && (
