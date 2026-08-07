@@ -3,6 +3,18 @@ export type MangoTiptapPointerBookmark = {
   textOffset: number;
 };
 
+export function preserveMangoTiptapCaretScroll(root: HTMLElement): void {
+  const ownerWindow = root.ownerDocument.defaultView;
+  if (!ownerWindow) return;
+  const scrollTop = root.scrollTop;
+  const scrollLeft = root.scrollLeft;
+  ownerWindow.requestAnimationFrame(() => {
+    if (!root.isConnected) return;
+    root.scrollTop = scrollTop;
+    root.scrollLeft = scrollLeft;
+  });
+}
+
 type BrowserCaretPosition = {
   offsetNode: Node;
   offset: number;

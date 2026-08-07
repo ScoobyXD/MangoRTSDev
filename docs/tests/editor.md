@@ -1,3 +1,19 @@
+# Process Story: Numbered rows edit cleanly, caret clicks stay put, and pinned Nodes fill the screen
+
+A user presses Enter after a numbered row and receives the next numbered row
+↓
+If that new numbered row remains empty, pressing Enter removes its number and places the caret on one ordinary blank row
+↓
+Pressing Backspace or Delete on the shown empty numbered marker removes only that marker; its attached rows keep their content, order, formatting, and indentation
+↓
+Clicking another insertion point in either a sleeping or active editor moves only the caret and keeps the text-box scroll position unchanged
+↓
+Opening a Node from the Pinned sidebar launches that Node popup in full-screen mode immediately
+↓
+These interactions keep the same editor document, popup instance, revisioned save path, and normal full-screen controls
+
+Last updated: 2026-08-07
+
 # Process Story: A Node header resolves people and presents a readable linker
 
 A user opens a Node through any editor-backed surface, including Updates
@@ -561,6 +577,9 @@ ED127 - A resource becomes changed for exit history only after a local editable 
 ED128 - Manual and action-triggered history use the same permanent resource history format and existing history endpoint. Before either snapshot, Mango flushes every mounted Tiptap textbox for that exact company/resource and then flushes the resource owner's changed textbox metadata. One per-resource save coordinator shares an in-flight save across nested unmounts, repeated close signals, and a simultaneous manual click. A successful manual or exit snapshot advances the same clean baseline; edits made after that success require one later snapshot. The manual button remains available and still saves even when the resource has no new changes.
 ED129 - An action-triggered snapshot is quiet: it does not open history, block an in-app close, or display a success dialog. Save failure leaves the resource changed so a later close or manual save can retry. The history batch represents the committed canonical resource after the local flush; therefore already committed concurrent edits from another authorized user may also be present. Refresh, external navigation, and tab/window close are best effort because a browser may terminate asynchronous work, while Mango-controlled closes, resource switches, and route unmounts run while the application remains alive.
 ED130 - A first pointer press in a sleeping Node textbox records the clicked stable Mango block ID and text offset before the static-to-live swap. Mango resolves that semantic bookmark in the live Tiptap DOM, applies its ProseMirror position, focuses without scrolling, and removes the static cover only after the live caret is ready. Coordinate lookup is fallback only. Activation must not blink content, move the caret to an unrelated position, mutate the document, save, or create an empty row.
+ED131 - Enter on a nonempty numbered item creates the next numbered item. Enter on that new item while it is still empty delegates to Tiptap's normal list exit: the blank numbered item is removed, exactly one ordinary blank paragraph follows the list, and the caret moves to that paragraph. The exit must not leave an empty numbered item or create an additional numbered row.
+ED132 - A primary-pointer caret click in a sleeping or active Tiptap editor preserves the exact text-box horizontal and vertical scroll offsets while retaining native caret placement. Opening a Node from the Pinned sidebar creates a fresh popup instance whose initial view is full-screen; the existing full-screen control may still return it to its normal-size rectangle afterward.
+ED133 - Backspace or Delete with a collapsed caret on an empty numbered, bulleted, or Checkbox marker removes that empty marker in one transaction. When an older saved item also owns later blocks and has a preceding list peer, those later blocks move intact to that peer and retain their exact content, order, formatting, block identity, and structural level. Without a preceding peer, the preserved blocks replace the empty item ahead of any remaining list items. Deletion must not repeatedly indent, outdent, merge, or otherwise re-parent the preserved blocks; text deletion and noncollapsed range deletion retain the editor's native behavior.
 
 ### Required Unified Rich-Editor Surface Inventory
 
