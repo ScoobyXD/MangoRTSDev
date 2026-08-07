@@ -9,6 +9,7 @@ export type EmailNodeAttachmentChange = {
   messageID: string;
   threadID?: string;
   informationID?: string;
+  logicGateIDs?: string[];
 };
 
 export function emailMessageMatchesNodeAttachment(
@@ -28,10 +29,18 @@ export function mergeEmailMessageWithNodeAttachment(
   const nodeID = attachment.nodeID.trim();
   if (!nodeID) return message;
   const informationID = attachment.informationID?.trim() ?? "";
+  const logicGateIDs = Array.from(new Set([
+    ...(message.logic_gate_ids ?? []),
+    ...(attachment.logicGateIDs ?? []),
+  ].map((logicGateID) => logicGateID.trim()).filter(Boolean)));
   return {
     ...message,
     collaboration_node_id: nodeID,
     collaboration_information_id: informationID || message.collaboration_information_id,
+    logic_gate_ids: logicGateIDs.length > 0 ? logicGateIDs : message.logic_gate_ids,
+    logic_gate_count: logicGateIDs.length > 0
+      ? Math.max(message.logic_gate_count ?? 0, logicGateIDs.length)
+      : message.logic_gate_count,
   };
 }
 

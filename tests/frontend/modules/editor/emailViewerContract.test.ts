@@ -292,6 +292,7 @@ test("mailbox realtime and non-primary tabs keep bounded request budgets", () =>
 test("personal and shared mail rows expose unread, selected, thread, and keyboard semantics", () => {
   const homeWorkspace = source("frontend/src/pages/home/HomeMailWorkspace.tsx");
   const homeParts = source("frontend/src/pages/home/HomeParts.tsx");
+  const homeStyles = source("frontend/src/pages/home/homeStyles.ts");
 
   assert.match(homeWorkspace, /aria-pressed=\{active\}/);
   assert.match(homeWorkspace, /aria-label=\{emailMessageRowAriaLabel\(message, rowAddressLabel\)\}/);
@@ -300,6 +301,14 @@ test("personal and shared mail rows expose unread, selected, thread, and keyboar
   assert.match(homeParts, /emailMessageHasMultipleThreadMessages\(message\)/);
   assert.match(homeParts, /role="img" aria-label=\{label\} title=\{label\}/);
   assert.match(homeParts, /messageUnreadDotStyle\(message\.unread\)/);
+  assert.doesNotMatch(homeParts, /MessagePlacementIcon/);
+  assert.match(homeStyles, /messageThreadIconStyle[\s\S]{0,220}color: "#0284c7"/);
+  assert.match(homeWorkspace, /messageThreadCountStyle/);
+  assert.doesNotMatch(homeWorkspace, /MessageAttachmentCount/);
+  assert.match(homeWorkspace, /kind="node"[\s\S]{0,180}placement="mailbox-card"/);
+  assert.match(homeWorkspace, /kind="logic_gate"[\s\S]{0,180}placement="mailbox-card"/);
+  assert.match(homeParts, /data-email-node-actions="true"[\s\S]{0,900}placement="thread-header"[\s\S]{0,900}\{emailNodeDestinationSearch\}/);
+  assert.doesNotMatch(homeParts, /data-email-node-indicator="message-header"/);
   assert.doesNotMatch(homeParts, /messageSelectDotStyle/);
 });
 

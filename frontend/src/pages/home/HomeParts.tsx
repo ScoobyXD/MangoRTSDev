@@ -60,8 +60,8 @@ import type { EmailCollaborationSelection } from "./EmailCollaborationChatSurfac
 
 export type EmailCollaborationNavigation = EmailCollaborationSelection & { requestID: number };
 import { applyHomeMailSignature, createHomeMailDraftID } from "./homeMailDrafts";
-import { buildRACIRoleInboxGroupsByCell, cleanIDList, clampNumber, emailAttachmentContentIDKeys, emailAttachmentIsReferencedInline, emailMessageHasMultipleThreadMessages, emailThreadMessageCount, formatAddressList, formatMessageDate, hasExplorerDrag, hasTriageMessageDrag, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, messageIsSent, messageReadStatusLabel, messageReadStatusTitle, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, orderEmailConversationMessages, rewriteEmailDocumentCIDSources, visibleEmailAttachmentsForBody, RACIRoleCellKey, readTriageMessageIDs, gvicStatusColor, setLogicGateDragData, setNodeDragData, type EmailConversationOrder } from "./homeUtils";
-import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateRACICellStyle, logicGateRACIColumnHeaderStyle, logicGateRACIColumnLabelStyle, logicGateRACIColumnLetterStyle, logicGateRACICornerStyle, logicGateRACIHeaderStyle, logicGateRACIMatrixSurfaceStyle, logicGateRACIMetaStyle, logicGateRACIPanelStyle, logicGateRACIPriorityHeaderStyle, logicGateRACIScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailAttachmentFileIconStyle, mailAttachmentGridStyle, mailAttachmentHeaderStyle, mailAttachmentMetaStyle, mailAttachmentNameStyle, mailAttachmentSectionStyle, mailAttachmentThumbnailStyle, mailAttachmentTileStyle, mailComposeAttachmentRemoveStyle, mailComposeAttachmentRowStyle, mailComposeOriginalFrameStyle, mailComposeOriginalStyle, mailComposeSendButtonStyle, mailComposeSignatureBoxStyle, mailComposeSignatureTextareaStyle, mailPanelInputStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messageLeadingIndicatorsStyle, messagePlacementIconStyle, messageReadStatusStyle, messageThreadIconStyle, messageTimestampStatusRowStyle, messageUnreadDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxContextMenuButtonStyle, shortcutRemoveStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
+import { buildRACIRoleInboxGroupsByCell, cleanIDList, clampNumber, emailAttachmentContentIDKeys, emailAttachmentIsReferencedInline, emailConversationLogicGateIDs, emailMessageHasMultipleThreadMessages, emailThreadMessageCount, formatAddressList, formatMessageDate, hasExplorerDrag, hasTriageMessageDrag, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, messageIsSent, messageReadStatusLabel, messageReadStatusTitle, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, orderEmailConversationMessages, rewriteEmailDocumentCIDSources, visibleEmailAttachmentsForBody, RACIRoleCellKey, readTriageMessageIDs, gvicStatusColor, setLogicGateDragData, setNodeDragData, type EmailConversationOrder } from "./homeUtils";
+import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateRACICellStyle, logicGateRACIColumnHeaderStyle, logicGateRACIColumnLabelStyle, logicGateRACIColumnLetterStyle, logicGateRACICornerStyle, logicGateRACIHeaderStyle, logicGateRACIMatrixSurfaceStyle, logicGateRACIMetaStyle, logicGateRACIPanelStyle, logicGateRACIPriorityHeaderStyle, logicGateRACIScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailAttachmentFileIconStyle, mailAttachmentGridStyle, mailAttachmentHeaderStyle, mailAttachmentMetaStyle, mailAttachmentNameStyle, mailAttachmentSectionStyle, mailAttachmentThumbnailStyle, mailAttachmentTileStyle, mailComposeAttachmentRemoveStyle, mailComposeAttachmentRowStyle, mailComposeOriginalFrameStyle, mailComposeOriginalStyle, mailComposeSendButtonStyle, mailComposeSignatureBoxStyle, mailComposeSignatureTextareaStyle, mailPanelInputStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messageLeadingIndicatorsStyle, messageReadStatusStyle, messageThreadIconStyle, messageTimestampStatusRowStyle, messageUnreadDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxContextMenuButtonStyle, shortcutRemoveStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
 import { mailConversationCardStyle, mailConversationTimelineDotStyle } from "./homeStyles";
 import { MessageReadReceiptChip } from "./MessageReadReceiptChip";
 import { buildForwardedEmailHTML } from "./emailForwarding";
@@ -1333,18 +1333,6 @@ const sharedRACISelectStyle: React.CSSProperties = {
   padding: "0 6px",
 };
 
-export function MessagePlacementIcon({ message, active }: { message: EmailMessage; active: boolean }) {
-  const count = message.logic_gate_count ?? message.logic_gate_ids?.length ?? 0;
-  if (count > 0) {
-    return (
-      <span style={messagePlacementIconStyle(active)} title={count === 1 ? "Sent to a Logic Gate" : `Sent to ${count} Logic Gates`}>
-        <ExplorerRowIcon kind="logic_gate" />
-      </span>
-    );
-  }
-  return null;
-}
-
 function MessageThreadIndicator({ message, active }: { message: EmailMessage; active: boolean }) {
   if (!emailMessageHasMultipleThreadMessages(message)) return null;
   const count = emailThreadMessageCount(message);
@@ -1361,12 +1349,47 @@ function MessageThreadIndicator({ message, active }: { message: EmailMessage; ac
   );
 }
 
+export function EmailEntityIconButton({ kind, label, placement, onClick }: {
+  kind: "node" | "logic_gate";
+  label: string;
+  placement: "mailbox-card" | "thread-header";
+  onClick: React.MouseEventHandler<HTMLButtonElement>;
+}) {
+  const compact = placement === "mailbox-card";
+  const node = kind === "node";
+  return (
+    <button
+      type="button"
+      data-email-node-indicator={node ? placement : undefined}
+      data-email-logic-gate-indicator={node ? undefined : placement}
+      title={label}
+      aria-label={label}
+      onClick={onClick}
+      style={{
+        width: compact ? 24 : 32,
+        minWidth: compact ? 24 : 32,
+        height: compact ? 22 : 30,
+        minHeight: compact ? 22 : 30,
+        border: `1px solid ${node ? "rgba(51,221,213,0.3)" : "rgba(25,240,122,0.38)"}`,
+        borderRadius: compact ? 7 : 8,
+        background: node ? "rgba(236,254,255,0.86)" : "rgba(236,253,245,0.9)",
+        display: "grid",
+        placeItems: "center",
+        cursor: "pointer",
+        padding: 0,
+        flex: "0 0 auto",
+      }}
+    >
+      <ExplorerRowIcon kind={kind} />
+    </button>
+  );
+}
+
 export function MessageLeadingIndicators({ message, active }: { message: EmailMessage; active: boolean }) {
   return (
     <span style={messageLeadingIndicatorsStyle}>
       <span aria-hidden="true" style={messageUnreadDotStyle(message.unread)} />
       <MessageThreadIndicator message={message} active={active} />
-      <MessagePlacementIcon message={message} active={active} />
     </span>
   );
 }
@@ -6069,7 +6092,7 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
   return { srcDoc };
 }
 
-function EmailConversationMessage({ message, companyID, sharedInboxID, accountEmail, fill, expanded, latest, timelineStart, timelineEnd, busy, calendarResponseAvailable, loadingBody = false, selectionNavigation, onToggleExpanded, onLoadBody, onReply, onReplyAll, onCreateSharedDraft, onForward, onEmailSelection, onCommentOnMessage, onOpenCollaborationNode }: {
+function EmailConversationMessage({ message, companyID, sharedInboxID, accountEmail, fill, expanded, latest, timelineStart, timelineEnd, busy, calendarResponseAvailable, loadingBody = false, selectionNavigation, onToggleExpanded, onLoadBody, onReply, onReplyAll, onCreateSharedDraft, onForward, onEmailSelection, onCommentOnMessage }: {
   message: EmailMessage;
   companyID: string;
   sharedInboxID?: string;
@@ -6091,7 +6114,6 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
   onForward: (message: EmailMessage) => void;
   onEmailSelection?: (selection: EmailCollaborationSelection) => void;
   onCommentOnMessage?: (message: EmailMessage) => void;
-  onOpenCollaborationNode?: (message: EmailMessage) => void;
 }) {
   const allAttachments = React.useMemo(
     () => (message.attachments ?? []).filter((attachment) => emailAttachmentFileName(attachment) || emailAttachmentHasResolvableContent(attachment)),
@@ -6175,18 +6197,6 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
               )}
             </span>
           </button>
-          {message.collaboration_node_id?.trim() && onOpenCollaborationNode && (
-            <button
-              type="button"
-              data-email-node-indicator="message-header"
-              title="Open existing email node"
-              aria-label={`Open node for this reply from ${formatAddressList(message.from) || "Unknown sender"}`}
-              onClick={() => onOpenCollaborationNode(message)}
-              style={{ ...mailPanelSmallButtonStyle, minWidth: 32, minHeight: 30, display: "grid", placeItems: "center", padding: "0 8px", borderColor: "rgba(51,221,213,0.3)", background: "rgba(236,254,255,0.86)" }}
-            >
-              <ExplorerRowIcon kind="node" />
-            </button>
-          )}
           {onCommentOnMessage && (
             <button
               type="button"
@@ -6282,9 +6292,10 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
     </article>
   );
 }
-export function MessageDetail({ message, threadMessages = [], companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, emailNodeDestinationSearch, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onCommentOnMessage, onOpenCollaborationNode }: {
+export function MessageDetail({ message, threadMessages = [], nodes, companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, emailNodeDestinationSearch, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onCommentOnMessage, onOpenCollaborationNode, onOpenLogicGate }: {
   message: EmailMessage;
   threadMessages?: EmailMessage[];
+  nodes: NodeRecord[];
   companyID: string;
   sharedInboxID?: string;
   accountEmail?: string;
@@ -6308,8 +6319,12 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
   onEmailSelection?: (selection: EmailCollaborationSelection) => void;
   onCommentOnMessage?: (message: EmailMessage) => void;
   onOpenCollaborationNode?: (message: EmailMessage) => void;
+  onOpenLogicGate?: (logicGateID: string) => void;
 }) {
   const canonicalConversationMessages = conversationMessagesForDetail(message, threadMessages);
+  const nodeByID = new Map(nodes.map((node) => [node.node_id, node]));
+  const associatedNodeMessage = canonicalConversationMessages.find((candidate) => candidate.collaboration_node_id?.trim()) ?? null;
+  const conversationLogicGateIDs = emailConversationLogicGateIDs(canonicalConversationMessages, nodeByID);
   const singleMessage = canonicalConversationMessages.length <= 1;
   const newestMessageID = canonicalConversationMessages[canonicalConversationMessages.length - 1]?.id ?? message.id;
   const [conversationOrder, setConversationOrder] = React.useState<EmailConversationOrder>("oldest");
@@ -6453,12 +6468,29 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
           <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={onToggleStar}>{message.starred ? "Unstar" : "Star"}</button>
           <button type="button" style={mailPanelSmallButtonStyle} disabled={busy || !archiveAvailable} onClick={onArchive}>{archiveLabel}</button>
           <button type="button" style={{ ...mailPanelSmallButtonStyle, ...dangerButtonStyle }} disabled={busy || !deleteAvailable} onClick={onDelete}>Delete</button>
+          {chatAvailable && (
+            <div data-email-node-actions="true" aria-label="Email node actions" style={{ flex: "0 0 auto", display: "flex", flexWrap: "nowrap", alignItems: "center", gap: 6, paddingLeft: 8, borderLeft: "1px solid rgba(51,221,213,0.28)", whiteSpace: "nowrap" }}>
+              {associatedNodeMessage && onOpenCollaborationNode && (
+                <EmailEntityIconButton
+                  kind="node"
+                  placement="thread-header"
+                  label="Open node for this email thread"
+                  onClick={() => onOpenCollaborationNode(associatedNodeMessage)}
+                />
+              )}
+              {onOpenLogicGate && conversationLogicGateIDs.map((logicGateID) => (
+                <EmailEntityIconButton
+                  key={logicGateID}
+                  kind="logic_gate"
+                  placement="thread-header"
+                  label="Open Logic Gate for this email thread"
+                  onClick={() => onOpenLogicGate(logicGateID)}
+                />
+              ))}
+              {emailNodeDestinationSearch}
+            </div>
+          )}
         </div>
-        {chatAvailable && (
-          <div data-email-node-actions="true" aria-label="Email node actions" style={{ marginLeft: "auto", flex: "0 0 auto", display: "flex", flexWrap: "nowrap", alignItems: "center", justifyContent: "flex-end", gap: 6, paddingLeft: 8, borderLeft: "1px solid rgba(51,221,213,0.28)", whiteSpace: "nowrap" }}>
-            {emailNodeDestinationSearch}
-          </div>
-        )}
       </div>
       <div ref={conversationScrollRef} data-email-conversation-scroll="true" data-email-conversation-count={conversationMessages.length} style={bodyContainerStyle}>
         {conversationMessages.map((conversationMessage, index) => (
@@ -6485,7 +6517,6 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
             onForward={(forwardMessage) => runMessageAction(forwardMessage, onForward)}
             onEmailSelection={onEmailSelection}
             onCommentOnMessage={onCommentOnMessage}
-            onOpenCollaborationNode={onOpenCollaborationNode}
           />
         ))}
       </div>
