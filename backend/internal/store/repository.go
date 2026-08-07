@@ -870,6 +870,7 @@ type CompanyExplorerLocationSegment struct {
 }
 
 type CompanyExplorerSearchQuery struct {
+	Context             context.Context
 	CompanyID           string
 	Query               string
 	PermissionUserID    string

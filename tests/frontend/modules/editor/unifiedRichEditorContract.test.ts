@@ -794,10 +794,13 @@ test("editor header keeps primary controls visible and preserves all secondary o
   assert.match(editorTabBar, /onCreateRelatedNode\(kind as EditorRelatedNodeCreationKind\)/);
   assert.match(editorContent, /onCreateRelatedNode=/);
   assert.match(editorContent, /onSaveCurrentVersion=/);
-  assert.match(editorContent, /secondaryActions=\{linkedEntityKind === "node" \|\| linkedEntityKind === "logic_gate" \? \[\{[\s\S]*id: "use-inherited-gvic-policy"[\s\S]*changeCurrentRACIMode\("inherited"\)[\s\S]*id: "use-customized-gvic-policy"[\s\S]*changeCurrentRACIMode\("customized"\)[\s\S]*id: "apply-gvic-to-inherited-descendants"[\s\S]*onSelect: applyLogicGateRACIToInheritedDescendants[\s\S]*id: "overwrite-gvic-descendants"[\s\S]*onSelect: \(\) => setLogicGateRACIApplyConfirmationOpen\(true\)[\s\S]*singleLine/);
-  assert.match(editorContent, /logicGateRACIApplyConfirmationOpen && linkedEntityKind === "logic_gate"[\s\S]*<ConfirmActionMenu[\s\S]*title="Overwrite all descendants, including customized\?"[\s\S]*confirmLabel="Overwrite"[\s\S]*cancelLabel="No"[\s\S]*onConfirm=\{\(\) => \{[\s\S]*setLogicGateRACIApplyConfirmationOpen\(false\);[\s\S]*applyLogicGateRACIToAssignedNodes\(\)[\s\S]*onCancel=\{\(\) => setLogicGateRACIApplyConfirmationOpen\(false\)\}/);
+  assert.match(editorContent, /secondaryActions=\{linkedEntityKind === "logic_gate" && gvicPolicyHasDescendants \? \[\{[\s\S]*id: "apply-gvic-to-inherited-descendants"[\s\S]*Apply to non-customized descendants[\s\S]*onSelect: applyLogicGateRACIToInheritedDescendants[\s\S]*id: "overwrite-gvic-descendants"[\s\S]*Apply to every descendant[\s\S]*onSelect: \(\) => setLogicGateRACIApplyConfirmationOpen\(true\)[\s\S]*singleLine/);
+  assert.doesNotMatch(editorContent, /changeCurrentRACIMode|use-inherited-gvic-policy|use-customized-gvic-policy/);
+  assert.match(editorContent, /logicGateRACIApplyConfirmationOpen && linkedEntityKind === "logic_gate"[\s\S]*<ConfirmActionMenu[\s\S]*title="Apply to every descendant\?"[\s\S]*confirmLabel="Apply"[\s\S]*cancelLabel="No"[\s\S]*onConfirm=\{\(\) => \{[\s\S]*setLogicGateRACIApplyConfirmationOpen\(false\);[\s\S]*applyLogicGateRACIToAssignedNodes\(\)[\s\S]*onCancel=\{\(\) => setLogicGateRACIApplyConfirmationOpen\(false\)\}/);
   assert.match(raciPresentation, /role: "responsible"[\s\S]*accent: KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR[\s\S]*role: "accountable"[\s\S]*accent: KANBAN_LOGIC_GATE_DONE_COLOR[\s\S]*role: "consulted"[\s\S]*accent: KANBAN_LOGIC_GATE_REVIEW_COLOR[\s\S]*role: "informed"[\s\S]*accent: KANBAN_LOGIC_GATE_BACKLOG_COLOR/);
   assert.match(linkedDocumentPanels, /const RACI_ROLES = LOGIC_GATE_RACI_ROLE_PRESENTATIONS[\s\S]*gridTemplateColumns: "repeat\(4, minmax\(145px, 1fr\)\)"[\s\S]*\{RACI_ROLES\.map/);
+  assert.match(linkedDocumentPanels, /aria-label="GVIC policy mode"[\s\S]*mode === "inherited" \? "Inherited" : "Customized"/);
+  assert.match(linkedDocumentPanels, /canEdit=\{canEdit\}/);
   assert.match(raciPresentation, /radial-gradient\(circle at 12% 10%[\s\S]*colorWithAlpha\(accent, 0\.14\)[\s\S]*colorWithAlpha\(accent, 0\.08\)[\s\S]*linear-gradient\(160deg,[\s\S]*colorWithAlpha\(accent, 0\.12\)[\s\S]*linear-gradient\(135deg,[\s\S]*colorWithAlpha\(accent, 0\.34\)/);
   assert.doesNotMatch(raciPresentation, /colorWithAlpha\(accent, 0\.(?:42|54|86)\)/);
   assert.match(linkedDocumentPanels, /data-raci-role-card=\{role\}[\s\S]*gridTemplateColumns: "minmax\(0, 1fr\) auto"[\s\S]*data-raci-assignment-name=\{role\}[\s\S]*whiteSpace: "nowrap"/);
@@ -1249,9 +1252,14 @@ test("the obsolete EmailPickerModal is removed and email attachment uses the uni
   assert.doesNotMatch(nodeWorkspaceParts, /EmailPickerModal/);
   assert.match(nodeWorkspace, /<UniversalEntityPicker[\s\S]*initialCategory="email_message"/);
   assert.match(projectSummary, /<UniversalEntityPicker[\s\S]*initialCategory="email_message"/);
-  assert.match(universalPicker, /label: "Emails", shortcut: "E"/);
+  assert.match(universalPicker, /ALL_ENTITY_TYPES[^\n]*\["node", "project", "logic_gate", "email_message"\]/);
+  assert.match(universalPicker, /label: "Nodes", shortcut: "N"[\s\S]*label: "Projects", shortcut: "A"[\s\S]*label: "Logic Gates", shortcut: "L"[\s\S]*label: "Emails", shortcut: "E"/);
+  assert.match(universalPicker, /searchEmailInAll = category === "all"[\s\S]*mailbox: "all"[\s\S]*requestJSON<MessagePage>\(path, \{ signal: controller\.signal \}\)/);
+  assert.match(universalPicker, /controller\.abort\(\)/);
+  assert.match(universalPicker, /emailSearchSequenceRef\.current !== sequence/);
   assert.match(emailPane, /"primary"[\s\S]*"starred"[\s\S]*"sent"/);
   assert.match(emailPane, /"all"[\s\S]*"spam"/);
+  assert.match(emailPane, /requestJSON<MessagePage>\(path, \{ signal: controller\.signal \}\)[\s\S]*controller\.abort\(\)/);
   assert.doesNotMatch(emailPane, /composeOpen|composeDraft|submitCompose|sendEmail\s*\(|<textarea|Schedule send|Save draft|Write a reply|Send message/);
 });
 

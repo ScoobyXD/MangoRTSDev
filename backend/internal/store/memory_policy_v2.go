@@ -281,6 +281,14 @@ func (r *MemoryRepo) memoryV2RACIPolicyLocked(companyID, resourceType, resourceI
 	if resolved.SourceType == resourceType && resolved.SourceID == resourceID && resolved.OverwrittenBy == nil {
 		policy.EffectiveAssignmentMode = PolicyModeCustomized
 	}
+	if setting.ParentResourceID != "" {
+		parentResolved := r.resolveV2PolicyLocked(companyID, setting.ParentResourceType, setting.ParentResourceID, true)
+		policy.ParentPolicy = &ResourceRACIPolicyParent{
+			Source:      PolicySource{ResourceType: parentResolved.SourceType, ResourceID: parentResolved.SourceID},
+			Assignments: r.directMemoryRACIEdgesLocked(companyID, parentResolved.SourceType, parentResolved.SourceID),
+		}
+	}
+	policy.HasDescendants = len(r.resourcePermissionDescendantTargetsLocked(companyID, resourceType, resourceID)) > 0
 	return policy
 }
 
@@ -402,6 +410,23 @@ func (r *MemoryRepo) PutResourceRACIPolicy(input ResourceRACIPolicyUpdateInput) 
 			return ResourceRACIPolicy{}, nil, err
 		}
 	}
+	if mode == PolicyModeInherited {
+		if current.ParentPolicy == nil {
+			return ResourceRACIPolicy{}, nil, ErrInvalid
+		}
+		parentInputs := make([]ResourceRACIAssignmentInput, 0, len(current.ParentPolicy.Assignments))
+		for _, assignment := range current.ParentPolicy.Assignments {
+			parentInputs = append(parentInputs, ResourceRACIAssignmentInput{Role: assignment.Role, PrincipalType: assignment.PrincipalType, PrincipalID: assignment.PrincipalID})
+		}
+		normalized, err = normalizeResourceRACIAssignmentInputs(parentInputs)
+		if err != nil {
+			return ResourceRACIPolicy{}, nil, err
+		}
+	}
+	mode = PolicyModeCustomized
+	if current.ParentPolicy != nil && normalizedRACIAssignmentsMatch(normalized, current.ParentPolicy.Assignments) {
+		mode = PolicyModeInherited
+	}
 	for _, item := range normalized {
 		if err := r.validateRACIPrincipalLocked(companyID, item.principalType, item.principalID); err != nil {
 			return ResourceRACIPolicy{}, nil, err
@@ -502,7 +527,42 @@ func (r *MemoryRepo) memoryV2PermissionPolicyLocked(companyID, resourceType, res
 	if resolved.SourceType == resourceType && resolved.SourceID == resourceID && resolved.OverwrittenBy == nil {
 		policy.EffectivePermissionMode = PolicyModeCustomized
 	}
+	if setting.ParentResourceID != "" {
+		parentResolved := r.resolveV2PolicyLocked(companyID, setting.ParentResourceType, setting.ParentResourceID, false)
+		parentSource := r.permissionV2Settings[resourcePolicyKey(companyID, parentResolved.SourceType, parentResolved.SourceID)]
+		policy.ParentPolicy = &ResourcePermissionPolicyParent{
+			Source:        PolicySource{ResourceType: parentResolved.SourceType, ResourceID: parentResolved.SourceID},
+			DefaultAccess: parentSource.DefaultAccess,
+			Permissions:   r.directMemoryPermissionEdgesLocked(companyID, parentResolved.SourceType, parentResolved.SourceID),
+		}
+	}
+	policy.HasDescendants = len(r.resourcePermissionDescendantTargetsLocked(companyID, resourceType, resourceID)) > 0
 	return policy
+}
+
+func (r *MemoryRepo) preserveMemoryActorEditLocked(companyID, actorUserID, defaultAccess string, items []resourcePermissionAssignment) ([]resourcePermissionAssignment, error) {
+	actorUserID = strings.TrimSpace(actorUserID)
+	if actorUserID == "" {
+		return nil, ErrInvalid
+	}
+	accessLevel, found := r.permissionAccessLevelForUserFromAssignmentsLocked(companyID, actorUserID, items)
+	if !found {
+		accessLevel = defaultAccess
+	}
+	if accessLevel == EntityPermissionEdit {
+		return items, nil
+	}
+	for index, item := range items {
+		if item.SubjectType == EntityPermissionSubjectUser && item.SubjectID == actorUserID {
+			items[index].AccessLevel = EntityPermissionEdit
+			return items, nil
+		}
+	}
+	items = append(items, resourcePermissionAssignment{SubjectType: EntityPermissionSubjectUser, SubjectID: actorUserID, AccessLevel: EntityPermissionEdit})
+	sort.Slice(items, func(i, j int) bool {
+		return resourcePermissionAssignmentKey(items[i]) < resourcePermissionAssignmentKey(items[j])
+	})
+	return items, nil
 }
 
 func (r *MemoryRepo) PutResourcePermissionPolicy(input ResourcePermissionPolicyUpdateInput) (ResourcePermissionPolicy, []domain.DomainEvent, error) {
@@ -531,6 +591,36 @@ func (r *MemoryRepo) PutResourcePermissionPolicy(input ResourcePermissionPolicyU
 	if expected := cleanPolicyRevision(input.ExpectedRevision); expected != "" && expected != current.Revision {
 		return ResourcePermissionPolicy{}, nil, ErrVersionConflict
 	}
+	var proposedDefaultAccess string
+	if mode == PolicyModeInherited {
+		if current.ParentPolicy == nil {
+			return ResourcePermissionPolicy{}, nil, ErrInvalid
+		}
+		proposedDefaultAccess = current.ParentPolicy.DefaultAccess
+		parentInputs := make([]EntityPermissionInput, 0, len(current.ParentPolicy.Permissions))
+		for _, permission := range current.ParentPolicy.Permissions {
+			parentInputs = append(parentInputs, EntityPermissionInput{SubjectType: permission.SubjectType, SubjectID: permission.SubjectID, AccessLevel: permission.AccessLevel})
+		}
+		normalized, err = normalizeV2EntityPermissionInputs(parentInputs)
+		if err != nil {
+			return ResourcePermissionPolicy{}, nil, err
+		}
+	} else {
+		proposedDefaultAccess, ok = NormalizeEntityPermission(*input.DefaultAccess)
+		if !ok {
+			return ResourcePermissionPolicy{}, nil, ErrInvalid
+		}
+	}
+	if input.PreserveActorEdit {
+		normalized, err = r.preserveMemoryActorEditLocked(companyID, input.ActorUserID, proposedDefaultAccess, normalized)
+		if err != nil {
+			return ResourcePermissionPolicy{}, nil, err
+		}
+	}
+	mode = PolicyModeCustomized
+	if current.ParentPolicy != nil && proposedDefaultAccess == current.ParentPolicy.DefaultAccess && normalizedPermissionsMatch(normalized, current.ParentPolicy.Permissions) {
+		mode = PolicyModeInherited
+	}
 	for _, item := range normalized {
 		if err := r.validateRACIPrincipalLocked(companyID, item.SubjectType, item.SubjectID); err != nil {
 			return ResourcePermissionPolicy{}, nil, err
@@ -545,15 +635,11 @@ func (r *MemoryRepo) PutResourcePermissionPolicy(input ResourcePermissionPolicyU
 		r.replaceMemoryPermissionEdgesLocked(companyID, resourceType, resourceID, nil)
 		setting.Mode, setting.DefaultAccess, setting.CustomizedSequence = PolicyModeInherited, "", 0
 	} else {
-		defaultAccess, ok := NormalizeEntityPermission(*input.DefaultAccess)
-		if !ok {
-			return ResourcePermissionPolicy{}, nil, ErrInvalid
-		}
 		edges := make([]domain.EntityPermission, 0, len(normalized))
 		for _, item := range normalized {
 			edges = append(edges, domain.EntityPermission{SubjectType: item.SubjectType, SubjectID: item.SubjectID, AccessLevel: item.AccessLevel})
 		}
-		setting.Mode, setting.DefaultAccess, setting.CustomizedSequence = PolicyModeCustomized, defaultAccess, r.nextPermissionV2SequenceLocked()
+		setting.Mode, setting.DefaultAccess, setting.CustomizedSequence = PolicyModeCustomized, proposedDefaultAccess, r.nextPermissionV2SequenceLocked()
 		r.replaceMemoryPermissionEdgesLocked(companyID, resourceType, resourceID, edges)
 	}
 	if action == PolicyDescendantActionIncludingCustomized {

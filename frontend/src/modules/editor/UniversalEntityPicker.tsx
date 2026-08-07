@@ -6,6 +6,11 @@ import { buildSidebarPinTreeRows, type SidebarPinTreeRow } from "../../app/sideb
 import type { SidebarPinTree } from "../../app/sidebarPins.js";
 import { ExplorerEntityIcon, ExplorerRowIcon } from "../../icons/index.js";
 import {
+  createMessageQuery,
+  fetchCommunicationsStatus,
+  type MessagePage,
+} from "../communications/communicationsApi.js";
+import {
   editorEntityTypeLabel,
   searchEditorEntityLinks,
   type EditorEntityLink,
@@ -47,8 +52,8 @@ type PickerRow =
   | { kind: "folder"; key: string; depth: number; label: string }
   | { kind: "entity"; key: string; depth: number; entity: EditorEntityLink; pinned: boolean };
 
-const ALL_ENTITY_TYPES: readonly EditorEntityType[] = ["node", "logic_gate", "project", "email_message"];
-const WORKSPACE_ENTITY_TYPES: readonly EditorWorkspaceEntityType[] = ["node", "logic_gate", "project"];
+const ALL_ENTITY_TYPES: readonly EditorEntityType[] = ["node", "project", "logic_gate", "email_message"];
+const WORKSPACE_ENTITY_TYPES: readonly EditorWorkspaceEntityType[] = ["node", "project", "logic_gate"];
 const EMPTY_PIN_TREE: SidebarPinTree = { folders: [], pins: [] };
 
 export function universalPickerShortcutCategory(value: string): EditorEntityType | null {
@@ -65,9 +70,9 @@ export function universalPickerAllowedTypes(
   linkTargetTypes: readonly EditorEntityType[],
   category: UniversalEntityPickerCategory,
 ): EditorEntityType[] {
-  const base = mode === "link" ? linkTargetTypes : ALL_ENTITY_TYPES;
-  const unique = base.filter((type, index) => base.indexOf(type) === index);
-  return category === "all" ? [...unique] : unique.includes(category) ? [category] : [];
+  const permitted = mode === "link" ? new Set(linkTargetTypes) : new Set(ALL_ENTITY_TYPES);
+  const ordered = ALL_ENTITY_TYPES.filter((type) => permitted.has(type));
+  return category === "all" ? ordered : ordered.includes(category) ? [category] : [];
 }
 
 function pinRowToPickerRow(row: SidebarPinTreeRow, allowedTypes: readonly EditorEntityType[]): PickerRow | null {
@@ -111,8 +116,8 @@ function pickerPanelPosition(anchor: UniversalEntityPickerAnchor, emailActive: b
 
 const categoryOptions: Array<{ type: EditorEntityType; label: string; shortcut: string }> = [
   { type: "node", label: "Nodes", shortcut: "N" },
-  { type: "logic_gate", label: "Logic Gates", shortcut: "L" },
   { type: "project", label: "Projects", shortcut: "A" },
+  { type: "logic_gate", label: "Logic Gates", shortcut: "L" },
   { type: "email_message", label: "Emails", shortcut: "E" },
 ];
 
@@ -122,6 +127,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
   const inputRef = useRef<HTMLInputElement | null>(null);
   const emailPaneRef = useRef<UniversalPickerEmailPaneHandle | null>(null);
   const searchSequenceRef = useRef(0);
+  const emailSearchSequenceRef = useRef(0);
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<UniversalEntityPickerMode>(() => (
     props.initialMode === "link" && props.linkTargetTypes.length > 0 ? "link" : "reference"
@@ -129,6 +135,10 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
   const [category, setCategory] = useState<UniversalEntityPickerCategory>(() => props.initialCategory ?? "all");
   const [pinTree, setPinTree] = useState<SidebarPinTree>(EMPTY_PIN_TREE);
   const [searchResults, setSearchResults] = useState<EditorEntityLink[]>([]);
+  const [emailSearchResults, setEmailSearchResults] = useState<EditorEntityLink[]>([]);
+  const [emailAccountEmail, setEmailAccountEmail] = useState("");
+  const [emailAccountResolved, setEmailAccountResolved] = useState(false);
+  const [emailSearchLoading, setEmailSearchLoading] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -148,13 +158,13 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
     if (!cleanQuery) return allPinnedRows;
     const matchingPins = allPinnedRows.filter((row) => row.kind === "entity" && row.entity.label.toLocaleLowerCase().includes(cleanQuery));
     const seen = new Set(matchingPins.map((row) => row.key));
-    return [...matchingPins, ...searchResults.flatMap<PickerRow>((entity) => {
+    return [...matchingPins, ...[...searchResults, ...emailSearchResults].flatMap<PickerRow>((entity) => {
       const key = `${entity.entityType}:${entity.entityID}`;
       if (seen.has(key)) return [];
       seen.add(key);
       return [{ kind: "entity", key, depth: 0, entity, pinned: false }];
     })];
-  }, [allPinnedRows, query, searchResults]);
+  }, [allPinnedRows, emailSearchResults, query, searchResults]);
   const selectableRows = useMemo(
     () => visibleRows.filter((row): row is Extract<PickerRow, { kind: "entity" }> => row.kind === "entity"),
     [visibleRows],
@@ -177,6 +187,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
   useEffect(() => {
     const cleanQuery = query.trim();
     const sequence = ++searchSequenceRef.current;
+    const controller = new AbortController();
     setSelectedIndex(0);
     setError("");
     if (!cleanQuery || workspaceAllowedTypes.length === 0 || category === "email_message") {
@@ -185,13 +196,89 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
     }
     const timer = window.setTimeout(() => {
       setLoading(true);
-      void searchEditorEntityLinks({ companyID: props.companyID, requestJSON: props.requestJSON }, cleanQuery, 30, workspaceAllowedTypes)
+      void searchEditorEntityLinks({ companyID: props.companyID, requestJSON: props.requestJSON }, cleanQuery, 30, workspaceAllowedTypes, controller.signal)
         .then((results) => { if (searchSequenceRef.current === sequence) setSearchResults(results); })
-        .catch((cause) => { if (searchSequenceRef.current === sequence) setError(cause instanceof Error ? cause.message : "Unable to search workspace"); })
+        .catch((cause) => {
+          if (cause instanceof DOMException && cause.name === "AbortError") return;
+          if (searchSequenceRef.current === sequence) setError(cause instanceof Error ? cause.message : "Unable to search workspace");
+        })
         .finally(() => { if (searchSequenceRef.current === sequence) setLoading(false); });
     }, 120);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
   }, [category, props.companyID, props.requestJSON, query, workspaceAllowedTypes]);
+
+  const searchEmailInAll = category === "all" && allowedTypes.includes("email_message");
+
+  useEffect(() => {
+    if (!searchEmailInAll || emailAccountResolved) return undefined;
+    let cancelled = false;
+    void fetchCommunicationsStatus()
+      .then((status) => {
+        if (cancelled) return;
+        const accountEmail = status.connected && status.status === "connected"
+          ? status.connection?.account_email?.trim().toLowerCase() ?? ""
+          : "";
+        setEmailAccountEmail(accountEmail);
+      })
+      .catch(() => { if (!cancelled) setEmailAccountEmail(""); })
+      .finally(() => { if (!cancelled) setEmailAccountResolved(true); });
+    return () => { cancelled = true; };
+  }, [emailAccountResolved, searchEmailInAll]);
+
+  useEffect(() => {
+    const cleanQuery = query.trim();
+    const sequence = ++emailSearchSequenceRef.current;
+    const controller = new AbortController();
+    if (!searchEmailInAll || !cleanQuery || !emailAccountResolved || !emailAccountEmail) {
+      setEmailSearchResults([]);
+      setEmailSearchLoading(false);
+      return () => controller.abort();
+    }
+    const timer = window.setTimeout(() => {
+      setEmailSearchLoading(true);
+      const path = `/v1/communications/messages${createMessageQuery({
+        companyID: props.companyID,
+        accountEmail: emailAccountEmail,
+        mailbox: "all",
+        limit: 10,
+        q: cleanQuery,
+      })}`;
+      void props.requestJSON<MessagePage>(path, { signal: controller.signal })
+        .then((page) => {
+          if (controller.signal.aborted || emailSearchSequenceRef.current !== sequence) return;
+          const seen = new Set<string>();
+          setEmailSearchResults((page.messages ?? []).flatMap((message) => {
+            const entityID = message.id?.trim() ?? "";
+            if (!entityID || seen.has(entityID)) return [];
+            seen.add(entityID);
+            return [{
+              entityType: "email_message" as const,
+              entityID,
+              label: message.subject?.trim() || "(no subject)",
+              emailMessageID: message.email_message_id?.trim() || undefined,
+              emailThreadID: message.thread_id?.trim() || undefined,
+              emailAccountEmail,
+              emailMailbox: "all" as const,
+              emailMessage: message,
+            }];
+          }));
+        })
+        .catch((cause) => {
+          if (cause instanceof DOMException && cause.name === "AbortError") return;
+          if (emailSearchSequenceRef.current === sequence) setEmailSearchResults([]);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted && emailSearchSequenceRef.current === sequence) setEmailSearchLoading(false);
+        });
+    }, 120);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [category, emailAccountEmail, emailAccountResolved, props.companyID, props.requestJSON, query, searchEmailInAll]);
 
   useEffect(() => {
     if (mode === "link" && category !== "all" && !props.linkTargetTypes.includes(category)) setCategory("all");
@@ -228,6 +315,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
     setCategory("all");
     setQuery("");
     setSearchResults([]);
+    setEmailSearchResults([]);
   };
   const onInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Escape") { event.preventDefault(); props.onCancel(); return; }
@@ -306,7 +394,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
         })}
       </div>
       {category === "email_message" ? (
-        <UniversalPickerEmailPane ref={emailPaneRef} active busy={busy} companyID={props.companyID} query={query} onChoose={chooseEmail} />
+        <UniversalPickerEmailPane ref={emailPaneRef} active busy={busy} companyID={props.companyID} query={query} requestJSON={props.requestJSON} onChoose={chooseEmail} />
       ) : <div role="listbox" aria-label={query.trim() ? "Workspace search results" : "Pinned resources"} style={{ minHeight: 150, maxHeight: 310, overflowY: "auto", padding: "3px 9px 10px" }}>
         <div style={{ padding: "2px 7px 7px", fontSize: 10, fontWeight: 900, letterSpacing: .7, textTransform: "uppercase", color: "#64748b" }}>{query.trim() ? "Results" : "Pinned"}</div>
         {visibleRows.map((row) => {
@@ -315,8 +403,8 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
           const active = index === selectedIndex;
           return <button key={row.key} type="button" role="option" aria-selected={active} disabled={busy} onMouseEnter={() => setSelectedIndex(index)} onClick={() => void choose(row.entity)} style={{ width: "100%", display: "grid", gridTemplateColumns: "auto minmax(0,1fr) auto", alignItems: "center", gap: 9, padding: "9px 10px", paddingLeft: 10 + row.depth * 14, border: active ? "1px solid rgba(8,145,178,.24)" : "1px solid transparent", borderRadius: 11, background: active ? "linear-gradient(145deg,rgba(232,251,255,.94),rgba(245,239,255,.92))" : "transparent", color: "#172033", cursor: busy ? "wait" : "pointer", textAlign: "left" }}><ExplorerEntityIcon kind={row.entity.entityType} /><span style={{ minWidth: 0 }}><span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 800 }}>{row.entity.label}</span><span style={{ display: "block", marginTop: 1, color: "#64748b", fontSize: 10 }}>{editorEntityTypeLabel(row.entity.entityType)}</span></span>{row.pinned && <span aria-label="Pinned" title="Pinned" style={{ color: "#f59e0b", fontSize: 12 }}>◆</span>}</button>;
         })}
-        {!loading && visibleRows.length === 0 && <div style={{ padding: "28px 14px", textAlign: "center", color: "#64748b", fontSize: 12 }}>{query.trim() ? "No matching resources." : "Your Pinned section is empty."}</div>}
-        {loading && <div style={{ padding: 12, color: "#64748b", fontSize: 11 }}>Loading…</div>}
+        {!loading && !emailSearchLoading && visibleRows.length === 0 && <div style={{ padding: "28px 14px", textAlign: "center", color: "#64748b", fontSize: 12 }}>{query.trim() ? "No matching resources." : "Your Pinned section is empty."}</div>}
+        {(loading || emailSearchLoading) && <div style={{ padding: 12, color: "#64748b", fontSize: 11 }}>Loading…</div>}
       </div>}
       <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 42, padding: "8px 14px", borderTop: "1px solid rgba(255,255,255,.72)", color: "#64748b", fontSize: 10 }}>
         {props.linkTargetTypes.length > 0 ? <button type="button" disabled={busy} onClick={() => setPickerMode(mode === "reference" ? "link" : "reference")} style={{ padding: "5px 8px", border: 0, borderRadius: 8, background: mode === "link" ? "rgba(124,58,237,.12)" : "rgba(8,145,178,.10)", color: mode === "link" ? "#6d28d9" : "#0e7490", cursor: "pointer", fontSize: 10, fontWeight: 900 }}>{mode === "link" ? "## Link" : "# Reference"}</button> : <span># Reference</span>}

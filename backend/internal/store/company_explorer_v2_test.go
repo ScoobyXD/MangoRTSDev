@@ -1149,7 +1149,7 @@ func TestMemoryCompanyExplorerSearchOrdersTypesAndReturnsLocationPath(t *testing
 	}
 }
 
-func TestMemoryCompanyExplorerEditorSearchPrioritizesActiveThenDoneEntities(t *testing.T) {
+func TestMemoryCompanyExplorerEditorSearchUsesExactUniversalPickerTypeOrder(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-220000000105"
 	repo.EnsureCompany(companyID, "Editor Ranking Co")
@@ -1208,19 +1208,20 @@ func TestMemoryCompanyExplorerEditorSearchPrioritizesActiveThenDoneEntities(t *t
 	if err != nil {
 		t.Fatalf("SearchCompanyExplorer: %v", err)
 	}
-	want := []struct{ resourceType, resourceID string }{
-		{EntityTypeNode, activeNodeID},
-		{EntityTypeProject, activeProject.Project.ProjectID},
-		{EntityTypeLogicGate, gateID},
-		{EntityTypeNode, doneNodeID},
-		{EntityTypeProject, doneProject.Project.ProjectID},
+	wantTypes := []string{EntityTypeNode, EntityTypeNode, EntityTypeProject, EntityTypeProject, EntityTypeLogicGate}
+	if len(results.Results) != len(wantTypes) {
+		t.Fatalf("editor search results=%+v, want %d", results.Results, len(wantTypes))
 	}
-	if len(results.Results) != len(want) {
-		t.Fatalf("editor search results=%+v, want %d", results.Results, len(want))
+	seenIDs := make(map[string]bool, len(results.Results))
+	for index, expectedType := range wantTypes {
+		if results.Results[index].ResourceType != expectedType {
+			t.Fatalf("result[%d]=%s/%s, want type %s; all=%+v", index, results.Results[index].ResourceType, results.Results[index].ResourceID, expectedType, results.Results)
+		}
+		seenIDs[results.Results[index].ResourceID] = true
 	}
-	for index, expected := range want {
-		if results.Results[index].ResourceType != expected.resourceType || results.Results[index].ResourceID != expected.resourceID {
-			t.Fatalf("result[%d]=%s/%s, want %s/%s; all=%+v", index, results.Results[index].ResourceType, results.Results[index].ResourceID, expected.resourceType, expected.resourceID, results.Results)
+	for _, expectedID := range []string{activeNodeID, doneNodeID, activeProject.Project.ProjectID, doneProject.Project.ProjectID, gateID} {
+		if !seenIDs[expectedID] {
+			t.Fatalf("editor search missing resource %s; all=%+v", expectedID, results.Results)
 		}
 	}
 }

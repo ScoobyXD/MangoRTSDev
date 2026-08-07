@@ -1,8 +1,24 @@
+# Process Story: Universal search narrows first and authorizes only the finalists
+
+A non-admin types a nonblank query in the Universal Picker
+↓
+All searches Nodes, Projects, Logic Gates, then Emails, while a selected tab searches only its matching source
+↓
+Mango ranks a bounded batch directly from those source tables before performing permission work
+↓
+The backend resolves the actor's group ancestry once, checks only the candidate resources and their exact typed parent paths, and continues with the next ranked batch only when denied rows leave open result slots
+↓
+Changing the query aborts stale workspace and email requests, and the search GET performs no folder repair, upsert, backfill, or version-triggering write
+↓
+GVIC remains separate and never participates in search authorization
+
+Last updated: 2026-08-07
+
 # Process Story: The universal picker references or links an exact typed resource
 
 A user opens the shared universal picker from a Node, Logic Gate, or Project editor, a Node or Project Attach email action, or a selected My Triage/Shared Triage message
 ↓
-The picker opens above a transparent dismiss layer, focuses one search field, and shows Nodes, Logic Gates, Projects, and Emails as typed categories
+The picker opens above a transparent dismiss layer, focuses one search field, and shows Nodes, Projects, Logic Gates, and Emails as typed categories
 ↓
 Single-hashtag reference mode inserts or opens the chosen exact resource without changing a business relationship
 ↓
@@ -28,7 +44,7 @@ UP4 - The picker has exactly two meanings. `#` is reference mode and may insert 
 
 UP5 - While the focused search is empty, typing `#` in reference mode changes to link mode only when the host supplied at least one legal link target. While the focused search is empty, Backspace in link mode changes to reference mode. The footer mode control performs the same transition. Every mode transition returns to All, clears the query, and clears workspace results.
 
-UP6 - The category row is ordered Nodes, Logic Gates, Projects, Emails. Emails is immediately to the right of Projects. The matching single-letter shortcuts are N then Tab, L then Tab, A then Tab, and E then Tab. A shortcut changes category and clears the shortcut text; it does not select a result.
+UP6 - The category row is ordered Nodes, Projects, Logic Gates, Emails. The matching single-letter shortcuts are N then Tab, A then Tab, L then Tab, and E then Tab. A shortcut changes category and clears the shortcut text; it does not select a result.
 
 UP7 - Clicking an active category selects that exact type and clears the query. Clicking the already active category returns to All. In link mode a category is enabled only if the source host supplied that type as a legal link destination; a disabled category cannot be selected by pointer or keyboard.
 
@@ -38,9 +54,9 @@ UP9 - The legal `##` matrix is exact: Node may link to a Logic Gate, Project, or
 
 UP10 - A blank All, Nodes, Logic Gates, or Projects view reads the current user's complete company-scoped Pinned tree. It preserves stored folder/pin sibling order and indentation, expands the tree for display, hides empty folders after type filtering, and does not invent recency or write recent-use state.
 
-UP11 - A nonblank workspace query searches only allowed Node, Logic Gate, and Project types through the editor-only company-scoped search. Matching pinned entities remain first. Workspace results with the same canonical type and ID as a matching pin appear only once.
+UP11 - A nonblank All query searches allowed Nodes, Projects, Logic Gates, and personal email in that order. A selected Nodes, Projects, Logic Gates, or Emails tab searches only that exact source and does not scan the other resource tables. Matching pinned entities remain first. Results with the same canonical type and ID as a matching pin appear only once.
 
-UP12 - Workspace search waits 120 milliseconds after input, requests at most 30 results, and ignores any response that is no longer the newest query. Changing category, mode, or query resets keyboard selection to the first selectable result.
+UP12 - Workspace search waits 120 milliseconds after input and requests at most 30 authorized results. Changing category, mode, or query aborts the old network request, carries that cancellation through the HTTP request into the database query, and retains the response-sequence guard, so an already completed stale response still cannot replace current state. Keyboard selection resets to the first selectable result.
 
 UP13 - Workspace search and blank Pinned reads use the current host's authenticated request function and company ID. They must preserve effective-access and visible-location filtering and must not reveal a cross-company, hidden, unsupported, folder-only, or inaccessible resource.
 
@@ -102,6 +118,18 @@ UP41 - The picker never writes a generic edge, central resource registry, transl
 
 UP42 - The Universal picker is a frontend orchestration and document-reference surface. Adding the Emails category does not itself require a database/schema change, a new backend relationship table, or a migration.
 
+UP43 - Editor-entity search ranks a bounded candidate batch directly from `nodes`, `projects`, and `logic_gates` before authorization. It never builds a company-wide visible Company Explorer tree and never runs point permission resolution across every company resource before applying the result limit.
+
+UP44 - For a non-admin search batch, direct-user rules, live nested-group rules, and the effective default are evaluated in permission precedence order. The actor's group ancestry is resolved once per batch. GVIC assignments are not read and never grant search visibility.
+
+UP45 - Company Explorer is consulted only for the exact candidate's canonical location rule: a Project or Logic Gate uses its exact placement and folder ancestors; a Node uses exact Logic Gate assignment or Project relationship locations, or no location when it is standalone. Every required location resource and folder ancestor must be accessible, so hidden organization is not leaked.
+
+UP46 - Permission filtering continues through later ranked candidate batches only when inaccessible rows leave result slots open. The response stops once its requested authorized limit is full or matching source rows are exhausted.
+
+UP47 - Every search GET is read-only. It must not open a repair transaction, upsert the three default Company Explorer folders, backfill placement, advance policy or folder versions, or fire write triggers. Creation and migration workflows own required default-state repair.
+
+UP48 - The search architecture in UP43 through UP47 is the rule for Mango free-text resource searches: narrow by company, selected type, text, and bounded rank first; authorize that narrowed set last. A listing endpoint that intentionally returns a complete tree is not a free-text search and retains its separately documented tree-visibility behavior.
+
 # Scenarios
 
 ## Scenario UP-S1: Open, filter, and dismiss the shared picker
@@ -114,7 +142,7 @@ Given:
 
 Expected:
 - The picker focuses search and starts in reference mode.
-- Nodes, Logic Gates, Projects, and Emails appear in that order; N/L/A/E followed by Tab selects an enabled category.
+- Nodes, Projects, Logic Gates, and Emails appear in that order; N/A/L/E followed by Tab selects an enabled category.
 - Blank workspace categories show the filtered Pinned tree; nonblank workspace queries show authorized matching pins first and deduplicated workspace results after them.
 - Arrow keys, Enter, Tab, Escape, pointer selection, mode switching, and outside-click dismissal follow the same rules in every host.
 

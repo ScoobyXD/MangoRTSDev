@@ -1,12 +1,15 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import {
   fetchCommunicationsStatus,
+  createMessageQuery,
   listEmailFolders,
   listEmailMessages,
   type EmailFolder,
   type EmailMailbox,
   type EmailMessage,
+  type MessagePage,
 } from "../communications/communicationsApi.js";
+import type { EditorEntityLinkRequest } from "./editorEntityLinks.js";
 import {
   EDITOR_NEU_ACTIVE_SURFACE,
   EDITOR_NEU_EDGE_FRAME,
@@ -35,6 +38,7 @@ type UniversalPickerEmailPaneProps = {
   busy: boolean;
   companyID: string;
   query: string;
+  requestJSON: EditorEntityLinkRequest;
   onChoose: (selection: UniversalPickerEmailSelection) => void;
 };
 
@@ -89,6 +93,7 @@ export const UniversalPickerEmailPane = forwardRef<UniversalPickerEmailPaneHandl
   busy,
   companyID,
   query,
+  requestJSON,
   onChoose,
 }, ref) {
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -160,6 +165,7 @@ export const UniversalPickerEmailPane = forwardRef<UniversalPickerEmailPaneHandl
   useEffect(() => {
     if (!active || !accountResolved || !accountEmail) return undefined;
     const sequence = ++requestSequenceRef.current;
+    const controller = new AbortController();
     let cancelled = false;
     setSelectedIndex(0);
     setLoading(true);
@@ -168,19 +174,21 @@ export const UniversalPickerEmailPane = forwardRef<UniversalPickerEmailPaneHandl
     setNextPageToken("");
     setError("");
     const timer = window.setTimeout(() => {
-      void listEmailMessages({
+      const path = `/v1/communications/messages${createMessageQuery({
         companyID,
         accountEmail,
         mailbox,
         limit: EMAIL_PAGE_SIZE,
         q: query.trim() || undefined,
-      })
+      })}`;
+      void requestJSON<MessagePage>(path, { signal: controller.signal })
         .then((page) => {
           if (cancelled || requestSequenceRef.current !== sequence) return;
           setMessages(page.messages ?? []);
           setNextPageToken(page.next_page_token ?? "");
         })
         .catch((cause) => {
+          if (cause instanceof DOMException && cause.name === "AbortError") return;
           if (!cancelled && requestSequenceRef.current === sequence) setError(cause instanceof Error ? cause.message : "Unable to search email.");
         })
         .finally(() => {
@@ -190,8 +198,9 @@ export const UniversalPickerEmailPane = forwardRef<UniversalPickerEmailPaneHandl
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      controller.abort();
     };
-  }, [accountEmail, accountResolved, active, companyID, mailbox, query]);
+  }, [accountEmail, accountResolved, active, companyID, mailbox, query, requestJSON]);
 
   useEffect(() => {
     if (selectedIndex < messages.length) return;

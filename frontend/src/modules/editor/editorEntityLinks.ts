@@ -147,7 +147,8 @@ export async function searchEditorEntityLinks(
   context: Pick<EditorEntityLinkContext, "companyID" | "requestJSON">,
   query: string,
   limit = 20,
-  entityTypes: readonly EditorWorkspaceEntityType[] = ["node", "logic_gate", "project"],
+  entityTypes: readonly EditorWorkspaceEntityType[] = ["node", "project", "logic_gate"],
+  signal?: AbortSignal,
 ): Promise<EditorEntityLink[]> {
   const requestedTypes = entityTypes.filter((type, index) => entityTypes.indexOf(type) === index);
   const requestedTypeSet = new Set(requestedTypes);
@@ -159,7 +160,7 @@ export async function searchEditorEntityLinks(
     resource_types: requestedTypes.join(","),
     ranking: "editor_entities",
   });
-  const response = await context.requestJSON<CompanyExplorerEntitySearchResponse>(`/v1/company-explorer/search?${params.toString()}`);
+  const response = await context.requestJSON<CompanyExplorerEntitySearchResponse>(`/v1/company-explorer/search?${params.toString()}`, { signal });
   const seen = new Set<string>();
   const results = (response.results ?? []).flatMap((result, responseIndex) => {
     const entityType = result.resource_type;
@@ -173,8 +174,8 @@ export async function searchEditorEntityLinks(
   });
   const typeOrder: Record<EditorWorkspaceEntityType, number> = {
     node: 0,
-    logic_gate: 1,
-    project: 2,
+    project: 1,
+    logic_gate: 2,
   };
   return results
     .sort((left, right) => typeOrder[left.entityType as EditorWorkspaceEntityType] - typeOrder[right.entityType as EditorWorkspaceEntityType] || left.responseIndex - right.responseIndex)

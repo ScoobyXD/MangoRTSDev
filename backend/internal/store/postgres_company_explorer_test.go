@@ -188,27 +188,28 @@ func TestPostgresCompanyExplorerSearchUsesVisibleExplorerLocations(t *testing.T)
 	}
 }
 
-func TestPostgresCompanyExplorerEditorSearchUsesLeanPriorityBuckets(t *testing.T) {
+func TestPostgresCompanyExplorerEditorSearchNarrowsBeforePermissionChecks(t *testing.T) {
 	raw, err := os.ReadFile("postgres_company_explorer_editor_search.go")
 	if err != nil {
 		t.Fatalf("ReadFile postgres_company_explorer_editor_search.go: %v", err)
 	}
 	source := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
 	for _, want := range []string{
-		"with recursive visible_folders as",
-		"visible_items as",
-		"and item.target_type in ('project', 'logic_gate') and (item.parent_folder_id",
-		"node_organization_links as",
-		"visible_node_links as",
+		"with recursive candidates as",
+		"candidate_batch as materialized",
+		"organization_links as",
+		"candidate_locations as",
+		"location_folders(candidate_type",
+		"member_groups_raw(group_id,depth,path) as",
+		"access_targets as",
+		"resolved_targets as",
+		"target_access as",
+		"candidate_access as",
 		"lower(node.name) like '%' || lower($2) || '%'",
 		"lower(project.name) like '%' || lower($2) || '%'",
 		"lower(logic_gate.header) like '%' || lower($2) || '%'",
-		"when candidate.resource_type='node' and lower(btrim(candidate.status))='done' then 3",
-		"when candidate.resource_type='node' then 0",
-		"when candidate.resource_type='project' and lower(btrim(candidate.status)) in ('done', 'completed', 'archived') then 4",
-		"when candidate.resource_type='project' then 1",
-		"when candidate.resource_type='logic_gate' then 2",
-		"order by matched.editor_priority, matched.match_priority",
+		"case candidate.resource_type when 'node' then 0 when 'project' then 1 when 'logic_gate' then 2",
+		"order by candidate.editor_priority, candidate.match_priority",
 		"'[]'::text as location_path",
 	} {
 		if !strings.Contains(source, want) {
@@ -219,10 +220,29 @@ func TestPostgresCompanyExplorerEditorSearchUsesLeanPriorityBuckets(t *testing.T
 		"jsonb_build_array",
 		"ranked_locations",
 		"companyexplorerfinalhaschildrenexpr",
+		"visible_folders as",
+		"mangorts_user_can_access_resource",
 	} {
 		if strings.Contains(source, forbidden) {
 			t.Fatalf("editor entity search SQL kept unused Explorer path work %q", forbidden)
 		}
+	}
+	searchRaw, err := os.ReadFile("postgres_company_explorer_search.go")
+	if err != nil {
+		t.Fatalf("ReadFile postgres_company_explorer_search.go: %v", err)
+	}
+	if strings.Contains(string(searchRaw), "ensureCompanyExplorerDefaultState(query.CompanyID)") {
+		t.Fatal("search must not repair or upsert Company Explorer defaults")
+	}
+	handlerRaw, err := os.ReadFile("../http/company_explorer_handlers.go")
+	if err != nil {
+		t.Fatalf("ReadFile company_explorer_handlers.go: %v", err)
+	}
+	if !strings.Contains(string(handlerRaw), "Context:             r.Context()") {
+		t.Fatal("search handler must carry request cancellation into the repository query")
+	}
+	if !strings.Contains(string(raw), "ctx := query.Context") || !strings.Contains(string(raw), "r.db.QueryContext(ctx") {
+		t.Fatal("editor entity search must run PostgreSQL work under the request context")
 	}
 }
 

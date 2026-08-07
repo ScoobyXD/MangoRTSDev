@@ -1,3 +1,19 @@
+# Process Story: Permission mode follows the policy and the saving manager stays inside
+
+A manager edits a resource's default or direct user/group permission rows without choosing a mode
+↓
+The UI compares the draft with the immediate parent's canonical default and raw user/group rules, showing Inherited only for an exact unordered match and Customized otherwise
+↓
+The backend repeats that comparison against the live parent inside the save transaction and stores the authoritative mode
+↓
+If the proposed result would deny the acting company manager Edit, the same transaction adds or corrects only that manager's direct Edit rule
+↓
+Other managers may still gain or lose access, while company admins and dev admins keep their existing bypass
+↓
+Descendant actions are labeled Apply to non-customized descendants and Apply to every descendant; only the second crosses customized boundaries and requires confirmation
+
+Last updated: 2026-08-07
+
 # Process Story: A manager controls peer permissions without an arbitrary row cap
 
 A company manager who can Edit a resource opens its permission settings
@@ -65,7 +81,7 @@ P23 - Permission writes update one complete policy or one descendant-reset seque
 P24 - Company managers do not bypass resource permissions.
 P25 - Company managers with effective Edit access can update user and group exceptions, including exceptions for other company managers; they cannot edit company-admin or dev-admin identities.
 P26 - Default access has only two states, edit and no access; `resource_permissions` stores explicit user/group source rows with their own access level.
-P27 - When a company manager changes a resource default, manager effective access is preserved while regular company users follow the new default and exceptions.
+P27 - On every permission save by a company manager, the acting manager must retain effective Edit access. If the proposed default, direct rule, group rule, inherited parent, or descendant action would deny that actor, the backend atomically adds or corrects only the actor's direct Edit rule. Other managers remain governed by the saved policy and may gain or lose access.
 P28 - Step 1 copied reconciled legacy policy into V2 staging. Step 2 uses canonical V2 tables only and retains renamed legacy policy tables only as frozen rollback evidence for Step 3.
 P29 - Runtime permission readers and writers use only `resource_permission_settings` and canonical `resource_permissions`; no legacy, fallback, dual-write, request-repair, or derived-authority path is active.
 P30 - A non-root resource starts inherited and stores no direct rule rows unless a creation workflow explicitly customizes it. A root is customized with a complete valid policy.
@@ -80,8 +96,8 @@ P38 - Kanban board/card visibility follows the owning Logic Gate access, but ope
 P39 - Permission settings denial copy explains that only managers and admins with resource edit access can manage permissions.
 P40 - Group permission rows are pointers to the group or subgroup; adding a user to that group later makes the user's effective permission follow the group row without writing per-user rows.
 P41 - A direct user rule overrides groups. The nearest matching group wins; at equal depth No Access beats Edit, then stable group identity breaks ties. Default applies only when no direct or group rule matches.
-P42 - Apply to inherited descendants saves the selected policy if needed and writes no descendant policy state. Inherited branches already resolve it live, and active customized boundaries remain protected.
-P43 - Overwrite all descendants uses one reset sequence that also supersedes older customized descendants. A later descendant customization becomes active again.
+P42 - Apply to non-customized descendants saves the selected policy if needed and writes no descendant policy state. Inherited branches already resolve it live, and active customized boundaries remain protected.
+P43 - Apply to every descendant uses one reset sequence that also supersedes older customized descendants. A later descendant customization becomes active again, and the UI requires confirmation before this action.
 P44 - Every permissions dialog and embedded permissions view, including Company Explorer folders, nodes, Logic Gates, projects, shared inboxes, and Shared Triage entry points, exposes an explicit `Save` button in a stable action area. Save commits the current default, user/group, and descendant selections without closing. Closing an editable dialog with pending changes saves successfully before dismissing it. Denied, read-only, unchanged, and already-saved dialogs close without writing, and closing after a successful explicit Save never issues a duplicate write.
 P45 - Runtime authorization resolves group permission rows from group source tables and group membership source rows; permission checks must not require a derived group closure/projection table to be populated.
 P46 - Ordinary policy writes do not walk descendants. Force-overwrite work stays constant-size as the subtree grows.
@@ -89,7 +105,13 @@ P47 - Settings contain inherited/customized mode, customized sequence, parent-li
 P48 - A parent link newer than a reset blocks that older reset from retroactively crossing a moved subtree. A later reset from the new ancestry may cross it.
 P49 - Separate monotonic sequence domains are used for RACI and permissions; wall-clock timestamps never decide policy precedence.
 P50 - A reset can make a stored customization inactive without deleting it. Reads explain both the effective source and the overwritten stored source.
-P51 - The frontend has distinct Inherited/Customized controls, Apply to inherited descendants, and separately confirmed Overwrite all descendants controls.
+P51 - Inherited and Customized are read-only status displays, never mode buttons. Permission inputs remain editable while the status is Inherited. Editing away from the parent changes the displayed status to Customized; restoring an exact parent match changes it back to Inherited.
+
+P69 - Permission policy equality compares the canonical default plus the unordered set of raw rules keyed by subject type, subject ID, and Edit/No Access. Expanded group users, display labels, timestamps, source IDs, and array order do not affect equality.
+
+P70 - The frontend may compare against the loaded parent snapshot for immediate feedback, but the backend must re-resolve and compare the live parent inside the write transaction. Roots cannot inherit. A request flag cannot force a mode that disagrees with the saved policy.
+
+P71 - Descendant controls appear only when the resource currently has descendants. The exact labels are `Apply to non-customized descendants` and `Apply to every descendant`; only the latter is separately confirmed.
 P52 - Permission audit/explainability identifies direct/default/group resolution, the effective customized source, eligible reset, parent-link boundary, and overwritten customization; it never reports RACI as an authorization grant.
 P53 - Permission fingerprints include effective source and sequence, eligible reset, parent-link boundary, group-membership version, actor identity, and actor-specific Edit result where exposed.
 P54 - Soft delete for nodes and Company Explorer delete targets requires edit access to the deleted resource or container; no access and RACI assignments never authorize the delete.
@@ -237,6 +259,9 @@ Business logic covered:
 - P51
 - P52
 - P53
+- P69
+- P70
+- P71
 - P68
 
 Given:
@@ -253,8 +278,8 @@ Expected:
 - Moving to a different folder or Logic Gate advances the parent-link sequence; inherited policy follows the new parent and customized policy is preserved.
 - Detaching an inherited Node materializes its current effective policy as customized in the same transaction.
 - Project permission changes do not cascade into related Logic Gates or nodes.
-- Inherited-only Apply adds no descendant state because inherited branches already resolve live.
-- Overwrite-all changes one reset sequence and can make eligible older customized policies inactive without deleting their dormant rows.
+- Apply to non-customized descendants adds no descendant state because inherited branches already resolve live.
+- Apply to every descendant changes one reset sequence and can make eligible older customized policies inactive without deleting their dormant rows.
 - After a successful parent permission save, cached Node and Logic Gate descendants refetch their live effective result instead of reusing a stale record payload.
 - A later descendant customization becomes active again; an ordinary later parent save cannot cross it.
 - A subtree moved after a reset is protected by its newer parent-link sequence until a later reset from its new ancestry.

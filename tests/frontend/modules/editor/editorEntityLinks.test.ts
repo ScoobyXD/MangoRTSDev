@@ -99,12 +99,15 @@ test("# entity drafts respect text boundaries and allow a searchable phrase", ()
   assert.equal(readActiveEntityLinkDraft("#road,", 6), null);
 });
 
-test("entity search groups Nodes, Logic Gates, and Projects in product order", async () => {
+test("entity search groups Nodes, Projects, and Logic Gates in product order and forwards cancellation", async () => {
   let requestedPath = "";
+  let requestedSignal: AbortSignal | null | undefined;
+  const controller = new AbortController();
   const results = await searchEditorEntityLinks({
     companyID: "company-1",
-    requestJSON: async <T>(path: string): Promise<T> => {
+    requestJSON: async <T>(path: string, init?: RequestInit): Promise<T> => {
       requestedPath = path;
+      requestedSignal = init?.signal;
       return {
         results: [
           { resource_type: "project", resource_id: "project-1", display_name: "Roadmap" },
@@ -115,15 +118,16 @@ test("entity search groups Nodes, Logic Gates, and Projects in product order", a
         ],
       } as T;
     },
-  }, "road");
+  }, "road", 20, ["node", "project", "logic_gate"], controller.signal);
 
   const url = new URL(requestedPath, "https://mango.test");
   assert.equal(url.pathname, "/v1/company-explorer/search");
   assert.equal(url.searchParams.get("company_id"), "company-1");
   assert.equal(url.searchParams.get("q"), "road");
-  assert.equal(url.searchParams.get("resource_types"), "node,logic_gate,project");
+  assert.equal(url.searchParams.get("resource_types"), "node,project,logic_gate");
   assert.equal(url.searchParams.get("ranking"), "editor_entities");
-  assert.deepEqual(results.map((entity) => entity.entityType), ["node", "logic_gate", "project"]);
+  assert.equal(requestedSignal, controller.signal);
+  assert.deepEqual(results.map((entity) => entity.entityType), ["node", "project", "logic_gate"]);
 });
 
 test("entity search requests and returns only the selected picker category", async () => {

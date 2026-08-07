@@ -151,6 +151,62 @@ func TestV2PermissionCustomizeInheritAndForceReset(t *testing.T) {
 	}
 }
 
+func TestV2PermissionModeAutomaticallyTracksExactParentPolicy(t *testing.T) {
+	repo, companyID, _, userA, userB := newV2PolicyTestRepo(t)
+	gate, _ := repo.CreateLogicGate(companyID, "automatic parent")
+	node, _ := repo.CreateNode(companyID, "automatic child")
+	priority := 1
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID: companyID, LogicGateID: gate.LogicGateID, NodeID: node.NodeID, Status: "pending", Priority: &priority, PrioritySet: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	deny := ResourceDefaultAccessNoAccess
+	parentPermissions := []EntityPermissionInput{
+		{SubjectType: EntityPermissionSubjectUser, SubjectID: userA.UserID, AccessLevel: EntityPermissionEdit},
+		{SubjectType: EntityPermissionSubjectUser, SubjectID: userB.UserID, AccessLevel: EntityPermissionNoAccess},
+	}
+	putMemoryPermissionPolicy(t, repo, ResourcePermissionPolicyUpdateInput{
+		CompanyID: companyID, ResourceType: EntityTypeLogicGate, ResourceID: gate.LogicGateID,
+		PermissionMode: PolicyModeCustomized, DefaultAccess: &deny, Permissions: parentPermissions, DescendantAction: PolicyDescendantActionInheritedOnly,
+	})
+	child, err := repo.GetResourcePermissionPolicy(companyID, EntityTypeNode, node.NodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.ParentPolicy == nil || child.ParentPolicy.DefaultAccess != deny || len(child.ParentPolicy.Permissions) != 2 {
+		t.Fatalf("parent snapshot = %+v", child.ParentPolicy)
+	}
+
+	child = putMemoryPermissionPolicy(t, repo, ResourcePermissionPolicyUpdateInput{
+		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
+		PermissionMode: PolicyModeCustomized, DefaultAccess: &deny,
+		Permissions:      []EntityPermissionInput{parentPermissions[1], parentPermissions[0]},
+		DescendantAction: PolicyDescendantActionInheritedOnly, ExpectedRevision: child.Revision,
+	})
+	if child.PermissionMode != PolicyModeInherited {
+		t.Fatalf("exact unordered parent match mode = %q, want inherited", child.PermissionMode)
+	}
+
+	child = putMemoryPermissionPolicy(t, repo, ResourcePermissionPolicyUpdateInput{
+		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
+		PermissionMode: PolicyModeCustomized, DefaultAccess: &deny, Permissions: parentPermissions[:1],
+		DescendantAction: PolicyDescendantActionInheritedOnly, ExpectedRevision: child.Revision,
+	})
+	if child.PermissionMode != PolicyModeCustomized {
+		t.Fatalf("different parent policy mode = %q, want customized", child.PermissionMode)
+	}
+
+	child = putMemoryPermissionPolicy(t, repo, ResourcePermissionPolicyUpdateInput{
+		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
+		PermissionMode: PolicyModeCustomized, DefaultAccess: &deny, Permissions: parentPermissions,
+		DescendantAction: PolicyDescendantActionInheritedOnly, ExpectedRevision: child.Revision,
+	})
+	if child.PermissionMode != PolicyModeInherited {
+		t.Fatalf("restored parent policy mode = %q, want inherited", child.PermissionMode)
+	}
+}
+
 func TestV2PermissionRejectsStaleRevisionAndDoesNotGrantThroughRACI(t *testing.T) {
 	repo, companyID, _, userA, _ := newV2PolicyTestRepo(t)
 	node, _ := repo.CreateNode(companyID, "separation")
