@@ -155,7 +155,7 @@ select distinct derived.user_id::text,
        coalesce(nullif(app_user.display_name, ''), nullif(app_user.email, ''), 'Unknown user')
 from mangorts_v2_effective_gvic_assignments($1::uuid,$2,$3::uuid) derived
 join users app_user on app_user.user_id=derived.user_id
-where derived.role='verified'
+where derived.role='verifier'
 order by 2, 1`, input.CompanyID, EntityTypeNode, input.NodeID)
 	if err != nil {
 		return NodeTimelineMutationResult{}, err

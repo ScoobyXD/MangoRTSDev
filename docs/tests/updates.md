@@ -1,3 +1,15 @@
+# Process Story: RCVI changes notify the people whose effective role changed
+
+A user replaces a Node or Logic Gate RCVI policy
+↓
+Mango compares effective RCVI before and after the write, including live nested-group expansion
+↓
+Each non-actor user who became effective or whose highest effective role changed receives one assignment update
+↓
+Unchanged, removed, unrelated, and actor users receive no assignment update, and Verifier requests route through the CVI surface
+
+Last updated: 2026-08-06
+
 # Process Story: An Update opens the exact thing that changed
 
 A user activates an Updates row
@@ -18,12 +30,12 @@ Last updated: 2026-08-06
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: saved-views API coverage exists for Updates Project, Logic Gate, and Status grouping fields. `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the exact shared status order and Updates wiring. `tests/frontend/pages/home/updatesSelection.test.ts` covers row selection, individual Seen/Unsee action resolution and successor/reload decisions, U74's pure current Logic Gate label and saved grouping-label/sort resolution, readable mention actor fallback, and strict editable Seen-history dates. `tests/frontend/pages/home/updatesGrouping.test.ts` covers U81's built-in grouping chain, U82's shared GVIC/Priority group-title presentation, U83's initial full expansion with manual-collapse preservation, the U84/U85 control and sidebar layout contracts, and U97's saved-view restoration selection. `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the Updates Node panel's shared-shell fullscreen capability and adapter wiring. Current Node/Logic Gate mounted row, panel, and open-action wiring is not a mounted behavior test. Other rule IDs are not mapped to automated tests yet.
+- Business Logic Covered By Automated Tests: saved-views API coverage exists for Updates Project, Logic Gate, and Status grouping fields. `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the exact shared status order and Updates wiring. `tests/frontend/pages/home/updatesSelection.test.ts` covers row selection, individual Seen/Unsee action resolution and successor/reload decisions, U74's pure current Logic Gate label and saved grouping-label/sort resolution, readable mention actor fallback, and strict editable Seen-history dates. `tests/frontend/pages/home/updatesGrouping.test.ts` covers U81's built-in grouping chain, U82's shared RCVI/Priority group-title presentation, U83's initial full expansion with manual-collapse preservation, the U84/U85 control and sidebar layout contracts, and U97's saved-view restoration selection. `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the Updates Node panel's shared-shell fullscreen capability and adapter wiring. Current Node/Logic Gate mounted row, panel, and open-action wiring is not a mounted behavior test. Other rule IDs are not mapped to automated tests yet.
 - Automated Regression Summary: `tests/frontend/pages/home/updatesGrouping.test.ts` also covers U86's unassigned-last priority order and U87's wider title allocation within the unchanged row width.
 
 ## Business Logic
 
-U1 - Updates is an event, mention, and notification feed, not the My Work active GVIC workload surface.
+U1 - Updates is an event, mention, and notification feed, not the My Work active RCVI workload surface.
 U2 - Update groups include unread notifications only.
 U3 - Update group filters support all, urgent, mention, and update/update aliases.
 U4 - The urgent filter includes urgent mentions only.
@@ -51,26 +63,26 @@ U25 - Updates saved grouping views persist Project, Logic Gate, and Status group
 U26 - The update trigger canon is limited to the rules in U27 through U49; adding a new update trigger requires updating this file.
 U27 - Adding a node to a Logic Gate creates an update, whether the node is created directly, an existing node is assigned, or an email is converted into a node in that Logic Gate.
 U28 - Moving a node from one Logic Gate status or state to another creates an update.
-U29 - The screen or API entry point does not create a separate update category: Logic Gate Work, GVIC Matrix, Kanban, and Home actions are classified by the semantic action they perform.
-U30 - A normal @ mention in a Node text box creates a mention update for the mentioned user and labels it with that user's current effective Node GVIC role; it never substitutes the parent Logic Gate's GVIC role.
-U31 - An urgent ! mention in a Node text box creates an urgent mention update for the mentioned user and uses the same current effective Node GVIC routing as U30.
-U32 - A normal @ mention in Node chat creates a mention update for the mentioned user and uses current effective Node GVIC routing.
-U33 - An urgent ! mention in Node chat creates an urgent mention update for the mentioned user and uses current effective Node GVIC routing.
-U34 - Any new Node chat message creates a chat-message update for current effective Node GVIC users even when it contains no @ mention or ! mention. Parent Logic Gate-only users are not Node chat recipients, and a mentioned user receives the mention row instead of a duplicate chat row.
-U35 - A normal @ mention in the Logic Gate text editor creates a mention update for the mentioned user using that Logic Gate's current effective GVIC role.
-U36 - An urgent ! mention in the Logic Gate text editor creates an urgent mention update for the mentioned user using that Logic Gate's current effective GVIC role.
+U29 - The screen or API entry point does not create a separate update category: Logic Gate Work, RCVI Matrix, Kanban, and Home actions are classified by the semantic action they perform.
+U30 - A normal @ mention in a Node text box creates a mention update for the mentioned user and labels it with that user's current effective Node RCVI role; it never substitutes the parent Logic Gate's RCVI role.
+U31 - An urgent ! mention in a Node text box creates an urgent mention update for the mentioned user and uses the same current effective Node RCVI routing as U30.
+U32 - A normal @ mention in Node chat creates a mention update for the mentioned user and uses current effective Node RCVI routing.
+U33 - An urgent ! mention in Node chat creates an urgent mention update for the mentioned user and uses current effective Node RCVI routing.
+U34 - Any new Node chat message creates a chat-message update for current effective Node RCVI users even when it contains no @ mention or ! mention. Parent Logic Gate-only users are not Node chat recipients, and a mentioned user receives the mention row instead of a duplicate chat row.
+U35 - A normal @ mention in the Logic Gate text editor creates a mention update for the mentioned user using that Logic Gate's current effective RCVI role.
+U36 - An urgent ! mention in the Logic Gate text editor creates an urgent mention update for the mentioned user using that Logic Gate's current effective RCVI role.
 U37 - Logic Gates do not have a chat surface for Updates purposes; only the Logic Gate text editor can create Logic Gate mention updates.
 U38 - Attaching an email directly to a node creates an attached-email update.
 U39 - Dropping or merging an email-node card onto an existing node creates the same attached-email update as a direct node email attachment.
 U40 - Removing a node from a Logic Gate creates an update.
 U41 - Deleting a node creates an update.
-U42 - A Node or Logic Gate GVIC assignment change creates an assignment update only for each user who is newly assigned or whose effective role changed. Existing unchanged users, removed users, and unrelated GVIC users receive no assignment update; the actor never receives their own notification.
+U42 - A Node or Logic Gate RCVI assignment change creates an assignment update only for each user who is newly assigned or whose effective role changed. Existing unchanged users, removed users, and unrelated RCVI users receive no assignment update; the actor never receives their own notification.
 U43 - Permission or access changes on update-relevant nodes or Logic Gates create updates.
-U44 - Node field changes create updates only for work-relevant field changes such as status, due date, priority, and similar non-name work fields. Recipients and Generated/Verified/Consulted/Informed labels come from the Node's current effective GVIC assignments, never its parent Logic Gate assignments and never a blanket Other role.
+U44 - Node field changes create updates only for work-relevant field changes such as status, due date, priority, and similar non-name work fields. Recipients and Responsible/Consulted/Verifier/Informed labels come from the Node's current effective RCVI assignments, never its parent Logic Gate assignments and never a blanket Other role.
 U45 - Rename-only changes do not create updates, including node renames, Logic Gate renames, and project renames.
 U46 - Logic Gate issue-flag changes do not create updates; the issue-flag feature is not part of the Updates trigger canon.
-U47 - Project-level notifications are not part of the Updates trigger canon yet, including project create, delete, rename, GVIC, and permission changes.
-U48 - Shared triage and shared inbox GVIC assignment changes create updates.
+U47 - Project-level notifications are not part of the Updates trigger canon yet, including project create, delete, rename, RCVI, and permission changes.
+U48 - Shared triage and shared inbox RCVI assignment changes create updates.
 U49 - Shared triage and shared inbox permission or access changes create updates.
 U50 - Update row copy keeps the actor first, the specific verb second, and the primary non-Logic-Gate object named where one exists. Individual update rows do not render a Logic Gate icon, label, or trailing Logic Gate context.
 U51 - Logic Gate IDs and labels remain available for grouping, filtering, resource opening, sorting, and navigation, but are not repeated inside individual Updates row copy. Node rows still name the node; a direct Logic Gate notification uses concise action copy without a per-row Logic Gate chip or label.
@@ -103,8 +115,8 @@ U77 - One accepted user-group mention creates at most one mention notification f
 U78 - Email-collaboration notification metadata may include collaboration ID, Node ID, provider message/thread ID, source mailbox discriminator, chat information ID, and selection-anchor metadata needed for authorized navigation, but never provider credentials, message/attachment bytes, presigned URLs, or storage keys.
 U79 - Email collaboration mention/chat rows use the shared email icon token required by U55. Activating an authorized row opens the email collaboration at the referenced message/chat anchor with the same underlying Node chat; a revoked/deleted/inaccessible target fails closed instead of falling back to an unrelated Node or mailbox.
 U80 - Summary-only acceptance/reconnect reconciliation never clears or replaces mounted Updates feed state. A real external notification change may revalidate roots/branches in the background, but applies the canonical result atomically and preserves current grouping expansion, selection, active preview, and visible rows on failure; row-only refreshes do not re-expand groups the user collapsed.
-U81 - Priority is an Updates grouping field accepted by frontend normalization, Key Views saved-view editing, and backend saved-view validation. The built-in Updates tab's exact default chain is Date -> GVIC -> Priority -> Logic Gate. Existing/custom saved views, including an explicit empty grouping stack, retain their persisted fields/order/directions and are never overwritten by the built-in default.
-U82 - GVIC and Priority grouping titles render as compact elevated rectangular entity surfaces instead of plain text. GVIC titles reuse the shared Generated cyan, Verified pink, Consulted purple, and Informed green editor palette; Other, No GVIC, and unknown roles use the same raised pattern with a neutral slate accent. Priority titles reuse the exact shared node-priority border, gradient, text color, and glow for their value. These presentation surfaces do not change disclosure, grouping order, row identity, or resource navigation.
+U81 - Priority is an Updates grouping field accepted by frontend normalization, Key Views saved-view editing, and backend saved-view validation. The built-in Updates tab's exact default chain is Date -> RCVI -> Priority -> Logic Gate. Existing/custom saved views, including an explicit empty grouping stack, retain their persisted fields/order/directions and are never overwritten by the built-in default.
+U82 - RCVI and Priority grouping titles render as compact elevated rectangular entity surfaces instead of plain text. RCVI titles reuse Responsible orange (#f97316), Consulted blue (#2563eb), Verifier green (#16a34a), and Informed purple (#7c3aed); Other, No RCVI, and unknown roles use the same raised pattern with a neutral slate accent. Priority titles reuse the exact shared Node-priority border, gradient, text color, and glow for their value. These presentation surfaces do not change disclosure, grouping order, row identity, or resource navigation.
 U83 - Opening Updates when no saved grouping views exist or activating any saved Updates grouping view expands every group at every nested level. A later feed refresh also opens newly introduced groups by default, while U80 still keeps any group the user explicitly collapsed closed until the user reopens it, chooses Expand all, or activates a different grouping view.
 U84 - The Updates page header provides Collapse all and Expand all actions. Collapse all closes every currently rendered grouping level, and Expand all opens every currently rendered grouping level without changing the active grouping view, filter, selection, or notification data.
 U85 - The elevated Updates sidebar rectangle is divided into two equal halves: the Updates icon/title occupies the left half, and the right half is divided into three equal live-count cells for urgent ! mentions, normal @ mentions, and regular updates. Each icon and number has its own fixed, centered row with visible breathing room between them. A zero-count cell stays neutral; a nonzero urgent cell uses a four-stop fiery red-orange gradient, a nonzero normal-mention cell uses a four-stop teal-blue gradient, and a nonzero regular-update cell uses a four-stop yellow-orange gradient. The active gradients use the same light-leading-edge, saturated-middle, and darker-trailing-edge treatment as Mango's Node and Company Explorer folder icons.
@@ -114,8 +126,8 @@ U88 - Update actor identity remains keyed by `actor_user_id`, but user-facing Up
 U89 - Seen Updates exposes separate From and To editable text fields in exact `DD/MM/YYYY` format. A date commits on blur or Enter only after strict calendar validation; impossible dates, other formats, and dates outside the available Seen-history bounds are marked invalid and do not issue a new feed query.
 U90 - Seen-history date queries use inclusive UTC calendar days. The initial window ends on the newest available Seen update and includes at most the latest 30 days. Any edited range remains within available history and at most 90 inclusive days; moving one edge beyond that maximum moves the opposite edge rather than sending an invalid backend request.
 U91 - Every row in Seen Updates replaces the normal **Seen** action with **Unsee**. Unsee clears only that notification's read timestamp through the existing current-user notification mutation, removes the row optimistically from Seen Updates without a full-feed reload or blink, and makes it eligible for the normal Updates inbox and unread badge counts. Failure restores the Seen Updates row and reports the error; unrelated notifications and the selected date window are unchanged.
-U93 - Creating a Node verification stamp sends one `node.verification_requested` update to each snapshotted Verified recipient except the actor. Later GVIC changes do not add, retract, or reroute that historical request.
-U94 - Verification request updates use a dedicated indigo check marker, canonical copy `{User} requested verification from you on <node icon> {Node}`, the Node's normal priority token, ACI/Verified routing, and no duplicate Logic Gate label in row copy.
+U93 - Creating a Node verification stamp sends one `node.verification_requested` update to each snapshotted Verifier recipient except the actor. Later RCVI changes do not add, retract, or reroute that historical request.
+U94 - Verification request updates use a dedicated indigo check marker, canonical copy `{User} requested verification from you on <node icon> {Node}`, the Node's normal priority token, CVI/Verifier routing, and no duplicate Logic Gate label in row copy.
 U95 - A verification update stores the stamp ID as its information target. Activating the row opens the authorized Node preview and scrolls that exact compact timeline stamp into view.
 U96 - Retrying the same verification-request idempotency key sends no duplicate update, and the requesting actor receives no self-notification even when included in the stamp's recipient snapshot.
 U92 - The Updates row-detail Node panel exposes the unified Node-shell fullscreen action in its top-right controls. Activating it moves the complete selected Node panel into the shared body-level blocking overlay with the standard 8px vertical and 12px horizontal viewport insets, hides conflicting app chrome, traps focus, and preserves the selected update, Node editor, and chat context. The same control, Escape, or backdrop restores the existing Updates split-panel layout and its saved ratio; closing still closes the Node panel.
@@ -183,12 +195,12 @@ Entity icons in Updates must also be shared tokens. Individual row copy may use 
 | Email-node card dropped or merged onto node | Blue | `{User} attached <email icon> email to <node icon> {Node}` |
 | Node removed from Logic Gate | Dark mellow red | `{User} removed <node icon> {Node}` |
 | Node deleted | Dark mellow red | `{User} deleted <node icon> {Node}` |
-| GVIC assigned on node | Blue | `{User} assigned {Assignee} as {GVIC Role} on <node icon> {Node}` |
-| GVIC changed on node | Purple | `{User} changed {Assignee}'s GVIC role to {GVIC Role} on <node icon> {Node}` |
-| GVIC removed from node | Dark mellow red | `{User} removed {Assignee}'s GVIC role from <node icon> {Node}` |
-| GVIC assigned on Logic Gate | Blue | `{User} assigned {Assignee} as {GVIC Role}` |
-| GVIC changed on Logic Gate | Purple | `{User} changed {Assignee}'s GVIC role to {GVIC Role}` |
-| GVIC removed from Logic Gate | Dark mellow red | `{User} removed {Assignee}'s GVIC role` |
+| RCVI assigned on node | Blue | `{User} assigned {Assignee} as {RCVI Role} on <node icon> {Node}` |
+| RCVI changed on node | Purple | `{User} changed {Assignee}'s RCVI role to {RCVI Role} on <node icon> {Node}` |
+| RCVI removed from node | Dark mellow red | `{User} removed {Assignee}'s RCVI role from <node icon> {Node}` |
+| RCVI assigned on Logic Gate | Blue | `{User} assigned {Assignee} as {RCVI Role}` |
+| RCVI changed on Logic Gate | Purple | `{User} changed {Assignee}'s RCVI role to {RCVI Role}` |
+| RCVI removed from Logic Gate | Dark mellow red | `{User} removed {Assignee}'s RCVI role` |
 | Permission granted on node | Blue | `{User} gave {Subject} access to <node icon> {Node}` |
 | Permission changed on node | Purple | `{User} changed {Subject}'s access on <node icon> {Node}` |
 | Permission revoked on node | Dark mellow red | `{User} removed {Subject}'s access from <node icon> {Node}` |
@@ -198,9 +210,9 @@ Entity icons in Updates must also be shared tokens. Individual row copy may use 
 | Node priority changed | Purple | `{User} updated <node icon> {Node} to {Priority}` |
 | Node due date changed | Purple | `{User} changed the due date on <node icon> {Node} to {Due Date}` |
 | Other update-relevant node field changed | Purple | `{User} changed {Field} on <node icon> {Node}` |
-| Shared triage or shared inbox GVIC assigned | Blue | `{User} assigned {Assignee} as {GVIC Role} on <folder icon> {Shared Surface}` |
-| Shared triage or shared inbox GVIC changed | Purple | `{User} changed {Assignee}'s GVIC role to {GVIC Role} on <folder icon> {Shared Surface}` |
-| Shared triage or shared inbox GVIC removed | Dark mellow red | `{User} removed {Assignee}'s GVIC role from <folder icon> {Shared Surface}` |
+| Shared triage or shared inbox RCVI assigned | Blue | `{User} assigned {Assignee} as {RCVI Role} on <folder icon> {Shared Surface}` |
+| Shared triage or shared inbox RCVI changed | Purple | `{User} changed {Assignee}'s RCVI role to {RCVI Role} on <folder icon> {Shared Surface}` |
+| Shared triage or shared inbox RCVI removed | Dark mellow red | `{User} removed {Assignee}'s RCVI role from <folder icon> {Shared Surface}` |
 | Shared triage or shared inbox permission granted | Blue | `{User} gave {Subject} access to <folder icon> {Shared Surface}` |
 | Shared triage or shared inbox permission changed | Purple | `{User} changed {Subject}'s access on <folder icon> {Shared Surface}` |
 | Shared triage or shared inbox permission revoked | Dark mellow red | `{User} removed {Subject}'s access from <folder icon> {Shared Surface}` |
@@ -306,8 +318,8 @@ Given:
 - The user leaves and later reloads Updates saved views.
 
 Expected:
-- The built-in tab defaults exactly to Date, GVIC, Priority, then Logic Gate, and Priority is available in the grouping picker.
-- GVIC and Priority grouping titles are raised rectangular entity surfaces: GVIC uses its shared editor role palette (with neutral slate for Other or unassigned values), and Priority uses the exact shared node-priority palette for that number rather than generic plain text.
+- The built-in tab defaults exactly to Date, RCVI, Priority, then Logic Gate, and Priority is available in the grouping picker.
+- RCVI and Priority grouping titles are raised rectangular entity surfaces: RCVI uses its shared editor role palette (with neutral slate for Other or unassigned values), and Priority uses the exact shared node-priority palette for that number rather than generic plain text.
 - Project, Logic Gate, Priority, and Status grouping fields save through the saved-views API.
 - The saved fields reload in the same grouping order and direction.
 - The selected saved view remains active after refresh, tab navigation, clicking Updates, and opening a notification filter. With no valid stored selection, the first saved view is restored before the built-in fallback, and a temporary saved-view request failure does not erase the stored preference.
@@ -351,16 +363,16 @@ Business logic covered:
 
 Given:
 - A user can see a node, Logic Gate, and shared triage surface.
-- Another user performs node-to-Logic-Gate actions, node chat actions, editor mention actions, email attachment actions, GVIC changes, permission changes, node deletion, rename-only changes, issue-flag changes, and project-level changes.
+- Another user performs node-to-Logic-Gate actions, node chat actions, editor mention actions, email attachment actions, RCVI changes, permission changes, node deletion, rename-only changes, issue-flag changes, and project-level changes.
 
 Expected:
 - Updates are created only by the positive trigger rules in U27, U28, U30 through U36, U38 through U44, U48, and U49.
-- Node-added and node-moved updates are classified by the semantic work action, not by whether the action came from Logic Gate Work, GVIC Matrix, Kanban, Home, or another entry point.
+- Node-added and node-moved updates are classified by the semantic work action, not by whether the action came from Logic Gate Work, RCVI Matrix, Kanban, Home, or another entry point.
 - Node text box, node chat, and Logic Gate text editor mentions create normal or urgent mention updates according to @ or ! mention syntax.
 - Node chat messages create updates even when they do not mention anyone.
 - Direct node email attachment and email-node-card drop or merge produce the same attached-email update category.
-- Node removal, node deletion, update-relevant GVIC changes, update-relevant permission changes, and non-name node field changes create updates.
-- Shared triage and shared inbox GVIC or permission changes create updates.
+- Node removal, node deletion, update-relevant RCVI changes, update-relevant permission changes, and non-name node field changes create updates.
+- Shared triage and shared inbox RCVI or permission changes create updates.
 - Logic Gate chat, rename-only changes, Logic Gate issue-flag changes, and project-level changes remain explicit non-triggers under U37 and U45 through U47.
 
 ### Scenario U-S6: Canonical Update Row Copy And Visual Tokens
@@ -376,7 +388,7 @@ Business logic covered:
 - U57
 
 Given:
-- A user receives update rows for node additions, node requests, email conversions, node status moves, mentions, node chat messages, email attachments, node removals, node deletions, GVIC changes, permission changes, node field changes, and shared triage changes.
+- A user receives update rows for node additions, node requests, email conversions, node status moves, mentions, node chat messages, email attachments, node removals, node deletions, RCVI changes, permission changes, node field changes, and shared triage changes.
 - Some rows include node status and priority values.
 - Some rows include node, email, folder, or project entity icons, while Logic Gate context remains present in grouping/navigation data.
 
@@ -520,7 +532,7 @@ Expected:
 - Acceptance refreshes summary badges only and issues no roots/branch feed requests.
 - The real hint performs one coalesced background canonical feed reconciliation without blanking visible rows, selection, preview, or expansion state; failure leaves the prior feed visible.
 - Row changes do not reopen a group the user collapsed.
-- Built-in Updates uses Date -> GVIC -> Priority -> Logic Gate exactly, while custom and empty stacks reload unchanged.
+- Built-in Updates uses Date -> RCVI -> Priority -> Logic Gate exactly, while custom and empty stacks reload unchanged.
 
 ### Scenario U-S12: Updates Expansion Controls And Sidebar Counters
 
@@ -557,8 +569,8 @@ Business logic covered:
 - U87
 
 Given:
-- Updates is grouped by Date -> GVIC -> Priority -> Logic Gate.
-- One Date/GVIC branch contains priorities 1 through 5 plus the shared `Unassigned to a Logic Gate` priority-zero group.
+- Updates is grouped by Date -> RCVI -> Priority -> Logic Gate.
+- One Date/RCVI branch contains priorities 1 through 5 plus the shared `Unassigned to a Logic Gate` priority-zero group.
 - Several Updates rows contain long Node titles, priority/status tokens, timestamps, and Seen buttons.
 
 Expected:
@@ -567,7 +579,7 @@ Expected:
 - The outer row width, timestamp column, and Seen button stay unchanged.
 - Each Node title uses the remaining title-line width and ellipsizes only when it reaches the neighboring tokens or fixed right-side controls.
 
-### Scenario U-S14: Editor-Owned GVIC Routing, Targeted Assignment, And Priority Context
+### Scenario U-S14: Editor-Owned RCVI Routing, Targeted Assignment, And Priority Context
 
 Business logic covered:
 - U21
@@ -583,15 +595,15 @@ Business logic covered:
 - U54
 
 Given:
-- A Node belongs to a Logic Gate, but the Node and Logic Gate currently have different GVIC users and roles.
+- A Node belongs to a Logic Gate, but the Node and Logic Gate currently have different RCVI users and roles.
 - A user creates normal and urgent mentions, ordinary chat, and work-field changes from the Node editor.
 - A user creates a mention from the Logic Gate editor.
 - Bob is newly assigned to the Node while Alice remains unchanged and Charlie is removed.
 - The Node has a concrete priority.
 
 Expected:
-- Every Node-origin mention, chat, and field update uses current effective Node GVIC routing and role labels; Logic Gate-only users receive none of those Node updates.
-- The Logic Gate-origin mention uses current effective Logic Gate GVIC routing.
+- Every Node-origin mention, chat, and field update uses current effective Node RCVI routing and role labels; Logic Gate-only users receive none of those Node updates.
+- The Logic Gate-origin mention uses current effective Logic Gate RCVI routing.
 - Only Bob receives the assignment update. Alice, Charlie, unrelated users, and the actor receive no assignment update.
 - Node updates store and display the Node priority. Missing priority stays No priority rather than becoming priority zero.
 - Visibility checks the Node for Node-owned notifications even when the notification also stores a Logic Gate grouping ID.

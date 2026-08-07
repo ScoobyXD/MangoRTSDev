@@ -23,7 +23,7 @@ func TestMemoryRepoMyWorkRowsAreDerivedFromV2PolicyAtReadTime(t *testing.T) {
 		ResourceType: EntityTypeNode,
 		ResourceID:   standaloneNode.NodeID,
 		Assignments: []ResourceGVICAssignmentInput{{
-			Role:          domain.GVICRoleGenerated,
+			Role:          domain.GVICRoleResponsible,
 			PrincipalType: EntityPermissionSubjectUser,
 			PrincipalID:   user.UserID,
 		}},
@@ -32,7 +32,7 @@ func TestMemoryRepoMyWorkRowsAreDerivedFromV2PolicyAtReadTime(t *testing.T) {
 	}
 
 	responsibleGate := mustCreateInboxReadLogicGate(t, repo, companyID, "Responsible gate")
-	mustSetInboxReadLogicGateGVIC(t, repo, companyID, responsibleGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}})
+	mustSetInboxReadLogicGateGVIC(t, repo, companyID, responsibleGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleResponsible, UserID: user.UserID}})
 	responsibleNode, err := repo.CreateNode(companyID, "Responsible node")
 	if err != nil {
 		t.Fatalf("CreateNode responsible: %v", err)
@@ -55,8 +55,8 @@ func TestMemoryRepoMyWorkRowsAreDerivedFromV2PolicyAtReadTime(t *testing.T) {
 		t.Fatalf("PutResourceGVICPolicy responsible node inherited: %v", err)
 	}
 
-	aciGate := mustCreateInboxReadLogicGate(t, repo, companyID, "ACI gate")
-	mustSetInboxReadLogicGateGVIC(t, repo, companyID, aciGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleVerified, UserID: user.UserID}})
+	cviGate := mustCreateInboxReadLogicGate(t, repo, companyID, "CVI gate")
+	mustSetInboxReadLogicGateGVIC(t, repo, companyID, cviGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleVerifier, UserID: user.UserID}})
 
 	assertMemoryGVICMatrixProjectionCounts(t, repo, companyID, 0, 0)
 
@@ -70,9 +70,9 @@ func TestMemoryRepoMyWorkRowsAreDerivedFromV2PolicyAtReadTime(t *testing.T) {
 	}
 	assertMemoryGVICMatrixProjectionCounts(t, repo, companyID, 2, 2)
 
-	responsibleNodes, err := repo.ListGeneratedInboxNodes(query)
+	responsibleNodes, err := repo.ListResponsibleInboxNodes(query)
 	if err != nil {
-		t.Fatalf("ListGeneratedInboxNodes: %v", err)
+		t.Fatalf("ListResponsibleInboxNodes: %v", err)
 	}
 	responsibleRead := mustFindInboxReadNode(t, responsibleNodes, responsibleNode.NodeID)
 	if responsibleRead.Priority == nil || *responsibleRead.Priority != priority {
@@ -82,13 +82,13 @@ func TestMemoryRepoMyWorkRowsAreDerivedFromV2PolicyAtReadTime(t *testing.T) {
 		t.Fatalf("responsible node logic_gate_ids = %+v, want %q", responsibleRead.LogicGateIDs, responsibleGate.LogicGateID)
 	}
 
-	aciGates, err := repo.ListACIInboxLogicGates(query)
+	cviGates, err := repo.ListCVIInboxLogicGates(query)
 	if err != nil {
-		t.Fatalf("ListACIInboxLogicGates: %v", err)
+		t.Fatalf("ListCVIInboxLogicGates: %v", err)
 	}
-	aciRead := findInboxReadGate(aciGates, aciGate.LogicGateID)
-	if aciRead == nil || !inboxReadRolesContain(aciRead.Roles, domain.GVICRoleVerified) {
-		t.Fatalf("ACI gates = %+v, want accountable gate", aciGates)
+	cviRead := findInboxReadGate(cviGates, cviGate.LogicGateID)
+	if cviRead == nil || !inboxReadRolesContain(cviRead.Roles, domain.GVICRoleVerifier) {
+		t.Fatalf("CVI gates = %+v, want verifier gate", cviGates)
 	}
 
 	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
@@ -100,9 +100,9 @@ func TestMemoryRepoMyWorkRowsAreDerivedFromV2PolicyAtReadTime(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions responsible node no access: %v", err)
 	}
-	responsibleNodes, err = repo.ListGeneratedInboxNodes(query)
+	responsibleNodes, err = repo.ListResponsibleInboxNodes(query)
 	if err != nil {
-		t.Fatalf("ListGeneratedInboxNodes after access change: %v", err)
+		t.Fatalf("ListResponsibleInboxNodes after access change: %v", err)
 	}
 	assertVisibleQueryNodesDoNotContain(t, responsibleNodes, responsibleNode.NodeID)
 	assertMemoryGVICMatrixProjectionCounts(t, repo, companyID, 2, 2)

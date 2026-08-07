@@ -72,34 +72,16 @@ func validateResourceGVICAssignmentInputsForOperation(keyValue resourceGVICKey, 
 	if operation == GVICAssignmentCommandRemove {
 		return nil
 	}
-	roleCounts := map[string]int{}
 	principalRoles := map[string]string{}
 	for _, assignment := range assignments {
-		if (assignment.role == domain.GVICRoleGenerated || assignment.role == domain.GVICRoleVerified) && assignment.principalType != EntityPermissionSubjectUser {
-			return ErrInvalid
-		}
 		principalKey := assignment.principalType + ":" + assignment.principalID
 		if existingRole, exists := principalRoles[principalKey]; exists && existingRole != assignment.role {
 			return ErrInvalid
 		}
 		principalRoles[principalKey] = assignment.role
-		if assignment.role == domain.GVICRoleGenerated {
-			roleCounts[assignment.role]++
-			if roleCounts[assignment.role] > 1 {
-				return ErrInvalid
-			}
-		}
 	}
 	_ = keyValue
 	return nil
-}
-
-func isSingleUserPrimaryGVICResourceType(resourceType string) bool {
-	return resourceType == EntityTypeNode || resourceType == EntityTypeLogicGate
-}
-
-func isSingleUserPrimaryGVICRole(role string) bool {
-	return role == domain.GVICRoleGenerated
 }
 
 func gvicAssignmentInputKey(input normalizedGVICAssignmentInput) string {
@@ -257,11 +239,11 @@ func sortResourceGVICEffectiveAssignments(items []domain.ResourceGVICEffectiveAs
 
 func gvicRoleSortValue(role string) int {
 	switch role {
-	case domain.GVICRoleGenerated:
+	case domain.GVICRoleResponsible:
 		return 0
-	case domain.GVICRoleVerified:
-		return 1
 	case domain.GVICRoleConsulted:
+		return 1
+	case domain.GVICRoleVerifier:
 		return 2
 	case domain.GVICRoleInformed:
 		return 3

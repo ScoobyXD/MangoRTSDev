@@ -102,7 +102,7 @@ func TestMemoryConsolidatedLogicGateViewIncludesDetailsProjectionGVICAndAssignme
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []LogicGateGVICAssignmentInput{{
-			Role:   domain.GVICRoleGenerated,
+			Role:   domain.GVICRoleResponsible,
 			UserID: responsible.UserID,
 		}},
 	}); err != nil {

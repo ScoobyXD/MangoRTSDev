@@ -164,11 +164,11 @@ test("Updates node panel split clamps, nudges, and emits a two-pane grid", () =>
 
 test("GVIC and Priority group titles reuse their semantic raised surfaces", () => {
   assert.deepEqual([
-    logicGateGVICRolePresentation("generated").accent,
-    logicGateGVICRolePresentation("verified").accent,
+    logicGateGVICRolePresentation("responsible").accent,
     logicGateGVICRolePresentation("consulted").accent,
+    logicGateGVICRolePresentation("verifier").accent,
     logicGateGVICRolePresentation("informed").accent,
-  ], ["#0891b2", "#db2777", "#7c3aed", "#059669"]);
+  ], ["#f97316", "#2563eb", "#16a34a", "#7c3aed"]);
 
   const other = resolveUpdateGroupSemanticPresentation({ field: "gvic", key: "gvic:other", label: "Other" });
   assert.equal(other?.kind, "gvic");
@@ -205,28 +205,28 @@ test("Updates groups expand completely on first activation and keep explicit col
   const groups = [{
     id: "date:today",
     groups: [{
-      id: "gvic:generated",
+      id: "gvic:responsible",
       groups: [{ id: "priority:urgent", groups: [] }],
     }],
   }];
 
   assert.deepEqual(collectAllUpdateGroupIDs(groups), new Set([
     "date:today",
-    "gvic:generated",
+    "gvic:responsible",
     "priority:urgent",
   ]));
   assert.deepEqual(reconcileExpandedUpdateGroupIDs({
     groups,
-    manuallyCollapsedGroupIDs: new Set(["gvic:generated"]),
+    manuallyCollapsedGroupIDs: new Set(["gvic:responsible"]),
     reset: true,
   }), new Set([
     "date:today",
-    "gvic:generated",
+    "gvic:responsible",
     "priority:urgent",
   ]));
   assert.deepEqual(reconcileExpandedUpdateGroupIDs({
     groups,
-    manuallyCollapsedGroupIDs: new Set(["gvic:generated"]),
+    manuallyCollapsedGroupIDs: new Set(["gvic:responsible"]),
     reset: false,
   }), new Set([
     "date:today",

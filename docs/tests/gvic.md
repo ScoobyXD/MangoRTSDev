@@ -1,22 +1,20 @@
-# Process Story: A resource resolves one live GVIC policy from its hierarchy
+# Process Story: A team assigns live RCVI responsibility
 
-A user opens a Node or Logic Gate and chooses Inherited, Customized, or a descendant action from More editor actions
+A manager or editor opens a Node or Logic Gate and sees Responsible, Consulted, Verifier, and Informed in that order
 ↓
-The resource either uses its nearest active customized ancestor or owns one complete customized policy
+Each role card shows the full names of its directly assigned people and the names of its directly assigned groups
 ↓
-Switching inherited policy to Customized copies the raw effective source before validating and storing the new complete policy
+Any role can receive multiple people or groups, while one direct principal can hold only one role on the same resource
 ↓
-Inherited descendants resolve the parent live, while a confirmed overwrite records one reset sequence that supersedes older customizations
+A group assignment stays one typed group edge and expands through current members and nested subgroups whenever effective RCVI is read
 ↓
-Successful policy saves invalidate cached Node and Logic Gate records so descendant views refetch the live effective result
+If membership changes or a person's effective role changes, My Work and notification routing use the new live result without copying per-user assignment rows
 ↓
-Cross-Logic-Gate Node moves read and authorize the canonical current assignment even when a browser source hint is stale, without requiring or rewriting unrelated email relationships
-↓
-Current nested-group membership expands GVIC principals for My Work and notifications, while permissions remain a separate decision
+RCVI remains separate from permissions and never grants Edit access
 
-Last updated: 2026-08-05
+Last updated: 2026-08-06
 
-# GVIC Tests
+# RCVI Tests (technical GVIC API namespace)
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
@@ -24,9 +22,9 @@ Coverage Status:
 
 ## Business Logic
 
-GVIC1 - GVIC supports Generated, Verified, Consulted, and Informed roles and normalizes input before validation.
-GVIC2 - Generated accepts at most one user and no group; Verified accepts users but no groups; Consulted and Informed accept users or groups.
-GVIC3 - One source principal can have only one role in one customized policy.
+GVIC1 - RCVI supports Responsible, Consulted, Verifier, and Informed roles and normalizes input before validation.
+GVIC2 - Responsible, Consulted, Verifier, and Informed each accept multiple users or groups.
+GVIC3 - One direct source principal can have only one RCVI role in one customized resource policy.
 GVIC4 - Canonical GVIC resource types are node, logic_gate, project, company_explorer_folder, shared_inbox_folder, and shared_inbox. `shared_triage_folder` is rejected after cutover.
 GVIC5 - `resource_gvic_settings` stores mode and sequences; `resource_gvic_assignments` stores only the complete customized graph. No effective, revision, snapshot, or projection table is policy authority.
 GVIC6 - Every root is customized, including an empty policy. A non-root resource starts inherited unless its creation workflow explicitly customizes it.
@@ -40,10 +38,10 @@ GVIC13 - A customization made after a reset becomes active again because its cus
 GVIC14 - A parent relationship created or changed receives a new parent-link sequence for both policy domains. A link newer than a reset blocks that older reset from crossing the moved edge.
 GVIC15 - Moving an inherited resource changes its effective policy immediately; moving a customized resource preserves that customization. Descendants are not rewritten.
 GVIC16 - A Node assigned to a Logic Gate uses that Logic Gate as its immediate parent. Detaching an inherited Node materializes its current effective GVIC as a customized Node policy in the same transaction.
-GVIC17 - A creator rule, including an email-derived Generated assignment, first copies the final effective parent policy and then changes the new resource to customized.
+GVIC17 - A creator rule, including an email-derived Responsible assignment, first copies the final effective parent policy and then changes the new resource to customized.
 GVIC18 - Group assignments remain group pointers. Current nested membership expands at read time, and cycles are rejected.
 GVIC19 - Group membership, parent-group, and deletion changes affect effective GVIC immediately without rewriting resource policies. Deleting a group removes its direct policy edges.
-GVIC20 - If one user reaches several roles, the deterministic order is Generated, Verified, Consulted, then Informed; direct and shallower sources break equal-role ties.
+GVIC20 - If one user reaches several roles, the deterministic order is Responsible, Consulted, Verifier, then Informed; direct and shallower sources break equal-role ties.
 GVIC21 - GVIC never grants Edit access. Authorization reads only the separate permission policy.
 GVIC22 - My Work includes a resource only when the actor has both effective GVIC and effective Edit permission, resolved from the four canonical tables, live hierarchy, and live groups.
 GVIC23 - Notification routing resolves the current effective GVIC of the exact target resource. Parent or neighboring resource GVIC never substitutes.
@@ -55,7 +53,7 @@ GVIC28 - Fingerprints include effective source identity and sequence, eligible r
 GVIC29 - Point reads, My Work, notification decisions, and cache validation derive current state at read time; policy writes stay constant-size with descendant count.
 GVIC30 - Resource deletion deletes its settings row and cascades its GVIC edges. No missing resource, user, or group identity can remain.
 GVIC31 - Shared inbox folder and shared inbox GVIC use their exact canonical resource identities and remain separate from permissions and mailbox credentials.
-GVIC32 - Logic Gate work may expose its effective Generated user as request-owner metadata, but that field never implies permission.
+GVIC32 - Logic Gate work may expose its effective Responsible user as request-owner metadata, but that field never implies permission.
 GVIC33 - Email-derived and workspace-created resources apply creator rules only after their final parent placement so copied policy comes from the correct source.
 GVIC34 - Stale in-flight reads cannot overwrite a newer committed policy response; ETags and policy fingerprints track the resolved V2 state.
 GVIC35 - Step 2 runtime readers and writers use only the two canonical GVIC tables. Temporarily retained legacy tables are frozen rollback evidence and have no deployed reader or writer.
@@ -63,6 +61,9 @@ GVIC36 - All GVIC changes and their settings, graph edges, events, and read-vers
 GVIC37 - The editor keeps the four role columns compact and removes the exposed policy-mode/effective-source strip; inherited policy is read-only until Customized is selected from More editor actions.
 GVIC38 - A cross-Logic-Gate Node move reads and authorizes the actual canonical one-per-Node assignment. A caller-supplied source Logic Gate is only a hint and cannot select relationship authority or cause a valid move to fail when stale. The move changes the canonical Logic Gate assignment and its projections; it neither requires nor rewrites optional email or attachment relationships owned by the same Node.
 GVIC39 - After any successful GVIC policy write, the company workspace snapshot and cached Node and Logic Gate records are invalidated. A descendant view must refetch its live effective policy instead of displaying a stale record cache; inherited-only Apply still writes no descendant policy rows, and overwrite-all still uses one reset sequence instead of materializing descendants.
+GVIC40 - The editor presents RCVI as Responsible (orange #f97316), Consulted (blue #2563eb), Verifier (green #16a34a), and Informed (purple #7c3aed), in that order.
+GVIC41 - Role cards show direct person and group names instead of a numeric People summary; names wrap within the card, and a group name represents its live nested membership.
+GVIC42 - Replacing a V2 policy notifies a non-actor user when that user's highest effective RCVI role changes, even when the user was already effective before the write.
 
 ## Scenarios
 
@@ -84,13 +85,13 @@ Given:
 - Requests include valid roles, aliased/cased role input, and invalid roles.
 
 Expected:
-- Generated, verified, consulted, and informed are accepted after normalization.
+- Responsible, consulted, verifier, and informed are accepted after normalization.
 - Invalid roles, resource types, principal types, or missing IDs are rejected.
-- Generated and verified do not produce edit/delete permission access.
+- Responsible and Verifier do not produce edit/delete permission access.
 - Consulted and informed do not produce edit permission access.
 - Resource authorization remains controlled by permission policy: default access, direct user rows, and group rows.
 - Different principals can hold different GVIC roles on the same resource without losing the role meaning.
-- Node and Logic Gate Generated rejects groups and keeps one user; Verified rejects groups but accepts multiple explicit users.
+- Every RCVI role accepts multiple direct users or groups; one direct principal cannot occupy two roles on the same resource.
 
 ### Scenario GVIC-S2: Group Expansion And Removal
 
@@ -170,7 +171,7 @@ Business logic covered:
 - GVIC39
 
 Given:
-- A logic gate has generated, verified, consulted, and informed GVIC assignments.
+- A Logic Gate has Responsible, Consulted, Verifier, and Informed RCVI assignments.
 - A user adds or removes one assignment through the canonical complete-policy PUT.
 - The user separately invokes inherited-only Apply or overwrite-all.
 - A broad Logic Gate payload or workspace list request may already be cached or in flight.
@@ -267,11 +268,11 @@ Business logic covered:
 - GVIC34
 
 Given:
-- A Logic Gate has one Generated user and an Arena work snapshot is cached.
-- The Generated assignment changes while an older work request is still in flight.
+- A Logic Gate has one Responsible user and an Arena work snapshot is cached.
+- The Responsible assignment changes while an older work request is still in flight.
 
 Expected:
-- The work header contains the current Generated user's ID as `request_owner_user_id`.
+- The work header contains the current Responsible user's ID as `request_owner_user_id`.
 - The payload contains no full GVIC assignment collection.
 - The assignment/policy change invalidates the gate work version and reconciles the shared cached snapshot.
 - The stale response cannot overwrite the newer request owner.
@@ -291,7 +292,7 @@ Given:
 
 Expected:
 - The ordinary standalone Node retains editable Node GVIC source assignments.
-- Email Node creation gives the creator direct Generated GVIC, and later generic GVIC mutations follow the same authorized Node rules as the ordinary Node.
+- Email Node creation gives the creator direct Responsible RCVI, and later generic RCVI mutations follow the same authorized Node rules as the ordinary Node.
 - Mention participation remains a permanent collaboration access grant but creates no GVIC assignment unless a separate GVIC command assigns one.
 ### Scenario GVIC-S10: Narrow Entity Headers Preserve The Compact GVIC Row And More-Owned Bulk Action
 
@@ -307,7 +308,7 @@ Given:
 - A Logic Gate user can access both descendant actions.
 
 Expected:
-- Generated, Verified, Consulted, and Informed remain in one horizontal row that may be clipped rather than wrapping vertically.
+- Responsible, Consulted, Verifier, and Informed remain in one horizontal row that may be clipped rather than wrapping vertically.
 - No policy-mode, effective-source, apply, or current-GVIC card appears in the header body.
 - Inherited and Customized mode changes remain available in **More editor actions**.
 - The Logic Gate bulk action remains in **More editor actions** with its existing permission, disabled, busy, and error handling.

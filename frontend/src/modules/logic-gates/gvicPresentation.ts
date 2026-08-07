@@ -8,10 +8,10 @@ export type LogicGateGVICRolePresentation = {
 };
 
 export const LOGIC_GATE_GVIC_ROLE_PRESENTATIONS: ReadonlyArray<LogicGateGVICRolePresentation> = [
-  { role: "generated", label: "Generated", accent: "#0891b2" },
-  { role: "verified", label: "Verified", accent: "#db2777" },
-  { role: "consulted", label: "Consulted", accent: "#7c3aed" },
-  { role: "informed", label: "Informed", accent: "#059669" },
+  { role: "responsible", label: "Responsible", accent: "#f97316" },
+  { role: "consulted", label: "Consulted", accent: "#2563eb" },
+  { role: "verifier", label: "Verifier", accent: "#16a34a" },
+  { role: "informed", label: "Informed", accent: "#7c3aed" },
 ];
 
 const LOGIC_GATE_GVIC_ROLE_PRESENTATION_BY_ROLE = new Map(
@@ -23,7 +23,7 @@ export function logicGateGVICRolePresentation(role: string): { label: string; ac
   const presentation = LOGIC_GATE_GVIC_ROLE_PRESENTATION_BY_ROLE.get(normalizedRole as LogicGateGVICRole);
   if (presentation) return presentation;
   if (normalizedRole === "other") return { label: "Other", accent: "#64748b" };
-  if (!normalizedRole || normalizedRole === "none") return { label: "No GVIC", accent: "#64748b" };
+  if (!normalizedRole || normalizedRole === "none") return { label: "No RCVI", accent: "#64748b" };
   return {
     label: normalizedRole.replace(/_/g, " ").replace(/\b\w/g, (character) => character.toUpperCase()),
     accent: "#64748b",

@@ -197,7 +197,7 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
   const [dueDateMode, setDueDateMode] = useState<"no_change" | "set" | "clear">("no_change");
   const [dueDate, setDueDate] = useState("");
   const [targetLogicGateID, setTargetLogicGateID] = useState("");
-  const [GVICRole, setGVICRole] = useState<CommunicationsSharedInboxGVICRole>("generated");
+  const [GVICRole, setGVICRole] = useState<CommunicationsSharedInboxGVICRole>("responsible");
   const [GVICUserID, setGVICUserID] = useState("");
   const [GVICAction, setGVICAction] = useState<"add" | "remove">("add");
   const sortedLogicGates = useMemo(() => [...logicGates].sort((a, b) => (
@@ -212,7 +212,7 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
     setDueDateMode("no_change");
     setDueDate("");
     setTargetLogicGateID(sortedLogicGates[0]?.logic_gate_id ?? "");
-    setGVICRole("generated");
+    setGVICRole("responsible");
     setGVICUserID(companyUsers[0]?.user_id ?? "");
     setGVICAction("add");
   }, [companyUsers, menu?.kind, menu?.ids.join("\u001f"), sortedLogicGates]);
@@ -362,9 +362,9 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
             <label style={labelStyle}>
               Role
               <select value={GVICRole} onChange={(event) => setGVICRole(event.target.value as CommunicationsSharedInboxGVICRole)} style={fieldStyle}>
-                <option value="generated">Generated</option>
-                <option value="verified">Verified</option>
+                <option value="responsible">Responsible</option>
                 <option value="consulted">Consulted</option>
+                <option value="verifier">Verifier</option>
                 <option value="informed">Informed</option>
               </select>
             </label>
@@ -397,7 +397,7 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
   );
 }
 
-type InboxMatrixViewID = Extract<HomeViewID, "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox">;
+type InboxMatrixViewID = Extract<HomeViewID, "r-inbox" | "v-inbox" | "c-inbox" | "i-inbox" | "o-inbox">;
 
 type InboxNodeDropInput = {
   logicGateID: string;
@@ -989,9 +989,9 @@ type CompanyUserGroupMember = {
 };
 
 const SHARED_INBOX_GVIC_ROLES: ReadonlyArray<{ role: CommunicationsSharedInboxGVICRole; label: string }> = [
-  { role: "generated", label: "Generated" },
-  { role: "verified", label: "Verified" },
+  { role: "responsible", label: "Responsible" },
   { role: "consulted", label: "Consulted" },
+  { role: "verifier", label: "Verifier" },
   { role: "informed", label: "Informed" },
 ];
 
@@ -1043,14 +1043,14 @@ export function SharedInboxGVICSettingsModal({
   onClose: () => void;
 }) {
   const [userDraftByRole, setUserDraftByRole] = useState<Record<CommunicationsSharedInboxGVICRole, string>>({
-    generated: "",
-    verified: "",
+    responsible: "",
+    verifier: "",
     consulted: "",
     informed: "",
   });
   const [groupDraftByRole, setGroupDraftByRole] = useState<Record<CommunicationsSharedInboxGVICRole, string>>({
-    generated: "",
-    verified: "",
+    responsible: "",
+    verifier: "",
     consulted: "",
     informed: "",
   });
@@ -1127,10 +1127,10 @@ export function SharedInboxGVICSettingsModal({
   return (
     <AppModalPortal onRequestClose={busy ? undefined : onClose}>
     <div style={sharedGVICBackdropStyle}>
-      <section style={sharedGVICModalStyle} aria-modal="true" role="dialog" aria-label={`${folder.name} GVIC assignments`}>
+      <section style={sharedGVICModalStyle} aria-modal="true" role="dialog" aria-label={`${folder.name} RCVI assignments`}>
         <div style={panelHeaderStyle}>
           <div style={{ minWidth: 0 }}>
-            <h2 style={panelTitleStyle}>{folder.name} GVIC assignments</h2>
+            <h2 style={panelTitleStyle}>{folder.name} RCVI assignments</h2>
             {loadError && <div style={{ ...mutedSmallStyle, color: "#8b123f" }}>{loadError}</div>}
           </div>
           <button type="button" style={smallButtonStyle} disabled={busy} onClick={onClose}>Close</button>
@@ -1545,7 +1545,7 @@ export function LogicGateRail({
     <aside ref={railSplit.railRef} style={logicGateRailStyle(railSplit.topHeight)}>
       <section
         style={logicGateRailSectionStyle}
-        onContextMenu={(event) => openCreateLogicGateMenu(event, "generated")}
+        onContextMenu={(event) => openCreateLogicGateMenu(event, "responsible")}
         onDragOver={(event) => {
           if (!hasExplorerDrag(event.dataTransfer)) return;
           event.preventDefault();
@@ -2723,7 +2723,7 @@ export function GVICMatrixViewerSelector({
             if (event.key === "Escape") setSearchOpen(false);
           }}
           placeholder="Search people"
-          aria-label="Search GVIC matrix people"
+          aria-label="Search RCVI matrix people"
           spellCheck={false}
           style={GVICMatrixViewerSearchInputStyle}
         />

@@ -179,13 +179,13 @@ func TestPostgresRealtimeProducersAreTransactionallyAtomic(t *testing.T) {
 		if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
 			CompanyID: company.CompanyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
 			Assignments: []ResourceGVICAssignmentInput{{
-				Role: domain.GVICRoleVerified, PrincipalType: EntityPermissionSubjectUser, PrincipalID: verifier.UserID,
+				Role: domain.GVICRoleVerifier, PrincipalType: EntityPermissionSubjectUser, PrincipalID: verifier.UserID,
 			}},
 		}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := db.Exec(`delete from resource_gvic_effective_assignments
-where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid and role='verified'`, company.CompanyID, node.NodeID); err != nil {
+where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid and role='verifier'`, company.CompanyID, node.NodeID); err != nil {
 			t.Fatal(err)
 		}
 		result, err := repo.CreateNodeVerificationRequest(NodeVerificationRequestInput{
@@ -325,7 +325,7 @@ func TestPostgresRealtimeOutboxRetryAndDuplicateCompletion(t *testing.T) {
 	}
 }
 
-func TestPostgresRealtimeRecycleRestorePreservesProjectAssociationsAndGeneratedProjection(t *testing.T) {
+func TestPostgresRealtimeRecycleRestorePreservesProjectAssociationsAndResponsibleProjection(t *testing.T) {
 	db, repo := openRealtimePostgresIntegration(t)
 	company, err := repo.CreateCompany("Realtime recycle restore")
 	if err != nil {
@@ -417,7 +417,7 @@ func TestPostgresRealtimeRecycleRestorePreservesProjectAssociationsAndGeneratedP
 	}
 	logicGateItem := requireRecycleItem(t, recycleItems, EntityTypeLogicGate, logicGate.LogicGateID)
 	if _, err := repo.RestoreRecycleBinItems(company.CompanyID, user.UserID, []string{logicGateItem.RecycleBinItemID}); err != nil {
-		t.Fatalf("restore Logic Gate payload containing generated projection columns: %v", err)
+		t.Fatalf("restore Logic Gate payload containing responsible projection columns: %v", err)
 	}
 	if _, err := repo.GetLogicGate(company.CompanyID, logicGate.LogicGateID); err != nil {
 		t.Fatalf("GetLogicGate after restore: %v", err)

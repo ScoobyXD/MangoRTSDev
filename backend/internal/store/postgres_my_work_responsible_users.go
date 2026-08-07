@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-func attachPostgresMyWorkGeneratedUserIDs(ctx context.Context, db *sql.DB, companyID string, items []GVICMatrixProjectionRow) error {
+func attachPostgresMyWorkResponsibleUserIDs(ctx context.Context, db *sql.DB, companyID string, items []GVICMatrixProjectionRow) error {
 	if len(items) == 0 {
 		return nil
 	}
@@ -19,7 +19,7 @@ func attachPostgresMyWorkGeneratedUserIDs(ctx context.Context, db *sql.DB, compa
 		if nodeID := strings.TrimSpace(item.NodeID); nodeID != "" {
 			nodeSet[nodeID] = true
 		}
-		wanted[myWorkGeneratedUsersContextKey(item)] = true
+		wanted[myWorkResponsibleUsersContextKey(item)] = true
 	}
 	nodeIDs := make([]string, 0, len(nodeSet))
 	for nodeID := range nodeSet {
@@ -37,7 +37,7 @@ select entry.company_id::text,
        entry.user_id::text
 from gvic_matrix_projection_table entry
 where entry.company_id=$1::uuid
-  and entry.gvic_assignment='generated'
+  and entry.gvic_assignment='responsible'
   and entry.node_id in (
     select btrim(value)::uuid
     from unnest(string_to_array($2::text, ',')) value
@@ -69,7 +69,7 @@ order by entry.user_id::text`, companyID, strings.Join(nodeIDs, ","))
 		return err
 	}
 	for index := range items {
-		items[index].GeneratedUserIDs = sortedGeneratedUserIDs(byContext[myWorkGeneratedUsersContextKey(items[index])])
+		items[index].ResponsibleUserIDs = sortedResponsibleUserIDs(byContext[myWorkResponsibleUsersContextKey(items[index])])
 	}
 	return nil
 }

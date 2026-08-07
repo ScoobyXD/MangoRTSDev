@@ -175,7 +175,7 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 		if writeV2PolicyErrorWithNotFound(w, err, "failed_to_load_permission_policy", notFoundCode) {
 			return
 		}
-		canEditManagers := actorCanManageCompany(actor, companyID)
+		canEditManagers := actorCanManageCompanyUsers(actor, companyID)
 		response := v2PermissionPolicyResponse{
 			ResourcePermissionPolicy: policy, CanEditPermissions: true,
 			CanEditManagerPermissions: canEditManagers,
@@ -238,7 +238,7 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	s.projectCommittedNotificationEvents(events)
-	canEditManagers := actorCanManageCompany(actor, req.CompanyID)
+	canEditManagers := actorCanManageCompanyUsers(actor, req.CompanyID)
 	response := v2PermissionPolicyResponse{
 		ResourcePermissionPolicy: policy, CanEditPermissions: true,
 		CanEditManagerPermissions: canEditManagers,
@@ -287,13 +287,13 @@ func (s *Server) actorCanWritePermissionSubjects(actor ActorContext, companyID s
 			continue
 		}
 		if subjectType == store.EntityPermissionSubjectGroup {
-			return false, nil
+			continue
 		}
 		role, exists := roles[strings.TrimSpace(permission.SubjectID)]
 		if !exists {
 			continue
 		}
-		if role == domain.RoleCompanyManager || domain.CanBypassResourcePermissions(role) {
+		if domain.CanBypassResourcePermissions(role) {
 			return false, nil
 		}
 	}

@@ -27,9 +27,9 @@ func TestVerificationRequestNotifiesSnapshottedRecipientsWithTimelineDeepLink(t 
 	_, err = repo.SetResourceGVICAssignments(store.ResourceGVICAssignmentUpdateInput{
 		CompanyID: companyID, ResourceType: store.EntityTypeNode, ResourceID: node.NodeID,
 		Assignments: []store.ResourceGVICAssignmentInput{
-			{Role: domain.GVICRoleVerified, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: actor.UserID},
-			{Role: domain.GVICRoleVerified, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: first.UserID},
-			{Role: domain.GVICRoleVerified, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: second.UserID},
+			{Role: domain.GVICRoleVerifier, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: actor.UserID},
+			{Role: domain.GVICRoleVerifier, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: first.UserID},
+			{Role: domain.GVICRoleVerifier, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: second.UserID},
 		},
 	})
 	if err != nil {
@@ -49,7 +49,7 @@ func TestVerificationRequestNotifiesSnapshottedRecipientsWithTimelineDeepLink(t 
 	seen := map[string]bool{}
 	for _, item := range items {
 		seen[item.RecipientUserID] = true
-		if item.Type != domain.NotificationEventNodeVerificationRequested || item.Surface != domain.NotificationSurfaceACIInbox || item.Role != domain.GVICRoleVerified {
+		if item.Type != domain.NotificationEventNodeVerificationRequested || item.Surface != domain.NotificationSurfaceCVIInbox || item.Role != domain.GVICRoleVerifier {
 			t.Fatalf("verification notification routing = %+v", item)
 		}
 		if item.NodeID != node.NodeID || item.InformationID != result.TimelineEvent.EventID || item.Priority == nil || *item.Priority != priority {

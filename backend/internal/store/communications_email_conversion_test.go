@@ -724,7 +724,7 @@ func setupEmailConversionUserAndGate(t *testing.T, repo *MemoryRepo, companyID s
 	if _, err := repo.SetLogicGateGVICAssignments(LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}},
+		Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleResponsible, UserID: user.UserID}},
 	}); err != nil {
 		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
 	}

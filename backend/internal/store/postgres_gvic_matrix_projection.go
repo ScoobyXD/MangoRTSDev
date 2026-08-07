@@ -79,7 +79,7 @@ with latest_assignment as (
     on effective.company_id=node_row.company_id
    and effective.resource_type='node'
    and effective.resource_id=node_row.node_id
-  where effective.role in ('generated', 'verified', 'consulted', 'informed')
+  where effective.role in ('responsible', 'verifier', 'consulted', 'informed')
 ), project_matches as (
   select distinct on (
     assignment_rows.company_id,
@@ -282,7 +282,7 @@ with input_users as (
    and effective.resource_id=node_row.node_id
   join input_users
     on input_users.user_id=effective.user_id
-  where effective.role in ('generated', 'verified', 'consulted', 'informed')), project_matches as (
+  where effective.role in ('responsible', 'verifier', 'consulted', 'informed')), project_matches as (
   select distinct on (
     assignment_rows.company_id,
     assignment_rows.user_id,
@@ -781,7 +781,7 @@ select entry.company_id::text,
 from gvic_matrix_projection_table entry
 where entry.company_id=$1::uuid
   and entry.user_id=$2::uuid
-  and entry.gvic_assignment in ('generated', 'verified', 'consulted', 'informed')
+  and entry.gvic_assignment in ('responsible', 'verifier', 'consulted', 'informed')
   and mangorts_user_can_access_resource(entry.company_id, 'node', entry.node_id, $4::uuid, 'edit')
   and (entry.logic_gate_id is null or mangorts_user_can_access_resource(entry.company_id, 'logic_gate', entry.logic_gate_id, $4::uuid, 'edit'))
   and (entry.project_id is null or mangorts_user_can_access_resource(entry.company_id, 'project', entry.project_id, $4::uuid, 'edit'))
@@ -802,7 +802,7 @@ limit $3`, companyID, userID, query.Limit, viewerUserID)
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	if err := attachPostgresMyWorkGeneratedUserIDs(context.Background(), r.db, companyID, items); err != nil {
+	if err := attachPostgresMyWorkResponsibleUserIDs(context.Background(), r.db, companyID, items); err != nil {
 		return nil, err
 	}
 	return items, nil
@@ -840,7 +840,7 @@ select entry.company_id::text,
 from gvic_matrix_projection_table entry
 where entry.company_id=$1::uuid
   and entry.user_id=$2::uuid
-  and entry.gvic_assignment in ('generated', 'verified', 'consulted', 'informed')
+  and entry.gvic_assignment in ('responsible', 'verifier', 'consulted', 'informed')
   and mangorts_user_can_access_resource(entry.company_id, 'node', entry.node_id, $3::uuid, 'edit')
   and (entry.logic_gate_id is null or mangorts_user_can_access_resource(entry.company_id, 'logic_gate', entry.logic_gate_id, $3::uuid, 'edit'))
   and (entry.project_id is null or mangorts_user_can_access_resource(entry.company_id, 'project', entry.project_id, $3::uuid, 'edit'))
@@ -861,7 +861,7 @@ limit nullif($4, 0)`, companyID, userID, viewerUserID, limit)
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	if err := attachPostgresMyWorkGeneratedUserIDs(context.Background(), r.db, companyID, items); err != nil {
+	if err := attachPostgresMyWorkResponsibleUserIDs(context.Background(), r.db, companyID, items); err != nil {
 		return nil, err
 	}
 	return items, nil

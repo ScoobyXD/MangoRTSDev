@@ -339,7 +339,7 @@ func TestResourceEditorCannotManagePermissionRules(t *testing.T) {
 	}
 }
 
-func TestCompanyManagerCanEditUserPermissionsButNotManagerRows(t *testing.T) {
+func TestCompanyManagerCanEditManagerAndUserPermissions(t *testing.T) {
 	t.Parallel()
 
 	key := mustRSAKey(t)
@@ -382,12 +382,15 @@ func TestCompanyManagerCanEditUserPermissionsButNotManagerRows(t *testing.T) {
 	if getRes.Code != http.StatusOK {
 		t.Fatalf("manager GET permissions status = %d, want %d body=%s", getRes.Code, http.StatusOK, strings.TrimSpace(getRes.Body.String()))
 	}
-	var getPayload store.ResourcePermissionPolicy
+	var getPayload struct {
+		store.ResourcePermissionPolicy
+		CanEditManagerPermissions bool `json:"can_edit_manager_permissions"`
+	}
 	if err := json.Unmarshal(getRes.Body.Bytes(), &getPayload); err != nil {
 		t.Fatalf("decode manager permissions: %v", err)
 	}
-	if getPayload.ResourceID != logicGate.LogicGateID || getPayload.PermissionMode != store.PolicyModeCustomized || getPayload.EffectiveDefaultAccess != store.ResourceDefaultAccessEdit {
-		t.Fatalf("manager canonical permission policy = %+v", getPayload)
+	if getPayload.ResourceID != logicGate.LogicGateID || getPayload.PermissionMode != store.PolicyModeCustomized || getPayload.EffectiveDefaultAccess != store.ResourceDefaultAccessEdit || !getPayload.CanEditManagerPermissions {
+		t.Fatalf("manager canonical permission policy = %+v, want manager-row edit authority", getPayload)
 	}
 
 	body, _ := json.Marshal(map[string]any{
@@ -404,8 +407,11 @@ func TestCompanyManagerCanEditUserPermissionsButNotManagerRows(t *testing.T) {
 	putReq.Header.Set("Content-Type", "application/json")
 	putRes := httptest.NewRecorder()
 	handler.ServeHTTP(putRes, putReq)
-	if putRes.Code != http.StatusForbidden || !strings.Contains(putRes.Body.String(), "company_admin_required") {
-		t.Fatalf("manager PUT containing manager row status = %d body=%s, want company_admin_required", putRes.Code, strings.TrimSpace(putRes.Body.String()))
+	if putRes.Code != http.StatusOK {
+		t.Fatalf("manager PUT containing peer-manager row status = %d body=%s, want %d", putRes.Code, strings.TrimSpace(putRes.Body.String()), http.StatusOK)
+	}
+	if access, err := repo.UserCanAccessEntity(companyID, store.EntityTypeLogicGate, logicGate.LogicGateID, peerManager.UserID, store.EntityPermissionEdit); err != nil || access {
+		t.Fatalf("peer manager access after manager edit = %v err=%v, want false", access, err)
 	}
 
 	body, _ = json.Marshal(map[string]any{

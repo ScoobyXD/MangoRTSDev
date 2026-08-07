@@ -246,7 +246,7 @@ func setupWorkItemAssignmentEventTest(t *testing.T, suffix string) (*MemoryRepo,
 	if _, err := repo.SetLogicGateGVICAssignments(LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}},
+		Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleResponsible, UserID: user.UserID}},
 	}); err != nil {
 		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
 	}

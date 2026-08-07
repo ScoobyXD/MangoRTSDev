@@ -112,7 +112,7 @@ func (r *MemoryRepo) notificationReadStateMutableByUserLocked(item domain.Notifi
 
 func notificationLogicGateGVICRole(role string) bool {
 	switch strings.TrimSpace(role) {
-	case domain.GVICRoleGenerated, domain.GVICRoleVerified, domain.GVICRoleConsulted, domain.GVICRoleInformed:
+	case domain.GVICRoleResponsible, domain.GVICRoleVerifier, domain.GVICRoleConsulted, domain.GVICRoleInformed:
 		return true
 	default:
 		return false

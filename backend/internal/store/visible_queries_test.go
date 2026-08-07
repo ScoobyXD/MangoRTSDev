@@ -172,10 +172,10 @@ func TestMemoryVisibleExplorerSharedTriageAndWorkItemReadsDoNotLeak(t *testing.T
 
 	responsibleGate := mustCreateVisibleQueryGate(t, repo, companyID, "Work item responsible")
 	responsibleNode := mustCreateVisibleQueryNode(t, repo, companyID, "Work item responsible node")
-	mustSetInboxReadLogicGateGVIC(t, repo, companyID, responsibleGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: viewer.UserID}})
+	mustSetInboxReadLogicGateGVIC(t, repo, companyID, responsibleGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleResponsible, UserID: viewer.UserID}})
 	mustAssignVisibleQueryNodeToGate(t, repo, companyID, responsibleGate.LogicGateID, responsibleNode.NodeID)
-	aciGate := mustCreateVisibleQueryGate(t, repo, companyID, "Work item ACI")
-	mustSetInboxReadLogicGateGVIC(t, repo, companyID, aciGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleVerified, UserID: viewer.UserID}})
+	cviGate := mustCreateVisibleQueryGate(t, repo, companyID, "Work item CVI")
+	mustSetInboxReadLogicGateGVIC(t, repo, companyID, cviGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleVerifier, UserID: viewer.UserID}})
 
 	sharedFolders, err := repo.ListVisibleCommunicationsSharedInboxFolders(companyID, viewer.UserID)
 	if err != nil {
@@ -202,23 +202,23 @@ func TestMemoryVisibleExplorerSharedTriageAndWorkItemReadsDoNotLeak(t *testing.T
 	if err != nil {
 		t.Fatalf("ListVisibleCompanyExplorerLogicGateSummaries: %v", err)
 	}
-	assertVisibleQueryLogicGateIDs(t, gateSummaries, visibleGate.LogicGateID, responsibleGate.LogicGateID, aciGate.LogicGateID)
+	assertVisibleQueryLogicGateIDs(t, gateSummaries, visibleGate.LogicGateID, responsibleGate.LogicGateID, cviGate.LogicGateID)
 	assertVisibleQueryLogicGatesDoNotContain(t, gateSummaries, hiddenGate.LogicGateID)
 
 	mustSetVisibleQueryDefaultAccess(t, repo, companyID, EntityTypeNode, responsibleNode.NodeID, ResourceDefaultAccessNoAccess)
-	responsibleNodes, err := repo.ListGeneratedInboxNodes(WorkItemInboxQuery{CompanyID: companyID, UserID: viewer.UserID, Limit: 10})
+	responsibleNodes, err := repo.ListResponsibleInboxNodes(WorkItemInboxQuery{CompanyID: companyID, UserID: viewer.UserID, Limit: 10})
 	if err != nil {
-		t.Fatalf("ListGeneratedInboxNodes: %v", err)
+		t.Fatalf("ListResponsibleInboxNodes: %v", err)
 	}
 	assertVisibleQueryNodesDoNotContain(t, responsibleNodes, responsibleNode.NodeID)
 
-	mustSetVisibleQueryDefaultAccess(t, repo, companyID, EntityTypeLogicGate, aciGate.LogicGateID, ResourceDefaultAccessNoAccess)
-	aciGates, err := repo.ListACIInboxLogicGates(WorkItemInboxQuery{CompanyID: companyID, UserID: viewer.UserID, Limit: 10})
+	mustSetVisibleQueryDefaultAccess(t, repo, companyID, EntityTypeLogicGate, cviGate.LogicGateID, ResourceDefaultAccessNoAccess)
+	cviGates, err := repo.ListCVIInboxLogicGates(WorkItemInboxQuery{CompanyID: companyID, UserID: viewer.UserID, Limit: 10})
 	if err != nil {
-		t.Fatalf("ListACIInboxLogicGates: %v", err)
+		t.Fatalf("ListCVIInboxLogicGates: %v", err)
 	}
-	if findInboxReadGate(aciGates, aciGate.LogicGateID) != nil {
-		t.Fatalf("ACI work item read leaked inaccessible gate: %+v", aciGates)
+	if findInboxReadGate(cviGates, cviGate.LogicGateID) != nil {
+		t.Fatalf("CVI work item read leaked inaccessible gate: %+v", cviGates)
 	}
 }
 
@@ -233,7 +233,7 @@ func TestMemorySharedTriageVisibilityUsesPermissionsNotGVIC(t *testing.T) {
 		t.Fatalf("CreateCommunicationsSharedInboxFolder: %v", err)
 	}
 	mustSetVisibleQueryDefaultAccess(t, repo, companyID, EntityTypeSharedInboxFolder, folder.FolderID, ResourceDefaultAccessNoAccess)
-	mustSetInboxReadResourceGVIC(t, repo, companyID, EntityTypeSharedInboxFolder, folder.FolderID, domain.GVICRoleGenerated, viewer.UserID)
+	mustSetInboxReadResourceGVIC(t, repo, companyID, EntityTypeSharedInboxFolder, folder.FolderID, domain.GVICRoleResponsible, viewer.UserID)
 
 	folders, err := repo.ListVisibleCommunicationsSharedInboxFolders(companyID, viewer.UserID)
 	if err != nil {

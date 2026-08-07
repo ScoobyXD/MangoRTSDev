@@ -12,6 +12,20 @@ No endpoint is guessed, no access is granted, no textbox placement is copied, an
 
 Last updated: 2026-08-06
 
+# Process Story: RCVI groups remain typed live relationships
+
+An editor assigns a person or group to Responsible, Consulted, Verifier, or Informed on a resource
+↓
+Mango stores the exact resource type and ID with the exact user or group principal type and ID
+↓
+One direct principal occupies one role on that resource, while every role permits multiple direct people and groups
+↓
+A group remains one source edge; current members and nested subgroups expand only when Mango resolves effective RCVI
+↓
+Membership changes alter effective assignments without translated identities, generic edges, or copied per-user policy rows
+
+Last updated: 2026-08-06
+
 # Process Story: Node location derives from typed organization
 
 A user searches for a Node in Company Explorer or Editor
@@ -54,7 +68,7 @@ Moving a Node between Logic Gates changes only that canonical assignment and its
 ↓
 The relationship subsystem stores that literal ID in a direct typed column when the endpoint type is fixed, or together with its canonical `resource_type` when the endpoint type can vary
 ↓
-The relationship remains in the table for its business meaning, such as Node structure, Logic Gate flow, Project membership, personal pin organization, email attachment, file ownership, Account assignment, permission, or GVIC assignment; only the documented Company Explorer, Logic Gate-to-Node, and Shared Triage parent links also define immediate V2 policy ancestry
+The relationship remains in the table for its business meaning, such as Node structure, Logic Gate flow, Project membership, personal pin organization, email attachment, file ownership, Account assignment, permission, or RCVI assignment; only the documented Company Explorer, Logic Gate-to-Node, and Shared Triage parent links also define immediate V2 policy ancestry
 ↓
 Reads, events, projections, recycle/restore, and permanent deletion use the same company, endpoint type, and literal resource ID; no resource registry, translated ID, or replacement identity is consulted
 ↓
@@ -72,7 +86,7 @@ These laws define how MangoRTS represents relationships. They apply to schema de
 
 A **resource** is an identifiable Mango business object that may own data or be one endpoint of a relationship. Resources include Nodes, Logic Gates, Projects, email messages and threads, textboxes and chats where they have their own identity, attachments, Accounts, Company Explorer folders, shared inboxes and folders, and any future business object explicitly added to a relationship contract.
 
-A user or group is normally a **principal** when it receives a permission or GVIC role. A relationship row and a derived projection row are records about resources; they are not automatically resources themselves.
+A user or group is normally a **principal** when it receives a permission or RCVI role. A relationship row and a derived projection row are records about resources; they are not automatically resources themselves.
 
 ## Iron laws
 
@@ -165,6 +179,7 @@ Current examples include:
 - A Logic Gate may be related to multiple Projects.
 - One Project/Logic-Gate pair has one stable semantic edge whether it is created directly from the Logic Gate editor or implicitly while adding an assigned Node.
 - An attachment may have multiple active owner relationships.
+- One RCVI resource/principal pair has exactly one direct role; Responsible, Consulted, Verifier, and Informed each permit multiple typed user or group principals, and group edges expand through live nested membership without copied per-user relationship rows.
 
 ### Law 13 — Duplicate commands do not create duplicate semantic edges
 

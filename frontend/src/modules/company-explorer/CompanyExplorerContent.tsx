@@ -162,16 +162,16 @@ function defaultCompanyExplorerScopeView(): CompanyExplorerScopeView {
 }
 
 const GVIC_FOLDER_ROWS = [
-  { role: "generated", label: "Generated" },
-  { role: "verified", label: "Verified" },
+  { role: "responsible", label: "Responsible" },
   { role: "consulted", label: "Consulted" },
+  { role: "verifier", label: "Verifier" },
   { role: "informed", label: "Informed" },
   { role: "other", label: "Others" },
 ] as const satisfies ReadonlyArray<{ role: CompanyExplorerGVICFolderRole; label: string }>;
 
-const LOGIC_GATE_GVIC_ROLES: LogicGateGVICRole[] = ["generated", "verified", "consulted", "informed"];
+const LOGIC_GATE_GVIC_ROLES: LogicGateGVICRole[] = ["responsible", "consulted", "verifier", "informed"];
 const GVIC_PROJECTION_LIMIT = 500;
-const GVIC_VISUAL_ROOT_FOLDER_PREFIX = "Mango GVIC ";
+const GVIC_VISUAL_ROOT_FOLDER_PREFIX = "Mango RCVI ";
 const DEFAULT_FOLDERS_LABEL = "Default Folders";
 const USE_SYNTHETIC_COMPANY_EXPLORER_SCOPE_ROWS = false;
 

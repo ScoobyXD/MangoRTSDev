@@ -32,7 +32,7 @@ func TestAssignNodeToLogicGateStatusWritesAssignmentSourceAndKanbanProjection(t 
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []store.LogicGateGVICAssignmentInput{{
-			Role:   domain.GVICRoleGenerated,
+			Role:   domain.GVICRoleResponsible,
 			UserID: responsibleUser.UserID,
 		}},
 	}); err != nil {

@@ -14,14 +14,14 @@ export type WorkItemLogicGateInboxItem = LogicGateRecord & {
   roles: LogicGateGVICRole[];
 };
 
-export type GeneratedInboxNodesResponse = {
+export type ResponsibleInboxNodesResponse = {
   company_id: string;
   user_id: string;
   limit: number;
   nodes: NodeRecord[];
 };
 
-export type ACIInboxLogicGatesResponse = {
+export type CVIInboxLogicGatesResponse = {
   company_id: string;
   user_id: string;
   limit: number;
@@ -70,12 +70,12 @@ export type MyWorkNodeMoveResult = {
   removed_projection_row_ids: string[];
 };
 
-export async function listGeneratedInboxNodes(params: WorkItemInboxReadParams): Promise<GeneratedInboxNodesResponse> {
-  return fetchWorkItemInboxRead<GeneratedInboxNodesResponse>(params, "/v1/work-items/generated-inbox");
+export async function listResponsibleInboxNodes(params: WorkItemInboxReadParams): Promise<ResponsibleInboxNodesResponse> {
+  return fetchWorkItemInboxRead<ResponsibleInboxNodesResponse>(params, "/v1/work-items/responsible-inbox");
 }
 
-export async function listACIInboxLogicGates(params: WorkItemInboxReadParams): Promise<ACIInboxLogicGatesResponse> {
-  return fetchWorkItemInboxRead<ACIInboxLogicGatesResponse>(params, "/v1/work-items/gvic-inbox");
+export async function listCVIInboxLogicGates(params: WorkItemInboxReadParams): Promise<CVIInboxLogicGatesResponse> {
+  return fetchWorkItemInboxRead<CVIInboxLogicGatesResponse>(params, "/v1/work-items/cvi-inbox");
 }
 
 export async function listMyNodes(params: WorkItemInboxReadParams): Promise<MyNodesResponse> {

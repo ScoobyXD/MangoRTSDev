@@ -1,7 +1,7 @@
 import { apiFetchJSON } from "../../auth/cognitoAuth.js";
 
-export type NotificationGVICRole = "generated" | "verified" | "consulted" | "informed" | "other";
-export type NotificationSurface = "r_inbox" | "aci_inbox" | "my_triage" | "shared_triage" | "";
+export type NotificationGVICRole = "responsible" | "consulted" | "verifier" | "informed" | "other";
+export type NotificationSurface = "r_inbox" | "cvi_inbox" | "my_triage" | "shared_triage" | "";
 
 export const EVENT_NOTIFICATIONS_UPDATED = "mangorts:notifications-updated";
 export const NOTIFICATION_UPDATE_SOURCE_REALTIME_ACCEPTED = "realtime-accepted-summary";
@@ -305,7 +305,7 @@ function normalizeSurface(value: unknown): NotificationSurface {
   const raw = typeof value === "string" ? value.trim() : "";
   switch (raw) {
     case "r_inbox":
-    case "aci_inbox":
+    case "cvi_inbox":
     case "my_triage":
     case "shared_triage":
       return raw;
@@ -317,8 +317,8 @@ function normalizeSurface(value: unknown): NotificationSurface {
 export function normalizeRole(value: unknown): NotificationGVICRole | "" {
   const raw = typeof value === "string" ? value.trim() : "";
   switch (raw) {
-    case "generated":
-    case "verified":
+    case "responsible":
+    case "verifier":
     case "consulted":
     case "informed":
     case "other":

@@ -13,7 +13,7 @@ func TestResourceGVICUpdatedWorkspaceEventTargetsOnlyNewOrChangedAssignments(t *
 	}
 	after := []domain.ResourceGVICEffectiveAssignment{
 		{UserID: "alice", Role: domain.GVICRoleConsulted},
-		{UserID: "bob", Role: domain.GVICRoleGenerated},
+		{UserID: "bob", Role: domain.GVICRoleResponsible},
 	}
 	if got := resourceGVICChangedUserIDs(before, after); !reflect.DeepEqual(got, []string{"bob"}) {
 		t.Fatalf("changed users = %v, want only newly assigned Bob", got)
@@ -42,11 +42,11 @@ func TestResourceGVICUpdatedWorkspaceEventTargetsOnlyNewOrChangedAssignments(t *
 
 func TestResourceGVICUpdatedWorkspaceEventSkipsUnchangedAndRemovedUsers(t *testing.T) {
 	before := []domain.ResourceGVICEffectiveAssignment{
-		{UserID: "alice", Role: domain.GVICRoleVerified},
+		{UserID: "alice", Role: domain.GVICRoleVerifier},
 		{UserID: "removed", Role: domain.GVICRoleInformed},
 	}
 	after := []domain.ResourceGVICEffectiveAssignment{
-		{UserID: "alice", Role: domain.GVICRoleVerified},
+		{UserID: "alice", Role: domain.GVICRoleVerifier},
 	}
 	result := ResourceGVICAssignmentMutationResult{
 		CompanyID:            "company-1",

@@ -1,7 +1,7 @@
 export type WorkspaceEntityCommandRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 
 export type WorkspaceEntityBatchKind = "node" | "logic_gate";
-export type WorkspaceEntityBatchCreatorLogicGateGVICRole = "generated" | "verified" | "consulted" | "informed";
+export type WorkspaceEntityBatchCreatorLogicGateGVICRole = "responsible" | "consulted" | "verifier" | "informed";
 export type WorkspaceEntityBatchMutationOrigin = "company_explorer" | "matrix" | "kanban" | "editor";
 
 export type WorkspaceEntityBatchItem = {

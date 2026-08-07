@@ -61,13 +61,6 @@ func (r *MemoryRepo) AddResourceGVICAssignments(input ResourceGVICAssignmentComm
 		byPrincipal[item.PrincipalType+":"+item.PrincipalID] = item
 	}
 	for _, item := range input.Assignments {
-		if strings.TrimSpace(item.Role) == domain.GVICRoleGenerated {
-			for principalKey, existing := range byPrincipal {
-				if existing.Role == domain.GVICRoleGenerated {
-					delete(byPrincipal, principalKey)
-				}
-			}
-		}
 		byPrincipal[strings.TrimSpace(item.PrincipalType)+":"+strings.TrimSpace(item.PrincipalID)] = item
 	}
 	items = items[:0]

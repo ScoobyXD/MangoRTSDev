@@ -186,20 +186,20 @@ test("My Work expanded group state is scoped to the matrix cell", () => {
     { field: "status", direction: "asc" },
   ]);
   const pendingGroupID = groups[0]?.groups[0]?.id ?? "";
-  const generatedPendingID = myWorkCellGroupStateID("generated:1", pendingGroupID);
+  const responsiblePendingID = myWorkCellGroupStateID("responsible:1", pendingGroupID);
   const consultedPendingID = myWorkCellGroupStateID("consulted:1", pendingGroupID);
 
   const expanded = computeAllExpandedCellGroupIDs([
-    { cellKey: "generated:1", groups },
+    { cellKey: "responsible:1", groups },
     { cellKey: "consulted:1", groups },
   ]);
   const afterConsultedCollapse = new Set(expanded);
   afterConsultedCollapse.delete(consultedPendingID);
 
-  assert.notEqual(generatedPendingID, consultedPendingID);
-  assert.equal(expanded.has(generatedPendingID), true);
+  assert.notEqual(responsiblePendingID, consultedPendingID);
+  assert.equal(expanded.has(responsiblePendingID), true);
   assert.equal(expanded.has(consultedPendingID), true);
-  assert.equal(afterConsultedCollapse.has(generatedPendingID), true);
+  assert.equal(afterConsultedCollapse.has(responsiblePendingID), true);
   assert.equal(afterConsultedCollapse.has(consultedPendingID), false);
 });
 
@@ -214,10 +214,10 @@ test("My Work scoped matrix loading preserves successful users when another user
         user_id: targetUserID,
         rows: [{
           company_id: "company-1",
-          projection_row_id: `my_work_node_leaf:company-1:${targetUserID}:generated:1:node:node-1:project:none:logic_gate:none`,
+          projection_row_id: `my_work_node_leaf:company-1:${targetUserID}:responsible:1:node:node-1:project:none:logic_gate:none`,
           user_id: targetUserID,
           node_name: "Still visible",
-          gvic_assignment: "generated",
+          gvic_assignment: "responsible",
           priority: 1,
           node_id: "node-1",
           created_timestamp: "2026-01-01T00:00:00Z",

@@ -918,7 +918,7 @@ func TestMemoryRepo_LogicGateKanbanPlacementStatusIssueAndNodeMetadata(t *testin
 		CompanyID:   companyID,
 		LogicGateID: firstGate.LogicGateID,
 		Assignments: []LogicGateGVICAssignmentInput{{
-			Role:   domain.GVICRoleGenerated,
+			Role:   domain.GVICRoleResponsible,
 			UserID: responsibleUser.UserID,
 		}},
 	}); err != nil {

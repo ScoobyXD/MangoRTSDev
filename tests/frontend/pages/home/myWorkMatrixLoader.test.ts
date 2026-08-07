@@ -71,7 +71,7 @@ test("My Work matrix cache dedupes in-flight loads", async () => {
       return {
         company_id: "company-cache-test",
         user_id: targetUserID,
-        rows: [myWorkProjectionRow(targetUserID, "generated", 1)],
+        rows: [myWorkProjectionRow(targetUserID, "responsible", 1)],
       };
     },
   });
@@ -99,7 +99,7 @@ test("My Work matrix cache reuses fresh values until marked stale", async () => 
     return {
       company_id: "company-cache-test",
       user_id: targetUserID,
-      rows: [myWorkProjectionRow(targetUserID, "verified", calls)],
+      rows: [myWorkProjectionRow(targetUserID, "verifier", calls)],
     };
   };
 
@@ -172,7 +172,7 @@ test("My Work matrix cache can invalidate an empty target-user result", async ()
 
 test("My Work committed titles patch only matching company and entity labels", () => {
   const cell = {
-    ...myWorkProjectionRow("user-title", "generated", 1),
+    ...myWorkProjectionRow("user-title", "responsible", 1),
     companyID: "company-cache-test",
     userID: "user-title",
     node_name: "Old node",
@@ -214,7 +214,7 @@ test("My Work title versions patch cached and pre-commit loads but leave later c
   const oldPayload = (title: string) => ({
     company_id: companyID,
     user_id: targetUserID,
-    rows: [{ ...myWorkProjectionRow(targetUserID, "generated", 1), node_name: title }],
+    rows: [{ ...myWorkProjectionRow(targetUserID, "responsible", 1), node_name: title }],
   });
   const commitTitle = (title: string) => {
     const update = { companyID, entityType: "node" as const, resourceID: nodeID, title };
@@ -299,7 +299,7 @@ test("My Work projection results merge title commits newer than the drop request
   const laterCanonical = patchMyWorkMatrixCells([], {
     companyID,
     rows: [{
-      ...myWorkProjectionRow(userID, "verified", 2),
+      ...myWorkProjectionRow(userID, "verifier", 2),
       node_name: "Later canonical node",
       logic_gate_id: logicGateID,
       logic_gate_name: "Later canonical gate",

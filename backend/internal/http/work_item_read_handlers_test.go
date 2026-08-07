@@ -26,11 +26,11 @@ func TestWorkItemInboxReadEndpointValidation(t *testing.T) {
 		name string
 		path string
 	}{
-		{name: "missing company", path: "/v1/work-items/generated-inbox"},
-		{name: "invalid company", path: "/v1/work-items/generated-inbox?company_id=not-a-uuid"},
-		{name: "invalid user", path: "/v1/work-items/generated-inbox?company_id=" + companyID + "&user_id=not-a-uuid"},
-		{name: "conflicting user aliases", path: "/v1/work-items/generated-inbox?company_id=" + companyID + "&user_id=" + userID + "&target_user_id=" + otherUserID},
-		{name: "invalid limit", path: "/v1/work-items/gvic-inbox?company_id=" + companyID + "&limit=0"},
+		{name: "missing company", path: "/v1/work-items/responsible-inbox"},
+		{name: "invalid company", path: "/v1/work-items/responsible-inbox?company_id=not-a-uuid"},
+		{name: "invalid user", path: "/v1/work-items/responsible-inbox?company_id=" + companyID + "&user_id=not-a-uuid"},
+		{name: "conflicting user aliases", path: "/v1/work-items/responsible-inbox?company_id=" + companyID + "&user_id=" + userID + "&target_user_id=" + otherUserID},
+		{name: "invalid limit", path: "/v1/work-items/cvi-inbox?company_id=" + companyID + "&limit=0"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -74,25 +74,25 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateLogicGate responsible: %v", err)
 	}
-	aciGate, err := repo.CreateLogicGate(companyID, "ACI API Gate")
+	cviGate, err := repo.CreateLogicGate(companyID, "CVI API Gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate aci: %v", err)
 	}
 	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: responsibleGate.LogicGateID,
-		Assignments: []store.LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}},
+		Assignments: []store.LogicGateGVICAssignmentInput{{Role: domain.GVICRoleResponsible, UserID: user.UserID}},
 	}); err != nil {
 		t.Fatalf("SetLogicGateGVICAssignments responsible: %v", err)
 	}
 	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
-		LogicGateID: aciGate.LogicGateID,
-		Assignments: []store.LogicGateGVICAssignmentInput{{Role: domain.GVICRoleVerified, UserID: user.UserID}},
+		LogicGateID: cviGate.LogicGateID,
+		Assignments: []store.LogicGateGVICAssignmentInput{{Role: domain.GVICRoleVerifier, UserID: user.UserID}},
 	}); err != nil {
 		t.Fatalf("SetLogicGateGVICAssignments aci: %v", err)
 	}
-	aciNode, err := repo.CreateNode(companyID, "Read API ACI node")
+	cviNode, err := repo.CreateNode(companyID, "Read API CVI node")
 	if err != nil {
 		t.Fatalf("CreateNode aci: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 		t.Fatalf("CreateNode standalone: %v", err)
 	}
 	mustSetWorkItemReadNodeGVIC(t, repo, companyID, standaloneNode.NodeID, user.UserID)
-	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: aciGate.LogicGateID, NodeID: aciNode.NodeID, Status: "done", Priority: testPriority(2), PrioritySet: true}); err != nil {
+	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: cviGate.LogicGateID, NodeID: cviNode.NodeID, Status: "done", Priority: testPriority(2), PrioritySet: true}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus aci: %v", err)
 	}
 	responsibleNode, err := repo.CreateNode(companyID, "Read API responsible node")
@@ -114,7 +114,7 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 	handler := NewServer(repo).Routes()
 	baseQuery := "company_id=" + companyID
 
-	responsibleRec := getWorkItemInboxRead(t, handler, "/v1/work-items/generated-inbox?"+baseQuery+"&limit=1", user.UserID, companyID, domain.RoleCompanyUser)
+	responsibleRec := getWorkItemInboxRead(t, handler, "/v1/work-items/responsible-inbox?"+baseQuery+"&limit=1", user.UserID, companyID, domain.RoleCompanyUser)
 	var responsiblePayload struct {
 		CompanyID string        `json:"company_id"`
 		UserID    string        `json:"user_id"`
@@ -141,13 +141,13 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 		t.Fatalf("my nodes = %+v, want standalone assigned node %s", myNodesPayload.Nodes, standaloneNode.NodeID)
 	}
 
-	aciRec := getWorkItemInboxRead(t, handler, "/v1/work-items/gvic-inbox?"+baseQuery, user.UserID, companyID, domain.RoleCompanyUser)
-	var aciPayload struct {
+	cviRec := getWorkItemInboxRead(t, handler, "/v1/work-items/cvi-inbox?"+baseQuery, user.UserID, companyID, domain.RoleCompanyUser)
+	var cviPayload struct {
 		LogicGates []store.WorkItemLogicGateInboxItem `json:"logic_gates"`
 	}
-	decodeWorkItemInboxReadPayload(t, aciRec, &aciPayload)
-	if len(aciPayload.LogicGates) != 1 || aciPayload.LogicGates[0].LogicGateID != aciGate.LogicGateID || !inboxReadHTTPRolesContain(aciPayload.LogicGates[0].Roles, domain.GVICRoleVerified) {
-		t.Fatalf("ACI payload = %+v, want accountable gate only", aciPayload.LogicGates)
+	decodeWorkItemInboxReadPayload(t, cviRec, &cviPayload)
+	if len(cviPayload.LogicGates) != 1 || cviPayload.LogicGates[0].LogicGateID != cviGate.LogicGateID || !inboxReadHTTPRolesContain(cviPayload.LogicGates[0].Roles, domain.GVICRoleVerifier) {
+		t.Fatalf("CVI payload = %+v, want Verifier gate only", cviPayload.LogicGates)
 	}
 
 	myGatesRec := getWorkItemInboxRead(t, handler, "/v1/work-items/my-logic-gates?"+baseQuery, user.UserID, companyID, domain.RoleCompanyUser)
@@ -156,13 +156,13 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 	}
 	decodeWorkItemInboxReadPayload(t, myGatesRec, &myGatesPayload)
 	if len(myGatesPayload.LogicGates) != 2 {
-		t.Fatalf("my logic gates = %+v, want responsible and accountable gates", myGatesPayload.LogicGates)
+		t.Fatalf("my logic gates = %+v, want responsible and verifier gates", myGatesPayload.LogicGates)
 	}
-	if !inboxReadHTTPPayloadHasGateRole(myGatesPayload.LogicGates, responsibleGate.LogicGateID, domain.GVICRoleGenerated) {
+	if !inboxReadHTTPPayloadHasGateRole(myGatesPayload.LogicGates, responsibleGate.LogicGateID, domain.GVICRoleResponsible) {
 		t.Fatalf("my logic gates missing responsible role: %+v", myGatesPayload.LogicGates)
 	}
-	if !inboxReadHTTPPayloadHasGateRole(myGatesPayload.LogicGates, aciGate.LogicGateID, domain.GVICRoleVerified) {
-		t.Fatalf("my logic gates missing accountable role: %+v", myGatesPayload.LogicGates)
+	if !inboxReadHTTPPayloadHasGateRole(myGatesPayload.LogicGates, cviGate.LogicGateID, domain.GVICRoleVerifier) {
+		t.Fatalf("my logic gates missing verifier role: %+v", myGatesPayload.LogicGates)
 	}
 
 	myWorkRec := getWorkItemInboxRead(t, handler, "/v1/work-items/my-work-matrix?"+baseQuery, user.UserID, companyID, domain.RoleCompanyUser)
@@ -175,8 +175,8 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 	if myWorkPayload.CompanyID != companyID || myWorkPayload.UserID != user.UserID {
 		t.Fatalf("my work metadata = %+v", myWorkPayload)
 	}
-	if !inboxReadHTTPMyWorkHasNode(myWorkPayload.Rows, responsibleNode.NodeID, domain.GVICRoleGenerated) {
-		t.Fatalf("my work rows missing generated node %s: %+v", responsibleNode.NodeID, myWorkPayload.Rows)
+	if !inboxReadHTTPMyWorkHasNode(myWorkPayload.Rows, responsibleNode.NodeID, domain.GVICRoleResponsible) {
+		t.Fatalf("my work rows missing Responsible node %s: %+v", responsibleNode.NodeID, myWorkPayload.Rows)
 	}
 }
 
@@ -198,11 +198,11 @@ func TestMyWorkMatrixNodeMoveUpdatesRolePriorityAndPreservesLogicGate(t *testing
 	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []store.LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}},
+		Assignments: []store.LogicGateGVICAssignmentInput{{Role: domain.GVICRoleResponsible, UserID: user.UserID}},
 	}); err != nil {
 		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
 	}
-	node, err := repo.CreateNode(companyID, "Move me from generated to consulted")
+	node, err := repo.CreateNode(companyID, "Move me from Responsible to Consulted")
 	if err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
@@ -244,11 +244,11 @@ func TestMyWorkMatrixNodeMoveUpdatesRolePriorityAndPreservesLogicGate(t *testing
 	if !inboxReadHTTPMyWorkHasNode(payload.Rows, node.NodeID, domain.GVICRoleConsulted) {
 		t.Fatalf("response rows missing consulted node: %+v", payload.Rows)
 	}
-	if inboxReadHTTPMyWorkHasNode(payload.Rows, node.NodeID, domain.GVICRoleGenerated) {
-		t.Fatalf("response rows still include generated node: %+v", payload.Rows)
+	if inboxReadHTTPMyWorkHasNode(payload.Rows, node.NodeID, domain.GVICRoleResponsible) {
+		t.Fatalf("response rows still include Responsible node: %+v", payload.Rows)
 	}
 	if len(payload.RemovedProjectionRowIDs) == 0 {
-		t.Fatalf("removed projection row IDs empty, want old generated row removed")
+		t.Fatalf("removed projection row IDs empty, want old Responsible row removed")
 	}
 
 	myWorkRec := getWorkItemInboxRead(t, handler, "/v1/work-items/my-work-matrix?company_id="+companyID, user.UserID, companyID, domain.RoleCompanyAdmin)
@@ -259,8 +259,8 @@ func TestMyWorkMatrixNodeMoveUpdatesRolePriorityAndPreservesLogicGate(t *testing
 	if !inboxReadHTTPMyWorkHasNode(myWorkPayload.Rows, node.NodeID, domain.GVICRoleConsulted) {
 		t.Fatalf("my work rows missing consulted node after move: %+v", myWorkPayload.Rows)
 	}
-	if inboxReadHTTPMyWorkHasNode(myWorkPayload.Rows, node.NodeID, domain.GVICRoleGenerated) {
-		t.Fatalf("my work rows still include generated node after move: %+v", myWorkPayload.Rows)
+	if inboxReadHTTPMyWorkHasNode(myWorkPayload.Rows, node.NodeID, domain.GVICRoleResponsible) {
+		t.Fatalf("my work rows still include Responsible node after move: %+v", myWorkPayload.Rows)
 	}
 	assignments, err := repo.ListNodeLogicGateAssignments(companyID, node.NodeID)
 	if err != nil {
@@ -447,8 +447,8 @@ func TestWorkItemInboxReadHandlersUseRequestContext(t *testing.T) {
 		path string
 		want string
 	}{
-		{name: "responsible inbox", path: "/v1/work-items/generated-inbox", want: "responsible"},
-		{name: "aci inbox", path: "/v1/work-items/gvic-inbox", want: "aci"},
+		{name: "responsible inbox", path: "/v1/work-items/responsible-inbox", want: "responsible"},
+		{name: "cvi inbox", path: "/v1/work-items/cvi-inbox", want: "cvi"},
 		{name: "my nodes", path: "/v1/work-items/my-nodes", want: "my_nodes"},
 		{name: "my logic gates", path: "/v1/work-items/my-logic-gates", want: "my_logic_gates"},
 	}
@@ -490,7 +490,7 @@ func TestWorkItemInboxReadHandlerPreservesCancelledRequestContext(t *testing.T) 
 	ctx, cancel := context.WithCancel(ctx)
 	cancel()
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/v1/work-items/generated-inbox?company_id="+companyID, nil).WithContext(ctx)
+	req := httptest.NewRequest(http.MethodGet, "/v1/work-items/responsible-inbox?company_id="+companyID, nil).WithContext(ctx)
 
 	handler.ServeHTTP(rec, req)
 
@@ -532,25 +532,25 @@ func (r *contextRecordingWorkItemReadRepo) recordWorkItemReadContext(ctx context
 	return nil
 }
 
-func (r *contextRecordingWorkItemReadRepo) ListGeneratedInboxNodes(store.WorkItemInboxQuery) ([]domain.Node, error) {
+func (r *contextRecordingWorkItemReadRepo) ListResponsibleInboxNodes(store.WorkItemInboxQuery) ([]domain.Node, error) {
 	r.legacyCalled = true
 	return nil, errLegacyWorkItemRead
 }
 
-func (r *contextRecordingWorkItemReadRepo) ListGeneratedInboxNodesContext(ctx context.Context, query store.WorkItemInboxQuery) ([]domain.Node, error) {
+func (r *contextRecordingWorkItemReadRepo) ListResponsibleInboxNodesContext(ctx context.Context, query store.WorkItemInboxQuery) ([]domain.Node, error) {
 	if err := r.recordWorkItemReadContext(ctx, "responsible"); err != nil {
 		return nil, err
 	}
 	return []domain.Node{}, nil
 }
 
-func (r *contextRecordingWorkItemReadRepo) ListACIInboxLogicGates(store.WorkItemInboxQuery) ([]store.WorkItemLogicGateInboxItem, error) {
+func (r *contextRecordingWorkItemReadRepo) ListCVIInboxLogicGates(store.WorkItemInboxQuery) ([]store.WorkItemLogicGateInboxItem, error) {
 	r.legacyCalled = true
 	return nil, errLegacyWorkItemRead
 }
 
-func (r *contextRecordingWorkItemReadRepo) ListACIInboxLogicGatesContext(ctx context.Context, query store.WorkItemInboxQuery) ([]store.WorkItemLogicGateInboxItem, error) {
-	if err := r.recordWorkItemReadContext(ctx, "aci"); err != nil {
+func (r *contextRecordingWorkItemReadRepo) ListCVIInboxLogicGatesContext(ctx context.Context, query store.WorkItemInboxQuery) ([]store.WorkItemLogicGateInboxItem, error) {
+	if err := r.recordWorkItemReadContext(ctx, "cvi"); err != nil {
 		return nil, err
 	}
 	return []store.WorkItemLogicGateInboxItem{}, nil
@@ -655,7 +655,7 @@ func mustSetWorkItemReadNodeGVIC(t *testing.T, repo *store.MemoryRepo, companyID
 		ResourceType: store.EntityTypeNode,
 		ResourceID:   nodeID,
 		Assignments: []store.ResourceGVICAssignmentInput{{
-			Role:          domain.GVICRoleGenerated,
+			Role:          domain.GVICRoleResponsible,
 			PrincipalType: store.EntityPermissionSubjectUser,
 			PrincipalID:   userID,
 		}},

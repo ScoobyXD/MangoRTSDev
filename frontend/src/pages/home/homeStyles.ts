@@ -54,7 +54,7 @@ const DEFAULT_GVIC_HEADER_PALETTE: GVICHeaderPalette = {
 };
 
 const LOGIC_GATE_GVIC_HEADER_PALETTES: Record<string, GVICHeaderPalette> = {
-  generated: {
+  responsible: {
     surface: "linear-gradient(135deg, rgba(236, 253, 245, 0.95), rgba(207, 250, 254, 0.72))",
     edge: "rgba(8, 145, 178, 0.40)",
     letterBackground: "linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(209, 250, 229, 0.88) 52%, rgba(207, 250, 254, 0.78))",
@@ -62,7 +62,7 @@ const LOGIC_GATE_GVIC_HEADER_PALETTES: Record<string, GVICHeaderPalette> = {
     labelColor: "#164e63",
     glow: "0 10px 24px rgba(8, 145, 178, 0.12)",
   },
-  verified: {
+  verifier: {
     surface: "linear-gradient(135deg, rgba(255, 241, 242, 0.94), rgba(254, 249, 195, 0.72))",
     edge: "rgba(225, 29, 72, 0.40)",
     letterBackground: "linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(255, 228, 230, 0.88) 52%, rgba(254, 249, 195, 0.76))",
@@ -1171,9 +1171,9 @@ export function logicGateInboxGroupNotificationStyle(role: string): React.CSSPro
 
 function inboxNotificationRoleColors(role: string): { background: string; border: string; color: string } {
   switch (role) {
-    case "generated":
+    case "responsible":
       return { background: "#f1f5f9", border: "rgba(100, 116, 139, 0.36)", color: "#334155" };
-    case "verified":
+    case "verifier":
       return { background: "#f1f5f9", border: "rgba(100, 116, 139, 0.38)", color: "#334155" };
     case "consulted":
       return { background: "#f1f5f9", border: "rgba(100, 116, 139, 0.34)", color: "#334155" };

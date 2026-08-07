@@ -1,3 +1,15 @@
+# Process Story: A Logic Gate assigns live RCVI responsibility
+
+A user assigns people or groups to Responsible, Consulted, Verifier, or Informed on a Logic Gate
+↓
+Each role card shows every direct person and group name, while nested group membership expands live for effective users
+↓
+Every role accepts multiple direct principals, one direct principal holds only one role, and the effective order is Responsible, Consulted, Verifier, then Informed
+↓
+Responsible supplies request-owner metadata, but RCVI remains separate from permission and grants no resource access
+
+Last updated: 2026-08-06
+
 # Process Story: A changed Logic Gate saves history when the Logic Gate is left
 
 A user edits the Logic Gate's final textbox document
@@ -32,7 +44,7 @@ Last updated: 2026-08-05
 
 A user creates or opens a Logic Gate from Explorer, Home, Logic Gate Arena, Kanban, or a direct route
 ↓
-The canonical Logic Gate record, Input/Output relationships, permissions, and GVIC assignments load through surviving APIs and caches
+The canonical Logic Gate record, Input/Output relationships, permissions, and RCVI assignments load through surviving APIs and caches
 ↓
 No Logic Gate Map route, frame, coordinate payload, position store, or compatibility reader exists
 ↓
@@ -67,13 +79,13 @@ Coverage Status:
 
 ## Business Logic
 
-LG1 - Logic gates support generated, verified, consulted, and informed GVIC assignments.
-LG2 - Logic Gate Generated is a single-user slot; Verified accepts multiple explicit users.
-LG3 - Logic Gate Generated and Verified assignments must use user principals, not group principals.
-LG4 - Replacing Generated removes its previous user; adding Verified keeps the existing Verified users.
-LG5 - Logic gate consulted and informed GVIC assignments may include users and user groups.
+LG1 - Logic Gates support Responsible, Consulted, Verifier, and Informed RCVI assignments in that order.
+LG2 - Every Logic Gate RCVI role accepts multiple direct user or group principals.
+LG3 - A direct principal can hold only one RCVI role on the same Logic Gate.
+LG4 - Group assignments remain typed group edges and expand through current members and nested subgroups whenever effective RCVI is read.
+LG5 - When one user reaches several roles through direct or group sources, the effective order is Responsible, Consulted, Verifier, then Informed.
 LG6 - Nodes dropped or created into a logic gate requested column store the requesting user.
-LG7 - The generated user for the logic gate sees accept and deny actions for requested nodes sent by another user.
+LG7 - Every effective Responsible user for the Logic Gate sees accept and deny actions for requested Nodes sent by another user.
 LG8 - Accepting a requested node moves it to pending and clears the request sender.
 LG9 - Denying a requested node moves it to backlog and clears the request sender.
 LG10 - The requesting user sees request-sent status on the requested card and can cancel the request back to backlog.
@@ -90,8 +102,8 @@ LG20 - Logic Gate exit history is action-triggered, not background work. After a
 LG21 - Restoring a Logic Gate saved version requires confirmation and overwrites the current `logic_gate_textboxes` row from final history without creating another saved-version row.
 LG22 - Logic Gate typing uses ordered 160 ms structured-operation micro-batches on one exact document queue. Stable operation IDs and server revisions serialize commit acknowledgement without overlapping whole-document projection writes or cross-target queue replacement.
 LG23 - Logic Gate editor save state must use the vocabulary and behavior `has changed`, `has not changed`, `save in progress`, and `save needed after current save`. The editor is marked `has not changed` only when the completed request's version matches the latest local version.
-LG24 - The Logic Gate editor exposes applying the current GVIC template to already assigned nodes as a one-shot action in the shared **More editor actions** menu, not as a persistent checkbox, fifth GVIC card, or vertical control between the title and GVIC fields.
-LG25 - Pressing the Logic Gate editor's apply-to-assigned-nodes action opens an explicit Yes/No confirmation; No, cancel, or dismissal makes no write, and only Yes applies the current Logic Gate GVIC template to nodes currently assigned to that Logic Gate. Ordinary GVIC role edits remain template-only for existing assigned nodes.
+LG24 - The Logic Gate editor exposes applying the current RCVI template to already assigned Nodes as a one-shot action in the shared **More editor actions** menu, not as a persistent checkbox, fifth RCVI card, or vertical control between the title and RCVI fields.
+LG25 - Pressing the Logic Gate editor's apply-to-assigned-nodes action opens an explicit Yes/No confirmation; No, cancel, or dismissal makes no write, and only Yes applies the current Logic Gate RCVI template to Nodes currently assigned to that Logic Gate. Ordinary RCVI role edits remain template-only for existing assigned Nodes.
 LG26 - Logic Gate editor surfaces participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, italic, strikethrough, text highlight/No highlight, left/center/right alignment, table, and people-suggestion/entity-boundary semantics must apply to Logic Gate editor text wherever it is opened. The `@`/`!` people picker uses stable, visible per-user profile colors rather than gray-only rows.
 LG27 - Logic Gate editor inline images/files must follow `docs/tests/attachments.md`: rich-editor paste/drop uses the shared editor image path, `logic_gate_textboxes.body_json` stores attachment references, and file ownership comes only from `attachments` plus `attachment_relationships`; no durable row stores data URLs or base64 file bytes.
 LG28 - The Logic Gate editor toolbar must use the shared rich-editor toolbar source and shared formatting controller. Font-size minus/value/plus, Bold, Underline, Italic, Strikethrough, the Highlight split button with **No highlight**, left/center/right alignment, table insertion, and the outline-style dropdown must match node text boxes, project text boxes, mail editor surfaces, and email signatures. The highlight main hitbox applies the chosen color without opening the picker, while the arrow only opens the picker. Vibrant active styling applies only to the individual hitbox and remains distinct from hover, focus, and disabled state.
@@ -102,14 +114,14 @@ LG32 - Changing the selected Logic Gate aborts the obsolete request, and selecti
 LG33 - First mounted-board subscription acceptance, reconnect acceptance, and compact `kanban.changed` hints share one single-flight targeted Logic Gate work loader with at most one queued final read; they do not overlap or abort/restart an active read. A later local board handler joining an accepted shared scope receives immediate acceptance. Admission proves the owning Logic Gate exists and current Edit access applies; publication rechecks that audience so a revoked subscriber receives no later hint. No projection delta, sequence, replay, or gap protocol exists.
 LG34 - The Logic Gate work response exposes only the minimal Logic Gate header/default/request-owner data, actor permission flags, board, columns, and minimal cards.
 LG35 - The work ETag uses one dedicated Logic Gate work-version row plus actor permission identity/flags and a response-contract salt; authorization is evaluated before `304 Not Modified`.
-LG36 - The board request owner is the Logic Gate's Generated user ID. The work payload does not ship the full GVIC assignment collection, and GVIC still does not grant resource permission.
+LG36 - Board request-owner metadata uses an effective Responsible user ID. The work payload does not ship the full RCVI assignment collection, and RCVI still does not grant resource permission.
 LG37 - Logic Gate text highlighting must use the shared `EditorTabBar` split button, palette/custom/**No highlight** choices, and shared formatting controller. The main hitbox applies/toggles the selected color to a restored range or collapsed-caret pending style without opening the picker; the arrow opens the picker without applying color. Highlight reports the chosen active/pending color and round-trips through sanitized rich HTML. **No highlight** clears selected highlighting or the pending highlight typing style, and a selection ending at a line/list-item boundary must not bleed into the following sibling.
 LG38 - Hydrating changed Logic Gate editor content while the editor or one of its shared toolbar controls owns focus must preserve the logical selection. The editor restores the last valid range, records text offsets before replacing the DOM, and restores those offsets afterward so toolbar focus does not move formatting to an unrelated location.
 LG39 - When a Logic Gate document is hidden by Metadata, History, or Save Settings isolation, its rich editor must also be hidden and formatting commands must be disabled. Editor navigation tabs remain usable so the user can return to the document.
 LG40 - Every successful Logic Gate rename entry point covered by RW15 publishes the concrete committed-title event after commit, and applicable same-window Logic Gate labels converge under RW15. An active Editor title draft/caret is preserved until editing ends; passive dock/pin updates preserve recency/storage, and no cross-user/generalized fan-out is created.
 LG41 - The Logic Gate editor header keeps Editor, Permissions, the shared formatting toolbar, Outline Styles/Automatic Numbering, and the immediately adjacent More control on one nonwrapping line. Relationships, Metadata, History, Save Settings, save-version/related-node commands, and any supported secondary actions remain available in the keyboard-operable **More editor actions** menu with their existing permission and disabled states.
 LG42 - Blocking Logic Gate editor dialogs and fullscreen image previews mount through the shared body-level modal portal above Key Views, Explorer, Search Explorer, and feature-local stacking contexts, trap focus while topmost, and restore prior focus when closed.
-LG43 - The Generated, Verified, Consulted, and Informed cards remain in one compact four-column horizontal row. Narrowing may clip that row beneath an adjacent pane, but must not wrap it vertically or add a persistent apply/current-GVIC card.
+LG43 - The Responsible, Consulted, Verifier, and Informed cards remain in one compact four-column horizontal row. Narrowing may clip that row beneath an adjacent pane, but must not wrap it vertically or add a persistent apply/current-RCVI card. Each card shows its direct person and group names with wrapping instead of a numeric People summary.
 LG44 - Reassigning a Node from Logic Gate A to Logic Gate B commits one membership change that identifies both source and destination projections. After success, A removes the Node immediately through the established canonical board refresh path and B/current consumers converge; failure leaves the existing projection intact, and duplicate local/realtime hints do not create duplicate refreshes or false membership.
 LG45 - A Node popup opened from Logic Gate Arena owns its transient half/fullscreen mode locally. Realtime acceptance and canonical summary/work/view projection reconciliation may update Node/board data and titles, but reopening/reconciling the same Node must preserve fullscreen until the user exits fullscreen or closes it; opening a different Node starts from the normal saved half-view ratio.
 LG46 - Each Logic Gate independently editable body is an exact collaboration document with its own server-ordered revision, snapshot, ETag, pending queue, and `editor:logic_gate:{logic_gate_id}:{document_id}` scope.
@@ -133,7 +145,7 @@ LG64 - A Logic Gate-to-Project link is successful only after the normal Project 
 
 ## Scenarios
 
-### Scenario LG-S1: Generated Single User And Verified Multiple Users
+### Scenario LG-S1: Every RCVI Role Accepts People And Groups
 
 Business logic covered:
 - LG1
@@ -142,29 +154,31 @@ Business logic covered:
 - LG4
 
 Given:
-- A logic gate has editable GVIC fields.
-- A company user is assigned to the logic gate's generated or verified field.
-- A second user is later selected for the same generated or verified field.
+- A logic gate has editable RCVI fields.
+- A company has users, groups, and nested subgroups.
+- Several direct principals are assigned to each Logic Gate RCVI role.
 
 Expected:
-- Generated accepts exactly one user and selecting a second Generated user replaces the first.
-- Verified accepts multiple users.
-- Group principals are not selectable or accepted for Generated or Verified.
+- Responsible, Consulted, Verifier, and Informed each accept multiple users or groups.
+- One direct principal cannot occupy two roles on the same Logic Gate.
+- Each card shows every direct person and group name, wrapping the text instead of displaying `People (n)`.
 
-### Scenario LG-S2: Consulted And Informed Users And Teams
+### Scenario LG-S2: Live RCVI Users And Teams
 
 Business logic covered:
 - LG1
+- LG2
+- LG4
 - LG5
 
 Given:
-- A logic gate has consulted and informed GVIC fields.
+- A Logic Gate has Responsible, Consulted, Verifier, and Informed RCVI fields.
 - A company has users, user groups, and nested user groups.
 
 Expected:
-- Consulted and informed can include individual users.
-- Consulted and informed can include user groups.
-- Consulted and informed can hold multiple assignments.
+- Every role can include individual users.
+- Every role can include user groups and current nested subgroup members.
+- Every role can hold multiple assignments.
 
 ### Scenario LG-S3: Requested Node Ownership
 
@@ -176,12 +190,12 @@ Business logic covered:
 - LG10
 
 Given:
-- A logic gate has a generated user.
+- A Logic Gate has an effective Responsible user.
 - Another user drops or creates a node into the requested column.
 
 Expected:
 - The requested card records the requesting user.
-- The generated user sees accept and deny actions on the requested card.
+- Every effective Responsible user sees accept and deny actions on the requested card.
 - Accept moves the card to pending.
 - Deny moves the card to backlog.
 - The requesting user sees request-sent status and can cancel the request to backlog.
@@ -220,7 +234,7 @@ Expected:
 - Left, center, and right alignment reflect and change the active paragraph/selected block or active-table context.
 - The toolbar uses the complete shared formatting and outline controls rather than a Logic Gate-only implementation; vibrant active styling affects only the individual hitbox and remains distinct from hover/focus/disabled state.
 - The primary header keeps Editor, Permissions, formatting, Outline Styles/Automatic Numbering, and the immediately adjacent More control on one nonwrapping line.
-- The four GVIC cards remain in one horizontal row that may clip beneath an adjacent pane rather than wrapping into taller header content.
+- The four RCVI cards remain in one horizontal row that may clip beneath an adjacent pane rather than wrapping into taller header content.
 - Secondary destinations and commands remain in **More editor actions**.
 - External hydration restores the same logical selection offsets after replacing the editor DOM, including when toolbar focus has moved the browser selection.
 - Table insertion uses the current caret/selection position from the shared toolbar and does not add a cell-level alignment-icon overlay.
@@ -260,24 +274,24 @@ Expected:
 - Deletion uses an exact tombstone and a late operation cannot recreate the document. No expected-revision conflict modal, server-version choice, or retained full-body draft exists.
 - Opening Metadata, History, or Save Settings hides the document and disables its formatting commands without disabling the navigation tabs needed to return.
 
-### Scenario LG-S6: Logic Gate GVIC Apply To Assigned Nodes Action
+### Scenario LG-S6: Logic Gate RCVI Apply To Assigned Nodes Action
 
 Business logic covered:
 - LG24
 - LG25
 
 Given:
-- A user is editing a Logic Gate that has generated, verified, consulted, and informed GVIC fields.
+- A user is editing a Logic Gate that has Responsible, Consulted, Verifier, and Informed RCVI fields.
 - The Logic Gate has nodes already assigned to it.
-- The user changes the Logic Gate's GVIC template.
+- The user changes the Logic Gate's RCVI template.
 - The user presses the apply-to-assigned-nodes action.
 
 Expected:
-- The apply-to-assigned-nodes action is available in **More editor actions**, and no checkbox, separate row, or fifth apply/current-GVIC card appears beside the role fields.
-- Pressing the action opens an explicit Yes/No confirmation before any bulk node GVIC update is sent.
-- Choosing No, canceling, or dismissing the confirmation leaves the current Logic Gate GVIC template saved but does not update existing assigned node snapshots.
-- Only choosing Yes applies the current Logic Gate GVIC template to nodes currently assigned to that Logic Gate.
-- Changing Generated, Verified, Consulted, or Informed directly does not implicitly apply that change to existing assigned nodes.
+- The apply-to-assigned-nodes action is available in **More editor actions**, and no checkbox, separate row, or fifth apply/current-RCVI card appears beside the role fields.
+- Pressing the action opens an explicit Yes/No confirmation before any bulk Node RCVI update is sent.
+- Choosing No, canceling, or dismissing the confirmation leaves the current Logic Gate RCVI template saved but does not update existing assigned Node snapshots.
+- Only choosing Yes applies the current Logic Gate RCVI template to Nodes currently assigned to that Logic Gate.
+- Changing Responsible, Consulted, Verifier, or Informed directly does not implicitly apply that change to existing assigned Nodes.
 
 ### Scenario LG-S7: Logic Gate Editor Images Use Mango Attachments
 
@@ -337,7 +351,7 @@ Business logic covered:
 - LG40
 
 Given:
-- A Logic Gate with a Generated user is opened in Arena from forced props and the matching current selection.
+- A Logic Gate with a Responsible user is opened in Arena from forced props and the matching current selection.
 - A cached snapshot exists, the user quickly changes gates, and acceptance/hints arrive while one mounted-board read is slow; another local board handler may join the accepted scope.
 - The same Logic Gate is renamed successfully from each supported entry point while multiple applicable RW15 consumers are mounted; one title `contentEditable` has a live draft/caret.
 
@@ -347,7 +361,7 @@ Expected:
 - First/reconnect/late-handler acceptance and hints use one active targeted loader plus at most one queued final reload; no overlap/restart, broad workspace reload, projection replay, or gap protocol runs.
 - Each successful rename publishes one committed-title event after commit and all non-edited mounted same-window labels converge immediately; the edited title applies its deferred update only after editing ends.
 - Failed renames publish no event, and title draft/caret plus dirty or in-flight editor text remain untouched.
-- The response carries `request_owner_user_id` and actor permission flags but no full GVIC, node, assignment, or status collections.
+- The response carries `request_owner_user_id` and actor permission flags but no full RCVI, node, assignment, or status collections.
 - Authorization runs before conditional-response handling, and changes that affect the representation advance its version or contract fingerprint.
 
 ### Scenario LG-S11: Cross-Gate Reassignment Converges Both Boards
@@ -382,8 +396,8 @@ Expected:
 - Closing or opening a different Node restores the normal saved half-view behavior.
 
 LG51 - Email-derived Nodes are not attached to a Logic Gate at chat creation. A later ordinary assignment is allowed, preserves selected Node priority/status behavior, and returns `created_from_email=true` immediately so the established email icon appears on the Logic Gate row/card without waiting for a refresh.
-LG52 - Normal and urgent mentions committed from a Logic Gate editor use that Logic Gate's current effective GVIC assignments and roles. Node GVIC is not consulted for a Logic Gate-owned action.
-LG53 - A Logic Gate GVIC mutation sends an assignment update only to a newly assigned or effective-role-changed user. Existing unchanged users, removed users, unrelated users, and the actor receive none.
+LG52 - Normal and urgent mentions committed from a Logic Gate editor use that Logic Gate's current effective RCVI assignments and roles. Node RCVI is not consulted for a Logic Gate-owned action.
+LG53 - A Logic Gate RCVI mutation sends an assignment update only to a newly assigned or effective-role-changed user. Existing unchanged users, removed users, unrelated users, and the actor receive none.
 
 ### Scenario LG-S13: Final Logic Gate storage and retirement boundary
 

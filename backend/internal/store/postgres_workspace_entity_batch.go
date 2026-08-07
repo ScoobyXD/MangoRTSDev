@@ -169,7 +169,7 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 	}
 	if input.CreatorUserID != "" {
 		for _, mapping := range result.EntityMappings {
-			role := domain.GVICRoleGenerated
+			role := domain.GVICRoleResponsible
 			if input.EntityKind == EntityTypeLogicGate {
 				role = input.CreatorLogicGateGVICRole
 			}

@@ -1,7 +1,6 @@
 package store
 
 import (
-	"errors"
 	"miraeopus/backend/internal/domain"
 	"os"
 	"sort"
@@ -108,14 +107,14 @@ func TestMemoryGroupMembershipGVICSyncIsAffectedGroupScoped(t *testing.T) {
 	}
 }
 
-func TestMemoryNodeAndLogicGatePrimaryGVICAllowsOnlyOneUserPerRole(t *testing.T) {
+func TestMemoryNodeAndLogicGateRCVIRolesAllowGroupsAndMultiplePrincipals(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "company-gvic-node-primary-user"
 	repo.EnsureCompany(companyID, "GVIC Node Primary User")
 
 	first := mustCreateGVICMembershipUser(t, repo, "gvic-node-primary-first", companyID)
 	next := mustCreateGVICMembershipUser(t, repo, "gvic-node-primary-next", companyID)
-	verified := mustCreateGVICMembershipUser(t, repo, "gvic-node-primary-verified", companyID)
+	verifier := mustCreateGVICMembershipUser(t, repo, "gvic-node-primary-verifier", companyID)
 	group, err := repo.CreateCompanyUserGroup(companyID, "", "Primary Group")
 	if err != nil {
 		t.Fatalf("CreateCompanyUserGroup: %v", err)
@@ -127,13 +126,13 @@ func TestMemoryNodeAndLogicGatePrimaryGVICAllowsOnlyOneUserPerRole(t *testing.T)
 		ResourceType: EntityTypeNode,
 		ResourceID:   node.NodeID,
 		Assignments: []ResourceGVICAssignmentInput{{
-			Role:          domain.GVICRoleGenerated,
+			Role:          domain.GVICRoleResponsible,
 			PrincipalType: EntityPermissionSubjectGroup,
 			PrincipalID:   group.GroupID,
 		}},
 	})
-	if !errors.Is(err, ErrInvalid) {
-		t.Fatalf("node generated group assignment error = %v, want %v", err, ErrInvalid)
+	if err != nil {
+		t.Fatalf("node Responsible group assignment rejected: %v", err)
 	}
 
 	_, err = repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
@@ -141,12 +140,12 @@ func TestMemoryNodeAndLogicGatePrimaryGVICAllowsOnlyOneUserPerRole(t *testing.T)
 		ResourceType: EntityTypeNode,
 		ResourceID:   node.NodeID,
 		Assignments: []ResourceGVICAssignmentInput{
-			{Role: domain.GVICRoleGenerated, PrincipalType: EntityPermissionSubjectUser, PrincipalID: first.UserID},
-			{Role: domain.GVICRoleGenerated, PrincipalType: EntityPermissionSubjectUser, PrincipalID: next.UserID},
+			{Role: domain.GVICRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: first.UserID},
+			{Role: domain.GVICRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: next.UserID},
 		},
 	})
-	if !errors.Is(err, ErrInvalid) {
-		t.Fatalf("node generated multi-user assignment error = %v, want %v", err, ErrInvalid)
+	if err != nil {
+		t.Fatalf("node multiple Responsible users rejected: %v", err)
 	}
 
 	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
@@ -154,8 +153,8 @@ func TestMemoryNodeAndLogicGatePrimaryGVICAllowsOnlyOneUserPerRole(t *testing.T)
 		ResourceType: EntityTypeNode,
 		ResourceID:   node.NodeID,
 		Assignments: []ResourceGVICAssignmentInput{
-			{Role: domain.GVICRoleGenerated, PrincipalType: EntityPermissionSubjectUser, PrincipalID: first.UserID},
-			{Role: domain.GVICRoleVerified, PrincipalType: EntityPermissionSubjectUser, PrincipalID: verified.UserID},
+			{Role: domain.GVICRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: first.UserID},
+			{Role: domain.GVICRoleVerifier, PrincipalType: EntityPermissionSubjectUser, PrincipalID: verifier.UserID},
 			{Role: domain.GVICRoleConsulted, PrincipalType: EntityPermissionSubjectGroup, PrincipalID: group.GroupID},
 		},
 	}); err != nil {
@@ -167,7 +166,7 @@ func TestMemoryNodeAndLogicGatePrimaryGVICAllowsOnlyOneUserPerRole(t *testing.T)
 		ResourceType: EntityTypeNode,
 		ResourceID:   node.NodeID,
 		Assignments: []ResourceGVICAssignmentInput{{
-			Role:          domain.GVICRoleGenerated,
+			Role:          domain.GVICRoleResponsible,
 			PrincipalType: EntityPermissionSubjectUser,
 			PrincipalID:   next.UserID,
 		}},
@@ -175,14 +174,14 @@ func TestMemoryNodeAndLogicGatePrimaryGVICAllowsOnlyOneUserPerRole(t *testing.T)
 	if err != nil {
 		t.Fatalf("AddResourceGVICAssignments replacement: %v", err)
 	}
-	generatedUsers := []string{}
+	responsibleUsers := []string{}
 	for _, assignment := range result.GVICAssignments {
-		if assignment.Role == domain.GVICRoleGenerated {
-			generatedUsers = append(generatedUsers, assignment.UserID)
+		if assignment.Role == domain.GVICRoleResponsible {
+			responsibleUsers = append(responsibleUsers, assignment.UserID)
 		}
 	}
-	if len(generatedUsers) != 1 || generatedUsers[0] != next.UserID {
-		t.Fatalf("generated users after replacement = %+v, want only %s", generatedUsers, next.UserID)
+	if len(responsibleUsers) != 2 || !stringSliceContains(responsibleUsers, first.UserID) || !stringSliceContains(responsibleUsers, next.UserID) {
+		t.Fatalf("Responsible users after add = %+v, want %s and %s", responsibleUsers, first.UserID, next.UserID)
 	}
 
 	logicGate, err := repo.CreateLogicGate(companyID, "logic gate primary slots")
@@ -194,13 +193,13 @@ func TestMemoryNodeAndLogicGatePrimaryGVICAllowsOnlyOneUserPerRole(t *testing.T)
 		ResourceType: EntityTypeLogicGate,
 		ResourceID:   logicGate.LogicGateID,
 		Assignments: []ResourceGVICAssignmentInput{{
-			Role:          domain.GVICRoleGenerated,
+			Role:          domain.GVICRoleResponsible,
 			PrincipalType: EntityPermissionSubjectGroup,
 			PrincipalID:   group.GroupID,
 		}},
 	})
-	if !errors.Is(err, ErrInvalid) {
-		t.Fatalf("logic gate generated group assignment error = %v, want %v", err, ErrInvalid)
+	if err != nil {
+		t.Fatalf("logic gate Responsible group assignment rejected: %v", err)
 	}
 
 	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
@@ -208,8 +207,8 @@ func TestMemoryNodeAndLogicGatePrimaryGVICAllowsOnlyOneUserPerRole(t *testing.T)
 		ResourceType: EntityTypeLogicGate,
 		ResourceID:   logicGate.LogicGateID,
 		Assignments: []ResourceGVICAssignmentInput{
-			{Role: domain.GVICRoleGenerated, PrincipalType: EntityPermissionSubjectUser, PrincipalID: first.UserID},
-			{Role: domain.GVICRoleVerified, PrincipalType: EntityPermissionSubjectUser, PrincipalID: verified.UserID},
+			{Role: domain.GVICRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: first.UserID},
+			{Role: domain.GVICRoleVerifier, PrincipalType: EntityPermissionSubjectUser, PrincipalID: verifier.UserID},
 			{Role: domain.GVICRoleInformed, PrincipalType: EntityPermissionSubjectGroup, PrincipalID: group.GroupID},
 		},
 	}); err != nil {
@@ -221,7 +220,7 @@ func TestMemoryNodeAndLogicGatePrimaryGVICAllowsOnlyOneUserPerRole(t *testing.T)
 		ResourceType: EntityTypeLogicGate,
 		ResourceID:   logicGate.LogicGateID,
 		Assignments: []ResourceGVICAssignmentInput{{
-			Role:          domain.GVICRoleGenerated,
+			Role:          domain.GVICRoleResponsible,
 			PrincipalType: EntityPermissionSubjectUser,
 			PrincipalID:   next.UserID,
 		}},
@@ -229,14 +228,14 @@ func TestMemoryNodeAndLogicGatePrimaryGVICAllowsOnlyOneUserPerRole(t *testing.T)
 	if err != nil {
 		t.Fatalf("AddResourceGVICAssignments logic gate replacement: %v", err)
 	}
-	logicGateGeneratedUsers := []string{}
+	logicGateResponsibleUsers := []string{}
 	for _, assignment := range logicGateResult.GVICAssignments {
-		if assignment.Role == domain.GVICRoleGenerated {
-			logicGateGeneratedUsers = append(logicGateGeneratedUsers, assignment.UserID)
+		if assignment.Role == domain.GVICRoleResponsible {
+			logicGateResponsibleUsers = append(logicGateResponsibleUsers, assignment.UserID)
 		}
 	}
-	if len(logicGateGeneratedUsers) != 1 || logicGateGeneratedUsers[0] != next.UserID {
-		t.Fatalf("logic gate generated users after replacement = %+v, want only %s", logicGateGeneratedUsers, next.UserID)
+	if len(logicGateResponsibleUsers) != 2 || !stringSliceContains(logicGateResponsibleUsers, first.UserID) || !stringSliceContains(logicGateResponsibleUsers, next.UserID) {
+		t.Fatalf("logic gate Responsible users after add = %+v, want %s and %s", logicGateResponsibleUsers, first.UserID, next.UserID)
 	}
 }
 
@@ -472,11 +471,11 @@ func mustSetGVICMembershipInherited(t *testing.T, repo *MemoryRepo, companyID, r
 	}
 }
 
-func mustListGVICMembershipGeneratedNodes(t *testing.T, repo *MemoryRepo, companyID, userID string) []domain.Node {
+func mustListGVICMembershipResponsibleNodes(t *testing.T, repo *MemoryRepo, companyID, userID string) []domain.Node {
 	t.Helper()
-	nodes, err := repo.ListGeneratedInboxNodes(WorkItemInboxQuery{CompanyID: companyID, UserID: userID, Limit: 20})
+	nodes, err := repo.ListResponsibleInboxNodes(WorkItemInboxQuery{CompanyID: companyID, UserID: userID, Limit: 20})
 	if err != nil {
-		t.Fatalf("ListGeneratedInboxNodes %s: %v", userID, err)
+		t.Fatalf("ListResponsibleInboxNodes %s: %v", userID, err)
 	}
 	return nodes
 }

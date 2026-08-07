@@ -80,7 +80,7 @@ func TestLogicGateWorkJSONContractIsKanbanSpecificAndNonRedundant(t *testing.T) 
 	if _, err := repo.SetLogicGateGVICAssignments(LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: owner.UserID}},
+		Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleResponsible, UserID: owner.UserID}},
 	}); err != nil {
 		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestMemoryLogicGateRequestedAssignmentsTrackRequester(t *testing.T) {
 	if _, err := repo.SetLogicGateGVICAssignments(LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: responsible.UserID}},
+		Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleResponsible, UserID: responsible.UserID}},
 	}); err != nil {
 		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
 	}

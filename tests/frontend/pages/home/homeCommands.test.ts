@@ -299,10 +299,10 @@ function projectionRow(resourceID: string, overrides: Partial<GVICMatrixProjecti
   const logicGateID = overrides.logic_gate_id ?? "none";
   return {
     company_id: "company-1",
-    projection_row_id: `my_work_node_leaf:company-1:user-1:generated:none:node:${resourceID}:project:none:logic_gate:${logicGateID}`,
+    projection_row_id: `my_work_node_leaf:company-1:user-1:responsible:none:node:${resourceID}:project:none:logic_gate:${logicGateID}`,
     user_id: "user-1",
     node_name: `Node ${resourceID}`,
-    gvic_assignment: "generated",
+    gvic_assignment: "responsible",
     node_id: resourceID,
     created_timestamp: timestamp,
     updated_timestamp: timestamp,
@@ -635,7 +635,7 @@ test("My Work node drop uses the dedicated move command for role and priority pl
         gvic_assignment: input.targetGVICRole,
         logic_gate_id: input.logicGateID ?? "",
       })],
-      removed_projection_row_ids: ["old-generated-row", `old-${input.nodeID}`, "old-generated-row"],
+      removed_projection_row_ids: ["old-responsible-row", `old-${input.nodeID}`, "old-responsible-row"],
     };
   };
 
@@ -672,7 +672,7 @@ test("My Work node drop uses the dedicated move command for role and priority pl
     ["node-1", "consulted", "user-2"],
     ["node-2", "consulted", "user-2"],
   ]);
-  assert.deepEqual(updated.removed_projection_row_ids, ["old-generated-row", "old-node-1", "old-node-2"]);
+  assert.deepEqual(updated.removed_projection_row_ids, ["old-responsible-row", "old-node-1", "old-node-2"]);
 });
 
 test("Home logic gate creation sends creator GVIC role through batch create", async () => {
@@ -680,7 +680,7 @@ test("Home logic gate creation sends creator GVIC role through batch create", as
   const result = await createHomeLogicGateCommand({
     apiBase: "https://api.example.test",
     companyID: "company-1",
-    creatorGVICRole: "generated",
+    creatorGVICRole: "responsible",
     requestJSON: async <T>(_apiBase: string, path: string, init?: RequestInit): Promise<T> => {
       calls.push({
         apiBase: _apiBase,
@@ -692,7 +692,7 @@ test("Home logic gate creation sends creator GVIC role through batch create", as
           company_id: "company-1",
           logic_gate_id: "gate-1",
           header: "new logic gate",
-          gvic_assignments: [{ company_id: "company-1", logic_gate_id: "gate-1", role: "generated", user_id: "user-1", created_timestamp: timestamp }],
+          gvic_assignments: [{ company_id: "company-1", logic_gate_id: "gate-1", role: "responsible", user_id: "user-1", created_timestamp: timestamp }],
           created_timestamp: timestamp,
         }],
         folder_items: [],
@@ -702,8 +702,8 @@ test("Home logic gate creation sends creator GVIC role through batch create", as
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].path, "/v1/workspace/entity-batches");
-  assert.equal(calls[0].body.creator_logic_gate_gvic_role, "generated");
-  assert.equal(result.logicGate.gvic_assignments?.[0]?.role, "generated");
+  assert.equal(calls[0].body.creator_logic_gate_gvic_role, "responsible");
+  assert.equal(result.logicGate.gvic_assignments?.[0]?.role, "responsible");
 });
 
 test("Home GVIC matrix node create preserves projection rows", async () => {
@@ -1226,13 +1226,13 @@ test("Home shared inbox GVIC commands build direct replacement payloads", async 
       principal_id: assignment.principal_id,
     }));
   };
-  const existing = sharedGVIC("inbox-1", "generated", "user-1");
+  const existing = sharedGVIC("inbox-1", "responsible", "user-1");
   const inboxes = [sharedInbox("inbox-1", { gvic_assignments: [existing] })];
 
   const added = await addSharedInboxGVICPrincipalCommand({
     companyID: "company-1",
     folderID: " inbox-1 ",
-    role: "verified",
+    role: "verifier",
     principalType: "user",
     principalID: " user-2 ",
     sharedInboxes: inboxes,
@@ -1243,7 +1243,7 @@ test("Home shared inbox GVIC commands build direct replacement payloads", async 
   const removed = await removeSharedInboxGVICPrincipalCommand({
     companyID: "company-1",
     folderID: "inbox-1",
-    role: "generated",
+    role: "responsible",
     principalType: "user",
     principalID: "user-1",
     sharedInboxes: inboxes,
@@ -1255,12 +1255,12 @@ test("Home shared inbox GVIC commands build direct replacement payloads", async 
       companyID: "company-1",
       folderID: "inbox-1",
       assignments: [
-        { role: "generated", principal_type: "user", principal_id: "user-1", user_id: "user-1" },
-        { role: "verified", principal_type: "user", principal_id: "user-2", user_id: "user-2" },
+        { role: "responsible", principal_type: "user", principal_id: "user-1", user_id: "user-1" },
+        { role: "verifier", principal_type: "user", principal_id: "user-2", user_id: "user-2" },
       ],
     },
     { companyID: "company-1", folderID: "inbox-1", assignments: [] },
   ]);
-  assert.deepEqual(added?.assignments.map((assignment) => [assignment.role, assignment.principal_type, assignment.principal_id, assignment.user_id]), [["generated", "user", "user-1", "user-1"], ["verified", "user", "user-2", "user-2"]]);
+  assert.deepEqual(added?.assignments.map((assignment) => [assignment.role, assignment.principal_type, assignment.principal_id, assignment.user_id]), [["responsible", "user", "user-1", "user-1"], ["verifier", "user", "user-2", "user-2"]]);
   assert.deepEqual(removed?.assignments, []);
 });

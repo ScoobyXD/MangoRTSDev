@@ -25,7 +25,7 @@ func TestGVICMatrixNodeCreateAndMoveV2IgnoresStaleSourceHint(t *testing.T) {
 		"company_id":                   companyID,
 		"name":                         "Matrix-created node",
 		"create_logic_gate_header":     "Matrix-created gate",
-		"creator_logic_gate_gvic_role": domain.GVICRoleGenerated,
+		"creator_logic_gate_gvic_role": domain.GVICRoleResponsible,
 		"priority":                     3,
 		"status":                       "pending",
 		"position":                     10,
@@ -56,7 +56,7 @@ func TestGVICMatrixNodeCreateAndMoveV2IgnoresStaleSourceHint(t *testing.T) {
 		CompanyID:                companyID,
 		Title:                    "Target gate seed node",
 		CreateLogicGateHeader:    "Target gate",
-		CreatorLogicGateGVICRole: domain.GVICRoleGenerated,
+		CreatorLogicGateGVICRole: domain.GVICRoleResponsible,
 		Priority:                 testPriority(2),
 		PrioritySet:              true,
 		Status:                   "pending",
@@ -121,7 +121,7 @@ func TestGVICMatrixNodeCreateInExistingLogicGateInheritsCurrentPolicy(t *testing
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []store.LogicGateGVICAssignmentInput{{
-			Role:   domain.GVICRoleGenerated,
+			Role:   domain.GVICRoleResponsible,
 			UserID: responsible.UserID,
 		}},
 	}); err != nil {
@@ -157,12 +157,12 @@ func TestGVICMatrixNodeCreateInExistingLogicGateInheritsCurrentPolicy(t *testing
 		t.Fatalf("ListResourceGVICEffectiveAssignments: %v", err)
 	}
 	if len(effective) != 1 ||
-		effective[0].Role != domain.GVICRoleGenerated ||
+		effective[0].Role != domain.GVICRoleResponsible ||
 		effective[0].UserID != responsible.UserID ||
 		effective[0].SourceResourceType != store.EntityTypeLogicGate ||
 		effective[0].SourceResourceID != logicGate.LogicGateID ||
 		effective[0].InheritanceType != store.PolicyModeInherited {
-		t.Fatalf("effective node GVIC = %+v, want inherited generated assignment from Logic Gate", effective)
+		t.Fatalf("effective node GVIC = %+v, want inherited Responsible assignment from Logic Gate", effective)
 	}
 }
 

@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-func myWorkGeneratedUsersContextKey(row GVICMatrixProjectionRow) string {
+func myWorkResponsibleUsersContextKey(row GVICMatrixProjectionRow) string {
 	logicGateID := ""
 	if row.LogicGateID != nil {
 		logicGateID = strings.TrimSpace(*row.LogicGateID)
@@ -18,7 +18,7 @@ func myWorkGeneratedUsersContextKey(row GVICMatrixProjectionRow) string {
 	}, "\x00")
 }
 
-func sortedGeneratedUserIDs(values map[string]bool) []string {
+func sortedResponsibleUserIDs(values map[string]bool) []string {
 	items := make([]string, 0, len(values))
 	for value := range values {
 		if clean := strings.TrimSpace(value); clean != "" {

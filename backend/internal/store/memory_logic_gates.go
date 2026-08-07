@@ -10,9 +10,9 @@ import (
 
 func GVICRoleSortValue(role string) int {
 	switch role {
-	case domain.GVICRoleGenerated:
+	case domain.GVICRoleResponsible:
 		return 0
-	case domain.GVICRoleVerified:
+	case domain.GVICRoleVerifier:
 		return 1
 	case domain.GVICRoleConsulted:
 		return 2

@@ -456,7 +456,7 @@ run("root folders from different domains can be locally ordered together", () =>
 run("custom top-level rows exclude default roots and keep custom branches", () => {
   const rows = [
     { id: "GVIC-default-folders", label: "Default Folders", depth: 0, kind: "folder" as const, folderKind: "logic_gate" as const, scopeLevel: 0, position: 1000, createdTimestamp: "", syntheticKind: "default_scope_folder" as const },
-    { id: "GVIC-folder-generated", label: "Generated", depth: 1, kind: "folder" as const, folderKind: "logic_gate" as const, scopeLevel: 1, position: 1000, createdTimestamp: "", syntheticKind: "GVIC_folder" as const },
+    { id: "GVIC-folder-responsible", label: "Responsible", depth: 1, kind: "folder" as const, folderKind: "logic_gate" as const, scopeLevel: 1, position: 1000, createdTimestamp: "", syntheticKind: "GVIC_folder" as const },
     { id: "workspace-folder-system-active", label: "Active Nodes", depth: 0, kind: "folder" as const, folderID: "system-active", folderKind: "node" as const, systemKey: "active_nodes" as const, scopeLevel: 0, position: 200, createdTimestamp: "0" },
     { id: "node-system", label: "System Node", depth: 1, kind: "node" as const, nodeID: "system", folderID: "system-active", folderKind: "node" as const, scopeLevel: 1, position: 1000, createdTimestamp: "1" },
     { id: "workspace-folder-function-root", label: "Logic Gates by Function", depth: 0, kind: "folder" as const, folderID: "function-root", folderKind: "logic_gate" as const, scopeLevel: 0, position: 300, createdTimestamp: "0" },
@@ -469,7 +469,7 @@ run("custom top-level rows exclude default roots and keep custom branches", () =
   assert.deepEqual(
     filterExplorerRowsForCustomTopLevel({
       rows,
-      hiddenRootFolderNames: ["Logic Gates by Function", "Mango GVIC Generated"],
+      hiddenRootFolderNames: ["Logic Gates by Function", "Mango RCVI Responsible"],
     }).map((row) => row.id),
     ["workspace-folder-custom", "logic-gate-custom"],
   );
@@ -509,12 +509,12 @@ run("scoped explorer rows render children under a named logic-gate root", () => 
 
 run("raw scoped tree rows keep custom folders under default-named parents", () => {
   const folders = [
-    { company_id: "c", folder_id: "generated-root", folder_kind: "logic_gate" as const, name: "Mango GVIC Generated", position: 1000, created_timestamp: "1", updated_timestamp: "1", scope_type: "company" as const },
-    { company_id: "c", folder_id: "custom-a", parent_folder_id: "generated-root", folder_kind: "logic_gate" as const, name: "Custom Generated A", position: 1000, created_timestamp: "2", updated_timestamp: "2", scope_type: "user" as const, scope_id: "user-1" },
-    { company_id: "c", folder_id: "custom-b", parent_folder_id: "generated-root", folder_kind: "logic_gate" as const, name: "Custom Generated B", position: 2000, created_timestamp: "3", updated_timestamp: "3", scope_type: "user" as const, scope_id: "user-1" },
+    { company_id: "c", folder_id: "responsible-root", folder_kind: "logic_gate" as const, name: "Mango RCVI Responsible", position: 1000, created_timestamp: "1", updated_timestamp: "1", scope_type: "company" as const },
+    { company_id: "c", folder_id: "custom-a", parent_folder_id: "responsible-root", folder_kind: "logic_gate" as const, name: "Custom Responsible A", position: 1000, created_timestamp: "2", updated_timestamp: "2", scope_type: "user" as const, scope_id: "user-1" },
+    { company_id: "c", folder_id: "custom-b", parent_folder_id: "responsible-root", folder_kind: "logic_gate" as const, name: "Custom Responsible B", position: 2000, created_timestamp: "3", updated_timestamp: "3", scope_type: "user" as const, scope_id: "user-1" },
   ];
   const rows = buildCompanyExplorerTreeRows({
-    expanded: new Set(["workspace-folder-generated-root", "workspace-folder-custom-a", "workspace-folder-custom-b"]),
+    expanded: new Set(["workspace-folder-responsible-root", "workspace-folder-custom-a", "workspace-folder-custom-b"]),
     nodes: [],
     logicGates: [
       { company_id: "c", logic_gate_id: "gate-a", node_id: "gate-a", header: "Gate A", title: "Gate A", created_timestamp: "4" },
@@ -531,10 +531,10 @@ run("raw scoped tree rows keep custom folders under default-named parents", () =
   });
 
   assert.deepEqual(rows.map((row) => [row.id, row.depth, row.kind, row.label]), [
-    ["workspace-folder-generated-root", 0, "folder", "Mango GVIC Generated"],
-    ["workspace-folder-custom-a", 1, "folder", "Custom Generated A"],
+    ["workspace-folder-responsible-root", 0, "folder", "Mango RCVI Responsible"],
+    ["workspace-folder-custom-a", 1, "folder", "Custom Responsible A"],
     ["logic-gate-gate-a", 2, "logic_gate", "Gate A"],
-    ["workspace-folder-custom-b", 1, "folder", "Custom Generated B"],
+    ["workspace-folder-custom-b", 1, "folder", "Custom Responsible B"],
     ["logic-gate-gate-b", 2, "logic_gate", "Gate B"],
   ]);
 });

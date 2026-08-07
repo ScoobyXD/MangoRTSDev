@@ -60,7 +60,7 @@ func TestMemoryNodeViewVersionCoversCanonicalSharedDependencies(t *testing.T) {
 		ResourceType: EntityTypeNode,
 		ResourceID:   node.NodeID,
 		Assignments: []ResourceGVICAssignmentInput{{
-			Role:          domain.GVICRoleGenerated,
+			Role:          domain.GVICRoleResponsible,
 			PrincipalType: EntityPermissionSubjectUser,
 			PrincipalID:   actor.UserID,
 		}},

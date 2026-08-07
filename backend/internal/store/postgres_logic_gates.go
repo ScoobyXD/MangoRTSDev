@@ -128,9 +128,9 @@ where assignment.company_id=$1::uuid
   )
 order by assignment.resource_id::text asc,
   case assignment.role
-    when 'generated' then 1
-    when 'verified' then 2
-    when 'consulted' then 3
+    when 'responsible' then 1
+    when 'consulted' then 2
+    when 'verifier' then 3
     when 'informed' then 4
     else 5
   end,

@@ -480,7 +480,7 @@ export function HomeMailWorkspace({
               {sharedInboxSettings && (
                 <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
                   <button style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpen}>Permissions</button>
-                  {sharedInboxSettings.onOpenGVIC && <button style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpenGVIC}>GVIC</button>}
+                  {sharedInboxSettings.onOpenGVIC && <button style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpenGVIC}>RCVI</button>}
                 </div>
               )}
             </div>
@@ -515,7 +515,7 @@ export function HomeMailWorkspace({
                   {sharedInboxSettings && (
                     <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
                       <button className="mango-elevated-action" style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpen}>Permissions</button>
-                      {sharedInboxSettings.onOpenGVIC && <button className="mango-elevated-action" style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpenGVIC}>GVIC</button>}
+                      {sharedInboxSettings.onOpenGVIC && <button className="mango-elevated-action" style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpenGVIC}>RCVI</button>}
                     </div>
                   )}
                 </div>

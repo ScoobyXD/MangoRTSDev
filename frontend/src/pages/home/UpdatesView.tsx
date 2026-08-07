@@ -1961,7 +1961,7 @@ function getUpdateGroupValues(
     return [{ ...value, key: `status:${value.key}` }];
   }
   const role = row.item.role?.trim() ?? "";
-  return role ? [{ key: `gvic:${role}`, label: updateGVICRoleLabel(role), sortValue: updateGVICRoleSort(role) }] : [{ key: "gvic:none", label: "No GVIC", sortValue: 99, sortLast: true }];
+  return role ? [{ key: `gvic:${role}`, label: updateGVICRoleLabel(role), sortValue: updateGVICRoleSort(role) }] : [{ key: "gvic:none", label: "No RCVI", sortValue: 99, sortLast: true }];
 }
 
 function updateResourceGroupValue(field: "project" | "logic_gate" | "node", resource: UpdateRowResource | undefined, emptyLabel: string): UniversalGroupValue {
@@ -2053,8 +2053,8 @@ function clearUpdatesSelectedViewID(companyID: string, userID: string): void {
 }
 
 function updateGVICRoleLabel(role: string): string {
-  if (role === "generated") return "Generated";
-  if (role === "verified") return "Verified";
+  if (role === "responsible") return "Responsible";
+  if (role === "verifier") return "Verifier";
   if (role === "consulted") return "Consulted";
   if (role === "informed") return "Informed";
   if (role === "other") return "Other";
@@ -2062,9 +2062,9 @@ function updateGVICRoleLabel(role: string): string {
 }
 
 function updateGVICRoleSort(role: string): number {
-  if (role === "generated") return 1;
-  if (role === "verified") return 2;
-  if (role === "consulted") return 3;
+  if (role === "responsible") return 1;
+  if (role === "consulted") return 2;
+  if (role === "verifier") return 3;
   if (role === "informed") return 4;
   if (role === "other") return 5;
   return 6;

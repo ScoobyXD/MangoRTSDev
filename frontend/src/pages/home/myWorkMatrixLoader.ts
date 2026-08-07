@@ -112,7 +112,7 @@ export function patchMyWorkMatrixCells(cells: MyWorkMatrixCellWithUser[], patch:
   const cleanCompanyID = patch.companyID.trim();
   const targetUsers = new Set(uniqueNonEmptyStrings(patch.targetUserIDs ?? []));
   const removedIDs = new Set(uniqueNonEmptyStrings(patch.removedProjectionRowIDs));
-  const generatedUserIDsByContext = generatedUserIDsByMyWorkContext(patch.rows);
+  const responsibleUserIDsByContext = responsibleUserIDsByMyWorkContext(patch.rows);
   const byProjectionID = new Map<string, MyWorkMatrixCellWithUser>();
   const passthrough: MyWorkMatrixCellWithUser[] = [];
   for (const cell of cells) {
@@ -127,13 +127,13 @@ export function patchMyWorkMatrixCells(cells: MyWorkMatrixCellWithUser[], patch:
     const projectionRowID = row.projection_row_id?.trim() ?? "";
     if (!projectionRowID) continue;
     const previous = byProjectionID.get(projectionRowID);
-    const generatedUserIDs = uniqueNonEmptyStrings([
-      ...(row.generated_user_ids ?? []),
-      ...(generatedUserIDsByContext.get(myWorkMatrixRowContextKey(row)) ?? []),
+    const responsibleUserIDs = uniqueNonEmptyStrings([
+      ...(row.responsible_user_ids ?? []),
+      ...(responsibleUserIDsByContext.get(myWorkMatrixRowContextKey(row)) ?? []),
     ]);
     byProjectionID.set(projectionRowID, {
       ...row,
-      generated_user_ids: generatedUserIDs.length > 0 ? generatedUserIDs : previous?.generated_user_ids,
+      responsible_user_ids: responsibleUserIDs.length > 0 ? responsibleUserIDs : previous?.responsible_user_ids,
       companyID: row.company_id?.trim() || cleanCompanyID,
       userID,
     });
@@ -406,12 +406,12 @@ function myWorkMatrixRowContextKey(row: MyWorkMatrixRow): string {
   ].join("\u0000");
 }
 
-function generatedUserIDsByMyWorkContext(rows: MyWorkMatrixRow[]): Map<string, string[]> {
+function responsibleUserIDsByMyWorkContext(rows: MyWorkMatrixRow[]): Map<string, string[]> {
   const byContext = new Map<string, Set<string>>();
   for (const row of rows) {
     const userIDs = uniqueNonEmptyStrings([
-      ...(row.generated_user_ids ?? []),
-      ...(row.gvic_assignment === "generated" ? [row.user_id ?? ""] : []),
+      ...(row.responsible_user_ids ?? []),
+      ...(row.gvic_assignment === "responsible" ? [row.user_id ?? ""] : []),
     ]);
     if (userIDs.length === 0) continue;
     const key = myWorkMatrixRowContextKey(row);

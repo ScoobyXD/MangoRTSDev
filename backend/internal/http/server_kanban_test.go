@@ -207,7 +207,7 @@ func TestKanbanCardDeleteRequiresEditPermissionNotGVIC(t *testing.T) {
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []store.LogicGateGVICAssignmentInput{{
-			Role:   domain.GVICRoleGenerated,
+			Role:   domain.GVICRoleResponsible,
 			UserID: user.UserID,
 		}},
 	}); err != nil {

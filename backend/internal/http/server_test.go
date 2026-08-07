@@ -243,9 +243,9 @@ func TestLogicGateGVICAssignmentsAPIAndReadModel(t *testing.T) {
 		"company_id":      companyID,
 		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{
-			{"role": domain.GVICRoleGenerated, "principal_type": store.EntityPermissionSubjectUser, "principal_id": responsible.UserID},
-			{"role": domain.GVICRoleVerified, "principal_type": store.EntityPermissionSubjectUser, "principal_id": accountable.UserID},
-			{"role": domain.GVICRoleVerified, "principal_type": store.EntityPermissionSubjectUser, "principal_id": accountable.UserID},
+			{"role": domain.GVICRoleResponsible, "principal_type": store.EntityPermissionSubjectUser, "principal_id": responsible.UserID},
+			{"role": domain.GVICRoleVerifier, "principal_type": store.EntityPermissionSubjectUser, "principal_id": accountable.UserID},
+			{"role": domain.GVICRoleVerifier, "principal_type": store.EntityPermissionSubjectUser, "principal_id": accountable.UserID},
 		},
 	})
 	req := httptest.NewRequest(http.MethodPut, "/v1/resources/logic_gate/"+logicGate.LogicGateID+"/gvic", bytes.NewReader(body))
@@ -265,11 +265,11 @@ func TestLogicGateGVICAssignmentsAPIAndReadModel(t *testing.T) {
 	if len(payload.Assignments) != 2 {
 		t.Fatalf("assignment count = %d, want 2", len(payload.Assignments))
 	}
-	if payload.Assignments[0].Role != domain.GVICRoleGenerated ||
+	if payload.Assignments[0].Role != domain.GVICRoleResponsible ||
 		payload.Assignments[0].PrincipalType != store.EntityPermissionSubjectUser ||
 		payload.Assignments[0].PrincipalID != responsible.UserID ||
 		payload.Assignments[0].UserDisplayName != "Responsible User" {
-		t.Fatalf("generated assignment = %+v", payload.Assignments[0])
+		t.Fatalf("responsible assignment = %+v", payload.Assignments[0])
 	}
 	if len(payload.Effective) != 2 {
 		t.Fatalf("effective assignment count = %d, want 2", len(payload.Effective))
@@ -331,7 +331,7 @@ func TestLogicGateGVICAssignmentsAPIAndReadModel(t *testing.T) {
 		"company_id":      companyID,
 		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{
-			{"role": "responsible", "principal_type": store.EntityPermissionSubjectUser, "principal_id": responsible.UserID},
+			{"role": "generated", "principal_type": store.EntityPermissionSubjectUser, "principal_id": responsible.UserID},
 		},
 	})
 	legacyRoleReq := httptest.NewRequest(http.MethodPut, "/v1/resources/logic_gate/"+logicGate.LogicGateID+"/gvic", bytes.NewReader(legacyRoleBody))
@@ -730,7 +730,7 @@ func TestCreateNodeAssignsCreator(t *testing.T) {
 	}
 }
 
-func TestUpdateNodeGVICGeneratedRequiresCompanyMembership(t *testing.T) {
+func TestUpdateNodeGVICResponsibleRequiresCompanyMembership(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -763,7 +763,7 @@ func TestUpdateNodeGVICGeneratedRequiresCompanyMembership(t *testing.T) {
 		"company_id":      companyID,
 		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{{
-			"role":           domain.GVICRoleGenerated,
+			"role":           domain.GVICRoleResponsible,
 			"principal_type": store.EntityPermissionSubjectUser,
 			"principal_id":   assignee.UserID,
 		}},
@@ -783,18 +783,18 @@ func TestUpdateNodeGVICGeneratedRequiresCompanyMembership(t *testing.T) {
 		t.Fatalf("decode assigned GVIC: %v", err)
 	}
 	if len(assigned.GVICAssignments) != 1 ||
-		assigned.GVICAssignments[0].Role != domain.GVICRoleGenerated ||
+		assigned.GVICAssignments[0].Role != domain.GVICRoleResponsible ||
 		assigned.GVICAssignments[0].PrincipalID != assignee.UserID ||
 		len(assigned.Effective) != 1 ||
 		assigned.Effective[0].UserID != assignee.UserID {
-		t.Fatalf("assigned GVIC = %+v effective=%+v, want generated assignee", assigned.GVICAssignments, assigned.Effective)
+		t.Fatalf("assigned GVIC = %+v effective=%+v, want responsible assignee", assigned.GVICAssignments, assigned.Effective)
 	}
 
 	outsiderBody, _ := json.Marshal(map[string]any{
 		"company_id":      companyID,
 		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{{
-			"role":           domain.GVICRoleGenerated,
+			"role":           domain.GVICRoleResponsible,
 			"principal_type": store.EntityPermissionSubjectUser,
 			"principal_id":   outsider.UserID,
 		}},
@@ -1594,10 +1594,10 @@ func TestWorkspaceEntityBatchAssignsCreatedNodesToCreator(t *testing.T) {
 		t.Fatalf("ListResourceGVICAssignments() error = %v", err)
 	}
 	if len(configured) != 1 ||
-		configured[0].Role != domain.GVICRoleGenerated ||
+		configured[0].Role != domain.GVICRoleResponsible ||
 		configured[0].PrincipalType != store.EntityPermissionSubjectUser ||
 		configured[0].PrincipalID != creator.UserID {
-		t.Fatalf("configured batch node GVIC = %+v, want creator generated source row", configured)
+		t.Fatalf("configured batch node GVIC = %+v, want creator responsible source row", configured)
 	}
 }
 
@@ -1715,7 +1715,7 @@ func TestWorkspaceEntityBatchAssignsCreatedLogicGateGVICToCreator(t *testing.T) 
 	body, _ := json.Marshal(map[string]any{
 		"company_id":                   companyID,
 		"entity_kind":                  "logic_gate",
-		"creator_logic_gate_gvic_role": "generated",
+		"creator_logic_gate_gvic_role": "responsible",
 		"items": []map[string]any{{
 			"client_id": "created-gate",
 			"title":     "Created gate",
@@ -1744,8 +1744,8 @@ func TestWorkspaceEntityBatchAssignsCreatedLogicGateGVICToCreator(t *testing.T) 
 		t.Fatalf("logic gate folder items = %+v, want none without explicit folder", payload.FolderItems)
 	}
 	assignments := payload.LogicGates[0].GVICAssignments
-	if len(assignments) != 1 || assignments[0].Role != domain.GVICRoleGenerated || assignments[0].UserID != creator.UserID {
-		t.Fatalf("response GVIC assignments = %+v, want generated creator", assignments)
+	if len(assignments) != 1 || assignments[0].Role != domain.GVICRoleResponsible || assignments[0].UserID != creator.UserID {
+		t.Fatalf("response GVIC assignments = %+v, want responsible creator", assignments)
 	}
 	if assignments[0].UserDisplayName != "GVIC Creator" || assignments[0].UserEmail != "gvic-creator@example.com" {
 		t.Fatalf("response GVIC user read model = %+v, want creator display fields", assignments[0])
@@ -1754,8 +1754,8 @@ func TestWorkspaceEntityBatchAssignsCreatedLogicGateGVICToCreator(t *testing.T) 
 	if err != nil {
 		t.Fatalf("GetLogicGate error = %v", err)
 	}
-	if len(stored.GVICAssignments) != 1 || stored.GVICAssignments[0].Role != domain.GVICRoleGenerated || stored.GVICAssignments[0].UserID != creator.UserID {
-		t.Fatalf("stored GVIC assignments = %+v, want generated creator only", stored.GVICAssignments)
+	if len(stored.GVICAssignments) != 1 || stored.GVICAssignments[0].Role != domain.GVICRoleResponsible || stored.GVICAssignments[0].UserID != creator.UserID {
+		t.Fatalf("stored GVIC assignments = %+v, want responsible creator only", stored.GVICAssignments)
 	}
 }
 
