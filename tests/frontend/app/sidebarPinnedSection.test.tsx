@@ -41,7 +41,7 @@ function dataTransfer(): DataTransfer {
   return new FakeDataTransfer() as unknown as DataTransfer;
 }
 
-test("Pinned renders Company Explorer-style folder headers and preserves exact nested drag identity through folder and root drops", async () => {
+test("Pinned renders Company Explorer-style folders, previews deliberate pin grouping, and preserves exact nested drag identity", async () => {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
     pretendToBeVisual: true,
     url: "http://localhost/",
@@ -89,6 +89,7 @@ test("Pinned renders Company Explorer-style folder headers and preserves exact n
     };
     let openedPinID = "";
     const moves: Array<{ moving: SidebarPinEntryRef; target: SidebarPinEntryRef | null; placement: string }> = [];
+    const groups: Array<{ draggedPinID: string; targetPinID: string }> = [];
     await act(async () => root.render(
       <AppSidebarPinnedSection
         tree={tree}
@@ -103,7 +104,10 @@ test("Pinned renders Company Explorer-style folder headers and preserves exact n
         onRenameFolder={async () => undefined}
         onDeleteFolder={async () => undefined}
         onMoveEntry={(moving, target, placement) => { moves.push({ moving, target, placement }); }}
-        onGroupPins={async () => null}
+        onGroupPins={async (dragged, target) => {
+          groups.push({ draggedPinID: dragged.pinID, targetPinID: target.pinID });
+          return null;
+        }}
         onExternalDrop={() => undefined}
         pinAcceptsResourceDrag={() => false}
         onPinnedResourceDrop={() => false}
@@ -219,6 +223,41 @@ test("Pinned renders Company Explorer-style folder headers and preserves exact n
     const notesEntry = container.querySelector<HTMLElement>('[data-pin-entry-id="pin-notes"]');
     const folderBEntry = container.querySelector<HTMLElement>('[data-pin-entry-id="folder-b"]');
     assert.ok(notesEntry && folderBEntry);
+
+    await act(async () => Simulate.dragStart(notesEntry, { dataTransfer: dataTransfer() }));
+    await act(async () => Simulate.dragOver(pinEntry, { dataTransfer: dataTransfer(), clientY: 0 }));
+    await act(async () => Simulate.drop(pinEntry, { dataTransfer: dataTransfer(), clientY: 0 }));
+    assert.deepEqual(groups, [], "releasing before the one-second hover does not group pins");
+    assert.equal(container.querySelector('[data-pin-group-preview]'), null);
+
+    await act(async () => Simulate.dragStart(notesEntry, { dataTransfer: dataTransfer() }));
+    await act(async () => Simulate.dragOver(pinEntry, { dataTransfer: dataTransfer(), clientY: 0 }));
+    await act(async () => new Promise((resolveDelay) => setTimeout(resolveDelay, 1050)));
+    assert.deepEqual(groups, [], "the armed preview does not write before mouse release");
+    const preview = container.querySelector<HTMLElement>('[data-pin-group-preview="pin-root"]');
+    assert.ok(preview, "one continuous second over a pin previews a New Folder");
+    assert.equal(preview.getAttribute("aria-label"), "New Folder preview");
+    assert.deepEqual(
+      Array.from(preview.querySelectorAll<HTMLElement>("[data-pin-group-preview-entry]")).map((entry) => entry.dataset.pinGroupPreviewEntry),
+      ["pin-root", "pin-notes"],
+      "the preview places the target first and dragged pin second",
+    );
+    assert.equal(notesEntry.style.display, "none", "the dragged pin temporarily appears inside the preview instead of twice");
+    await act(async () => Simulate.dragLeave(pinEntry, { dataTransfer: dataTransfer(), relatedTarget: surface }));
+    assert.equal(container.querySelector('[data-pin-group-preview]'), null, "moving away immediately restores the normal tree");
+    assert.notEqual(notesEntry.style.display, "none");
+    assert.deepEqual(groups, [], "canceling the preview performs no grouping command");
+
+    await act(async () => Simulate.dragStart(notesEntry, { dataTransfer: dataTransfer() }));
+    await act(async () => Simulate.dragOver(pinEntry, { dataTransfer: dataTransfer(), clientY: 0 }));
+    await act(async () => new Promise((resolveDelay) => setTimeout(resolveDelay, 1050)));
+    assert.ok(container.querySelector('[data-pin-group-preview="pin-root"]'));
+    const payloadWithheldAtGroupDrop = dataTransfer();
+    payloadWithheldAtGroupDrop.setData(APP_SIDEBAR_PIN_DRAG_MIME, "");
+    await act(async () => Simulate.drop(pinEntry, { dataTransfer: payloadWithheldAtGroupDrop, clientY: 0 }));
+    assert.deepEqual(groups, [{ draggedPinID: "pin-notes", targetPinID: "pin-root" }], "only releasing while the preview is armed creates the folder");
+    assert.equal(container.querySelector('[data-pin-group-preview]'), null);
+
     const startTransfer = dataTransfer();
     await act(async () => Simulate.dragStart(notesEntry, { dataTransfer: startTransfer }));
     const payloadWithheldAtFolderDrop = dataTransfer();

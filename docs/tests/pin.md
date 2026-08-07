@@ -1,3 +1,17 @@
+# Process Story: A deliberate pin hover previews a folder before release
+
+A user drags one existing pinned resource row over the middle of another existing pinned resource row
+↓
+For the first second nothing reorganizes or saves; after one continuous second over that exact target, Pinned locally previews an expanded New Folder with the target first and dragged pin second
+↓
+Moving away, switching to an edge zone, or ending the drag immediately removes the preview and restores both rows without sending a grouping command
+↓
+Only releasing the mouse while that exact preview remains armed sends the existing atomic group command
+↓
+The committed New Folder takes the target's parent and position, expands, and enters explicit inline rename without changing either resource's typed identity, access, or underlying data
+
+Last updated: 2026-08-07
+
 # Process Story: Pinned folders move reliably with Company Explorer headers
 
 A user reaches the Pinned surface above Tower and organizes a mixed tree of personal folders and resource pins
@@ -80,7 +94,7 @@ Last updated: 2026-08-05
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (backend nested-folder lifecycle, atomic grouping, owner and cycle rejection, permission-edge coverage, canonical schema audit, frontend flat and recursive tree planning, subtree removal, DB-backed API/no-cache behavior, internal-drag precedence and retained drop identity, fullscreen pinned-Node launch, Pinned DOM presentation/explicit context-menu rename/click-to-toggle folder headers/open-sided corners/inline folder totals/fixed status columns coverage, and exact Logic Gate status counts, colors, zero suppression, recursive folder totals, and live refresh coverage exist; `tests/frontend/app/timelineState.test.ts` covers PIN29 local pin-title reconciliation and stale persisted-response overlay; full browser pointer drag choreography still needs mapped automation)
+- Business Logic Covered By Automated Tests: Partial (backend nested-folder lifecycle, atomic grouping, owner and cycle rejection, permission-edge coverage, canonical schema audit, frontend flat and recursive tree planning, subtree removal, DB-backed API/no-cache behavior, internal-drag precedence and retained drop identity, one-second pin-group preview/cancel/drop-only commitment, fullscreen pinned-Node launch, Pinned DOM presentation/explicit context-menu rename/click-to-toggle folder headers/open-sided corners/inline folder totals/fixed status columns coverage, and exact Logic Gate status counts, colors, zero suppression, recursive folder totals, and live refresh coverage exist; `tests/frontend/app/timelineState.test.ts` covers PIN29 local pin-title reconciliation and stale persisted-response overlay; full browser pointer drag choreography still needs mapped automation)
 
 ## Business Logic
 
@@ -115,7 +129,7 @@ PIN28 - Pinned-node and pinned-Logic-Gate email conversions persist mailbox prov
 PIN29 - After a successful same-window Node or Logic Gate rename, the visible matching sidebar pin name converges from the concrete committed-title event. This is a local label patch only: project pins are unaffected, no pin HTTP write occurs, and the durable pin-name snapshot/listing rules remain unchanged.
 PIN30 - The canonical personal folder table is pin_folders. Every folder belongs to one company membership and one user, may have one owner-scoped parent folder, and may nest to arbitrary depth without cycles.
 PIN31 - Folders and pins share one mixed sibling order within each parent. A complete user tree is loaded in one read; Pinned folders do not use Company Explorer lazy loading.
-PIN32 - Dropping an existing pinned row onto the middle of another existing pinned row atomically creates New Folder in the target's current parent, at the target's current position, with the target at position 1000 and dragged pin at position 2000.
+PIN32 - Holding an existing pinned row over the middle of another existing pinned row for one continuous second arms grouping. Releasing while that exact target remains armed atomically creates New Folder in the target's current parent, at the target's current position, with the target at position 1000 and dragged pin at position 2000. Releasing before the delay does not group.
 PIN33 - Pin-on-pin grouping follows the target when pins start in different folders. The dragged pin moves from its old parent; the one-pin-per-user/company/resource rule still prevents duplicates.
 PIN34 - Deleting a pin folder deletes its descendant folders and contained pin rows only. It never deletes, recycles, or changes the underlying Node, Logic Gate, or Project.
 PIN35 - Moving a folder into itself or one of its descendants is rejected atomically. Every move, reorder, and grouping command rejects cross-company and cross-user entry IDs.
@@ -141,6 +155,7 @@ PIN54 - Folder status squares follow the same zero suppression as Logic Gate row
 PIN55 - The sidebar loads each distinct pinned Logic Gate's canonical work view when the pin set or company changes, listens to the existing same-window Kanban-content event and the exact board real-time scope, and reloads only the affected Logic Gate after committed changes. Recalculation writes no pin, folder, relationship, assignment, cache fallback, or browser storage record, and a failed or forbidden work read clears that gate's displayed contribution without hiding its pin.
 PIN56 - The Pinned surface renders above Tower in the left sidebar. Moving that surface changes no persisted pin or Tower data.
 PIN57 - A Pinned folder's drag hitbox is its visible header, not the expanded descendant frame. The header middle is an inside drop; its top and bottom edges are before and after drops in the folder's parent; and the Pinned root end zone reparents an entry to root. A nested row's drag start must not bubble into and replace its typed identity with a draggable ancestor folder. Pinned retains that exact internal entry through drop, as Company Explorer retains its active drag payload, so a browser withholding custom `DataTransfer` content at release cannot turn a displayed valid target into a no-op. These zones allow pins and folders to reorder, move into a folder, move between folders, or come out of any parent while the cycle and owner rules remain enforced.
+PIN58 - After the one-second middle hover in PIN32, Pinned shows a current-session-only expanded New Folder preview at the target row, with the target first and dragged pin second. The dragged row temporarily appears only in that preview. No API, database, pin, or folder change occurs until drop. Leaving that target, entering a non-middle zone, or ending the drag cancels the timer and preview immediately and sends no grouping command; only dropping the exact dragged pin on the exact armed target may invoke the atomic group command.
 
 ## Scenarios
 
@@ -319,6 +334,7 @@ Business logic covered:
 - PIN33
 - PIN35
 - PIN38
+- PIN58
 
 Given:
 - A dragged pin and target pin may start at root, in the same folder, or in different folders.
@@ -326,6 +342,10 @@ Given:
 
 Expected:
 - The internal pin drag wins.
+- Releasing before one continuous second over the target does not group the pins.
+- After one continuous second over the target middle, Pinned previews an expanded New Folder with target first and dragged pin second without sending a command.
+- Moving away, entering an edge zone, or ending the drag removes the preview, restores both original rows, and sends no command.
+- Releasing only while the exact preview is armed invokes grouping; custom drag data may be absent at release because the retained internal identity remains authoritative.
 - One transaction creates New Folder in the target parent at the target position.
 - Target is first and dragged pin is second.
 - The new folder expands and enters inline rename.

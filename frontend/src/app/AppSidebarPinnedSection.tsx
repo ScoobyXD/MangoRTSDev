@@ -52,6 +52,13 @@ type PinContextMenu =
   | { kind: "pin"; x: number; y: number; pin: SidebarPin }
   | { kind: "folder"; x: number; y: number; folder: SidebarPinFolder };
 
+type PinGroupHover = {
+  draggedPinID: string;
+  targetPinID: string;
+};
+
+const PIN_GROUP_HOVER_DELAY_MS = 1000;
+
 export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): React.ReactElement {
   const {
     tree,
@@ -83,9 +90,13 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
   const [bumpingPinID, setBumpingPinID] = useState("");
   const [activeRemovePinID, setActiveRemovePinID] = useState("");
   const [focusedFolderID, setFocusedFolderID] = useState("");
+  const [pinGroupPreview, setPinGroupPreview] = useState<PinGroupHover | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const bumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeDraggedEntryRef = useRef<SidebarPinEntryRef | null>(null);
+  const pinGroupHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pinGroupHoverCandidateRef = useRef<PinGroupHover | null>(null);
+  const armedPinGroupRef = useRef<PinGroupHover | null>(null);
   const entries = useMemo(() => buildSidebarPinTreeNodes(tree, expandedFolderIDs), [expandedFolderIDs, tree]);
   const folderStatusCountsByID = useMemo(
     () => aggregateSidebarPinFolderStatusCounts(tree, logicGateStatusCountsByID),
@@ -100,6 +111,7 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
 
   useEffect(() => () => {
     if (bumpTimerRef.current) clearTimeout(bumpTimerRef.current);
+    if (pinGroupHoverTimerRef.current) clearTimeout(pinGroupHoverTimerRef.current);
   }, []);
 
   useEffect(() => {
@@ -153,11 +165,45 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
     });
   };
 
+  const clearPinGroupHover = () => {
+    if (pinGroupHoverTimerRef.current) clearTimeout(pinGroupHoverTimerRef.current);
+    pinGroupHoverTimerRef.current = null;
+    pinGroupHoverCandidateRef.current = null;
+    armedPinGroupRef.current = null;
+    setPinGroupPreview(null);
+  };
+
+  const updatePinGroupHover = (moving: SidebarPinEntryRef, row: SidebarPinTreeNode, placement: SidebarPinDropPlacement) => {
+    if (placement !== "inside" || moving.entryType !== "pin" || row.entryType !== "pin" || moving.entryID === row.pin.pinID) {
+      clearPinGroupHover();
+      return;
+    }
+    const candidate: PinGroupHover = { draggedPinID: moving.entryID, targetPinID: row.pin.pinID };
+    const current = pinGroupHoverCandidateRef.current;
+    if (current?.draggedPinID === candidate.draggedPinID && current.targetPinID === candidate.targetPinID) return;
+    clearPinGroupHover();
+    pinGroupHoverCandidateRef.current = candidate;
+    pinGroupHoverTimerRef.current = setTimeout(() => {
+      const latest = pinGroupHoverCandidateRef.current;
+      if (latest?.draggedPinID !== candidate.draggedPinID || latest.targetPinID !== candidate.targetPinID) return;
+      pinGroupHoverTimerRef.current = null;
+      armedPinGroupRef.current = candidate;
+      setPinGroupPreview(candidate);
+    }, PIN_GROUP_HOVER_DELAY_MS);
+  };
+
   const handleInternalDrop = async (moving: SidebarPinEntryRef, row: SidebarPinTreeNode, placement: SidebarPinDropPlacement) => {
     const target: SidebarPinEntryRef = { entryType: row.entryType, entryID: row.entryID };
+    const armedGroup = armedPinGroupRef.current;
+    const groupingIsArmed = placement === "inside"
+      && row.entryType === "pin"
+      && moving.entryType === "pin"
+      && armedGroup?.draggedPinID === moving.entryID
+      && armedGroup.targetPinID === row.pin.pinID;
+    clearPinGroupHover();
     if (placement === "inside" && row.entryType === "pin" && moving.entryType === "pin") {
       const dragged = tree.pins.find((pin) => pin.pinID === moving.entryID);
-      if (!dragged || dragged.pinID === row.pin.pinID) return;
+      if (!groupingIsArmed || !dragged || dragged.pinID === row.pin.pinID) return;
       const folderID = await onGroupPins(dragged, row.pin);
       if (!folderID) return;
       setExpandedFolderIDs((current) => new Set(current).add(folderID));
@@ -209,6 +255,17 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
     );
   };
 
+  const renderPinGroupPreviewRow = (pin: SidebarPin): React.ReactNode => (
+    <div key={pin.pinID} data-pin-group-preview-entry={pin.pinID} style={pinGroupPreviewRowStyle}>
+      <span style={pinGroupPreviewPinStyle}>
+        <span style={rowIconStyle}><ExplorerRowIcon kind={pin.kind} /></span>
+        <span style={rowTextStyle}>{pin.name}</span>
+      </span>
+      {renderStatusCounts(pin.kind === "logic_gate" ? logicGateStatusCountsByID[pin.id] : undefined, true)}
+      <span aria-hidden="true" style={pinGroupPreviewRemoveSlotStyle} />
+    </div>
+  );
+
   const renderEntries = (nodes: SidebarPinTreeNode[]): React.ReactNode => nodes.map((row) => {
     const rowKey = `${row.entryType}:${row.entryID}`;
     const placement = dropTarget?.key === rowKey ? dropTarget.placement : null;
@@ -217,6 +274,11 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
     const expanded = row.entryType === "folder" && expandedFolderIDs.has(row.folder.folderID);
     const folderCounts = row.entryType === "folder" ? folderStatusCountsByID[row.folder.folderID] : undefined;
     const folderHasCounts = visibleSidebarLogicGateStatusCounts(folderCounts).length > 0;
+    const isPinGroupPreviewSource = row.entryType === "pin" && pinGroupPreview?.draggedPinID === row.pin.pinID;
+    const isPinGroupPreviewTarget = row.entryType === "pin" && pinGroupPreview?.targetPinID === row.pin.pinID;
+    const previewDraggedPin = isPinGroupPreviewTarget
+      ? tree.pins.find((pin) => pin.pinID === pinGroupPreview?.draggedPinID)
+      : undefined;
     return (
       <div
         key={rowKey}
@@ -225,33 +287,40 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
         data-pin-depth={row.depth}
         data-pin-raised={pinRaised ? "true" : undefined}
         draggable={renamingFolderID !== row.entryID}
-        style={pinEntryStyle(row.entryType, placement, pinRaised)}
+        style={isPinGroupPreviewSource ? { display: "none" } : pinEntryStyle(row.entryType, isPinGroupPreviewTarget ? null : placement, pinRaised)}
         onDragStart={(event) => {
           event.stopPropagation();
           activeDraggedEntryRef.current = ref;
           event.dataTransfer.effectAllowed = "move";
           event.dataTransfer.setData(APP_SIDEBAR_PIN_DRAG_MIME, JSON.stringify(ref));
           event.dataTransfer.setData("text/plain", row.entryType === "folder" ? row.folder.name : row.pin.name);
+          clearPinGroupHover();
           setDropTarget(null);
         }}
         onDragEnd={(event) => {
           event.stopPropagation();
           activeDraggedEntryRef.current = null;
+          clearPinGroupHover();
           setDropTarget(null);
         }}
         onDragLeave={(event) => {
           const related = event.relatedTarget instanceof Node ? event.relatedTarget : null;
           if (related && event.currentTarget.contains(related)) return;
+          if (pinGroupHoverCandidateRef.current?.targetPinID === row.entryID) clearPinGroupHover();
           setDropTarget((current) => current?.key === rowKey ? null : current);
         }}
         onDragOver={(event) => {
-          if (activeDraggedEntryRef.current || hasSidebarPinDrag(event.dataTransfer)) {
+          const moving = activeDraggedEntryRef.current ?? readDraggedEntry(event.dataTransfer);
+          if (moving) {
             event.preventDefault();
             event.stopPropagation();
             event.dataTransfer.dropEffect = "move";
-            setDropTarget({ key: rowKey, placement: getPinDropIntent(event, row.entryType) });
+            const intent = getPinDropIntent(event, row.entryType);
+            updatePinGroupHover(moving, row, intent);
+            setDropTarget({ key: rowKey, placement: intent });
             return;
           }
+          clearPinGroupHover();
           if (row.entryType === "pin" && pinAcceptsResourceDrag(row.pin, event.dataTransfer)) {
             event.preventDefault();
             event.stopPropagation();
@@ -278,6 +347,7 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
             return;
           }
           if (row.entryType === "pin" && onPinnedResourceDrop(row.pin, event)) {
+            clearPinGroupHover();
             setDropTarget(null);
             return;
           }
@@ -300,7 +370,21 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
             : { kind: "pin", x: event.clientX, y: event.clientY, pin: row.pin });
         }}
       >
-        {row.entryType === "folder" ? (
+        {isPinGroupPreviewTarget && previewDraggedPin && row.entryType === "pin" ? (
+          <fieldset data-pin-group-preview={row.pin.pinID} aria-label="New Folder preview" style={folderFrameStyle("inside")}>
+            <legend style={folderLegendStyle(false)}>
+              <span aria-hidden="true" style={previewDisclosureStyle}><ExplorerDisclosureIcon open color="#475569" /></span>
+              <span style={pinGroupPreviewTitleStyle}>
+                <ExplorerRowIcon kind="folder" />
+                <span style={folderNameTextStyle}>New Folder</span>
+              </span>
+            </legend>
+            <div style={folderContentsStyle}>
+              {renderPinGroupPreviewRow(row.pin)}
+              {renderPinGroupPreviewRow(previewDraggedPin)}
+            </div>
+          </fieldset>
+        ) : row.entryType === "folder" ? (
           <fieldset data-pin-folder-frame={row.folder.folderID} style={folderFrameStyle(placement)}>
             <legend data-pin-drop-anchor={rowKey} style={folderLegendStyle(folderHasCounts)}>
               <button
@@ -415,12 +499,14 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
         if (activeDraggedEntryRef.current || hasSidebarPinDrag(event.dataTransfer) || hasSidebarPinSectionDrop(event.dataTransfer)) {
           event.preventDefault();
           event.dataTransfer.dropEffect = activeDraggedEntryRef.current || hasSidebarPinDrag(event.dataTransfer) ? "move" : "copy";
+          clearPinGroupHover();
           setDropTarget({ key: "__end__", placement: "after" });
         }
       }}
       onDragLeave={(event) => {
         const related = event.relatedTarget instanceof Node ? event.relatedTarget : null;
         if (related && event.currentTarget.contains(related)) return;
+        clearPinGroupHover();
         setDropTarget(null);
         onPinDragLeave();
       }}
@@ -428,10 +514,12 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
         const moving = readDraggedEntry(event.dataTransfer) ?? activeDraggedEntryRef.current;
         if (moving) {
           event.preventDefault();
+          clearPinGroupHover();
           onMoveEntry(moving, null, "after");
           activeDraggedEntryRef.current = null;
         } else if (hasSidebarPinSectionDrop(event.dataTransfer)) {
           event.preventDefault();
+          clearPinGroupHover();
           onExternalDrop(event, "", null, "after");
         }
         setDropTarget(null);
@@ -602,6 +690,7 @@ function folderLegendStyle(hasCounts: boolean): React.CSSProperties {
 }
 const folderContentsStyle: React.CSSProperties = { minWidth: 0, display: "grid", alignContent: "start", gap: 3, marginRight: -4, padding: "2px 0 0 10px" };
 const disclosureButtonStyle: React.CSSProperties = { width: 14, height: 20, display: "grid", placeItems: "center", border: 0, background: "transparent", cursor: "pointer", padding: 0 };
+const previewDisclosureStyle: React.CSSProperties = { width: 14, height: 20, display: "grid", placeItems: "center" };
 function folderNameButtonStyle(focused: boolean): React.CSSProperties {
   return {
     minWidth: 0,
@@ -628,6 +717,10 @@ function folderNameButtonStyle(focused: boolean): React.CSSProperties {
 }
 const folderNameTextStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 const folderRenameStyle: React.CSSProperties = { minWidth: 0, display: "grid", gridTemplateColumns: "15px minmax(0, 1fr)", alignItems: "center", gap: 4 };
+const pinGroupPreviewTitleStyle: React.CSSProperties = { minWidth: 0, height: 22, display: "grid", gridTemplateColumns: "15px minmax(0, 1fr)", alignItems: "center", gap: 4, color: "#111827", fontSize: 11.5, fontWeight: 700 };
+const pinGroupPreviewRowStyle: React.CSSProperties = { minWidth: 0, minHeight: 29, display: "grid", gridTemplateColumns: "minmax(0,1fr) auto 22px", alignItems: "center", gap: 2 };
+const pinGroupPreviewPinStyle: React.CSSProperties = { minWidth: 0, minHeight: 29, display: "grid", gridTemplateColumns: "20px minmax(0,1fr)", alignItems: "center", gap: 4, color: "#111", fontSize: 11.5, fontWeight: 600, padding: "0 5px" };
+const pinGroupPreviewRemoveSlotStyle: React.CSSProperties = { width: 22, height: 22 };
 const pinRowStyle: React.CSSProperties = { minWidth: 0, minHeight: 29, display: "grid", gridTemplateColumns: "minmax(0,1fr) auto 22px", alignItems: "center", gap: 2 };
 const rowIconStyle: React.CSSProperties = { width: 20, height: 20, display: "grid", placeItems: "center", color: "#111" };
 const pinButtonStyle: React.CSSProperties = { minWidth: 0, minHeight: 29, display: "grid", gridTemplateColumns: "20px minmax(0,1fr)", alignItems: "center", gap: 4, border: 0, borderRadius: 7, background: "transparent", color: "#111", cursor: "pointer", font: "inherit", fontSize: 11.5, fontWeight: 600, padding: "0 5px", textAlign: "left" };
