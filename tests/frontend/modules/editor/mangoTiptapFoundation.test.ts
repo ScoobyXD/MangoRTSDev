@@ -770,6 +770,38 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
     assert.equal(editor.state.doc.child(1).childCount, 2);
     assert.equal(editor.state.doc.child(1).child(1).child(1).attrs.blockId, "person-label");
 
+    const lastNumberedRow = { type: "listItem", attrs: { blockId: "number-six" }, content: [
+      { type: "paragraph", attrs: { blockId: "number-six-paragraph" }, content: [{ type: "text", text: "I think eventually we'll need child/parent logic gate stuff." }] },
+    ] };
+    editor.commands.setContent({ type: "doc", content: [{
+      type: "orderedList",
+      attrs: { blockId: "talk-list", start: 1 },
+      content: [
+        { type: "listItem", attrs: { blockId: "number-one" }, content: [{ type: "paragraph", attrs: { blockId: "number-one-paragraph" }, content: [{ type: "text", text: "Get rid of mandating priority" }] }] },
+        lastNumberedRow,
+        { type: "listItem", attrs: { blockId: "number-seven" }, content: [{ type: "paragraph", attrs: { blockId: "number-seven-paragraph" } }] },
+      ],
+    }] });
+    let emptyLastNumberPosition = 0;
+    editor.state.doc.descendants((node, position) => {
+      if (node.attrs.blockId === "number-seven-paragraph") emptyLastNumberPosition = position + 1;
+    });
+    const rowAboveBeforeDelete = editor.state.doc.firstChild?.child(1).toJSON();
+    editor.commands.setTextSelection(emptyLastNumberPosition);
+    assert.equal(editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Delete",
+      bubbles: true,
+      cancelable: true,
+    })), false, "Delete removes only the final empty number marker");
+    assert.equal(editor.state.doc.childCount, 2, "the former numbered row remains as an ordinary blank row");
+    assert.equal(editor.state.doc.child(0).type.name, "orderedList");
+    assert.equal(editor.state.doc.child(0).childCount, 2);
+    assert.deepEqual(editor.state.doc.child(0).child(1).toJSON(), rowAboveBeforeDelete, "the row above remains unchanged");
+    assert.equal(editor.state.doc.child(1).type.name, "paragraph");
+    assert.equal(editor.state.doc.child(1).attrs.blockId, "number-seven-paragraph", "the blank row keeps its identity");
+    assert.equal(editor.state.selection.$from.parent, editor.state.doc.child(1), "the caret remains on the row whose marker was deleted");
+    assert.equal(editor.state.selection.$from.parentOffset, 0);
+
     editor.commands.setContent({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "abc" }] }] });
     editor.commands.setTextSelection(4);
     assert.equal(
