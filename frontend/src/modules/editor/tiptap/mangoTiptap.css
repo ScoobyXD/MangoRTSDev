@@ -61,6 +61,13 @@
   white-space: pre-wrap;
 }
 
+/* ProseMirror adds a second, browser-only break after a saved trailing hard
+   break. Before another block that helper must not manufacture a row that the
+   sleeping renderer did not show. The real saved hard break remains intact. */
+.mango-tiptap-prosemirror p:not(:last-child) > br + br.ProseMirror-trailingBreak {
+  display: none;
+}
+
 .mango-tiptap-static-document ul,
 .mango-tiptap-static-document ol,
 .mango-tiptap-prosemirror ul,

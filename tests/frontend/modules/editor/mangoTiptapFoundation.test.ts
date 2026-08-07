@@ -1709,6 +1709,23 @@ test("Node, Project, and Logic Gate editors use revisioned JSON while email stay
   assert.match(editor, /if \(event\.button !== 0\) return;\s*event\.preventDefault\(\);/);
   assert.match(editor, />Keep my version<\/button>/);
   assert.match(editor, />Use saved version<\/button>/);
+  const editorCSS = read("frontend/src/modules/editor/tiptap/mangoTiptap.css");
+  const activationDOM = new JSDOM(`<!doctype html><style>${editorCSS}</style>
+    <div class="mango-tiptap-prosemirror">
+      <p id="before-block">Line ending in a saved break<br><br class="ProseMirror-trailingBreak"></p>
+      <ul><li><p>Following block</p></li></ul>
+      <p id="document-end">Final saved break<br><br class="ProseMirror-trailingBreak"></p>
+    </div>`);
+  assert.equal(
+    activationDOM.window.getComputedStyle(activationDOM.window.document.querySelector("#before-block .ProseMirror-trailingBreak")!).display,
+    "none",
+    "activation must not reveal ProseMirror's browser-only helper as a new row before the next block",
+  );
+  assert.notEqual(
+    activationDOM.window.getComputedStyle(activationDOM.window.document.querySelector("#document-end .ProseMirror-trailingBreak")!).display,
+    "none",
+    "a saved hard break at the document end must retain ProseMirror's editable caret row",
+  );
   const communications = read("frontend/src/modules/communications/communicationsApi.ts");
   assert.doesNotMatch(communications, /mangoTiptap|tiptap_json|editor_format/);
 });
