@@ -3572,7 +3572,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             className="mango-pane-layout-transition"
             aria-hidden={!nodeEmailColumnVisible}
             {...(!nodeEmailColumnVisible ? { inert: "" } : {})}
-            style={{ gridColumn: "1", position: "relative", minWidth: 0, height: nodeWorkspaceViewportHeight, minHeight: nodeWorkspaceViewportHeight, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: panelBackground, overflow: "hidden", opacity: nodeEmailColumnVisible ? 1 : 0, transform: nodeEmailColumnVisible ? "translateX(0) scale(1)" : "translateX(-10px) scale(0.985)", pointerEvents: nodeEmailColumnVisible ? "auto" : "none", boxShadow: EDITOR_NEU_SHADOW, transition: "opacity 180ms ease, transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1)" }}
+            style={{ gridColumn: "1", position: "sticky", top: 38, alignSelf: "start", zIndex: 2, minWidth: 0, height: nodeWorkspaceViewportHeight, minHeight: nodeWorkspaceViewportHeight, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: panelBackground, overflow: "hidden", opacity: nodeEmailColumnVisible ? 1 : 0, transform: nodeEmailColumnVisible ? "translateX(0) scale(1)" : "translateX(-10px) scale(0.985)", pointerEvents: nodeEmailColumnVisible ? "auto" : "none", boxShadow: EDITOR_NEU_SHADOW, transition: "opacity 180ms ease, transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1)" }}
           >
             <AttachedEmailOrganizerPane
               emails={nodeAttachedEmails}

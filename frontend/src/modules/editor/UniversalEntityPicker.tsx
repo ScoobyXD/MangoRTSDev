@@ -27,8 +27,10 @@ export type UniversalEntityPickerAnchor = { left: number; top: number };
 export type UniversalEntityPickerProps = {
   companyID: string;
   requestJSON: EditorEntityLinkRequest;
-  sourceType: EditorEntityType;
+  sourceType?: EditorEntityType;
+  sourceLabel?: string;
   linkTargetTypes: readonly EditorEntityType[];
+  initialMode?: UniversalEntityPickerMode;
   anchor: UniversalEntityPickerAnchor;
   onChoose: (entity: EditorEntityLink, mode: UniversalEntityPickerMode) => Promise<void>;
   onCancel: () => void;
@@ -108,7 +110,9 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
   const inputRef = useRef<HTMLInputElement | null>(null);
   const searchSequenceRef = useRef(0);
   const [query, setQuery] = useState("");
-  const [mode, setMode] = useState<UniversalEntityPickerMode>("reference");
+  const [mode, setMode] = useState<UniversalEntityPickerMode>(() => (
+    props.initialMode === "link" && props.linkTargetTypes.length > 0 ? "link" : "reference"
+  ));
   const [category, setCategory] = useState<UniversalEntityPickerCategory>("all");
   const [pinTree, setPinTree] = useState<SidebarPinTree>(EMPTY_PIN_TREE);
   const [searchResults, setSearchResults] = useState<EditorEntityLink[]>([]);
@@ -202,9 +206,14 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
   };
   const onInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Escape") { event.preventDefault(); props.onCancel(); return; }
-    if (event.key === "#" && !query && props.linkTargetTypes.length > 0) {
+    if (event.key === "#" && !query && mode === "reference" && props.linkTargetTypes.length > 0) {
       event.preventDefault();
-      setPickerMode(mode === "reference" ? "link" : "reference");
+      setPickerMode("link");
+      return;
+    }
+    if (event.key === "Backspace" && !query && mode === "link") {
+      event.preventDefault();
+      setPickerMode("reference");
       return;
     }
     if (event.key === "Tab" && !event.shiftKey) {
@@ -238,7 +247,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
       <div style={{ padding: "14px 14px 10px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 9 }}>
           <strong style={{ fontSize: 13 }}>Universal picker</strong>
-          <span style={{ marginLeft: "auto", fontSize: 11, color: "#64748b" }}>{editorEntityTypeLabel(props.sourceType)} editor</span>
+          <span style={{ marginLeft: "auto", fontSize: 11, color: "#64748b" }}>{props.sourceLabel?.trim() || (props.sourceType ? `${editorEntityTypeLabel(props.sourceType)} editor` : "Mango resource")}</span>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0,1fr)", alignItems: "center", gap: 8, padding: "8px 11px", borderRadius: 13, background: EDITOR_NEU_ACTIVE_SURFACE, boxShadow: "inset 3px 3px 8px rgba(174,174,192,.18), inset -3px -3px 8px rgba(255,255,255,.92)" }}>
           <span aria-hidden="true" style={{ fontSize: 17, fontWeight: 900, color: mode === "link" ? "#7c3aed" : "#0891b2" }}>{mode === "link" ? "##" : "#"}</span>
@@ -265,7 +274,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 42, padding: "8px 14px", borderTop: "1px solid rgba(255,255,255,.72)", color: "#64748b", fontSize: 10 }}>
         {props.linkTargetTypes.length > 0 ? <button type="button" disabled={busy} onClick={() => setPickerMode(mode === "reference" ? "link" : "reference")} style={{ padding: "5px 8px", border: 0, borderRadius: 8, background: mode === "link" ? "rgba(124,58,237,.12)" : "rgba(8,145,178,.10)", color: mode === "link" ? "#6d28d9" : "#0e7490", cursor: "pointer", fontSize: 10, fontWeight: 900 }}>{mode === "link" ? "## Link" : "# Reference"}</button> : <span># Reference</span>}
-        <span>↑↓ choose · Enter/Tab select · Esc close</span>
+        <span>{mode === "link" ? "Backspace for # reference" : "# for ## link"} · ↑↓ choose · Enter/Tab select · Esc close</span>
         {error && <span role="alert" style={{ marginLeft: "auto", color: "#b91c1c", fontWeight: 800 }}>{error}</span>}
       </div>
     </div>, portalTarget,

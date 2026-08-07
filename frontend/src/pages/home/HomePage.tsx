@@ -66,6 +66,7 @@ import { isOutboundEmailUndoneError } from "../../modules/communications/outboun
 import { realtimePersonalMailboxScope, realtimeSharedMailboxScope, subscribeRealtimeScope } from "../../modules/realtime/realtimeWebSocket";
 import { buildReplyAllRecipients } from "../../modules/communications/emailRecipients";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
+import type { EditorEntityLink } from "../../modules/editor/editorEntityLinks.js";
 import type { NodeRecord, NodeRelationship } from "../../modules/nodes/types";
 import { buildCompanyExplorerTreeRows } from "../../modules/company-explorer/companyExplorerTreeRows";
 import {
@@ -4741,6 +4742,23 @@ export function HomePage({
     if (onNavigate) onNavigate(targetPath);
     else window.location.assign(targetPath);
   }, [companyID, onNavigate]);
+  const openEmailPickerEntity = useCallback((entity: EditorEntityLink) => {
+    if (entity.entityType === "node") {
+      const node = nodeByID.get(entity.entityID) ?? {
+        company_id: companyID,
+        node_id: entity.entityID,
+        name: entity.label,
+        created_timestamp: "",
+      };
+      openNodeEditorOverlay(node);
+      return;
+    }
+    if (entity.entityType === "logic_gate") {
+      openLogicGateArena(entity.entityID, entity.label);
+      return;
+    }
+    openProjectManagement(entity.entityID, entity.label);
+  }, [companyID, nodeByID, openLogicGateArena, openNodeEditorOverlay, openProjectManagement]);
   const getLogicGateDragIDs = useCallback((logicGateID: string): string[] => {
     const cleanLogicGateID = logicGateID.trim();
     if (!cleanLogicGateID) return [];
@@ -5975,6 +5993,7 @@ export function HomePage({
             archiveLabel={isArchiveMailbox ? "Unarchive" : "Archive"}
             busy={busy}
             companyID={companyID}
+            entityRequestJSON={permissionsRequestJSON}
             currentUserID={currentUserID}
             compose={compose}
             draftCount={activeMailDrafts.length}
@@ -6081,6 +6100,7 @@ export function HomePage({
               setNextPageToken("");
             }}
             onEmailCollaborationChange={applyEmailCollaborationChange}
+            onOpenPickerEntity={openEmailPickerEntity}
             onOpenCollaborationNode={openEmailCollaborationNode}
             onEmailNodeAttachmentChange={applyEmailNodeAttachmentChange}
           />

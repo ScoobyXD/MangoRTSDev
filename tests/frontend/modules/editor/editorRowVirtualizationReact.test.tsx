@@ -724,6 +724,8 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     assert.equal(emailNodeRow.querySelector<HTMLElement>('[data-node-visible-panes]')?.dataset.nodeVisiblePanes, "editor-chat");
     assert.equal(emailColumn.style.height, emailColumn.style.minHeight, "the email column should remain bounded to the available Node viewport");
     assert.ok(Number.parseFloat(emailColumn.style.minHeight) >= 240, "the email column should fill the remaining Node viewport");
+    assert.equal(emailColumn.style.position, "sticky", "the email column should remain in view while the Node timeline scrolls");
+    assert.equal(emailColumn.style.top, "38px", "the sticky email column should sit below the sticky Node toolbar");
     assert.equal(emailColumn.style.overflow, "hidden", "a long email should not extend the outer virtualized timeline");
     const emailColumnScroll = emailColumn.querySelector<HTMLElement>(".editor-document-scroll");
     assert.ok(emailColumnScroll, "the bounded email column should retain its own content scroller");

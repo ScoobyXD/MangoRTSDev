@@ -11,7 +11,6 @@ import {
 } from "../../../../frontend/src/modules/editor/editorProjection.js";
 import {
   buildEmailCollaborationParticipantRoster,
-  buildEmailNodeDestinationSearchOptions,
   emailNodeImportRequired,
   emailCollaborationChatSessionMounted,
   emailCollaborationChatSessionVisible,
@@ -118,34 +117,7 @@ test("email chat session opens directly for a selection and resets across scope 
   assert.equal(reconcileEmailCollaborationChatSession(session, "scope-b"), null);
 });
 
-test("email hashtag search finds every destination kind and preserves current-node opening", () => {
-  const nodes = [
-    { company_id: "company-1", node_id: "node-current", name: "Current launch", created_timestamp: "2026-07-20T10:00:00.000Z" },
-    { company_id: "company-1", node_id: "node-next", name: "Launch checklist", created_timestamp: "2026-07-20T10:00:00.000Z" },
-  ];
-  const logicGates = [
-    { company_id: "company-1", logic_gate_id: "gate-1", header: "Launch approval", created_timestamp: "2026-07-20T10:00:00.000Z" },
-  ];
-  const projects = [
-    { company_id: "company-1", project_id: "project-1", name: "Launch program", status: "Active", created_timestamp: "2026-07-20T10:00:00.000Z", updated_timestamp: "2026-07-20T10:00:00.000Z" },
-  ];
-
-  const matches = buildEmailNodeDestinationSearchOptions({
-    query: "# launch",
-    nodes,
-    logicGates,
-    projects,
-    currentNodeID: "node-current",
-  });
-  assert.deepEqual(matches.map((option) => option.kind), ["current", "node", "logic_gate", "project"]);
-  assert.equal(matches[0]?.detail, "Open the Node already linked to this email");
-
-  const blank = buildEmailNodeDestinationSearchOptions({ query: "#", nodes, logicGates, projects });
-  assert.deepEqual(blank, [{
-    key: "standalone:new", kind: "standalone", id: "new", label: "Create floating node (a node without a Logic Gate)",
-    detail: "Create without priority or Logic Gate placement",
-  }]);
-
+test("email destination requests preserve typed Node creation intent", () => {
   const request = nextEmailNodeDestinationRequest(null, {
     kind: "project",
     projectID: "project-1",
@@ -158,7 +130,6 @@ test("email hashtag search finds every destination kind and preserves current-no
     requestID: 1,
   });
 });
-
 test("email collaboration chat resolves to a real linked text box and only reads legacy attached-email chat as fallback", () => {
   const linkedTextBox = {
     information_id: "text-box-1",
@@ -229,7 +200,8 @@ test("My and Shared Triage open the simplified floating-Node comment journey", (
   const sharedChat = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
 
   assert.match(workspace, /const commentOnEmailSelection = React\.useCallback[\s\S]*setEmailSelection\(selection\);[\s\S]*setEmailChatSession\(\{ key: emailChatKey, visible: true \}\)/);
-  assert.match(workspace, /selectedMessage\?\.collaboration_id[\s\S]*selectedMessage\?\.collaboration_node_id[\s\S]*setEmailChatSession\(\{ key: emailChatKey, visible: true \}\)/);
+  assert.match(workspace, /if \(!emailChatKey \|\| !selectedMessage\?\.collaboration_node_id\?\.trim\(\)\) return;[\s\S]*setEmailChatSession\(\{ key: emailChatKey, visible: true \}\)/);
+  assert.doesNotMatch(workspace, /selectedMessage\?\.collaboration_id\?\.trim\(\) \|\| selectedMessage\?\.collaboration_node_id/);
   assert.match(workspace, /onEmailSelection=\{commentOnEmailSelection\}/);
   assert.match(workspace, /<EmailCollaborationChatSurface[\s\S]*onClose=\{closeEmailChat\}[\s\S]*active=\{emailChatVisible\}/);
   assert.doesNotMatch(workspace, /toggleEmailChat|nextEmailCollaborationActionRequest/);
@@ -249,12 +221,14 @@ test("My and Shared Triage open the simplified floating-Node comment journey", (
   assert.match(surface, /const importedCollaborations = await listEmailCollaborations/);
   assert.doesNotMatch(surface, /parseEditorAttachedEmails|resolveEmailCollaboration\(/);
 
-  assert.match(destinationSearch, /const hasSearchText = query\.trim\(\)\.replace/);
-  assert.match(destinationSearch, /!open \|\| !hasSearchText \|\| !companyID/);
-  assert.match(destinationSearch, /selectedOption\?\.kind === "standalone"/);
-  assert.match(destinationSearch, /if \(option\.kind === "standalone"\)[\s\S]*onSubmit\(\{ kind: "standalone" \}\)/);
-  assert.match(destinationSearch, /Create a floating node now, or type to search Nodes, Logic Gates, and projects\./);
-  assert.match(destinationSearch, /role="combobox"[\s\S]*role="listbox"/);
+  assert.match(destinationSearch, /<UniversalEntityPicker[\s\S]*sourceLabel="Email"[\s\S]*initialMode="link"/);
+  assert.match(destinationSearch, /data-email-floating-node-button="true"[\s\S]*aria-label="Create floating node from email"/);
+  assert.match(destinationSearch, /const createFloatingNode[\s\S]*onSubmit\(\{ kind: "standalone" \}\)/);
+  assert.match(destinationSearch, /mode === "reference"[\s\S]*onOpenEntity\(entity\)/);
+  assert.match(destinationSearch, /entity\.entityType === "node"[\s\S]*onSubmit\(\{ kind: "node", nodeID: entity\.entityID \}\)/);
+  assert.match(destinationSearch, /pendingLink\.entityType === "logic_gate"[\s\S]*kind: "logic_gate"/);
+  assert.match(destinationSearch, /pendingLink\.entityType === "project"[\s\S]*kind: "project"/);
+  assert.doesNotMatch(destinationSearch, /buildEmailNodeDestinationSearchOptions|listProjects/);
   assert.match(sharedChat, /headerTrailing\?: React\.ReactNode/);
   assert.match(surface, /<ChatPane[\s\S]*fillHeight/);
 });
@@ -285,7 +259,7 @@ test("email-created nodes reuse canonical chat data with one node email column",
   assert.match(nodeParts, /height: replyComposerOpen \? "clamp\(420px, calc\(100vh - 300px\), 760px\)" : "auto"/);
   assert.match(nodeParts, /minHeight: replyComposerOpen \? undefined : 0/);
   assert.match(nodeParts, /className="editor-document-scroll mango-pane-enter"/);
-  assert.match(nodeSurface, /data-node-email-column="true"[\s\S]{0,180}className="mango-pane-layout-transition"/);
+  assert.match(nodeSurface, /data-node-email-column="true"[\s\S]{0,420}position: "sticky"[\s\S]{0,80}top: 38/);
   assert.match(nodeSurface, /data-node-text-box-columns="editor-chat"[\s\S]{0,420}transition: "grid-template-columns 180ms/);
   assert.match(nodeParts, /initialFocusMessageID[\s\S]*scrollIntoView/);
   assert.match(projection, /selection_block_id: input\.selectionBlockID/);
