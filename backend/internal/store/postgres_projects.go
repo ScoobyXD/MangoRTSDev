@@ -916,6 +916,17 @@ select exists (
 		return ProjectRelationshipMutationResult{Relationship: &projection}, nil
 	}
 
+	var lockedNodeID string
+	if err := tx.QueryRowContext(ctx, `
+select node_id::text
+from nodes
+where company_id=$1::uuid and node_id=$2::uuid
+for update`, input.CompanyID, input.ResourceID).Scan(&lockedNodeID); errors.Is(err, sql.ErrNoRows) {
+		return ProjectRelationshipMutationResult{}, ErrNotFound
+	} else if err != nil {
+		return ProjectRelationshipMutationResult{}, err
+	}
+
 	var logicGateID string
 	err = tx.QueryRowContext(ctx, `
 select logic_gate_id::text
@@ -927,6 +938,18 @@ limit 1`, input.CompanyID, input.ResourceID).Scan(&logicGateID)
 		return ProjectRelationshipMutationResult{}, ErrProjectNodeLogicGateRequired
 	}
 	if err != nil {
+		return ProjectRelationshipMutationResult{}, err
+	}
+	var alreadyRelated bool
+	if err := tx.QueryRowContext(ctx, `
+select exists (
+  select 1
+  from project_relationships
+  where company_id=$1::uuid
+    and project_id=$2::uuid
+    and resource_type='node'
+    and resource_id=$3::uuid
+)`, input.CompanyID, input.ProjectID, input.ResourceID).Scan(&alreadyRelated); err != nil {
 		return ProjectRelationshipMutationResult{}, err
 	}
 
@@ -955,6 +978,11 @@ limit 1`, input.CompanyID, input.ResourceID).Scan(&logicGateID)
 	nodeProjection, err := projectRelationshipProjectionByIDTx(ctx, tx, input.CompanyID, nodeRelationshipID)
 	if err != nil {
 		return ProjectRelationshipMutationResult{}, err
+	}
+	if !alreadyRelated {
+		if _, err := insertProjectAssignmentTimelineEventTx(ctx, tx, input.CompanyID, input.ResourceID, input.ActorUserID, input.ProjectID); err != nil {
+			return ProjectRelationshipMutationResult{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return ProjectRelationshipMutationResult{}, err

@@ -16,11 +16,11 @@ function pin(kind: SidebarPin["kind"]): SidebarPin {
 }
 
 describe("sidebarPinNodePopupLaunch", () => {
-  it("marks only pinned Node launches fullscreen and gives each open a fresh instance identity", () => {
+  it("opens only pinned Nodes at their normal size and gives each open a fresh instance identity", () => {
     assert.deepEqual(sidebarPinNodePopupLaunch(pin("node"), 101), {
       nodeID: "resource-1",
       nodeTitle: "Pinned resource",
-      initialFullscreen: true,
+      initialFullscreen: false,
       popupInstanceID: 101,
     });
     assert.equal(sidebarPinNodePopupLaunch(pin("logic_gate"), 102), null);

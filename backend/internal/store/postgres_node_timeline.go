@@ -13,6 +13,7 @@ const nodeTimelineEventColumns = `event_id::text, company_id::text, node_id::tex
 coalesce(actor_user_id::text, ''), actor_display_name,
 coalesce(from_logic_gate_id::text, ''), from_logic_gate_name,
 coalesce(to_logic_gate_id::text, ''), to_logic_gate_name,
+coalesce(project_id::text, ''), project_name,
 idempotency_key, created_timestamp`
 
 func scanNodeTimelineEvent(scanner interface{ Scan(...any) error }) (domain.NodeTimelineEvent, error) {
@@ -22,6 +23,7 @@ func scanNodeTimelineEvent(scanner interface{ Scan(...any) error }) (domain.Node
 		&item.ActorUserID, &item.ActorDisplayName,
 		&item.FromLogicGateID, &item.FromLogicGateName,
 		&item.ToLogicGateID, &item.ToLogicGateName,
+		&item.ProjectID, &item.ProjectName,
 		&item.IdempotencyKey, &item.CreatedTimestamp,
 	)
 	item.VerificationRecipients = []domain.NodeTimelineVerificationRecipient{}
@@ -269,6 +271,24 @@ left join users actor on actor.user_id=$4::uuid
 where source_gate.company_id=$2::uuid and source_gate.logic_gate_id=$5::uuid
 returning `+nodeTimelineEventColumns,
 		newUUIDv7String(), companyID, nodeID, actorUserID, fromLogicGateID, toLogicGateID))
+	if err != nil {
+		return item, err
+	}
+	return item, nil
+}
+
+func insertProjectAssignmentTimelineEventTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, actorUserID, projectID string) (domain.NodeTimelineEvent, error) {
+	item, err := scanNodeTimelineEvent(tx.QueryRowContext(ctx, `
+insert into node_timeline_events
+(event_id, company_id, node_id, event_type, actor_user_id, actor_display_name, project_id, project_name)
+select $1::uuid, $2::uuid, $3::uuid, 'project_assignment', nullif($4, '')::uuid,
+       coalesce(nullif(actor.display_name, ''), nullif(actor.email, ''), 'Unknown user'),
+       project.project_id, project.name
+from projects project
+left join users actor on actor.user_id=nullif($4, '')::uuid
+where project.company_id=$2::uuid and project.project_id=$5::uuid
+returning `+nodeTimelineEventColumns,
+		newUUIDv7String(), companyID, nodeID, actorUserID, projectID))
 	if err != nil {
 		return item, err
 	}

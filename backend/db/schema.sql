@@ -657,13 +657,16 @@ create table if not exists node_timeline_events (
   from_logic_gate_name text not null default '',
   to_logic_gate_id uuid,
   to_logic_gate_name text not null default '',
+  project_id uuid,
+  project_name text not null default '',
   idempotency_key text not null default '',
   created_timestamp timestamptz not null default now(),
-  constraint node_timeline_events_type_chk check (event_type in ('logic_gate_transfer', 'verification_request')),
+  constraint node_timeline_events_type_chk check (event_type in ('logic_gate_transfer', 'project_assignment', 'verification_request')),
   constraint node_timeline_events_actor_name_chk check (btrim(actor_display_name) <> ''),
-  constraint node_timeline_events_transfer_chk check (
-    (event_type='logic_gate_transfer' and from_logic_gate_id is not null and to_logic_gate_id is not null and from_logic_gate_id<>to_logic_gate_id and btrim(from_logic_gate_name)<>'' and btrim(to_logic_gate_name)<>'')
-    or (event_type='verification_request' and from_logic_gate_id is null and to_logic_gate_id is null)
+  constraint node_timeline_events_payload_chk check (
+    (event_type='logic_gate_transfer' and from_logic_gate_id is not null and to_logic_gate_id is not null and from_logic_gate_id<>to_logic_gate_id and btrim(from_logic_gate_name)<>'' and btrim(to_logic_gate_name)<>'' and project_id is null and btrim(project_name)='')
+    or (event_type='project_assignment' and from_logic_gate_id is null and btrim(from_logic_gate_name)='' and to_logic_gate_id is null and btrim(to_logic_gate_name)='' and project_id is not null and btrim(project_name)<>'')
+    or (event_type='verification_request' and from_logic_gate_id is null and btrim(from_logic_gate_name)='' and to_logic_gate_id is null and btrim(to_logic_gate_name)='' and project_id is null and btrim(project_name)='')
   ),
   primary key (company_id, event_id),
   unique (company_id, node_id, event_id),

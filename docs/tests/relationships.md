@@ -1,3 +1,17 @@
+# Process Story: A Node header links through exact relationship commands
+
+A user opens the Node header's double-hash picker and chooses a Logic Gate, Project, or Email
+↓
+Mango carries the unchanged Node type/ID and chosen target type/ID into the established typed command
+↓
+A Logic Gate choice creates the first assignment or moves the current assignment, a Project choice creates the one allowed Node `project_relationships` row and its required Logic Gate relationship, and an Email choice attaches the exact stored message
+↓
+The first exact Project relationship atomically snapshots one durable Node timeline stamp; an idempotent repeat creates no duplicate stamp
+↓
+The picker and clickable header chips remain presentation only and never become generic edges, surrogate identities, or permission authority
+
+Last updated: 2026-08-07
+
 # Process Story: A completed email message inherits exact Node-wide destinations
 
 A qualifying Inbox arrival reconciles a stored email thread
@@ -42,7 +56,7 @@ Last updated: 2026-08-06
 
 # Process Story: The universal picker references or links exact typed resources
 
-A user opens the universal picker from a resource editor or a selected My Triage/Shared Triage email
+A user opens the universal picker from a resource editor, the Node header's default `##` linker, or a selected My Triage/Shared Triage email
 ↓
 Single-hashtag reference mode opens or inserts the chosen exact Node, Logic Gate, Project, or email message without creating a relationship
 ↓

@@ -19,9 +19,10 @@ test("node timeline plus offers text box and verify stamp without direct creatio
   assert.match(nodeSurface, /Verify stamp[\s\S]*Request everyone assigned to Accountable/);
   assert.doesNotMatch(nodeSurface, /role="menuitem"[\s\S]{0,300}verificationRequestPending[\s\S]{0,300}background: "rgba\(99,102,241,0\.08\)"/);
   assert.doesNotMatch(nodeSurface, /title="Add text box"\s*onClick=\{createTextBlock\}/);
+  assert.match(nodeSurface, /data-node-header-timeline-control="true"[\s\S]*title="Add timeline entry"/);
 });
 
-test("compact timeline rows expose immutable transfer copy and recipient-only verification controls", () => {
+test("compact timeline rows expose immutable relationship copy and recipient-only verification controls", () => {
   const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
   assert.match(nodeSurface, /data-node-timeline-activity="true"/);
   assert.match(nodeSurface, /data-node-timeline-event-id=\{item\.event_id\}/);
@@ -30,12 +31,15 @@ test("compact timeline rows expose immutable transfer copy and recipient-only ve
   assert.match(nodeSurface, /moved this node from[\s\S]*fromLogicGateName[\s\S]*toLogicGateName/);
   assert.match(nodeSurface, /<TimelineCell accent=\{accent\} muted=\{false\} isLast=\{false\} minHeight=/);
   assert.match(nodeSurface, /<time[\s\S]*<TimelineClockIcon[\s\S]*Logic Gate transfer/);
-  assert.match(nodeSurface, /data-node-timeline-gate-icon="header"/);
+  assert.match(nodeSurface, /data-node-timeline-entity-icon="header"/);
   assert.match(nodeSurface, /data-node-timeline-gate-icon=\{position\}/);
   assert.match(nodeSurface, /position="from"[\s\S]*position="to"/);
   assert.match(nodeSurface, /alignItems: "stretch", alignContent: "start"/);
   assert.match(nodeSurface, /data-node-timeline-logic-gate-link=\{position\}/);
   assert.match(nodeSurface, /openEditorEntityLink\(\{ entityType: "logic_gate", entityID: cleanLogicGateID, label: logicGateName \}\)/);
+  assert.match(nodeSurface, /Project assignment[\s\S]*assigned this node to[\s\S]*TimelineProjectLink/);
+  assert.match(nodeSurface, /data-node-timeline-project-link="true"/);
+  assert.match(nodeSurface, /openEditorEntityLink\(\{ entityType: "project", entityID: cleanProjectID, label: projectName \}\)/);
   assert.doesNotMatch(nodeSurface, /background: isVerification \? "#6366f1" : "#0ea5e9"/);
   assert.match(nodeSurface, /recipient\.user_id === author\.userID/);
   assert.match(nodeSurface, /disabled=\{!isCurrentUser \|\| completed \|\| pending\}/);
@@ -44,6 +48,20 @@ test("compact timeline rows expose immutable transfer copy and recipient-only ve
   const focusHelper = source("frontend/src/modules/editor/transientInformationFocus.ts");
   assert.match(nodeSurface, /scheduleTransientInformationFocus\(\{ root: \(\) => root/);
   assert.match(focusHelper, /"data-node-timeline-event-id"/);
+});
+
+test("node header uses compact email controls, typed links, and the double-hash linker", () => {
+  const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
+  assert.match(nodeSurface, /data-node-header-email-controls="true"[\s\S]*<MailIcon[\s\S]*nodeAttachedEmails\.length[\s\S]*aria-label="Attach email"/);
+  assert.match(nodeSurface, /data-node-header-link="logic_gate"[\s\S]*assignedLogicGateLabel/);
+  assert.match(nodeSurface, /data-node-header-link="project"[\s\S]*primaryAssignedProjectLabel/);
+  assert.match(nodeSurface, /data-node-header-universal-linker="true"[\s\S]*>##<\/span>[\s\S]*initialMode="link"/);
+  assert.match(nodeSurface, /linkTargetTypes=\{NODE_HEADER_LINK_TARGET_TYPES\}/);
+  assert.doesNotMatch(nodeSurface, />\s*Email \(\{nodeAttachedEmails\.length\}\)\s*</);
+  assert.doesNotMatch(nodeSurface, />\s*Attach email\s*</);
+  assert.doesNotMatch(nodeSurface, /Assigned to Logic Gate|Assign to Project|Go to Logic Gate|Go to Project/);
+  assert.match(nodeSurface, /NODE_EMAIL_COLUMN_BOTTOM_GUTTER_PX[\s\S]*marginBottom: NODE_EMAIL_COLUMN_BOTTOM_GUTTER_PX/);
+  assert.match(nodeSurface, /data-node-email-column="true"[\s\S]*borderRadius: 14[\s\S]*backgroundClip: "padding-box"/);
 });
 
 test("every RACI role supports multiple people and groups while Updates keeps verification copy", () => {
