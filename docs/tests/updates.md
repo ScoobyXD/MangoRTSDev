@@ -1,3 +1,15 @@
+# Process Story: RACI grouping shares the pale Kanban palette
+
+An Updates user groups notifications by RACI
+↓
+Responsible, Accountable, Consulted, and Informed reuse the Kanban In Progress orange, Done green, Review teal-blue, and Backlog purple
+↓
+Their raised surfaces use the pale RACI gradient instead of full Kanban-column strength
+↓
+Grouping order, disclosure, row identity, and navigation remain unchanged
+
+Last updated: 2026-08-06
+
 # Process Story: RACI changes notify the people whose effective role changed
 
 A user replaces a Node or Logic Gate RACI policy
@@ -118,7 +130,7 @@ U78 - Email-collaboration notification metadata may include collaboration ID, No
 U79 - Email collaboration mention/chat rows use the shared email icon token required by U55. Activating an authorized row opens the email collaboration at the referenced message/chat anchor with the same underlying Node chat; a revoked/deleted/inaccessible target fails closed instead of falling back to an unrelated Node or mailbox.
 U80 - Summary-only acceptance/reconnect reconciliation never clears or replaces mounted Updates feed state. A real external notification change may revalidate roots/branches in the background, but applies the canonical result atomically and preserves current grouping expansion, selection, active preview, and visible rows on failure; row-only refreshes do not re-expand groups the user collapsed.
 U81 - Priority is an Updates grouping field accepted by frontend normalization, Key Views saved-view editing, and backend saved-view validation. The built-in Updates tab's exact default chain is Date -> RACI -> Priority -> Logic Gate. Existing/custom saved views, including an explicit empty grouping stack, retain their persisted fields/order/directions and are never overwritten by the built-in default.
-U82 - RACI and Priority grouping titles render as compact elevated rectangular entity surfaces instead of plain text. RACI titles reuse Responsible orange (#f97316), Accountable green (#16a34a), Consulted blue (#2563eb), and Informed purple (#7c3aed); Other, No RACI, and unknown roles use the same raised pattern with a neutral slate accent. Priority titles reuse the exact shared Node-priority border, gradient, text color, and glow for their value. These presentation surfaces do not change disclosure, grouping order, row identity, or resource navigation.
+U82 - RACI and Priority grouping titles render as compact elevated rectangular entity surfaces instead of plain text. RACI titles reuse Kanban In Progress orange (#f08a24) for Responsible, Done green (#19c879) for Accountable, Review teal-blue (#19a8ff) for Consulted, and Backlog purple (#8b5cf6) for Informed through the pale RACI gradient; Other, No RACI, and unknown roles use the same raised pattern with a neutral slate accent. Priority titles reuse the exact shared Node-priority border, gradient, text color, and glow for their value. These presentation surfaces do not change disclosure, grouping order, row identity, or resource navigation.
 U83 - Opening Updates when no saved grouping views exist or activating any saved Updates grouping view expands every group at every nested level. A later feed refresh also opens newly introduced groups by default, while U80 still keeps any group the user explicitly collapsed closed until the user reopens it, chooses Expand all, or activates a different grouping view.
 U84 - The Updates page header provides Collapse all and Expand all actions. Collapse all closes every currently rendered grouping level, and Expand all opens every currently rendered grouping level without changing the active grouping view, filter, selection, or notification data.
 U85 - The elevated Updates sidebar rectangle is divided into two equal halves: the Updates icon/title occupies the left half, and the right half is divided into three equal live-count cells for urgent ! mentions, normal @ mentions, and regular updates. Each icon and number has its own fixed, centered row with visible breathing room between them. A zero-count cell stays neutral; a nonzero urgent cell uses a four-stop fiery red-orange gradient, a nonzero normal-mention cell uses a four-stop teal-blue gradient, and a nonzero regular-update cell uses a four-stop yellow-orange gradient. The active gradients use the same light-leading-edge, saturated-middle, and darker-trailing-edge treatment as Mango's Node and Company Explorer folder icons.

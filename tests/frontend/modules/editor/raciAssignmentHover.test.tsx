@@ -109,7 +109,19 @@ test("RACI cards keep Add on top, show every assignment on one line, and preserv
     assert.ok(informedCard && addButton);
     assert.equal(addButton.parentElement?.style.gridRow, "1", "Add stays in the top role-heading row");
     assert.equal(assignmentButton.parentElement?.style.gridRow, "2", "the name surface receives the full second row");
-    assert.match(informedCard.getAttribute("style") ?? "", /radial-gradient/, "role cards use the stronger Kanban-style layered gradient");
+    assert.match(informedCard.getAttribute("style") ?? "", /radial-gradient/, "role cards use a layered Kanban-color gradient");
+    const expectedLightRoleColors = new Map([
+      ["responsible", "rgba(240, 138, 36, 0.14)"],
+      ["accountable", "rgba(25, 200, 121, 0.14)"],
+      ["consulted", "rgba(25, 168, 255, 0.14)"],
+      ["informed", "rgba(139, 92, 246, 0.14)"],
+    ]);
+    for (const [role, expectedColor] of expectedLightRoleColors) {
+      const roleCard = container.querySelector<HTMLElement>(`[data-raci-role-card="${role}"]`);
+      assert.ok(roleCard);
+      assert.equal(roleCard.getAttribute("style")?.includes(expectedColor), true, `${role} uses its light Kanban palette color`);
+      assert.doesNotMatch(roleCard.getAttribute("style") ?? "", /, 0\.(?:42|54|86)\)/, `${role} does not restore the dark gradient`);
+    }
     const assignmentNameRows = Array.from(assignmentButton.querySelectorAll<HTMLElement>('[data-raci-assignment-name="informed"]'));
     assert.deepEqual(assignmentNameRows.map((row) => row.textContent?.trim()), informedNames);
     assert.equal(assignmentNameRows.every((row) => row.style.whiteSpace === "nowrap"), true, "each assigned principal owns one unwrapped line");

@@ -168,7 +168,7 @@ test("RACI and Priority group titles reuse their semantic raised surfaces", () =
     logicGateRACIRolePresentation("consulted").accent,
     logicGateRACIRolePresentation("accountable").accent,
     logicGateRACIRolePresentation("informed").accent,
-  ], ["#f97316", "#2563eb", "#16a34a", "#7c3aed"]);
+  ], ["#f08a24", "#19a8ff", "#19c879", "#8b5cf6"]);
 
   const other = resolveUpdateGroupSemanticPresentation({ field: "gvic", key: "gvic:other", label: "Other" });
   assert.equal(other?.kind, "gvic");
