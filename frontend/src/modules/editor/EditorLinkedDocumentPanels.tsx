@@ -891,8 +891,14 @@ function RACIAssignmentBoard({
 }) {
   return (
     <div style={{ minWidth: 0, width: "100%", display: "grid", gap: 6, overflowX: "auto", overflowY: "hidden" }}>
+      <div
+        aria-label="GVIC policy mode"
+        style={{ justifySelf: "start", padding: "3px 8px", borderRadius: 999, fontSize: 10, fontWeight: 800, color: mode === "inherited" ? "#475569" : "#1d4ed8", background: mode === "inherited" ? "rgba(226, 232, 240, 0.72)" : "rgba(219, 234, 254, 0.82)" }}
+      >
+        {mode === "inherited" ? "Inherited" : "Customized"}
+      </div>
       {overwrittenByAncestor && (
-        <div style={{ fontSize: 10, color: "#b45309" }}>This stored customization is inactive because an ancestor overwrite superseded it.</div>
+        <div style={{ fontSize: 10, color: "#64748b" }}>This item currently follows the policy applied by an ancestor.</div>
       )}
       <div
         aria-label="RACI assignments"
@@ -918,7 +924,7 @@ function RACIAssignmentBoard({
             accent={accent}
             panelBackground={panelBackground}
             ruleColor={ruleColor}
-            canEdit={canEdit && mode === "customized"}
+            canEdit={canEdit}
             disabledReason={disabledReason}
             onAddPrincipal={onAddPrincipal}
             onRemovePrincipal={onRemovePrincipal}

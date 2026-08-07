@@ -1,3 +1,17 @@
+# Process Story: Search touches Explorer ancestry only for narrowed location checks
+
+A user types a nonblank Universal Picker query
+↓
+Mango ranks a bounded candidate batch directly from the selected source table, or from Nodes, Projects, and Logic Gates in that order for All
+↓
+Only after narrowing does Mango resolve each candidate's Edit permission and, when the candidate has an organizational location, the visibility of that exact Logic Gate or Project placement and its folder ancestors
+↓
+Company Explorer supplies those candidate-specific typed paths but stores no permission rows and is never scanned as the source of Node, Project, or Logic Gate names
+↓
+The read performs no default-folder repair, and additional candidate batches are checked only when denied results leave the requested page unfilled
+
+Last updated: 2026-08-07
+
 # Process Story: Collaboration Nodes receive Responsible RACI without Explorer ownership
 
 A user creates a standalone collaboration Node from a personal or shared email
@@ -90,7 +104,7 @@ E41 - Company Explorer has no cross-user realtime subscription. It patches the i
 E43 - Placing or moving a project or Logic Gate into an Explorer folder advances both parent-link sequences. Inherited policy follows the target folder immediately; customized policy remains independent.
 E44 - Reordering or re-saving a project or Logic Gate under the same Explorer folder preserves the resource's own permissions.
 E45 - Moving a project or Logic Gate to the company root converts an inherited effective policy to a complete customized root policy and preserves an existing customized policy.
-E46 - Editing an Explorer folder changes inherited descendants live but does not cross active customized boundaries. Inherited-only Apply adds no descendant state; overwrite-all records one reset sequence without walking or rewriting descendants.
+E46 - Editing an Explorer folder changes inherited descendants live but does not cross active customized boundaries. Apply to non-customized descendants adds no descendant state; Apply to every descendant records one reset sequence without walking or rewriting descendants.
 E47 - Dropping a My Triage or Shared Triage email onto a Company Explorer Logic Gate row uses the communications conversion path to create a Pending direct email-created node/card in that Logic Gate's Kanban/work path, not a Company Explorer placement. The created node/card must not appear as a Company Explorer row and must not be inserted into `company_explorer_items`.
 E48 - A successful Company Explorer email-to-Logic-Gate drop updates Home triage state once from the committed conversion result, keeps the source row visible, and patches its Logic Gate icon without a broad conversion/workspace WebSocket event, broad cache invalidation, stale prefetched-page reuse, post-removal fill, message-length prefetch, list blanking, or repeated mail GETs. A later exact-mailbox provider update may independently cause one canonical active-list reconciliation.
 E49 - A successful Company Explorer email-to-Logic-Gate drop shows a temporary green success banner over the Company Explorer sidebar section.
@@ -108,6 +122,10 @@ E60 - Existing email-to-Logic-Gate conversion still creates Pending work under i
 E61 - Explorer policy reads explain inherited/customized mode, effective source, active reset, and inactive overwritten customization for folders, projects, and Logic Gates.
 E62 - Moving a subtree after an older force reset protects it through the new parent-link sequence; a later reset from its new ancestry may cross that link.
 E63 - Deleting an Explorer target removes both V2 settings rows and cascading policy edges; deleting only a placement follows root/detach materialization rules without deleting the target.
+E64 - Editor/Universal Picker entity ranking first reads a bounded candidate batch directly from the requested Node, Project, and/or Logic Gate source tables. Permission and location visibility checks run only for that batch, and later ranked batches are checked only when needed to fill the requested authorized result limit.
+E65 - Universal Picker location visibility uses only each narrowed candidate's exact typed organization links and folder ancestors. Company Explorer provides those paths but stores no permission or RACI assignment rows and is not a source table for entity names.
+E66 - A Company Explorer or Universal Picker search GET performs no default-folder creation, repair, transaction, upsert, or version-triggering write. Default-folder setup belongs to explicit initialization and repair paths.
+E67 - Within one narrowed permission batch, the actor's nested group ancestry is resolved once and reused across candidate resource, location-resource, and folder checks. Effective permission policy still follows each candidate's canonical immediate-parent chain.
 
 
 ## Bug History

@@ -1,3 +1,19 @@
+# Process Story: GVIC inheritance is automatic and remains a raw pointer policy
+
+An editor changes a direct Responsible, Accountable, Consulted, or Informed user/group assignment
+↓
+Inherited and Customized remain status displays while all authorized assignment fields stay editable
+↓
+The draft is Customized when its unordered raw role/principal pointers differ from the immediate parent and automatically returns to Inherited when they match exactly
+↓
+The backend repeats the live parent comparison in the write transaction; expanded group members are never used for policy equality
+↓
+A parent exposes Apply to non-customized descendants and, with confirmation, Apply to every descendant only when descendants exist
+↓
+The constant-size reset pointer remains the force mechanism, and GVIC never grants permission or search visibility
+
+Last updated: 2026-08-07
+
 # Process Story: RACI cards keep every direct assignment readable
 
 A user opens a Node or Logic Gate with Responsible, Accountable, Consulted, and Informed assignments
@@ -60,8 +76,8 @@ RACI7 - An inherited resource stores no RACI edges. Its effective policy is the 
 RACI8 - Customizing copies the current effective policy once, applies the requested complete replacement, and allocates a new customized sequence in one transaction.
 RACI9 - Returning to inherited deletes the resource's customized edges and customized sequence, then immediately exposes its current effective ancestor.
 RACI10 - An ordinary policy save changes only that resource. It does not rewrite descendants.
-RACI11 - Apply to inherited descendants saves the selected policy if needed and writes no descendant policy state. Inherited branches already resolve it live, and active customized boundaries remain protected.
-RACI12 - Overwrite all descendants records one ancestor reset sequence that also supersedes older active customized policies below that resource. The UI requires a separate confirmation.
+RACI11 - Apply to non-customized descendants saves the selected policy if needed and writes no descendant policy state. Inherited branches already resolve it live, and active customized boundaries remain protected.
+RACI12 - Apply to every descendant records one ancestor reset sequence that also supersedes older active customized policies below that resource. The UI requires a separate confirmation.
 RACI13 - A customization made after a reset becomes active again because its customized sequence is newer.
 RACI14 - A parent relationship created or changed receives a new parent-link sequence for both policy domains. A link newer than a reset blocks that older reset from crossing the moved edge.
 RACI15 - Moving an inherited resource changes its effective policy immediately; moving a customized resource preserves that customization. Descendants are not rewritten.
@@ -76,7 +92,7 @@ RACI23 - Notification routing resolves the current effective RACI of the exact t
 RACI24 - Assignment notifications are sent only for newly effective users or effective role changes; unchanged users, removals, unrelated users, and the actor receive none.
 RACI25 - RACI event payloads identify policy type, action, descendant action, allocated sequence, mode, and changed recipients.
 RACI26 - Reads explain the stored mode, effective mode, source resource, active reset, and an inactive stored customization superseded by force overwrite.
-RACI27 - The frontend keeps Inherited and Customized controls in More editor actions, provides both descendant actions and the overwrite explanation, protects stale writes, invalidates affected workspace reads, and performs no optimistic descendant materialization.
+RACI27 - The frontend shows Inherited or Customized as a non-clickable status, keeps authorized assignment inputs editable in either state, provides both exact descendant actions only when descendants exist, protects stale writes, invalidates affected workspace reads, and performs no optimistic descendant materialization.
 RACI28 - Fingerprints include effective source identity and sequence, eligible reset identity and sequence, the parent-link boundary, live group-membership version, and actor-specific edit result where exposed.
 RACI29 - Point reads, My Work, notification decisions, and cache validation derive current state at read time; policy writes stay constant-size with descendant count.
 RACI30 - Resource deletion deletes its settings row and cascades its RACI edges. No missing resource, user, or group identity can remain.
@@ -86,9 +102,13 @@ RACI33 - Email-derived and workspace-created resources apply creator rules only 
 RACI34 - Stale in-flight reads cannot overwrite a newer committed policy response; ETags and policy fingerprints track the resolved V2 state.
 RACI35 - Step 2 runtime readers and writers use only the two canonical RACI tables. Temporarily retained legacy tables are frozen rollback evidence and have no deployed reader or writer.
 RACI36 - All RACI changes and their settings, graph edges, events, and read-version effects commit atomically.
-RACI37 - The editor keeps the four role columns compact and removes the exposed policy-mode/effective-source strip; inherited policy is read-only until Customized is selected from More editor actions.
+RACI37 - The editor keeps the four role columns compact, shows one neutral Inherited/Customized status, does not show raw policy-source UUIDs or customization warnings, and does not require a separate mode action before an inherited assignment can be edited.
 RACI38 - A cross-Logic-Gate Node move reads and authorizes the actual canonical one-per-Node assignment. A caller-supplied source Logic Gate is only a hint and cannot select relationship authority or cause a valid move to fail when stale. The move changes the canonical Logic Gate assignment and its projections; it neither requires nor rewrites optional email or attachment relationships owned by the same Node.
-RACI39 - After any successful RACI policy write, the company workspace snapshot and cached Node and Logic Gate records are invalidated. A descendant view must refetch its live effective policy instead of displaying a stale record cache; inherited-only Apply still writes no descendant policy rows, and overwrite-all still uses one reset sequence instead of materializing descendants.
+RACI39 - After any successful RACI policy write, the company workspace snapshot and cached Node and Logic Gate records are invalidated. A descendant view must refetch its live effective policy instead of displaying a stale record cache; Apply to non-customized descendants still writes no descendant policy rows, and Apply to every descendant still uses one reset sequence instead of materializing descendants.
+
+RACI45 - GVIC policy equality compares the unordered raw assignment set keyed by role, principal type, and principal ID. A group stays one pointer. Expanded effective users, labels, timestamps, and array order do not affect equality.
+
+RACI46 - The frontend uses its loaded parent policy for immediate status, while the backend re-resolves the live parent and stores the authoritative mode inside the same write transaction. Roots remain customized because they have no parent.
 RACI40 - The editor presents RACI as Responsible (Kanban In Progress orange #f08a24), Accountable (Kanban Done green #19c879), Consulted (Kanban Review teal-blue #19a8ff), and Informed (Kanban Backlog purple #8b5cf6), in that order. Each card keeps a pale layered treatment: a 14%/8% radial highlight, a 12%/7%/6% fill, a 34%/22%/12% edge gradient, and a 6% role-colored glow. The stronger Kanban column surface opacity is not used on RACI cards.
 RACI41 - Each role card keeps Add in its top-right heading row and gives the assignment surface the full card width. Zero assignments renders one unwrapped `No assignments` row; otherwise every direct person or group renders as its own unwrapped name row, all rows remain visible as the card grows, and a group name continues to represent its live nested membership.
 RACI42 - Replacing a V2 policy notifies a non-actor user when that user's highest effective RACI role changes, even when the user was already effective before the write.
@@ -167,15 +187,15 @@ Business logic covered:
 
 Given:
 - A Logic Gate has inherited and customized Node descendants.
-- A regular Logic Gate RACI edit is saved with inherited-only Apply.
-- The user separately runs overwrite-all for that Logic Gate.
+- A regular Logic Gate RACI edit uses Apply to non-customized descendants.
+- The user separately runs Apply to every descendant for that Logic Gate.
 - A user later opens or refreshes My Work after RACI assignments change.
 - Another browser may retain stale My Work state until navigation or refresh.
 
 Expected:
 - A regular edit updates one complete Logic Gate policy; inherited Nodes see it and active customized Nodes do not.
-- Inherited-only Apply adds no descendant state or graph writes.
-- Overwrite-all updates one descendant-reset sequence and makes eligible older Node customizations inactive without walking assigned Nodes.
+- Apply to non-customized descendants adds no descendant state or graph writes.
+- Apply to every descendant updates one descendant-reset sequence and makes eligible older Node customizations inactive without walking assigned Nodes.
 - Project, Node, and shared-resource policy writes remain scoped to one settings row and one complete edge set.
 - My Work derives current rows from V2 policy, hierarchy, live groups, permissions, and work metadata.
 - No RACI/My Work realtime policy scope or permanent effective/projection authority is created.
@@ -209,19 +229,19 @@ Business logic covered:
 Given:
 - A Logic Gate has Responsible, Accountable, Consulted, and Informed RACI assignments.
 - A user adds or removes one assignment through the canonical complete-policy PUT.
-- The user separately invokes inherited-only Apply or overwrite-all.
+- The user separately invokes Apply to non-customized descendants or Apply to every descendant.
 - A broad Logic Gate payload or workspace list request may already be cached or in flight.
 - An inherited Node is assigned to the Logic Gate and another Node owns an active customization.
 
 Expected:
 - The write replaces one complete customized edge set and its sequence in one transaction.
-- Inherited-only Apply writes no descendant state; overwrite-all changes one reset sequence.
+- Apply to non-customized descendants writes no descendant state; Apply to every descendant changes one reset sequence.
 - No permanent effective or My Work authority rows are maintained.
 - Editable RACI chips and mode/source explanations reconcile from the canonical response.
 - My Work and other non-live views resolve current state on open or refresh.
 - Stale broad Logic Gate payloads, stale workspace list cache entries, cached Node/Logic Gate records, and stale in-flight reads cannot overwrite newer Logic Gate RACI assignments or descendant effective policy.
 - Logic Gate and Node RACI follow the same freshness contract.
-- The inherited Node resolves the Logic Gate live; the customized Node remains independent until an eligible overwrite-all reset.
+- The inherited Node resolves the Logic Gate live; the customized Node remains independent until an eligible Apply to every descendant reset.
 - Parent-link, reset, group-version, actor, and effective-source fingerprints prevent unsafe 304 responses.
 - The canonical response remains authoritative without pretending descendants were individually rewritten.
 
@@ -252,8 +272,8 @@ Given:
 Expected:
 - Placing either Node advances its parent-link sequence without replacing an active customized policy.
 - The inherited Node follows the Logic Gate live; the customized Node stays independent on an ordinary parent edit.
-- Selecting Customized on an inherited Node copies the raw effective source once, preserving group pointers, before edits.
-- Overwrite-all changes one Logic Gate reset sequence and can supersede older customized descendants without row fanout.
+- Editing an inherited Node starts from the raw parent assignments, preserves group pointers, and automatically becomes Customized only when the saved raw assignment set differs from the immediate parent.
+- Apply to every descendant changes one Logic Gate reset sequence and can supersede older customized descendants without row fanout.
 - A parent link created after an older reset protects the moved subtree until a later reset.
 - Detaching the inherited Node materializes its current effective policy as a customized Node policy in the same transaction.
 - My Work shows the node only when the user's effective node RACI includes that node; parent project or logic gate RACI only provides grouping and context.
@@ -280,14 +300,14 @@ Business logic covered:
 Given:
 - A parent resource has configured RACI assignments.
 - Some descendants are inherited and one child has a different customization.
-- The parent is saved normally, inherited-only Apply is selected, then overwrite-all is separately confirmed.
+- The parent is saved normally, Apply to non-customized descendants is selected, then Apply to every descendant is separately confirmed.
 - The child is customized again after the reset and another subtree is moved after the reset.
 
 Expected:
 - New non-root resources start inherited and store no copied RACI edges.
 - Editing a parent changes inherited branches live and stops at the active customized child.
-- Inherited-only Apply adds no policy state and performs no descendant writes.
-- Overwrite-all changes one reset sequence and makes eligible older customizations inactive without deleting their dormant rows.
+- Apply to non-customized descendants adds no policy state and performs no descendant writes.
+- Apply to every descendant changes one reset sequence and makes eligible older customizations inactive without deleting their dormant rows.
 - A later child customization copies the then-current effective source, applies its changes, and becomes independent again.
 - A subtree moved after the reset is protected by its newer parent-link sequence.
 - Point reads explain the effective source, eligible reset, and any inactive stored customization.
@@ -338,6 +358,8 @@ Business logic covered:
 - RACI37
 - RACI40
 - RACI41
+- RACI45
+- RACI46
 
 Given:
 - A Node or Logic Gate editor shows the four shared RACI role cards.
@@ -350,12 +372,12 @@ Expected:
 - Each role card uses its matching Kanban palette color through the pale RACI gradient, and Add stays in the top-right heading row.
 - `No assignments` remains one line when a role is empty.
 - Five assigned people or groups render as five visible single-line name rows in the assignment surface rather than a count, a comma-truncated summary, or one name split across two rows.
-- No policy-mode, effective-source, apply, or current-RACI card appears in the header body.
-- Inherited and Customized mode changes remain available in **More editor actions**.
-- The Logic Gate bulk action remains in **More editor actions** with its existing permission, disabled, busy, and error handling.
-- Selecting that action opens an explicit Yes/No confirmation.
+- No effective-source, apply, or current-RACI card appears in the header body; the assignment surface may show one compact status pill.
+- Inherited and Customized are read-only status displays beside the assignments, not mode-change buttons; authorized fields remain editable in either state.
+- The Logic Gate descendant actions appear in **More editor actions** only when the Logic Gate has descendants and retain their existing permission, disabled, busy, and error handling.
+- **Apply to non-customized descendants** preserves customized boundaries. **Apply to every descendant** opens an explicit Yes/No confirmation before it crosses those boundaries.
 - Choosing No, canceling, or dismissing performs no write.
-- Only choosing Yes records the overwrite-all reset sequence; no assigned Node policy rows are individually rewritten.
+- Only choosing Yes records the Apply to every descendant reset sequence; no assigned Node policy rows are individually rewritten.
 
 ### Scenario RACI-S11: Editor-Owned Routing And Target-Only Assignment Updates
 

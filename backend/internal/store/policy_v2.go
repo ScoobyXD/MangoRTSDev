@@ -22,6 +22,17 @@ type PolicyOverwrite struct {
 	Sequence     int64  `json:"sequence"`
 }
 
+type ResourceRACIPolicyParent struct {
+	Source      PolicySource                    `json:"source"`
+	Assignments []domain.ResourceRACIAssignment `json:"gvic_assignments"`
+}
+
+type ResourcePermissionPolicyParent struct {
+	Source        PolicySource              `json:"source"`
+	DefaultAccess string                    `json:"default_access"`
+	Permissions   []domain.EntityPermission `json:"permissions"`
+}
+
 type ResourceRACIPolicy struct {
 	CompanyID               string                                   `json:"company_id"`
 	ResourceType            string                                   `json:"resource_type"`
@@ -32,22 +43,26 @@ type ResourceRACIPolicy struct {
 	OverwrittenByAncestor   *PolicyOverwrite                         `json:"overwritten_by_ancestor"`
 	RACIAssignments         []domain.ResourceRACIAssignment          `json:"gvic_assignments"`
 	EffectiveAssignments    []domain.ResourceRACIEffectiveAssignment `json:"effective_assignments"`
+	ParentPolicy            *ResourceRACIPolicyParent                `json:"parent_policy,omitempty"`
+	HasDescendants          bool                                     `json:"has_descendants"`
 	Revision                string                                   `json:"revision"`
 }
 
 type ResourcePermissionPolicy struct {
-	CompanyID               string                    `json:"company_id"`
-	ResourceType            string                    `json:"resource_type"`
-	ResourceID              string                    `json:"resource_id"`
-	PermissionMode          string                    `json:"permission_mode"`
-	EffectivePermissionMode string                    `json:"effective_permission_mode"`
-	EffectiveSource         PolicySource              `json:"effective_source"`
-	OverwrittenByAncestor   *PolicyOverwrite          `json:"overwritten_by_ancestor"`
-	DefaultAccess           *string                   `json:"default_access"`
-	EffectiveDefaultAccess  string                    `json:"effective_default_access"`
-	Permissions             []domain.EntityPermission `json:"permissions"`
-	EffectivePermissions    []domain.EntityPermission `json:"effective_permissions"`
-	Revision                string                    `json:"revision"`
+	CompanyID               string                          `json:"company_id"`
+	ResourceType            string                          `json:"resource_type"`
+	ResourceID              string                          `json:"resource_id"`
+	PermissionMode          string                          `json:"permission_mode"`
+	EffectivePermissionMode string                          `json:"effective_permission_mode"`
+	EffectiveSource         PolicySource                    `json:"effective_source"`
+	OverwrittenByAncestor   *PolicyOverwrite                `json:"overwritten_by_ancestor"`
+	DefaultAccess           *string                         `json:"default_access"`
+	EffectiveDefaultAccess  string                          `json:"effective_default_access"`
+	Permissions             []domain.EntityPermission       `json:"permissions"`
+	EffectivePermissions    []domain.EntityPermission       `json:"effective_permissions"`
+	ParentPolicy            *ResourcePermissionPolicyParent `json:"parent_policy,omitempty"`
+	HasDescendants          bool                            `json:"has_descendants"`
+	Revision                string                          `json:"revision"`
 }
 
 type ResourceRACIPolicyUpdateInput struct {
@@ -63,16 +78,17 @@ type ResourceRACIPolicyUpdateInput struct {
 }
 
 type ResourcePermissionPolicyUpdateInput struct {
-	CompanyID        string
-	ResourceType     string
-	ResourceID       string
-	PermissionMode   string
-	DefaultAccess    *string
-	Permissions      []EntityPermissionInput
-	DescendantAction string
-	ExpectedRevision string
-	ActorUserID      string
-	IdempotencyKey   string
+	CompanyID         string
+	ResourceType      string
+	ResourceID        string
+	PermissionMode    string
+	DefaultAccess     *string
+	Permissions       []EntityPermissionInput
+	DescendantAction  string
+	ExpectedRevision  string
+	ActorUserID       string
+	PreserveActorEdit bool
+	IdempotencyKey    string
 }
 
 type ResourcePolicyFingerprints struct {

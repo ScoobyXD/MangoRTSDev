@@ -495,16 +495,17 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
     await act(async () => entityComposer.dispatchEvent(new dom.window.KeyboardEvent("keyup", { key: "o", bubbles: true })));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 150)); });
     await flushFrames();
-    assert.ok(requestedEntityPaths.some((path) => path.includes("resource_types=node%2Clogic_gate%2Cproject") && path.includes("ranking=editor_entities")));
+    assert.ok(requestedEntityPaths.some((path) => path.includes("resource_types=node%2Cproject%2Clogic_gate") && path.includes("ranking=editor_entities")));
     const entityMenu = container.querySelector<HTMLElement>('[data-mango-chat-entity-menu="true"]');
     assert.ok(entityMenu, "# opens the shared workspace entity picker in chat");
     assert.deepEqual(
       Array.from(entityMenu.querySelectorAll<HTMLElement>("[data-mango-chat-entity-type]")).map((option) => option.dataset.mangoChatEntityType),
-      ["node", "logic_gate", "project"],
-      "chat exposes Nodes, Logic Gates, and Projects in product order",
+      ["node", "project", "logic_gate"],
+      "chat exposes Nodes, Projects, and Logic Gates in product order",
     );
     const arrowDown = new dom.window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true });
     await act(async () => entityComposer.dispatchEvent(arrowDown));
+    await act(async () => entityComposer.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true })));
     const acceptEntity = new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
     await act(async () => entityComposer.dispatchEvent(acceptEntity));
     await flushFrames();

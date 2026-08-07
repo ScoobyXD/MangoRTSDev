@@ -4858,7 +4858,7 @@ export function useEditorDocumentSurfaceHandlers({
         } satisfies React.CSSProperties,
       },
       entitySearchState === "loading" && entityOptions.length === 0
-        ? React.createElement("div", { role: "status", style: { padding: "9px", fontSize: 11 } }, "Searching Nodes, Logic Gates, and Projects…")
+        ? React.createElement("div", { role: "status", style: { padding: "9px", fontSize: 11 } }, "Searching Nodes, Projects, and Logic Gates…")
         : entitySearchState === "error"
           ? React.createElement("div", { role: "alert", style: { padding: "9px", fontSize: 11, color: "#b91c1c" } }, entitySearchError)
           : entityOptions.length === 0

@@ -16,6 +16,11 @@ test("permission dialog saves pending changes before closing without duplicate w
   assert.equal(source.includes("invalidateResourcePolicyDependentCaches(apiBase, companyID);"), true);
   assert.match(source, /onClick=\{closeWithSave\} disabled=\{busy\}[\s\S]*?aria-label="Close permissions"/);
   assert.match(source, /<AppModalPortal onRequestClose=\{busy \? undefined : closeWithSave\}>/);
-  assert.match(source, /onClick=\{\(\) => \{ void save\(false, "inherited_only"\); \}\}[\s\S]*Apply to inherited descendants/);
-  assert.match(source, /window\.confirm\([\s\S]*void save\(false, "including_customized"\)[\s\S]*Overwrite all descendants, including customized/);
+  assert.match(source, /permissionMapsEqual\(accessBySubject, permissionsToMap\(parentPolicy\.permissions \?\? \[\]\)\) \? "inherited" : "customized"/);
+  assert.match(source, /aria-label="Permission policy mode"[\s\S]*permissionMode === "inherited" \? "Inherited" : "Customized"/);
+  assert.doesNotMatch(source, /setPermissionMode|onClick=[^\n]*permissionMode/);
+  assert.match(source, /onClick=\{\(\) => \{ void save\(false, "inherited_only"\); \}\}[\s\S]*Apply to non-customized descendants/);
+  assert.match(source, /window\.confirm\([\s\S]*void save\(false, "including_customized"\)[\s\S]*Apply to every descendant/);
+  assert.match(source, /const supportsDescendantApply = hasDescendants/);
+  assert.doesNotMatch(source, /Effective source:[\s\S]*effectiveSource\.resource_id/);
 });

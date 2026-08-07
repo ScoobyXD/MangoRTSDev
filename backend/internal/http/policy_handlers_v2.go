@@ -229,7 +229,8 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 		CompanyID: req.CompanyID, ResourceType: entityType, ResourceID: entityID,
 		PermissionMode: req.PermissionMode, DefaultAccess: req.DefaultAccess, Permissions: req.Permissions,
 		DescendantAction: req.DescendantAction, ExpectedRevision: r.Header.Get("If-Match"),
-		ActorUserID: actor.User.UserID, IdempotencyKey: policyIdempotencyKey(r, req.IdempotencyKey),
+		ActorUserID: actor.User.UserID, PreserveActorEdit: actor.CompanyRole == domain.RoleCompanyManager,
+		IdempotencyKey: policyIdempotencyKey(r, req.IdempotencyKey),
 	})
 	if err != nil {
 		log.Printf("failed to update v2 permission policy company_id=%s resource_type=%s resource_id=%s: %v", req.CompanyID, entityType, entityID, err)

@@ -129,6 +129,7 @@ func (s *Server) handleCompanyExplorerSearch(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	results, err := s.repo.SearchCompanyExplorer(store.CompanyExplorerSearchQuery{
+		Context:             r.Context(),
 		CompanyID:           companyID,
 		Query:               queryText,
 		PermissionUserID:    s.entityPermissionActorUserID(r, companyID),

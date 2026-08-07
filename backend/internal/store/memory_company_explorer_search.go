@@ -157,7 +157,6 @@ func (r *MemoryRepo) SearchCompanyExplorer(query CompanyExplorerSearchQuery) (Co
 	defer r.mu.Unlock()
 
 	r.ensureCompanyExplorerV2CompanyGraphLocked(query.CompanyID)
-	r.ensureCompanyExplorerDefaultStateLocked(query.CompanyID)
 	rowsQuery := CompanyExplorerV2RowsQuery{CompanyID: query.CompanyID, PermissionUserID: query.PermissionUserID}
 	matches := make([]CompanyExplorerSearchResult, 0)
 	add := func(entity memoryCompanyExplorerV2Entity) {
@@ -303,32 +302,14 @@ func (r *MemoryRepo) companyExplorerNodeSearchLocationPathLocked(companyID, node
 }
 
 func (r *MemoryRepo) companyExplorerEditorEntityPriorityLocked(item CompanyExplorerSearchResult) int {
-	status := ""
-	switch item.ResourceType {
-	case EntityTypeNode:
-		if node, ok := r.nodes[key(item.CompanyID, item.ResourceID)]; ok && node.Status != nil {
-			status = *node.Status
-		}
-	case EntityTypeProject:
-		if project, ok := r.projects[key(item.CompanyID, item.ResourceID)]; ok {
-			status = project.Status
-		}
-	}
-	return companyExplorerEditorEntityPriority(item.ResourceType, status)
+	return companyExplorerEditorEntityPriority(item.ResourceType)
 }
 
-func companyExplorerEditorEntityPriority(entityType, status string) int {
-	status = strings.ToLower(strings.TrimSpace(status))
+func companyExplorerEditorEntityPriority(entityType string) int {
 	switch entityType {
 	case EntityTypeNode:
-		if status == "done" {
-			return 3
-		}
 		return 0
 	case EntityTypeProject:
-		if status == "done" || status == "completed" || status == "archived" {
-			return 4
-		}
 		return 1
 	case EntityTypeLogicGate:
 		return 2

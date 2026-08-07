@@ -1,3 +1,17 @@
+# Process Story: Policy inheritance follows typed parents without moving permissions into Explorer
+
+A permission or RACI resolver receives one exact resource type and ID
+↓
+It follows only that resource type's canonical immediate-parent relationship: Explorer folder placement for folders, Projects, and Logic Gates; Logic Gate assignment for Nodes; or the typed Shared Inbox hierarchy
+↓
+Company Explorer contributes only its folder and placement edges; permission and RACI settings and assignments remain in their four dedicated policy tables
+↓
+Inherited policies point through the live typed parent chain, while customized policies keep complete rows at the exact resource
+↓
+Automatic inherited/customized comparison changes only policy state and never creates a duplicate relationship, generic resource registry, or translated identity
+
+Last updated: 2026-08-07
+
 # Process Story: RACI labels keep exact identity without exposing internal IDs
 
 A user opens a Node or Logic Gate through Editor, Updates, or another supported surface
@@ -330,6 +344,12 @@ Removing historical Node placement rows or their now-empty deterministic folder 
 When a provider message becomes completely stored under an existing `email_thread_id`, Mango MUST atomically create only the missing `email_relationships` rows for the distinct current destinations where the same company/thread already has `resource_type='node'` and `resource_textbox_id is null`. The new relationship MUST use the exact stored `email_message_id`, exact Node ID, exact company, and canonical `node` type.
 
 This propagation is idempotent and MUST NOT recopy an existing message, invent or choose a Node for an unplaced thread, copy Project/Logic-Gate/textbox destinations, grant permissions or RACI, create a chat/draft, or treat a relationship as provider-thread membership authority. The message upsert and its missing Node-wide relationships commit or roll back together.
+
+### Law 30 — Policy parentage reuses canonical typed relationships
+
+Policy settings and assignments MUST remain in `resource_gvic_settings`, `resource_gvic_assignments`, `resource_permission_settings`, and `resource_permissions`. Company Explorer stores no permission or RACI rows. It contributes only the exact folder-parent and Project/Logic-Gate placement edges already owned by Explorer; Node policy parentage uses the exact Logic Gate assignment, and Shared Inbox policy parentage uses its own typed hierarchy.
+
+Inherited resolution may follow those live typed parent edges, but it MUST NOT copy them into policy tables, invent a generic resource edge, or make Company Explorer a second policy authority. Comparing a saved raw policy with its immediate parent's raw policy may change the policy mode to inherited or customized; it MUST NOT change resource placement, assignment, ownership, or endpoint identity.
 
 ## Required design examples
 

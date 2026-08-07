@@ -347,7 +347,8 @@ func TestCompanyManagerCanEditManagerAndUserPermissions(t *testing.T) {
 	companyID := "11111111-1111-4111-8111-11111111111a"
 	repo.EnsureCompany(companyID, "Permission Manager Co")
 
-	if _, err := repo.UpsertAuthUser("permission-manager", "manager@example.com", "Manager User"); err != nil {
+	managerUser, err := repo.UpsertAuthUser("permission-manager", "manager@example.com", "Manager User")
+	if err != nil {
 		t.Fatalf("UpsertAuthUser manager: %v", err)
 	}
 	peerManager, err := repo.UpsertAuthUser("permission-peer-manager", "peer-manager@example.com", "Peer Manager")
@@ -438,6 +439,38 @@ func TestCompanyManagerCanEditManagerAndUserPermissions(t *testing.T) {
 	}
 	if len(permissions) != 1 || permissions[0].SubjectID != targetUser.UserID || permissions[0].AccessLevel != store.EntityPermissionNoAccess {
 		t.Fatalf("permissions = %+v, want only target no_access row", permissions)
+	}
+
+	body, _ = json.Marshal(map[string]any{
+		"company_id": companyID, "permission_mode": store.PolicyModeCustomized, "default_access": store.ResourceDefaultAccessNoAccess,
+		"permissions": []map[string]string{{"subject_type": "user", "subject_id": targetUser.UserID, "access_level": store.EntityPermissionEdit}},
+	})
+	putReq = httptest.NewRequest(http.MethodPut, "/v1/resources/logic_gate/"+logicGate.LogicGateID+"/permissions", strings.NewReader(string(body)))
+	putReq.Header.Set("Authorization", managerToken)
+	putReq.Header.Set("Content-Type", "application/json")
+	putRes = httptest.NewRecorder()
+	handler.ServeHTTP(putRes, putReq)
+	if putRes.Code != http.StatusOK {
+		t.Fatalf("manager default-no-access PUT status = %d, want %d body=%s", putRes.Code, http.StatusOK, strings.TrimSpace(putRes.Body.String()))
+	}
+	if access, err := repo.UserCanAccessEntity(companyID, store.EntityTypeLogicGate, logicGate.LogicGateID, peerManager.UserID, store.EntityPermissionEdit); err != nil || access {
+		t.Fatalf("peer manager access after default no access = %v err=%v, want false", access, err)
+	}
+	if access, err := repo.UserCanAccessEntity(companyID, store.EntityTypeLogicGate, logicGate.LogicGateID, managerUser.UserID, store.EntityPermissionEdit); err != nil || !access {
+		t.Fatalf("acting manager access after default no access = %v err=%v, want true", access, err)
+	}
+	permissions, err = repo.ListEntityPermissions(companyID, store.EntityTypeLogicGate, logicGate.LogicGateID)
+	if err != nil {
+		t.Fatalf("ListEntityPermissions after manager preservation: %v", err)
+	}
+	managerEditFound := false
+	for _, permission := range permissions {
+		if permission.SubjectType == store.EntityPermissionSubjectUser && permission.SubjectID == managerUser.UserID && permission.AccessLevel == store.EntityPermissionEdit {
+			managerEditFound = true
+		}
+	}
+	if !managerEditFound {
+		t.Fatalf("permissions = %+v, want direct acting-manager edit preservation", permissions)
 	}
 }
 

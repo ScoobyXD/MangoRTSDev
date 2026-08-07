@@ -8,7 +8,7 @@ import (
 	"miraeopus/backend/internal/domain"
 )
 
-func TestMemoryV2RACICustomizeWithoutAssignmentsCopiesRawEffectiveSource(t *testing.T) {
+func TestMemoryV2RACICustomizeWithoutAssignmentsReturnsToInheritedWhenItMatchesParent(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "a1000000-0000-4000-8000-000000000001"
 	repo.EnsureCompany(companyID, "Customize Source Co")
@@ -58,10 +58,13 @@ func TestMemoryV2RACICustomizeWithoutAssignmentsCopiesRawEffectiveSource(t *test
 	if err != nil {
 		t.Fatalf("customize inherited node: %v", err)
 	}
-	if customized.AssignmentMode != PolicyModeCustomized || len(customized.RACIAssignments) != 1 {
-		t.Fatalf("customized policy = %+v", customized)
+	if customized.AssignmentMode != PolicyModeInherited || len(customized.RACIAssignments) != 0 {
+		t.Fatalf("automatic policy mode = %+v, want inherited", customized)
 	}
-	assignment := customized.RACIAssignments[0]
+	if customized.ParentPolicy == nil || len(customized.ParentPolicy.Assignments) != 1 {
+		t.Fatalf("parent policy = %+v, want one raw group pointer", customized.ParentPolicy)
+	}
+	assignment := customized.ParentPolicy.Assignments[0]
 	if assignment.Role != domain.RACIRoleConsulted || assignment.PrincipalType != EntityPermissionSubjectGroup || assignment.PrincipalID != group.GroupID {
 		t.Fatalf("copied assignment = %+v, want raw group pointer", assignment)
 	}

@@ -29,7 +29,7 @@ type EmailNodeDestinationSearchProps = {
   onError: (message: string) => void;
 };
 
-const EMAIL_PICKER_LINK_TARGET_TYPES = ["node", "logic_gate", "project"] as const;
+const EMAIL_PICKER_LINK_TARGET_TYPES = ["node", "project", "logic_gate"] as const;
 
 const choiceGroupStyle: React.CSSProperties = {
   minWidth: 0,

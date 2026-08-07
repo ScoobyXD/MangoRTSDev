@@ -266,12 +266,12 @@ func TestMemoryLogicGateResourceRACIIncludingCustomizedResetSupersedesDescendant
 	if _, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
 		Assignments: []ResourceRACIAssignmentInput{{
-			Role: domain.RACIRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: initialUser.UserID,
+			Role: domain.RACIRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: nextUser.UserID,
 		}},
 	}); err != nil {
 		t.Fatalf("SetResourceRACIAssignments customized node: %v", err)
 	}
-	assertMemoryNodeRACIResolution(t, repo, companyID, node.NodeID, PolicyModeCustomized, initialUser.UserID, initialUser.UserID, EntityTypeNode, node.NodeID, false)
+	assertMemoryNodeRACIResolution(t, repo, companyID, node.NodeID, PolicyModeCustomized, nextUser.UserID, nextUser.UserID, EntityTypeNode, node.NodeID, false)
 
 	result, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID:          companyID,
@@ -293,7 +293,7 @@ func TestMemoryLogicGateResourceRACIIncludingCustomizedResetSupersedesDescendant
 	if len(result.RACIAssignments) != 1 || result.RACIAssignments[0].UserID != nextUser.UserID {
 		t.Fatalf("gate source assignments = %+v, want next responsible user", result.RACIAssignments)
 	}
-	assertMemoryNodeRACIResolution(t, repo, companyID, node.NodeID, PolicyModeCustomized, initialUser.UserID, nextUser.UserID, EntityTypeLogicGate, logicGate.LogicGateID, true)
+	assertMemoryNodeRACIResolution(t, repo, companyID, node.NodeID, PolicyModeCustomized, nextUser.UserID, nextUser.UserID, EntityTypeLogicGate, logicGate.LogicGateID, true)
 }
 
 func TestMemoryLogicGateResourceRACIApplyToDescendantsUsesCurrentUnchangedSnapshot(t *testing.T) {

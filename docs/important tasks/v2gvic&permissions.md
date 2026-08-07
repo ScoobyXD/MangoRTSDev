@@ -1,3 +1,19 @@
+# Process Story: Policy editing chooses its own mode and never locks out the acting manager
+
+An authorized user edits RACI or permission values directly without clicking an Inherited or Customized mode button
+↓
+The UI compares the unordered raw draft with the immediate parent's raw policy and displays Inherited only for an exact match
+↓
+The backend repeats that comparison inside the save transaction and stores the authoritative mode
+↓
+A company manager may change policies that affect other managers, but the acting manager keeps a direct Edit rule whenever the proposed permission policy would otherwise remove their own Edit access
+↓
+Parents expose Apply to non-customized descendants and, only when descendants exist and after confirmation, Apply to every descendant
+↓
+Both actions preserve the pointer-and-reset model: no descendant policy-row fanout is performed
+
+Last updated: 2026-08-07
+
 # Process Story: RACI names responsibility and expands teams live
 
 A manager or editor assigns Responsible, Accountable, Consulted, or Informed to people or groups on a resource
@@ -20,7 +36,7 @@ A Mango company organizes work as a resource tree. A Company Explorer folder can
 
 An inherited resource points to its immediate parent's effective policy. Inheritance continues one parent at a time until Mango reaches the nearest active customized policy. A customized resource remains a child in the resource tree, but it owns a complete policy and blocks ordinary inheritance through that branch. Descendants that remain inherited use that customized resource as their policy source.
 
-A parent has two descendant actions. `Apply to inherited descendants` changes the policy seen by inherited branches and stops at active customized boundaries. It requires no descendant writes because inherited descendants already resolve through their immediate parents. `Overwrite all descendants, including customized` is the explicit force action. It records one monotonic reset sequence at the parent instead of rewriting every descendant. The reset makes older customized policies beneath that parent inactive. A descendant customized after the reset becomes independent again. A subtree created or moved beneath the parent after an older reset is not retroactively overwritten by that reset.
+A parent has two descendant actions. `Apply to non-customized descendants` changes the policy seen by inherited branches and stops at active customized boundaries. It requires no descendant writes because inherited descendants already resolve through their immediate parents. `Apply to every descendant` is the explicit force action and requires confirmation. It records one monotonic reset sequence at the parent instead of rewriting every descendant. The reset makes older customized policies beneath that parent inactive. A descendant customized after the reset becomes independent again. A subtree created or moved beneath the parent after an older reset is not retroactively overwritten by that reset.
 
 RACI and permissions remain separate systems. `resource_gvic_assignments` stores customized RACI edges from a resource to a user or user group. `resource_permissions` stores customized permission edges from a resource to a user or user group. RACI never grants resource access. Permission authorization first selects one effective permission policy through the inheritance rules, then resolves direct user, nested group, and default access inside that policy. Group membership is live source data and is never copied into permanent per-user policy rows.
 
@@ -65,6 +81,8 @@ The following decisions are not open implementation choices:
 12. Database timestamps are audit/display fields. Monotonic sequences decide overwrite ordering.
 13. The final policy schema contains exactly four tables. PostgreSQL sequences, indexes, constraint functions, and triggers are not additional product-state tables.
 14. No compatibility reader, fallback reader, dual writer, or request-time schema repair remains after Step 3.
+15. `Inherited` and `Customized` are derived status displays, not user-selected modes. A complete draft that exactly matches the immediate parent's raw policy saves as inherited; any difference saves as customized. The backend makes this decision authoritatively in the write transaction.
+16. A company manager may change permission rules for peer managers, but a save must preserve the acting manager's own effective Edit access by adding or correcting only that actor's direct rule when necessary.
 
 ## Terminology
 
@@ -89,13 +107,13 @@ The one complete RACI or permission policy selected after walking the immediate-
 
 The direct parent supplied by the canonical resource hierarchy. Policy tables do not duplicate parent IDs.
 
-### Inherited-only apply
+### Non-customized descendant apply
 
-The user action labeled `Apply to inherited descendants`. Because inheritance is live, this changes no descendant policy rows. It confirms that inherited branches use the selected resource's effective policy and that customized boundaries remain protected.
+The user action labeled `Apply to non-customized descendants`. Because inheritance is live, this changes no descendant policy rows. It confirms that inherited branches use the selected resource's effective policy and that customized boundaries remain protected.
 
 ### Force overwrite
 
-The user action labeled `Overwrite all descendants, including customized`. It advances the selected resource's descendant reset sequence and invalidates older customized policies beneath it.
+The user action labeled `Apply to every descendant`. After explicit confirmation, it advances the selected resource's descendant reset sequence and invalidates older customized policies beneath it.
 
 ## Supported resource hierarchy
 
@@ -411,12 +429,12 @@ The settings row is therefore required even when the graph table contains no row
 
 ## The two descendant actions
 
-### Action 1: Apply to inherited descendants
+### Action 1: Apply to non-customized descendants
 
 User-facing label:
 
 ```text
-Apply to inherited descendants
+Apply to non-customized descendants
 ```
 
 Rules:
@@ -426,7 +444,7 @@ Rules:
 3. Every inherited branch already resolves through its immediate parents and sees the new effective policy.
 4. Stop at every active customized boundary.
 5. Descendants below that boundary continue inheriting from the customized resource, not from the selected ancestor.
-6. An unchanged inherited-only Apply may write an audit event, but it must not manufacture policy state or fan out descendant writes.
+6. An unchanged Apply to non-customized descendants action may write an audit event, but it must not manufacture policy state or fan out descendant writes.
 
 Example:
 
@@ -437,12 +455,12 @@ Folder A: customized
       Node D: inherited        continues using Logic Gate C
 ```
 
-### Action 2: Overwrite all descendants, including customized
+### Action 2: Apply to every descendant
 
 User-facing label:
 
 ```text
-Overwrite all descendants, including customized
+Apply to every descendant
 ```
 
 Rules:
@@ -702,8 +720,8 @@ The design must work when a folder has 100,000 or 10,000,000 descendants.
 ### Write complexity
 
 - Parent policy save: O(number of rules on that parent).
-- Apply to inherited descendants: O(number of rules on that parent), with zero descendant policy writes.
-- Force overwrite including customized: O(1) settings update plus audit event.
+- Apply to non-customized descendants: O(number of rules on that parent), with zero descendant policy writes.
+- Apply to every descendant: O(1) settings update plus audit event.
 - Customize one child: O(number of rules in the one copied policy).
 - Move one subtree: O(1) policy-settings updates at the moved root; no descendant policy writes.
 - Group membership change: O(group source change); no resource-policy fan-out.
@@ -802,7 +820,7 @@ Therefore the safe initial conversion is:
 - all initial parent links receive the migration baseline sequence;
 - new V2 sequences start strictly above the migration baseline.
 
-This preserves visible behavior without inventing inheritance. After cutover, users can explicitly return resources to inherited mode or use the force-overwrite action to reset a subtree.
+This preserves visible behavior without inventing inheritance. After cutover, saving a resource with a policy that exactly matches its immediate parent automatically returns it to inherited mode; Apply to every descendant resets a subtree through the force sequence.
 
 ### Preflight requirements
 
@@ -920,11 +938,11 @@ No old reader, fallback, or dual writer may remain in the deployed Step 2 applic
 
 Step 2 must provide:
 
-- clear `Inherited` and `Customized` controls for both RACI and permissions;
+- clear, read-only `Inherited` and `Customized` status displays for both RACI and permissions while authorized fields remain editable;
 - the effective source resource name/type;
 - an explanation when a stored customization is inactive because an ancestor force-overwrite superseded it;
-- `Apply to inherited descendants`;
-- a separately styled and confirmed `Overwrite all descendants, including customized` action;
+- `Apply to non-customized descendants`, shown only when descendants exist;
+- a separately styled and confirmed `Apply to every descendant` action, shown only when descendants exist;
 - canonical response reconciliation and stale-request protection;
 - no optimistic UI that pretends millions of descendants were individually rewritten.
 
@@ -985,7 +1003,7 @@ On August 5, 2026, the first post-cutover smoke check exposed a backend-only def
 
 The same smoke session exposed a separate historical Node final-storage conversion defect in 10 current textboxes: a blank legacy body became a TipTap document with `document.content=[]`, which the backend correctly rejects. This is not a V2 policy failure and does not require rerunning the V2 cutover. The forward-only repair is `backend/db/migrations/20260805_zzzd_repair_empty_node_textbox_documents.sql`; a human operator first runs `scripts/repair_empty_node_textbox_documents_preflight.sql` read-only in DBeaver, reviews `READY_TO_REPAIR`, and then applies the reviewed migration through the normal migration process. It repairs only that exact body in current, history, seen, and Recycle Bin copies, preserves revisions and all relationship/restore metadata, is a no-op on fresh databases and reruns, and leaves the shipped Node cutover plus all Step 2 legacy evidence unchanged. Agents must not apply this SQL to a live database.
 
-The frontend uses only the canonical `/v1/resources/{resource_type}/{resource_id}/gvic` and `/permissions` endpoints. The obsolete Node, Logic Gate, Project, and Company Explorer permission URL shapes are no longer routed. RACI and permission surfaces expose Inherited/Customized mode, effective source, overwritten-customization explanation, inherited-only Apply, separately confirmed overwrite-all, If-Match stale-write protection, and canonical response reconciliation. Selecting Customized without an explicit RACI replacement asks the backend to copy the raw effective source policy once, preserving group pointers; an explicit empty array remains an intentionally empty customization.
+The frontend uses only the canonical `/v1/resources/{resource_type}/{resource_id}/gvic` and `/permissions` endpoints. The obsolete Node, Logic Gate, Project, and Company Explorer permission URL shapes are no longer routed. RACI and permission surfaces expose Inherited/Customized status, effective-source explanation without raw resource IDs, Apply to non-customized descendants, separately confirmed Apply to every descendant, If-Match stale-write protection, and canonical response reconciliation. Editing an inherited policy begins from its raw parent pointers; the frontend displays and the backend stores Inherited again when the complete raw draft exactly matches the immediate parent. An explicit empty RACI array remains an intentionally empty customization unless the immediate parent's raw RACI policy is also empty.
 
 #### Verification evidence
 
@@ -1065,8 +1083,8 @@ The implementation must map these scenarios into `docs/tests/gvic.md`, `docs/tes
 
 ### Overwrite scenarios
 
-1. Inherited-only Apply performs no descendant policy writes.
-2. Inherited-only Apply stops at customized boundaries.
+1. Apply to non-customized descendants performs no descendant policy writes.
+2. Apply to non-customized descendants stops at customized boundaries.
 3. Force overwrite invalidates older customized descendants with one parent settings update.
 4. Force overwrite reaches descendants beneath an invalidated customized boundary.
 5. A later child customization becomes active again.
@@ -1111,8 +1129,8 @@ The implementation must map these scenarios into `docs/tests/gvic.md`, `docs/tes
 
 ### Scale and concurrency scenarios
 
-1. Apply to inherited descendants performs a constant number of policy writes for 1, 100,000, and 10,000,000 modeled descendants.
-2. Force overwrite performs a constant number of policy writes regardless of descendant count.
+1. Apply to non-customized descendants performs a constant number of policy writes for 1, 100,000, and 10,000,000 modeled descendants.
+2. Apply to every descendant performs a constant number of policy writes regardless of descendant count.
 3. Point authorization cost depends on ancestry/rule depth, not descendant count.
 4. Concurrent complete-policy writes reject stale expected revisions.
 5. Command idempotency prevents repeated force sequences for one retried request.

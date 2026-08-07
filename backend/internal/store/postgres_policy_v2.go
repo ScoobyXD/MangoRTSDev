@@ -101,7 +101,37 @@ where setting.company_id=$1::uuid and setting.resource_type=$2 and setting.resou
 	if err != nil {
 		return ResourceRACIPolicy{}, err
 	}
+	policy.ParentPolicy, err = postgresV2RACIParentPolicy(ctx, queryer, keyValue)
+	if err != nil {
+		return ResourceRACIPolicy{}, err
+	}
+	policy.HasDescendants, err = postgresV2PolicyHasDescendants(ctx, queryer, keyValue.companyID, keyValue.resourceType, keyValue.resourceID)
+	if err != nil {
+		return ResourceRACIPolicy{}, err
+	}
 	return policy, nil
+}
+
+func postgresV2RACIParentPolicy(ctx context.Context, queryer postgresRACIQueryer, keyValue resourceRACIKey) (*ResourceRACIPolicyParent, error) {
+	var sourceType, sourceID string
+	err := queryer.QueryRowContext(ctx, `
+select resolved.source_resource_type,resolved.source_resource_id::text
+from mangorts_v2_policy_parent($1::uuid,$2,$3::uuid) parent
+cross join lateral mangorts_v2_resolve_gvic_policy($1::uuid,parent.parent_resource_type,parent.parent_resource_id) resolved
+limit 1`, keyValue.companyID, keyValue.resourceType, keyValue.resourceID).Scan(&sourceType, &sourceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	assignments, err := postgresDirectResourceRACIAssignmentsForResource(ctx, queryer, resourceRACIKey{
+		companyID: keyValue.companyID, resourceType: sourceType, resourceID: sourceID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &ResourceRACIPolicyParent{Source: PolicySource{ResourceType: sourceType, ResourceID: sourceID}, Assignments: assignments}, nil
 }
 
 func postgresV2EffectiveRACIAssignments(ctx context.Context, queryer postgresRACIQueryer, keyValue resourceRACIKey) ([]domain.ResourceRACIEffectiveAssignment, error) {
@@ -212,6 +242,25 @@ func (r *PostgresRepo) PutResourceRACIPolicy(input ResourceRACIPolicyUpdateInput
 			return ResourceRACIPolicy{}, nil, err
 		}
 	}
+	if mode == PolicyModeInherited {
+		if current.ParentPolicy == nil {
+			return ResourceRACIPolicy{}, nil, ErrInvalid
+		}
+		parentInputs := make([]ResourceRACIAssignmentInput, 0, len(current.ParentPolicy.Assignments))
+		for _, assignment := range current.ParentPolicy.Assignments {
+			parentInputs = append(parentInputs, ResourceRACIAssignmentInput{
+				Role: assignment.Role, PrincipalType: assignment.PrincipalType, PrincipalID: assignment.PrincipalID,
+			})
+		}
+		normalized, err = normalizeResourceRACIAssignmentInputs(parentInputs)
+		if err != nil {
+			return ResourceRACIPolicy{}, nil, err
+		}
+	}
+	mode = PolicyModeCustomized
+	if current.ParentPolicy != nil && normalizedRACIAssignmentsMatch(normalized, current.ParentPolicy.Assignments) {
+		mode = PolicyModeInherited
+	}
 	for _, assignment := range normalized {
 		if err := validatePostgresRACIPrincipalTx(ctx, tx, keyValue.companyID, assignment.principalType, assignment.principalID); err != nil {
 			return ResourceRACIPolicy{}, nil, err
@@ -219,13 +268,6 @@ func (r *PostgresRepo) PutResourceRACIPolicy(input ResourceRACIPolicyUpdateInput
 	}
 	var resultingSequence int64
 	if mode == PolicyModeInherited {
-		var hasParent bool
-		if err := tx.QueryRowContext(ctx, `select exists(select 1 from mangorts_v2_policy_parent($1::uuid,$2,$3::uuid))`, keyValue.companyID, keyValue.resourceType, keyValue.resourceID).Scan(&hasParent); err != nil {
-			return ResourceRACIPolicy{}, nil, err
-		}
-		if !hasParent {
-			return ResourceRACIPolicy{}, nil, ErrInvalid
-		}
 		if _, err := tx.ExecContext(ctx, `delete from resource_gvic_assignments where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, keyValue.companyID, keyValue.resourceType, keyValue.resourceID); err != nil {
 			return ResourceRACIPolicy{}, nil, err
 		}
@@ -351,7 +393,65 @@ where setting.company_id=$1::uuid and setting.resource_type=$2 and setting.resou
 	if err != nil {
 		return ResourcePermissionPolicy{}, err
 	}
+	policy.ParentPolicy, err = postgresV2PermissionParentPolicy(ctx, queryer, companyID, resourceType, resourceID)
+	if err != nil {
+		return ResourcePermissionPolicy{}, err
+	}
+	policy.HasDescendants, err = postgresV2PolicyHasDescendants(ctx, queryer, companyID, resourceType, resourceID)
+	if err != nil {
+		return ResourcePermissionPolicy{}, err
+	}
 	return policy, nil
+}
+
+func postgresV2PermissionParentPolicy(ctx context.Context, queryer postgresResourceAccessQueryer, companyID, resourceType, resourceID string) (*ResourcePermissionPolicyParent, error) {
+	var sourceType, sourceID, defaultAccess string
+	err := queryer.QueryRowContext(ctx, `
+select resolved.source_resource_type,resolved.source_resource_id::text,setting.default_access
+from mangorts_v2_policy_parent($1::uuid,$2,$3::uuid) parent
+cross join lateral mangorts_v2_resolve_permission_policy($1::uuid,parent.parent_resource_type,parent.parent_resource_id) resolved
+join resource_permission_settings setting
+  on setting.company_id=$1::uuid
+ and setting.resource_type=resolved.source_resource_type
+ and setting.resource_id=resolved.source_resource_id
+limit 1`, companyID, resourceType, resourceID).Scan(&sourceType, &sourceID, &defaultAccess)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	permissions, err := postgresV2PermissionEdges(ctx, queryer, companyID, sourceType, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	return &ResourcePermissionPolicyParent{
+		Source: PolicySource{ResourceType: sourceType, ResourceID: sourceID}, DefaultAccess: defaultAccess, Permissions: permissions,
+	}, nil
+}
+
+func postgresV2PolicyHasDescendants(ctx context.Context, queryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, companyID, resourceType, resourceID string) (bool, error) {
+	var hasDescendants bool
+	err := queryer.QueryRowContext(ctx, `
+select exists(
+  select 1 from node_logic_gate_assignments
+  where $2='logic_gate' and company_id=$1::uuid and logic_gate_id=$3::uuid
+  union all
+  select 1 from company_explorer_folders
+  where $2='company_explorer_folder' and company_id=$1::uuid and parent_folder_id=$3::uuid
+  union all
+  select 1 from company_explorer_items
+  where $2='company_explorer_folder' and company_id=$1::uuid and parent_folder_id=$3::uuid
+  union all
+  select 1 from shared_inbox_folders
+  where $2='shared_inbox_folder' and company_id=$1::uuid and parent_folder_id=$3::uuid
+  union all
+  select 1 from shared_inboxes
+  where $2='shared_inbox_folder' and company_id=$1::uuid and parent_folder_id=$3::uuid
+)`, companyID, resourceType, resourceID).Scan(&hasDescendants)
+	return hasDescendants, err
 }
 
 func postgresV2PermissionEdges(ctx context.Context, queryer postgresResourceAccessQueryer, companyID, resourceType, resourceID string) ([]domain.EntityPermission, error) {
@@ -428,6 +528,38 @@ func (r *PostgresRepo) PutResourcePermissionPolicy(input ResourcePermissionPolic
 	if expected := cleanPolicyRevision(input.ExpectedRevision); expected != "" && expected != current.Revision {
 		return ResourcePermissionPolicy{}, nil, ErrVersionConflict
 	}
+	var proposedDefaultAccess string
+	if mode == PolicyModeInherited {
+		if current.ParentPolicy == nil {
+			return ResourcePermissionPolicy{}, nil, ErrInvalid
+		}
+		proposedDefaultAccess = current.ParentPolicy.DefaultAccess
+		parentInputs := make([]EntityPermissionInput, 0, len(current.ParentPolicy.Permissions))
+		for _, permission := range current.ParentPolicy.Permissions {
+			parentInputs = append(parentInputs, EntityPermissionInput{
+				SubjectType: permission.SubjectType, SubjectID: permission.SubjectID, AccessLevel: permission.AccessLevel,
+			})
+		}
+		normalized, err = normalizeV2EntityPermissionInputs(parentInputs)
+		if err != nil {
+			return ResourcePermissionPolicy{}, nil, err
+		}
+	} else {
+		proposedDefaultAccess, ok = NormalizeEntityPermission(*input.DefaultAccess)
+		if !ok {
+			return ResourcePermissionPolicy{}, nil, ErrInvalid
+		}
+	}
+	if input.PreserveActorEdit {
+		normalized, err = preservePostgresActorEdit(ctx, tx, companyID, input.ActorUserID, proposedDefaultAccess, normalized)
+		if err != nil {
+			return ResourcePermissionPolicy{}, nil, err
+		}
+	}
+	mode = PolicyModeCustomized
+	if current.ParentPolicy != nil && proposedDefaultAccess == current.ParentPolicy.DefaultAccess && normalizedPermissionsMatch(normalized, current.ParentPolicy.Permissions) {
+		mode = PolicyModeInherited
+	}
 	for _, permission := range normalized {
 		if err := validatePostgresRACIPrincipalTx(ctx, tx, companyID, permission.SubjectType, permission.SubjectID); err != nil {
 			return ResourcePermissionPolicy{}, nil, err
@@ -435,13 +567,6 @@ func (r *PostgresRepo) PutResourcePermissionPolicy(input ResourcePermissionPolic
 	}
 	var resultingSequence int64
 	if mode == PolicyModeInherited {
-		var hasParent bool
-		if err := tx.QueryRowContext(ctx, `select exists(select 1 from mangorts_v2_policy_parent($1::uuid,$2,$3::uuid))`, companyID, resourceType, resourceID).Scan(&hasParent); err != nil {
-			return ResourcePermissionPolicy{}, nil, err
-		}
-		if !hasParent {
-			return ResourcePermissionPolicy{}, nil, ErrInvalid
-		}
 		if _, err := tx.ExecContext(ctx, `delete from resource_permissions where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, resourceType, resourceID); err != nil {
 			return ResourcePermissionPolicy{}, nil, err
 		}
@@ -449,16 +574,12 @@ func (r *PostgresRepo) PutResourcePermissionPolicy(input ResourcePermissionPolic
 			return ResourcePermissionPolicy{}, nil, err
 		}
 	} else {
-		defaultAccess, ok := NormalizeEntityPermission(*input.DefaultAccess)
-		if !ok {
-			return ResourcePermissionPolicy{}, nil, ErrInvalid
-		}
 		var sequence int64
 		if err := tx.QueryRowContext(ctx, `select nextval('resource_permission_change_sequence')`).Scan(&sequence); err != nil {
 			return ResourcePermissionPolicy{}, nil, err
 		}
 		resultingSequence = sequence
-		if _, err := tx.ExecContext(ctx, `update resource_permission_settings set permission_mode='customized',default_access=$4,customized_sequence=$5,updated_timestamp=now() where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, resourceType, resourceID, defaultAccess, sequence); err != nil {
+		if _, err := tx.ExecContext(ctx, `update resource_permission_settings set permission_mode='customized',default_access=$4,customized_sequence=$5,updated_timestamp=now() where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, resourceType, resourceID, proposedDefaultAccess, sequence); err != nil {
 			return ResourcePermissionPolicy{}, nil, err
 		}
 		if _, err := tx.ExecContext(ctx, `delete from resource_permissions where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, resourceType, resourceID); err != nil {
@@ -516,6 +637,131 @@ func normalizeV2EntityPermissionInputs(inputs []EntityPermissionInput) ([]resour
 		seen[keyValue] = true
 		items = append(items, item)
 	}
+	sort.Slice(items, func(i, j int) bool {
+		return resourcePermissionAssignmentKey(items[i]) < resourcePermissionAssignmentKey(items[j])
+	})
+	return items, nil
+}
+
+func normalizedRACIAssignmentsMatch(items []normalizedRACIAssignmentInput, parent []domain.ResourceRACIAssignment) bool {
+	if len(items) != len(parent) {
+		return false
+	}
+	parentKeys := make(map[string]bool, len(parent))
+	for _, assignment := range parent {
+		parentKeys[assignment.Role+":"+assignment.PrincipalType+":"+assignment.PrincipalID] = true
+	}
+	for _, item := range items {
+		if !parentKeys[gvicAssignmentInputKey(item)] {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizedPermissionsMatch(items []resourcePermissionAssignment, parent []domain.EntityPermission) bool {
+	if len(items) != len(parent) {
+		return false
+	}
+	parentKeys := make(map[string]bool, len(parent))
+	for _, permission := range parent {
+		accessLevel, ok := NormalizeEntityPermission(permission.AccessLevel)
+		if !ok {
+			accessLevel, ok = NormalizeEntityPermission(permission.Permission)
+		}
+		if !ok {
+			return false
+		}
+		parentKeys[permissionPolicySemanticKey(permission.SubjectType, permission.SubjectID, accessLevel)] = true
+	}
+	for _, item := range items {
+		if !parentKeys[permissionPolicySemanticKey(item.SubjectType, item.SubjectID, item.AccessLevel)] {
+			return false
+		}
+	}
+	return true
+}
+
+func permissionPolicySemanticKey(subjectType, subjectID, accessLevel string) string {
+	return subjectType + ":" + subjectID + ":" + accessLevel
+}
+
+func preservePostgresActorEdit(ctx context.Context, queryer postgresResourceAccessQueryer, companyID, actorUserID, defaultAccess string, items []resourcePermissionAssignment) ([]resourcePermissionAssignment, error) {
+	actorUserID = cleanUUIDText(actorUserID)
+	if actorUserID == "" {
+		return nil, ErrInvalid
+	}
+	for index, item := range items {
+		if item.SubjectType == EntityPermissionSubjectUser && item.SubjectID == actorUserID {
+			if item.AccessLevel == EntityPermissionEdit {
+				return items, nil
+			}
+			items[index].AccessLevel = EntityPermissionEdit
+			sort.Slice(items, func(i, j int) bool {
+				return resourcePermissionAssignmentKey(items[i]) < resourcePermissionAssignmentKey(items[j])
+			})
+			return items, nil
+		}
+	}
+
+	groupDepths := map[string]int{}
+	rows, err := queryer.QueryContext(ctx, `
+with recursive member_groups(group_id,depth,path) as (
+  select member.group_id,0,array[member.group_id]
+  from company_user_group_members member
+  where member.company_id=$1::uuid and member.user_id=$2::uuid
+  union all
+  select parent.parent_group_id,member.depth+1,member.path || parent.parent_group_id
+  from member_groups member
+  join company_user_groups parent
+    on parent.company_id=$1::uuid and parent.group_id=member.group_id
+  where parent.parent_group_id is not null
+    and member.depth<100
+    and not parent.parent_group_id=any(member.path)
+)
+select group_id::text,min(depth) from member_groups group by group_id`, companyID, actorUserID)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var groupID string
+		var depth int
+		if err := rows.Scan(&groupID, &depth); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		groupDepths[groupID] = depth
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	selectedAccess := ""
+	selectedDepth := int(^uint(0) >> 1)
+	selectedID := ""
+	for _, item := range items {
+		if item.SubjectType != EntityPermissionSubjectGroup {
+			continue
+		}
+		depth, found := groupDepths[item.SubjectID]
+		if !found {
+			continue
+		}
+		if selectedAccess == "" || depth < selectedDepth ||
+			(depth == selectedDepth && item.AccessLevel == EntityPermissionNoAccess && selectedAccess != EntityPermissionNoAccess) ||
+			(depth == selectedDepth && item.AccessLevel == selectedAccess && item.SubjectID < selectedID) {
+			selectedAccess, selectedDepth, selectedID = item.AccessLevel, depth, item.SubjectID
+		}
+	}
+	if selectedAccess == EntityPermissionEdit || (selectedAccess == "" && defaultAccess == EntityPermissionEdit) {
+		return items, nil
+	}
+	items = append(items, resourcePermissionAssignment{
+		SubjectType: EntityPermissionSubjectUser, SubjectID: actorUserID, AccessLevel: EntityPermissionEdit,
+	})
 	sort.Slice(items, func(i, j int) bool {
 		return resourcePermissionAssignmentKey(items[i]) < resourcePermissionAssignmentKey(items[j])
 	})

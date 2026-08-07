@@ -1,3 +1,17 @@
+# Process Story: Shared Triage policy status is automatic
+
+A manager edits a Shared Triage folder or shared inbox RACI or permission policy
+↓
+Inherited and Customized remain status displays while the authorized fields stay editable
+↓
+An exact raw match with the immediate parent saves as Inherited; any difference saves as Customized
+↓
+When descendants exist, Apply to non-customized descendants preserves customized boundaries and confirmed Apply to every descendant crosses them through one reset sequence
+↓
+No action rewrites every descendant policy row, and an acting company manager keeps Edit access
+
+Last updated: 2026-08-07
+
 # Process Story: Shared Triage references or links an authorized email
 
 A user opens an authorized Shared Triage mailbox, and the exact shared inbox policy still controls every read and mutation. Selecting an encountered row with a Node association opens the right chat column; an unassociated row does not auto-open it. The toolbar shows a separate Node-plus floating-Node action and a `## Ready!` launcher for the shared universal picker. Empty-query Backspace switches to `#` reference, `#` switches back to link, and an outside click dismisses the popup. Reference only opens the chosen resource. Link reuses an exact Node or creates an email Node in a Logic Gate/Project through the existing typed commands. Floating success shows its elevated green notice left of the button before the Node indicator; opening that indicator never invokes the Updates-only yellow flash. Moves, force resets, live groups, deletion, and cache fingerprints continue to follow the same V2 hierarchy contract.
@@ -38,7 +52,7 @@ ST19 - Shared inbox and folder group edges remain group pointers and resolve thr
 ST20 - If required Shared Triage access or folder-list storage is unavailable, access and folder-list endpoints return service unavailable with `shared_inbox_storage_unavailable`, not a silent success or generic `failed_to_list_shared_inboxes` error.
 ST21 - Canonical RACI supports exact `shared_inbox_folder` and `shared_inbox` resources. Both use inherited/customized policy semantics; mailbox credentials are never policy principals.
 ST22 - Shared Triage must not show private personal mailbox messages unless they were explicitly added through a shared inbox path.
-ST23 - Policy/tree changes update canonical rows and fingerprints. Parent moves advance parent-link sequences; inherited-only Apply writes no descendant state; overwrite-all records one reset sequence; other clients resolve the result on navigation or refresh.
+ST23 - Policy/tree changes update canonical rows and fingerprints. Parent moves advance parent-link sequences; Apply to non-customized descendants writes no descendant state; Apply to every descendant records one reset sequence; other clients resolve the result on navigation or refresh.
 ST24 - Company-owned shared mailbox credentials are stored in company_email_connections, not as permission-bearing users.
 ST25 - A mailbox address used by a shared inbox does not need to be a Mango user and does not need company membership.
 ST26 - Each mailbox-capable shared inbox stores a company_email_connection_id foreign key that points to the company-owned mailbox credential used for mail operations.
