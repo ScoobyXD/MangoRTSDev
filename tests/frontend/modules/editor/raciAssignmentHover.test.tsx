@@ -15,7 +15,7 @@ function installGlobal(name: string, value: unknown, restores: Restore[]) {
   });
 }
 
-test("RACI assignment people and groups list opens immediately on hover and closes when the pointer leaves", async () => {
+test("RACI cards keep Add on top, show every assignment on one line, and preserve the hover list", async () => {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
     pretendToBeVisual: true,
     url: "http://localhost/",
@@ -54,6 +54,7 @@ test("RACI assignment people and groups list opens immediately on hover and clos
     const noop = () => undefined;
     const editingTitleRef = React.createRef<HTMLSpanElement>();
     const editingTitleDraftRef = { current: "" };
+    const informedNames = ["Jonathan Kim", "Christina Phan", "Maya Patel", "Andre Silva", "Rina Cho"];
     await act(async () => root.render(
       <EditorLinkedDocumentPanels
         activeTab="editor"
@@ -66,16 +67,16 @@ test("RACI assignment people and groups list opens immediately on hover and clos
         canEditRACI
         nodePresetFields={null}
         gvicFields={{
-          assignments: [{
+          assignments: informedNames.map((name, index) => ({
             company_id: "company-1",
             logic_gate_id: "logic-gate-1",
-            role: "informed",
-            principal_type: "user",
-            principal_id: "user-1",
-            user_id: "user-1",
-            user_display_name: "Jonathan Kim",
-            user_email: "jonathankim829@gmail.com",
-          }],
+            role: "informed" as const,
+            principal_type: "user" as const,
+            principal_id: `user-${index + 1}`,
+            user_id: `user-${index + 1}`,
+            user_display_name: name,
+            user_email: `${name.toLowerCase().replace(/\s+/g, ".")}@example.com`,
+          })),
         }}
         companyUsers={[]}
         companyUserGroups={[]}
@@ -103,6 +104,19 @@ test("RACI assignment people and groups list opens immediately on hover and clos
     const assignmentButton = container.querySelector<HTMLButtonElement>('button[aria-label="Informed people and groups"]');
     assert.ok(assignmentButton);
     assert.equal(assignmentButton.textContent?.includes("Jonathan Kim"), true);
+    const informedCard = container.querySelector<HTMLElement>('[data-raci-role-card="informed"]');
+    const addButton = informedCard?.querySelector<HTMLButtonElement>('button[data-raci-add-principal="informed"]');
+    assert.ok(informedCard && addButton);
+    assert.equal(addButton.parentElement?.style.gridRow, "1", "Add stays in the top role-heading row");
+    assert.equal(assignmentButton.parentElement?.style.gridRow, "2", "the name surface receives the full second row");
+    assert.match(informedCard.getAttribute("style") ?? "", /radial-gradient/, "role cards use the stronger Kanban-style layered gradient");
+    const assignmentNameRows = Array.from(assignmentButton.querySelectorAll<HTMLElement>('[data-raci-assignment-name="informed"]'));
+    assert.deepEqual(assignmentNameRows.map((row) => row.textContent?.trim()), informedNames);
+    assert.equal(assignmentNameRows.every((row) => row.style.whiteSpace === "nowrap"), true, "each assigned principal owns one unwrapped line");
+    const responsibleEmptyRow = container.querySelector<HTMLElement>('[data-raci-assignment-empty="responsible"]');
+    assert.ok(responsibleEmptyRow);
+    assert.equal(responsibleEmptyRow.textContent, "No assignments");
+    assert.equal(responsibleEmptyRow.style.whiteSpace, "nowrap", "an empty single entry never becomes a two-line pill");
     assert.equal(dom.window.document.querySelector('[role="listbox"][aria-label="Informed people and groups"]'), null);
 
     await act(async () => Simulate.mouseEnter(assignmentButton));
@@ -111,7 +125,7 @@ test("RACI assignment people and groups list opens immediately on hover and clos
     assert.ok(assignmentList, "merely hovering the names must open the assigned people and groups list");
     assert.equal(assignmentList.parentElement, dom.window.document.body, "the hovered list escapes clipping editor containers");
     assert.match(assignmentList.textContent ?? "", /Jonathan Kim/);
-    assert.match(assignmentList.textContent ?? "", /jonathankim829@gmail\.com/);
+    assert.match(assignmentList.textContent ?? "", /jonathan\.kim@example\.com/);
 
     await act(async () => {
       Simulate.mouseLeave(assignmentButton);

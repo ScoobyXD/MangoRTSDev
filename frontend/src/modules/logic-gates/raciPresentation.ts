@@ -34,8 +34,8 @@ export function logicGateRACIRaisedSurfaceStyle(role: string): React.CSSProperti
   const { accent } = logicGateRACIRolePresentation(role);
   return {
     border: "1px solid transparent",
-    background: `linear-gradient(145deg, rgba(255,255,255,0.96), ${colorWithAlpha(accent, 0.07)}) padding-box, linear-gradient(135deg, ${colorWithAlpha(accent, 0.67)}, rgba(255,255,255,0.84)) border-box`,
-    boxShadow: "4px 4px 12px rgba(174,174,192,0.16), -4px -4px 12px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.84)",
+    background: `radial-gradient(circle at 12% 10%, ${colorWithAlpha(accent, 0.42)} 0%, ${colorWithAlpha(accent, 0.24)} 34%, transparent 62%) padding-box, linear-gradient(160deg, ${colorWithAlpha(accent, 0.32)} 0%, ${colorWithAlpha(accent, 0.22)} 42%, rgba(248,250,252,0.92) 78%, ${colorWithAlpha(accent, 0.12)} 100%) padding-box, linear-gradient(135deg, ${colorWithAlpha(accent, 0.86)} 0%, ${colorWithAlpha(accent, 0.54)} 46%, ${colorWithAlpha(accent, 0.24)} 78%, rgba(255,255,255,0.88) 100%) border-box`,
+    boxShadow: `0 14px 30px ${colorWithAlpha(accent, 0.16)}, 4px 4px 12px rgba(174,174,192,0.18), -4px -4px 12px rgba(255,255,255,0.82), inset 1px 1px 0 rgba(255,255,255,0.86)`,
   };
 }
 

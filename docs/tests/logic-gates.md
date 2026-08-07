@@ -2,7 +2,11 @@
 
 A user assigns people or groups to Responsible, Accountable, Consulted, or Informed on a Logic Gate
 ↓
-Each role card shows every direct person and group name, while nested group membership expands live for effective users
+Each role card uses its established RACI color with the same layered gradient strength as a Kanban column
+↓
+Add stays in the top-right heading row, and every direct person or group occupies a separate single-line name row below it
+↓
+All direct names remain visible as the card grows, while nested group membership expands live for effective users
 ↓
 Every role accepts multiple direct principals, one direct principal holds only one role, and the effective order is Responsible, Accountable, Consulted, then Informed
 ↓
@@ -121,7 +125,7 @@ LG39 - When a Logic Gate document is hidden by Metadata, History, or Save Settin
 LG40 - Every successful Logic Gate rename entry point covered by RW15 publishes the concrete committed-title event after commit, and applicable same-window Logic Gate labels converge under RW15. An active Editor title draft/caret is preserved until editing ends; passive dock/pin updates preserve recency/storage, and no cross-user/generalized fan-out is created.
 LG41 - The Logic Gate editor header keeps Editor, Permissions, the shared formatting toolbar, Outline Styles/Automatic Numbering, and the immediately adjacent More control on one nonwrapping line. Relationships, Metadata, History, Save Settings, save-version/related-node commands, and any supported secondary actions remain available in the keyboard-operable **More editor actions** menu with their existing permission and disabled states.
 LG42 - Blocking Logic Gate editor dialogs and fullscreen image previews mount through the shared body-level modal portal above Key Views, Explorer, Search Explorer, and feature-local stacking contexts, trap focus while topmost, and restore prior focus when closed.
-LG43 - The Responsible, Accountable, Consulted, and Informed cards remain in one compact four-column horizontal row. Narrowing may clip that row beneath an adjacent pane, but must not wrap it vertically or add a persistent apply/current-RACI card. Each card shows its direct person and group names with wrapping instead of a numeric People summary.
+LG43 - The Responsible, Accountable, Consulted, and Informed cards remain in one compact four-column horizontal row with their established role colors and Kanban-strength layered gradients. Narrowing may clip that row beneath an adjacent pane, but must not wrap it vertically or add a persistent apply/current-RACI card. Add stays in each card's top-right heading row; the full-width assignment area renders `No assignments` once or renders every direct person and group as its own unwrapped line, growing vertically instead of showing a numeric People summary or splitting one entry across rows.
 LG44 - Reassigning a Node from Logic Gate A to Logic Gate B commits one membership change that identifies both source and destination projections. After success, A removes the Node immediately through the established canonical board refresh path and B/current consumers converge; failure leaves the existing projection intact, and duplicate local/realtime hints do not create duplicate refreshes or false membership.
 LG45 - A Node popup opened from Logic Gate Arena owns its transient half/fullscreen mode locally. Realtime acceptance and canonical summary/work/view projection reconciliation may update Node/board data and titles, but reopening/reconciling the same Node must preserve fullscreen until the user exits fullscreen or closes it; opening a different Node starts from the normal saved half-view ratio.
 LG46 - Each Logic Gate independently editable body is an exact collaboration document with its own server-ordered revision, snapshot, ETag, pending queue, and `editor:logic_gate:{logic_gate_id}:{document_id}` scope.
@@ -161,7 +165,9 @@ Given:
 Expected:
 - Responsible, Accountable, Consulted, and Informed each accept multiple users or groups.
 - One direct principal cannot occupy two roles on the same Logic Gate.
-- Each card shows every direct person and group name, wrapping the text instead of displaying `People (n)`.
+- Each card keeps Add at the top, uses the stronger layered role gradient, and gives the assignment area the full card width.
+- An empty card shows one single-line `No assignments` row; a card with five assignments shows five separate single-line names.
+- No direct assignment is replaced by `People (n)` or hidden in a comma-truncated summary.
 
 ### Scenario LG-S2: Live RACI Users And Teams
 

@@ -45,6 +45,15 @@ describe("pinned Logic Gate status counts", () => {
         ["review", "Review", "#19a8ff"],
       ],
     );
+    assert.deepEqual(
+      SIDEBAR_LOGIC_GATE_STATUS_COUNT_DEFINITIONS.map(({ key, gradient }) => [key, gradient]),
+      [
+        ["request", "linear-gradient(135deg, #fffbd1 0%, #fff24d 42%, #facc15 100%)"],
+        ["pending", "linear-gradient(135deg, #ffffff 0%, #f1f5f9 48%, #d9e0e8 100%)"],
+        ["inProgress", "linear-gradient(135deg, #fff0d9 0%, #ffb45c 45%, #f08a24 100%)"],
+        ["review", "linear-gradient(135deg, #33ddd5 0%, #19a8ff 100%)"],
+      ],
+    );
     assert.deepEqual(visibleSidebarLogicGateStatusCounts(counts).map(({ key, count }) => [key, count]), [
       ["request", 2],
       ["inProgress", 1],

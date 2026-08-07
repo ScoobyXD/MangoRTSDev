@@ -22,6 +22,7 @@ import {
 import {
   aggregateSidebarPinFolderStatusCounts,
   visibleSidebarLogicGateStatusCounts,
+  type SidebarLogicGateStatusCountDefinition,
   type SidebarLogicGateStatusCounts,
 } from "./sidebarLogicGateStatusCounts.js";
 
@@ -180,7 +181,7 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
             data-pin-status-count={item.count}
             aria-label={`${item.label}: ${item.count}`}
             title={`${item.label}: ${item.count}`}
-            style={statusCountStyle(item.color)}
+            style={statusCountStyle(item)}
           >
             {item.count}
           </span>
@@ -551,7 +552,7 @@ const rowIconStyle: React.CSSProperties = { width: 20, height: 20, display: "gri
 const pinButtonStyle: React.CSSProperties = { minWidth: 0, minHeight: 29, display: "grid", gridTemplateColumns: "20px minmax(0,1fr)", alignItems: "center", gap: 4, border: 0, borderRadius: 7, background: "transparent", color: "#111", cursor: "pointer", font: "inherit", fontSize: 11.5, fontWeight: 600, padding: "0 5px", textAlign: "left" };
 const rowTextStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 const statusCountsStyle: React.CSSProperties = { display: "inline-flex", alignItems: "center", justifyContent: "flex-end", gap: 2, minWidth: 0, whiteSpace: "nowrap" };
-function statusCountStyle(color: string): React.CSSProperties {
+function statusCountStyle(definition: SidebarLogicGateStatusCountDefinition): React.CSSProperties {
   return {
     minWidth: 17,
     height: 17,
@@ -559,11 +560,12 @@ function statusCountStyle(color: string): React.CSSProperties {
     display: "inline-grid",
     placeItems: "center",
     padding: "0 3px",
-    border: "1px solid rgba(15,23,42,.12)",
+    border: `1px solid ${definition.borderColor}`,
     borderRadius: 4,
-    background: color,
-    color: "#111827",
-    boxShadow: "inset 0 1px 0 rgba(255,255,255,.28)",
+    backgroundColor: definition.color,
+    backgroundImage: definition.gradient,
+    color: definition.textColor,
+    boxShadow: `0 3px 8px ${definition.glowColor}, inset 0 1px 0 rgba(255,255,255,.68)`,
     fontSize: 9.5,
     fontWeight: 850,
     lineHeight: 1,

@@ -798,6 +798,9 @@ test("editor header keeps primary controls visible and preserves all secondary o
   assert.match(editorContent, /logicGateRACIApplyConfirmationOpen && linkedEntityKind === "logic_gate"[\s\S]*<ConfirmActionMenu[\s\S]*title="Overwrite all descendants, including customized\?"[\s\S]*confirmLabel="Overwrite"[\s\S]*cancelLabel="No"[\s\S]*onConfirm=\{\(\) => \{[\s\S]*setLogicGateRACIApplyConfirmationOpen\(false\);[\s\S]*applyLogicGateRACIToAssignedNodes\(\)[\s\S]*onCancel=\{\(\) => setLogicGateRACIApplyConfirmationOpen\(false\)\}/);
   assert.match(raciPresentation, /LOGIC_GATE_RACI_ROLE_PRESENTATIONS[\s\S]*role: "responsible"[\s\S]*accent: "#f97316"[\s\S]*role: "accountable"[\s\S]*accent: "#16a34a"[\s\S]*role: "consulted"[\s\S]*accent: "#2563eb"[\s\S]*role: "informed"[\s\S]*accent: "#7c3aed"/);
   assert.match(linkedDocumentPanels, /const RACI_ROLES = LOGIC_GATE_RACI_ROLE_PRESENTATIONS[\s\S]*gridTemplateColumns: "repeat\(4, minmax\(145px, 1fr\)\)"[\s\S]*\{RACI_ROLES\.map/);
+  assert.match(raciPresentation, /radial-gradient\(circle at 12% 10%[\s\S]*colorWithAlpha\(accent, 0\.42\)[\s\S]*linear-gradient\(135deg,[\s\S]*colorWithAlpha\(accent, 0\.86\)/);
+  assert.match(linkedDocumentPanels, /data-raci-role-card=\{role\}[\s\S]*gridTemplateColumns: "minmax\(0, 1fr\) auto"[\s\S]*data-raci-assignment-name=\{role\}[\s\S]*whiteSpace: "nowrap"/);
+  assert.match(linkedDocumentPanels, /data-raci-add-principal=\{role\}[\s\S]*aria-label=\{`Add \$\{label\} user or team`\}/);
   assert.doesNotMatch(linkedDocumentPanels, /Apply RACI to assigned nodes|Current RACI|Apply RACI to all descendants/);
   assert.doesNotMatch(linkedDocumentPanels, />Policy mode<|Effective source:/);
   assert.match(editorContent, /<EntityPermissionsPanel[\s\S]*readOnly=\{!linkedEntityCanEdit\}[\s\S]*onSaved=\{\(\) => invalidateWorkspaceSnapshot\(apiBase, companyID\)\}/);

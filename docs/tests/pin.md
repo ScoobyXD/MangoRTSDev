@@ -4,7 +4,7 @@ A user opens the sidebar Pinned section with one or more pinned Logic Gates
 ↓
 Mango reads each distinct visible Logic Gate's canonical work view and counts assigned Nodes in Request, Pending, In Progress, and Review
 ↓
-Each Logic Gate row shows only its nonzero colored status squares, using the same yellow, gray, orange, and blue as the Kanban columns
+Each Logic Gate row shows only its nonzero status squares: bright futuristic yellow for Request, a very light gray gradient for Pending, Kanban orange for In Progress, and the Node icon's cyan-to-blue gradient for Review
 ↓
 Every containing pin folder adds the four counts from its direct and nested pinned Logic Gates, so a collapsed parent still shows the complete recursive totals
 ↓
@@ -120,7 +120,7 @@ PIN47 - A single click on a Pinned folder title starts inline rename while its s
 PIN48 - Pointing to, keyboard-focusing, or opening a pinned resource gives its otherwise flat row a brief neutral two-pixel lift. Keyboard focus and valid drag placement remain temporary interaction indicators and must not restore a permanent colored item frame.
 PIN49 - Pinned folder outlines and rows use compact spacing without crowding: the top-border lead-in stays short, the disclosure arrow sits close to the folder title, and nested indentation remains clear. Pointing to or keyboard-focusing a pin's X turns the X character and its outline bright red without changing unpin behavior.
 PIN50 - A pinned Logic Gate's status counts derive read-only from its canonical Logic Gate work cards: Request counts `requested`, Pending counts `pending`, In Progress counts `in_progress`, and Review counts `review`. Backlog and Done cards are not included in these four counters.
-PIN51 - The four counters use Kanban's existing order and colors: Request yellow (`#facc15`), Pending gray (`#6f7b8a`), In Progress orange (`#f08a24`), and Review blue (`#19a8ff`). A counter square contains only its number, and a zero counter renders no square.
+PIN51 - The four counters keep Kanban's existing order and base colors but render as softer futuristic gradients: Request uses `#fffbd1` to `#fff24d` to canonical yellow `#facc15`; Pending uses super-light gray `#ffffff` to `#f1f5f9` to `#d9e0e8` over the canonical gray fallback; In Progress uses `#fff0d9` to `#ffb45c` to canonical orange `#f08a24`; Review reuses the Node icon's exact `#33ddd5` to `#19a8ff` gradient. A counter square contains only its number, and a zero counter renders no square.
 PIN52 - Status squares appear on pinned Logic Gate rows only. Pinned Node and Project rows never show Logic Gate work counts, and a Logic Gate with zero in all four tracked statuses keeps the normal row with no status squares.
 PIN53 - A pin folder's counters are the per-status sum of every pinned Logic Gate directly inside it and inside all descendant pin folders. Each Logic Gate contributes once to every ancestor folder; collapsed state does not change the total, and moving the pin makes its contribution follow the persisted current parent tree.
 PIN54 - Folder status squares follow the same zero suppression as Logic Gate rows. A folder whose direct and nested pins contain no accessible nonzero tracked Logic Gate work shows the normal folder UI without counters; Node pins, Project pins, root-level Logic Gates, inaccessible stale Logic Gates, Backlog, and Done add nothing to that folder.
@@ -404,7 +404,7 @@ Given:
 - A committed Node assignment, removal, or status move changes one pinned Logic Gate locally or through its board real-time scope.
 
 Expected:
-- Each Logic Gate row shows only nonzero Request, Pending, In Progress, and Review number squares in yellow, gray, orange, and blue order.
+- Each Logic Gate row shows only nonzero Request, Pending, In Progress, and Review number squares in bright yellow, super-light gray, Kanban orange, and Node-gradient cyan-blue order.
 - Backlog, Done, Node pins, Project pins, zero-work Logic Gates, and inaccessible stale Logic Gates show or contribute no status square.
 - The inner folder sums its direct and nested Logic Gates, and the outer folder adds that complete inner total to its direct Logic Gate totals even while either folder is collapsed.
 - Moving a Logic Gate pin to another folder makes subsequent totals follow the current pin tree without changing the Logic Gate assignment.
