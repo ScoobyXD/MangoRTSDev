@@ -55,7 +55,7 @@ test("node header uses compact email controls, typed links, and the double-hash 
   assert.match(nodeSurface, /data-node-header-email-controls="true"[\s\S]*<MailIcon[\s\S]*nodeAttachedEmails\.length[\s\S]*aria-label="Attach email"/);
   assert.match(nodeSurface, /data-node-header-link="logic_gate"[\s\S]*assignedLogicGateLabel/);
   assert.match(nodeSurface, /data-node-header-link="project"[\s\S]*primaryAssignedProjectLabel/);
-  assert.match(nodeSurface, /data-node-header-universal-linker="true"[\s\S]*>##<\/span>[\s\S]*initialMode="link"/);
+  assert.match(nodeSurface, /data-node-header-universal-linker="true"[\s\S]*EDITOR_NEU_EDGE_FRAME[\s\S]*>##<\/strong>[\s\S]*Ready! Open universal linker[\s\S]*initialMode="link"/);
   assert.match(nodeSurface, /linkTargetTypes=\{NODE_HEADER_LINK_TARGET_TYPES\}/);
   assert.doesNotMatch(nodeSurface, />\s*Email \(\{nodeAttachedEmails\.length\}\)\s*</);
   assert.doesNotMatch(nodeSurface, />\s*Attach email\s*</);
@@ -69,8 +69,9 @@ test("every RACI role supports multiple people and groups while Updates keeps ve
   const editor = source("frontend/src/modules/editor/EditorContent.tsx");
   const updates = source("frontend/src/pages/home/UpdatesView.tsx");
   assert.match(gvicPanel, /inputPlaceholder = disabledReason \? "Inherited" : "Add user or team"/);
-  assert.match(gvicPanel, /const assignedLabels = assignments\.map\(RACIAssignmentLabel\)\.filter\(Boolean\)/);
-  assert.match(gvicPanel, /assignedLabels\.map\(\(assignmentLabel, index\) =>[\s\S]*data-raci-assignment-name=\{role\}[\s\S]*whiteSpace: "nowrap"/);
+  assert.match(gvicPanel, /const assignedLabels = assignments\.map\(assignmentLabel\)\.filter\(Boolean\)/);
+  assert.match(gvicPanel, /data-raci-assignment-names=\{role\}[\s\S]*gridTemplateColumns: "repeat\(2, minmax\(0, 1fr\)\)"[\s\S]*assignedLabels\.map\(\(assignmentLabel, index\) =>[\s\S]*data-raci-assignment-name=\{role\}[\s\S]*whiteSpace: "nowrap"/);
+  assert.match(gvicPanel, /companyUsers\.find[\s\S]*companyUserGroupMembers\.find[\s\S]*\|\| "Unknown user"/);
   assert.match(gvicPanel, /principalType: "group"[\s\S]*selectable: state\.selectable/);
   assert.doesNotMatch(gvicPanel, /primaryUserRole|singleUserOnly|People \(/);
   assert.doesNotMatch(editor, /singleUserRole|role === "accountable" && principalType !== "user"/);

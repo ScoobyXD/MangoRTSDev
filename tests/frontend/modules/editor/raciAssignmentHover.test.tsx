@@ -15,7 +15,7 @@ function installGlobal(name: string, value: unknown, restores: Restore[]) {
   });
 }
 
-test("RACI cards keep Add on top, show every assignment on one line, and preserve the hover list", async () => {
+test("RACI cards resolve directory names, place two assignments per row, and preserve the hover list", async () => {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
     pretendToBeVisual: true,
     url: "http://localhost/",
@@ -55,6 +55,13 @@ test("RACI cards keep Add on top, show every assignment on one line, and preserv
     const editingTitleRef = React.createRef<HTMLSpanElement>();
     const editingTitleDraftRef = { current: "" };
     const informedNames = ["Jonathan Kim", "Christina Phan", "Maya Patel", "Andre Silva", "Rina Cho"];
+    const informedUserIDs = [
+      "019e090c-e62f-781b-b123-000000000001",
+      "955a2eed-cdfb-9845-b123-000000000002",
+      "c8cb539d-7a62-4bc8-b123-000000000003",
+      "ec114c8d-46b5-4ee0-b123-000000000004",
+      "f2ae47cb-e499-4818-b123-000000000005",
+    ];
     await act(async () => root.render(
       <EditorLinkedDocumentPanels
         activeTab="editor"
@@ -67,18 +74,21 @@ test("RACI cards keep Add on top, show every assignment on one line, and preserv
         canEditRACI
         nodePresetFields={null}
         gvicFields={{
-          assignments: informedNames.map((name, index) => ({
+          assignments: informedNames.map((_name, index) => ({
             company_id: "company-1",
             logic_gate_id: "logic-gate-1",
             role: "informed" as const,
             principal_type: "user" as const,
-            principal_id: `user-${index + 1}`,
-            user_id: `user-${index + 1}`,
-            user_display_name: name,
-            user_email: `${name.toLowerCase().replace(/\s+/g, ".")}@example.com`,
+            principal_id: informedUserIDs[index],
+            user_id: informedUserIDs[index],
+            user_email: `${informedNames[index].toLowerCase().replace(/\s+/g, ".")}@example.com`,
           })),
         }}
-        companyUsers={[]}
+        companyUsers={informedNames.map((name, index) => ({
+          user_id: informedUserIDs[index],
+          display_name: name,
+          email: `${name.toLowerCase().replace(/\s+/g, ".")}@example.com`,
+        }))}
         companyUserGroups={[]}
         companyUserGroupMembers={[]}
         isEditingTitle={false}
@@ -124,7 +134,12 @@ test("RACI cards keep Add on top, show every assignment on one line, and preserv
     }
     const assignmentNameRows = Array.from(assignmentButton.querySelectorAll<HTMLElement>('[data-raci-assignment-name="informed"]'));
     assert.deepEqual(assignmentNameRows.map((row) => row.textContent?.trim()), informedNames);
+    assert.equal(informedUserIDs.some((userID) => assignmentButton.textContent?.includes(userID)), false, "internal user IDs never appear as RACI labels");
+    const assignmentNamesGrid = assignmentButton.querySelector<HTMLElement>('[data-raci-assignment-names="informed"]');
+    assert.equal(assignmentNamesGrid?.style.gridTemplateColumns, "repeat(2, minmax(0, 1fr))", "two equal name columns share each assignment row");
     assert.equal(assignmentNameRows.every((row) => row.style.whiteSpace === "nowrap"), true, "each assigned principal owns one unwrapped line");
+    const roleGrid = container.querySelector<HTMLElement>('[aria-label="RACI assignments"]');
+    assert.equal(roleGrid?.style.gridTemplateColumns, "repeat(4, minmax(170px, 1fr))", "all four expanded RACI cards retain equal widths");
     const responsibleEmptyRow = container.querySelector<HTMLElement>('[data-raci-assignment-empty="responsible"]');
     assert.ok(responsibleEmptyRow);
     assert.equal(responsibleEmptyRow.textContent, "No assignments");

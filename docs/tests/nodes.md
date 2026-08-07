@@ -1,3 +1,17 @@
+# Process Story: Node headers show assignments and linking controls clearly
+
+A user opens a Node through Editor, Updates, or another supported Node surface
+↓
+Each direct RACI principal resolves to assignment metadata or the current company directory, so a sparse payload never displays an internal user/group ID as its name
+↓
+The four equal-width role cards remain on one line and place two single-line assignment names on each row
+↓
+The Node header presents `##` as a light, readable button with an explicit universal-linker label and the established active border when its picker opens
+↓
+The display changes leave the exact RACI edges and typed Logic Gate, Project, and Email link commands unchanged
+
+Last updated: 2026-08-07
+
 # Process Story: A Node header stays compact while linking exact destinations
 
 A user opens a Node from a sidebar pin at its normal saved window size
@@ -11,20 +25,6 @@ Moving to another Logic Gate creates the existing transfer stamp; creating the f
 Refreshing, relinking the same Project, opening the mail column, or clicking a current-resource chip does not resize the Node or duplicate relationship history
 
 Last updated: 2026-08-07
-
-# Process Story: Node RACI cards show every direct assignment cleanly
-
-A user opens a Node whose Responsible, Accountable, Consulted, or Informed role has direct assignments
-↓
-Each role card uses its established role color with the same layered gradient strength as a Kanban column
-↓
-Add remains in the top-right heading row while the assignment area spans the complete card width
-↓
-`No assignments` stays on one line, and every assigned person or group gets one separate single-line row so all five names remain visible when five principals are assigned
-↓
-The display change does not alter the Node's typed RACI edges, live group expansion, role ordering, or separate permission policy
-
-Last updated: 2026-08-06
 
 # Process Story: A stored email reply appears in every existing Node destination
 
@@ -138,7 +138,7 @@ N4 - Group assignments remain typed group edges and expand through current membe
 N5 - When one user reaches several roles through direct or group sources, the effective order is Responsible, Accountable, Consulted, then Informed.
 N6 - Node RACI assignment pickers should display the company user-group tree as a collapsed hierarchy.
 N7 - Node RACI picker subgroups and users should be visually indented according to their hierarchy depth.
-N8 - Every Node RACI card shows the full names of its direct users and groups, wraps those names instead of showing a numeric People summary, and provides per-assignment removal in its assignment list.
+N8 - Every Node RACI card resolves each direct user/group label from assignment metadata and then the current company directory, never presents the principal ID as the visible name, and provides per-assignment removal in its assignment list. The four role cards have equal width, remain in one horizontal row, and place two single-line names on each assignment row instead of adding one full row per principal or reducing the list to a numeric summary.
 N9 - DELETE `/v1/nodes/{node_id}` requires current effective Edit access, moves the Node and related placements to the deleting actor's Recycle Bin, and removes the Node's two V2 settings rows and cascading policy edges.
 N10 - Node soft delete requires edit access to the node; no access is denied.
 N11 - Successful node soft delete stamps `deleted_by_user_id` with the deleting actor.
@@ -488,7 +488,7 @@ Expected:
 - Typing `@` or `!` in a node text box or its chat opens the people picker with each user represented by a stable profile color keyed by normalized user ID, then email, then display name. Rich-editor keyboard selection adds a translucent same-color row tint and active rail; chat retains its active-row treatment. Both keep the profile avatar opaque/full-color with tested white-text contrast instead of washing every user gray.
 - The shared format toolbar controls the focused node text box through the shared formatting controller, so font size, inline formats, highlight, alignment, table, and outline-style behavior cannot diverge by node opener.
 - Editor, Permissions, shared formatting, Outline Styles/Automatic Numbering, and the immediately adjacent More control remain on one nonwrapping primary-header line; Relationships, Metadata, History, Save Settings, version/related-node commands, and supported secondary actions remain available in the keyboard-operable **More editor actions** menu.
-- The four RACI cards remain in one horizontal row that may clip beneath an adjacent pane rather than wrapping into taller header content.
+- The four RACI cards remain equal-width in one horizontal row, widen together, and place two single-line principal names on each assignment row. A narrow adjacent pane may require horizontal overflow instead of wrapping the role cards into taller header content.
 - Relationships, Metadata, History, and Save Settings disable formatting only when their content hides/replaces the document; returning to the document preserves the text-block layout.
 - Node windows, dialogs, and previews render in the shared body-level overlay layer above Key Views/Explorer/Search Explorer; blocking modes trap/restore focus, while anchored Kanban panels remain modeless until fullscreen.
 - Project Logic Gates / Nodes inline node editors remain in document flow; Kanban panels retain the same mounted editor while moving between anchored and fullscreen geometry.
@@ -828,7 +828,7 @@ N138 - Opening a pinned Node creates a fresh window instance at the normal store
 
 N139 - The Node header timeline plus is centered over the left timeline rail. The old labelled Email, Attach email, assignment, and Go to buttons are removed. One mail icon/count toggles the Node email column, its divided adjacent plus opens email attachment, and current Logic Gate/Project icon-label chips open those exact resources.
 
-N140 - The Node header linker is visibly initialized to `##` and permits Logic Gate, Project, and Email targets. A Logic Gate choice uses the established assignment/move command and priority rule, a Project choice uses the established exact `project_relationships` command, and an Email choice attaches the exact stored message through the existing Node email command. The picker and header chips add no new relationship authority.
+N140 - The Node header linker is a light, readable button visibly initialized to purple `##` with the explicit `Ready! Open universal linker` label and an elevated active border while open. It permits Logic Gate, Project, and Email targets. A Logic Gate choice uses the established assignment/move command and priority rule, a Project choice uses the established exact `project_relationships` command, and an Email choice attaches the exact stored message through the existing Node email command. The picker and header chips add no new relationship authority.
 
 N141 - Creating a Node's first exact Project relationship atomically creates one immutable `project_assignment` timeline stamp with actor, Project ID, and Project-name snapshots. Re-adding the same relationship is idempotent and creates no duplicate. The Project relationship, its implicit Logic Gate relationship, dependent projections, and stamp succeed or roll back together. The Node email column reserves a visible bottom gutter and keeps a rounded border/shadow so it reads as a separate elevated surface.
 

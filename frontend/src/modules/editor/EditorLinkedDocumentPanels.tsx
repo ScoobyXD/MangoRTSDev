@@ -61,7 +61,7 @@ type EditorLinkedDocumentPanelsProps = {
   } | null;
   companyUsers: Array<{ user_id: string; email?: string; display_name?: string }>;
   companyUserGroups: Array<{ group_id: string; parent_group_id?: string; name: string; position: number }>;
-  companyUserGroupMembers: Array<{ group_id: string; user_id: string }>;
+  companyUserGroupMembers: Array<{ group_id: string; user_id: string; user_display_name?: string; user_email?: string }>;
   isEditingTitle: boolean;
   editingTitleRef: React.RefObject<HTMLSpanElement>;
   editingTitleDraftRef: React.MutableRefObject<string>;
@@ -200,13 +200,44 @@ function logicGateRACIAssignmentSubjectKey(assignment: LogicGateRACIAssignment):
   return `${logicGateRACIAssignmentPrincipalType(assignment)}:${logicGateRACIAssignmentPrincipalID(assignment)}`;
 }
 
-function RACIAssignmentLabel(assignment: LogicGateRACIAssignment): string {
+function RACIAssignmentLabel(
+  assignment: LogicGateRACIAssignment,
+  companyUsers: Array<{ user_id: string; email?: string; display_name?: string }>,
+  companyUserGroups: Array<{ group_id: string; name?: string }>,
+  companyUserGroupMembers: Array<{ user_id: string; user_display_name?: string; user_email?: string }>,
+): string {
+  const principalID = logicGateRACIAssignmentPrincipalID(assignment);
+  const displayCandidate = (...values: Array<string | undefined>): string => (
+    values
+      .map((value) => value?.trim() ?? "")
+      .find((value) => value && value !== principalID) ?? ""
+  );
   if (logicGateRACIAssignmentPrincipalType(assignment) === "group") {
-    return assignment.principal_name?.trim() || logicGateRACIAssignmentPrincipalID(assignment) || "Group";
+    const group = companyUserGroups.find((candidate) => candidate.group_id.trim() === principalID);
+    return displayCandidate(assignment.principal_name, group?.name) || "Unknown group";
   }
-  const name = (assignment.user_display_name ?? "").trim();
-  const email = (assignment.user_email ?? "").trim();
-  return assignment.principal_name?.trim() || name || email || logicGateRACIAssignmentPrincipalID(assignment) || assignment.user_id;
+  const user = companyUsers.find((candidate) => candidate.user_id.trim() === principalID);
+  const membership = companyUserGroupMembers.find((candidate) => candidate.user_id.trim() === principalID);
+  return displayCandidate(
+    assignment.principal_name,
+    assignment.user_display_name,
+    user?.display_name,
+    membership?.user_display_name,
+    assignment.user_email,
+    user?.email,
+    membership?.user_email,
+  ) || "Unknown user";
+}
+
+function RACIUserEmail(
+  assignment: LogicGateRACIAssignment,
+  companyUsers: Array<{ user_id: string; email?: string }>,
+  companyUserGroupMembers: Array<{ user_id: string; user_email?: string }>,
+): string {
+  const principalID = logicGateRACIAssignmentPrincipalID(assignment);
+  const user = companyUsers.find((candidate) => candidate.user_id.trim() === principalID);
+  const membership = companyUserGroupMembers.find((candidate) => candidate.user_id.trim() === principalID);
+  return assignment.user_email?.trim() || user?.email?.trim() || membership?.user_email?.trim() || "";
 }
 
 function validHexColor(value: string): string {
@@ -849,7 +880,7 @@ function RACIAssignmentBoard({
   overwrittenByAncestor?: { resource_type: string; resource_id: string; sequence: number } | null;
   companyUsers: Array<{ user_id: string; email?: string; display_name?: string }>;
   companyUserGroups: Array<{ group_id: string; parent_group_id?: string; name: string; position: number }>;
-  companyUserGroupMembers: Array<{ group_id: string; user_id: string }>;
+  companyUserGroupMembers: Array<{ group_id: string; user_id: string; user_display_name?: string; user_email?: string }>;
   accent: string;
   panelBackground: string;
   ruleColor: string;
@@ -859,7 +890,7 @@ function RACIAssignmentBoard({
   onRemovePrincipal: (role: LogicGateRACIRole, principalType: LogicGateRACIPrincipalType, principalID: string) => void;
 }) {
   return (
-    <div style={{ minWidth: 0, width: "100%", display: "grid", gap: 6, overflow: "hidden" }}>
+    <div style={{ minWidth: 0, width: "100%", display: "grid", gap: 6, overflowX: "auto", overflowY: "hidden" }}>
       {overwrittenByAncestor && (
         <div style={{ fontSize: 10, color: "#b45309" }}>This stored customization is inactive because an ancestor overwrite superseded it.</div>
       )}
@@ -869,7 +900,7 @@ function RACIAssignmentBoard({
           minWidth: 0,
           width: "100%",
           display: "grid",
-          gridTemplateColumns: "repeat(4, minmax(145px, 1fr))",
+          gridTemplateColumns: "repeat(4, minmax(170px, 1fr))",
           gap: 6,
           alignItems: "stretch",
         }}
@@ -920,7 +951,7 @@ function RACIRoleEditor({
   allAssignments: LogicGateRACIAssignment[];
   companyUsers: Array<{ user_id: string; email?: string; display_name?: string }>;
   companyUserGroups: Array<{ group_id: string; parent_group_id?: string; name: string; position: number }>;
-  companyUserGroupMembers: Array<{ group_id: string; user_id: string }>;
+  companyUserGroupMembers: Array<{ group_id: string; user_id: string; user_display_name?: string; user_email?: string }>;
   accent: string;
   panelBackground: string;
   ruleColor: string;
@@ -955,7 +986,13 @@ function RACIRoleEditor({
   const inheritedReadOnly = Boolean(disabledReason) && !canEdit;
   const inputPlaceholder = disabledReason ? "Inherited" : "Add user or team";
   const pickerAriaLabel = `${label} users and teams`;
-  const assignedLabels = assignments.map(RACIAssignmentLabel).filter(Boolean);
+  const assignmentLabel = (assignment: LogicGateRACIAssignment) => RACIAssignmentLabel(
+    assignment,
+    companyUsers,
+    companyUserGroups,
+    companyUserGroupMembers,
+  );
+  const assignedLabels = assignments.map(assignmentLabel).filter(Boolean);
   const assignedSummary = assignedLabels.length === 0
     ? "No assignments"
     : assignedLabels.join(", ");
@@ -1235,9 +1272,9 @@ function RACIRoleEditor({
               }}
               style={{ width: "100%", minHeight: 25, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 6, border: `1px solid ${hexWithAlpha(roleAccent, assignedListVisible ? "70" : "2f")}`, borderRadius: 10, background: assignedListVisible ? EDITOR_NEU_ACTIVE_SURFACE : EDITOR_NEU_SURFACE, color: "#111827", cursor: "pointer", padding: "4px 8px", font: "inherit", fontSize: 11, fontWeight: 800, opacity: 1, boxShadow: assignedListVisible ? `0 7px 15px ${hexWithAlpha(roleAccent, "1c")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "2px 2px 7px rgba(174,174,192,0.15), -2px -2px 7px rgba(255,255,255,0.74), inset 1px 1px 0 rgba(255,255,255,0.82)" }}
             >
-              <span data-raci-assignment-names={role} style={{ minWidth: 0, flex: "1 1 auto", display: "grid", gap: 2, textAlign: "left", lineHeight: 1.25 }}>
+              <span data-raci-assignment-names={role} style={{ minWidth: 0, flex: "1 1 auto", display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", columnGap: 6, rowGap: 2, textAlign: "left", lineHeight: 1.25 }}>
                 {assignedLabels.length === 0 ? (
-                  <span data-raci-assignment-empty={role} style={{ minWidth: 0, whiteSpace: "nowrap" }}>No assignments</span>
+                  <span data-raci-assignment-empty={role} style={{ minWidth: 0, gridColumn: "1 / -1", whiteSpace: "nowrap" }}>No assignments</span>
                 ) : assignedLabels.map((assignmentLabel, index) => (
                   <span key={`${index}:${assignmentLabel}`} data-raci-assignment-name={role} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {assignmentLabel}
@@ -1261,22 +1298,25 @@ function RACIRoleEditor({
             ) : assignments.map((assignment) => {
               const principalType = logicGateRACIAssignmentPrincipalType(assignment);
               const principalID = logicGateRACIAssignmentPrincipalID(assignment);
-              const assignmentLabel = RACIAssignmentLabel(assignment);
-              const assignmentAccent = principalType === "group" ? roleAccent : userAccentForName(assignmentLabel || principalID);
+              const resolvedAssignmentLabel = assignmentLabel(assignment);
+              const resolvedAssignmentEmail = principalType === "user"
+                ? RACIUserEmail(assignment, companyUsers, companyUserGroupMembers)
+                : "";
+              const assignmentAccent = principalType === "group" ? roleAccent : userAccentForName(resolvedAssignmentLabel);
               return (
                 <div
                   key={`${assignment.role}:${principalType}:${principalID}`}
                   role="option"
                   aria-selected="true"
-                  title={principalType === "group" ? "User group" : assignment.user_email || principalID}
+                  title={principalType === "group" ? "User group" : resolvedAssignmentEmail || resolvedAssignmentLabel}
                   style={{ minWidth: 0, minHeight: 34, display: "grid", gridTemplateColumns: canEdit ? "24px minmax(0, 1fr) 22px" : "24px minmax(0, 1fr)", alignItems: "center", gap: 8, border: "1px solid transparent", borderRadius: 10, background: "transparent", padding: "5px 7px", boxShadow: `inset 0 0 0 1px ${ruleColor || "transparent"}` }}
                 >
-                  <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: 999, display: "grid", placeItems: "center", background: principalType === "group" ? hexWithAlpha(roleAccent, "bb") : avatarBackgroundForName(assignmentLabel || principalID), color: "#ffffff", fontSize: 9, fontWeight: 900, boxShadow: "2px 2px 6px rgba(174,174,192,0.18), -2px -2px 6px rgba(255,255,255,0.76)" }}>
-                    {principalType === "group" ? "GR" : initialsForName(assignmentLabel || principalID)}
+                  <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: 999, display: "grid", placeItems: "center", background: principalType === "group" ? hexWithAlpha(roleAccent, "bb") : avatarBackgroundForName(resolvedAssignmentLabel), color: "#ffffff", fontSize: 9, fontWeight: 900, boxShadow: "2px 2px 6px rgba(174,174,192,0.18), -2px -2px 6px rgba(255,255,255,0.76)" }}>
+                    {principalType === "group" ? "GR" : initialsForName(resolvedAssignmentLabel)}
                   </span>
                   <span style={{ minWidth: 0, display: "grid", gap: 1 }}>
-                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 800, color: assignmentAccent }}>{assignmentLabel}</span>
-                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#64748b", fontSize: 9.5, fontWeight: 500 }}>{principalType === "group" ? "User group" : assignment.user_email}</span>
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 800, color: assignmentAccent }}>{resolvedAssignmentLabel}</span>
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#64748b", fontSize: 9.5, fontWeight: 500 }}>{principalType === "group" ? "User group" : resolvedAssignmentEmail}</span>
                   </span>
                   {canEdit && (
                     <button

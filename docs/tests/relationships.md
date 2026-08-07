@@ -1,3 +1,17 @@
+# Process Story: RACI labels keep exact identity without exposing internal IDs
+
+A user opens a Node or Logic Gate through Editor, Updates, or another supported surface
+↓
+Mango keeps each direct RACI edge keyed by its unchanged typed user or group principal ID
+↓
+The shared RACI header resolves the visible name from assignment metadata and then the current company user/group directory
+↓
+The four equal-width role cards show two resolved names per row; a temporarily unresolved principal uses a neutral unknown label instead of displaying its internal ID
+↓
+This presentation rule does not translate the principal ID, copy an assignment, or change RACI cardinality, inheritance, permissions, or relationship authority
+
+Last updated: 2026-08-07
+
 # Process Story: A Node header links through exact relationship commands
 
 A user opens the Node header's double-hash picker and chooses a Logic Gate, Project, or Email
