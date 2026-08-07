@@ -279,13 +279,13 @@ function updateCurrentMangoTiptapIndent(editor: Editor, delta: -1 | 1): boolean 
  */
 export function handleMangoTiptapOutlineEnter(editor: Editor, outlineStyle: EditorOutlineStyleID): boolean {
   if (!editor.state.selection.empty) return false;
-  if (editor.isActive("taskItem")) return editor.commands.splitListItem("taskItem");
-  if (editor.isActive("listItem")) return editor.commands.splitListItem("listItem");
-  if (!editor.isActive("paragraph") && !editor.isActive("heading")) return false;
-
   const { $from } = editor.state.selection;
   const currentBlock = $from.parent;
   const empty = currentBlock.isTextblock && currentBlock.content.size === 0;
+  if (editor.isActive("taskItem")) return empty ? false : editor.commands.splitListItem("taskItem");
+  if (editor.isActive("listItem")) return empty ? false : editor.commands.splitListItem("listItem");
+  if (!editor.isActive("paragraph") && !editor.isActive("heading")) return false;
+
   if (outlineStyle === "indent-guides") return false;
   if (outlineStyle === "automatic-outline-numbering") {
     return empty ? editor.commands.toggleOrderedList() : false;

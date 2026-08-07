@@ -553,6 +553,23 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     assert.equal(dom.window.document.activeElement, activeProseMirror, "the first pointer activation must focus the attached editor without requiring a second click");
     assert.equal(activeProseMirror.dataset.mangoLegacyLeadingDateHeading, "true");
 
+    editorRoot.scrollTop = 321;
+    holdAnimationFrames = true;
+    const activeCaretEvent = new dom.window.MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, clientX: 20, clientY: 20 });
+    await act(async () => {
+      activeProseMirror.dispatchEvent(activeCaretEvent);
+    });
+    assert.equal(activeCaretEvent.defaultPrevented, false, "an active-editor click keeps native caret placement");
+    editorRoot.scrollTop = 17;
+    holdAnimationFrames = false;
+    const caretFrames = [...heldAnimationFrames.values()];
+    heldAnimationFrames.clear();
+    assert.ok(caretFrames.length > 0, "the caret click schedules scroll restoration before paint");
+    await act(async () => {
+      caretFrames.forEach((callback) => callback(Date.now()));
+    });
+    assert.equal(editorRoot.scrollTop, 321, "placing a caret in an active editor must not move the text-box scroll position");
+
     restartEditorTraceForTests();
     await act(async () => { await subscriptionRecover?.(); });
     await flushAsyncWork(3);
