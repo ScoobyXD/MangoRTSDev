@@ -82,8 +82,10 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
   const [raisedPinID, setRaisedPinID] = useState("");
   const [bumpingPinID, setBumpingPinID] = useState("");
   const [activeRemovePinID, setActiveRemovePinID] = useState("");
+  const [focusedFolderID, setFocusedFolderID] = useState("");
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const bumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeDraggedEntryRef = useRef<SidebarPinEntryRef | null>(null);
   const entries = useMemo(() => buildSidebarPinTreeNodes(tree, expandedFolderIDs), [expandedFolderIDs, tree]);
   const folderStatusCountsByID = useMemo(
     () => aggregateSidebarPinFolderStatusCounts(tree, logicGateStatusCountsByID),
@@ -140,6 +142,15 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
     setExpandedFolderIDs((current) => new Set(current).add(folderID));
     setRenamingFolderID(folderID);
     setRenameDraft("New Folder");
+  };
+
+  const toggleFolder = (folderID: string) => {
+    setExpandedFolderIDs((current) => {
+      const next = new Set(current);
+      if (next.has(folderID)) next.delete(folderID);
+      else next.add(folderID);
+      return next;
+    });
   };
 
   const handleInternalDrop = async (moving: SidebarPinEntryRef, row: SidebarPinTreeNode, placement: SidebarPinDropPlacement) => {
@@ -216,19 +227,25 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
         draggable={renamingFolderID !== row.entryID}
         style={pinEntryStyle(row.entryType, placement, pinRaised)}
         onDragStart={(event) => {
+          event.stopPropagation();
+          activeDraggedEntryRef.current = ref;
           event.dataTransfer.effectAllowed = "move";
           event.dataTransfer.setData(APP_SIDEBAR_PIN_DRAG_MIME, JSON.stringify(ref));
           event.dataTransfer.setData("text/plain", row.entryType === "folder" ? row.folder.name : row.pin.name);
           setDropTarget(null);
         }}
-        onDragEnd={() => setDropTarget(null)}
+        onDragEnd={(event) => {
+          event.stopPropagation();
+          activeDraggedEntryRef.current = null;
+          setDropTarget(null);
+        }}
         onDragLeave={(event) => {
           const related = event.relatedTarget instanceof Node ? event.relatedTarget : null;
           if (related && event.currentTarget.contains(related)) return;
           setDropTarget((current) => current?.key === rowKey ? null : current);
         }}
         onDragOver={(event) => {
-          if (hasSidebarPinDrag(event.dataTransfer)) {
+          if (activeDraggedEntryRef.current || hasSidebarPinDrag(event.dataTransfer)) {
             event.preventDefault();
             event.stopPropagation();
             event.dataTransfer.dropEffect = "move";
@@ -250,12 +267,13 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
           }
         }}
         onDrop={(event) => {
-          const moving = readDraggedEntry(event.dataTransfer);
+          const moving = readDraggedEntry(event.dataTransfer) ?? activeDraggedEntryRef.current;
           const intent = getPinDropIntent(event, row.entryType);
           if (moving) {
             event.preventDefault();
             event.stopPropagation();
             void handleInternalDrop(moving, row, intent);
+            activeDraggedEntryRef.current = null;
             setDropTarget(null);
             return;
           }
@@ -291,55 +309,58 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
                 style={disclosureButtonStyle}
                 onClick={(event) => {
                   event.stopPropagation();
-                  setExpandedFolderIDs((current) => {
-                    const next = new Set(current);
-                    if (next.has(row.folder.folderID)) next.delete(row.folder.folderID);
-                    else next.add(row.folder.folderID);
-                    return next;
-                  });
+                  toggleFolder(row.folder.folderID);
                 }}
               >
                 <ExplorerDisclosureIcon open={expanded} color="#475569" />
               </button>
               {renamingFolderID === row.folder.folderID ? (
-                <input
-                  ref={renameInputRef}
-                  value={renameDraft}
-                  aria-label="Pinned folder name"
-                  style={renameInputStyle}
-                  onChange={(event) => setRenameDraft(event.target.value)}
-                  onBlur={() => void finishRename(row.folder)}
-                  onClick={(event) => event.stopPropagation()}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      void finishRename(row.folder);
-                    } else if (event.key === "Escape") {
-                      event.preventDefault();
-                      setRenamingFolderID("");
-                    }
-                  }}
-                  onPointerDown={(event) => event.stopPropagation()}
-                />
+                <span style={folderRenameStyle}>
+                  <ExplorerRowIcon kind="folder" />
+                  <input
+                    ref={renameInputRef}
+                    value={renameDraft}
+                    aria-label="Pinned folder name"
+                    style={renameInputStyle}
+                    onChange={(event) => setRenameDraft(event.target.value)}
+                    onBlur={() => void finishRename(row.folder)}
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void finishRename(row.folder);
+                      } else if (event.key === "Escape") {
+                        event.preventDefault();
+                        setRenamingFolderID("");
+                      }
+                    }}
+                    onPointerDown={(event) => event.stopPropagation()}
+                  />
+                </span>
               ) : (
                 <button
                   type="button"
                   data-pin-folder-title={row.folder.folderID}
-                  title="Right-click for folder actions; drag to move"
-                  style={folderNameButtonStyle}
+                  data-pin-folder-title-focused={focusedFolderID === row.folder.folderID ? "true" : undefined}
+                  title="Click to expand or collapse; right-click for folder actions; drag to move"
+                  style={folderNameButtonStyle(focusedFolderID === row.folder.folderID)}
+                  onFocus={() => setFocusedFolderID(row.folder.folderID)}
+                  onBlur={() => setFocusedFolderID((current) => current === row.folder.folderID ? "" : current)}
                   onClick={(event) => {
                     event.stopPropagation();
+                    toggleFolder(row.folder.folderID);
                   }}
                   onDoubleClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
                   }}
                 >
-                  {row.folder.name}
+                  <ExplorerRowIcon kind="folder" />
+                  <span style={folderNameTextStyle}>{row.folder.name}</span>
                 </button>
               )}
+              {folderHasCounts && <span data-pin-folder-status-column style={folderStatusColumnStyle}>{renderStatusCounts(folderCounts)}</span>}
             </legend>
-            {folderHasCounts && <span data-pin-folder-status-column style={folderStatusColumnStyle}>{renderStatusCounts(folderCounts)}</span>}
             {expanded && (
               <div data-pin-folder-contents={row.folder.folderID} style={folderContentsStyle}>
                 {renderEntries(row.children)}
@@ -386,14 +407,14 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
       aria-label="Pinned"
       data-sidebar-pinned-surface="elevated"
       onDragEnter={(event) => {
-        if (hasSidebarPinDrag(event.dataTransfer) || hasSidebarPinSectionDrop(event.dataTransfer) || tree.pins.some((pin) => pinAcceptsResourceDrag(pin, event.dataTransfer))) {
+        if (activeDraggedEntryRef.current || hasSidebarPinDrag(event.dataTransfer) || hasSidebarPinSectionDrop(event.dataTransfer) || tree.pins.some((pin) => pinAcceptsResourceDrag(pin, event.dataTransfer))) {
           onPinDragEnter();
         }
       }}
       onDragOver={(event) => {
-        if (hasSidebarPinDrag(event.dataTransfer) || hasSidebarPinSectionDrop(event.dataTransfer)) {
+        if (activeDraggedEntryRef.current || hasSidebarPinDrag(event.dataTransfer) || hasSidebarPinSectionDrop(event.dataTransfer)) {
           event.preventDefault();
-          event.dataTransfer.dropEffect = hasSidebarPinDrag(event.dataTransfer) ? "move" : "copy";
+          event.dataTransfer.dropEffect = activeDraggedEntryRef.current || hasSidebarPinDrag(event.dataTransfer) ? "move" : "copy";
           setDropTarget({ key: "__end__", placement: "after" });
         }
       }}
@@ -404,10 +425,11 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
         onPinDragLeave();
       }}
       onDrop={(event) => {
-        const moving = readDraggedEntry(event.dataTransfer);
+        const moving = readDraggedEntry(event.dataTransfer) ?? activeDraggedEntryRef.current;
         if (moving) {
           event.preventDefault();
           onMoveEntry(moving, null, "after");
+          activeDraggedEntryRef.current = null;
         } else if (hasSidebarPinSectionDrop(event.dataTransfer)) {
           event.preventDefault();
           onExternalDrop(event, "", null, "after");
@@ -565,27 +587,54 @@ function folderFrameStyle(placement: SidebarPinDropPlacement | null): React.CSSP
 
 function folderLegendStyle(hasCounts: boolean): React.CSSProperties {
   return {
-    maxWidth: hasCounts ? "calc(100% - 104px)" : "calc(100% - 17px)",
+    width: hasCounts ? "calc(100% - 35px)" : undefined,
+    maxWidth: hasCounts ? "calc(100% - 35px)" : "calc(100% - 17px)",
     minWidth: 0,
     marginLeft: 11,
     padding: "0 2px",
     display: "inline-grid",
-    gridTemplateColumns: "14px minmax(0, 1fr)",
+    gridTemplateColumns: hasCounts ? "14px minmax(0, 1fr) 74px" : "14px minmax(0, 1fr)",
     alignItems: "center",
-    gap: 1,
+    gap: 2,
     color: "#111827",
+    boxSizing: "border-box",
   };
 }
 const folderContentsStyle: React.CSSProperties = { minWidth: 0, display: "grid", alignContent: "start", gap: 3, marginRight: -4, padding: "2px 0 0 10px" };
 const disclosureButtonStyle: React.CSSProperties = { width: 14, height: 20, display: "grid", placeItems: "center", border: 0, background: "transparent", cursor: "pointer", padding: 0 };
-const folderNameButtonStyle: React.CSSProperties = { minWidth: 0, maxWidth: "100%", height: 22, border: 0, background: "transparent", color: "#111827", cursor: "grab", font: "inherit", fontSize: 11.5, fontWeight: 700, textAlign: "left", padding: "0 1px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+function folderNameButtonStyle(focused: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    maxWidth: "100%",
+    height: 22,
+    display: "grid",
+    gridTemplateColumns: "15px minmax(0, 1fr)",
+    alignItems: "center",
+    gap: 4,
+    border: 0,
+    borderRadius: 5,
+    outline: "none",
+    background: focused ? "rgba(241,245,249,.82)" : "transparent",
+    boxShadow: focused ? "inset 0 0 0 1px rgba(100,116,139,.24)" : "none",
+    color: "#111827",
+    cursor: "pointer",
+    font: "inherit",
+    fontSize: 11.5,
+    fontWeight: 700,
+    textAlign: "left",
+    padding: "0 1px",
+    overflow: "hidden",
+  };
+}
+const folderNameTextStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+const folderRenameStyle: React.CSSProperties = { minWidth: 0, display: "grid", gridTemplateColumns: "15px minmax(0, 1fr)", alignItems: "center", gap: 4 };
 const pinRowStyle: React.CSSProperties = { minWidth: 0, minHeight: 29, display: "grid", gridTemplateColumns: "minmax(0,1fr) auto 22px", alignItems: "center", gap: 2 };
 const rowIconStyle: React.CSSProperties = { width: 20, height: 20, display: "grid", placeItems: "center", color: "#111" };
 const pinButtonStyle: React.CSSProperties = { minWidth: 0, minHeight: 29, display: "grid", gridTemplateColumns: "20px minmax(0,1fr)", alignItems: "center", gap: 4, border: 0, borderRadius: 7, background: "transparent", color: "#111", cursor: "pointer", font: "inherit", fontSize: 11.5, fontWeight: 600, padding: "0 5px", textAlign: "left" };
 const rowTextStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 const statusCountsStyle: React.CSSProperties = { width: 74, display: "grid", gridTemplateColumns: "repeat(4, 17px)", alignItems: "center", justifyContent: "end", gap: 2, minWidth: 74, whiteSpace: "nowrap" };
 const statusCountSlotStyle: React.CSSProperties = { width: 17, height: 17, display: "grid", placeItems: "center" };
-const folderStatusColumnStyle: React.CSSProperties = { position: "absolute", zIndex: 1, top: -8, right: 24, width: 74, height: 17, display: "block" };
+const folderStatusColumnStyle: React.CSSProperties = { width: 74, height: 17, display: "block" };
 function statusCountStyle(definition: SidebarLogicGateStatusCountDefinition): React.CSSProperties {
   return {
     minWidth: 17,
