@@ -110,6 +110,8 @@
     "../../../frontend/src/app/sidebarPinsApi.ts",
     "../../../frontend/src/app/sidebarPinDrops.ts",
     "../../../frontend/src/app/sidebarPinTree.ts",
+    "../../../frontend/src/app/sidebarLogicGateStatusCounts.ts",
+    "../app/sidebarLogicGateStatusCounts.test.ts",
     "../../../frontend/src/app/sidebarPinPopup.ts",
     "../app/sidebarPinsApi.test.ts",
     "../app/sidebarPinDrops.test.ts",

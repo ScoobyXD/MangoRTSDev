@@ -19,9 +19,15 @@ import {
   type SidebarPinFolder,
   type SidebarPinTree,
 } from "./sidebarPins.js";
+import {
+  aggregateSidebarPinFolderStatusCounts,
+  visibleSidebarLogicGateStatusCounts,
+  type SidebarLogicGateStatusCounts,
+} from "./sidebarLogicGateStatusCounts.js";
 
 type AppSidebarPinnedSectionProps = {
   tree: SidebarPinTree;
+  logicGateStatusCountsByID: Readonly<Record<string, SidebarLogicGateStatusCounts | undefined>>;
   dropActive: boolean;
   dropSuccess: string;
   pinnedResourceDropBusy: boolean;
@@ -47,6 +53,7 @@ type PinContextMenu =
 export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): React.ReactElement {
   const {
     tree,
+    logicGateStatusCountsByID,
     dropActive,
     dropSuccess,
     pinnedResourceDropBusy,
@@ -76,6 +83,10 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const bumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const entries = useMemo(() => buildSidebarPinTreeNodes(tree, expandedFolderIDs), [expandedFolderIDs, tree]);
+  const folderStatusCountsByID = useMemo(
+    () => aggregateSidebarPinFolderStatusCounts(tree, logicGateStatusCountsByID),
+    [logicGateStatusCountsByID, tree],
+  );
 
   useEffect(() => {
     if (!renamingFolderID || !renameInputRef.current) return;
@@ -155,6 +166,27 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
       bumpTimerRef.current = null;
     }, 180);
     onPinOpen(pin);
+  };
+
+  const renderStatusCounts = (counts: SidebarLogicGateStatusCounts | undefined): React.ReactNode => {
+    const visibleCounts = visibleSidebarLogicGateStatusCounts(counts);
+    if (visibleCounts.length === 0) return null;
+    return (
+      <span data-pin-status-counts style={statusCountsStyle}>
+        {visibleCounts.map((item) => (
+          <span
+            key={item.key}
+            data-pin-status={item.key}
+            data-pin-status-count={item.count}
+            aria-label={`${item.label}: ${item.count}`}
+            title={`${item.label}: ${item.count}`}
+            style={statusCountStyle(item.color)}
+          >
+            {item.count}
+          </span>
+        ))}
+      </span>
+    );
   };
 
   const renderEntries = (nodes: SidebarPinTreeNode[]): React.ReactNode => nodes.map((row) => {
@@ -292,6 +324,7 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
                   {row.folder.name}
                 </button>
               )}
+              {renderStatusCounts(folderStatusCountsByID[row.folder.folderID])}
             </legend>
             {expanded && (
               <div data-pin-folder-contents={row.folder.folderID} style={folderContentsStyle}>
@@ -313,6 +346,7 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
               <span style={rowIconStyle}><ExplorerRowIcon kind={row.pin.kind} /></span>
               <span style={rowTextStyle}>{row.pin.name}</span>
             </button>
+            {row.pin.kind === "logic_gate" && renderStatusCounts(logicGateStatusCountsByID[row.pin.id])}
             <button
               type="button"
               aria-label={`Unpin ${row.pin.name}`}
@@ -504,7 +538,7 @@ const folderLegendStyle: React.CSSProperties = {
   marginLeft: 11,
   padding: "0 2px",
   display: "inline-grid",
-  gridTemplateColumns: "14px minmax(0, 1fr)",
+  gridTemplateColumns: "14px minmax(0, 1fr) auto",
   alignItems: "center",
   gap: 1,
   color: "#111827",
@@ -512,10 +546,29 @@ const folderLegendStyle: React.CSSProperties = {
 const folderContentsStyle: React.CSSProperties = { minWidth: 0, display: "grid", alignContent: "start", gap: 3, padding: "2px 0 0 10px" };
 const disclosureButtonStyle: React.CSSProperties = { width: 14, height: 20, display: "grid", placeItems: "center", border: 0, background: "transparent", cursor: "pointer", padding: 0 };
 const folderNameButtonStyle: React.CSSProperties = { minWidth: 0, maxWidth: "100%", height: 22, border: 0, background: "transparent", color: "#111827", cursor: "grab", font: "inherit", fontSize: 11.5, fontWeight: 700, textAlign: "left", padding: "0 1px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
-const pinRowStyle: React.CSSProperties = { minWidth: 0, minHeight: 29, display: "grid", gridTemplateColumns: "minmax(0,1fr) 22px", alignItems: "center", gap: 2 };
+const pinRowStyle: React.CSSProperties = { minWidth: 0, minHeight: 29, display: "grid", gridTemplateColumns: "minmax(0,1fr) auto 22px", alignItems: "center", gap: 2 };
 const rowIconStyle: React.CSSProperties = { width: 20, height: 20, display: "grid", placeItems: "center", color: "#111" };
 const pinButtonStyle: React.CSSProperties = { minWidth: 0, minHeight: 29, display: "grid", gridTemplateColumns: "20px minmax(0,1fr)", alignItems: "center", gap: 4, border: 0, borderRadius: 7, background: "transparent", color: "#111", cursor: "pointer", font: "inherit", fontSize: 11.5, fontWeight: 600, padding: "0 5px", textAlign: "left" };
 const rowTextStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+const statusCountsStyle: React.CSSProperties = { display: "inline-flex", alignItems: "center", justifyContent: "flex-end", gap: 2, minWidth: 0, whiteSpace: "nowrap" };
+function statusCountStyle(color: string): React.CSSProperties {
+  return {
+    minWidth: 17,
+    height: 17,
+    boxSizing: "border-box",
+    display: "inline-grid",
+    placeItems: "center",
+    padding: "0 3px",
+    border: "1px solid rgba(15,23,42,.12)",
+    borderRadius: 4,
+    background: color,
+    color: "#111827",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,.28)",
+    fontSize: 9.5,
+    fontWeight: 850,
+    lineHeight: 1,
+  };
+}
 function removeButtonStyle(active: boolean): React.CSSProperties {
   return {
     width: 22,
