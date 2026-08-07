@@ -16,6 +16,7 @@ test("node email mailbox scopes normalize personal accounts and suppress them fo
 
 test("node-attached email viewer discloses per-message recipients while retaining thread, attachment, and image behavior", () => {
   const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
+  const universalPickerEmailPane = source("frontend/src/modules/editor/UniversalPickerEmailPane.tsx");
   const calendarInviteCard = source("frontend/src/modules/communications/CalendarInviteCard.tsx");
 
   assert.match(nodeParts, /Expand all threads/);
@@ -62,9 +63,9 @@ test("node-attached email viewer discloses per-message recipients while retainin
   assert.match(nodeParts, /getEmailThread\(threadID, companyID, mailboxScope\.sharedInboxID, mailboxScope\.accountEmail\)/);
   assert.match(nodeParts, /listEmailMessages\(\{ companyID, \.\.\.mailboxScope, mailbox: "all"/);
   assert.match(nodeParts, /account_email: mailboxScope\.accountEmail/);
-  assert.match(nodeParts, /status\.connected && status\.status === "connected"/);
-  assert.match(nodeParts, /if \(!accountScopeResolved \|\| !accountEmail\) return/);
-  assert.ok((nodeParts.match(/listEmailMessages\(\{\s*accountEmail,/g) ?? []).length >= 3);
+  assert.match(universalPickerEmailPane, /status\.connected && status\.status === "connected"/);
+  assert.match(universalPickerEmailPane, /if \(!active \|\| !accountResolved \|\| !accountEmail\) return undefined/);
+  assert.ok((universalPickerEmailPane.match(/listEmailMessages\(\{/g) ?? []).length >= 2);
   assert.match(calendarInviteCard, /Calendar invitation/);
   assert.match(nodeParts, /window\.setTimeout\(\(\) => replyEditorControllerRef\.current\?\.focus\(\), 0\)/);
 });
@@ -158,7 +159,7 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(triageChat, /existingMessageAccent \|\| editorEmailMessageAccent\(emailMessageID, existingEmailAccents\)/);
 });
 
-test("both node-wide email attachment entry paths retain exact provider mailbox identity", () => {
+test("node drag and Universal-picker email attachment retain exact provider mailbox identity", () => {
   const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
   const editorProjection = source("frontend/src/modules/editor/editorProjection.ts");
 
@@ -167,7 +168,8 @@ test("both node-wide email attachment entry paths retain exact provider mailbox 
   assert.match(nodeSurface, /accountEmail: email\.accountEmail/);
   assert.match(nodeSurface, /information: buildEditorAttachedEmailPayload\(email\)/);
   assert.match(nodeSurface, /parseDraggedEmail\(event\.dataTransfer\)/);
-  assert.match(nodeSurface, /messageAttachmentPayload\(message, scope\.sharedInboxID, scope\.accountEmail\)/);
+  assert.match(nodeSurface, /messageAttachmentPayload\(entity\.emailMessage, entity\.emailSharedInboxID, entity\.emailAccountEmail\)/);
+  assert.match(nodeSurface, /initialCategory="email_message"/);
   assert.match(editorProjection, /shared_inbox_id: input\.sharedInboxID\?\.trim\(\) \?\? ""/);
   assert.match(editorProjection, /account_email: input\.accountEmail\?\.trim\(\) \?\? ""/);
   assert.doesNotMatch(editorProjection, /attachments: input\.attachments/);

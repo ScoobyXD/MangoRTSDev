@@ -72,7 +72,7 @@ P14 - Selecting a node search result creates or reuses the project node relation
 P15 - Project text boxes participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, italic, text highlight/No highlight, left/center/right alignment, and table semantics must apply to project text boxes.
 P16 - Project text-box document bodies, title, email accent/reference metadata, display order, revisions, and timestamps live in `project_textboxes`. Attachment metadata is rebuilt from active final attachment relationships; Node documents opened inside Projects remain Node-owned.
 P17 - Project critical-path inline node windows use the unified node shell and unified node text-box editor semantics, while mutations inside that inline node window remain node editor mutations instead of project critical-path data mutations.
-P18 - The project email picker is attach/select only and must not expose compose, send, scheduled send, or draft-save behavior.
+P18 - Project Attach email opens the shared Universal picker directly in `##` link mode with Emails selected. It may search the connected personal mailbox and attach the exact existing message, but it must not expose compose, reply, send, scheduled send, draft-save, or mailbox-mutation behavior.
 P19 - Project critical-path inline node windows mount `UnifiedNodeShell`; the inline window may keep project row selection/close state in Project Management, but shell actions and body metadata come from the shared node-shell source.
 P20 - Project text-box inline images and files follow `docs/tests/attachments.md`: `attachments` plus `attachment_relationships` are the durable file authority, and the existing Project projection-shaped API response is rebuilt without storing file bytes or a legacy Project projection row.
 P21 - Project chat attachments use Mango attachment references, and project critical-path inline node windows inherit node attachment behavior while preserving node-owned persistence for node edits.
@@ -219,7 +219,7 @@ Business logic covered:
 
 Given:
 - A user edits a project text box.
-- The user opens the project email picker.
+- The user opens Project Attach email in the Universal picker.
 
 Expected:
 - The project text box uses the same unified editor semantics as node, Logic Gate, and email compose/reply rich editor surfaces.
@@ -232,8 +232,8 @@ Expected:
 - The primary header keeps Editor, Permissions, the shared formatting toolbar, and Outline Styles/Automatic Numbering visible; Assignments and available open/minimize actions remain in **More editor actions**.
 - Project text-box edits save to project information/projection state.
 - Project text-box edits do not write node information/projection state.
-- The project email picker allows attaching existing email where permitted.
-- The project email picker does not expose compose, send, scheduled send, or draft-save controls.
+- The Universal picker Emails category allows attaching an exact existing personal-mailbox message where permitted.
+- The Emails category does not expose compose, reply, send, scheduled send, draft-save, or mailbox-mutation controls.
 
 ### Scenario P-S6: Project Attachments Use Global Attachment Storage
 
@@ -328,7 +328,7 @@ Business logic covered:
 - P44
 
 Given:
-- A personal mailbox message is attached through the project picker.
+- A personal mailbox message is attached through the Project Universal picker Emails category.
 - A shared-inbox message is converted into project work and later reopened from its attached-email row.
 - The user focuses the attached-email reply editor and adds a file or inline image.
 

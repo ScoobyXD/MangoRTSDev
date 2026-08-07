@@ -3,7 +3,7 @@ import type { JSONContent } from "@tiptap/core";
 import { needsMangoTiptapLegacyDateHeadingBreak, type MangoTiptapDocument } from "./mangoTiptapDocument.js";
 import { isDormantMangoTiptapAnnotation, type MangoTiptapAnnotation } from "./mangoTiptapAnnotations.js";
 import { ExplorerEntityIcon } from "../../../icons/index.js";
-import { editorEntityRoute, editorEntityTypeLabel, isEditorEntityType, openEditorEntityLink } from "../editorEntityLinks.js";
+import { editorEntityRoute, editorEntityTypeLabel, isEditorEmailMailbox, isEditorEntityType, openEditorEntityLink } from "../editorEntityLinks.js";
 import "./mangoTiptap.css";
 
 export type MangoStaticAttachmentImageProps = {
@@ -139,6 +139,14 @@ function renderNode(
       const entityID = String(attrs.entityId || "");
       const label = String(attrs.label || "Entity");
       if (!isEditorEntityType(entityType) || !entityID) return <span key={key}>{label}</span>;
+      const emailMailbox = String(attrs.emailMailbox || "").trim();
+      const emailEntity = entityType === "email_message" ? {
+        emailMessageID: String(attrs.emailMessageId || "") || undefined,
+        emailThreadID: String(attrs.emailThreadId || "") || undefined,
+        emailAccountEmail: String(attrs.emailAccountEmail || "").trim().toLowerCase() || undefined,
+        emailSharedInboxID: String(attrs.emailSharedInboxId || "").trim() || undefined,
+        emailMailbox: isEditorEmailMailbox(emailMailbox) ? emailMailbox : undefined,
+      } : {};
       return (
         <a
           key={key}
@@ -147,12 +155,17 @@ function renderNode(
           data-mango-entity-type={entityType}
           data-mango-entity-id={entityID}
           data-mango-entity-label={label}
+          data-mango-email-message-id={entityType === "email_message" ? emailEntity.emailMessageID : undefined}
+          data-mango-email-thread-id={entityType === "email_message" ? emailEntity.emailThreadID : undefined}
+          data-mango-email-account-email={entityType === "email_message" ? emailEntity.emailAccountEmail : undefined}
+          data-mango-email-shared-inbox-id={entityType === "email_message" ? emailEntity.emailSharedInboxID : undefined}
+          data-mango-email-mailbox={entityType === "email_message" ? emailEntity.emailMailbox : undefined}
           aria-label={`Open ${editorEntityTypeLabel(entityType)} ${label}`}
-          href={editorEntityRoute({ entityType, entityID })}
+          href={entityType === "email_message" ? undefined : editorEntityRoute({ entityType, entityID })}
           onClick={(event) => {
             if (event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
             event.preventDefault();
-            openEditorEntityLink({ entityType, entityID, label });
+            openEditorEntityLink({ entityType, entityID, label, ...emailEntity });
           }}
         >
           <ExplorerEntityIcon kind={entityType} className="mango-editor-entity-icon" />

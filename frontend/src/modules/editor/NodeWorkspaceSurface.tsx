@@ -3,7 +3,7 @@ import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { AppModalPortal, useAppFloatingMenuDismissal } from "../../app/AppModalPortal.js";
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { isAbortError } from "../api/requestJSON";
-import type { EditorEntityLink } from "./editorEntityLinks.js";
+import { openEditorEntityLink, type EditorEntityLink } from "./editorEntityLinks.js";
 import { humanLabelOrFallback } from "../entityLabels.js";
 import { getLogicGateRecordSingleFlight } from "../logic-gates/logicGateRecordStore.js";
 import type { LogicGateRecord } from "../logic-gates/types";
@@ -75,7 +75,7 @@ import { createEditorImageFrame } from "./editorImages";
 import { serializeEditorDocumentHTML } from "./richTextEditing";
 import { createEditorScrollMemory } from "./editorScroll";
 import { useBoundedEditorRowVirtualization } from "./editorRowVirtualization";
-import { openEditorEntityLink } from "./editorEntityLinks";
+import { UniversalEntityPicker, type UniversalEntityPickerAnchor, type UniversalEntityPickerMode } from "./UniversalEntityPicker.js";
 import { useMangoEditorDataFormat } from "./editorDataFormat";
 import { markEditorHistoryChanged } from "./editorExitHistory.js";
 import { flushMangoTiptapDocument } from "./tiptap/mangoTiptapFlushRegistry.js";
@@ -90,7 +90,6 @@ import {
   ChatPane,
   DeleteTextBlockConfirmationModal,
   EmailCountDropdown,
-  EmailPickerModal,
   LinkedEmailPreviewPane,
   NodeTextBlockEditor,
   removeStoredEmailLocalHighlight,
@@ -507,6 +506,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const paneLayoutScope = `${companyID}\u001f${nodeID}`;
   const editorDataFormat = useMangoEditorDataFormat(apiBase, companyID, requestJSON);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const emailPickerLauncherRef = useRef<HTMLButtonElement | null>(null);
   const logicGateAssignerRef = useRef<HTMLDivElement | null>(null);
   const timelineCreateMenuRef = useRef<HTMLDivElement | null>(null);
   const logicGateSearchRequestRef = useRef(0);
@@ -559,7 +559,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [activeRowBlockID, setActiveRowBlockID] = useState("");
   const [tiptapPinnedBlockIDs, setTiptapPinnedBlockIDs] = useState<Set<string>>(() => new Set());
   const [emailReplyBlockID, setEmailReplyBlockID] = useState("");
-  const [emailPickerTargetBlockID, setEmailPickerTargetBlockID] = useState<string | null>(null);
+  const [emailPickerAnchor, setEmailPickerAnchor] = useState<UniversalEntityPickerAnchor | null>(null);
   const [nodeEmailModalMessageID, setNodeEmailModalMessageID] = useState("");
   const [expandedLinkedEmailBlockIDs, setExpandedLinkedEmailBlockIDs] = useState<Set<string>>(() => new Set());
   const [nodeEmailFocusExpanded, setNodeEmailFocusExpanded] = useState(false);
@@ -975,7 +975,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setLogicGateAssignerOpen(false);
     setTimelineCreateMenuOpen(false);
     setProjectAssignerOpen(false);
-    setEmailPickerTargetBlockID(null);
+    setEmailPickerAnchor(null);
     setDropActive(false);
     setDeleteTextBlockConfirmation(null);
   }, [canEdit]);
@@ -2260,7 +2260,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (attachedEmails.some((item) => mailboxMatches(item) && (
       item.messageID === email.messageID || Boolean(email.threadID?.trim() && item.threadID?.trim() === email.threadID.trim())
     ))) {
-      setEmailPickerTargetBlockID(null);
+      setEmailPickerAnchor(null);
       return;
     }
     const id = generateStableInformationID();
@@ -2278,7 +2278,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       attachedTimestamp: email.attachedTimestamp,
     };
     setAttachedEmails((current) => [attached, ...current]);
-    setEmailPickerTargetBlockID(null);
+    setEmailPickerAnchor(null);
     setSelectedEmailIDsByBlock((current) => ({ ...current, [NODE_EMAIL_COLUMN_LAYOUT_ID]: email.messageID }));
     setClosedEmailBlockIDs((current) => {
       const next = new Set(current);
@@ -2298,7 +2298,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       });
       onProjectionMutation();
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "failed_to_attach_email");
+      setAttachedEmails((current) => current.filter((item) => item.id !== id));
+      const message = cause instanceof Error ? cause.message : "failed_to_attach_email";
+      onError(message);
+      throw cause instanceof Error ? cause : new Error(message);
     }
   }, [attachedEmails, canEdit, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
 
@@ -2551,9 +2554,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       setProjectRelationshipRefreshKey((key) => key + 1);
       return;
     }
-    throw new Error("A Node can only be linked to a Logic Gate or Project.");
+    if (entity.entityType === "email_message") {
+      if (!entity.emailMessage) throw new Error("The selected email is no longer available. Search for it again.");
+      await attachEmail(messageAttachmentPayload(entity.emailMessage, entity.emailSharedInboxID, entity.emailAccountEmail));
+      return;
+    }
+    throw new Error("A Node can only be linked to a Logic Gate, Project, or Email.");
   }, [
-    canEdit, companyID, loadNodeTimelineEvents, nodeID, nodePriorityUnassignedForLogicGate,
+    attachEmail, canEdit, companyID, loadNodeTimelineEvents, nodeID, nodePriorityUnassignedForLogicGate,
     onAssignToLogicGate, onRequireNodePriorityForLogicGateAssignment,
   ]);
 
@@ -2563,7 +2571,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (!email) return;
     event.preventDefault();
     setDropActive(false);
-    void attachEmail({ ...email, attachedTimestamp: new Date().toISOString() });
+    void attachEmail({ ...email, attachedTimestamp: new Date().toISOString() }).catch(() => undefined);
   }, [attachEmail, canEdit]);
 
   const openBlockEmail = useCallback((blockID: string, messageID: string) => {
@@ -3366,8 +3374,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           )}
           {canEdit && (
             <button
+              ref={emailPickerLauncherRef}
               type="button"
-              onClick={() => setEmailPickerTargetBlockID("")}
+              onClick={() => {
+                const bounds = emailPickerLauncherRef.current?.getBoundingClientRect();
+                setEmailPickerAnchor({ left: bounds?.left ?? 24, top: (bounds?.bottom ?? 49) + 7 });
+              }}
               style={{
                 minHeight: 30,
                 borderRadius: 9,
@@ -4129,14 +4141,21 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         </div>
         </AppModalPortal>
       )}
-      {canEdit && emailPickerTargetBlockID !== null && (
-        <EmailPickerModal
-          accent={accent}
-          surfaceText={surfaceText}
-          panelBackground={panelBackground}
-          strokeColor={strokeColor}
-          onClose={() => setEmailPickerTargetBlockID(null)}
-          onAttach={(message, scope) => { void attachEmail(messageAttachmentPayload(message, scope.sharedInboxID, scope.accountEmail)); }}
+      {canEdit && emailPickerAnchor && (
+        <UniversalEntityPicker
+          companyID={companyID}
+          requestJSON={requestJSON}
+          sourceType="node"
+          linkTargetTypes={["logic_gate", "project", "email_message"]}
+          initialMode="link"
+          initialCategory="email_message"
+          anchor={emailPickerAnchor}
+          onCancel={() => setEmailPickerAnchor(null)}
+          onChoose={async (entity: EditorEntityLink, mode: UniversalEntityPickerMode) => {
+            if (mode === "link") await linkEntityFromEditor(entity);
+            else openEditorEntityLink(entity);
+            setEmailPickerAnchor(null);
+          }}
         />
       )}
       {canEdit && deleteTextBlockConfirmation && (

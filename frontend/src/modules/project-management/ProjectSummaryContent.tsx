@@ -30,6 +30,8 @@ import { buildCompanyExplorerSearchTreeRows } from "../company-explorer/companyE
 import type { ExplorerTreeNode } from "../company-explorer/companyExplorerTypes.js";
 import { getExplorerDropPayloadItems, getExplorerDropPayloadItemType, type ExplorerDropPayload } from "../company-explorer/treePresentation.js";
 import { createRequestJSON } from "../api/requestJSON.js";
+import { openEditorEntityLink, type EditorEntityLink } from "../editor/editorEntityLinks.js";
+import { UniversalEntityPicker, type UniversalEntityPickerAnchor, type UniversalEntityPickerMode } from "../editor/UniversalEntityPicker.js";
 import {
   buildEditorAttachedEmailPayload,
   buildEditorTextBlockChatPayload,
@@ -76,7 +78,6 @@ import type { EditorDocumentFormattingController, EditorSelectionInlineFormatSta
 import {
   AttachedEmailOrganizerPane,
   ChatPane,
-  EmailPickerModal,
   NodeTextBlockEditor,
   TextBlockActionsMenu,
   TimelineCell,
@@ -459,7 +460,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [chatMessageFocusRequests, setChatMessageFocusRequests] = useState<Record<string, { messageID: string; requestID: number }>>({});
   const [chatComposerFocusRequestIDs, setChatComposerFocusRequestIDs] = useState<Record<string, number>>({});
   const [selectedEmailIDsByBlock, setSelectedEmailIDsByBlock] = useState<Record<string, string>>({});
-  const [emailPickerBlockID, setEmailPickerBlockID] = useState("");
+  const [emailPicker, setEmailPicker] = useState<{ blockID: string; anchor: UniversalEntityPickerAnchor } | null>(null);
   const [permissionsOpen, setPermissionsOpen] = useState(false);
   const [assignmentsOpen, setAssignmentsOpen] = useState(false);
   const [assignmentAccountIDs, setAssignmentAccountIDs] = useState<string[]>([]);
@@ -1558,11 +1559,23 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       setAttachedEmails((current) => [nextEmail, ...current.filter((email) => email.messageID !== nextEmail.messageID || email.blockID !== blockID)]);
       setOpenEmailBlockIDs((current) => new Set(current).add(blockID));
       setSelectedEmailIDsByBlock((current) => ({ ...current, [blockID]: payload.messageID }));
-      setEmailPickerBlockID("");
+      setEmailPicker(null);
     } catch (emailError) {
-      setError(emailError instanceof Error ? emailError.message : "Failed to attach email");
+      const message = emailError instanceof Error ? emailError.message : "Failed to attach email";
+      setError(message);
+      throw emailError instanceof Error ? emailError : new Error(message);
     }
   }, [companyID, projectID]);
+
+  const linkEmailFromEditor = useCallback(async (blockID: string, entity: EditorEntityLink) => {
+    if (entity.entityType !== "email_message" || !entity.emailMessage) {
+      throw new Error("A Project text box can only link a selected Email.");
+    }
+    await attachEmailToBlock(blockID, entity.emailMessage, {
+      sharedInboxID: entity.emailSharedInboxID,
+      accountEmail: entity.emailAccountEmail,
+    });
+  }, [attachEmailToBlock]);
 
   const removeAttachedEmail = useCallback(async (emailID: string) => {
     setAttachedEmails((current) => current.filter((email) => email.id !== emailID));
@@ -2650,7 +2663,14 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                           {emailMounted && (
                             <div style={{ ...projectEmailPaneWrapStyle, height: TEXT_BLOCK_MIN_HEIGHT, display: emailOpen ? "grid" : "none", overflow: "hidden", borderRight: `1px solid ${EDITOR_NEU_SOFT_BORDER}` }}>
                               <div style={projectEmailPaneToolbarStyle}>
-                                <button type="button" style={projectEmailAttachButtonStyle} onClick={() => setEmailPickerBlockID(block.id)}>Attach email</button>
+                                <button
+                                  type="button"
+                                  style={projectEmailAttachButtonStyle}
+                                  onClick={(event) => {
+                                    const bounds = event.currentTarget.getBoundingClientRect();
+                                    setEmailPicker({ blockID: block.id, anchor: { left: bounds.left, top: bounds.bottom + 7 } });
+                                  }}
+                                >Attach email</button>
                               </div>
                               <AttachedEmailOrganizerPane
                                 emails={attachedEmailsByBlockID.get(block.id) ?? []}
@@ -2704,7 +2724,8 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                 companyUsers={companyUsers}
                                 documentValue={block.document}
                                 documentScrollMemoryRef={projectDocumentScrollMemoryRef}
-                                chatMessages={chatMessagesByBlockID.get(block.id) ?? []}
+                                 chatMessages={chatMessagesByBlockID.get(block.id) ?? []}
+                                 onEntityLink={(entity) => linkEmailFromEditor(block.id, entity)}
                                 activeChatAnchorMessageID={activeChatMessageIDs[block.id] ?? ""}
                                 chatNavigationRequest={chatNavigationRequests[block.id] ?? null}
                                 surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
@@ -2992,14 +3013,21 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           ) : null}
         </aside>
       </div>
-      {emailPickerBlockID ? (
-        <EmailPickerModal
-          accent={accent}
-          surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
-          panelBackground={EDITOR_NEU_PANEL_BACKGROUND}
-          strokeColor={EDITOR_NEU_SOFT_BORDER}
-          onClose={() => setEmailPickerBlockID("")}
-          onAttach={(message, scope) => void attachEmailToBlock(emailPickerBlockID, message, scope)}
+      {emailPicker ? (
+        <UniversalEntityPicker
+          companyID={companyID}
+          requestJSON={attachmentRequestJSON}
+          sourceType="project"
+          linkTargetTypes={["email_message"]}
+          initialMode="link"
+          initialCategory="email_message"
+          anchor={emailPicker.anchor}
+          onCancel={() => setEmailPicker(null)}
+          onChoose={async (entity: EditorEntityLink, mode: UniversalEntityPickerMode) => {
+            if (mode === "link") await linkEmailFromEditor(emailPicker.blockID, entity);
+            else openEditorEntityLink(entity);
+            setEmailPicker(null);
+          }}
         />
       ) : null}
     </div>

@@ -49,14 +49,14 @@ Search and creation retain the current company/workspace scope and existing effe
 - Shared behavior means editing semantics: indentation, Delete/Backspace, copy/cut/paste, paste cleanup, lists, checklist, link creation, font size, bold, underline, table insertion where supported, selection behavior, keyboard routing, sanitization, and legacy plain-text loading.
 - Shared behavior does not mean shared persistence. Node, Logic Gate, project, personal mailbox, and shared mailbox saves must continue to use their own domain adapters and authorization scopes.
 - Chat panes inside node/project text boxes are conversation UI and must remain outside the unified rich editor contract.
-- Node/project email pickers are attach/select surfaces only; compose/reply bodies belong in real mail compose/reply surfaces and should use the unified editor.
+- The Universal picker's Emails category is the Node/Project attach/select surface; compose/reply bodies belong in real mail compose/reply surfaces and should use the unified editor.
 
 ## Unified Editor Implementation Update (2026-07-08)
 - `frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts` is the shared rich editor behavior source for keyboard routing, paste cleanup, deletion, lists/checklists, font sizing, bold/underline, links, tables, selection, undo/redo, and sanitized serialization.
 - `frontend/src/modules/editor/UnifiedRichEditorSurface.tsx` is the narrow adapter for rich editor surfaces that do not need the full linked-document frame, currently including My Triage compose/reply, Shared Triage compose/reply, and attached-email reply bodies.
 - `frontend/src/modules/editor/unifiedRichEditorContract.ts` records the Phase 1 surface IDs and persistence boundaries used by focused frontend tests.
 - Node text blocks, project text blocks, project inline critical-path node text boxes, and Logic Gate editor text continue to keep their domain persistence adapters while using the same editor handler behavior.
-- `EmailPickerModal` is an attach/select picker only. It can search, filter, scroll, and attach existing email, but it must not contain compose, send, schedule, draft-save, or compose-body editor behavior.
+- `UniversalEntityPicker` plus `UniversalPickerEmailPane` own Node/Project email selection. The obsolete `EmailPickerModal` is removed; the shared picker may search, filter, page, and attach existing email but must not contain compose, reply, send, schedule, draft-save, mailbox-mutation, or compose-body editor behavior.
 
 ## Unified Node Shell Implementation Update (2026-07-09)
 - `frontend/src/modules/editor/UnifiedNodeShell.tsx` is the shared user-facing shell source for full node-window chrome/action ordering and the node-workspace body boundary.

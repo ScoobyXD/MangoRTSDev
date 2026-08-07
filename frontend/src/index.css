@@ -1218,6 +1218,12 @@ button, input, textarea, select {
   --mango-entity-chip-shadow: rgba(180, 83, 9, 0.15);
 }
 
+.mango-editor-entity-link--email_message {
+  --mango-entity-chip-border: rgba(8, 145, 178, 0.4);
+  --mango-entity-chip-background: linear-gradient(135deg, rgba(255,255,255,0.98), rgba(207,250,254,0.9), rgba(224,231,255,0.84));
+  --mango-entity-chip-shadow: rgba(8, 145, 178, 0.15);
+}
+
 .mango-editor-entity-icon {
   display: block;
   flex: 0 0 auto;

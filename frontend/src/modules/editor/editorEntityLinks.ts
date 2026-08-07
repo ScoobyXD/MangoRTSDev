@@ -1,14 +1,22 @@
 import { buildLogicGateRoute, buildNodeRoute, buildProjectRoute, parseDeepLinkRoute } from "../../app/deepLinkRoutes.js";
 import { createExplorerEntityIconElement } from "../../icons/index.js";
+import type { EmailMailbox, EmailMessage } from "../communications/communicationsApi.js";
 import { createNodeFromSelectionTitle, normalizeSelectedTextForNodeTitle } from "../nodes/selectionNodeCreation.js";
 
-export type EditorEntityType = "node" | "logic_gate" | "project";
+export type EditorWorkspaceEntityType = "node" | "logic_gate" | "project";
+export type EditorEntityType = EditorWorkspaceEntityType | "email_message";
 
 export type EditorEntityLink = {
   entityType: EditorEntityType;
   entityID: string;
   label: string;
   updatedTimestamp?: string;
+  emailMessageID?: string;
+  emailThreadID?: string;
+  emailAccountEmail?: string;
+  emailSharedInboxID?: string;
+  emailMailbox?: EmailMailbox;
+  emailMessage?: EmailMessage;
 };
 
 export type EditorEntityLinkRequest = <T>(path: string, init?: RequestInit & { json?: unknown }) => Promise<T>;
@@ -40,20 +48,29 @@ export const EDITOR_ENTITY_TYPE_ATTRIBUTE = "data-mango-entity-type";
 export const EDITOR_ENTITY_ID_ATTRIBUTE = "data-mango-entity-id";
 export const EDITOR_ENTITY_LABEL_ATTRIBUTE = "data-mango-entity-label";
 export const EDITOR_ENTITY_NAVIGATION_STATE_KEY = "mangoInlineEditorEntityNavigation";
+export const EVENT_EDITOR_EMAIL_REFERENCE_OPEN = "mangorts:editor-email-reference-open";
 
 const ENTITY_DRAFT_BOUNDARY_PATTERN = /[A-Za-z0-9_#.-]/;
-const ENTITY_TYPES = new Set<EditorEntityType>(["node", "logic_gate", "project"]);
+const ENTITY_TYPES = new Set<EditorEntityType>(["node", "logic_gate", "project", "email_message"]);
+const WORKSPACE_ENTITY_TYPES = new Set<EditorWorkspaceEntityType>(["node", "logic_gate", "project"]);
+const EMAIL_MAILBOXES = new Set<EmailMailbox>(["primary", "drafts", "sent", "starred", "all", "archive", "spam"]);
 
 export function isEditorEntityType(value: unknown): value is EditorEntityType {
   return typeof value === "string" && ENTITY_TYPES.has(value as EditorEntityType);
 }
 
+export function isEditorEmailMailbox(value: unknown): value is EmailMailbox {
+  return typeof value === "string" && EMAIL_MAILBOXES.has(value as EmailMailbox);
+}
+
 export function editorEntityTypeLabel(type: EditorEntityType): string {
+  if (type === "email_message") return "Email";
   if (type === "logic_gate") return "Logic Gate";
   return type === "project" ? "Project" : "Node";
 }
 
 export function editorEntityRoute(entity: Pick<EditorEntityLink, "entityType" | "entityID">): string {
+  if (entity.entityType === "email_message") throw new Error("Email references open through their exact mailbox scope, not an app route.");
   if (entity.entityType === "logic_gate") return buildLogicGateRoute(entity.entityID);
   if (entity.entityType === "project") return buildProjectRoute(entity.entityID);
   return buildNodeRoute(entity.entityID);
@@ -87,6 +104,10 @@ export function openEditorEntityLink(entity: EditorEntityLink, context?: Pick<Ed
     return;
   }
   if (typeof window === "undefined") return;
+  if (entity.entityType === "email_message") {
+    window.dispatchEvent(new window.CustomEvent<EditorEntityLink>(EVENT_EDITOR_EMAIL_REFERENCE_OPEN, { detail: entity }));
+    return;
+  }
   const targetPath = editorEntityRoute(entity);
   if (window.location.pathname === targetPath) return;
   const sourceRoute = parseDeepLinkRoute(window.location.pathname);
@@ -126,7 +147,7 @@ export async function searchEditorEntityLinks(
   context: Pick<EditorEntityLinkContext, "companyID" | "requestJSON">,
   query: string,
   limit = 20,
-  entityTypes: readonly EditorEntityType[] = ["node", "logic_gate", "project"],
+  entityTypes: readonly EditorWorkspaceEntityType[] = ["node", "logic_gate", "project"],
 ): Promise<EditorEntityLink[]> {
   const requestedTypes = entityTypes.filter((type, index) => entityTypes.indexOf(type) === index);
   const requestedTypeSet = new Set(requestedTypes);
@@ -144,19 +165,19 @@ export async function searchEditorEntityLinks(
     const entityType = result.resource_type;
     const entityID = result.resource_id?.trim() ?? "";
     const label = result.display_name?.trim() ?? "";
-    if (!isEditorEntityType(entityType) || !requestedTypeSet.has(entityType) || !entityID || !label) return [];
+    if (!isEditorEntityType(entityType) || !WORKSPACE_ENTITY_TYPES.has(entityType as EditorWorkspaceEntityType) || !requestedTypeSet.has(entityType as EditorWorkspaceEntityType) || !entityID || !label) return [];
     const key = `${entityType}:${entityID}`;
     if (seen.has(key)) return [];
     seen.add(key);
     return [{ entityType, entityID, label, updatedTimestamp: result.updated_timestamp, responseIndex }];
   });
-  const typeOrder: Record<EditorEntityType, number> = {
+  const typeOrder: Record<EditorWorkspaceEntityType, number> = {
     node: 0,
     logic_gate: 1,
     project: 2,
   };
   return results
-    .sort((left, right) => typeOrder[left.entityType] - typeOrder[right.entityType] || left.responseIndex - right.responseIndex)
+    .sort((left, right) => typeOrder[left.entityType as EditorWorkspaceEntityType] - typeOrder[right.entityType as EditorWorkspaceEntityType] || left.responseIndex - right.responseIndex)
     .map(({ entityType, entityID, label, updatedTimestamp }) => ({ entityType, entityID, label, updatedTimestamp }));
 }
 
@@ -200,6 +221,11 @@ export function createEditorEntityLinkElement(ownerDocument: Document, entity: E
   element.setAttribute(EDITOR_ENTITY_TYPE_ATTRIBUTE, entity.entityType);
   element.setAttribute(EDITOR_ENTITY_ID_ATTRIBUTE, entity.entityID.trim());
   element.setAttribute(EDITOR_ENTITY_LABEL_ATTRIBUTE, entity.label.trim());
+  if (entity.emailMessageID?.trim()) element.setAttribute("data-mango-email-message-id", entity.emailMessageID.trim());
+  if (entity.emailThreadID?.trim()) element.setAttribute("data-mango-email-thread-id", entity.emailThreadID.trim());
+  if (entity.emailAccountEmail?.trim()) element.setAttribute("data-mango-email-account-email", entity.emailAccountEmail.trim().toLowerCase());
+  if (entity.emailSharedInboxID?.trim()) element.setAttribute("data-mango-email-shared-inbox-id", entity.emailSharedInboxID.trim());
+  if (entity.emailMailbox?.trim()) element.setAttribute("data-mango-email-mailbox", entity.emailMailbox.trim());
   element.setAttribute("aria-label", `Open ${editorEntityTypeLabel(entity.entityType)} ${entity.label.trim()}`);
   element.setAttribute("title", `Open ${editorEntityTypeLabel(entity.entityType)}: ${entity.label.trim()}`);
   const label = ownerDocument.createElement("span");
@@ -214,7 +240,20 @@ export function readEditorEntityLinkElement(element: Element | null): EditorEnti
   const entityType = element.getAttribute(EDITOR_ENTITY_TYPE_ATTRIBUTE);
   const entityID = element.getAttribute(EDITOR_ENTITY_ID_ATTRIBUTE)?.trim() ?? "";
   const label = element.getAttribute(EDITOR_ENTITY_LABEL_ATTRIBUTE)?.trim() || element.textContent?.trim() || "";
-  return isEditorEntityType(entityType) && entityID && label ? { entityType, entityID, label } : null;
+  if (!isEditorEntityType(entityType) || !entityID || !label) return null;
+  const emailMailbox = element.getAttribute("data-mango-email-mailbox")?.trim() ?? "";
+  return {
+    entityType,
+    entityID,
+    label,
+    ...(entityType === "email_message" ? {
+      emailMessageID: element.dataset.mangoEmailMessageId?.trim() || undefined,
+      emailThreadID: element.dataset.mangoEmailThreadId?.trim() || undefined,
+      emailAccountEmail: element.dataset.mangoEmailAccountEmail?.trim().toLowerCase() || undefined,
+      emailSharedInboxID: element.dataset.mangoEmailSharedInboxId?.trim() || undefined,
+      emailMailbox: isEditorEmailMailbox(emailMailbox) ? emailMailbox : undefined,
+    } : {}),
+  };
 }
 
 function editorEntityLinkImmediatelyBeforeCaret(root: HTMLElement): HTMLElement | null {
