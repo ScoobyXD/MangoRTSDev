@@ -12,6 +12,10 @@ export type SidebarPinTreeRow =
   | { entryType: "folder"; entryID: string; parentFolderID: string; depth: number; folder: SidebarPinFolder }
   | { entryType: "pin"; entryID: string; parentFolderID: string; depth: number; pin: SidebarPin };
 
+export type SidebarPinTreeNode =
+  | { entryType: "folder"; entryID: string; parentFolderID: string; depth: number; folder: SidebarPinFolder; children: SidebarPinTreeNode[] }
+  | { entryType: "pin"; entryID: string; parentFolderID: string; depth: number; pin: SidebarPin };
+
 export type SidebarPinDropPlacement = "before" | "after" | "inside";
 
 export function emptySidebarPinTree(): SidebarPinTree {
@@ -30,6 +34,23 @@ export function sortSidebarPinEntries<T extends { position: number; createdTimes
 }
 
 export function buildSidebarPinTreeRows(tree: SidebarPinTree, expandedFolderIDs: ReadonlySet<string>): SidebarPinTreeRow[] {
+  const rows: SidebarPinTreeRow[] = [];
+  const append = (nodes: SidebarPinTreeNode[]) => {
+    for (const node of nodes) {
+      if (node.entryType === "folder") {
+        const { children: _children, ...row } = node;
+        rows.push(row);
+        append(node.children);
+      } else {
+        rows.push(node);
+      }
+    }
+  };
+  append(buildSidebarPinTreeNodes(tree, expandedFolderIDs));
+  return rows;
+}
+
+export function buildSidebarPinTreeNodes(tree: SidebarPinTree, expandedFolderIDs: ReadonlySet<string>): SidebarPinTreeNode[] {
   const foldersByParent = new Map<string, SidebarPinFolder[]>();
   const pinsByParent = new Map<string, SidebarPin[]>();
   for (const folder of tree.folders) {
@@ -43,9 +64,8 @@ export function buildSidebarPinTreeRows(tree: SidebarPinTree, expandedFolderIDs:
     pinsByParent.set(pin.parentFolderID, items);
   }
 
-  const rows: SidebarPinTreeRow[] = [];
   const visited = new Set<string>();
-  const visit = (parentFolderID: string, depth: number) => {
+  const visit = (parentFolderID: string, depth: number): SidebarPinTreeNode[] => {
     const entries = sortSidebarPinEntries([
       ...(foldersByParent.get(parentFolderID) ?? []).map((folder) => ({
         entryType: "folder" as const,
@@ -62,19 +82,26 @@ export function buildSidebarPinTreeRows(tree: SidebarPinTree, expandedFolderIDs:
         pin,
       })),
     ]);
+    const nodes: SidebarPinTreeNode[] = [];
     for (const entry of entries) {
       if (entry.entryType === "folder") {
         if (visited.has(entry.entryID)) continue;
         visited.add(entry.entryID);
-        rows.push({ entryType: "folder", entryID: entry.entryID, parentFolderID, depth, folder: entry.folder });
-        if (expandedFolderIDs.has(entry.entryID)) visit(entry.entryID, depth + 1);
+        nodes.push({
+          entryType: "folder",
+          entryID: entry.entryID,
+          parentFolderID,
+          depth,
+          folder: entry.folder,
+          children: expandedFolderIDs.has(entry.entryID) ? visit(entry.entryID, depth + 1) : [],
+        });
       } else {
-        rows.push({ entryType: "pin", entryID: entry.entryID, parentFolderID, depth, pin: entry.pin });
+        nodes.push({ entryType: "pin", entryID: entry.entryID, parentFolderID, depth, pin: entry.pin });
       }
     }
+    return nodes;
   };
-  visit("", 0);
-  return rows;
+  return visit("", 0);
 }
 
 export function upsertSidebarPin(tree: SidebarPinTree, pin: SidebarPin): SidebarPinTree {

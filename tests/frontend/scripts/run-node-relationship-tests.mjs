@@ -132,6 +132,10 @@ const componentTests = [
     source: resolve(repoRoot, "tests/frontend/modules/editor/editorTextBlockChatNavigation.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorTextBlockChatNavigation.test.js"),
   },
+  {
+    source: resolve(repoRoot, "tests/frontend/app/sidebarPinnedSection.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/app/sidebarPinnedSection.test.js"),
+  },
 ];
 const packageFile = resolve(frontendRoot, ".test-dist/package.json");
 const tscEntrypoint = resolve(frontendRoot, "node_modules/typescript/bin/tsc");

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  buildSidebarPinTreeNodes,
   buildSidebarPinTreeRows,
   planSidebarPinMove,
   removeSidebarPinFolderSubtree,
@@ -31,6 +32,28 @@ describe("sidebarPinTree", () => {
       buildSidebarPinTreeRows(tree, new Set()).map((row) => row.entryID),
       ["pin-root", "folder-a"],
     );
+  });
+
+  it("builds recursive folder containers without changing mixed sibling order", () => {
+    const tree: SidebarPinTree = {
+      folders: [folder("folder-a", "", 1000), folder("folder-b", "folder-a", 2000)],
+      pins: [pin("pin-root", "", 500), pin("pin-a", "folder-a", 1000), pin("pin-b", "folder-b", 1000)],
+    };
+    const nodes = buildSidebarPinTreeNodes(tree, new Set(["folder-a", "folder-b"]));
+    assert.deepEqual(nodes.map((node) => node.entryID), ["pin-root", "folder-a"]);
+
+    const folderA = nodes.find((node) => node.entryID === "folder-a");
+    if (!folderA || folderA.entryType !== "folder") throw new Error("folder-a should be a recursive folder node");
+    assert.deepEqual(folderA.children.map((node) => [node.entryID, node.depth]), [["pin-a", 1], ["folder-b", 1]]);
+
+    const folderB = folderA.children.find((node) => node.entryID === "folder-b");
+    if (!folderB || folderB.entryType !== "folder") throw new Error("folder-b should be nested under folder-a");
+    assert.deepEqual(folderB.children.map((node) => [node.entryID, node.depth]), [["pin-b", 2]]);
+
+    const collapsed = buildSidebarPinTreeNodes(tree, new Set());
+    const collapsedFolder = collapsed.find((node) => node.entryID === "folder-a");
+    if (!collapsedFolder || collapsedFolder.entryType !== "folder") throw new Error("collapsed folder-a should remain visible");
+    assert.deepEqual(collapsedFolder.children, []);
   });
 
   it("moves mixed entries between parents and rejects folder descendant cycles", () => {
