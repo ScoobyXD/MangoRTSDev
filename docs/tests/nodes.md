@@ -4,7 +4,7 @@ A user opens a Node through Editor, Updates, or another supported Node surface
 ↓
 Each direct RACI principal resolves to assignment metadata or the current company directory, so a sparse payload never displays an internal user/group ID as its name
 ↓
-The four equal-width role cards remain on one line and place two single-line assignment names on each row
+The four equal-width role cards remain on one line, pair two single-line names on complete rows, and give a single or final odd name the complete row width
 ↓
 The Node header presents `##` as a light, readable button with an explicit universal-linker label and the established active border when its picker opens
 ↓
@@ -138,7 +138,7 @@ N4 - Group assignments remain typed group edges and expand through current membe
 N5 - When one user reaches several roles through direct or group sources, the effective order is Responsible, Accountable, Consulted, then Informed.
 N6 - Node RACI assignment pickers should display the company user-group tree as a collapsed hierarchy.
 N7 - Node RACI picker subgroups and users should be visually indented according to their hierarchy depth.
-N8 - Every Node RACI card resolves each direct user/group label from assignment metadata and then the current company directory, never presents the principal ID as the visible name, and provides per-assignment removal in its assignment list. The four role cards have equal width, remain in one horizontal row, and place two single-line names on each assignment row instead of adding one full row per principal or reducing the list to a numeric summary.
+N8 - Every Node RACI card resolves each direct user/group label from assignment metadata and then the current company directory, never presents the principal ID as the visible name, and provides per-assignment removal in its assignment list. The four role cards have equal width and remain in one horizontal row. Complete pairs share a row equally, while one assignment or the final odd assignment spans both columns so it receives the full card width; the list is never reduced to a numeric summary.
 N9 - DELETE `/v1/nodes/{node_id}` requires current effective Edit access, moves the Node and related placements to the deleting actor's Recycle Bin, and removes the Node's two V2 settings rows and cascading policy edges.
 N10 - Node soft delete requires edit access to the node; no access is denied.
 N11 - Successful node soft delete stamps `deleted_by_user_id` with the deleting actor.
@@ -488,7 +488,7 @@ Expected:
 - Typing `@` or `!` in a node text box or its chat opens the people picker with each user represented by a stable profile color keyed by normalized user ID, then email, then display name. Rich-editor keyboard selection adds a translucent same-color row tint and active rail; chat retains its active-row treatment. Both keep the profile avatar opaque/full-color with tested white-text contrast instead of washing every user gray.
 - The shared format toolbar controls the focused node text box through the shared formatting controller, so font size, inline formats, highlight, alignment, table, and outline-style behavior cannot diverge by node opener.
 - Editor, Permissions, shared formatting, Outline Styles/Automatic Numbering, and the immediately adjacent More control remain on one nonwrapping primary-header line; Relationships, Metadata, History, Save Settings, version/related-node commands, and supported secondary actions remain available in the keyboard-operable **More editor actions** menu.
-- The four RACI cards remain equal-width in one horizontal row, widen together, and place two single-line principal names on each assignment row. A narrow adjacent pane may require horizontal overflow instead of wrapping the role cards into taller header content.
+- The four RACI cards remain equal-width in one horizontal row and widen together. Complete name pairs share a row equally, while a single or final odd principal spans the complete row. A narrow adjacent pane may require horizontal overflow instead of wrapping the role cards into taller header content.
 - Relationships, Metadata, History, and Save Settings disable formatting only when their content hides/replaces the document; returning to the document preserves the text-block layout.
 - Node windows, dialogs, and previews render in the shared body-level overlay layer above Key Views/Explorer/Search Explorer; blocking modes trap/restore focus, while anchored Kanban panels remain modeless until fullscreen.
 - Project Logic Gates / Nodes inline node editors remain in document flow; Kanban panels retain the same mounted editor while moving between anchored and fullscreen geometry.

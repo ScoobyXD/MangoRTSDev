@@ -6,7 +6,7 @@ Mango keeps each direct RACI edge keyed by its unchanged typed user or group pri
 ↓
 The shared RACI header resolves the visible name from assignment metadata and then the current company user/group directory
 ↓
-The four equal-width role cards show two resolved names per row; a temporarily unresolved principal uses a neutral unknown label instead of displaying its internal ID
+The four equal-width role cards pair resolved names where two are available, while a single or final odd name spans its complete row; a temporarily unresolved principal uses a neutral unknown label instead of displaying its internal ID
 ↓
 This presentation rule does not translate the principal ID, copy an assignment, or change RACI cardinality, inheritance, permissions, or relationship authority
 

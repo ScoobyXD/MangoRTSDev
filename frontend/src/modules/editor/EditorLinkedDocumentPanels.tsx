@@ -1275,11 +1275,19 @@ function RACIRoleEditor({
               <span data-raci-assignment-names={role} style={{ minWidth: 0, flex: "1 1 auto", display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", columnGap: 6, rowGap: 2, textAlign: "left", lineHeight: 1.25 }}>
                 {assignedLabels.length === 0 ? (
                   <span data-raci-assignment-empty={role} style={{ minWidth: 0, gridColumn: "1 / -1", whiteSpace: "nowrap" }}>No assignments</span>
-                ) : assignedLabels.map((assignmentLabel, index) => (
-                  <span key={`${index}:${assignmentLabel}`} data-raci-assignment-name={role} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {assignmentLabel}
-                  </span>
-                ))}
+                ) : assignedLabels.map((assignmentLabel, index) => {
+                  const isUnpairedFinalAssignment = assignedLabels.length % 2 === 1 && index === assignedLabels.length - 1;
+                  return (
+                    <span
+                      key={`${index}:${assignmentLabel}`}
+                      data-raci-assignment-name={role}
+                      data-raci-assignment-row-width={isUnpairedFinalAssignment ? "full" : "half"}
+                      style={{ minWidth: 0, gridColumn: isUnpairedFinalAssignment ? "1 / -1" : undefined, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                    >
+                      {assignmentLabel}
+                    </span>
+                  );
+                })}
               </span>
               <span aria-hidden="true" style={{ color: roleAccent || accent, fontSize: 9, fontWeight: 900 }}>{assignedListVisible ? "^" : "v"}</span>
             </button>

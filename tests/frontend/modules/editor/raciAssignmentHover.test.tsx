@@ -138,6 +138,9 @@ test("RACI cards resolve directory names, place two assignments per row, and pre
     const assignmentNamesGrid = assignmentButton.querySelector<HTMLElement>('[data-raci-assignment-names="informed"]');
     assert.equal(assignmentNamesGrid?.style.gridTemplateColumns, "repeat(2, minmax(0, 1fr))", "two equal name columns share each assignment row");
     assert.equal(assignmentNameRows.every((row) => row.style.whiteSpace === "nowrap"), true, "each assigned principal owns one unwrapped line");
+    assert.equal(assignmentNameRows.slice(0, -1).every((row) => row.dataset.raciAssignmentRowWidth === "half" && row.style.gridColumn === ""), true, "complete pairs share their row equally");
+    assert.equal(assignmentNameRows.at(-1)?.dataset.raciAssignmentRowWidth, "full", "the fifth assignment owns the final row by itself");
+    assert.equal(assignmentNameRows.at(-1)?.style.gridColumn, "1 / -1", "an unpaired final name receives the full card width");
     const roleGrid = container.querySelector<HTMLElement>('[aria-label="RACI assignments"]');
     assert.equal(roleGrid?.style.gridTemplateColumns, "repeat(4, minmax(170px, 1fr))", "all four expanded RACI cards retain equal widths");
     const responsibleEmptyRow = container.querySelector<HTMLElement>('[data-raci-assignment-empty="responsible"]');
