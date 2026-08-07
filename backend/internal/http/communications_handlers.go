@@ -332,6 +332,114 @@ func (s *Server) handleCommunicationsMessages(w http.ResponseWriter, r *http.Req
 	}
 }
 
+func (s *Server) handleCommunicationsStoredMessages(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	query, valid := parseNylasMessageQuery(w, r)
+	if !valid {
+		return
+	}
+	if query.CompanyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	if query.PageToken != "" {
+		writeError(w, http.StatusBadRequest, "stored_email_page_token_unsupported")
+		return
+	}
+	if !requireCompanyAccess(w, r, query.CompanyID) {
+		return
+	}
+	connection, ok := s.requireCommunicationsConnection(w, r, actor, query.CompanyID, query.SharedInboxID, store.EntityPermissionEdit)
+	if !ok {
+		return
+	}
+	readInput := store.CommunicationsEmailAccountReadInput{
+		CompanyID: query.CompanyID, AccountEmail: connection.AccountEmail, Provider: connection.Provider,
+	}
+	if query.SharedInboxID != "" {
+		readInput.SharedInboxID = query.SharedInboxID
+	} else {
+		readInput.PersonalUserID = connection.UserID
+		readInput.PersonalAccountEmail = connection.AccountEmail
+	}
+	storedMessages, err := s.repo.ListCommunicationsEmailMessagesForAccount(readInput)
+	if errors.Is(err, store.ErrNotFound) {
+		writeJSON(w, http.StatusOK, NylasMessagePage{Messages: []NylasMessage{}})
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_list_stored_email")
+		return
+	}
+	messages := make([]NylasMessage, 0, len(storedMessages))
+	for _, stored := range storedMessages {
+		message := nylasMessageFromStoredSnapshot(stored.Message)
+		message.EmailMessageID = stored.EmailMessageID
+		if message.ThreadID == "" {
+			message.ThreadID = stored.ProviderThreadID
+		}
+		if nylasMessageMatchesCachedPageQuery(message, query) {
+			message.Body = ""
+			message.Attachments = nil
+			messages = append(messages, message)
+		}
+	}
+	sort.SliceStable(messages, func(i, j int) bool {
+		if messages[i].Date != messages[j].Date {
+			if query.Order == "oldest" {
+				return messages[i].Date < messages[j].Date
+			}
+			return messages[i].Date > messages[j].Date
+		}
+		return messages[i].ID < messages[j].ID
+	})
+	if len(messages) > query.Limit {
+		messages = messages[:query.Limit]
+	}
+	writeJSON(w, http.StatusOK, NylasMessagePage{Messages: messages})
+}
+
+func nylasMessageFromStoredSnapshot(message domain.EmailMessageSnapshot) NylasMessage {
+	return NylasMessage{
+		EmailMessageID: message.EmailMessageID, ID: message.ID, ThreadID: message.ThreadID,
+		Subject: message.Subject, Snippet: message.Snippet, Body: message.Body, Date: message.Date,
+		Unread: message.Unread, Starred: message.Starred,
+		From: nylasAddressesFromStoredSnapshots(message.From), To: nylasAddressesFromStoredSnapshots(message.To),
+		Cc: nylasAddressesFromStoredSnapshots(message.Cc), Bcc: nylasAddressesFromStoredSnapshots(message.Bcc),
+		ReplyTo:     nylasAddressesFromStoredSnapshots(message.ReplyTo),
+		Attachments: nylasAttachmentsFromStoredSnapshots(message.Attachments),
+		Folders:     append([]string(nil), message.Folders...), FolderIDs: append([]string(nil), message.FolderIDs...),
+	}
+}
+
+func nylasAddressesFromStoredSnapshots(addresses []domain.EmailAddressSnapshot) []NylasEmailAddress {
+	out := make([]NylasEmailAddress, 0, len(addresses))
+	for _, address := range addresses {
+		out = append(out, NylasEmailAddress{Name: address.Name, Email: address.Email})
+	}
+	return out
+}
+
+func nylasAttachmentsFromStoredSnapshots(attachments []domain.EmailAttachmentSnapshot) []NylasAttachment {
+	out := make([]NylasAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		out = append(out, NylasAttachment{
+			ID: attachment.ID, AttachmentID: attachment.AttachmentID, Filename: attachment.Filename,
+			ContentType: attachment.ContentType, ContentID: attachment.ContentID,
+			ContentDisposition: attachment.ContentDisposition, IsInline: attachment.IsInline, Size: attachment.Size,
+		})
+	}
+	return out
+}
+
 func (s *Server) handleCommunicationsMessagesArchiveBatch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -499,7 +607,7 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 		action = "attachment"
 		attachmentID = strings.TrimSpace(parts[2])
 	}
-	if messageID == "" || len(parts) > 3 || (len(parts) == 2 && action != "archive" && action != "unarchive") || (len(parts) == 3 && action != "attachment") {
+	if messageID == "" || len(parts) > 3 || (len(parts) == 2 && action != "archive" && action != "unarchive" && action != "ingest") || (len(parts) == 3 && action != "attachment") {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
@@ -562,6 +670,14 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 	}
 	connection, ok := s.requireCommunicationsConnection(w, r, actor, companyID, sharedInboxID, requiredSharedInboxAccess)
 	if !ok {
+		return
+	}
+	if action == "ingest" {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		s.ingestCommunicationsMessage(w, r, connection, companyID, sharedInboxID, messageID, actor.User.UserID)
 		return
 	}
 	if action == "archive" {
@@ -648,6 +764,49 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 	}
+}
+
+func (s *Server) ingestCommunicationsMessage(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection, companyID, sharedInboxID, messageID, actorUserID string) {
+	message, err := s.communicationsMessage(r.Context(), connection, messageID)
+	if err != nil {
+		s.writeNylasError(w, r, connection, err)
+		return
+	}
+	snapshot := emailMessageSnapshotFromNylas(message)
+	input := s.communicationsEmailThreadInputForConnection(connection, snapshot, snapshot.ThreadID == "")
+	input.CompanyID = companyID
+	input.RequestedByUserID = actorUserID
+	if sharedInboxID != "" {
+		input.SharedInboxID = sharedInboxID
+		input.PersonalUserID = ""
+		input.PersonalAccountEmail = ""
+	} else {
+		input.SharedInboxID = ""
+		input.PersonalUserID = connection.UserID
+		input.PersonalAccountEmail = connection.AccountEmail
+	}
+	thread, err := s.repo.UpsertCommunicationsEmailThread(input)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_ingest_email_message")
+		return
+	}
+	message.EmailMessageID = internalEmailMessageIDForProvider(thread, message.ID)
+	if message.EmailMessageID == "" {
+		writeError(w, http.StatusInternalServerError, "failed_to_ingest_email_message")
+		return
+	}
+	if connection.EmailConnectionID != "" {
+		if _, _, err := s.repo.EnsureCommunicationsEmailIngestionJob(store.CommunicationsEmailIngestionJobInput{
+			CompanyID: companyID, EmailConnectionID: connection.EmailConnectionID,
+			EmailThreadID: thread.EmailThreadID, ProviderMessageID: message.ID,
+			ProviderThreadID: message.ThreadID, Priority: store.CommunicationsEmailIngestionPriorityVisible,
+		}); err != nil {
+			log.Printf("failed to continue selected email ingestion company_id=%s connection_id=%s message_id=%s: %v", companyID, connection.EmailConnectionID, message.ID, err)
+		} else {
+			s.wakeCommunicationsEmailThreadDownloadWorker()
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"message": message})
 }
 
 func (s *Server) downloadCommunicationsAttachment(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection, _, _ string, messageID, attachmentID string) {

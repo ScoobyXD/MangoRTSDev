@@ -65,7 +65,9 @@ test("node-attached email viewer discloses per-message recipients while retainin
   assert.match(nodeParts, /account_email: mailboxScope\.accountEmail/);
   assert.match(universalPickerEmailPane, /status\.connected && status\.status === "connected"/);
   assert.match(universalPickerEmailPane, /if \(!active \|\| !accountResolved \|\| !accountEmail\) return undefined/);
-  assert.ok((universalPickerEmailPane.match(/listEmailMessages\(\{/g) ?? []).length >= 2);
+  assert.match(universalPickerEmailPane, /await listStoredEmailMessages\(params\)/);
+  assert.match(universalPickerEmailPane, /await listEmailMessages\(params\)/);
+  assert.match(universalPickerEmailPane, /const page = await listEmailMessages\(\{/);
   assert.match(calendarInviteCard, /Calendar invitation/);
   assert.match(nodeParts, /window\.setTimeout\(\(\) => replyEditorControllerRef\.current\?\.focus\(\), 0\)/);
 });

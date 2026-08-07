@@ -13,6 +13,7 @@ import {
   downloadEmailAttachment,
   deleteEmailDraft,
   emailMessageMatchesListFilters,
+  ensureEmailMessageIngested,
   ensureEmailCollaboration,
   fetchCommunicationsStatus,
   getCalendarInviteEvent,
@@ -32,6 +33,7 @@ import {
   listEmailDrafts,
   listEmailFolders,
   listEmailMessages,
+  listStoredEmailMessages,
   listNodeFolderItems,
   listNodes,
   markCommunicationsWorkspacePanelStale,
@@ -77,6 +79,39 @@ test("communications message query omits empty values and encodes filters", () =
 test("communications folder query scopes shared inbox folder reads", () => {
   assert.equal(createFolderQuery({}), "");
   assert.equal(createFolderQuery({ companyID: " company-1 ", sharedInboxID: " shared-1 " }), "?company_id=company-1&shared_inbox_id=shared-1");
+});
+
+test("stored search and selected-message ingestion preserve the exact mailbox scope", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ path: string; method: string }> = [];
+  globalThis.fetch = async (input, init) => {
+    const path = String(input);
+    calls.push({ path, method: init?.method ?? "GET" });
+    if (path.includes("/stored-messages")) return jsonResponse({ messages: [{ ...message("stored"), email_message_id: "internal-stored" }] });
+    return jsonResponse({ message: { ...message("provider-only"), email_message_id: "internal-provider" } });
+  };
+  try {
+    const page = await listStoredEmailMessages({
+      companyID: "company-1", accountEmail: "Owner@Example.com", mailbox: "primary", limit: 12, q: "invoice",
+    });
+    assert.equal(page.messages[0]?.email_message_id, "internal-stored");
+    const stored = await ensureEmailMessageIngested("provider-only", {
+      companyID: "company-1", accountEmail: "Owner@Example.com",
+    });
+    assert.equal(stored.email_message_id, "internal-provider");
+    assert.deepEqual(calls, [
+      {
+        path: "/v1/communications/stored-messages?limit=12&mailbox=primary&company_id=company-1&account_email=owner%40example.com&q=invoice",
+        method: "GET",
+      },
+      {
+        path: "/v1/communications/messages/provider-only/ingest?company_id=company-1&account_email=owner%40example.com",
+        method: "POST",
+      },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("email collaboration list is read-only while floating-node ensure sends a retry-safe node identity", async () => {

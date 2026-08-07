@@ -465,10 +465,18 @@ test("adding a scope to a healthy socket does not create a global transport outa
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
   assert.equal(statuses[statuses.length - 1], "connected");
 
-  const unsubscribeChat = client.subscribe("chat:node:node-1");
+  let rejected = "";
+  const unsubscribeChat = client.subscribe("chat:node:node-1", {
+    onRejected: (message) => { rejected = message.error ?? ""; },
+  });
   assert.equal(statuses[statuses.length - 1], "connected");
   assert.equal(shouldBlockRealtimeMutation("POST", "/v1/nodes/node-1"), false);
   assert.equal(JSON.parse(socket.sent[socket.sent.length - 1] ?? "{}").scope, "chat:node:node-1");
+  socket.onmessage?.({ data: JSON.stringify({ type: "subscription.rejected", scope: "chat:node:node-1", error: "forbidden" }) });
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+  assert.equal(rejected, "forbidden", "the rejected feature still receives its scoped error");
+  assert.equal(statuses[statuses.length - 1], "connected", "an optional rejected scope cannot override a healthy heartbeat");
+  assert.equal(shouldBlockRealtimeMutation("POST", "/v1/nodes/node-1"), false);
 
   unsubscribeChat();
   unsubscribeNotifications();

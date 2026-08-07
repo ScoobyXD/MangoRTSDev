@@ -476,6 +476,7 @@ export class MangoRealtimeClient {
   private readonly disconnectedAfterMs: number;
   private readonly subscriptions = new Map<string, Set<RealtimeSubscriptionHandlers>>();
   private readonly acceptedScopes = new Set<string>();
+  private readonly rejectedScopes = new Set<string>();
   private socket: WebSocket | null = null;
   private opening = false;
   private manualClose = false;
@@ -529,6 +530,7 @@ export class MangoRealtimeClient {
       if (current && current.size > 0) return;
       this.subscriptions.delete(cleanScope);
       this.acceptedScopes.delete(cleanScope);
+      this.rejectedScopes.delete(cleanScope);
       if (!this.hasConsumers()) {
         this.close();
         return;
@@ -558,6 +560,7 @@ export class MangoRealtimeClient {
     this.heartbeatConfirmed = false;
     this.recoveredAttemptID = 0;
     this.acceptedScopes.clear();
+    this.rejectedScopes.clear();
     this.markOutage();
     const attemptID = this.openAttemptID + 1;
     this.openAttemptID = attemptID;
@@ -592,6 +595,7 @@ export class MangoRealtimeClient {
           this.heartbeatConfirmed = false;
           this.recoveredAttemptID = 0;
           this.acceptedScopes.clear();
+          this.rejectedScopes.clear();
           this.stopHeartbeatWatchdog();
           if (!this.manualClose && this.hasConsumers()) {
             this.markOutage();
@@ -624,6 +628,7 @@ export class MangoRealtimeClient {
     this.serverReady = false;
     this.heartbeatConfirmed = false;
     this.acceptedScopes.clear();
+    this.rejectedScopes.clear();
     setRealtimeHealthClientActive(this.healthKey, false);
   }
 
@@ -664,6 +669,7 @@ export class MangoRealtimeClient {
     this.serverReady = false;
     this.heartbeatConfirmed = false;
     this.acceptedScopes.clear();
+    this.rejectedScopes.clear();
     this.reconnectAttempts = 0;
     this.setHealth("disconnected");
     setRealtimeHealthClientActive(this.healthKey, false);
@@ -709,8 +715,10 @@ export class MangoRealtimeClient {
     if (!bucket || bucket.size === 0) return;
     if (message.type === "subscription.accepted") {
       this.acceptedScopes.add(message.scope);
+      this.rejectedScopes.delete(message.scope);
     } else if (message.type === "subscription.rejected") {
       this.acceptedScopes.delete(message.scope);
+      this.rejectedScopes.add(message.scope);
     }
     for (const sub of bucket) {
       switch (message.type) {
@@ -762,7 +770,7 @@ export class MangoRealtimeClient {
   private maybeFinishRecovery(): void {
     if (!this.serverReady || !this.heartbeatConfirmed || this.recoveryPromise) return;
     for (const scope of this.subscriptions.keys()) {
-      if (!this.acceptedScopes.has(scope)) return;
+      if (!this.acceptedScopes.has(scope) && !this.rejectedScopes.has(scope)) return;
     }
     if (this.recoveredAttemptID === this.openAttemptID) {
       this.setHealth("connected", this.lastHeartbeatConfirmedAt);
@@ -770,7 +778,8 @@ export class MangoRealtimeClient {
     }
     const attemptID = this.openAttemptID;
     const recoveries: Array<Promise<void>> = [];
-    for (const bucket of this.subscriptions.values()) {
+    for (const [scope, bucket] of this.subscriptions.entries()) {
+      if (!this.acceptedScopes.has(scope)) continue;
       for (const subscription of bucket) {
         if (!subscription.onRecover) continue;
         recoveries.push(Promise.resolve().then(() => subscription.onRecover?.()));
@@ -781,7 +790,7 @@ export class MangoRealtimeClient {
       .then(() => {
         if (attemptID !== this.openAttemptID || !this.serverReady || !this.heartbeatConfirmed) return;
         for (const scope of this.subscriptions.keys()) {
-          if (!this.acceptedScopes.has(scope)) return;
+          if (!this.acceptedScopes.has(scope) && !this.rejectedScopes.has(scope)) return;
         }
         this.recoveredAttemptID = attemptID;
         this.reconnectAttempts = 0;

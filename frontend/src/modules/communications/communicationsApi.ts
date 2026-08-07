@@ -692,6 +692,25 @@ export async function listEmailMessages(params: ListMessagesParams): Promise<Mes
   }
 }
 
+export async function listStoredEmailMessages(params: ListMessagesParams): Promise<MessagePage> {
+  const localParams = { ...params, pageToken: undefined, refresh: undefined };
+  return cloneMessagePage(await apiFetchJSON<MessagePage>(`/v1/communications/stored-messages${createMessageQuery(localParams)}`));
+}
+
+export async function ensureEmailMessageIngested(
+  messageID: string,
+  scope: Pick<ListMessagesParams, "companyID" | "sharedInboxID" | "accountEmail">,
+): Promise<EmailMessage> {
+  const cleanMessageID = messageID.trim();
+  if (!cleanMessageID) throw new Error("email_message_id_required");
+  const query = createMessageQuery(scope);
+  const payload = await apiFetchJSON<{ message: EmailMessage }>(
+    `/v1/communications/messages/${encodeURIComponent(cleanMessageID)}/ingest${query}`,
+    { method: "POST" },
+  );
+  return cloneMessage(payload.message);
+}
+
 export function sortEmailMessagesByDateDescending(messages: EmailMessage[]): EmailMessage[] {
   return messages
     .map((message, index) => ({ message: cloneMessage(message), index }))

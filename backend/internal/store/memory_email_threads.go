@@ -252,6 +252,34 @@ func (r *MemoryRepo) ListCommunicationsEmailThreadsForAccount(input Communicatio
 	})
 	return items, nil
 }
+
+func (r *MemoryRepo) ListCommunicationsEmailMessagesForAccount(input CommunicationsEmailAccountReadInput) ([]domain.CommunicationsEmailMessage, error) {
+	input, scope, err := normalizeCommunicationsEmailAccountReadInput(input)
+	if err != nil {
+		return nil, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	items := []domain.CommunicationsEmailMessage{}
+	for _, thread := range r.emailThreads {
+		if thread.Provider != input.Provider || !communicationsEmailThreadMatchesScope(thread, input.CompanyID, scope) {
+			continue
+		}
+		clonedThread := cloneCommunicationsEmailThread(thread)
+		for _, message := range clonedThread.Messages {
+			message.ProviderThreadID = clonedThread.ProviderThreadID
+			message.Message.ThreadID = clonedThread.ProviderThreadID
+			items = append(items, message)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Message.Date != items[j].Message.Date {
+			return items[i].Message.Date > items[j].Message.Date
+		}
+		return items[i].ProviderMessageID < items[j].ProviderMessageID
+	})
+	return items, nil
+}
 func (r *MemoryRepo) GetCommunicationsNodeEmailThread(companyID, nodeID, emailThreadID string) (domain.CommunicationsNodeEmailThread, error) {
 	companyID, nodeID, emailThreadID = cleanUUIDText(companyID), cleanUUIDText(nodeID), cleanUUIDText(emailThreadID)
 	if companyID == "" || nodeID == "" || emailThreadID == "" {

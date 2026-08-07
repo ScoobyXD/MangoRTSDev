@@ -5,6 +5,7 @@ import { fetchSidebarPinTreeWithRequest } from "../../app/sidebarPinsApi.js";
 import { buildSidebarPinTreeRows, type SidebarPinTreeRow } from "../../app/sidebarPinTree.js";
 import type { SidebarPinTree } from "../../app/sidebarPins.js";
 import { ExplorerEntityIcon, ExplorerRowIcon, HeaderTriageIcon } from "../../icons/index.js";
+import { ensureEmailMessageIngested } from "../communications/communicationsApi.js";
 import {
   editorEntityTypeLabel,
   searchEditorEntityLinks,
@@ -202,7 +203,21 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
     setBusy(true);
     setError("");
     try {
-      await props.onChoose(entity, mode);
+      let selectedEntity = entity;
+      if (entity.entityType === "email_message" && entity.emailMessage && !entity.emailMessage.email_message_id?.trim()) {
+        const storedMessage = await ensureEmailMessageIngested(entity.entityID, {
+          companyID: props.companyID,
+          sharedInboxID: entity.emailSharedInboxID,
+          accountEmail: entity.emailAccountEmail,
+        });
+        selectedEntity = {
+          ...entity,
+          emailMessageID: storedMessage.email_message_id?.trim() || undefined,
+          emailThreadID: storedMessage.thread_id?.trim() || entity.emailThreadID,
+          emailMessage: storedMessage,
+        };
+      }
+      await props.onChoose(selectedEntity, mode);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to complete this action");
       setBusy(false);

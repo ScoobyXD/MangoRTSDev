@@ -10,7 +10,9 @@ Double-hashtag link mode enables only the destination types supported by the sou
 ↓
 The Emails category replaces the workspace list with the connected personal mailbox's Inbox, Starred, Sent, All, or Spam results and enlarges the picker so six or seven message rows remain visible
 ↓
-Choosing an email preserves its provider message identity and mailbox scope; an editor stores a durable email reference chip, while a Node or Project link uses the existing exact-message attachment command
+Mango paints authorized stored matches first, always reconciles Nylas second, merges exact messages without losing durable IDs, and groups threads through the same helper as My Triage and Shared Triage
+↓
+Choosing an email preserves its provider message identity and mailbox scope; if its Mango ID is not known, the picker ingests the exact message before an editor stores a reference or a Node/Project link uses the existing exact-message attachment command
 ↓
 The picker creates no generic relationship, translated identity, compose surface, send path, draft path, or compatibility email picker
 
@@ -62,15 +64,15 @@ UP21 - The email folder controls reproduce the mailbox order Inbox, Starred, Sen
 
 UP22 - Inbox maps to the primary mailbox, Starred to starred, Sent to sent, All email to all, and Spam folder to spam. Changing the mailbox closes the All menu, resets selection and results, and searches only the chosen mailbox.
 
-UP23 - The same top search input searches email subject/provider results in the active mailbox. A nonblank email query waits 180 milliseconds; a blank mailbox load starts immediately. A category or mailbox/query change clears the old page before showing results from the new request, and a stale response cannot replace newer state.
+UP23 - The same top search input searches the active mailbox. A nonblank email query waits 180 milliseconds; a blank mailbox load starts immediately. Each current request reads Mango's authorized stored messages first and paints them immediately, then always reconciles the same exact account/mailbox/query with Nylas because a nonempty local result does not prove provider coverage is complete. A category or mailbox/query change clears the old page, and a stale local or provider response cannot replace newer state.
 
-UP24 - An email request asks for 12 messages per page. Scrolling within two row heights of the list bottom requests the provider's next page token. Appended pages retain provider order and deduplicate only by exact provider message ID. The provider's absence of another token ends pagination.
+UP24 - Stored and provider email requests each ask for 12 messages on the initial page. Provider reconciliation adopts provider order and current metadata, preserves a known Mango `email_message_id`, appends stored-only matches, and deduplicates by exact provider message ID. Scrolling within two row heights requests the provider's next token; raw messages merge before thread condensation, and the provider's absence of another token ends pagination.
 
-UP25 - An email result row shows unread state, sender, subject, snippet, and date/time when those values exist. A missing sender is labeled Unknown sender and a missing subject is labeled `(no subject)`. Display fallback text never replaces the stored provider identity.
+UP25 - Email results call the same mailbox-scoped thread-condensation helper as My Triage and Shared Triage. One row shows the representative message's unread state, sender, subject, snippet, date/time, and thread count when greater than one; unread/starred/count aggregation follows that shared helper. A missing sender is labeled Unknown sender and a missing subject is labeled `(no subject)`. Display fallback text never replaces stored identity.
 
 UP26 - Arrow keys wrap through loaded email rows and keep the highlighted row in view. Enter, plain Tab, or pointer click chooses the highlighted email only when it has an account scope and the picker is not already completing another action.
 
-UP27 - A chosen email entity uses the provider message ID as its exact entity ID and stores the subject label, normalized account email, active mailbox, provider thread ID when known, internal Mango `email_message_id` when known, and the selected provider message payload for the immediate host command. Those identities must not be translated through a generic resource registry.
+UP27 - A chosen email entity uses the provider message ID as its exact provider identity and stores the subject label, normalized account email, active mailbox, provider thread ID when known, internal Mango `email_message_id` when known, and the selected provider message payload for the immediate host command. If the internal ID is not known, selection first runs the exact authorized ingestion command and replaces the entity payload with the returned durable Mango identity. Those identities must not be translated through a generic resource registry.
 
 UP28 - An email reference chip is a typed `email_message` atom with the canonical envelope icon. Its durable Tiptap/legacy attributes preserve the provider message ID plus known internal message ID, thread ID, account, shared-inbox scope, and mailbox so copy/paste, JSON persistence, static rendering, remount, and later activation retain the same email.
 
@@ -82,7 +84,7 @@ UP31 - In editor `##` mode, the host relationship command completes before the p
 
 UP32 - Node-to-Logic-Gate uses the existing priority-valid assign-or-move command with Requested destination status. Node-to-Project uses the existing atomic typed Node/Project command. Logic-Gate-to-Project creates or reuses the existing Gate/Project row. The picker does not duplicate their authorization, cardinality, idempotency, event, projection, or timeline rules.
 
-UP33 - Linking an email to a Node or using a Node Attach email action uses the existing exact-message Node import/attachment command. Linking an email to a Project or using Project Attach email uses the existing Project exact-message attachment command. The commands receive the selected provider message and account/mailbox scope rather than a surrogate picker identity.
+UP33 - Linking an email to a Node or using a Node Attach email action uses the existing exact-message Node import/attachment command. Linking an email to a Project or using Project Attach email uses the existing Project exact-message attachment command. Before either typed command, the picker ensures the exact provider message is durably ingested when necessary and supplies its real Mango `email_message_id` plus account/mailbox scope rather than a surrogate picker identity.
 
 UP34 - From a selected email, choosing an existing Node reuses that Node through exact-message import. Choosing a Logic Gate creates the email Node only after valid priority selection and assigns it with the established Logic Gate command. Choosing a Project requires valid priority plus a Logic Gate choice and then uses the established typed Project/Logic Gate commands.
 
@@ -100,7 +102,7 @@ UP40 - The obsolete node-specific email picker no longer exists. Node and Projec
 
 UP41 - The picker never writes a generic edge, central resource registry, translated/surrogate resource identity, or untyped polymorphic relationship. Every `##` action retains the source and destination's unchanged canonical types/IDs and delegates to the established typed command described by `docs/tests/relationships.md`.
 
-UP42 - The Universal picker is a frontend orchestration and document-reference surface. Adding the Emails category does not itself require a database/schema change, a new backend relationship table, or a migration.
+UP42 - Universal-picker email reliability adds an authorized stored-message read and idempotent exact-message ingestion command but no database/schema change, new relationship table, generic registry, compatibility identity, or migration.
 
 # Scenarios
 
@@ -130,7 +132,8 @@ Given:
 
 Expected:
 - The popup expands and replaces the resource list with Inbox, Starred, Sent, and the All/Spam control plus roughly six or seven visible message rows.
-- Search applies to the selected mailbox, stale searches cannot replace the newest query, and scrolling loads deduplicated provider pages.
+- Stored search results paint first; provider reconciliation always follows, preserves durable Mango IDs, and failure leaves stored rows usable with a sync warning.
+- Results and appended pages group threads through the exact helper used by My Triage and Shared Triage.
 - E then Tab enters Emails; arrows highlight messages; Enter, Tab, or pointer click chooses the exact provider message and scope.
 - The pane contains no compose, send, draft, reply, or mailbox-mutation UI, and the retired node-specific picker is absent.
 
@@ -163,5 +166,6 @@ Given:
 Expected:
 - Only the exact source/destination pairs in UP9 are selectable.
 - Mango sends literal canonical identities through the existing permission-checked command, and an editor inserts a reference chip only after that command succeeds.
+- A provider-only email is durably ingested first, so Node/Project attachment never receives a missing or provider-substituted `email_message_id`.
 - Removing the chip never reverses the relationship.
 - No generic edge, registry identity, backend compatibility path, schema change, or migration is introduced by the picker.

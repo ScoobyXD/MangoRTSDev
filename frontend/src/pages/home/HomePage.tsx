@@ -2083,6 +2083,10 @@ export function HomePage({
       },
       reconcile: async (plan) => {
         const reads: Array<Promise<unknown>> = [];
+        if (plan.messages) {
+          const messageRead = loadMessagesRef.current?.({ refresh: true });
+          if (messageRead) reads.push(messageRead);
+        }
         if (plan.folders) {
           const folderRead = loadFoldersRef.current?.({
             owner: { mailboxScopeKey: subscribedMailboxScopeKey },
