@@ -1,3 +1,17 @@
+# Process Story: First-click activation keeps trailing line breaks stable
+
+A sleeping Node, Project, or Logic Gate editor shows a saved paragraph followed by another block
+↓
+That paragraph may end with a saved hard break from typing or pasted rich text
+↓
+The user clicks the sleeping editor to place the caret
+↓
+The live ProseMirror surface keeps the real saved hard break but hides its extra browser-only helper before the following block
+↓
+No empty row appears, no block is created or removed, and the caret, scroll position, JSON document, annotations, and save state remain unchanged
+
+Last updated: 2026-08-07
+
 # Process Story: Editor policy status follows the draft automatically
 
 An authorized user opens RACI or permissions for a Node, Project, or Logic Gate
@@ -599,6 +613,7 @@ ED131 - Enter on a nonempty numbered item creates the next numbered item. Enter 
 ED132 - A primary-pointer caret click in a sleeping or active Tiptap editor preserves the exact text-box horizontal and vertical scroll offsets while retaining native caret placement. Opening a Node from the Pinned sidebar creates a fresh popup instance whose initial view is full-screen; the existing full-screen control may still return it to its normal-size rectangle afterward.
 ED133 - Backspace or Delete with a collapsed caret on a simple empty numbered, bulleted, or Checkbox item removes the marker but retains the item's paragraph as one ordinary blank row at that exact document position, with the caret on that row. When an older saved item also owns later blocks and has a preceding list peer, those later blocks move intact to that peer and retain their exact content, order, formatting, block identity, and structural level. Without a preceding peer, the preserved blocks replace the empty item ahead of any remaining list items. Deletion must not jump the caret to the preceding row or repeatedly indent, outdent, merge, or otherwise re-parent preserved blocks; text deletion and noncollapsed range deletion retain the editor's native behavior.
 ED134 - Node, Project, and Logic Gate policy surfaces show Inherited and Customized only as automatic status. Authorized users edit the policy directly in either state; exact unordered equality with the immediate parent's raw pointers returns to Inherited, any difference is Customized, and the backend decides the stored mode again inside the save transaction. Descendant actions appear only when descendants exist and use the exact labels Apply to non-customized descendants and Apply to every descendant, with confirmation required for the latter.
+ED135 - A saved hard break at the end of a paragraph remains explicit JSON. When another block follows that paragraph, first-click activation must not expose ProseMirror's additional browser-only trailing-break helper as a new empty row. The live surface must match the sleeping surface without adding, removing, or saving document nodes and without changing annotation positions. A hard break at the end of the document retains the helper row required for normal caret editing.
 
 ### Required Unified Rich-Editor Surface Inventory
 
