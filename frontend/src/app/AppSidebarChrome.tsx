@@ -1320,6 +1320,27 @@ export function AppSidebar({
         />
       </section>
 
+      <AppSidebarPinnedSection
+        tree={pinTree}
+        logicGateStatusCountsByID={logicGateStatusCountsByID}
+        dropActive={pinDropActive}
+        dropSuccess={pinDropSuccess}
+        pinnedResourceDropBusy={pinnedResourceDropBusy}
+        onPinOpen={onPinOpen}
+        onPinOpenInNewTab={onPinOpenInNewTab}
+        onPinRemove={onPinRemove}
+        onCreateFolder={onPinCreateFolder}
+        onRenameFolder={onPinRenameFolder}
+        onDeleteFolder={onPinDeleteFolder}
+        onMoveEntry={onPinMoveEntry}
+        onGroupPins={onPinGroup}
+        onExternalDrop={onPinExternalDrop}
+        pinAcceptsResourceDrag={pinAcceptsResourceDrag}
+        onPinnedResourceDrop={handlePinnedResourceDrop}
+        onPinDragEnter={onPinDragEnter}
+        onPinDragLeave={onPinDragLeave}
+      />
+
       <section style={appSidebarNavSectionStyle} aria-label="Tower">
         <AppSidebarSectionHeader label="Tower" />
         <AppSidebarButton
@@ -1348,27 +1369,6 @@ export function AppSidebar({
           }}
         />
       </section>
-
-      <AppSidebarPinnedSection
-        tree={pinTree}
-        logicGateStatusCountsByID={logicGateStatusCountsByID}
-        dropActive={pinDropActive}
-        dropSuccess={pinDropSuccess}
-        pinnedResourceDropBusy={pinnedResourceDropBusy}
-        onPinOpen={onPinOpen}
-        onPinOpenInNewTab={onPinOpenInNewTab}
-        onPinRemove={onPinRemove}
-        onCreateFolder={onPinCreateFolder}
-        onRenameFolder={onPinRenameFolder}
-        onDeleteFolder={onPinDeleteFolder}
-        onMoveEntry={onPinMoveEntry}
-        onGroupPins={onPinGroup}
-        onExternalDrop={onPinExternalDrop}
-        pinAcceptsResourceDrag={pinAcceptsResourceDrag}
-        onPinnedResourceDrop={handlePinnedResourceDrop}
-        onPinDragEnter={onPinDragEnter}
-        onPinDragLeave={onPinDragLeave}
-      />
 
       <section style={appSidebarNavSectionStyle} aria-label="Entities">
         <AppSidebarSectionHeader label="Entities" />
