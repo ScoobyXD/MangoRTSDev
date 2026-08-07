@@ -134,7 +134,7 @@ E2N27 - If the thread has no current Node-wide destination, ingestion stores the
 
 E2N28 - Text-box relationships are ignored when deriving automatic destinations in Phase 1. No new message is automatically placed on a text box.
 
-E2N29 - Creating an email relationship does not create permissions, GVIC assignments, ownership, participants, or access. Normal Node authorization remains authoritative.
+E2N29 - Creating an email relationship does not create permissions, RACI assignments, ownership, participants, or access. Normal Node authorization remains authoritative.
 
 E2N30 - Message finalization and automatic Node-wide relationship creation are one database transaction. The Node icon must not appear before the relationship commit succeeds.
 

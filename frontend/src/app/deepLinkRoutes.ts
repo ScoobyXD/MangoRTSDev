@@ -1,5 +1,5 @@
-import { GVIC_INBOX_SECTIONS } from "../pages/home/homeConstants.js";
-import type { GVICInboxRole, GVICInboxViewID } from "../pages/home/homeTypes.js";
+import { RACI_INBOX_SECTIONS } from "../pages/home/homeConstants.js";
+import type { RACIInboxRole, RACIInboxViewID } from "../pages/home/homeTypes.js";
 
 export type LogicGateDeepLinkRoute = {
   kind: "logic_gate";
@@ -19,8 +19,8 @@ export type ProjectDeepLinkRoute = {
 
 export type GvicDeepLinkRoute = {
   kind: "gvic";
-  role: GVICInboxRole;
-  viewID: GVICInboxViewID;
+  role: RACIInboxRole;
+  viewID: RACIInboxViewID;
   nodeID?: string;
 };
 
@@ -44,18 +44,18 @@ export function normalizeAppPath(pathname: string): string {
   return "/";
 }
 
-export function gvicSectionForRoleOrView(value: string): (typeof GVIC_INBOX_SECTIONS)[number] | null {
+export function gvicSectionForRoleOrView(value: string): (typeof RACI_INBOX_SECTIONS)[number] | null {
   const token = value.trim().toLowerCase();
   if (!token) return null;
-  return GVIC_INBOX_SECTIONS.find((section) => section.role === token || section.viewID === token) ?? null;
+  return RACI_INBOX_SECTIONS.find((section) => section.role === token || section.viewID === token) ?? null;
 }
 
-export function gvicRoleForViewID(viewID: string): GVICInboxRole | null {
-  return GVIC_INBOX_SECTIONS.find((section) => section.viewID === viewID)?.role ?? null;
+export function gvicRoleForViewID(viewID: string): RACIInboxRole | null {
+  return RACI_INBOX_SECTIONS.find((section) => section.viewID === viewID)?.role ?? null;
 }
 
-export function gvicViewIDForRole(role: string): GVICInboxViewID | null {
-  return GVIC_INBOX_SECTIONS.find((section) => section.role === role)?.viewID ?? null;
+export function gvicViewIDForRole(role: string): RACIInboxViewID | null {
+  return RACI_INBOX_SECTIONS.find((section) => section.role === role)?.viewID ?? null;
 }
 
 export function parseDeepLinkRoute(pathname: string): DeepLinkRoute | null {
@@ -124,7 +124,7 @@ export function buildProjectLogicGateNavigationPlan(
   };
 }
 
-export function buildGvicRoute(role: GVICInboxRole, nodeID?: string): string {
+export function buildGvicRoute(role: RACIInboxRole, nodeID?: string): string {
   const cleanRole = encodeSegment(role);
   const cleanNodeID = nodeID?.trim() ? encodeSegment(nodeID) : "";
   return cleanNodeID ? `/gvic/${cleanRole}/nodes/${cleanNodeID}` : `/gvic/${cleanRole}`;

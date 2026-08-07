@@ -1,5 +1,5 @@
 import type React from "react";
-import { logicGateGVICRaisedSurfaceStyle, logicGateGVICRolePresentation } from "../../modules/logic-gates/gvicPresentation.js";
+import { logicGateRACIRaisedSurfaceStyle, logicGateRACIRolePresentation } from "../../modules/logic-gates/raciPresentation.js";
 import { KANBAN_NODE_PRIORITY_STYLE_OPTIONS } from "../../modules/kanban/shared.js";
 import type { UpdateGroup } from "../../modules/notifications/notificationsApi.js";
 
@@ -16,14 +16,14 @@ export function resolveUpdateGroupSemanticPresentation(
 ): UpdateGroupSemanticPresentation | null {
   if (group.field === "gvic") {
     const role = group.key.startsWith("gvic:") ? group.key.slice("gvic:".length).trim().toLowerCase() : group.label.trim().toLowerCase();
-    const presentation = logicGateGVICRolePresentation(role);
+    const presentation = logicGateRACIRolePresentation(role);
     return {
       kind: "gvic",
       iconLabel: presentation.label.slice(0, 1).toUpperCase() || "G",
       iconColor: presentation.accent,
       iconBorderColor: presentation.accent,
       surfaceStyle: {
-        ...logicGateGVICRaisedSurfaceStyle(role),
+        ...logicGateRACIRaisedSurfaceStyle(role),
         minHeight: 28,
         boxSizing: "border-box",
         gridTemplateColumns: "18px minmax(0, auto)",

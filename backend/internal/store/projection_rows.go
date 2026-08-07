@@ -2,7 +2,7 @@ package store
 
 import "strings"
 
-func gvicMatrixProjectionRowIdentity(row GVICMatrixProjectionRow) string {
+func gvicMatrixProjectionRowIdentity(row RACIMatrixProjectionRow) string {
 	userID := strings.TrimSpace(row.UserID)
 	if projectionRowID := strings.TrimSpace(row.ProjectionRowID); projectionRowID != "" {
 		return userID + ":" + projectionRowID
@@ -11,7 +11,7 @@ func gvicMatrixProjectionRowIdentity(row GVICMatrixProjectionRow) string {
 		return userID + ":" + itemID
 	}
 	if nodeID := strings.TrimSpace(firstNonEmpty(row.NodeID, row.NodeLeafID)); nodeID != "" {
-		return userID + ":" + strings.TrimSpace(firstNonEmpty(row.GVICAssignment, row.Role)) + ":" + nodeID + ":" + strings.TrimSpace(row.ProjectID) + ":" + strings.TrimSpace(pointerStringValue(row.LogicGateID))
+		return userID + ":" + strings.TrimSpace(firstNonEmpty(row.RACIAssignment, row.Role)) + ":" + nodeID + ":" + strings.TrimSpace(row.ProjectID) + ":" + strings.TrimSpace(pointerStringValue(row.LogicGateID))
 	}
 	return userID + ":" + strings.TrimSpace(row.ResourceType) + ":" + strings.TrimSpace(row.ResourceID)
 }

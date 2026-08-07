@@ -1,7 +1,7 @@
 import { requestJSON } from "../api/requestJSON.js";
 import type { Account } from "../accounts/accountsApi.js";
 import type { CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
-import type { LogicGateGVICRole, LogicGateRecord } from "../logic-gates/types.js";
+import type { LogicGateRACIRole, LogicGateRecord } from "../logic-gates/types.js";
 import type { NodeRecord } from "../nodes/types.js";
 import { markWorkspaceSnapshotScopeStale } from "../workspace/workspaceSnapshotCache.js";
 import {
@@ -204,7 +204,7 @@ export async function upsertKanbanCard(args: {
   return card;
 }
 
-export type GVICMatrixProjectionRow = {
+export type RACIMatrixProjectionRow = {
   company_id: string;
   projection_row_id: string;
   user_id: string;
@@ -225,27 +225,27 @@ export type GVICMatrixProjectionRow = {
   sort_order?: number;
 };
 
-export type LogicGateAssignmentCommandResult = { card: KanbanCard; node: NodeRecord; gvic_projection_rows: GVICMatrixProjectionRow[] };
+export type LogicGateAssignmentCommandResult = { card: KanbanCard; node: NodeRecord; gvic_projection_rows: RACIMatrixProjectionRow[] };
 type LogicGateAssignmentMutationOrigin = "company_explorer" | "kanban" | "matrix";
 
-export type GVICMatrixNodeCreateResult = {
+export type RACIMatrixNodeCreateResult = {
   node: NodeRecord;
   logic_gate?: LogicGateRecord;
   assignment?: unknown;
   card?: KanbanCard;
   folder_items?: CompanyExplorerFolderItem[];
-  gvic_projection_rows: GVICMatrixProjectionRow[];
+  gvic_projection_rows: RACIMatrixProjectionRow[];
 };
 
 type LogicGateAssignmentCommandPayload = Omit<LogicGateAssignmentCommandResult, "gvic_projection_rows"> & {
-  gvic_projection_rows?: GVICMatrixProjectionRow[] | null;
+  gvic_projection_rows?: RACIMatrixProjectionRow[] | null;
 };
 
-type GVICMatrixNodeCreatePayload = Omit<GVICMatrixNodeCreateResult, "gvic_projection_rows"> & {
-  gvic_projection_rows?: GVICMatrixProjectionRow[] | null;
+type RACIMatrixNodeCreatePayload = Omit<RACIMatrixNodeCreateResult, "gvic_projection_rows"> & {
+  gvic_projection_rows?: RACIMatrixProjectionRow[] | null;
 };
 
-function normalizeGVICMatrixProjectionRows(rows?: GVICMatrixProjectionRow[] | null): GVICMatrixProjectionRow[] {
+function normalizeRACIMatrixProjectionRows(rows?: RACIMatrixProjectionRow[] | null): RACIMatrixProjectionRow[] {
   return Array.isArray(rows) ? rows : [];
 }
 
@@ -253,31 +253,31 @@ function normalizeLogicGateAssignmentCommandResult(payload: LogicGateAssignmentC
   return {
     card: { ...payload.card },
     node: { ...payload.node },
-    gvic_projection_rows: normalizeGVICMatrixProjectionRows(payload.gvic_projection_rows),
+    gvic_projection_rows: normalizeRACIMatrixProjectionRows(payload.gvic_projection_rows),
   };
 }
 
-export async function createGVICMatrixNode(args: {
+export async function createRACIMatrixNode(args: {
   apiBase: string;
   companyID: string;
   name: string;
   logicGateID?: string;
   createLogicGateHeader?: string;
-  creatorLogicGateGVICRole?: LogicGateGVICRole;
+  creatorLogicGateRACIRole?: LogicGateRACIRole;
   status?: string;
   columnID?: string;
   priority?: number | null;
   position?: number;
   isIssue?: boolean;
-}): Promise<GVICMatrixNodeCreateResult> {
-  const payload = await requestJSON<GVICMatrixNodeCreatePayload>(args.apiBase, "/v2/gvic-matrix/nodes", {
+}): Promise<RACIMatrixNodeCreateResult> {
+  const payload = await requestJSON<RACIMatrixNodeCreatePayload>(args.apiBase, "/v2/gvic-matrix/nodes", {
     method: "POST",
     json: {
       company_id: args.companyID,
       name: args.name,
       logic_gate_id: args.logicGateID,
       create_logic_gate_header: args.createLogicGateHeader,
-      creator_logic_gate_gvic_role: args.creatorLogicGateGVICRole,
+      creator_logic_gate_gvic_role: args.creatorLogicGateRACIRole,
       mutation_origin: "matrix",
       status: args.status ?? args.columnID,
       priority: args.priority,
@@ -294,7 +294,7 @@ export async function createGVICMatrixNode(args: {
   markNodeWorkspaceSnapshotStale(args.apiBase, args.companyID);
   return {
     ...payload,
-    gvic_projection_rows: normalizeGVICMatrixProjectionRows(payload.gvic_projection_rows),
+    gvic_projection_rows: normalizeRACIMatrixProjectionRows(payload.gvic_projection_rows),
   };
 }
 

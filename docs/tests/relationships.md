@@ -12,15 +12,15 @@ No endpoint is guessed, no access is granted, no textbox placement is copied, an
 
 Last updated: 2026-08-06
 
-# Process Story: RCVI groups remain typed live relationships
+# Process Story: RACI groups remain typed live relationships
 
-An editor assigns a person or group to Responsible, Consulted, Verifier, or Informed on a resource
+An editor assigns a person or group to Responsible, Accountable, Consulted, or Informed on a resource
 ↓
 Mango stores the exact resource type and ID with the exact user or group principal type and ID
 ↓
 One direct principal occupies one role on that resource, while every role permits multiple direct people and groups
 ↓
-A group remains one source edge; current members and nested subgroups expand only when Mango resolves effective RCVI
+A group remains one source edge; current members and nested subgroups expand only when Mango resolves effective RACI
 ↓
 Membership changes alter effective assignments without translated identities, generic edges, or copied per-user policy rows
 
@@ -68,7 +68,7 @@ Moving a Node between Logic Gates changes only that canonical assignment and its
 ↓
 The relationship subsystem stores that literal ID in a direct typed column when the endpoint type is fixed, or together with its canonical `resource_type` when the endpoint type can vary
 ↓
-The relationship remains in the table for its business meaning, such as Node structure, Logic Gate flow, Project membership, personal pin organization, email attachment, file ownership, Account assignment, permission, or RCVI assignment; only the documented Company Explorer, Logic Gate-to-Node, and Shared Triage parent links also define immediate V2 policy ancestry
+The relationship remains in the table for its business meaning, such as Node structure, Logic Gate flow, Project membership, personal pin organization, email attachment, file ownership, Account assignment, permission, or RACI assignment; only the documented Company Explorer, Logic Gate-to-Node, and Shared Triage parent links also define immediate V2 policy ancestry
 ↓
 Reads, events, projections, recycle/restore, and permanent deletion use the same company, endpoint type, and literal resource ID; no resource registry, translated ID, or replacement identity is consulted
 ↓
@@ -86,7 +86,7 @@ These laws define how MangoRTS represents relationships. They apply to schema de
 
 A **resource** is an identifiable Mango business object that may own data or be one endpoint of a relationship. Resources include Nodes, Logic Gates, Projects, email messages and threads, textboxes and chats where they have their own identity, attachments, Accounts, Company Explorer folders, shared inboxes and folders, and any future business object explicitly added to a relationship contract.
 
-A user or group is normally a **principal** when it receives a permission or RCVI role. A relationship row and a derived projection row are records about resources; they are not automatically resources themselves.
+A user or group is normally a **principal** when it receives a permission or RACI role. A relationship row and a derived projection row are records about resources; they are not automatically resources themselves.
 
 ## Iron laws
 
@@ -119,7 +119,7 @@ Examples include:
 - `project_relationships` for a Project's Node and Logic Gate membership.
 - `email_relationships` for normalized email messages attached to supported Mango owners.
 - `attachment_relationships` for stored files owned or used by supported Mango resources.
-- Account assignment, permission, and GVIC relationship tables for their own distinct meanings.
+- Account assignment, permission, and RACI relationship tables for their own distinct meanings.
 
 ### Law 5 — Do not split one meaning merely because endpoint types differ
 
@@ -179,7 +179,7 @@ Current examples include:
 - A Logic Gate may be related to multiple Projects.
 - One Project/Logic-Gate pair has one stable semantic edge whether it is created directly from the Logic Gate editor or implicitly while adding an assigned Node.
 - An attachment may have multiple active owner relationships.
-- One RCVI resource/principal pair has exactly one direct role; Responsible, Consulted, Verifier, and Informed each permit multiple typed user or group principals, and group edges expand through live nested membership without copied per-user relationship rows.
+- One RACI resource/principal pair has exactly one direct role; Responsible, Accountable, Consulted, and Informed each permit multiple typed user or group principals, and group edges expand through live nested membership without copied per-user relationship rows.
 
 ### Law 13 — Duplicate commands do not create duplicate semantic edges
 
@@ -194,9 +194,9 @@ A relationship row MUST NOT automatically bypass the normal authorization rules 
 For email and attachment links, knowing an email ID, attachment ID, object key, or relationship ID is never sufficient by itself. Access is checked through the exact owning resource and relationship scope.
 
 
-The only relationships that define V2 GVIC and permission parentage are the exact hierarchy contracts in `docs/importanttasks/v2gvic&permissions.md`: Company Explorer folders parent contained folders, Projects, and Logic Gates; a Logic Gate parents its assigned Nodes; Shared Triage folders parent contained folders and shared inboxes. Project membership, Node-to-Node structure, email, attachment, Account, and other relationships do not become policy parents.
+The only relationships that define V2 RACI and permission parentage are the exact hierarchy contracts in `docs/importanttasks/v2gvic&permissions.md`: Company Explorer folders parent contained folders, Projects, and Logic Gates; a Logic Gate parents its assigned Nodes; Shared Triage folders parent contained folders and shared inboxes. Project membership, Node-to-Node structure, email, attachment, Account, and other relationships do not become policy parents.
 
-Creating or moving one of those parent links advances separate GVIC and permission parent-link sequences. The relationship does not copy policy rows or grant access by itself; an inherited child resolves its current parent policy, while a customized child remains independent. Removing the only Node-to-Logic-Gate parent materializes an inherited Node's current effective policies before detach so a root never remains inherited.
+Creating or moving one of those parent links advances separate RACI and permission parent-link sequences. The relationship does not copy policy rows or grant access by itself; an inherited child resolves its current parent policy, while a customized child remains independent. Removing the only Node-to-Logic-Gate parent materializes an inherited Node's current effective policies before detach so a root never remains inherited.
 
 A relationship reader or writer MUST NOT translate resource identity, use an untyped generic edge, or consult a central registry to resolve policy ancestry. The canonical relationship rows and literal typed resource IDs are the hierarchy authority.
 ### Law 15 — Relationship creation is atomic with its command
@@ -219,7 +219,7 @@ Single deletion, batch deletion, company deletion, retention cleanup, and any ba
 
 Normal foreign-key cascades MAY perform cleanup for fixed typed columns. Generic typed references MAY use explicit transactional deletes or validated database triggers. The result, not one particular mechanism, is mandatory.
 
-When deleting a relationship endpoint causes an assignment or parent-link cascade, trigger logic MUST distinguish that endpoint deletion from detaching a surviving resource. Policy materialization or parent advancement runs for a surviving detached resource, but MUST NOT run against an endpoint that is already being deleted. The endpoint deletion still removes its exact GVIC and permission settings in the same transaction.
+When deleting a relationship endpoint causes an assignment or parent-link cascade, trigger logic MUST distinguish that endpoint deletion from detaching a surviving resource. Policy materialization or parent advancement runs for a surviving detached resource, but MUST NOT run against an endpoint that is already being deleted. The endpoint deletion still removes its exact RACI and permission settings in the same transaction.
 
 ### Law 18 — Recycling preserves restorable relationships
 
@@ -295,13 +295,13 @@ Deleting a pin, pin folder, or pin folder subtree deletes only personal organiza
 
 Node search location derives only from exact source relationships: visible Logic Gate assignment and that Logic Gate's visible Company Explorer ancestry first, visible Project relationship and that Project's ancestry second, otherwise an empty path for an accessible standalone Node. A Node with only hidden organizational paths is excluded so hidden ancestry does not leak.
 
-Removing historical Node placement rows or their now-empty deterministic folder MUST NOT delete a Node, Logic Gate assignment, Project relationship, email relationship, attachment relationship, chat ownership, GVIC assignment, permission, or any other endpoint or typed edge.
+Removing historical Node placement rows or their now-empty deterministic folder MUST NOT delete a Node, Logic Gate assignment, Project relationship, email relationship, attachment relationship, chat ownership, RACI assignment, permission, or any other endpoint or typed edge.
 
 ### Law 29 — New email messages inherit only exact Node-wide thread destinations
 
 When a provider message becomes completely stored under an existing `email_thread_id`, Mango MUST atomically create only the missing `email_relationships` rows for the distinct current destinations where the same company/thread already has `resource_type='node'` and `resource_textbox_id is null`. The new relationship MUST use the exact stored `email_message_id`, exact Node ID, exact company, and canonical `node` type.
 
-This propagation is idempotent and MUST NOT recopy an existing message, invent or choose a Node for an unplaced thread, copy Project/Logic-Gate/textbox destinations, grant permissions or GVIC, create a chat/draft, or treat a relationship as provider-thread membership authority. The message upsert and its missing Node-wide relationships commit or roll back together.
+This propagation is idempotent and MUST NOT recopy an existing message, invent or choose a Node for an unplaced thread, copy Project/Logic-Gate/textbox destinations, grant permissions or RACI, create a chat/draft, or treat a relationship as provider-thread membership authority. The message upsert and its missing Node-wide relationships commit or roll back together.
 
 ## Required design examples
 

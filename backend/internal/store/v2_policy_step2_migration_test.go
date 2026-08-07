@@ -15,9 +15,9 @@ const (
 	v2PolicyStep2SchemaBegin = "-- BEGIN V2 GVIC AND PERMISSIONS STEP 2 CUTOVER SCHEMA"
 	v2PolicyStep2SchemaEnd   = "-- END V2 GVIC AND PERMISSIONS STEP 2 CUTOVER SCHEMA"
 	v2PolicyStep2Migration   = "20260805_zzzc_v2_gvic_permissions_step2_cutover.sql"
-	rcviRoleSchemaBegin      = "-- BEGIN RCVI ROLE CONTRACT"
-	rcviRoleSchemaEnd        = "-- END RCVI ROLE CONTRACT"
-	rcviRoleMigration        = "20260806_zzz_rcvi_roles.sql"
+	raciRoleSchemaBegin      = "-- BEGIN RACI ROLE CONTRACT"
+	raciRoleSchemaEnd        = "-- END RACI ROLE CONTRACT"
+	raciRoleMigration        = "20260806_zzz_raci_roles.sql"
 )
 
 func TestV2PolicyStep2SchemaAndOperatorContract(t *testing.T) {
@@ -75,30 +75,33 @@ func TestV2PolicyStep2SchemaAndOperatorContract(t *testing.T) {
 	}
 }
 
-func TestRCVIRoleMigrationAndSchemaContract(t *testing.T) {
+func TestRACIRoleMigrationAndSchemaContract(t *testing.T) {
 	schema := readV2PolicyStep1File(t, "..", "..", "db", "schema.sql")
-	migration := readV2PolicyStep1File(t, "..", "..", "db", "migrations", rcviRoleMigration)
-	start := strings.Index(schema, rcviRoleSchemaBegin)
-	end := strings.Index(schema, rcviRoleSchemaEnd)
+	migration := readV2PolicyStep1File(t, "..", "..", "db", "migrations", raciRoleMigration)
+	start := strings.Index(schema, raciRoleSchemaBegin)
+	end := strings.Index(schema, raciRoleSchemaEnd)
 	if start < 0 || end <= start {
-		t.Fatal("canonical schema is missing the marked RCVI role block")
+		t.Fatal("canonical schema is missing the marked RACI role block")
 	}
-	if strings.TrimSpace(schema[start+len(rcviRoleSchemaBegin):end]) != strings.TrimSpace(migration) {
-		t.Fatal("canonical RCVI role block drifted from the migration")
+	if strings.TrimSpace(schema[start+len(raciRoleSchemaBegin):end]) != strings.TrimSpace(migration) {
+		t.Fatal("canonical RACI role block drifted from the migration")
 	}
 	lower := strings.ToLower(migration)
 	for _, required := range []string{
 		"when 'generated' then 'responsible'",
-		"when 'verified' then 'verifier'",
-		"check (role in ('responsible', 'consulted', 'verifier', 'informed'))",
+		"when 'verified' then 'accountable'",
+		"when 'verifier' then 'accountable'",
+		"check (role in ('responsible', 'accountable', 'consulted', 'informed'))",
 		"drop constraint if exists resource_gvic_assignments_v2_staging_user_only_role_chk",
 		"drop index if exists idx_resource_gvic_assignments_v2_one_generated",
-		"when 'responsible' then 1 when 'consulted' then 2 when 'verifier' then 3",
+		"when 'responsible' then 1 when 'accountable' then 2 when 'consulted' then 3",
 		"update recycle_bin_items",
-		"set surface='cvi_inbox' where surface='aci_inbox'",
+		"set surface='aci_inbox' where surface='cvi_inbox'",
+		"when 'cvi_inbox.changed' then 'aci_inbox.changed'",
+		"when 'cvi_inbox.rcvi_updated' then 'aci_inbox.raci_updated'",
 	} {
 		if !strings.Contains(lower, required) {
-			t.Errorf("RCVI migration is missing %q", required)
+			t.Errorf("RACI migration is missing %q", required)
 		}
 	}
 }
@@ -137,7 +140,7 @@ func TestV2PolicyStep2DisposablePostgresCutoverBehaviorAndFreshSchema(t *testing
 	}
 	reset()
 	schema := readV2PolicyStep1File(t, "..", "..", "db", "schema.sql")
-	legacySchema := removeRCVIRoleSchemaBlock(t, removeV2PolicyStep2SchemaBlock(t, removeV2PolicyStep1SchemaBlock(t, schema)))
+	legacySchema := removeRACIRoleSchemaBlock(t, removeV2PolicyStep2SchemaBlock(t, removeV2PolicyStep1SchemaBlock(t, schema)))
 	if _, err := db.Exec(legacySchema); err != nil {
 		t.Fatalf("apply legacy schema: %v", err)
 	}
@@ -175,7 +178,7 @@ from mangorts_v2_effective_gvic_assignments(
 		t.Fatal(err)
 	}
 	if role != "verified" || sourceType != EntityTypeNode || sourceID != "00000000-0000-4000-8000-000000000112" {
-		t.Fatalf("detached materialized effective GVIC=%s/%s/%s", role, sourceType, sourceID)
+		t.Fatalf("detached materialized effective RACI=%s/%s/%s", role, sourceType, sourceID)
 	}
 	var nodeMode, permissionMode string
 	var nodeParent, permissionParent int64
@@ -205,17 +208,17 @@ where g.company_id='00000000-0000-4000-8000-000000000101' and g.resource_type='n
 	}
 	var groupEdges int
 	if err := db.QueryRow(`select count(*) from resource_gvic_assignments where principal_id='00000000-0000-4000-8000-000000000130'`).Scan(&groupEdges); err != nil || groupEdges != 0 {
-		t.Fatalf("deleted group GVIC edges=%d err=%v", groupEdges, err)
+		t.Fatalf("deleted group RACI edges=%d err=%v", groupEdges, err)
 	}
 
-	if _, err := db.Exec(readV2PolicyStep1File(t, "..", "..", "db", "migrations", rcviRoleMigration)); err != nil {
-		t.Fatalf("apply RCVI role migration: %v", err)
+	if _, err := db.Exec(readV2PolicyStep1File(t, "..", "..", "db", "migrations", raciRoleMigration)); err != nil {
+		t.Fatalf("apply RACI role migration: %v", err)
 	}
 	if err := db.QueryRow(`select role from resource_gvic_assignments
 where company_id='00000000-0000-4000-8000-000000000101'
   and resource_type='node' and resource_id='00000000-0000-4000-8000-000000000112'
-  and principal_type='user' and principal_id='00000000-0000-4000-8000-000000000103'`).Scan(&role); err != nil || role != "verifier" {
-		t.Fatalf("migrated active assignment role=%q err=%v, want verifier", role, err)
+  and principal_type='user' and principal_id='00000000-0000-4000-8000-000000000103'`).Scan(&role); err != nil || role != "accountable" {
+		t.Fatalf("migrated active assignment role=%q err=%v, want accountable", role, err)
 	}
 	if _, err := db.Exec(`
 insert into company_user_groups(company_id,group_id,name)
@@ -224,11 +227,11 @@ insert into company_user_group_members(company_id,group_id,user_id)
 values('00000000-0000-4000-8000-000000000101','00000000-0000-4000-8000-000000000131','00000000-0000-4000-8000-000000000102');
 insert into resource_gvic_assignments(company_id,resource_type,resource_id,role,principal_type,principal_id)
 values('00000000-0000-4000-8000-000000000101','node','00000000-0000-4000-8000-000000000112','responsible','group','00000000-0000-4000-8000-000000000131');`); err != nil {
-		t.Fatalf("insert Responsible group after RCVI migration: %v", err)
+		t.Fatalf("insert Responsible group after RACI migration: %v", err)
 	}
 	if _, err := db.Exec(`insert into resource_gvic_assignments(company_id,resource_type,resource_id,role,principal_type,principal_id)
 values('00000000-0000-4000-8000-000000000101','node','00000000-0000-4000-8000-000000000112','generated','user','00000000-0000-4000-8000-000000000102')`); err == nil {
-		t.Fatal("legacy generated role was accepted after RCVI migration")
+		t.Fatal("legacy generated role was accepted after RACI migration")
 	}
 	reset()
 	if _, err := db.Exec(schema); err != nil {
@@ -237,14 +240,14 @@ values('00000000-0000-4000-8000-000000000101','node','00000000-0000-4000-8000-00
 	assertV2PolicyStep2CutoverNames(t, db)
 }
 
-func removeRCVIRoleSchemaBlock(t *testing.T, schema string) string {
+func removeRACIRoleSchemaBlock(t *testing.T, schema string) string {
 	t.Helper()
-	start := strings.Index(schema, rcviRoleSchemaBegin)
-	end := strings.Index(schema, rcviRoleSchemaEnd)
+	start := strings.Index(schema, raciRoleSchemaBegin)
+	end := strings.Index(schema, raciRoleSchemaEnd)
 	if start < 0 || end <= start {
-		t.Fatal("canonical schema is missing RCVI role markers")
+		t.Fatal("canonical schema is missing RACI role markers")
 	}
-	return schema[:start] + schema[end+len(rcviRoleSchemaEnd):]
+	return schema[:start] + schema[end+len(raciRoleSchemaEnd):]
 }
 func removeV2PolicyStep2SchemaBlock(t *testing.T, schema string) string {
 	t.Helper()
@@ -260,7 +263,7 @@ func assertV2PolicyStep2CutoverNames(t *testing.T, db interface {
 	QueryRow(query string, args ...any) *sql.Row
 }) {
 	t.Helper()
-	var finalGVIC, finalPermission, legacyGVIC, legacyPermission, stagingGVIC, stagingPermission bool
+	var finalRACI, finalPermission, legacyRACI, legacyPermission, stagingRACI, stagingPermission bool
 	if err := db.QueryRow(`select
   to_regclass('public.resource_gvic_assignments') is not null,
   to_regclass('public.resource_permissions') is not null,
@@ -268,12 +271,12 @@ func assertV2PolicyStep2CutoverNames(t *testing.T, db interface {
   to_regclass('public.resource_permissions_step2_legacy') is not null,
   to_regclass('public.resource_gvic_assignments_v2_staging') is not null,
   to_regclass('public.resource_permissions_v2_staging') is not null`).Scan(
-		&finalGVIC, &finalPermission, &legacyGVIC, &legacyPermission, &stagingGVIC, &stagingPermission,
+		&finalRACI, &finalPermission, &legacyRACI, &legacyPermission, &stagingRACI, &stagingPermission,
 	); err != nil {
 		t.Fatal(err)
 	}
-	if !finalGVIC || !finalPermission || !legacyGVIC || !legacyPermission || stagingGVIC || stagingPermission {
-		t.Fatalf("cutover names final=%v/%v legacy=%v/%v staging=%v/%v", finalGVIC, finalPermission, legacyGVIC, legacyPermission, stagingGVIC, stagingPermission)
+	if !finalRACI || !finalPermission || !legacyRACI || !legacyPermission || stagingRACI || stagingPermission {
+		t.Fatalf("cutover names final=%v/%v legacy=%v/%v staging=%v/%v", finalRACI, finalPermission, legacyRACI, legacyPermission, stagingRACI, stagingPermission)
 	}
 }
 

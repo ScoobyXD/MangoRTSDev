@@ -2,7 +2,7 @@ package store
 
 import "strings"
 
-func (r *MemoryRepo) attachMyWorkResponsibleUserIDsLocked(items []GVICMatrixProjectionRow) {
+func (r *MemoryRepo) attachMyWorkResponsibleUserIDsLocked(items []RACIMatrixProjectionRow) {
 	if len(items) == 0 {
 		return
 	}
@@ -11,8 +11,8 @@ func (r *MemoryRepo) attachMyWorkResponsibleUserIDsLocked(items []GVICMatrixProj
 		wanted[myWorkResponsibleUsersContextKey(item)] = true
 	}
 	byContext := make(map[string]map[string]bool)
-	for _, source := range r.GVICMatrixProjectionRows {
-		if source.ResourceType != GVICMatrixProjectionResourceNode {
+	for _, source := range r.RACIMatrixProjectionRows {
+		if source.ResourceType != RACIMatrixProjectionResourceNode {
 			continue
 		}
 		userID := strings.TrimSpace(source.UserID)
@@ -20,7 +20,7 @@ func (r *MemoryRepo) attachMyWorkResponsibleUserIDsLocked(items []GVICMatrixProj
 			continue
 		}
 		for _, row := range r.myWorkFlatPathRowsForNodeProjectionLocked(source) {
-			if row.GVICAssignment != "responsible" {
+			if row.RACIAssignment != "responsible" {
 				continue
 			}
 			contextKey := myWorkResponsibleUsersContextKey(row)

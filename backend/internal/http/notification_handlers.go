@@ -994,7 +994,7 @@ func errorsIsInvalid(err error) bool {
 	return err == store.ErrInvalid
 }
 
-func logicGateGVICAssignmentUserIDs(assignments []domain.LogicGateGVICAssignment) []string {
+func logicGateRACIAssignmentUserIDs(assignments []domain.LogicGateRACIAssignment) []string {
 	out := make([]string, 0, len(assignments))
 	seen := map[string]struct{}{}
 	for _, assignment := range assignments {
@@ -1011,9 +1011,9 @@ func logicGateGVICAssignmentUserIDs(assignments []domain.LogicGateGVICAssignment
 	return out
 }
 
-func newlyAssignedLogicGateGVICUserIDs(before, after []domain.LogicGateGVICAssignment) []string {
-	beforeRoles := highestLogicGateGVICRolesByUser(before)
-	afterRoles := highestLogicGateGVICRolesByUser(after)
+func newlyAssignedLogicGateRACIUserIDs(before, after []domain.LogicGateRACIAssignment) []string {
+	beforeRoles := highestLogicGateRACIRolesByUser(before)
+	afterRoles := highestLogicGateRACIRolesByUser(after)
 	out := make([]string, 0, len(afterRoles))
 	for userID, role := range afterRoles {
 		if role == "" || beforeRoles[userID] == role {
@@ -1025,37 +1025,37 @@ func newlyAssignedLogicGateGVICUserIDs(before, after []domain.LogicGateGVICAssig
 	return out
 }
 
-func highestLogicGateGVICRolesByUser(assignments []domain.LogicGateGVICAssignment) map[string]string {
+func highestLogicGateRACIRolesByUser(assignments []domain.LogicGateRACIAssignment) map[string]string {
 	out := map[string]string{}
 	for _, assignment := range assignments {
 		userID := strings.TrimSpace(assignment.UserID)
-		role, ok := store.NormalizeGVICRole(assignment.Role)
+		role, ok := store.NormalizeRACIRole(assignment.Role)
 		if !ok || userID == "" {
 			continue
 		}
-		if GVICNotificationRoleRank(role) > GVICNotificationRoleRank(out[userID]) {
+		if RACINotificationRoleRank(role) > RACINotificationRoleRank(out[userID]) {
 			out[userID] = role
 		}
 	}
 	return out
 }
 
-func GVICNotificationRoleRank(role string) int {
+func RACINotificationRoleRank(role string) int {
 	switch strings.TrimSpace(role) {
-	case domain.GVICRoleResponsible:
+	case domain.RACIRoleResponsible:
 		return 4
-	case domain.GVICRoleVerifier:
+	case domain.RACIRoleAccountable:
 		return 3
-	case domain.GVICRoleConsulted:
+	case domain.RACIRoleConsulted:
 		return 2
-	case domain.GVICRoleInformed:
+	case domain.RACIRoleInformed:
 		return 1
 	default:
 		return 0
 	}
 }
 
-func sharedInboxGVICAssignmentUserIDs(assignments []domain.SharedInboxGVICAssignment) []string {
+func sharedInboxRACIAssignmentUserIDs(assignments []domain.SharedInboxRACIAssignment) []string {
 	out := make([]string, 0, len(assignments))
 	seen := map[string]struct{}{}
 	for _, assignment := range assignments {
@@ -1072,7 +1072,7 @@ func sharedInboxGVICAssignmentUserIDs(assignments []domain.SharedInboxGVICAssign
 	return out
 }
 
-func logicGateGVICFingerprint(assignments []domain.LogicGateGVICAssignment) string {
+func logicGateRACIFingerprint(assignments []domain.LogicGateRACIAssignment) string {
 	parts := make([]string, 0, len(assignments))
 	for _, assignment := range assignments {
 		parts = append(parts, strings.TrimSpace(assignment.Role)+":"+strings.TrimSpace(assignment.UserID))
@@ -1081,7 +1081,7 @@ func logicGateGVICFingerprint(assignments []domain.LogicGateGVICAssignment) stri
 	return strings.Join(parts, ",")
 }
 
-func sharedInboxGVICFingerprint(assignments []domain.SharedInboxGVICAssignment) string {
+func sharedInboxRACIFingerprint(assignments []domain.SharedInboxRACIAssignment) string {
 	parts := make([]string, 0, len(assignments))
 	for _, assignment := range assignments {
 		principalType := strings.TrimSpace(assignment.PrincipalType)

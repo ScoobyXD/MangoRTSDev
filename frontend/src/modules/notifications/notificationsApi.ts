@@ -1,7 +1,7 @@
 import { apiFetchJSON } from "../../auth/cognitoAuth.js";
 
-export type NotificationGVICRole = "responsible" | "consulted" | "verifier" | "informed" | "other";
-export type NotificationSurface = "r_inbox" | "cvi_inbox" | "my_triage" | "shared_triage" | "";
+export type NotificationRACIRole = "responsible" | "accountable" | "consulted" | "informed" | "other";
+export type NotificationSurface = "r_inbox" | "aci_inbox" | "my_triage" | "shared_triage" | "";
 
 export const EVENT_NOTIFICATIONS_UPDATED = "mangorts:notifications-updated";
 export const NOTIFICATION_UPDATE_SOURCE_REALTIME_ACCEPTED = "realtime-accepted-summary";
@@ -20,7 +20,7 @@ export type NotificationItem = {
   title: string;
   body_preview?: string;
   surface?: NotificationSurface;
-  role?: NotificationGVICRole | "";
+  role?: NotificationRACIRole | "";
   logic_gate_id?: string;
   node_id?: string;
   information_id?: string;
@@ -49,7 +49,7 @@ export const NOTIFICATION_TYPE_URGENT_MENTION = "mention.urgent_created";
 
 export type NotificationRoleCount = {
   surface?: NotificationSurface;
-  role?: NotificationGVICRole | "";
+  role?: NotificationRACIRole | "";
   count: number;
 };
 
@@ -61,7 +61,7 @@ export type NotificationTypeCount = {
 export type NotificationLogicGateCount = {
   logic_gate_id: string;
   node_id?: string;
-  role: NotificationGVICRole;
+  role: NotificationRACIRole;
   count: number;
 };
 
@@ -78,7 +78,7 @@ export type NotificationClearInput = {
   companyID?: string;
   type?: string;
   surface?: NotificationSurface;
-  role?: NotificationGVICRole | "";
+  role?: NotificationRACIRole | "";
   logicGateID?: string;
   nodeID?: string;
 };
@@ -288,7 +288,7 @@ function normalizeNotificationSummary(summary: NotificationSummary, companyID: s
       ? summary.logic_gate_counts.map((item) => ({
           logic_gate_id: item.logic_gate_id?.trim() ?? "",
           node_id: item.node_id?.trim() || undefined,
-          role: normalizeRole(item.role) as NotificationGVICRole,
+          role: normalizeRole(item.role) as NotificationRACIRole,
           count: normalizeCount(item.count),
         })).filter((item) => item.logic_gate_id && item.role && item.count > 0)
       : [],
@@ -305,7 +305,7 @@ function normalizeSurface(value: unknown): NotificationSurface {
   const raw = typeof value === "string" ? value.trim() : "";
   switch (raw) {
     case "r_inbox":
-    case "cvi_inbox":
+    case "aci_inbox":
     case "my_triage":
     case "shared_triage":
       return raw;
@@ -314,11 +314,11 @@ function normalizeSurface(value: unknown): NotificationSurface {
   }
 }
 
-export function normalizeRole(value: unknown): NotificationGVICRole | "" {
+export function normalizeRole(value: unknown): NotificationRACIRole | "" {
   const raw = typeof value === "string" ? value.trim() : "";
   switch (raw) {
     case "responsible":
-    case "verifier":
+    case "accountable":
     case "consulted":
     case "informed":
     case "other":

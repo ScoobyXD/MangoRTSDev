@@ -1,36 +1,36 @@
 package store
 
-func (r *MemoryRepo) CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GVICMatrixNodeCreateResult, error) {
-	input, err := NormalizeGVICMatrixNodeCreateInput(input)
+func (r *MemoryRepo) CreateRACIMatrixNode(input RACIMatrixNodeCreateInput) (RACIMatrixNodeCreateResult, error) {
+	input, err := NormalizeRACIMatrixNodeCreateInput(input)
 	if err != nil {
-		return GVICMatrixNodeCreateResult{}, err
+		return RACIMatrixNodeCreateResult{}, err
 	}
 
-	result := GVICMatrixNodeCreateResult{}
+	result := RACIMatrixNodeCreateResult{}
 	logicGateID := input.LogicGateID
 	if input.CreateLogicGateHeader != "" {
 		batch, err := r.CreateWorkspaceEntityBatch(WorkspaceEntityBatchInput{
 			CompanyID:                input.CompanyID,
 			EntityKind:               "logic_gate",
 			CreatorUserID:            input.ActorUserID,
-			CreatorLogicGateGVICRole: input.CreatorLogicGateGVICRole,
+			CreatorLogicGateRACIRole: input.CreatorLogicGateRACIRole,
 			Items: []WorkspaceEntityBatchItemInput{{
-				ClientID: "GVICMatrix-matrix-logic-gate",
+				ClientID: "RACIMatrix-matrix-logic-gate",
 				Title:    input.CreateLogicGateHeader,
 			}},
 		})
 		if err != nil {
-			return GVICMatrixNodeCreateResult{}, err
+			return RACIMatrixNodeCreateResult{}, err
 		}
 		if len(batch.LogicGates) == 0 {
-			return GVICMatrixNodeCreateResult{}, ErrNotFound
+			return RACIMatrixNodeCreateResult{}, ErrNotFound
 		}
 		logicGate := batch.LogicGates[0]
 		logicGateID = logicGate.LogicGateID
 		result.LogicGate = &logicGate
 		result.FolderItems = append(result.FolderItems, batch.FolderItems...)
 		r.mu.Lock()
-		r.syncGVICMatrixProjectionForLogicGateAssignmentsLocked(input.CompanyID, logicGateID, nil, nil)
+		r.syncRACIMatrixProjectionForLogicGateAssignmentsLocked(input.CompanyID, logicGateID, nil, nil)
 		r.mu.Unlock()
 		eventInputs := []DomainEventInput{
 			logicGateCreatedWorkspaceEventInput(logicGate, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)),
@@ -40,7 +40,7 @@ func (r *MemoryRepo) CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GVIC
 		}
 		events, err := r.AppendDomainEvents(eventInputs)
 		if err != nil {
-			return GVICMatrixNodeCreateResult{}, err
+			return RACIMatrixNodeCreateResult{}, err
 		}
 		result.Events = append(result.Events, events...)
 	}
@@ -64,7 +64,7 @@ func (r *MemoryRepo) CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GVIC
 			IdempotencyKey:      input.IdempotencyKey,
 		})
 		if err != nil {
-			return GVICMatrixNodeCreateResult{}, err
+			return RACIMatrixNodeCreateResult{}, err
 		}
 		assignment := assignmentResult.Assignment
 		card := assignmentResult.Card
@@ -86,7 +86,7 @@ func (r *MemoryRepo) CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GVIC
 	node, err := r.createNodeWithIDLocked(input.CompanyID, input.NodeID, input.Title)
 	if err != nil {
 		r.restoreNodeGraphEventStateLocked(snapshot)
-		return GVICMatrixNodeCreateResult{}, err
+		return RACIMatrixNodeCreateResult{}, err
 	}
 	result.Node = node
 	if folderItem, ok := r.folderItems[folderItemKey(input.CompanyID, "node", node.NodeID)]; ok {
@@ -95,7 +95,7 @@ func (r *MemoryRepo) CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GVIC
 	event, err := r.appendDomainEventLocked(nodeCreatedWorkspaceEventInputWithMetadata(result.Node, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
 	if err != nil {
 		r.restoreNodeGraphEventStateLocked(snapshot)
-		return GVICMatrixNodeCreateResult{}, err
+		return RACIMatrixNodeCreateResult{}, err
 	}
 	result.Events = append(result.Events, event)
 	return result, nil

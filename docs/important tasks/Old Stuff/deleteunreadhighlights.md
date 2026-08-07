@@ -120,13 +120,13 @@ Start with fresh `rg` results rather than assuming this list is exhaustive.
   - Remove `NodeContentChange` imports and the `content_changes` view shape.
   - Remove `contentChangeCache` and `getNodeContentChangesSingleFlight`.
   - Remove all `anchorClean*` success, inflight, retry, timer, and ETag bookkeeping and the POST to `/v1/nodes/{node}/changes/anchor-clean`.
-  - Keep the rest of the consolidated Node view cache, authorization generation, ETag behavior, details, projections, and GVIC loading.
+  - Keep the rest of the consolidated Node view cache, authorization generation, ETag behavior, details, projections, and RACI loading.
 
 ### Editor orchestration
 
 - `frontend/src/modules/editor/EditorContent.tsx`
   - Remove Node content-change state, loaded-Node tracking, refresh tokens, loads, optimistic mark-seen logic, individual seen POST, bulk seen POST, and props passed to the Node workspace.
-  - Keep unrelated projection, document, relationship, attachment, chat, history, save-state, and GVIC behavior.
+  - Keep unrelated projection, document, relationship, attachment, chat, history, save-state, and RACI behavior.
 - `frontend/src/modules/editor/nodeContentChanges.ts`
   - Delete this feature-specific module when no imports remain.
 - `frontend/src/modules/editor/NodeWorkspaceSurface.tsx`

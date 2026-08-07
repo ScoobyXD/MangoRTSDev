@@ -32,11 +32,11 @@ ST13 - Sending mail from a shared inbox requires edit access to that shared inbo
 ST14 - Shared inbox content and send actions both require edit access; a no-access user receives no mailbox content.
 ST15 - Reading a shared inbox or folder permission policy uses the canonical generic permission endpoint and requires manager/admin authority plus effective Edit access.
 ST16 - Updating a shared inbox or folder permission policy uses the canonical generic permission endpoint, complete-policy replacement, If-Match protection, and the same management gate.
-ST17 - Permission responses expose inherited/customized mode, effective source/default/rules, reset/overwrite explanation, effective access, and permission-management capabilities. GVIC is read separately from its canonical endpoint.
-ST18 - Permission and GVIC writes remain exact and separate. GVIC is notification/My Work/update routing data and never grants Shared Triage Edit access or authorizes delete/mutation actions.
+ST17 - Permission responses expose inherited/customized mode, effective source/default/rules, reset/overwrite explanation, effective access, and permission-management capabilities. RACI is read separately from its canonical endpoint.
+ST18 - Permission and RACI writes remain exact and separate. RACI is notification/My Work/update routing data and never grants Shared Triage Edit access or authorizes delete/mutation actions.
 ST19 - Shared inbox and folder group edges remain group pointers and resolve through current nested `company_user_groups` and `company_user_group_members` data without a derived closure or effective table.
 ST20 - If required Shared Triage access or folder-list storage is unavailable, access and folder-list endpoints return service unavailable with `shared_inbox_storage_unavailable`, not a silent success or generic `failed_to_list_shared_inboxes` error.
-ST21 - Canonical GVIC supports exact `shared_inbox_folder` and `shared_inbox` resources. Both use inherited/customized policy semantics; mailbox credentials are never policy principals.
+ST21 - Canonical RACI supports exact `shared_inbox_folder` and `shared_inbox` resources. Both use inherited/customized policy semantics; mailbox credentials are never policy principals.
 ST22 - Shared Triage must not show private personal mailbox messages unless they were explicitly added through a shared inbox path.
 ST23 - Policy/tree changes update canonical rows and fingerprints. Parent moves advance parent-link sequences; inherited-only Apply writes no descendant state; overwrite-all records one reset sequence; other clients resolve the result on navigation or refresh.
 ST24 - Company-owned shared mailbox credentials are stored in company_email_connections, not as permission-bearing users.
@@ -52,11 +52,11 @@ ST33 - If a company-owned shared connection is missing or expired, normal permit
 ST34 - If a company-owned shared connection is missing or expired, managers/admins who can edit that shared inbox can start shared inbox OAuth reconnect for the company-owned credential.
 ST35 - Shared inbox mail actions use the company-owned grant but are authorized and audited as the currently logged-in user.
 ST36 - Shared inbox permissions use `resource_permission_settings` plus canonical `resource_permissions` with resource_type `shared_inbox`; folder permissions use exact type `shared_inbox_folder`. `shared_triage_folder` is rejected after cutover.
-ST37 - Shared inbox and folder GVIC use `resource_gvic_settings` plus canonical `resource_gvic_assignments` under their exact resource IDs.
-ST38 - Email connection records do not receive Shared Triage permissions or GVIC assignments; permissions and GVIC are assigned to the shared inbox work surface.
+ST37 - Shared inbox and folder RACI use `resource_gvic_settings` plus canonical `resource_gvic_assignments` under their exact resource IDs.
+ST38 - Email connection records do not receive Shared Triage permissions or RACI assignments; permissions and RACI are assigned to the shared inbox work surface.
 ST39 - Plain Shared Triage folders are organizational containers only; selecting one clears mail state and must not call email folder, message list, message detail, prefetch, or load-more endpoints.
 ST40 - Shared Triage consumes compact, permission-checked `mailbox:shared:<shared_inbox_id>` hints for only the exact selected mail-bearing shared inbox. First acceptance and reconnect acceptance invalidate reusable cache state but start zero provider reads. External message/folder hints use one-active/one-queued-final coordination only for metadata and directly identified detail; event payloads never insert or replace rows and no mail polling is used.
-ST41 - Shared subscription admission requires the exact existing mail-bearing resource plus current Edit access, and publication rechecks the current exact audience. My Work, Updates, GVIC matrix, Shared Triage root/headings/group rows/plain folders, inaccessible inboxes, and inactive inboxes retain no fallback personal/mailbox subscription and issue no provider GET because of a hint.
+ST41 - Shared subscription admission requires the exact existing mail-bearing resource plus current Edit access, and publication rechecks the current exact audience. My Work, Updates, RACI matrix, Shared Triage root/headings/group rows/plain folders, inaccessible inboxes, and inactive inboxes retain no fallback personal/mailbox subscription and issue no provider GET because of a hint.
 ST42 - Navigating to a concrete shared mailbox performs its normal canonical load and installs that exact subscription. Navigating away cancels/discards captured timers and pending work, unsubscribes the old inbox, and prevents a hint or stale response from Shared Inbox A from refreshing/invalidation Shared Inbox B.
 ST43 - Shared Triage mailbox inboxes must show a fixed, predictable message batch size of 12 messages per page.
 ST44 - Shared Triage mailbox inboxes automatically prefetch the next message page after the selected-detail foreground path settles, without waiting for scrolling or the archive/advance action.
@@ -93,7 +93,7 @@ ST74 - Final failures and successful completions are recorded durably on archive
 ST75 - Duplicate active Shared Triage archive submissions for the same actor, shared inbox, account, and message must not create duplicate active job items or duplicate provider archive attempts.
 ST76 - Shared Triage archive jobs must preserve company/shared-inbox scope and use the company-owned shared mailbox grant, not the actor's personal mailbox grant.
 ST77 - Accepted background Shared Triage archive job IDs are pending work, not confirmed archive mutations; they must not be applied to the current visible shared-inbox message-list cache until an explicit user action or later full reload reconciles provider state.
-ST78 - Removing a mailbox-capable shared inbox from Shared Triage without deleting the email connection is a separate remove action: it removes the Shared Triage work surface and shared inbox permissions/GVIC rows while preserving the company_email_connections credential.
+ST78 - Removing a mailbox-capable shared inbox from Shared Triage without deleting the email connection is a separate remove action: it removes the Shared Triage work surface and shared inbox permissions/RACI rows while preserving the company_email_connections credential.
 ST79 - Dragging a Shared Triage mailbox email into a Logic Gate, Company Explorer Logic Gate row, Kanban column, project relationship panel, or project Logic Gate group must preserve `shared_inbox_id` through the drag payload and conversion API request; the supported cross-window boundary is Chrome window/tab to Chrome window/tab, and cross-browser application drag/drop is not a documented business requirement unless a separate compatibility rule and test are added. Company Explorer folders are not Shared Triage email conversion targets.
 ST80 - Shared Triage email conversion uses the company-owned shared mailbox grant for message detail reads; it must not require or fall back to the actor's personal mailbox connection.
 ST81 - A successful Shared Triage email conversion creates the same direct email-created Kanban node/card semantics as My Triage when a Logic Gate is targeted, including the visible email-origin marker and later email-transfer behavior; project-only conversion creates an email-origin project node relationship.
@@ -343,21 +343,21 @@ Business logic covered:
 - ST38
 
 Given:
-- A shared inbox has default access, user grants, group grants, and GVIC assignments.
+- A shared inbox has default access, user grants, group grants, and RACI assignments.
 - One regular user has edit access and a company manager has edit access.
 - The access store can be available or unavailable.
 
 Expected:
 - The regular no-access user cannot read or update access settings.
 - The company manager can update default access and explicit resource grants for regular company users.
-- The response includes default access, explicit grants, GVIC assignments, effective access, can-edit-permissions, and can-edit-manager-permissions.
-- GVIC assignments are not converted into resource permission grants and do not grant edit access or authorize delete/mutation actions.
+- The response includes default access, explicit grants, RACI assignments, effective access, can-edit-permissions, and can-edit-manager-permissions.
+- RACI assignments are not converted into resource permission grants and do not grant edit access or authorize delete/mutation actions.
 - User and group grants are both accepted, and group grants resolve from source group membership tables rather than a derived group projection table.
-- Permissions and GVIC rows target the shared inbox resource, not the company email connection.
+- Permissions and RACI rows target the shared inbox resource, not the company email connection.
 - Shared Triage folder permissions use the `shared_inbox_folder` resource type, mailbox permissions use the `shared_inbox` resource type, and `shared_triage_folder` is not treated as a table name.
 - If storage is unavailable, the endpoint returns service unavailable with `shared_inbox_storage_unavailable`.
 
-### Scenario ST-S5: Shared Inbox GVIC Scope
+### Scenario ST-S5: Shared Inbox RACI Scope
 
 Business logic covered:
 - ST21
@@ -368,10 +368,10 @@ Given:
 - The company has a mailbox-capable shared inbox and a plain shared inbox folder.
 
 Expected:
-- GVIC assignments can be managed for the mailbox/shared inbox resource.
-- GVIC assignments are rejected for a plain organizational folder when that resource is not a mailbox/shared inbox.
-- GVIC assignments do not move when the shared inbox is reconnected to the same or a different company email connection.
-- Loading the Shared Triage folder tree does not depend on GVIC projection tables such as `resource_gvic_effective_assignments`.
+- RACI assignments can be managed for the mailbox/shared inbox resource.
+- RACI assignments are rejected for a plain organizational folder when that resource is not a mailbox/shared inbox.
+- RACI assignments do not move when the shared inbox is reconnected to the same or a different company email connection.
+- Loading the Shared Triage folder tree does not depend on RACI projection tables such as `resource_gvic_effective_assignments`.
 
 ### Scenario ST-S6: Company-Owned Shared Mailbox Connection Setup
 
@@ -446,7 +446,7 @@ Expected:
 - Selecting the plain parent folder does not retry mail GETs when the row has no mailbox connection because folders are not mailbox resources.
 - Selecting the mailbox-capable shared inbox may load mail using the company-owned shared grant.
 - Nylas message/folder webhooks update only exact-inbox backend/frontend cache state and reconcile only the currently open mail-bearing shared inbox; event payloads never mutate visible rows directly.
-- Hints received in My Work, Updates, GVIC, root/headings/plain folders, another shared inbox, or another mail tab trigger no provider GET and install no fallback personal subscription.
+- Hints received in My Work, Updates, RACI, root/headings/plain folders, another shared inbox, or another mail tab trigger no provider GET and install no fallback personal subscription.
 - Clicking an email row, focusing the email body, and clicking back into the list do not reload, blank, or replace the message list.
 - Focus or visibility return does not refresh the active mailbox-capable mail view, and there is no browser-side 30-second message polling loop.
 - First acceptance and reconnect perform zero provider reads. Signed external message/folder hints share one exact-scope coalescer for metadata and directly identified detail only; the visible list remains stable.

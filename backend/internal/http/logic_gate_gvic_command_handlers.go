@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-func (s *Server) handleLogicGateGVICCommand(w http.ResponseWriter, r *http.Request, logicGateID, operation string) {
+func (s *Server) handleLogicGateRACICommand(w http.ResponseWriter, r *http.Request, logicGateID, operation string) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
@@ -31,27 +31,27 @@ func (s *Server) handleLogicGateGVICCommand(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	assignments, ok := parseLogicGateGVICCommandAssignments(fields)
+	assignments, ok := parseLogicGateRACICommandAssignments(fields)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid_gvic_assignments")
 		return
 	}
 
 	actorUserID, idempotencyKey := workItemAssignmentRequestEventMetadata(r)
-	input := store.LogicGateGVICAssignmentCommandInput{
+	input := store.LogicGateRACIAssignmentCommandInput{
 		CompanyID:      companyID,
 		LogicGateID:    logicGateID,
 		Assignments:    assignments,
 		ActorUserID:    actorUserID,
 		IdempotencyKey: idempotencyKey,
 	}
-	var result store.LogicGateGVICAssignmentCommandResult
+	var result store.LogicGateRACIAssignmentCommandResult
 	var err error
 	switch operation {
-	case store.LogicGateGVICCommandAdd:
-		result, err = s.repo.AddLogicGateGVICAssignments(input)
-	case store.LogicGateGVICCommandRemove:
-		result, err = s.repo.RemoveLogicGateGVICAssignments(input)
+	case store.LogicGateRACICommandAdd:
+		result, err = s.repo.AddLogicGateRACIAssignments(input)
+	case store.LogicGateRACICommandRemove:
+		result, err = s.repo.RemoveLogicGateRACIAssignments(input)
 	default:
 		writeError(w, http.StatusNotFound, "not_found")
 		return
@@ -64,8 +64,8 @@ func (s *Server) handleLogicGateGVICCommand(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "gvic_principal_not_in_company")
 		return
 	}
-	if errors.Is(err, store.ErrGVICStorageUnavailable) {
-		writeError(w, http.StatusServiceUnavailable, "logic_gate_GVIC_storage_unavailable")
+	if errors.Is(err, store.ErrRACIStorageUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, "logic_gate_RACI_storage_unavailable")
 		return
 	}
 	if errors.Is(err, store.ErrNotFound) {
@@ -73,7 +73,7 @@ func (s *Server) handleLogicGateGVICCommand(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_update_logic_gate_GVIC")
+		writeError(w, http.StatusInternalServerError, "failed_to_update_logic_gate_RACI")
 		return
 	}
 
@@ -82,12 +82,12 @@ func (s *Server) handleLogicGateGVICCommand(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, result)
 }
 
-func parseLogicGateGVICCommandAssignments(fields map[string]json.RawMessage) ([]store.LogicGateGVICAssignmentInput, bool) {
+func parseLogicGateRACICommandAssignments(fields map[string]json.RawMessage) ([]store.LogicGateRACIAssignmentInput, bool) {
 	if raw, set := fields["assignments"]; set {
 		if strings.TrimSpace(string(raw)) == "" || strings.TrimSpace(string(raw)) == "null" {
 			return nil, false
 		}
-		var assignments []store.LogicGateGVICAssignmentInput
+		var assignments []store.LogicGateRACIAssignmentInput
 		if err := json.Unmarshal(raw, &assignments); err != nil {
 			return nil, false
 		}
@@ -104,10 +104,10 @@ func parseLogicGateGVICCommandAssignments(fields map[string]json.RawMessage) ([]
 		if !principalTypePresent || !principalIDPresent {
 			return nil, false
 		}
-		return []store.LogicGateGVICAssignmentInput{{Role: role, PrincipalType: principalType, PrincipalID: principalID, UserID: userID}}, true
+		return []store.LogicGateRACIAssignmentInput{{Role: role, PrincipalType: principalType, PrincipalID: principalID, UserID: userID}}, true
 	}
 	if !userPresent {
 		return nil, false
 	}
-	return []store.LogicGateGVICAssignmentInput{{Role: role, UserID: userID}}, true
+	return []store.LogicGateRACIAssignmentInput{{Role: role, UserID: userID}}, true
 }

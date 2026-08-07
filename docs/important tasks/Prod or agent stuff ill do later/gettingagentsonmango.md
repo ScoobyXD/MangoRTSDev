@@ -144,7 +144,7 @@ Generated or handwritten SDKs can be added for TypeScript, Python, Go, and other
 
 For a local agent acting for a user, use OAuth Authorization Code with PKCE:
 
-1. The local agent or Mango CLI generates a code verifier and challenge.
+1. The local agent or Mango CLI generates a code accountable and challenge.
 2. It opens Mango in the user's browser.
 3. The user signs in to Mango and approves access.
 4. Mango redirects to a temporary localhost callback or another approved client callback.
@@ -231,7 +231,7 @@ The important mappings are:
 | Task | Node-to-logic-gate assignment |
 | File content | Public document/block representation |
 | Link | Relationship or Explorer placement |
-| Metadata | Status, priority, due date, permissions, GVIC roles |
+| Metadata | Status, priority, due date, permissions, RACI roles |
 | Revision | Version, editor sequence, or ETag |
 | Watch journal | Ordered change feed |
 | Blob | Attachment |

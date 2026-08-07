@@ -44,10 +44,10 @@ func isPostgresInvalidTextRepresentation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == postgresInvalidTextRepresentationCode
 }
 
-func scanLogicGateGVICAssignment(row interface {
+func scanLogicGateRACIAssignment(row interface {
 	Scan(dest ...any) error
-}) (domain.LogicGateGVICAssignment, error) {
-	var item domain.LogicGateGVICAssignment
+}) (domain.LogicGateRACIAssignment, error) {
+	var item domain.LogicGateRACIAssignment
 	var displayName sql.NullString
 	var email sql.NullString
 	err := row.Scan(
@@ -74,15 +74,15 @@ func scanLogicGateGVICAssignment(row interface {
 	return item, err
 }
 
-func appendLogicGateGVICAssignment(assignmentsByGate map[string][]domain.LogicGateGVICAssignment, item domain.LogicGateGVICAssignment) {
-	principalType, principalID := logicGateGVICAssignmentPrincipal(item)
+func appendLogicGateRACIAssignment(assignmentsByGate map[string][]domain.LogicGateRACIAssignment, item domain.LogicGateRACIAssignment) {
+	principalType, principalID := logicGateRACIAssignmentPrincipal(item)
 	if item.LogicGateID == "" || item.Role == "" || principalID == "" {
 		return
 	}
 	item.PrincipalType = principalType
 	item.PrincipalID = principalID
 	for _, existing := range assignmentsByGate[item.LogicGateID] {
-		existingPrincipalType, existingPrincipalID := logicGateGVICAssignmentPrincipal(existing)
+		existingPrincipalType, existingPrincipalID := logicGateRACIAssignmentPrincipal(existing)
 		if existing.Role == item.Role && existingPrincipalType == principalType && existingPrincipalID == principalID {
 			return
 		}
@@ -90,8 +90,8 @@ func appendLogicGateGVICAssignment(assignmentsByGate map[string][]domain.LogicGa
 	assignmentsByGate[item.LogicGateID] = append(assignmentsByGate[item.LogicGateID], item)
 }
 
-func (r *PostgresRepo) listLogicGateGVICAssignments(ctx context.Context, companyID string, logicGateIDs []string) (map[string][]domain.LogicGateGVICAssignment, error) {
-	assignmentsByGate := map[string][]domain.LogicGateGVICAssignment{}
+func (r *PostgresRepo) listLogicGateRACIAssignments(ctx context.Context, companyID string, logicGateIDs []string) (map[string][]domain.LogicGateRACIAssignment, error) {
+	assignmentsByGate := map[string][]domain.LogicGateRACIAssignment{}
 	if len(logicGateIDs) == 0 {
 		return assignmentsByGate, nil
 	}
@@ -130,7 +130,7 @@ order by assignment.resource_id::text asc,
   case assignment.role
     when 'responsible' then 1
     when 'consulted' then 2
-    when 'verifier' then 3
+    when 'accountable' then 3
     when 'informed' then 4
     else 5
   end,
@@ -141,13 +141,13 @@ order by assignment.resource_id::text asc,
 	)
 	if err != nil {
 		if isPostgresUndefinedTable(err, "resource_gvic_assignments") {
-			return nil, ErrGVICStorageUnavailable
+			return nil, ErrRACIStorageUnavailable
 		}
 		return nil, err
 	}
 	defer genericRows.Close()
 	for genericRows.Next() {
-		var item domain.LogicGateGVICAssignment
+		var item domain.LogicGateRACIAssignment
 		var principalName sql.NullString
 		var displayName sql.NullString
 		var email sql.NullString
@@ -177,29 +177,29 @@ order by assignment.resource_id::text asc,
 		if item.PrincipalType == EntityPermissionSubjectUser && item.UserID == "" {
 			item.UserID = item.PrincipalID
 		}
-		appendLogicGateGVICAssignment(assignmentsByGate, item)
+		appendLogicGateRACIAssignment(assignmentsByGate, item)
 	}
 	if err := genericRows.Err(); err != nil {
 		return nil, err
 	}
 	for logicGateID := range assignmentsByGate {
-		sortLogicGateGVICAssignments(assignmentsByGate[logicGateID])
+		sortLogicGateRACIAssignments(assignmentsByGate[logicGateID])
 	}
 	return assignmentsByGate, nil
 }
 
-func (r *PostgresRepo) attachLogicGateGVICAssignments(ctx context.Context, companyID string, gates []domain.LogicGate) ([]domain.LogicGate, error) {
+func (r *PostgresRepo) attachLogicGateRACIAssignments(ctx context.Context, companyID string, gates []domain.LogicGate) ([]domain.LogicGate, error) {
 	for index := range gates {
-		gates[index].GVICAssignments = []domain.LogicGateGVICAssignment{}
-		policy, err := r.GetResourceGVICPolicy(companyID, EntityTypeLogicGate, gates[index].LogicGateID)
+		gates[index].RACIAssignments = []domain.LogicGateRACIAssignment{}
+		policy, err := r.GetResourceRACIPolicy(companyID, EntityTypeLogicGate, gates[index].LogicGateID)
 		if err != nil {
 			return nil, err
 		}
-		assignments := make([]domain.ResourceGVICAssignment, 0, len(policy.EffectiveAssignments))
+		assignments := make([]domain.ResourceRACIAssignment, 0, len(policy.EffectiveAssignments))
 		for _, effective := range policy.EffectiveAssignments {
-			assignments = append(assignments, domain.ResourceGVICAssignment{Role: effective.Role, PrincipalType: EntityPermissionSubjectUser, PrincipalID: effective.UserID})
+			assignments = append(assignments, domain.ResourceRACIAssignment{Role: effective.Role, PrincipalType: EntityPermissionSubjectUser, PrincipalID: effective.UserID})
 		}
-		gates[index].GVICAssignments = logicGateGVICAssignmentsFromResources(assignments)
+		gates[index].RACIAssignments = logicGateRACIAssignmentsFromResources(assignments)
 	}
 	return gates, nil
 }
@@ -232,7 +232,7 @@ func (r *PostgresRepo) CreateLogicGate(companyID, header string) (domain.LogicGa
 	if err := tx.Commit(); err != nil {
 		return domain.LogicGate{}, err
 	}
-	items, err := r.attachLogicGateGVICAssignments(ctx, companyID, []domain.LogicGate{item})
+	items, err := r.attachLogicGateRACIAssignments(ctx, companyID, []domain.LogicGate{item})
 	if err != nil {
 		return domain.LogicGate{}, err
 	}
@@ -270,7 +270,7 @@ RETURNING company_id, logic_gate_id, header, created_timestamp
 	if err := tx.Commit(); err != nil {
 		return domain.LogicGate{}, err
 	}
-	items, err := r.attachLogicGateGVICAssignments(ctx, companyID, []domain.LogicGate{item})
+	items, err := r.attachLogicGateRACIAssignments(ctx, companyID, []domain.LogicGate{item})
 	if err != nil {
 		return domain.LogicGate{}, err
 	}
@@ -302,7 +302,7 @@ func (r *PostgresRepo) ListLogicGates(companyID string) ([]domain.LogicGate, err
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return r.attachLogicGateGVICAssignments(ctx, companyID, items)
+	return r.attachLogicGateRACIAssignments(ctx, companyID, items)
 }
 
 func (r *PostgresRepo) ListVisibleLogicGates(companyID, userID string) ([]domain.LogicGate, error) {
@@ -337,7 +337,7 @@ func (r *PostgresRepo) ListVisibleLogicGates(companyID, userID string) ([]domain
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	items, err = r.attachLogicGateGVICAssignments(ctx, companyID, items)
+	items, err = r.attachLogicGateRACIAssignments(ctx, companyID, items)
 	if err != nil {
 		return nil, err
 	}
@@ -389,7 +389,7 @@ func (r *PostgresRepo) ListLogicGatesInFolderSubtree(companyID, folderID string)
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return r.attachLogicGateGVICAssignments(ctx, companyID, items)
+	return r.attachLogicGateRACIAssignments(ctx, companyID, items)
 }
 
 func (r *PostgresRepo) ListVisibleLogicGatesInFolderSubtree(companyID, folderID, userID string) ([]domain.LogicGate, error) {
@@ -444,7 +444,7 @@ func (r *PostgresRepo) ListVisibleLogicGatesInFolderSubtree(companyID, folderID,
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	items, err = r.attachLogicGateGVICAssignments(ctx, companyID, items)
+	items, err = r.attachLogicGateRACIAssignments(ctx, companyID, items)
 	if err != nil {
 		return nil, err
 	}
@@ -497,7 +497,7 @@ order by lower(logic_gate.header) asc, logic_gate.logic_gate_id::text asc`
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return r.attachLogicGateGVICAssignments(ctx, companyID, items)
+	return r.attachLogicGateRACIAssignments(ctx, companyID, items)
 }
 
 func (r *PostgresRepo) QueryVisibleLogicGates(companyID, userID string, query LogicGateQuery) ([]domain.LogicGate, error) {
@@ -552,7 +552,7 @@ order by lower(logic_gate.header) asc, logic_gate.logic_gate_id::text asc`
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	items, err = r.attachLogicGateGVICAssignments(ctx, companyID, items)
+	items, err = r.attachLogicGateRACIAssignments(ctx, companyID, items)
 	if err != nil {
 		return nil, err
 	}
@@ -593,27 +593,27 @@ func (r *PostgresRepo) GetLogicGate(companyID, logicGateID string) (domain.Logic
 	} else if err != nil && !errors.Is(err, ErrNotFound) {
 		return domain.LogicGate{}, err
 	}
-	items, err := r.attachLogicGateGVICAssignments(ctx, companyID, []domain.LogicGate{item})
+	items, err := r.attachLogicGateRACIAssignments(ctx, companyID, []domain.LogicGate{item})
 	if err != nil {
 		return domain.LogicGate{}, err
 	}
 	return items[0], nil
 }
 
-func (r *PostgresRepo) SetLogicGateGVICAssignments(input LogicGateGVICAssignmentUpdateInput) ([]domain.LogicGateGVICAssignment, error) {
-	current, err := r.GetResourceGVICPolicy(input.CompanyID, EntityTypeLogicGate, input.LogicGateID)
+func (r *PostgresRepo) SetLogicGateRACIAssignments(input LogicGateRACIAssignmentUpdateInput) ([]domain.LogicGateRACIAssignment, error) {
+	current, err := r.GetResourceRACIPolicy(input.CompanyID, EntityTypeLogicGate, input.LogicGateID)
 	if err != nil {
 		return nil, err
 	}
-	assignments := make([]ResourceGVICAssignmentInput, 0, len(input.Assignments))
+	assignments := make([]ResourceRACIAssignmentInput, 0, len(input.Assignments))
 	for _, item := range input.Assignments {
-		normalized, err := normalizeLogicGateGVICAssignmentInput(item)
+		normalized, err := normalizeLogicGateRACIAssignmentInput(item)
 		if err != nil {
 			return nil, err
 		}
-		assignments = append(assignments, ResourceGVICAssignmentInput{Role: normalized.role, PrincipalType: normalized.principalType, PrincipalID: normalized.principalID})
+		assignments = append(assignments, ResourceRACIAssignmentInput{Role: normalized.role, PrincipalType: normalized.principalType, PrincipalID: normalized.principalID})
 	}
-	policy, _, err := r.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{
+	policy, _, err := r.PutResourceRACIPolicy(ResourceRACIPolicyUpdateInput{
 		CompanyID: input.CompanyID, ResourceType: EntityTypeLogicGate, ResourceID: input.LogicGateID,
 		AssignmentMode: PolicyModeCustomized, Assignments: assignments, DescendantAction: PolicyDescendantActionInheritedOnly,
 		ExpectedRevision: current.Revision,
@@ -621,7 +621,7 @@ func (r *PostgresRepo) SetLogicGateGVICAssignments(input LogicGateGVICAssignment
 	if err != nil {
 		return nil, err
 	}
-	return logicGateGVICAssignmentsFromResources(policy.GVICAssignments), nil
+	return logicGateRACIAssignmentsFromResources(policy.RACIAssignments), nil
 }
 
 func (r *PostgresRepo) DeleteLogicGate(companyID, logicGateID string) error {

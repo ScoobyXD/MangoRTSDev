@@ -8,13 +8,13 @@ import (
 	"strings"
 )
 
-func sortSharedInboxGVICAssignments(items []domain.SharedInboxGVICAssignment) {
+func sortSharedInboxRACIAssignments(items []domain.SharedInboxRACIAssignment) {
 	sort.Slice(items, func(i, j int) bool {
-		if GVICRoleSortValue(items[i].Role) != GVICRoleSortValue(items[j].Role) {
-			return GVICRoleSortValue(items[i].Role) < GVICRoleSortValue(items[j].Role)
+		if RACIRoleSortValue(items[i].Role) != RACIRoleSortValue(items[j].Role) {
+			return RACIRoleSortValue(items[i].Role) < RACIRoleSortValue(items[j].Role)
 		}
-		iLabel := sharedInboxGVICAssignmentSortLabel(items[i])
-		jLabel := sharedInboxGVICAssignmentSortLabel(items[j])
+		iLabel := sharedInboxRACIAssignmentSortLabel(items[i])
+		jLabel := sharedInboxRACIAssignmentSortLabel(items[j])
 		if iLabel != jLabel {
 			return iLabel < jLabel
 		}
@@ -28,7 +28,7 @@ func sortSharedInboxGVICAssignments(items []domain.SharedInboxGVICAssignment) {
 	})
 }
 
-func sharedInboxGVICAssignmentSortLabel(item domain.SharedInboxGVICAssignment) string {
+func sharedInboxRACIAssignmentSortLabel(item domain.SharedInboxRACIAssignment) string {
 	label := strings.ToLower(strings.TrimSpace(item.PrincipalName))
 	if label == "" {
 		label = strings.ToLower(strings.TrimSpace(item.UserDisplayName))
@@ -45,7 +45,7 @@ func sharedInboxGVICAssignmentSortLabel(item domain.SharedInboxGVICAssignment) s
 	return label
 }
 
-func appendSharedInboxGVICAssignment(assignmentsByInbox map[string][]domain.SharedInboxGVICAssignment, item domain.SharedInboxGVICAssignment) {
+func appendSharedInboxRACIAssignment(assignmentsByInbox map[string][]domain.SharedInboxRACIAssignment, item domain.SharedInboxRACIAssignment) {
 	principalType := strings.TrimSpace(item.PrincipalType)
 	principalID := strings.TrimSpace(item.PrincipalID)
 	if principalType == "" {
@@ -75,8 +75,8 @@ func appendSharedInboxGVICAssignment(assignmentsByInbox map[string][]domain.Shar
 	assignmentsByInbox[item.FolderID] = append(assignmentsByInbox[item.FolderID], item)
 }
 
-func (r *PostgresRepo) listCommunicationsSharedInboxGVICAssignments(ctx context.Context, companyID string, sharedInboxIDs []string) (map[string][]domain.SharedInboxGVICAssignment, error) {
-	assignmentsByInbox := map[string][]domain.SharedInboxGVICAssignment{}
+func (r *PostgresRepo) listCommunicationsSharedInboxRACIAssignments(ctx context.Context, companyID string, sharedInboxIDs []string) (map[string][]domain.SharedInboxRACIAssignment, error) {
+	assignmentsByInbox := map[string][]domain.SharedInboxRACIAssignment{}
 	if len(sharedInboxIDs) == 0 {
 		return assignmentsByInbox, nil
 	}
@@ -116,7 +116,7 @@ order by assignment.resource_id::text asc,
   case assignment.role
     when 'responsible' then 1
     when 'consulted' then 2
-    when 'verifier' then 3
+    when 'accountable' then 3
     when 'informed' then 4
     else 5
   end,
@@ -127,13 +127,13 @@ order by assignment.resource_id::text asc,
 	)
 	if err != nil {
 		if isPostgresUndefinedTable(err, "resource_gvic_assignments") || isPostgresUndefinedColumn(err, "") || isPostgresInvalidTextRepresentation(err) {
-			return nil, ErrGVICStorageUnavailable
+			return nil, ErrRACIStorageUnavailable
 		}
 		return nil, err
 	}
 	defer genericRows.Close()
 	for genericRows.Next() {
-		var item domain.SharedInboxGVICAssignment
+		var item domain.SharedInboxRACIAssignment
 		var principalName sql.NullString
 		var displayName sql.NullString
 		var email sql.NullString
@@ -171,25 +171,25 @@ order by assignment.resource_id::text asc,
 				item.PrincipalName = item.UserEmail
 			}
 		}
-		appendSharedInboxGVICAssignment(assignmentsByInbox, item)
+		appendSharedInboxRACIAssignment(assignmentsByInbox, item)
 	}
 	if err := genericRows.Err(); err != nil {
 		return nil, err
 	}
 	for inboxID := range assignmentsByInbox {
-		sortSharedInboxGVICAssignments(assignmentsByInbox[inboxID])
+		sortSharedInboxRACIAssignments(assignmentsByInbox[inboxID])
 	}
 	return assignmentsByInbox, nil
 }
 
-func (r *PostgresRepo) attachCommunicationsSharedInboxGVICAssignments(ctx context.Context, companyID string, folders []domain.CompanyExplorerFolder) ([]domain.CompanyExplorerFolder, error) {
+func (r *PostgresRepo) attachCommunicationsSharedInboxRACIAssignments(ctx context.Context, companyID string, folders []domain.CompanyExplorerFolder) ([]domain.CompanyExplorerFolder, error) {
 	ids := make([]string, 0, len(folders))
 	for _, folder := range folders {
 		if folder.FolderKind == "communications" && normalizeCommunicationsSharedInboxEntryType(folder.EntryType, folder.AccountEmail != nil || folder.SharedInboxID != "") == CommunicationsSharedInboxEntryTypeSharedInbox {
 			ids = append(ids, folder.FolderID)
 		}
 	}
-	assignments, err := r.listCommunicationsSharedInboxGVICAssignments(ctx, companyID, ids)
+	assignments, err := r.listCommunicationsSharedInboxRACIAssignments(ctx, companyID, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -198,25 +198,25 @@ func (r *PostgresRepo) attachCommunicationsSharedInboxGVICAssignments(ctx contex
 			continue
 		}
 		if normalizeCommunicationsSharedInboxEntryType(folders[index].EntryType, folders[index].AccountEmail != nil || folders[index].SharedInboxID != "") == CommunicationsSharedInboxEntryTypeSharedInbox {
-			folders[index].GVICAssignments = assignments[folders[index].FolderID]
+			folders[index].RACIAssignments = assignments[folders[index].FolderID]
 		}
-		gvicResourceType := CommunicationsSharedInboxGVICResourceType(folders[index])
-		policy, err := r.GetResourceGVICPolicy(companyID, gvicResourceType, folders[index].FolderID)
+		gvicResourceType := CommunicationsSharedInboxRACIResourceType(folders[index])
+		policy, err := r.GetResourceRACIPolicy(companyID, gvicResourceType, folders[index].FolderID)
 		if err != nil {
 			return nil, err
 		}
-		gvicAssignments := make([]domain.ResourceGVICAssignment, 0, len(policy.EffectiveAssignments))
+		gvicAssignments := make([]domain.ResourceRACIAssignment, 0, len(policy.EffectiveAssignments))
 		for _, effective := range policy.EffectiveAssignments {
-			gvicAssignments = append(gvicAssignments, domain.ResourceGVICAssignment{
+			gvicAssignments = append(gvicAssignments, domain.ResourceRACIAssignment{
 				Role: effective.Role, PrincipalType: EntityPermissionSubjectUser, PrincipalID: effective.UserID,
 			})
 		}
-		folders[index].GVICAssignments = sharedInboxGVICAssignmentsFromResources(gvicAssignments, folders[index].FolderID)
+		folders[index].RACIAssignments = sharedInboxRACIAssignmentsFromResources(gvicAssignments, folders[index].FolderID)
 	}
 	return folders, nil
 }
 
-func (r *PostgresRepo) SetCommunicationsSharedInboxGVICAssignments(input SharedInboxGVICAssignmentUpdateInput) ([]domain.SharedInboxGVICAssignment, error) {
+func (r *PostgresRepo) SetCommunicationsSharedInboxRACIAssignments(input SharedInboxRACIAssignmentUpdateInput) ([]domain.SharedInboxRACIAssignment, error) {
 	companyID := strings.TrimSpace(input.CompanyID)
 	sharedInboxID := strings.TrimSpace(input.FolderID)
 	if companyID == "" || sharedInboxID == "" {
@@ -257,7 +257,7 @@ func (r *PostgresRepo) SetCommunicationsSharedInboxGVICAssignments(input SharedI
 	normalized := make([]normalizedAssignment, 0, len(input.Assignments))
 	seen := map[string]bool{}
 	for _, assignment := range input.Assignments {
-		role, ok := NormalizeGVICRole(assignment.Role)
+		role, ok := NormalizeRACIRole(assignment.Role)
 		principalType := strings.ToLower(strings.TrimSpace(assignment.PrincipalType))
 		principalID := strings.TrimSpace(assignment.PrincipalID)
 		userID := strings.TrimSpace(assignment.UserID)
@@ -316,7 +316,7 @@ where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`,
 		companyID, EntityTypeSharedInbox, sharedInboxID,
 	); err != nil {
 		if isPostgresUndefinedTable(err, "resource_gvic_assignments") {
-			return nil, ErrGVICStorageUnavailable
+			return nil, ErrRACIStorageUnavailable
 		}
 		return nil, err
 	}
@@ -336,7 +336,7 @@ on conflict (company_id, resource_type, resource_id, role, principal_type, princ
 			companyID, EntityTypeSharedInbox, sharedInboxID, assignment.role, assignment.principalType, assignment.principalID,
 		); err != nil {
 			if isPostgresUndefinedTable(err, "resource_gvic_assignments") {
-				return nil, ErrGVICStorageUnavailable
+				return nil, ErrRACIStorageUnavailable
 			}
 			return nil, err
 		}
@@ -350,8 +350,8 @@ on conflict (company_id, resource_type, resource_id, role, principal_type, princ
 	}
 	for _, folder := range folders {
 		if folder.FolderID == sharedInboxID {
-			return folder.GVICAssignments, nil
+			return folder.RACIAssignments, nil
 		}
 	}
-	return []domain.SharedInboxGVICAssignment{}, nil
+	return []domain.SharedInboxRACIAssignment{}, nil
 }

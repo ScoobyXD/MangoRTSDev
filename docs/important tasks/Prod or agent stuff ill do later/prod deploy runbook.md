@@ -519,10 +519,10 @@ Agent database-access boundary:
 
 - Root `AGENTS.md` now says database access boundaries are physical, not trust-based.
 - Durable policy: `docs/security/database-agent-access-contract.md`.
-- Verifier: `scripts/verify_agent_db_access_boundary.py`.
+- Accountable: `scripts/verify_agent_db_access_boundary.py`.
 - AWS permission-set template: `docs/security/aws-prod-agent-readonly-permission-set-policy.template.json`.
 - Default prod agent role should be `mangorts-prod-agent-readonly`; it must have no Secrets Manager access and must deny ECS run/register/update, IAM PassRole, RDS mutation, RDS Data API SQL execution, Route53/CloudFormation/Cognito/CloudFront mutation paths, and related write actions.
-- Current Hermes session verifier passes because no `mangorts-prod`/`mangorts-dev` admin SSO token or static AWS credentials are active.
+- Current Hermes session accountable passes because no `mangorts-prod`/`mangorts-dev` admin SSO token or static AWS credentials are active.
 - Full physical enforcement is not complete until Jonat creates/assigns the IAM Identity Center permission set, configures the read-only AWS CLI profile, and keeps human-only tfvars/DBeaver writer credentials outside Hermes-accessible paths.
 
 ## GitHub production environment setup

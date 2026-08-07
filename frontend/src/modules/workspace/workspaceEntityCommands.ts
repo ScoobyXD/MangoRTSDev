@@ -1,7 +1,7 @@
 export type WorkspaceEntityCommandRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 
 export type WorkspaceEntityBatchKind = "node" | "logic_gate";
-export type WorkspaceEntityBatchCreatorLogicGateGVICRole = "responsible" | "consulted" | "verifier" | "informed";
+export type WorkspaceEntityBatchCreatorLogicGateRACIRole = "responsible" | "accountable" | "consulted" | "informed";
 export type WorkspaceEntityBatchMutationOrigin = "company_explorer" | "matrix" | "kanban" | "editor";
 
 export type WorkspaceEntityBatchItem = {
@@ -30,7 +30,7 @@ export async function createWorkspaceEntityBatchCommand<TResponse>(args: {
   entityKind: WorkspaceEntityBatchKind;
   folderID?: string;
   mutationOrigin?: WorkspaceEntityBatchMutationOrigin;
-  creatorLogicGateGVICRole?: WorkspaceEntityBatchCreatorLogicGateGVICRole;
+  creatorLogicGateRACIRole?: WorkspaceEntityBatchCreatorLogicGateRACIRole;
   items: WorkspaceEntityBatchItem[];
   relationships?: WorkspaceEntityBatchRelationship[];
   requestJSON: WorkspaceEntityCommandRequest;
@@ -40,7 +40,7 @@ export async function createWorkspaceEntityBatchCommand<TResponse>(args: {
     entity_kind: WorkspaceEntityBatchKind;
     folder_id: string;
     mutation_origin?: WorkspaceEntityBatchMutationOrigin;
-    creator_logic_gate_gvic_role?: WorkspaceEntityBatchCreatorLogicGateGVICRole;
+    creator_logic_gate_gvic_role?: WorkspaceEntityBatchCreatorLogicGateRACIRole;
     items: WorkspaceEntityBatchItem[];
     relationships: WorkspaceEntityBatchRelationship[];
   } = {
@@ -50,7 +50,7 @@ export async function createWorkspaceEntityBatchCommand<TResponse>(args: {
     items: args.items,
     relationships: args.relationships ?? [],
   };
-  if (args.entityKind === "logic_gate" && args.creatorLogicGateGVICRole) body.creator_logic_gate_gvic_role = args.creatorLogicGateGVICRole;
+  if (args.entityKind === "logic_gate" && args.creatorLogicGateRACIRole) body.creator_logic_gate_gvic_role = args.creatorLogicGateRACIRole;
   if (args.mutationOrigin) body.mutation_origin = args.mutationOrigin;
   return args.requestJSON<TResponse>("/v1/workspace/entity-batches", { method: "POST", body: JSON.stringify(body) });
 }

@@ -99,7 +99,7 @@ test("My Work matrix cache reuses fresh values until marked stale", async () => 
     return {
       company_id: "company-cache-test",
       user_id: targetUserID,
-      rows: [myWorkProjectionRow(targetUserID, "verifier", calls)],
+      rows: [myWorkProjectionRow(targetUserID, "accountable", calls)],
     };
   };
 
@@ -299,7 +299,7 @@ test("My Work projection results merge title commits newer than the drop request
   const laterCanonical = patchMyWorkMatrixCells([], {
     companyID,
     rows: [{
-      ...myWorkProjectionRow(userID, "verifier", 2),
+      ...myWorkProjectionRow(userID, "accountable", 2),
       node_name: "Later canonical node",
       logic_gate_id: logicGateID,
       logic_gate_name: "Later canonical gate",

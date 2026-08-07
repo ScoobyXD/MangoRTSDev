@@ -180,7 +180,7 @@ func TestMemoryAssignmentsDoNotGrantEditAccess(t *testing.T) {
 		t.Fatalf("assigned node edit allowed = %v err = %v, want false", allowed, err)
 	}
 
-	gate, err := repo.CreateLogicGate(companyID, "GVIC gate")
+	gate, err := repo.CreateLogicGate(companyID, "RACI gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
@@ -196,18 +196,18 @@ func TestMemoryAssignmentsDoNotGrantEditAccess(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions gate deny: %v", err)
 	}
-	if _, err := repo.SetLogicGateGVICAssignments(LogicGateGVICAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateRACIAssignments(LogicGateRACIAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: gate.LogicGateID,
-		Assignments: []LogicGateGVICAssignmentInput{{
-			Role:   domain.GVICRoleConsulted,
+		Assignments: []LogicGateRACIAssignmentInput{{
+			Role:   domain.RACIRoleConsulted,
 			UserID: responsible.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
+		t.Fatalf("SetLogicGateRACIAssignments: %v", err)
 	}
 	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeLogicGate, gate.LogicGateID, responsible.UserID, EntityPermissionEdit); err != nil || allowed {
-		t.Fatalf("GVIC user logic gate edit allowed = %v err = %v, want false", allowed, err)
+		t.Fatalf("RACI user logic gate edit allowed = %v err = %v, want false", allowed, err)
 	}
 
 	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
@@ -222,28 +222,28 @@ func TestMemoryAssignmentsDoNotGrantEditAccess(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions gate view: %v", err)
 	}
-	if _, err := repo.SetLogicGateGVICAssignments(LogicGateGVICAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateRACIAssignments(LogicGateRACIAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: gate.LogicGateID,
-		Assignments: []LogicGateGVICAssignmentInput{{
-			Role:   domain.GVICRoleResponsible,
+		Assignments: []LogicGateRACIAssignmentInput{{
+			Role:   domain.RACIRoleResponsible,
 			UserID: responsible.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateGVICAssignments responsible: %v", err)
+		t.Fatalf("SetLogicGateRACIAssignments responsible: %v", err)
 	}
 	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeLogicGate, gate.LogicGateID, responsible.UserID, EntityPermissionEdit); err != nil || !allowed {
-		t.Fatalf("explicit edit with GVIC assignment allowed = %v err = %v, want true", allowed, err)
+		t.Fatalf("explicit edit with RACI assignment allowed = %v err = %v, want true", allowed, err)
 	}
-	if _, err := repo.SetLogicGateGVICAssignments(LogicGateGVICAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateRACIAssignments(LogicGateRACIAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: gate.LogicGateID,
-		Assignments: []LogicGateGVICAssignmentInput{{
-			Role:   domain.GVICRoleConsulted,
+		Assignments: []LogicGateRACIAssignmentInput{{
+			Role:   domain.RACIRoleConsulted,
 			UserID: responsible.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateGVICAssignments consulted restore: %v", err)
+		t.Fatalf("SetLogicGateRACIAssignments consulted restore: %v", err)
 	}
 
 	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
@@ -255,19 +255,19 @@ func TestMemoryAssignmentsDoNotGrantEditAccess(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("clear gate permissions: %v", err)
 	}
-	repaired, err := repo.AddLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{
+	repaired, err := repo.AddLogicGateRACIAssignments(LogicGateRACIAssignmentCommandInput{
 		CompanyID:   companyID,
 		LogicGateID: gate.LogicGateID,
-		Assignments: []LogicGateGVICAssignmentInput{{
-			Role:   domain.GVICRoleConsulted,
+		Assignments: []LogicGateRACIAssignmentInput{{
+			Role:   domain.RACIRoleConsulted,
 			UserID: responsible.UserID,
 		}},
 	})
 	if err != nil {
-		t.Fatalf("duplicate AddLogicGateGVICAssignments: %v", err)
+		t.Fatalf("duplicate AddLogicGateRACIAssignments: %v", err)
 	}
 	if repaired.Changed {
-		t.Fatalf("duplicate AddLogicGateGVICAssignments changed = true, want false")
+		t.Fatalf("duplicate AddLogicGateRACIAssignments changed = true, want false")
 	}
 	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeLogicGate, gate.LogicGateID, responsible.UserID, EntityPermissionEdit); err != nil || !allowed {
 		t.Fatalf("cleared direct permissions default edit allowed = %v err = %v, want true", allowed, err)

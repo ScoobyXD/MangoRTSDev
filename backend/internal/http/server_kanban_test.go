@@ -153,7 +153,7 @@ func TestKanbanProjectionCompatibilityFlow(t *testing.T) {
 	}
 }
 
-func TestKanbanCardDeleteRequiresEditPermissionNotGVIC(t *testing.T) {
+func TestKanbanCardDeleteRequiresEditPermissionNotRACI(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -203,15 +203,15 @@ func TestKanbanCardDeleteRequiresEditPermissionNotGVIC(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions no access: %v", err)
 	}
-	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateRACIAssignments(store.LogicGateRACIAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []store.LogicGateGVICAssignmentInput{{
-			Role:   domain.GVICRoleResponsible,
+		Assignments: []store.LogicGateRACIAssignmentInput{{
+			Role:   domain.RACIRoleResponsible,
 			UserID: user.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
+		t.Fatalf("SetLogicGateRACIAssignments: %v", err)
 	}
 	priority := 3
 	result, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
@@ -232,7 +232,7 @@ func TestKanbanCardDeleteRequiresEditPermissionNotGVIC(t *testing.T) {
 	deleteRec := httptest.NewRecorder()
 	handler.ServeHTTP(deleteRec, deleteReq)
 	if deleteRec.Code != http.StatusNotFound {
-		t.Fatalf("DELETE with no access plus GVIC status = %d body=%s, want hidden 404", deleteRec.Code, deleteRec.Body.String())
+		t.Fatalf("DELETE with no access plus RACI status = %d body=%s, want hidden 404", deleteRec.Code, deleteRec.Body.String())
 	}
 
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{

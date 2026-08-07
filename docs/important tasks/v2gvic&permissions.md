@@ -1,36 +1,36 @@
-# Process Story: RCVI names responsibility and expands teams live
+# Process Story: RACI names responsibility and expands teams live
 
-A manager or editor assigns Responsible, Consulted, Verifier, or Informed to people or groups on a resource
+A manager or editor assigns Responsible, Accountable, Consulted, or Informed to people or groups on a resource
 ↓
 The policy stores each direct user or group once, and the editor shows each direct assignee's full display name
 ↓
-Nested group membership expands live for effective RCVI, My Work, and notifications without creating permanent per-user copies
+Nested group membership expands live for effective RACI, My Work, and notifications without creating permanent per-user copies
 ↓
 A changed effective role notifies that non-actor user even when the user was already assigned before the policy replacement
 ↓
 A company manager with Edit access can manage regular-user, group, and peer-manager permission rules, while admin identities remain protected
 ↓
-RCVI and permissions remain separate, and the permission PUT has no documented 1,000-assignment product cap
+RACI and permissions remain separate, and the permission PUT has no documented 1,000-assignment product cap
 
 Last updated: 2026-08-06
 
 # Process Story
 
-A Mango company organizes work as a resource tree. A Company Explorer folder can contain subfolders, Projects, and Logic Gates; a Logic Gate can contain assigned Nodes. Shared Triage folders can contain subfolders and shared inboxes. Every resource has a GVIC assignment mode and a permission mode. Each mode is either `inherited` or `customized`.
+A Mango company organizes work as a resource tree. A Company Explorer folder can contain subfolders, Projects, and Logic Gates; a Logic Gate can contain assigned Nodes. Shared Triage folders can contain subfolders and shared inboxes. Every resource has a RACI assignment mode and a permission mode. Each mode is either `inherited` or `customized`.
 
 An inherited resource points to its immediate parent's effective policy. Inheritance continues one parent at a time until Mango reaches the nearest active customized policy. A customized resource remains a child in the resource tree, but it owns a complete policy and blocks ordinary inheritance through that branch. Descendants that remain inherited use that customized resource as their policy source.
 
 A parent has two descendant actions. `Apply to inherited descendants` changes the policy seen by inherited branches and stops at active customized boundaries. It requires no descendant writes because inherited descendants already resolve through their immediate parents. `Overwrite all descendants, including customized` is the explicit force action. It records one monotonic reset sequence at the parent instead of rewriting every descendant. The reset makes older customized policies beneath that parent inactive. A descendant customized after the reset becomes independent again. A subtree created or moved beneath the parent after an older reset is not retroactively overwritten by that reset.
 
-GVIC and permissions remain separate systems. `resource_gvic_assignments` stores customized GVIC edges from a resource to a user or user group. `resource_permissions` stores customized permission edges from a resource to a user or user group. GVIC never grants resource access. Permission authorization first selects one effective permission policy through the inheritance rules, then resolves direct user, nested group, and default access inside that policy. Group membership is live source data and is never copied into permanent per-user policy rows.
+RACI and permissions remain separate systems. `resource_gvic_assignments` stores customized RACI edges from a resource to a user or user group. `resource_permissions` stores customized permission edges from a resource to a user or user group. RACI never grants resource access. Permission authorization first selects one effective permission policy through the inheritance rules, then resolves direct user, nested group, and default access inside that policy. Group membership is live source data and is never copied into permanent per-user policy rows.
 
 The final product model has exactly four policy tables: `resource_gvic_settings`, `resource_gvic_assignments`, `resource_permission_settings`, and `resource_permissions`. The settings tables distinguish inherited from intentionally empty customized policies and hold the sequence values needed for scalable force-overwrite behavior. The assignment tables hold the actual customized user/group edges. There is no permanent effective-assignment table, descendant fan-out table, policy-application history table, or duplicated default-access authority.
 
-# V2 RCVI and Permissions (technical GVIC storage/API namespace)
+# V2 RACI and Permissions (technical `gvic` storage/API namespace)
 
 ## Purpose and status
 
-This document is the authoritative product, database, API, migration, and verification contract for the V2 GVIC and permission system.
+This document is the authoritative product, database, API, migration, and verification contract for the V2 RACI and permission system.
 
 It replaces the current pointer/application design after the three separately completed steps below:
 
@@ -39,20 +39,20 @@ It replaces the current pointer/application design after the three separately co
 3. Complete testing, soak, snapshot, and separately approved retirement of old storage.
 
 This document does not authorize an agent to apply SQL to a live database. Repository agents may create schema, migration, preflight, copy, verification, and retirement files, but a human controls every live-database operation.
-## August 6, 2026 RCVI conversion
+## August 6, 2026 RACI conversion
 
-The product roles are Responsible, Consulted, Verifier, and Informed. Existing technical table, API, and helper names keep the `gvic` namespace; that namespace is not a fifth role or a separate policy authority.
+The product roles are Responsible, Accountable, Consulted, and Informed. Existing technical table, API, and helper names keep the `gvic` namespace; that namespace is not a fifth role or a separate policy authority.
 
-Existing databases require the reviewed forward migration `backend/db/migrations/20260806_zzz_rcvi_roles.sql`. It converts active Generated rows to Responsible and Verified rows to Verifier, updates notification and projection role values, updates restorable Recycle Bin policy JSON, removes the old Responsible/Verifier user-only and single-Responsible restrictions, and installs live nested-group effective resolution for every RCVI role. Agents must not apply it to a live database.
+Existing databases require the reviewed forward migration `backend/db/migrations/20260806_zzz_raci_roles.sql`. It converts active Generated rows to Responsible and active Verified or Verifier rows to Accountable, updates notification and projection role values, updates restorable Recycle Bin policy JSON, removes the legacy Generated/Verified user-only and single-Generated restrictions, and installs live nested-group effective resolution for every RACI role. Agents must not apply it to a live database.
 
-Fresh disposable databases receive the same final contract from the marked RCVI block at the end of `backend/db/schema.sql`. That file is also a replayable history and still contains the earlier Step 1 staging and Step 2 rename/cutover construction before the final RCVI block. Runtime code reads and writes only the final four V2 policy tables. This RCVI change does not rewrite the historical construction into a new direct-create-only schema.
+Fresh disposable databases receive the same final contract from the marked RACI block at the end of `backend/db/schema.sql`. That file is also a replayable history and still contains the earlier Step 1 staging and Step 2 rename/cutover construction before the final RACI block. Runtime code reads and writes only the final four V2 policy tables. This RACI change does not rewrite the historical construction into a new direct-create-only schema.
 
 ## Final decisions
 
 The following decisions are not open implementation choices:
 
 1. Use the words `inherited` and `customized`. Do not use `local` for the product or database mode.
-2. GVIC and permissions have separate settings tables, separate assignment tables, separate sequences, separate APIs, and separate business rules.
+2. RACI and permissions have separate settings tables, separate assignment tables, separate sequences, separate APIs, and separate business rules.
 3. A resource inherits one complete policy from its immediate parent chain. Policies from multiple resource levels are not merged.
 4. A customized resource is still a normal child in the resource tree. Only its policy becomes independent.
 5. Ordinary parent changes affect inherited branches and stop at active customized boundaries.
@@ -60,7 +60,7 @@ The following decisions are not open implementation choices:
 7. A later descendant customization wins over an older force reset.
 8. A force reset applies only across parent links that existed when that reset was recorded. A resource or subtree moved under the parent later is not affected by the older reset.
 9. Group assignments remain group edges. Effective users are resolved from current group hierarchy and membership.
-10. GVIC never grants view or edit permission.
+10. RACI never grants view or edit permission.
 11. Current policy resolution does not depend on audit history, timestamps, a projection table, or old application rows.
 12. Database timestamps are audit/display fields. Monotonic sequences decide overwrite ordering.
 13. The final policy schema contains exactly four tables. PostgreSQL sequences, indexes, constraint functions, and triggers are not additional product-state tables.
@@ -83,7 +83,7 @@ A settings row may still say `customized` after a force reset. In that case its 
 
 ### Effective policy
 
-The one complete GVIC or permission policy selected after walking the immediate-parent chain and applying force-reset rules.
+The one complete RACI or permission policy selected after walking the immediate-parent chain and applying force-reset rules.
 
 ### Immediate parent
 
@@ -110,7 +110,7 @@ shared_inbox_folder
 shared_inbox
 ```
 
-The old GVIC spelling `shared_triage_folder` is not a final resource type. Step 1 converts it to `shared_inbox_folder`.
+The old RACI spelling `shared_triage_folder` is not a final resource type. Step 1 converts it to `shared_inbox_folder`.
 
 Immediate parents are resolved only from canonical hierarchy tables:
 
@@ -145,7 +145,7 @@ Each policy mutation obtains its sequence inside the same transaction as its sta
 
 ### `resource_gvic_settings`
 
-One row exists for every GVIC-capable resource.
+One row exists for every RACI-capable resource.
 
 ```sql
 create table resource_gvic_settings (
@@ -199,7 +199,7 @@ create index on resource_gvic_settings
 
 ### `resource_gvic_assignments`
 
-This is the customized GVIC graph. It contains no inherited copies and no expanded group-member rows.
+This is the customized RACI graph. It contains no inherited copies and no expanded group-member rows.
 
 ```sql
 create table resource_gvic_assignments (
@@ -222,7 +222,7 @@ create table resource_gvic_assignments (
   foreign key (company_id, resource_type, resource_id)
     references resource_gvic_settings(company_id, resource_type, resource_id)
     on delete cascade,
-  check (role in ('responsible', 'consulted', 'verifier', 'informed')),
+  check (role in ('responsible', 'accountable', 'consulted', 'informed')),
   check (principal_type in ('user', 'group'))
 );
 ```
@@ -238,11 +238,11 @@ create index on resource_gvic_assignments
   (company_id, principal_type, principal_id, role, resource_type, resource_id);
 ```
 
-Uniform GVIC validation applies to every supported resource type so a folder policy can be inherited by a Logic Gate or Node without becoming invalid:
+Uniform RACI validation applies to every supported resource type so a folder policy can be inherited by a Logic Gate or Node without becoming invalid:
 
-- Responsible, Consulted, Verifier, and Informed each allow multiple users or groups.
+- Responsible, Accountable, Consulted, and Informed each allow multiple users or groups.
 - One direct principal may have only one source role in one customized resource policy.
-- Effective users from overlapping direct and group paths resolve in Responsible, Consulted, Verifier, Informed priority order.
+- Effective users from overlapping direct and group paths resolve in Responsible, Accountable, Consulted, Informed priority order.
 
 ### `resource_permission_settings`
 
@@ -359,7 +359,7 @@ Resource deletion must delete both settings rows. Cascades then delete assignmen
 
 ## Effective-policy resolution
 
-GVIC and permissions use the same traversal algorithm but read their separate settings, assignment, and sequence domains.
+RACI and permissions use the same traversal algorithm but read their separate settings, assignment, and sequence domains.
 
 ### Base rule without force overwrite
 
@@ -404,7 +404,7 @@ This provides the intended limited latest-write rule:
 
 An empty assignment table does not mean inherited.
 
-- GVIC `customized` plus zero GVIC rows means intentionally nobody is assigned.
+- RACI `customized` plus zero RACI rows means intentionally nobody is assigned.
 - Permission `customized` plus zero permission rows means the customized `default_access` applies to everyone without exceptions.
 
 The settings row is therefore required even when the graph table contains no rows.
@@ -492,7 +492,7 @@ The Logic Gate becomes independent again.
 ### Customize
 
 1. Resolve the current effective parent policy.
-2. Replace the resource's GVIC or permission graph rows with a complete copy of that policy.
+2. Replace the resource's RACI or permission graph rows with a complete copy of that policy.
 3. Apply the user's changes to the copied policy.
 4. Set stored mode to customized.
 5. Allocate a new `customized_sequence`.
@@ -511,7 +511,7 @@ Customization is copy-on-customize for one resource only. It is never descendant
 ### Move within the resource tree
 
 1. The canonical hierarchy writer changes the parent relationship.
-2. Allocate a new `parent_link_sequence` for GVIC and permissions on the moved resource.
+2. Allocate a new `parent_link_sequence` for RACI and permissions on the moved resource.
 3. Do not rewrite the moved resource's descendants.
 4. An inherited moved resource immediately uses its new parent chain.
 5. A customized moved resource remains customized.
@@ -523,7 +523,7 @@ Customization is copy-on-customize for one resource only. It is never descendant
 1. Assigning or moving a Node to a Logic Gate changes its immediate parent and advances both parent-link sequences.
 2. An inherited Node uses the new Logic Gate immediately.
 3. A customized Node remains customized after the move.
-4. Detaching a Node removes its immediate parent. An inherited Node cannot remain inherited without a parent, so detach must convert its currently effective GVIC and permission policies into customized policies in the same transaction.
+4. Detaching a Node removes its immediate parent. An inherited Node cannot remain inherited without a parent, so detach must convert its currently effective RACI and permission policies into customized policies in the same transaction.
 
 ### Delete
 
@@ -532,17 +532,17 @@ Customization is copy-on-customize for one resource only. It is never descendant
 3. Deleting a parent follows the resource tree's existing child move/delete rules before policy cleanup.
 4. No policy row may retain a missing resource, user, or group identity.
 
-## GVIC-specific rules
+## RACI-specific rules
 
-1. Roles are Responsible, Consulted, Verifier, and Informed, displayed in that order.
+1. Roles are Responsible, Accountable, Consulted, and Informed, displayed in that order.
 2. Every role allows multiple direct users or groups.
 3. One direct principal has only one role in one customized policy.
 4. Nested groups expand from `company_user_groups` and `company_user_group_members` at read time.
-5. If one effective user reaches several roles through overlapping groups, the effective role is selected deterministically in this order: Responsible, Consulted, Verifier, Informed.
-6. The editor colors are Responsible orange (`#f97316`), Consulted blue (`#2563eb`), Verifier green (`#16a34a`), and Informed purple (`#7c3aed`).
+5. If one effective user reaches several roles through overlapping groups, the effective role is selected deterministically in this order: Responsible, Accountable, Consulted, Informed.
+6. The editor colors are Responsible orange (`#f97316`), Accountable green (`#16a34a`), Consulted blue (`#2563eb`), and Informed purple (`#7c3aed`).
 7. The editor shows direct person and group names in each role card; names wrap instead of collapsing to `People (n)`.
-8. A group membership or group-parent change changes effective GVIC immediately without rewriting policy rows.
-9. GVIC controls assignment, My Work, update routing, and notification targeting only. It never grants resource access.
+8. A group membership or group-parent change changes effective RACI immediately without rewriting policy rows.
+9. RACI controls assignment, My Work, update routing, and notification targeting only. It never grants resource access.
 10. My Work must still require effective Edit permission to the returned resource.
 
 ## Permission-specific rules
@@ -556,14 +556,14 @@ After selecting one effective permission policy through inheritance:
 5. Among matching nested groups, the nearest group membership depth wins.
 6. At equal group depth, `no_access` beats `edit`.
 7. If no user or group rule applies, use `resource_permission_settings.default_access` from the effective customized policy.
-8. GVIC assignments are never considered by permission authorization.
+8. RACI assignments are never considered by permission authorization.
 9. Permission-setting reads and writes retain the manager/admin authorization boundary. Managers with effective Edit access may change regular-user, group, and peer-manager rules; company-admin and dev-admin identities remain protected, and admins retain their bypass.
 10. Runtime authorization resolves current group hierarchy from source group tables. It does not depend on `company_user_group_closure` or another required derived table.
 11. The canonical V2 permission PUT has no documented 1,000-assignment product cap.
 
 ## Group changes
 
-1. Adding or removing a user from a group changes effective GVIC and permission results immediately.
+1. Adding or removing a user from a group changes effective RACI and permission results immediately.
 2. Moving a group under another group changes nested membership immediately.
 3. Deleting a group removes direct graph edges referencing that group from both graph tables.
 4. Group deletion must not leave blank-label or stale UUID policy assignments.
@@ -572,9 +572,9 @@ After selecting one effective permission policy through inheritance:
 
 ## API and JSON contract
 
-V2 removes legacy specialized GVIC writers and uses one resource-shaped JSON contract per domain.
+V2 removes legacy specialized RACI writers and uses one resource-shaped JSON contract per domain.
 
-### GVIC read response
+### RACI read response
 
 ```json
 {
@@ -608,7 +608,7 @@ V2 removes legacy specialized GVIC writers and uses one resource-shaped JSON con
 
 `gvic_assignments` contains stored customized edges only. It is empty for stored inherited mode. `effective_assignments` contains the resolved user-level result for the current request and is not read from a permanent effective table.
 
-### GVIC write request
+### RACI write request
 
 ```json
 {
@@ -720,9 +720,9 @@ Permission checks perform work proportional to:
 
 They must not perform work proportional to the total number of descendants.
 
-### My Work and reverse GVIC lookup
+### My Work and reverse RACI lookup
 
-My Work reads from canonical GVIC settings/assignments, canonical hierarchy, current group membership, and current permissions.
+My Work reads from canonical RACI settings/assignments, canonical hierarchy, current group membership, and current permissions.
 
 Requirements:
 
@@ -753,7 +753,7 @@ Authorization is evaluated before returning HTTP 304.
 2. Emit one committed resource-scoped policy event containing the parent, policy type, action, and sequence.
 3. Clients invalidate and reread affected scopes through the compact event.
 4. If product later requires descendant notifications, use an explicitly bounded background aggregation job, not the policy write transaction.
-5. GVIC notification recipients are newly assigned users or users whose highest effective role changed, excluding the actor. Removed users do not receive an assignment notification.
+5. RACI notification recipients are newly assigned users or users whose highest effective role changed, excluding the actor. Removed users do not receive an assignment notification.
 
 ## Three-step implementation and rollout
 
@@ -785,7 +785,7 @@ For every resource and both policy types:
 3. Treat any disagreement as a reported blocker until classified.
 4. Copy the resolved complete policy into V2 staging graph rows.
 5. Copy the resolved permission default into V2 permission settings.
-6. Normalize `shared_triage_folder` GVIC identities to `shared_inbox_folder`.
+6. Normalize `shared_triage_folder` RACI identities to `shared_inbox_folder`.
 7. Validate every resource and principal identity.
 8. Report orphans and invalid role shapes; do not guess replacement resources or principals.
 
@@ -813,8 +813,8 @@ The read-only preflight must report at least:
 - every resource with source, revision, subtree-application, effective, or projection rows;
 - missing resources, users, groups, company memberships, or parent relationships;
 - current inherited/resolved permission default and edge counts;
-- current resolved GVIC role/principal counts;
-- historical legacy Generated/Verified group rows or multiple legacy Generated users before the RCVI conversion;
+- current resolved RACI role/principal counts;
+- historical legacy Generated/Verified group rows or multiple legacy Generated users before the RACI conversion;
 - one-principal/multiple-role conflicts;
 - old application snapshot/tombstone usage;
 - old source versus resolved versus effective-table disagreements;
@@ -837,7 +837,7 @@ Step 1 is complete only when:
 
 ### Step 1 implementation and operator record
 
-Step 1 repository implementation was completed and verifier on August 5, 2026. It is additive only: the old GVIC and permission tables, functions, triggers, readers, and writers remain active and unchanged. No SQL was applied to a live database, and no application cutover was performed.
+Step 1 repository implementation was completed and accountable on August 5, 2026. It is additive only: the old RACI and permission tables, functions, triggers, readers, and writers remain active and unchanged. No SQL was applied to a live database, and no application cutover was performed.
 
 Apply these repository migrations in filename order:
 
@@ -873,13 +873,13 @@ Step 1 never guesses that equal parent and child policies were inherited. Every 
 - `descendant_reset_sequence = 0`;
 - `parent_link_sequence` equal to the migration baseline for children and zero for roots;
 - a customization sequence equal to the migration baseline;
-- separate GVIC and permission sequences whose next values are strictly above the baseline.
+- separate RACI and permission sequences whose next values are strictly above the baseline.
 
-The copy normalizes old GVIC `shared_triage_folder` identities to `shared_inbox_folder`. Missing resources or principals, invalid GVIC role shapes, hierarchy cycles, unresolved permission defaults, old effective-table disagreements, and My Work projection disagreements stop the copy instead of being guessed or silently repaired.
+The copy normalizes old RACI `shared_triage_folder` identities to `shared_inbox_folder`. Missing resources or principals, invalid RACI role shapes, hierarchy cycles, unresolved permission defaults, old effective-table disagreements, and My Work projection disagreements stop the copy instead of being guessed or silently repaired.
 
 #### Verification record
 
-The schema contract and disposable-PostgreSQL integration tests cover first application, restartable rerun, schema-drift refusal, and transactional rollback. The copy was verifier against one repeatable-read source snapshot, including latest snapshot and direct-revision boundaries, exact counts, and policy fingerprints. The complete repository verification gate passed with the real disposable PostgreSQL path enabled.
+The schema contract and disposable-PostgreSQL integration tests cover first application, restartable rerun, schema-drift refusal, and transactional rollback. The copy was accountable against one repeatable-read source snapshot, including latest snapshot and direct-revision boundaries, exact counts, and policy fingerprints. The complete repository verification gate passed with the real disposable PostgreSQL path enabled.
 
 ## Step 2: application cutover to the four final tables
 
@@ -901,14 +901,14 @@ Change backend and frontend behavior so every policy read, write, authorization 
 
 Step 2 must replace:
 
-- generic GVIC source/effective readers and writers;
-- old Logic Gate GVIC command handlers and repository methods;
-- old Shared Inbox GVIC writers;
+- generic RACI source/effective readers and writers;
+- old Logic Gate RACI command handlers and repository methods;
+- old Shared Inbox RACI writers;
 - permission authorization SQL and settings CRUD;
 - Node Logic Gate placement, cross-gate move, and detach behavior;
 - Company Explorer and Shared Triage create/move/delete behavior;
 - group membership and group hierarchy effects;
-- My Work GVIC queries;
+- My Work RACI queries;
 - notification target resolution;
 - Logic Gate and Node read fingerprints/ETags;
 - workspace version/event behavior;
@@ -920,7 +920,7 @@ No old reader, fallback, or dual writer may remain in the deployed Step 2 applic
 
 Step 2 must provide:
 
-- clear `Inherited` and `Customized` controls for both GVIC and permissions;
+- clear `Inherited` and `Customized` controls for both RACI and permissions;
 - the effective source resource name/type;
 - an explanation when a stored customization is inactive because an ancestor force-overwrite superseded it;
 - `Apply to inherited descendants`;
@@ -941,12 +941,12 @@ Step 2 is complete only when:
 
 ### Step 2 implementation and operator record
 
-Step 2 repository implementation was completed and verifier on August 5, 2026. No SQL was applied to a live database, no production secret or database writer credential was accessed, and no cloud resource was changed. Step 3 retirement was not performed.
+Step 2 repository implementation was completed and accountable on August 5, 2026. No SQL was applied to a live database, no production secret or database writer credential was accessed, and no cloud resource was changed. Step 3 retirement was not performed.
 
 The Step 2 database artifacts are:
 
 - `backend/db/migrations/20260805_zzzc_v2_gvic_permissions_step2_cutover.sql`: the one atomic cutover transaction;
-- the `V2_GVIC_PERMISSIONS_STEP2_BEGIN/END` block in `backend/db/schema.sql`: the matching fresh-database schema state;
+- the `V2_RACI_PERMISSIONS_STEP2_BEGIN/END` block in `backend/db/schema.sql`: the matching fresh-database schema state;
 - `scripts/v2_gvic_permissions_step2_preflight.sql`: DBeaver-safe read-only pre-cutover validation;
 - `scripts/v2_gvic_permissions_step2_readiness.sql`: DBeaver-safe read-only post-deploy readiness validation.
 
@@ -979,13 +979,13 @@ Use a designated database operator and ordinary DBeaver PostgreSQL SQL execution
 
 #### Implemented runtime behavior
 
-The deployed Step 2 build reads and writes only the four canonical policy tables. It resolves inherited/customized policies, inactive overwritten customizations, parent-link reset boundaries, live nested groups, exact GVIC/permission separation, Node detach materialization, final-parent creator rules, current My Work, current notification targets, and actor-safe policy fingerprints. Legacy readers are excluded from the deployed build and no fallback, compatibility reader, dual writer, or request-time schema repair was added.
+The deployed Step 2 build reads and writes only the four canonical policy tables. It resolves inherited/customized policies, inactive overwritten customizations, parent-link reset boundaries, live nested groups, exact RACI/permission separation, Node detach materialization, final-parent creator rules, current My Work, current notification targets, and actor-safe policy fingerprints. Legacy readers are excluded from the deployed build and no fallback, compatibility reader, dual writer, or request-time schema repair was added.
 
 On August 5, 2026, the first post-cutover smoke check exposed a backend-only default-access reader defect: `postgresResourceDefaultAccess` selected a nonexistent `default_access` column from `mangorts_v2_resolve_permission_policy`. The resolver contract returns the effective source identity, so the reader now joins that identity to `resource_permission_settings` and reads the selected source row's `default_access`. A guarded disposable-PostgreSQL assertion exercises this exact runtime reader after cutover. This correction changes no business rule or database object, requires no SQL, and requires only deployment/restart of the corrected backend. The Step 2 readiness result remains valid and all temporary legacy evidence remains untouched.
 
 The same smoke session exposed a separate historical Node final-storage conversion defect in 10 current textboxes: a blank legacy body became a TipTap document with `document.content=[]`, which the backend correctly rejects. This is not a V2 policy failure and does not require rerunning the V2 cutover. The forward-only repair is `backend/db/migrations/20260805_zzzd_repair_empty_node_textbox_documents.sql`; a human operator first runs `scripts/repair_empty_node_textbox_documents_preflight.sql` read-only in DBeaver, reviews `READY_TO_REPAIR`, and then applies the reviewed migration through the normal migration process. It repairs only that exact body in current, history, seen, and Recycle Bin copies, preserves revisions and all relationship/restore metadata, is a no-op on fresh databases and reruns, and leaves the shipped Node cutover plus all Step 2 legacy evidence unchanged. Agents must not apply this SQL to a live database.
 
-The frontend uses only the canonical `/v1/resources/{resource_type}/{resource_id}/gvic` and `/permissions` endpoints. The obsolete Node, Logic Gate, Project, and Company Explorer permission URL shapes are no longer routed. GVIC and permission surfaces expose Inherited/Customized mode, effective source, overwritten-customization explanation, inherited-only Apply, separately confirmed overwrite-all, If-Match stale-write protection, and canonical response reconciliation. Selecting Customized without an explicit GVIC replacement asks the backend to copy the raw effective source policy once, preserving group pointers; an explicit empty array remains an intentionally empty customization.
+The frontend uses only the canonical `/v1/resources/{resource_type}/{resource_id}/gvic` and `/permissions` endpoints. The obsolete Node, Logic Gate, Project, and Company Explorer permission URL shapes are no longer routed. RACI and permission surfaces expose Inherited/Customized mode, effective source, overwritten-customization explanation, inherited-only Apply, separately confirmed overwrite-all, If-Match stale-write protection, and canonical response reconciliation. Selecting Customized without an explicit RACI replacement asks the backend to copy the raw effective source policy once, preserving group pointers; an explicit empty array remains an intentionally empty customization.
 
 #### Verification evidence
 
@@ -1003,9 +1003,9 @@ Prove the V2 runtime is authoritative, then remove every old policy table, colum
 
 ### Post-retirement save incident
 
-After the one-transaction retirement script was run on August 5, 2026, the operator reported that GVIC and permission edits would not save and that an editable permission dialog could not close while its close-with-save write failed. The same failure reproduced on a freshly recreated local database and produced no backend handler log. Browser evidence identified the shared cause: every V2 policy PUT sends `If-Match` for stale-write protection, but the API CORS allow-list omitted `If-Match`. The browser therefore rejected the preflight before sending either the GVIC or permission PUT to Go. The retirement SQL and the four canonical policy tables were not the cause.
+After the one-transaction retirement script was run on August 5, 2026, the operator reported that RACI and permission edits would not save and that an editable permission dialog could not close while its close-with-save write failed. The same failure reproduced on a freshly recreated local database and produced no backend handler log. Browser evidence identified the shared cause: every V2 policy PUT sends `If-Match` for stale-write protection, but the API CORS allow-list omitted `If-Match`. The browser therefore rejected the preflight before sending either the RACI or permission PUT to Go. The retirement SQL and the four canonical policy tables were not the cause.
 
-The API CORS contract now allows `If-Match`, with a regression assertion in the API preflight test. This restores all canonical GVIC and permission write call sites without removing stale-write protection or adding a fallback. Permission dialogs retain the documented close-with-save rule: X, Escape, and modal dismissal save pending editable changes before closing; denied, read-only, unchanged, and already-saved dialogs close without a write; a successful explicit Save prevents a duplicate close write. Focused frontend contract coverage enforces that behavior.
+The API CORS contract now allows `If-Match`, with a regression assertion in the API preflight test. This restores all canonical RACI and permission write call sites without removing stale-write protection or adding a fallback. Permission dialogs retain the documented close-with-save rule: X, Escape, and modal dismissal save pending editable changes before closing; denied, read-only, unchanged, and already-saved dialogs close without a write; a successful explicit Save prevents a duplicate close write. Focused frontend contract coverage enforces that behavior.
 
 No database repair, legacy-table restoration, migration rerun, or schema change is required. Deploy/restart the corrected backend so browsers receive the updated preflight response; the frontend close behavior ships with the matching frontend build.
 
@@ -1044,7 +1044,7 @@ Repository inspection during Steps 1-3 may add obsolete policy triggers, functio
 
 After retirement:
 
-- replaying `backend/db/schema.sql` runs the recorded Step 1 staging construction, Step 2 rename/cutover, and final RCVI role block, and ends with only the four final policy tables and two sequences;
+- replaying `backend/db/schema.sql` runs the recorded Step 1 staging construction, Step 2 rename/cutover, and final RACI role block, and ends with only the four final policy tables and two sequences;
 - the historical construction remains visible in the canonical schema file, but no staging or legacy policy table remains in the replayed final database state;
 - no old reader, writer, fallback, compatibility alias, or dual write remains;
 - no permanent effective, projection, closure, revision, or subtree-application table is required for correctness;
@@ -1059,7 +1059,7 @@ The implementation must map these scenarios into `docs/tests/gvic.md`, `docs/tes
 1. Root customized → child inherited → grandchild inherited: all use root policy.
 2. Root customized → child customized → grandchild inherited: child and grandchild use child policy.
 3. Ordinary root save changes inherited branches but not the customized child branch.
-4. An intentionally empty customized GVIC policy blocks inheritance.
+4. An intentionally empty customized RACI policy blocks inheritance.
 5. An intentionally empty customized permission exception set still uses its customized default.
 6. A root cannot be inherited.
 
@@ -1087,15 +1087,15 @@ The implementation must map these scenarios into `docs/tests/gvic.md`, `docs/tes
 9. Detaching an inherited Node materializes its current effective policy as customized.
 10. Moving a Node between Logic Gates follows inherited/customized mode instead of unconditionally replacing both policies.
 
-### GVIC scenarios
+### RACI scenarios
 
-1. Responsible, Consulted, Verifier, and Informed each accept multiple users or groups.
+1. Responsible, Accountable, Consulted, and Informed each accept multiple users or groups.
 2. One direct principal cannot occupy more than one role on the same resource.
-3. Overlapping groups resolve one effective user role using Responsible, Consulted, Verifier, Informed priority.
+3. Overlapping groups resolve one effective user role using Responsible, Accountable, Consulted, Informed priority.
 4. Role cards show direct assignee names and wrap long name lists.
 5. Group membership changes affect effective users without resource-policy writes.
-6. GVIC does not grant resource access.
-7. My Work includes only resources where the user has both effective GVIC and effective Edit permission.
+6. RACI does not grant resource access.
+7. My Work includes only resources where the user has both effective RACI and effective Edit permission.
 
 ### Permission scenarios
 
@@ -1130,7 +1130,7 @@ Step 2 changes business behavior and must update the business-rule files with a 
 - `docs/tests/users-and-user-groups.md`
 - any Company Explorer or Shared Triage process document whose inheritance behavior changes
 
-Stale rules saying a Node always snapshots a Logic Gate on entry, a linked Node always uses live gate GVIC regardless of mode, or a generic Apply physically replaces every child must be removed rather than preserved as compatibility wording.
+Stale rules saying a Node always snapshots a Logic Gate on entry, a linked Node always uses live gate RACI regardless of mode, or a generic Apply physically replaces every child must be removed rather than preserved as compatibility wording.
 
 ## Step 1 worker boundary
 

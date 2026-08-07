@@ -7,50 +7,50 @@ import (
 	"strings"
 )
 
-func (r *PostgresRepo) ListResourceGVICAssignments(companyID, resourceType, resourceID string) ([]domain.ResourceGVICAssignment, error) {
-	policy, err := r.GetResourceGVICPolicy(companyID, resourceType, resourceID)
+func (r *PostgresRepo) ListResourceRACIAssignments(companyID, resourceType, resourceID string) ([]domain.ResourceRACIAssignment, error) {
+	policy, err := r.GetResourceRACIPolicy(companyID, resourceType, resourceID)
 	if err != nil {
 		return nil, err
 	}
-	return policy.GVICAssignments, nil
+	return policy.RACIAssignments, nil
 }
 
-func (r *PostgresRepo) SetResourceGVICAssignments(input ResourceGVICAssignmentUpdateInput) (ResourceGVICAssignmentMutationResult, error) {
-	current, err := r.GetResourceGVICPolicy(input.CompanyID, input.ResourceType, input.ResourceID)
+func (r *PostgresRepo) SetResourceRACIAssignments(input ResourceRACIAssignmentUpdateInput) (ResourceRACIAssignmentMutationResult, error) {
+	current, err := r.GetResourceRACIPolicy(input.CompanyID, input.ResourceType, input.ResourceID)
 	if err != nil {
-		return ResourceGVICAssignmentMutationResult{}, err
+		return ResourceRACIAssignmentMutationResult{}, err
 	}
 	action := PolicyDescendantActionInheritedOnly
 	if input.ApplyToDescendants {
 		action = PolicyDescendantActionIncludingCustomized
 	}
-	assignments := append([]ResourceGVICAssignmentInput{}, input.Assignments...)
-	policy, events, err := r.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{
+	assignments := append([]ResourceRACIAssignmentInput{}, input.Assignments...)
+	policy, events, err := r.PutResourceRACIPolicy(ResourceRACIPolicyUpdateInput{
 		CompanyID: input.CompanyID, ResourceType: input.ResourceType, ResourceID: input.ResourceID,
 		AssignmentMode: PolicyModeCustomized, Assignments: assignments, DescendantAction: action,
 		ExpectedRevision: current.Revision, ActorUserID: input.ActorUserID, IdempotencyKey: input.IdempotencyKey,
 	})
 	if err != nil {
-		return ResourceGVICAssignmentMutationResult{}, err
+		return ResourceRACIAssignmentMutationResult{}, err
 	}
-	return ResourceGVICAssignmentMutationResult{
+	return ResourceRACIAssignmentMutationResult{
 		CompanyID: policy.CompanyID, ResourceType: policy.ResourceType, ResourceID: policy.ResourceID,
-		Operation: GVICAssignmentCommandSet, Changed: true, GVICAssignments: policy.GVICAssignments,
+		Operation: RACIAssignmentCommandSet, Changed: true, RACIAssignments: policy.RACIAssignments,
 		EffectiveAssignments: policy.EffectiveAssignments, Events: events,
 	}, nil
 }
 
-func v2GVICAssignmentsForEdit(policy ResourceGVICPolicy) []ResourceGVICAssignmentInput {
-	items := []ResourceGVICAssignmentInput{}
+func v2RACIAssignmentsForEdit(policy ResourceRACIPolicy) []ResourceRACIAssignmentInput {
+	items := []ResourceRACIAssignmentInput{}
 	if policy.AssignmentMode == PolicyModeCustomized && policy.OverwrittenByAncestor == nil {
-		for _, item := range policy.GVICAssignments {
-			items = append(items, ResourceGVICAssignmentInput{Role: item.Role, PrincipalType: item.PrincipalType, PrincipalID: item.PrincipalID})
+		for _, item := range policy.RACIAssignments {
+			items = append(items, ResourceRACIAssignmentInput{Role: item.Role, PrincipalType: item.PrincipalType, PrincipalID: item.PrincipalID})
 		}
 		return items
 	}
 	seen := map[string]bool{}
 	for _, item := range policy.EffectiveAssignments {
-		candidate := ResourceGVICAssignmentInput{Role: item.Role, PrincipalType: item.SourcePrincipalType, PrincipalID: item.SourcePrincipalID}
+		candidate := ResourceRACIAssignmentInput{Role: item.Role, PrincipalType: item.SourcePrincipalType, PrincipalID: item.SourcePrincipalID}
 		keyValue := candidate.Role + ":" + candidate.PrincipalType + ":" + candidate.PrincipalID
 		if !seen[keyValue] {
 			seen[keyValue] = true
@@ -60,7 +60,7 @@ func v2GVICAssignmentsForEdit(policy ResourceGVICPolicy) []ResourceGVICAssignmen
 	return items
 }
 
-func v2GVICInputSetsEqual(left, right []ResourceGVICAssignmentInput) bool {
+func v2RACIInputSetsEqual(left, right []ResourceRACIAssignmentInput) bool {
 	if len(left) != len(right) {
 		return false
 	}
@@ -78,22 +78,22 @@ func v2GVICInputSetsEqual(left, right []ResourceGVICAssignmentInput) bool {
 	return true
 }
 
-func unchangedV2GVICMutation(policy ResourceGVICPolicy, operation string) ResourceGVICAssignmentMutationResult {
-	return ResourceGVICAssignmentMutationResult{
+func unchangedV2RACIMutation(policy ResourceRACIPolicy, operation string) ResourceRACIAssignmentMutationResult {
+	return ResourceRACIAssignmentMutationResult{
 		CompanyID: policy.CompanyID, ResourceType: policy.ResourceType, ResourceID: policy.ResourceID,
-		Operation: operation, Changed: false, GVICAssignments: policy.GVICAssignments,
+		Operation: operation, Changed: false, RACIAssignments: policy.RACIAssignments,
 		EffectiveAssignments: policy.EffectiveAssignments, Events: []domain.DomainEvent{},
 	}
 }
 
-func (r *PostgresRepo) AddResourceGVICAssignments(input ResourceGVICAssignmentCommandInput) (ResourceGVICAssignmentMutationResult, error) {
-	current, err := r.GetResourceGVICPolicy(input.CompanyID, input.ResourceType, input.ResourceID)
+func (r *PostgresRepo) AddResourceRACIAssignments(input ResourceRACIAssignmentCommandInput) (ResourceRACIAssignmentMutationResult, error) {
+	current, err := r.GetResourceRACIPolicy(input.CompanyID, input.ResourceType, input.ResourceID)
 	if err != nil {
-		return ResourceGVICAssignmentMutationResult{}, err
+		return ResourceRACIAssignmentMutationResult{}, err
 	}
-	items := v2GVICAssignmentsForEdit(current)
-	before := append([]ResourceGVICAssignmentInput{}, items...)
-	byPrincipal := map[string]ResourceGVICAssignmentInput{}
+	items := v2RACIAssignmentsForEdit(current)
+	before := append([]ResourceRACIAssignmentInput{}, items...)
+	byPrincipal := map[string]ResourceRACIAssignmentInput{}
 	for _, item := range items {
 		byPrincipal[item.PrincipalType+":"+item.PrincipalID] = item
 	}
@@ -104,47 +104,47 @@ func (r *PostgresRepo) AddResourceGVICAssignments(input ResourceGVICAssignmentCo
 	for _, item := range byPrincipal {
 		items = append(items, item)
 	}
-	if v2GVICInputSetsEqual(before, items) {
-		return unchangedV2GVICMutation(current, GVICAssignmentCommandAdd), nil
+	if v2RACIInputSetsEqual(before, items) {
+		return unchangedV2RACIMutation(current, RACIAssignmentCommandAdd), nil
 	}
-	return r.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{CompanyID: input.CompanyID, ResourceType: input.ResourceType, ResourceID: input.ResourceID, Assignments: items, ActorUserID: input.ActorUserID, IdempotencyKey: input.IdempotencyKey, ApplyToDescendants: input.ApplyToDescendants})
+	return r.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{CompanyID: input.CompanyID, ResourceType: input.ResourceType, ResourceID: input.ResourceID, Assignments: items, ActorUserID: input.ActorUserID, IdempotencyKey: input.IdempotencyKey, ApplyToDescendants: input.ApplyToDescendants})
 }
 
-func (r *PostgresRepo) RemoveResourceGVICAssignments(input ResourceGVICAssignmentCommandInput) (ResourceGVICAssignmentMutationResult, error) {
-	current, err := r.GetResourceGVICPolicy(input.CompanyID, input.ResourceType, input.ResourceID)
+func (r *PostgresRepo) RemoveResourceRACIAssignments(input ResourceRACIAssignmentCommandInput) (ResourceRACIAssignmentMutationResult, error) {
+	current, err := r.GetResourceRACIPolicy(input.CompanyID, input.ResourceType, input.ResourceID)
 	if err != nil {
-		return ResourceGVICAssignmentMutationResult{}, err
+		return ResourceRACIAssignmentMutationResult{}, err
 	}
 	remove := map[string]bool{}
 	for _, item := range input.Assignments {
 		remove[item.Role+":"+item.PrincipalType+":"+item.PrincipalID] = true
 	}
-	items := []ResourceGVICAssignmentInput{}
-	for _, item := range v2GVICAssignmentsForEdit(current) {
+	items := []ResourceRACIAssignmentInput{}
+	for _, item := range v2RACIAssignmentsForEdit(current) {
 		if !remove[item.Role+":"+item.PrincipalType+":"+item.PrincipalID] {
 			items = append(items, item)
 		}
 	}
-	if v2GVICInputSetsEqual(v2GVICAssignmentsForEdit(current), items) {
-		return unchangedV2GVICMutation(current, GVICAssignmentCommandRemove), nil
+	if v2RACIInputSetsEqual(v2RACIAssignmentsForEdit(current), items) {
+		return unchangedV2RACIMutation(current, RACIAssignmentCommandRemove), nil
 	}
-	return r.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{CompanyID: input.CompanyID, ResourceType: input.ResourceType, ResourceID: input.ResourceID, Assignments: items, ActorUserID: input.ActorUserID, IdempotencyKey: input.IdempotencyKey, ApplyToDescendants: input.ApplyToDescendants})
+	return r.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{CompanyID: input.CompanyID, ResourceType: input.ResourceType, ResourceID: input.ResourceID, Assignments: items, ActorUserID: input.ActorUserID, IdempotencyKey: input.IdempotencyKey, ApplyToDescendants: input.ApplyToDescendants})
 }
 
-func (r *PostgresRepo) ListResourceGVICEffectiveAssignments(companyID, resourceType, resourceID string) ([]domain.ResourceGVICEffectiveAssignment, error) {
-	policy, err := r.GetResourceGVICPolicy(companyID, resourceType, resourceID)
+func (r *PostgresRepo) ListResourceRACIEffectiveAssignments(companyID, resourceType, resourceID string) ([]domain.ResourceRACIEffectiveAssignment, error) {
+	policy, err := r.GetResourceRACIPolicy(companyID, resourceType, resourceID)
 	if err != nil {
 		return nil, err
 	}
 	return policy.EffectiveAssignments, nil
 }
 
-type postgresGVICQueryer interface {
+type postgresRACIQueryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-func postgresGVICResourceExists(ctx context.Context, queryer postgresGVICQueryer, keyValue resourceGVICKey) (bool, error) {
+func postgresRACIResourceExists(ctx context.Context, queryer postgresRACIQueryer, keyValue resourceRACIKey) (bool, error) {
 	var sqlText string
 	switch keyValue.resourceType {
 	case EntityTypeNode:
@@ -167,7 +167,7 @@ func postgresGVICResourceExists(ctx context.Context, queryer postgresGVICQueryer
 	return exists, err
 }
 
-func validatePostgresGVICPrincipalTx(ctx context.Context, tx *sql.Tx, companyID, principalType, principalID string) error {
+func validatePostgresRACIPrincipalTx(ctx context.Context, tx *sql.Tx, companyID, principalType, principalID string) error {
 	var sqlText string
 	switch principalType {
 	case EntityPermissionSubjectUser:
@@ -187,7 +187,7 @@ func validatePostgresGVICPrincipalTx(ctx context.Context, tx *sql.Tx, companyID,
 	return nil
 }
 
-func postgresDirectResourceGVICAssignmentsForResource(ctx context.Context, queryer postgresGVICQueryer, keyValue resourceGVICKey) ([]domain.ResourceGVICAssignment, error) {
+func postgresDirectResourceRACIAssignmentsForResource(ctx context.Context, queryer postgresRACIQueryer, keyValue resourceRACIKey) ([]domain.ResourceRACIAssignment, error) {
 	rows, err := queryer.QueryContext(ctx, `
 select
   assignment.company_id::text,
@@ -217,7 +217,7 @@ order by
   case assignment.role
     when 'responsible' then 1
     when 'consulted' then 2
-    when 'verifier' then 3
+    when 'accountable' then 3
     when 'informed' then 4
     else 5
   end,
@@ -228,9 +228,9 @@ order by
 		return nil, err
 	}
 	defer rows.Close()
-	items := make([]domain.ResourceGVICAssignment, 0)
+	items := make([]domain.ResourceRACIAssignment, 0)
 	for rows.Next() {
-		var item domain.ResourceGVICAssignment
+		var item domain.ResourceRACIAssignment
 		var principalName sql.NullString
 		var userID sql.NullString
 		var displayName sql.NullString
@@ -268,6 +268,6 @@ order by
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	sortResourceGVICAssignments(items)
+	sortResourceRACIAssignments(items)
 	return items, nil
 }

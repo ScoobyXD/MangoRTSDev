@@ -775,7 +775,7 @@ test("editor header keeps primary controls visible and preserves all secondary o
   const editorTabBar = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorTabBar.tsx"), "utf8");
   const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
   const linkedDocumentPanels = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorLinkedDocumentPanels.tsx"), "utf8");
-  const gvicPresentation = readFileSync(resolve(process.cwd(), "frontend/src/modules/logic-gates/gvicPresentation.ts"), "utf8");
+  const raciPresentation = readFileSync(resolve(process.cwd(), "frontend/src/modules/logic-gates/raciPresentation.ts"), "utf8");
   const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
 
   assert.match(editorTabBar, /const primaryTabs = visibleTabs\.filter\(\(tab\) => EDITOR_PRIMARY_HEADER_TAB_IDS\.includes\(tab\.id\)\)/);
@@ -794,11 +794,11 @@ test("editor header keeps primary controls visible and preserves all secondary o
   assert.match(editorTabBar, /onCreateRelatedNode\(kind as EditorRelatedNodeCreationKind\)/);
   assert.match(editorContent, /onCreateRelatedNode=/);
   assert.match(editorContent, /onSaveCurrentVersion=/);
-  assert.match(editorContent, /secondaryActions=\{linkedEntityKind === "node" \|\| linkedEntityKind === "logic_gate" \? \[\{[\s\S]*id: "use-inherited-gvic-policy"[\s\S]*changeCurrentGVICMode\("inherited"\)[\s\S]*id: "use-customized-gvic-policy"[\s\S]*changeCurrentGVICMode\("customized"\)[\s\S]*id: "apply-gvic-to-inherited-descendants"[\s\S]*onSelect: applyLogicGateGVICToInheritedDescendants[\s\S]*id: "overwrite-gvic-descendants"[\s\S]*onSelect: \(\) => setLogicGateGVICApplyConfirmationOpen\(true\)[\s\S]*singleLine/);
-  assert.match(editorContent, /logicGateGVICApplyConfirmationOpen && linkedEntityKind === "logic_gate"[\s\S]*<ConfirmActionMenu[\s\S]*title="Overwrite all descendants, including customized\?"[\s\S]*confirmLabel="Overwrite"[\s\S]*cancelLabel="No"[\s\S]*onConfirm=\{\(\) => \{[\s\S]*setLogicGateGVICApplyConfirmationOpen\(false\);[\s\S]*applyLogicGateGVICToAssignedNodes\(\)[\s\S]*onCancel=\{\(\) => setLogicGateGVICApplyConfirmationOpen\(false\)\}/);
-  assert.match(gvicPresentation, /LOGIC_GATE_GVIC_ROLE_PRESENTATIONS[\s\S]*role: "responsible"[\s\S]*accent: "#f97316"[\s\S]*role: "consulted"[\s\S]*accent: "#2563eb"[\s\S]*role: "verifier"[\s\S]*accent: "#16a34a"[\s\S]*role: "informed"[\s\S]*accent: "#7c3aed"/);
-  assert.match(linkedDocumentPanels, /const GVIC_ROLES = LOGIC_GATE_GVIC_ROLE_PRESENTATIONS[\s\S]*gridTemplateColumns: "repeat\(4, minmax\(145px, 1fr\)\)"[\s\S]*\{GVIC_ROLES\.map/);
-  assert.doesNotMatch(linkedDocumentPanels, /Apply GVIC to assigned nodes|Current GVIC|Apply GVIC to all descendants/);
+  assert.match(editorContent, /secondaryActions=\{linkedEntityKind === "node" \|\| linkedEntityKind === "logic_gate" \? \[\{[\s\S]*id: "use-inherited-gvic-policy"[\s\S]*changeCurrentRACIMode\("inherited"\)[\s\S]*id: "use-customized-gvic-policy"[\s\S]*changeCurrentRACIMode\("customized"\)[\s\S]*id: "apply-gvic-to-inherited-descendants"[\s\S]*onSelect: applyLogicGateRACIToInheritedDescendants[\s\S]*id: "overwrite-gvic-descendants"[\s\S]*onSelect: \(\) => setLogicGateRACIApplyConfirmationOpen\(true\)[\s\S]*singleLine/);
+  assert.match(editorContent, /logicGateRACIApplyConfirmationOpen && linkedEntityKind === "logic_gate"[\s\S]*<ConfirmActionMenu[\s\S]*title="Overwrite all descendants, including customized\?"[\s\S]*confirmLabel="Overwrite"[\s\S]*cancelLabel="No"[\s\S]*onConfirm=\{\(\) => \{[\s\S]*setLogicGateRACIApplyConfirmationOpen\(false\);[\s\S]*applyLogicGateRACIToAssignedNodes\(\)[\s\S]*onCancel=\{\(\) => setLogicGateRACIApplyConfirmationOpen\(false\)\}/);
+  assert.match(raciPresentation, /LOGIC_GATE_RACI_ROLE_PRESENTATIONS[\s\S]*role: "responsible"[\s\S]*accent: "#f97316"[\s\S]*role: "accountable"[\s\S]*accent: "#16a34a"[\s\S]*role: "consulted"[\s\S]*accent: "#2563eb"[\s\S]*role: "informed"[\s\S]*accent: "#7c3aed"/);
+  assert.match(linkedDocumentPanels, /const RACI_ROLES = LOGIC_GATE_RACI_ROLE_PRESENTATIONS[\s\S]*gridTemplateColumns: "repeat\(4, minmax\(145px, 1fr\)\)"[\s\S]*\{RACI_ROLES\.map/);
+  assert.doesNotMatch(linkedDocumentPanels, /Apply RACI to assigned nodes|Current RACI|Apply RACI to all descendants/);
   assert.doesNotMatch(linkedDocumentPanels, />Policy mode<|Effective source:/);
   assert.match(editorContent, /<EntityPermissionsPanel[\s\S]*readOnly=\{!linkedEntityCanEdit\}[\s\S]*onSaved=\{\(\) => invalidateWorkspaceSnapshot\(apiBase, companyID\)\}/);
   assert.match(editorContent, /descendant_action: descendantAction/);

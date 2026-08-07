@@ -7,7 +7,7 @@ import {
 import { getAuthSessionCacheGeneration } from "../../auth/cognitoAuth.js";
 import { requestJSONWithMeta } from "../api/requestJSON.js";
 import { isHTTPNotFoundError } from "../api/requestJSON.js";
-import type { LogicGateGVICAssignment } from "../logic-gates/types.js";
+import type { LogicGateRACIAssignment } from "../logic-gates/types.js";
 import type { NodeDetails, NodeRecord, NodeRelationship } from "./types.js";
 
 export type NodeProjectionItem = {
@@ -25,7 +25,7 @@ type NodeViewResponse = NodeDetails & {
   company_id?: string;
   node_id?: string;
   projections?: NodeProjectionItem[];
-  gvic_assignments?: LogicGateGVICAssignment[];
+  gvic_assignments?: LogicGateRACIAssignment[];
 };
 
 const viewCache = new Map<string, NodeViewResponse>();
@@ -39,7 +39,7 @@ const detailsCache = new Map<string, NodeDetails>();
 
 const projectionCache = new Map<string, NodeProjectionItem[]>();
 
-const gvicAssignmentCache = new Map<string, LogicGateGVICAssignment[]>();
+const gvicAssignmentCache = new Map<string, LogicGateRACIAssignment[]>();
 
 function key(apiBase: string, companyID: string, nodeID: string): string {
   ensureNodeRecordStoreAuthScope();
@@ -196,7 +196,7 @@ export async function getNodeInformationProjectionSingleFlight(apiBase: string, 
   return payload.projections ?? [];
 }
 
-export async function getNodeGVICAssignmentsSingleFlight(apiBase: string, companyID: string, nodeID: string): Promise<LogicGateGVICAssignment[]> {
+export async function getNodeRACIAssignmentsSingleFlight(apiBase: string, companyID: string, nodeID: string): Promise<LogicGateRACIAssignment[]> {
   const cacheKey = key(apiBase, companyID, nodeID);
   const cached = gvicAssignmentCache.get(cacheKey);
   if (cached) return cached;

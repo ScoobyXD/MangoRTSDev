@@ -24,7 +24,7 @@ type resourcePermissionSubtreeApplication struct {
 	Sequence             int64
 }
 
-type resourceGVICSubtreeApplication struct {
+type resourceRACISubtreeApplication struct {
 	CompanyID            string
 	AncestorResourceType string
 	AncestorResourceID   string
@@ -71,11 +71,11 @@ func (r *MemoryRepo) setDirectResourcePolicySequenceLocked(companyID, resourceTy
 	r.resourcePermissionRevisions[resourcePolicyKey(companyID, resourceType, resourceID)] = sequence
 }
 
-func (r *MemoryRepo) directGVICPolicySequenceLocked(companyID, resourceType, resourceID string) int64 {
+func (r *MemoryRepo) directRACIPolicySequenceLocked(companyID, resourceType, resourceID string) int64 {
 	return r.gvicPolicyRevisions[resourcePolicyKey(companyID, resourceType, resourceID)]
 }
 
-func (r *MemoryRepo) setDirectGVICPolicySequenceLocked(companyID, resourceType, resourceID string, sequence int64) {
+func (r *MemoryRepo) setDirectRACIPolicySequenceLocked(companyID, resourceType, resourceID string, sequence int64) {
 	r.gvicPolicyRevisions[resourcePolicyKey(companyID, resourceType, resourceID)] = sequence
 }
 
@@ -83,8 +83,8 @@ func clonePermissionApplications(items []resourcePermissionSubtreeApplication) [
 	return append([]resourcePermissionSubtreeApplication(nil), items...)
 }
 
-func cloneGVICApplications(items []resourceGVICSubtreeApplication) []resourceGVICSubtreeApplication {
-	return append([]resourceGVICSubtreeApplication(nil), items...)
+func cloneRACIApplications(items []resourceRACISubtreeApplication) []resourceRACISubtreeApplication {
+	return append([]resourceRACISubtreeApplication(nil), items...)
 }
 
 type resourcePolicyAncestor struct {
@@ -403,10 +403,10 @@ func (r *MemoryRepo) permissionAccessLevelForUserFromAssignmentsLocked(companyID
 	return bestAccess, bestAccess != ""
 }
 
-func (r *MemoryRepo) resolvedResourceGVICAssignmentsLocked(companyID, resourceType, resourceID string) []domain.ResourceGVICAssignment {
-	directSequence := r.directGVICPolicySequenceLocked(companyID, resourceType, resourceID)
+func (r *MemoryRepo) resolvedResourceRACIAssignmentsLocked(companyID, resourceType, resourceID string) []domain.ResourceRACIAssignment {
+	directSequence := r.directRACIPolicySequenceLocked(companyID, resourceType, resourceID)
 	type resolvedRule struct {
-		assignment domain.ResourceGVICAssignment
+		assignment domain.ResourceRACIAssignment
 		sequence   int64
 		deleted    bool
 	}
@@ -431,7 +431,7 @@ func (r *MemoryRepo) resolvedResourceGVICAssignmentsLocked(companyID, resourceTy
 		}
 	}
 	if snapshotSequence == 0 {
-		for _, assignment := range r.directGVICAssignmentsForResourceLocked(companyID, resourceType, resourceID) {
+		for _, assignment := range r.directRACIAssignmentsForResourceLocked(companyID, resourceType, resourceID) {
 			rules[gvicRuleKey(assignment.Role, assignment.PrincipalType, assignment.PrincipalID)] = resolvedRule{assignment: assignment, sequence: directSequence}
 		}
 	}
@@ -447,39 +447,39 @@ func (r *MemoryRepo) resolvedResourceGVICAssignmentsLocked(companyID, resourceTy
 		if exists && existing.sequence >= application.Sequence {
 			continue
 		}
-		item := r.resourceGVICAssignmentForPrincipalLocked(resourceGVICKey{companyID: companyID, resourceType: resourceType, resourceID: resourceID}, normalizedGVICAssignmentInput{
+		item := r.resourceRACIAssignmentForPrincipalLocked(resourceRACIKey{companyID: companyID, resourceType: resourceType, resourceID: resourceID}, normalizedRACIAssignmentInput{
 			role:          application.Role,
 			principalType: application.PrincipalType,
 			principalID:   application.PrincipalID,
 		}, time.Now().UTC())
 		rules[ruleKey] = resolvedRule{assignment: item, sequence: application.Sequence, deleted: application.Deleted}
 	}
-	items := make([]domain.ResourceGVICAssignment, 0, len(rules))
+	items := make([]domain.ResourceRACIAssignment, 0, len(rules))
 	for _, rule := range rules {
 		if rule.deleted {
 			continue
 		}
 		items = append(items, rule.assignment)
 	}
-	sortResourceGVICAssignments(items)
+	sortResourceRACIAssignments(items)
 	return items
 }
 
-func (r *MemoryRepo) directGVICAssignmentsForResourceLocked(companyID, resourceType, resourceID string) []domain.ResourceGVICAssignment {
-	items := make([]domain.ResourceGVICAssignment, 0)
+func (r *MemoryRepo) directRACIAssignmentsForResourceLocked(companyID, resourceType, resourceID string) []domain.ResourceRACIAssignment {
+	items := make([]domain.ResourceRACIAssignment, 0)
 	for _, assignment := range r.gvicAssignments {
 		if assignment.CompanyID == companyID && assignment.ResourceType == resourceType && assignment.ResourceID == resourceID {
 			items = append(items, assignment)
 		}
 	}
-	sortResourceGVICAssignments(items)
+	sortResourceRACIAssignments(items)
 	return items
 }
 
-func (r *MemoryRepo) recordGVICSubtreeApplicationsLocked(companyID, ancestorType, ancestorID string, sequence int64, currentAssignments []domain.ResourceGVICAssignment) bool {
+func (r *MemoryRepo) recordRACISubtreeApplicationsLocked(companyID, ancestorType, ancestorID string, sequence int64, currentAssignments []domain.ResourceRACIAssignment) bool {
 	// An explicit snapshot makes an unchanged Apply command meaningful and
-	// removes descendant-only GVIC rules before current parent rules are read.
-	r.gvicSubtreeApplications = append(r.gvicSubtreeApplications, resourceGVICSubtreeApplication{
+	// removes descendant-only RACI rules before current parent rules are read.
+	r.gvicSubtreeApplications = append(r.gvicSubtreeApplications, resourceRACISubtreeApplication{
 		CompanyID:            companyID,
 		AncestorResourceType: ancestorType,
 		AncestorResourceID:   ancestorID,
@@ -487,7 +487,7 @@ func (r *MemoryRepo) recordGVICSubtreeApplicationsLocked(companyID, ancestorType
 		Sequence:             sequence,
 	})
 	for _, current := range currentAssignments {
-		r.gvicSubtreeApplications = append(r.gvicSubtreeApplications, resourceGVICSubtreeApplication{
+		r.gvicSubtreeApplications = append(r.gvicSubtreeApplications, resourceRACISubtreeApplication{
 			CompanyID:            companyID,
 			AncestorResourceType: ancestorType,
 			AncestorResourceID:   ancestorID,

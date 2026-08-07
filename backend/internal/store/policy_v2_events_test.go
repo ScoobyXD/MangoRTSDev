@@ -22,15 +22,15 @@ func TestV2PolicyEventsCarryPolicyActionAndResultingSequence(t *testing.T) {
 		t.Fatalf("CreateNode: %v", err)
 	}
 
-	_, gvicEvents, err := repo.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{
+	_, gvicEvents, err := repo.PutResourceRACIPolicy(ResourceRACIPolicyUpdateInput{
 		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
 		AssignmentMode: PolicyModeCustomized, DescendantAction: PolicyDescendantActionIncludingCustomized,
-		Assignments: []ResourceGVICAssignmentInput{{
-			Role: domain.GVICRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: user.UserID,
+		Assignments: []ResourceRACIAssignmentInput{{
+			Role: domain.RACIRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: user.UserID,
 		}},
 	})
 	if err != nil {
-		t.Fatalf("PutResourceGVICPolicy: %v", err)
+		t.Fatalf("PutResourceRACIPolicy: %v", err)
 	}
 	assertV2PolicyEventSequence(t, gvicEvents, "gvic", PolicyDescendantActionIncludingCustomized)
 
@@ -49,7 +49,7 @@ func TestV2PolicyEventsCarryPolicyActionAndResultingSequence(t *testing.T) {
 	assertV2PolicyEventSequence(t, permissionEvents, "permission", PolicyDescendantActionIncludingCustomized)
 }
 
-func TestV2GVICPolicyRoleChangeTargetsExistingUser(t *testing.T) {
+func TestV2RACIPolicyRoleChangeTargetsExistingUser(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "company-v2-policy-role-change"
 	repo.EnsureCompany(companyID, "V2 Policy Role Change")
@@ -65,20 +65,20 @@ func TestV2GVICPolicyRoleChangeTargetsExistingUser(t *testing.T) {
 		t.Fatalf("CreateNode: %v", err)
 	}
 
-	if _, _, err := repo.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{
+	if _, _, err := repo.PutResourceRACIPolicy(ResourceRACIPolicyUpdateInput{
 		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
 		AssignmentMode: PolicyModeCustomized, DescendantAction: PolicyDescendantActionInheritedOnly,
-		Assignments: []ResourceGVICAssignmentInput{{Role: domain.GVICRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: user.UserID}},
+		Assignments: []ResourceRACIAssignmentInput{{Role: domain.RACIRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: user.UserID}},
 	}); err != nil {
-		t.Fatalf("initial PutResourceGVICPolicy: %v", err)
+		t.Fatalf("initial PutResourceRACIPolicy: %v", err)
 	}
-	_, events, err := repo.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{
+	_, events, err := repo.PutResourceRACIPolicy(ResourceRACIPolicyUpdateInput{
 		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
 		AssignmentMode: PolicyModeCustomized, DescendantAction: PolicyDescendantActionInheritedOnly,
-		Assignments: []ResourceGVICAssignmentInput{{Role: domain.GVICRoleConsulted, PrincipalType: EntityPermissionSubjectUser, PrincipalID: user.UserID}},
+		Assignments: []ResourceRACIAssignmentInput{{Role: domain.RACIRoleConsulted, PrincipalType: EntityPermissionSubjectUser, PrincipalID: user.UserID}},
 	})
 	if err != nil {
-		t.Fatalf("role-change PutResourceGVICPolicy: %v", err)
+		t.Fatalf("role-change PutResourceRACIPolicy: %v", err)
 	}
 	if len(events) != 1 {
 		t.Fatalf("role-change events = %+v, want one", events)

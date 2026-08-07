@@ -20,11 +20,11 @@ type MemoryRepo struct {
 	logicGateInfo                  map[string][]domain.LogicGateInformation
 	logicGateText                  map[string]map[string]domain.LogicGateProjection
 	logicGateRels                  map[string][]domain.LogicGateRelationship
-	logicGateGVIC                  map[string][]domain.LogicGateGVICAssignment
-	gvicAssignments                map[string]domain.ResourceGVICAssignment
-	gvicEffectiveAssignments       map[string]domain.ResourceGVICEffectiveAssignment
+	logicGateRACI                  map[string][]domain.LogicGateRACIAssignment
+	gvicAssignments                map[string]domain.ResourceRACIAssignment
+	gvicEffectiveAssignments       map[string]domain.ResourceRACIEffectiveAssignment
 	gvicPolicyRevisions            map[string]int64
-	gvicSubtreeApplications        []resourceGVICSubtreeApplication
+	gvicSubtreeApplications        []resourceRACISubtreeApplication
 	gvicV2Settings                 map[string]memoryV2PolicySetting
 	permissionV2Settings           map[string]memoryV2PolicySetting
 	gvicV2Sequence                 int64
@@ -40,7 +40,7 @@ type MemoryRepo struct {
 	projectRelationships           map[string]domain.ProjectRelationship
 	projectRelationshipProjection  map[string]domain.ProjectRelationshipProjection
 	projectCriticalPathSteps       map[string]domain.ProjectCriticalPathStep
-	sharedInboxGVIC                map[string][]domain.SharedInboxGVICAssignment
+	sharedInboxRACI                map[string][]domain.SharedInboxRACIAssignment
 	folders                        map[string]domain.CompanyExplorerFolder
 	folderItems                    map[string]domain.CompanyExplorerFolderItem
 	companyExplorerV2Entities      map[string]memoryCompanyExplorerV2Entity
@@ -52,7 +52,7 @@ type MemoryRepo struct {
 	kanbanColumns                  map[string][]domain.KanbanColumn
 	kanbanCards                    map[string][]domain.KanbanCard
 	nodeLogicGateAssignments       map[string]domain.NodeLogicGateAssignment
-	GVICMatrixProjectionRows       map[string]memoryGVICMatrixProjectionRow
+	RACIMatrixProjectionRows       map[string]memoryRACIMatrixProjectionRow
 	projectTimelineItems           map[string]memoryProjectManagementTimelineItem
 	projectTimelineProjection      map[string]ProjectManagementTimelineProjectionRow
 	users                          map[string]domain.User
@@ -120,11 +120,11 @@ func NewMemoryRepo() *MemoryRepo {
 		logicGateInfo:                  map[string][]domain.LogicGateInformation{},
 		logicGateText:                  map[string]map[string]domain.LogicGateProjection{},
 		logicGateRels:                  map[string][]domain.LogicGateRelationship{},
-		logicGateGVIC:                  map[string][]domain.LogicGateGVICAssignment{},
-		gvicAssignments:                map[string]domain.ResourceGVICAssignment{},
-		gvicEffectiveAssignments:       map[string]domain.ResourceGVICEffectiveAssignment{},
+		logicGateRACI:                  map[string][]domain.LogicGateRACIAssignment{},
+		gvicAssignments:                map[string]domain.ResourceRACIAssignment{},
+		gvicEffectiveAssignments:       map[string]domain.ResourceRACIEffectiveAssignment{},
 		gvicPolicyRevisions:            map[string]int64{},
-		gvicSubtreeApplications:        []resourceGVICSubtreeApplication{},
+		gvicSubtreeApplications:        []resourceRACISubtreeApplication{},
 		gvicV2Settings:                 map[string]memoryV2PolicySetting{},
 		permissionV2Settings:           map[string]memoryV2PolicySetting{},
 		policyV2Idempotency:            map[string]bool{},
@@ -138,7 +138,7 @@ func NewMemoryRepo() *MemoryRepo {
 		projectRelationships:           map[string]domain.ProjectRelationship{},
 		projectRelationshipProjection:  map[string]domain.ProjectRelationshipProjection{},
 		projectCriticalPathSteps:       map[string]domain.ProjectCriticalPathStep{},
-		sharedInboxGVIC:                map[string][]domain.SharedInboxGVICAssignment{},
+		sharedInboxRACI:                map[string][]domain.SharedInboxRACIAssignment{},
 		folders:                        map[string]domain.CompanyExplorerFolder{},
 		folderItems:                    map[string]domain.CompanyExplorerFolderItem{},
 		companyExplorerV2Entities:      map[string]memoryCompanyExplorerV2Entity{},
@@ -150,7 +150,7 @@ func NewMemoryRepo() *MemoryRepo {
 		kanbanColumns:                  map[string][]domain.KanbanColumn{},
 		kanbanCards:                    map[string][]domain.KanbanCard{},
 		nodeLogicGateAssignments:       map[string]domain.NodeLogicGateAssignment{},
-		GVICMatrixProjectionRows:       map[string]memoryGVICMatrixProjectionRow{},
+		RACIMatrixProjectionRows:       map[string]memoryRACIMatrixProjectionRow{},
 		projectTimelineItems:           map[string]memoryProjectManagementTimelineItem{},
 		projectTimelineProjection:      map[string]ProjectManagementTimelineProjectionRow{},
 		users:                          map[string]domain.User{},
@@ -259,7 +259,7 @@ func logicGateShortcutKey(userID, companyID, logicGateID string) string {
 	return userID + ":" + companyID + ":" + logicGateID
 }
 
-func sharedInboxGVICKey(companyID, folderID string) string {
+func sharedInboxRACIKey(companyID, folderID string) string {
 	return companyID + ":" + folderID
 }
 

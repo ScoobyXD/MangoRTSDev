@@ -2,55 +2,55 @@ package store
 
 import "miraeopus/backend/internal/domain"
 
-func normalizeLogicGateCommandResourceAssignments(inputs []LogicGateGVICAssignmentInput) ([]ResourceGVICAssignmentInput, error) {
-	items := make([]ResourceGVICAssignmentInput, 0, len(inputs))
+func normalizeLogicGateCommandResourceAssignments(inputs []LogicGateRACIAssignmentInput) ([]ResourceRACIAssignmentInput, error) {
+	items := make([]ResourceRACIAssignmentInput, 0, len(inputs))
 	for _, input := range inputs {
-		normalized, err := normalizeLogicGateGVICAssignmentInput(input)
+		normalized, err := normalizeLogicGateRACIAssignmentInput(input)
 		if err != nil {
 			return nil, err
 		}
-		items = append(items, ResourceGVICAssignmentInput{Role: normalized.role, PrincipalType: normalized.principalType, PrincipalID: normalized.principalID})
+		items = append(items, ResourceRACIAssignmentInput{Role: normalized.role, PrincipalType: normalized.principalType, PrincipalID: normalized.principalID})
 	}
 	return items, nil
 }
 
-func (r *PostgresRepo) AddLogicGateGVICAssignments(input LogicGateGVICAssignmentCommandInput) (LogicGateGVICAssignmentCommandResult, error) {
-	return r.applyV2LogicGateGVICAssignmentCommand(input, LogicGateGVICCommandAdd)
+func (r *PostgresRepo) AddLogicGateRACIAssignments(input LogicGateRACIAssignmentCommandInput) (LogicGateRACIAssignmentCommandResult, error) {
+	return r.applyV2LogicGateRACIAssignmentCommand(input, LogicGateRACICommandAdd)
 }
 
-func (r *PostgresRepo) RemoveLogicGateGVICAssignments(input LogicGateGVICAssignmentCommandInput) (LogicGateGVICAssignmentCommandResult, error) {
-	return r.applyV2LogicGateGVICAssignmentCommand(input, LogicGateGVICCommandRemove)
+func (r *PostgresRepo) RemoveLogicGateRACIAssignments(input LogicGateRACIAssignmentCommandInput) (LogicGateRACIAssignmentCommandResult, error) {
+	return r.applyV2LogicGateRACIAssignmentCommand(input, LogicGateRACICommandRemove)
 }
 
-func (r *PostgresRepo) applyV2LogicGateGVICAssignmentCommand(input LogicGateGVICAssignmentCommandInput, operation string) (LogicGateGVICAssignmentCommandResult, error) {
+func (r *PostgresRepo) applyV2LogicGateRACIAssignmentCommand(input LogicGateRACIAssignmentCommandInput, operation string) (LogicGateRACIAssignmentCommandResult, error) {
 	assignments, err := normalizeLogicGateCommandResourceAssignments(input.Assignments)
 	if err != nil {
-		return LogicGateGVICAssignmentCommandResult{}, err
+		return LogicGateRACIAssignmentCommandResult{}, err
 	}
-	beforePolicy, err := r.GetResourceGVICPolicy(input.CompanyID, EntityTypeLogicGate, input.LogicGateID)
+	beforePolicy, err := r.GetResourceRACIPolicy(input.CompanyID, EntityTypeLogicGate, input.LogicGateID)
 	if err != nil {
-		return LogicGateGVICAssignmentCommandResult{}, err
+		return LogicGateRACIAssignmentCommandResult{}, err
 	}
-	command := ResourceGVICAssignmentCommandInput{
+	command := ResourceRACIAssignmentCommandInput{
 		CompanyID: input.CompanyID, ResourceType: EntityTypeLogicGate, ResourceID: input.LogicGateID,
 		Assignments: assignments, ActorUserID: input.ActorUserID, IdempotencyKey: input.IdempotencyKey,
 	}
-	var mutation ResourceGVICAssignmentMutationResult
+	var mutation ResourceRACIAssignmentMutationResult
 	switch operation {
-	case LogicGateGVICCommandAdd:
-		mutation, err = r.AddResourceGVICAssignments(command)
-	case LogicGateGVICCommandRemove:
-		mutation, err = r.RemoveResourceGVICAssignments(command)
+	case LogicGateRACICommandAdd:
+		mutation, err = r.AddResourceRACIAssignments(command)
+	case LogicGateRACICommandRemove:
+		mutation, err = r.RemoveResourceRACIAssignments(command)
 	default:
-		return LogicGateGVICAssignmentCommandResult{}, ErrInvalid
+		return LogicGateRACIAssignmentCommandResult{}, ErrInvalid
 	}
 	if err != nil {
-		return LogicGateGVICAssignmentCommandResult{}, err
+		return LogicGateRACIAssignmentCommandResult{}, err
 	}
-	return LogicGateGVICAssignmentCommandResult{
+	return LogicGateRACIAssignmentCommandResult{
 		CompanyID: input.CompanyID, LogicGateID: input.LogicGateID, Operation: operation, Changed: mutation.Changed,
-		BeforeAssignments: logicGateGVICAssignmentsFromResources(beforePolicy.GVICAssignments),
-		GVICAssignments:   logicGateGVICAssignmentsFromResources(mutation.GVICAssignments),
+		BeforeAssignments: logicGateRACIAssignmentsFromResources(beforePolicy.RACIAssignments),
+		RACIAssignments:   logicGateRACIAssignmentsFromResources(mutation.RACIAssignments),
 		Events:            append([]domain.DomainEvent{}, mutation.Events...),
 	}, nil
 }

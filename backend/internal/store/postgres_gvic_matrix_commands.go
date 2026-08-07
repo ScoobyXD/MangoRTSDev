@@ -7,47 +7,47 @@ import (
 	"miraeopus/backend/internal/domain"
 )
 
-func (r *PostgresRepo) CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GVICMatrixNodeCreateResult, error) {
+func (r *PostgresRepo) CreateRACIMatrixNode(input RACIMatrixNodeCreateInput) (RACIMatrixNodeCreateResult, error) {
 	ctx := ContextWithTimingRecorder(context.Background(), input.TimingRecorder)
-	stop := observeTiming(ctx, "repo.CreateGVICMatrixNode.normalize_input")
-	input, err := NormalizeGVICMatrixNodeCreateInput(input)
+	stop := observeTiming(ctx, "repo.CreateRACIMatrixNode.normalize_input")
+	input, err := NormalizeRACIMatrixNodeCreateInput(input)
 	stop()
 	if err != nil {
-		return GVICMatrixNodeCreateResult{}, err
+		return RACIMatrixNodeCreateResult{}, err
 	}
 
-	defer observeTiming(ctx, "repo.CreateGVICMatrixNode.transaction")()
+	defer observeTiming(ctx, "repo.CreateRACIMatrixNode.transaction")()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return GVICMatrixNodeCreateResult{}, err
+		return RACIMatrixNodeCreateResult{}, err
 	}
 	defer tx.Rollback()
 
 	meta := workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)
-	result := GVICMatrixNodeCreateResult{}
+	result := RACIMatrixNodeCreateResult{}
 	logicGateID := input.LogicGateID
 	deferCompanyExplorerFolderItems := input.MutationOrigin == MutationOriginMatrix || input.MutationOrigin == MutationOriginKanban
 	if input.CreateLogicGateHeader != "" {
-		stop := observeTiming(ctx, "repo.CreateGVICMatrixNode.logic_gate_writes")
-		logicGate, _, err := createGVICMatrixLogicGateTx(ctx, tx, input, !deferCompanyExplorerFolderItems)
+		stop := observeTiming(ctx, "repo.CreateRACIMatrixNode.logic_gate_writes")
+		logicGate, _, err := createRACIMatrixLogicGateTx(ctx, tx, input, !deferCompanyExplorerFolderItems)
 		stop()
 		if err != nil {
-			return GVICMatrixNodeCreateResult{}, err
+			return RACIMatrixNodeCreateResult{}, err
 		}
 		logicGateID = logicGate.LogicGateID
 		result.LogicGate = &logicGate
 		eventInputs := []DomainEventInput{logicGateCreatedWorkspaceEventInput(logicGate, meta)}
-		stop = observeTiming(ctx, "repo.CreateGVICMatrixNode.domain_event_append")
+		stop = observeTiming(ctx, "repo.CreateRACIMatrixNode.domain_event_append")
 		events, err := r.appendDomainEventsTx(ctx, tx, eventInputs)
 		stop()
 		if err != nil {
-			return GVICMatrixNodeCreateResult{}, err
+			return RACIMatrixNodeCreateResult{}, err
 		}
 		result.Events = append(result.Events, events...)
 	}
 
 	if logicGateID != "" {
-		stop := observeTiming(ctx, "repo.CreateGVICMatrixNode.assignment_writes")
+		stop := observeTiming(ctx, "repo.CreateRACIMatrixNode.assignment_writes")
 		assignmentResult, err := r.assignNodeToLogicGateStatusTx(ctx, tx, LogicGateNodeAssignmentInput{
 			CompanyID:           input.CompanyID,
 			LogicGateID:         logicGateID,
@@ -68,7 +68,7 @@ func (r *PostgresRepo) CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GV
 		})
 		stop()
 		if err != nil {
-			return GVICMatrixNodeCreateResult{}, err
+			return RACIMatrixNodeCreateResult{}, err
 		}
 		assignment := assignmentResult.Assignment
 		card := assignmentResult.Card
@@ -76,16 +76,16 @@ func (r *PostgresRepo) CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GV
 		result.Assignment = &assignment
 		result.Card = &card
 		result.Events = append(result.Events, assignmentResult.Events...)
-		stop = observeTiming(ctx, "repo.CreateGVICMatrixNode.commit")
+		stop = observeTiming(ctx, "repo.CreateRACIMatrixNode.commit")
 		if err := tx.Commit(); err != nil {
 			stop()
-			return GVICMatrixNodeCreateResult{}, err
+			return RACIMatrixNodeCreateResult{}, err
 		}
 		stop()
 		return result, nil
 	}
 
-	stop = observeTiming(ctx, "repo.CreateGVICMatrixNode.node_writes")
+	stop = observeTiming(ctx, "repo.CreateRACIMatrixNode.node_writes")
 	var node domain.Node
 	if deferCompanyExplorerFolderItems {
 		node, err = r.createNodeWithIDProjectionAndFolderTx(ctx, tx, input.CompanyID, input.NodeID, input.Title, true, false)
@@ -94,34 +94,34 @@ func (r *PostgresRepo) CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GV
 	}
 	stop()
 	if err != nil {
-		return GVICMatrixNodeCreateResult{}, err
+		return RACIMatrixNodeCreateResult{}, err
 	}
 	eventInputs := []DomainEventInput{nodeCreatedWorkspaceEventInputWithMetadata(node, meta)}
-	stop = observeTiming(ctx, "repo.CreateGVICMatrixNode.domain_event_append")
+	stop = observeTiming(ctx, "repo.CreateRACIMatrixNode.domain_event_append")
 	events, err := r.appendDomainEventsTx(ctx, tx, eventInputs)
 	stop()
 	if err != nil {
-		return GVICMatrixNodeCreateResult{}, err
+		return RACIMatrixNodeCreateResult{}, err
 	}
 	result.Node = node
 	result.Events = append(result.Events, events...)
-	stop = observeTiming(ctx, "repo.CreateGVICMatrixNode.commit")
+	stop = observeTiming(ctx, "repo.CreateRACIMatrixNode.commit")
 	if err := tx.Commit(); err != nil {
 		stop()
-		return GVICMatrixNodeCreateResult{}, err
+		return RACIMatrixNodeCreateResult{}, err
 	}
 	stop()
 	return result, nil
 }
 
-func createGVICMatrixLogicGateTx(ctx context.Context, tx *sql.Tx, input GVICMatrixNodeCreateInput, syncFolderItem bool) (domain.LogicGate, domain.CompanyExplorerFolderItem, error) {
+func createRACIMatrixLogicGateTx(ctx context.Context, tx *sql.Tx, input RACIMatrixNodeCreateInput, syncFolderItem bool) (domain.LogicGate, domain.CompanyExplorerFolderItem, error) {
 	created := domain.LogicGate{
 		CompanyID:     input.CompanyID,
 		LogicGateID:   newUUIDv7String(),
 		Header:        input.CreateLogicGateHeader,
 		DefaultAccess: ResourceDefaultAccessEdit,
 	}
-	stop := observeTiming(ctx, "repo.createGVICMatrixLogicGateTx.logic_gate_insert")
+	stop := observeTiming(ctx, "repo.createRACIMatrixLogicGateTx.logic_gate_insert")
 	if err := tx.QueryRowContext(ctx,
 		`insert into logic_gates (company_id, logic_gate_id, header, created_timestamp)
 		 values ($1, $2, $3, now())
@@ -132,7 +132,7 @@ func createGVICMatrixLogicGateTx(ctx context.Context, tx *sql.Tx, input GVICMatr
 		return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, err
 	}
 	stop()
-	if input.ActorUserID != "" && input.CreatorLogicGateGVICRole != "" {
+	if input.ActorUserID != "" && input.CreatorLogicGateRACIRole != "" {
 		var creatorInCompany bool
 		if err := tx.QueryRowContext(ctx, `
 select exists(
@@ -145,17 +145,17 @@ select exists(
 		if !creatorInCompany {
 			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, ErrPrincipalNotInCompany
 		}
-		policy, err := customizeNewPostgresResourceGVICForCreatorTx(ctx, tx,
-			resourceGVICKey{companyID: input.CompanyID, resourceType: EntityTypeLogicGate, resourceID: created.LogicGateID}, input.CreatorLogicGateGVICRole, input.ActorUserID)
+		policy, err := customizeNewPostgresResourceRACIForCreatorTx(ctx, tx,
+			resourceRACIKey{companyID: input.CompanyID, resourceType: EntityTypeLogicGate, resourceID: created.LogicGateID}, input.CreatorLogicGateRACIRole, input.ActorUserID)
 		if err != nil {
 			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, err
 		}
-		created.GVICAssignments = logicGateGVICAssignmentsFromResources(policy.GVICAssignments)
+		created.RACIAssignments = logicGateRACIAssignmentsFromResources(policy.RACIAssignments)
 		created.EffectiveAccess = EntityPermissionEdit
 	}
 	var folderItem domain.CompanyExplorerFolderItem
 	if syncFolderItem {
-		stop = observeTiming(ctx, "repo.createGVICMatrixLogicGateTx.folder_item_writes")
+		stop = observeTiming(ctx, "repo.createRACIMatrixLogicGateTx.folder_item_writes")
 		stop()
 	}
 	return created, folderItem, nil

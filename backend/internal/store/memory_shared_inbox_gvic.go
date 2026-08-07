@@ -6,16 +6,16 @@ import (
 	"time"
 )
 
-func (r *MemoryRepo) withSharedInboxGVICLocked(folder domain.CompanyExplorerFolder) domain.CompanyExplorerFolder {
+func (r *MemoryRepo) withSharedInboxRACILocked(folder domain.CompanyExplorerFolder) domain.CompanyExplorerFolder {
 	if folder.FolderKind != "communications" {
 		return folder
 	}
 	folder = normalizeMemorySharedInboxFolder(folder)
-	assignments := make([]domain.SharedInboxGVICAssignment, 0)
+	assignments := make([]domain.SharedInboxRACIAssignment, 0)
 	accessGrants := make([]domain.EntityPermission, 0)
 	if folder.EntryType == CommunicationsSharedInboxEntryTypeSharedInbox {
 		seenAssignments := map[string]bool{}
-		for _, assignment := range r.sharedInboxGVIC[sharedInboxGVICKey(folder.CompanyID, folder.FolderID)] {
+		for _, assignment := range r.sharedInboxRACI[sharedInboxRACIKey(folder.CompanyID, folder.FolderID)] {
 			principalType := strings.TrimSpace(assignment.PrincipalType)
 			principalID := strings.TrimSpace(assignment.PrincipalID)
 			if principalType == "" {
@@ -41,19 +41,19 @@ func (r *MemoryRepo) withSharedInboxGVICLocked(folder domain.CompanyExplorerFold
 		grant.AccessLevel = grant.Permission
 		accessGrants = append(accessGrants, r.withEntityPermissionSubjectLocked(grant))
 	}
-	sortSharedInboxGVICAssignments(assignments)
+	sortSharedInboxRACIAssignments(assignments)
 	sortEntityPermissions(accessGrants)
-	gvicResourceType := CommunicationsSharedInboxGVICResourceType(folder)
+	gvicResourceType := CommunicationsSharedInboxRACIResourceType(folder)
 	resourceAssignments := r.gvicAssignmentsForResourceLocked(folder.CompanyID, gvicResourceType, folder.FolderID)
 	if len(resourceAssignments) > 0 {
-		assignments = sharedInboxGVICAssignmentsFromResources(resourceAssignments, folder.FolderID)
+		assignments = sharedInboxRACIAssignmentsFromResources(resourceAssignments, folder.FolderID)
 	}
-	folder.GVICAssignments = assignments
+	folder.RACIAssignments = assignments
 	folder.AccessGrants = accessGrants
 	return folder
 }
 
-func (r *MemoryRepo) SetCommunicationsSharedInboxGVICAssignments(input SharedInboxGVICAssignmentUpdateInput) ([]domain.SharedInboxGVICAssignment, error) {
+func (r *MemoryRepo) SetCommunicationsSharedInboxRACIAssignments(input SharedInboxRACIAssignmentUpdateInput) ([]domain.SharedInboxRACIAssignment, error) {
 	companyID := strings.TrimSpace(input.CompanyID)
 	folderID := strings.TrimSpace(input.FolderID)
 	if companyID == "" || folderID == "" {
@@ -73,10 +73,10 @@ func (r *MemoryRepo) SetCommunicationsSharedInboxGVICAssignments(input SharedInb
 	}
 
 	now := time.Now().UTC()
-	assignments := make([]domain.SharedInboxGVICAssignment, 0, len(input.Assignments))
+	assignments := make([]domain.SharedInboxRACIAssignment, 0, len(input.Assignments))
 	seen := map[string]bool{}
 	for _, assignment := range input.Assignments {
-		role, ok := NormalizeGVICRole(assignment.Role)
+		role, ok := NormalizeRACIRole(assignment.Role)
 		principalType := strings.ToLower(strings.TrimSpace(assignment.PrincipalType))
 		principalID := strings.TrimSpace(assignment.PrincipalID)
 		userID := strings.TrimSpace(assignment.UserID)
@@ -95,7 +95,7 @@ func (r *MemoryRepo) SetCommunicationsSharedInboxGVICAssignments(input SharedInb
 			continue
 		}
 		seen[seenKey] = true
-		item := domain.SharedInboxGVICAssignment{
+		item := domain.SharedInboxRACIAssignment{
 			CompanyID:        companyID,
 			FolderID:         folderID,
 			SharedInboxID:    folderID,
@@ -128,8 +128,8 @@ func (r *MemoryRepo) SetCommunicationsSharedInboxGVICAssignments(input SharedInb
 		}
 		assignments = append(assignments, item)
 	}
-	sortSharedInboxGVICAssignments(assignments)
-	r.sharedInboxGVIC[sharedInboxGVICKey(companyID, folderID)] = assignments
-	next := r.withSharedInboxGVICLocked(folder).GVICAssignments
-	return append([]domain.SharedInboxGVICAssignment{}, next...), nil
+	sortSharedInboxRACIAssignments(assignments)
+	r.sharedInboxRACI[sharedInboxRACIKey(companyID, folderID)] = assignments
+	next := r.withSharedInboxRACILocked(folder).RACIAssignments
+	return append([]domain.SharedInboxRACIAssignment{}, next...), nil
 }

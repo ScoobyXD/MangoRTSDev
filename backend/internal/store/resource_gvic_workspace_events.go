@@ -6,26 +6,26 @@ import (
 	"strings"
 )
 
-const NodeGVICUpdatedEventType = "node_gvic_updated"
+const NodeRACIUpdatedEventType = "node_gvic_updated"
 
-func highestResourceGVICRolesByUser(assignments []domain.ResourceGVICEffectiveAssignment) map[string]string {
+func highestResourceRACIRolesByUser(assignments []domain.ResourceRACIEffectiveAssignment) map[string]string {
 	roles := map[string]string{}
 	for _, assignment := range assignments {
 		userID := strings.TrimSpace(assignment.UserID)
-		role, ok := NormalizeGVICRole(assignment.Role)
+		role, ok := NormalizeRACIRole(assignment.Role)
 		if !ok || userID == "" {
 			continue
 		}
-		if logicGateGVICRoleRank(role) > logicGateGVICRoleRank(roles[userID]) {
+		if logicGateRACIRoleRank(role) > logicGateRACIRoleRank(roles[userID]) {
 			roles[userID] = role
 		}
 	}
 	return roles
 }
 
-func resourceGVICChangedUserIDs(before, after []domain.ResourceGVICEffectiveAssignment) []string {
-	beforeRoles := highestResourceGVICRolesByUser(before)
-	afterRoles := highestResourceGVICRolesByUser(after)
+func resourceRACIChangedUserIDs(before, after []domain.ResourceRACIEffectiveAssignment) []string {
+	beforeRoles := highestResourceRACIRolesByUser(before)
+	afterRoles := highestResourceRACIRolesByUser(after)
 	userIDs := make([]string, 0, len(afterRoles))
 	for userID, role := range afterRoles {
 		if beforeRoles[userID] != role {
@@ -36,17 +36,17 @@ func resourceGVICChangedUserIDs(before, after []domain.ResourceGVICEffectiveAssi
 	return userIDs
 }
 
-func resourceGVICUpdatedWorkspaceEventInput(
-	result ResourceGVICAssignmentMutationResult,
-	beforeEffective []domain.ResourceGVICEffectiveAssignment,
+func resourceRACIUpdatedWorkspaceEventInput(
+	result ResourceRACIAssignmentMutationResult,
+	beforeEffective []domain.ResourceRACIEffectiveAssignment,
 	actorUserID string,
 	idempotencyKey string,
 ) (DomainEventInput, bool) {
-	resourceType, ok := NormalizeGVICResourceType(result.ResourceType)
+	resourceType, ok := NormalizeRACIResourceType(result.ResourceType)
 	if !ok || (resourceType != EntityTypeNode && resourceType != EntityTypeLogicGate) {
 		return DomainEventInput{}, false
 	}
-	assignmentUserIDs := resourceGVICChangedUserIDs(beforeEffective, result.EffectiveAssignments)
+	assignmentUserIDs := resourceRACIChangedUserIDs(beforeEffective, result.EffectiveAssignments)
 	if len(assignmentUserIDs) == 0 {
 		return DomainEventInput{}, false
 	}
@@ -54,12 +54,12 @@ func resourceGVICUpdatedWorkspaceEventInput(
 		"resource_type":       resourceType,
 		"resource_id":         strings.TrimSpace(result.ResourceID),
 		"operation":           strings.TrimSpace(result.Operation),
-		"gvic_assignments":    result.GVICAssignments,
+		"gvic_assignments":    result.RACIAssignments,
 		"assignment_user_ids": assignmentUserIDs,
 	}
-	eventType := LogicGateGVICUpdatedEventType
+	eventType := LogicGateRACIUpdatedEventType
 	if resourceType == EntityTypeNode {
-		eventType = NodeGVICUpdatedEventType
+		eventType = NodeRACIUpdatedEventType
 		payload["node_id"] = strings.TrimSpace(result.ResourceID)
 	} else {
 		payload["logic_gate_id"] = strings.TrimSpace(result.ResourceID)

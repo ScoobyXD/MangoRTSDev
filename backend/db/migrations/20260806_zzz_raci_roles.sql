@@ -1,11 +1,11 @@
--- Rename the active GVIC role contract to RCVI and allow groups in every role.
+-- Rename the active GVIC role contract to RACI and allow groups in every role.
 begin;
 
 do $$
 begin
   if current_setting('server_version_num')::integer < 170000
      or current_setting('server_version_num')::integer >= 190000 then
-    raise exception 'rcvi_roles_unsupported_postgresql_version:%', current_setting('server_version');
+    raise exception 'raci_roles_unsupported_postgresql_version:%', current_setting('server_version');
   end if;
 end;
 $$;
@@ -19,51 +19,62 @@ alter table resource_gvic_assignments
   drop constraint if exists resource_gvic_assignments_v2_staging_role_chk,
   drop constraint if exists resource_gvic_assignments_v2_staging_user_only_role_chk,
   drop constraint if exists resource_gvic_assignments_role_chk,
-  drop constraint if exists resource_gvic_assignments_rcvi_role_chk;
+  drop constraint if exists resource_gvic_assignments_rcvi_role_chk,
+  drop constraint if exists resource_gvic_assignments_raci_role_chk;
 drop index if exists idx_resource_gvic_assignments_v2_one_generated;
 
 update resource_gvic_assignments
 set role = case role
   when 'generated' then 'responsible'
-  when 'verified' then 'verifier'
+  when 'verified' then 'accountable'
+  when 'verifier' then 'accountable'
   else role
 end
-where role in ('generated', 'verified');
+where role in ('generated', 'verified', 'verifier');
 
 alter table resource_gvic_assignments
-  add constraint resource_gvic_assignments_rcvi_role_chk
-    check (role in ('responsible', 'consulted', 'verifier', 'informed'));
+  add constraint resource_gvic_assignments_raci_role_chk
+    check (role in ('responsible', 'accountable', 'consulted', 'informed'));
 
 alter table notifications drop constraint if exists notifications_surface_chk;
-update notifications set surface='cvi_inbox' where surface='aci_inbox';
+update notifications set surface='aci_inbox' where surface='cvi_inbox';
+update notifications
+set event_type = case event_type
+  when 'cvi_inbox.changed' then 'aci_inbox.changed'
+  when 'cvi_inbox.RCVI_updated' then 'aci_inbox.RACI_updated'
+  else event_type
+end
+where event_type in ('cvi_inbox.changed', 'cvi_inbox.RCVI_updated');
 alter table notifications
   add constraint notifications_surface_chk
-    check (surface = '' or surface in ('r_inbox', 'cvi_inbox', 'my_triage', 'shared_triage'));
+    check (surface = '' or surface in ('r_inbox', 'aci_inbox', 'my_triage', 'shared_triage'));
 
 alter table notifications drop constraint if exists notifications_role_chk;
 update notifications
 set role = case role
   when 'generated' then 'responsible'
-  when 'verified' then 'verifier'
+  when 'verified' then 'accountable'
+  when 'verifier' then 'accountable'
   else role
 end
-where role in ('generated', 'verified');
+where role in ('generated', 'verified', 'verifier');
 alter table notifications
   add constraint notifications_role_chk
-    check (role = '' or role in ('responsible', 'consulted', 'verifier', 'informed', 'other'));
+    check (role = '' or role in ('responsible', 'accountable', 'consulted', 'informed', 'other'));
 
 alter table gvic_matrix_projection_table
   drop constraint if exists gvic_matrix_projection_gvic_assignment_chk;
 update gvic_matrix_projection_table
 set gvic_assignment = case gvic_assignment
   when 'generated' then 'responsible'
-  when 'verified' then 'verifier'
+  when 'verified' then 'accountable'
+  when 'verifier' then 'accountable'
   else gvic_assignment
 end
-where gvic_assignment in ('generated', 'verified');
+where gvic_assignment in ('generated', 'verified', 'verifier');
 alter table gvic_matrix_projection_table
   add constraint gvic_matrix_projection_gvic_assignment_chk
-    check (gvic_assignment in ('responsible', 'consulted', 'verifier', 'informed'));
+    check (gvic_assignment in ('responsible', 'accountable', 'consulted', 'informed'));
 
 update recycle_bin_items item
 set restore_payload = jsonb_set(
@@ -73,7 +84,8 @@ set restore_payload = jsonb_set(
     select jsonb_agg(
       case assignment->>'role'
         when 'generated' then jsonb_set(assignment, '{role}', '"responsible"'::jsonb)
-        when 'verified' then jsonb_set(assignment, '{role}', '"verifier"'::jsonb)
+        when 'verified' then jsonb_set(assignment, '{role}', '"accountable"'::jsonb)
+        when 'verifier' then jsonb_set(assignment, '{role}', '"accountable"'::jsonb)
         else assignment
       end
     )
@@ -139,7 +151,7 @@ as $$
     select distinct on (candidate.user_id) candidate.*
     from candidates candidate
     order by candidate.user_id,
-      case candidate.role when 'responsible' then 1 when 'consulted' then 2 when 'verifier' then 3 else 4 end,
+      case candidate.role when 'responsible' then 1 when 'accountable' then 2 when 'consulted' then 3 else 4 end,
       case candidate.source_principal_type when 'user' then 0 else 1 end,
       candidate.group_depth,
       candidate.source_principal_id

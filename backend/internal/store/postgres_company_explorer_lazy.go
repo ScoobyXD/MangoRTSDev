@@ -202,7 +202,7 @@ order by item.position asc, item.created_timestamp asc, gate.logic_gate_id::text
 	if err != nil {
 		return nil, err
 	}
-	return r.attachLogicGateGVICAssignments(ctx, query.CompanyID, items)
+	return r.attachLogicGateRACIAssignments(ctx, query.CompanyID, items)
 }
 
 func (r *PostgresRepo) queryCompanyExplorerLazyFolderLogicGates(ctx context.Context, query CompanyExplorerLazyRowsQuery) ([]domain.LogicGate, error) {
@@ -233,7 +233,7 @@ order by item.position asc, item.created_timestamp asc, gate.logic_gate_id::text
 	if err != nil {
 		return nil, err
 	}
-	return r.attachLogicGateGVICAssignments(ctx, query.CompanyID, items)
+	return r.attachLogicGateRACIAssignments(ctx, query.CompanyID, items)
 }
 
 func (r *PostgresRepo) queryCompanyExplorerLazyRootProjects(ctx context.Context, query CompanyExplorerLazyRowsQuery) ([]domain.Project, error) {

@@ -769,7 +769,7 @@ func recycleProjectRelationshipWhere(companyID string, nodeIDs, logicGateIDs, pr
 	return "company_id=$1::uuid and (" + strings.Join(clauses, " or ") + ")", args
 }
 
-func recycleGVICMatrixProjectionWhere(companyID string, nodeIDs, logicGateIDs []string) (string, []any) {
+func recycleRACIMatrixProjectionWhere(companyID string, nodeIDs, logicGateIDs []string) (string, []any) {
 	clauses := []string{}
 	args := []any{companyID}
 	if len(nodeIDs) > 0 {

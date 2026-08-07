@@ -663,9 +663,9 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 	if err != nil {
 		return DeleteCompanyUserResult{}, fmt.Errorf("list user gvic assignments: %w", err)
 	}
-	gvicKeys := []resourceGVICKey{}
+	gvicKeys := []resourceRACIKey{}
 	for gvicRows.Next() {
-		var keyValue resourceGVICKey
+		var keyValue resourceRACIKey
 		if scanErr := gvicRows.Scan(&keyValue.companyID, &keyValue.resourceType, &keyValue.resourceID); scanErr != nil {
 			gvicRows.Close()
 			return DeleteCompanyUserResult{}, fmt.Errorf("scan user gvic assignment: %w", scanErr)

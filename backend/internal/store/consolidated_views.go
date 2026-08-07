@@ -10,7 +10,7 @@ type nodeViewLoader interface {
 	GetNodeDetailsSummary(companyID, nodeID string) (domain.NodeDetails, error)
 	ListNodeProjections(companyID, nodeID string) ([]domain.NodeProjection, error)
 	ListNodeLogicGateAssignments(companyID, nodeID string) ([]domain.NodeLogicGateAssignment, error)
-	ListResourceGVICAssignments(companyID, resourceType, resourceID string) ([]domain.ResourceGVICAssignment, error)
+	ListResourceRACIAssignments(companyID, resourceType, resourceID string) ([]domain.ResourceRACIAssignment, error)
 	ListNodeTimelineEvents(companyID, nodeID string) ([]domain.NodeTimelineEvent, error)
 }
 
@@ -39,7 +39,7 @@ func loadNodeView(loader nodeViewLoader, input NodeViewInput) (domain.NodeView, 
 		details         domain.NodeDetails
 		projections     []domain.NodeProjection
 		assignments     []domain.NodeLogicGateAssignment
-		gvicAssignments []domain.ResourceGVICAssignment
+		gvicAssignments []domain.ResourceRACIAssignment
 		timelineEvents  = []domain.NodeTimelineEvent{}
 		detailsErr      error
 		projectionsErr  error
@@ -63,7 +63,7 @@ func loadNodeView(loader nodeViewLoader, input NodeViewInput) (domain.NodeView, 
 	}()
 	go func() {
 		defer waitGroup.Done()
-		gvicAssignments, gvicErr = loader.ListResourceGVICAssignments(companyID, EntityTypeNode, nodeID)
+		gvicAssignments, gvicErr = loader.ListResourceRACIAssignments(companyID, EntityTypeNode, nodeID)
 	}()
 	go func() {
 		defer waitGroup.Done()
@@ -88,7 +88,7 @@ func loadNodeView(loader nodeViewLoader, input NodeViewInput) (domain.NodeView, 
 		assignments = []domain.NodeLogicGateAssignment{}
 	}
 	if gvicAssignments == nil {
-		gvicAssignments = []domain.ResourceGVICAssignment{}
+		gvicAssignments = []domain.ResourceRACIAssignment{}
 	}
 
 	return domain.NodeView{
@@ -99,7 +99,7 @@ func loadNodeView(loader nodeViewLoader, input NodeViewInput) (domain.NodeView, 
 		Projections:          projections,
 		Relationships:        details.Relationships,
 		LogicGateAssignments: assignments,
-		GVICAssignments:      gvicAssignments,
+		RACIAssignments:      gvicAssignments,
 		InformationCount:     details.InformationCount,
 		TimelineEvents:       timelineEvents,
 		TimelineEventCount:   len(timelineEvents),
@@ -143,8 +143,8 @@ func loadLogicGateView(loader logicGateViewLoader, companyID, logicGateID string
 	if details.Relationships == nil {
 		details.Relationships = []domain.LogicGateRelationship{}
 	}
-	if details.LogicGate.GVICAssignments == nil {
-		details.LogicGate.GVICAssignments = []domain.LogicGateGVICAssignment{}
+	if details.LogicGate.RACIAssignments == nil {
+		details.LogicGate.RACIAssignments = []domain.LogicGateRACIAssignment{}
 	}
 	if projections == nil {
 		projections = []domain.LogicGateProjection{}
@@ -156,12 +156,12 @@ func loadLogicGateView(loader logicGateViewLoader, companyID, logicGateID string
 		LogicGate:           details.LogicGate,
 		Information:         details.Information,
 		Projections:         projections,
-		GVICAssignments:     details.LogicGate.GVICAssignments,
+		RACIAssignments:     details.LogicGate.RACIAssignments,
 		Relationships:       details.Relationships,
 		Work:                work,
 		InformationCount:    len(details.Information),
 		ProjectionCount:     len(projections),
-		GVICAssignmentCount: len(details.LogicGate.GVICAssignments),
+		RACIAssignmentCount: len(details.LogicGate.RACIAssignments),
 		RelationshipsCount:  len(details.Relationships),
 		AssignmentCount:     len(work.Cards),
 		NodeCount:           len(work.Cards),

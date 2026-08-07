@@ -69,7 +69,7 @@ func TestMemoryWorkItemAssignmentWorkspaceEventsAreAtomicAndSemantic(t *testing.
 		t.Fatalf("ListDomainEventsAfter: %v", err)
 	}
 	wantTypes := []string{
-		LogicGateGVICUpdatedEventType,
+		LogicGateRACIUpdatedEventType,
 		WorkItemLogicGateAssignmentSavedEventType, "kanban_card_upserted", "node_updated",
 		WorkItemLogicGateAssignmentMovedEventType, "kanban_card_moved", "node_updated",
 		WorkItemLogicGateIssueToggledEventType, "kanban_card_moved", "node_updated",
@@ -243,12 +243,12 @@ func setupWorkItemAssignmentEventTest(t *testing.T, suffix string) (*MemoryRepo,
 	if _, err := repo.AddCompanyMembership("actor-"+suffix, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership: %v", err)
 	}
-	if _, err := repo.SetLogicGateGVICAssignments(LogicGateGVICAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateRACIAssignments(LogicGateRACIAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleResponsible, UserID: user.UserID}},
+		Assignments: []LogicGateRACIAssignmentInput{{Role: domain.RACIRoleResponsible, UserID: user.UserID}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
+		t.Fatalf("SetLogicGateRACIAssignments: %v", err)
 	}
 	return repo, companyID, logicGate, node, user.UserID
 }

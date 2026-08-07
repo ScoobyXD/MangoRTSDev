@@ -4,7 +4,7 @@ A manager changes a group, its parent, or its members
 ↓
 The canonical group source rows and shared membership version change
 ↓
-Permission and GVIC reads expand the current nested tree without rewriting resource policies
+Permission and RACI reads expand the current nested tree without rewriting resource policies
 ↓
 Deleted groups lose their direct policy edges, while collaboration participant snapshots stay unchanged
 
@@ -30,7 +30,7 @@ UG9 - Onboarding list, invitation management, user deletion, and user group muta
 UG10 - A company user cannot delete themself from the company.
 UG11 - Deleting a company user removes that user's membership in the company.
 UG12 - Deleting a company user removes the user's company group memberships.
-UG13 - Deleting a company user removes that user's direct canonical permission and GVIC edges; future effective reads resolve remaining direct/group/default policy without stored effective rows or projections.
+UG13 - Deleting a company user removes that user's direct canonical permission and RACI edges; future effective reads resolve remaining direct/group/default policy without stored effective rows or projections.
 UG14 - External identity deletion is queued or completed only when the user has no remaining company membership or dev-admin ownership that must be preserved.
 UG15 - User group lists return both groups and group members.
 UG16 - Creating a user group requires company manager authority.
@@ -40,7 +40,7 @@ UG19 - A user group's parent must exist in the same company.
 UG20 - User group hierarchy changes cannot create parent cycles.
 UG21 - Setting user group members replaces the full member list for that group.
 UG22 - Every user added to a group must already belong to the same company.
-UG23 - Group membership and parent changes affect every canonical permission or GVIC group pointer immediately through read-time nested expansion. Resource policy rows are not rewritten; the company group-membership version changes for fingerprints and ETags.
+UG23 - Group membership and parent changes affect every canonical permission or RACI group pointer immediately through read-time nested expansion. Resource policy rows are not rewritten; the company group-membership version changes for fingerprints and ETags.
 UG24 - Creating an invitation requires company manager, company admin, or dev admin authority.
 UG25 - Invitation email addresses are normalized before storage and comparison.
 UG26 - Invitation roles are normalized to an invitable company role.
@@ -51,7 +51,7 @@ UG30 - Accepting an invitation checks token, email, status, and expiration befor
 UG31 - Invitation delivery status is tracked separately from invitation acceptance status.
 UG32 - Company managers can invite company users and company managers; only company admins and dev admins can invite company admins.
 UG33 - Company managers can delete company users and company managers, but cannot delete company admins or dev admins.
-UG34 - Deleting a group removes canonical permission and GVIC edges that directly reference that deleted group, leaves other groups and resource policies intact, and changes the membership version. Missing-group policy edges are forbidden.
+UG34 - Deleting a group removes canonical permission and RACI edges that directly reference that deleted group, leaves other groups and resource policies intact, and changes the membership version. Missing-group policy edges are forbidden.
 UG35 - The email-collaboration chat mention picker may target an active same-company user or user group. The durable chat payload identifies selected principal IDs separately from display text so renamed users/groups and duplicate names cannot retarget a mention.
 UG36 - At the accepted chat transaction, a valid group mention resolves the selected group's current active same-company user closure through the existing group hierarchy plus membership source rows, deduplicates users across direct and overlapping group mentions, and snapshots those user IDs as collaboration participants. A valid empty group adds no participant; a missing, deleted, or cross-company group is rejected.
 UG37 - An email-collaboration group mention is deliberately different from the dynamic group pointers in UG23: later member/hierarchy changes do not add or remove collaboration participants, change Node access, or rewrite historical mention notifications.
@@ -101,7 +101,7 @@ Business logic covered:
 
 Given:
 - A company manager deletes another company user or company manager from the company.
-- The user has group memberships and canonical permission/GVIC edges.
+- The user has group memberships and canonical permission/RACI edges.
 - The manager also attempts to delete themself.
 - The manager also attempts to delete a company admin.
 
@@ -109,7 +109,7 @@ Expected:
 - User deletion requires company manager authority.
 - A user cannot delete themself.
 - Deleting another user removes company membership and group memberships.
-- Direct permission/GVIC edges for that user are removed; remaining effective results resolve from current canonical policy and groups.
+- Direct permission/RACI edges for that user are removed; remaining effective results resolve from current canonical policy and groups.
 - External identity deletion is not performed while other memberships or dev-admin ownership must be preserved.
 - Company managers cannot delete company admins or dev admins.
 
@@ -130,7 +130,7 @@ Business logic covered:
 Given:
 - A company has nested user groups and company users.
 - A manager changes group hierarchy and member lists.
-- Resources have permission and GVIC source rows that reference those groups.
+- Resources have permission and RACI source rows that reference those groups.
 - A request tries to add a user from another company.
 
 Expected:
@@ -140,7 +140,7 @@ Expected:
 - Hierarchy changes cannot create cycles.
 - Setting members replaces the full member list.
 - Users from another company are rejected.
-- Membership changes dynamically affect permission/GVIC pointers without rewriting resource rows.
+- Membership changes dynamically affect permission/RACI pointers without rewriting resource rows.
 - Deleting a group removes only edges that directly reference it and advances the membership version.
 
 ### Scenario UG-S4: Invitations
@@ -203,5 +203,5 @@ Expected:
 - The valid group resolves from current hierarchy/member source rows and each distinct current active same-company user is snapshotted once.
 - The empty valid group adds nobody without inventing a user; deleted/cross-company groups are rejected.
 - The actor receives no self-mention notification and retries/overlap produce no duplicate participant or notification.
-- Later group changes still affect dynamic resource permission/GVIC group pointers under UG23 but do not affect the collaboration snapshot.
+- Later group changes still affect dynamic resource permission/RACI group pointers under UG23 but do not affect the collaboration snapshot.
 - The open email-chat header represents each durable participant `user_id` once through a direct/creator avatar or group-provenance cohort. Any group pill counts only its snapshotted rows; missing current group metadata uses a safe fallback and neither recalculates membership nor hides represented users. The underlying shared ChatPane remains usable by Node callers without requiring them to render this email-specific header.

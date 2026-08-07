@@ -75,7 +75,7 @@ func TestMemoryConsolidatedNodeViewIncludesDetailsProjectionAndAssignments(t *te
 	}
 }
 
-func TestMemoryConsolidatedLogicGateViewIncludesDetailsProjectionGVICAndAssignmentBackedWork(t *testing.T) {
+func TestMemoryConsolidatedLogicGateViewIncludesDetailsProjectionRACIAndAssignmentBackedWork(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "55555555-5555-4555-8555-555555555511"
 	repo.EnsureCompany(companyID, "Phase 5 Logic Gate View Store Co")
@@ -98,15 +98,15 @@ func TestMemoryConsolidatedLogicGateViewIncludesDetailsProjectionGVICAndAssignme
 	if _, err := repo.AddLogicGateInformation(companyID, logicGate.LogicGateID, "Text box", "current logic gate document", "55555555-5555-4555-8555-555555555512"); err != nil {
 		t.Fatalf("AddLogicGateInformation: %v", err)
 	}
-	if _, err := repo.SetLogicGateGVICAssignments(LogicGateGVICAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateRACIAssignments(LogicGateRACIAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []LogicGateGVICAssignmentInput{{
-			Role:   domain.GVICRoleResponsible,
+		Assignments: []LogicGateRACIAssignmentInput{{
+			Role:   domain.RACIRoleResponsible,
 			UserID: responsible.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
+		t.Fatalf("SetLogicGateRACIAssignments: %v", err)
 	}
 	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
 		CompanyID:   companyID,
@@ -133,8 +133,8 @@ func TestMemoryConsolidatedLogicGateViewIncludesDetailsProjectionGVICAndAssignme
 	if view.ProjectionCount != 1 || len(view.Projections) != 1 || view.Projections[0].Information != "current logic gate document" {
 		t.Fatalf("logic gate view projections = %+v, want current editor projection", view.Projections)
 	}
-	if view.GVICAssignmentCount != 1 || len(view.GVICAssignments) != 1 || view.GVICAssignments[0].UserID != responsible.UserID {
-		t.Fatalf("logic gate view GVIC = %+v, want responsible assignment", view.GVICAssignments)
+	if view.RACIAssignmentCount != 1 || len(view.RACIAssignments) != 1 || view.RACIAssignments[0].UserID != responsible.UserID {
+		t.Fatalf("logic gate view RACI = %+v, want responsible assignment", view.RACIAssignments)
 	}
 	if view.AssignmentCount != 1 || len(view.Work.Cards) != 1 || view.Work.Cards[0].NodeID != node.NodeID {
 		t.Fatalf("logic gate view work = %+v, want assignment-backed work card", view.Work.Cards)
@@ -217,9 +217,9 @@ func (loader *blockingNodeViewLoader) ListNodeLogicGateAssignments(_, _ string) 
 	loader.enter("assignments")
 	return []domain.NodeLogicGateAssignment{}, nil
 }
-func (loader *blockingNodeViewLoader) ListResourceGVICAssignments(_, _, _ string) ([]domain.ResourceGVICAssignment, error) {
+func (loader *blockingNodeViewLoader) ListResourceRACIAssignments(_, _, _ string) ([]domain.ResourceRACIAssignment, error) {
 	loader.enter("gvic")
-	return []domain.ResourceGVICAssignment{}, nil
+	return []domain.ResourceRACIAssignment{}, nil
 }
 
 func (loader *blockingNodeViewLoader) ListNodeTimelineEvents(_, _ string) ([]domain.NodeTimelineEvent, error) {

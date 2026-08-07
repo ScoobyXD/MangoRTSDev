@@ -75,7 +75,7 @@ The Phase 2 repository implementation now also includes:
 - rendered Yjs-relative comment decorations, click-to-focus navigation, moving-anchor behavior, and explicit unanchored/deleted/legacy fallbacks using the database's `none`, `legacy_offsets_v1`, `yjs_relative_v1` and anchor-status vocabulary;
 - atomic, idempotent domain-event plus realtime-outbox writes for create, move, archive/restore, comments/replies, attachment associations, and email associations; Yjs typing remains outside the business outbox;
 - trusted checkpoint authority: clients can append updates and read recovery state but cannot claim checkpoint coverage; and
-- placement/GVIC data in the workspace header plus server/workspace-scoped activation so a global build flag cannot hide an unconverted legacy workspace.
+- placement/RACI data in the workspace header plus server/workspace-scoped activation so a global build flag cannot hide an unconverted legacy workspace.
 
 `scripts/run_all_tests.mjs` retains frontend unit/contract tests, the production build, backend Go tests, and infrastructure contracts. The dedicated production-path realtime runner and former two-API/Vite/Chromium/S3 browser workflow were removed from CI on 2026-07-28. Bounded hydration, continuation, edit/reload/offline recovery, comments, archive/restore, attachment upload/inline image, and email continuation require manual browser acceptance until replacement automation is added.
 

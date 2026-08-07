@@ -23,7 +23,7 @@ type memoryProjectScopedCreateSnapshot struct {
 	kanbanColumns                 map[string][]domain.KanbanColumn
 	kanbanCards                   map[string][]domain.KanbanCard
 	nodeLogicGateAssignments      map[string]domain.NodeLogicGateAssignment
-	GVICMatrixProjectionRows      map[string]memoryGVICMatrixProjectionRow
+	RACIMatrixProjectionRows      map[string]memoryRACIMatrixProjectionRow
 	effectiveAccess               map[string]domain.EffectiveResourceAccess
 	domainEvents                  map[string]domain.DomainEvent
 	workspaceReadVersions         map[string]int64
@@ -46,7 +46,7 @@ func (r *MemoryRepo) snapshotProjectScopedCreateLocked() memoryProjectScopedCrea
 		kanbanColumns:                 cloneMemorySliceMap(r.kanbanColumns),
 		kanbanCards:                   cloneMemorySliceMap(r.kanbanCards),
 		nodeLogicGateAssignments:      cloneMemoryMap(r.nodeLogicGateAssignments),
-		GVICMatrixProjectionRows:      cloneMemoryMap(r.GVICMatrixProjectionRows),
+		RACIMatrixProjectionRows:      cloneMemoryMap(r.RACIMatrixProjectionRows),
 		effectiveAccess:               cloneMemoryMap(r.effectiveAccess),
 		domainEvents:                  cloneMemoryMap(r.domainEvents),
 		workspaceReadVersions:         cloneMemoryMap(r.workspaceReadVersions),
@@ -69,7 +69,7 @@ func (r *MemoryRepo) restoreProjectScopedCreateLocked(snapshot memoryProjectScop
 	r.kanbanColumns = snapshot.kanbanColumns
 	r.kanbanCards = snapshot.kanbanCards
 	r.nodeLogicGateAssignments = snapshot.nodeLogicGateAssignments
-	r.GVICMatrixProjectionRows = snapshot.GVICMatrixProjectionRows
+	r.RACIMatrixProjectionRows = snapshot.RACIMatrixProjectionRows
 	r.effectiveAccess = snapshot.effectiveAccess
 	r.domainEvents = snapshot.domainEvents
 	r.workspaceReadVersions = snapshot.workspaceReadVersions
@@ -158,7 +158,7 @@ func (r *MemoryRepo) CreateNodeAssociatedWithProject(input ProjectScopedNodeCrea
 		return ProjectScopedNodeCreateResult{}, err
 	}
 	projection := r.projectRelationshipProjection[projectRelationshipKey(input.CompanyID, relationshipID)]
-	r.syncGVICMatrixProjectionForProjectResourcesLocked(input.CompanyID, []string{node.NodeID}, []string{input.InitialAssignment.LogicGateID})
+	r.syncRACIMatrixProjectionForProjectResourcesLocked(input.CompanyID, []string{node.NodeID}, []string{input.InitialAssignment.LogicGateID})
 	r.bumpLogicGateWorkReadVersionLocked(input.CompanyID, input.InitialAssignment.LogicGateID)
 	meta := workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)
 	events, err := r.appendDomainEventsLocked([]DomainEventInput{
@@ -241,7 +241,7 @@ func (r *MemoryRepo) assignInitialProjectScopedNodeToLogicGateLocked(input Proje
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
-	r.syncGVICResourceKeysLocked(assignmentInput.CompanyID, []resourceGVICKey{{companyID: assignmentInput.CompanyID, resourceType: EntityTypeNode, resourceID: assignmentInput.NodeID}})
+	r.syncRACIResourceKeysLocked(assignmentInput.CompanyID, []resourceRACIKey{{companyID: assignmentInput.CompanyID, resourceType: EntityTypeNode, resourceID: assignmentInput.NodeID}})
 	assignment, ok := r.nodeLogicGateAssignmentLocked(assignmentInput.CompanyID, assignmentInput.NodeID, assignmentInput.LogicGateID)
 	if !ok {
 		return LogicGateNodeAssignmentResult{}, ErrNotFound

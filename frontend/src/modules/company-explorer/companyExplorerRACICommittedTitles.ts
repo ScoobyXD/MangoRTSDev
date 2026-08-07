@@ -1,15 +1,15 @@
-import type { GVICMatrixProjectionRow } from "../kanban/kanbanApi.js";
+import type { RACIMatrixProjectionRow } from "../kanban/kanbanApi.js";
 import type { CommittedEntityTitleUpdate } from "../realtime/committedEntityTitleUpdates.js";
 
-type GVICProjectionLogicGateTitleRecord = {
+type RACIProjectionLogicGateTitleRecord = {
   company_id: string;
   logic_gate_id: string;
   header: string;
   title?: string;
 };
 
-export type GVICProjectionTitleCacheEntry<TLogicGate extends GVICProjectionLogicGateTitleRecord> = {
-  rows: GVICMatrixProjectionRow[];
+export type RACIProjectionTitleCacheEntry<TLogicGate extends RACIProjectionLogicGateTitleRecord> = {
+  rows: RACIMatrixProjectionRow[];
   logicGates: TLogicGate[];
   loaded: boolean;
 };
@@ -26,11 +26,11 @@ function cleanUpdate(update: CommittedEntityTitleUpdate, activeCompanyID: string
   return { companyID, resourceID, title };
 }
 
-export function reconcileGVICProjectionRowTitles(
-  rows: GVICMatrixProjectionRow[],
+export function reconcileRACIProjectionRowTitles(
+  rows: RACIMatrixProjectionRow[],
   update: CommittedEntityTitleUpdate,
   activeCompanyID: string,
-): GVICMatrixProjectionRow[] {
+): RACIMatrixProjectionRow[] {
   const clean = cleanUpdate(update, activeCompanyID);
   if (!clean) return rows;
   let changed = false;
@@ -48,7 +48,7 @@ export function reconcileGVICProjectionRowTitles(
   return changed ? next : rows;
 }
 
-export function reconcileGVICProjectionLogicGateTitles<TLogicGate extends GVICProjectionLogicGateTitleRecord>(
+export function reconcileRACIProjectionLogicGateTitles<TLogicGate extends RACIProjectionLogicGateTitleRecord>(
   logicGates: TLogicGate[],
   update: CommittedEntityTitleUpdate,
   activeCompanyID: string,
@@ -68,16 +68,16 @@ export function reconcileGVICProjectionLogicGateTitles<TLogicGate extends GVICPr
   return changed ? next : logicGates;
 }
 
-export function reconcileGVICProjectionTitlesByUserID<TLogicGate extends GVICProjectionLogicGateTitleRecord>(
-  projectionByUserID: Record<string, GVICProjectionTitleCacheEntry<TLogicGate>>,
+export function reconcileRACIProjectionTitlesByUserID<TLogicGate extends RACIProjectionLogicGateTitleRecord>(
+  projectionByUserID: Record<string, RACIProjectionTitleCacheEntry<TLogicGate>>,
   update: CommittedEntityTitleUpdate,
   activeCompanyID: string,
-): Record<string, GVICProjectionTitleCacheEntry<TLogicGate>> {
+): Record<string, RACIProjectionTitleCacheEntry<TLogicGate>> {
   let changed = false;
-  const next: Record<string, GVICProjectionTitleCacheEntry<TLogicGate>> = {};
+  const next: Record<string, RACIProjectionTitleCacheEntry<TLogicGate>> = {};
   for (const [userID, entry] of Object.entries(projectionByUserID)) {
-    const rows = reconcileGVICProjectionRowTitles(entry.rows, update, activeCompanyID);
-    const logicGates = reconcileGVICProjectionLogicGateTitles(entry.logicGates, update, activeCompanyID);
+    const rows = reconcileRACIProjectionRowTitles(entry.rows, update, activeCompanyID);
+    const logicGates = reconcileRACIProjectionLogicGateTitles(entry.logicGates, update, activeCompanyID);
     if (rows === entry.rows && logicGates === entry.logicGates) next[userID] = entry;
     else {
       changed = true;

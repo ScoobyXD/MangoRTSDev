@@ -1,20 +1,20 @@
-# Process Story: A team assigns live RCVI responsibility
+# Process Story: A team assigns live RACI responsibility
 
-A manager or editor opens a Node or Logic Gate and sees Responsible, Consulted, Verifier, and Informed in that order
+A manager or editor opens a Node or Logic Gate and sees Responsible, Accountable, Consulted, and Informed in that order
 ↓
 Each role card shows the full names of its directly assigned people and the names of its directly assigned groups
 ↓
 Any role can receive multiple people or groups, while one direct principal can hold only one role on the same resource
 ↓
-A group assignment stays one typed group edge and expands through current members and nested subgroups whenever effective RCVI is read
+A group assignment stays one typed group edge and expands through current members and nested subgroups whenever effective RACI is read
 ↓
 If membership changes or a person's effective role changes, My Work and notification routing use the new live result without copying per-user assignment rows
 ↓
-RCVI remains separate from permissions and never grants Edit access
+RACI remains separate from permissions and never grants Edit access
 
 Last updated: 2026-08-06
 
-# RCVI Tests (technical GVIC API namespace)
+# RACI Tests (technical `gvic` API namespace)
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
@@ -22,118 +22,121 @@ Coverage Status:
 
 ## Business Logic
 
-GVIC1 - RCVI supports Responsible, Consulted, Verifier, and Informed roles and normalizes input before validation.
-GVIC2 - Responsible, Consulted, Verifier, and Informed each accept multiple users or groups.
-GVIC3 - One direct source principal can have only one RCVI role in one customized resource policy.
-GVIC4 - Canonical GVIC resource types are node, logic_gate, project, company_explorer_folder, shared_inbox_folder, and shared_inbox. `shared_triage_folder` is rejected after cutover.
-GVIC5 - `resource_gvic_settings` stores mode and sequences; `resource_gvic_assignments` stores only the complete customized graph. No effective, revision, snapshot, or projection table is policy authority.
-GVIC6 - Every root is customized, including an empty policy. A non-root resource starts inherited unless its creation workflow explicitly customizes it.
-GVIC7 - An inherited resource stores no GVIC edges. Its effective policy is the nearest active customized resource in its live parent chain.
-GVIC8 - Customizing copies the current effective policy once, applies the requested complete replacement, and allocates a new customized sequence in one transaction.
-GVIC9 - Returning to inherited deletes the resource's customized edges and customized sequence, then immediately exposes its current effective ancestor.
-GVIC10 - An ordinary policy save changes only that resource. It does not rewrite descendants.
-GVIC11 - Apply to inherited descendants saves the selected policy if needed and writes no descendant policy state. Inherited branches already resolve it live, and active customized boundaries remain protected.
-GVIC12 - Overwrite all descendants records one ancestor reset sequence that also supersedes older active customized policies below that resource. The UI requires a separate confirmation.
-GVIC13 - A customization made after a reset becomes active again because its customized sequence is newer.
-GVIC14 - A parent relationship created or changed receives a new parent-link sequence for both policy domains. A link newer than a reset blocks that older reset from crossing the moved edge.
-GVIC15 - Moving an inherited resource changes its effective policy immediately; moving a customized resource preserves that customization. Descendants are not rewritten.
-GVIC16 - A Node assigned to a Logic Gate uses that Logic Gate as its immediate parent. Detaching an inherited Node materializes its current effective GVIC as a customized Node policy in the same transaction.
-GVIC17 - A creator rule, including an email-derived Responsible assignment, first copies the final effective parent policy and then changes the new resource to customized.
-GVIC18 - Group assignments remain group pointers. Current nested membership expands at read time, and cycles are rejected.
-GVIC19 - Group membership, parent-group, and deletion changes affect effective GVIC immediately without rewriting resource policies. Deleting a group removes its direct policy edges.
-GVIC20 - If one user reaches several roles, the deterministic order is Responsible, Consulted, Verifier, then Informed; direct and shallower sources break equal-role ties.
-GVIC21 - GVIC never grants Edit access. Authorization reads only the separate permission policy.
-GVIC22 - My Work includes a resource only when the actor has both effective GVIC and effective Edit permission, resolved from the four canonical tables, live hierarchy, and live groups.
-GVIC23 - Notification routing resolves the current effective GVIC of the exact target resource. Parent or neighboring resource GVIC never substitutes.
-GVIC24 - Assignment notifications are sent only for newly effective users or effective role changes; unchanged users, removals, unrelated users, and the actor receive none.
-GVIC25 - GVIC event payloads identify policy type, action, descendant action, allocated sequence, mode, and changed recipients.
-GVIC26 - Reads explain the stored mode, effective mode, source resource, active reset, and an inactive stored customization superseded by force overwrite.
-GVIC27 - The frontend keeps Inherited and Customized controls in More editor actions, provides both descendant actions and the overwrite explanation, protects stale writes, invalidates affected workspace reads, and performs no optimistic descendant materialization.
-GVIC28 - Fingerprints include effective source identity and sequence, eligible reset identity and sequence, the parent-link boundary, live group-membership version, and actor-specific edit result where exposed.
-GVIC29 - Point reads, My Work, notification decisions, and cache validation derive current state at read time; policy writes stay constant-size with descendant count.
-GVIC30 - Resource deletion deletes its settings row and cascades its GVIC edges. No missing resource, user, or group identity can remain.
-GVIC31 - Shared inbox folder and shared inbox GVIC use their exact canonical resource identities and remain separate from permissions and mailbox credentials.
-GVIC32 - Logic Gate work may expose its effective Responsible user as request-owner metadata, but that field never implies permission.
-GVIC33 - Email-derived and workspace-created resources apply creator rules only after their final parent placement so copied policy comes from the correct source.
-GVIC34 - Stale in-flight reads cannot overwrite a newer committed policy response; ETags and policy fingerprints track the resolved V2 state.
-GVIC35 - Step 2 runtime readers and writers use only the two canonical GVIC tables. Temporarily retained legacy tables are frozen rollback evidence and have no deployed reader or writer.
-GVIC36 - All GVIC changes and their settings, graph edges, events, and read-version effects commit atomically.
-GVIC37 - The editor keeps the four role columns compact and removes the exposed policy-mode/effective-source strip; inherited policy is read-only until Customized is selected from More editor actions.
-GVIC38 - A cross-Logic-Gate Node move reads and authorizes the actual canonical one-per-Node assignment. A caller-supplied source Logic Gate is only a hint and cannot select relationship authority or cause a valid move to fail when stale. The move changes the canonical Logic Gate assignment and its projections; it neither requires nor rewrites optional email or attachment relationships owned by the same Node.
-GVIC39 - After any successful GVIC policy write, the company workspace snapshot and cached Node and Logic Gate records are invalidated. A descendant view must refetch its live effective policy instead of displaying a stale record cache; inherited-only Apply still writes no descendant policy rows, and overwrite-all still uses one reset sequence instead of materializing descendants.
-GVIC40 - The editor presents RCVI as Responsible (orange #f97316), Consulted (blue #2563eb), Verifier (green #16a34a), and Informed (purple #7c3aed), in that order.
-GVIC41 - Role cards show direct person and group names instead of a numeric People summary; names wrap within the card, and a group name represents its live nested membership.
-GVIC42 - Replacing a V2 policy notifies a non-actor user when that user's highest effective RCVI role changes, even when the user was already effective before the write.
+RACI1 - RACI supports Responsible, Accountable, Consulted, and Informed roles and normalizes input before validation.
+RACI2 - Responsible, Accountable, Consulted, and Informed each accept multiple users or groups.
+RACI3 - One direct source principal can have only one RACI role in one customized resource policy.
+RACI4 - Canonical RACI resource types are node, logic_gate, project, company_explorer_folder, shared_inbox_folder, and shared_inbox. `shared_triage_folder` is rejected after cutover.
+RACI5 - `resource_gvic_settings` stores mode and sequences; `resource_gvic_assignments` stores only the complete customized graph. No effective, revision, snapshot, or projection table is policy authority.
+RACI6 - Every root is customized, including an empty policy. A non-root resource starts inherited unless its creation workflow explicitly customizes it.
+RACI7 - An inherited resource stores no RACI edges. Its effective policy is the nearest active customized resource in its live parent chain.
+RACI8 - Customizing copies the current effective policy once, applies the requested complete replacement, and allocates a new customized sequence in one transaction.
+RACI9 - Returning to inherited deletes the resource's customized edges and customized sequence, then immediately exposes its current effective ancestor.
+RACI10 - An ordinary policy save changes only that resource. It does not rewrite descendants.
+RACI11 - Apply to inherited descendants saves the selected policy if needed and writes no descendant policy state. Inherited branches already resolve it live, and active customized boundaries remain protected.
+RACI12 - Overwrite all descendants records one ancestor reset sequence that also supersedes older active customized policies below that resource. The UI requires a separate confirmation.
+RACI13 - A customization made after a reset becomes active again because its customized sequence is newer.
+RACI14 - A parent relationship created or changed receives a new parent-link sequence for both policy domains. A link newer than a reset blocks that older reset from crossing the moved edge.
+RACI15 - Moving an inherited resource changes its effective policy immediately; moving a customized resource preserves that customization. Descendants are not rewritten.
+RACI16 - A Node assigned to a Logic Gate uses that Logic Gate as its immediate parent. Detaching an inherited Node materializes its current effective RACI as a customized Node policy in the same transaction.
+RACI17 - A creator rule, including an email-derived Responsible assignment, first copies the final effective parent policy and then changes the new resource to customized.
+RACI18 - Group assignments remain group pointers. Current nested membership expands at read time, and cycles are rejected.
+RACI19 - Group membership, parent-group, and deletion changes affect effective RACI immediately without rewriting resource policies. Deleting a group removes its direct policy edges.
+RACI20 - If one user reaches several roles, the deterministic order is Responsible, Accountable, Consulted, then Informed; direct and shallower sources break equal-role ties.
+RACI21 - RACI never grants Edit access. Authorization reads only the separate permission policy.
+RACI22 - My Work includes a resource only when the actor has both effective RACI and effective Edit permission, resolved from the four canonical tables, live hierarchy, and live groups.
+RACI23 - Notification routing resolves the current effective RACI of the exact target resource. Parent or neighboring resource RACI never substitutes.
+RACI24 - Assignment notifications are sent only for newly effective users or effective role changes; unchanged users, removals, unrelated users, and the actor receive none.
+RACI25 - RACI event payloads identify policy type, action, descendant action, allocated sequence, mode, and changed recipients.
+RACI26 - Reads explain the stored mode, effective mode, source resource, active reset, and an inactive stored customization superseded by force overwrite.
+RACI27 - The frontend keeps Inherited and Customized controls in More editor actions, provides both descendant actions and the overwrite explanation, protects stale writes, invalidates affected workspace reads, and performs no optimistic descendant materialization.
+RACI28 - Fingerprints include effective source identity and sequence, eligible reset identity and sequence, the parent-link boundary, live group-membership version, and actor-specific edit result where exposed.
+RACI29 - Point reads, My Work, notification decisions, and cache validation derive current state at read time; policy writes stay constant-size with descendant count.
+RACI30 - Resource deletion deletes its settings row and cascades its RACI edges. No missing resource, user, or group identity can remain.
+RACI31 - Shared inbox folder and shared inbox RACI use their exact canonical resource identities and remain separate from permissions and mailbox credentials.
+RACI32 - Logic Gate work may expose its effective Responsible user as request-owner metadata, but that field never implies permission.
+RACI33 - Email-derived and workspace-created resources apply creator rules only after their final parent placement so copied policy comes from the correct source.
+RACI34 - Stale in-flight reads cannot overwrite a newer committed policy response; ETags and policy fingerprints track the resolved V2 state.
+RACI35 - Step 2 runtime readers and writers use only the two canonical RACI tables. Temporarily retained legacy tables are frozen rollback evidence and have no deployed reader or writer.
+RACI36 - All RACI changes and their settings, graph edges, events, and read-version effects commit atomically.
+RACI37 - The editor keeps the four role columns compact and removes the exposed policy-mode/effective-source strip; inherited policy is read-only until Customized is selected from More editor actions.
+RACI38 - A cross-Logic-Gate Node move reads and authorizes the actual canonical one-per-Node assignment. A caller-supplied source Logic Gate is only a hint and cannot select relationship authority or cause a valid move to fail when stale. The move changes the canonical Logic Gate assignment and its projections; it neither requires nor rewrites optional email or attachment relationships owned by the same Node.
+RACI39 - After any successful RACI policy write, the company workspace snapshot and cached Node and Logic Gate records are invalidated. A descendant view must refetch its live effective policy instead of displaying a stale record cache; inherited-only Apply still writes no descendant policy rows, and overwrite-all still uses one reset sequence instead of materializing descendants.
+RACI40 - The editor presents RACI as Responsible (orange #f97316), Accountable (green #16a34a), Consulted (blue #2563eb), and Informed (purple #7c3aed), in that order.
+RACI41 - Role cards show direct person and group names instead of a numeric People summary; names wrap within the card, and a group name represents its live nested membership.
+RACI42 - Replacing a V2 policy notifies a non-actor user when that user's highest effective RACI role changes, even when the user was already effective before the write.
+RACI43 - Accountable is the green second role and uses the A inbox. The obsolete Verifier role, V inbox, and CVI notification surface are rejected after cutover; migration converts stored Verified or Verifier values to Accountable and CVI notifications to ACI.
 
 ## Scenarios
 
-### Scenario GVIC-S1: Role Validation And Access Levels
+### Scenario RACI-S1: Role Validation And Access Levels
 
 Business logic covered:
-- GVIC1
-- GVIC2
-- GVIC3
-- GVIC4
-- GVIC5
-- GVIC6
-- GVIC7
-- GVIC19
-- GVIC22
+- RACI1
+- RACI2
+- RACI3
+- RACI4
+- RACI5
+- RACI6
+- RACI7
+- RACI19
+- RACI22
+- RACI43
 
 Given:
 - A company assigns users and groups to nodes, logic gates, projects, and supported shared resources.
 - Requests include valid roles, aliased/cased role input, and invalid roles.
 
 Expected:
-- Responsible, consulted, verifier, and informed are accepted after normalization.
+- Responsible, accountable, consulted, and informed are accepted after normalization.
+- Legacy Generated, Verified, and Verifier role values are rejected by runtime writes after the migration.
 - Invalid roles, resource types, principal types, or missing IDs are rejected.
-- Responsible and Verifier do not produce edit/delete permission access.
+- Responsible and Accountable do not produce edit/delete permission access.
 - Consulted and informed do not produce edit permission access.
 - Resource authorization remains controlled by permission policy: default access, direct user rows, and group rows.
-- Different principals can hold different GVIC roles on the same resource without losing the role meaning.
-- Every RCVI role accepts multiple direct users or groups; one direct principal cannot occupy two roles on the same resource.
+- Different principals can hold different RACI roles on the same resource without losing the role meaning.
+- Every RACI role accepts multiple direct users or groups; one direct principal cannot occupy two roles on the same resource.
 
-### Scenario GVIC-S2: Group Expansion And Removal
+### Scenario RACI-S2: Group Expansion And Removal
 
 Business logic covered:
-- GVIC8
-- GVIC9
-- GVIC17
-- GVIC18
-- GVIC23
-- GVIC37
+- RACI8
+- RACI9
+- RACI17
+- RACI18
+- RACI23
+- RACI37
 
 Given:
-- A group has members and a GVIC assignment on a resource.
-- One user also has a direct GVIC assignment.
-- A user is removed from the group and a GVIC assignment is later deleted.
+- A group has members and a RACI assignment on a resource.
+- One user also has a direct RACI assignment.
+- A user is removed from the group and a RACI assignment is later deleted.
 
 Expected:
 - Group assignments expand into effective user assignments for current group members.
 - Effective records preserve whether access came from direct or group source.
 - Removing the user from the group removes only the group-derived effective access.
-- Removing the GVIC edge removes that source principal from future effective resolution.
+- Removing the RACI edge removes that source principal from future effective resolution.
 - No permanent effective or projection row is updated or retimestamped.
 - Current nested membership is expanded on each canonical read.
 - Group membership or parent changes update the company group fingerprint without changing resource customization sequences.
 
-### Scenario GVIC-S3: Canonical Resolution Without Descendant Materialization
+### Scenario RACI-S3: Canonical Resolution Without Descendant Materialization
 
 Business logic covered:
-- GVIC10
-- GVIC11
-- GVIC12
-- GVIC13
-- GVIC14
-- GVIC15
-- GVIC16
-- GVIC35
+- RACI10
+- RACI11
+- RACI12
+- RACI13
+- RACI14
+- RACI15
+- RACI16
+- RACI35
 
 Given:
 - A Logic Gate has inherited and customized Node descendants.
-- A regular Logic Gate GVIC edit is saved with inherited-only Apply.
+- A regular Logic Gate RACI edit is saved with inherited-only Apply.
 - The user separately runs overwrite-all for that Logic Gate.
-- A user later opens or refreshes My Work after GVIC assignments change.
+- A user later opens or refreshes My Work after RACI assignments change.
 - Another browser may retain stale My Work state until navigation or refresh.
 
 Expected:
@@ -142,36 +145,36 @@ Expected:
 - Overwrite-all updates one descendant-reset sequence and makes eligible older Node customizations inactive without walking assigned Nodes.
 - Project, Node, and shared-resource policy writes remain scoped to one settings row and one complete edge set.
 - My Work derives current rows from V2 policy, hierarchy, live groups, permissions, and work metadata.
-- No GVIC/My Work realtime policy scope or permanent effective/projection authority is created.
+- No RACI/My Work realtime policy scope or permanent effective/projection authority is created.
 - My Work sees current effective state on its next canonical load.
 - Independently required notification/domain-event consumers remain, but no generic browser refresh event is published.
 
-### Scenario GVIC-S4: Shared Inbox GVIC And Permission Separation
+### Scenario RACI-S4: Shared Inbox RACI And Permission Separation
 
 Business logic covered:
-- GVIC20
+- RACI20
 
 Given:
-- A shared inbox has GVIC assignments and separate resource permission grants.
+- A shared inbox has RACI assignments and separate resource permission grants.
 
 Expected:
-- GVIC assignment reads and writes preserve GVIC records.
-- Updating shared inbox access does not convert GVIC assignments into ordinary permission grants.
+- RACI assignment reads and writes preserve RACI records.
+- Updating shared inbox access does not convert RACI assignments into ordinary permission grants.
 
-### Scenario GVIC-S5: Complete Writes And Logic Gate Cache Freshness
+### Scenario RACI-S5: Complete Writes And Logic Gate Cache Freshness
 
 Business logic covered:
-- GVIC23
-- GVIC24
-- GVIC25
-- GVIC26
-- GVIC27
-- GVIC28
-- GVIC34
-- GVIC39
+- RACI23
+- RACI24
+- RACI25
+- RACI26
+- RACI27
+- RACI28
+- RACI34
+- RACI39
 
 Given:
-- A Logic Gate has Responsible, Consulted, Verifier, and Informed RCVI assignments.
+- A Logic Gate has Responsible, Accountable, Consulted, and Informed RACI assignments.
 - A user adds or removes one assignment through the canonical complete-policy PUT.
 - The user separately invokes inherited-only Apply or overwrite-all.
 - A broad Logic Gate payload or workspace list request may already be cached or in flight.
@@ -181,33 +184,33 @@ Expected:
 - The write replaces one complete customized edge set and its sequence in one transaction.
 - Inherited-only Apply writes no descendant state; overwrite-all changes one reset sequence.
 - No permanent effective or My Work authority rows are maintained.
-- Editable GVIC chips and mode/source explanations reconcile from the canonical response.
+- Editable RACI chips and mode/source explanations reconcile from the canonical response.
 - My Work and other non-live views resolve current state on open or refresh.
-- Stale broad Logic Gate payloads, stale workspace list cache entries, cached Node/Logic Gate records, and stale in-flight reads cannot overwrite newer Logic Gate GVIC assignments or descendant effective policy.
-- Logic Gate and Node GVIC follow the same freshness contract.
+- Stale broad Logic Gate payloads, stale workspace list cache entries, cached Node/Logic Gate records, and stale in-flight reads cannot overwrite newer Logic Gate RACI assignments or descendant effective policy.
+- Logic Gate and Node RACI follow the same freshness contract.
 - The inherited Node resolves the Logic Gate live; the customized Node remains independent until an eligible overwrite-all reset.
 - Parent-link, reset, group-version, actor, and effective-source fingerprints prevent unsafe 304 responses.
 - The canonical response remains authoritative without pretending descendants were individually rewritten.
 
-### Scenario GVIC-S6: Node Logic Gate Inheritance, Detach, My Work, And Updates
+### Scenario RACI-S6: Node Logic Gate Inheritance, Detach, My Work, And Updates
 
 Business logic covered:
-- GVIC21
-- GVIC28
-- GVIC29
-- GVIC30
-- GVIC31
-- GVIC32
-- GVIC33
-- GVIC34
-- GVIC35
-- GVIC36
-- GVIC29
+- RACI21
+- RACI28
+- RACI29
+- RACI30
+- RACI31
+- RACI32
+- RACI33
+- RACI34
+- RACI35
+- RACI36
+- RACI29
 
 Given:
-- A standalone customized Node has its own GVIC policy.
+- A standalone customized Node has its own RACI policy.
 - An inherited Node and the customized Node are placed into a Logic Gate with a different policy.
-- The Logic Gate GVIC changes after both Nodes have entered.
+- The Logic Gate RACI changes after both Nodes have entered.
 - The Logic Gate change is saved normally and may later be force-overwritten through descendants.
 - One subtree is moved after an older reset.
 - The inherited Node is later detached from the Logic Gate.
@@ -220,35 +223,35 @@ Expected:
 - Overwrite-all changes one Logic Gate reset sequence and can supersede older customized descendants without row fanout.
 - A parent link created after an older reset protects the moved subtree until a later reset.
 - Detaching the inherited Node materializes its current effective policy as a customized Node policy in the same transaction.
-- My Work shows the node only when the user's effective node GVIC includes that node; parent project or logic gate GVIC only provides grouping and context.
-- Project GVIC does not flow down into logic gates or nodes.
-- Updates visibility uses the GVIC/access rules of the updated target: project updates use project GVIC, logic gate updates use logic gate GVIC, and node updates use node effective GVIC.
+- My Work shows the node only when the user's effective node RACI includes that node; parent project or logic gate RACI only provides grouping and context.
+- Project RACI does not flow down into logic gates or nodes.
+- Updates visibility uses the RACI/access rules of the updated target: project updates use project RACI, logic gate updates use logic gate RACI, and node updates use node effective RACI.
 
-### Scenario GVIC-S7: Live Inheritance And Sequence-Scaled Descendant Actions
+### Scenario RACI-S7: Live Inheritance And Sequence-Scaled Descendant Actions
 
 Business logic covered:
-- GVIC6
-- GVIC7
-- GVIC8
-- GVIC10
-- GVIC11
-- GVIC12
-- GVIC13
-- GVIC14
-- GVIC15
-- GVIC18
-- GVIC26
-- GVIC28
-- GVIC29
+- RACI6
+- RACI7
+- RACI8
+- RACI10
+- RACI11
+- RACI12
+- RACI13
+- RACI14
+- RACI15
+- RACI18
+- RACI26
+- RACI28
+- RACI29
 
 Given:
-- A parent resource has configured GVIC assignments.
+- A parent resource has configured RACI assignments.
 - Some descendants are inherited and one child has a different customization.
 - The parent is saved normally, inherited-only Apply is selected, then overwrite-all is separately confirmed.
 - The child is customized again after the reset and another subtree is moved after the reset.
 
 Expected:
-- New non-root resources start inherited and store no copied GVIC edges.
+- New non-root resources start inherited and store no copied RACI edges.
 - Editing a parent changes inherited branches live and stops at the active customized child.
 - Inherited-only Apply adds no policy state and performs no descendant writes.
 - Overwrite-all changes one reset sequence and makes eligible older customizations inactive without deleting their dormant rows.
@@ -256,16 +259,16 @@ Expected:
 - A subtree moved after the reset is protected by its newer parent-link sequence.
 - Point reads explain the effective source, eligible reset, and any inactive stored customization.
 - Write count stays constant as modeled descendant count grows.
-- Group GVIC assignments remain group pointers and are not expanded into one source row per user.
-- GVIC explanations identify source policy, direct/group principal, live membership, reset, and parent-link boundary.
+- Group RACI assignments remain group pointers and are not expanded into one source row per user.
+- RACI explanations identify source policy, direct/group principal, live membership, reset, and parent-link boundary.
 
-### Scenario GVIC-S8: Minimal Logic Gate Work Request Owner
+### Scenario RACI-S8: Minimal Logic Gate Work Request Owner
 
 Business logic covered:
-- GVIC21
-- GVIC28
-- GVIC32
-- GVIC34
+- RACI21
+- RACI28
+- RACI32
+- RACI34
 
 Given:
 - A Logic Gate has one Responsible user and an Arena work snapshot is cached.
@@ -273,68 +276,68 @@ Given:
 
 Expected:
 - The work header contains the current Responsible user's ID as `request_owner_user_id`.
-- The payload contains no full GVIC assignment collection.
+- The payload contains no full RACI assignment collection.
 - The assignment/policy change invalidates the gate work version and reconciles the shared cached snapshot.
 - The stale response cannot overwrite the newer request owner.
 - Request-owner metadata does not grant any resource permission flag.
 
-### Scenario GVIC-S9: Email Node Creator Ownership And Normal GVIC
+### Scenario RACI-S9: Email Node Creator Ownership And Normal RACI
 
 Business logic covered:
-- GVIC29
-- GVIC17
-- GVIC33
+- RACI29
+- RACI17
+- RACI33
 
 Given:
 - An ordinary standalone Node and an email-collaboration Node both exist.
 - A participant joins the email collaboration through a direct or group mention.
-- The creator submits the first priority-bearing email comment, a participant later joins through a direct or group mention, and an authorized caller edits GVIC on both Nodes.
+- The creator submits the first priority-bearing email comment, a participant later joins through a direct or group mention, and an authorized caller edits RACI on both Nodes.
 
 Expected:
-- The ordinary standalone Node retains editable Node GVIC source assignments.
-- Email Node creation gives the creator direct Responsible RCVI, and later generic RCVI mutations follow the same authorized Node rules as the ordinary Node.
-- Mention participation remains a permanent collaboration access grant but creates no GVIC assignment unless a separate GVIC command assigns one.
-### Scenario GVIC-S10: Narrow Entity Headers Preserve The Compact GVIC Row And More-Owned Bulk Action
+- The ordinary standalone Node retains editable Node RACI source assignments.
+- Email Node creation gives the creator direct Responsible RACI, and later generic RACI mutations follow the same authorized Node rules as the ordinary Node.
+- Mention participation remains a permanent collaboration access grant but creates no RACI assignment unless a separate RACI command assigns one.
+### Scenario RACI-S10: Narrow Entity Headers Preserve The Compact RACI Row And More-Owned Bulk Action
 
 Business logic covered:
-- GVIC12
-- GVIC27
-- GVIC37
+- RACI12
+- RACI27
+- RACI37
 
 Given:
-- A Node or Logic Gate editor shows the four shared GVIC role cards.
+- A Node or Logic Gate editor shows the four shared RACI role cards.
 - An adjacent pane narrows the available editor width.
-- A Node or Logic Gate user can access GVIC policy mode actions.
+- A Node or Logic Gate user can access RACI policy mode actions.
 - A Logic Gate user can access both descendant actions.
 
 Expected:
-- Responsible, Consulted, Verifier, and Informed remain in one horizontal row that may be clipped rather than wrapping vertically.
-- No policy-mode, effective-source, apply, or current-GVIC card appears in the header body.
+- Responsible, Accountable, Consulted, and Informed remain in one horizontal row that may be clipped rather than wrapping vertically.
+- No policy-mode, effective-source, apply, or current-RACI card appears in the header body.
 - Inherited and Customized mode changes remain available in **More editor actions**.
 - The Logic Gate bulk action remains in **More editor actions** with its existing permission, disabled, busy, and error handling.
 - Selecting that action opens an explicit Yes/No confirmation.
 - Choosing No, canceling, or dismissing performs no write.
 - Only choosing Yes records the overwrite-all reset sequence; no assigned Node policy rows are individually rewritten.
 
-### Scenario GVIC-S11: Editor-Owned Routing And Target-Only Assignment Updates
+### Scenario RACI-S11: Editor-Owned Routing And Target-Only Assignment Updates
 
 Business logic covered:
-- GVIC36
-- GVIC23
-- GVIC24
+- RACI36
+- RACI23
+- RACI24
 
 Given:
-- A Node is inside a Logic Gate and their current GVIC assignments differ.
+- A Node is inside a Logic Gate and their current RACI assignments differ.
 - Node and Logic Gate editor actions are committed.
-- Bob is newly assigned, Alice is unchanged, and Charlie is removed by a GVIC mutation.
+- Bob is newly assigned, Alice is unchanged, and Charlie is removed by a RACI mutation.
 
 Expected:
 - Node actions use the Node's current effective roles and Logic Gate actions use the Logic Gate's current effective roles.
 
-### Scenario GVIC-S12: Cross-Logic-Gate Moves Use The Canonical Assignment
+### Scenario RACI-S12: Cross-Logic-Gate Moves Use The Canonical Assignment
 
 Business logic covered:
-- GVIC38
+- RACI38
 
 Given:
 - A Node has one canonical Logic Gate work assignment.

@@ -19,7 +19,7 @@ func (r *MemoryRepo) GetLogicGateWork(companyID, logicGateID string) (domain.Log
 	if !ok {
 		return domain.LogicGateWorkView{}, ErrNotFound
 	}
-	logicGate = r.withLogicGateGVICLocked(logicGate)
+	logicGate = r.withLogicGateRACILocked(logicGate)
 	if policy, found := r.resolvedResourcePermissionPolicyLocked(companyID, EntityTypeLogicGate, logicGateID); found {
 		logicGate.DefaultAccess = policy.DefaultAccess
 	}

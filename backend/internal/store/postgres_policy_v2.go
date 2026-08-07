@@ -37,23 +37,23 @@ func normalizeDescendantAction(value string) (string, bool) {
 	}
 }
 
-func (r *PostgresRepo) GetResourceGVICPolicy(companyID, resourceType, resourceID string) (ResourceGVICPolicy, error) {
-	keyValue, err := normalizeResourceGVICKey(companyID, resourceType, resourceID)
+func (r *PostgresRepo) GetResourceRACIPolicy(companyID, resourceType, resourceID string) (ResourceRACIPolicy, error) {
+	keyValue, err := normalizeResourceRACIKey(companyID, resourceType, resourceID)
 	if err != nil {
-		return ResourceGVICPolicy{}, err
+		return ResourceRACIPolicy{}, err
 	}
-	return postgresV2GVICPolicy(context.Background(), r.db, keyValue)
+	return postgresV2RACIPolicy(context.Background(), r.db, keyValue)
 }
 
-func postgresV2GVICPolicy(ctx context.Context, queryer postgresGVICQueryer, keyValue resourceGVICKey) (ResourceGVICPolicy, error) {
-	if exists, err := postgresGVICResourceExists(ctx, queryer, keyValue); err != nil {
-		return ResourceGVICPolicy{}, err
+func postgresV2RACIPolicy(ctx context.Context, queryer postgresRACIQueryer, keyValue resourceRACIKey) (ResourceRACIPolicy, error) {
+	if exists, err := postgresRACIResourceExists(ctx, queryer, keyValue); err != nil {
+		return ResourceRACIPolicy{}, err
 	} else if !exists {
-		return ResourceGVICPolicy{}, ErrNotFound
+		return ResourceRACIPolicy{}, ErrNotFound
 	}
-	policy := ResourceGVICPolicy{
+	policy := ResourceRACIPolicy{
 		CompanyID: keyValue.companyID, ResourceType: keyValue.resourceType, ResourceID: keyValue.resourceID,
-		GVICAssignments: []domain.ResourceGVICAssignment{}, EffectiveAssignments: []domain.ResourceGVICEffectiveAssignment{},
+		RACIAssignments: []domain.ResourceRACIAssignment{}, EffectiveAssignments: []domain.ResourceRACIEffectiveAssignment{},
 	}
 	var sourceType, sourceID string
 	var overwrittenType, overwrittenID sql.NullString
@@ -77,10 +77,10 @@ where setting.company_id=$1::uuid and setting.resource_type=$2 and setting.resou
 		&policy.AssignmentMode, &sourceType, &sourceID, &overwrittenType, &overwrittenID, &overwrittenSequence, &policy.Revision,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ResourceGVICPolicy{}, ErrNotFound
+		return ResourceRACIPolicy{}, ErrNotFound
 	}
 	if err != nil {
-		return ResourceGVICPolicy{}, err
+		return ResourceRACIPolicy{}, err
 	}
 	policy.EffectiveSource = PolicySource{ResourceType: sourceType, ResourceID: sourceID}
 	policy.EffectiveAssignmentMode = PolicyModeInherited
@@ -90,21 +90,21 @@ where setting.company_id=$1::uuid and setting.resource_type=$2 and setting.resou
 	if overwrittenID.Valid {
 		policy.OverwrittenByAncestor = &PolicyOverwrite{ResourceType: overwrittenType.String, ResourceID: overwrittenID.String, Sequence: overwrittenSequence.Int64}
 	}
-	policy.GVICAssignments, err = postgresDirectResourceGVICAssignmentsForResource(ctx, queryer, keyValue)
+	policy.RACIAssignments, err = postgresDirectResourceRACIAssignmentsForResource(ctx, queryer, keyValue)
 	if err != nil {
-		return ResourceGVICPolicy{}, err
+		return ResourceRACIPolicy{}, err
 	}
 	if policy.AssignmentMode == PolicyModeInherited {
-		policy.GVICAssignments = []domain.ResourceGVICAssignment{}
+		policy.RACIAssignments = []domain.ResourceRACIAssignment{}
 	}
-	policy.EffectiveAssignments, err = postgresV2EffectiveGVICAssignments(ctx, queryer, keyValue)
+	policy.EffectiveAssignments, err = postgresV2EffectiveRACIAssignments(ctx, queryer, keyValue)
 	if err != nil {
-		return ResourceGVICPolicy{}, err
+		return ResourceRACIPolicy{}, err
 	}
 	return policy, nil
 }
 
-func postgresV2EffectiveGVICAssignments(ctx context.Context, queryer postgresGVICQueryer, keyValue resourceGVICKey) ([]domain.ResourceGVICEffectiveAssignment, error) {
+func postgresV2EffectiveRACIAssignments(ctx context.Context, queryer postgresRACIQueryer, keyValue resourceRACIKey) ([]domain.ResourceRACIEffectiveAssignment, error) {
 	rows, err := queryer.QueryContext(ctx, `
 select $1::uuid::text,$2,$3::uuid::text,effective.role,effective.user_id::text,
        effective.source_resource_type,effective.source_resource_id::text,
@@ -118,9 +118,9 @@ order by effective.user_id::text,effective.role,effective.source_principal_type,
 		return nil, err
 	}
 	defer rows.Close()
-	items := []domain.ResourceGVICEffectiveAssignment{}
+	items := []domain.ResourceRACIEffectiveAssignment{}
 	for rows.Next() {
-		var item domain.ResourceGVICEffectiveAssignment
+		var item domain.ResourceRACIEffectiveAssignment
 		var displayName, email sql.NullString
 		if err := rows.Scan(&item.CompanyID, &item.ResourceType, &item.ResourceID, &item.Role, &item.UserID,
 			&item.SourceResourceType, &item.SourceResourceID, &item.SourcePrincipalType, &item.SourcePrincipalID,
@@ -138,151 +138,151 @@ order by effective.user_id::text,effective.role,effective.source_principal_type,
 	return items, rows.Err()
 }
 
-func (r *PostgresRepo) PutResourceGVICPolicy(input ResourceGVICPolicyUpdateInput) (ResourceGVICPolicy, []domain.DomainEvent, error) {
-	keyValue, err := normalizeResourceGVICKey(input.CompanyID, input.ResourceType, input.ResourceID)
+func (r *PostgresRepo) PutResourceRACIPolicy(input ResourceRACIPolicyUpdateInput) (ResourceRACIPolicy, []domain.DomainEvent, error) {
+	keyValue, err := normalizeResourceRACIKey(input.CompanyID, input.ResourceType, input.ResourceID)
 	if err != nil {
-		return ResourceGVICPolicy{}, nil, err
+		return ResourceRACIPolicy{}, nil, err
 	}
 	mode, ok := normalizePolicyMode(input.AssignmentMode)
 	if !ok {
-		return ResourceGVICPolicy{}, nil, ErrInvalid
+		return ResourceRACIPolicy{}, nil, ErrInvalid
 	}
 	action, ok := normalizeDescendantAction(input.DescendantAction)
 	if !ok || (mode == PolicyModeInherited && len(input.Assignments) > 0) {
-		return ResourceGVICPolicy{}, nil, ErrInvalid
+		return ResourceRACIPolicy{}, nil, ErrInvalid
 	}
-	normalized, err := normalizeResourceGVICAssignmentInputs(input.Assignments)
+	normalized, err := normalizeResourceRACIAssignmentInputs(input.Assignments)
 	if err != nil {
-		return ResourceGVICPolicy{}, nil, err
+		return ResourceRACIPolicy{}, nil, err
 	}
-	if err := validateResourceGVICAssignmentInputsForOperation(keyValue, normalized, GVICAssignmentCommandSet); err != nil {
-		return ResourceGVICPolicy{}, nil, err
+	if err := validateResourceRACIAssignmentInputsForOperation(keyValue, normalized, RACIAssignmentCommandSet); err != nil {
+		return ResourceRACIPolicy{}, nil, err
 	}
 
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return ResourceGVICPolicy{}, nil, err
+		return ResourceRACIPolicy{}, nil, err
 	}
 	defer tx.Rollback()
 	if strings.TrimSpace(input.IdempotencyKey) != "" {
 		var duplicate bool
 		if err := tx.QueryRowContext(ctx, `select exists(select 1 from domain_events where company_id=$1::uuid and idempotency_key=$2)`, keyValue.companyID, strings.TrimSpace(input.IdempotencyKey)).Scan(&duplicate); err != nil {
-			return ResourceGVICPolicy{}, nil, err
+			return ResourceRACIPolicy{}, nil, err
 		}
 		if duplicate {
 			if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
-				return ResourceGVICPolicy{}, nil, err
+				return ResourceRACIPolicy{}, nil, err
 			}
-			policy, err := r.GetResourceGVICPolicy(keyValue.companyID, keyValue.resourceType, keyValue.resourceID)
+			policy, err := r.GetResourceRACIPolicy(keyValue.companyID, keyValue.resourceType, keyValue.resourceID)
 			return policy, []domain.DomainEvent{}, err
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `select 1 from resource_gvic_settings where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid for update`, keyValue.companyID, keyValue.resourceType, keyValue.resourceID); err != nil {
-		return ResourceGVICPolicy{}, nil, err
+		return ResourceRACIPolicy{}, nil, err
 	}
-	current, err := postgresV2GVICPolicy(ctx, tx, keyValue)
+	current, err := postgresV2RACIPolicy(ctx, tx, keyValue)
 	if err != nil {
-		return ResourceGVICPolicy{}, nil, err
+		return ResourceRACIPolicy{}, nil, err
 	}
 	if expected := cleanPolicyRevision(input.ExpectedRevision); expected != "" && expected != current.Revision {
-		return ResourceGVICPolicy{}, nil, ErrVersionConflict
+		return ResourceRACIPolicy{}, nil, ErrVersionConflict
 	}
 	if mode == PolicyModeCustomized && input.Assignments == nil {
-		sourceKey := resourceGVICKey{
+		sourceKey := resourceRACIKey{
 			companyID:    keyValue.companyID,
 			resourceType: current.EffectiveSource.ResourceType,
 			resourceID:   current.EffectiveSource.ResourceID,
 		}
-		sourceEdges, err := postgresDirectResourceGVICAssignmentsForResource(ctx, tx, sourceKey)
+		sourceEdges, err := postgresDirectResourceRACIAssignmentsForResource(ctx, tx, sourceKey)
 		if err != nil {
-			return ResourceGVICPolicy{}, nil, err
+			return ResourceRACIPolicy{}, nil, err
 		}
-		inputs := make([]ResourceGVICAssignmentInput, 0, len(sourceEdges))
+		inputs := make([]ResourceRACIAssignmentInput, 0, len(sourceEdges))
 		for _, edge := range sourceEdges {
-			inputs = append(inputs, ResourceGVICAssignmentInput{
+			inputs = append(inputs, ResourceRACIAssignmentInput{
 				Role: edge.Role, PrincipalType: edge.PrincipalType, PrincipalID: edge.PrincipalID,
 			})
 		}
-		normalized, err = normalizeResourceGVICAssignmentInputs(inputs)
+		normalized, err = normalizeResourceRACIAssignmentInputs(inputs)
 		if err != nil {
-			return ResourceGVICPolicy{}, nil, err
+			return ResourceRACIPolicy{}, nil, err
 		}
-		if err := validateResourceGVICAssignmentInputsForOperation(keyValue, normalized, GVICAssignmentCommandSet); err != nil {
-			return ResourceGVICPolicy{}, nil, err
+		if err := validateResourceRACIAssignmentInputsForOperation(keyValue, normalized, RACIAssignmentCommandSet); err != nil {
+			return ResourceRACIPolicy{}, nil, err
 		}
 	}
 	for _, assignment := range normalized {
-		if err := validatePostgresGVICPrincipalTx(ctx, tx, keyValue.companyID, assignment.principalType, assignment.principalID); err != nil {
-			return ResourceGVICPolicy{}, nil, err
+		if err := validatePostgresRACIPrincipalTx(ctx, tx, keyValue.companyID, assignment.principalType, assignment.principalID); err != nil {
+			return ResourceRACIPolicy{}, nil, err
 		}
 	}
 	var resultingSequence int64
 	if mode == PolicyModeInherited {
 		var hasParent bool
 		if err := tx.QueryRowContext(ctx, `select exists(select 1 from mangorts_v2_policy_parent($1::uuid,$2,$3::uuid))`, keyValue.companyID, keyValue.resourceType, keyValue.resourceID).Scan(&hasParent); err != nil {
-			return ResourceGVICPolicy{}, nil, err
+			return ResourceRACIPolicy{}, nil, err
 		}
 		if !hasParent {
-			return ResourceGVICPolicy{}, nil, ErrInvalid
+			return ResourceRACIPolicy{}, nil, ErrInvalid
 		}
 		if _, err := tx.ExecContext(ctx, `delete from resource_gvic_assignments where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, keyValue.companyID, keyValue.resourceType, keyValue.resourceID); err != nil {
-			return ResourceGVICPolicy{}, nil, err
+			return ResourceRACIPolicy{}, nil, err
 		}
 		if _, err := tx.ExecContext(ctx, `update resource_gvic_settings set assignment_mode='inherited',customized_sequence=null,updated_timestamp=now() where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, keyValue.companyID, keyValue.resourceType, keyValue.resourceID); err != nil {
-			return ResourceGVICPolicy{}, nil, err
+			return ResourceRACIPolicy{}, nil, err
 		}
 	} else {
 		var sequence int64
 		if err := tx.QueryRowContext(ctx, `select nextval('resource_gvic_change_sequence')`).Scan(&sequence); err != nil {
-			return ResourceGVICPolicy{}, nil, err
+			return ResourceRACIPolicy{}, nil, err
 		}
 		resultingSequence = sequence
 		if _, err := tx.ExecContext(ctx, `update resource_gvic_settings set assignment_mode='customized',customized_sequence=$4,updated_timestamp=now() where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, keyValue.companyID, keyValue.resourceType, keyValue.resourceID, sequence); err != nil {
-			return ResourceGVICPolicy{}, nil, err
+			return ResourceRACIPolicy{}, nil, err
 		}
 		if _, err := tx.ExecContext(ctx, `delete from resource_gvic_assignments where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, keyValue.companyID, keyValue.resourceType, keyValue.resourceID); err != nil {
-			return ResourceGVICPolicy{}, nil, err
+			return ResourceRACIPolicy{}, nil, err
 		}
 		for _, assignment := range normalized {
 			if _, err := tx.ExecContext(ctx, `insert into resource_gvic_assignments(company_id,resource_type,resource_id,role,principal_type,principal_id,created_timestamp,updated_timestamp) values($1::uuid,$2,$3::uuid,$4,$5,$6::uuid,now(),now())`, keyValue.companyID, keyValue.resourceType, keyValue.resourceID, assignment.role, assignment.principalType, assignment.principalID); err != nil {
-				return ResourceGVICPolicy{}, nil, err
+				return ResourceRACIPolicy{}, nil, err
 			}
 		}
 	}
 	if action == PolicyDescendantActionIncludingCustomized {
 		if err := tx.QueryRowContext(ctx, `select nextval('resource_gvic_change_sequence')`).Scan(&resultingSequence); err != nil {
-			return ResourceGVICPolicy{}, nil, err
+			return ResourceRACIPolicy{}, nil, err
 		}
 		if _, err := tx.ExecContext(ctx, `update resource_gvic_settings set descendant_reset_sequence=$4,updated_timestamp=now() where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, keyValue.companyID, keyValue.resourceType, keyValue.resourceID, resultingSequence); err != nil {
-			return ResourceGVICPolicy{}, nil, err
+			return ResourceRACIPolicy{}, nil, err
 		}
 	}
-	after, err := postgresV2GVICPolicy(ctx, tx, keyValue)
+	after, err := postgresV2RACIPolicy(ctx, tx, keyValue)
 	if err != nil {
-		return ResourceGVICPolicy{}, nil, err
+		return ResourceRACIPolicy{}, nil, err
 	}
-	userIDs := resourceGVICChangedUserIDs(current.EffectiveAssignments, after.EffectiveAssignments)
+	userIDs := resourceRACIChangedUserIDs(current.EffectiveAssignments, after.EffectiveAssignments)
 
 	eventInput := DomainEventInput{CompanyID: keyValue.companyID, StreamType: workspaceDomainStreamType, StreamID: keyValue.companyID,
-		Type: v2GVICEventType(keyValue.resourceType), ActorUserID: strings.TrimSpace(input.ActorUserID), IdempotencyKey: strings.TrimSpace(input.IdempotencyKey),
+		Type: v2RACIEventType(keyValue.resourceType), ActorUserID: strings.TrimSpace(input.ActorUserID), IdempotencyKey: strings.TrimSpace(input.IdempotencyKey),
 		Payload: v2PolicyEventPayload(keyValue.resourceType, keyValue.resourceID, map[string]any{"policy_type": "gvic", "assignment_mode": mode, "action": action, "descendant_action": action, "sequence": resultingSequence, "assignment_user_ids": userIDs})}
 	event, err := r.appendDomainEventTx(ctx, tx, eventInput)
 	if err != nil {
-		return ResourceGVICPolicy{}, nil, err
+		return ResourceRACIPolicy{}, nil, err
 	}
 	if err := tx.Commit(); err != nil {
-		return ResourceGVICPolicy{}, nil, err
+		return ResourceRACIPolicy{}, nil, err
 	}
 	return after, []domain.DomainEvent{event}, nil
 }
 
-func v2GVICEventType(resourceType string) string {
+func v2RACIEventType(resourceType string) string {
 	switch resourceType {
 	case EntityTypeNode:
-		return NodeGVICUpdatedEventType
+		return NodeRACIUpdatedEventType
 	case EntityTypeLogicGate:
-		return LogicGateGVICUpdatedEventType
+		return LogicGateRACIUpdatedEventType
 	case EntityTypeSharedInbox:
 		return "communications_shared_inbox_gvic_updated"
 	default:
@@ -429,7 +429,7 @@ func (r *PostgresRepo) PutResourcePermissionPolicy(input ResourcePermissionPolic
 		return ResourcePermissionPolicy{}, nil, ErrVersionConflict
 	}
 	for _, permission := range normalized {
-		if err := validatePostgresGVICPrincipalTx(ctx, tx, companyID, permission.SubjectType, permission.SubjectID); err != nil {
+		if err := validatePostgresRACIPrincipalTx(ctx, tx, companyID, permission.SubjectType, permission.SubjectID); err != nil {
 			return ResourcePermissionPolicy{}, nil, err
 		}
 	}
@@ -551,7 +551,7 @@ func (r *PostgresRepo) ResourcePolicyFingerprints(companyID, resourceType, resou
 	err := r.db.QueryRowContext(context.Background(), `
 select mangorts_v2_gvic_policy_fingerprint($1::uuid,$2,$3::uuid),
        mangorts_v2_permission_policy_fingerprint($1::uuid,$2,$3::uuid,nullif($4,'')::uuid)`,
-		companyID, resourceType, resourceID, userID).Scan(&result.GVIC, &result.Permission)
+		companyID, resourceType, resourceID, userID).Scan(&result.RACI, &result.Permission)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ResourcePolicyFingerprints{}, ErrNotFound
 	}

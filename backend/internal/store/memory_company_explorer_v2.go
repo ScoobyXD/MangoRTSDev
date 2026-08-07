@@ -627,7 +627,7 @@ func (r *MemoryRepo) DeleteCompanyExplorerV2Folder(companyID, entityID string) e
 		delete(r.companyExplorerV2Entities, key(companyID, id))
 
 		delete(r.folders, key(companyID, id))
-		delete(r.sharedInboxGVIC, sharedInboxGVICKey(companyID, id))
+		delete(r.sharedInboxRACI, sharedInboxRACIKey(companyID, id))
 	}
 	for subscriptionKey, subscription := range r.companyExplorerV2Subscriptions {
 		if subscription.CompanyID == companyID && folderIDs[subscription.AnchorEntityID] {

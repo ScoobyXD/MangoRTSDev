@@ -114,7 +114,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 		rep.NextSteps = []string{
 			"Review candidate IDs and counts before apply.",
 			"Apply is human-only; an agent must never run this command with database writer or attachment S3 access.",
-			"The database access verifier is a safety check only and never authorizes an agent writer/S3 apply run.",
+			"The database access accountable is a safety check only and never authorizes an agent writer/S3 apply run.",
 			"A human may apply only through an approved human admin session with -apply -confirm-apply=" + applyConfirmation + ".",
 		}
 		return json.NewEncoder(stdout).Encode(rep)

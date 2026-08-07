@@ -9,14 +9,14 @@ import (
 	"time"
 )
 
-func TestMemoryGroupMembershipGVICSyncIsAffectedGroupScoped(t *testing.T) {
+func TestMemoryGroupMembershipRACISyncIsAffectedGroupScoped(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "company-gvic-membership-scope"
-	repo.EnsureCompany(companyID, "GVIC Membership Scope")
+	repo.EnsureCompany(companyID, "RACI Membership Scope")
 
-	first := mustCreateGVICMembershipUser(t, repo, "gvic-member-first", companyID)
-	next := mustCreateGVICMembershipUser(t, repo, "gvic-member-next", companyID)
-	unrelatedUser := mustCreateGVICMembershipUser(t, repo, "gvic-member-unrelated", companyID)
+	first := mustCreateRACIMembershipUser(t, repo, "gvic-member-first", companyID)
+	next := mustCreateRACIMembershipUser(t, repo, "gvic-member-next", companyID)
+	unrelatedUser := mustCreateRACIMembershipUser(t, repo, "gvic-member-unrelated", companyID)
 
 	parent, err := repo.CreateCompanyUserGroup(companyID, "", "Parent")
 	if err != nil {
@@ -42,15 +42,15 @@ func TestMemoryGroupMembershipGVICSyncIsAffectedGroupScoped(t *testing.T) {
 		t.Fatalf("SetCompanyUserGroupMembers unrelated: %v", err)
 	}
 
-	parentNode := mustCreateGVICMembershipNode(t, repo, companyID, "parent assigned node")
-	childNode := mustCreateGVICMembershipNode(t, repo, companyID, "child assigned node")
-	unrelatedNode := mustCreateGVICMembershipNode(t, repo, companyID, "unrelated assigned node")
+	parentNode := mustCreateRACIMembershipNode(t, repo, companyID, "parent assigned node")
+	childNode := mustCreateRACIMembershipNode(t, repo, companyID, "child assigned node")
+	unrelatedNode := mustCreateRACIMembershipNode(t, repo, companyID, "unrelated assigned node")
 	logicGate, err := repo.CreateLogicGate(companyID, "child assigned gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
-	mustSetGVICMembershipGroupAssignment(t, repo, companyID, EntityTypeLogicGate, logicGate.LogicGateID, child.GroupID, domain.GVICRoleInformed)
-	linkedNode := mustCreateGVICMembershipNode(t, repo, companyID, "linked node")
+	mustSetRACIMembershipGroupAssignment(t, repo, companyID, EntityTypeLogicGate, logicGate.LogicGateID, child.GroupID, domain.RACIRoleInformed)
+	linkedNode := mustCreateRACIMembershipNode(t, repo, companyID, "linked node")
 	priority := 1
 	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
 		CompanyID:   companyID,
@@ -62,18 +62,18 @@ func TestMemoryGroupMembershipGVICSyncIsAffectedGroupScoped(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
-	mustSetGVICMembershipInherited(t, repo, companyID, EntityTypeNode, linkedNode.NodeID)
+	mustSetRACIMembershipInherited(t, repo, companyID, EntityTypeNode, linkedNode.NodeID)
 
-	mustSetGVICMembershipGroupAssignment(t, repo, companyID, EntityTypeNode, parentNode.NodeID, parent.GroupID, domain.GVICRoleConsulted)
-	mustSetGVICMembershipGroupAssignment(t, repo, companyID, EntityTypeNode, childNode.NodeID, child.GroupID, domain.GVICRoleInformed)
-	mustSetGVICMembershipGroupAssignment(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID, unrelatedGroup.GroupID, domain.GVICRoleConsulted)
+	mustSetRACIMembershipGroupAssignment(t, repo, companyID, EntityTypeNode, parentNode.NodeID, parent.GroupID, domain.RACIRoleConsulted)
+	mustSetRACIMembershipGroupAssignment(t, repo, companyID, EntityTypeNode, childNode.NodeID, child.GroupID, domain.RACIRoleInformed)
+	mustSetRACIMembershipGroupAssignment(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID, unrelatedGroup.GroupID, domain.RACIRoleConsulted)
 
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, parentNode.NodeID, []string{first.UserID}, GVICInheritanceDirect)
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, childNode.NodeID, []string{first.UserID}, GVICInheritanceDirect)
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, logicGate.LogicGateID, []string{first.UserID}, GVICInheritanceDirect)
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, linkedNode.NodeID, []string{first.UserID}, "inherited")
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, parentNode.NodeID, []string{first.UserID}, RACIInheritanceDirect)
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, childNode.NodeID, []string{first.UserID}, RACIInheritanceDirect)
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, logicGate.LogicGateID, []string{first.UserID}, RACIInheritanceDirect)
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, linkedNode.NodeID, []string{first.UserID}, "inherited")
 
-	unrelatedBefore := mustListGVICMembershipEffective(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID)
+	unrelatedBefore := mustListRACIMembershipEffective(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID)
 	if len(unrelatedBefore) != 1 || unrelatedBefore[0].UserID != unrelatedUser.UserID {
 		t.Fatalf("unrelated initial effective = %+v, want unrelated user", unrelatedBefore)
 	}
@@ -84,12 +84,12 @@ func TestMemoryGroupMembershipGVICSyncIsAffectedGroupScoped(t *testing.T) {
 		t.Fatalf("SetCompanyUserGroupMembers child next: %v", err)
 	}
 
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, parentNode.NodeID, []string{next.UserID}, GVICInheritanceDirect)
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, childNode.NodeID, []string{next.UserID}, GVICInheritanceDirect)
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, logicGate.LogicGateID, []string{next.UserID}, GVICInheritanceDirect)
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, linkedNode.NodeID, []string{next.UserID}, "inherited")
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, parentNode.NodeID, []string{next.UserID}, RACIInheritanceDirect)
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, childNode.NodeID, []string{next.UserID}, RACIInheritanceDirect)
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, logicGate.LogicGateID, []string{next.UserID}, RACIInheritanceDirect)
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, linkedNode.NodeID, []string{next.UserID}, "inherited")
 
-	unrelatedAfter := mustListGVICMembershipEffective(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID)
+	unrelatedAfter := mustListRACIMembershipEffective(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID)
 	if len(unrelatedAfter) != 1 || unrelatedAfter[0].UserID != unrelatedUser.UserID || !unrelatedAfter[0].UpdatedTimestamp.Equal(unrelatedUpdatedAt) {
 		t.Fatalf("unrelated effective after child membership change = %+v, want unchanged timestamp %s", unrelatedAfter, unrelatedUpdatedAt)
 	}
@@ -97,36 +97,36 @@ func TestMemoryGroupMembershipGVICSyncIsAffectedGroupScoped(t *testing.T) {
 	if _, err := repo.SetCompanyUserGroupMembers(companyID, child.GroupID, nil); err != nil {
 		t.Fatalf("SetCompanyUserGroupMembers child empty: %v", err)
 	}
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, parentNode.NodeID, nil, GVICInheritanceDirect)
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, childNode.NodeID, nil, GVICInheritanceDirect)
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, logicGate.LogicGateID, nil, GVICInheritanceDirect)
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, linkedNode.NodeID, nil, GVICInheritanceDirect)
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, parentNode.NodeID, nil, RACIInheritanceDirect)
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, childNode.NodeID, nil, RACIInheritanceDirect)
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, logicGate.LogicGateID, nil, RACIInheritanceDirect)
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, linkedNode.NodeID, nil, RACIInheritanceDirect)
 
 	if _, err := repo.SetCompanyUserGroupMembers(companyID, unassignedGroup.GroupID, []string{first.UserID}); err != nil {
 		t.Fatalf("SetCompanyUserGroupMembers unassigned: %v", err)
 	}
 }
 
-func TestMemoryNodeAndLogicGateRCVIRolesAllowGroupsAndMultiplePrincipals(t *testing.T) {
+func TestMemoryNodeAndLogicGateRACIRolesAllowGroupsAndMultiplePrincipals(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "company-gvic-node-primary-user"
-	repo.EnsureCompany(companyID, "GVIC Node Primary User")
+	repo.EnsureCompany(companyID, "RACI Node Primary User")
 
-	first := mustCreateGVICMembershipUser(t, repo, "gvic-node-primary-first", companyID)
-	next := mustCreateGVICMembershipUser(t, repo, "gvic-node-primary-next", companyID)
-	verifier := mustCreateGVICMembershipUser(t, repo, "gvic-node-primary-verifier", companyID)
+	first := mustCreateRACIMembershipUser(t, repo, "gvic-node-primary-first", companyID)
+	next := mustCreateRACIMembershipUser(t, repo, "gvic-node-primary-next", companyID)
+	accountable := mustCreateRACIMembershipUser(t, repo, "gvic-node-primary-accountable", companyID)
 	group, err := repo.CreateCompanyUserGroup(companyID, "", "Primary Group")
 	if err != nil {
 		t.Fatalf("CreateCompanyUserGroup: %v", err)
 	}
-	node := mustCreateGVICMembershipNode(t, repo, companyID, "node primary slots")
+	node := mustCreateRACIMembershipNode(t, repo, companyID, "node primary slots")
 
-	_, err = repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	_, err = repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID:    companyID,
 		ResourceType: EntityTypeNode,
 		ResourceID:   node.NodeID,
-		Assignments: []ResourceGVICAssignmentInput{{
-			Role:          domain.GVICRoleResponsible,
+		Assignments: []ResourceRACIAssignmentInput{{
+			Role:          domain.RACIRoleResponsible,
 			PrincipalType: EntityPermissionSubjectGroup,
 			PrincipalID:   group.GroupID,
 		}},
@@ -135,48 +135,48 @@ func TestMemoryNodeAndLogicGateRCVIRolesAllowGroupsAndMultiplePrincipals(t *test
 		t.Fatalf("node Responsible group assignment rejected: %v", err)
 	}
 
-	_, err = repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	_, err = repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID:    companyID,
 		ResourceType: EntityTypeNode,
 		ResourceID:   node.NodeID,
-		Assignments: []ResourceGVICAssignmentInput{
-			{Role: domain.GVICRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: first.UserID},
-			{Role: domain.GVICRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: next.UserID},
+		Assignments: []ResourceRACIAssignmentInput{
+			{Role: domain.RACIRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: first.UserID},
+			{Role: domain.RACIRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: next.UserID},
 		},
 	})
 	if err != nil {
 		t.Fatalf("node multiple Responsible users rejected: %v", err)
 	}
 
-	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	if _, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID:    companyID,
 		ResourceType: EntityTypeNode,
 		ResourceID:   node.NodeID,
-		Assignments: []ResourceGVICAssignmentInput{
-			{Role: domain.GVICRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: first.UserID},
-			{Role: domain.GVICRoleVerifier, PrincipalType: EntityPermissionSubjectUser, PrincipalID: verifier.UserID},
-			{Role: domain.GVICRoleConsulted, PrincipalType: EntityPermissionSubjectGroup, PrincipalID: group.GroupID},
+		Assignments: []ResourceRACIAssignmentInput{
+			{Role: domain.RACIRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: first.UserID},
+			{Role: domain.RACIRoleAccountable, PrincipalType: EntityPermissionSubjectUser, PrincipalID: accountable.UserID},
+			{Role: domain.RACIRoleConsulted, PrincipalType: EntityPermissionSubjectGroup, PrincipalID: group.GroupID},
 		},
 	}); err != nil {
-		t.Fatalf("SetResourceGVICAssignments valid node GVIC: %v", err)
+		t.Fatalf("SetResourceRACIAssignments valid node RACI: %v", err)
 	}
 
-	result, err := repo.AddResourceGVICAssignments(ResourceGVICAssignmentCommandInput{
+	result, err := repo.AddResourceRACIAssignments(ResourceRACIAssignmentCommandInput{
 		CompanyID:    companyID,
 		ResourceType: EntityTypeNode,
 		ResourceID:   node.NodeID,
-		Assignments: []ResourceGVICAssignmentInput{{
-			Role:          domain.GVICRoleResponsible,
+		Assignments: []ResourceRACIAssignmentInput{{
+			Role:          domain.RACIRoleResponsible,
 			PrincipalType: EntityPermissionSubjectUser,
 			PrincipalID:   next.UserID,
 		}},
 	})
 	if err != nil {
-		t.Fatalf("AddResourceGVICAssignments replacement: %v", err)
+		t.Fatalf("AddResourceRACIAssignments replacement: %v", err)
 	}
 	responsibleUsers := []string{}
-	for _, assignment := range result.GVICAssignments {
-		if assignment.Role == domain.GVICRoleResponsible {
+	for _, assignment := range result.RACIAssignments {
+		if assignment.Role == domain.RACIRoleResponsible {
 			responsibleUsers = append(responsibleUsers, assignment.UserID)
 		}
 	}
@@ -188,12 +188,12 @@ func TestMemoryNodeAndLogicGateRCVIRolesAllowGroupsAndMultiplePrincipals(t *test
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
-	_, err = repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	_, err = repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID:    companyID,
 		ResourceType: EntityTypeLogicGate,
 		ResourceID:   logicGate.LogicGateID,
-		Assignments: []ResourceGVICAssignmentInput{{
-			Role:          domain.GVICRoleResponsible,
+		Assignments: []ResourceRACIAssignmentInput{{
+			Role:          domain.RACIRoleResponsible,
 			PrincipalType: EntityPermissionSubjectGroup,
 			PrincipalID:   group.GroupID,
 		}},
@@ -202,35 +202,35 @@ func TestMemoryNodeAndLogicGateRCVIRolesAllowGroupsAndMultiplePrincipals(t *test
 		t.Fatalf("logic gate Responsible group assignment rejected: %v", err)
 	}
 
-	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	if _, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID:    companyID,
 		ResourceType: EntityTypeLogicGate,
 		ResourceID:   logicGate.LogicGateID,
-		Assignments: []ResourceGVICAssignmentInput{
-			{Role: domain.GVICRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: first.UserID},
-			{Role: domain.GVICRoleVerifier, PrincipalType: EntityPermissionSubjectUser, PrincipalID: verifier.UserID},
-			{Role: domain.GVICRoleInformed, PrincipalType: EntityPermissionSubjectGroup, PrincipalID: group.GroupID},
+		Assignments: []ResourceRACIAssignmentInput{
+			{Role: domain.RACIRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: first.UserID},
+			{Role: domain.RACIRoleAccountable, PrincipalType: EntityPermissionSubjectUser, PrincipalID: accountable.UserID},
+			{Role: domain.RACIRoleInformed, PrincipalType: EntityPermissionSubjectGroup, PrincipalID: group.GroupID},
 		},
 	}); err != nil {
-		t.Fatalf("SetResourceGVICAssignments valid logic gate GVIC: %v", err)
+		t.Fatalf("SetResourceRACIAssignments valid logic gate RACI: %v", err)
 	}
 
-	logicGateResult, err := repo.AddResourceGVICAssignments(ResourceGVICAssignmentCommandInput{
+	logicGateResult, err := repo.AddResourceRACIAssignments(ResourceRACIAssignmentCommandInput{
 		CompanyID:    companyID,
 		ResourceType: EntityTypeLogicGate,
 		ResourceID:   logicGate.LogicGateID,
-		Assignments: []ResourceGVICAssignmentInput{{
-			Role:          domain.GVICRoleResponsible,
+		Assignments: []ResourceRACIAssignmentInput{{
+			Role:          domain.RACIRoleResponsible,
 			PrincipalType: EntityPermissionSubjectUser,
 			PrincipalID:   next.UserID,
 		}},
 	})
 	if err != nil {
-		t.Fatalf("AddResourceGVICAssignments logic gate replacement: %v", err)
+		t.Fatalf("AddResourceRACIAssignments logic gate replacement: %v", err)
 	}
 	logicGateResponsibleUsers := []string{}
-	for _, assignment := range logicGateResult.GVICAssignments {
-		if assignment.Role == domain.GVICRoleResponsible {
+	for _, assignment := range logicGateResult.RACIAssignments {
+		if assignment.Role == domain.RACIRoleResponsible {
 			logicGateResponsibleUsers = append(logicGateResponsibleUsers, assignment.UserID)
 		}
 	}
@@ -239,13 +239,13 @@ func TestMemoryNodeAndLogicGateRCVIRolesAllowGroupsAndMultiplePrincipals(t *test
 	}
 }
 
-func TestMemoryGroupParentMoveGVICSyncUsesOldAndNewAncestors(t *testing.T) {
+func TestMemoryGroupParentMoveRACISyncUsesOldAndNewAncestors(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "company-gvic-parent-move-scope"
-	repo.EnsureCompany(companyID, "GVIC Parent Move Scope")
+	repo.EnsureCompany(companyID, "RACI Parent Move Scope")
 
-	movedUser := mustCreateGVICMembershipUser(t, repo, "gvic-parent-move-user", companyID)
-	unrelatedUser := mustCreateGVICMembershipUser(t, repo, "gvic-parent-move-unrelated", companyID)
+	movedUser := mustCreateRACIMembershipUser(t, repo, "gvic-parent-move-user", companyID)
+	unrelatedUser := mustCreateRACIMembershipUser(t, repo, "gvic-parent-move-unrelated", companyID)
 
 	oldParent, err := repo.CreateCompanyUserGroup(companyID, "", "Old parent")
 	if err != nil {
@@ -270,49 +270,49 @@ func TestMemoryGroupParentMoveGVICSyncUsesOldAndNewAncestors(t *testing.T) {
 		t.Fatalf("SetCompanyUserGroupMembers unrelated: %v", err)
 	}
 
-	oldGate, oldNode := mustCreateGVICMembershipGateWithNodeSnapshot(t, repo, companyID, "old ancestor gate", "old ancestor node", oldParent.GroupID, domain.GVICRoleConsulted)
-	newGate, newNode := mustCreateGVICMembershipGateWithNodeSnapshot(t, repo, companyID, "new ancestor gate", "new ancestor node", newParent.GroupID, domain.GVICRoleConsulted)
-	_, unrelatedNode := mustCreateGVICMembershipGateWithNodeSnapshot(t, repo, companyID, "unrelated gate", "unrelated node", unrelatedGroup.GroupID, domain.GVICRoleConsulted)
+	oldGate, oldNode := mustCreateRACIMembershipGateWithNodeSnapshot(t, repo, companyID, "old ancestor gate", "old ancestor node", oldParent.GroupID, domain.RACIRoleConsulted)
+	newGate, newNode := mustCreateRACIMembershipGateWithNodeSnapshot(t, repo, companyID, "new ancestor gate", "new ancestor node", newParent.GroupID, domain.RACIRoleConsulted)
+	_, unrelatedNode := mustCreateRACIMembershipGateWithNodeSnapshot(t, repo, companyID, "unrelated gate", "unrelated node", unrelatedGroup.GroupID, domain.RACIRoleConsulted)
 
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, oldGate.LogicGateID, []string{movedUser.UserID}, GVICInheritanceDirect)
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, oldNode.NodeID, []string{movedUser.UserID}, "inherited")
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, newGate.LogicGateID, nil, GVICInheritanceDirect)
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, newNode.NodeID, nil, GVICInheritanceDirect)
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, oldGate.LogicGateID, []string{movedUser.UserID}, RACIInheritanceDirect)
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, oldNode.NodeID, []string{movedUser.UserID}, "inherited")
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, newGate.LogicGateID, nil, RACIInheritanceDirect)
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, newNode.NodeID, nil, RACIInheritanceDirect)
 
-	unrelatedBefore := mustListGVICMembershipEffective(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID)
+	unrelatedBefore := mustListRACIMembershipEffective(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID)
 	if len(unrelatedBefore) != 1 || unrelatedBefore[0].UserID != unrelatedUser.UserID {
 		t.Fatalf("unrelated node effective before move = %+v, want unrelated user", unrelatedBefore)
 	}
 	unrelatedEffectiveUpdatedAt := unrelatedBefore[0].UpdatedTimestamp
-	unrelatedProjectionBefore := mustFindGVICMembershipProjectionRow(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID, unrelatedUser.UserID)
+	unrelatedProjectionBefore := mustFindRACIMembershipProjectionRow(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID, unrelatedUser.UserID)
 
 	time.Sleep(time.Millisecond)
 	if _, err := repo.UpdateCompanyUserGroup(companyID, movedGroup.GroupID, &newParent.GroupID, "", 0); err != nil {
 		t.Fatalf("UpdateCompanyUserGroup move: %v", err)
 	}
 
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, oldGate.LogicGateID, nil, GVICInheritanceDirect)
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, oldNode.NodeID, nil, GVICInheritanceDirect)
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, newGate.LogicGateID, []string{movedUser.UserID}, GVICInheritanceDirect)
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, newNode.NodeID, []string{movedUser.UserID}, "inherited")
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, oldGate.LogicGateID, nil, RACIInheritanceDirect)
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, oldNode.NodeID, nil, RACIInheritanceDirect)
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, newGate.LogicGateID, []string{movedUser.UserID}, RACIInheritanceDirect)
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, newNode.NodeID, []string{movedUser.UserID}, "inherited")
 
-	unrelatedAfter := mustListGVICMembershipEffective(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID)
+	unrelatedAfter := mustListRACIMembershipEffective(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID)
 	if len(unrelatedAfter) != 1 || unrelatedAfter[0].UserID != unrelatedUser.UserID || !unrelatedAfter[0].UpdatedTimestamp.Equal(unrelatedEffectiveUpdatedAt) {
 		t.Fatalf("unrelated node effective after move = %+v, want unchanged timestamp %s", unrelatedAfter, unrelatedEffectiveUpdatedAt)
 	}
-	unrelatedProjectionAfter := mustFindGVICMembershipProjectionRow(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID, unrelatedUser.UserID)
+	unrelatedProjectionAfter := mustFindRACIMembershipProjectionRow(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID, unrelatedUser.UserID)
 	if !unrelatedProjectionAfter.UpdatedTimestamp.Equal(unrelatedProjectionBefore.UpdatedTimestamp) {
 		t.Fatalf("unrelated projection updated_timestamp = %s, want unchanged %s", unrelatedProjectionAfter.UpdatedTimestamp, unrelatedProjectionBefore.UpdatedTimestamp)
 	}
 }
 
-func TestMemoryGroupDeleteGVICSyncClearsDeletedAndAncestorResources(t *testing.T) {
+func TestMemoryGroupDeleteRACISyncClearsDeletedAndAncestorResources(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "company-gvic-group-delete-scope"
-	repo.EnsureCompany(companyID, "GVIC Group Delete Scope")
+	repo.EnsureCompany(companyID, "RACI Group Delete Scope")
 
-	deletedUser := mustCreateGVICMembershipUser(t, repo, "gvic-delete-user", companyID)
-	unrelatedUser := mustCreateGVICMembershipUser(t, repo, "gvic-delete-unrelated", companyID)
+	deletedUser := mustCreateRACIMembershipUser(t, repo, "gvic-delete-user", companyID)
+	unrelatedUser := mustCreateRACIMembershipUser(t, repo, "gvic-delete-unrelated", companyID)
 
 	parent, err := repo.CreateCompanyUserGroup(companyID, "", "Parent")
 	if err != nil {
@@ -333,42 +333,42 @@ func TestMemoryGroupDeleteGVICSyncClearsDeletedAndAncestorResources(t *testing.T
 		t.Fatalf("SetCompanyUserGroupMembers unrelated: %v", err)
 	}
 
-	parentGate, parentNode := mustCreateGVICMembershipGateWithNodeSnapshot(t, repo, companyID, "parent gate", "parent node", parent.GroupID, domain.GVICRoleInformed)
-	childGate, childNode := mustCreateGVICMembershipGateWithNodeSnapshot(t, repo, companyID, "child gate", "child node", child.GroupID, domain.GVICRoleInformed)
-	_, unrelatedNode := mustCreateGVICMembershipGateWithNodeSnapshot(t, repo, companyID, "delete unrelated gate", "delete unrelated node", unrelatedGroup.GroupID, domain.GVICRoleInformed)
+	parentGate, parentNode := mustCreateRACIMembershipGateWithNodeSnapshot(t, repo, companyID, "parent gate", "parent node", parent.GroupID, domain.RACIRoleInformed)
+	childGate, childNode := mustCreateRACIMembershipGateWithNodeSnapshot(t, repo, companyID, "child gate", "child node", child.GroupID, domain.RACIRoleInformed)
+	_, unrelatedNode := mustCreateRACIMembershipGateWithNodeSnapshot(t, repo, companyID, "delete unrelated gate", "delete unrelated node", unrelatedGroup.GroupID, domain.RACIRoleInformed)
 
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, parentGate.LogicGateID, []string{deletedUser.UserID}, GVICInheritanceDirect)
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, childGate.LogicGateID, []string{deletedUser.UserID}, GVICInheritanceDirect)
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, parentGate.LogicGateID, []string{deletedUser.UserID}, RACIInheritanceDirect)
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, childGate.LogicGateID, []string{deletedUser.UserID}, RACIInheritanceDirect)
 
-	unrelatedBefore := mustListGVICMembershipEffective(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID)
+	unrelatedBefore := mustListRACIMembershipEffective(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID)
 	if len(unrelatedBefore) != 1 || unrelatedBefore[0].UserID != unrelatedUser.UserID {
 		t.Fatalf("unrelated node effective before delete = %+v, want unrelated user", unrelatedBefore)
 	}
 	unrelatedEffectiveUpdatedAt := unrelatedBefore[0].UpdatedTimestamp
-	unrelatedProjectionBefore := mustFindGVICMembershipProjectionRow(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID, unrelatedUser.UserID)
+	unrelatedProjectionBefore := mustFindRACIMembershipProjectionRow(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID, unrelatedUser.UserID)
 
 	time.Sleep(time.Millisecond)
 	if err := repo.DeleteCompanyUserGroup(companyID, child.GroupID); err != nil {
 		t.Fatalf("DeleteCompanyUserGroup child: %v", err)
 	}
 
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, parentGate.LogicGateID, nil, GVICInheritanceDirect)
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, parentNode.NodeID, nil, GVICInheritanceDirect)
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, childGate.LogicGateID, nil, GVICInheritanceDirect)
-	assertGVICMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, childNode.NodeID, nil, GVICInheritanceDirect)
-	childSourceRows, err := repo.ListResourceGVICAssignments(companyID, EntityTypeLogicGate, childGate.LogicGateID)
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, parentGate.LogicGateID, nil, RACIInheritanceDirect)
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, parentNode.NodeID, nil, RACIInheritanceDirect)
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeLogicGate, childGate.LogicGateID, nil, RACIInheritanceDirect)
+	assertRACIMembershipEffectiveUsers(t, repo, companyID, EntityTypeNode, childNode.NodeID, nil, RACIInheritanceDirect)
+	childSourceRows, err := repo.ListResourceRACIAssignments(companyID, EntityTypeLogicGate, childGate.LogicGateID)
 	if err != nil {
-		t.Fatalf("ListResourceGVICAssignments child gate: %v", err)
+		t.Fatalf("ListResourceRACIAssignments child gate: %v", err)
 	}
 	if len(childSourceRows) != 0 {
 		t.Fatalf("child gate source assignments after delete = %+v, want none", childSourceRows)
 	}
 
-	unrelatedAfter := mustListGVICMembershipEffective(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID)
+	unrelatedAfter := mustListRACIMembershipEffective(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID)
 	if len(unrelatedAfter) != 1 || unrelatedAfter[0].UserID != unrelatedUser.UserID || !unrelatedAfter[0].UpdatedTimestamp.Equal(unrelatedEffectiveUpdatedAt) {
 		t.Fatalf("unrelated node effective after delete = %+v, want unchanged timestamp %s", unrelatedAfter, unrelatedEffectiveUpdatedAt)
 	}
-	unrelatedProjectionAfter := mustFindGVICMembershipProjectionRow(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID, unrelatedUser.UserID)
+	unrelatedProjectionAfter := mustFindRACIMembershipProjectionRow(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID, unrelatedUser.UserID)
 	if !unrelatedProjectionAfter.UpdatedTimestamp.Equal(unrelatedProjectionBefore.UpdatedTimestamp) {
 		t.Fatalf("unrelated projection updated_timestamp = %s, want unchanged %s", unrelatedProjectionAfter.UpdatedTimestamp, unrelatedProjectionBefore.UpdatedTimestamp)
 	}
@@ -383,7 +383,7 @@ func TestPostgresGroupHierarchyUsesLiveV2ResolutionWithoutFanout(t *testing.T) {
 	updateBody := extractFunctionSourceForTest(t, entitySource, "func (r *PostgresRepo) UpdateCompanyUserGroup")
 	deleteBody := extractFunctionSourceForTest(t, entitySource, "func (r *PostgresRepo) DeleteCompanyUserGroup")
 	for name, body := range map[string]string{"update": updateBody, "delete": deleteBody} {
-		for _, forbidden := range []string{"syncPostgresGVIC", "resource_gvic_effective_assignments", "gvic_matrix_projection", "recomputeGroupDependent"} {
+		for _, forbidden := range []string{"syncPostgresRACI", "resource_gvic_effective_assignments", "gvic_matrix_projection", "recomputeGroupDependent"} {
 			if strings.Contains(body, forbidden) {
 				t.Fatalf("group %s retained Step 1 fanout %q", name, forbidden)
 			}
@@ -396,7 +396,7 @@ func TestPostgresGroupHierarchyUsesLiveV2ResolutionWithoutFanout(t *testing.T) {
 	}
 }
 
-func mustCreateGVICMembershipUser(t *testing.T, repo *MemoryRepo, subject, companyID string) domain.User {
+func mustCreateRACIMembershipUser(t *testing.T, repo *MemoryRepo, subject, companyID string) domain.User {
 	t.Helper()
 	user, err := repo.UpsertAuthUser(subject, subject+"@example.com", subject)
 	if err != nil {
@@ -408,7 +408,7 @@ func mustCreateGVICMembershipUser(t *testing.T, repo *MemoryRepo, subject, compa
 	return user
 }
 
-func mustCreateGVICMembershipNode(t *testing.T, repo *MemoryRepo, companyID, title string) domain.Node {
+func mustCreateRACIMembershipNode(t *testing.T, repo *MemoryRepo, companyID, title string) domain.Node {
 	t.Helper()
 	node, err := repo.CreateNode(companyID, title)
 	if err != nil {
@@ -417,14 +417,14 @@ func mustCreateGVICMembershipNode(t *testing.T, repo *MemoryRepo, companyID, tit
 	return node
 }
 
-func mustCreateGVICMembershipGateWithNodeSnapshot(t *testing.T, repo *MemoryRepo, companyID, gateTitle, nodeTitle, groupID, role string) (domain.LogicGate, domain.Node) {
+func mustCreateRACIMembershipGateWithNodeSnapshot(t *testing.T, repo *MemoryRepo, companyID, gateTitle, nodeTitle, groupID, role string) (domain.LogicGate, domain.Node) {
 	t.Helper()
 	logicGate, err := repo.CreateLogicGate(companyID, gateTitle)
 	if err != nil {
 		t.Fatalf("CreateLogicGate %q: %v", gateTitle, err)
 	}
-	mustSetGVICMembershipGroupAssignment(t, repo, companyID, EntityTypeLogicGate, logicGate.LogicGateID, groupID, role)
-	node := mustCreateGVICMembershipNode(t, repo, companyID, nodeTitle)
+	mustSetRACIMembershipGroupAssignment(t, repo, companyID, EntityTypeLogicGate, logicGate.LogicGateID, groupID, role)
+	node := mustCreateRACIMembershipNode(t, repo, companyID, nodeTitle)
 	priority := 1
 	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
 		CompanyID:   companyID,
@@ -436,42 +436,42 @@ func mustCreateGVICMembershipGateWithNodeSnapshot(t *testing.T, repo *MemoryRepo
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus %s/%s: %v", logicGate.LogicGateID, node.NodeID, err)
 	}
-	mustSetGVICMembershipInherited(t, repo, companyID, EntityTypeNode, node.NodeID)
+	mustSetRACIMembershipInherited(t, repo, companyID, EntityTypeNode, node.NodeID)
 	return logicGate, node
 }
 
-func mustSetGVICMembershipGroupAssignment(t *testing.T, repo *MemoryRepo, companyID, resourceType, resourceID, groupID, role string) {
+func mustSetRACIMembershipGroupAssignment(t *testing.T, repo *MemoryRepo, companyID, resourceType, resourceID, groupID, role string) {
 	t.Helper()
-	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	if _, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID:    companyID,
 		ResourceType: resourceType,
 		ResourceID:   resourceID,
-		Assignments: []ResourceGVICAssignmentInput{{
+		Assignments: []ResourceRACIAssignmentInput{{
 			Role:          role,
 			PrincipalType: EntityPermissionSubjectGroup,
 			PrincipalID:   groupID,
 		}},
 	}); err != nil {
-		t.Fatalf("SetResourceGVICAssignments %s/%s: %v", resourceType, resourceID, err)
+		t.Fatalf("SetResourceRACIAssignments %s/%s: %v", resourceType, resourceID, err)
 	}
 }
 
-func mustSetGVICMembershipInherited(t *testing.T, repo *MemoryRepo, companyID, resourceType, resourceID string) {
+func mustSetRACIMembershipInherited(t *testing.T, repo *MemoryRepo, companyID, resourceType, resourceID string) {
 	t.Helper()
-	current, err := repo.GetResourceGVICPolicy(companyID, resourceType, resourceID)
+	current, err := repo.GetResourceRACIPolicy(companyID, resourceType, resourceID)
 	if err != nil {
-		t.Fatalf("GetResourceGVICPolicy %s/%s: %v", resourceType, resourceID, err)
+		t.Fatalf("GetResourceRACIPolicy %s/%s: %v", resourceType, resourceID, err)
 	}
-	if _, _, err := repo.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{
+	if _, _, err := repo.PutResourceRACIPolicy(ResourceRACIPolicyUpdateInput{
 		CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID,
 		AssignmentMode: PolicyModeInherited, DescendantAction: PolicyDescendantActionInheritedOnly,
 		ExpectedRevision: current.Revision,
 	}); err != nil {
-		t.Fatalf("PutResourceGVICPolicy inherited %s/%s: %v", resourceType, resourceID, err)
+		t.Fatalf("PutResourceRACIPolicy inherited %s/%s: %v", resourceType, resourceID, err)
 	}
 }
 
-func mustListGVICMembershipResponsibleNodes(t *testing.T, repo *MemoryRepo, companyID, userID string) []domain.Node {
+func mustListRACIMembershipResponsibleNodes(t *testing.T, repo *MemoryRepo, companyID, userID string) []domain.Node {
 	t.Helper()
 	nodes, err := repo.ListResponsibleInboxNodes(WorkItemInboxQuery{CompanyID: companyID, UserID: userID, Limit: 20})
 	if err != nil {
@@ -480,7 +480,7 @@ func mustListGVICMembershipResponsibleNodes(t *testing.T, repo *MemoryRepo, comp
 	return nodes
 }
 
-func mustFindGVICMembershipProjectionRow(t *testing.T, repo *MemoryRepo, companyID, resourceType, resourceID, userID string) GVICMatrixProjectionRow {
+func mustFindRACIMembershipProjectionRow(t *testing.T, repo *MemoryRepo, companyID, resourceType, resourceID, userID string) RACIMatrixProjectionRow {
 	t.Helper()
 	nodeIDs := []string(nil)
 	logicGateIDs := []string(nil)
@@ -492,9 +492,9 @@ func mustFindGVICMembershipProjectionRow(t *testing.T, repo *MemoryRepo, company
 	default:
 		t.Fatalf("unsupported projection resource type %q", resourceType)
 	}
-	rows, err := repo.ListGVICMatrixProjectionRowsForResources(companyID, nodeIDs, logicGateIDs)
+	rows, err := repo.ListRACIMatrixProjectionRowsForResources(companyID, nodeIDs, logicGateIDs)
 	if err != nil {
-		t.Fatalf("ListGVICMatrixProjectionRowsForResources %s/%s: %v", resourceType, resourceID, err)
+		t.Fatalf("ListRACIMatrixProjectionRowsForResources %s/%s: %v", resourceType, resourceID, err)
 	}
 	for _, row := range rows {
 		rowMatches := false
@@ -509,12 +509,12 @@ func mustFindGVICMembershipProjectionRow(t *testing.T, repo *MemoryRepo, company
 		}
 	}
 	t.Fatalf("projection row for %s/%s user %s not found in %+v", resourceType, resourceID, userID, rows)
-	return GVICMatrixProjectionRow{}
+	return RACIMatrixProjectionRow{}
 }
 
-func assertGVICMembershipEffectiveUsers(t *testing.T, repo *MemoryRepo, companyID, resourceType, resourceID string, want []string, inheritanceType string) {
+func assertRACIMembershipEffectiveUsers(t *testing.T, repo *MemoryRepo, companyID, resourceType, resourceID string, want []string, inheritanceType string) {
 	t.Helper()
-	items := mustListGVICMembershipEffective(t, repo, companyID, resourceType, resourceID)
+	items := mustListRACIMembershipEffective(t, repo, companyID, resourceType, resourceID)
 	got := make([]string, 0, len(items))
 	for _, item := range items {
 		if item.InheritanceType != inheritanceType {
@@ -529,11 +529,11 @@ func assertGVICMembershipEffectiveUsers(t *testing.T, repo *MemoryRepo, companyI
 	}
 }
 
-func mustListGVICMembershipEffective(t *testing.T, repo *MemoryRepo, companyID, resourceType, resourceID string) []domain.ResourceGVICEffectiveAssignment {
+func mustListRACIMembershipEffective(t *testing.T, repo *MemoryRepo, companyID, resourceType, resourceID string) []domain.ResourceRACIEffectiveAssignment {
 	t.Helper()
-	items, err := repo.ListResourceGVICEffectiveAssignments(companyID, resourceType, resourceID)
+	items, err := repo.ListResourceRACIEffectiveAssignments(companyID, resourceType, resourceID)
 	if err != nil {
-		t.Fatalf("ListResourceGVICEffectiveAssignments %s/%s: %v", resourceType, resourceID, err)
+		t.Fatalf("ListResourceRACIEffectiveAssignments %s/%s: %v", resourceType, resourceID, err)
 	}
 	return items
 }

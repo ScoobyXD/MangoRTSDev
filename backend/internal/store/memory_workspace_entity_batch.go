@@ -149,14 +149,14 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 			return WorkspaceEntityBatchResult{}, ErrPrincipalNotInCompany
 		}
 		for _, mapping := range result.EntityMappings {
-			role := domain.GVICRoleResponsible
+			role := domain.RACIRoleResponsible
 			if input.EntityKind == EntityTypeLogicGate {
-				role = input.CreatorLogicGateGVICRole
+				role = input.CreatorLogicGateRACIRole
 			}
 			if role == "" {
 				continue
 			}
-			policy, err := r.customizeNewMemoryResourceGVICForCreatorLocked(input.CompanyID, input.EntityKind, mapping.EntityID, role, input.CreatorUserID)
+			policy, err := r.customizeNewMemoryResourceRACIForCreatorLocked(input.CompanyID, input.EntityKind, mapping.EntityID, role, input.CreatorUserID)
 			if err != nil {
 				return WorkspaceEntityBatchResult{}, err
 			}
@@ -170,7 +170,7 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 			} else {
 				for index := range result.LogicGates {
 					if result.LogicGates[index].LogicGateID == mapping.EntityID {
-						result.LogicGates[index].GVICAssignments = logicGateGVICAssignmentsFromResources(policy.GVICAssignments)
+						result.LogicGates[index].RACIAssignments = logicGateRACIAssignmentsFromResources(policy.RACIAssignments)
 						result.LogicGates[index].EffectiveAccess = r.effectiveAccessLevelForUserLocked(input.CompanyID, input.CreatorUserID, EntityTypeLogicGate, mapping.EntityID)
 					}
 				}

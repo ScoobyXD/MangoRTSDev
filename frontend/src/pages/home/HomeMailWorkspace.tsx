@@ -346,7 +346,7 @@ export function HomeMailWorkspace({
   selectedMessageRowKey: string;
   selectedMessageIDs: Set<string>;
   selectedThreadMessages: EmailMessage[];
-  sharedInboxSettings?: { onOpen: () => void; onOpenGVIC?: () => void };
+  sharedInboxSettings?: { onOpen: () => void; onOpenRACI?: () => void };
   unassignedSharedInbox?: { folderName: string; message?: string; actionLabel?: string; onAssignEmail?: () => void };
   showDetailResizeHandle: boolean;
   unreadOnly: boolean;
@@ -480,7 +480,7 @@ export function HomeMailWorkspace({
               {sharedInboxSettings && (
                 <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
                   <button style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpen}>Permissions</button>
-                  {sharedInboxSettings.onOpenGVIC && <button style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpenGVIC}>RCVI</button>}
+                  {sharedInboxSettings.onOpenRACI && <button style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpenRACI}>RACI</button>}
                 </div>
               )}
             </div>
@@ -515,7 +515,7 @@ export function HomeMailWorkspace({
                   {sharedInboxSettings && (
                     <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
                       <button className="mango-elevated-action" style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpen}>Permissions</button>
-                      {sharedInboxSettings.onOpenGVIC && <button className="mango-elevated-action" style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpenGVIC}>RCVI</button>}
+                      {sharedInboxSettings.onOpenRACI && <button className="mango-elevated-action" style={{ ...mailPanelSmallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpenRACI}>RACI</button>}
                     </div>
                   )}
                 </div>

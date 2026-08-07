@@ -22,7 +22,7 @@ This folder contains architecture, product behavior, and migration documentation
   - final storage and cache contracts
   - file ownership for node runtime
 - `docs/frontend/src/modules/logic-gates.md`
-  - Logic Gate records, Input/Output relationships, Editor, GVIC, and manual history
+  - Logic Gate records, Input/Output relationships, Editor, RACI, and manual history
   - Input/Output relationship semantics
   - API and final-storage contracts
   - Editor, Arena/Kanban, and Company Explorer behavior

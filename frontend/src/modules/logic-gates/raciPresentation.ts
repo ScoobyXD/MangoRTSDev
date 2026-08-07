@@ -1,37 +1,37 @@
 import type React from "react";
-import type { LogicGateGVICRole } from "./types.js";
+import type { LogicGateRACIRole } from "./types.js";
 
-export type LogicGateGVICRolePresentation = {
-  role: LogicGateGVICRole;
+export type LogicGateRACIRolePresentation = {
+  role: LogicGateRACIRole;
   label: string;
   accent: string;
 };
 
-export const LOGIC_GATE_GVIC_ROLE_PRESENTATIONS: ReadonlyArray<LogicGateGVICRolePresentation> = [
+export const LOGIC_GATE_RACI_ROLE_PRESENTATIONS: ReadonlyArray<LogicGateRACIRolePresentation> = [
   { role: "responsible", label: "Responsible", accent: "#f97316" },
+  { role: "accountable", label: "Accountable", accent: "#16a34a" },
   { role: "consulted", label: "Consulted", accent: "#2563eb" },
-  { role: "verifier", label: "Verifier", accent: "#16a34a" },
   { role: "informed", label: "Informed", accent: "#7c3aed" },
 ];
 
-const LOGIC_GATE_GVIC_ROLE_PRESENTATION_BY_ROLE = new Map(
-  LOGIC_GATE_GVIC_ROLE_PRESENTATIONS.map((presentation) => [presentation.role, presentation]),
+const LOGIC_GATE_RACI_ROLE_PRESENTATION_BY_ROLE = new Map(
+  LOGIC_GATE_RACI_ROLE_PRESENTATIONS.map((presentation) => [presentation.role, presentation]),
 );
 
-export function logicGateGVICRolePresentation(role: string): { label: string; accent: string } {
+export function logicGateRACIRolePresentation(role: string): { label: string; accent: string } {
   const normalizedRole = role.trim().toLowerCase();
-  const presentation = LOGIC_GATE_GVIC_ROLE_PRESENTATION_BY_ROLE.get(normalizedRole as LogicGateGVICRole);
+  const presentation = LOGIC_GATE_RACI_ROLE_PRESENTATION_BY_ROLE.get(normalizedRole as LogicGateRACIRole);
   if (presentation) return presentation;
   if (normalizedRole === "other") return { label: "Other", accent: "#64748b" };
-  if (!normalizedRole || normalizedRole === "none") return { label: "No RCVI", accent: "#64748b" };
+  if (!normalizedRole || normalizedRole === "none") return { label: "No RACI", accent: "#64748b" };
   return {
     label: normalizedRole.replace(/_/g, " ").replace(/\b\w/g, (character) => character.toUpperCase()),
     accent: "#64748b",
   };
 }
 
-export function logicGateGVICRaisedSurfaceStyle(role: string): React.CSSProperties {
-  const { accent } = logicGateGVICRolePresentation(role);
+export function logicGateRACIRaisedSurfaceStyle(role: string): React.CSSProperties {
+  const { accent } = logicGateRACIRolePresentation(role);
   return {
     border: "1px solid transparent",
     background: `linear-gradient(145deg, rgba(255,255,255,0.96), ${colorWithAlpha(accent, 0.07)}) padding-box, linear-gradient(135deg, ${colorWithAlpha(accent, 0.67)}, rgba(255,255,255,0.84)) border-box`,

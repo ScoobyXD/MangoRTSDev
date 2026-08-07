@@ -75,7 +75,7 @@ func (r *MemoryRepo) UpdateProject(input ProjectInput) (ProjectMutationResult, e
 	}
 	project.UpdatedTimestamp = time.Now().UTC()
 	r.projects[k] = project
-	r.syncGVICMatrixProjectionForProjectResourcesLocked(input.CompanyID, gvicNodeIDs, gvicLogicGateIDs)
+	r.syncRACIMatrixProjectionForProjectResourcesLocked(input.CompanyID, gvicNodeIDs, gvicLogicGateIDs)
 	project = r.withProjectReadModelLocked(project)
 	return ProjectMutationResult{Project: &project}, nil
 }
@@ -92,7 +92,7 @@ func (r *MemoryRepo) DeleteProject(companyID, projectID, actorUserID string) (Pr
 	if err := r.deleteProjectLocked(companyID, projectID); err != nil {
 		return ProjectMutationResult{}, err
 	}
-	r.syncGVICMatrixProjectionForProjectResourcesLocked(companyID, gvicNodeIDs, gvicLogicGateIDs)
+	r.syncRACIMatrixProjectionForProjectResourcesLocked(companyID, gvicNodeIDs, gvicLogicGateIDs)
 	return ProjectMutationResult{DeletedID: projectID}, nil
 }
 
@@ -117,12 +117,12 @@ func (r *MemoryRepo) gvicMatrixProjectAffectedResourceIDsLocked(companyID, proje
 	return mapKeys(nodeSet), mapKeys(logicGateSet)
 }
 
-func (r *MemoryRepo) syncGVICMatrixProjectionForProjectResourcesLocked(companyID string, nodeIDs, logicGateIDs []string) {
+func (r *MemoryRepo) syncRACIMatrixProjectionForProjectResourcesLocked(companyID string, nodeIDs, logicGateIDs []string) {
 	for _, nodeID := range cleanUUIDTextSlice(nodeIDs) {
-		r.syncGVICMatrixProjectionForNodeLocked(companyID, nodeID)
+		r.syncRACIMatrixProjectionForNodeLocked(companyID, nodeID)
 	}
 	for _, logicGateID := range cleanUUIDTextSlice(logicGateIDs) {
-		r.syncGVICMatrixProjectionForLogicGateLocked(companyID, logicGateID)
+		r.syncRACIMatrixProjectionForLogicGateLocked(companyID, logicGateID)
 	}
 }
 
@@ -453,7 +453,7 @@ func (r *MemoryRepo) UpsertProjectRelationship(input ProjectRelationshipInput) (
 		if err != nil {
 			return ProjectRelationshipMutationResult{}, err
 		}
-		r.syncGVICMatrixProjectionForProjectResourcesLocked(input.CompanyID, nil, []string{input.ResourceID})
+		r.syncRACIMatrixProjectionForProjectResourcesLocked(input.CompanyID, nil, []string{input.ResourceID})
 		return ProjectRelationshipMutationResult{
 			Relationship: &gateProjection,
 		}, nil
@@ -469,12 +469,12 @@ func (r *MemoryRepo) UpsertProjectRelationship(input ProjectRelationshipInput) (
 
 	previousRelationships := cloneMemoryMap(r.projectRelationships)
 	previousProjections := cloneMemoryMap(r.projectRelationshipProjection)
-	previousGVICRows := cloneMemoryMap(r.GVICMatrixProjectionRows)
+	previousRACIRows := cloneMemoryMap(r.RACIMatrixProjectionRows)
 	previousReadVersions := cloneMemoryMap(r.workspaceReadVersions)
 	rollback := func() {
 		r.projectRelationships = previousRelationships
 		r.projectRelationshipProjection = previousProjections
-		r.GVICMatrixProjectionRows = previousGVICRows
+		r.RACIMatrixProjectionRows = previousRACIRows
 		r.workspaceReadVersions = previousReadVersions
 	}
 
@@ -491,7 +491,7 @@ func (r *MemoryRepo) UpsertProjectRelationship(input ProjectRelationshipInput) (
 		rollback()
 		return ProjectRelationshipMutationResult{}, err
 	}
-	r.syncGVICMatrixProjectionForProjectResourcesLocked(input.CompanyID, []string{input.ResourceID}, []string{assignment.LogicGateID})
+	r.syncRACIMatrixProjectionForProjectResourcesLocked(input.CompanyID, []string{input.ResourceID}, []string{assignment.LogicGateID})
 	return ProjectRelationshipMutationResult{
 		Relationship:          &nodeProjection,
 		ImplicitRelationships: []domain.ProjectRelationshipProjection{gateProjection},
@@ -566,12 +566,12 @@ func (r *MemoryRepo) DeleteProjectRelationship(input ProjectRelationshipDeleteIn
 	before := r.projectRelationshipProjectionRowsForRelationshipLocked(input.CompanyID, input.RelationshipID)
 	gvicNodeSet := map[string]bool{}
 	gvicLogicGateSet := map[string]bool{}
-	addProjectRelationshipGVICMatrixResourceIDs(gvicNodeSet, gvicLogicGateSet, before)
+	addProjectRelationshipRACIMatrixResourceIDs(gvicNodeSet, gvicLogicGateSet, before)
 	gvicNodeIDs := mapKeys(gvicNodeSet)
 	gvicLogicGateIDs := mapKeys(gvicLogicGateSet)
 	delete(r.projectRelationships, relationshipKey)
 	delete(r.projectRelationshipProjection, relationshipKey)
-	r.syncGVICMatrixProjectionForProjectResourcesLocked(input.CompanyID, gvicNodeIDs, gvicLogicGateIDs)
+	r.syncRACIMatrixProjectionForProjectResourcesLocked(input.CompanyID, gvicNodeIDs, gvicLogicGateIDs)
 	if relationship.ResourceType == EntityTypeNode {
 		for _, assignment := range r.nodeLogicGateAssignments {
 			if assignment.CompanyID == input.CompanyID && assignment.NodeID == relationship.ResourceID {

@@ -13,7 +13,7 @@ func (r *PostgresRepo) ListResponsibleInboxNodes(query WorkItemInboxQuery) ([]do
 }
 
 func (r *PostgresRepo) ListResponsibleInboxNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
-	return r.listGVICMatrixProjectedNodes(ctx, query, true)
+	return r.listRACIMatrixProjectedNodes(ctx, query, true)
 }
 
 func (r *PostgresRepo) ListMyNodes(query WorkItemInboxQuery) ([]domain.Node, error) {
@@ -21,10 +21,10 @@ func (r *PostgresRepo) ListMyNodes(query WorkItemInboxQuery) ([]domain.Node, err
 }
 
 func (r *PostgresRepo) ListMyNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
-	return r.listGVICMatrixProjectedNodes(ctx, query, false)
+	return r.listRACIMatrixProjectedNodes(ctx, query, false)
 }
 
-func (r *PostgresRepo) listGVICMatrixProjectedNodes(ctx context.Context, query WorkItemInboxQuery, responsibleOnly bool) ([]domain.Node, error) {
+func (r *PostgresRepo) listRACIMatrixProjectedNodes(ctx context.Context, query WorkItemInboxQuery, responsibleOnly bool) ([]domain.Node, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -72,12 +72,12 @@ limit $3`, query.CompanyID, query.UserID, query.Limit, query.ViewerUserID)
 	return items, rows.Err()
 }
 
-func (r *PostgresRepo) ListCVIInboxLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
-	return r.ListCVIInboxLogicGatesContext(context.Background(), query)
+func (r *PostgresRepo) ListACIInboxLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
+	return r.ListACIInboxLogicGatesContext(context.Background(), query)
 }
 
-func (r *PostgresRepo) ListCVIInboxLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
-	return r.listGVICMatrixProjectedLogicGates(ctx, query, true)
+func (r *PostgresRepo) ListACIInboxLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
+	return r.listRACIMatrixProjectedLogicGates(ctx, query, true)
 }
 
 func (r *PostgresRepo) ListMyLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
@@ -85,17 +85,17 @@ func (r *PostgresRepo) ListMyLogicGates(query WorkItemInboxQuery) ([]WorkItemLog
 }
 
 func (r *PostgresRepo) ListMyLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
-	return r.listGVICMatrixProjectedLogicGates(ctx, query, false)
+	return r.listRACIMatrixProjectedLogicGates(ctx, query, false)
 }
 
-func (r *PostgresRepo) listGVICMatrixProjectedLogicGates(ctx context.Context, query WorkItemInboxQuery, cviOnly bool) ([]WorkItemLogicGateInboxItem, error) {
+func (r *PostgresRepo) listRACIMatrixProjectedLogicGates(ctx context.Context, query WorkItemInboxQuery, aciOnly bool) ([]WorkItemLogicGateInboxItem, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	query = NormalizeWorkItemInboxQuery(query)
 	roleFilter := ""
-	if cviOnly {
-		roleFilter = "\n  and assignment.role in ('verifier', 'consulted', 'informed')"
+	if aciOnly {
+		roleFilter = "\n  and assignment.role in ('accountable', 'consulted', 'informed')"
 	}
 	rows, err := r.db.QueryContext(ctx, `
 select
@@ -139,19 +139,19 @@ limit $3`, query.CompanyID, query.UserID, query.Limit, query.ViewerUserID)
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	assignmentsByGate, err := r.listProjectedLogicGateGVICAssignments(ctx, query.CompanyID, ids)
+	assignmentsByGate, err := r.listProjectedLogicGateRACIAssignments(ctx, query.CompanyID, ids)
 	if err != nil {
 		return nil, err
 	}
 	for index := range items {
-		items[index].GVICAssignments = assignmentsByGate[strings.TrimSpace(items[index].LogicGateID)]
-		if items[index].GVICAssignments == nil {
-			items[index].GVICAssignments = []domain.LogicGateGVICAssignment{}
+		items[index].RACIAssignments = assignmentsByGate[strings.TrimSpace(items[index].LogicGateID)]
+		if items[index].RACIAssignments == nil {
+			items[index].RACIAssignments = []domain.LogicGateRACIAssignment{}
 		}
 	}
 	return items, nil
 }
 
-func (r *PostgresRepo) listProjectedLogicGateGVICAssignments(ctx context.Context, companyID string, logicGateIDs []string) (map[string][]domain.LogicGateGVICAssignment, error) {
-	return r.listLogicGateGVICAssignments(ctx, companyID, logicGateIDs)
+func (r *PostgresRepo) listProjectedLogicGateRACIAssignments(ctx context.Context, companyID string, logicGateIDs []string) (map[string][]domain.LogicGateRACIAssignment, error) {
+	return r.listLogicGateRACIAssignments(ctx, companyID, logicGateIDs)
 }

@@ -1,6 +1,6 @@
 import type { CurrentUserResponse } from "../../auth/cognitoAuth.js";
 import type { EmailMessage } from "../../modules/communications/communicationsApi.js";
-import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gates/types.js";
+import type { LogicGateRACIRole, LogicGateRecord } from "../../modules/logic-gates/types.js";
 import type { NodeRecord } from "../../modules/nodes/types.js";
 
 export type HomePageProps = {
@@ -88,7 +88,7 @@ export type HomeViewID =
   | "my-triage"
   | "shared-root"
   | "r-inbox"
-  | "v-inbox"
+  | "a-inbox"
   | "c-inbox"
   | "i-inbox"
   | "o-inbox"
@@ -128,9 +128,9 @@ export type HomeColumnResizeDrag = {
   captureTarget: HTMLButtonElement;
 };
 
-export type GVICInboxRole = LogicGateGVICRole | "other";
-export type GVICInboxViewID = Extract<HomeViewID, "r-inbox" | "v-inbox" | "c-inbox" | "i-inbox" | "o-inbox">;
-export type GVICInboxStatus = "pending" | "in_progress" | "review" | "done";
+export type RACIInboxRole = LogicGateRACIRole | "other";
+export type RACIInboxViewID = Extract<HomeViewID, "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox">;
+export type RACIInboxStatus = "pending" | "in_progress" | "review" | "done";
 export type InboxPriority = 0 | 1 | 2 | 3 | 4 | 5;
 
 export type InboxLogicGateNodeGroup = {

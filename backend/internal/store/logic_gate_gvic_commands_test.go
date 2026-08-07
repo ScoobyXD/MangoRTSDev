@@ -8,43 +8,43 @@ import (
 	"miraeopus/backend/internal/domain"
 )
 
-func TestMemoryLogicGateGVICCommandsAreIdempotentAndInvalidateReadVersions(t *testing.T) {
+func TestMemoryLogicGateRACICommandsAreIdempotentAndInvalidateReadVersions(t *testing.T) {
 	t.Parallel()
 
 	repo := NewMemoryRepo()
-	companyID := "company-GVIC-command-idempotent"
-	repo.EnsureCompany(companyID, "GVIC Command Company")
+	companyID := "company-RACI-command-idempotent"
+	repo.EnsureCompany(companyID, "RACI Command Company")
 	logicGate, err := repo.CreateLogicGate(companyID, "Command Gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
-	responsible, err := repo.UpsertAuthUser("GVIC-command-responsible", "responsible-command@example.com", "Responsible Command")
+	responsible, err := repo.UpsertAuthUser("RACI-command-responsible", "responsible-command@example.com", "Responsible Command")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser: %v", err)
 	}
-	if _, err := repo.AddCompanyMembership("GVIC-command-responsible", companyID, domain.RoleCompanyUser); err != nil {
+	if _, err := repo.AddCompanyMembership("RACI-command-responsible", companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership: %v", err)
 	}
 
-	addInput := LogicGateGVICAssignmentCommandInput{
+	addInput := LogicGateRACIAssignmentCommandInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []LogicGateGVICAssignmentInput{{
-			Role:   domain.GVICRoleResponsible,
+		Assignments: []LogicGateRACIAssignmentInput{{
+			Role:   domain.RACIRoleResponsible,
 			UserID: responsible.UserID,
 		}},
 		ActorUserID:    responsible.UserID,
-		IdempotencyKey: "GVIC-add-once",
+		IdempotencyKey: "RACI-add-once",
 	}
-	added, err := repo.AddLogicGateGVICAssignments(addInput)
+	added, err := repo.AddLogicGateRACIAssignments(addInput)
 	if err != nil {
-		t.Fatalf("AddLogicGateGVICAssignments: %v", err)
+		t.Fatalf("AddLogicGateRACIAssignments: %v", err)
 	}
-	if !added.Changed || added.Operation != LogicGateGVICCommandAdd || len(added.GVICAssignments) != 1 || len(added.Events) != 1 {
+	if !added.Changed || added.Operation != LogicGateRACICommandAdd || len(added.RACIAssignments) != 1 || len(added.Events) != 1 {
 		t.Fatalf("added result = %+v, want one changed assignment and event", added)
 	}
 	addPayload := added.Events[0].Payload
-	if added.Events[0].Type != LogicGateGVICUpdatedEventType || addPayload["resource_type"] != EntityTypeLogicGate || addPayload["resource_id"] != logicGate.LogicGateID ||
+	if added.Events[0].Type != LogicGateRACIUpdatedEventType || addPayload["resource_type"] != EntityTypeLogicGate || addPayload["resource_id"] != logicGate.LogicGateID ||
 		addPayload["assignment_mode"] != PolicyModeCustomized || addPayload["descendant_action"] != PolicyDescendantActionInheritedOnly ||
 		addPayload["policy_type"] != "gvic" || addPayload["action"] != PolicyDescendantActionInheritedOnly || addPayload["sequence"].(int64) <= 0 {
 		t.Fatalf("add event = %+v, want canonical V2 policy audit payload", added.Events[0])
@@ -56,33 +56,33 @@ func TestMemoryLogicGateGVICCommandsAreIdempotentAndInvalidateReadVersions(t *te
 	if err != nil {
 		t.Fatalf("ListMyLogicGates after add: %v", err)
 	}
-	if len(myGates) != 1 || myGates[0].LogicGateID != logicGate.LogicGateID || !inboxReadRolesContain(myGates[0].Roles, domain.GVICRoleResponsible) {
+	if len(myGates) != 1 || myGates[0].LogicGateID != logicGate.LogicGateID || !inboxReadRolesContain(myGates[0].Roles, domain.RACIRoleResponsible) {
 		t.Fatalf("my gates after add = %+v, want responsible gate", myGates)
 	}
 
-	duplicateAdd, err := repo.AddLogicGateGVICAssignments(addInput)
+	duplicateAdd, err := repo.AddLogicGateRACIAssignments(addInput)
 	if err != nil {
-		t.Fatalf("duplicate AddLogicGateGVICAssignments: %v", err)
+		t.Fatalf("duplicate AddLogicGateRACIAssignments: %v", err)
 	}
-	if duplicateAdd.Changed || len(duplicateAdd.GVICAssignments) != 1 || len(duplicateAdd.Events) != 0 {
+	if duplicateAdd.Changed || len(duplicateAdd.RACIAssignments) != 1 || len(duplicateAdd.Events) != 0 {
 		t.Fatalf("duplicate add result = %+v, want no-op without event", duplicateAdd)
 	}
 	assertWorkspaceEventCount(t, repo, companyID, 1)
 	assertWorkspaceReadVersion(t, repo, companyID, "logic-gates", "", 1, true)
 
-	removeInput := LogicGateGVICAssignmentCommandInput{
+	removeInput := LogicGateRACIAssignmentCommandInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []LogicGateGVICAssignmentInput{{
-			Role:   domain.GVICRoleResponsible,
+		Assignments: []LogicGateRACIAssignmentInput{{
+			Role:   domain.RACIRoleResponsible,
 			UserID: responsible.UserID,
 		}},
 	}
-	removed, err := repo.RemoveLogicGateGVICAssignments(removeInput)
+	removed, err := repo.RemoveLogicGateRACIAssignments(removeInput)
 	if err != nil {
-		t.Fatalf("RemoveLogicGateGVICAssignments: %v", err)
+		t.Fatalf("RemoveLogicGateRACIAssignments: %v", err)
 	}
-	if !removed.Changed || removed.Operation != LogicGateGVICCommandRemove || len(removed.GVICAssignments) != 0 || len(removed.Events) != 1 {
+	if !removed.Changed || removed.Operation != LogicGateRACICommandRemove || len(removed.RACIAssignments) != 0 || len(removed.Events) != 1 {
 		t.Fatalf("removed result = %+v, want changed removal and event", removed)
 	}
 	removePayload := removed.Events[0].Payload
@@ -101,43 +101,43 @@ func TestMemoryLogicGateGVICCommandsAreIdempotentAndInvalidateReadVersions(t *te
 		t.Fatalf("my gates after remove = %+v, want none", myGates)
 	}
 
-	missingRemove, err := repo.RemoveLogicGateGVICAssignments(removeInput)
+	missingRemove, err := repo.RemoveLogicGateRACIAssignments(removeInput)
 	if err != nil {
-		t.Fatalf("missing RemoveLogicGateGVICAssignments: %v", err)
+		t.Fatalf("missing RemoveLogicGateRACIAssignments: %v", err)
 	}
-	if missingRemove.Changed || len(missingRemove.GVICAssignments) != 0 || len(missingRemove.Events) != 0 {
+	if missingRemove.Changed || len(missingRemove.RACIAssignments) != 0 || len(missingRemove.Events) != 0 {
 		t.Fatalf("missing remove result = %+v, want no-op without event", missingRemove)
 	}
 	assertWorkspaceEventCount(t, repo, companyID, 2)
 	assertWorkspaceReadVersion(t, repo, companyID, "logic-gates", "", 2, true)
 }
 
-func TestMemoryLogicGateResourceGVICResolvesInheritedAndCustomizedNodesLive(t *testing.T) {
+func TestMemoryLogicGateResourceRACIResolvesInheritedAndCustomizedNodesLive(t *testing.T) {
 	t.Parallel()
 
 	repo := NewMemoryRepo()
-	companyID := "company-GVIC-snapshot-entry"
-	repo.EnsureCompany(companyID, "GVIC Snapshot Company")
-	directUser := mustCreateGVICMembershipUser(t, repo, "GVIC-snapshot-direct", companyID)
-	gateUser := mustCreateGVICMembershipUser(t, repo, "GVIC-snapshot-gate", companyID)
-	nextGateUser := mustCreateGVICMembershipUser(t, repo, "GVIC-snapshot-next-gate", companyID)
-	node := mustCreateGVICMembershipNode(t, repo, companyID, "snapshot node")
+	companyID := "company-RACI-snapshot-entry"
+	repo.EnsureCompany(companyID, "RACI Snapshot Company")
+	directUser := mustCreateRACIMembershipUser(t, repo, "RACI-snapshot-direct", companyID)
+	gateUser := mustCreateRACIMembershipUser(t, repo, "RACI-snapshot-gate", companyID)
+	nextGateUser := mustCreateRACIMembershipUser(t, repo, "RACI-snapshot-next-gate", companyID)
+	node := mustCreateRACIMembershipNode(t, repo, companyID, "snapshot node")
 	logicGate, err := repo.CreateLogicGate(companyID, "Pointer Gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
 
-	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	if _, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID:    companyID,
 		ResourceType: EntityTypeLogicGate,
 		ResourceID:   logicGate.LogicGateID,
-		Assignments: []ResourceGVICAssignmentInput{{
-			Role:          domain.GVICRoleResponsible,
+		Assignments: []ResourceRACIAssignmentInput{{
+			Role:          domain.RACIRoleResponsible,
 			PrincipalType: EntityPermissionSubjectUser,
 			PrincipalID:   gateUser.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("SetResourceGVICAssignments logic gate initial: %v", err)
+		t.Fatalf("SetResourceRACIAssignments logic gate initial: %v", err)
 	}
 
 	priority := 1
@@ -151,29 +151,29 @@ func TestMemoryLogicGateResourceGVICResolvesInheritedAndCustomizedNodesLive(t *t
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
-	if _, _, err := repo.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{
+	if _, _, err := repo.PutResourceRACIPolicy(ResourceRACIPolicyUpdateInput{
 		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
 		AssignmentMode: PolicyModeInherited, DescendantAction: PolicyDescendantActionInheritedOnly,
 	}); err != nil {
-		t.Fatalf("PutResourceGVICPolicy node inherited: %v", err)
+		t.Fatalf("PutResourceRACIPolicy node inherited: %v", err)
 	}
-	assertMemoryNodeGVICResolution(t, repo, companyID, node.NodeID, PolicyModeInherited, "", gateUser.UserID, EntityTypeLogicGate, logicGate.LogicGateID, false)
+	assertMemoryNodeRACIResolution(t, repo, companyID, node.NodeID, PolicyModeInherited, "", gateUser.UserID, EntityTypeLogicGate, logicGate.LogicGateID, false)
 
-	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	if _, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID:    companyID,
 		ResourceType: EntityTypeLogicGate,
 		ResourceID:   logicGate.LogicGateID,
-		Assignments: []ResourceGVICAssignmentInput{{
-			Role:          domain.GVICRoleResponsible,
+		Assignments: []ResourceRACIAssignmentInput{{
+			Role:          domain.RACIRoleResponsible,
 			PrincipalType: EntityPermissionSubjectUser,
 			PrincipalID:   nextGateUser.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("SetResourceGVICAssignments logic gate next: %v", err)
+		t.Fatalf("SetResourceRACIAssignments logic gate next: %v", err)
 	}
-	assertMemoryNodeGVICResolution(t, repo, companyID, node.NodeID, PolicyModeInherited, "", nextGateUser.UserID, EntityTypeLogicGate, logicGate.LogicGateID, false)
+	assertMemoryNodeRACIResolution(t, repo, companyID, node.NodeID, PolicyModeInherited, "", nextGateUser.UserID, EntityTypeLogicGate, logicGate.LogicGateID, false)
 
-	nextNode := mustCreateGVICMembershipNode(t, repo, companyID, "snapshot next node")
+	nextNode := mustCreateRACIMembershipNode(t, repo, companyID, "snapshot next node")
 	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
@@ -184,27 +184,27 @@ func TestMemoryLogicGateResourceGVICResolvesInheritedAndCustomizedNodesLive(t *t
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus next node: %v", err)
 	}
-	if _, _, err := repo.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{
+	if _, _, err := repo.PutResourceRACIPolicy(ResourceRACIPolicyUpdateInput{
 		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: nextNode.NodeID,
 		AssignmentMode: PolicyModeInherited, DescendantAction: PolicyDescendantActionInheritedOnly,
 	}); err != nil {
-		t.Fatalf("PutResourceGVICPolicy next node inherited: %v", err)
+		t.Fatalf("PutResourceRACIPolicy next node inherited: %v", err)
 	}
-	assertMemoryNodeGVICResolution(t, repo, companyID, nextNode.NodeID, PolicyModeInherited, "", nextGateUser.UserID, EntityTypeLogicGate, logicGate.LogicGateID, false)
+	assertMemoryNodeRACIResolution(t, repo, companyID, nextNode.NodeID, PolicyModeInherited, "", nextGateUser.UserID, EntityTypeLogicGate, logicGate.LogicGateID, false)
 
-	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	if _, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID:    companyID,
 		ResourceType: EntityTypeNode,
 		ResourceID:   node.NodeID,
-		Assignments: []ResourceGVICAssignmentInput{{
-			Role:          domain.GVICRoleResponsible,
+		Assignments: []ResourceRACIAssignmentInput{{
+			Role:          domain.RACIRoleResponsible,
 			PrincipalType: EntityPermissionSubjectUser,
 			PrincipalID:   directUser.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("SetResourceGVICAssignments linked node direct: %v", err)
+		t.Fatalf("SetResourceRACIAssignments linked node direct: %v", err)
 	}
-	assertMemoryNodeGVICResolution(t, repo, companyID, node.NodeID, PolicyModeCustomized, directUser.UserID, directUser.UserID, EntityTypeNode, node.NodeID, false)
+	assertMemoryNodeRACIResolution(t, repo, companyID, node.NodeID, PolicyModeCustomized, directUser.UserID, directUser.UserID, EntityTypeNode, node.NodeID, false)
 
 	rows, err := repo.ListMyWorkMatrixRows(WorkItemInboxQuery{CompanyID: companyID, UserID: directUser.UserID, ViewerUserID: directUser.UserID, Limit: 10})
 	if err != nil {
@@ -224,33 +224,33 @@ func TestMemoryLogicGateResourceGVICResolvesInheritedAndCustomizedNodesLive(t *t
 	if _, err := repo.RemoveLogicGateNodeAssignment(LogicGateNodeAssignmentRemoveInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, NodeID: node.NodeID}); err != nil {
 		t.Fatalf("RemoveLogicGateNodeAssignment: %v", err)
 	}
-	assertMemoryNodeGVICResolution(t, repo, companyID, node.NodeID, PolicyModeCustomized, directUser.UserID, directUser.UserID, EntityTypeNode, node.NodeID, false)
+	assertMemoryNodeRACIResolution(t, repo, companyID, node.NodeID, PolicyModeCustomized, directUser.UserID, directUser.UserID, EntityTypeNode, node.NodeID, false)
 }
 
-func TestMemoryLogicGateResourceGVICIncludingCustomizedResetSupersedesDescendant(t *testing.T) {
+func TestMemoryLogicGateResourceRACIIncludingCustomizedResetSupersedesDescendant(t *testing.T) {
 	t.Parallel()
 
 	repo := NewMemoryRepo()
-	companyID := "company-GVIC-apply-descendants"
-	repo.EnsureCompany(companyID, "GVIC Apply Descendants Company")
-	initialUser := mustCreateGVICMembershipUser(t, repo, "GVIC-apply-descendants-initial", companyID)
-	nextUser := mustCreateGVICMembershipUser(t, repo, "GVIC-apply-descendants-next", companyID)
-	node := mustCreateGVICMembershipNode(t, repo, companyID, "apply descendants node")
+	companyID := "company-RACI-apply-descendants"
+	repo.EnsureCompany(companyID, "RACI Apply Descendants Company")
+	initialUser := mustCreateRACIMembershipUser(t, repo, "RACI-apply-descendants-initial", companyID)
+	nextUser := mustCreateRACIMembershipUser(t, repo, "RACI-apply-descendants-next", companyID)
+	node := mustCreateRACIMembershipNode(t, repo, companyID, "apply descendants node")
 	logicGate, err := repo.CreateLogicGate(companyID, "Apply Descendants Gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
-	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	if _, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID:    companyID,
 		ResourceType: EntityTypeLogicGate,
 		ResourceID:   logicGate.LogicGateID,
-		Assignments: []ResourceGVICAssignmentInput{{
-			Role:          domain.GVICRoleResponsible,
+		Assignments: []ResourceRACIAssignmentInput{{
+			Role:          domain.RACIRoleResponsible,
 			PrincipalType: EntityPermissionSubjectUser,
 			PrincipalID:   initialUser.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("SetResourceGVICAssignments initial gate: %v", err)
+		t.Fatalf("SetResourceRACIAssignments initial gate: %v", err)
 	}
 	priority := 1
 	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
@@ -263,65 +263,65 @@ func TestMemoryLogicGateResourceGVICIncludingCustomizedResetSupersedesDescendant
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
-	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	if _, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
-		Assignments: []ResourceGVICAssignmentInput{{
-			Role: domain.GVICRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: initialUser.UserID,
+		Assignments: []ResourceRACIAssignmentInput{{
+			Role: domain.RACIRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: initialUser.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("SetResourceGVICAssignments customized node: %v", err)
+		t.Fatalf("SetResourceRACIAssignments customized node: %v", err)
 	}
-	assertMemoryNodeGVICResolution(t, repo, companyID, node.NodeID, PolicyModeCustomized, initialUser.UserID, initialUser.UserID, EntityTypeNode, node.NodeID, false)
+	assertMemoryNodeRACIResolution(t, repo, companyID, node.NodeID, PolicyModeCustomized, initialUser.UserID, initialUser.UserID, EntityTypeNode, node.NodeID, false)
 
-	result, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	result, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID:          companyID,
 		ResourceType:       EntityTypeLogicGate,
 		ResourceID:         logicGate.LogicGateID,
 		ApplyToDescendants: true,
-		Assignments: []ResourceGVICAssignmentInput{{
-			Role:          domain.GVICRoleResponsible,
+		Assignments: []ResourceRACIAssignmentInput{{
+			Role:          domain.RACIRoleResponsible,
 			PrincipalType: EntityPermissionSubjectUser,
 			PrincipalID:   nextUser.UserID,
 		}},
 	})
 	if err != nil {
-		t.Fatalf("SetResourceGVICAssignments apply descendants: %v", err)
+		t.Fatalf("SetResourceRACIAssignments apply descendants: %v", err)
 	}
 	if !result.Changed {
-		t.Fatalf("SetResourceGVICAssignments apply descendants changed = false, want true")
+		t.Fatalf("SetResourceRACIAssignments apply descendants changed = false, want true")
 	}
-	if len(result.GVICAssignments) != 1 || result.GVICAssignments[0].UserID != nextUser.UserID {
-		t.Fatalf("gate source assignments = %+v, want next responsible user", result.GVICAssignments)
+	if len(result.RACIAssignments) != 1 || result.RACIAssignments[0].UserID != nextUser.UserID {
+		t.Fatalf("gate source assignments = %+v, want next responsible user", result.RACIAssignments)
 	}
-	assertMemoryNodeGVICResolution(t, repo, companyID, node.NodeID, PolicyModeCustomized, initialUser.UserID, nextUser.UserID, EntityTypeLogicGate, logicGate.LogicGateID, true)
+	assertMemoryNodeRACIResolution(t, repo, companyID, node.NodeID, PolicyModeCustomized, initialUser.UserID, nextUser.UserID, EntityTypeLogicGate, logicGate.LogicGateID, true)
 }
 
-func TestMemoryLogicGateResourceGVICApplyToDescendantsUsesCurrentUnchangedSnapshot(t *testing.T) {
+func TestMemoryLogicGateResourceRACIApplyToDescendantsUsesCurrentUnchangedSnapshot(t *testing.T) {
 	t.Parallel()
 
 	repo := NewMemoryRepo()
-	companyID := "company-GVIC-current-snapshot"
-	repo.EnsureCompany(companyID, "GVIC Current Snapshot Company")
-	gateUser := mustCreateGVICMembershipUser(t, repo, "GVIC-current-snapshot-gate", companyID)
-	descendantUser := mustCreateGVICMembershipUser(t, repo, "GVIC-current-snapshot-descendant", companyID)
-	consultedUser := mustCreateGVICMembershipUser(t, repo, "GVIC-current-snapshot-consulted", companyID)
-	node := mustCreateGVICMembershipNode(t, repo, companyID, "current snapshot node")
+	companyID := "company-RACI-current-snapshot"
+	repo.EnsureCompany(companyID, "RACI Current Snapshot Company")
+	gateUser := mustCreateRACIMembershipUser(t, repo, "RACI-current-snapshot-gate", companyID)
+	descendantUser := mustCreateRACIMembershipUser(t, repo, "RACI-current-snapshot-descendant", companyID)
+	consultedUser := mustCreateRACIMembershipUser(t, repo, "RACI-current-snapshot-consulted", companyID)
+	node := mustCreateRACIMembershipNode(t, repo, companyID, "current snapshot node")
 	logicGate, err := repo.CreateLogicGate(companyID, "Current Snapshot Gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
-	gateAssignments := []ResourceGVICAssignmentInput{{
-		Role:          domain.GVICRoleResponsible,
+	gateAssignments := []ResourceRACIAssignmentInput{{
+		Role:          domain.RACIRoleResponsible,
 		PrincipalType: EntityPermissionSubjectUser,
 		PrincipalID:   gateUser.UserID,
 	}}
-	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	if _, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID:    companyID,
 		ResourceType: EntityTypeLogicGate,
 		ResourceID:   logicGate.LogicGateID,
 		Assignments:  gateAssignments,
 	}); err != nil {
-		t.Fatalf("SetResourceGVICAssignments gate template: %v", err)
+		t.Fatalf("SetResourceRACIAssignments gate template: %v", err)
 	}
 	priority := 1
 	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
@@ -330,21 +330,21 @@ func TestMemoryLogicGateResourceGVICApplyToDescendantsUsesCurrentUnchangedSnapsh
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
-	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	if _, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID:    companyID,
 		ResourceType: EntityTypeNode,
 		ResourceID:   node.NodeID,
-		Assignments: []ResourceGVICAssignmentInput{
-			{Role: domain.GVICRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: descendantUser.UserID},
-			{Role: domain.GVICRoleConsulted, PrincipalType: EntityPermissionSubjectUser, PrincipalID: consultedUser.UserID},
+		Assignments: []ResourceRACIAssignmentInput{
+			{Role: domain.RACIRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: descendantUser.UserID},
+			{Role: domain.RACIRoleConsulted, PrincipalType: EntityPermissionSubjectUser, PrincipalID: consultedUser.UserID},
 		},
 	}); err != nil {
-		t.Fatalf("SetResourceGVICAssignments descendant custom snapshot: %v", err)
+		t.Fatalf("SetResourceRACIAssignments descendant custom snapshot: %v", err)
 	}
 
 	// Business rule: clicking Apply replaces the descendant snapshot with the
 	// gate's current assignments even though the gate assignments did not change.
-	result, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	result, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID:          companyID,
 		ResourceType:       EntityTypeLogicGate,
 		ResourceID:         logicGate.LogicGateID,
@@ -352,14 +352,14 @@ func TestMemoryLogicGateResourceGVICApplyToDescendantsUsesCurrentUnchangedSnapsh
 		Assignments:        gateAssignments,
 	})
 	if err != nil {
-		t.Fatalf("SetResourceGVICAssignments reapply current gate snapshot: %v", err)
+		t.Fatalf("SetResourceRACIAssignments reapply current gate snapshot: %v", err)
 	}
 	if !result.Changed {
 		t.Fatal("reapplying the current gate snapshot should report a descendant change")
 	}
-	policy, err := repo.GetResourceGVICPolicy(companyID, EntityTypeNode, node.NodeID)
+	policy, err := repo.GetResourceRACIPolicy(companyID, EntityTypeNode, node.NodeID)
 	if err != nil {
-		t.Fatalf("GetResourceGVICPolicy after reset: %v", err)
+		t.Fatalf("GetResourceRACIPolicy after reset: %v", err)
 	}
 	if policy.AssignmentMode != PolicyModeCustomized || policy.EffectiveAssignmentMode != PolicyModeInherited || policy.OverwrittenByAncestor == nil ||
 		policy.EffectiveSource.ResourceType != EntityTypeLogicGate || policy.EffectiveSource.ResourceID != logicGate.LogicGateID || len(policy.EffectiveAssignments) != 1 || policy.EffectiveAssignments[0].UserID != gateUser.UserID {
@@ -368,47 +368,47 @@ func TestMemoryLogicGateResourceGVICApplyToDescendantsUsesCurrentUnchangedSnapsh
 
 	// An empty current gate policy is still a complete snapshot and therefore
 	// clears assignments on current descendants.
-	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	if _, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID: companyID, ResourceType: EntityTypeLogicGate, ResourceID: logicGate.LogicGateID,
 	}); err != nil {
-		t.Fatalf("SetResourceGVICAssignments clear gate: %v", err)
+		t.Fatalf("SetResourceRACIAssignments clear gate: %v", err)
 	}
-	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	if _, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
-		Assignments: []ResourceGVICAssignmentInput{{Role: domain.GVICRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: descendantUser.UserID}},
+		Assignments: []ResourceRACIAssignmentInput{{Role: domain.RACIRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: descendantUser.UserID}},
 	}); err != nil {
-		t.Fatalf("SetResourceGVICAssignments restore descendant custom snapshot: %v", err)
+		t.Fatalf("SetResourceRACIAssignments restore descendant custom snapshot: %v", err)
 	}
-	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	if _, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID: companyID, ResourceType: EntityTypeLogicGate, ResourceID: logicGate.LogicGateID, ApplyToDescendants: true,
 	}); err != nil {
-		t.Fatalf("SetResourceGVICAssignments apply empty current snapshot: %v", err)
+		t.Fatalf("SetResourceRACIAssignments apply empty current snapshot: %v", err)
 	}
-	policy, err = repo.GetResourceGVICPolicy(companyID, EntityTypeNode, node.NodeID)
+	policy, err = repo.GetResourceRACIPolicy(companyID, EntityTypeNode, node.NodeID)
 	if err != nil {
-		t.Fatalf("GetResourceGVICPolicy after empty reset: %v", err)
+		t.Fatalf("GetResourceRACIPolicy after empty reset: %v", err)
 	}
-	if policy.AssignmentMode != PolicyModeCustomized || len(policy.GVICAssignments) != 1 || policy.GVICAssignments[0].UserID != descendantUser.UserID ||
+	if policy.AssignmentMode != PolicyModeCustomized || len(policy.RACIAssignments) != 1 || policy.RACIAssignments[0].UserID != descendantUser.UserID ||
 		len(policy.EffectiveAssignments) != 0 || policy.OverwrittenByAncestor == nil {
 		t.Fatalf("node policy after empty reset = %+v, want dormant source edge and empty effective policy", policy)
 	}
 }
 
-func assertMemoryNodeGVICResolution(t *testing.T, repo *MemoryRepo, companyID, nodeID, storedMode, storedUserID, effectiveUserID, sourceType, sourceID string, overwritten bool) {
+func assertMemoryNodeRACIResolution(t *testing.T, repo *MemoryRepo, companyID, nodeID, storedMode, storedUserID, effectiveUserID, sourceType, sourceID string, overwritten bool) {
 	t.Helper()
-	policy, err := repo.GetResourceGVICPolicy(companyID, EntityTypeNode, nodeID)
+	policy, err := repo.GetResourceRACIPolicy(companyID, EntityTypeNode, nodeID)
 	if err != nil {
-		t.Fatalf("GetResourceGVICPolicy node: %v", err)
+		t.Fatalf("GetResourceRACIPolicy node: %v", err)
 	}
 	if policy.AssignmentMode != storedMode {
 		t.Fatalf("node assignment mode = %q, want %q: %+v", policy.AssignmentMode, storedMode, policy)
 	}
 	if storedUserID == "" {
-		if len(policy.GVICAssignments) != 0 {
-			t.Fatalf("node stored assignments = %+v, want none", policy.GVICAssignments)
+		if len(policy.RACIAssignments) != 0 {
+			t.Fatalf("node stored assignments = %+v, want none", policy.RACIAssignments)
 		}
-	} else if len(policy.GVICAssignments) != 1 || policy.GVICAssignments[0].UserID != storedUserID {
-		t.Fatalf("node stored assignments = %+v, want %s", policy.GVICAssignments, storedUserID)
+	} else if len(policy.RACIAssignments) != 1 || policy.RACIAssignments[0].UserID != storedUserID {
+		t.Fatalf("node stored assignments = %+v, want %s", policy.RACIAssignments, storedUserID)
 	}
 	if len(policy.EffectiveAssignments) != 1 || policy.EffectiveAssignments[0].UserID != effectiveUserID ||
 		policy.EffectiveSource.ResourceType != sourceType || policy.EffectiveSource.ResourceID != sourceID ||
@@ -419,37 +419,37 @@ func assertMemoryNodeGVICResolution(t *testing.T, repo *MemoryRepo, companyID, n
 		t.Fatalf("node overwrite marker = %+v, want present=%v", policy.OverwrittenByAncestor, overwritten)
 	}
 }
-func TestMemoryLogicGateRCVICommandsAddMultipleResponsibleUsers(t *testing.T) {
+func TestMemoryLogicGateRACICommandsAddMultipleResponsibleUsers(t *testing.T) {
 	t.Parallel()
 
 	repo := NewMemoryRepo()
-	companyID := "company-GVIC-command-primary-replace"
-	repo.EnsureCompany(companyID, "GVIC Command Primary Replace Company")
+	companyID := "company-RACI-command-primary-replace"
+	repo.EnsureCompany(companyID, "RACI Command Primary Replace Company")
 	logicGate, err := repo.CreateLogicGate(companyID, "Primary Replace Gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
-	first := mustCreateGVICMembershipUser(t, repo, "GVIC-command-primary-first", companyID)
-	next := mustCreateGVICMembershipUser(t, repo, "GVIC-command-primary-next", companyID)
+	first := mustCreateRACIMembershipUser(t, repo, "RACI-command-primary-first", companyID)
+	next := mustCreateRACIMembershipUser(t, repo, "RACI-command-primary-next", companyID)
 
-	if _, err := repo.AddLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{
+	if _, err := repo.AddLogicGateRACIAssignments(LogicGateRACIAssignmentCommandInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleResponsible, UserID: first.UserID}},
+		Assignments: []LogicGateRACIAssignmentInput{{Role: domain.RACIRoleResponsible, UserID: first.UserID}},
 	}); err != nil {
-		t.Fatalf("AddLogicGateGVICAssignments first Responsible: %v", err)
+		t.Fatalf("AddLogicGateRACIAssignments first Responsible: %v", err)
 	}
-	result, err := repo.AddLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{
+	result, err := repo.AddLogicGateRACIAssignments(LogicGateRACIAssignmentCommandInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleResponsible, UserID: next.UserID}},
+		Assignments: []LogicGateRACIAssignmentInput{{Role: domain.RACIRoleResponsible, UserID: next.UserID}},
 	})
 	if err != nil {
-		t.Fatalf("AddLogicGateGVICAssignments second Responsible: %v", err)
+		t.Fatalf("AddLogicGateRACIAssignments second Responsible: %v", err)
 	}
 	responsibleUsers := []string{}
-	for _, assignment := range result.GVICAssignments {
-		if assignment.Role == domain.GVICRoleResponsible {
+	for _, assignment := range result.RACIAssignments {
+		if assignment.Role == domain.RACIRoleResponsible {
 			responsibleUsers = append(responsibleUsers, assignment.UserID)
 		}
 	}
@@ -458,82 +458,82 @@ func TestMemoryLogicGateRCVICommandsAddMultipleResponsibleUsers(t *testing.T) {
 	}
 }
 
-func TestMemoryLogicGateGVICDeltaDoesNotRetimestampUnchangedEffectiveRows(t *testing.T) {
+func TestMemoryLogicGateRACIDeltaDoesNotRetimestampUnchangedEffectiveRows(t *testing.T) {
 	t.Parallel()
 
 	repo := NewMemoryRepo()
-	companyID := "company-GVIC-delta-effective-stability"
-	repo.EnsureCompany(companyID, "GVIC Delta Effective Stability Company")
+	companyID := "company-RACI-delta-effective-stability"
+	repo.EnsureCompany(companyID, "RACI Delta Effective Stability Company")
 	logicGate, err := repo.CreateLogicGate(companyID, "Delta Effective Stability Gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
-	responsible := mustCreateGVICMembershipUser(t, repo, "GVIC-delta-responsible", companyID)
-	verifier := mustCreateGVICMembershipUser(t, repo, "GVIC-delta-verifier", companyID)
-	consulted := mustCreateGVICMembershipUser(t, repo, "GVIC-delta-consulted", companyID)
+	responsible := mustCreateRACIMembershipUser(t, repo, "RACI-delta-responsible", companyID)
+	accountable := mustCreateRACIMembershipUser(t, repo, "RACI-delta-accountable", companyID)
+	consulted := mustCreateRACIMembershipUser(t, repo, "RACI-delta-consulted", companyID)
 
-	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	if _, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID:    companyID,
 		ResourceType: EntityTypeLogicGate,
 		ResourceID:   logicGate.LogicGateID,
-		Assignments: []ResourceGVICAssignmentInput{
-			{Role: domain.GVICRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: responsible.UserID},
-			{Role: domain.GVICRoleVerifier, PrincipalType: EntityPermissionSubjectUser, PrincipalID: verifier.UserID},
-			{Role: domain.GVICRoleConsulted, PrincipalType: EntityPermissionSubjectUser, PrincipalID: consulted.UserID},
+		Assignments: []ResourceRACIAssignmentInput{
+			{Role: domain.RACIRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: responsible.UserID},
+			{Role: domain.RACIRoleAccountable, PrincipalType: EntityPermissionSubjectUser, PrincipalID: accountable.UserID},
+			{Role: domain.RACIRoleConsulted, PrincipalType: EntityPermissionSubjectUser, PrincipalID: consulted.UserID},
 		},
 	}); err != nil {
-		t.Fatalf("SetResourceGVICAssignments initial: %v", err)
+		t.Fatalf("SetResourceRACIAssignments initial: %v", err)
 	}
-	before, err := repo.ListResourceGVICEffectiveAssignments(companyID, EntityTypeLogicGate, logicGate.LogicGateID)
+	before, err := repo.ListResourceRACIEffectiveAssignments(companyID, EntityTypeLogicGate, logicGate.LogicGateID)
 	if err != nil {
-		t.Fatalf("ListResourceGVICEffectiveAssignments before remove: %v", err)
+		t.Fatalf("ListResourceRACIEffectiveAssignments before remove: %v", err)
 	}
-	beforeResponsible := mustFindEffectiveGVICForUserRole(t, before, responsible.UserID, domain.GVICRoleResponsible).UpdatedTimestamp
-	beforeConsulted := mustFindEffectiveGVICForUserRole(t, before, consulted.UserID, domain.GVICRoleConsulted).UpdatedTimestamp
+	beforeResponsible := mustFindEffectiveRACIForUserRole(t, before, responsible.UserID, domain.RACIRoleResponsible).UpdatedTimestamp
+	beforeConsulted := mustFindEffectiveRACIForUserRole(t, before, consulted.UserID, domain.RACIRoleConsulted).UpdatedTimestamp
 
 	time.Sleep(time.Millisecond)
-	if _, err := repo.RemoveResourceGVICAssignments(ResourceGVICAssignmentCommandInput{
+	if _, err := repo.RemoveResourceRACIAssignments(ResourceRACIAssignmentCommandInput{
 		CompanyID:    companyID,
 		ResourceType: EntityTypeLogicGate,
 		ResourceID:   logicGate.LogicGateID,
-		Assignments: []ResourceGVICAssignmentInput{{
-			Role:          domain.GVICRoleVerifier,
+		Assignments: []ResourceRACIAssignmentInput{{
+			Role:          domain.RACIRoleAccountable,
 			PrincipalType: EntityPermissionSubjectUser,
-			PrincipalID:   verifier.UserID,
+			PrincipalID:   accountable.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("RemoveResourceGVICAssignments verifier: %v", err)
+		t.Fatalf("RemoveResourceRACIAssignments accountable: %v", err)
 	}
-	after, err := repo.ListResourceGVICEffectiveAssignments(companyID, EntityTypeLogicGate, logicGate.LogicGateID)
+	after, err := repo.ListResourceRACIEffectiveAssignments(companyID, EntityTypeLogicGate, logicGate.LogicGateID)
 	if err != nil {
-		t.Fatalf("ListResourceGVICEffectiveAssignments after remove: %v", err)
+		t.Fatalf("ListResourceRACIEffectiveAssignments after remove: %v", err)
 	}
-	if got := findEffectiveGVICForUserRole(after, verifier.UserID, domain.GVICRoleVerifier); got != nil {
-		t.Fatalf("verifier effective assignment still exists after remove: %+v", *got)
+	if got := findEffectiveRACIForUserRole(after, accountable.UserID, domain.RACIRoleAccountable); got != nil {
+		t.Fatalf("accountable effective assignment still exists after remove: %+v", *got)
 	}
-	if got := mustFindEffectiveGVICForUserRole(t, after, responsible.UserID, domain.GVICRoleResponsible); !got.UpdatedTimestamp.Equal(beforeResponsible) {
+	if got := mustFindEffectiveRACIForUserRole(t, after, responsible.UserID, domain.RACIRoleResponsible); !got.UpdatedTimestamp.Equal(beforeResponsible) {
 		t.Fatalf("responsible updated_timestamp = %s, want unchanged %s", got.UpdatedTimestamp, beforeResponsible)
 	}
-	if got := mustFindEffectiveGVICForUserRole(t, after, consulted.UserID, domain.GVICRoleConsulted); !got.UpdatedTimestamp.Equal(beforeConsulted) {
+	if got := mustFindEffectiveRACIForUserRole(t, after, consulted.UserID, domain.RACIRoleConsulted); !got.UpdatedTimestamp.Equal(beforeConsulted) {
 		t.Fatalf("consulted updated_timestamp = %s, want unchanged %s", got.UpdatedTimestamp, beforeConsulted)
 	}
 }
 
-func TestMemoryLogicGateGVICCommandsExpandGroupAssignments(t *testing.T) {
+func TestMemoryLogicGateRACICommandsExpandGroupAssignments(t *testing.T) {
 	t.Parallel()
 
 	repo := NewMemoryRepo()
-	companyID := "company-GVIC-command-group"
-	repo.EnsureCompany(companyID, "GVIC Command Group Company")
+	companyID := "company-RACI-command-group"
+	repo.EnsureCompany(companyID, "RACI Command Group Company")
 	logicGate, err := repo.CreateLogicGate(companyID, "Group Command Gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
-	member, err := repo.UpsertAuthUser("GVIC-command-group-member", "group-member-command@example.com", "Group Command Member")
+	member, err := repo.UpsertAuthUser("RACI-command-group-member", "group-member-command@example.com", "Group Command Member")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser member: %v", err)
 	}
-	if _, err := repo.AddCompanyMembership("GVIC-command-group-member", companyID, domain.RoleCompanyUser); err != nil {
+	if _, err := repo.AddCompanyMembership("RACI-command-group-member", companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership member: %v", err)
 	}
 	parentGroup, err := repo.CreateCompanyUserGroup(companyID, "", "Operations")
@@ -548,49 +548,49 @@ func TestMemoryLogicGateGVICCommandsExpandGroupAssignments(t *testing.T) {
 		t.Fatalf("SetCompanyUserGroupMembers child: %v", err)
 	}
 
-	added, err := repo.AddLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{
+	added, err := repo.AddLogicGateRACIAssignments(LogicGateRACIAssignmentCommandInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []LogicGateGVICAssignmentInput{{
-			Role:          domain.GVICRoleConsulted,
+		Assignments: []LogicGateRACIAssignmentInput{{
+			Role:          domain.RACIRoleConsulted,
 			PrincipalType: EntityPermissionSubjectGroup,
 			PrincipalID:   parentGroup.GroupID,
 		}},
 	})
 	if err != nil {
-		t.Fatalf("AddLogicGateGVICAssignments group: %v", err)
+		t.Fatalf("AddLogicGateRACIAssignments group: %v", err)
 	}
-	if !added.Changed || len(added.GVICAssignments) != 1 ||
-		added.GVICAssignments[0].PrincipalType != EntityPermissionSubjectGroup ||
-		added.GVICAssignments[0].PrincipalID != parentGroup.GroupID {
+	if !added.Changed || len(added.RACIAssignments) != 1 ||
+		added.RACIAssignments[0].PrincipalType != EntityPermissionSubjectGroup ||
+		added.RACIAssignments[0].PrincipalID != parentGroup.GroupID {
 		t.Fatalf("added group result = %+v, want configured group assignment", added)
 	}
-	effective, err := repo.ListResourceGVICEffectiveAssignments(companyID, EntityTypeLogicGate, logicGate.LogicGateID)
+	effective, err := repo.ListResourceRACIEffectiveAssignments(companyID, EntityTypeLogicGate, logicGate.LogicGateID)
 	if err != nil {
-		t.Fatalf("ListResourceGVICEffectiveAssignments after group add: %v", err)
+		t.Fatalf("ListResourceRACIEffectiveAssignments after group add: %v", err)
 	}
 	if len(effective) != 1 || effective[0].UserID != member.UserID || effective[0].SourcePrincipalType != EntityPermissionSubjectGroup || effective[0].SourcePrincipalID != parentGroup.GroupID {
 		t.Fatalf("effective group result = %+v, want expanded member projection", effective)
 	}
 
-	removed, err := repo.RemoveLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{
+	removed, err := repo.RemoveLogicGateRACIAssignments(LogicGateRACIAssignmentCommandInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []LogicGateGVICAssignmentInput{{
-			Role:          domain.GVICRoleConsulted,
+		Assignments: []LogicGateRACIAssignmentInput{{
+			Role:          domain.RACIRoleConsulted,
 			PrincipalType: EntityPermissionSubjectGroup,
 			PrincipalID:   parentGroup.GroupID,
 		}},
 	})
 	if err != nil {
-		t.Fatalf("RemoveLogicGateGVICAssignments group: %v", err)
+		t.Fatalf("RemoveLogicGateRACIAssignments group: %v", err)
 	}
-	if !removed.Changed || len(removed.GVICAssignments) != 0 {
+	if !removed.Changed || len(removed.RACIAssignments) != 0 {
 		t.Fatalf("removed group result = %+v, want configured group removed", removed)
 	}
 }
 
-func findEffectiveGVICForUserRole(items []domain.ResourceGVICEffectiveAssignment, userID, role string) *domain.ResourceGVICEffectiveAssignment {
+func findEffectiveRACIForUserRole(items []domain.ResourceRACIEffectiveAssignment, userID, role string) *domain.ResourceRACIEffectiveAssignment {
 	for i := range items {
 		if items[i].UserID == userID && items[i].Role == role {
 			return &items[i]
@@ -599,47 +599,47 @@ func findEffectiveGVICForUserRole(items []domain.ResourceGVICEffectiveAssignment
 	return nil
 }
 
-func mustFindEffectiveGVICForUserRole(t *testing.T, items []domain.ResourceGVICEffectiveAssignment, userID, role string) domain.ResourceGVICEffectiveAssignment {
+func mustFindEffectiveRACIForUserRole(t *testing.T, items []domain.ResourceRACIEffectiveAssignment, userID, role string) domain.ResourceRACIEffectiveAssignment {
 	t.Helper()
-	item := findEffectiveGVICForUserRole(items, userID, role)
+	item := findEffectiveRACIForUserRole(items, userID, role)
 	if item == nil {
 		t.Fatalf("effective assignment for user %s role %s not found in %+v", userID, role, items)
 	}
 	return *item
 }
 
-func TestMemoryLogicGateGVICCommandsRejectInvalidRoleUserAndCompanyAndAllowsGroup(t *testing.T) {
+func TestMemoryLogicGateRACICommandsRejectInvalidRoleUserAndCompanyAndAllowsGroup(t *testing.T) {
 	t.Parallel()
 
 	repo := NewMemoryRepo()
-	companyID := "company-GVIC-command-validation"
-	otherCompanyID := "company-GVIC-command-validation-other"
-	repo.EnsureCompany(companyID, "GVIC Validation Company")
-	repo.EnsureCompany(otherCompanyID, "Other GVIC Validation Company")
+	companyID := "company-RACI-command-validation"
+	otherCompanyID := "company-RACI-command-validation-other"
+	repo.EnsureCompany(companyID, "RACI Validation Company")
+	repo.EnsureCompany(otherCompanyID, "Other RACI Validation Company")
 	logicGate, err := repo.CreateLogicGate(companyID, "Validation Gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
-	member, err := repo.UpsertAuthUser("GVIC-command-member", "member-command@example.com", "Member Command")
+	member, err := repo.UpsertAuthUser("RACI-command-member", "member-command@example.com", "Member Command")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser member: %v", err)
 	}
-	if _, err := repo.AddCompanyMembership("GVIC-command-member", companyID, domain.RoleCompanyUser); err != nil {
+	if _, err := repo.AddCompanyMembership("RACI-command-member", companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership member: %v", err)
 	}
-	outsider, err := repo.UpsertAuthUser("GVIC-command-outsider", "outsider-command@example.com", "Outsider Command")
+	outsider, err := repo.UpsertAuthUser("RACI-command-outsider", "outsider-command@example.com", "Outsider Command")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser outsider: %v", err)
 	}
-	if _, err := repo.AddCompanyMembership("GVIC-command-outsider", otherCompanyID, domain.RoleCompanyUser); err != nil {
+	if _, err := repo.AddCompanyMembership("RACI-command-outsider", otherCompanyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership outsider: %v", err)
 	}
 
-	_, err = repo.AddLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateGVICAssignmentInput{{Role: "owner", UserID: member.UserID}}})
+	_, err = repo.AddLogicGateRACIAssignments(LogicGateRACIAssignmentCommandInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateRACIAssignmentInput{{Role: "owner", UserID: member.UserID}}})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("invalid add role err = %v, want ErrInvalid", err)
 	}
-	_, err = repo.RemoveLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateGVICAssignmentInput{{Role: "owner", UserID: member.UserID}}})
+	_, err = repo.RemoveLogicGateRACIAssignments(LogicGateRACIAssignmentCommandInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateRACIAssignmentInput{{Role: "owner", UserID: member.UserID}}})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("invalid remove role err = %v, want ErrInvalid", err)
 	}
@@ -647,22 +647,22 @@ func TestMemoryLogicGateGVICCommandsRejectInvalidRoleUserAndCompanyAndAllowsGrou
 	if err != nil {
 		t.Fatalf("CreateCompanyUserGroup Responsible team: %v", err)
 	}
-	_, err = repo.AddLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleResponsible, PrincipalType: EntityPermissionSubjectGroup, PrincipalID: group.GroupID}}})
+	_, err = repo.AddLogicGateRACIAssignments(LogicGateRACIAssignmentCommandInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateRACIAssignmentInput{{Role: domain.RACIRoleResponsible, PrincipalType: EntityPermissionSubjectGroup, PrincipalID: group.GroupID}}})
 	if err != nil {
 		t.Fatalf("Responsible group add rejected: %v", err)
 	}
-	_, err = repo.AddLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleResponsible, UserID: outsider.UserID}}})
+	_, err = repo.AddLogicGateRACIAssignments(LogicGateRACIAssignmentCommandInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateRACIAssignmentInput{{Role: domain.RACIRoleResponsible, UserID: outsider.UserID}}})
 	if !errors.Is(err, ErrPrincipalNotInCompany) {
 		t.Fatalf("outsider add err = %v, want ErrPrincipalNotInCompany", err)
 	}
-	removed, err := repo.RemoveLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleResponsible, UserID: outsider.UserID}}})
+	removed, err := repo.RemoveLogicGateRACIAssignments(LogicGateRACIAssignmentCommandInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateRACIAssignmentInput{{Role: domain.RACIRoleResponsible, UserID: outsider.UserID}}})
 	if err != nil {
 		t.Fatalf("stale outsider remove: %v", err)
 	}
 	if removed.Changed || len(removed.Events) != 0 {
 		t.Fatalf("stale outsider remove = %+v, want idempotent cleanup no-op", removed)
 	}
-	_, err = repo.AddLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{CompanyID: otherCompanyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleResponsible, UserID: outsider.UserID}}})
+	_, err = repo.AddLogicGateRACIAssignments(LogicGateRACIAssignmentCommandInput{CompanyID: otherCompanyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateRACIAssignmentInput{{Role: domain.RACIRoleResponsible, UserID: outsider.UserID}}})
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("wrong company add err = %v, want ErrNotFound", err)
 	}

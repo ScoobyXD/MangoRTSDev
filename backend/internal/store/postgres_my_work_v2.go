@@ -10,22 +10,22 @@ type postgresPolicyRowsQueryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
-func (r *PostgresRepo) ListGVICMatrixProjectionRowsForResources(companyID string, nodeIDs, logicGateIDs []string) ([]GVICMatrixProjectionRow, error) {
-	return queryPostgresV2GVICRows(context.Background(), r.db, companyID, "", "", nodeIDs, logicGateIDs, 0)
+func (r *PostgresRepo) ListRACIMatrixProjectionRowsForResources(companyID string, nodeIDs, logicGateIDs []string) ([]RACIMatrixProjectionRow, error) {
+	return queryPostgresV2RACIRows(context.Background(), r.db, companyID, "", "", nodeIDs, logicGateIDs, 0)
 }
 
-func (r *PostgresRepo) ListGVICMatrixProjectionRowsForLogicGate(companyID, logicGateID string) ([]GVICMatrixProjectionRow, error) {
-	return queryPostgresV2GVICRows(context.Background(), r.db, companyID, "", "", nil, []string{logicGateID}, 0)
+func (r *PostgresRepo) ListRACIMatrixProjectionRowsForLogicGate(companyID, logicGateID string) ([]RACIMatrixProjectionRow, error) {
+	return queryPostgresV2RACIRows(context.Background(), r.db, companyID, "", "", nil, []string{logicGateID}, 0)
 }
 
-func (r *PostgresRepo) ListGVICMatrixProjectionRowsForUser(query WorkItemInboxQuery) ([]GVICMatrixProjectionRow, error) {
+func (r *PostgresRepo) ListRACIMatrixProjectionRowsForUser(query WorkItemInboxQuery) ([]RACIMatrixProjectionRow, error) {
 	query = NormalizeWorkItemInboxQuery(query)
-	return queryPostgresV2GVICRows(context.Background(), r.db, query.CompanyID, query.UserID, query.ViewerUserID, nil, nil, query.Limit)
+	return queryPostgresV2RACIRows(context.Background(), r.db, query.CompanyID, query.UserID, query.ViewerUserID, nil, nil, query.Limit)
 }
 
-func (r *PostgresRepo) ListMyWorkMatrixRows(query WorkItemInboxQuery) ([]GVICMatrixProjectionRow, error) {
+func (r *PostgresRepo) ListMyWorkMatrixRows(query WorkItemInboxQuery) ([]RACIMatrixProjectionRow, error) {
 	query = NormalizeWorkItemInboxQuery(query)
-	return queryPostgresV2GVICRows(context.Background(), r.db, query.CompanyID, query.UserID, query.ViewerUserID, nil, nil, query.Limit)
+	return queryPostgresV2RACIRows(context.Background(), r.db, query.CompanyID, query.UserID, query.ViewerUserID, nil, nil, query.Limit)
 }
 
 func (r *PostgresRepo) ListMyWorkMatrix(query WorkItemInboxQuery) (MyWorkMatrixResponse, error) {
@@ -37,7 +37,7 @@ func (r *PostgresRepo) ListMyWorkMatrix(query WorkItemInboxQuery) (MyWorkMatrixR
 	return MyWorkMatrixResponse{CompanyID: query.CompanyID, UserID: query.UserID, Rows: rows}, nil
 }
 
-func queryPostgresV2GVICRows(ctx context.Context, queryer postgresPolicyRowsQueryer, companyID, userID, viewerUserID string, nodeIDs, logicGateIDs []string, limit int) ([]GVICMatrixProjectionRow, error) {
+func queryPostgresV2RACIRows(ctx context.Context, queryer postgresPolicyRowsQueryer, companyID, userID, viewerUserID string, nodeIDs, logicGateIDs []string, limit int) ([]RACIMatrixProjectionRow, error) {
 	companyID = cleanUUIDText(companyID)
 	userID = cleanUUIDText(userID)
 	viewerUserID = cleanUUIDText(viewerUserID)
@@ -79,16 +79,16 @@ select company_id::text,resource_type,resource_id::text,display_title,role,user_
        source_resource_type,source_resource_id::text,source_principal_type,source_principal_id::text,inheritance_type,
        status,due_date::text,priority,created_timestamp,updated_timestamp
 from selected
-order by case role when 'responsible' then 1 when 'consulted' then 2 when 'verifier' then 3 else 4 end,
+order by case role when 'responsible' then 1 when 'accountable' then 2 when 'consulted' then 3 else 4 end,
          coalesce(priority,6),created_timestamp,resource_type,resource_id::text,user_id::text
 limit nullif($6,0)`, companyID, userID, viewerUserID, nodeIDs, logicGateIDs, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := make([]GVICMatrixProjectionRow, 0)
+	items := make([]RACIMatrixProjectionRow, 0)
 	for rows.Next() {
-		var item GVICMatrixProjectionRow
+		var item RACIMatrixProjectionRow
 		var status, dueDate sql.NullString
 		var priority sql.NullInt64
 		if err := rows.Scan(&item.CompanyID, &item.ResourceType, &item.ResourceID, &item.DisplayTitle, &item.Role, &item.UserID,
@@ -96,7 +96,7 @@ limit nullif($6,0)`, companyID, userID, viewerUserID, nodeIDs, logicGateIDs, lim
 			&status, &dueDate, &priority, &item.ResourceCreatedTimestamp, &item.UpdatedTimestamp); err != nil {
 			return nil, err
 		}
-		item.GVICAssignment = item.Role
+		item.RACIAssignment = item.Role
 		item.ProjectionRowID = strings.Join([]string{item.ResourceType, item.ResourceID, item.UserID}, ":")
 		item.CreatedTimestamp = item.ResourceCreatedTimestamp
 		if status.Valid {

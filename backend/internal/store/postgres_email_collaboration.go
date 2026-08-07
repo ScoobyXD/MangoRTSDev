@@ -229,7 +229,7 @@ values($1::uuid,$2::uuid,$3,$4,'no_access',now())`, input.CompanyID, nodeID, com
 	if _, err := customizeNewPostgresResourcePermissionForCreatorTx(ctx, tx, input.CompanyID, EntityTypeNode, nodeID, input.CreatedByUserID); err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}
-	if _, err := customizeNewPostgresResourceGVICForCreatorTx(ctx, tx, resourceGVICKey{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: nodeID}, domain.GVICRoleResponsible, input.CreatedByUserID); err != nil {
+	if _, err := customizeNewPostgresResourceRACIForCreatorTx(ctx, tx, resourceRACIKey{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: nodeID}, domain.RACIRoleResponsible, input.CreatedByUserID); err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}
 	item, err := postgresEmailCollaborationByID(ctx, tx, input.CompanyID, relationshipID, input.CreatedByUserID)

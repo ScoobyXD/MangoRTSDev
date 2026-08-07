@@ -109,7 +109,7 @@ The decision affects:
 - every company-scoped product table
 - `VITE_COMPANY_ID` in the production frontend build
 - company membership authorization
-- resource permissions and GVIC policy tables
+- resource permissions and RACI policy tables
 - saved views, pins, notifications, workspace read versions, and projections if copied
 
 Do not let `frontend/src/auth/currentCompany.ts` silently use the dev fallback UUID as the production tenant. Set `VITE_COMPANY_ID` explicitly for prod until tenant selection exists.
@@ -199,7 +199,7 @@ Also run app-level validation:
 - Create, edit, and delete a node.
 - Create, edit, and delete a logic gate.
 - Load Kanban and mutate a card.
-- Confirm permissions/GVIC behavior for at least one non-admin user.
+- Confirm permissions/RACI behavior for at least one non-admin user.
 - Confirm saved views and pins for mapped users if copied.
 - Confirm no dev-only users, companies, or test content are visible.
 

@@ -71,7 +71,7 @@ func (r *MemoryRepo) notificationVisibleToUserLocked(item domain.Notification, u
 	if companyID == "" || userID == "" {
 		return true
 	}
-	if notificationLogicGateGVICRole(item.Role) {
+	if notificationLogicGateRACIRole(item.Role) {
 		if nodeID := strings.TrimSpace(item.NodeID); nodeID != "" {
 			return r.entityExistsLocked(companyID, EntityTypeNode, nodeID)
 		}
@@ -110,9 +110,9 @@ func (r *MemoryRepo) notificationReadStateMutableByUserLocked(item domain.Notifi
 	}
 }
 
-func notificationLogicGateGVICRole(role string) bool {
+func notificationLogicGateRACIRole(role string) bool {
 	switch strings.TrimSpace(role) {
-	case domain.GVICRoleResponsible, domain.GVICRoleVerifier, domain.GVICRoleConsulted, domain.GVICRoleInformed:
+	case domain.RACIRoleResponsible, domain.RACIRoleAccountable, domain.RACIRoleConsulted, domain.RACIRoleInformed:
 		return true
 	default:
 		return false

@@ -132,7 +132,7 @@ func (r *MemoryRepo) SetCompanyExplorerFolderScope(companyID, folderID, scopeTyp
 	item.ScopeID = normalizedScopeID
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.folders[key(companyID, item.FolderID)] = item
-	return r.withSharedInboxGVICLocked(item), nil
+	return r.withSharedInboxRACILocked(item), nil
 }
 
 func (r *MemoryRepo) ListCompanyExplorerFolders(companyID, folderKind string) ([]domain.CompanyExplorerFolder, error) {
@@ -562,7 +562,7 @@ func (r *MemoryRepo) SetCommunicationsSharedInboxAccountEmail(companyID, folderI
 	item.SharedInboxID = item.FolderID
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.folders[key(companyID, item.FolderID)] = item
-	return r.withSharedInboxGVICLocked(item), nil
+	return r.withSharedInboxRACILocked(item), nil
 }
 
 func (r *MemoryRepo) DeleteCompanyExplorerFolder(companyID, folderID string) error {
@@ -774,7 +774,7 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 	}
 	for folderID := range folderIDs {
 		delete(r.folders, key(companyID, folderID))
-		delete(r.sharedInboxGVIC, sharedInboxGVICKey(companyID, folderID))
+		delete(r.sharedInboxRACI, sharedInboxRACIKey(companyID, folderID))
 	}
 	for permissionKey, permission := range r.entityPermissions {
 		if permission.CompanyID == companyID &&
@@ -1196,7 +1196,7 @@ func companyExplorerLogicGateSummary(gate domain.LogicGate) domain.LogicGate {
 		CompanyID:        gate.CompanyID,
 		LogicGateID:      gate.LogicGateID,
 		Header:           gate.Header,
-		GVICAssignments:  append([]domain.LogicGateGVICAssignment{}, gate.GVICAssignments...),
+		RACIAssignments:  append([]domain.LogicGateRACIAssignment{}, gate.RACIAssignments...),
 		CreatedTimestamp: gate.CreatedTimestamp,
 	}
 }
@@ -1216,7 +1216,7 @@ func (r *MemoryRepo) ListCompanyExplorerLogicGateSummaries(companyID string) ([]
 		if gate.CompanyID != companyID {
 			continue
 		}
-		items = append(items, companyExplorerLogicGateSummary(r.withLogicGateGVICLocked(gate)))
+		items = append(items, companyExplorerLogicGateSummary(r.withLogicGateRACILocked(gate)))
 	}
 	sortCompanyExplorerLogicGateSummaries(items)
 	return items, nil
@@ -1240,7 +1240,7 @@ func (r *MemoryRepo) ListVisibleCompanyExplorerLogicGateSummaries(companyID, use
 		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionEdit) {
 			continue
 		}
-		items = append(items, companyExplorerLogicGateSummary(r.withLogicGateGVICLocked(gate)))
+		items = append(items, companyExplorerLogicGateSummary(r.withLogicGateRACILocked(gate)))
 	}
 	sortCompanyExplorerLogicGateSummaries(items)
 	return items, nil
@@ -1266,7 +1266,7 @@ func (r *MemoryRepo) ListCompanyExplorerLogicGateSummariesInFolderSubtree(compan
 			continue
 		}
 		seen[folderItem.ItemID] = true
-		items = append(items, companyExplorerLogicGateSummary(r.withLogicGateGVICLocked(gate)))
+		items = append(items, companyExplorerLogicGateSummary(r.withLogicGateRACILocked(gate)))
 	}
 	sortCompanyExplorerLogicGateSummaries(items)
 	return items, nil
@@ -1301,7 +1301,7 @@ func (r *MemoryRepo) ListVisibleCompanyExplorerLogicGateSummariesInFolderSubtree
 			continue
 		}
 		seen[folderItem.ItemID] = true
-		items = append(items, companyExplorerLogicGateSummary(r.withLogicGateGVICLocked(gate)))
+		items = append(items, companyExplorerLogicGateSummary(r.withLogicGateRACILocked(gate)))
 	}
 	sortCompanyExplorerLogicGateSummaries(items)
 	return items, nil

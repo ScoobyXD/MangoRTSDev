@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-func myWorkResponsibleUsersContextKey(row GVICMatrixProjectionRow) string {
+func myWorkResponsibleUsersContextKey(row RACIMatrixProjectionRow) string {
 	logicGateID := ""
 	if row.LogicGateID != nil {
 		logicGateID = strings.TrimSpace(*row.LogicGateID)

@@ -134,20 +134,20 @@ func normalizeTimingLabel(label string) string {
 	case "repo.postgresDeleteNodeRowsTx.node_delete":
 		return "delete.node.rows.node"
 	case "repo.CreateWorkspaceEntityBatch.node_writes",
-		"repo.CreateGVICMatrixNode.node_writes",
+		"repo.CreateRACIMatrixNode.node_writes",
 		"repo.assignNodeToLogicGateStatusTx.node_writes",
 		"repo.MoveLogicGateNodeAssignment.node_writes":
 		return "source.node"
 	case "repo.CreateWorkspaceEntityBatch.logic_gate_writes",
-		"repo.CreateGVICMatrixNode.logic_gate_writes",
-		"repo.createGVICMatrixLogicGateTx.logic_gate_insert":
+		"repo.CreateRACIMatrixNode.logic_gate_writes",
+		"repo.createRACIMatrixLogicGateTx.logic_gate_insert":
 		return "source.logic_gate"
-	case "repo.CreateWorkspaceEntityBatch.GVIC_assignment_writes",
-		"repo.createGVICMatrixLogicGateTx.GVIC_assignment_writes":
-		return "source.GVIC_assignment"
+	case "repo.CreateWorkspaceEntityBatch.RACI_assignment_writes",
+		"repo.createRACIMatrixLogicGateTx.RACI_assignment_writes":
+		return "source.RACI_assignment"
 	case "repo.assignNodeToLogicGateStatusTx.assignment_writes",
 		"repo.MoveLogicGateNodeAssignment.assignment_writes",
-		"repo.CreateGVICMatrixNode.assignment_writes":
+		"repo.CreateRACIMatrixNode.assignment_writes":
 		return "source.assignment"
 	case "repo.assignNodeToLogicGateStatusTx.node_assignment_writes",
 		"repo.MoveLogicGateNodeAssignment.node_assignment_writes":
@@ -156,28 +156,28 @@ func normalizeTimingLabel(label string) string {
 		"repo.MoveLogicGateNodeAssignment.access_policy_copy":
 		return "source.access_policy_copy"
 	case "repo.CreateWorkspaceEntityBatch.commit",
-		"repo.CreateGVICMatrixNode.commit",
+		"repo.CreateRACIMatrixNode.commit",
 		"repo.AssignNodeToLogicGateStatus.commit",
 		"repo.MoveLogicGateNodeAssignment.commit":
 		return "source.transaction_commit"
 	case "repo.CreateWorkspaceEntityBatch.relationship_writes":
 		return "source.relationship"
 	case "repo.CreateWorkspaceEntityBatch.transaction",
-		"repo.CreateGVICMatrixNode.transaction",
+		"repo.CreateRACIMatrixNode.transaction",
 		"repo.AssignNodeToLogicGateStatus.transaction",
 		"repo.MoveLogicGateNodeAssignment.transaction":
 		return "source.transaction_repo"
 	case "repo.assignNodeToLogicGateStatusTx.total",
 		"repo.MoveLogicGateNodeAssignmentTx.total":
 		return "source.command_total"
-	case "repo.CreateGVICMatrixNode.normalize_input":
+	case "repo.CreateRACIMatrixNode.normalize_input":
 		return "source.normalize_input"
 	case "repo.CreateWorkspaceEntityBatch.folder_setup":
 		return "explorer.folder_setup"
 	case "repo.CreateWorkspaceEntityBatch.folder_item_writes",
-		"repo.createGVICMatrixLogicGateTx.folder_item_writes":
+		"repo.createRACIMatrixLogicGateTx.folder_item_writes":
 		return "explorer.folder_item_write"
-	case "repo.CreateGVICMatrixNode.folder_item_read":
+	case "repo.CreateRACIMatrixNode.folder_item_read":
 		return "explorer.folder_item_read"
 	case "repo.nextCompanyExplorerSQLRowPosition":
 		return "explorer.folder_position_read"
@@ -191,10 +191,10 @@ func normalizeTimingLabel(label string) string {
 		return "source.node_create"
 	case "repo.assignNodeToLogicGateStatusTx.priority_write":
 		return "source.priority_write"
-	case "repo.CreateGVICMatrixNode.projection_reread",
+	case "repo.CreateRACIMatrixNode.projection_reread",
 		"repo.assignNodeToLogicGateStatusTx.projection_reread",
 		"repo.MoveLogicGateNodeAssignment.projection_reread":
-		return "reread.GVIC_MATRIX_PROJECTION"
+		return "reread.RACI_MATRIX_PROJECTION"
 	case "repo.assignNodeToLogicGateStatusTx.node_reread",
 		"repo.MoveLogicGateNodeAssignment.node_reread",
 		"repo.MoveLogicGateNodeAssignment.node_read":
@@ -207,28 +207,28 @@ func normalizeTimingLabel(label string) string {
 		return "source.assignment_position_read"
 	case "repo.MoveLogicGateNodeAssignment.email_reference_work":
 		return "kanban.email_reference_work"
-	case "repo.assignNodeToLogicGateStatusTx.GVIC_MATRIX_PROJECTION_sync",
-		"repo.MoveLogicGateNodeAssignment.GVIC_MATRIX_PROJECTION_sync",
-		"repo.CreateWorkspaceEntityBatch.GVIC_MATRIX_PROJECTION_sync",
-		"repo.createGVICMatrixLogicGateTx.GVIC_MATRIX_PROJECTION_sync":
-		return "GVIC_MATRIX_PROJECTION.sync_call"
+	case "repo.assignNodeToLogicGateStatusTx.RACI_MATRIX_PROJECTION_sync",
+		"repo.MoveLogicGateNodeAssignment.RACI_MATRIX_PROJECTION_sync",
+		"repo.CreateWorkspaceEntityBatch.RACI_MATRIX_PROJECTION_sync",
+		"repo.createRACIMatrixLogicGateTx.RACI_MATRIX_PROJECTION_sync":
+		return "RACI_MATRIX_PROJECTION.sync_call"
 	case "repo.assignNodeToLogicGateStatusTx.projection_dependencies":
 		return "projection.dependencies"
-	case "repo.syncPostgresGVICMatrixProjectionForNodeTx.total":
-		return "GVIC_MATRIX_PROJECTION.total"
-	case "repo.syncPostgresGVICMatrixProjectionForNodeTx.delete_stale":
-		return "GVIC_MATRIX_PROJECTION.delete_stale"
-	case "repo.syncPostgresGVICMatrixProjectionForNodeTx.upsert":
-		return "GVIC_MATRIX_PROJECTION.upsert"
-	case "repo.syncPostgresGVICMatrixProjectionForLogicGateUsersTx.total":
-		return "GVIC_MATRIX_PROJECTION.total"
-	case "repo.deleteStalePostgresGVICMatrixProjectionForLogicGateUserTx":
-		return "GVIC_MATRIX_PROJECTION.delete_stale"
-	case "repo.upsertPostgresGVICMatrixProjectionForLogicGateUserTx":
-		return "GVIC_MATRIX_PROJECTION.upsert"
+	case "repo.syncPostgresRACIMatrixProjectionForNodeTx.total":
+		return "RACI_MATRIX_PROJECTION.total"
+	case "repo.syncPostgresRACIMatrixProjectionForNodeTx.delete_stale":
+		return "RACI_MATRIX_PROJECTION.delete_stale"
+	case "repo.syncPostgresRACIMatrixProjectionForNodeTx.upsert":
+		return "RACI_MATRIX_PROJECTION.upsert"
+	case "repo.syncPostgresRACIMatrixProjectionForLogicGateUsersTx.total":
+		return "RACI_MATRIX_PROJECTION.total"
+	case "repo.deleteStalePostgresRACIMatrixProjectionForLogicGateUserTx":
+		return "RACI_MATRIX_PROJECTION.delete_stale"
+	case "repo.upsertPostgresRACIMatrixProjectionForLogicGateUserTx":
+		return "RACI_MATRIX_PROJECTION.upsert"
 	case "repo.assignNodeToLogicGateStatusTx.domain_event_append",
 		"repo.MoveLogicGateNodeAssignment.domain_event_append",
-		"repo.CreateGVICMatrixNode.domain_event_append":
+		"repo.CreateRACIMatrixNode.domain_event_append":
 		return "events.append.total"
 	case "repo.appendDomainEventTx.normalize_payload":
 		return "events.payload_build"

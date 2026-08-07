@@ -7,21 +7,21 @@ import { requestAppSidebarPin } from "../../app/sidebarPins";
 import type { CompanyUser, CompanyUserGroup, CompanyUserGroupMember } from "../../modules/communications/communicationsApi";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../icons/index.js";
 import { readCommittedEntityTitleVersion, subscribeCommittedEntityTitleUpdates } from "../../modules/realtime/committedEntityTitleUpdates";
-import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gates/types";
+import type { LogicGateRACIRole, LogicGateRecord } from "../../modules/logic-gates/types";
 import type { NodeRecord } from "../../modules/nodes/types";
 import { listMyWorkMatrixRows, type MyWorkMatrixRow } from "../../modules/work-items/workItemReadApi";
 import { cleanIDList, logicGateTitle } from "./homeUtils";
 import { EVENT_HOME_SAVED_VIEWS_CHANGED } from "./HomeSavedViewsSidebar";
 import {
   homeColorWithAlpha,
-  homeGVICRoleAccent,
-  logicGateGVICColumnHeaderStyle,
-  logicGateGVICColumnLabelStyle,
-  logicGateGVICColumnLetterStyle,
-  logicGateGVICCornerStyle,
-  logicGateGVICHeaderStyle,
-  logicGateGVICMatrixSurfaceStyle,
-  logicGateGVICPriorityHeaderStyle,
+  homeRACIRoleAccent,
+  logicGateRACIColumnHeaderStyle,
+  logicGateRACIColumnLabelStyle,
+  logicGateRACIColumnLetterStyle,
+  logicGateRACICornerStyle,
+  logicGateRACIHeaderStyle,
+  logicGateRACIMatrixSurfaceStyle,
+  logicGateRACIPriorityHeaderStyle,
   sharedInboxContextMenuButtonStyle,
 } from "./homeStyles";
 import {
@@ -53,7 +53,7 @@ import {
   buildNestedGroups,
   computeAllExpandedCellGroupIDs,
   defaultMyWorkSelectedScope,
-  GVICRoleLabel,
+  RACIRoleLabel,
   myWorkCellGroupStateID,
   normalizeMyWorkGroupingStack,
   normalizeMyWorkSavedGroupingSetting,
@@ -103,10 +103,10 @@ type ScopePickerRow = {
   scope: MyWorkSelectedScope;
 };
 
-const MY_WORK_MATRIX_ROLES: LogicGateGVICRole[] = ["responsible", "consulted", "verifier", "informed"];
+const MY_WORK_MATRIX_ROLES: LogicGateRACIRole[] = ["responsible", "accountable", "consulted", "informed"];
 const MY_WORK_MATRIX_PRIORITIES = [1, 2, 3, 4, 5, 0] as const;
 type MyWorkMatrixPriority = typeof MY_WORK_MATRIX_PRIORITIES[number];
-type MyWorkCellCreateInput = { priority: MyWorkMatrixPriority; creatorGVICRole?: LogicGateGVICRole };
+type MyWorkCellCreateInput = { priority: MyWorkMatrixPriority; creatorRACIRole?: LogicGateRACIRole };
 type MyWorkNodeDropInput = MyWorkCellCreateInput & { logicGateID?: string; nodeIDs: string[]; fromLogicGateID?: string; targetUserID?: string };
 type MyWorkCellNodeDropInput = MyWorkCellCreateInput & { nodeIDs: string[]; fromLogicGateID?: string };
 type MyWorkCellLogicGateDropInput = MyWorkCellCreateInput & { logicGateIDs: string[]; nodeIDsByLogicGateID?: Record<string, string[]> };
@@ -115,7 +115,7 @@ type MyWorkNodeDropResult = { gvic_projection_rows?: MyWorkMatrixRow[]; removed_
 type MyWorkNodeDragPayload = { nodeIDs: string[]; fromLogicGateID?: string; targetUserID?: string };
 type MyWorkLogicGateDragPayload = { logicGateIDs: string[]; nodeIDsByLogicGateID?: Record<string, string[]> };
 type MyWorkProjectDragPayload = { projectIDs: string[]; logicGateIDsByProjectID?: Record<string, string[]>; nodeIDsByProjectID?: Record<string, string[]>; nodeIDsByLogicGateID?: Record<string, string[]> };
-type MyWorkRoleColumnWidths = Record<LogicGateGVICRole, number>;
+type MyWorkRoleColumnWidths = Record<LogicGateRACIRole, number>;
 const HOME_INBOX_NODE_DRAG_MIME = "application/x-mangorts-home-inbox-node";
 const HOME_INBOX_LOGIC_GATE_DRAG_MIME = "application/x-mangorts-home-inbox-logic-gate";
 const HOME_INBOX_PROJECT_DRAG_MIME = "application/x-mangorts-home-inbox-project";
@@ -141,7 +141,7 @@ type MyWorkNestedGroupStats = {
 };
 type MyWorkMatrixCellRenderMetric = {
   priority: MyWorkMatrixPriority;
-  role: LogicGateGVICRole;
+  role: LogicGateRACIRole;
   rows: number;
   totalRows: number;
   groups: number;
@@ -506,7 +506,7 @@ export function MyWorkView({
     setScopeMenuLevel(null);
   }, []);
 
-  const updateRoleColumnWidth = useCallback((role: LogicGateGVICRole, width: number) => {
+  const updateRoleColumnWidth = useCallback((role: LogicGateRACIRole, width: number) => {
     setRoleColumnWidths((current) => {
       const next = { ...current, [role]: clampMyWorkRoleColumnWidth(width) };
       storeMyWorkRoleColumnWidths(companyID, next);
@@ -514,7 +514,7 @@ export function MyWorkView({
     });
   }, [companyID]);
 
-  const startRoleColumnResize = useCallback((role: LogicGateGVICRole, event: React.PointerEvent<HTMLButtonElement>) => {
+  const startRoleColumnResize = useCallback((role: LogicGateRACIRole, event: React.PointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
     const ownerDocument = event.currentTarget.ownerDocument;
@@ -884,7 +884,7 @@ function MyWorkGroupList({
 }: {
   groups: MyWorkNestedGroup[];
   cellKey: string;
-  role: LogicGateGVICRole;
+  role: LogicGateRACIRole;
   expandedGroupIDs: Set<string>;
   onToggleGroup: (groupID: string) => void;
   onOpenNode: (node: NodeRecord) => void;
@@ -983,7 +983,7 @@ function MyWorkRows({
   showLogicGateHeaders = true,
 }: {
   rows: MyWorkResourceRow[];
-  role: LogicGateGVICRole;
+  role: LogicGateRACIRole;
   depth: number;
   onOpenNode: (node: NodeRecord) => void;
   onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
@@ -1034,7 +1034,7 @@ function MyWorkDisplayRowItem({
   logicGateByID,
 }: {
   displayRow: MyWorkDisplayRow;
-  role: LogicGateGVICRole;
+  role: LogicGateRACIRole;
   onOpenNode: (node: NodeRecord) => void;
   onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
   onOpenProject: (projectID: string, label: string) => void;
@@ -1232,7 +1232,7 @@ function mergeMyWorkNestedGroupStats(left: MyWorkNestedGroupStats, right: MyWork
 function buildMyWorkRowsByMatrixCell(rows: MyWorkResourceRow[]): Map<string, MyWorkResourceRow[]> {
   const out = new Map<string, MyWorkResourceRow[]>();
   for (const row of rows) {
-    const role = row.primaryGVICRole;
+    const role = row.primaryRACIRole;
     if (!role) continue;
     const key = myWorkCellBucketKey(role, priorityBucket(row.priority));
     const list = out.get(key) ?? [];
@@ -1324,7 +1324,7 @@ function MyWorkMatrix({
   nodeByID: Map<string, NodeRecord>;
   logicGateByID: Map<string, LogicGateRecord>;
   roleColumnWidths: MyWorkRoleColumnWidths;
-  onStartRoleColumnResize: (role: LogicGateGVICRole, event: React.PointerEvent<HTMLButtonElement>) => void;
+  onStartRoleColumnResize: (role: LogicGateRACIRole, event: React.PointerEvent<HTMLButtonElement>) => void;
 }) {
   const [createMenu, setCreateMenu] = useState<{ x: number; y: number; input: MyWorkCellCreateInput } | null>(null);
   const hasCreateCellActions = Boolean(onCreateNodeInCell);
@@ -1399,12 +1399,12 @@ function MyWorkMatrix({
       <div style={myWorkMatrixCornerStyle}>Priority</div>
       {MY_WORK_MATRIX_ROLES.map((role) => (
         <div key={role} style={myWorkMatrixColumnHeaderStyle(role)}>
-          <strong style={logicGateGVICColumnLetterStyle(role)}>{myWorkGVICRoleLetter(role)}</strong>
-          <span style={logicGateGVICColumnLabelStyle(role)}>{GVICRoleLabel(role)}</span>
+          <strong style={logicGateRACIColumnLetterStyle(role)}>{myWorkRACIRoleLetter(role)}</strong>
+          <span style={logicGateRACIColumnLabelStyle(role)}>{RACIRoleLabel(role)}</span>
           <button
             type="button"
-            aria-label={`Resize ${GVICRoleLabel(role)} column`}
-            title={`Resize ${GVICRoleLabel(role)} column`}
+            aria-label={`Resize ${RACIRoleLabel(role)} column`}
+            title={`Resize ${RACIRoleLabel(role)} column`}
             style={myWorkColumnResizeHandleStyle}
             onPointerDown={(event) => onStartRoleColumnResize(role, event)}
           />
@@ -1446,7 +1446,7 @@ function MyWorkMatrix({
                 totalMs,
               });
             }
-            const createInput = { priority, creatorGVICRole: role };
+            const createInput = { priority, creatorRACIRole: role };
             return (
               <div
                 key={`${priority}:${role}`}
@@ -1549,7 +1549,7 @@ function buildMyWorkRowsFromMatrix({
   for (const item of matrixCells) {
     const contextKey = myWorkMatrixAssignmentContextKey(item);
     const responsibleUserIDs = cleanIDList(item.responsible_user_ids ?? []);
-    if (normalizeGVICRole(item.gvic_assignment) === "responsible") {
+    if (normalizeRACIRole(item.gvic_assignment) === "responsible") {
       responsibleUserIDs.push(item.userID.trim() || item.user_id?.trim() || "");
     }
     if (responsibleUserIDs.length === 0) continue;
@@ -1558,7 +1558,7 @@ function buildMyWorkRowsFromMatrix({
     responsibleUserIDsByContext.set(contextKey, users);
   }
   for (const item of matrixCells) {
-    const role = normalizeGVICRole(item.gvic_assignment);
+    const role = normalizeRACIRole(item.gvic_assignment);
     if (!role) continue;
     const userID = item.userID.trim() || item.user_id?.trim() || "";
     const nodeID = item.node_id?.trim() || "";
@@ -1584,7 +1584,7 @@ function buildMyWorkRowsFromMatrix({
       people,
       teams: teamsForUsers(userID ? [userID] : [], groupIDsByUserID, groupByID),
       gvicRoles: [role],
-      primaryGVICRole: role,
+      primaryRACIRole: role,
       participantUserIDs: userID ? [userID] : [],
       projectID,
       projectName,
@@ -1623,7 +1623,7 @@ function nodeRecordFromMyWorkRow(row: MyWorkResourceRow): NodeRecord | null {
   };
 }
 
-function myWorkCellBucketKey(role: LogicGateGVICRole, priority: MyWorkMatrixPriority): string {
+function myWorkCellBucketKey(role: LogicGateRACIRole, priority: MyWorkMatrixPriority): string {
   return role + ":" + String(priority);
 }
 
@@ -1653,22 +1653,22 @@ function hasMyWorkDragType(dataTransfer: DataTransfer, mime: string): boolean {
   return Array.from(dataTransfer.types ?? []).includes(mime);
 }
 
-function normalizeGVICRole(role: string | null | undefined): LogicGateGVICRole | "" {
-  if (role === "responsible" || role === "verifier" || role === "consulted" || role === "informed") return role;
+function normalizeRACIRole(role: string | null | undefined): LogicGateRACIRole | "" {
+  if (role === "responsible" || role === "accountable" || role === "consulted" || role === "informed") return role;
   return "";
 }
 
-function myWorkGVICRoleLetter(role: LogicGateGVICRole): string {
+function myWorkRACIRoleLetter(role: LogicGateRACIRole): string {
   if (role === "responsible") return "R";
   if (role === "consulted") return "C";
-  if (role === "verifier") return "V";
+  if (role === "accountable") return "V";
   return "I";
 }
 
 function defaultMyWorkRoleColumnWidths(): MyWorkRoleColumnWidths {
   return {
     responsible: MY_WORK_ROLE_COLUMN_DEFAULT_WIDTH,
-    verifier: MY_WORK_ROLE_COLUMN_DEFAULT_WIDTH,
+    accountable: MY_WORK_ROLE_COLUMN_DEFAULT_WIDTH,
     consulted: MY_WORK_ROLE_COLUMN_DEFAULT_WIDTH,
     informed: MY_WORK_ROLE_COLUMN_DEFAULT_WIDTH,
   };
@@ -1694,10 +1694,10 @@ function clampMyWorkRoleColumnWidth(width: number): number {
 function normalizeMyWorkRoleColumnWidths(value: unknown): MyWorkRoleColumnWidths {
   const fallback = defaultMyWorkRoleColumnWidths();
   if (!value || typeof value !== "object") return fallback;
-  const candidate = value as Partial<Record<LogicGateGVICRole, unknown>>;
+  const candidate = value as Partial<Record<LogicGateRACIRole, unknown>>;
   return {
     responsible: typeof candidate.responsible === "number" && Number.isFinite(candidate.responsible) ? clampMyWorkRoleColumnWidth(candidate.responsible) : fallback.responsible,
-    verifier: typeof candidate.verifier === "number" && Number.isFinite(candidate.verifier) ? clampMyWorkRoleColumnWidth(candidate.verifier) : fallback.verifier,
+    accountable: typeof candidate.accountable === "number" && Number.isFinite(candidate.accountable) ? clampMyWorkRoleColumnWidth(candidate.accountable) : fallback.accountable,
     consulted: typeof candidate.consulted === "number" && Number.isFinite(candidate.consulted) ? clampMyWorkRoleColumnWidth(candidate.consulted) : fallback.consulted,
     informed: typeof candidate.informed === "number" && Number.isFinite(candidate.informed) ? clampMyWorkRoleColumnWidth(candidate.informed) : fallback.informed,
   };
@@ -1978,7 +1978,7 @@ function PeopleIcon({ multiple }: { multiple: boolean }) {
   );
 }
 
-function GroupHeaderIcon({ field, role }: { field: MyWorkGroupingField; role: LogicGateGVICRole }) {
+function GroupHeaderIcon({ field, role }: { field: MyWorkGroupingField; role: LogicGateRACIRole }) {
   if (field === "project") return <ExplorerRowIcon kind="project" />;
   if (field === "logic_gate") return <ExplorerRowIcon kind="logic_gate" />;
   return <span aria-hidden="true" style={groupHeaderBadgeStyle(role)}>{groupHeaderBadgeLabel(field)}</span>;
@@ -1999,8 +1999,8 @@ const peopleIconStyle: React.CSSProperties = {
   color: "#2563eb",
 };
 
-function groupHeaderBadgeStyle(role: LogicGateGVICRole): React.CSSProperties {
-  const accent = homeGVICRoleAccent(role);
+function groupHeaderBadgeStyle(role: LogicGateRACIRole): React.CSSProperties {
+  const accent = homeRACIRoleAccent(role);
   return {
     width: 18,
     height: 18,
@@ -2017,7 +2017,7 @@ function groupHeaderBadgeStyle(role: LogicGateGVICRole): React.CSSProperties {
   };
 }
 const myWorkShellStyle: React.CSSProperties = {
-  ...logicGateGVICMatrixSurfaceStyle,
+  ...logicGateRACIMatrixSurfaceStyle,
   minWidth: 0,
   minHeight: 0,
   height: "100%",
@@ -2028,7 +2028,7 @@ const myWorkShellStyle: React.CSSProperties = {
 };
 
 const myWorkHeaderStyle: React.CSSProperties = {
-  ...logicGateGVICHeaderStyle,
+  ...logicGateRACIHeaderStyle,
   minWidth: 0,
   minHeight: 54,
   display: "grid",
@@ -2105,7 +2105,7 @@ function myWorkMatrixGridStyle(roleColumnWidths: MyWorkRoleColumnWidths): React.
 }
 
 const myWorkMatrixCornerStyle: React.CSSProperties = {
-  ...logicGateGVICCornerStyle,
+  ...logicGateRACICornerStyle,
   position: "sticky",
   top: 0,
   left: 0,
@@ -2121,9 +2121,9 @@ const myWorkMatrixCornerStyle: React.CSSProperties = {
   padding: "0 10px",
 };
 
-function myWorkMatrixColumnHeaderStyle(role: LogicGateGVICRole): React.CSSProperties {
+function myWorkMatrixColumnHeaderStyle(role: LogicGateRACIRole): React.CSSProperties {
   return {
-    ...logicGateGVICColumnHeaderStyle(role),
+    ...logicGateRACIColumnHeaderStyle(role),
     position: "sticky",
     top: 0,
     zIndex: 2,
@@ -2149,7 +2149,7 @@ const myWorkColumnResizeHandleStyle: React.CSSProperties = {
 
 function myWorkMatrixPriorityHeaderStyle(priority: MyWorkMatrixPriority): React.CSSProperties {
   return {
-    ...logicGateGVICPriorityHeaderStyle(priority === 0 ? undefined : priority),
+    ...logicGateRACIPriorityHeaderStyle(priority === 0 ? undefined : priority),
     position: "sticky",
     left: 0,
     zIndex: 1,
@@ -2159,8 +2159,8 @@ function myWorkMatrixPriorityHeaderStyle(priority: MyWorkMatrixPriority): React.
   };
 }
 
-function myWorkMatrixCellStyle(role: LogicGateGVICRole): React.CSSProperties {
-  const accent = homeGVICRoleAccent(role);
+function myWorkMatrixCellStyle(role: LogicGateRACIRole): React.CSSProperties {
+  const accent = homeRACIRoleAccent(role);
   return {
     minWidth: 0,
     minHeight: 96,
@@ -2344,8 +2344,8 @@ const groupBlockStyle: React.CSSProperties = {
   gap: 2,
 };
 
-function groupHeaderStyle(depth: number, role: LogicGateGVICRole): React.CSSProperties {
-  const accent = homeGVICRoleAccent(role);
+function groupHeaderStyle(depth: number, role: LogicGateRACIRole): React.CSSProperties {
+  const accent = homeRACIRoleAccent(role);
   return {
     width: "max-content",
     maxWidth: "100%",
@@ -2435,8 +2435,8 @@ const logicGateSectionBlockStyle: React.CSSProperties = {
   justifyItems: "start",
 };
 
-function workRowStyle(depth: number, role: LogicGateGVICRole, kind: MyWorkResourceRow["kind"], displayHeader: boolean): React.CSSProperties {
-  const accent = homeGVICRoleAccent(role);
+function workRowStyle(depth: number, role: LogicGateRACIRole, kind: MyWorkResourceRow["kind"], displayHeader: boolean): React.CSSProperties {
+  const accent = homeRACIRoleAccent(role);
   const headerAccent = kind === "project" ? "#64748b" : accent;
   return {
     width: "fit-content",
@@ -2495,8 +2495,8 @@ function workRowTitleTextStyle(displayHeader: boolean): React.CSSProperties {
   };
 }
 
-function workRowStatusStyle(role: LogicGateGVICRole): React.CSSProperties {
-  const accent = homeGVICRoleAccent(role);
+function workRowStatusStyle(role: LogicGateRACIRole): React.CSSProperties {
+  const accent = homeRACIRoleAccent(role);
   return {
     minWidth: 0,
     maxWidth: 120,

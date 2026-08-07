@@ -150,7 +150,7 @@ func (s *Server) handleWorkItemMyWorkMatrixNodeMove(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusBadRequest, "target_gvic_role_required")
 		return
 	}
-	normalizedRole, roleOK := store.NormalizeGVICRole(targetRole)
+	normalizedRole, roleOK := store.NormalizeRACIRole(targetRole)
 	if !roleOK {
 		stop()
 		writeError(w, http.StatusBadRequest, "invalid_target_gvic_role")
@@ -264,7 +264,7 @@ func (s *Server) handleWorkItemMyWorkMatrixNodeMove(w http.ResponseWriter, r *ht
 	}
 	stop()
 
-	beforeRows, err := s.repo.ListGVICMatrixProjectionRowsForResources(companyID, []string{nodeID}, nil)
+	beforeRows, err := s.repo.ListRACIMatrixProjectionRowsForResources(companyID, []string{nodeID}, nil)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_my_work_move")
 		return
@@ -326,11 +326,11 @@ func (s *Server) handleWorkItemMyWorkMatrixNodeMove(w http.ResponseWriter, r *ht
 	}
 
 	stop = timings.observeAccounted("source.gvic_role_update")
-	_, err = s.repo.AddResourceGVICAssignments(store.ResourceGVICAssignmentCommandInput{
+	_, err = s.repo.AddResourceRACIAssignments(store.ResourceRACIAssignmentCommandInput{
 		CompanyID:    companyID,
 		ResourceType: store.EntityTypeNode,
 		ResourceID:   nodeID,
-		Assignments: []store.ResourceGVICAssignmentInput{{
+		Assignments: []store.ResourceRACIAssignmentInput{{
 			Role:          normalizedRole,
 			PrincipalType: store.EntityPermissionSubjectUser,
 			PrincipalID:   targetUserID,
@@ -356,7 +356,7 @@ func (s *Server) handleWorkItemMyWorkMatrixNodeMove(w http.ResponseWriter, r *ht
 		return
 	}
 
-	afterRows, err := s.repo.ListGVICMatrixProjectionRowsForResources(companyID, []string{nodeID}, nil)
+	afterRows, err := s.repo.ListRACIMatrixProjectionRowsForResources(companyID, []string{nodeID}, nil)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_my_work_move")
 		return
@@ -370,11 +370,11 @@ func (s *Server) handleWorkItemMyWorkMatrixNodeMove(w http.ResponseWriter, r *ht
 		"node":                       node,
 		"card":                       card,
 		"gvic_projection_rows":       afterRows,
-		"removed_projection_row_ids": removedGVICMatrixProjectionRowIDs(beforeRows, afterRows),
+		"removed_projection_row_ids": removedRACIMatrixProjectionRowIDs(beforeRows, afterRows),
 	})
 }
 
-func removedGVICMatrixProjectionRowIDs(beforeRows, afterRows []store.GVICMatrixProjectionRow) []string {
+func removedRACIMatrixProjectionRowIDs(beforeRows, afterRows []store.RACIMatrixProjectionRow) []string {
 	afterIDs := map[string]bool{}
 	for _, row := range afterRows {
 		if id := strings.TrimSpace(row.ProjectionRowID); id != "" {

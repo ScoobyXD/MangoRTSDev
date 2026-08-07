@@ -130,7 +130,7 @@ Authenticated smoke tests require a real prod user:
 - Logic gate create/edit/delete works.
 - Kanban board load/mutation works.
 - Saved views and pins work.
-- Permission/GVIC checks match expected roles.
+- Permission/RACI checks match expected roles.
 - Notifications load.
 - Nylas OAuth connect completes for a test mailbox.
 - Shared inbox webhook updates reach the backend if Communications is enabled.

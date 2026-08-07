@@ -8,15 +8,15 @@ import (
 	"time"
 )
 
-func GVICRoleSortValue(role string) int {
+func RACIRoleSortValue(role string) int {
 	switch role {
-	case domain.GVICRoleResponsible:
+	case domain.RACIRoleResponsible:
 		return 0
-	case domain.GVICRoleVerifier:
+	case domain.RACIRoleAccountable:
 		return 1
-	case domain.GVICRoleConsulted:
+	case domain.RACIRoleConsulted:
 		return 2
-	case domain.GVICRoleInformed:
+	case domain.RACIRoleInformed:
 		return 3
 	default:
 		return 4
@@ -35,7 +35,7 @@ func (r *MemoryRepo) companyUserByIDLocked(companyID, userID string) (domain.Use
 	return domain.User{}, false
 }
 
-func logicGateGVICAssignmentPrincipal(item domain.LogicGateGVICAssignment) (string, string) {
+func logicGateRACIAssignmentPrincipal(item domain.LogicGateRACIAssignment) (string, string) {
 	principalType := strings.TrimSpace(item.PrincipalType)
 	principalID := strings.TrimSpace(item.PrincipalID)
 	if principalType == "" {
@@ -47,12 +47,12 @@ func logicGateGVICAssignmentPrincipal(item domain.LogicGateGVICAssignment) (stri
 	return principalType, principalID
 }
 
-func logicGateGVICAssignmentPrincipalKey(item domain.LogicGateGVICAssignment) string {
-	principalType, principalID := logicGateGVICAssignmentPrincipal(item)
+func logicGateRACIAssignmentPrincipalKey(item domain.LogicGateRACIAssignment) string {
+	principalType, principalID := logicGateRACIAssignmentPrincipal(item)
 	return strings.TrimSpace(item.Role) + ":" + principalType + ":" + principalID
 }
 
-func logicGateGVICAssignmentSortLabel(item domain.LogicGateGVICAssignment) string {
+func logicGateRACIAssignmentSortLabel(item domain.LogicGateRACIAssignment) string {
 	label := strings.ToLower(strings.TrimSpace(item.PrincipalName))
 	if label == "" {
 		label = strings.ToLower(strings.TrimSpace(item.UserDisplayName))
@@ -61,7 +61,7 @@ func logicGateGVICAssignmentSortLabel(item domain.LogicGateGVICAssignment) strin
 		label = strings.ToLower(strings.TrimSpace(item.UserEmail))
 	}
 	if label == "" {
-		_, principalID := logicGateGVICAssignmentPrincipal(item)
+		_, principalID := logicGateRACIAssignmentPrincipal(item)
 		label = strings.ToLower(principalID)
 	}
 	if label == "" {
@@ -70,8 +70,8 @@ func logicGateGVICAssignmentSortLabel(item domain.LogicGateGVICAssignment) strin
 	return label
 }
 
-func (r *MemoryRepo) logicGateGVICAssignmentForPrincipalLocked(companyID, logicGateID, role, principalType, principalID string, created time.Time) (domain.LogicGateGVICAssignment, error) {
-	item := domain.LogicGateGVICAssignment{
+func (r *MemoryRepo) logicGateRACIAssignmentForPrincipalLocked(companyID, logicGateID, role, principalType, principalID string, created time.Time) (domain.LogicGateRACIAssignment, error) {
+	item := domain.LogicGateRACIAssignment{
 		CompanyID:        companyID,
 		LogicGateID:      logicGateID,
 		Role:             role,
@@ -83,7 +83,7 @@ func (r *MemoryRepo) logicGateGVICAssignmentForPrincipalLocked(companyID, logicG
 	case EntityPermissionSubjectUser:
 		user, ok := r.companyUserByIDLocked(companyID, principalID)
 		if !ok {
-			return domain.LogicGateGVICAssignment{}, ErrPrincipalNotInCompany
+			return domain.LogicGateRACIAssignment{}, ErrPrincipalNotInCompany
 		}
 		item.UserID = user.UserID
 		item.UserDisplayName = strings.TrimSpace(user.DisplayName)
@@ -95,16 +95,16 @@ func (r *MemoryRepo) logicGateGVICAssignmentForPrincipalLocked(companyID, logicG
 	case EntityPermissionSubjectGroup:
 		group, ok := r.userGroups[userGroupKey(companyID, principalID)]
 		if !ok {
-			return domain.LogicGateGVICAssignment{}, ErrPrincipalNotInCompany
+			return domain.LogicGateRACIAssignment{}, ErrPrincipalNotInCompany
 		}
 		item.PrincipalName = strings.TrimSpace(group.Name)
 	default:
-		return domain.LogicGateGVICAssignment{}, ErrInvalid
+		return domain.LogicGateRACIAssignment{}, ErrInvalid
 	}
 	return item, nil
 }
 
-func (r *MemoryRepo) logicGateGVICUserIDsForGroupLocked(companyID, groupID string) ([]string, error) {
+func (r *MemoryRepo) logicGateRACIUserIDsForGroupLocked(companyID, groupID string) ([]string, error) {
 	if _, ok := r.userGroups[userGroupKey(companyID, groupID)]; !ok {
 		return nil, ErrPrincipalNotInCompany
 	}
@@ -124,8 +124,8 @@ func (r *MemoryRepo) logicGateGVICUserIDsForGroupLocked(companyID, groupID strin
 	return out, nil
 }
 
-func (r *MemoryRepo) expandedLogicGateGVICCommandAssignmentsLocked(companyID string, assignments []normalizedLogicGateGVICCommandAssignment) ([]normalizedLogicGateGVICCommandAssignment, error) {
-	expanded := make([]normalizedLogicGateGVICCommandAssignment, 0, len(assignments))
+func (r *MemoryRepo) expandedLogicGateRACICommandAssignmentsLocked(companyID string, assignments []normalizedLogicGateRACICommandAssignment) ([]normalizedLogicGateRACICommandAssignment, error) {
+	expanded := make([]normalizedLogicGateRACICommandAssignment, 0, len(assignments))
 	seen := map[string]bool{}
 	for _, assignment := range assignments {
 		if assignment.principalType != EntityPermissionSubjectGroup {
@@ -137,12 +137,12 @@ func (r *MemoryRepo) expandedLogicGateGVICCommandAssignmentsLocked(companyID str
 			expanded = append(expanded, assignment)
 			continue
 		}
-		userIDs, err := r.logicGateGVICUserIDsForGroupLocked(companyID, assignment.principalID)
+		userIDs, err := r.logicGateRACIUserIDsForGroupLocked(companyID, assignment.principalID)
 		if err != nil {
 			return nil, err
 		}
 		for _, userID := range userIDs {
-			expandedAssignment := normalizedLogicGateGVICCommandAssignment{
+			expandedAssignment := normalizedLogicGateRACICommandAssignment{
 				role:          assignment.role,
 				principalType: EntityPermissionSubjectUser,
 				principalID:   userID,
@@ -159,21 +159,21 @@ func (r *MemoryRepo) expandedLogicGateGVICCommandAssignmentsLocked(companyID str
 	return expanded, nil
 }
 
-func sortLogicGateGVICAssignments(items []domain.LogicGateGVICAssignment) {
+func sortLogicGateRACIAssignments(items []domain.LogicGateRACIAssignment) {
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].LogicGateID != items[j].LogicGateID {
 			return items[i].LogicGateID < items[j].LogicGateID
 		}
-		if GVICRoleSortValue(items[i].Role) != GVICRoleSortValue(items[j].Role) {
-			return GVICRoleSortValue(items[i].Role) < GVICRoleSortValue(items[j].Role)
+		if RACIRoleSortValue(items[i].Role) != RACIRoleSortValue(items[j].Role) {
+			return RACIRoleSortValue(items[i].Role) < RACIRoleSortValue(items[j].Role)
 		}
-		iLabel := logicGateGVICAssignmentSortLabel(items[i])
-		jLabel := logicGateGVICAssignmentSortLabel(items[j])
+		iLabel := logicGateRACIAssignmentSortLabel(items[i])
+		jLabel := logicGateRACIAssignmentSortLabel(items[j])
 		if iLabel != jLabel {
 			return iLabel < jLabel
 		}
-		iPrincipalType, iPrincipalID := logicGateGVICAssignmentPrincipal(items[i])
-		jPrincipalType, jPrincipalID := logicGateGVICAssignmentPrincipal(items[j])
+		iPrincipalType, iPrincipalID := logicGateRACIAssignmentPrincipal(items[i])
+		jPrincipalType, jPrincipalID := logicGateRACIAssignmentPrincipal(items[j])
 		if iPrincipalType != jPrincipalType {
 			return iPrincipalType < jPrincipalType
 		}
@@ -181,19 +181,19 @@ func sortLogicGateGVICAssignments(items []domain.LogicGateGVICAssignment) {
 	})
 }
 
-func (r *MemoryRepo) withLogicGateGVICLocked(gate domain.LogicGate) domain.LogicGate {
+func (r *MemoryRepo) withLogicGateRACILocked(gate domain.LogicGate) domain.LogicGate {
 	gate.DefaultAccess = defaultResourceAccessOrEdit(gate.DefaultAccess)
-	assignments := r.logicGateGVICAssignmentsAsLogicGateGVICLocked(gate.CompanyID, gate.LogicGateID)
-	sortLogicGateGVICAssignments(assignments)
-	gate.GVICAssignments = assignments
+	assignments := r.logicGateRACIAssignmentsAsLogicGateRACILocked(gate.CompanyID, gate.LogicGateID)
+	sortLogicGateRACIAssignments(assignments)
+	gate.RACIAssignments = assignments
 	return gate
 }
 
-func (r *MemoryRepo) logicGateGVICAssignmentsAsLogicGateGVICLocked(companyID, logicGateID string) []domain.LogicGateGVICAssignment {
+func (r *MemoryRepo) logicGateRACIAssignmentsAsLogicGateRACILocked(companyID, logicGateID string) []domain.LogicGateRACIAssignment {
 	items := r.gvicAssignmentsForResourceLocked(companyID, EntityTypeLogicGate, logicGateID)
-	out := make([]domain.LogicGateGVICAssignment, 0, len(items))
+	out := make([]domain.LogicGateRACIAssignment, 0, len(items))
 	for _, item := range items {
-		assignment := domain.LogicGateGVICAssignment{
+		assignment := domain.LogicGateRACIAssignment{
 			CompanyID:        item.CompanyID,
 			LogicGateID:      item.ResourceID,
 			Role:             item.Role,
@@ -210,7 +210,7 @@ func (r *MemoryRepo) logicGateGVICAssignmentsAsLogicGateGVICLocked(companyID, lo
 		}
 		out = append(out, assignment)
 	}
-	sortLogicGateGVICAssignments(out)
+	sortLogicGateRACIAssignments(out)
 	return out
 }
 
@@ -242,7 +242,7 @@ func (r *MemoryRepo) CreateLogicGate(companyID, header string) (domain.LogicGate
 	}
 	r.logicGates[key(companyID, item.LogicGateID)] = item
 	r.ensureLogicGateKanbanBoardLocked(companyID, item.LogicGateID, item.Header)
-	return r.withLogicGateGVICLocked(item), nil
+	return r.withLogicGateRACILocked(item), nil
 }
 
 func (r *MemoryRepo) UpdateLogicGateHeader(companyID, logicGateID, header string) (domain.LogicGate, error) {
@@ -261,9 +261,9 @@ func (r *MemoryRepo) UpdateLogicGateHeader(companyID, logicGateID, header string
 		board.UpdatedTimestamp = time.Now().UTC()
 		r.kanbanBoards[boardKeyValue] = board
 	}
-	r.syncGVICMatrixProjectionForLogicGateLocked(companyID, logicGateID)
+	r.syncRACIMatrixProjectionForLogicGateLocked(companyID, logicGateID)
 	r.syncProjectManagementTimelineProjectionForLogicGateLocked(companyID, logicGateID)
-	return r.withLogicGateGVICLocked(item), nil
+	return r.withLogicGateRACILocked(item), nil
 }
 
 func (r *MemoryRepo) ListLogicGates(companyID string) ([]domain.LogicGate, error) {
@@ -273,7 +273,7 @@ func (r *MemoryRepo) ListLogicGates(companyID string) ([]domain.LogicGate, error
 	items := make([]domain.LogicGate, 0)
 	for _, gate := range r.logicGates {
 		if gate.CompanyID == companyID {
-			items = append(items, r.withLogicGateGVICLocked(gate))
+			items = append(items, r.withLogicGateRACILocked(gate))
 		}
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -300,7 +300,7 @@ func (r *MemoryRepo) ListVisibleLogicGates(companyID, userID string) ([]domain.L
 		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionEdit) {
 			continue
 		}
-		gate = r.withLogicGateGVICLocked(gate)
+		gate = r.withLogicGateRACILocked(gate)
 		gate.EffectiveAccess = r.effectiveAccessLevelForUserLocked(companyID, userID, EntityTypeLogicGate, gate.LogicGateID)
 		items = append(items, gate)
 	}
@@ -330,7 +330,7 @@ func (r *MemoryRepo) ListLogicGatesInFolderSubtree(companyID, folderID string) (
 	items := make([]domain.LogicGate, 0, len(visible))
 	for _, gate := range r.logicGates {
 		if gate.CompanyID == companyID && visible[gate.LogicGateID] {
-			items = append(items, r.withLogicGateGVICLocked(gate))
+			items = append(items, r.withLogicGateRACILocked(gate))
 		}
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -368,7 +368,7 @@ func (r *MemoryRepo) ListVisibleLogicGatesInFolderSubtree(companyID, folderID, u
 		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionEdit) {
 			continue
 		}
-		gate = r.withLogicGateGVICLocked(gate)
+		gate = r.withLogicGateRACILocked(gate)
 		gate.EffectiveAccess = r.effectiveAccessLevelForUserLocked(companyID, userID, EntityTypeLogicGate, gate.LogicGateID)
 		items = append(items, gate)
 	}
@@ -389,12 +389,12 @@ func logicGateMatchesQuery(gate domain.LogicGate, query string) bool {
 		strings.Contains(strings.ToLower(gate.LogicGateID), query)
 }
 
-func (r *MemoryRepo) logicGateAssignedToUserLocked(companyID string, assignments []domain.LogicGateGVICAssignment, userID string) bool {
+func (r *MemoryRepo) logicGateAssignedToUserLocked(companyID string, assignments []domain.LogicGateRACIAssignment, userID string) bool {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return true
 	}
-	return r.logicGateGVICAssignmentUserSetLocked(companyID, assignments)[userID]
+	return r.logicGateRACIAssignmentUserSetLocked(companyID, assignments)[userID]
 }
 
 func sortLogicGateQueryResults(items []domain.LogicGate) {
@@ -417,11 +417,11 @@ func (r *MemoryRepo) QueryLogicGates(companyID string, query LogicGateQuery) ([]
 		if gate.CompanyID != companyID || !logicGateMatchesQuery(gate, query.Search) {
 			continue
 		}
-		assignments := r.logicGateGVICAssignmentsAsLogicGateGVICLocked(gate.CompanyID, gate.LogicGateID)
+		assignments := r.logicGateRACIAssignmentsAsLogicGateRACILocked(gate.CompanyID, gate.LogicGateID)
 		if !r.logicGateAssignedToUserLocked(companyID, assignments, query.AssignedUserID) {
 			continue
 		}
-		items = append(items, r.withLogicGateGVICLocked(gate))
+		items = append(items, r.withLogicGateRACILocked(gate))
 	}
 	sortLogicGateQueryResults(items)
 	if query.Limit > 0 && len(items) > query.Limit {
@@ -448,11 +448,11 @@ func (r *MemoryRepo) QueryVisibleLogicGates(companyID, userID string, query Logi
 		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionEdit) {
 			continue
 		}
-		assignments := r.logicGateGVICAssignmentsAsLogicGateGVICLocked(gate.CompanyID, gate.LogicGateID)
+		assignments := r.logicGateRACIAssignmentsAsLogicGateRACILocked(gate.CompanyID, gate.LogicGateID)
 		if !r.logicGateAssignedToUserLocked(companyID, assignments, query.AssignedUserID) {
 			continue
 		}
-		items = append(items, r.withLogicGateGVICLocked(gate))
+		items = append(items, r.withLogicGateRACILocked(gate))
 	}
 	sortLogicGateQueryResults(items)
 	if query.Limit > 0 && len(items) > query.Limit {
@@ -468,26 +468,26 @@ func (r *MemoryRepo) GetLogicGate(companyID, logicGateID string) (domain.LogicGa
 	if !ok {
 		return domain.LogicGate{}, ErrNotFound
 	}
-	return r.withLogicGateGVICLocked(item), nil
+	return r.withLogicGateRACILocked(item), nil
 }
 
-func (r *MemoryRepo) SetLogicGateGVICAssignments(input LogicGateGVICAssignmentUpdateInput) ([]domain.LogicGateGVICAssignment, error) {
-	assignments := make([]ResourceGVICAssignmentInput, 0, len(input.Assignments))
+func (r *MemoryRepo) SetLogicGateRACIAssignments(input LogicGateRACIAssignmentUpdateInput) ([]domain.LogicGateRACIAssignment, error) {
+	assignments := make([]ResourceRACIAssignmentInput, 0, len(input.Assignments))
 	for _, item := range input.Assignments {
-		normalized, err := normalizeLogicGateGVICAssignmentInput(item)
+		normalized, err := normalizeLogicGateRACIAssignmentInput(item)
 		if err != nil {
 			return nil, err
 		}
-		assignments = append(assignments, ResourceGVICAssignmentInput{Role: normalized.role, PrincipalType: normalized.principalType, PrincipalID: normalized.principalID})
+		assignments = append(assignments, ResourceRACIAssignmentInput{Role: normalized.role, PrincipalType: normalized.principalType, PrincipalID: normalized.principalID})
 	}
-	result, err := r.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	result, err := r.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID: input.CompanyID, ResourceType: EntityTypeLogicGate, ResourceID: input.LogicGateID,
 		Assignments: assignments,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return logicGateGVICAssignmentsFromResources(result.GVICAssignments), nil
+	return logicGateRACIAssignmentsFromResources(result.RACIAssignments), nil
 }
 
 func (r *MemoryRepo) DeleteLogicGate(companyID, logicGateID string) error {
@@ -508,7 +508,7 @@ func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string) error 
 			affectedNodeIDs = append(affectedNodeIDs, assignment.NodeID)
 		}
 	}
-	r.deleteGVICMatrixProjectionForLogicGateLocked(companyID, logicGateID)
+	r.deleteRACIMatrixProjectionForLogicGateLocked(companyID, logicGateID)
 	for itemKey, item := range r.projectTimelineItems {
 		if item.CompanyID == companyID && item.EntityType == EntityTypeLogicGate && item.EntityID == logicGateID {
 			delete(r.projectTimelineItems, itemKey)
@@ -518,7 +518,7 @@ func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string) error 
 	delete(r.logicGates, k)
 	delete(r.logicGateInfo, k)
 	delete(r.logicGateText, k)
-	delete(r.logicGateGVIC, k)
+	delete(r.logicGateRACI, k)
 	for permissionKey, permission := range r.entityPermissions {
 		if permission.CompanyID == companyID && permission.EntityType == EntityTypeLogicGate && permission.EntityID == logicGateID {
 			delete(r.entityPermissions, permissionKey)
@@ -526,7 +526,7 @@ func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string) error 
 	}
 	r.deleteNodeLogicGateAssignmentsForLogicGateLocked(companyID, logicGateID)
 	for _, nodeID := range affectedNodeIDs {
-		r.syncGVICMatrixProjectionForNodeLocked(companyID, nodeID)
+		r.syncRACIMatrixProjectionForNodeLocked(companyID, nodeID)
 	}
 	delete(r.folderItems, folderItemKey(companyID, "logic_gate", logicGateID))
 	for boardKeyValue, board := range r.kanbanBoards {
@@ -808,7 +808,7 @@ func (r *MemoryRepo) GetLogicGateDetails(companyID, logicGateID string) (domain.
 	})
 
 	return domain.LogicGateDetails{
-		LogicGate:     r.withLogicGateGVICLocked(logicGate),
+		LogicGate:     r.withLogicGateRACILocked(logicGate),
 		Information:   info,
 		Relationships: relationships,
 	}, nil
@@ -822,7 +822,7 @@ func (r *MemoryRepo) CreateLogicGateWithWorkspaceEvent(companyID, header string)
 	item := domain.LogicGate{CompanyID: companyID, LogicGateID: newUUIDv7String(), Header: header, DefaultAccess: ResourceDefaultAccessEdit, CreatedTimestamp: time.Now().UTC()}
 	r.logicGates[key(companyID, item.LogicGateID)] = item
 	r.ensureLogicGateKanbanBoardLocked(companyID, item.LogicGateID, item.Header)
-	item = r.withLogicGateGVICLocked(item)
+	item = r.withLogicGateRACILocked(item)
 	event, err := r.appendDomainEventLocked(logicGateCreatedWorkspaceEventInput(item, workItemAssignmentEventMetadata{}))
 	if err != nil {
 		r.logicGates = beforeGates
@@ -838,7 +838,7 @@ func (r *MemoryRepo) UpdateLogicGateHeaderWithWorkspaceEvent(companyID, logicGat
 	defer r.mu.Unlock()
 	beforeGates := maps.Clone(r.logicGates)
 	beforeBoards := maps.Clone(r.kanbanBoards)
-	beforeGVICProjection := maps.Clone(r.GVICMatrixProjectionRows)
+	beforeRACIProjection := maps.Clone(r.RACIMatrixProjectionRows)
 	beforeTimelineItems := maps.Clone(r.projectTimelineItems)
 	beforeTimelineProjection := maps.Clone(r.projectTimelineProjection)
 	k := key(companyID, logicGateID)
@@ -854,14 +854,14 @@ func (r *MemoryRepo) UpdateLogicGateHeaderWithWorkspaceEvent(companyID, logicGat
 		board.UpdatedTimestamp = time.Now().UTC()
 		r.kanbanBoards[boardKeyValue] = board
 	}
-	r.syncGVICMatrixProjectionForLogicGateLocked(companyID, logicGateID)
+	r.syncRACIMatrixProjectionForLogicGateLocked(companyID, logicGateID)
 	r.syncProjectManagementTimelineProjectionForLogicGateLocked(companyID, logicGateID)
-	item = r.withLogicGateGVICLocked(item)
+	item = r.withLogicGateRACILocked(item)
 	event, err := r.appendDomainEventLocked(logicGateUpdatedWorkspaceEventInput(item))
 	if err != nil {
 		r.logicGates = beforeGates
 		r.kanbanBoards = beforeBoards
-		r.GVICMatrixProjectionRows = beforeGVICProjection
+		r.RACIMatrixProjectionRows = beforeRACIProjection
 		r.projectTimelineItems = beforeTimelineItems
 		r.projectTimelineProjection = beforeTimelineProjection
 		return domain.LogicGate{}, domain.DomainEvent{}, err

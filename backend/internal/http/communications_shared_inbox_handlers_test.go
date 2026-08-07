@@ -276,17 +276,17 @@ func TestCommunicationsSharedInboxAccountEmailRequiresManagerOrAdmin(t *testing.
 	}
 }
 
-func TestCommunicationsSharedInboxAccessRouteDoesNotConvertGVICAssignmentsToPermissions(t *testing.T) {
+func TestCommunicationsSharedInboxAccessRouteDoesNotConvertRACIAssignmentsToPermissions(t *testing.T) {
 	t.Parallel()
 
 	backing := store.NewMemoryRepo()
 	repo := backing
 	server := NewServer(repo)
-	companyID := "company-shared-inbox-access-no-GVIC-compat"
+	companyID := "company-shared-inbox-access-no-RACI-compat"
 	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
-	repo.EnsureCompany(companyID, "Shared Inbox No GVIC Compat")
+	repo.EnsureCompany(companyID, "Shared Inbox No RACI Compat")
 
-	user, err := repo.UpsertAuthUser("subject-shared-access-no-GVIC-compat", "no-GVIC-compat@example.com", "No GVIC Compat")
+	user, err := repo.UpsertAuthUser("subject-shared-access-no-RACI-compat", "no-RACI-compat@example.com", "No RACI Compat")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser error = %v", err)
 	}
@@ -310,7 +310,7 @@ func TestCommunicationsSharedInboxAccessRouteDoesNotConvertGVICAssignmentsToPerm
 	body, _ := json.Marshal(map[string]any{
 		"company_id": companyID,
 		"assignments": []map[string]string{
-			{"role": domain.GVICRoleResponsible, "user_id": user.UserID},
+			{"role": domain.RACIRoleResponsible, "user_id": user.UserID},
 		},
 	})
 	req := httptest.NewRequest(http.MethodPut, "/v1/communications/shared-inboxes/"+folder.FolderID+"/access", bytes.NewReader(body))

@@ -58,7 +58,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/nodes/nodeRelationshipStructure.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/nodes/nodeRecordStore.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/companyExplorerStore.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/companyExplorerGVICVisibility.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/companyExplorerRACIVisibility.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/selectionSync.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/treePresentation.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/folders/companyExplorerFolders.test.js"),
@@ -125,8 +125,8 @@ const componentTests = [
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/attachmentCountDropdown.test.js"),
   },
   {
-    source: resolve(repoRoot, "tests/frontend/modules/editor/gvicAssignmentHover.test.tsx"),
-    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/gvicAssignmentHover.test.js"),
+    source: resolve(repoRoot, "tests/frontend/modules/editor/raciAssignmentHover.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/raciAssignmentHover.test.js"),
   },
   {
     source: resolve(repoRoot, "tests/frontend/modules/editor/editorTextBlockChatNavigation.test.tsx"),

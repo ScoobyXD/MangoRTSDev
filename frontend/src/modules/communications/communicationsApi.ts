@@ -3,7 +3,7 @@ import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folder
 import type { CompanyExplorerV2Row } from "../company-explorer/companyExplorerLazyApi.js";
 import { logicGateKanbanBoardID, type KanbanBoard, type KanbanCard } from "../kanban/shared.js";
 import type { NodeRecord } from "../nodes/types.js";
-import type { LogicGateGVICAssignment, LogicGateGVICRole, LogicGateGVICPrincipalType, LogicGateRecord } from "../logic-gates/types.js";
+import type { LogicGateRACIAssignment, LogicGateRACIRole, LogicGateRACIPrincipalType, LogicGateRecord } from "../logic-gates/types.js";
 import type { ProjectRelationshipProjection } from "../project-management/projectManagementApi.js";
 import { markWorkspaceSnapshotScopeStale } from "../workspace/workspaceSnapshotCache.js";
 import { invalidateResourcePolicyDependentCaches } from "../permissions/resourcePolicyCaches.js";
@@ -148,16 +148,16 @@ export type ListEmailFoldersParams = {
   refresh?: boolean;
 };
 
-export type CommunicationsSharedInboxGVICRole = LogicGateGVICRole;
-export type CommunicationsSharedInboxGVICPrincipalType = "user" | "group";
+export type CommunicationsSharedInboxRACIRole = LogicGateRACIRole;
+export type CommunicationsSharedInboxRACIPrincipalType = "user" | "group";
 
-export type CommunicationsSharedInboxGVICAssignment = {
+export type CommunicationsSharedInboxRACIAssignment = {
   company_id: string;
   folder_id: string;
   resource_type?: string;
   resource_id?: string;
-  role: CommunicationsSharedInboxGVICRole;
-  principal_type?: CommunicationsSharedInboxGVICPrincipalType;
+  role: CommunicationsSharedInboxRACIRole;
+  principal_type?: CommunicationsSharedInboxRACIPrincipalType;
   principal_id?: string;
   principal_name?: string;
   user_id: string;
@@ -192,7 +192,7 @@ export type CommunicationsSharedInbox = {
   account_email?: string;
   company_email_connection_id?: string;
   position: number;
-  gvic_assignments?: CommunicationsSharedInboxGVICAssignment[];
+  gvic_assignments?: CommunicationsSharedInboxRACIAssignment[];
   access_grants?: ResourceAccessGrant[];
   effective_access_level?: ResourceAccessLevel;
   created_timestamp: string;
@@ -1253,30 +1253,30 @@ export async function removeCommunicationsSharedInbox(companyID: string, folderI
   dispatchCommunicationsSharedInboxesUpdated(cleanCompanyID);
 }
 
-export async function updateCommunicationsSharedInboxGVICAssignments(
+export async function updateCommunicationsSharedInboxRACIAssignments(
   companyID: string,
   folderID: string,
-  assignments: Array<{ role: CommunicationsSharedInboxGVICRole; principal_type?: CommunicationsSharedInboxGVICPrincipalType; principal_id?: string; user_id?: string }>,
-): Promise<CommunicationsSharedInboxGVICAssignment[]> {
+  assignments: Array<{ role: CommunicationsSharedInboxRACIRole; principal_type?: CommunicationsSharedInboxRACIPrincipalType; principal_id?: string; user_id?: string }>,
+): Promise<CommunicationsSharedInboxRACIAssignment[]> {
   const cleanCompanyID = companyID.trim();
   const cleanFolderID = folderID.trim();
   const path = `/v1/resources/shared_inbox/${encodeURIComponent(cleanFolderID)}/gvic`;
   const current = await apiFetchJSON<{ revision: string }>(
     `${path}?company_id=${encodeURIComponent(cleanCompanyID)}`,
   );
-  const payload = await apiFetchJSON<{ gvic_assignments?: CommunicationsSharedInboxGVICAssignment[] }>(path, {
+  const payload = await apiFetchJSON<{ gvic_assignments?: CommunicationsSharedInboxRACIAssignment[] }>(path, {
     method: "PUT",
     headers: { "If-Match": current.revision },
     body: JSON.stringify({
       assignment_mode: "customized",
       company_id: cleanCompanyID,
       descendant_action: "inherited_only",
-      gvic_assignments: assignments.map(toResourceGVICAssignmentInput),
+      gvic_assignments: assignments.map(toResourceRACIAssignmentInput),
     }),
   });
   invalidateCacheKey(`shared-inboxes:${cleanCompanyID}`);
   dispatchCommunicationsSharedInboxesUpdated(cleanCompanyID);
-  return cloneResourceGVICAssignmentsAsSharedInbox(payload.gvic_assignments ?? [], cleanFolderID);
+  return cloneResourceRACIAssignmentsAsSharedInbox(payload.gvic_assignments ?? [], cleanFolderID);
 }
 
 export async function listLogicGates(companyID: string): Promise<LogicGateRecord[]> {
@@ -1304,23 +1304,23 @@ export async function listCompanyUserGroups(companyID: string): Promise<CompanyU
   }, cloneCompanyUserGroupsResponse);
 }
 
-export async function updateLogicGateGVICAssignments(
+export async function updateLogicGateRACIAssignments(
   companyID: string,
   logicGateID: string,
-  assignments: Array<{ role: LogicGateGVICRole; user_id?: string; principal_type?: LogicGateGVICPrincipalType; principal_id?: string }>,
+  assignments: Array<{ role: LogicGateRACIRole; user_id?: string; principal_type?: LogicGateRACIPrincipalType; principal_id?: string }>,
   applyToDescendants = false,
-): Promise<LogicGateGVICAssignment[]> {
+): Promise<LogicGateRACIAssignment[]> {
   const body = {
     company_id: companyID,
     assignment_mode: "customized",
-    gvic_assignments: assignments.map(toResourceGVICAssignmentInput),
+    gvic_assignments: assignments.map(toResourceRACIAssignmentInput),
     descendant_action: applyToDescendants ? "including_customized" : "inherited_only",
   };
   const path = `/v1/resources/logic_gate/${encodeURIComponent(logicGateID)}/gvic`;
   const current = await apiFetchJSON<{ revision: string }>(
     `${path}?company_id=${encodeURIComponent(companyID)}`,
   );
-  const payload = await apiFetchJSON<{ gvic_assignments?: LogicGateGVICAssignment[] }>(path, {
+  const payload = await apiFetchJSON<{ gvic_assignments?: LogicGateRACIAssignment[] }>(path, {
     method: "PUT",
     headers: { "If-Match": current.revision },
     body: JSON.stringify(body),
@@ -1328,32 +1328,32 @@ export async function updateLogicGateGVICAssignments(
   invalidateWorkspacePanelCache(companyID);
   markLogicGateWorkspaceSnapshotScopesStale(companyID, logicGateID);
   invalidateResourcePolicyDependentCaches(readAuthConfig().apiBase, companyID);
-  return cloneResourceGVICAssignmentsAsLogicGate(payload.gvic_assignments ?? [], logicGateID);
+  return cloneResourceRACIAssignmentsAsLogicGate(payload.gvic_assignments ?? [], logicGateID);
 }
 
-export type LogicGateGVICAssignmentCommandResult = {
+export type LogicGateRACIAssignmentCommandResult = {
   company_id: string;
   logic_gate_id?: string;
   resource_id?: string;
   operation: "add" | "remove";
   changed: boolean;
-  gvic_assignments?: LogicGateGVICAssignment[];
+  gvic_assignments?: LogicGateRACIAssignment[];
 };
 
-async function commandLogicGateGVICAssignments(
+async function commandLogicGateRACIAssignments(
   companyID: string,
   logicGateID: string,
   operation: "add" | "remove",
-  assignments: Array<{ role: LogicGateGVICRole; user_id?: string; principal_type?: LogicGateGVICPrincipalType; principal_id?: string }>,
+  assignments: Array<{ role: LogicGateRACIRole; user_id?: string; principal_type?: LogicGateRACIPrincipalType; principal_id?: string }>,
   applyToDescendants = false,
-): Promise<LogicGateGVICAssignment[]> {
+): Promise<LogicGateRACIAssignment[]> {
   const path = `/v1/resources/logic_gate/${encodeURIComponent(logicGateID)}/gvic`;
-  const current = await apiFetchJSON<{ revision: string; gvic_assignments?: LogicGateGVICAssignment[] }>(
+  const current = await apiFetchJSON<{ revision: string; gvic_assignments?: LogicGateRACIAssignment[] }>(
     `${path}?company_id=${encodeURIComponent(companyID)}`,
   );
-  let next = (current.gvic_assignments ?? []).map(toResourceGVICAssignmentInput);
-  for (const assignment of assignments.map(toResourceGVICAssignmentInput)) {
-    const matches = (candidate: ReturnType<typeof toResourceGVICAssignmentInput>) => (
+  let next = (current.gvic_assignments ?? []).map(toResourceRACIAssignmentInput);
+  for (const assignment of assignments.map(toResourceRACIAssignmentInput)) {
+    const matches = (candidate: ReturnType<typeof toResourceRACIAssignmentInput>) => (
       candidate.role === assignment.role
       && candidate.principal_type === assignment.principal_type
       && candidate.principal_id === assignment.principal_id
@@ -1366,7 +1366,7 @@ async function commandLogicGateGVICAssignments(
 
     next.push(assignment);
   }
-  const payload = await apiFetchJSON<{ gvic_assignments?: LogicGateGVICAssignment[] }>(path, {
+  const payload = await apiFetchJSON<{ gvic_assignments?: LogicGateRACIAssignment[] }>(path, {
     method: "PUT",
     headers: { "If-Match": current.revision },
     body: JSON.stringify({
@@ -1379,25 +1379,25 @@ async function commandLogicGateGVICAssignments(
   invalidateWorkspacePanelCache(companyID);
   markLogicGateWorkspaceSnapshotScopesStale(companyID, logicGateID);
   invalidateResourcePolicyDependentCaches(readAuthConfig().apiBase, companyID);
-  return cloneResourceGVICAssignmentsAsLogicGate(payload.gvic_assignments ?? [], logicGateID);
+  return cloneResourceRACIAssignmentsAsLogicGate(payload.gvic_assignments ?? [], logicGateID);
 }
 
-export function addLogicGateGVICAssignments(
+export function addLogicGateRACIAssignments(
   companyID: string,
   logicGateID: string,
-  assignments: Array<{ role: LogicGateGVICRole; user_id?: string; principal_type?: LogicGateGVICPrincipalType; principal_id?: string }>,
+  assignments: Array<{ role: LogicGateRACIRole; user_id?: string; principal_type?: LogicGateRACIPrincipalType; principal_id?: string }>,
   applyToDescendants = false,
-): Promise<LogicGateGVICAssignment[]> {
-  return commandLogicGateGVICAssignments(companyID, logicGateID, "add", assignments, applyToDescendants);
+): Promise<LogicGateRACIAssignment[]> {
+  return commandLogicGateRACIAssignments(companyID, logicGateID, "add", assignments, applyToDescendants);
 }
 
-export function removeLogicGateGVICAssignments(
+export function removeLogicGateRACIAssignments(
   companyID: string,
   logicGateID: string,
-  assignments: Array<{ role: LogicGateGVICRole; user_id?: string; principal_type?: LogicGateGVICPrincipalType; principal_id?: string }>,
+  assignments: Array<{ role: LogicGateRACIRole; user_id?: string; principal_type?: LogicGateRACIPrincipalType; principal_id?: string }>,
   applyToDescendants = false,
-): Promise<LogicGateGVICAssignment[]> {
-  return commandLogicGateGVICAssignments(companyID, logicGateID, "remove", assignments, applyToDescendants);
+): Promise<LogicGateRACIAssignment[]> {
+  return commandLogicGateRACIAssignments(companyID, logicGateID, "remove", assignments, applyToDescendants);
 }
 
 export async function listNodes(companyID: string): Promise<NodeRecord[]> {
@@ -1838,10 +1838,10 @@ export function markCommunicationsWorkspacePanelStale(companyID: string, scope?:
   clearWorkspacePanelReadCache(cleanCompanyID);
 }
 
-export function patchLogicGateGVICAssignmentsInCommunicationsWorkspaceCache(
+export function patchLogicGateRACIAssignmentsInCommunicationsWorkspaceCache(
   companyID: string,
   logicGateID: string,
-  assignments: LogicGateGVICAssignment[],
+  assignments: LogicGateRACIAssignment[],
 ): void {
   const cleanCompanyID = companyID.trim();
   const cleanLogicGateID = logicGateID.trim();
@@ -1856,7 +1856,7 @@ export function patchLogicGateGVICAssignmentsInCommunicationsWorkspaceCache(
     changed = true;
     return {
       ...logicGate,
-      gvic_assignments: cloneResourceGVICAssignmentsAsLogicGate(assignments, cleanLogicGateID),
+      gvic_assignments: cloneResourceRACIAssignmentsAsLogicGate(assignments, cleanLogicGateID),
     };
   });
   if (!changed) return;
@@ -2741,7 +2741,7 @@ function cloneSharedInboxes(inboxes: CommunicationsSharedInbox[]): Communication
 }
 
 function cloneSharedInbox(inbox: CommunicationsSharedInbox): CommunicationsSharedInbox {
-  const assignments = cloneResourceGVICAssignmentsAsSharedInbox(inbox.gvic_assignments ?? [], inbox.folder_id);
+  const assignments = cloneResourceRACIAssignmentsAsSharedInbox(inbox.gvic_assignments ?? [], inbox.folder_id);
   return {
     ...inbox,
     gvic_assignments: assignments,
@@ -2753,12 +2753,12 @@ function cloneResourceAccessGrants(grants: ResourceAccessGrant[]): ResourceAcces
   return grants.map((grant) => ({ ...grant }));
 }
 
-function toResourceGVICAssignmentInput(assignment: {
-  role: LogicGateGVICRole;
+function toResourceRACIAssignmentInput(assignment: {
+  role: LogicGateRACIRole;
   user_id?: string;
-  principal_type?: LogicGateGVICPrincipalType;
+  principal_type?: LogicGateRACIPrincipalType;
   principal_id?: string;
-}): { role: LogicGateGVICRole; principal_type: LogicGateGVICPrincipalType; principal_id: string } {
+}): { role: LogicGateRACIRole; principal_type: LogicGateRACIPrincipalType; principal_id: string } {
   const principalType = assignment.principal_type?.trim() === "group" ? "group" : "user";
   const principalID = (assignment.principal_id ?? assignment.user_id ?? "").trim();
   return {
@@ -2768,10 +2768,10 @@ function toResourceGVICAssignmentInput(assignment: {
   };
 }
 
-function cloneResourceGVICAssignmentsAsSharedInbox(
-  assignments: CommunicationsSharedInboxGVICAssignment[],
+function cloneResourceRACIAssignmentsAsSharedInbox(
+  assignments: CommunicationsSharedInboxRACIAssignment[],
   fallbackFolderID: string,
-): CommunicationsSharedInboxGVICAssignment[] {
+): CommunicationsSharedInboxRACIAssignment[] {
   return assignments.map((assignment) => {
     const principalType = assignment.principal_type ?? "user";
     const principalID = assignment.principal_id ?? assignment.user_id ?? "";
@@ -2808,7 +2808,7 @@ function cloneCompanyExplorerRows(rows: CompanyExplorerV2Row[]): CompanyExplorer
 
 function cloneLogicGates(logicGates: LogicGateRecord[]): LogicGateRecord[] {
   return logicGates.map((logicGate) => {
-    const assignments = cloneLogicGateGVICAssignments(logicGate.gvic_assignments ?? []);
+    const assignments = cloneLogicGateRACIAssignments(logicGate.gvic_assignments ?? []);
     return {
       ...logicGate,
       gvic_assignments: assignments,
@@ -2816,14 +2816,14 @@ function cloneLogicGates(logicGates: LogicGateRecord[]): LogicGateRecord[] {
   });
 }
 
-function cloneLogicGateGVICAssignments(assignments: LogicGateGVICAssignment[]): LogicGateGVICAssignment[] {
+function cloneLogicGateRACIAssignments(assignments: LogicGateRACIAssignment[]): LogicGateRACIAssignment[] {
   return assignments.map((assignment) => ({ ...assignment }));
 }
 
-function cloneResourceGVICAssignmentsAsLogicGate(
-  assignments: LogicGateGVICAssignment[],
+function cloneResourceRACIAssignmentsAsLogicGate(
+  assignments: LogicGateRACIAssignment[],
   fallbackLogicGateID: string,
-): LogicGateGVICAssignment[] {
+): LogicGateRACIAssignment[] {
   return assignments.map((assignment) => {
     const principalType = assignment.principal_type ?? "user";
     const principalID = assignment.principal_id ?? assignment.user_id ?? "";

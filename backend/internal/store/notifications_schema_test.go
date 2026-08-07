@@ -70,7 +70,7 @@ func TestSchemaDropsDerivedResourceGrantCompatibilityTriggers(t *testing.T) {
 	schema := strings.ToLower(strings.Join(strings.Fields(string(schemaRaw)), " "))
 	for _, forbidden := range []string{
 		"trg_grant_node_assignee_edit_access",
-		"trg_grant_logic_gate_GVIC_edit_access",
+		"trg_grant_logic_gate_RACI_edit_access",
 		"mangorts_grant_resource_access_at_least",
 	} {
 		if strings.Contains(schema, forbidden) {

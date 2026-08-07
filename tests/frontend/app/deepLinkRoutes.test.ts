@@ -116,7 +116,7 @@ describe("deepLinkRoutes", () => {
     assert.match(summary, /onProjectUpdated\?\.\(renamedProject\)/);
   });
 
-  it("round-trips RCVI node routes with existing role and view IDs", () => {
+  it("round-trips RACI node routes with existing role and view IDs", () => {
     assert.equal(gvicViewIDForRole("responsible"), "r-inbox");
     assert.equal(gvicRoleForViewID("r-inbox"), "responsible");
 
@@ -130,11 +130,11 @@ describe("deepLinkRoutes", () => {
     });
   });
 
-  it("accepts RCVI view IDs as aliases for existing role IDs", () => {
-    assert.deepEqual(parseDeepLinkRoute("/gvic/v-inbox/nodes/node-2"), {
+  it("accepts RACI view IDs as aliases for existing role IDs", () => {
+    assert.deepEqual(parseDeepLinkRoute("/gvic/a-inbox/nodes/node-2"), {
       kind: "gvic",
-      role: "verifier",
-      viewID: "v-inbox",
+      role: "accountable",
+      viewID: "a-inbox",
       nodeID: "node-2",
     });
   });

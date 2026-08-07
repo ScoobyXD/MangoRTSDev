@@ -100,7 +100,7 @@ func TestMemoryEmailConversionCommandCreatesAssignedWorkItemWithProvenanceAndEve
 	if err != nil {
 		t.Fatalf("ListDomainEventsAfter: %v", err)
 	}
-	wantTypes := []string{LogicGateGVICUpdatedEventType, WorkItemEmailConvertedEventType, "node_created", WorkItemLogicGateAssignmentSavedEventType, "kanban_card_upserted", "node_updated"}
+	wantTypes := []string{LogicGateRACIUpdatedEventType, WorkItemEmailConvertedEventType, "node_created", WorkItemLogicGateAssignmentSavedEventType, "kanban_card_upserted", "node_updated"}
 	if gotTypes := domainEventTypes(durable); !reflect.DeepEqual(gotTypes, wantTypes) {
 		t.Fatalf("durable event types = %+v, want %+v", gotTypes, wantTypes)
 	}
@@ -145,7 +145,7 @@ func TestMemoryEmailConversionCommandCanCreateNewLogicGate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListDomainEventsAfter: %v", err)
 	}
-	if len(durable) < 3 || durable[0].Type != LogicGateGVICUpdatedEventType || durable[1].Type != "logic_gate_created" || durable[2].Type != WorkItemEmailConvertedEventType {
+	if len(durable) < 3 || durable[0].Type != LogicGateRACIUpdatedEventType || durable[1].Type != "logic_gate_created" || durable[2].Type != WorkItemEmailConvertedEventType {
 		t.Fatalf("durable events = %+v, want policy audit, logic gate created, then email converted", domainEventTypes(durable))
 	}
 }
@@ -721,12 +721,12 @@ func setupEmailConversionUserAndGate(t *testing.T, repo *MemoryRepo, companyID s
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
-	if _, err := repo.SetLogicGateGVICAssignments(LogicGateGVICAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateRACIAssignments(LogicGateRACIAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleResponsible, UserID: user.UserID}},
+		Assignments: []LogicGateRACIAssignmentInput{{Role: domain.RACIRoleResponsible, UserID: user.UserID}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
+		t.Fatalf("SetLogicGateRACIAssignments: %v", err)
 	}
 	return user, logicGate
 }

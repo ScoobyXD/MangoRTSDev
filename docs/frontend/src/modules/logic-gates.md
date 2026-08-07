@@ -4,20 +4,20 @@ Last updated: 2026-08-05
 
 ## Purpose
 
-Logic Gates remain first-class workspace records with an Editor, Input/Output relationships, GVIC presentation, Kanban/Arena workflows, manual saved versions, permissions, attachments, exact email ownership, recycle, and restore behavior.
+Logic Gates remain first-class workspace records with an Editor, Input/Output relationships, RACI presentation, Kanban/Arena workflows, manual saved versions, permissions, attachments, exact email ownership, recycle, and restore behavior.
 
 ## Module ownership
 
 - `frontend/src/modules/logic-gates/types.ts` owns shared Logic Gate record, relationship, details, permission, and Editor projection types.
-- `frontend/src/modules/logic-gates/logicGateRecordStore.ts` owns coalesced details, projection, and GVIC reads.
+- `frontend/src/modules/logic-gates/logicGateRecordStore.ts` owns coalesced details, projection, and RACI reads.
 - `frontend/src/modules/logic-gates/logicGateRelationshipGraph.ts` owns the in-memory full-workspace Logic Gate and relationship snapshot used by surviving consumers.
-- `frontend/src/modules/logic-gates/gvicPresentation.ts` owns GVIC label and presentation rules.
+- `frontend/src/modules/logic-gates/raciPresentation.ts` owns RACI label and presentation rules.
 - Committed-title snapshot reconciliation lives in `frontend/src/modules/realtime/committedTitleSnapshotReconciliation.ts`.
 
 ## API and persistence contracts
 
-- Logic Gate list, detail, update, permission, GVIC, relationship, deletion, recycle, and restore commands keep their existing APIs.
-- `/v1/workspace/entity-batches` creates Logic Gates, `logic_gate_relationships`, folder items, creator GVIC assignments, and client-to-entity mappings. Items contain identity, title, and optional Explorer position only.
+- Logic Gate list, detail, update, permission, RACI, relationship, deletion, recycle, and restore commands keep their existing APIs.
+- `/v1/workspace/entity-batches` creates Logic Gates, `logic_gate_relationships`, folder items, creator RACI assignments, and client-to-entity mappings. Items contain identity, title, and optional Explorer position only.
 - Logic Gate relationships continue using Input/Output endpoint semantics and canonical `logic_gate_relationships` storage.
 - Workspace snapshots expose Logic Gates and relationships only through retained `full`, `company_explorer`, and `kanban` scopes.
 - Committed title updates keep Editor, Kanban/Arena, Home, Explorer, Project, and dock/pin labels consistent while preserving active drafts.

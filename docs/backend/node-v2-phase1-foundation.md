@@ -98,7 +98,7 @@ Classification vocabulary:
 | `resource_attachments` | Current generic active/soft-deleted association model. | `postgres_attachments.go`, upload completion, migration tools. | Migration source/compatibility layer. New Node links carry exact Node/text-box ownership and may retain the source link ID for audit. Ten known orphaned legacy Node links require explicit repair policy. |
 | `attachment_variants` | Derived display/thumbnail/email-send objects. | Variant worker and attachment reads. | Retain as rebuildable data. Deleting a link never deletes authoritative bytes or variants implicitly. |
 | `attachment_upload_intents` / `attachment_upload_parts` | Operational upload state. Expired rows can currently persist indefinitely. | Direct-upload handlers and `postgres_attachment_uploads.go`. | Retain current upload path; add a later bounded row-deletion job after object cleanup and audit retention are agreed. |
-| `node_logic_gate_assignments` | Authoritative current placement, not history. | Assignment, Kanban, GVIC, Explorer, Project, access, and update stores. | Retain. A move transaction updates current placement and appends an immutable `node_movements` row. |
+| `node_logic_gate_assignments` | Authoritative current placement, not history. | Assignment, Kanban, RACI, Explorer, Project, access, and update stores. | Retain. A move transaction updates current placement and appends an immutable `node_movements` row. |
 | `node_timeline_events` and `node_timeline_verification_recipients` | Current authoritative transfer/request stamps and recipient completion state. | `postgres_node_timeline.go`, Node timeline HTTP/UI, assignment transaction. | Preserve current behavior. Migrate into separate movement/request/event facts and the three-type index only during a later atomic cutover; do not replace now. |
 | `domain_events` | Authoritative domain event/update feed used by projection and notification consumers. Retention purpose is broader than Node timeline. | `postgres_domain_events.go` and producer transactions. | Retain pending a separate event-log decision. Node v2 commands continue the atomic domain-event/outbox rule; typing updates do not become domain events. |
 | `realtime_outbox` | Operational committed-event delivery log. Published rows currently have no deletion policy. | `postgres_realtime_outbox.go`, dispatch/consumer, producer transactions. | Retain for business events. Add a later replay-window cleanup. Yjs document updates use the collaboration service, not this general outbox. |
@@ -116,7 +116,7 @@ The exact DDL is the source of truth. Its key boundaries are:
 - immutable `node_movements`, verification requests/recipients/events, and a small `node_timeline_items` read index with exactly three item types.
 - `editor_migration_runs` and `editor_document_migrations`: transitional backup evidence, source/target checksums, validation results, warnings, and rollback/export status.
 
-Foreign keys intentionally use repeated `(company_id,node_id,textbox_id)` ownership keys. Historical movement/verifier IDs are snapshots rather than cascading user/Logic Gate FKs, so audit copy survives rename or removal. Attachment and email content is never cascaded from a text-box link.
+Foreign keys intentionally use repeated `(company_id,node_id,textbox_id)` ownership keys. Historical movement/accountable IDs are snapshots rather than cascading user/Logic Gate FKs, so audit copy survives rename or removal. Attachment and email content is never cascaded from a text-box link.
 
 ## Node workspace HTTP contract
 

@@ -148,7 +148,7 @@ func buildLogicGateWorkView(logicGate domain.LogicGate, assignments []logicGateW
 			LogicGateID:        logicGate.LogicGateID,
 			Header:             logicGate.Header,
 			DefaultAccess:      defaultResourceAccessOrEdit(logicGate.DefaultAccess),
-			RequestOwnerUserID: logicGateWorkRequestOwnerUserID(logicGate.GVICAssignments),
+			RequestOwnerUserID: logicGateWorkRequestOwnerUserID(logicGate.RACIAssignments),
 		},
 		Board:   board,
 		Columns: columns,
@@ -156,10 +156,10 @@ func buildLogicGateWorkView(logicGate domain.LogicGate, assignments []logicGateW
 	}
 }
 
-func logicGateWorkRequestOwnerUserID(assignments []domain.LogicGateGVICAssignment) string {
+func logicGateWorkRequestOwnerUserID(assignments []domain.LogicGateRACIAssignment) string {
 	for _, assignment := range assignments {
-		principalType, principalID := logicGateGVICAssignmentPrincipal(assignment)
-		if assignment.Role == domain.GVICRoleResponsible && principalType == EntityPermissionSubjectUser {
+		principalType, principalID := logicGateRACIAssignmentPrincipal(assignment)
+		if assignment.Role == domain.RACIRoleResponsible && principalType == EntityPermissionSubjectUser {
 			return strings.TrimSpace(principalID)
 		}
 	}

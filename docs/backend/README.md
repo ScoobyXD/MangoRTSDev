@@ -226,7 +226,7 @@ Communications invitation response:
 - `GET /v1/company-explorer/folder-items?company_id={uuid}&folder_id={uuid}&item_type=node|logic_gate`
 - `POST /v1/company-explorer/folder-items` (assign/move item; moving to a different folder level deletes relationships touching that node or logic gate)
 - `DELETE /v1/company-explorer/folder-items?company_id={uuid}&item_type=node|logic_gate&item_id={uuid}`
-- `POST /v1/workspace/entity-batches` (create Nodes or Logic Gates with optional relationships, Explorer placement, GVIC assignment, and client/entity mappings)
+- `POST /v1/workspace/entity-batches` (create Nodes or Logic Gates with optional relationships, Explorer placement, RACI assignment, and client/entity mappings)
 - `GET /v1/kanban/boards?company_id={uuid}&after_position=0&limit=100`
 - `POST /v1/kanban/boards`
 - `PUT /v1/kanban/boards/{board_id}`
@@ -343,4 +343,4 @@ Kanban cards are node-only through the API. Logic Gates use Logic Gate Arena and
 
 ### Workspace entity batch contract
 
-`POST /v1/workspace/entity-batches` creates Nodes or Logic Gates together with optional relationships, Company Explorer folder items, creator GVIC assignment, and request-local `client_id` to durable entity mappings. Item payloads contain `client_id`, the entity title field, and optional Explorer `position`. Coordinates are rejected as unknown fields. The response contains no geometry results.
+`POST /v1/workspace/entity-batches` creates Nodes or Logic Gates together with optional relationships, Company Explorer folder items, creator RACI assignment, and request-local `client_id` to durable entity mappings. Item payloads contain `client_id`, the entity title field, and optional Explorer `position`. Coordinates are rejected as unknown fields. The response contains no geometry results.

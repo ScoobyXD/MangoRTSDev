@@ -119,7 +119,7 @@ func (r *MemoryRepo) UpdateCompanyUserGroup(companyID, groupID string, parentGro
 		for affectedGroupID := range newAffectedGroupIDs {
 			oldAffectedGroupIDs[affectedGroupID] = true
 		}
-		r.syncGVICGroupDependentResourcesForGroupSetLocked(companyID, oldAffectedGroupIDs)
+		r.syncRACIGroupDependentResourcesForGroupSetLocked(companyID, oldAffectedGroupIDs)
 	}
 	return cloneCompanyUserGroup(group), nil
 }
@@ -139,7 +139,7 @@ func (r *MemoryRepo) DeleteCompanyUserGroup(companyID, groupID string) error {
 	}
 	groupIDs := companyUserGroupSubtreeIDsLocked(r.userGroups, companyID, groupID)
 	affectedGroupIDs := companyUserGroupAncestorIDsLocked(r.userGroups, companyID, mapKeys(groupIDs))
-	affectedGVICKeys := r.gvicResourceKeysForGroupSetLocked(companyID, affectedGroupIDs)
+	affectedRACIKeys := r.gvicResourceKeysForGroupSetLocked(companyID, affectedGroupIDs)
 	for descendantID := range groupIDs {
 		delete(r.userGroups, userGroupKey(companyID, descendantID))
 	}
@@ -193,7 +193,7 @@ func (r *MemoryRepo) DeleteCompanyUserGroup(companyID, groupID string) error {
 			r.folders[key(companyID, resource.entityID)] = folder
 		}
 	}
-	for GVICKey, assignments := range r.sharedInboxGVIC {
+	for RACIKey, assignments := range r.sharedInboxRACI {
 		next := assignments[:0]
 		for _, assignment := range assignments {
 			if assignment.CompanyID == companyID && assignment.PrincipalType == EntityPermissionSubjectGroup && groupIDs[assignment.PrincipalID] {
@@ -202,9 +202,9 @@ func (r *MemoryRepo) DeleteCompanyUserGroup(companyID, groupID string) error {
 			next = append(next, assignment)
 		}
 		if len(next) == 0 {
-			delete(r.sharedInboxGVIC, GVICKey)
+			delete(r.sharedInboxRACI, RACIKey)
 		} else {
-			r.sharedInboxGVIC[GVICKey] = next
+			r.sharedInboxRACI[RACIKey] = next
 		}
 	}
 	for assignmentKey, assignment := range r.gvicAssignments {
@@ -212,7 +212,7 @@ func (r *MemoryRepo) DeleteCompanyUserGroup(companyID, groupID string) error {
 			delete(r.gvicAssignments, assignmentKey)
 		}
 	}
-	r.syncGVICResourceKeysLocked(companyID, affectedGVICKeys)
+	r.syncRACIResourceKeysLocked(companyID, affectedRACIKeys)
 	return nil
 }
 
