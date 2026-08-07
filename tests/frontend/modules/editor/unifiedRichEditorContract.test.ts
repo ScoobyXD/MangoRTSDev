@@ -1249,7 +1249,10 @@ test("the obsolete EmailPickerModal is removed and email attachment uses the uni
   assert.doesNotMatch(nodeWorkspaceParts, /EmailPickerModal/);
   assert.match(nodeWorkspace, /<UniversalEntityPicker[\s\S]*initialCategory="email_message"/);
   assert.match(projectSummary, /<UniversalEntityPicker[\s\S]*initialCategory="email_message"/);
-  assert.match(universalPicker, /label: "Emails", shortcut: "E"/);
+  assert.match(universalPicker, /if \(normalized === "e"\) return "email_message"/);
+  assert.match(universalPicker, /\{ type: "email_message", label: "Emails" \}/);
+  assert.match(universalPicker, /<HeaderTriageIcon/);
+  assert.doesNotMatch(universalPicker, /<kbd/);
   assert.match(emailPane, /"primary"[\s\S]*"starred"[\s\S]*"sent"/);
   assert.match(emailPane, /"all"[\s\S]*"spam"/);
   assert.doesNotMatch(emailPane, /composeOpen|composeDraft|submitCompose|sendEmail\s*\(|<textarea|Schedule send|Save draft|Write a reply|Send message/);

@@ -4,7 +4,7 @@ import { useAppOverlayPortalTarget } from "../../app/AppModalPortal.js";
 import { fetchSidebarPinTreeWithRequest } from "../../app/sidebarPinsApi.js";
 import { buildSidebarPinTreeRows, type SidebarPinTreeRow } from "../../app/sidebarPinTree.js";
 import type { SidebarPinTree } from "../../app/sidebarPins.js";
-import { ExplorerEntityIcon, ExplorerRowIcon } from "../../icons/index.js";
+import { ExplorerEntityIcon, ExplorerRowIcon, HeaderTriageIcon } from "../../icons/index.js";
 import {
   editorEntityTypeLabel,
   searchEditorEntityLinks,
@@ -101,7 +101,7 @@ function pinnedRows(tree: SidebarPinTree, allowedTypes: readonly EditorEntityTyp
 function pickerPanelPosition(anchor: UniversalEntityPickerAnchor, emailActive: boolean): React.CSSProperties {
   const viewportWidth = typeof window === "undefined" ? 1200 : window.innerWidth;
   const viewportHeight = typeof window === "undefined" ? 800 : window.innerHeight;
-  const preferredWidth = emailActive ? 720 : 430;
+  const preferredWidth = emailActive ? 720 : 560;
   const preferredHeight = emailActive ? 650 : 470;
   const width = Math.min(preferredWidth, Math.max(300, viewportWidth - 24));
   const left = Math.max(12, Math.min(anchor.left, viewportWidth - width - 12));
@@ -109,11 +109,11 @@ function pickerPanelPosition(anchor: UniversalEntityPickerAnchor, emailActive: b
   return { position: "fixed", left, top, width, maxHeight: Math.max(280, viewportHeight - 24) };
 }
 
-const categoryOptions: Array<{ type: EditorEntityType; label: string; shortcut: string }> = [
-  { type: "node", label: "Nodes", shortcut: "N" },
-  { type: "logic_gate", label: "Logic Gates", shortcut: "L" },
-  { type: "project", label: "Projects", shortcut: "A" },
-  { type: "email_message", label: "Emails", shortcut: "E" },
+const categoryOptions: Array<{ type: EditorEntityType; label: string }> = [
+  { type: "node", label: "Nodes" },
+  { type: "logic_gate", label: "Logic Gates" },
+  { type: "project", label: "Projects" },
+  { type: "email_message", label: "Emails" },
 ];
 
 export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (props) => {
@@ -298,11 +298,11 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
           <input ref={inputRef} value={query} disabled={busy} aria-label={mode === "link" ? "Search resources to link" : "Search resources to reference"} placeholder={category === "email_message" ? "Search Inbox, Starred, Sent, All, or Spam…" : mode === "link" ? "Search what to link…" : "Search pins or workspace…"} onChange={(event) => setQuery(event.target.value)} onKeyDown={onInputKeyDown} style={{ width: "100%", minWidth: 0, padding: 0, border: 0, outline: 0, background: "transparent", color: "#172033", font: "inherit", fontSize: 14 }} />
         </div>
       </div>
-      <div style={{ display: "flex", gap: 6, padding: "0 14px 10px", overflowX: "auto" }}>
+      <div data-mango-universal-picker-categories="true" style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 6, padding: "0 14px 10px" }}>
         {categoryOptions.map((option) => {
           const enabled = mode === "reference" || props.linkTargetTypes.includes(option.type);
           const active = category === option.type;
-          return <button key={option.type} type="button" disabled={!enabled || busy} aria-pressed={active} onClick={() => { setCategory(active ? "all" : option.type); setQuery(""); }} style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0, padding: "7px 9px", border: active ? "1px solid rgba(8,145,178,.30)" : "1px solid rgba(255,255,255,.72)", borderRadius: 11, background: active ? "linear-gradient(145deg,#e8fbff,#f5efff)" : EDITOR_NEU_ACTIVE_SURFACE, boxShadow: active ? "inset 2px 2px 5px rgba(174,174,192,.18)" : EDITOR_NEU_SHADOW, color: enabled ? "#263247" : "#94a3b8", cursor: enabled ? "pointer" : "not-allowed", fontSize: 11, fontWeight: 800 }}>{option.type === "email_message" ? <ExplorerEntityIcon kind="email_message" /> : <ExplorerRowIcon kind={option.type} />}{option.label}<kbd style={{ color: "#64748b", fontSize: 9 }}>{option.shortcut} Tab</kbd></button>;
+          return <button key={option.type} type="button" disabled={!enabled || busy} aria-pressed={active} onClick={() => { setCategory(active ? "all" : option.type); setQuery(""); }} style={{ width: "100%", minWidth: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "7px 9px", border: active ? "1px solid rgba(8,145,178,.30)" : "1px solid rgba(255,255,255,.72)", borderRadius: 11, background: active ? "linear-gradient(145deg,#e8fbff,#f5efff)" : EDITOR_NEU_ACTIVE_SURFACE, boxShadow: active ? "inset 2px 2px 5px rgba(174,174,192,.18)" : EDITOR_NEU_SHADOW, color: enabled ? "#263247" : "#94a3b8", cursor: enabled ? "pointer" : "not-allowed", fontSize: 11, fontWeight: 800, whiteSpace: "nowrap" }}>{option.type === "email_message" ? <HeaderTriageIcon color={enabled ? "#0ea5e9" : "#94a3b8"} /> : <ExplorerRowIcon kind={option.type} />}{option.label}</button>;
         })}
       </div>
       {category === "email_message" ? (
