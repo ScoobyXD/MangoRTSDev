@@ -341,9 +341,9 @@ function handleMangoTiptapEmptyListItemDelete(editor: Editor): boolean {
   const listStart = $from.before(listDepth);
   const replacement: ProseMirrorNode[] = [];
   let selectionPosition = listStart + 1;
-  let selectionBias: -1 | 1 = 1;
-  const createList = (items: ProseMirrorNode[], startOffset = 0) => {
+  const createList = (items: ProseMirrorNode[], startOffset = 0, keepBlockID = true) => {
     const attrs = { ...list.attrs };
+    if (!keepBlockID && "blockId" in attrs) attrs.blockId = null;
     if (list.type.name === "orderedList" && startOffset > 0) {
       attrs.start = Math.max(1, Number(list.attrs.start) || 1) + startOffset;
     }
@@ -362,18 +362,11 @@ function handleMangoTiptapEmptyListItemDelete(editor: Editor): boolean {
     const joinedPreviousItem = previousItem.copy(Fragment.fromArray([...previousContent, ...trailingBlocks]));
     replacement.push(createList([...earlierItems, joinedPreviousItem, ...afterItems]));
   } else if (trailingBlocks.length === 0) {
-    const remainingItems = [...beforeItems, ...afterItems];
-    if (remainingItems.length > 0) {
-      const remainingList = createList(remainingItems);
-      replacement.push(remainingList);
-      if (beforeItems.length > 0) {
-        selectionPosition = listStart + beforeItems.reduce((size, node) => size + node.nodeSize, 1) - 1;
-        selectionBias = -1;
-      }
-    } else {
-      const paragraph = editor.state.schema.nodes.paragraph?.createAndFill();
-      if (!paragraph) return false;
-      replacement.push(paragraph);
+    if (beforeItems.length > 0) replacement.push(createList(beforeItems));
+    selectionPosition = listStart + replacement.reduce((size, node) => size + node.nodeSize, 0) + 1;
+    replacement.push($from.parent);
+    if (afterItems.length > 0) {
+      replacement.push(createList(afterItems, itemIndex + 1, beforeItems.length === 0));
     }
   } else {
     selectionPosition = listStart + 1;
@@ -389,7 +382,7 @@ function handleMangoTiptapEmptyListItemDelete(editor: Editor): boolean {
     Fragment.fromArray(replacement),
   );
   const boundedSelectionPosition = Math.max(0, Math.min(transaction.doc.content.size, selectionPosition));
-  transaction.setSelection(TextSelection.near(transaction.doc.resolve(boundedSelectionPosition), selectionBias));
+  transaction.setSelection(TextSelection.near(transaction.doc.resolve(boundedSelectionPosition), 1));
   editor.view.dispatch(transaction);
   return true;
 }
