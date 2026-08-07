@@ -23,8 +23,8 @@ export type SidebarLogicGateStatusCountDefinition = {
 export const SIDEBAR_LOGIC_GATE_STATUS_COUNT_DEFINITIONS: readonly SidebarLogicGateStatusCountDefinition[] = [
   { key: "request", label: "Request", color: KANBAN_LOGIC_GATE_REQUESTED_COLOR, gradient: "linear-gradient(135deg, #fffbd1 0%, #fff24d 42%, #facc15 100%)", borderColor: "#f5c400", textColor: "#422006", glowColor: "rgba(250, 204, 21, 0.28)" },
   { key: "pending", label: "Pending", color: KANBAN_LOGIC_GATE_PENDING_COLOR, gradient: "linear-gradient(135deg, #ffffff 0%, #f1f5f9 48%, #d9e0e8 100%)", borderColor: "#cbd5e1", textColor: "#334155", glowColor: "rgba(148, 163, 184, 0.20)" },
-  { key: "inProgress", label: "In Progress", color: "#ffb866", gradient: "linear-gradient(135deg, #fff7ed 0%, #ffd7ad 48%, #ffae62 100%)", borderColor: "#f59a45", textColor: "#6b2a0b", glowColor: "rgba(251, 146, 60, 0.20)" },
-  { key: "review", label: "Review", color: "#5ee0d2", gradient: "linear-gradient(135deg, #d8fff9 0%, #8eeadf 48%, #54d8cc 100%)", borderColor: "#35bfb5", textColor: "#064e4a", glowColor: "rgba(45, 212, 191, 0.22)" },
+  { key: "inProgress", label: "In Progress", color: "rgb(254, 155, 70)", gradient: "none", borderColor: "#f58b32", textColor: "#5f2409", glowColor: "rgba(254, 155, 70, 0.24)" },
+  { key: "review", label: "Review", color: "#19a8ff", gradient: "linear-gradient(180deg, #33ddd5 0%, #19a8ff 100%)", borderColor: "#19a8ff", textColor: "#062d4f", glowColor: "rgba(25, 168, 255, 0.28)" },
 ];
 
 export function emptySidebarLogicGateStatusCounts(): SidebarLogicGateStatusCounts {
