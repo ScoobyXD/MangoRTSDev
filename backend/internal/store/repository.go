@@ -723,10 +723,10 @@ type LogicGateWorkRepository interface {
 }
 
 type WorkItemReadRepository interface {
-	ListGeneratedInboxNodes(query WorkItemInboxQuery) ([]domain.Node, error)
-	ListGeneratedInboxNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error)
-	ListACIInboxLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
-	ListACIInboxLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
+	ListResponsibleInboxNodes(query WorkItemInboxQuery) ([]domain.Node, error)
+	ListResponsibleInboxNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error)
+	ListCVIInboxLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
+	ListCVIInboxLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
 	ListMyNodes(query WorkItemInboxQuery) ([]domain.Node, error)
 	ListMyNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error)
 	ListMyLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
@@ -1117,7 +1117,7 @@ type ProjectionRow struct {
 	ResourceType                 string           `json:"resource_type,omitempty"`
 	ResourceID                   string           `json:"resource_id,omitempty"`
 	GVICAssignment               string           `json:"gvic_assignment,omitempty"`
-	GeneratedUserIDs             []string         `json:"generated_user_ids,omitempty"`
+	ResponsibleUserIDs           []string         `json:"responsible_user_ids,omitempty"`
 	ParentResourceType           string           `json:"parent_resource_type,omitempty"`
 	ParentResourceID             string           `json:"parent_resource_id,omitempty"`
 	NodeLeafID                   string           `json:"node_leaf_id,omitempty"`
@@ -2443,12 +2443,12 @@ func NormalizeKanbanBoardQuery(query KanbanBoardQuery) KanbanBoardQuery {
 
 func NormalizeGVICRole(role string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(role)) {
-	case domain.GVICRoleGenerated:
-		return domain.GVICRoleGenerated, true
-	case domain.GVICRoleVerified:
-		return domain.GVICRoleVerified, true
+	case domain.GVICRoleResponsible:
+		return domain.GVICRoleResponsible, true
 	case domain.GVICRoleConsulted:
 		return domain.GVICRoleConsulted, true
+	case domain.GVICRoleVerifier:
+		return domain.GVICRoleVerifier, true
 	case domain.GVICRoleInformed:
 		return domain.GVICRoleInformed, true
 	default:

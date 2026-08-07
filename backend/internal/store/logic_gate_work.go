@@ -159,7 +159,7 @@ func buildLogicGateWorkView(logicGate domain.LogicGate, assignments []logicGateW
 func logicGateWorkRequestOwnerUserID(assignments []domain.LogicGateGVICAssignment) string {
 	for _, assignment := range assignments {
 		principalType, principalID := logicGateGVICAssignmentPrincipal(assignment)
-		if assignment.Role == domain.GVICRoleGenerated && principalType == EntityPermissionSubjectUser {
+		if assignment.Role == domain.GVICRoleResponsible && principalType == EntityPermissionSubjectUser {
 			return strings.TrimSpace(principalID)
 		}
 	}

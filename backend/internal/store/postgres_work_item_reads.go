@@ -8,11 +8,11 @@ import (
 	"strings"
 )
 
-func (r *PostgresRepo) ListGeneratedInboxNodes(query WorkItemInboxQuery) ([]domain.Node, error) {
-	return r.ListGeneratedInboxNodesContext(context.Background(), query)
+func (r *PostgresRepo) ListResponsibleInboxNodes(query WorkItemInboxQuery) ([]domain.Node, error) {
+	return r.ListResponsibleInboxNodesContext(context.Background(), query)
 }
 
-func (r *PostgresRepo) ListGeneratedInboxNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
+func (r *PostgresRepo) ListResponsibleInboxNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
 	return r.listGVICMatrixProjectedNodes(ctx, query, true)
 }
 
@@ -24,14 +24,14 @@ func (r *PostgresRepo) ListMyNodesContext(ctx context.Context, query WorkItemInb
 	return r.listGVICMatrixProjectedNodes(ctx, query, false)
 }
 
-func (r *PostgresRepo) listGVICMatrixProjectedNodes(ctx context.Context, query WorkItemInboxQuery, generatedOnly bool) ([]domain.Node, error) {
+func (r *PostgresRepo) listGVICMatrixProjectedNodes(ctx context.Context, query WorkItemInboxQuery, responsibleOnly bool) ([]domain.Node, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	query = NormalizeWorkItemInboxQuery(query)
 	roleFilter := ""
-	if generatedOnly {
-		roleFilter = "and assignment.role='generated'"
+	if responsibleOnly {
+		roleFilter = "and assignment.role='responsible'"
 	}
 	rows, err := r.db.QueryContext(ctx, `
 select
@@ -72,11 +72,11 @@ limit $3`, query.CompanyID, query.UserID, query.Limit, query.ViewerUserID)
 	return items, rows.Err()
 }
 
-func (r *PostgresRepo) ListACIInboxLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
-	return r.ListACIInboxLogicGatesContext(context.Background(), query)
+func (r *PostgresRepo) ListCVIInboxLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
+	return r.ListCVIInboxLogicGatesContext(context.Background(), query)
 }
 
-func (r *PostgresRepo) ListACIInboxLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
+func (r *PostgresRepo) ListCVIInboxLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
 	return r.listGVICMatrixProjectedLogicGates(ctx, query, true)
 }
 
@@ -88,14 +88,14 @@ func (r *PostgresRepo) ListMyLogicGatesContext(ctx context.Context, query WorkIt
 	return r.listGVICMatrixProjectedLogicGates(ctx, query, false)
 }
 
-func (r *PostgresRepo) listGVICMatrixProjectedLogicGates(ctx context.Context, query WorkItemInboxQuery, aciOnly bool) ([]WorkItemLogicGateInboxItem, error) {
+func (r *PostgresRepo) listGVICMatrixProjectedLogicGates(ctx context.Context, query WorkItemInboxQuery, cviOnly bool) ([]WorkItemLogicGateInboxItem, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	query = NormalizeWorkItemInboxQuery(query)
 	roleFilter := ""
-	if aciOnly {
-		roleFilter = "\n  and assignment.role in ('verified', 'consulted', 'informed')"
+	if cviOnly {
+		roleFilter = "\n  and assignment.role in ('verifier', 'consulted', 'informed')"
 	}
 	rows, err := r.db.QueryContext(ctx, `
 select

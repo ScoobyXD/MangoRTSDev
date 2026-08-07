@@ -1,3 +1,17 @@
+# Process Story: A manager controls peer permissions without an arbitrary row cap
+
+A company manager who can Edit a resource opens its permission settings
+↓
+The manager can change the default and direct user or group rules, including rules for another company manager
+↓
+Company-admin and dev-admin identities remain protected because managers cannot edit those administrative rows or bypass resource permissions
+↓
+The complete V2 policy saves with stale-write protection and no documented 1,000-assignment product limit
+↓
+Live direct, nested-group, and default rules resolve Edit or No Access independently from RCVI
+
+Last updated: 2026-08-06
+
 # Process Story: Authorization resolves one live V2 permission policy
 
 A user requests a Node, Logic Gate, relationship, Editor document, Explorer row, or Kanban item
@@ -14,7 +28,7 @@ An editable dialog saves pending changes before closing; denied, read-only, unch
 ↓
 A successful permission save invalidates the workspace snapshot and cached Node and Logic Gate records so descendant views refetch the new live policy result
 
-Last updated: 2026-08-05
+Last updated: 2026-08-06
 
 # Permissions Tests
 
@@ -31,7 +45,7 @@ P3 - Blank permission input is invalid and must not create an implicit grant.
 P4 - Legacy `view`, `admin`, and `manage` resource permission values are invalid; compatibility aliases must not recreate a third access outcome.
 P5 - Default access participates in effective access calculation.
 P6 - Resource permissions support user and group source principals.
-P7 - A resource can have at most 1000 explicit permission assignments in one update.
+P7 - The canonical V2 permission PUT has no documented 1,000-assignment product limit; request size remains governed by the normal HTTP and database boundaries.
 P8 - Dev admins and company admins resolve company-managed resource access to edit, not to a separate resource-admin tier.
 P9 - GVIC assignments do not grant resource permission access and must not satisfy edit, delete, or mutation authorization checks.
 P10 - GVIC assignments must not elevate a user from no access to edit; edit/delete authority comes only from the resource permission policy.
@@ -49,7 +63,7 @@ P21 - Malformed or unknown resource IDs do not crash visibility checks.
 P22 - Effective access is resolved from canonical settings, rules, live hierarchy, and live nested groups at read time; no derived effective-access table is policy authority.
 P23 - Permission writes update one complete policy or one descendant-reset sequence and relevant read versions atomically. They never rewrite every descendant or publish a generic permission/workspace event.
 P24 - Company managers do not bypass resource permissions.
-P25 - Company managers can update permission exceptions for company users only; dev admins and company admins can update manager and user exceptions.
+P25 - Company managers with effective Edit access can update user and group exceptions, including exceptions for other company managers; they cannot edit company-admin or dev-admin identities.
 P26 - Default access has only two states, edit and no access; `resource_permissions` stores explicit user/group source rows with their own access level.
 P27 - When a company manager changes a resource default, manager effective access is preserved while regular company users follow the new default and exceptions.
 P28 - Step 1 copied reconciled legacy policy into V2 staging. Step 2 uses canonical V2 tables only and retains renamed legacy policy tables only as frozen rollback evidence for Step 3.
@@ -85,9 +99,9 @@ P57 - Logic Gate work authorization is evaluated before conditional ETag handlin
 P58 - Direct or inherited source changes, eligible resets, parent moves, and group-version changes alter the policy fingerprint without descendant version fanout.
 P59 - Company role, group membership, and group hierarchy changes that can alter actor permission flags update the shared group-membership version.
 P60 - Authorization is evaluated before conditional ETag handling, and the actor-specific permission result is part of the ETag so revoked or differently authorized users cannot share an unsafe validator.
-P61 - GVIC Generated/request-owner data may appear in the Logic Gate header, but GVIC assignments do not set `can_edit`.
+P61 - RCVI Responsible/request-owner data may appear in the Logic Gate header, but RCVI assignments do not set `can_edit`.
 P62 - Permission mutations still publish no generic permission/workspace event. Instead, before a later Node-chat, mounted-board, or shared-mailbox hint reaches an already-subscribed socket, that narrow publisher resolves the exact current audience and fails closed on lookup errors. A user revoked after subscribing receives no later resource identifiers/hints without needing a reconnect.
-P63 - A newly created email Node first resolves and copies the effective policy from its final parent/source, then becomes customized with one system-managed direct Edit binding for its creator and direct Generated GVIC. Generic permission replacement cannot widen or remove collaboration participant grants.
+P63 - A newly created email Node first resolves and copies the effective policy from its final parent/source, then becomes customized with one system-managed direct Edit binding for its creator and direct Responsible RCVI. Generic permission replacement cannot widen or remove collaboration participant grants.
 P64 - A committed direct user mention or resolved user-group mention snapshots each distinct same-company user as a collaboration participant and adds one system-managed direct edit binding for that user in the same durable transaction. These are user bindings, not live group pointers, so later group changes neither grant nor revoke collaboration access.
 P65 - Collaboration participant membership and its mandatory Node edit binding are append-only for the collaboration lifetime. The collaboration Node policy is system-managed: generic Node permission mutation cannot add a grant, remove/downgrade/replace a participant binding, or change its default away from `no_access`; only the accepted mention-participant path may add a binding. Deleting the mention message has no permission effect.
 P66 - A generic Node permission grant alone does not create email collaboration participation, a triage row, source-mailbox access, or shared-draft access. The existing dev-admin/company-admin bypass remains an administrative access rule but does not silently add the administrator to participant lists, mention notifications, or My Drafts.
@@ -134,7 +148,7 @@ Expected:
 - Group rows are not expanded to per-user rows; later group membership changes affect effective access.
 - Group permission authorization resolves from source group/membership tables and remains correct after a schema reset even if derived group projections are empty.
 - Direct user rows override group rows for that user.
-- Updates with more than 1000 explicit assignments are rejected.
+- The V2 permission PUT does not reject a policy merely because it contains more than 1,000 explicit assignments.
 
 ### Scenario P-S2: Denial Behavior And Permission Settings
 
@@ -169,7 +183,7 @@ Expected:
 - Responses include stored/effective mode, stored/effective default and rules, source/reset/overwrite explanation, effective access, and permission-management capabilities.
 - Regular-user resource edit access does not allow loading or updating permission settings.
 - A non-manager/non-admin opening the permissions tab sees a manager/admin permission message instead of a generic permissions failure.
-- Company managers can change company user exceptions but cannot change other manager exceptions.
+- Company managers can change regular-user, group, and other company-manager exceptions, but cannot change company-admin or dev-admin identities.
 - When a manager flips the default, manager effective access is preserved and regular company user access follows the new default plus exceptions.
 
 ### Scenario P-S3: Visibility Filtering And Live V2 Resolution

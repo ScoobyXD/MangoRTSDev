@@ -239,12 +239,12 @@ func TestCompanyExplorerSnapshotCarriesGVICAndLogicGateMembership(t *testing.T) 
 	companyID := "company-explorer-gvic-snapshot"
 	repo.EnsureCompany(companyID, "GVIC Snapshot Company")
 
-	generatedSubject := "gvic-snapshot-generated"
-	generated, err := repo.UpsertAuthUser(generatedSubject, "generated-snapshot@example.com", "Generated Snapshot")
+	responsibleSubject := "gvic-snapshot-responsible"
+	responsible, err := repo.UpsertAuthUser(responsibleSubject, "responsible-snapshot@example.com", "Responsible Snapshot")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser: %v", err)
 	}
-	if _, err := repo.AddCompanyMembership(generatedSubject, companyID, domain.RoleCompanyUser); err != nil {
+	if _, err := repo.AddCompanyMembership(responsibleSubject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership: %v", err)
 	}
 	logicGate, err := repo.CreateLogicGate(companyID, "GVIC Snapshot Gate")
@@ -256,11 +256,11 @@ func TestCompanyExplorerSnapshotCarriesGVICAndLogicGateMembership(t *testing.T) 
 		ResourceType: store.EntityTypeLogicGate,
 		ResourceID:   logicGate.LogicGateID,
 		Assignments: []store.ResourceGVICAssignmentInput{{
-			Role:          domain.GVICRoleGenerated,
+			Role:          domain.GVICRoleResponsible,
 			PrincipalType: store.EntityPermissionSubjectUser,
-			PrincipalID:   generated.UserID,
+			PrincipalID:   responsible.UserID,
 		}},
-		ActorUserID:    generated.UserID,
+		ActorUserID:    responsible.UserID,
 		IdempotencyKey: "company-explorer-gvic-snapshot",
 	}); err != nil {
 		t.Fatalf("AddResourceGVICAssignments: %v", err)
@@ -270,7 +270,7 @@ func TestCompanyExplorerSnapshotCarriesGVICAndLogicGateMembership(t *testing.T) 
 		CompanyID:      companyID,
 		Title:          "GVIC Snapshot Node",
 		LogicGateID:    logicGate.LogicGateID,
-		ActorUserID:    generated.UserID,
+		ActorUserID:    responsible.UserID,
 		IdempotencyKey: "company-explorer-gvic-node",
 		MutationOrigin: "matrix",
 		Priority:       &priority,
@@ -305,11 +305,11 @@ func TestCompanyExplorerSnapshotCarriesGVICAndLogicGateMembership(t *testing.T) 
 		t.Fatalf("snapshot logic gates = %+v, missing %s", payload.LogicGates, logicGate.LogicGateID)
 	}
 	if len(snapshotGate.GVICAssignments) != 1 ||
-		snapshotGate.GVICAssignments[0].Role != domain.GVICRoleGenerated ||
+		snapshotGate.GVICAssignments[0].Role != domain.GVICRoleResponsible ||
 		snapshotGate.GVICAssignments[0].PrincipalType != store.EntityPermissionSubjectUser ||
-		snapshotGate.GVICAssignments[0].PrincipalID != generated.UserID ||
-		snapshotGate.GVICAssignments[0].UserID != generated.UserID {
-		t.Fatalf("snapshot gate gvic_assignments = %+v, want generated assignment", snapshotGate.GVICAssignments)
+		snapshotGate.GVICAssignments[0].PrincipalID != responsible.UserID ||
+		snapshotGate.GVICAssignments[0].UserID != responsible.UserID {
+		t.Fatalf("snapshot gate gvic_assignments = %+v, want responsible assignment", snapshotGate.GVICAssignments)
 	}
 
 	var snapshotNode *domain.Node
@@ -453,23 +453,23 @@ func TestCommunicationsSharedInboxGVICAPI(t *testing.T) {
 	companyID := "company-shared-inbox-gvic-test"
 	repo.EnsureCompany(companyID, "Shared Inbox GVIC Test")
 
-	generated, err := repo.UpsertAuthUser("subject-shared-gvic-generated", "generated@example.com", "Generated Person")
+	responsible, err := repo.UpsertAuthUser("subject-shared-gvic-responsible", "responsible@example.com", "Responsible Person")
 	if err != nil {
-		t.Fatalf("UpsertAuthUser generated error = %v", err)
+		t.Fatalf("UpsertAuthUser responsible error = %v", err)
 	}
-	verified, err := repo.UpsertAuthUser("subject-shared-gvic-verified", "verified@example.com", "Verified Person")
+	verifier, err := repo.UpsertAuthUser("subject-shared-gvic-verifier", "verifier@example.com", "Verifier Person")
 	if err != nil {
-		t.Fatalf("UpsertAuthUser verified error = %v", err)
+		t.Fatalf("UpsertAuthUser verifier error = %v", err)
 	}
 	informedMember, err := repo.UpsertAuthUser("subject-shared-gvic-informed", "informed@example.com", "Informed Person")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser informed member error = %v", err)
 	}
-	if _, err := repo.AddCompanyMembership(generated.CognitoSubject, companyID, "company_user"); err != nil {
-		t.Fatalf("AddCompanyMembership generated error = %v", err)
+	if _, err := repo.AddCompanyMembership(responsible.CognitoSubject, companyID, "company_user"); err != nil {
+		t.Fatalf("AddCompanyMembership responsible error = %v", err)
 	}
-	if _, err := repo.AddCompanyMembership(verified.CognitoSubject, companyID, "company_user"); err != nil {
-		t.Fatalf("AddCompanyMembership verified error = %v", err)
+	if _, err := repo.AddCompanyMembership(verifier.CognitoSubject, companyID, "company_user"); err != nil {
+		t.Fatalf("AddCompanyMembership verifier error = %v", err)
 	}
 	if _, err := repo.AddCompanyMembership(informedMember.CognitoSubject, companyID, "company_user"); err != nil {
 		t.Fatalf("AddCompanyMembership informed member error = %v", err)
@@ -483,7 +483,7 @@ func TestCommunicationsSharedInboxGVICAPI(t *testing.T) {
 	}
 
 	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       generated.UserID,
+		UserID:       responsible.UserID,
 		Provider:     "google",
 		AccountEmail: "ar@example.com",
 		Scope:        "shared",
@@ -500,14 +500,14 @@ func TestCommunicationsSharedInboxGVICAPI(t *testing.T) {
 		"company_id":      companyID,
 		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{
-			{"role": domain.GVICRoleGenerated, "principal_type": store.EntityPermissionSubjectUser, "principal_id": generated.UserID},
-			{"role": domain.GVICRoleVerified, "principal_type": store.EntityPermissionSubjectUser, "principal_id": verified.UserID},
+			{"role": domain.GVICRoleResponsible, "principal_type": store.EntityPermissionSubjectUser, "principal_id": responsible.UserID},
+			{"role": domain.GVICRoleVerifier, "principal_type": store.EntityPermissionSubjectUser, "principal_id": verifier.UserID},
 			{"role": domain.GVICRoleInformed, "principal_type": store.EntityPermissionSubjectGroup, "principal_id": department.GroupID},
 		},
 	})
 	resourceType := store.CommunicationsSharedInboxGVICResourceType(folder)
 	req := httptest.NewRequest(http.MethodPut, "/v1/resources/"+resourceType+"/"+folder.FolderID+"/gvic", bytes.NewReader(body))
-	req = requestWithActorForTest(req, generated, companyID)
+	req = requestWithActorForTest(req, responsible, companyID)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -525,21 +525,21 @@ func TestCommunicationsSharedInboxGVICAPI(t *testing.T) {
 	if len(updatePayload.Assignments) != 3 {
 		t.Fatalf("PUT shared inbox GVIC assignment count = %d, want 3", len(updatePayload.Assignments))
 	}
-	foundGenerated := false
+	foundResponsible := false
 	foundGroupSource := false
 	for _, assignment := range updatePayload.Assignments {
 		if assignment.ResourceType != resourceType || assignment.ResourceID != folder.FolderID {
 			t.Fatalf("assignment = %+v, want resource %s/%s", assignment, resourceType, folder.FolderID)
 		}
-		if assignment.Role == domain.GVICRoleGenerated && assignment.PrincipalType == store.EntityPermissionSubjectUser && assignment.PrincipalID == generated.UserID && assignment.UserID == generated.UserID {
-			foundGenerated = true
+		if assignment.Role == domain.GVICRoleResponsible && assignment.PrincipalType == store.EntityPermissionSubjectUser && assignment.PrincipalID == responsible.UserID && assignment.UserID == responsible.UserID {
+			foundResponsible = true
 		}
 		if assignment.Role == domain.GVICRoleInformed && assignment.PrincipalType == store.EntityPermissionSubjectGroup && assignment.PrincipalID == department.GroupID {
 			foundGroupSource = true
 		}
 	}
-	if !foundGenerated || !foundGroupSource {
-		t.Fatalf("gvic source assignments = %+v, want generated user and informed group", updatePayload.Assignments)
+	if !foundResponsible || !foundGroupSource {
+		t.Fatalf("gvic source assignments = %+v, want responsible user and informed group", updatePayload.Assignments)
 	}
 	foundExpandedMember := false
 	for _, assignment := range updatePayload.EffectiveAssignments {
@@ -624,7 +624,7 @@ func TestCommunicationsSharedInboxFolderGVICInheritanceAndCustomization(t *testi
 		"company_id":      companyID,
 		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{
-			{"role": domain.GVICRoleGenerated, "principal_type": store.EntityPermissionSubjectUser, "principal_id": parentUser.UserID},
+			{"role": domain.GVICRoleResponsible, "principal_type": store.EntityPermissionSubjectUser, "principal_id": parentUser.UserID},
 		},
 	})
 	legacyReq := httptest.NewRequest(http.MethodPut, "/v1/resources/"+store.EntityTypeSharedTriageFolder+"/"+parent.FolderID+"/gvic", bytes.NewReader(parentBody))
@@ -661,14 +661,14 @@ func TestCommunicationsSharedInboxFolderGVICInheritanceAndCustomization(t *testi
 		t.Fatalf("decode inherited child GVIC: %v", err)
 	}
 	if inheritedPayload.AssignmentMode != store.PolicyModeInherited || inheritedPayload.EffectiveSource.ResourceID != parent.FolderID || len(inheritedPayload.EffectiveAssignments) != 1 || inheritedPayload.EffectiveAssignments[0].UserID != parentUser.UserID {
-		t.Fatalf("inherited child policy = %+v, want parent generated policy", inheritedPayload)
+		t.Fatalf("inherited child policy = %+v, want parent responsible policy", inheritedPayload)
 	}
 
 	childBody, _ := json.Marshal(map[string]any{
 		"company_id":      companyID,
 		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{
-			{"role": domain.GVICRoleVerified, "principal_type": store.EntityPermissionSubjectUser, "principal_id": childUser.UserID},
+			{"role": domain.GVICRoleVerifier, "principal_type": store.EntityPermissionSubjectUser, "principal_id": childUser.UserID},
 		},
 	})
 	childReq := httptest.NewRequest(http.MethodPut, "/v1/resources/"+store.EntityTypeSharedInboxFolder+"/"+child.FolderID+"/gvic", bytes.NewReader(childBody))
@@ -689,11 +689,11 @@ func TestCommunicationsSharedInboxFolderGVICInheritanceAndCustomization(t *testi
 	if len(childPayload.Assignments) != 1 {
 		t.Fatalf("child PUT assignment count = %d, want direct child only", len(childPayload.Assignments))
 	}
-	if childPayload.Assignments[0].ResourceID != child.FolderID || childPayload.Assignments[0].Role != domain.GVICRoleVerified || childPayload.Assignments[0].UserID != childUser.UserID {
+	if childPayload.Assignments[0].ResourceID != child.FolderID || childPayload.Assignments[0].Role != domain.GVICRoleVerifier || childPayload.Assignments[0].UserID != childUser.UserID {
 		t.Fatalf("child assignment = %+v, want direct child assignment only", childPayload.Assignments[0])
 	}
-	if len(childPayload.EffectiveAssignments) != 1 || childPayload.EffectiveAssignments[0].Role != domain.GVICRoleVerified || childPayload.EffectiveAssignments[0].UserID != childUser.UserID {
-		t.Fatalf("child effective assignments = %+v, want direct verified child only", childPayload.EffectiveAssignments)
+	if len(childPayload.EffectiveAssignments) != 1 || childPayload.EffectiveAssignments[0].Role != domain.GVICRoleVerifier || childPayload.EffectiveAssignments[0].UserID != childUser.UserID {
+		t.Fatalf("child effective assignments = %+v, want direct verifier child only", childPayload.EffectiveAssignments)
 	}
 }
 
@@ -995,7 +995,7 @@ func TestCompanyExplorerCommunicationsFolderListDoesNotApplyGVICFiltering(t *tes
 		CompanyID: companyID, ResourceType: store.EntityTypeSharedInbox, ResourceID: assigned.FolderID,
 		AssignmentMode: store.PolicyModeCustomized, DescendantAction: store.PolicyDescendantActionInheritedOnly,
 		Assignments: []store.ResourceGVICAssignmentInput{{
-			Role: domain.GVICRoleGenerated, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: assignedUser.UserID,
+			Role: domain.GVICRoleResponsible, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: assignedUser.UserID,
 		}},
 	}); err != nil {
 		t.Fatalf("PutResourceGVICPolicy assigned error = %v", err)
@@ -1690,7 +1690,7 @@ func TestCompanyExplorerBatchDeleteTargetsRemovesMoreThanFolderItemBatchLimit(t 
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("Unmarshal response: %v", err)
 	}
-	expectedDeletedTargets := count * 2 // each Logic Gate delete also deletes its generated kanban board.
+	expectedDeletedTargets := count * 2 // each Logic Gate delete also deletes its responsible kanban board.
 	if len(response.Targets) != expectedDeletedTargets {
 		t.Fatalf("deleted targets = %d, want %d", len(response.Targets), expectedDeletedTargets)
 	}
@@ -1872,14 +1872,14 @@ func TestCompanyExplorerLazyRejectsLegacyScopes(t *testing.T) {
 	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: gateA.LogicGateID,
-		Assignments: []store.LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: userA.UserID}},
+		Assignments: []store.LogicGateGVICAssignmentInput{{Role: domain.GVICRoleResponsible, UserID: userA.UserID}},
 	}); err != nil {
 		t.Fatalf("SetLogicGateGVICAssignments A error = %v", err)
 	}
 	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: gateB.LogicGateID,
-		Assignments: []store.LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: userB.UserID}},
+		Assignments: []store.LogicGateGVICAssignmentInput{{Role: domain.GVICRoleResponsible, UserID: userB.UserID}},
 	}); err != nil {
 		t.Fatalf("SetLogicGateGVICAssignments B error = %v", err)
 	}

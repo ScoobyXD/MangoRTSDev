@@ -98,13 +98,6 @@ func (r *PostgresRepo) AddResourceGVICAssignments(input ResourceGVICAssignmentCo
 		byPrincipal[item.PrincipalType+":"+item.PrincipalID] = item
 	}
 	for _, item := range input.Assignments {
-		if strings.TrimSpace(item.Role) == domain.GVICRoleGenerated {
-			for principalKey, existing := range byPrincipal {
-				if existing.Role == domain.GVICRoleGenerated {
-					delete(byPrincipal, principalKey)
-				}
-			}
-		}
 		byPrincipal[strings.TrimSpace(item.PrincipalType)+":"+strings.TrimSpace(item.PrincipalID)] = item
 	}
 	items = items[:0]
@@ -222,9 +215,9 @@ where assignment.company_id=$1::uuid
   and assignment.resource_id=$3::uuid
 order by
   case assignment.role
-    when 'generated' then 1
-    when 'verified' then 2
-    when 'consulted' then 3
+    when 'responsible' then 1
+    when 'consulted' then 2
+    when 'verifier' then 3
     when 'informed' then 4
     else 5
   end,

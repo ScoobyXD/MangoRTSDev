@@ -1042,9 +1042,9 @@ func highestLogicGateGVICRolesByUser(assignments []domain.LogicGateGVICAssignmen
 
 func GVICNotificationRoleRank(role string) int {
 	switch strings.TrimSpace(role) {
-	case domain.GVICRoleGenerated:
+	case domain.GVICRoleResponsible:
 		return 4
-	case domain.GVICRoleVerified:
+	case domain.GVICRoleVerifier:
 		return 3
 	case domain.GVICRoleConsulted:
 		return 2

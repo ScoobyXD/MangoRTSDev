@@ -26,8 +26,8 @@ func TestNodeVerificationRequestAPIIsIdempotentAndRecipientScoped(t *testing.T) 
 	if _, err := repo.SetResourceGVICAssignments(store.ResourceGVICAssignmentUpdateInput{
 		CompanyID: companyID, ResourceType: store.EntityTypeNode, ResourceID: node.NodeID,
 		Assignments: []store.ResourceGVICAssignmentInput{
-			{Role: domain.GVICRoleVerified, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: first.UserID},
-			{Role: domain.GVICRoleVerified, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: second.UserID},
+			{Role: domain.GVICRoleVerifier, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: first.UserID},
+			{Role: domain.GVICRoleVerifier, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: second.UserID},
 		},
 	}); err != nil {
 		t.Fatalf("SetResourceGVICAssignments: %v", err)

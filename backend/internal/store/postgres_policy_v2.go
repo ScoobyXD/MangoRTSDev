@@ -262,17 +262,8 @@ func (r *PostgresRepo) PutResourceGVICPolicy(input ResourceGVICPolicyUpdateInput
 	if err != nil {
 		return ResourceGVICPolicy{}, nil, err
 	}
-	beforeUserIDs := make(map[string]bool, len(current.EffectiveAssignments))
-	for _, assignment := range current.EffectiveAssignments {
-		beforeUserIDs[assignment.UserID] = true
-	}
-	userIDs := make([]string, 0, len(after.EffectiveAssignments))
-	for _, assignment := range after.EffectiveAssignments {
-		if !beforeUserIDs[assignment.UserID] {
-			userIDs = append(userIDs, assignment.UserID)
-		}
-	}
-	sort.Strings(userIDs)
+	userIDs := resourceGVICChangedUserIDs(current.EffectiveAssignments, after.EffectiveAssignments)
+
 	eventInput := DomainEventInput{CompanyID: keyValue.companyID, StreamType: workspaceDomainStreamType, StreamID: keyValue.companyID,
 		Type: v2GVICEventType(keyValue.resourceType), ActorUserID: strings.TrimSpace(input.ActorUserID), IdempotencyKey: strings.TrimSpace(input.IdempotencyKey),
 		Payload: v2PolicyEventPayload(keyValue.resourceType, keyValue.resourceID, map[string]any{"policy_type": "gvic", "assignment_mode": mode, "action": action, "descendant_action": action, "sequence": resultingSequence, "assignment_user_ids": userIDs})}

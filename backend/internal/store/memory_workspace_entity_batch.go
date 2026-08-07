@@ -149,7 +149,7 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 			return WorkspaceEntityBatchResult{}, ErrPrincipalNotInCompany
 		}
 		for _, mapping := range result.EntityMappings {
-			role := domain.GVICRoleGenerated
+			role := domain.GVICRoleResponsible
 			if input.EntityKind == EntityTypeLogicGate {
 				role = input.CreatorLogicGateGVICRole
 			}

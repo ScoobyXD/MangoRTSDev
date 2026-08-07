@@ -226,11 +226,11 @@ func TestMemoryAssignmentsDoNotGrantEditAccess(t *testing.T) {
 		CompanyID:   companyID,
 		LogicGateID: gate.LogicGateID,
 		Assignments: []LogicGateGVICAssignmentInput{{
-			Role:   domain.GVICRoleGenerated,
+			Role:   domain.GVICRoleResponsible,
 			UserID: responsible.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateGVICAssignments generated: %v", err)
+		t.Fatalf("SetLogicGateGVICAssignments responsible: %v", err)
 	}
 	if allowed, err := repo.UserCanAccessEntity(companyID, EntityTypeLogicGate, gate.LogicGateID, responsible.UserID, EntityPermissionEdit); err != nil || !allowed {
 		t.Fatalf("explicit edit with GVIC assignment allowed = %v err = %v, want true", allowed, err)

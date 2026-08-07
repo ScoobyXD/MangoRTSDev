@@ -1,3 +1,13 @@
+# Process Story: Collaboration Nodes receive Responsible RCVI without Explorer ownership
+
+A user creates a standalone collaboration Node from a personal or shared email
+↓
+Mango writes the creator's direct Responsible RCVI edge and participant Edit grants in their typed policy tables
+↓
+The Node remains outside Company Explorer placement storage, and RCVI never substitutes for permission
+
+Last updated: 2026-08-06
+
 # Process Story: Nodes stay outside Company Explorer placement storage
 
 A user creates or finds a Node from Editor, email collaboration, chat, Project, or Logic Gate work
@@ -16,7 +26,7 @@ Last updated: 2026-08-06
 
 A user opens Home and selects a Node, Logic Gate, Project, Kanban board, folder, or communications row in Explorer
 ↓
-Explorer resolves the exact accessible row through current folder hierarchy, V2 GVIC, and V2 Edit permission, then publishes semantic selection only to directly linked surviving frames
+Explorer resolves the exact accessible row through current folder hierarchy, V2 RCVI, and V2 Edit permission, then publishes semantic selection only to directly linked surviving frames
 ↓
 Editor or Kanban consumes the entity context without reading browser geometry or position state
 ↓
@@ -32,7 +42,7 @@ Last updated: 2026-08-05
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: backend coverage exists for V2 tree reads, placement/delete behavior, protected default folders, inherited/customized policy, move boundaries, and force resets. `tests/frontend/modules/company-explorer/companyExplorerStore.test.ts` covers E55 committed-title publication/registry helpers and Explorer, search, and GVIC title reconcilers. Rule ID mapping remains partial.
+- Business Logic Covered By Automated Tests: backend coverage exists for V2 tree reads, placement/delete behavior, protected default folders, inherited/customized policy, move boundaries, and force resets. `tests/frontend/modules/company-explorer/companyExplorerStore.test.ts` covers E55 committed-title publication/registry helpers and Explorer, search, and RCVI title reconcilers. Rule ID mapping remains partial.
 
 ## Business Logic
 
@@ -48,7 +58,7 @@ E9 - The final Company Explorer tree contains folders, subfolders, Logic Gates, 
 E10 - Project rows are standalone leaf rows; project relationships do not render nested Explorer child rows.
 E11 - Logic Gate rows are standalone leaf rows; node assignments do not render as nested Explorer child rows.
 E12 - Creating an Explorer folder requires company, actor, permission user, parent entity, and nonblank folder name.
-E13 - New root Explorer folders own complete customized GVIC and permission policies; new subfolders start inherited with no copied policy edges and resolve their current parent live.
+E13 - New root Explorer folders own complete customized RCVI and permission policies; new subfolders start inherited with no copied policy edges and resolve their current parent live.
 E14 - Explorer folders can be created only under the company root or another folder.
 E15 - Creating a folder under a non-folder resource is rejected.
 E16 - Renaming an Explorer folder requires edit access to that folder.
@@ -89,12 +99,12 @@ E51 - Double-clicking a Company Explorer row label must not enter inline rename 
 E52 - We want multi browser click-drag ability. So I can drag an email from My Triage or Shared Triage and click drag it to another browser window (but the same account) and drop it off on the company explorer logic gate and create a node within that logic gate's kanban board with an email icon (but obviously not create a node on the company explorer)
 E53 - Permissions opened from Company Explorer for folders, projects, or Logic Gates use the shared permission view and always expose a visible **Save** action when editable. Node search results remain open-only and do not gain Explorer permission actions.
 E54 - An email conversion through Company Explorer sends the exact source mailbox key and persists mailbox provenance in the created node's attached-email projection: personal/My Triage drag and conversion requests carry normalized `account_email`; Shared Triage requests carry `shared_inbox_id` and suppress a personal-account query, while the canonical projection retains both the shared inbox and its company mailbox account email. Later reads, replies, attachments, drafts, and invitation responses use that source scope.
-E55 - Every successful Node or Logic Gate rename entry point publishes the concrete committed-title event after commit. Company Explorer patches matching Logic Gate rows, Node search results, and mounted GVIC-mode Node/Logic Gate names (including scoped per-user cached rows) immediately alongside the other applicable mounted surfaces; active title drafts/carets are deferred, failed renames publish no event, and another browser still uses canonical reads.
+E55 - Every successful Node or Logic Gate rename entry point publishes the concrete committed-title event after commit. Company Explorer patches matching Logic Gate rows, Node search results, and mounted RCVI-mode Node/Logic Gate names (including scoped per-user cached rows) immediately alongside the other applicable mounted surfaces; active title drafts/carets are deferred, failed renames publish no event, and another browser still uses canonical reads.
 E56 - Re-running default-folder repair is idempotent and creates or repairs only Unfiled, Projects, and Logic Gates. It never recreates Unfiled/Nodes or backfills Nodes.
-E57 - A Triage-comment email Node receives its creator/participant Edit grants and creator Generated GVIC directly as an ordinary standalone Node; its privacy never depends on Company Explorer folder placement or visibility.
+E57 - A Triage-comment email Node receives its creator/participant Edit grants and creator Responsible RCVI directly as an ordinary standalone Node; its privacy never depends on Company Explorer folder placement or visibility.
 E58 - Collaboration ownership, chat, participants, drafts, source-thread links, attachments, and Node policies remain in their typed domain tables. Company Explorer has no collaboration Node projection or lifecycle edge.
 E59 - Concurrent collaboration retries and future provider messages reuse the same collaboration Node without creating a Company Explorer item or duplicate search result.
-E60 - Existing email-to-Logic-Gate conversion still creates Pending work under its established typed assignment path. Starting chat on an unconverted triage email creates a standalone creator-Generated-GVIC Node with no Company Explorer placement and no initial Logic Gate.
+E60 - Existing email-to-Logic-Gate conversion still creates Pending work under its established typed assignment path. Starting chat on an unconverted triage email creates a standalone creator-Responsible-RCVI Node with no Company Explorer placement and no initial Logic Gate.
 E61 - Explorer policy reads explain inherited/customized mode, effective source, active reset, and inactive overwritten customization for folders, projects, and Logic Gates.
 E62 - Moving a subtree after an older force reset protects it through the new parent-link sequence; a later reset from its new ancestry may cross that link.
 E63 - Deleting an Explorer target removes both V2 settings rows and cascading policy edges; deleting only a placement follows root/detach materialization rules without deleting the target.
@@ -197,7 +207,7 @@ Given:
 - Another browser may change an Explorer resource while this browser remains open.
 
 Expected:
-- The committed response or concrete same-window committed-title event patches matching Explorer Logic Gate rows, Node search results, and materialized/scoped GVIC-mode Node and Logic Gate names in the initiating browser.
+- The committed response or concrete same-window committed-title event patches matching Explorer Logic Gate rows, Node search results, and materialized/scoped RCVI-mode Node and Logic Gate names in the initiating browser.
 - Editor, Kanban, Home, Project, dock/pin, and Explorer labels converge from that same event as applicable.
 - Failed renames publish no title event; no generalized server fan-out or full reload is required.
 - Durable domain facts may retain the affected parent entity ID for independently required consumers, but no Company Explorer or workspace browser event is published.

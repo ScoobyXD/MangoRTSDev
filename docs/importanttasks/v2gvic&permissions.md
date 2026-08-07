@@ -1,3 +1,19 @@
+# Process Story: RCVI names responsibility and expands teams live
+
+A manager or editor assigns Responsible, Consulted, Verifier, or Informed to people or groups on a resource
+↓
+The policy stores each direct user or group once, and the editor shows each direct assignee's full display name
+↓
+Nested group membership expands live for effective RCVI, My Work, and notifications without creating permanent per-user copies
+↓
+A changed effective role notifies that non-actor user even when the user was already assigned before the policy replacement
+↓
+A company manager with Edit access can manage regular-user, group, and peer-manager permission rules, while admin identities remain protected
+↓
+RCVI and permissions remain separate, and the permission PUT has no documented 1,000-assignment product cap
+
+Last updated: 2026-08-06
+
 # Process Story
 
 A Mango company organizes work as a resource tree. A Company Explorer folder can contain subfolders, Projects, and Logic Gates; a Logic Gate can contain assigned Nodes. Shared Triage folders can contain subfolders and shared inboxes. Every resource has a GVIC assignment mode and a permission mode. Each mode is either `inherited` or `customized`.
@@ -10,7 +26,7 @@ GVIC and permissions remain separate systems. `resource_gvic_assignments` stores
 
 The final product model has exactly four policy tables: `resource_gvic_settings`, `resource_gvic_assignments`, `resource_permission_settings`, and `resource_permissions`. The settings tables distinguish inherited from intentionally empty customized policies and hold the sequence values needed for scalable force-overwrite behavior. The assignment tables hold the actual customized user/group edges. There is no permanent effective-assignment table, descendant fan-out table, policy-application history table, or duplicated default-access authority.
 
-# V2 GVIC and Permissions
+# V2 RCVI and Permissions (technical GVIC storage/API namespace)
 
 ## Purpose and status
 
@@ -23,6 +39,13 @@ It replaces the current pointer/application design after the three separately co
 3. Complete testing, soak, snapshot, and separately approved retirement of old storage.
 
 This document does not authorize an agent to apply SQL to a live database. Repository agents may create schema, migration, preflight, copy, verification, and retirement files, but a human controls every live-database operation.
+## August 6, 2026 RCVI conversion
+
+The product roles are Responsible, Consulted, Verifier, and Informed. Existing technical table, API, and helper names keep the `gvic` namespace; that namespace is not a fifth role or a separate policy authority.
+
+Existing databases require the reviewed forward migration `backend/db/migrations/20260806_zzz_rcvi_roles.sql`. It converts active Generated rows to Responsible and Verified rows to Verifier, updates notification and projection role values, updates restorable Recycle Bin policy JSON, removes the old Responsible/Verifier user-only and single-Responsible restrictions, and installs live nested-group effective resolution for every RCVI role. Agents must not apply it to a live database.
+
+Fresh disposable databases receive the same final contract from the marked RCVI block at the end of `backend/db/schema.sql`. That file is also a replayable history and still contains the earlier Step 1 staging and Step 2 rename/cutover construction before the final RCVI block. Runtime code reads and writes only the final four V2 policy tables. This RCVI change does not rewrite the historical construction into a new direct-create-only schema.
 
 ## Final decisions
 
@@ -199,9 +222,8 @@ create table resource_gvic_assignments (
   foreign key (company_id, resource_type, resource_id)
     references resource_gvic_settings(company_id, resource_type, resource_id)
     on delete cascade,
-  check (role in ('generated', 'verified', 'consulted', 'informed')),
-  check (principal_type in ('user', 'group')),
-  check (role not in ('generated', 'verified') or principal_type = 'user')
+  check (role in ('responsible', 'consulted', 'verifier', 'informed')),
+  check (principal_type in ('user', 'group'))
 );
 ```
 
@@ -211,9 +233,6 @@ Additional required constraints and indexes:
 create unique index on resource_gvic_assignments
   (company_id, resource_type, resource_id, principal_type, principal_id);
 
-create unique index on resource_gvic_assignments
-  (company_id, resource_type, resource_id)
-  where role = 'generated';
 
 create index on resource_gvic_assignments
   (company_id, principal_type, principal_id, role, resource_type, resource_id);
@@ -221,11 +240,9 @@ create index on resource_gvic_assignments
 
 Uniform GVIC validation applies to every supported resource type so a folder policy can be inherited by a Logic Gate or Node without becoming invalid:
 
-- Generated: zero or one user; groups are forbidden.
-- Verified: zero or more users; groups are forbidden.
-- Consulted: users and groups are allowed.
-- Informed: users and groups are allowed.
-- One principal may have only one source role in one customized resource policy.
+- Responsible, Consulted, Verifier, and Informed each allow multiple users or groups.
+- One direct principal may have only one source role in one customized resource policy.
+- Effective users from overlapping direct and group paths resolve in Responsible, Consulted, Verifier, Informed priority order.
 
 ### `resource_permission_settings`
 
@@ -470,7 +487,7 @@ The Logic Gate becomes independent again.
 2. A root starts customized with a complete valid policy, even when that policy contains no edges.
 3. Allocate `parent_link_sequence` when the parent relationship is created.
 4. An inherited child receives no copied graph rows.
-5. A workflow that must assign a creator directly, such as an email-derived Node Generated assignment, first customizes from the current effective parent policy and then applies the creator rule.
+5. A workflow that must assign a creator directly, such as an email-derived Node Responsible assignment, first customizes from the current effective parent policy and then applies the creator rule.
 
 ### Customize
 
@@ -517,13 +534,13 @@ Customization is copy-on-customize for one resource only. It is never descendant
 
 ## GVIC-specific rules
 
-1. Roles are Generated, Verified, Consulted, and Informed.
-2. Generated allows at most one user and no groups.
-3. Verified allows multiple users and no groups.
-4. Consulted and Informed allow users and groups.
-5. One source principal has only one role in one customized policy.
-6. Nested groups expand from `company_user_groups` and `company_user_group_members` at read time.
-7. If one effective user reaches several roles through overlapping groups, the effective user role is selected deterministically in this order: Generated, Verified, Consulted, Informed.
+1. Roles are Responsible, Consulted, Verifier, and Informed, displayed in that order.
+2. Every role allows multiple direct users or groups.
+3. One direct principal has only one role in one customized policy.
+4. Nested groups expand from `company_user_groups` and `company_user_group_members` at read time.
+5. If one effective user reaches several roles through overlapping groups, the effective role is selected deterministically in this order: Responsible, Consulted, Verifier, Informed.
+6. The editor colors are Responsible orange (`#f97316`), Consulted blue (`#2563eb`), Verifier green (`#16a34a`), and Informed purple (`#7c3aed`).
+7. The editor shows direct person and group names in each role card; names wrap instead of collapsing to `People (n)`.
 8. A group membership or group-parent change changes effective GVIC immediately without rewriting policy rows.
 9. GVIC controls assignment, My Work, update routing, and notification targeting only. It never grants resource access.
 10. My Work must still require effective Edit permission to the returned resource.
@@ -540,8 +557,9 @@ After selecting one effective permission policy through inheritance:
 6. At equal group depth, `no_access` beats `edit`.
 7. If no user or group rule applies, use `resource_permission_settings.default_access` from the effective customized policy.
 8. GVIC assignments are never considered by permission authorization.
-9. Permission-setting reads and writes retain the existing manager/admin authorization boundary. Managers must also have effective Edit access to the target; admins retain their bypass.
+9. Permission-setting reads and writes retain the manager/admin authorization boundary. Managers with effective Edit access may change regular-user, group, and peer-manager rules; company-admin and dev-admin identities remain protected, and admins retain their bypass.
 10. Runtime authorization resolves current group hierarchy from source group tables. It does not depend on `company_user_group_closure` or another required derived table.
+11. The canonical V2 permission PUT has no documented 1,000-assignment product cap.
 
 ## Group changes
 
@@ -572,14 +590,14 @@ V2 removes legacy specialized GVIC writers and uses one resource-shaped JSON con
   "overwritten_by_ancestor": null,
   "gvic_assignments": [
     {
-      "role": "generated",
+      "role": "responsible",
       "principal_type": "user",
       "principal_id": "uuid"
     }
   ],
   "effective_assignments": [
     {
-      "role": "generated",
+      "role": "responsible",
       "user_id": "uuid",
       "source_principal_type": "user",
       "source_principal_id": "uuid"
@@ -796,7 +814,7 @@ The read-only preflight must report at least:
 - missing resources, users, groups, company memberships, or parent relationships;
 - current inherited/resolved permission default and edge counts;
 - current resolved GVIC role/principal counts;
-- invalid Generated/Verified group rows or multiple Generated users;
+- historical legacy Generated/Verified group rows or multiple legacy Generated users before the RCVI conversion;
 - one-principal/multiple-role conflicts;
 - old application snapshot/tombstone usage;
 - old source versus resolved versus effective-table disagreements;
@@ -819,7 +837,7 @@ Step 1 is complete only when:
 
 ### Step 1 implementation and operator record
 
-Step 1 repository implementation was completed and verified on August 5, 2026. It is additive only: the old GVIC and permission tables, functions, triggers, readers, and writers remain active and unchanged. No SQL was applied to a live database, and no application cutover was performed.
+Step 1 repository implementation was completed and verifier on August 5, 2026. It is additive only: the old GVIC and permission tables, functions, triggers, readers, and writers remain active and unchanged. No SQL was applied to a live database, and no application cutover was performed.
 
 Apply these repository migrations in filename order:
 
@@ -861,7 +879,7 @@ The copy normalizes old GVIC `shared_triage_folder` identities to `shared_inbox_
 
 #### Verification record
 
-The schema contract and disposable-PostgreSQL integration tests cover first application, restartable rerun, schema-drift refusal, and transactional rollback. The copy was verified against one repeatable-read source snapshot, including latest snapshot and direct-revision boundaries, exact counts, and policy fingerprints. The complete repository verification gate passed with the real disposable PostgreSQL path enabled.
+The schema contract and disposable-PostgreSQL integration tests cover first application, restartable rerun, schema-drift refusal, and transactional rollback. The copy was verifier against one repeatable-read source snapshot, including latest snapshot and direct-revision boundaries, exact counts, and policy fingerprints. The complete repository verification gate passed with the real disposable PostgreSQL path enabled.
 
 ## Step 2: application cutover to the four final tables
 
@@ -923,7 +941,7 @@ Step 2 is complete only when:
 
 ### Step 2 implementation and operator record
 
-Step 2 repository implementation was completed and verified on August 5, 2026. No SQL was applied to a live database, no production secret or database writer credential was accessed, and no cloud resource was changed. Step 3 retirement was not performed.
+Step 2 repository implementation was completed and verifier on August 5, 2026. No SQL was applied to a live database, no production secret or database writer credential was accessed, and no cloud resource was changed. Step 3 retirement was not performed.
 
 The Step 2 database artifacts are:
 
@@ -997,7 +1015,7 @@ No database repair, legacy-table restoration, migration rerun, or schema change 
 2. Run disposable PostgreSQL integration tests against a fresh schema and a realistic converted schema.
 3. Reconcile every V2 effective result with the expected hierarchy rules.
 4. Prove no deployed SQL references old tables.
-5. Exercise large generated trees and verify write counts do not grow with descendant count.
+5. Exercise large responsible trees and verify write counts do not grow with descendant count.
 6. Complete the agreed soak period.
 7. Take and verify the agreed restorable database snapshot.
 8. Run a separately reviewed read-only retirement preflight.
@@ -1026,8 +1044,8 @@ Repository inspection during Steps 1-3 may add obsolete policy triggers, functio
 
 After retirement:
 
-- `backend/db/schema.sql` directly creates only the four final policy tables and two sequences;
-- no create-then-drop legacy history remains in the canonical schema;
+- replaying `backend/db/schema.sql` runs the recorded Step 1 staging construction, Step 2 rename/cutover, and final RCVI role block, and ends with only the four final policy tables and two sequences;
+- the historical construction remains visible in the canonical schema file, but no staging or legacy policy table remains in the replayed final database state;
 - no old reader, writer, fallback, compatibility alias, or dual write remains;
 - no permanent effective, projection, closure, revision, or subtree-application table is required for correctness;
 - all current behavior is reproducible from the four policy tables, canonical hierarchy, canonical group source tables, and ordinary audit/version infrastructure.
@@ -1071,10 +1089,10 @@ The implementation must map these scenarios into `docs/tests/gvic.md`, `docs/tes
 
 ### GVIC scenarios
 
-1. Generated accepts at most one user.
-2. Verified accepts multiple users but no groups.
-3. Consulted and Informed accept users and groups.
-4. Overlapping groups resolve one effective user role using the documented role order.
+1. Responsible, Consulted, Verifier, and Informed each accept multiple users or groups.
+2. One direct principal cannot occupy more than one role on the same resource.
+3. Overlapping groups resolve one effective user role using Responsible, Consulted, Verifier, Informed priority.
+4. Role cards show direct assignee names and wrap long name lists.
 5. Group membership changes affect effective users without resource-policy writes.
 6. GVIC does not grant resource access.
 7. My Work includes only resources where the user has both effective GVIC and effective Edit permission.
@@ -1088,6 +1106,8 @@ The implementation must map these scenarios into `docs/tests/gvic.md`, `docs/tes
 5. Admin bypass and manager non-bypass remain correct.
 6. Authorization occurs before HTTP 304.
 7. Group changes invalidate permission fingerprints without descendant policy writes.
+8. A company manager with Edit access can change peer-manager rules but cannot change company-admin or dev-admin identities.
+9. Policies above 1,000 explicit rows are not rejected by a product-specific assignment cap.
 
 ### Scale and concurrency scenarios
 

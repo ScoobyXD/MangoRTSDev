@@ -1,3 +1,13 @@
+# Process Story: Responsible users control requested Logic Gate work
+
+A Node enters a Logic Gate's Requested column with its requesting user recorded
+↓
+Every current effective Responsible user for that Logic Gate can accept the request into Pending or decline it into Backlog
+↓
+The request-owner metadata is derived from Responsible RCVI, while authorization still comes only from permission policy
+
+Last updated: 2026-08-06
+
 # Process Story: A deleted Kanban Node stays deleted
 
 A user confirms deletion for one or more Node cards on a Kanban board
@@ -6,7 +16,7 @@ The board starts one local mutation window and removes those cards optimisticall
 ↓
 One atomic typed-target delete request recycles every confirmed Node and removes its owned Kanban/Logic Gate work placements
 ↓
-Database cleanup removes the deleted Node's exact GVIC and permission rows without running surviving-Node detach materialization during assignment cascades
+Database cleanup removes the deleted Node's exact RCVI and permission rows without running surviving-Node detach materialization during assignment cascades
 ↓
 Realtime hints and older in-flight board reads cannot restore stale cards while that mutation is active
 ↓
@@ -70,7 +80,7 @@ KB32 - A grouping stack may contain multiple grouping levels.
 KB33 - Logic Gate Kanban does not inject mandatory grouping rows; every grouping row is optional and user-controlled.
 KB34 - Due date grouping uses the card/node due date and places missing dates under `No due date`.
 KB35 - Date Added is not a grouping field; it is a separate checkable sort control that can be enabled or disabled, with Asc/Desc direction available while enabled.
-KB36 - By-person grouping uses the person who originally created or transferred the card into the current Logic Gate, not department, HR group, team, or GVIC role name.
+KB36 - By-person grouping uses the person who originally created or transferred the card into the current Logic Gate, not department, HR group, team, or RCVI role name.
 KB37 - Missing by-person provenance is grouped under `No person`.
 KB38 - Account grouping uses assigned accounts. A card with multiple accounts can appear in each matching account subgroup.
 KB39 - A card with no account appears under `No account`.
@@ -96,7 +106,7 @@ KB55 - Placement provenance text must use the exact prefix `from: ` followed by 
 KB56 - Placement provenance text includes the initial Logic Gate card/assignment creation month/day and local time without a year, such as `6/23 1:45 p.m.`.
 KB57 - The by-person display must resolve to a company user's display name when available.
 KB58 - If the display name is unavailable, the by-person display may fall back to email or user ID.
-KB59 - The by-person footer must not show department names, HR groups, user groups, teams, GVIC role names, or generic ownership labels.
+KB59 - The by-person footer must not show department names, HR groups, user groups, teams, RCVI role names, or generic ownership labels.
 KB60 - A first assignment into a Logic Gate records the actor user as the placed-by user.
 KB61 - Moving a card within the same Logic Gate preserves the original placed-by user.
 KB62 - Moving or transferring a card into a different Logic Gate records the transfer actor as the placed-by user for the new Logic Gate.
@@ -106,7 +116,7 @@ KB64 - Existing historical rows with no placed-by user may render without a by-p
 ### Requested Work Flow
 
 KB65 - Nodes dropped or created into a Logic Gate requested column store the requesting user.
-KB66 - The generated user for the Logic Gate sees accept and decline actions for requested nodes sent by another user.
+KB66 - Every current effective Responsible user for the Logic Gate sees accept and decline actions for requested Nodes sent by another user.
 KB67 - Accepting a requested node moves it to pending and clears the request sender.
 KB68 - Declining a requested node moves it to backlog and clears the request sender.
 KB69 - The requesting user sees request-sent status on the requested card.
@@ -165,7 +175,7 @@ KB113 - Mounted Kanban consumes only `kanban.changed` on `board:{board_id}` and 
 KB114 - First/reconnect/late-handler acceptance and compact change hints route through one single-flight targeted board revalidation with at most one queued final request; they never abort/restart an active request or trigger a broad workspace reload.
 KB115 - The canonical `/work` response preserves every minimal card field that can affect rendering, including `created_from_email`, requested-by, placed-by, issue state, due date, priority, accounts, title, position, and timestamps.
 KB116 - Logic Gate work serialization contains only `logic_gate`, actor `permissions`, `board`, `columns`, and minimal `cards`; no projection sequence or replay cursor is serialized.
-KB117 - Logic Gate work serialization does not contain top-level `company_id` or `logic_gate_id`, `statuses`, `assignments`, `nodes`, `cards_limit`, or a full GVIC collection.
+KB117 - Logic Gate work serialization does not contain top-level `company_id` or `logic_gate_id`, `statuses`, `assignments`, `nodes`, `cards_limit`, or a full RCVI collection.
 KB118 - Each minimal card row contains its card, column, node, title, request/placement, issue, position, due-date, priority, direct-email-origin, account, creation, and projection-update fields only as required; the frontend derives repeated board/company/Logic Gate IDs locally.
 KB119 - Database ordering uses the canonical stored status rank requested, backlog, pending, in progress, review, done; unknown historical status text falls back to pending rank, then cards sort by position, assignment creation time, and stable assignment/card identity.
 KB120 - Owning-Logic-Gate authorization runs before a cached ETag can produce `304 Not Modified`; a permission revocation must never expose or preserve unauthorized board data.
@@ -178,7 +188,7 @@ KB126 - Deleting a Logic Gate captures its exact currently authorized local moun
 KB127 - Selecting a node from a Kanban card opens the normal modeless node window at near-full board size by default: 1% top/left ratios and 98% width/height ratios, with only an 8px renderer safety gutter at the board's right/bottom edge. The versioned per-company/frame geometry key resets older narrower defaults once; later user drag/resize persists under the new key, and fullscreen behavior remains separate.
 KB128 - In a route-controlled Logic Gate Arena, opening or closing a Kanban node popup produces one continuous UI transition. Local popup state must not retrigger forced-route synchronization against the previous route and briefly close a newly opened node or reopen a newly closed node.
 KB130 - Confirmed Kanban Node deletion uses one atomic typed-target delete request, participates in the board's local mutation window, and updates both rendered and current card state. Older in-flight reads and realtime refresh hints cannot restore the deleted cards. A failed request restores the optimistic snapshot and schedules one canonical board refresh.
-KB131 - Deleting an assigned Node through the typed-target transaction recycles the Node and removes its assignment, GVIC policy, and permission policy in one transaction. Assignment and parent-link delete triggers skip surviving-resource detach materialization only when the Node endpoint no longer exists; explicitly detaching an assignment from a surviving Node still materializes customized root policy.
+KB131 - Deleting an assigned Node through the typed-target transaction recycles the Node and removes its assignment, RCVI policy, and permission policy in one transaction. Assignment and parent-link delete triggers skip surviving-resource detach materialization only when the Node endpoint no longer exists; explicitly detaching an assignment from a surviving Node still materializes customized root policy.
 
 ## Scenarios
 
@@ -328,13 +338,13 @@ Business logic covered:
 - KB72
 
 Given:
-- A Logic Gate has a generated user.
+- A Logic Gate has an effective Responsible user.
 - Another user drops or creates a node into the requested column.
 
 Expected:
 - The requested card records the requesting user.
-- The generated user can accept the request to pending.
-- The generated user can decline the request to backlog.
+- An effective Responsible user can accept the request to Pending.
+- An effective Responsible user can decline the request to Backlog.
 - The requester can cancel the request to backlog.
 - Requester metadata clears after accept, decline, or cancel.
 - Placed-by metadata remains separate and can still display as `from: {person} {date/time}`.
@@ -603,7 +613,7 @@ Business logic covered:
 
 Given:
 
-- A Node is assigned to a Logic Gate and has inherited GVIC and permission policy rows.
+- A Node is assigned to a Logic Gate and has inherited RCVI and permission policy rows.
 - The same database triggers also support explicitly detaching a surviving Node.
 
 When:
@@ -612,6 +622,6 @@ When:
 
 Expected:
 
-- The Node, Logic Gate assignment, GVIC policy, and permission policy rows are removed atomically, and one Node recycle-bin item is written.
+- The Node, Logic Gate assignment, RCVI policy, and permission policy rows are removed atomically, and one Node recycle-bin item is written.
 - Cascading assignment cleanup does not try to materialize policy for the Node that is already being deleted.
-- Explicitly removing an assignment from a surviving Node still materializes customized root GVIC and permission policy.
+- Explicitly removing an assignment from a surviving Node still materializes customized root RCVI and permission policy.

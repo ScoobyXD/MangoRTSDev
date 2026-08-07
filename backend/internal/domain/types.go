@@ -779,10 +779,10 @@ type LogicGate struct {
 }
 
 const (
-	GVICRoleGenerated = "generated"
-	GVICRoleVerified  = "verified"
-	GVICRoleConsulted = "consulted"
-	GVICRoleInformed  = "informed"
+	GVICRoleResponsible = "responsible"
+	GVICRoleConsulted   = "consulted"
+	GVICRoleVerifier    = "verifier"
+	GVICRoleInformed    = "informed"
 )
 
 type ResourceGVICAssignment struct {
@@ -1022,7 +1022,7 @@ type ProjectView struct {
 }
 
 // LogicGateWorkHeader is the Kanban-specific Logic Gate metadata needed by the
-// Arena. RequestOwnerUserID is derived from the Generated user assignment; the
+// Arena. RequestOwnerUserID is derived from the Responsible user assignment; the
 // full GVIC collection belongs to the Logic Gate details APIs.
 type LogicGateWorkHeader struct {
 	LogicGateID        string `json:"logic_gate_id"`
@@ -1216,13 +1216,13 @@ const (
 	NotificationEventNodeCommentCreated        = "node.comment_created"
 	NotificationEventMentionCreated            = "mention.created"
 	NotificationEventUrgentMentionCreated      = "mention.urgent_created"
-	NotificationEventACIInboxChanged           = "aci_inbox.changed"
-	NotificationEventACIInboxGVICUpdated       = "aci_inbox.GVIC_updated"
+	NotificationEventCVIInboxChanged           = "cvi_inbox.changed"
+	NotificationEventCVIInboxRCVIUpdated       = "cvi_inbox.RCVI_updated"
 )
 
 const (
 	NotificationSurfaceRInbox       = "r_inbox"
-	NotificationSurfaceACIInbox     = "aci_inbox"
+	NotificationSurfaceCVIInbox     = "cvi_inbox"
 	NotificationSurfaceMyTriage     = "my_triage"
 	NotificationSurfaceSharedTriage = "shared_triage"
 )

@@ -57,11 +57,11 @@ func (r *MemoryRepo) rebuildV2MyWorkRowsLocked(companyID string) {
 	}
 }
 
-func (r *MemoryRepo) ListGeneratedInboxNodes(query WorkItemInboxQuery) ([]domain.Node, error) {
-	return r.ListGeneratedInboxNodesContext(context.Background(), query)
+func (r *MemoryRepo) ListResponsibleInboxNodes(query WorkItemInboxQuery) ([]domain.Node, error) {
+	return r.ListResponsibleInboxNodesContext(context.Background(), query)
 }
 
-func (r *MemoryRepo) ListGeneratedInboxNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
+func (r *MemoryRepo) ListResponsibleInboxNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
 	return r.listGVICMatrixProjectedNodes(ctx, query, true)
 }
 
@@ -73,7 +73,7 @@ func (r *MemoryRepo) ListMyNodesContext(ctx context.Context, query WorkItemInbox
 	return r.listGVICMatrixProjectedNodes(ctx, query, false)
 }
 
-func (r *MemoryRepo) listGVICMatrixProjectedNodes(ctx context.Context, query WorkItemInboxQuery, generatedOnly bool) ([]domain.Node, error) {
+func (r *MemoryRepo) listGVICMatrixProjectedNodes(ctx context.Context, query WorkItemInboxQuery, responsibleOnly bool) ([]domain.Node, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -90,8 +90,8 @@ func (r *MemoryRepo) listGVICMatrixProjectedNodes(ctx context.Context, query Wor
 		if row.CompanyID != query.CompanyID || row.UserID != query.UserID || row.ResourceType != GVICMatrixProjectionResourceNode {
 			continue
 		}
-		if generatedOnly {
-			if row.LogicGateID == "" || !r.gvicEffectiveUserHasRoleLocked(query.CompanyID, EntityTypeNode, row.ResourceID, query.UserID, domain.GVICRoleGenerated) {
+		if responsibleOnly {
+			if row.LogicGateID == "" || !r.gvicEffectiveUserHasRoleLocked(query.CompanyID, EntityTypeNode, row.ResourceID, query.UserID, domain.GVICRoleResponsible) {
 				continue
 			}
 		} else if row.LogicGateID != "" {
@@ -114,13 +114,13 @@ func (r *MemoryRepo) listGVICMatrixProjectedNodes(ctx context.Context, query Wor
 	return items, nil
 }
 
-func (r *MemoryRepo) ListACIInboxLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
-	return r.ListACIInboxLogicGatesContext(context.Background(), query)
+func (r *MemoryRepo) ListCVIInboxLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
+	return r.ListCVIInboxLogicGatesContext(context.Background(), query)
 }
 
-func (r *MemoryRepo) ListACIInboxLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
+func (r *MemoryRepo) ListCVIInboxLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
 	return r.listGVICMatrixProjectedLogicGates(ctx, query, map[string]bool{
-		domain.GVICRoleVerified:  true,
+		domain.GVICRoleVerifier:  true,
 		domain.GVICRoleConsulted: true,
 		domain.GVICRoleInformed:  true,
 	})
@@ -506,7 +506,7 @@ func (r *MemoryRepo) ListGVICMatrixProjectionRowsForUser(query WorkItemInboxQuer
 	if query.Limit > 0 && len(items) > query.Limit {
 		items = items[:query.Limit]
 	}
-	r.attachMyWorkGeneratedUserIDsLocked(items)
+	r.attachMyWorkResponsibleUserIDsLocked(items)
 	return items, nil
 }
 
@@ -575,7 +575,7 @@ func (r *MemoryRepo) ListMyWorkMatrixRows(query WorkItemInboxQuery) ([]GVICMatri
 	if query.Limit > 0 && len(items) > query.Limit {
 		items = items[:query.Limit]
 	}
-	r.attachMyWorkGeneratedUserIDsLocked(items)
+	r.attachMyWorkResponsibleUserIDsLocked(items)
 	return items, nil
 }
 
@@ -747,10 +747,10 @@ func memoryGVICMatrixProjectionRowToDTO(row memoryGVICMatrixProjectionRow) GVICM
 
 func (r *MemoryRepo) myWorkRolesForProjectionRowLocked(row memoryGVICMatrixProjectionRow) []string {
 	return r.gvicEffectiveRolesForUserLocked(row.CompanyID, row.ResourceType, row.ResourceID, row.UserID, map[string]bool{
-		domain.GVICRoleGenerated: true,
-		domain.GVICRoleVerified:  true,
-		domain.GVICRoleConsulted: true,
-		domain.GVICRoleInformed:  true,
+		domain.GVICRoleResponsible: true,
+		domain.GVICRoleVerifier:    true,
+		domain.GVICRoleConsulted:   true,
+		domain.GVICRoleInformed:    true,
 	})
 }
 

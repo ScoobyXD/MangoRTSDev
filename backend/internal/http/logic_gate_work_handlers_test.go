@@ -520,7 +520,7 @@ func TestLogicGateWorkV2StateChangeCreatesNotifications(t *testing.T) {
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []store.LogicGateGVICAssignmentInput{{
-			Role:   domain.GVICRoleGenerated,
+			Role:   domain.GVICRoleResponsible,
 			UserID: viewer.UserID,
 		}},
 	}); err != nil {
@@ -531,7 +531,7 @@ func TestLogicGateWorkV2StateChangeCreatesNotifications(t *testing.T) {
 		ResourceType: store.EntityTypeNode,
 		ResourceID:   node.NodeID,
 		Assignments: []store.ResourceGVICAssignmentInput{{
-			Role:          domain.GVICRoleGenerated,
+			Role:          domain.GVICRoleResponsible,
 			PrincipalType: store.EntityPermissionSubjectUser,
 			PrincipalID:   responsible.UserID,
 		}},
@@ -561,7 +561,7 @@ func TestLogicGateWorkV2StateChangeCreatesNotifications(t *testing.T) {
 	if item.Type != store.WorkItemLogicGateAssignmentMovedEventType {
 		t.Fatalf("responsible notification type = %q, want %q", item.Type, store.WorkItemLogicGateAssignmentMovedEventType)
 	}
-	if item.Surface != domain.NotificationSurfaceRInbox || item.Role != domain.GVICRoleGenerated {
+	if item.Surface != domain.NotificationSurfaceRInbox || item.Role != domain.GVICRoleResponsible {
 		t.Fatalf("responsible notification metadata = %+v, want responsible R inbox", item)
 	}
 	if item.LogicGateID != logicGate.LogicGateID || item.NodeID != node.NodeID {

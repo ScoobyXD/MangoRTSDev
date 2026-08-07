@@ -1,3 +1,17 @@
+# Process Story: A Node assigns live RCVI responsibility
+
+A user assigns people or groups to Responsible, Consulted, Verifier, or Informed on a Node
+↓
+Each direct person or group appears by name in the matching role card, and names wrap instead of becoming a count
+↓
+Every role accepts multiple direct people or groups, while one direct principal holds only one role on that Node
+↓
+Nested group membership expands live whenever effective RCVI, My Work, notifications, or verification recipients are read
+↓
+RCVI remains separate from Node permissions and grants no access by itself
+
+Last updated: 2026-08-06
+
 # Process Story: A changed Node saves history when the Node is left
 
 A user edits a Node textbox, textbox metadata, or textbox structure
@@ -16,7 +30,7 @@ Last updated: 2026-08-06
 
 A user creates a Node from Editor, chat, email collaboration, Project, or Logic Gate work
 ↓
-The Node is stored once in `nodes`, while Logic Gate assignments, Project relationships, email links, attachments, chat ownership, GVIC, and permissions remain in their exact typed tables
+The Node is stored once in `nodes`, while Logic Gate assignments, Project relationships, email links, attachments, chat ownership, RCVI, and permissions remain in their exact typed tables
 ↓
 No Node creation or repair path inserts `target_type='node'` into `company_explorer_items`, and no Unfiled/Nodes folder is created
 ↓
@@ -28,7 +42,7 @@ Last updated: 2026-08-06
 
 A user creates or opens a Node from Home, Explorer, Kanban, Project, Updates, an entity link, or a direct route
 ↓
-The canonical Node, relationships, final textbox data, and current inherited/customized GVIC and permission policies load through their exact APIs and actor-safe caches
+The canonical Node, relationships, final textbox data, and current inherited/customized RCVI and permission policies load through their exact APIs and actor-safe caches
 ↓
 Persisted Tiptap annotations whose kind is `change` load as dormant positional metadata: they do not render, count, navigate, activate, or call a seen API
 ↓
@@ -77,14 +91,14 @@ Required regression scenario:
 - Confirm the node-level file and email counters do not decrease because of text-box deletion, deleted-origin files remain labeled and usable, and the global email list opens the retained conversation in the standalone node-level organizer with zero live text boxes.
 - Confirm an edit-authorized user can list, preview, download, and upload retained files and open retained attached emails, while a no-access user receives neither list.
 
-N1 - Nodes support generated, verified, consulted, and informed GVIC assignments.
-N2 - Node Generated is a single-user slot; Node Verified accepts multiple explicit users and rejects group principals.
-N3 - Node generated and verified GVIC assignments must use a user principal, not a group principal.
-N4 - Replacing the generated or verified user on a node removes the previous user for that role.
-N5 - Node consulted and informed GVIC assignments may include users and user groups.
-N6 - Node GVIC assignment pickers should display the company user-group tree as a collapsed hierarchy.
-N7 - Node GVIC picker subgroups and users should be visually indented according to their hierarchy depth.
-N8 - A generated or verified node assignment chip should show the assigned user's name and provide a direct remove action.
+N1 - Nodes support Responsible, Consulted, Verifier, and Informed RCVI assignments in that order.
+N2 - Every Node RCVI role accepts multiple direct user or group principals.
+N3 - A direct principal can hold only one RCVI role on the same Node.
+N4 - Group assignments remain typed group edges and expand through current members and nested subgroups whenever effective RCVI is read.
+N5 - When one user reaches several roles through direct or group sources, the effective order is Responsible, Consulted, Verifier, then Informed.
+N6 - Node RCVI assignment pickers should display the company user-group tree as a collapsed hierarchy.
+N7 - Node RCVI picker subgroups and users should be visually indented according to their hierarchy depth.
+N8 - Every Node RCVI card shows the full names of its direct users and groups, wraps those names instead of showing a numeric People summary, and provides per-assignment removal in its assignment list.
 N9 - DELETE `/v1/nodes/{node_id}` requires current effective Edit access, moves the Node and related placements to the deleting actor's Recycle Bin, and removes the Node's two V2 settings rows and cascading policy edges.
 N10 - Node soft delete requires edit access to the node; no access is denied.
 N11 - Successful node soft delete stamps `deleted_by_user_id` with the deleting actor.
@@ -171,9 +185,9 @@ N91 - Every successful Node rename entry point covered by RW15 publishes the con
 N92 - Mounted Node chat performs one single-flight canonical durable-chat refresh on first subscription acceptance and every reconnect acceptance, with at most one queued final read and no overlap/invalidation. A later local handler joining the already accepted Node scope receives immediate acceptance. This closes each mount's load-to-subscribe race without replay/generalized history or dirty editor-text replacement.
 N93 - A node editor header keeps Editor, Permissions, the shared formatting toolbar, Outline Styles/Automatic Numbering, and the immediately adjacent More control on one nonwrapping line. Relationships, Metadata, History, Save Settings, save-version/related-node commands, and supported opener-specific secondary actions remain available in the accessible **More editor actions** overflow menu with their existing permission and disabled state.
 N94 - Node popups/panels, permissions and email dialogs, and image/attachment/email previews mount through the shared body-level overlay portal above Key Views, Explorer, Search Explorer, and feature-local stacking contexts. Blocking modal modes trap focus and restore prior focus on close; anchored Kanban editor panels may remain modeless until fullscreen. The Project Logic Gates / Nodes inline editor remains in document flow and does not use the overlay portal.
-N95 - The Generated, Verified, Consulted, and Informed cards remain in one compact four-column horizontal row. Narrowing may clip that row beneath an adjacent pane, but must not wrap it vertically.
-N96 - The lazy EMAIL52 trigger creates one email-derived Node after provider validation with no Company Explorer placement. It directly customizes creator Generated GVIC and Edit permission, and retry or later replies for the same exact mailbox/thread identity reuse that Node.
-N97 - The email Node contains one protected canonical source-scoped `Attached email` projection with `created_from_email=true` plus shared `Text block chat` rows. Generic writes may add ordinary text boxes and other normal Node information but cannot overwrite/delete the canonical email projection. Saved-version, Project, Logic Gate/Kanban, GVIC, and account behavior follows normal Node contracts; whole-Node delete and generic permission replacement remain protected while collaboration source/participant records exist.
+N95 - The Responsible, Consulted, Verifier, and Informed cards remain in one compact four-column horizontal row. Narrowing may clip that row beneath an adjacent pane, but must not wrap it vertically.
+N96 - The lazy EMAIL52 trigger creates one email-derived Node after provider validation with no Company Explorer placement. It directly customizes creator Responsible RCVI and Edit permission, and retry or later replies for the same exact mailbox/thread identity reuse that Node.
+N97 - The email Node contains one protected canonical source-scoped `Attached email` projection with `created_from_email=true` plus shared `Text block chat` rows. Generic writes may add ordinary text boxes and other normal Node information but cannot overwrite/delete the canonical email projection. Saved-version, Project, Logic Gate/Kanban, RCVI, and account behavior follows normal Node contracts; whole-Node delete and generic permission replacement remain protected while collaboration source/participant records exist.
 N98 - My/Shared Triage and the email Node mount the same shared ChatPane over the same canonical chat block ID and information rows. Message IDs, parent IDs, ordering, indentation, deletion ownership, mentions, attachments, composer state, and `chat:node:{node_id}` refresh are shared data, never copied histories. The Node header shows compact durable chat-author/mention context.
 N99 - An email-selection chat persists `selection_source=email`, exact provider message ID, trimmed quote, and valid offsets. A text-box selection in the node-wide email chat additionally persists `selection_block_id`, so chat navigation can focus the originating editor while email references still open the exact reply and quote.
 N100 - The email Node keeps the effective default and complete rules copied from its final source, while the creator and accepted mention participants receive permanent direct Edit access. The permissions surface cannot add/remove/replace those system-managed grants. Mention access is Node-chat access only: it grants authorized reads of the Mango-stored email snapshot attached to that Node, without requiring the viewer to own or access the source Nylas mailbox, and never changes provider recipients, delivery, CC/BCC, or subscription.
@@ -193,7 +207,7 @@ N108 - Every attached-email Reply and Reply All submission enters EMAIL90's cent
 
 ## Scenarios
 
-### Scenario N-S1: Generated Single User And Verified Multiple Users
+### Scenario N-S1: Every RCVI Role Accepts People And Groups
 
 Business logic covered:
 - N1
@@ -203,33 +217,35 @@ Business logic covered:
 - N8
 
 Given:
-- A node has editable GVIC fields.
-- A company user is assigned to the node's generated or verified field.
-- A second user is later selected for the same generated or verified field.
+- A node has editable RCVI fields.
+- A company has users, groups, and nested subgroups.
+- Several direct principals are assigned to each Node RCVI role.
 
 Expected:
-- Generated accepts exactly one user and selecting a second Generated user replaces the first.
-- Verified accepts multiple users and displays them in its assignment list.
-- Group principals are not selectable or accepted for Generated or Verified.
-- Assigned chips display each user's name.
-- The assigned chip exposes a direct remove action instead of an assignment-list dropdown.
+- Responsible, Consulted, Verifier, and Informed each accept multiple users or groups.
+- One direct principal cannot occupy two roles on the same Node.
+- Each card shows every direct person and group name, wrapping the text instead of displaying `People (n)`.
+- Opening a card's assignment list exposes a remove action for each direct assignment.
+- Current nested group membership expands live for effective RCVI.
 
-### Scenario N-S2: Consulted And Informed Users And Teams
+### Scenario N-S2: Live RCVI Users And Teams
 
 Business logic covered:
 - N1
+- N2
+- N4
 - N5
 
 Given:
-- A node has consulted and informed GVIC fields.
+- A node has Responsible, Consulted, Verifier, and Informed RCVI fields.
 - A company has users, user groups, and nested user groups.
 
 Expected:
-- Consulted and informed can include individual users.
-- Consulted and informed can include user groups.
-- Consulted and informed can hold multiple assignments.
+- Every role can include individual users.
+- Every role can include user groups and current nested subgroup members.
+- Every role can hold multiple assignments.
 
-### Scenario N-S3: Node GVIC Organization Tree Picker
+### Scenario N-S3: Node RCVI Organization Tree Picker
 
 Business logic covered:
 - N6
@@ -237,7 +253,7 @@ Business logic covered:
 
 Given:
 - A company has top-level user groups, subgroups, and users inside those groups.
-- A user opens a node GVIC assignment picker.
+- A user opens a node RCVI assignment picker.
 
 Expected:
 - The picker opens with groups collapsed by default.
@@ -430,7 +446,7 @@ Expected:
 - Typing `@` or `!` in a node text box or its chat opens the people picker with each user represented by a stable profile color keyed by normalized user ID, then email, then display name. Rich-editor keyboard selection adds a translucent same-color row tint and active rail; chat retains its active-row treatment. Both keep the profile avatar opaque/full-color with tested white-text contrast instead of washing every user gray.
 - The shared format toolbar controls the focused node text box through the shared formatting controller, so font size, inline formats, highlight, alignment, table, and outline-style behavior cannot diverge by node opener.
 - Editor, Permissions, shared formatting, Outline Styles/Automatic Numbering, and the immediately adjacent More control remain on one nonwrapping primary-header line; Relationships, Metadata, History, Save Settings, version/related-node commands, and supported secondary actions remain available in the keyboard-operable **More editor actions** menu.
-- The four GVIC cards remain in one horizontal row that may clip beneath an adjacent pane rather than wrapping into taller header content.
+- The four RCVI cards remain in one horizontal row that may clip beneath an adjacent pane rather than wrapping into taller header content.
 - Relationships, Metadata, History, and Save Settings disable formatting only when their content hides/replaces the document; returning to the document preserves the text-block layout.
 - Node windows, dialogs, and previews render in the shared body-level overlay layer above Key Views/Explorer/Search Explorer; blocking modes trap/restore focus, while anchored Kanban panels remain modeless until fullscreen.
 - Project Logic Gates / Nodes inline node editors remain in document flow; Kanban panels retain the same mounted editor while moving between anchored and fullscreen geometry.
@@ -673,7 +689,7 @@ Given:
 
 Expected:
 - Highlight/read alone creates no Node; the first nonempty chat submit ensures exactly one standalone private Node outside every Logic Gate/project/work-assignment path, and retry reuses it if the following chat write fails.
-- The Node has no placeholder text box, status, priority, GVIC, card, or inherited work policy.
+- The Node has no placeholder text box, status, priority, RCVI, card, or inherited work policy.
 - Its canonical attached-email projection preserves source mailbox/thread provenance, and the collaboration Node creates no Company Explorer item or default Nodes folder.
 - The email and Node mounts show the same durable chat IDs and shared ChatPane behavior, including parent indentation, anchor navigation, mentions, attachments, deletion ownership, and Node chat reconciliation.
 - The creator and mentioned participant keep direct edit access while nonparticipants are denied.
@@ -733,13 +749,13 @@ Expected:
 N112 - Every Node has one optional, independently resizable, full-height email column to the left of its multi-text-box list. Importing one message stores one node-level attached-email source and displays the complete thread as collapsed message cards on the compact line-and-dot timeline; importing another reply from the same mailbox/thread does not duplicate the source. The exact `/v1/nodes/{node_id}/email-threads/{email_thread_id}` read routes to the authorized durable Node/thread link and returns Mango-stored history rather than `not_found`. Expanding an email consumes the column's available viewport instead of retaining the old 620-pixel/72vh ceiling. Once an attachment exists, the Node Email toggle retains one three-track workspace shell: closing animates email width to zero plus a short fade/left transform and makes the pane inert, accessibility-hidden, and pointer-disabled; opening reverses the transition to the saved width. Each text box owns its editor and optional message-linked chat. Email-linked boxes persist an exact message ID and matching unique accent shared with that card; clicking either side smoothly reveals its exact partner. Email-created nodes bind their initial editor to the selected source message, while the entire thread remains attached at Node level.
 
 N113 - A new Node text box starts with Editor open and Chat closed unless that exact box already owns durable chat. Legacy email-origin chat resolves to a stable linked/declared/oldest host and never follows list position. Email, Editor, and Chat labels share one horizontal row; their opened panes and linked-email expansion use the shared short, reduced-motion-aware entrance transition without changing persisted open/closed state. A linked exact-message email preview always belongs to the left content column, sharing that column vertically with Editor when both are open. Chat always owns a separate right column at full row-body height and is never shortened by the email preview. Text-box actions expose a visible fixed-position Delete menu. Optional attachment-list network failures stay local to their retryable menu.
-N114 - Mentions, urgent mentions, ordinary chat, and work-field updates created from a Node editor always route and label recipients through that exact Node's current effective GVIC resolver. The resolver may use its active Node customization or inherited Logic Gate source; callers never substitute a parent lookup. Assignment notifications go only to newly effective or effective-role-changed users, not unchanged, removed, unrelated, or actor users.
+N114 - Mentions, urgent mentions, ordinary chat, and work-field updates created from a Node editor always route and label recipients through that exact Node's current effective RCVI resolver. The resolver may use its active Node customization or inherited Logic Gate source; callers never substitute a parent lookup. Assignment notifications go only to newly effective or effective-role-changed users, not unchanged, removed, unrelated, or actor users.
 N115 - An authenticated user with Node Edit access may edit or delete only a Node chat comment whose stored `author_id` is that user. Comment edits use the exact projection ID through PATCH, preserve the original comment envelope and attachment/source relationships, refresh direct mention notifications and collaboration participants, and publish one compact `chat.message.updated` hint on the existing exact Node chat scope. Generic information/projection POST routes must reject attempts to overwrite an existing chat comment so the author check cannot be bypassed.
 N116 - The Updates row-detail Node panel exposes the shared fullscreen/restore shell action. Fullscreen uses the body-level blocking overlay, shared viewport insets, focus/Escape handling, and app-chrome suppression; restore returns to the existing Updates split ratio without changing the selected update or Node context.
 N117 - Moving an assigned Node from one Logic Gate ID to another commits a durable compact timeline event with timestamp, actor-name snapshot, source Logic Gate ID/name snapshot, and destination Logic Gate ID/name snapshot. Initial assignment, removal, and same-Logic-Gate status movement do not create that event.
 N118 - A Node timeline transfer event is immutable and read-only. Later actor or Logic Gate rename/removal does not rewrite historical display copy, and the assignment move and timeline insert succeed or roll back together.
 N119 - The Node timeline plus button opens a keyboard-labelled menu with New text box and Verify stamp choices. New text box preserves existing behavior; the plus itself no longer creates a text box immediately.
-N120 - A verification stamp snapshots every current effective Node Verified user once, requires at least one recipient, preserves that snapshot across later GVIC changes, and renders one individually actionable check beside each name. PostgreSQL derives recipients from canonical V2 settings/assignments, current hierarchy, reset boundaries, and live groups during the request, persists each recipient, reads canonical `nodes.name`, and carries that Node name into the notification domain event.
+N120 - A verification stamp snapshots every current effective Node Verifier user once, requires at least one recipient, preserves that snapshot across later RCVI changes, and renders one individually actionable check beside each name. PostgreSQL derives recipients from canonical V2 settings/assignments, current hierarchy, reset boundaries, and live groups during the request, persists each recipient, reads canonical `nodes.name`, and carries that Node name into the notification domain event.
 N121 - Only a snapshotted recipient can complete their own verification. Completion is one-way, stores the first server timestamp, is idempotent under retry/concurrency, and cannot complete another recipient.
 N122 - Transfer and verification stamps stack as content-height cards on the exact shared text-box line-and-circle timeline, stop well before the right edge, remain accessible in narrow layouts, and do not change text-box virtualization or editing. Spare workspace height stays below the rows and cannot stretch a card or create internal bottom whitespace. The timestamp and clock lead the card; Logic Gate transfer headings and both stored from/to gate-name snapshots use the established Logic Gate icon. Source and destination chips with stored IDs are keyboard-accessible Logic Gate links that push browser history so Back restores the Node route and workspace state.
 N123 - Updates deep links use the verification stamp event ID, and the Node editor scrolls that exact `data-node-timeline-event-id` row into view without opening or editing an unrelated text box.
@@ -760,9 +776,9 @@ N133 - A Node assigned to a Logic Gate uses that Logic Gate as its immediate pol
 
 N134 - Assigning or moving a Node to a Logic Gate advances both parent-link sequences. A move newer than an ancestor reset prevents that older reset from crossing the new relationship.
 
-N135 - Detaching an inherited Node atomically copies its current effective GVIC and permission policies into complete customized Node policies before removing the parent. A customized Node keeps its own policies.
+N135 - Detaching an inherited Node atomically copies its current effective RCVI and permission policies into complete customized Node policies before removing the parent. A customized Node keeps its own policies.
 
-N136 - Node GVIC and permission modes are separate. Changing one never changes the other's mode, edges, sequences, authorization, or notification meaning.
+N136 - Node RCVI and permission modes are separate. Changing one never changes the other's mode, edges, sequences, authorization, or notification meaning.
 
 N137 - Node reads and ETags include V2 source/reset/parent-link and live-group fingerprints, and authorization is checked before a conditional 304 response.
 

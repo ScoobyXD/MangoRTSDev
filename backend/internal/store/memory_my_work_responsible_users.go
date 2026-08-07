@@ -2,13 +2,13 @@ package store
 
 import "strings"
 
-func (r *MemoryRepo) attachMyWorkGeneratedUserIDsLocked(items []GVICMatrixProjectionRow) {
+func (r *MemoryRepo) attachMyWorkResponsibleUserIDsLocked(items []GVICMatrixProjectionRow) {
 	if len(items) == 0 {
 		return
 	}
 	wanted := make(map[string]bool, len(items))
 	for _, item := range items {
-		wanted[myWorkGeneratedUsersContextKey(item)] = true
+		wanted[myWorkResponsibleUsersContextKey(item)] = true
 	}
 	byContext := make(map[string]map[string]bool)
 	for _, source := range r.GVICMatrixProjectionRows {
@@ -20,10 +20,10 @@ func (r *MemoryRepo) attachMyWorkGeneratedUserIDsLocked(items []GVICMatrixProjec
 			continue
 		}
 		for _, row := range r.myWorkFlatPathRowsForNodeProjectionLocked(source) {
-			if row.GVICAssignment != "generated" {
+			if row.GVICAssignment != "responsible" {
 				continue
 			}
-			contextKey := myWorkGeneratedUsersContextKey(row)
+			contextKey := myWorkResponsibleUsersContextKey(row)
 			if !wanted[contextKey] {
 				continue
 			}
@@ -36,6 +36,6 @@ func (r *MemoryRepo) attachMyWorkGeneratedUserIDsLocked(items []GVICMatrixProjec
 		}
 	}
 	for index := range items {
-		items[index].GeneratedUserIDs = sortedGeneratedUserIDs(byContext[myWorkGeneratedUsersContextKey(items[index])])
+		items[index].ResponsibleUserIDs = sortedResponsibleUserIDs(byContext[myWorkResponsibleUsersContextKey(items[index])])
 	}
 }

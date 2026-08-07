@@ -374,7 +374,6 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   };
   const gvicBoard = gvicFields ? (
     <GVICAssignmentBoard
-      linkedEntityKind={linkedEntityKind}
       assignments={gvicFields.assignments}
       mode={gvicFields.mode}
       overwrittenByAncestor={gvicFields.overwrittenByAncestor}
@@ -831,7 +830,6 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
 };
 
 function GVICAssignmentBoard({
-  linkedEntityKind,
   assignments,
   mode,
   overwrittenByAncestor,
@@ -846,7 +844,6 @@ function GVICAssignmentBoard({
   onAddPrincipal,
   onRemovePrincipal,
 }: {
-  linkedEntityKind: "" | "node" | "logic_gate";
   assignments: LogicGateGVICAssignment[];
   mode: "inherited" | "customized";
   overwrittenByAncestor?: { resource_type: string; resource_id: string; sequence: number } | null;
@@ -867,7 +864,7 @@ function GVICAssignmentBoard({
         <div style={{ fontSize: 10, color: "#b45309" }}>This stored customization is inactive because an ancestor overwrite superseded it.</div>
       )}
       <div
-        aria-label="GVIC assignments"
+        aria-label="RCVI assignments"
         style={{
           minWidth: 0,
           width: "100%",
@@ -882,7 +879,6 @@ function GVICAssignmentBoard({
             key={item.role}
             role={item.role}
             label={item.label}
-            linkedEntityKind={linkedEntityKind}
             assignments={assignments.filter((assignment) => assignment.role === item.role)}
             allAssignments={assignments}
             companyUsers={companyUsers}
@@ -905,7 +901,6 @@ function GVICAssignmentBoard({
 function GVICRoleEditor({
   role,
   label,
-  linkedEntityKind,
   assignments,
   allAssignments,
   companyUsers,
@@ -921,7 +916,6 @@ function GVICRoleEditor({
 }: {
   role: LogicGateGVICRole;
   label: string;
-  linkedEntityKind: "" | "node" | "logic_gate";
   assignments: LogicGateGVICAssignment[];
   allAssignments: LogicGateGVICAssignment[];
   companyUsers: Array<{ user_id: string; email?: string; display_name?: string }>;
@@ -958,19 +952,17 @@ function GVICRoleEditor({
     return out;
   }, [allAssignments]);
   const roleAccent = logicGateGVICRolePresentation(role).accent;
-  const primaryUserRole = (linkedEntityKind === "node" || linkedEntityKind === "logic_gate") && (role === "generated" || role === "verified");
-  const singleUserOnly = primaryUserRole && role === "generated";
   const inheritedReadOnly = Boolean(disabledReason) && !canEdit;
-  const inputPlaceholder = disabledReason ? "Inherited" : primaryUserRole ? "Add user" : "Add user or team";
-  const pickerAriaLabel = primaryUserRole ? `${label} users` : `${label} users and teams`;
-  const assignedSummary = singleUserOnly
-    ? (assignments.length === 0 ? "" : assignments.length === 1 ? GVICAssignmentLabel(assignments[0]) : `${GVICAssignmentLabel(assignments[0])} +${assignments.length - 1}`)
-    : `People (${assignments.length})`;
-  const showAssignedButton = !singleUserOnly || assignments.length > 0;
+  const inputPlaceholder = disabledReason ? "Inherited" : "Add user or team";
+  const pickerAriaLabel = `${label} users and teams`;
+  const assignedSummary = assignments.length === 0
+    ? "No assignments"
+    : assignments.map(GVICAssignmentLabel).filter(Boolean).join(", ");
+  const showAssignedButton = true;
   const assignedListVisible = assignedOpen || assignedHoverOpen;
-  const assignmentChipLabel = showAssignedButton ? assignedSummary : "No user";
+  const assignmentChipLabel = assignedSummary;
   const showDisabledTooltip = inheritedReadOnly && Boolean(disabledReason && disabledTooltipPosition);
-  const assignedListPosition = useFloatingLayerPosition(assignedAnchorRef, assignedListVisible && showAssignedButton && !singleUserOnly, { width: 320, maxHeight: 240 });
+  const assignedListPosition = useFloatingLayerPosition(assignedAnchorRef, assignedListVisible, { width: 320, maxHeight: 240 });
   const pickerListPosition = useFloatingLayerPosition(inputAnchorRef, canEdit && open, { width: 360, maxHeight: 290 });
   const toggleGroupExpanded = (groupID: string) => {
     const cleanGroupID = groupID.trim();
@@ -1080,10 +1072,10 @@ function GVICRoleEditor({
         principalType: "group",
         principalID: groupID,
         label: companyGroupLabel(group, groupID),
-        meta: primaryUserRole && state.selectable ? "Groups are not allowed for this role" : state.meta,
+        meta: state.meta,
         depth,
         rowType: "group",
-        selectable: !primaryUserRole && state.selectable,
+        selectable: state.selectable,
         expandable: hasChildren,
         expanded,
       }];
@@ -1123,7 +1115,7 @@ function GVICRoleEditor({
       pickerRows: rows,
       selectableOptions: rows.filter((row) => row.selectable),
     };
-  }, [companyUserGroupMembers, companyUserGroups, companyUsers, draft, expandedGroupIDs, occupiedRoleByPrincipalKey, primaryUserRole, role]);
+  }, [companyUserGroupMembers, companyUserGroups, companyUsers, draft, expandedGroupIDs, occupiedRoleByPrincipalKey, role]);
 
   const showAssignedHoverPreview = () => {
     if (assignedHoverCloseTimerRef.current !== null) {
@@ -1145,11 +1137,6 @@ function GVICRoleEditor({
   useEffect(() => () => {
     if (assignedHoverCloseTimerRef.current !== null) window.clearTimeout(assignedHoverCloseTimerRef.current);
   }, []);
-  useEffect(() => {
-    if (!singleUserOnly) return;
-    setAssignedOpen(false);
-    setAssignedHoverOpen(false);
-  }, [singleUserOnly]);
 
   useEffect(() => {
     if (!open && !assignedListVisible) return;
@@ -1192,7 +1179,6 @@ function GVICRoleEditor({
 
   const addPrincipalOption = (option: LogicGateGVICPrincipalPickerOption) => {
     if (!canEdit || !option.selectable || occupiedRoleByPrincipalKey.has(`${option.principalType}:${option.principalID}`)) return;
-    if (primaryUserRole && option.principalType !== "user") return;
     onAddPrincipal(role, option.principalType, option.principalID);
     setDraft("");
     setOpen(false);
@@ -1235,53 +1221,38 @@ function GVICRoleEditor({
           {showAssignedButton ? (
             <button
               type="button"
-              aria-label={singleUserOnly && assignments[0] ? `Remove ${GVICAssignmentLabel(assignments[0])} from ${label}` : `${label} people`}
-              aria-haspopup={singleUserOnly ? undefined : "listbox"}
-              aria-expanded={singleUserOnly ? undefined : assignedListVisible}
-              aria-controls={singleUserOnly ? undefined : `${inputID}-assigned-users`}
-              disabled={singleUserOnly && !canEdit}
-              onMouseEnter={() => {
-                if (singleUserOnly) return;
-                showAssignedHoverPreview();
-              }}
-              onMouseLeave={() => {
-                if (singleUserOnly) return;
-                hideAssignedHoverPreview();
-              }}
+              aria-label={`${label} people and groups`}
+              aria-haspopup="listbox"
+              aria-expanded={assignedListVisible}
+              aria-controls={`${inputID}-assigned-users`}
+              onMouseEnter={showAssignedHoverPreview}
+              onMouseLeave={hideAssignedHoverPreview}
               onClick={() => {
-                if (singleUserOnly) {
-                  const assignment = assignments[0];
-                  if (!canEdit || !assignment) return;
-                  onRemovePrincipal(role, logicGateGVICAssignmentPrincipalType(assignment), logicGateGVICAssignmentPrincipalID(assignment));
-                  setAssignedOpen(false);
-                  setOpen(false);
-                  return;
-                }
                 setAssignedOpen((current) => !current);
                 setOpen(false);
               }}
-              style={{ width: "fit-content", maxWidth: "100%", minHeight: 25, display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${hexWithAlpha(roleAccent, assignedListVisible ? "70" : "2f")}`, borderRadius: 999, background: assignedListVisible ? EDITOR_NEU_ACTIVE_SURFACE : EDITOR_NEU_SURFACE, color: "#111827", cursor: singleUserOnly && !canEdit ? "default" : "pointer", padding: "2px 8px", font: "inherit", fontSize: 11, fontWeight: 800, opacity: singleUserOnly && !canEdit ? 0.66 : 1, boxShadow: assignedListVisible ? `0 7px 15px ${hexWithAlpha(roleAccent, "1c")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "2px 2px 7px rgba(174,174,192,0.15), -2px -2px 7px rgba(255,255,255,0.74), inset 1px 1px 0 rgba(255,255,255,0.82)" }}
+              style={{ width: "100%", minHeight: 25, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 6, border: `1px solid ${hexWithAlpha(roleAccent, assignedListVisible ? "70" : "2f")}`, borderRadius: 999, background: assignedListVisible ? EDITOR_NEU_ACTIVE_SURFACE : EDITOR_NEU_SURFACE, color: "#111827", cursor: "pointer", padding: "2px 8px", font: "inherit", fontSize: 11, fontWeight: 800, opacity: 1, boxShadow: assignedListVisible ? `0 7px 15px ${hexWithAlpha(roleAccent, "1c")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "2px 2px 7px rgba(174,174,192,0.15), -2px -2px 7px rgba(255,255,255,0.74), inset 1px 1px 0 rgba(255,255,255,0.82)" }}
             >
-              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{assignedSummary}</span>
-              <span aria-hidden="true" style={{ color: roleAccent || accent, fontSize: singleUserOnly ? 11 : 9, fontWeight: 900 }}>{singleUserOnly ? "x" : assignedListVisible ? "^" : "v"}</span>
+              <span style={{ minWidth: 0, textAlign: "left", whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.25 }}>{assignedSummary}</span>
+              <span aria-hidden="true" style={{ color: roleAccent || accent, fontSize: 9, fontWeight: 900 }}>{assignedListVisible ? "^" : "v"}</span>
             </button>
           ) : (
             <span style={{ maxWidth: "100%", minHeight: 25, display: "inline-flex", alignItems: "center", border: `1px dashed ${hexWithAlpha(roleAccent, "32")}`, borderRadius: 999, background: "rgba(255,255,255,0.52)", color: "#64748b", padding: "2px 8px", fontSize: 11, fontWeight: 760, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {assignmentChipLabel}
             </span>
           )}
-          {assignedListVisible && showAssignedButton && !singleUserOnly && assignedListPosition && floatingPortalTarget && createPortal(
+          {assignedListVisible && assignedListPosition && floatingPortalTarget && createPortal(
           <div
             ref={assignedListRef}
             onMouseEnter={showAssignedHoverPreview}
             onMouseLeave={hideAssignedHoverPreview}
             id={`${inputID}-assigned-users`}
             role="listbox"
-            aria-label={primaryUserRole ? `${label} people` : `${label} people and groups`}
+            aria-label={`${label} people and groups`}
             style={{ position: "fixed", zIndex: GVIC_FLOATING_LAYER_Z_INDEX + 1, top: assignedListPosition.top, left: assignedListPosition.left, width: assignedListPosition.width, maxHeight: assignedListPosition.maxHeight, overflowY: "auto", padding: 6, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: panelBackground || EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, color: "#111827" }}
           >
             {assignments.length === 0 ? (
-              <div style={{ padding: "8px 10px", color: "#64748b", fontSize: 11, fontWeight: 650 }}>{singleUserOnly ? "No user" : "No people"}</div>
+              <div style={{ padding: "8px 10px", color: "#64748b", fontSize: 11, fontWeight: 650 }}>No people or groups</div>
             ) : assignments.map((assignment) => {
               const principalType = logicGateGVICAssignmentPrincipalType(assignment);
               const principalID = logicGateGVICAssignmentPrincipalID(assignment);
@@ -1336,7 +1307,7 @@ function GVICRoleEditor({
           type="button"
           id={inputID}
           disabled={!canEdit}
-          aria-label={`Add ${label} ${primaryUserRole ? "user" : "user or team"}`}
+          aria-label={`Add ${label} user or team`}
           aria-haspopup="listbox"
           aria-expanded={canEdit && open}
           aria-controls={`${inputID}-options`}
@@ -1404,7 +1375,7 @@ function GVICRoleEditor({
             <div role="listbox" aria-label={pickerAriaLabel} style={{ minHeight: 0, overflowY: "auto", display: "grid", alignContent: "start", gap: 3, paddingTop: 6 }}>
               {pickerRows.length === 0 ? (
                 <div style={{ padding: "8px 10px", color: "#64748b", fontSize: 11, fontWeight: 500 }}>
-                  {draft.trim() ? "No matches" : primaryUserRole ? "No users available" : "No users or teams available"}
+                  {draft.trim() ? "No matches" : "No users or teams available"}
                 </div>
               ) : pickerRows.map((option) => {
               const optionAccent = option.principalType === "group" ? roleAccent : userAccentForName(option.label || option.principalID);

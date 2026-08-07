@@ -46,9 +46,9 @@ export const GVIC_STATUS_COLUMNS: ReadonlyArray<{ status: GVICInboxStatus; lette
 ];
 
 export const GVIC_INBOX_SECTIONS: ReadonlyArray<{ viewID: GVICInboxViewID; role: GVICInboxRole; letter: string; label: string; title: string }> = [
-  { viewID: "r-inbox", role: "generated", letter: "G", label: "Generated", title: "Generated Nodes" },
-  { viewID: "a-inbox", role: "verified", letter: "V", label: "Verified", title: "Verified Nodes" },
+  { viewID: "r-inbox", role: "responsible", letter: "R", label: "Responsible", title: "Responsible Nodes" },
   { viewID: "c-inbox", role: "consulted", letter: "C", label: "Consulted", title: "Consulted Nodes" },
+  { viewID: "v-inbox", role: "verifier", letter: "V", label: "Verifier", title: "Verifier Nodes" },
   { viewID: "i-inbox", role: "informed", letter: "I", label: "Informed", title: "Informed Nodes" },
   { viewID: "o-inbox", role: "other", letter: "O", label: "Other", title: "Other Nodes" },
 ];

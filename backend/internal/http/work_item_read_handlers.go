@@ -109,7 +109,7 @@ func workItemInboxRequestedUserID(r *http.Request) (string, bool, bool, bool) {
 	return userID, true, true, true
 }
 
-func (s *Server) handleWorkItemGeneratedInbox(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleWorkItemResponsibleInbox(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
@@ -118,9 +118,9 @@ func (s *Server) handleWorkItemGeneratedInbox(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
-	items, err := s.repo.ListGeneratedInboxNodesContext(r.Context(), query)
+	items, err := s.repo.ListResponsibleInboxNodesContext(r.Context(), query)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_generated_inbox")
+		writeError(w, http.StatusInternalServerError, "failed_to_list_responsible_inbox")
 		return
 	}
 	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
@@ -131,7 +131,7 @@ func (s *Server) handleWorkItemGeneratedInbox(w http.ResponseWriter, r *http.Req
 	})
 }
 
-func (s *Server) handleWorkItemACIInbox(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleWorkItemCVIInbox(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
@@ -140,9 +140,9 @@ func (s *Server) handleWorkItemACIInbox(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	items, err := s.repo.ListACIInboxLogicGatesContext(r.Context(), query)
+	items, err := s.repo.ListCVIInboxLogicGatesContext(r.Context(), query)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_gvic_inbox")
+		writeError(w, http.StatusInternalServerError, "failed_to_list_cvi_inbox")
 		return
 	}
 	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{

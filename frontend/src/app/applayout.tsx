@@ -287,7 +287,7 @@ const STATIC_HOME_KEY_VIEW_IDS = new Set<HomeKeyViewID>([
   "my-triage",
   "shared-root",
   "r-inbox",
-  "a-inbox",
+  "v-inbox",
   "c-inbox",
   "i-inbox",
   "o-inbox",

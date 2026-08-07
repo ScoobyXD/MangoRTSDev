@@ -26,7 +26,7 @@ func TestV2PolicyEventsCarryPolicyActionAndResultingSequence(t *testing.T) {
 		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
 		AssignmentMode: PolicyModeCustomized, DescendantAction: PolicyDescendantActionIncludingCustomized,
 		Assignments: []ResourceGVICAssignmentInput{{
-			Role: domain.GVICRoleGenerated, PrincipalType: EntityPermissionSubjectUser, PrincipalID: user.UserID,
+			Role: domain.GVICRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: user.UserID,
 		}},
 	})
 	if err != nil {
@@ -49,6 +49,45 @@ func TestV2PolicyEventsCarryPolicyActionAndResultingSequence(t *testing.T) {
 	assertV2PolicyEventSequence(t, permissionEvents, "permission", PolicyDescendantActionIncludingCustomized)
 }
 
+func TestV2GVICPolicyRoleChangeTargetsExistingUser(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "company-v2-policy-role-change"
+	repo.EnsureCompany(companyID, "V2 Policy Role Change")
+	user, err := repo.UpsertAuthUser("v2-policy-role-change-user", "role-change@example.com", "Role Change User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Policy Role Change Node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+
+	if _, _, err := repo.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{
+		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
+		AssignmentMode: PolicyModeCustomized, DescendantAction: PolicyDescendantActionInheritedOnly,
+		Assignments: []ResourceGVICAssignmentInput{{Role: domain.GVICRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: user.UserID}},
+	}); err != nil {
+		t.Fatalf("initial PutResourceGVICPolicy: %v", err)
+	}
+	_, events, err := repo.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{
+		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
+		AssignmentMode: PolicyModeCustomized, DescendantAction: PolicyDescendantActionInheritedOnly,
+		Assignments: []ResourceGVICAssignmentInput{{Role: domain.GVICRoleConsulted, PrincipalType: EntityPermissionSubjectUser, PrincipalID: user.UserID}},
+	})
+	if err != nil {
+		t.Fatalf("role-change PutResourceGVICPolicy: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("role-change events = %+v, want one", events)
+	}
+	userIDs, ok := events[0].Payload["assignment_user_ids"].([]string)
+	if !ok || len(userIDs) != 1 || userIDs[0] != user.UserID {
+		t.Fatalf("assignment_user_ids = %#v, want existing user %s after role change", events[0].Payload["assignment_user_ids"], user.UserID)
+	}
+}
 func assertV2PolicyEventSequence(t *testing.T, events []domain.DomainEvent, policyType, action string) {
 	t.Helper()
 	if len(events) != 1 {

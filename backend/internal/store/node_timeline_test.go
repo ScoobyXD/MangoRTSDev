@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestNodeVerificationRequestSnapshotsMultipleVerifiedUsersAndCompletesPerPerson(t *testing.T) {
+func TestNodeVerificationRequestSnapshotsMultipleVerifierUsersAndCompletesPerPerson(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "62626262-6262-4262-8262-626262626201"
 	repo.EnsureCompany(companyID, "Timeline Verification Co")
@@ -21,12 +21,12 @@ func TestNodeVerificationRequestSnapshotsMultipleVerifiedUsersAndCompletesPerPer
 	_, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
 		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
 		Assignments: []ResourceGVICAssignmentInput{
-			{Role: domain.GVICRoleVerified, PrincipalType: EntityPermissionSubjectUser, PrincipalID: first.UserID},
-			{Role: domain.GVICRoleVerified, PrincipalType: EntityPermissionSubjectUser, PrincipalID: second.UserID},
+			{Role: domain.GVICRoleVerifier, PrincipalType: EntityPermissionSubjectUser, PrincipalID: first.UserID},
+			{Role: domain.GVICRoleVerifier, PrincipalType: EntityPermissionSubjectUser, PrincipalID: second.UserID},
 		},
 	})
 	if err != nil {
-		t.Fatalf("SetResourceGVICAssignments multiple verified: %v", err)
+		t.Fatalf("SetResourceGVICAssignments multiple verifier: %v", err)
 	}
 
 	created, err := repo.CreateNodeVerificationRequest(NodeVerificationRequestInput{
@@ -51,10 +51,10 @@ func TestNodeVerificationRequestSnapshotsMultipleVerifiedUsersAndCompletesPerPer
 
 	_, err = repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
 		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
-		Assignments: []ResourceGVICAssignmentInput{{Role: domain.GVICRoleVerified, PrincipalType: EntityPermissionSubjectUser, PrincipalID: later.UserID}},
+		Assignments: []ResourceGVICAssignmentInput{{Role: domain.GVICRoleVerifier, PrincipalType: EntityPermissionSubjectUser, PrincipalID: later.UserID}},
 	})
 	if err != nil {
-		t.Fatalf("replace verified after snapshot: %v", err)
+		t.Fatalf("replace verifier after snapshot: %v", err)
 	}
 	listed, err := repo.ListNodeTimelineEvents(companyID, node.NodeID)
 	if err != nil || len(listed) != 1 || len(listed[0].VerificationRecipients) != 2 {
@@ -140,21 +140,34 @@ func TestNodeTimelineRecordsOnlyCrossLogicGateTransfersWithSnapshots(t *testing.
 	}
 }
 
-func TestVerifiedGVICAllowsManyUsersButRejectsGroups(t *testing.T) {
+func TestVerifierRCVIAllowsManyUsersAndGroups(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "62626262-6262-4262-8262-626262626203"
-	repo.EnsureCompany(companyID, "Verified Rule Co")
-	first := mustCreateGVICMembershipUser(t, repo, "verified-rule-first", companyID)
-	second := mustCreateGVICMembershipUser(t, repo, "verified-rule-second", companyID)
-	node := mustCreateGVICMembershipNode(t, repo, companyID, "Verified rule node")
-	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID, Assignments: []ResourceGVICAssignmentInput{
-		{Role: domain.GVICRoleVerified, PrincipalType: EntityPermissionSubjectUser, PrincipalID: first.UserID},
-		{Role: domain.GVICRoleVerified, PrincipalType: EntityPermissionSubjectUser, PrincipalID: second.UserID},
-	}}); err != nil {
-		t.Fatalf("multiple verified users rejected: %v", err)
+	repo.EnsureCompany(companyID, "Verifier Rule Co")
+	first := mustCreateGVICMembershipUser(t, repo, "verifier-rule-first", companyID)
+	second := mustCreateGVICMembershipUser(t, repo, "verifier-rule-second", companyID)
+	group, err := repo.CreateCompanyUserGroup(companyID, "", "Verifier Team")
+	if err != nil {
+		t.Fatalf("CreateCompanyUserGroup: %v", err)
 	}
-	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID, Assignments: []ResourceGVICAssignmentInput{{Role: domain.GVICRoleVerified, PrincipalType: EntityPermissionSubjectGroup, PrincipalID: "62626262-6262-4262-8262-626262626299"}}}); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("verified group err=%v, want ErrInvalid", err)
+	if _, err := repo.SetCompanyUserGroupMembers(companyID, group.GroupID, []string{first.UserID, second.UserID}); err != nil {
+		t.Fatalf("SetCompanyUserGroupMembers: %v", err)
+	}
+	node := mustCreateGVICMembershipNode(t, repo, companyID, "Verifier rule node")
+	result, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
+		Assignments: []ResourceGVICAssignmentInput{{Role: domain.GVICRoleVerifier, PrincipalType: EntityPermissionSubjectGroup, PrincipalID: group.GroupID}},
+	})
+	if err != nil {
+		t.Fatalf("Verifier group assignment rejected: %v", err)
+	}
+	if len(result.EffectiveAssignments) != 2 {
+		t.Fatalf("Verifier effective assignments = %+v, want both group members", result.EffectiveAssignments)
+	}
+	for _, assignment := range result.EffectiveAssignments {
+		if assignment.Role != domain.GVICRoleVerifier || (assignment.UserID != first.UserID && assignment.UserID != second.UserID) {
+			t.Fatalf("unexpected Verifier effective assignment: %+v", assignment)
+		}
 	}
 }
 

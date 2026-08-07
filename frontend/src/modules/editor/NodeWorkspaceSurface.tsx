@@ -375,7 +375,7 @@ function logicGateOptionLabel(logicGate: LogicGateRecord): string {
 function nodeTimelineErrorMessage(cause: unknown, fallback: string): string {
   const message = cause instanceof Error ? cause.message : fallback;
   if (message === "verification_recipients_required") {
-    return "Add at least one person to Verified before requesting a verify stamp.";
+    return "Add at least one person to Verifier before requesting a verify stamp.";
   }
   if (message.toLowerCase() === "failed to fetch") {
     return "Could not reach the server. Check your connection and try again.";
@@ -3345,7 +3345,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     style={{ width: "100%", border: 0, borderRadius: 8, background: "transparent", color: surfaceText, display: "grid", gridTemplateColumns: "28px 1fr", alignItems: "center", gap: 8, padding: "9px 10px", textAlign: "left", cursor: verificationRequestPending ? "wait" : "pointer" }}
                   >
                     <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: 8, border: `1px solid ${ruleColor}`, display: "grid", placeItems: "center", background: "rgba(255,255,255,0.55)", color: accent, fontWeight: 950, boxSizing: "border-box" }}>✓</span>
-                    <span><strong style={{ display: "block", fontSize: 12 }}>Verify stamp</strong><small style={{ opacity: 0.7 }}>Request everyone assigned to Verified</small></span>
+                    <span><strong style={{ display: "block", fontSize: 12 }}>Verify stamp</strong><small style={{ opacity: 0.7 }}>Request everyone assigned to Verifier</small></span>
                   </button>
                 </div>
               )}

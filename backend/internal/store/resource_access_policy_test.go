@@ -160,7 +160,7 @@ func TestV2PermissionRejectsStaleRevisionAndDoesNotGrantThroughGVIC(t *testing.T
 	if _, _, err := repo.PutResourcePermissionPolicy(ResourcePermissionPolicyUpdateInput{CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID, PermissionMode: PolicyModeCustomized, DefaultAccess: &deny, DescendantAction: PolicyDescendantActionInheritedOnly, ExpectedRevision: current.Revision}); err != ErrVersionConflict {
 		t.Fatalf("stale write error=%v", err)
 	}
-	if _, _, err := repo.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID, AssignmentMode: PolicyModeCustomized, Assignments: []ResourceGVICAssignmentInput{{Role: domain.GVICRoleGenerated, PrincipalType: EntityPermissionSubjectUser, PrincipalID: userA.UserID}}, DescendantAction: PolicyDescendantActionInheritedOnly}); err != nil {
+	if _, _, err := repo.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID, AssignmentMode: PolicyModeCustomized, Assignments: []ResourceGVICAssignmentInput{{Role: domain.GVICRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: userA.UserID}}, DescendantAction: PolicyDescendantActionInheritedOnly}); err != nil {
 		t.Fatal(err)
 	}
 	if allowed, _ := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, userA.UserID, EntityPermissionEdit); allowed {

@@ -9,7 +9,7 @@ export type LogicGateRecord = ResourceAccessFields & {
   created_timestamp: string;
 };
 
-export type LogicGateGVICRole = "generated" | "verified" | "consulted" | "informed";
+export type LogicGateGVICRole = "responsible" | "consulted" | "verifier" | "informed";
 export type LogicGateGVICPrincipalType = "user" | "group";
 
 export type LogicGateGVICAssignment = {

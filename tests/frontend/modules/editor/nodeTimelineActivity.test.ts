@@ -16,7 +16,7 @@ test("node timeline plus offers text box and verify stamp without direct creatio
   assert.match(nodeSurface, /createVerificationRequest\(\)[\s\S]*Verify stamp/);
   assert.equal(nodeSurface.match(/className="mango-timeline-create-menu-item"/g)?.length, 2);
   assert.match(styles, /\.mango-timeline-create-menu-item:not\(:disabled\):hover,[\s\S]*\.mango-timeline-create-menu-item:not\(:disabled\):focus-visible/);
-  assert.match(nodeSurface, /Verify stamp[\s\S]*Request everyone assigned to Verified/);
+  assert.match(nodeSurface, /Verify stamp[\s\S]*Request everyone assigned to Verifier/);
   assert.doesNotMatch(nodeSurface, /role="menuitem"[\s\S]{0,300}verificationRequestPending[\s\S]{0,300}background: "rgba\(99,102,241,0\.08\)"/);
   assert.doesNotMatch(nodeSurface, /title="Add text box"\s*onClick=\{createTextBlock\}/);
 });
@@ -46,13 +46,15 @@ test("compact timeline rows expose immutable transfer copy and recipient-only ve
   assert.match(focusHelper, /"data-node-timeline-event-id"/);
 });
 
-test("verified supports multiple explicit people and Updates gets verification copy", () => {
+test("every RCVI role supports multiple people and groups while Updates keeps verification copy", () => {
   const gvicPanel = source("frontend/src/modules/editor/EditorLinkedDocumentPanels.tsx");
   const editor = source("frontend/src/modules/editor/EditorContent.tsx");
   const updates = source("frontend/src/pages/home/UpdatesView.tsx");
-  assert.match(gvicPanel, /primaryUserRole[\s\S]*role === "generated" \|\| role === "verified"/);
-  assert.match(gvicPanel, /singleUserOnly = primaryUserRole && role === "generated"/);
-  assert.match(editor, /const singleUserRole = role === "generated";[\s\S]*role === "verified" && principalType !== "user"/);
+  assert.match(gvicPanel, /inputPlaceholder = disabledReason \? "Inherited" : "Add user or team"/);
+  assert.match(gvicPanel, /assignments\.map\(GVICAssignmentLabel\)\.filter\(Boolean\)\.join\(", "\)/);
+  assert.match(gvicPanel, /principalType: "group"[\s\S]*selectable: state\.selectable/);
+  assert.doesNotMatch(gvicPanel, /primaryUserRole|singleUserOnly|People \(/);
+  assert.doesNotMatch(editor, /singleUserRole|role === "verifier" && principalType !== "user"/);
   assert.match(updates, /node\.verification_requested/);
   assert.match(updates, /requested verification from you on/);
   assert.match(updates, /verification: \{ color: "#4338ca"/);

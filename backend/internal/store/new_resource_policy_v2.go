@@ -28,7 +28,7 @@ func (r *MemoryRepo) customizeNewMemoryResourceGVICForCreatorLocked(companyID, r
 	complete := make([]domain.ResourceGVICAssignment, 0, len(edges)+1)
 	for _, edge := range edges {
 		if (edge.PrincipalType == EntityPermissionSubjectUser && edge.PrincipalID == creatorUserID) ||
-			(normalized[0].role == domain.GVICRoleGenerated && edge.Role == domain.GVICRoleGenerated) {
+			(normalized[0].role == domain.GVICRoleResponsible && edge.Role == domain.GVICRoleResponsible) {
 			continue
 		}
 		complete = append(complete, edge)
@@ -119,7 +119,7 @@ order by edge.role,edge.principal_type,edge.principal_id::text`, keyValue.compan
 			return ResourceGVICPolicy{}, err
 		}
 		if (edge.PrincipalType == EntityPermissionSubjectUser && edge.PrincipalID == creatorUserID) ||
-			(role == domain.GVICRoleGenerated && edge.Role == domain.GVICRoleGenerated) {
+			(role == domain.GVICRoleResponsible && edge.Role == domain.GVICRoleResponsible) {
 			continue
 		}
 		complete = append(complete, edge)

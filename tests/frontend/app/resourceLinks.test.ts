@@ -23,8 +23,8 @@ describe("resourceLinks", () => {
 
   it("builds node routes inside the current GVIC or Logic Gate context", () => {
     assert.equal(
-      buildContextualNodeRoute("node 2", "/gvic/generated"),
-      "/gvic/generated/nodes/node%202",
+      buildContextualNodeRoute("node 2", "/gvic/responsible"),
+      "/gvic/responsible/nodes/node%202",
     );
     assert.equal(
       buildContextualNodeRoute("node 2", "/logic-gates/lg-1"),

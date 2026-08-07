@@ -103,7 +103,7 @@ type ScopePickerRow = {
   scope: MyWorkSelectedScope;
 };
 
-const MY_WORK_MATRIX_ROLES: LogicGateGVICRole[] = ["generated", "verified", "consulted", "informed"];
+const MY_WORK_MATRIX_ROLES: LogicGateGVICRole[] = ["responsible", "consulted", "verifier", "informed"];
 const MY_WORK_MATRIX_PRIORITIES = [1, 2, 3, 4, 5, 0] as const;
 type MyWorkMatrixPriority = typeof MY_WORK_MATRIX_PRIORITIES[number];
 type MyWorkCellCreateInput = { priority: MyWorkMatrixPriority; creatorGVICRole?: LogicGateGVICRole };
@@ -1545,17 +1545,17 @@ function buildMyWorkRowsFromMatrix({
   groupIDsByUserID: Map<string, string[]>;
 }): MyWorkResourceRow[] {
   const rows: MyWorkResourceRow[] = [];
-  const generatedUserIDsByContext = new Map<string, Set<string>>();
+  const responsibleUserIDsByContext = new Map<string, Set<string>>();
   for (const item of matrixCells) {
     const contextKey = myWorkMatrixAssignmentContextKey(item);
-    const generatedUserIDs = cleanIDList(item.generated_user_ids ?? []);
-    if (normalizeGVICRole(item.gvic_assignment) === "generated") {
-      generatedUserIDs.push(item.userID.trim() || item.user_id?.trim() || "");
+    const responsibleUserIDs = cleanIDList(item.responsible_user_ids ?? []);
+    if (normalizeGVICRole(item.gvic_assignment) === "responsible") {
+      responsibleUserIDs.push(item.userID.trim() || item.user_id?.trim() || "");
     }
-    if (generatedUserIDs.length === 0) continue;
-    const users = generatedUserIDsByContext.get(contextKey) ?? new Set<string>();
-    for (const userID of generatedUserIDs) if (userID) users.add(userID);
-    generatedUserIDsByContext.set(contextKey, users);
+    if (responsibleUserIDs.length === 0) continue;
+    const users = responsibleUserIDsByContext.get(contextKey) ?? new Set<string>();
+    for (const userID of responsibleUserIDs) if (userID) users.add(userID);
+    responsibleUserIDsByContext.set(contextKey, users);
   }
   for (const item of matrixCells) {
     const role = normalizeGVICRole(item.gvic_assignment);
@@ -1568,8 +1568,8 @@ function buildMyWorkRowsFromMatrix({
     const title = item.node_name?.trim() || nodeID;
     const projectName = item.project_name?.trim() || projectID;
     const logicGateName = item.logic_gate_name?.trim() || logicGateID;
-    const generatedUserIDs = Array.from(generatedUserIDsByContext.get(myWorkMatrixAssignmentContextKey(item)) ?? []);
-    const people = generatedUserIDs.map((generatedUserID) => personForUserID(generatedUserID, userByID));
+    const responsibleUserIDs = Array.from(responsibleUserIDsByContext.get(myWorkMatrixAssignmentContextKey(item)) ?? []);
+    const people = responsibleUserIDs.map((responsibleUserID) => personForUserID(responsibleUserID, userByID));
     rows.push({
       rowKey: item.projection_row_id?.trim() || `${userID}:${role}:node:${nodeID}:project:${projectID || "none"}:logic_gate:${logicGateID || "none"}`,
       companyID: item.companyID || item.company_id,
@@ -1654,21 +1654,21 @@ function hasMyWorkDragType(dataTransfer: DataTransfer, mime: string): boolean {
 }
 
 function normalizeGVICRole(role: string | null | undefined): LogicGateGVICRole | "" {
-  if (role === "generated" || role === "verified" || role === "consulted" || role === "informed") return role;
+  if (role === "responsible" || role === "verifier" || role === "consulted" || role === "informed") return role;
   return "";
 }
 
 function myWorkGVICRoleLetter(role: LogicGateGVICRole): string {
-  if (role === "generated") return "G";
-  if (role === "verified") return "V";
+  if (role === "responsible") return "R";
   if (role === "consulted") return "C";
+  if (role === "verifier") return "V";
   return "I";
 }
 
 function defaultMyWorkRoleColumnWidths(): MyWorkRoleColumnWidths {
   return {
-    generated: MY_WORK_ROLE_COLUMN_DEFAULT_WIDTH,
-    verified: MY_WORK_ROLE_COLUMN_DEFAULT_WIDTH,
+    responsible: MY_WORK_ROLE_COLUMN_DEFAULT_WIDTH,
+    verifier: MY_WORK_ROLE_COLUMN_DEFAULT_WIDTH,
     consulted: MY_WORK_ROLE_COLUMN_DEFAULT_WIDTH,
     informed: MY_WORK_ROLE_COLUMN_DEFAULT_WIDTH,
   };
@@ -1696,8 +1696,8 @@ function normalizeMyWorkRoleColumnWidths(value: unknown): MyWorkRoleColumnWidths
   if (!value || typeof value !== "object") return fallback;
   const candidate = value as Partial<Record<LogicGateGVICRole, unknown>>;
   return {
-    generated: typeof candidate.generated === "number" && Number.isFinite(candidate.generated) ? clampMyWorkRoleColumnWidth(candidate.generated) : fallback.generated,
-    verified: typeof candidate.verified === "number" && Number.isFinite(candidate.verified) ? clampMyWorkRoleColumnWidth(candidate.verified) : fallback.verified,
+    responsible: typeof candidate.responsible === "number" && Number.isFinite(candidate.responsible) ? clampMyWorkRoleColumnWidth(candidate.responsible) : fallback.responsible,
+    verifier: typeof candidate.verifier === "number" && Number.isFinite(candidate.verifier) ? clampMyWorkRoleColumnWidth(candidate.verifier) : fallback.verifier,
     consulted: typeof candidate.consulted === "number" && Number.isFinite(candidate.consulted) ? clampMyWorkRoleColumnWidth(candidate.consulted) : fallback.consulted,
     informed: typeof candidate.informed === "number" && Number.isFinite(candidate.informed) ? clampMyWorkRoleColumnWidth(candidate.informed) : fallback.informed,
   };

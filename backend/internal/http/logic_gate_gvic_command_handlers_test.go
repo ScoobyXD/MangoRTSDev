@@ -52,7 +52,7 @@ func TestLogicGateGVICAddRemoveCommandAPI(t *testing.T) {
 	removedWriterBody := map[string]any{
 		"company_id":       companyID,
 		"assignment_mode":  store.PolicyModeCustomized,
-		"gvic_assignments": []map[string]string{{"role": domain.GVICRoleGenerated, "principal_type": store.EntityPermissionSubjectUser, "principal_id": responsible.UserID}},
+		"gvic_assignments": []map[string]string{{"role": domain.GVICRoleResponsible, "principal_type": store.EntityPermissionSubjectUser, "principal_id": responsible.UserID}},
 	}
 	for _, operation := range []string{store.GVICAssignmentCommandAdd, store.GVICAssignmentCommandRemove} {
 		response := postResourceGVICCommandForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, operation, removedWriterBody)
@@ -65,8 +65,8 @@ func TestLogicGateGVICAddRemoveCommandAPI(t *testing.T) {
 		"company_id":      companyID,
 		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{
-			{"role": domain.GVICRoleGenerated, "principal_type": store.EntityPermissionSubjectUser, "principal_id": responsible.UserID},
-			{"role": domain.GVICRoleGenerated, "principal_type": store.EntityPermissionSubjectUser, "principal_id": responsible.UserID},
+			{"role": domain.GVICRoleResponsible, "principal_type": store.EntityPermissionSubjectUser, "principal_id": responsible.UserID},
+			{"role": domain.GVICRoleResponsible, "principal_type": store.EntityPermissionSubjectUser, "principal_id": responsible.UserID},
 		},
 		"idempotency_key": "canonical-add-normalization",
 	}
@@ -96,7 +96,7 @@ func TestLogicGateGVICAddRemoveCommandAPI(t *testing.T) {
 		t.Fatalf("idempotent empty replacement = %+v status=%d, want unchanged revision", missingRemovePayload, missingRemove.Code)
 	}
 
-	for _, role := range []string{"owner", "responsible"} {
+	for _, role := range []string{"owner", "generated"} {
 		invalidRole := putResourceGVICPolicyForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, map[string]any{
 			"company_id": companyID, "assignment_mode": store.PolicyModeCustomized,
 			"gvic_assignments": []map[string]string{{"role": role, "principal_type": store.EntityPermissionSubjectUser, "principal_id": responsible.UserID}},
@@ -108,18 +108,18 @@ func TestLogicGateGVICAddRemoveCommandAPI(t *testing.T) {
 
 	fullReplace := putResourceGVICPolicyForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, map[string]any{
 		"company_id": companyID, "assignment_mode": store.PolicyModeCustomized,
-		"gvic_assignments": []map[string]string{{"role": domain.GVICRoleVerified, "principal_type": store.EntityPermissionSubjectUser, "principal_id": accountable.UserID}},
+		"gvic_assignments": []map[string]string{{"role": domain.GVICRoleVerifier, "principal_type": store.EntityPermissionSubjectUser, "principal_id": accountable.UserID}},
 	})
 	fullReplacePayload := decodeResourceGVICCommandPayloadForTest(t, fullReplace)
-	if fullReplace.Code != http.StatusOK || len(fullReplacePayload.Assignments) != 1 || fullReplacePayload.Assignments[0].Role != domain.GVICRoleVerified {
-		t.Fatalf("full replacement status=%d payload=%+v, want verified assignment", fullReplace.Code, fullReplacePayload)
+	if fullReplace.Code != http.StatusOK || len(fullReplacePayload.Assignments) != 1 || fullReplacePayload.Assignments[0].Role != domain.GVICRoleVerifier {
+		t.Fatalf("full replacement status=%d payload=%+v, want Verifier assignment", fullReplace.Code, fullReplacePayload)
 	}
 
 	outsiderAdd := putResourceGVICPolicyForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, map[string]any{
 		"company_id":      companyID,
 		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{{
-			"role":           domain.GVICRoleGenerated,
+			"role":           domain.GVICRoleResponsible,
 			"principal_type": store.EntityPermissionSubjectUser,
 			"principal_id":   outsider.UserID,
 		}},

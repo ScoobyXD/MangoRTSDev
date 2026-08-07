@@ -343,8 +343,8 @@ export function priorityLabel(priority: number): string {
 }
 
 export function GVICRoleLabel(role: LogicGateGVICRole): string {
-  if (role === "generated") return "Generated";
-  if (role === "verified") return "Verified";
+  if (role === "responsible") return "Responsible";
+  if (role === "verifier") return "Verifier";
   if (role === "consulted") return "Consulted";
   return "Informed";
 }

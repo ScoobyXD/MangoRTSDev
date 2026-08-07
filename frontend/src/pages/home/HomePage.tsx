@@ -3943,7 +3943,7 @@ export function HomePage({
       )));
       await loadSharedInboxes();
     } catch (GVICError) {
-      setError(formatError(GVICError, "Failed to update Shared Triage GVIC"));
+      setError(formatError(GVICError, "Failed to update Shared Triage RCVI"));
     } finally {
       setBusy("");
     }
@@ -4901,7 +4901,7 @@ export function HomePage({
         titleVersionAtStart,
       });
     } catch (projectionError) {
-      setError(formatError(projectionError, "Failed to refresh GVIC matrix"));
+      setError(formatError(projectionError, "Failed to refresh RCVI matrix"));
     } finally {
       GVICMatrixProjectionRefetchInFlightRef.current = false;
     }
@@ -4978,7 +4978,7 @@ export function HomePage({
     setBusy("create-logic-gate");
     setError("");
     try {
-      const creatorGVICRole = options.creatorGVICRole ?? (options.assignCurrentUser ? "generated" : undefined);
+      const creatorGVICRole = options.creatorGVICRole ?? (options.assignCurrentUser ? "responsible" : undefined);
       const titleVersionAtStart = readCommittedEntityTitleVersion();
       const result = await createHomeLogicGateCommand({ apiBase, companyID, creatorGVICRole });
       const logicGate = mergeCreatedLogicGate(result.logicGate, result.folderItems, titleVersionAtStart);
@@ -5165,7 +5165,7 @@ export function HomePage({
       const titleVersionAtStart = readCommittedEntityTitleVersion();
       const targetRole = input.creatorGVICRole;
       if (currentUserID && targetRole) {
-        const GVICRoles: LogicGateGVICRole[] = ["generated", "verified", "consulted", "informed"];
+        const GVICRoles: LogicGateGVICRole[] = ["responsible", "consulted", "verifier", "informed"];
         const assignmentUpdates = await Promise.all(logicGateIDs.map(async (logicGateID) => {
           const gate = logicGateByID.get(logicGateID);
           let assignments = gate?.gvic_assignments ?? [];

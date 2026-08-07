@@ -79,7 +79,7 @@ select company_id::text,resource_type,resource_id::text,display_title,role,user_
        source_resource_type,source_resource_id::text,source_principal_type,source_principal_id::text,inheritance_type,
        status,due_date::text,priority,created_timestamp,updated_timestamp
 from selected
-order by case role when 'generated' then 1 when 'verified' then 2 when 'consulted' then 3 else 4 end,
+order by case role when 'responsible' then 1 when 'consulted' then 2 when 'verifier' then 3 else 4 end,
          coalesce(priority,6),created_timestamp,resource_type,resource_id::text,user_id::text
 limit nullif($6,0)`, companyID, userID, viewerUserID, nodeIDs, logicGateIDs, limit)
 	if err != nil {

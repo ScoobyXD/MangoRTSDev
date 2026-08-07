@@ -241,7 +241,7 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 		restore()
 		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}
-	if _, err := r.customizeNewMemoryResourceGVICForCreatorLocked(input.CompanyID, EntityTypeNode, node.NodeID, domain.GVICRoleGenerated, input.CreatedByUserID); err != nil {
+	if _, err := r.customizeNewMemoryResourceGVICForCreatorLocked(input.CompanyID, EntityTypeNode, node.NodeID, domain.GVICRoleResponsible, input.CreatedByUserID); err != nil {
 		restore()
 		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}

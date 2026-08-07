@@ -15,6 +15,9 @@ const (
 	v2PolicyStep2SchemaBegin = "-- BEGIN V2 GVIC AND PERMISSIONS STEP 2 CUTOVER SCHEMA"
 	v2PolicyStep2SchemaEnd   = "-- END V2 GVIC AND PERMISSIONS STEP 2 CUTOVER SCHEMA"
 	v2PolicyStep2Migration   = "20260805_zzzc_v2_gvic_permissions_step2_cutover.sql"
+	rcviRoleSchemaBegin      = "-- BEGIN RCVI ROLE CONTRACT"
+	rcviRoleSchemaEnd        = "-- END RCVI ROLE CONTRACT"
+	rcviRoleMigration        = "20260806_zzz_rcvi_roles.sql"
 )
 
 func TestV2PolicyStep2SchemaAndOperatorContract(t *testing.T) {
@@ -72,6 +75,33 @@ func TestV2PolicyStep2SchemaAndOperatorContract(t *testing.T) {
 	}
 }
 
+func TestRCVIRoleMigrationAndSchemaContract(t *testing.T) {
+	schema := readV2PolicyStep1File(t, "..", "..", "db", "schema.sql")
+	migration := readV2PolicyStep1File(t, "..", "..", "db", "migrations", rcviRoleMigration)
+	start := strings.Index(schema, rcviRoleSchemaBegin)
+	end := strings.Index(schema, rcviRoleSchemaEnd)
+	if start < 0 || end <= start {
+		t.Fatal("canonical schema is missing the marked RCVI role block")
+	}
+	if strings.TrimSpace(schema[start+len(rcviRoleSchemaBegin):end]) != strings.TrimSpace(migration) {
+		t.Fatal("canonical RCVI role block drifted from the migration")
+	}
+	lower := strings.ToLower(migration)
+	for _, required := range []string{
+		"when 'generated' then 'responsible'",
+		"when 'verified' then 'verifier'",
+		"check (role in ('responsible', 'consulted', 'verifier', 'informed'))",
+		"drop constraint if exists resource_gvic_assignments_v2_staging_user_only_role_chk",
+		"drop index if exists idx_resource_gvic_assignments_v2_one_generated",
+		"when 'responsible' then 1 when 'consulted' then 2 when 'verifier' then 3",
+		"update recycle_bin_items",
+		"set surface='cvi_inbox' where surface='aci_inbox'",
+	} {
+		if !strings.Contains(lower, required) {
+			t.Errorf("RCVI migration is missing %q", required)
+		}
+	}
+}
 func TestV2PolicyStep2DisposablePostgresCutoverBehaviorAndFreshSchema(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("MANGORTS_V2_POLICY_STEP2_TEST_DATABASE_URL"))
 	if dsn == "" {
@@ -107,7 +137,7 @@ func TestV2PolicyStep2DisposablePostgresCutoverBehaviorAndFreshSchema(t *testing
 	}
 	reset()
 	schema := readV2PolicyStep1File(t, "..", "..", "db", "schema.sql")
-	legacySchema := removeV2PolicyStep2SchemaBlock(t, removeV2PolicyStep1SchemaBlock(t, schema))
+	legacySchema := removeRCVIRoleSchemaBlock(t, removeV2PolicyStep2SchemaBlock(t, removeV2PolicyStep1SchemaBlock(t, schema)))
 	if _, err := db.Exec(legacySchema); err != nil {
 		t.Fatalf("apply legacy schema: %v", err)
 	}
@@ -178,6 +208,28 @@ where g.company_id='00000000-0000-4000-8000-000000000101' and g.resource_type='n
 		t.Fatalf("deleted group GVIC edges=%d err=%v", groupEdges, err)
 	}
 
+	if _, err := db.Exec(readV2PolicyStep1File(t, "..", "..", "db", "migrations", rcviRoleMigration)); err != nil {
+		t.Fatalf("apply RCVI role migration: %v", err)
+	}
+	if err := db.QueryRow(`select role from resource_gvic_assignments
+where company_id='00000000-0000-4000-8000-000000000101'
+  and resource_type='node' and resource_id='00000000-0000-4000-8000-000000000112'
+  and principal_type='user' and principal_id='00000000-0000-4000-8000-000000000103'`).Scan(&role); err != nil || role != "verifier" {
+		t.Fatalf("migrated active assignment role=%q err=%v, want verifier", role, err)
+	}
+	if _, err := db.Exec(`
+insert into company_user_groups(company_id,group_id,name)
+values('00000000-0000-4000-8000-000000000101','00000000-0000-4000-8000-000000000131','Responsible Team');
+insert into company_user_group_members(company_id,group_id,user_id)
+values('00000000-0000-4000-8000-000000000101','00000000-0000-4000-8000-000000000131','00000000-0000-4000-8000-000000000102');
+insert into resource_gvic_assignments(company_id,resource_type,resource_id,role,principal_type,principal_id)
+values('00000000-0000-4000-8000-000000000101','node','00000000-0000-4000-8000-000000000112','responsible','group','00000000-0000-4000-8000-000000000131');`); err != nil {
+		t.Fatalf("insert Responsible group after RCVI migration: %v", err)
+	}
+	if _, err := db.Exec(`insert into resource_gvic_assignments(company_id,resource_type,resource_id,role,principal_type,principal_id)
+values('00000000-0000-4000-8000-000000000101','node','00000000-0000-4000-8000-000000000112','generated','user','00000000-0000-4000-8000-000000000102')`); err == nil {
+		t.Fatal("legacy generated role was accepted after RCVI migration")
+	}
 	reset()
 	if _, err := db.Exec(schema); err != nil {
 		t.Fatalf("apply fresh canonical Step 2 schema: %v", err)
@@ -185,6 +237,15 @@ where g.company_id='00000000-0000-4000-8000-000000000101' and g.resource_type='n
 	assertV2PolicyStep2CutoverNames(t, db)
 }
 
+func removeRCVIRoleSchemaBlock(t *testing.T, schema string) string {
+	t.Helper()
+	start := strings.Index(schema, rcviRoleSchemaBegin)
+	end := strings.Index(schema, rcviRoleSchemaEnd)
+	if start < 0 || end <= start {
+		t.Fatal("canonical schema is missing RCVI role markers")
+	}
+	return schema[:start] + schema[end+len(rcviRoleSchemaEnd):]
+}
 func removeV2PolicyStep2SchemaBlock(t *testing.T, schema string) string {
 	t.Helper()
 	start := strings.Index(schema, v2PolicyStep2SchemaBegin)

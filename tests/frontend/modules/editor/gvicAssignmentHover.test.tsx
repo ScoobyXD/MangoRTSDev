@@ -15,7 +15,7 @@ function installGlobal(name: string, value: unknown, restores: Restore[]) {
   });
 }
 
-test("GVIC assignment people list opens immediately on hover and closes when the pointer leaves", async () => {
+test("RCVI assignment people and groups list opens immediately on hover and closes when the pointer leaves", async () => {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
     pretendToBeVisual: true,
     url: "http://localhost/",
@@ -100,37 +100,37 @@ test("GVIC assignment people list opens immediately on hover and closes when the
       />,
     ));
 
-    const peopleButton = container.querySelector<HTMLButtonElement>('button[aria-label="Informed people"]');
-    assert.ok(peopleButton);
-    assert.equal(peopleButton.textContent?.includes("People (1)"), true);
+    const assignmentButton = container.querySelector<HTMLButtonElement>('button[aria-label="Informed people and groups"]');
+    assert.ok(assignmentButton);
+    assert.equal(assignmentButton.textContent?.includes("Jonathan Kim"), true);
     assert.equal(dom.window.document.querySelector('[role="listbox"][aria-label="Informed people and groups"]'), null);
 
-    await act(async () => Simulate.mouseEnter(peopleButton));
+    await act(async () => Simulate.mouseEnter(assignmentButton));
 
-    const peopleList = dom.window.document.querySelector<HTMLElement>('[role="listbox"][aria-label="Informed people and groups"]');
-    assert.ok(peopleList, "merely hovering the count must open the assigned people list");
-    assert.equal(peopleList.parentElement, dom.window.document.body, "the hovered list escapes clipping editor containers");
-    assert.match(peopleList.textContent ?? "", /Jonathan Kim/);
-    assert.match(peopleList.textContent ?? "", /jonathankim829@gmail\.com/);
+    const assignmentList = dom.window.document.querySelector<HTMLElement>('[role="listbox"][aria-label="Informed people and groups"]');
+    assert.ok(assignmentList, "merely hovering the names must open the assigned people and groups list");
+    assert.equal(assignmentList.parentElement, dom.window.document.body, "the hovered list escapes clipping editor containers");
+    assert.match(assignmentList.textContent ?? "", /Jonathan Kim/);
+    assert.match(assignmentList.textContent ?? "", /jonathankim829@gmail\.com/);
 
     await act(async () => {
-      Simulate.mouseLeave(peopleButton);
+      Simulate.mouseLeave(assignmentButton);
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    assert.equal(dom.window.document.querySelector('[role="listbox"][aria-label="Informed people and groups"]'), null, "leaving the People count closes a hover-only preview");
+    assert.equal(dom.window.document.querySelector('[role="listbox"][aria-label="Informed people and groups"]'), null, "leaving the assignment names closes a hover-only preview");
 
-    await act(async () => Simulate.mouseEnter(peopleButton));
-    const interactivePeopleList = dom.window.document.querySelector<HTMLElement>('[role="listbox"][aria-label="Informed people and groups"]');
-    assert.ok(interactivePeopleList);
+    await act(async () => Simulate.mouseEnter(assignmentButton));
+    const interactiveAssignmentList = dom.window.document.querySelector<HTMLElement>('[role="listbox"][aria-label="Informed people and groups"]');
+    assert.ok(interactiveAssignmentList);
     await act(async () => {
-      Simulate.mouseLeave(peopleButton);
-      Simulate.mouseEnter(interactivePeopleList);
+      Simulate.mouseLeave(assignmentButton);
+      Simulate.mouseEnter(interactiveAssignmentList);
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     assert.ok(dom.window.document.querySelector('[role="listbox"][aria-label="Informed people and groups"]'), "the preview stays open while the pointer is over its list");
 
     await act(async () => {
-      Simulate.mouseLeave(interactivePeopleList);
+      Simulate.mouseLeave(interactiveAssignmentList);
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     assert.equal(dom.window.document.querySelector('[role="listbox"][aria-label="Informed people and groups"]'), null, "leaving the list closes the hover preview");

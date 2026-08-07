@@ -8,7 +8,7 @@ export type UpdateGroupingSetting = {
 export const UPDATE_GROUPING_FIELDS: ReadonlyArray<{ value: UpdateGroupingField; label: string }> = [
   { value: "type", label: "Update Type" },
   { value: "date", label: "Date" },
-  { value: "gvic", label: "GVIC" },
+  { value: "gvic", label: "RCVI" },
   { value: "priority", label: "Priority" },
   { value: "project", label: "Project" },
   { value: "logic_gate", label: "Logic Gate" },

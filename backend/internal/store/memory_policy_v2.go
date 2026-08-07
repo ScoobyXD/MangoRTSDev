@@ -432,20 +432,10 @@ func (r *MemoryRepo) PutResourceGVICPolicy(input ResourceGVICPolicyUpdateInput) 
 		resultingSequence = setting.DescendantResetSequence
 	}
 	after := r.memoryV2GVICPolicyLocked(companyID, resourceType, resourceID)
-	beforeUserIDs := make(map[string]bool, len(current.EffectiveAssignments))
-	for _, item := range current.EffectiveAssignments {
-		beforeUserIDs[item.UserID] = true
-	}
-	userIDs := []string{}
-	for _, item := range after.EffectiveAssignments {
-		if !beforeUserIDs[item.UserID] {
-			userIDs = append(userIDs, item.UserID)
-		}
-	}
+	userIDs := resourceGVICChangedUserIDs(current.EffectiveAssignments, after.EffectiveAssignments)
 	if resourceType == EntityTypeNode {
 		r.bumpNodeViewVersionLocked(companyID, resourceID)
 	}
-	sort.Strings(userIDs)
 	event, err := r.appendDomainEventLocked(DomainEventInput{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, Type: v2GVICEventType(resourceType), ActorUserID: input.ActorUserID, IdempotencyKey: input.IdempotencyKey, Payload: v2PolicyEventPayload(resourceType, resourceID, map[string]any{"policy_type": "gvic", "assignment_mode": mode, "action": action, "descendant_action": action, "sequence": resultingSequence, "assignment_user_ids": userIDs})})
 	if err != nil {
 		return ResourceGVICPolicy{}, nil, err

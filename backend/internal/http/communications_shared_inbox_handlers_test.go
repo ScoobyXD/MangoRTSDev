@@ -310,7 +310,7 @@ func TestCommunicationsSharedInboxAccessRouteDoesNotConvertGVICAssignmentsToPerm
 	body, _ := json.Marshal(map[string]any{
 		"company_id": companyID,
 		"assignments": []map[string]string{
-			{"role": domain.GVICRoleGenerated, "user_id": user.UserID},
+			{"role": domain.GVICRoleResponsible, "user_id": user.UserID},
 		},
 	})
 	req := httptest.NewRequest(http.MethodPut, "/v1/communications/shared-inboxes/"+folder.FolderID+"/access", bytes.NewReader(body))

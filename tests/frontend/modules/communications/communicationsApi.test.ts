@@ -377,14 +377,14 @@ test("shared inbox helpers use communications shared inbox endpoints", async () 
     const listed = await listCommunicationsSharedInboxes(" company-1 ");
     const created = await createCommunicationsSharedInbox({ companyID: "company-1", name: " Business ", accountEmail: "shared@example.com" });
     const updated = await updateCommunicationsSharedInbox({ companyID: "company-1", folderID: " shared-1 ", name: " Client Facing " });
-    const access = await updateCommunicationsSharedInboxGVICAssignments("company-1", "shared-1", [{ role: "generated", principal_type: "user", principal_id: "user-1", user_id: "user-1" }]);
+    const access = await updateCommunicationsSharedInboxGVICAssignments("company-1", "shared-1", [{ role: "responsible", principal_type: "user", principal_id: "user-1", user_id: "user-1" }]);
     await deleteCommunicationsSharedInbox("company-1", "shared-1");
     await removeCommunicationsSharedInbox("company-1", "shared-1");
 
     assert.equal(listed[0]?.name, "Business");
     assert.equal(created.folder_id, "shared-2");
     assert.equal(updated.folder_id, "shared-1");
-    assert.deepEqual(access.map((item) => [item.role, item.principal_type, item.principal_id, item.user_id]), [["generated", "user", "user-1", "user-1"]]);
+    assert.deepEqual(access.map((item) => [item.role, item.principal_type, item.principal_id, item.user_id]), [["responsible", "user", "user-1", "user-1"]]);
     assert.deepEqual(calls, [
       {
         path: "/v1/communications/shared-inboxes?company_id=company-1",
@@ -409,7 +409,7 @@ test("shared inbox helpers use communications shared inbox endpoints", async () 
       {
         path: "/v1/resources/shared_inbox/shared-1/gvic",
         method: "PUT",
-        body: { company_id: "company-1", assignment_mode: "customized", descendant_action: "inherited_only", gvic_assignments: [{ role: "generated", principal_type: "user", principal_id: "user-1" }] },
+        body: { company_id: "company-1", assignment_mode: "customized", descendant_action: "inherited_only", gvic_assignments: [{ role: "responsible", principal_type: "user", principal_id: "user-1" }] },
       },
       {
         path: "/v1/communications/shared-inboxes/shared-1?company_id=company-1",
@@ -1770,15 +1770,15 @@ test("logic gate GVIC helpers read then replace one complete V2 policy", async (
     return jsonResponse({ revision: `revision-${calls.length}`, gvic_assignments: currentAssignments });
   };
   try {
-    const addResult = await addLogicGateGVICAssignments("company-1", "gate 1", [{ role: "generated", user_id: "user-1" }]);
-    const removeResult = await removeLogicGateGVICAssignments("company-1", "gate 1", [{ role: "generated", user_id: "user-1" }]);
+    const addResult = await addLogicGateGVICAssignments("company-1", "gate 1", [{ role: "responsible", user_id: "user-1" }]);
+    const removeResult = await removeLogicGateGVICAssignments("company-1", "gate 1", [{ role: "responsible", user_id: "user-1" }]);
     await addLogicGateGVICAssignments("company-1", "gate 1", [{ role: "consulted", principal_type: "group", principal_id: "group-1" }], true);
     assert.deepEqual(calls, [
       { path: "/v1/resources/logic_gate/gate%201/gvic?company_id=company-1", method: "GET", body: undefined },
       {
         path: "/v1/resources/logic_gate/gate%201/gvic",
         method: "PUT",
-        body: { company_id: "company-1", assignment_mode: "customized", descendant_action: "inherited_only", gvic_assignments: [{ role: "generated", principal_type: "user", principal_id: "user-1" }] },
+        body: { company_id: "company-1", assignment_mode: "customized", descendant_action: "inherited_only", gvic_assignments: [{ role: "responsible", principal_type: "user", principal_id: "user-1" }] },
       },
       { path: "/v1/resources/logic_gate/gate%201/gvic?company_id=company-1", method: "GET", body: undefined },
       {
@@ -1793,7 +1793,7 @@ test("logic gate GVIC helpers read then replace one complete V2 policy", async (
         body: { company_id: "company-1", assignment_mode: "customized", descendant_action: "including_customized", gvic_assignments: [{ role: "consulted", principal_type: "group", principal_id: "group-1" }] },
       },
     ]);
-    assert.deepEqual(addResult.map((item) => [item.role, item.user_id]), [["generated", "user-1"]]);
+    assert.deepEqual(addResult.map((item) => [item.role, item.user_id]), [["responsible", "user-1"]]);
     assert.deepEqual(removeResult.map((item) => [item.role, item.user_id]), []);
   } finally {
     globalThis.fetch = originalFetch;

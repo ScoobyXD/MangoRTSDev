@@ -88,7 +88,7 @@ export type HomeViewID =
   | "my-triage"
   | "shared-root"
   | "r-inbox"
-  | "a-inbox"
+  | "v-inbox"
   | "c-inbox"
   | "i-inbox"
   | "o-inbox"
@@ -129,7 +129,7 @@ export type HomeColumnResizeDrag = {
 };
 
 export type GVICInboxRole = LogicGateGVICRole | "other";
-export type GVICInboxViewID = Extract<HomeViewID, "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox">;
+export type GVICInboxViewID = Extract<HomeViewID, "r-inbox" | "v-inbox" | "c-inbox" | "i-inbox" | "o-inbox">;
 export type GVICInboxStatus = "pending" | "in_progress" | "review" | "done";
 export type InboxPriority = 0 | 1 | 2 | 3 | 4 | 5;
 

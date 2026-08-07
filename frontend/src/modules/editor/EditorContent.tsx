@@ -1412,7 +1412,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, nodeAccounts, nodeLogicGateIDs, nodePriorityDraft, updateNodePresetPatch]);
 
   const nodeGVICIsInherited = gvicPolicyMode === "inherited";
-  const nodeGVICReadOnlyReason = nodeGVICIsInherited ? "This policy is inherited. Choose GVIC policy: Customized from More editor actions to edit it." : "";
+  const nodeGVICReadOnlyReason = nodeGVICIsInherited ? "This policy is inherited. Choose RCVI policy: Customized from More editor actions to edit it." : "";
 
   const saveResourceGVICAssignments = useCallback(async (
     resourceType: "node" | "logic_gate",
@@ -1573,30 +1573,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     if (nodeGVICIsInherited) return;
     const cleanPrincipalID = principalID.trim();
     if (!cleanPrincipalID) return;
-    const singleUserRole = role === "generated";
-    if (role === "verified" && principalType !== "user") return;
-    if (singleUserRole) {
-      if (principalType !== "user") return;
-      const existing = nodeGVICAssignments.filter((assignment) => assignment.role === role);
-      if (existing.length === 1 && logicGateGVICAssignmentPrincipalType(existing[0]) === "user" && logicGateGVICAssignmentPrincipalID(existing[0]) === cleanPrincipalID) return;
-      const user = companyUsers.find((candidate) => candidate.user_id === cleanPrincipalID);
-      void saveNodeGVICAssignments([
-        ...nodeGVICAssignments.filter((assignment) => assignment.role !== role),
-        {
-          company_id: companyID,
-          resource_id: linkedNodeID,
-          role,
-          principal_type: "user",
-          principal_id: cleanPrincipalID,
-          principal_name: user?.display_name ?? user?.email,
-          user_id: cleanPrincipalID,
-          user_display_name: user?.display_name,
-          user_email: user?.email,
-          created_timestamp: new Date().toISOString(),
-        },
-      ]);
-      return;
-    }
     const existingPrincipalIDsForRole = new Set(nodeGVICAssignments
       .filter((assignment) => assignment.role === role && logicGateGVICAssignmentPrincipalType(assignment) === principalType)
       .map((assignment) => logicGateGVICAssignmentPrincipalID(assignment))
@@ -1654,31 +1630,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     const cleanPrincipalID = principalID.trim();
     if (!cleanPrincipalID) return;
     const currentAssignments = logicGateGVICAssignmentsRef.current;
-    const singleUserRole = role === "generated";
-    if (role === "verified" && principalType !== "user") return;
-    if (singleUserRole) {
-      if (principalType !== "user") return;
-      const existing = currentAssignments.filter((assignment) => assignment.role === role);
-      if (existing.length === 1 && logicGateGVICAssignmentPrincipalType(existing[0]) === "user" && logicGateGVICAssignmentPrincipalID(existing[0]) === cleanPrincipalID) return;
-      const user = companyUsers.find((candidate) => candidate.user_id === cleanPrincipalID);
-      const optimisticAssignment: LogicGateGVICAssignment = {
-        company_id: companyID,
-        logic_gate_id: linkedNodeID,
-        role,
-        principal_type: "user",
-        principal_id: cleanPrincipalID,
-        principal_name: user?.display_name ?? user?.email,
-        user_id: cleanPrincipalID,
-        user_display_name: user?.display_name,
-        user_email: user?.email,
-        created_timestamp: new Date().toISOString(),
-      };
-      commandLogicGateGVICAssignments("add", { role, principal_type: "user", principal_id: cleanPrincipalID, user_id: cleanPrincipalID }, [
-        ...currentAssignments.filter((assignment) => assignment.role !== role),
-        optimisticAssignment,
-      ]);
-      return;
-    }
     const existingPrincipalIDsForRole = new Set(currentAssignments
       .filter((assignment) => assignment.role === role && logicGateGVICAssignmentPrincipalType(assignment) === principalType)
       .map((assignment) => logicGateGVICAssignmentPrincipalID(assignment))
@@ -2484,12 +2435,12 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             saveStateStorageKey={linkedEntityKind === "logic_gate" && documentInformationID ? mangoTiptapPendingStorageKey({ companyID, resourceType: "logic_gate", resourceID: linkedNodeID, documentID: documentInformationID }) : undefined}
             secondaryActions={linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? [{
               id: "use-inherited-gvic-policy",
-              label: `GVIC policy: Inherited${gvicPolicyMode === "inherited" ? " (current)" : ""}`,
+              label: `RCVI policy: Inherited${gvicPolicyMode === "inherited" ? " (current)" : ""}`,
               disabled: !linkedEntityCanEdit || logicGateGVICApplyToAssignedNodesBusy || gvicPolicyMode === "inherited",
               onSelect: () => changeCurrentGVICMode("inherited"),
             }, {
               id: "use-customized-gvic-policy",
-              label: `GVIC policy: Customized${gvicPolicyMode === "customized" ? " (current)" : ""}`,
+              label: `RCVI policy: Customized${gvicPolicyMode === "customized" ? " (current)" : ""}`,
               disabled: !linkedEntityCanEdit || logicGateGVICApplyToAssignedNodesBusy || gvicPolicyMode === "customized",
               onSelect: () => changeCurrentGVICMode("customized"),
             }, ...(linkedEntityKind === "logic_gate" ? [{
@@ -2566,7 +2517,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         {logicGateGVICApplyConfirmationOpen && linkedEntityKind === "logic_gate" && (
           <ConfirmActionMenu
             title="Overwrite all descendants, including customized?"
-            detail="This invalidates older customized GVIC policies below this resource. Later customizations remain independent."
+            detail="This invalidates older customized RCVI policies below this resource. Later customizations remain independent."
             confirmLabel="Overwrite"
             cancelLabel="No"
             confirmDisabled={!linkedEntityCanEdit || logicGateGVICApplyToAssignedNodesBusy}

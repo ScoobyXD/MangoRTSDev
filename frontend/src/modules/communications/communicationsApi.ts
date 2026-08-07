@@ -1360,11 +1360,8 @@ async function commandLogicGateGVICAssignments(
       next = next.filter((candidate) => !matches(candidate));
       continue;
     }
-    if (assignment.role === "generated") {
-      next = next.filter((candidate) => candidate.role !== "generated");
-    } else {
-      next = next.filter((candidate) => !matches(candidate));
-    }
+    next = next.filter((candidate) => !matches(candidate));
+
     next.push(assignment);
   }
   const payload = await apiFetchJSON<{ gvic_assignments?: LogicGateGVICAssignment[] }>(path, {

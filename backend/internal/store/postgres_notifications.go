@@ -59,14 +59,14 @@ const notificationRecipientVisibilityConditionSQL = `(
     company_id is null
     or case
         when btrim(node_id) <> ''
-          and role in ('generated', 'verified', 'consulted', 'informed') then exists (
+          and role in ('responsible', 'verifier', 'consulted', 'informed') then exists (
             select 1
             from nodes
             where nodes.company_id=notifications.company_id
               and nodes.node_id=notifications.node_id::uuid
           )
         when btrim(logic_gate_id) <> ''
-          and role in ('generated', 'verified', 'consulted', 'informed') then exists (
+          and role in ('responsible', 'verifier', 'consulted', 'informed') then exists (
             select 1
             from logic_gates
             where logic_gates.company_id=notifications.company_id

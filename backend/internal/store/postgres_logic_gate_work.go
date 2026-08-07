@@ -24,7 +24,7 @@ with gate_metadata as (
     coalesce((
       select assignment.user_id::text
       from mangorts_v2_effective_gvic_assignments(gate.company_id,'logic_gate',gate.logic_gate_id) assignment
-      where assignment.role='generated'
+      where assignment.role='responsible'
       order by assignment.user_id
       limit 1
     ), '') as request_owner_user_id,

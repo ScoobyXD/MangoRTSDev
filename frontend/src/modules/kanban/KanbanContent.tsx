@@ -900,8 +900,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const columnColorByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, getKanbanColumnDisplayColor(column)])), [orderedColumns]);
   const columnTitleByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, column.title.trim().toLowerCase()])), [orderedColumns]);
   const arenaUserByID = useMemo(() => new Map(companyUsers.map((user) => [user.user_id.trim(), user])), [companyUsers]);
-  const activeLogicGateGeneratedUserID = activeLogicGateRequestOwnerUserID;
-  const activeLogicGateGeneratedUserLabel = useMemo(() => companyUserDisplayName(arenaUserByID.get(activeLogicGateGeneratedUserID), activeLogicGateGeneratedUserID), [activeLogicGateGeneratedUserID, arenaUserByID]);
+  const activeLogicGateResponsibleUserID = activeLogicGateRequestOwnerUserID;
+  const activeLogicGateResponsibleUserLabel = useMemo(() => companyUserDisplayName(arenaUserByID.get(activeLogicGateResponsibleUserID), activeLogicGateResponsibleUserID), [activeLogicGateResponsibleUserID, arenaUserByID]);
   const arenaNodeByID = useMemo(() => {
     const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
     const nodeByID = new Map<string, NodeRecord>((snapshot.nodes ?? []).map((node) => [node.node_id, node]));
@@ -2446,7 +2446,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     const isRequestedCard = activeBoardIsLogicGate && isKanbanRequestedColumn({ column_id: card.column_id, title: columnTitleByID.get(card.column_id) ?? "" });
     const viewerUserID = (currentUserID ?? "").trim();
     const requestedByUserID = (card.requested_by_user_id ?? "").trim();
-    const requestOwnerUserID = activeLogicGateGeneratedUserID.trim();
+    const requestOwnerUserID = activeLogicGateResponsibleUserID.trim();
     const isRequestedForCurrentUser = isRequestedCard
       && Boolean(viewerUserID)
       && Boolean(requestOwnerUserID)
@@ -2459,7 +2459,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       && requestedByUserID !== requestOwnerUserID;
     const requestedStatusText = isRequestedCard && !isRequestedForCurrentUser
       ? requestOwnerUserID
-        ? `Request sent to ${activeLogicGateGeneratedUserLabel}`
+        ? `Request sent to ${activeLogicGateResponsibleUserLabel}`
         : "Request pending"
       : undefined;
     const placedByUserID = (card.placed_by_user_id ?? "").trim();
