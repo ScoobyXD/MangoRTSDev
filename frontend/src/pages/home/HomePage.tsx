@@ -66,7 +66,7 @@ import { isOutboundEmailUndoneError } from "../../modules/communications/outboun
 import { realtimePersonalMailboxScope, realtimeSharedMailboxScope, subscribeRealtimeScope } from "../../modules/realtime/realtimeWebSocket";
 import { buildReplyAllRecipients } from "../../modules/communications/emailRecipients";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
-import type { EditorEntityLink } from "../../modules/editor/editorEntityLinks.js";
+import { EVENT_EDITOR_EMAIL_REFERENCE_OPEN, type EditorEntityLink } from "../../modules/editor/editorEntityLinks.js";
 import type { NodeRecord, NodeRelationship } from "../../modules/nodes/types";
 import { buildCompanyExplorerTreeRows } from "../../modules/company-explorer/companyExplorerTreeRows";
 import {
@@ -4742,7 +4742,52 @@ export function HomePage({
     if (onNavigate) onNavigate(targetPath);
     else window.location.assign(targetPath);
   }, [companyID, onNavigate]);
+  const openReferencedEmail = useCallback(async (entity: EditorEntityLink) => {
+    if (entity.entityType !== "email_message") return;
+    const sharedInboxID = entity.emailSharedInboxID?.trim() ?? "";
+    const sharedFolder = sharedInboxID
+      ? sharedInboxes.find((folder) => folder.folder_id === sharedInboxID || folder.shared_inbox_id === sharedInboxID)
+      : undefined;
+    const targetViewID = sharedFolder ? `shared:${sharedFolder.folder_id}` as HomeViewID : "my-triage";
+    const targetMailbox = entity.emailMailbox && entity.emailMailbox !== "drafts" && entity.emailMailbox !== "archive"
+      ? entity.emailMailbox
+      : "all";
+    selectHomeView(targetViewID, targetMailbox);
+    setNodeEditorOverlay(null);
+    setError("");
+    try {
+      const message = entity.emailMessage ?? await getEmailMessage(
+        entity.entityID,
+        companyID,
+        sharedFolder?.folder_id || sharedInboxID || undefined,
+        { accountEmail: sharedFolder ? undefined : entity.emailAccountEmail },
+      );
+      const rowKey = emailMessageRowKey(message);
+      selectedMessageRef.current = message;
+      selectedMessageIDRef.current = message.id;
+      selectedMessageRowKeyRef.current = rowKey;
+      setMessages((current) => mergeEmailMessageIntoMessageList(current, message, {
+        companyID,
+        sharedInboxID: sharedFolder?.folder_id || sharedInboxID || undefined,
+        accountEmail: sharedFolder ? undefined : entity.emailAccountEmail,
+        mailbox: targetMailbox,
+        limit: MESSAGE_BATCH_SIZE,
+      }));
+      setSelectedMessage(message);
+      setSelectedMessageID(message.id);
+      setSelectedMessageRowKey(rowKey);
+      setSelectedMessageIDs(new Set([rowKey]));
+      setSelectionAnchorMessageID(message.id);
+    } catch (cause) {
+      setError(formatError(cause, "Unable to open the referenced email"));
+    }
+  }, [companyID, selectHomeView, sharedInboxes]);
+
   const openEmailPickerEntity = useCallback((entity: EditorEntityLink) => {
+    if (entity.entityType === "email_message") {
+      void openReferencedEmail(entity);
+      return;
+    }
     if (entity.entityType === "node") {
       const node = nodeByID.get(entity.entityID) ?? {
         company_id: companyID,
@@ -4758,7 +4803,16 @@ export function HomePage({
       return;
     }
     openProjectManagement(entity.entityID, entity.label);
-  }, [companyID, nodeByID, openLogicGateArena, openNodeEditorOverlay, openProjectManagement]);
+  }, [companyID, nodeByID, openLogicGateArena, openNodeEditorOverlay, openProjectManagement, openReferencedEmail]);
+
+  useEffect(() => {
+    const onOpenEmailReference = (event: Event) => {
+      const entity = (event as CustomEvent<EditorEntityLink>).detail;
+      if (entity?.entityType === "email_message") void openReferencedEmail(entity);
+    };
+    window.addEventListener(EVENT_EDITOR_EMAIL_REFERENCE_OPEN, onOpenEmailReference);
+    return () => window.removeEventListener(EVENT_EDITOR_EMAIL_REFERENCE_OPEN, onOpenEmailReference);
+  }, [openReferencedEmail]);
   const getLogicGateDragIDs = useCallback((logicGateID: string): string[] => {
     const cleanLogicGateID = logicGateID.trim();
     if (!cleanLogicGateID) return [];

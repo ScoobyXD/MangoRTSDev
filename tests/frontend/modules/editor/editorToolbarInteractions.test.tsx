@@ -47,6 +47,15 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
   }
   installGlobal("getComputedStyle", dom.window.getComputedStyle.bind(dom.window), restores);
   installGlobal("IS_REACT_ACT_ENVIRONMENT", true, restores);
+  installGlobal("fetch", async (input: string | URL | Request) => {
+    const url = String(input);
+    const payload = url.includes("/v1/communications/status")
+      ? { configured: true, connected: true, status: "connected", connection: { account_email: "owner@example.com" } }
+      : url.includes("/v1/communications/folders")
+        ? { folders: [{ id: "inbox", name: "Inbox", system_folder: "inbox", total_count: 560 }] }
+        : { messages: [] };
+    return { ok: true, status: 200, json: async () => payload, text: async () => JSON.stringify(payload) } as Response;
+  }, restores);
   const legacyInputPrototype = dom.window.HTMLElement.prototype as unknown as { attachEvent?: () => void; detachEvent?: () => void };
   if (!legacyInputPrototype.attachEvent) legacyInputPrototype.attachEvent = () => undefined;
   if (!legacyInputPrototype.detachEvent) legacyInputPrototype.detachEvent = () => undefined;
@@ -679,7 +688,7 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
           companyID="company-1"
           requestJSON={async <T,>(): Promise<T> => ({ user_pin_folders: [], user_pins: [] }) as T}
           sourceType="node"
-          linkTargetTypes={["logic_gate", "project"]}
+          linkTargetTypes={["logic_gate", "project", "email_message"]}
           initialMode="link"
           anchor={{ left: 24, top: 24 }}
           onChoose={async () => undefined}
@@ -711,6 +720,18 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     modalPickerInput = modalPicker.querySelector<HTMLInputElement>('input[aria-label="Search resources to link"]');
     assert.ok(modalPickerInput);
     assert.equal(modalPicker.dataset.mangoUniversalPickerMode, "link", "# on an empty reference picker enters ## link mode");
+    await act(async () => { Simulate.change(modalPickerInput, { target: { value: "e" } }); });
+    await flushAsyncWork();
+    await act(async () => { Simulate.keyDown(modalPickerInput, { key: "Tab" }); });
+    await flushAsyncWork();
+    const emailCategory = [...modalPicker.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.includes("Emails"));
+    assert.equal(emailCategory?.getAttribute("aria-pressed"), "true", "E then Tab selects the Emails category");
+    assert.ok(modalPicker.querySelector('[data-mango-universal-picker-email-pane="true"]'));
+    assert.equal(modalPicker.style.width, "720px", "the Emails category expands the picker for a mailbox list");
+    assert.deepEqual(
+      [...modalPicker.querySelectorAll<HTMLElement>('[role="tablist"][aria-label="Email folders"] [role="tab"]')].map((tab) => tab.textContent?.replace(/\s+/g, " ").trim()),
+      ["Inbox560", "Starred", "Sent➤", "All⌄"],
+    );
     const pickerDismissLayer = dom.window.document.querySelector<HTMLElement>('[data-mango-universal-picker-dismiss-layer="true"]');
     assert.ok(pickerDismissLayer, "the universal picker should render an explicit outside-click dismiss layer");
     await act(async () => {

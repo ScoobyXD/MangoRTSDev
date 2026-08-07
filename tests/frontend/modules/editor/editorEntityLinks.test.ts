@@ -14,6 +14,7 @@ import {
   createEditorEntityLinkElement,
   createNodeEntityFromSelection,
   editorEntityRoute,
+  EVENT_EDITOR_EMAIL_REFERENCE_OPEN,
   normalizeEditorSelectionNodeTitle,
   openEditorEntityLink,
   readActiveEntityLinkDraft,
@@ -22,6 +23,7 @@ import {
   replaceEditorEntityLinkWithLabel,
   returnToEditorEntitySourceNode,
   searchEditorEntityLinks,
+  type EditorEntityLink,
 } from "../../../../frontend/src/modules/editor/editorEntityLinks.js";
 
 test("highlighted-text actions keep the square-plus button immediately right of the chat button", () => {
@@ -205,13 +207,14 @@ test("legacy entity chips preserve identity, type styling, and routes", () => {
   }
 });
 
-test("entity chips render the canonical Node, Logic Gate, and Project icons", () => {
+test("entity chips render the canonical Node, Logic Gate, Project, and Email icons", () => {
   const dom = new JSDOM("<!doctype html>");
   try {
     const icons = [
       ["node", "M3.7 1.7h5.45l3.15 3.15v9.45H3.7z"],
       ["logic_gate", "M4.35 3.55h3.35c2.45 0 4.45 1.95 4.45 4.45s-2 4.45-4.45 4.45H4.35z"],
       ["project", "M2.3 3.1h11.4v9.8H2.3z"],
+      ["email_message", "M2.1 3.65h11.8v8.7H2.1z"],
     ] as const;
     for (const [entityType, expectedPath] of icons) {
       const element = createEditorEntityLinkElement(dom.window.document, {
@@ -238,7 +241,11 @@ test("entity clicks navigate inside the app and Node-to-Node links retain a safe
   Object.defineProperty(globalThis, "window", { configurable: true, value: dom.window });
   let popStateCount = 0;
   let historyBackCount = 0;
+  let openedEmail: EditorEntityLink | undefined;
   dom.window.addEventListener("popstate", () => { popStateCount += 1; });
+  dom.window.addEventListener(EVENT_EDITOR_EMAIL_REFERENCE_OPEN, (event) => {
+    openedEmail = (event as CustomEvent<EditorEntityLink>).detail;
+  });
   Object.defineProperty(dom.window.history, "back", { configurable: true, value: () => { historyBackCount += 1; } });
   try {
     openEditorEntityLink({ entityType: "node", entityID: "target-node", label: "Target Node" });
@@ -254,6 +261,26 @@ test("entity clicks navigate inside the app and Node-to-Node links retain a safe
     assert.equal(dom.window.location.pathname, "/projects/project-1");
     assert.equal(popStateCount, 2);
     assert.equal(readEditorEntitySourceNodePath("target-node", dom.window.history.state), null);
+
+    openEditorEntityLink({
+      entityType: "email_message",
+      entityID: "provider-message-1",
+      label: "Quarterly update",
+      emailMessageID: "mango-message-1",
+      emailThreadID: "provider-thread-1",
+      emailAccountEmail: "owner@example.com",
+      emailMailbox: "starred",
+    });
+    assert.equal(dom.window.location.pathname, "/projects/project-1", "an Email reference opens through the mailbox event without inventing an app route");
+    assert.deepEqual(openedEmail, {
+      entityType: "email_message",
+      entityID: "provider-message-1",
+      label: "Quarterly update",
+      emailMessageID: "mango-message-1",
+      emailThreadID: "provider-thread-1",
+      emailAccountEmail: "owner@example.com",
+      emailMailbox: "starred",
+    });
   } finally {
     if (previousWindow === undefined) delete (globalThis as Record<string, unknown>).window;
     else Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow });
@@ -359,6 +386,24 @@ test("durable Tiptap entity nodes keep their identity through history and Backsp
     assert.equal(editor.commands.redo(), true);
     assert.equal(editor.getJSON().content?.[0]?.content?.some((node) => node.type === "mangoEntityLink"), true);
 
+    editor.commands.setContent({ type: "doc", content: [{ type: "paragraph", content: [{
+      type: "mangoEntityLink",
+      attrs: {
+        entityType: "email_message",
+        entityId: "provider-message-1",
+        label: "Quarterly update",
+        emailMessageId: "mango-message-1",
+        emailThreadId: "provider-thread-1",
+        emailAccountEmail: "owner@example.com",
+        emailMailbox: "all",
+      },
+    }] }] });
+    const emailNode = editor.getJSON().content?.[0]?.content?.[0] as { attrs?: Record<string, unknown> } | undefined;
+    assert.equal(emailNode?.attrs?.entityType, "email_message");
+    assert.equal(emailNode?.attrs?.emailMessageId, "mango-message-1");
+    assert.equal(emailNode?.attrs?.emailAccountEmail, "owner@example.com");
+    assert.match(editor.getHTML(), /data-mango-email-message-id="mango-message-1"/);
+
     let entityEnd = -1;
     editor.state.doc.descendants((node, position) => {
       if (node.type.name !== "mangoEntityLink") return true;
@@ -369,7 +414,7 @@ test("durable Tiptap entity nodes keep their identity through history and Backsp
     editor.commands.setTextSelection(entityEnd);
     editor.view.dom.dispatchEvent(new domGlobals.KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true }));
     assert.equal(editor.getJSON().content?.[0]?.content?.some((node) => node.type === "mangoEntityLink") ?? false, false);
-    assert.match(editor.state.doc.textContent, /Most recent project/);
+    assert.match(editor.state.doc.textContent, /Quarterly update/);
     assert.equal(editor.commands.undo(), true);
     assert.equal(editor.getJSON().content?.[0]?.content?.some((node) => node.type === "mangoEntityLink"), true);
   } finally {

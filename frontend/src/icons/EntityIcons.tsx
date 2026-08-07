@@ -1,6 +1,6 @@
 import React from "react";
 
-export type ExplorerEntityIconKind = "node" | "logic_gate" | "project";
+export type ExplorerEntityIconKind = "node" | "logic_gate" | "project" | "email_message";
 export type ExplorerEntityIconTone = "default" | "inverse" | "orange";
 
 type SVGSpec = {
@@ -25,6 +25,8 @@ const NODE_DETAIL_PATH = "M9.15 1.7v3.15h3.15M5.55 7.25h4.9M5.55 9.55h4.9M5.55 1
 const PROJECT_BODY_PATH = "M2.3 3.1h11.4v9.8H2.3z";
 const PROJECT_DETAIL_PATH = "M4.1 5.25h3.2M4.1 7.85h5.7M4.1 10.45h3.9";
 const PROJECT_CHECKS_PATH = "M11.25 5.15h1.3v1.3h-1.3zM11.25 7.45h1.3v1.3h-1.3zM11.25 9.75h1.3v1.3h-1.3z";
+const EMAIL_BODY_PATH = "M2.1 3.65h11.8v8.7H2.1z";
+const EMAIL_FLAP_PATH = "m2.55 5.1 3.35 2.65 3.35-2.65M2.75 11.75l3.4-3M13.25 11.75l-3.4-3";
 const LOGIC_GATE_CONNECTION_PATH = "M1.4 5.25h3.05M1.4 10.75h3.05M11.7 8h2.9";
 const LOGIC_GATE_BODY_PATH = "M4.35 3.55h3.35c2.45 0 4.45 1.95 4.45 4.45s-2 4.45-4.45 4.45H4.35z";
 
@@ -55,6 +57,14 @@ function iconSpecs(kind: ExplorerEntityIconKind, tone: ExplorerEntityIconTone, i
       { tag: "path", attrs: { d: PROJECT_BODY_PATH, fill, stroke, strokeWidth: "1.25", strokeLinejoin: "round" } },
       { tag: "path", attrs: { d: PROJECT_DETAIL_PATH, fill: "none", stroke, strokeWidth: "1.05", strokeLinecap: "round" } },
       { tag: "path", attrs: { d: PROJECT_CHECKS_PATH, fill: stroke } },
+    ];
+  }
+  if (kind === "email_message") {
+    const stroke = tone === "inverse" ? "#ffffff" : tone === "orange" ? "#ff9708" : "#0891b2";
+    const fill = tone === "inverse" ? "rgba(255,255,255,0.10)" : tone === "orange" ? "rgba(255,151,8,0.10)" : "rgba(8,145,178,0.09)";
+    return [
+      { tag: "path", attrs: { d: EMAIL_BODY_PATH, fill, stroke, strokeWidth: "1.2", strokeLinejoin: "round" } },
+      { tag: "path", attrs: { d: EMAIL_FLAP_PATH, fill: "none", stroke, strokeWidth: "1.05", strokeLinecap: "round", strokeLinejoin: "round" } },
     ];
   }
   return [{

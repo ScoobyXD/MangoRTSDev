@@ -1070,6 +1070,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     assert.equal(categoryButtons.find((button) => button.textContent?.includes("Nodes"))?.disabled, true);
     assert.equal(categoryButtons.find((button) => button.textContent?.includes("Logic Gates"))?.disabled, false);
     assert.equal(categoryButtons.find((button) => button.textContent?.includes("Projects"))?.disabled, false);
+    assert.equal(categoryButtons.find((button) => button.textContent?.includes("Emails"))?.disabled, false);
     assert.deepEqual(linkedPickerEntities, []);
     await act(async () => { Simulate.keyDown(pickerInput, { key: "Escape" }); });
     await waitFor(() => !dom.window.document.querySelector('[data-mango-universal-picker="true"]'), "Escape should close the universal picker");

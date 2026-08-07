@@ -888,6 +888,31 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
             parseHTML: (element) => element.getAttribute("data-mango-entity-label") ?? element.textContent,
             renderHTML: () => ({}),
           },
+          emailMessageId: {
+            default: null,
+            parseHTML: (element) => element.getAttribute("data-mango-email-message-id"),
+            renderHTML: () => ({}),
+          },
+          emailThreadId: {
+            default: null,
+            parseHTML: (element) => element.getAttribute("data-mango-email-thread-id"),
+            renderHTML: () => ({}),
+          },
+          emailAccountEmail: {
+            default: null,
+            parseHTML: (element) => element.getAttribute("data-mango-email-account-email"),
+            renderHTML: () => ({}),
+          },
+          emailSharedInboxId: {
+            default: null,
+            parseHTML: (element) => element.getAttribute("data-mango-email-shared-inbox-id"),
+            renderHTML: () => ({}),
+          },
+          emailMailbox: {
+            default: null,
+            parseHTML: (element) => element.getAttribute("data-mango-email-mailbox"),
+            renderHTML: () => ({}),
+          },
         };
       },
       parseHTML() {
@@ -895,7 +920,7 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
       },
       renderHTML({ node, HTMLAttributes }) {
         const type = String(node.attrs.entityType || "node");
-        const entityType = type === "logic_gate" || type === "project" ? type : "node";
+        const entityType = type === "logic_gate" || type === "project" || type === "email_message" ? type : "node";
         const label = String(node.attrs.label || "Entity");
         const ownerDocument = globalThis.document;
         const icon = ownerDocument
@@ -906,6 +931,13 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
           "data-mango-entity-type": entityType,
           "data-mango-entity-id": node.attrs.entityId,
           "data-mango-entity-label": label,
+          ...(entityType === "email_message" ? {
+            "data-mango-email-message-id": node.attrs.emailMessageId || undefined,
+            "data-mango-email-thread-id": node.attrs.emailThreadId || undefined,
+            "data-mango-email-account-email": node.attrs.emailAccountEmail || undefined,
+            "data-mango-email-shared-inbox-id": node.attrs.emailSharedInboxId || undefined,
+            "data-mango-email-mailbox": node.attrs.emailMailbox || undefined,
+          } : {}),
           role: "link",
           tabindex: "0",
           "aria-label": `Open ${editorEntityTypeLabel(entityType)} ${label}`,

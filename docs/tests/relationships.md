@@ -10,7 +10,7 @@ Only missing typed Node relationships are inserted idempotently for the new mess
 ↓
 No endpoint is guessed, no access is granted, no textbox placement is copied, and an unplaced thread remains unplaced
 
-Last updated: 2026-08-06
+Last updated: 2026-08-07
 
 # Process Story: RACI groups remain typed live relationships
 
@@ -44,11 +44,11 @@ Last updated: 2026-08-06
 
 A user opens the universal picker from a resource editor or a selected My Triage/Shared Triage email
 ↓
-Single-hashtag reference mode opens or inserts the chosen exact Node, Logic Gate, or Project without creating a relationship
+Single-hashtag reference mode opens or inserts the chosen exact Node, Logic Gate, Project, or email message without creating a relationship
 ↓
 Double-hashtag link mode keeps the source and chosen result's unchanged canonical types and IDs and permits only the documented pair
 ↓
-An email-to-Node choice uses the established exact-message import command; an email-to-Logic-Gate or email-to-Project choice creates the email Node and then uses the existing typed Logic Gate/Project assignment commands
+An email-to-Node choice uses the established exact-message import command; an email-to-Logic-Gate or email-to-Project choice creates the email Node and then uses the existing typed Logic Gate/Project assignment commands; a Node-to-email or Project-to-email choice uses that owner's established exact-message attachment command
 ↓
 Node-to-Logic-Gate uses the Logic Gate work-assignment command, while Node-to-Project and Logic-Gate-to-Project use `project_relationships`
 ↓

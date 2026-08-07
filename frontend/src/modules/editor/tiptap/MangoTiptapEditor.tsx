@@ -194,9 +194,35 @@ export type MangoTiptapEditorProps = {
 
 const EMPTY_MENTION_USERS: readonly MentionableCompanyUser[] = [];
 const EMPTY_ANNOTATIONS: readonly MangoTiptapAnnotation[] = [];
-const NODE_LINK_TARGET_TYPES: readonly EditorEntityType[] = ["logic_gate", "project"];
+const NODE_LINK_TARGET_TYPES: readonly EditorEntityType[] = ["logic_gate", "project", "email_message"];
 const LOGIC_GATE_LINK_TARGET_TYPES: readonly EditorEntityType[] = ["project"];
+const PROJECT_LINK_TARGET_TYPES: readonly EditorEntityType[] = ["email_message"];
 const EMPTY_LINK_TARGET_TYPES: readonly EditorEntityType[] = [];
+
+function mangoEntityLinkAttributes(entity: EditorEntityLink): Record<string, string | null> {
+  return {
+    entityType: entity.entityType,
+    entityId: entity.entityID,
+    label: entity.label,
+    emailMessageId: entity.emailMessageID ?? null,
+    emailThreadId: entity.emailThreadID ?? null,
+    emailAccountEmail: entity.emailAccountEmail ?? null,
+    emailSharedInboxId: entity.emailSharedInboxID ?? null,
+    emailMailbox: entity.emailMailbox ?? null,
+  };
+}
+
+function emailEntityMetadataFromRecord(record: Record<string, unknown>): Pick<EditorEntityLink, "emailMessageID" | "emailThreadID" | "emailAccountEmail" | "emailSharedInboxID" | "emailMailbox"> {
+  const stringValue = (key: string) => typeof record[key] === "string" ? String(record[key]).trim() : "";
+  const mailbox = stringValue("emailMailbox");
+  return {
+    emailMessageID: stringValue("emailMessageId") || undefined,
+    emailThreadID: stringValue("emailThreadId") || undefined,
+    emailAccountEmail: stringValue("emailAccountEmail").toLowerCase() || undefined,
+    emailSharedInboxID: stringValue("emailSharedInboxId") || undefined,
+    emailMailbox: (["primary", "drafts", "sent", "starred", "all", "archive", "spam"] as const).find((value) => value === mailbox),
+  };
+}
 
 type UniversalPickerDraft = {
   from: number;
@@ -1298,8 +1324,10 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     ? EMPTY_LINK_TARGET_TYPES
     : resourceType === "node"
       ? NODE_LINK_TARGET_TYPES
-      : resourceType === "logic_gate"
-        ? LOGIC_GATE_LINK_TARGET_TYPES
+    : resourceType === "logic_gate"
+      ? LOGIC_GATE_LINK_TARGET_TYPES
+      : resourceType === "project"
+        ? PROJECT_LINK_TARGET_TYPES
         : EMPTY_LINK_TARGET_TYPES;
   const cancelUniversalPicker = useCallback(() => {
     const draft = universalPickerDraftRef.current;
@@ -1335,7 +1363,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       return;
     }
     const inserted = editor.chain().focus().insertContentAt({ from: draft.from, to: draft.to }, [
-      { type: "mangoEntityLink", attrs: { entityType: entity.entityType, entityId: entity.entityID, label: entity.label } },
+      { type: "mangoEntityLink", attrs: mangoEntityLinkAttributes(entity) },
       { type: "text", text: " " },
     ]).run();
     if (!inserted) throw new Error("Unable to insert the selected reference.");
@@ -1417,9 +1445,20 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
             const entityType = keyboardEntityElement.dataset.mangoEntityType;
             const entityID = keyboardEntityElement.dataset.mangoEntityId?.trim() ?? "";
             const label = keyboardEntityElement.dataset.mangoEntityLabel?.trim() ?? "";
-            if ((entityType === "node" || entityType === "logic_gate" || entityType === "project") && entityID && label) {
+            if ((entityType === "node" || entityType === "logic_gate" || entityType === "project" || entityType === "email_message") && entityID && label) {
               event.preventDefault();
-              openEntityLink({ entityType, entityID, label });
+              openEntityLink({
+                entityType,
+                entityID,
+                label,
+                ...(entityType === "email_message" ? {
+                  emailMessageID: keyboardEntityElement.dataset.mangoEmailMessageId?.trim() || undefined,
+                  emailThreadID: keyboardEntityElement.dataset.mangoEmailThreadId?.trim() || undefined,
+                  emailAccountEmail: keyboardEntityElement.dataset.mangoEmailAccountEmail?.trim().toLowerCase() || undefined,
+                  emailSharedInboxID: keyboardEntityElement.dataset.mangoEmailSharedInboxId?.trim() || undefined,
+                  emailMailbox: keyboardEntityElement.dataset.mangoEmailMailbox as EditorEntityLink["emailMailbox"],
+                } : {}),
+              });
               return true;
             }
           }
@@ -1466,9 +1505,9 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           const entityType = node.attrs.entityType;
           const entityID = typeof node.attrs.entityId === "string" ? node.attrs.entityId.trim() : "";
           const label = typeof node.attrs.label === "string" ? node.attrs.label.trim() : "";
-          if (!(["node", "logic_gate", "project"] as const).includes(entityType) || !entityID || !label) return false;
+          if (!(["node", "logic_gate", "project", "email_message"] as const).includes(entityType) || !entityID || !label) return false;
           event.preventDefault();
-          openEntityLink({ entityType, entityID, label });
+          openEntityLink({ entityType, entityID, label, ...(entityType === "email_message" ? emailEntityMetadataFromRecord(node.attrs) : {}) });
           return true;
         },
       },
@@ -1730,7 +1769,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       }
       editor.chain().focus().insertContentAt(
         { from: action.from, to: action.to },
-        { type: "mangoEntityLink", attrs: { entityType: entity.entityType, entityId: entity.entityID, label: entity.label } },
+        { type: "mangoEntityLink", attrs: mangoEntityLinkAttributes(entity) },
       ).run();
       setSelectionAction(null);
       setError("");

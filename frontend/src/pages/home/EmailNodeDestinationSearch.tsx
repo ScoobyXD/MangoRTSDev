@@ -1,5 +1,5 @@
 import React from "react";
-import { ExplorerRowIcon } from "../../icons/index.js";
+import { ExplorerEntityIcon, ExplorerRowIcon } from "../../icons/index.js";
 import { type EditorEntityLink, type EditorEntityLinkRequest } from "../../modules/editor/editorEntityLinks.js";
 import {
   EDITOR_NEU_ACTIVE_SURFACE,
@@ -239,7 +239,7 @@ export function EmailNodeDestinationSearch({
           style={{ position: "absolute", zIndex: 70, top: "calc(100% + 7px)", right: 0, width: "min(390px, calc(100vw - 32px))", maxHeight: "min(72vh, 540px)", overflowY: "auto", display: "grid", gap: 9, border: "1px solid transparent", borderRadius: 13, background: EDITOR_NEU_SURFACE + " padding-box, " + EDITOR_NEU_EDGE_FRAME + " border-box", padding: 10, boxShadow: EDITOR_NEU_PANEL_SHADOW }}
         >
           <div style={{ display: "grid", gridTemplateColumns: "24px minmax(0, 1fr)", alignItems: "center", gap: 8, color: "#334155" }}>
-            <ExplorerRowIcon kind={pendingLink.entityType} />
+            <ExplorerEntityIcon kind={pendingLink.entityType} />
             <span style={{ minWidth: 0 }}>
               <strong style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5 }}>{pendingLink.label}</strong>
               <span style={{ color: "#64748b", fontSize: 9.5 }}>{pendingLink.entityType === "logic_gate" ? "Create a new email Node in this Logic Gate" : "Create a new email Node in this Project"}</span>

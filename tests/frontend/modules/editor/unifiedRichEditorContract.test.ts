@@ -1239,18 +1239,20 @@ test("draft and signature persistence reject inline file bytes before durable wr
   assert.match(behaviorTests, /http\.StatusBadRequest/);
 });
 
-test("EmailPickerModal remains attach-only and cannot compose or send mail", () => {
+test("the obsolete EmailPickerModal is removed and email attachment uses the universal picker", () => {
   const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
-  const start = nodeWorkspaceParts.indexOf("export const EmailPickerModal");
-  const end = nodeWorkspaceParts.indexOf("function messageDocument", start);
-  assert.notEqual(start, -1);
-  assert.notEqual(end, -1);
-  const emailPickerModal = nodeWorkspaceParts.slice(start, end);
+  const nodeWorkspace = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
+  const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
+  const universalPicker = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/UniversalEntityPicker.tsx"), "utf8");
+  const emailPane = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/UniversalPickerEmailPane.tsx"), "utf8");
 
-  assert.match(emailPickerModal, /onAttach/);
-  assert.doesNotMatch(emailPickerModal, /composeOpen|composeDraft|submitCompose/);
-  assert.doesNotMatch(emailPickerModal, /sendEmail\s*\(/);
-  assert.doesNotMatch(emailPickerModal, /<textarea|Schedule send|Save draft|Save to|Write a reply|Send message/);
+  assert.doesNotMatch(nodeWorkspaceParts, /EmailPickerModal/);
+  assert.match(nodeWorkspace, /<UniversalEntityPicker[\s\S]*initialCategory="email_message"/);
+  assert.match(projectSummary, /<UniversalEntityPicker[\s\S]*initialCategory="email_message"/);
+  assert.match(universalPicker, /label: "Emails", shortcut: "E"/);
+  assert.match(emailPane, /"primary"[\s\S]*"starred"[\s\S]*"sent"/);
+  assert.match(emailPane, /"all"[\s\S]*"spam"/);
+  assert.doesNotMatch(emailPane, /composeOpen|composeDraft|submitCompose|sendEmail\s*\(|<textarea|Schedule send|Save draft|Write a reply|Send message/);
 });
 
 test("unified node shell contract lists every Phase 2 full node-window surface", () => {

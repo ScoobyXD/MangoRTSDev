@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { AppModalPortal, useAppFloatingMenuDismissal, useAppOverlayPortalTarget, useAppViewportAnchorRect } from "../../app/AppModalPortal.js";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { ExplorerEntityIcon } from "../../icons/index.js";
-import { downloadEmailAttachment, fetchCommunicationsStatus, getEmailCollaborationThread, getEmailMessage, getEmailSignature, getEmailThread, getNodeEmailThread, listEmailMessages, sendEmail, type EmailAddress, type EmailAttachment, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
+import { downloadEmailAttachment, getEmailCollaborationThread, getEmailMessage, getEmailSignature, getEmailThread, getNodeEmailThread, listEmailMessages, sendEmail, type EmailAddress, type EmailAttachment, type EmailMessage } from "../communications/communicationsApi";
 import { CalendarInviteCard } from "../communications/CalendarInviteCard";
 import { OutboundEmailUndoBanner } from "../communications/OutboundEmailUndoBanner";
 import { isOutboundEmailUndoneError } from "../communications/outboundEmailUndo";
@@ -84,7 +84,6 @@ import {
   ChatIcon,
   type ChatThreadNode,
   countChatThreadDescendants,
-  EMAIL_DRAG_MIME,
   formatAddressList,
   formatFileSize,
   formatTimestamp,
@@ -92,7 +91,6 @@ import {
   initialsForName,
   isImageAttachment,
   MailIcon,
-  messageAttachmentPayload,
   PaperclipIcon,
   PlusIcon,
   TextEditorIcon,
@@ -4671,15 +4669,7 @@ const EMAIL_SELECTION_ACTION_GAP = 5;
 const EMAIL_SELECTION_ACTION_PADDING = 4;
 const EMAIL_SELECTION_ACTION_BORDER = 1;
 const EMAIL_SELECTION_ACTION_OFFSET = 8;
-const EMAIL_PICKER_MESSAGE_BATCH_SIZE = 12;
-const EMAIL_PICKER_PREFETCH_REMAINING_ROWS = 5;
-const EMAIL_PICKER_APPROX_ROW_HEIGHT = 80;
-
-type EmailPickerPrefetchedPage = {
-  filterKey: string;
-  pageToken: string;
-  page: MessagePage;
-};
+const EMAIL_THREAD_MESSAGE_BATCH_SIZE = 12;
 
 type EmailBodyImageSelection = {
   src: string;
@@ -5569,7 +5559,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         if (cancelled) return;
         let ids = Array.from(new Set((thread.message_ids ?? []).map((item) => item.trim()).filter(Boolean)));
         if (ids.length === 0) {
-          const page = await listEmailMessages({ companyID, ...mailboxScope, mailbox: "all", limit: EMAIL_PICKER_MESSAGE_BATCH_SIZE, threadID, refresh: true });
+          const page = await listEmailMessages({ companyID, ...mailboxScope, mailbox: "all", limit: EMAIL_THREAD_MESSAGE_BATCH_SIZE, threadID, refresh: true });
           ids = Array.from(new Set((page.messages ?? []).map((item) => item.id).filter(Boolean)));
         }
         if (!ids.includes(payload.id)) ids.unshift(payload.id);
@@ -5584,7 +5574,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         if (!cancelled) setThreadMessages(details.filter((item): item is EmailMessage => Boolean(item)));
       } catch {
         try {
-          const page = await listEmailMessages({ companyID, ...mailboxScope, mailbox: "all", limit: EMAIL_PICKER_MESSAGE_BATCH_SIZE, threadID, refresh: true });
+          const page = await listEmailMessages({ companyID, ...mailboxScope, mailbox: "all", limit: EMAIL_THREAD_MESSAGE_BATCH_SIZE, threadID, refresh: true });
           if (cancelled) return;
           const ids = Array.from(new Set((page.messages ?? []).map((item) => item.id).filter(Boolean)));
           if (!ids.includes(payload.id)) ids.unshift(payload.id);
@@ -6655,411 +6645,6 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       />
     )}
     </>
-  );
-};
-
-type EmailPickerModalProps = {
-  accent: string;
-  surfaceText: string;
-  panelBackground: string;
-  strokeColor: string;
-  onClose: () => void;
-  onAttach: (message: EmailMessage, scope: { sharedInboxID?: string; accountEmail?: string }) => void;
-};
-
-export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surfaceText, panelBackground, strokeColor, onClose, onAttach }) => {
-  const [mailbox, setMailbox] = useState<EmailMailbox>("primary");
-  const [query, setQuery] = useState("");
-  const [searchDraft, setSearchDraft] = useState("");
-  const [unreadOnly, setUnreadOnly] = useState(false);
-  const [messages, setMessages] = useState<EmailMessage[]>([]);
-  const [nextPageToken, setNextPageToken] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState("");
-  const [accountEmail, setAccountEmail] = useState("");
-  const [accountScopeResolved, setAccountScopeResolved] = useState(false);
-  const messageListRef = useRef<HTMLDivElement | null>(null);
-  const requestSeqRef = useRef(0);
-  const prefetchedPageRef = useRef<EmailPickerPrefetchedPage | null>(null);
-  const prefetchPromiseRef = useRef<Promise<void> | null>(null);
-  const prefetchFilterKeyRef = useRef("");
-  const prefetchPageTokenRef = useRef("");
-  const filterKey = useMemo(() => `${mailbox}\n${query.trim()}\n${unreadOnly ? "1" : "0"}`, [mailbox, query, unreadOnly]);
-  const filterKeyRef = useRef(filterKey);
-  const nextPageTokenRef = useRef(nextPageToken);
-  const loadingRef = useRef(loading);
-  const loadingMoreRef = useRef(loadingMore);
-
-  useEffect(() => {
-    let cancelled = false;
-    void fetchCommunicationsStatus()
-      .then((status) => {
-        if (cancelled) return;
-        const resolvedAccountEmail = status.connected && status.status === "connected"
-          ? status.connection?.account_email?.trim().toLowerCase() ?? ""
-          : "";
-        setAccountEmail(resolvedAccountEmail);
-        if (!resolvedAccountEmail) {
-          setLoading(false);
-          setError("email_account_not_connected");
-        }
-      })
-      .catch((cause) => {
-        if (!cancelled) {
-          setLoading(false);
-          setError(cause instanceof Error ? cause.message : "failed_to_load_email_account");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setAccountScopeResolved(true);
-      });
-    return () => { cancelled = true; };
-  }, []);
-
-  useEffect(() => {
-    filterKeyRef.current = filterKey;
-  }, [filterKey]);
-
-  useEffect(() => {
-    nextPageTokenRef.current = nextPageToken;
-  }, [nextPageToken]);
-
-  useEffect(() => {
-    loadingRef.current = loading;
-  }, [loading]);
-
-  useEffect(() => {
-    loadingMoreRef.current = loadingMore;
-  }, [loadingMore]);
-
-  const clearPrefetchedPage = useCallback(() => {
-    prefetchedPageRef.current = null;
-    prefetchPromiseRef.current = null;
-    prefetchFilterKeyRef.current = "";
-    prefetchPageTokenRef.current = "";
-  }, []);
-
-  const appendMessagePage = useCallback((page: MessagePage) => {
-    setMessages((current) => {
-      const seen = new Set(current.map((message) => message.id));
-      const next = [...current];
-      for (const message of page.messages ?? []) {
-        if (!message.id || seen.has(message.id)) continue;
-        seen.add(message.id);
-        next.push(message);
-      }
-      return next;
-    });
-    const nextToken = page.next_page_token ?? "";
-    nextPageTokenRef.current = nextToken;
-    setNextPageToken(nextToken);
-    return nextToken;
-  }, []);
-
-
-  useEffect(() => {
-    if (!accountScopeResolved || !accountEmail) return;
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      const requestSeq = requestSeqRef.current + 1;
-      requestSeqRef.current = requestSeq;
-      loadingRef.current = true;
-      loadingMoreRef.current = false;
-      setLoading(true);
-      setLoadingMore(false);
-      setError("");
-      setMessages([]);
-      nextPageTokenRef.current = "";
-      setNextPageToken("");
-      clearPrefetchedPage();
-      void listEmailMessages({ accountEmail, mailbox, limit: EMAIL_PICKER_MESSAGE_BATCH_SIZE, q: query.trim() || undefined, unread: unreadOnly || undefined })
-        .then((page) => {
-          if (cancelled || requestSeqRef.current !== requestSeq) return;
-          setMessages(page.messages ?? []);
-          const nextToken = page.next_page_token ?? "";
-          nextPageTokenRef.current = nextToken;
-          setNextPageToken(nextToken);
-        })
-        .catch((cause) => {
-          if (!cancelled && requestSeqRef.current === requestSeq) setError(cause instanceof Error ? cause.message : "failed_to_load_email");
-        })
-        .finally(() => {
-          if (!cancelled && requestSeqRef.current === requestSeq) {
-            loadingRef.current = false;
-            setLoading(false);
-          }
-        });
-    }, query.trim() ? 220 : 0);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [accountEmail, accountScopeResolved, clearPrefetchedPage, mailbox, query, unreadOnly]);
-
-  const appendPrefetchedPage = useCallback((pageToken: string): string | null => {
-    const prefetched = prefetchedPageRef.current;
-    if (!prefetched || prefetched.filterKey !== filterKeyRef.current || prefetched.pageToken !== pageToken) return null;
-    prefetchedPageRef.current = null;
-    prefetchPromiseRef.current = null;
-    prefetchFilterKeyRef.current = "";
-    prefetchPageTokenRef.current = "";
-    return appendMessagePage(prefetched.page);
-  }, [appendMessagePage]);
-
-  const prefetchNextMessagePage = useCallback(async (explicitPageToken?: string) => {
-    if (loadingRef.current || loadingMoreRef.current) return;
-    const pageToken = (explicitPageToken ?? nextPageTokenRef.current).trim();
-    if (!pageToken) return;
-    const requestFilterKey = filterKeyRef.current;
-    const prefetched = prefetchedPageRef.current;
-    if (prefetched?.filterKey === requestFilterKey && prefetched.pageToken === pageToken) return;
-    if (prefetchPromiseRef.current && prefetchFilterKeyRef.current === requestFilterKey && prefetchPageTokenRef.current === pageToken) return;
-    prefetchFilterKeyRef.current = requestFilterKey;
-    prefetchPageTokenRef.current = pageToken;
-    const request = listEmailMessages({
-      accountEmail,
-      mailbox,
-      limit: EMAIL_PICKER_MESSAGE_BATCH_SIZE,
-      pageToken,
-      q: query.trim() || undefined,
-      unread: unreadOnly || undefined,
-    })
-      .then((page) => {
-        if (filterKeyRef.current !== requestFilterKey || nextPageTokenRef.current !== pageToken) return;
-        prefetchedPageRef.current = { filterKey: requestFilterKey, pageToken, page };
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (prefetchPromiseRef.current === request) {
-          prefetchPromiseRef.current = null;
-          prefetchFilterKeyRef.current = "";
-          prefetchPageTokenRef.current = "";
-        }
-      });
-    prefetchPromiseRef.current = request;
-    await request;
-  }, [accountEmail, mailbox, query, unreadOnly]);
-
-  const loadMoreMessages = useCallback(async () => {
-    if (loadingRef.current || loadingMoreRef.current) return;
-    const pageToken = nextPageTokenRef.current.trim();
-    if (!pageToken) return;
-    const appendedNextToken = appendPrefetchedPage(pageToken);
-    if (appendedNextToken !== null) {
-      window.setTimeout(() => {
-        if (appendedNextToken) void prefetchNextMessagePage(appendedNextToken);
-      }, 0);
-      return;
-    }
-    const requestFilterKey = filterKeyRef.current;
-    loadingMoreRef.current = true;
-    setLoadingMore(true);
-    setError("");
-    try {
-      if (prefetchPromiseRef.current && prefetchFilterKeyRef.current === requestFilterKey && prefetchPageTokenRef.current === pageToken) {
-        await prefetchPromiseRef.current;
-        const prefetchedNextToken = appendPrefetchedPage(pageToken);
-        if (prefetchedNextToken !== null) {
-          window.setTimeout(() => {
-            if (prefetchedNextToken) void prefetchNextMessagePage(prefetchedNextToken);
-          }, 0);
-          return;
-        }
-      }
-      const page = await listEmailMessages({
-        accountEmail,
-        mailbox,
-        limit: EMAIL_PICKER_MESSAGE_BATCH_SIZE,
-        pageToken,
-        q: query.trim() || undefined,
-        unread: unreadOnly || undefined,
-      });
-      if (filterKeyRef.current !== requestFilterKey || nextPageTokenRef.current !== pageToken) return;
-      const nextToken = appendMessagePage(page);
-      window.setTimeout(() => {
-        if (nextToken) void prefetchNextMessagePage(nextToken);
-      }, 0);
-    } catch (cause) {
-      if (filterKeyRef.current === requestFilterKey) setError(cause instanceof Error ? cause.message : "failed_to_load_email");
-    } finally {
-      loadingMoreRef.current = false;
-      setLoadingMore(false);
-    }
-  }, [accountEmail, appendMessagePage, appendPrefetchedPage, mailbox, prefetchNextMessagePage, query, unreadOnly]);
-
-  const emailPickerWithinPrefetchDistance = useCallback((): boolean => {
-    const list = messageListRef.current;
-    if (!list) return false;
-    const remaining = list.scrollHeight - list.scrollTop - list.clientHeight;
-    return remaining < EMAIL_PICKER_APPROX_ROW_HEIGHT * EMAIL_PICKER_PREFETCH_REMAINING_ROWS;
-  }, []);
-
-  const handleMessageListScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
-    const target = event.currentTarget;
-    const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
-    if (remaining < EMAIL_PICKER_APPROX_ROW_HEIGHT * EMAIL_PICKER_PREFETCH_REMAINING_ROWS) void prefetchNextMessagePage();
-    if (remaining < EMAIL_PICKER_APPROX_ROW_HEIGHT * 2) void loadMoreMessages();
-  }, [loadMoreMessages, prefetchNextMessagePage]);
-
-  useEffect(() => {
-    if (loading || !nextPageToken) return;
-    window.setTimeout(() => {
-      const list = messageListRef.current;
-      if (!list) return;
-      if (emailPickerWithinPrefetchDistance()) void prefetchNextMessagePage();
-      if (list.scrollHeight <= list.clientHeight + (EMAIL_PICKER_APPROX_ROW_HEIGHT * 2)) void loadMoreMessages();
-    }, 0);
-  }, [emailPickerWithinPrefetchDistance, loadMoreMessages, loading, messages.length, nextPageToken, prefetchNextMessagePage]);
-
-  const mailboxTabs: Array<{ mailbox: EmailMailbox; label: string }> = [
-    { mailbox: "primary", label: "Inbox" },
-    { mailbox: "starred", label: "Starred" },
-    { mailbox: "all", label: "All" },
-    { mailbox: "sent", label: "Sent" },
-  ];
-  const unreadCount = messages.filter((message) => message.unread).length;
-
-  const tabButtonStyle = (active: boolean): React.CSSProperties => ({
-    minWidth: 0,
-    minHeight: 34,
-    border: active ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-    borderRadius: 10,
-    background: active ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
-    color: active ? "#111827" : surfaceText,
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    cursor: "pointer",
-    padding: "0 10px",
-    fontSize: 11.5,
-    fontWeight: 850,
-    letterSpacing: 0,
-    whiteSpace: "nowrap",
-    boxShadow: active ? `${EDITOR_NEU_SHADOW}, inset 1px 1px 0 rgba(255,255,255,0.78)` : EDITOR_NEU_SHADOW,
-  });
-
-  const submitSearch = (event: React.FormEvent) => {
-    event.preventDefault();
-    setQuery(searchDraft.trim());
-  };
-
-  return (
-    <AppModalPortal onRequestClose={onClose}>
-      <div
-      role="dialog"
-      aria-modal="true"
-      style={{ position: "fixed", inset: 0, zIndex: 1, background: "rgba(17, 24, 39, 0.32)", display: "grid", placeItems: "center", padding: 18 }}
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div style={{ width: "min(620px, 100%)", height: "min(760px, 92vh)", display: "grid", gridTemplateRows: "auto 1fr", border: `1px solid ${strokeColor}`, borderRadius: 12, background: panelBackground, color: surfaceText, boxShadow: "0 18px 48px rgba(0,0,0,0.24)", overflow: "hidden" }}>
-        <div style={{ display: "grid", gap: 8, padding: 12, borderBottom: `1px solid ${strokeColor}`, background: panelBackground }}>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 8, alignItems: "center" }}>
-            <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 7, color: surfaceText }}>
-              <MailIcon color={accent} />
-              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 14, fontWeight: 950 }}>My Triage</span>
-            </div>
-            <button type="button" onClick={onClose} style={{ width: 32, height: 32, border: `1px solid ${strokeColor}`, borderRadius: 9, background: "#ffffff", color: surfaceText, cursor: "pointer", fontSize: 18, lineHeight: 1, boxShadow: EDITOR_NEU_SHADOW }}>
-            x
-            </button>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 6 }}>
-            {mailboxTabs.map((tab) => (
-              <button
-                key={tab.mailbox}
-                type="button"
-                style={tabButtonStyle(mailbox === tab.mailbox)}
-                onClick={() => {
-                  setMailbox(tab.mailbox);
-                }}
-              >
-                {tab.label}
-                {mailbox === tab.mailbox && messages.length > 0 && (
-                  <span style={{ minWidth: 18, height: 18, display: "inline-grid", placeItems: "center", borderRadius: 9, padding: "0 5px", border: "1px solid rgba(148,163,184,0.18)", background: "#ffffff", color: "#334155", fontSize: 10, fontWeight: 850 }}>
-                    {messages.length}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-          <form style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 76px", gap: 6 }} onSubmit={submitSearch}>
-            <input
-              autoFocus
-              value={searchDraft}
-              onChange={(event) => setSearchDraft(event.currentTarget.value)}
-              placeholder="Search mail"
-              style={{ minWidth: 0, height: 34, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, padding: "0 10px", outline: "none", color: surfaceText, background: "#ffffff", fontSize: 12, letterSpacing: 0, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }}
-            />
-            <button type="submit" style={tabButtonStyle(false)}>Search</button>
-          </form>
-          <div style={{ minWidth: 0, minHeight: 24, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", gap: 10, padding: "0 2px" }}>
-            <span style={{ minWidth: 0, color: "rgba(15,23,42,0.58)", fontSize: 11, fontWeight: 800 }}>{unreadOnly ? "Unread only" : `${unreadCount} unread`}</span>
-            <label style={{ display: "flex", alignItems: "center", gap: 7, color: surfaceText, fontSize: 11, fontWeight: 700 }}>
-              <input type="checkbox" checked={unreadOnly} onChange={(event) => setUnreadOnly(event.currentTarget.checked)} />
-              <span>Unread only</span>
-            </label>
-          </div>
-        </div>
-        <div
-          ref={messageListRef}
-          className="editor-document-scroll"
-          onScroll={handleMessageListScroll}
-          style={{ overflowY: "auto", minHeight: 220, padding: 10, display: "grid", alignContent: "start", gap: 8, ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}
-        >
-          {error && <div style={{ padding: 10, border: "1px solid rgba(185,28,28,0.24)", borderRadius: 10, background: "rgba(254,242,242,0.9)", color: "#991b1b", fontSize: 12, fontWeight: 800 }}>{error}</div>}
-          <>
-            {loading && <div style={{ padding: 12, color: surfaceText, opacity: 0.68, fontSize: 12, fontWeight: 700 }}>Loading</div>}
-            {!loading && !error && messages.length === 0 && <div style={{ padding: 12, color: surfaceText, opacity: 0.68, fontSize: 12, fontWeight: 700 }}>No email</div>}
-            {messages.map((message) => (
-                <button
-                  key={message.id}
-                  type="button"
-                  draggable
-                  onDragStart={(event) => {
-                    event.dataTransfer.effectAllowed = "copy";
-                    event.dataTransfer.setData(EMAIL_DRAG_MIME, JSON.stringify(messageAttachmentPayload(message, "", accountEmail)));
-                  }}
-                  onClick={() => onAttach(message, { accountEmail })}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "18px minmax(0, 1fr) auto",
-                    gap: 8,
-                    alignItems: "center",
-                    width: "100%",
-                    minWidth: 0,
-                    textAlign: "left",
-                    border: message.unread ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-                    borderRadius: 10,
-                    background: message.unread ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : "#ffffff",
-                    color: surfaceText,
-                    padding: "9px 10px",
-                    cursor: "grab",
-                    boxShadow: message.unread ? "0 8px 18px rgba(15,23,42,0.10), inset 1px 1px 0 rgba(255,255,255,0.86)" : EDITOR_NEU_SHADOW,
-                  }}
-                >
-                  <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: 999, background: message.unread ? accent : "rgba(148,163,184,0.34)", boxShadow: message.unread ? "0 0 0 4px rgba(6,182,212,0.10)" : undefined }} />
-                  <span style={{ minWidth: 0, display: "grid", gap: 3 }}>
-                    <span style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 8, alignItems: "center" }}>
-                      <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, fontWeight: 900 }}>{formatAddressList(message.from) || "Unknown sender"}</strong>
-                      <span style={{ color: "rgba(15,23,42,0.62)", fontSize: 10.5, fontWeight: 780, whiteSpace: "nowrap" }}>{formatTimestamp(message.date, "day")}</span>
-                    </span>
-                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 850 }}>{message.subject || "(no subject)"}</span>
-                    {message.snippet && <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.78)", fontSize: 11, fontWeight: 650 }}>{message.snippet}</span>}
-                  </span>
-                  <span style={{ width: 34, height: 34, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", boxShadow: EDITOR_NEU_SHADOW }}>
-                    <PaperclipIcon color={accent} />
-                  </span>
-                </button>
-              ))}
-              {loadingMore && <div style={{ padding: 10, color: surfaceText, opacity: 0.68, fontSize: 11, fontWeight: 800, textAlign: "center" }}>Loading more</div>}
-          </>
-        </div>
-      </div>
-      </div>
-    </AppModalPortal>
   );
 };
 
