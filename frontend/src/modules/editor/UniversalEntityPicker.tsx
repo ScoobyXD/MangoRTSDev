@@ -145,12 +145,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
 
   useEffect(() => {
     inputRef.current?.focus({ preventScroll: true });
-    const listener = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) props.onCancel();
-    };
-    window.addEventListener("pointerdown", listener, true);
-    return () => window.removeEventListener("pointerdown", listener, true);
-  }, [props.onCancel]);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -239,11 +234,18 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
 
   if (!portalTarget) return null;
   return createPortal(
-    <div ref={rootRef} role="dialog" aria-label="Universal picker" data-mango-universal-picker="true" data-mango-universal-picker-mode={mode} style={{
-      ...pickerPanelPosition(props.anchor), zIndex: 10070, display: "grid", gridTemplateRows: "auto auto minmax(120px,1fr) auto", overflow: "hidden",
-      border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 18, background: EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW,
-      color: "#172033", fontFamily: "inherit",
-    }}>
+    <>
+      <div
+        aria-hidden="true"
+        data-mango-universal-picker-dismiss-layer="true"
+        onPointerDown={props.onCancel}
+        style={{ position: "fixed", inset: 0, zIndex: 10069, background: "transparent" }}
+      />
+      <div ref={rootRef} role="dialog" aria-label="Universal picker" data-mango-universal-picker="true" data-mango-universal-picker-mode={mode} style={{
+        ...pickerPanelPosition(props.anchor), zIndex: 10070, display: "grid", gridTemplateRows: "auto auto minmax(120px,1fr) auto", overflow: "hidden",
+        border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 18, background: EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW,
+        color: "#172033", fontFamily: "inherit",
+      }}>
       <div style={{ padding: "14px 14px 10px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 9 }}>
           <strong style={{ fontSize: 13 }}>Universal picker</strong>
@@ -277,6 +279,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
         <span>{mode === "link" ? "Backspace for # reference" : "# for ## link"} · ↑↓ choose · Enter/Tab select · Esc close</span>
         {error && <span role="alert" style={{ marginLeft: "auto", color: "#b91c1c", fontWeight: 800 }}>{error}</span>}
       </div>
-    </div>, portalTarget,
+      </div>
+    </>, portalTarget,
   );
 };

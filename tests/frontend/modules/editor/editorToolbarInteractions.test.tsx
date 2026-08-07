@@ -671,6 +671,8 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     assert.ok(dashCell.querySelector('ul[data-mango-editor-list="bullet"]'), "dash-space creates a structural bullet inside a table cell");
     assert.ok(dashCell.contains(dom.window.document.getSelection()?.anchorNode ?? null));
 
+    let pickerCancelCount = 0;
+
     await act(async () => root.render(
       <AppModalPortal ownerDocument={dom.window.document}>
         <UniversalEntityPicker
@@ -681,7 +683,7 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
           initialMode="link"
           anchor={{ left: 24, top: 24 }}
           onChoose={async () => undefined}
-          onCancel={noop}
+          onCancel={() => { pickerCancelCount += 1; }}
         />
       </AppModalPortal>,
     ));
@@ -709,6 +711,12 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     modalPickerInput = modalPicker.querySelector<HTMLInputElement>('input[aria-label="Search resources to link"]');
     assert.ok(modalPickerInput);
     assert.equal(modalPicker.dataset.mangoUniversalPickerMode, "link", "# on an empty reference picker enters ## link mode");
+    const pickerDismissLayer = dom.window.document.querySelector<HTMLElement>('[data-mango-universal-picker-dismiss-layer="true"]');
+    assert.ok(pickerDismissLayer, "the universal picker should render an explicit outside-click dismiss layer");
+    await act(async () => {
+      pickerDismissLayer.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
+    });
+    assert.equal(pickerCancelCount, 1, "clicking outside the picker should request dismissal exactly once");
 
   } finally {
     if (mountedRoot) await act(async () => mountedRoot?.unmount());

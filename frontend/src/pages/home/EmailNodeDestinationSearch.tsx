@@ -23,6 +23,7 @@ type EmailNodeDestinationSearchProps = {
   requestJSON: EditorEntityLinkRequest;
   logicGates: LogicGateRecord[];
   busy: boolean;
+  actionNotice?: string;
   onSubmit: (destination: EmailNodeDestination) => void;
   onOpenEntity: (entity: EditorEntityLink) => void;
   onError: (message: string) => void;
@@ -84,6 +85,7 @@ export function EmailNodeDestinationSearch({
   requestJSON,
   logicGates,
   busy,
+  actionNotice = "",
   onSubmit,
   onOpenEntity,
   onError,
@@ -179,6 +181,17 @@ export function EmailNodeDestinationSearch({
       data-email-node-destination-search="true"
       style={{ position: "relative", flex: "0 1 300px", width: "clamp(205px, 28vw, 300px)", minWidth: 184, display: "grid", gridTemplateColumns: "34px minmax(0, 1fr)", gap: 6 }}
     >
+      {actionNotice && (
+        <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          data-email-action-success="true"
+          style={{ position: "absolute", zIndex: 86, top: 0, right: "calc(100% + 9px)", width: "max-content", maxWidth: "min(240px, 34vw)", minHeight: 32, display: "grid", alignItems: "center", border: "1px solid rgba(34,197,94,0.42)", borderRadius: 10, background: "linear-gradient(145deg, rgba(240,253,244,0.98), rgba(220,252,231,0.96))", color: "#166534", padding: "6px 10px", fontSize: 11, fontWeight: 850, lineHeight: 1.25, boxShadow: "0 10px 22px rgba(22,101,52,0.18)", animation: "mango-pane-enter 180ms ease-out", pointerEvents: "none" }}
+        >
+          {actionNotice}
+        </div>
+      )}
       <button
         type="button"
         data-email-floating-node-button="true"
