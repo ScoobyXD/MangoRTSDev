@@ -606,7 +606,6 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
     assert.equal(editor.state.doc.child(0).attrs.indentLevel, 0);
 
     for (const [outlineStyle, expectedList] of [
-      ["automatic-outline-numbering", "orderedList"],
       ["bullet-list", "bulletList"],
       ["checklist", "taskList"],
     ] as const) {
@@ -616,6 +615,19 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
       assert.equal(editor.state.doc.firstChild?.type.name, expectedList);
       assert.equal(editor.state.doc.childCount, 1, `${outlineStyle} must not append a generated ordinary row`);
     }
+
+    editor.commands.setContent({ type: "doc", content: [{ type: "paragraph" }] });
+    editor.commands.setTextSelection(1);
+    assert.equal(handleMangoTiptapOutlineEnter(editor, "automatic-outline-numbering"), false, "Automatic Numbering does not convert an ordinary empty row on Enter");
+    assert.equal(editor.commands.keyboardShortcut("Enter"), true);
+    assert.equal(editor.state.doc.childCount, 2, "ordinary Enter creates the next ordinary row");
+    assert.equal(editor.state.doc.child(0).type.name, "paragraph");
+    assert.equal(editor.state.doc.child(1).type.name, "paragraph");
+    assert.equal(editor.state.selection.$from.parent, editor.state.doc.child(1));
+    editor.commands.setContent({ type: "doc", content: [{ type: "paragraph" }] });
+    editor.commands.setTextSelection(1);
+    typeThroughEditorInput("1. ");
+    assert.equal(editor.state.doc.firstChild?.type.name, "orderedList", "typing a numbered marker still starts a numbered list");
 
     editor.commands.setContent({ type: "doc", content: [
       { type: "paragraph", content: [{ type: "text", text: "ordinary row" }] },
@@ -698,6 +710,13 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
     assert.equal(editor.state.doc.child(0).childCount, 1, "the blank numbered item is removed");
     assert.equal(editor.state.doc.child(1).type.name, "paragraph", "the caret moves to an ordinary row without a number");
     assert.equal(editor.state.selection.$from.parent, editor.state.doc.child(1));
+    assert.equal(handleMangoTiptapOutlineEnter(editor, "automatic-outline-numbering"), false, "Enter after the list exit stays in ordinary paragraph mode");
+    assert.equal(editor.commands.keyboardShortcut("Enter"), true);
+    assert.equal(editor.state.doc.childCount, 3, "Enter below the exited list creates another ordinary row");
+    assert.equal(editor.state.doc.child(1).type.name, "paragraph");
+    assert.equal(editor.state.doc.child(2).type.name, "paragraph");
+    assert.equal(editor.state.selection.$from.parent, editor.state.doc.child(2));
+    assert.equal(editor.state.doc.child(0).childCount, 1, "ordinary Enter cannot restart or extend the numbered list");
 
     const nestedRows = [
       { type: "paragraph", attrs: { blockId: "person-label" }, content: [{ type: "text", text: "Christina:" }] },

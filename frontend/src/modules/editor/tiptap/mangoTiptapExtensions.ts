@@ -274,8 +274,8 @@ function updateCurrentMangoTiptapIndent(editor: Editor, delta: -1 | 1): boolean 
 }
 
 /**
- * Starts the structural outline selected in the shared toolbar. Existing list
- * items keep their own list kind and use Tiptap's normal Enter behavior.
+ * Starts the selected bullet or Checkbox outline. Numbered lists continue only
+ * while active; ordinary paragraphs stay ordinary after a numbered-list exit.
  */
 export function handleMangoTiptapOutlineEnter(editor: Editor, outlineStyle: EditorOutlineStyleID): boolean {
   if (!editor.state.selection.empty) return false;
@@ -286,10 +286,7 @@ export function handleMangoTiptapOutlineEnter(editor: Editor, outlineStyle: Edit
   if (editor.isActive("listItem")) return empty ? false : editor.commands.splitListItem("listItem");
   if (!editor.isActive("paragraph") && !editor.isActive("heading")) return false;
 
-  if (outlineStyle === "indent-guides") return false;
-  if (outlineStyle === "automatic-outline-numbering") {
-    return empty ? editor.commands.toggleOrderedList() : false;
-  }
+  if (outlineStyle === "indent-guides" || outlineStyle === "automatic-outline-numbering") return false;
 
   const startList = () => outlineStyle === "checklist"
     ? editor.commands.toggleTaskList()
