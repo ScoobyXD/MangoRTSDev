@@ -1,3 +1,17 @@
+# Process Story: A first Node-editor click keeps its exact caret
+
+A sleeping Node textbox shows its stable static document while the live editor is not mounted
+↓
+The user's first pointer press records the clicked stable block ID and text offset before activation begins
+↓
+Mango attaches the live Tiptap document behind the unchanged static surface and resolves that same block/offset in the live DOM
+↓
+The live editor accepts the caret and focus before the static surface is removed
+↓
+The user sees no content blink, random caret jump, scroll change, document mutation, or save caused by activation
+
+Last updated: 2026-08-07
+
 # Process Story: Changed editor history saves when the resource is left
 
 A user edits a Node, Logic Gate, or Project textbox
@@ -531,6 +545,7 @@ ED126 - History snapshot creation is action-triggered, never timer-triggered. A 
 ED127 - A resource becomes changed for exit history only after a local editable history-visible mutation: a Tiptap document transaction; a user-created Node or Project textbox or successful deletion; Node or Project textbox title/attachment metadata change; or a confirmed saved-version restore. Loading canonical data, automatically ensuring an initial empty textbox, receiving a remote refresh, focusing, selecting, scrolling, opening tabs/panes, or closing an unchanged view does not mark the resource and must create no exit-history row.
 ED128 - Manual and action-triggered history use the same permanent resource history format and existing history endpoint. Before either snapshot, Mango flushes every mounted Tiptap textbox for that exact company/resource and then flushes the resource owner's changed textbox metadata. One per-resource save coordinator shares an in-flight save across nested unmounts, repeated close signals, and a simultaneous manual click. A successful manual or exit snapshot advances the same clean baseline; edits made after that success require one later snapshot. The manual button remains available and still saves even when the resource has no new changes.
 ED129 - An action-triggered snapshot is quiet: it does not open history, block an in-app close, or display a success dialog. Save failure leaves the resource changed so a later close or manual save can retry. The history batch represents the committed canonical resource after the local flush; therefore already committed concurrent edits from another authorized user may also be present. Refresh, external navigation, and tab/window close are best effort because a browser may terminate asynchronous work, while Mango-controlled closes, resource switches, and route unmounts run while the application remains alive.
+ED130 - A first pointer press in a sleeping Node textbox records the clicked stable Mango block ID and text offset before the static-to-live swap. Mango resolves that semantic bookmark in the live Tiptap DOM, applies its ProseMirror position, focuses without scrolling, and removes the static cover only after the live caret is ready. Coordinate lookup is fallback only. Activation must not blink content, move the caret to an unrelated position, mutate the document, save, or create an empty row.
 
 ### Required Unified Rich-Editor Surface Inventory
 

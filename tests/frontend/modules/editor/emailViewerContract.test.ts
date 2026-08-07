@@ -90,7 +90,7 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeSurface, /aria-label=\{linkedEmailExpanded \? "Hide linked email" : "Show linked email"\}/);
   assert.match(nodeSurface, /data-node-email-column="true"/);
   assert.match(nodeSurface, /data-node-email-workspace-mode=\{nodeEmailWorkspaceMode\}/);
-  assert.match(nodeSurface, /Math\.max\(TEXT_BLOCK_ROW_HEIGHT, Math\.floor\(height - TEXT_BLOCK_HEADER_CHROME_HEIGHT\)\)/);
+  assert.match(nodeSurface, /Math\.max\([\s\S]*TEXT_BLOCK_ROW_HEIGHT,[\s\S]*Math\.floor\(height - TEXT_BLOCK_HEADER_CHROME_HEIGHT - NODE_EMAIL_COLUMN_BOTTOM_GUTTER_PX\)/);
   assert.doesNotMatch(nodeSurface, /min\(720px, calc\(100vh - 170px\)\)/);
   assert.match(nodeSurface, /const nodeEmailWorkspaceGridTemplateColumns = nodeEmailColumnVisible/);
   assert.match(nodeSurface, /"minmax\(0, 1fr\) 0px 0px"[\s\S]*"0px 0px minmax\(0, 1fr\)"/);

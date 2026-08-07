@@ -1,3 +1,17 @@
+# Process Story: A Project link becomes durable Node history
+
+A user links an assigned Node to a Project through the header's `##` picker
+↓
+The established Project relationship command creates the exact Node row and required Logic Gate row
+↓
+That same transaction snapshots the actor, Project ID, and current Project name into one `project_assignment` timeline event
+↓
+The compact clickable Project stamp appears on the Node timeline
+↓
+Retrying the exact relationship updates no historical copy and creates no duplicate stamp
+
+Last updated: 2026-08-07
+
 # Process Story: A Accountable group becomes an exact verification snapshot
 
 A user creates a verification stamp on a Node with current effective Accountable people and groups
@@ -10,7 +24,7 @@ The request update routes through the ACI surface with the Accountable role whil
 
 Last updated: 2026-08-06
 
-# Node Timeline Transfer And Verification Rules
+# Node Timeline Relationship And Verification Rules
 
 This document defines the durable business rules for compact activity entries on a Node timeline. Text boxes remain editable document rows; transfer and verification entries are immutable activity stamps and use a shorter visual row.
 
@@ -20,7 +34,7 @@ The unshipped Node v2 projection is retired. Migration `20260802_retire_node_v2_
 
 Current product activity uses `node_timeline_events` and `node_timeline_verification_recipients` for transfer and verification stamps. Current editable text lives in `node_textboxes`; existing information/projection tables continue to provide the workspace presentation. These retained stores are separate from the retired Node v2 subsystem.
 
-The transfer and verification rules below remain current. Do not reintroduce the retired Node v2 projection as a second source of truth.
+The relationship and verification rules below remain current. Do not reintroduce the retired Node v2 projection as a second source of truth.
 
 ## Logic Gate transfer events
 
@@ -32,6 +46,14 @@ The transfer and verification rules below remain current. Do not reintroduce the
 6. A compact stamp reuses the exact shared Node timeline rail and circle used by text boxes. Its leading timestamp includes a clock icon, and its header, source snapshot, and destination snapshot use the established Logic Gate icon. Visual labels must render the stored name snapshots, not a generic replacement label.
 7. The transfer card consumes only its content height; spare Node-workspace viewport height must remain below the timeline rows and must never stretch a transfer card or create blank space inside it.
 8. Source and destination Logic Gate chips are keyboard-accessible links whenever their snapshotted IDs are present. Opening one pushes the Logic Gate route onto browser history so Back returns to the exact Node route and preserved workspace state. A missing ID remains readable historical text and is not presented as an actionable link.
+
+## Project assignment events
+
+1. A Project-assignment event is created only when the exact Node-to-Project relationship is first created. Re-adding that same relationship is idempotent and creates no second stamp.
+2. The Node relationship, its required implicit Logic Gate relationship, dependent projections, and the timeline event commit in one repository transaction. Any failure rolls back all of them.
+3. The event snapshots the actor display name plus Project ID and Project name at commit time. Later actor or Project rename/removal does not rewrite historical copy.
+4. The compact stamp uses the sentence `{actor} assigned this node to {Project}` and the established Project icon. A stored Project ID makes the Project chip a keyboard-accessible exact-resource link; a missing ID remains readable non-actionable history.
+5. Project-assignment stamps are immutable and inherit read authorization from the owning Node. They are presentation history, not relationship or permission authority.
 
 ## Verification assignment rules
 
@@ -66,7 +88,8 @@ The transfer and verification rules below remain current. Do not reintroduce the
 
 ## Persistence and rollout
 
-- `node_timeline_events` stores immutable transfer and verification headers.
+- `node_timeline_events` stores immutable Logic Gate transfer, Project assignment, and verification headers.
 - `node_timeline_verification_recipients` stores the immutable recipient snapshot plus the one mutable completion timestamp.
 - Both tables cascade only with deletion of the owning Node. Historical actor, Logic Gate, and recipient IDs/names are intentionally not foreign-key cascaded so audit copy survives rename/removal.
 - Apply `backend/db/migrations/20260722_node_timeline_verification_events.sql` through the normal human-managed database rollout before deploying code that uses these endpoints. Agents must not apply it to a live database.
+- Apply `backend/db/migrations/20260807_node_project_assignment_timeline.sql` through the normal human-managed database rollout before deploying Project-assignment stamps. Agents must not apply it to a live database.

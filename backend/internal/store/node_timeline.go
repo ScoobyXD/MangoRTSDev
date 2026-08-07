@@ -191,3 +191,28 @@ func (r *MemoryRepo) appendLogicGateTransferTimelineEventLocked(companyID, nodeI
 	r.nodeTimelineEvents[key(companyID, item.EventID)] = item
 	return item
 }
+
+func (r *MemoryRepo) appendProjectAssignmentTimelineEventLocked(companyID, nodeID, actorUserID, projectID string, createdTimestamp time.Time) domain.NodeTimelineEvent {
+	actorDisplayName := "Unknown user"
+	if actor, ok := r.companyUserByIDLocked(companyID, actorUserID); ok {
+		actorDisplayName = strings.TrimSpace(actor.DisplayName)
+		if actorDisplayName == "" {
+			actorDisplayName = strings.TrimSpace(actor.Email)
+		}
+	}
+	projectName := "Deleted project"
+	if project, ok := r.projects[key(companyID, projectID)]; ok && strings.TrimSpace(project.Name) != "" {
+		projectName = strings.TrimSpace(project.Name)
+	}
+	item := domain.NodeTimelineEvent{
+		EventID: newUUIDv7String(), CompanyID: companyID, NodeID: nodeID,
+		Type:                   domain.NodeTimelineEventProjectAssignment,
+		ActorUserID:            actorUserID,
+		ActorDisplayName:       actorDisplayName,
+		ProjectID:              projectID,
+		ProjectName:            projectName,
+		VerificationRecipients: []domain.NodeTimelineVerificationRecipient{}, CreatedTimestamp: createdTimestamp,
+	}
+	r.nodeTimelineEvents[key(companyID, item.EventID)] = item
+	return item
+}

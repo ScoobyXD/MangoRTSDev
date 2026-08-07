@@ -44,6 +44,10 @@ import {
   growMangoTiptapTable,
 } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapTable.js";
 import {
+  captureMangoTiptapPointerBookmark,
+  resolveMangoTiptapPointerBookmark,
+} from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapPointerActivation.js";
+import {
   MangoTiptapAnnotations,
   mergeMangoTiptapAnnotationPositions,
   navigateMangoTiptapTarget,
@@ -1744,4 +1748,23 @@ test("persisted dormant changes survive without a feature owner", () => {
     { id: "chat-owned", kind: "chat", from: 6, to: 9 },
     { id: "change-dormant", kind: "change", from: 10, to: 14 },
   ]);
+});
+
+test("sleeping editor pointer activation preserves the clicked caret across the static-to-live swap", () => {
+  const dom = new JSDOM("<!doctype html><html><body><div id='static'><p data-mango-block-id='block-1'><strong>Alpha</strong> beta</p></div><div id='live'><p data-mango-block-id='block-1'><span>Alpha</span> beta</p></div></body></html>");
+  const document = dom.window.document;
+  const staticRoot = document.querySelector<HTMLElement>("#static")!;
+  const liveRoot = document.querySelector<HTMLElement>("#live")!;
+  const clickedText = staticRoot.querySelector("strong")!.firstChild!;
+  Object.defineProperty(document, "caretPositionFromPoint", {
+    configurable: true,
+    value: () => ({ offsetNode: clickedText, offset: 3 }),
+  });
+
+  const bookmark = captureMangoTiptapPointerBookmark(staticRoot, clickedText, { left: 120, top: 80 });
+  assert.deepEqual(bookmark, { blockID: "block-1", textOffset: 3 });
+
+  const resolved = resolveMangoTiptapPointerBookmark(liveRoot, bookmark!);
+  assert.equal(resolved?.node.textContent, "Alpha");
+  assert.equal(resolved?.offset, 3);
 });

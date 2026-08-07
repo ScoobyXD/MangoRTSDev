@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
-import { AppModalPortal, useAppFloatingMenuDismissal } from "../../app/AppModalPortal.js";
+import { useAppFloatingMenuDismissal } from "../../app/AppModalPortal.js";
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { isAbortError } from "../api/requestJSON";
 import type { EditorEntityLink } from "./editorEntityLinks.js";
@@ -9,19 +9,11 @@ import { getLogicGateRecordSingleFlight } from "../logic-gates/logicGateRecordSt
 import type { LogicGateRecord } from "../logic-gates/types";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../dashboardEvents";
 import { ExplorerRowIcon } from "../../icons/index.js";
-import { CompanyExplorerSearchBox } from "../company-explorer/CompanyExplorerSearchBox";
-import { fetchCompanyExplorerSearchResults, type CompanyExplorerSearchResult } from "../company-explorer/companyExplorerLazyApi";
-import { reconcileCompanyExplorerSearchResultTitles } from "../company-explorer/companyExplorerStore";
 import { foldCommittedEntityTitlesSince, readCommittedEntityTitleVersion, subscribeCommittedEntityTitleUpdates } from "../realtime/committedEntityTitleUpdates";
-import { buildCompanyExplorerSearchTreeRows } from "../company-explorer/companyExplorerTreeRows";
-import type { ExplorerTreeNode } from "../company-explorer/companyExplorerTypes";
 import { reconcileCommittedLogicGateRecordTitles } from "../realtime/committedTitleSnapshotReconciliation";
 import {
-  fetchProjectView,
   listProjectRelationshipsForResource,
-  listProjects,
   upsertProjectRelationship,
-  type ProjectRecord,
   type ProjectRelationshipProjection,
 } from "../project-management/projectManagementApi";
 import { scheduleTransientInformationFocus } from "./transientInformationFocus.js";
@@ -78,6 +70,11 @@ import { useBoundedEditorRowVirtualization } from "./editorRowVirtualization";
 import { openEditorEntityLink } from "./editorEntityLinks";
 import { useMangoEditorDataFormat } from "./editorDataFormat";
 import { markEditorHistoryChanged } from "./editorExitHistory.js";
+import {
+  UniversalEntityPicker,
+  type UniversalEntityPickerAnchor,
+  type UniversalEntityPickerMode,
+} from "./UniversalEntityPicker.js";
 import { flushMangoTiptapDocument } from "./tiptap/mangoTiptapFlushRegistry.js";
 import { mangoTiptapPendingStorageKey } from "./tiptap/mangoTiptapSync.js";
 import { serializeMangoTiptapDocument } from "./tiptap/mangoTiptapDocument.js";
@@ -89,7 +86,6 @@ import {
   AttachmentCountDropdown,
   ChatPane,
   DeleteTextBlockConfirmationModal,
-  EmailCountDropdown,
   EmailPickerModal,
   LinkedEmailPreviewPane,
   NodeTextBlockEditor,
@@ -145,6 +141,8 @@ const TEXT_CHAT_PANE_DEFAULT_WIDTH_PX = 340;
 const TEXT_SIDE_PANE_MIN_WIDTH_PX = 300;
 const TEXT_SIDE_PANE_MAX_WIDTH_PX = 1400;
 const NODE_EMAIL_COLUMN_LAYOUT_ID = "__node_email_column__";
+const NODE_EMAIL_COLUMN_BOTTOM_GUTTER_PX = 18;
+const NODE_HEADER_LINK_TARGET_TYPES = ["logic_gate", "project"] as const;
 
 type NodeTimelineVerificationRecipient = {
   company_id: string;
@@ -160,13 +158,15 @@ type NodeTimelineEvent = {
   event_id: string;
   company_id: string;
   node_id: string;
-  type: "logic_gate_transfer" | "verification_request";
+  type: "logic_gate_transfer" | "project_assignment" | "verification_request";
   actor_user_id?: string;
   actor_display_name: string;
   from_logic_gate_id?: string;
   from_logic_gate_name?: string;
   to_logic_gate_id?: string;
   to_logic_gate_name?: string;
+  project_id?: string;
+  project_name?: string;
   verification_recipients: NodeTimelineVerificationRecipient[];
   created_timestamp: string;
 };
@@ -383,12 +383,6 @@ function nodeTimelineErrorMessage(cause: unknown, fallback: string): string {
   return message;
 }
 
-const RelationshipCheckIcon: React.FC<{ color: string }> = ({ color }) => (
-  <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block" }}>
-    <path d="m3.4 8.15 2.8 2.75 6.35-6.65" fill="none" stroke={color} strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
 const TimelineClockIcon: React.FC<{ color: string }> = ({ color }) => (
   <svg data-node-timeline-clock-icon="true" aria-hidden="true" width="13" height="13" viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
     <circle cx="8" cy="8" r="5.7" fill="none" stroke={color} strokeWidth="1.45" />
@@ -426,23 +420,31 @@ const TimelineLogicGateLink: React.FC<{
   );
 };
 
-function sortLogicGateOptions(items: LogicGateRecord[]): LogicGateRecord[] {
-  return [...items].sort((a, b) => (
-    logicGateOptionLabel(a).localeCompare(logicGateOptionLabel(b), undefined, { numeric: true, sensitivity: "base" })
-    || a.logic_gate_id.localeCompare(b.logic_gate_id)
-  ));
-}
-
-function projectOptionLabel(project: ProjectRecord): string {
-  return humanLabelOrFallback(project.name, humanLabelOrFallback(project.project_id, "Project"));
-}
-
-function sortProjectOptions(items: ProjectRecord[]): ProjectRecord[] {
-  return [...items].sort((a, b) => (
-    projectOptionLabel(a).localeCompare(projectOptionLabel(b), undefined, { numeric: true, sensitivity: "base" })
-    || a.project_id.localeCompare(b.project_id)
-  ));
-}
+const TimelineProjectLink: React.FC<{ projectID: string; projectName: string }> = ({ projectID, projectName }) => {
+  const cleanProjectID = projectID.trim();
+  const content = (
+    <>
+      <span data-node-timeline-project-icon="true" aria-hidden="true" style={{ display: "inline-flex" }}><ExplorerRowIcon kind="project" /></span>
+      <strong>{projectName}</strong>
+    </>
+  );
+  if (!cleanProjectID) {
+    return <span className="mango-editor-entity-link mango-editor-entity-link--project" style={{ margin: 0, cursor: "default", pointerEvents: "none" }}>{content}</span>;
+  }
+  return (
+    <button
+      type="button"
+      className="mango-editor-entity-link mango-editor-entity-link--project"
+      data-node-timeline-project-link="true"
+      aria-label={`Open Project ${projectName}`}
+      title={`Open Project: ${projectName}`}
+      onClick={() => openEditorEntityLink({ entityType: "project", entityID: cleanProjectID, label: projectName })}
+      style={{ margin: 0 }}
+    >
+      {content}
+    </button>
+  );
+};
 
 function projectRelationshipLabel(row: ProjectRelationshipProjection): string {
   return row.project_name?.trim() || humanLabelOrFallback(row.project_id, "Project");
@@ -507,15 +509,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const paneLayoutScope = `${companyID}\u001f${nodeID}`;
   const editorDataFormat = useMangoEditorDataFormat(apiBase, companyID, requestJSON);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const logicGateAssignerRef = useRef<HTMLDivElement | null>(null);
   const timelineCreateMenuRef = useRef<HTMLDivElement | null>(null);
-  const logicGateSearchRequestRef = useRef(0);
-  const projectAssignerRef = useRef<HTMLDivElement | null>(null);
   const saveTimersRef = useRef(new Map<string, number>());
   const attachmentUploadScopeRef = useRef({ companyID, nodeID, canEdit, generation: 0 });
   const nodeAttachmentUploadFilesRef = useRef(new Map<string, { file: File; blockID: string; controller?: AbortController }>());
-  const logicGateAssignStatusTimerRef = useRef<number | null>(null);
-  const logicGateAssignFlashTimerRef = useRef<number | null>(null);
   const contentByBlockRef = useRef(new Map<string, EditorTextBlockContent>());
   const documentScrollMemoryRef = useRef(createEditorScrollMemory());
   const focusBlockIDRef = useRef("");
@@ -560,44 +557,22 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [tiptapPinnedBlockIDs, setTiptapPinnedBlockIDs] = useState<Set<string>>(() => new Set());
   const [emailReplyBlockID, setEmailReplyBlockID] = useState("");
   const [emailPickerTargetBlockID, setEmailPickerTargetBlockID] = useState<string | null>(null);
-  const [nodeEmailModalMessageID, setNodeEmailModalMessageID] = useState("");
   const [expandedLinkedEmailBlockIDs, setExpandedLinkedEmailBlockIDs] = useState<Set<string>>(() => new Set());
   const [nodeEmailFocusExpanded, setNodeEmailFocusExpanded] = useState(false);
-  const [logicGateAssignerOpen, setLogicGateAssignerOpen] = useState(false);
-  const [logicGateSearch, setLogicGateSearch] = useState("");
-  const [logicGateSearchResults, setLogicGateSearchResults] = useState<CompanyExplorerSearchResult[]>([]);
   const [assignedLogicGateRecords, setAssignedLogicGateRecords] = useState<LogicGateRecord[]>([]);
-  const [logicGateSearchLoading, setLogicGateSearchLoading] = useState(false);
-  const [assigningLogicGateID, setAssigningLogicGateID] = useState("");
-  const [hoveredLogicGateID, setHoveredLogicGateID] = useState("");
   const [lastAssignedLogicGateID, setLastAssignedLogicGateID] = useState("");
   const [lastAssignedLogicGateLabel, setLastAssignedLogicGateLabel] = useState("");
-  const [logicGateAssignStatus, setLogicGateAssignStatus] = useState("");
-  const [logicGateAssignFlash, setLogicGateAssignFlash] = useState<"" | "success" | "error">("");
-  const [projectAssignerOpen, setProjectAssignerOpen] = useState(false);
-  const [projectSearch, setProjectSearch] = useState("");
-  const [projectOptions, setProjectOptions] = useState<ProjectRecord[]>([]);
-  const [projectOptionsLoading, setProjectOptionsLoading] = useState(false);
   const [projectRelationshipRefreshKey, setProjectRelationshipRefreshKey] = useState(0);
   const [nodeProjectRelationships, setNodeProjectRelationships] = useState<ProjectRelationshipProjection[]>([]);
-  const [selectedProjectForAssignment, setSelectedProjectForAssignment] = useState<ProjectRecord | null>(null);
-  const [projectLogicGateOptions, setProjectLogicGateOptions] = useState<LogicGateRecord[]>([]);
-  const [projectLogicGatesLoading, setProjectLogicGatesLoading] = useState(false);
-  const [assigningProjectID, setAssigningProjectID] = useState("");
-  const [assigningProjectLogicGateID, setAssigningProjectLogicGateID] = useState("");
-  const [projectAssignStatus, setProjectAssignStatus] = useState("");
+  const [headerLinkPickerAnchor, setHeaderLinkPickerAnchor] = useState<UniversalEntityPickerAnchor | null>(null);
   useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
     if (update.companyID !== companyID || update.entityType !== "logic_gate") return;
     const resourceID = update.resourceID.trim();
     const title = update.title.trim();
     if (!resourceID || !title) return;
     setAssignedLogicGateRecords((current) => reconcileCommittedLogicGateRecordTitles(current, update));
-    setLogicGateSearchResults((current) => reconcileCompanyExplorerSearchResultTitles(current, update));
     setLastAssignedLogicGateLabel((current) => lastAssignedLogicGateID.trim() === resourceID ? title : current);
-    setProjectLogicGateOptions((current) => reconcileCommittedLogicGateRecordTitles(current, update));
   }), [companyID, lastAssignedLogicGateID]);
-
-  const [projectAssignerDropdownLeft, setProjectAssignerDropdownLeft] = useState(0);
   const [dropActive, setDropActive] = useState(false);
   const [author, setAuthor] = useState({ userID: "", name: "You" });
   const [timelineEvents, setTimelineEvents] = useState<NodeTimelineEvent[]>([]);
@@ -689,25 +664,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const editorGridTemplateColumns = compact
     ? `${TEXT_TIMELINE_COMPACT_COLUMN_WIDTH_PX}px minmax(0, 1fr)`
     : `${TEXT_TIMELINE_COLUMN_WIDTH_PX}px minmax(0, 1fr)`;
-  const logicGateSearchTreeRows = useMemo(() => (
-    buildCompanyExplorerSearchTreeRows(logicGateSearchResults.filter((result) => (
-      result.resource_type === "folder" || result.resource_type === "logic_gate"
-    )))
-  ), [logicGateSearchResults]);
   const logicGateLabelByID = useMemo(() => {
     const labels = new Map<string, string>();
     for (const logicGate of assignedLogicGateRecords) {
       if (!logicGate.logic_gate_id || labels.has(logicGate.logic_gate_id)) continue;
       labels.set(logicGate.logic_gate_id, logicGateOptionLabel(logicGate));
     }
-    for (const result of logicGateSearchResults) {
-      if (result.resource_type !== "logic_gate") continue;
-      const logicGateID = (result.resource_id || result.entity_id).trim();
-      if (!logicGateID || labels.has(logicGateID)) continue;
-      labels.set(logicGateID, humanLabelOrFallback(result.display_name, humanLabelOrFallback(logicGateID, "Logic Gate")));
-    }
     return labels;
-  }, [assignedLogicGateRecords, logicGateSearchResults]);
+  }, [assignedLogicGateRecords]);
   const assignedLogicGateIDSet = useMemo(() => new Set(assignedLogicGateIDs.map((id) => id.trim()).filter(Boolean)), [assignedLogicGateIDs]);
   const hasAssignedLogicGate = assignedLogicGateIDSet.size > 0 || Boolean(lastAssignedLogicGateID.trim());
   const assignedLogicGateLabel = useMemo(() => {
@@ -728,9 +692,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     return "";
   }, [assignedLogicGateIDs, lastAssignedLogicGateID]);
-  const assignLogicGateButtonLabel = hasAssignedLogicGate
-    ? `Assigned to Logic Gate: ${assignedLogicGateLabel}`
-    : "Assign to Logic Gate";
   const sortedNodeProjectRelationships = useMemo(() => (
     [...nodeProjectRelationships].sort((a, b) => (
       (b.relationship_updated_timestamp ?? "").localeCompare(a.relationship_updated_timestamp ?? "")
@@ -740,28 +701,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const primaryAssignedProject = sortedNodeProjectRelationships[0] ?? null;
   const primaryAssignedProjectID = primaryAssignedProject?.project_id?.trim() ?? "";
   const primaryAssignedProjectLabel = primaryAssignedProject ? projectRelationshipLabel(primaryAssignedProject) : "";
-  const assignProjectButtonLabel = primaryAssignedProject
-    ? `Project: ${primaryAssignedProjectLabel}`
-    : "Assign to Project";
-  const projectSearchQuery = projectSearch.trim().toLocaleLowerCase();
-  const filteredProjectOptions = useMemo(() => {
-    if (!projectSearchQuery) return projectOptions;
-    return projectOptions.filter((project) => (
-      projectOptionLabel(project).toLocaleLowerCase().includes(projectSearchQuery)
-      || project.project_id.toLocaleLowerCase().includes(projectSearchQuery)
-    ));
-  }, [projectOptions, projectSearchQuery]);
-  const projectAssignerMenuWidth = Math.max(
-    280,
-    Math.min(compact ? 320 : 390, width > 0 ? width - 28 : compact ? 320 : 390),
-  );
   const nodePriorityUnassignedForLogicGate = useMemo(() => {
     const raw = nodePriorityDraft.trim();
     if (!raw || raw === "0") return true;
     const parsed = Number(raw);
     return !Number.isInteger(parsed) || parsed < 1 || parsed > 5;
   }, [nodePriorityDraft]);
-  const logicGateSearchQuery = logicGateSearch.trim();
   const focusTargetBlockID = useMemo(() => {
     const targetID = focusInformationID?.trim() ?? "";
     const emailMessageID = focusEmailMessageID?.trim() ?? "";
@@ -921,20 +866,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
   useEffect(() => {
     setNodeEmailFocusExpanded(false);
-    setLogicGateAssignerOpen(false);
-    setProjectAssignerOpen(false);
-    setNodeEmailModalMessageID("");
-    setLogicGateSearch("");
-    setAssigningLogicGateID("");
     setLastAssignedLogicGateID("");
     setLastAssignedLogicGateLabel("");
-    setLogicGateAssignStatus("");
-    setLogicGateAssignFlash("");
-    setSelectedProjectForAssignment(null);
-    setProjectLogicGateOptions([]);
-    setProjectAssignStatus("");
-    setAssigningProjectID("");
-    setAssigningProjectLogicGateID("");
+    setHeaderLinkPickerAnchor(null);
   }, [nodeID]);
 
   useEffect(() => {
@@ -972,55 +906,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
   useEffect(() => {
     if (canEdit) return;
-    setLogicGateAssignerOpen(false);
     setTimelineCreateMenuOpen(false);
-    setProjectAssignerOpen(false);
+    setHeaderLinkPickerAnchor(null);
     setEmailPickerTargetBlockID(null);
     setDropActive(false);
     setDeleteTextBlockConfirmation(null);
   }, [canEdit]);
 
   useAppFloatingMenuDismissal(timelineCreateMenuOpen, timelineCreateMenuRef, () => setTimelineCreateMenuOpen(false));
-  useAppFloatingMenuDismissal(logicGateAssignerOpen, logicGateAssignerRef, () => setLogicGateAssignerOpen(false));
-
-  useEffect(() => {
-    if (logicGateAssignerOpen) return;
-    setLogicGateSearch("");
-    setLogicGateSearchResults([]);
-    setLogicGateSearchLoading(false);
-  }, [logicGateAssignerOpen]);
-
-  useLayoutEffect(() => {
-    if (!projectAssignerOpen) {
-      setProjectAssignerDropdownLeft(0);
-      return;
-    }
-    const updateDropdownLeft = () => {
-      const anchor = projectAssignerRef.current;
-      if (!anchor || typeof window === "undefined") {
-        setProjectAssignerDropdownLeft(0);
-        return;
-      }
-      const anchorBounds = anchor.getBoundingClientRect();
-      const rootBounds = rootRef.current?.getBoundingClientRect();
-      const visibleRight = Math.min(rootBounds?.right ?? window.innerWidth, window.innerWidth) - 14;
-      const visibleLeft = Math.max(rootBounds?.left ?? 0, 0) + 14;
-      const overflowRight = Math.max(0, anchorBounds.left + projectAssignerMenuWidth - visibleRight);
-      const minLeft = visibleLeft - anchorBounds.left;
-      const nextLeft = Math.round(Math.max(minLeft, -overflowRight));
-      setProjectAssignerDropdownLeft((current) => (current === nextLeft ? current : nextLeft));
-    };
-    updateDropdownLeft();
-    window.addEventListener("resize", updateDropdownLeft);
-    return () => window.removeEventListener("resize", updateDropdownLeft);
-  }, [projectAssignerMenuWidth, projectAssignerOpen, width]);
-
-  useAppFloatingMenuDismissal(projectAssignerOpen, projectAssignerRef, () => setProjectAssignerOpen(false));
-
-  useEffect(() => {
-    if (projectAssignerOpen) return;
-    setProjectSearch("");
-  }, [projectAssignerOpen]);
 
   useEffect(() => {
     if (!companyID || !nodeID) {
@@ -1038,67 +931,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     return () => { cancelled = true; };
   }, [companyID, nodeID, projectRelationshipRefreshKey]);
 
-  useEffect(() => {
-    if (!projectAssignerOpen || !companyID) return;
-    let cancelled = false;
-    setProjectOptionsLoading(true);
-    void listProjects(companyID)
-      .then((payload) => {
-        if (!cancelled) setProjectOptions(sortProjectOptions(payload.projects ?? []));
-      })
-      .catch((cause) => {
-        if (!cancelled) onError(cause instanceof Error ? cause.message : "failed_to_load_projects");
-      })
-      .finally(() => {
-        if (!cancelled) setProjectOptionsLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [companyID, onError, projectAssignerOpen]);
-
-  useEffect(() => {
-    const projectID = selectedProjectForAssignment?.project_id?.trim() ?? "";
-    if (!projectAssignerOpen || !companyID || !projectID) {
-      setProjectLogicGateOptions([]);
-      setProjectLogicGatesLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setProjectLogicGateOptions([]);
-    setProjectLogicGatesLoading(true);
-    const titleVersionAtStart = readCommittedEntityTitleVersion();
-    void (async () => {
-      const view = await fetchProjectView(companyID, projectID);
-      if (cancelled) return;
-      const logicGateIDs = Array.from(new Set((view.relationships ?? [])
-        .filter((row) => row.resource_type === "logic_gate")
-        .map((row) => row.resource_id.trim())
-        .filter(Boolean)));
-      const records = await Promise.all(logicGateIDs.map(async (logicGateID) => {
-        try {
-          const details = await getLogicGateRecordSingleFlight(apiBase, companyID, logicGateID);
-          return details.logic_gate;
-        } catch {
-          return null;
-        }
-      }));
-      if (!cancelled) {
-        setProjectLogicGateOptions(foldCommittedEntityTitlesSince(
-          sortLogicGateOptions(records.filter((record): record is LogicGateRecord => Boolean(record))),
-          companyID,
-          titleVersionAtStart,
-          reconcileCommittedLogicGateRecordTitles,
-        ));
-      }
-    })()
-      .catch((cause) => {
-        if (!cancelled) onError(cause instanceof Error ? cause.message : "failed_to_load_project_logic_gates");
-      })
-      .finally(() => {
-        if (cancelled) return;
-        setProjectLogicGatesLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [apiBase, companyID, onError, projectAssignerOpen, selectedProjectForAssignment?.project_id]);
 
   useEffect(() => {
     const layout = readStoredTextPaneLayout(companyID, nodeID);
@@ -1303,44 +1135,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     });
     return () => { cancelled = true; };
   }, [apiBase, assignedLogicGateIDs, companyID]);
-  useEffect(() => {
-    const query = logicGateSearch.trim();
-    if (!logicGateAssignerOpen || !companyID || !query) {
-      setLogicGateSearchResults([]);
-      setLogicGateSearchLoading(false);
-      return;
-    }
-    const requestID = logicGateSearchRequestRef.current + 1;
-    logicGateSearchRequestRef.current = requestID;
-    let cancelled = false;
-    setLogicGateSearchLoading(true);
-    const timer = window.setTimeout(() => {
-      const titleVersionAtStart = readCommittedEntityTitleVersion();
-      void fetchCompanyExplorerSearchResults(apiBase, companyID, query, 24, ["folder", "logic_gate"])
-        .then((payload) => {
-          if (!cancelled && logicGateSearchRequestRef.current === requestID) setLogicGateSearchResults(foldCommittedEntityTitlesSince(
-            payload.results ?? [],
-            companyID,
-            titleVersionAtStart,
-            reconcileCompanyExplorerSearchResultTitles,
-          ));
-        })
-        .catch((cause) => {
-          if (!cancelled && logicGateSearchRequestRef.current === requestID) onError(cause instanceof Error ? cause.message : "failed_to_search_logic_gates");
-        })
-        .finally(() => {
-          if (!cancelled && logicGateSearchRequestRef.current === requestID) setLogicGateSearchLoading(false);
-        });
-    }, 180);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [apiBase, companyID, logicGateAssignerOpen, logicGateSearch, onError]);
-
   useEffect(() => () => {
-    if (logicGateAssignStatusTimerRef.current !== null) window.clearTimeout(logicGateAssignStatusTimerRef.current);
-    if (logicGateAssignFlashTimerRef.current !== null) window.clearTimeout(logicGateAssignFlashTimerRef.current);
     for (const timer of saveTimersRef.current.values()) window.clearTimeout(timer);
     saveTimersRef.current.clear();
     void textBlockProjectionSaveController.flushChangedBlocks().catch(() => undefined);
@@ -2323,18 +2118,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
   }, [attachedEmails, canEdit, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
 
-  const flashLogicGateAssignButton = useCallback((state: "success" | "error") => {
-    if (logicGateAssignFlashTimerRef.current !== null) {
-      window.clearTimeout(logicGateAssignFlashTimerRef.current);
-      logicGateAssignFlashTimerRef.current = null;
-    }
-    setLogicGateAssignFlash(state);
-    logicGateAssignFlashTimerRef.current = window.setTimeout(() => {
-      setLogicGateAssignFlash((current) => (current === state ? "" : current));
-      logicGateAssignFlashTimerRef.current = null;
-    }, 700);
-  }, []);
-
   const loadNodeTimelineEvents = useCallback(async () => {
     if (!companyID || !nodeID) {
       setTimelineEvents([]);
@@ -2398,129 +2181,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
   }, [author.userID, companyID, nodeID, requestJSON, verificationCompletionPendingID]);
 
-  const assignToLogicGate = useCallback(async (logicGateID: string, rawLabel: string) => {
-    if (!canEdit) return;
-    const cleanLogicGateID = logicGateID.trim();
-    if (!cleanLogicGateID || assigningLogicGateID) return;
-    if (logicGateAssignStatusTimerRef.current !== null) {
-      window.clearTimeout(logicGateAssignStatusTimerRef.current);
-      logicGateAssignStatusTimerRef.current = null;
-    }
-    if (nodePriorityUnassignedForLogicGate) {
-      const message = "Must give node a priority";
-      setLastAssignedLogicGateID("");
-      setLastAssignedLogicGateLabel("");
-      setLogicGateAssignStatus(message);
-      flashLogicGateAssignButton("error");
-      onRequireNodePriorityForLogicGateAssignment();
-      logicGateAssignStatusTimerRef.current = window.setTimeout(() => {
-        setLogicGateAssignStatus((current) => (current === message ? "" : current));
-        logicGateAssignStatusTimerRef.current = null;
-      }, 1500);
-      return;
-    }
-    const label = humanLabelOrFallback(rawLabel, humanLabelOrFallback(cleanLogicGateID, "Logic Gate"));
-    const previousAssignedLogicGateID = lastAssignedLogicGateID;
-    const previousAssignedLogicGateLabel = lastAssignedLogicGateLabel;
-    setAssigningLogicGateID(cleanLogicGateID);
-    setLastAssignedLogicGateID(cleanLogicGateID);
-    setLastAssignedLogicGateLabel(label);
-    setLogicGateAssignerOpen(false);
-    setLogicGateSearch("");
-    setLogicGateAssignStatus(`Assigning to Logic Gate: ${label}`);
-    try {
-      await onAssignToLogicGate(cleanLogicGateID);
-      await loadNodeTimelineEvents();
-      const message = `Assigned to Logic Gate: ${label}`;
-      setLogicGateAssignStatus(message);
-      flashLogicGateAssignButton("success");
-      logicGateAssignStatusTimerRef.current = window.setTimeout(() => {
-        setLogicGateAssignStatus((current) => (current === message ? "" : current));
-        logicGateAssignStatusTimerRef.current = null;
-      }, 1500);
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "failed_to_assign_logic_gate";
-      setLastAssignedLogicGateID(previousAssignedLogicGateID);
-      setLastAssignedLogicGateLabel(previousAssignedLogicGateLabel);
-      setLogicGateAssignStatus(message);
-      flashLogicGateAssignButton("error");
-      onError(message);
-      logicGateAssignStatusTimerRef.current = window.setTimeout(() => {
-        setLogicGateAssignStatus((current) => (current === message ? "" : current));
-        logicGateAssignStatusTimerRef.current = null;
-      }, 1500);
-    } finally {
-      setAssigningLogicGateID("");
-    }
-  }, [assigningLogicGateID, canEdit, flashLogicGateAssignButton, lastAssignedLogicGateID, lastAssignedLogicGateLabel, loadNodeTimelineEvents, nodePriorityUnassignedForLogicGate, onAssignToLogicGate, onError, onRequireNodePriorityForLogicGateAssignment]);
-
-  const assignToProject = useCallback(async () => {
-    if (!canEdit) return;
-    const project = selectedProjectForAssignment;
-    const projectID = project?.project_id?.trim() ?? "";
-    if (!companyID || !nodeID || !projectID || assigningProjectID || assigningProjectLogicGateID) return;
-    const projectLabel = project ? projectOptionLabel(project) : projectID;
-    setAssigningProjectID(projectID);
-    setProjectAssignStatus(`Adding to ${projectLabel}`);
-    try {
-      await upsertProjectRelationship({
-        companyID,
-        projectID,
-        resourceType: "node",
-        resourceID: nodeID,
-      });
-      setProjectAssignerOpen(false);
-      setSelectedProjectForAssignment(null);
-      setProjectAssignStatus(`Project: ${projectLabel}`);
-      setProjectRelationshipRefreshKey((key) => key + 1);
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "failed_to_assign_project";
-      setProjectAssignStatus(message);
-      onError(message);
-    } finally {
-      setAssigningProjectID("");
-    }
-  }, [assigningProjectID, assigningProjectLogicGateID, canEdit, companyID, nodeID, onError, selectedProjectForAssignment]);
-
-  const assignToProjectLogicGate = useCallback(async (logicGate: LogicGateRecord) => {
-    if (!canEdit) return;
-    const project = selectedProjectForAssignment;
-    const projectID = project?.project_id?.trim() ?? "";
-    const logicGateID = logicGate.logic_gate_id.trim();
-    if (!companyID || !nodeID || !projectID || !logicGateID || assigningProjectID || assigningProjectLogicGateID) return;
-    if (nodePriorityUnassignedForLogicGate) {
-      setProjectAssignStatus("Must give node a priority");
-      onRequireNodePriorityForLogicGateAssignment();
-      return;
-    }
-    const projectLabel = project ? projectOptionLabel(project) : projectID;
-    const logicGateLabel = logicGateOptionLabel(logicGate);
-    setAssigningProjectLogicGateID(logicGateID);
-    setProjectAssignStatus(`Adding to ${projectLabel}`);
-    try {
-      await upsertProjectRelationship({
-        companyID,
-        projectID,
-        resourceType: "node",
-        resourceID: nodeID,
-      });
-      await onAssignToLogicGate(logicGateID);
-      await loadNodeTimelineEvents();
-      setLastAssignedLogicGateID(logicGateID);
-      setLastAssignedLogicGateLabel(logicGateLabel);
-      setProjectAssignerOpen(false);
-      setSelectedProjectForAssignment(null);
-      setProjectAssignStatus(`Project: ${projectLabel}`);
-      setProjectRelationshipRefreshKey((key) => key + 1);
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "failed_to_assign_project";
-      setProjectAssignStatus(message);
-      onError(message);
-    } finally {
-      setAssigningProjectLogicGateID("");
-    }
-  }, [assigningProjectID, assigningProjectLogicGateID, canEdit, companyID, loadNodeTimelineEvents, nodeID, nodePriorityUnassignedForLogicGate, onAssignToLogicGate, onError, onRequireNodePriorityForLogicGateAssignment, selectedProjectForAssignment]);
-
   const linkEntityFromEditor = useCallback(async (entity: EditorEntityLink) => {
     if (!canEdit) throw new Error("You do not have permission to edit this Node.");
     if (entity.entityType === "logic_gate") {
@@ -2534,7 +2194,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       await loadNodeTimelineEvents();
       setLastAssignedLogicGateID(logicGateID);
       setLastAssignedLogicGateLabel(entity.label);
-      setLogicGateAssignStatus(`Assigned to Logic Gate: ${entity.label}`);
       setProjectRelationshipRefreshKey((key) => key + 1);
       return;
     }
@@ -2547,7 +2206,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         resourceType: "node",
         resourceID: nodeID,
       });
-      setProjectAssignStatus(`Project: ${entity.label}`);
+      await loadNodeTimelineEvents();
       setProjectRelationshipRefreshKey((key) => key + 1);
       return;
     }
@@ -2556,6 +2215,15 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     canEdit, companyID, loadNodeTimelineEvents, nodeID, nodePriorityUnassignedForLogicGate,
     onAssignToLogicGate, onRequireNodePriorityForLogicGateAssignment,
   ]);
+
+  const chooseHeaderLinkedEntity = useCallback(async (entity: EditorEntityLink, mode: UniversalEntityPickerMode) => {
+    if (mode === "link") {
+      await linkEntityFromEditor(entity);
+    } else {
+      openEditorEntityLink(entity);
+    }
+    setHeaderLinkPickerAnchor(null);
+  }, [linkEntityFromEditor]);
 
   const onDropEmail = useCallback((event: React.DragEvent) => {
     if (!canEdit) return;
@@ -2596,12 +2264,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       delete next[cleanBlockID];
       return next;
     });
-  }, []);
-
-  const openAttachedEmailFromHeader = useCallback((messageID: string) => {
-    const cleanMessageID = messageID.trim();
-    if (!cleanMessageID) return;
-    setNodeEmailModalMessageID(cleanMessageID);
   }, []);
 
   const revealEmailTextBlock = useCallback((messageID: string) => {
@@ -2813,299 +2475,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     );
   };
 
-  const renderLogicGateSearchRow = (row: ExplorerTreeNode) => {
-    const logicGateID = (row.logicGateID ?? row.resourceID ?? (row.entityType === "logic_gate" ? row.entityID : "") ?? "").trim();
-    const selectable = row.kind === "logic_gate" && Boolean(logicGateID);
-    const label = row.label || logicGateID;
-    const depthInset = Math.min(72, Math.max(0, row.depth) * 14);
-    if (!selectable) {
-      return (
-        <div
-          key={row.id}
-          role="presentation"
-          style={{
-            minHeight: 30,
-            display: "grid",
-            gridTemplateColumns: `${depthInset}px 24px minmax(0, 1fr)`,
-            alignItems: "center",
-            gap: 7,
-            color: surfaceText,
-            opacity: row.syntheticKind === "search_path" ? 0.66 : 0.82,
-            padding: "4px 8px",
-            minWidth: 0,
-          }}
-        >
-          <span aria-hidden="true" />
-          <span aria-hidden="true" style={{ width: 22, height: 22, display: "grid", placeItems: "center" }}>
-            <ExplorerRowIcon kind="folder" systemKey={row.systemKey} mangoDefaultFolder={Boolean(row.systemKey || row.protectedDefaultFolder)} />
-          </span>
-          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: row.syntheticKind === "search_result" ? 850 : 760 }}>
-            {label}
-          </span>
-        </div>
-      );
-    }
-    const selected = assignedLogicGateIDSet.has(logicGateID) || lastAssignedLogicGateID === logicGateID;
-    const busy = assigningLogicGateID === logicGateID;
-    const hovered = hoveredLogicGateID === logicGateID;
-    const highlighted = selected || busy || hovered;
-    return (
-      <button
-        key={row.id}
-        type="button"
-        disabled={Boolean(assigningLogicGateID)}
-        onClick={() => { void assignToLogicGate(logicGateID, label); }}
-        title={label}
-        style={{
-          position: "relative",
-          width: "100%",
-          minHeight: 38,
-          display: "grid",
-          gridTemplateColumns: `${depthInset}px 28px minmax(0, 1fr) 24px`,
-          alignItems: "center",
-          gap: 8,
-          border: highlighted ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-          borderRadius: 9,
-          background: highlighted ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
-          color: surfaceText,
-          cursor: assigningLogicGateID ? "default" : "pointer",
-          font: "inherit",
-          padding: "6px 8px",
-          minWidth: 0,
-          textAlign: "left",
-          boxShadow: highlighted ? `${EDITOR_NEU_SHADOW}, inset 1px 1px 0 rgba(255,255,255,0.86)` : EDITOR_NEU_SHADOW,
-          transition: "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease, transform 160ms ease",
-          transform: hovered && !selected ? "translateY(-1px)" : "translateY(0)",
-        }}
-        onMouseEnter={() => setHoveredLogicGateID(logicGateID)}
-        onMouseLeave={() => setHoveredLogicGateID((current) => (current === logicGateID ? "" : current))}
-      >
-        <span aria-hidden="true" />
-        <span aria-hidden="true" style={{ width: 28, height: 28, borderRadius: 8, display: "grid", placeItems: "center", background: highlighted ? "rgba(255,255,255,0.76)" : "rgba(255,255,255,0.58)", boxShadow: highlighted ? "inset 1px 1px 0 rgba(255,255,255,0.86)" : "2px 2px 6px rgba(174,174,192,0.18), -2px -2px 6px rgba(255,255,255,0.86)" }}>
-          <ExplorerRowIcon kind="logic_gate" />
-        </span>
-        <span style={{ maxWidth: "100%", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: selected ? 900 : 820, lineHeight: 1.2 }}>
-          {label}
-        </span>
-        <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: 8, display: "grid", placeItems: "center", border: selected ? `1px solid ${accent}` : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: selected ? "#ffffff" : "rgba(255,255,255,0.5)", opacity: selected || busy ? 1 : 0 }}>
-          {selected ? <RelationshipCheckIcon color={accent} /> : busy ? "..." : null}
-        </span>
-      </button>
-    );
-  };
-
-  const logicGateAssignerMenuWidth = Math.max(
-    280,
-    Math.min(compact ? 420 : 520, width > 0 ? width - 28 : compact ? 420 : 520),
-  );
-  const logicGateAssignButtonBackground = logicGateAssignFlash === "success"
-    ? "linear-gradient(135deg, rgba(57,255,136,0.98), rgba(206,255,225,0.98))"
-    : logicGateAssignFlash === "error"
-      ? "linear-gradient(135deg, rgba(255,65,96,0.98), rgba(255,220,228,0.98))"
-      : logicGateAssignerOpen
-        ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`
-        : EDITOR_NEU_SURFACE;
-  const logicGateAssignButtonBorder = logicGateAssignFlash
-    ? "1px solid transparent"
-    : logicGateAssignerOpen ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`;
-  const logicGateAssignButtonColor = logicGateAssignFlash === "success"
-    ? "#064e3b"
-    : logicGateAssignFlash === "error"
-      ? "#7f1d1d"
-      : surfaceText;
-  const logicGateAssignButtonBoxShadow = logicGateAssignFlash === "success"
-    ? "0 0 0 1px rgba(57,255,136,0.42), 0 0 26px rgba(57,255,136,0.58), inset 1px 1px 0 rgba(255,255,255,0.88)"
-    : logicGateAssignFlash === "error"
-      ? "0 0 0 1px rgba(255,65,96,0.42), 0 0 26px rgba(255,65,96,0.56), inset 1px 1px 0 rgba(255,255,255,0.84)"
-      : EDITOR_NEU_SHADOW;
-
-  const logicGateAssignerDropdown = canEdit && logicGateAssignerOpen ? (
-    <div
-      role="menu"
-      aria-label="Assign logic gate"
-      onMouseDown={(event) => event.stopPropagation()}
-      style={{
-        position: "absolute",
-        top: "calc(100% - 1px)",
-        left: 0,
-        zIndex: 95,
-        width: logicGateAssignerMenuWidth,
-        minWidth: 0,
-        maxWidth: "calc(100vw - 44px)",
-        minHeight: 0,
-        display: "grid",
-        gap: 9,
-        border: "1px solid transparent",
-        borderRadius: "0 0 14px 14px",
-        background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
-        padding: 10,
-        boxShadow: `${EDITOR_NEU_PANEL_SHADOW}, 0 18px 36px rgba(15,23,42,0.16)`,
-      }}
-    >
-      <div style={{ minWidth: 0 }}>
-        <CompanyExplorerSearchBox
-          value={logicGateSearch}
-          onChange={setLogicGateSearch}
-          onEscape={() => setLogicGateSearch("")}
-          placeholder="Search logic gates"
-          ariaLabel="Search logic gates"
-          autoFocus
-          style={{
-            height: 34,
-            borderRadius: 10,
-            border: logicGateSearchQuery ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-            background: logicGateSearchQuery ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_ACTIVE_SURFACE,
-            boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.16), inset -2px -2px 6px rgba(255,255,255,0.82)",
-          }}
-        />
-      </div>
-
-      {nodePriorityUnassignedForLogicGate && (
-        <div style={{ justifySelf: "start", maxWidth: "100%", display: "inline-flex", alignItems: "center", border: "1px solid rgba(245, 158, 11, 0.34)", borderRadius: 10, background: "linear-gradient(135deg, rgba(255,251,235,0.96), rgba(254,243,199,0.72))", color: "#92400e", padding: "7px 9px", fontSize: 11, fontWeight: 800, lineHeight: 1.3, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.82)" }}>
-          In order to assign to a Logic Gate, give this node a priority.
-        </div>
-      )}
-
-      {logicGateSearchQuery && (
-        <div
-          className="editor-document-scroll"
-          role="listbox"
-          aria-label="Logic gate search results"
-          style={{
-            minHeight: 0,
-            maxHeight: 314,
-            overflowY: "auto",
-            padding: "2px 6px 8px 2px",
-            display: "grid",
-            alignContent: "start",
-            gap: 5,
-            background: "rgba(255,255,255,0.42)",
-            borderRadius: 10,
-            ["--editor-document-scroll-accent" as string]: "linear-gradient(180deg, rgba(92,238,255,0.92), rgba(183,124,255,0.82))",
-            ["--editor-document-scroll-track" as string]: "rgba(255,255,255,0.46)",
-          }}
-        >
-          {logicGateSearchLoading && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64, padding: 8 }}>Searching...</div>}
-          {!logicGateSearchLoading && logicGateSearchTreeRows.length === 0 && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64, padding: 8 }}>No matches</div>}
-          {!logicGateSearchLoading && logicGateSearchTreeRows.length > 0 && logicGateSearchTreeRows.map(renderLogicGateSearchRow)}
-        </div>
-      )}
-
-      {logicGateAssignStatus && <div style={{ justifySelf: "start", maxWidth: "100%", border: `1px solid ${logicGateAssignStatus.startsWith("Assigning") ? "rgba(59,130,246,0.24)" : logicGateAssignStatus.startsWith("Assigned") ? "rgba(100,116,139,0.22)" : "rgba(245,158,11,0.30)"}`, borderRadius: 9, background: logicGateAssignStatus.startsWith("Assigning") ? "rgba(239,246,255,0.82)" : logicGateAssignStatus.startsWith("Assigned") ? "rgba(248,250,252,0.9)" : "rgba(255,251,235,0.9)", color: logicGateAssignStatus.startsWith("Assigning") ? accent : logicGateAssignStatus.startsWith("Assigned") ? surfaceText : "#92400e", padding: "5px 8px", fontSize: 11, fontWeight: 800, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{logicGateAssignStatus}</div>}
-    </div>
-  ) : null;
-  const projectAssignerDropdown = canEdit && projectAssignerOpen ? (
-    <div
-      role="menu"
-      aria-label="Assign project"
-      onMouseDown={(event) => event.stopPropagation()}
-      style={{
-        position: "absolute",
-        top: "calc(100% - 1px)",
-        left: projectAssignerDropdownLeft,
-        zIndex: 94,
-        width: projectAssignerMenuWidth,
-        minWidth: 0,
-        maxWidth: "calc(100vw - 44px)",
-        display: "grid",
-        gap: 9,
-        border: "1px solid transparent",
-        borderRadius: "0 0 14px 14px",
-        background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
-        padding: 10,
-        boxShadow: `${EDITOR_NEU_PANEL_SHADOW}, 0 18px 36px rgba(15,23,42,0.16)`,
-      }}
-    >
-      <div style={{ display: "grid", gap: 5, minWidth: 0 }}>
-        <div style={{ color: surfaceText, opacity: 0.68, fontSize: 10.5, fontWeight: 900 }}>Project</div>
-        <CompanyExplorerSearchBox
-          value={projectSearch}
-          onChange={setProjectSearch}
-          onEscape={() => setProjectSearch("")}
-          placeholder="Search projects"
-          ariaLabel="Search projects"
-          autoFocus
-          style={{
-            height: 34,
-            borderRadius: 10,
-            border: projectSearchQuery ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-            background: projectSearchQuery ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_ACTIVE_SURFACE,
-            boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.16), inset -2px -2px 6px rgba(255,255,255,0.82)",
-          }}
-        />
-        <div className="editor-document-scroll" style={{ maxHeight: 168, overflowY: "auto", display: "grid", gap: 5, padding: "2px 5px 6px 2px" }}>
-          {projectOptionsLoading && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64, padding: 8 }}>Loading projects</div>}
-          {!projectOptionsLoading && projectOptions.length === 0 && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64, padding: 8 }}>No projects</div>}
-          {!projectOptionsLoading && projectOptions.length > 0 && filteredProjectOptions.length === 0 && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64, padding: 8 }}>No matching projects</div>}
-          {!projectOptionsLoading && filteredProjectOptions.map((project) => {
-            const projectID = project.project_id.trim();
-            const selected = selectedProjectForAssignment?.project_id === projectID;
-            return (
-              <button
-                key={projectID}
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setSelectedProjectForAssignment(project);
-                  setProjectAssignStatus("");
-                }}
-                title={projectOptionLabel(project)}
-                style={{ minHeight: 34, display: "grid", gridTemplateColumns: "24px minmax(0, 1fr) 18px", alignItems: "center", gap: 7, border: selected ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: selected ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: surfaceText, cursor: "pointer", padding: "5px 8px", font: "inherit", textAlign: "left", boxShadow: EDITOR_NEU_SHADOW }}
-              >
-                <ExplorerRowIcon kind="project" />
-                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: 850 }}>{projectOptionLabel(project)}</span>
-                <span>{selected ? <RelationshipCheckIcon color={accent} /> : null}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-      {selectedProjectForAssignment && (
-        <div style={{ display: "grid", gap: 5, minWidth: 0 }}>
-          <div style={{ color: surfaceText, opacity: 0.68, fontSize: 10.5, fontWeight: 900 }}>Optional: Add to a logic gate in this project</div>
-          {nodePriorityUnassignedForLogicGate && (
-            <div style={{ border: "1px solid rgba(245, 158, 11, 0.34)", borderRadius: 9, background: "rgba(255,251,235,0.9)", color: "#92400e", padding: "6px 8px", fontSize: 11, fontWeight: 800 }}>Give this node a priority before assigning it to a project logic gate.</div>
-          )}
-          <div className="editor-document-scroll" style={{ maxHeight: 190, overflowY: "auto", display: "grid", gap: 5, padding: "2px 5px 6px 2px" }}>
-            {projectLogicGatesLoading && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64, padding: 8 }}>Loading logic gates</div>}
-            {!projectLogicGatesLoading && projectLogicGateOptions.length === 0 && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64, padding: 8 }}>No logic gates in this project</div>}
-            {!projectLogicGatesLoading && projectLogicGateOptions.map((logicGate) => {
-              const logicGateID = logicGate.logic_gate_id.trim();
-              const busy = assigningProjectLogicGateID === logicGateID;
-              return (
-                <button
-                  key={logicGateID}
-                  type="button"
-                  role="menuitem"
-                  disabled={Boolean(assigningProjectID || assigningProjectLogicGateID)}
-                  onClick={() => { void assignToProjectLogicGate(logicGate); }}
-                  title={logicGateOptionLabel(logicGate)}
-                  style={{ minHeight: 34, display: "grid", gridTemplateColumns: "24px minmax(0, 1fr) 18px", alignItems: "center", gap: 7, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: EDITOR_NEU_SURFACE, color: surfaceText, cursor: assigningProjectID || assigningProjectLogicGateID ? "default" : "pointer", padding: "5px 8px", font: "inherit", textAlign: "left", boxShadow: EDITOR_NEU_SHADOW }}
-                >
-                  <ExplorerRowIcon kind="logic_gate" />
-                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: 850 }}>{logicGateOptionLabel(logicGate)}</span>
-                  <span>{busy ? "..." : null}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-      {projectAssignStatus && <div style={{ justifySelf: "start", maxWidth: "100%", border: `1px solid ${projectAssignStatus.startsWith("Project:") ? "rgba(100,116,139,0.22)" : "rgba(59,130,246,0.24)"}`, borderRadius: 9, background: projectAssignStatus.startsWith("Project:") ? "rgba(248,250,252,0.9)" : "rgba(239,246,255,0.82)", color: projectAssignStatus.startsWith("Project:") ? surfaceText : accent, padding: "5px 8px", fontSize: 11, fontWeight: 800, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{projectAssignStatus}</div>}
-      {selectedProjectForAssignment && (
-        <button
-          type="button"
-          role="menuitem"
-          disabled={Boolean(assigningProjectID || assigningProjectLogicGateID)}
-          onClick={() => { void assignToProject(); }}
-          title={`Apply project ${projectOptionLabel(selectedProjectForAssignment)}`}
-          style={{ minHeight: 34, width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", border: "1px solid transparent", borderRadius: 9, background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`, color: accent, cursor: assigningProjectID || assigningProjectLogicGateID ? "default" : "pointer", padding: "5px 12px", font: "inherit", fontSize: 11, fontWeight: 900, textAlign: "center", boxShadow: EDITOR_NEU_SHADOW }}
-        >
-          {assigningProjectID ? "Applying..." : "Apply"}
-        </button>
-      )}
-    </div>
-  ) : null;
 
   const nodeEmailColumnVisible = nodeAttachedEmails.length > 0 && openEmailBlockIDs.has(NODE_EMAIL_COLUMN_LAYOUT_ID);
   const maximumVisibleTextPaneCount = blocks.reduce((maximum, block) => {
@@ -3115,7 +2484,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, 0);
   const nodeTextSurfaceVisible = maximumVisibleTextPaneCount > 0;
   const nodeEmailOnly = nodeEmailColumnVisible && !nodeTextSurfaceVisible;
-  const nodeWorkspaceViewportHeight = Math.max(TEXT_BLOCK_ROW_HEIGHT, Math.floor(height - TEXT_BLOCK_HEADER_CHROME_HEIGHT));
+  const nodeWorkspaceViewportHeight = Math.max(
+    TEXT_BLOCK_ROW_HEIGHT,
+    Math.floor(height - TEXT_BLOCK_HEADER_CHROME_HEIGHT - NODE_EMAIL_COLUMN_BOTTOM_GUTTER_PX),
+  );
   const minimumNodeTextWorkspaceWidth = maximumVisibleTextPaneCount > 1
     ? TEXT_BLOCK_RESIZE_MIN_WIDTH_PX + TEXT_CHAT_SPLIT_HANDLE_WIDTH_PX + TEXT_SIDE_PANE_MIN_WIDTH_PX
     : TEXT_SIDE_PANE_MIN_WIDTH_PX;
@@ -3211,8 +2583,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const renderNodeTimelineEvent = (item: NodeTimelineEvent) => {
     const createdLabel = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.created_timestamp));
     const isVerification = item.type === "verification_request";
+    const isProjectAssignment = item.type === "project_assignment";
     const fromLogicGateName = item.from_logic_gate_name?.trim() || "Deleted logic gate";
     const toLogicGateName = item.to_logic_gate_name?.trim() || "Deleted logic gate";
+    const projectName = item.project_name?.trim() || "Deleted project";
     return (
       <React.Fragment key={item.event_id}>
         <div style={{ padding: "2px 0 4px", boxSizing: "border-box" }}>
@@ -3227,8 +2601,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 7, flexWrap: "wrap", minHeight: 15 }}>
             <time dateTime={item.created_timestamp} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, opacity: 0.72 }}><TimelineClockIcon color={surfaceText} />{createdLabel}</time>
             <span aria-hidden="true" style={{ width: 1, height: 12, background: ruleColor }} />
-            {!isVerification && <span data-node-timeline-gate-icon="header" aria-hidden="true" style={{ display: "inline-flex" }}><ExplorerRowIcon kind="logic_gate" /></span>}
-            <strong style={{ fontSize: 12, letterSpacing: "0.01em" }}>{isVerification ? "Requested verification" : "Logic Gate transfer"}</strong>
+            {!isVerification && <span data-node-timeline-entity-icon="header" aria-hidden="true" style={{ display: "inline-flex" }}><ExplorerRowIcon kind={isProjectAssignment ? "project" : "logic_gate"} /></span>}
+            <strong style={{ fontSize: 12, letterSpacing: "0.01em" }}>{isVerification ? "Requested verification" : isProjectAssignment ? "Project assignment" : "Logic Gate transfer"}</strong>
           </div>
           {isVerification ? (
             <>
@@ -3255,6 +2629,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 })}
               </div>
             </>
+          ) : isProjectAssignment ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", marginTop: 4, fontSize: 11.5, lineHeight: 1.25 }}>
+              <strong>{item.actor_display_name}</strong>
+              <span>assigned this node to</span>
+              <TimelineProjectLink projectID={item.project_id ?? ""} projectName={projectName} />
+            </div>
           ) : (
             <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", marginTop: 4, fontSize: 11.5, lineHeight: 1.25 }}>
               <strong>{item.actor_display_name}</strong>
@@ -3293,11 +2673,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       }}
     >
       <div style={{ display: "grid", gridTemplateColumns: editorGridTemplateColumns, columnGap: TEXT_CHAT_GRID_COLUMN_GAP_PX, rowGap: 12, alignItems: "start", minWidth: 0 }}>
-        <div aria-hidden="true" style={{ position: "sticky", top: 0, zIndex: 42, minHeight: 38, padding: "0 0 7px", background: panelBackground }} />
-
-        <div style={{ position: "sticky", top: 0, zIndex: 43, display: "flex", alignItems: "center", gap: 7, flexWrap: "nowrap", overflow: "visible", padding: "0 0 7px", background: panelBackground }}>
+        <div
+          data-node-header-timeline-control="true"
+          style={{ position: "sticky", top: 0, zIndex: 44, minHeight: 38, padding: "0 0 7px", background: panelBackground, display: "flex", alignItems: "flex-start", justifyContent: "flex-start" }}
+        >
           {canEdit && (
-            <div ref={timelineCreateMenuRef} style={{ position: "relative", flex: "0 0 auto" }}>
+            <div ref={timelineCreateMenuRef} style={{ position: "relative", width: 30, flex: "0 0 30px" }}>
               <button
                 type="button"
                 title="Add timeline entry"
@@ -3305,18 +2686,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 aria-haspopup="menu"
                 aria-expanded={timelineCreateMenuOpen}
                 onClick={() => setTimelineCreateMenuOpen((current) => !current)}
-                style={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: 9,
-                  border: "1px solid transparent",
-                  background: `${EDITOR_NEU_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
-                  color: accent,
-                  display: "grid",
-                  placeItems: "center",
-                  cursor: "pointer",
-                  boxShadow: EDITOR_NEU_SHADOW,
-                }}
+                style={{ width: 30, height: 30, borderRadius: 9, border: "1px solid transparent", background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", boxShadow: EDITOR_NEU_SHADOW }}
               >
                 <PlusIcon color={accent} />
               </button>
@@ -3324,7 +2694,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 <div
                   role="menu"
                   aria-label="Choose timeline entry type"
-                  style={{ position: "absolute", top: 36, left: 0, zIndex: 80, width: 230, padding: 7, borderRadius: 12, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: panelBackground, boxShadow: EDITOR_NEU_PANEL_SHADOW }}
+                  style={{ position: "absolute", top: 36, left: 0, zIndex: 80, width: 230, padding: 7, borderRadius: 12, border: "1px solid " + EDITOR_NEU_SOFT_BORDER, background: panelBackground, boxShadow: EDITOR_NEU_PANEL_SHADOW }}
                 >
                   <button
                     type="button"
@@ -3344,61 +2714,44 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     onClick={() => { void createVerificationRequest(); }}
                     style={{ width: "100%", border: 0, borderRadius: 8, background: "transparent", color: surfaceText, display: "grid", gridTemplateColumns: "28px 1fr", alignItems: "center", gap: 8, padding: "9px 10px", textAlign: "left", cursor: verificationRequestPending ? "wait" : "pointer" }}
                   >
-                    <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: 8, border: `1px solid ${ruleColor}`, display: "grid", placeItems: "center", background: "rgba(255,255,255,0.55)", color: accent, fontWeight: 950, boxSizing: "border-box" }}>✓</span>
+                    <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: 8, border: "1px solid " + ruleColor, display: "grid", placeItems: "center", background: "rgba(255,255,255,0.55)", color: accent, fontWeight: 950, boxSizing: "border-box" }}>✓</span>
                     <span><strong style={{ display: "block", fontSize: 12 }}>Verify stamp</strong><small style={{ opacity: 0.7 }}>Request everyone assigned to Accountable</small></span>
                   </button>
                 </div>
               )}
             </div>
           )}
-          {nodeAttachedEmails.length > 0 && (
-            <button
-              type="button"
-              title={nodeEmailColumnVisible ? "Hide node email column" : "Open node email column"}
-              aria-label="Toggle node email column"
-              aria-pressed={nodeEmailColumnVisible}
-              onClick={toggleNodeEmailColumn}
-              style={{ minHeight: 30, borderRadius: 9, border: nodeEmailColumnVisible ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: nodeEmailColumnVisible ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: accent, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "0 9px", cursor: "pointer", fontSize: 11, fontWeight: 900, boxShadow: EDITOR_NEU_SHADOW }}
-            >
-              <MailIcon color={accent} />
-              Email ({nodeAttachedEmails.length})
-            </button>
+        </div>
+
+        <div data-node-header-controls="true" style={{ position: "sticky", top: 0, zIndex: 43, display: "flex", alignItems: "center", gap: 7, flexWrap: "nowrap", overflow: "visible", minWidth: 0, padding: "0 0 7px", background: panelBackground }}>
+          {(canEdit || nodeAttachedEmails.length > 0) && (
+            <div data-node-header-email-controls="true" style={{ minHeight: 30, display: "inline-flex", alignItems: "center", border: "1px solid " + EDITOR_NEU_SOFT_BORDER, borderRadius: 9, background: nodeEmailColumnVisible ? EDITOR_NEU_ACTIVE_SURFACE : EDITOR_NEU_SURFACE, boxShadow: EDITOR_NEU_SHADOW, overflow: "hidden", flex: "0 0 auto" }}>
+              <button
+                type="button"
+                title={nodeAttachedEmails.length > 0 ? (nodeEmailColumnVisible ? "Hide node email column" : "Open node email column") : "No attached emails"}
+                aria-label="Toggle node email column"
+                aria-pressed={nodeEmailColumnVisible}
+                disabled={nodeAttachedEmails.length === 0}
+                onClick={toggleNodeEmailColumn}
+                style={{ height: 28, border: 0, background: "transparent", color: accent, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "0 7px", cursor: nodeAttachedEmails.length > 0 ? "pointer" : "default", fontSize: 11, fontWeight: 900, opacity: nodeAttachedEmails.length > 0 ? 1 : 0.62 }}
+              >
+                <MailIcon color={accent} />
+                <span>{nodeAttachedEmails.length}</span>
+              </button>
+              {canEdit && <span aria-hidden="true" style={{ width: 1, height: 17, background: EDITOR_NEU_SOFT_BORDER }} />}
+              {canEdit && (
+                <button
+                  type="button"
+                  title="Attach email"
+                  aria-label="Attach email"
+                  onClick={() => setEmailPickerTargetBlockID("")}
+                  style={{ width: 29, height: 28, border: 0, background: "transparent", color: accent, display: "grid", placeItems: "center", cursor: "pointer", padding: 0 }}
+                >
+                  <PlusIcon color={accent} />
+                </button>
+              )}
+            </div>
           )}
-          {canEdit && (
-            <button
-              type="button"
-              onClick={() => setEmailPickerTargetBlockID("")}
-              style={{
-                minHeight: 30,
-                borderRadius: 9,
-                border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-                background: EDITOR_NEU_SURFACE,
-                color: surfaceText,
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 7,
-                padding: "0 10px",
-                cursor: "pointer",
-                fontSize: 12,
-                fontWeight: 800,
-                letterSpacing: 0,
-                whiteSpace: "nowrap",
-                flex: "0 0 auto",
-                boxShadow: EDITOR_NEU_SHADOW,
-              }}
-            >
-              <MailIcon color={accent} />
-              Attach email
-            </button>
-          )}
-          <EmailCountDropdown
-            emails={nodeAttachedEmails}
-            accent={accent}
-            surfaceText={surfaceText}
-            align="left"
-            onOpenEmail={openAttachedEmailFromHeader}
-            onRemoveEmail={canEdit ? (emailID) => { void removeAttachedEmail(emailID); } : undefined}
-          />
           <AttachmentCountDropdown
             items={nodeAttachmentDropdownItems}
             uploads={nodeAttachmentUploadDropdownItems}
@@ -3415,138 +2768,67 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             onRetryUpload={retryNodeAttachmentUpload}
             onError={onError}
           />
-          {canEdit && (
-            <div ref={logicGateAssignerRef} style={{ position: "relative", display: "inline-flex", flex: "1 1 132px", minWidth: 0, maxWidth: compact ? "100%" : 360, overflow: "visible" }}>
-              <button
-                type="button"
-                title={assignLogicGateButtonLabel}
-                aria-haspopup="menu"
-                aria-expanded={logicGateAssignerOpen}
-                onClick={() => {
-                  setLogicGateAssignerOpen((open) => !open);
-                  setLogicGateAssignStatus("");
-                }}
-                style={{
-                  minHeight: 30,
-                  width: "100%",
-                  minWidth: 0,
-                  borderRadius: logicGateAssignerOpen ? "9px 9px 0 0" : 9,
-                  border: logicGateAssignButtonBorder,
-                  background: logicGateAssignButtonBackground,
-                  color: logicGateAssignButtonColor,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 7,
-                  padding: "0 10px",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  fontWeight: 800,
-                  letterSpacing: 0,
-                  whiteSpace: "nowrap",
-                  boxShadow: logicGateAssignButtonBoxShadow,
-                  transition: "background 140ms ease, border-color 140ms ease, box-shadow 180ms ease, color 140ms ease",
-                }}
-              >
-                <ExplorerRowIcon kind="logic_gate" />
-                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{assignLogicGateButtonLabel}</span>
-              </button>
-              {logicGateAssignerDropdown}
-            </div>
-          )}
           {hasAssignedLogicGate && primaryAssignedLogicGateID && (
             <button
               type="button"
+              data-node-header-link="logic_gate"
               title={`Go to ${assignedLogicGateLabel}`}
               onClick={goToAssignedLogicGate}
-              style={{
-                minHeight: 30,
-                borderRadius: 9,
-                border: "1px solid transparent",
-                background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
-                color: accent,
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 7,
-                padding: "0 10px",
-                cursor: "pointer",
-                fontSize: 12,
-                fontWeight: 900,
-                letterSpacing: 0,
-                whiteSpace: "nowrap",
-                flex: "0 0 auto",
-                boxShadow: EDITOR_NEU_SHADOW,
-              }}
+              style={{ minHeight: 30, maxWidth: 230, borderRadius: 9, border: "1px solid transparent", background: EDITOR_NEU_ACTIVE_SURFACE, color: accent, display: "inline-flex", alignItems: "center", gap: 6, padding: "0 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 850, whiteSpace: "nowrap", boxShadow: EDITOR_NEU_SHADOW }}
             >
-              Go to Logic Gate
+              <ExplorerRowIcon kind="logic_gate" />
+              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{assignedLogicGateLabel}</span>
             </button>
-          )}
-          {canEdit && (
-            <div ref={projectAssignerRef} style={{ position: "relative", display: "inline-flex", flex: "0 1 auto", width: "fit-content", minWidth: 0, maxWidth: compact ? "100%" : 360, overflow: "visible" }}>
-              <button
-                type="button"
-                title={assignProjectButtonLabel}
-                aria-haspopup="menu"
-                aria-expanded={projectAssignerOpen}
-                onClick={() => {
-                  setProjectAssignerOpen((open) => !open);
-                  setProjectAssignStatus("");
-                }}
-                style={{
-                  minHeight: 30,
-                  width: "100%",
-                  minWidth: 0,
-                  borderRadius: projectAssignerOpen ? "9px 9px 0 0" : 9,
-                  border: projectAssignerOpen ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-                  background: projectAssignerOpen ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
-                  color: surfaceText,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 7,
-                  padding: "0 10px",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  fontWeight: 800,
-                  letterSpacing: 0,
-                  whiteSpace: "nowrap",
-                  boxShadow: EDITOR_NEU_SHADOW,
-                }}
-              >
-                <ExplorerRowIcon kind="project" />
-                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{assignProjectButtonLabel}</span>
-              </button>
-              {projectAssignerDropdown}
-            </div>
           )}
           {primaryAssignedProjectID && (
             <button
               type="button"
+              data-node-header-link="project"
               title={`Go to ${primaryAssignedProjectLabel}`}
               onClick={goToAssignedProject}
-              style={{
-                minHeight: 30,
-                borderRadius: 9,
-                border: "1px solid transparent",
-                background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
-                color: accent,
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 7,
-                padding: "0 10px",
-                cursor: "pointer",
-                fontSize: 12,
-                fontWeight: 900,
-                letterSpacing: 0,
-                whiteSpace: "nowrap",
-                flex: "0 0 auto",
-                boxShadow: EDITOR_NEU_SHADOW,
-              }}
+              style={{ minHeight: 30, maxWidth: 230, borderRadius: 9, border: "1px solid transparent", background: EDITOR_NEU_ACTIVE_SURFACE, color: accent, display: "inline-flex", alignItems: "center", gap: 6, padding: "0 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 850, whiteSpace: "nowrap", boxShadow: EDITOR_NEU_SHADOW }}
             >
-              Go to Project
+              <ExplorerRowIcon kind="project" />
+              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{primaryAssignedProjectLabel}</span>
             </button>
           )}
-          </div>
+          {canEdit && (
+            <div
+              data-node-header-universal-linker="true"
+              role="group"
+              aria-label="Link this Node"
+              onClick={(event) => {
+                const rect = event.currentTarget.getBoundingClientRect();
+                setHeaderLinkPickerAnchor({ left: rect.left, top: rect.bottom + 8 });
+              }}
+              style={{ height: 30, minWidth: 190, maxWidth: 330, flex: "1 1 220px", display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", alignItems: "center", gap: 6, border: "1px solid " + EDITOR_NEU_SOFT_BORDER, borderRadius: 9, background: EDITOR_NEU_SURFACE, boxShadow: EDITOR_NEU_SHADOW, padding: "0 8px", boxSizing: "border-box", cursor: "text" }}
+            >
+              <span aria-hidden="true" style={{ color: accent, fontSize: 12, fontWeight: 950 }}>##</span>
+              <input
+                readOnly
+                value=""
+                aria-label="Link this Node to a Logic Gate or Project"
+                aria-haspopup="dialog"
+                aria-expanded={headerLinkPickerAnchor !== null}
+                placeholder="Link Logic Gate or Project…"
+                style={{ minWidth: 0, width: "100%", border: 0, outline: 0, background: "transparent", color: surfaceText, font: "inherit", fontSize: 11.5, fontWeight: 750, cursor: "text", padding: 0 }}
+              />
+            </div>
+          )}
+        </div>
+        {headerLinkPickerAnchor && (
+          <UniversalEntityPicker
+            companyID={companyID}
+            requestJSON={requestJSON}
+            sourceType="node"
+            sourceLabel="Node header"
+            linkTargetTypes={NODE_HEADER_LINK_TARGET_TYPES}
+            initialMode="link"
+            anchor={headerLinkPickerAnchor}
+            onChoose={chooseHeaderLinkedEntity}
+            onCancel={() => setHeaderLinkPickerAnchor(null)}
+          />
+        )}
 
         {blocks.length === 0 && !nodeEmailColumnVisible && (
           <>
@@ -3563,7 +2845,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           data-node-email-workspace-mode={nodeEmailWorkspaceMode}
           data-node-email-focus-mode={nodeEmailFocusActive ? "expanded" : "normal"}
           data-node-email-column-visible={nodeEmailColumnVisible ? "true" : "false"}
-          style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: nodeEmailWorkspaceGridTemplateColumns, minWidth: nodeEmailColumnVisible && !nodeEmailOnly ? nodeEmailWorkspacePixelWidth : 0, minHeight: nodeWorkspaceViewportHeight, alignItems: "stretch", alignContent: "start", transition: "grid-template-columns 180ms cubic-bezier(0.2, 0.8, 0.2, 1)" }}
+          style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: nodeEmailWorkspaceGridTemplateColumns, minWidth: nodeEmailColumnVisible && !nodeEmailOnly ? nodeEmailWorkspacePixelWidth : 0, minHeight: nodeWorkspaceViewportHeight, marginBottom: NODE_EMAIL_COLUMN_BOTTOM_GUTTER_PX, alignItems: "stretch", alignContent: "start", transition: "grid-template-columns 180ms cubic-bezier(0.2, 0.8, 0.2, 1)" }}
         >
         {nodeAttachedEmails.length > 0 && (
           <div
@@ -3572,7 +2854,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             className="mango-pane-layout-transition"
             aria-hidden={!nodeEmailColumnVisible}
             {...(!nodeEmailColumnVisible ? { inert: "" } : {})}
-            style={{ gridColumn: "1", position: "sticky", top: 38, alignSelf: "start", zIndex: 2, minWidth: 0, height: nodeWorkspaceViewportHeight, minHeight: nodeWorkspaceViewportHeight, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: panelBackground, overflow: "hidden", opacity: nodeEmailColumnVisible ? 1 : 0, transform: nodeEmailColumnVisible ? "translateX(0) scale(1)" : "translateX(-10px) scale(0.985)", pointerEvents: nodeEmailColumnVisible ? "auto" : "none", boxShadow: EDITOR_NEU_SHADOW, transition: "opacity 180ms ease, transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1)" }}
+            style={{ gridColumn: "1", position: "sticky", top: 38, alignSelf: "start", zIndex: 2, minWidth: 0, height: nodeWorkspaceViewportHeight, minHeight: nodeWorkspaceViewportHeight, boxSizing: "border-box", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: panelBackground, backgroundClip: "padding-box", overflow: "hidden", opacity: nodeEmailColumnVisible ? 1 : 0, transform: nodeEmailColumnVisible ? "translateX(0) scale(1)" : "translateX(-10px) scale(0.985)", pointerEvents: nodeEmailColumnVisible ? "auto" : "none", boxShadow: EDITOR_NEU_SHADOW, transition: "opacity 180ms ease, transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1)" }}
           >
             <AttachedEmailOrganizerPane
               emails={nodeAttachedEmails}
@@ -4070,65 +3352,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         />
       </div>
 
-      {nodeEmailModalMessageID && (
-        <AppModalPortal onRequestClose={() => setNodeEmailModalMessageID("")}>
-        <div
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setNodeEmailModalMessageID("");
-          }}
-          style={{ position: "fixed", zIndex: 1, inset: 0, display: "grid", placeItems: "stretch", background: "rgba(15,23,42,0.44)", padding: 12 }}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="node-attached-email-dialog-title"
-            style={{ width: "100%", height: "100%", minWidth: 0, minHeight: 0, display: "grid", gridTemplateRows: "44px minmax(0, 1fr)", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: panelBackground, color: surfaceText, overflow: "hidden", boxShadow: "0 24px 64px rgba(15,23,42,0.28)" }}
-          >
-            <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) 32px", alignItems: "center", gap: 10, borderBottom: `1px solid ${ruleColor}`, padding: "6px 8px 6px 12px", background: EDITOR_NEU_SURFACE }}>
-              <div id="node-attached-email-dialog-title" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, fontWeight: 900 }}>
-                Attached emails
-              </div>
-              <button
-                type="button"
-                title="Close attached emails"
-                aria-label="Close attached emails"
-                onClick={() => setNodeEmailModalMessageID("")}
-                style={{ width: 30, height: 30, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: surfaceText, cursor: "pointer", fontSize: 14, fontWeight: 900, lineHeight: 1, padding: 0, boxShadow: EDITOR_NEU_SHADOW }}
-              >
-                X
-              </button>
-            </div>
-            <div style={{ minWidth: 0, minHeight: 0, overflow: "hidden" }}>
-              <AttachedEmailOrganizerPane
-                emails={nodeAttachedEmails}
-                nodeID={nodeID}
-                apiBase={apiBase}
-                companyID={companyID}
-                companyUsers={companyUsers}
-                attachmentRequestJSON={requestJSON}
-                storageKey={`node-editor-attached-email-layout-v1:${companyID || "company"}:${nodeID || "node"}`}
-                editable={canEdit}
-                accent={accent}
-                surfaceText={surfaceText}
-                strokeColor={strokeColor}
-                ruleColor={ruleColor}
-                selectedMessageID={nodeEmailModalMessageID}
-                onSelectMessage={setNodeEmailModalMessageID}
-                onClearSelectedMessage={() => setNodeEmailModalMessageID("")}
-                onRemoveEmail={canEdit ? (emailID) => { void removeAttachedEmail(emailID); } : undefined}
-                onReplyEditorFocus={() => {
-                  setFocusedTextBlockID("");
-                  if (formattingControllerRef) formattingControllerRef.current = null;
-                }}
-                onError={onError}
-                onEmailMessageActivate={revealEmailTextBlock}
-              />
-            </div>
-          </div>
-        </div>
-        </AppModalPortal>
-      )}
       {canEdit && emailPickerTargetBlockID !== null && (
         <EmailPickerModal
           accent={accent}

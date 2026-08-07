@@ -716,6 +716,7 @@ type NodeProjection struct {
 
 const (
 	NodeTimelineEventLogicGateTransfer   = "logic_gate_transfer"
+	NodeTimelineEventProjectAssignment   = "project_assignment"
 	NodeTimelineEventVerificationRequest = "verification_request"
 )
 
@@ -740,6 +741,8 @@ type NodeTimelineEvent struct {
 	FromLogicGateName      string                              `json:"from_logic_gate_name,omitempty"`
 	ToLogicGateID          string                              `json:"to_logic_gate_id,omitempty"`
 	ToLogicGateName        string                              `json:"to_logic_gate_name,omitempty"`
+	ProjectID              string                              `json:"project_id,omitempty"`
+	ProjectName            string                              `json:"project_name,omitempty"`
 	IdempotencyKey         string                              `json:"-"`
 	VerificationRecipients []NodeTimelineVerificationRecipient `json:"verification_recipients"`
 	CreatedTimestamp       time.Time                           `json:"created_timestamp"`

@@ -466,16 +466,26 @@ func (r *MemoryRepo) UpsertProjectRelationship(input ProjectRelationshipInput) (
 	if !ok || strings.TrimSpace(assignment.LogicGateID) == "" {
 		return ProjectRelationshipMutationResult{}, ErrProjectNodeLogicGateRequired
 	}
+	alreadyRelated := false
+	for _, relationship := range r.projectRelationships {
+		if relationship.CompanyID == input.CompanyID && relationship.ProjectID == input.ProjectID &&
+			relationship.ResourceType == EntityTypeNode && relationship.ResourceID == input.ResourceID {
+			alreadyRelated = true
+			break
+		}
+	}
 
 	previousRelationships := cloneMemoryMap(r.projectRelationships)
 	previousProjections := cloneMemoryMap(r.projectRelationshipProjection)
 	previousRACIRows := cloneMemoryMap(r.RACIMatrixProjectionRows)
 	previousReadVersions := cloneMemoryMap(r.workspaceReadVersions)
+	previousTimelineEvents := cloneMemoryMap(r.nodeTimelineEvents)
 	rollback := func() {
 		r.projectRelationships = previousRelationships
 		r.projectRelationshipProjection = previousProjections
 		r.RACIMatrixProjectionRows = previousRACIRows
 		r.workspaceReadVersions = previousReadVersions
+		r.nodeTimelineEvents = previousTimelineEvents
 	}
 
 	gateProjection, err := r.upsertProjectRelationshipSourceLocked(ProjectRelationshipInput{
@@ -492,6 +502,9 @@ func (r *MemoryRepo) UpsertProjectRelationship(input ProjectRelationshipInput) (
 		return ProjectRelationshipMutationResult{}, err
 	}
 	r.syncRACIMatrixProjectionForProjectResourcesLocked(input.CompanyID, []string{input.ResourceID}, []string{assignment.LogicGateID})
+	if !alreadyRelated {
+		r.appendProjectAssignmentTimelineEventLocked(input.CompanyID, input.ResourceID, input.ActorUserID, input.ProjectID, time.Now().UTC())
+	}
 	return ProjectRelationshipMutationResult{
 		Relationship:          &nodeProjection,
 		ImplicitRelationships: []domain.ProjectRelationshipProjection{gateProjection},

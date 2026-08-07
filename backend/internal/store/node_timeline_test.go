@@ -140,6 +140,56 @@ func TestNodeTimelineRecordsOnlyCrossLogicGateTransfersWithSnapshots(t *testing.
 	}
 }
 
+func TestNodeTimelineRecordsProjectAssignmentOnceWithSnapshots(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "62626262-6262-4262-8262-626262626204"
+	repo.EnsureCompany(companyID, "Timeline Project Co")
+	actor := mustCreateRACIMembershipUser(t, repo, "timeline-project-actor", companyID)
+	projectResult, err := repo.CreateProject(ProjectInput{CompanyID: companyID, Name: "Launch", Status: ProjectDefaultStatus})
+	if err != nil || projectResult.Project == nil {
+		t.Fatalf("CreateProject = %+v err=%v", projectResult, err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Delivery")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	node := mustCreateRACIMembershipNode(t, repo, companyID, "Launch packet")
+	priority := 2
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID: companyID, LogicGateID: logicGate.LogicGateID, NodeID: node.NodeID,
+		Priority: &priority, PrioritySet: true, ActorUserID: actor.UserID,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	input := ProjectRelationshipInput{
+		CompanyID: companyID, ProjectID: projectResult.Project.ProjectID,
+		ResourceType: EntityTypeNode, ResourceID: node.NodeID, ActorUserID: actor.UserID,
+	}
+	if _, err := repo.UpsertProjectRelationship(input); err != nil {
+		t.Fatalf("UpsertProjectRelationship: %v", err)
+	}
+	if _, err := repo.UpsertProjectRelationship(input); err != nil {
+		t.Fatalf("idempotent UpsertProjectRelationship: %v", err)
+	}
+	events, err := repo.ListNodeTimelineEvents(companyID, node.NodeID)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("project assignment timeline = %+v err=%v", events, err)
+	}
+	item := events[0]
+	if item.Type != domain.NodeTimelineEventProjectAssignment || item.ActorDisplayName != actor.DisplayName || item.ProjectID != projectResult.Project.ProjectID || item.ProjectName != "Launch" {
+		t.Fatalf("project assignment snapshot = %+v", item)
+	}
+	repo.mu.Lock()
+	changed := repo.projects[key(companyID, projectResult.Project.ProjectID)]
+	changed.Name = "Renamed Launch"
+	repo.projects[key(companyID, projectResult.Project.ProjectID)] = changed
+	repo.mu.Unlock()
+	events, _ = repo.ListNodeTimelineEvents(companyID, node.NodeID)
+	if events[0].ProjectName != "Launch" {
+		t.Fatalf("historical project name was rewritten: %+v", events[0])
+	}
+}
+
 func TestAccountableRACIAllowsManyUsersAndGroups(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "62626262-6262-4262-8262-626262626203"
@@ -172,21 +222,36 @@ func TestAccountableRACIAllowsManyUsersAndGroups(t *testing.T) {
 }
 
 func TestNodeTimelineSchemaAndMigrationContract(t *testing.T) {
-	for _, path := range []string{"../../db/schema.sql", "../../db/migrations/20260722_node_timeline_verification_events.sql"} {
+	checks := map[string][]string{
+		"../../db/schema.sql": {
+			"create table if not exists node_timeline_events",
+			"create table if not exists node_timeline_verification_recipients",
+			"idx_node_timeline_events_idempotency",
+			"event_type in ('logic_gate_transfer', 'project_assignment', 'verification_request')",
+			"project_id uuid",
+			"project_name text not null default ''",
+			"trg_node_view_version_timeline_events",
+			"trg_node_view_version_timeline_recipients",
+		},
+		"../../db/migrations/20260722_node_timeline_verification_events.sql": {
+			"create table if not exists node_timeline_events",
+			"create table if not exists node_timeline_verification_recipients",
+			"completed_timestamp timestamptz",
+		},
+		"../../db/migrations/20260807_node_project_assignment_timeline.sql": {
+			"add column if not exists project_id uuid",
+			"add column if not exists project_name text not null default ''",
+			"node_timeline_events_payload_chk",
+			"event_type='project_assignment'",
+		},
+	}
+	for path, markers := range checks {
 		payload, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("ReadFile %s: %v", path, err)
 		}
 		source := strings.ToLower(string(payload))
-		for _, marker := range []string{
-			"create table if not exists node_timeline_events",
-			"create table if not exists node_timeline_verification_recipients",
-			"idx_node_timeline_events_idempotency",
-			"event_type in ('logic_gate_transfer', 'verification_request')",
-			"completed_timestamp timestamptz",
-			"trg_node_view_version_timeline_events",
-			"trg_node_view_version_timeline_recipients",
-		} {
+		for _, marker := range markers {
 			if !strings.Contains(source, marker) {
 				t.Fatalf("%s missing %q", path, marker)
 			}

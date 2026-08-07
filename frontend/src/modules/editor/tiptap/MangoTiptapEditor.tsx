@@ -30,6 +30,10 @@ import {
   type UniversalEntityPickerAnchor,
   type UniversalEntityPickerMode,
 } from "../UniversalEntityPicker.js";
+import {
+  captureMangoTiptapPointerBookmark,
+  resolveMangoTiptapPointerBookmark,
+} from "./mangoTiptapPointerActivation.js";
 
 import { MangoEditorLifecycle, type MangoEditorLifecycleSnapshot } from "../editorLifecycle";
 import { incrementEditorRuntimeMetric, trackEditorRuntimeResource } from "../editorRuntimeMetrics";
@@ -1157,6 +1161,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     setLiveSurfaceReady(false);
     const coordinates = { left: event.clientX, top: event.clientY };
     const root = event.currentTarget;
+    const pointerBookmark = captureMangoTiptapPointerBookmark(root, event.target, coordinates);
     const preservedScrollTop = root.scrollTop;
     const preservedScrollLeft = root.scrollLeft;
     void activate().then(() => {
@@ -1171,8 +1176,19 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         }
         root.scrollTop = preservedScrollTop;
         root.scrollLeft = preservedScrollLeft;
-        const position = editor.view.posAtCoords(coordinates);
-        if (position) editor.commands.setTextSelection(position.pos);
+        const bookmarkedDOMPosition = pointerBookmark
+          ? resolveMangoTiptapPointerBookmark(editor.view.dom, pointerBookmark)
+          : null;
+        let requestedPosition: number | null = null;
+        if (bookmarkedDOMPosition) {
+          try {
+            requestedPosition = editor.view.posAtDOM(bookmarkedDOMPosition.node, bookmarkedDOMPosition.offset);
+          } catch {
+            requestedPosition = null;
+          }
+        }
+        if (requestedPosition === null) requestedPosition = editor.view.posAtCoords(coordinates)?.pos ?? null;
+        if (requestedPosition !== null) editor.commands.setTextSelection(requestedPosition);
         (editor.view.dom as HTMLElement).focus({ preventScroll: true });
         root.scrollTop = preservedScrollTop;
         root.scrollLeft = preservedScrollLeft;

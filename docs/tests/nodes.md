@@ -1,3 +1,17 @@
+# Process Story: A Node header stays compact while linking exact destinations
+
+A user opens a Node from a sidebar pin at its normal saved window size
+↓
+The timeline plus sits over the left rail, while one mail icon/count toggles the elevated email column and its adjacent plus opens email attachment
+↓
+Current Logic Gate and Project chips open those exact resources, and the header's default `##` picker links through the existing typed commands
+↓
+Moving to another Logic Gate creates the existing transfer stamp; creating the first Project relationship creates one Project-assignment stamp in the same transaction
+↓
+Refreshing, relinking the same Project, opening the mail column, or clicking a current-resource chip does not resize the Node or duplicate relationship history
+
+Last updated: 2026-08-07
+
 # Process Story: Node RACI cards show every direct assignment cleanly
 
 A user opens a Node whose Responsible, Accountable, Consulted, or Informed role has direct assignments
@@ -785,7 +799,7 @@ N118 - A Node timeline transfer event is immutable and read-only. Later actor or
 N119 - The Node timeline plus button opens a keyboard-labelled menu with New text box and Verify stamp choices. New text box preserves existing behavior; the plus itself no longer creates a text box immediately.
 N120 - A verification stamp snapshots every current effective Node Accountable user once, requires at least one recipient, preserves that snapshot across later RACI changes, and renders one individually actionable check beside each name. PostgreSQL derives recipients from canonical V2 settings/assignments, current hierarchy, reset boundaries, and live groups during the request, persists each recipient, reads canonical `nodes.name`, and carries that Node name into the notification domain event.
 N121 - Only a snapshotted recipient can complete their own verification. Completion is one-way, stores the first server timestamp, is idempotent under retry/concurrency, and cannot complete another recipient.
-N122 - Transfer and verification stamps stack as content-height cards on the exact shared text-box line-and-circle timeline, stop well before the right edge, remain accessible in narrow layouts, and do not change text-box virtualization or editing. Spare workspace height stays below the rows and cannot stretch a card or create internal bottom whitespace. The timestamp and clock lead the card; Logic Gate transfer headings and both stored from/to gate-name snapshots use the established Logic Gate icon. Source and destination chips with stored IDs are keyboard-accessible Logic Gate links that push browser history so Back restores the Node route and workspace state.
+N122 - Transfer, Project-assignment, and verification stamps stack as content-height cards on the exact shared text-box line-and-circle timeline, stop well before the right edge, remain accessible in narrow layouts, and do not change text-box virtualization or editing. Spare workspace height stays below the rows and cannot stretch a card or create internal bottom whitespace. The timestamp and clock lead the card; relationship headings and stored destination snapshots use the matching Logic Gate or Project icon. Stored Logic Gate and Project chips are keyboard-accessible exact-resource links that push browser history so Back restores the Node route and workspace state.
 N123 - Updates deep links use the verification stamp event ID, and the Node editor scrolls that exact `data-node-timeline-event-id` row into view without opening or editing an unrelated text box.
 
 N124 - Hashtag destination submission and first email-chat creation share the established import transaction. The selected Nylas message is fetched, identity-validated, stored completely, attached to the Node, and returned for immediate rendering before the request succeeds. The rest of the current provider thread is downloaded only by a durable retryable background job created atomically with the import.
@@ -809,6 +823,14 @@ N135 - Detaching an inherited Node atomically copies its current effective RACI 
 N136 - Node RACI and permission modes are separate. Changing one never changes the other's mode, edges, sequences, authorization, or notification meaning.
 
 N137 - Node reads and ETags include V2 source/reset/parent-link and live-group fingerprints, and authorization is checked before a conditional 304 response.
+
+N138 - Opening a pinned Node creates a fresh window instance at the normal stored/default Node size. The sidebar pin path must never force fullscreen, so initial open and refresh use the same sizing rule.
+
+N139 - The Node header timeline plus is centered over the left timeline rail. The old labelled Email, Attach email, assignment, and Go to buttons are removed. One mail icon/count toggles the Node email column, its divided adjacent plus opens email attachment, and current Logic Gate/Project icon-label chips open those exact resources.
+
+N140 - The Node header linker is visibly initialized to `##` and permits only Logic Gate and Project targets. A Logic Gate choice uses the established assignment/move command and priority rule. A Project choice uses the established exact `project_relationships` command; the picker and header chips add no new relationship authority.
+
+N141 - Creating a Node's first exact Project relationship atomically creates one immutable `project_assignment` timeline stamp with actor, Project ID, and Project-name snapshots. Re-adding the same relationship is idempotent and creates no duplicate. The Project relationship, its implicit Logic Gate relationship, dependent projections, and stamp succeed or roll back together. The Node email column reserves a visible bottom gutter and keeps a rounded border/shadow so it reads as a separate elevated surface.
 
 ### Scenario N-S23: Email, Editor, And Chat Column Correction
 
