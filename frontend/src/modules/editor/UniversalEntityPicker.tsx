@@ -101,7 +101,7 @@ function pinnedRows(tree: SidebarPinTree, allowedTypes: readonly EditorEntityTyp
 function pickerPanelPosition(anchor: UniversalEntityPickerAnchor, emailActive: boolean): React.CSSProperties {
   const viewportWidth = typeof window === "undefined" ? 1200 : window.innerWidth;
   const viewportHeight = typeof window === "undefined" ? 800 : window.innerHeight;
-  const preferredWidth = emailActive ? 720 : 560;
+  const preferredWidth = emailActive ? 720 : 460;
   const preferredHeight = emailActive ? 650 : 470;
   const width = Math.min(preferredWidth, Math.max(300, viewportWidth - 24));
   const left = Math.max(12, Math.min(anchor.left, viewportWidth - width - 12));
@@ -298,7 +298,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
           <input ref={inputRef} value={query} disabled={busy} aria-label={mode === "link" ? "Search resources to link" : "Search resources to reference"} placeholder={category === "email_message" ? "Search Inbox, Starred, Sent, All, or Spam…" : mode === "link" ? "Search what to link…" : "Search pins or workspace…"} onChange={(event) => setQuery(event.target.value)} onKeyDown={onInputKeyDown} style={{ width: "100%", minWidth: 0, padding: 0, border: 0, outline: 0, background: "transparent", color: "#172033", font: "inherit", fontSize: 14 }} />
         </div>
       </div>
-      <div data-mango-universal-picker-categories="true" style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 6, padding: "0 14px 10px" }}>
+      <div data-mango-universal-picker-categories="true" style={{ width: "calc(100% - 28px)", maxWidth: 430, display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 6, margin: "0 auto 10px" }}>
         {categoryOptions.map((option) => {
           const enabled = mode === "reference" || props.linkTargetTypes.includes(option.type);
           const active = category === option.type;

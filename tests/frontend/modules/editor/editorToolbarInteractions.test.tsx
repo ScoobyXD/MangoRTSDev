@@ -704,10 +704,12 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     assert.ok(activeModalLayer);
     assert.ok(modalPickerInput);
     assert.equal(modalPicker.dataset.mangoUniversalPickerMode, "link");
-    assert.equal(modalPicker.style.width, "560px", "the universal picker is wide enough to keep all four categories on one row");
+    assert.equal(modalPicker.style.width, "460px", "the normal universal picker stays compact while keeping all four categories on one row");
     const pickerCategories = modalPicker.querySelector<HTMLElement>('[data-mango-universal-picker-categories="true"]');
     assert.ok(pickerCategories);
     assert.equal(pickerCategories.style.display, "grid");
+    assert.equal(pickerCategories.style.width, "calc(100% - 28px)");
+    assert.equal(pickerCategories.style.maxWidth, "430px", "equal category columns remain compact even when Email mode widens the results pane");
     assert.equal(pickerCategories.style.overflowX, "", "category tabs do not use a horizontal scrollbar");
     assert.deepEqual(
       [...pickerCategories.querySelectorAll<HTMLButtonElement>("button")].map((button) => button.textContent?.trim()),
