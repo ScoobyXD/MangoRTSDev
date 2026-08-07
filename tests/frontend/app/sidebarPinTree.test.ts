@@ -84,6 +84,39 @@ describe("sidebarPinTree", () => {
     assert.equal(cycle.tree, tree);
   });
 
+  it("moves pins and folders out of a parent through the parent folder edge", () => {
+    const tree: SidebarPinTree = {
+      folders: [folder("folder-a", "", 1000), folder("folder-b", "folder-a", 1000)],
+      pins: [pin("pin-root", "", 2000), pin("pin-a", "folder-a", 2000)],
+    };
+
+    const liftedPin = planSidebarPinMove(
+      tree,
+      { entryType: "pin", entryID: "pin-a" },
+      { entryType: "folder", entryID: "folder-a" },
+      "before",
+    );
+    assert.equal(liftedPin.tree.pins.find((item) => item.pinID === "pin-a")?.parentFolderID, "");
+    assert.deepEqual(liftedPin.updates.map((entry) => [entry.entryType, entry.entryID, entry.parentFolderID, entry.position]), [
+      ["pin", "pin-a", "", 1000],
+      ["folder", "folder-a", "", 2000],
+      ["pin", "pin-root", "", 3000],
+    ]);
+
+    const liftedFolder = planSidebarPinMove(
+      tree,
+      { entryType: "folder", entryID: "folder-b" },
+      { entryType: "folder", entryID: "folder-a" },
+      "after",
+    );
+    assert.equal(liftedFolder.tree.folders.find((item) => item.folderID === "folder-b")?.parentFolderID, "");
+    assert.deepEqual(liftedFolder.updates.map((entry) => [entry.entryType, entry.entryID, entry.parentFolderID, entry.position]), [
+      ["folder", "folder-a", "", 1000],
+      ["folder", "folder-b", "", 2000],
+      ["pin", "pin-root", "", 3000],
+    ]);
+  });
+
   it("removes a folder subtree and contained pins without touching outside pins", () => {
     const tree: SidebarPinTree = {
       folders: [folder("folder-a", "", 1000), folder("folder-b", "folder-a", 1000), folder("folder-c", "", 2000)],

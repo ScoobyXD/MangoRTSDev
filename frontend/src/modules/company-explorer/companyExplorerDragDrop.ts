@@ -134,8 +134,8 @@ export function isExplorerTextInputTarget(target: EventTarget | null): boolean {
   return Boolean(element?.closest("input, textarea, [contenteditable='true']"));
 }
 
-export function getExplorerDropIntent(event: DragEvent<HTMLElement>): ExplorerRowDropPlacement | "inside" {
-  const rect = event.currentTarget.getBoundingClientRect();
+export function getExplorerDropIntent(event: DragEvent<HTMLElement>, hitTarget: HTMLElement = event.currentTarget): ExplorerRowDropPlacement | "inside" {
+  const rect = hitTarget.getBoundingClientRect();
   const y = event.clientY - rect.top;
   if (y < rect.height * 0.25) return "before";
   if (y > rect.height * 0.75) return "after";

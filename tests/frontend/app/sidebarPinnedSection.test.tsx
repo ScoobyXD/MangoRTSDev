@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
 import React, { act } from "react";
 import { JSDOM } from "jsdom";
@@ -16,7 +18,7 @@ function installGlobal(name: string, value: unknown, restores: Restore[]) {
   });
 }
 
-test("Pinned renders one compact elevated surface with recursive hairline folders, one-click rename, a flat-row bump, and a red remove hover", async () => {
+test("Pinned renders open-sided recursive folders with explicit rename, fixed action columns, a flat-row bump, and a red remove hover", async () => {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
     pretendToBeVisual: true,
     url: "http://localhost/",
@@ -92,6 +94,11 @@ test("Pinned renders one compact elevated surface with recursive hairline folder
     const folderA = container.querySelector<HTMLFieldSetElement>('fieldset[data-pin-folder-frame="folder-a"]');
     assert.ok(folderA);
     assert.equal(folderA.style.borderTopWidth, "1px");
+    assert.equal(folderA.style.borderBottomWidth, "1px");
+    assert.equal(folderA.style.borderLeftWidth, "0px", "folder frames have no continuous left edge");
+    assert.equal(folderA.style.borderRightWidth, "0px", "folder frames have no continuous right edge");
+    assert.match(folderA.style.backgroundImage, /linear-gradient/, "four short corner gradients return from the top and bottom rules");
+    assert.equal(folderA.style.backgroundSize, "1px 5px, 1px 5px, 1px 5px, 1px 5px");
     assert.equal(folderA.style.boxShadow, "none", "folder outlines are not elevated surfaces");
     const folderALegend = folderA.querySelector<HTMLLegendElement>("legend");
     assert.ok(folderALegend);
@@ -99,32 +106,54 @@ test("Pinned renders one compact elevated surface with recursive hairline folder
     assert.equal(folderALegend.style.gap, "1px", "the disclosure arrow stays close to the folder title");
     assert.equal(folderALegend.querySelectorAll("svg").length, 1, "the legend has only its disclosure icon, not a folder icon");
 
-    const folderRequest = folderALegend.querySelector<HTMLElement>('[data-pin-status="request"]');
-    const folderReview = folderALegend.querySelector<HTMLElement>('[data-pin-status="review"]');
+    const folderRequest = folderA.querySelector<HTMLElement>(':scope > [data-pin-folder-status-column] [data-pin-status="request"]');
+    const folderReview = folderA.querySelector<HTMLElement>(':scope > [data-pin-folder-status-column] [data-pin-status="review"]');
     assert.equal(folderRequest?.dataset.pinStatusCount, "1", "the collapsed parent shows its nested Logic Gate request total");
     assert.equal(folderReview?.dataset.pinStatusCount, "2", "the collapsed parent shows its nested Logic Gate review total");
-    assert.equal(folderALegend.querySelector('[data-pin-status="pending"]'), null, "zero status squares are omitted");
+    assert.equal(folderA.querySelector(':scope > [data-pin-folder-status-column] [data-pin-status="pending"]'), null, "zero status squares are omitted");
     assert.equal(folderRequest?.style.backgroundColor, "rgb(250, 204, 21)");
     assert.equal(folderReview?.style.backgroundColor, "rgb(25, 168, 255)");
     assert.equal(folderRequest?.style.backgroundImage, "linear-gradient(135deg, rgb(255, 251, 209) 0%, rgb(255, 242, 77) 42%, rgb(250, 204, 21) 100%)");
     assert.equal(folderReview?.style.backgroundImage, "linear-gradient(135deg, rgb(51, 221, 213) 0%, rgb(25, 168, 255) 100%)", "Review reuses the Node icon gradient");
+    const folderStatusColumn = folderA.querySelector<HTMLElement>(":scope > [data-pin-folder-status-column]");
+    const folderStatusGrid = folderStatusColumn?.querySelector<HTMLElement>("[data-pin-status-counts]");
+    assert.ok(folderStatusColumn && folderStatusGrid);
+    assert.equal(folderStatusColumn.style.right, "24px", "folder counts use the same right-side lane as pin counts");
+    assert.equal(folderStatusGrid.style.gridTemplateColumns, "repeat(4, 17px)");
+    assert.equal(folderRequest?.parentElement?.dataset.pinStatusSlot, "request");
+    assert.equal(folderReview?.parentElement?.dataset.pinStatusSlot, "review");
 
     const folderATitle = container.querySelector<HTMLButtonElement>('button[data-pin-folder-title="folder-a"]');
     assert.ok(folderATitle);
     await act(async () => Simulate.click(folderATitle));
+    assert.equal(container.querySelector('input[aria-label="Pinned folder name"]'), null, "one click does not rename a folder");
+    await act(async () => Simulate.doubleClick(folderATitle));
+    assert.equal(container.querySelector('input[aria-label="Pinned folder name"]'), null, "double click does not rename a folder");
+    await act(async () => Simulate.contextMenu(folderATitle, { clientX: 42, clientY: 55 }));
+    const folderMenu = dom.window.document.querySelector<HTMLElement>('[role="menu"][aria-label="Pinned folder actions"]');
+    assert.ok(folderMenu, "right click opens the folder action menu");
+    assert.equal(folderMenu.style.width, "158px");
+    assert.equal(folderMenu.style.minWidth, "158px");
+    assert.equal(folderMenu.style.maxWidth, "158px");
+    const renameAction = Array.from(folderMenu.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "Rename");
+    assert.ok(renameAction);
+    await act(async () => Simulate.click(renameAction));
     const renameInput = container.querySelector<HTMLInputElement>('input[aria-label="Pinned folder name"]');
-    assert.ok(renameInput, "one click on a folder title starts inline rename");
+    assert.ok(renameInput, "the explicit Rename action starts inline rename");
     assert.equal(renameInput.value, "Folder A");
     await act(async () => Simulate.keyDown(renameInput, { key: "Escape" }));
 
     const folderAContents = container.querySelector<HTMLElement>('[data-pin-folder-contents="folder-a"]');
     const folderB = container.querySelector<HTMLFieldSetElement>('fieldset[data-pin-folder-frame="folder-b"]');
     assert.ok(folderAContents && folderB && folderAContents.contains(folderB), "nested folders render as indented recursive outlines");
+    const folderADropAnchor = folderA.querySelector<HTMLElement>('[data-pin-drop-anchor="folder:folder-a"]');
+    assert.ok(folderADropAnchor && !folderADropAnchor.contains(folderB), "the expanded subtree is outside the folder header drop hitbox");
     assert.equal(folderAContents.style.paddingLeft, "10px");
+    assert.equal(folderAContents.style.marginRight, "-4px", "each nested level restores the parent's right-side action columns");
 
     const folderBLegend = folderB.querySelector<HTMLLegendElement>("legend");
     assert.ok(folderBLegend);
-    assert.equal(folderBLegend.querySelector<HTMLElement>('[data-pin-status="request"]')?.dataset.pinStatusCount, "1");
+    assert.equal(folderB.querySelector<HTMLElement>(':scope > [data-pin-folder-status-column] [data-pin-status="request"]')?.dataset.pinStatusCount, "1");
     const folderBDisclosure = folderB.querySelector<HTMLButtonElement>('button[aria-label="Expand Folder B"]');
     assert.ok(folderBDisclosure);
     await act(async () => Simulate.click(folderBDisclosure));
@@ -133,10 +162,14 @@ test("Pinned renders one compact elevated surface with recursive hairline folder
     assert.equal(logicGateEntry.querySelector<HTMLElement>('[data-pin-status="request"]')?.dataset.pinStatusCount, "1");
     assert.equal(logicGateEntry.querySelector<HTMLElement>('[data-pin-status="review"]')?.dataset.pinStatusCount, "2");
     assert.equal(logicGateEntry.querySelector('[data-pin-status="pending"]'), null);
+    assert.equal(logicGateEntry.querySelector<HTMLElement>('[data-pin-status-counts]')?.style.gridTemplateColumns, "repeat(4, 17px)");
 
     const pinEntry = container.querySelector<HTMLElement>('[data-pin-entry-id="pin-root"]');
     const pinButton = pinEntry?.querySelector<HTMLButtonElement>("button");
     assert.ok(pinEntry && pinButton);
+    const rootNodeStatusSlots = pinEntry.querySelectorAll('[data-pin-status-slot]');
+    assert.equal(rootNodeStatusSlots.length, 4, "non-Logic-Gate rows reserve the same four status columns");
+    assert.equal(pinEntry.querySelector('[data-pin-status]'), null, "reserved Node slots contain no status square");
     assert.match(pinButton.getAttribute("style") ?? "", /border: 0px/);
     assert.match(pinButton.getAttribute("style") ?? "", /background: transparent/);
     await act(async () => Simulate.mouseEnter(pinButton));
@@ -147,6 +180,7 @@ test("Pinned renders one compact elevated surface with recursive hairline folder
 
     const removeButton = pinEntry.querySelector<HTMLButtonElement>('button[aria-label="Unpin Root Node"]');
     assert.ok(removeButton);
+    assert.equal(removeButton.dataset.pinRemoveColumn, "true");
     await act(async () => Simulate.mouseEnter(removeButton));
     assert.equal(removeButton.dataset.pinRemoveActive, "true");
     assert.equal(removeButton.style.color, "rgb(255, 32, 32)");
@@ -158,4 +192,11 @@ test("Pinned renders one compact elevated surface with recursive hairline folder
     dom.window.close();
     for (const restore of restores.reverse()) restore();
   }
+});
+
+test("Pinned appears above Tower in the sidebar", () => {
+  const source = readFileSync(resolve(process.cwd(), "frontend/src/app/AppSidebarChrome.tsx"), "utf8");
+  const pinnedIndex = source.indexOf("<AppSidebarPinnedSection");
+  const towerIndex = source.indexOf('aria-label="Tower"');
+  assert.ok(pinnedIndex >= 0 && towerIndex > pinnedIndex);
 });
