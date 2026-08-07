@@ -93,7 +93,7 @@ test("Pinned renders Company Explorer-style folders, previews deliberate pin gro
     await act(async () => root.render(
       <AppSidebarPinnedSection
         tree={tree}
-        logicGateStatusCountsByID={{ "gate-1": { request: 1, pending: 0, inProgress: 0, review: 2 } }}
+        logicGateStatusCountsByID={{ "gate-1": { request: 12, pending: 3, inProgress: 4, review: 5 } }}
         dropActive={false}
         dropSuccess=""
         pinnedResourceDropBusy={false}
@@ -128,7 +128,18 @@ test("Pinned renders Company Explorer-style folders, previews deliberate pin gro
     assert.equal(folderA.style.borderRightWidth, "0px", "folder frames have no continuous right edge");
     assert.match(folderA.style.backgroundImage, /linear-gradient/, "four short corner gradients return from the top and bottom rules");
     assert.equal(folderA.style.backgroundSize, "1px 5px, 1px 5px, 1px 5px, 1px 5px");
+    assert.equal(folderA.style.width, "calc(100% - 4px)", "folder corners are inset from both outer edges");
+    assert.equal(folderA.style.margin, "0px 2px");
     assert.equal(folderA.style.boxShadow, "none", "folder outlines are not elevated surfaces");
+    const folderAEntry = folderA.closest<HTMLElement>('[data-pin-entry="folder"]');
+    assert.ok(folderAEntry);
+    await act(async () => Simulate.mouseEnter(folderAEntry));
+    assert.equal(folderA.dataset.pinFolderRaised, "true", "hovering anywhere in a folder elevates its complete frame");
+    assert.equal(folderA.style.transform, "translateY(-2px)");
+    assert.notEqual(folderA.style.boxShadow, "none");
+    await act(async () => Simulate.mouseLeave(folderAEntry, { relatedTarget: surface }));
+    assert.equal(folderA.dataset.pinFolderRaised, undefined);
+    assert.equal(folderA.style.transform, "translateY(0)");
     const folderALegend = folderA.querySelector<HTMLLegendElement>("legend");
     assert.ok(folderALegend);
     assert.equal(folderALegend.style.marginLeft, "11px", "the folder title begins after a short leading rule");
@@ -136,18 +147,28 @@ test("Pinned renders Company Explorer-style folders, previews deliberate pin gro
     assert.equal(folderALegend.querySelectorAll("svg").length, 2, "the folder title uses the same disclosure and folder icons as Company Explorer");
 
     const folderRequest = folderA.querySelector<HTMLElement>('[data-pin-folder-status-column] [data-pin-status="request"]');
+    const folderPending = folderA.querySelector<HTMLElement>('[data-pin-folder-status-column] [data-pin-status="pending"]');
+    const folderInProgress = folderA.querySelector<HTMLElement>('[data-pin-folder-status-column] [data-pin-status="inProgress"]');
     const folderReview = folderA.querySelector<HTMLElement>('[data-pin-folder-status-column] [data-pin-status="review"]');
-    assert.equal(folderRequest?.dataset.pinStatusCount, "1", "the collapsed parent shows its nested Logic Gate request total");
-    assert.equal(folderReview?.dataset.pinStatusCount, "2", "the collapsed parent shows its nested Logic Gate review total");
-    assert.equal(folderA.querySelector('[data-pin-folder-status-column] [data-pin-status="pending"]'), null, "zero status squares are omitted");
+    assert.equal(folderRequest?.dataset.pinStatusCount, "12", "the collapsed parent shows its nested Logic Gate request total");
+    assert.equal(folderPending?.dataset.pinStatusCount, "3");
+    assert.equal(folderInProgress?.dataset.pinStatusCount, "4");
+    assert.equal(folderReview?.dataset.pinStatusCount, "5", "the collapsed parent shows its nested Logic Gate review total");
     assert.equal(folderRequest?.style.backgroundColor, "rgb(250, 204, 21)");
-    assert.equal(folderReview?.style.backgroundColor, "rgb(25, 168, 255)");
+    assert.equal(folderInProgress?.style.backgroundColor, "rgb(255, 184, 102)");
+    assert.equal(folderReview?.style.backgroundColor, "rgb(94, 224, 210)");
     assert.equal(folderRequest?.style.backgroundImage, "linear-gradient(135deg, rgb(255, 251, 209) 0%, rgb(255, 242, 77) 42%, rgb(250, 204, 21) 100%)");
-    assert.equal(folderReview?.style.backgroundImage, "linear-gradient(135deg, rgb(51, 221, 213) 0%, rgb(25, 168, 255) 100%)", "Review reuses the Node icon gradient");
+    assert.equal(folderInProgress?.style.backgroundImage, "linear-gradient(135deg, rgb(255, 247, 237) 0%, rgb(255, 215, 173) 48%, rgb(255, 174, 98) 100%)");
+    assert.equal(folderReview?.style.backgroundImage, "linear-gradient(135deg, rgb(216, 255, 249) 0%, rgb(142, 234, 223) 48%, rgb(84, 216, 204) 100%)");
+    for (const box of [folderRequest, folderPending, folderInProgress, folderReview]) {
+      assert.equal(box?.style.width, "17px", "every count box has the same fixed width regardless of digit count");
+      assert.equal(box?.style.padding, "0px");
+    }
     const folderStatusColumn = folderA.querySelector<HTMLElement>("[data-pin-folder-status-column]");
     const folderStatusGrid = folderStatusColumn?.querySelector<HTMLElement>("[data-pin-status-counts]");
     assert.ok(folderStatusColumn && folderStatusGrid);
     assert.equal(folderStatusColumn.parentElement, folderALegend, "folder totals interrupt the top rule on the same row as the folder title");
+    assert.equal(folderALegend.style.width, "calc(100% - 29px)", "folder totals reach the same right-side columns as pin totals");
     assert.equal(folderALegend.style.gridTemplateColumns, "14px minmax(0, 1fr) 74px");
     assert.equal(folderStatusGrid.style.gridTemplateColumns, "repeat(4, 17px)");
     assert.equal(folderRequest?.parentElement?.dataset.pinStatusSlot, "request");
@@ -181,19 +202,18 @@ test("Pinned renders Company Explorer-style folders, previews deliberate pin gro
     const folderADropAnchor = folderA.querySelector<HTMLElement>('[data-pin-drop-anchor="folder:folder-a"]');
     assert.ok(folderADropAnchor && !folderADropAnchor.contains(folderB), "the expanded subtree is outside the folder header drop hitbox");
     assert.equal(folderAContents.style.paddingLeft, "10px");
-    assert.equal(folderAContents.style.marginRight, "-4px", "each nested level restores the parent's right-side action columns");
+    assert.equal(folderAContents.style.marginRight, "-6px", "each nested level restores the parent's right-side action columns after the corner inset");
 
     const folderBLegend = folderB.querySelector<HTMLLegendElement>("legend");
     assert.ok(folderBLegend);
-    assert.equal(folderB.querySelector<HTMLElement>('[data-pin-folder-status-column] [data-pin-status="request"]')?.dataset.pinStatusCount, "1");
+    assert.equal(folderB.querySelector<HTMLElement>('[data-pin-folder-status-column] [data-pin-status="request"]')?.dataset.pinStatusCount, "12");
     const folderBDisclosure = folderB.querySelector<HTMLButtonElement>('button[aria-label="Expand Folder B"]');
     assert.ok(folderBDisclosure);
     await act(async () => Simulate.click(folderBDisclosure));
     const logicGateEntry = container.querySelector<HTMLElement>('[data-pin-entry-id="pin-nested"]');
     assert.ok(logicGateEntry, "expanding the nested folder reveals the counted Logic Gate row");
-    assert.equal(logicGateEntry.querySelector<HTMLElement>('[data-pin-status="request"]')?.dataset.pinStatusCount, "1");
-    assert.equal(logicGateEntry.querySelector<HTMLElement>('[data-pin-status="review"]')?.dataset.pinStatusCount, "2");
-    assert.equal(logicGateEntry.querySelector('[data-pin-status="pending"]'), null);
+    assert.equal(logicGateEntry.querySelector<HTMLElement>('[data-pin-status="request"]')?.dataset.pinStatusCount, "12");
+    assert.equal(logicGateEntry.querySelector<HTMLElement>('[data-pin-status="review"]')?.dataset.pinStatusCount, "5");
     assert.equal(logicGateEntry.querySelector<HTMLElement>('[data-pin-status-counts]')?.style.gridTemplateColumns, "repeat(4, 17px)");
 
     const pinEntry = container.querySelector<HTMLElement>('[data-pin-entry-id="pin-root"]');
@@ -205,8 +225,9 @@ test("Pinned renders Company Explorer-style folders, previews deliberate pin gro
     assert.match(pinButton.getAttribute("style") ?? "", /border: 0px/);
     assert.match(pinButton.getAttribute("style") ?? "", /background: transparent/);
     await act(async () => Simulate.mouseEnter(pinButton));
-    assert.equal(pinEntry.dataset.pinRaised, "true");
-    assert.equal(pinEntry.style.transform, "translateY(-2px)");
+    assert.equal(pinEntry.dataset.pinRaised, undefined, "individual pin rows do not elevate on hover");
+    assert.equal(pinEntry.style.transform, "");
+    assert.equal(pinEntry.style.boxShadow, "none");
     await act(async () => Simulate.click(pinButton));
     assert.equal(openedPinID, "pin-root");
 
