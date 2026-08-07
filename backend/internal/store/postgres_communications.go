@@ -68,10 +68,13 @@ func (r *PostgresRepo) GetUserEmailConnection(userID string) (domain.UserEmailCo
 	connection, err := scanPostgresEmailConnection(r.db.QueryRow(
 		`select `+postgresEmailConnectionColumns+`
 		 from email_connections connection
-		 join users app_user on app_user.user_id=connection.personal_user_id
 		 where connection.connection_type='personal'
 		   and connection.personal_user_id=$1::uuid
-		   and connection.account_email=lower(btrim(app_user.email))
+		   and exists (
+		     select 1 from users app_user
+		     where app_user.user_id=connection.personal_user_id
+		       and connection.account_email=lower(btrim(app_user.email))
+		   )
 		 order by connection.updated_timestamp desc
 		 limit 1`, userID))
 	if errors.Is(err, sql.ErrNoRows) {
