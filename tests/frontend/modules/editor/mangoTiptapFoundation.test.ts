@@ -698,6 +698,92 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
     assert.equal(editor.state.doc.child(0).childCount, 1, "the blank numbered item is removed");
     assert.equal(editor.state.doc.child(1).type.name, "paragraph", "the caret moves to an ordinary row without a number");
     assert.equal(editor.state.selection.$from.parent, editor.state.doc.child(1));
+
+    const nestedRows = [
+      { type: "paragraph", attrs: { blockId: "person-label" }, content: [{ type: "text", text: "Christina:" }] },
+      { type: "orderedList", attrs: { blockId: "person-list", start: 1 }, content: [
+        { type: "listItem", attrs: { blockId: "person-first" }, content: [{ type: "paragraph", attrs: { blockId: "person-first-paragraph" }, content: [{ type: "text", text: "DONE updates" }] }] },
+        { type: "listItem", attrs: { blockId: "person-second" }, content: [{ type: "paragraph", attrs: { blockId: "person-second-paragraph" }, content: [{ type: "text", text: "Creating a folder" }] }] },
+      ] },
+    ];
+    const malformedNumberedDocument = {
+      type: "doc",
+      content: [
+        { type: "paragraph", attrs: { blockId: "section-label" }, content: [{ type: "text", text: "annoyances:" }] },
+        { type: "orderedList", attrs: { blockId: "annoyances-list", start: 1 }, content: [
+          { type: "listItem", attrs: { blockId: "annoyance-first" }, content: [{ type: "paragraph", attrs: { blockId: "annoyance-first-paragraph" }, content: [{ type: "text", text: "Fix the permissions page" }] }] },
+          { type: "listItem", attrs: { blockId: "annoyance-second" }, content: [{ type: "paragraph", attrs: { blockId: "annoyance-second-paragraph" } }] },
+          { type: "listItem", attrs: { blockId: "annoyance-third" }, content: [
+            { type: "paragraph", attrs: { blockId: "annoyance-third-paragraph" } },
+            ...nestedRows,
+          ] },
+        ] },
+        { type: "paragraph", attrs: { blockId: "after-numbering" }, content: [{ type: "text", text: "after" }] },
+      ],
+    };
+    editor.commands.setContent(malformedNumberedDocument);
+    let emptyNumberedPosition = 0;
+    editor.state.doc.descendants((node, position) => {
+      if (node.attrs.blockId === "annoyance-third-paragraph") emptyNumberedPosition = position + 1;
+    });
+    const malformedNumberedItem = editor.state.doc.child(1).child(2);
+    const nestedRowsBeforeDelete = [];
+    for (let index = 1; index < malformedNumberedItem.childCount; index += 1) {
+      nestedRowsBeforeDelete.push(malformedNumberedItem.child(index).toJSON());
+    }
+    editor.commands.setTextSelection(emptyNumberedPosition);
+    assert.equal(editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Backspace",
+      bubbles: true,
+      cancelable: true,
+    })), false, "Backspace removes the empty numbered marker and prevents native re-parenting");
+    const afterEmptyNumberDelete = editor.getJSON().content ?? [];
+    assert.deepEqual(
+      afterEmptyNumberDelete.map((node) => node.type),
+      ["paragraph", "orderedList", "paragraph"],
+      "the deletion does not split the surrounding list or move its following rows to the document root",
+    );
+    assert.equal(afterEmptyNumberDelete[1]?.content?.length, 2, "only the selected empty numbered item is removed");
+    const preservedParentItem = editor.state.doc.child(1).child(1);
+    const nestedRowsAfterDelete = [];
+    for (let index = 1; index < preservedParentItem.childCount; index += 1) {
+      nestedRowsAfterDelete.push(preservedParentItem.child(index).toJSON());
+    }
+    assert.deepEqual(
+      nestedRowsAfterDelete,
+      nestedRowsBeforeDelete,
+      "the following rows keep their content, order, formatting, identities, and list depth",
+    );
+    assert.equal(editor.state.selection.$from.parent.attrs.blockId, "person-label", "the caret moves to the first preserved row");
+
+    editor.commands.setContent(malformedNumberedDocument);
+    emptyNumberedPosition = 0;
+    editor.state.doc.descendants((node, position) => {
+      if (node.attrs.blockId === "annoyance-third-paragraph") emptyNumberedPosition = position + 1;
+    });
+    editor.commands.setTextSelection(emptyNumberedPosition);
+    assert.equal(editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Delete",
+      bubbles: true,
+      cancelable: true,
+    })), false, "Delete uses the same marker-only removal and prevents native re-parenting");
+    assert.equal(editor.state.doc.child(1).childCount, 2);
+    assert.equal(editor.state.doc.child(1).child(1).child(1).attrs.blockId, "person-label");
+
+    editor.commands.setContent({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "abc" }] }] });
+    editor.commands.setTextSelection(4);
+    assert.equal(
+      editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true })),
+      true,
+      "ordinary text Backspace is left to the browser's native text deletion",
+    );
+    editor.commands.setTextSelection({ from: 1, to: 3 });
+    assert.equal(
+      editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true, cancelable: true })),
+      false,
+      "ProseMirror still owns noncollapsed range deletion",
+    );
+    assert.equal(editor.getText(), "c", "noncollapsed range deletion keeps ProseMirror's native result");
   } finally {
     editor.destroy();
     dom.window.close();
