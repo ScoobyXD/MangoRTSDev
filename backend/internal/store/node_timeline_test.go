@@ -8,25 +8,25 @@ import (
 	"testing"
 )
 
-func TestNodeVerificationRequestSnapshotsMultipleVerifierUsersAndCompletesPerPerson(t *testing.T) {
+func TestNodeVerificationRequestSnapshotsMultipleAccountableUsersAndCompletesPerPerson(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "62626262-6262-4262-8262-626262626201"
 	repo.EnsureCompany(companyID, "Timeline Verification Co")
-	actor := mustCreateGVICMembershipUser(t, repo, "timeline-actor", companyID)
-	first := mustCreateGVICMembershipUser(t, repo, "timeline-first-verifier", companyID)
-	second := mustCreateGVICMembershipUser(t, repo, "timeline-second-verifier", companyID)
-	later := mustCreateGVICMembershipUser(t, repo, "timeline-later-verifier", companyID)
-	node := mustCreateGVICMembershipNode(t, repo, companyID, "Verification packet")
+	actor := mustCreateRACIMembershipUser(t, repo, "timeline-actor", companyID)
+	first := mustCreateRACIMembershipUser(t, repo, "timeline-first-accountable", companyID)
+	second := mustCreateRACIMembershipUser(t, repo, "timeline-second-accountable", companyID)
+	later := mustCreateRACIMembershipUser(t, repo, "timeline-later-accountable", companyID)
+	node := mustCreateRACIMembershipNode(t, repo, companyID, "Verification packet")
 
-	_, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	_, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
-		Assignments: []ResourceGVICAssignmentInput{
-			{Role: domain.GVICRoleVerifier, PrincipalType: EntityPermissionSubjectUser, PrincipalID: first.UserID},
-			{Role: domain.GVICRoleVerifier, PrincipalType: EntityPermissionSubjectUser, PrincipalID: second.UserID},
+		Assignments: []ResourceRACIAssignmentInput{
+			{Role: domain.RACIRoleAccountable, PrincipalType: EntityPermissionSubjectUser, PrincipalID: first.UserID},
+			{Role: domain.RACIRoleAccountable, PrincipalType: EntityPermissionSubjectUser, PrincipalID: second.UserID},
 		},
 	})
 	if err != nil {
-		t.Fatalf("SetResourceGVICAssignments multiple verifier: %v", err)
+		t.Fatalf("SetResourceRACIAssignments multiple accountable: %v", err)
 	}
 
 	created, err := repo.CreateNodeVerificationRequest(NodeVerificationRequestInput{
@@ -49,12 +49,12 @@ func TestNodeVerificationRequestSnapshotsMultipleVerifierUsersAndCompletesPerPer
 		t.Fatalf("idempotent replay = %+v err=%v", replayed, err)
 	}
 
-	_, err = repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	_, err = repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
-		Assignments: []ResourceGVICAssignmentInput{{Role: domain.GVICRoleVerifier, PrincipalType: EntityPermissionSubjectUser, PrincipalID: later.UserID}},
+		Assignments: []ResourceRACIAssignmentInput{{Role: domain.RACIRoleAccountable, PrincipalType: EntityPermissionSubjectUser, PrincipalID: later.UserID}},
 	})
 	if err != nil {
-		t.Fatalf("replace verifier after snapshot: %v", err)
+		t.Fatalf("replace accountable after snapshot: %v", err)
 	}
 	listed, err := repo.ListNodeTimelineEvents(companyID, node.NodeID)
 	if err != nil || len(listed) != 1 || len(listed[0].VerificationRecipients) != 2 {
@@ -62,7 +62,7 @@ func TestNodeVerificationRequestSnapshotsMultipleVerifierUsersAndCompletesPerPer
 	}
 	for _, recipient := range listed[0].VerificationRecipients {
 		if recipient.UserID == later.UserID {
-			t.Fatalf("later verifier leaked into historical snapshot: %+v", listed[0])
+			t.Fatalf("later accountable leaked into historical snapshot: %+v", listed[0])
 		}
 	}
 
@@ -95,7 +95,7 @@ func TestNodeTimelineRecordsOnlyCrossLogicGateTransfersWithSnapshots(t *testing.
 	repo := NewMemoryRepo()
 	companyID := "62626262-6262-4262-8262-626262626202"
 	repo.EnsureCompany(companyID, "Timeline Transfer Co")
-	actor := mustCreateGVICMembershipUser(t, repo, "timeline-transfer-actor", companyID)
+	actor := mustCreateRACIMembershipUser(t, repo, "timeline-transfer-actor", companyID)
 	source, err := repo.CreateLogicGate(companyID, "Intake")
 	if err != nil {
 		t.Fatalf("CreateLogicGate source: %v", err)
@@ -104,7 +104,7 @@ func TestNodeTimelineRecordsOnlyCrossLogicGateTransfersWithSnapshots(t *testing.
 	if err != nil {
 		t.Fatalf("CreateLogicGate target: %v", err)
 	}
-	node := mustCreateGVICMembershipNode(t, repo, companyID, "Transfer packet")
+	node := mustCreateRACIMembershipNode(t, repo, companyID, "Transfer packet")
 	priority := 3
 	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: source.LogicGateID, NodeID: node.NodeID, Status: LogicGateWorkStatusPending, Priority: &priority, PrioritySet: true, ActorUserID: actor.UserID}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
@@ -140,33 +140,33 @@ func TestNodeTimelineRecordsOnlyCrossLogicGateTransfersWithSnapshots(t *testing.
 	}
 }
 
-func TestVerifierRCVIAllowsManyUsersAndGroups(t *testing.T) {
+func TestAccountableRACIAllowsManyUsersAndGroups(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "62626262-6262-4262-8262-626262626203"
-	repo.EnsureCompany(companyID, "Verifier Rule Co")
-	first := mustCreateGVICMembershipUser(t, repo, "verifier-rule-first", companyID)
-	second := mustCreateGVICMembershipUser(t, repo, "verifier-rule-second", companyID)
-	group, err := repo.CreateCompanyUserGroup(companyID, "", "Verifier Team")
+	repo.EnsureCompany(companyID, "Accountable Rule Co")
+	first := mustCreateRACIMembershipUser(t, repo, "accountable-rule-first", companyID)
+	second := mustCreateRACIMembershipUser(t, repo, "accountable-rule-second", companyID)
+	group, err := repo.CreateCompanyUserGroup(companyID, "", "Accountable Team")
 	if err != nil {
 		t.Fatalf("CreateCompanyUserGroup: %v", err)
 	}
 	if _, err := repo.SetCompanyUserGroupMembers(companyID, group.GroupID, []string{first.UserID, second.UserID}); err != nil {
 		t.Fatalf("SetCompanyUserGroupMembers: %v", err)
 	}
-	node := mustCreateGVICMembershipNode(t, repo, companyID, "Verifier rule node")
-	result, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	node := mustCreateRACIMembershipNode(t, repo, companyID, "Accountable rule node")
+	result, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
-		Assignments: []ResourceGVICAssignmentInput{{Role: domain.GVICRoleVerifier, PrincipalType: EntityPermissionSubjectGroup, PrincipalID: group.GroupID}},
+		Assignments: []ResourceRACIAssignmentInput{{Role: domain.RACIRoleAccountable, PrincipalType: EntityPermissionSubjectGroup, PrincipalID: group.GroupID}},
 	})
 	if err != nil {
-		t.Fatalf("Verifier group assignment rejected: %v", err)
+		t.Fatalf("Accountable group assignment rejected: %v", err)
 	}
 	if len(result.EffectiveAssignments) != 2 {
-		t.Fatalf("Verifier effective assignments = %+v, want both group members", result.EffectiveAssignments)
+		t.Fatalf("Accountable effective assignments = %+v, want both group members", result.EffectiveAssignments)
 	}
 	for _, assignment := range result.EffectiveAssignments {
-		if assignment.Role != domain.GVICRoleVerifier || (assignment.UserID != first.UserID && assignment.UserID != second.UserID) {
-			t.Fatalf("unexpected Verifier effective assignment: %+v", assignment)
+		if assignment.Role != domain.RACIRoleAccountable || (assignment.UserID != first.UserID && assignment.UserID != second.UserID) {
+			t.Fatalf("unexpected Accountable effective assignment: %+v", assignment)
 		}
 	}
 }

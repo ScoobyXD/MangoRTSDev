@@ -202,40 +202,40 @@ func TestLogicGateCRUDRelationshipAndInformationAPI(t *testing.T) {
 	}
 }
 
-func TestLogicGateGVICAssignmentsAPIAndReadModel(t *testing.T) {
+func TestLogicGateRACIAssignmentsAPIAndReadModel(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
 	server := NewServer(repo)
-	companyID := "company-logic-gate-GVIC-test"
+	companyID := "company-logic-gate-RACI-test"
 	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
-	otherCompanyID := "company-logic-gate-GVIC-other"
-	repo.EnsureCompany(companyID, "GVIC Test Company")
+	otherCompanyID := "company-logic-gate-RACI-other"
+	repo.EnsureCompany(companyID, "RACI Test Company")
 	repo.EnsureCompany(otherCompanyID, "Other Company")
 
 	logicGate, err := repo.CreateLogicGate(companyID, "approval gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate() error = %v", err)
 	}
-	responsible, err := repo.UpsertAuthUser("GVIC-responsible", "responsible@example.com", "Responsible User")
+	responsible, err := repo.UpsertAuthUser("RACI-responsible", "responsible@example.com", "Responsible User")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser responsible error = %v", err)
 	}
-	if _, err := repo.AddCompanyMembership("GVIC-responsible", companyID, domain.RoleCompanyUser); err != nil {
+	if _, err := repo.AddCompanyMembership("RACI-responsible", companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership responsible error = %v", err)
 	}
-	accountable, err := repo.UpsertAuthUser("GVIC-accountable", "accountable@example.com", "Accountable User")
+	accountable, err := repo.UpsertAuthUser("RACI-accountable", "accountable@example.com", "Accountable User")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser accountable error = %v", err)
 	}
-	if _, err := repo.AddCompanyMembership("GVIC-accountable", companyID, domain.RoleCompanyUser); err != nil {
+	if _, err := repo.AddCompanyMembership("RACI-accountable", companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership accountable error = %v", err)
 	}
-	outsider, err := repo.UpsertAuthUser("GVIC-outsider", "outsider@example.com", "Outsider User")
+	outsider, err := repo.UpsertAuthUser("RACI-outsider", "outsider@example.com", "Outsider User")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser outsider error = %v", err)
 	}
-	if _, err := repo.AddCompanyMembership("GVIC-outsider", otherCompanyID, domain.RoleCompanyUser); err != nil {
+	if _, err := repo.AddCompanyMembership("RACI-outsider", otherCompanyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership outsider error = %v", err)
 	}
 
@@ -243,9 +243,9 @@ func TestLogicGateGVICAssignmentsAPIAndReadModel(t *testing.T) {
 		"company_id":      companyID,
 		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{
-			{"role": domain.GVICRoleResponsible, "principal_type": store.EntityPermissionSubjectUser, "principal_id": responsible.UserID},
-			{"role": domain.GVICRoleVerifier, "principal_type": store.EntityPermissionSubjectUser, "principal_id": accountable.UserID},
-			{"role": domain.GVICRoleVerifier, "principal_type": store.EntityPermissionSubjectUser, "principal_id": accountable.UserID},
+			{"role": domain.RACIRoleResponsible, "principal_type": store.EntityPermissionSubjectUser, "principal_id": responsible.UserID},
+			{"role": domain.RACIRoleAccountable, "principal_type": store.EntityPermissionSubjectUser, "principal_id": accountable.UserID},
+			{"role": domain.RACIRoleAccountable, "principal_type": store.EntityPermissionSubjectUser, "principal_id": accountable.UserID},
 		},
 	})
 	req := httptest.NewRequest(http.MethodPut, "/v1/resources/logic_gate/"+logicGate.LogicGateID+"/gvic", bytes.NewReader(body))
@@ -253,19 +253,19 @@ func TestLogicGateGVICAssignmentsAPIAndReadModel(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("PUT logic gate GVIC status = %d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("PUT logic gate RACI status = %d body=%s", rec.Code, rec.Body.String())
 	}
 	var payload struct {
-		Assignments []domain.ResourceGVICAssignment          `json:"gvic_assignments"`
-		Effective   []domain.ResourceGVICEffectiveAssignment `json:"effective_assignments"`
+		Assignments []domain.ResourceRACIAssignment          `json:"gvic_assignments"`
+		Effective   []domain.ResourceRACIEffectiveAssignment `json:"effective_assignments"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode GVIC payload: %v", err)
+		t.Fatalf("decode RACI payload: %v", err)
 	}
 	if len(payload.Assignments) != 2 {
 		t.Fatalf("assignment count = %d, want 2", len(payload.Assignments))
 	}
-	if payload.Assignments[0].Role != domain.GVICRoleResponsible ||
+	if payload.Assignments[0].Role != domain.RACIRoleResponsible ||
 		payload.Assignments[0].PrincipalType != store.EntityPermissionSubjectUser ||
 		payload.Assignments[0].PrincipalID != responsible.UserID ||
 		payload.Assignments[0].UserDisplayName != "Responsible User" {
@@ -279,22 +279,22 @@ func TestLogicGateGVICAssignmentsAPIAndReadModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetLogicGateDetails() error = %v", err)
 	}
-	if len(details.LogicGate.GVICAssignments) != 2 {
-		t.Fatalf("details GVIC assignments = %+v, want 2 assignments", details.LogicGate.GVICAssignments)
+	if len(details.LogicGate.RACIAssignments) != 2 {
+		t.Fatalf("details RACI assignments = %+v, want 2 assignments", details.LogicGate.RACIAssignments)
 	}
 	logicGates, err := repo.ListLogicGates(companyID)
 	if err != nil {
 		t.Fatalf("ListLogicGates() error = %v", err)
 	}
-	if len(logicGates) != 1 || len(logicGates[0].GVICAssignments) != 2 {
-		t.Fatalf("listed logic gates = %+v, want GVIC read model", logicGates)
+	if len(logicGates) != 1 || len(logicGates[0].RACIAssignments) != 2 {
+		t.Fatalf("listed logic gates = %+v, want RACI read model", logicGates)
 	}
 	assigned, err := repo.QueryLogicGates(companyID, store.LogicGateQuery{AssignedUserID: accountable.UserID})
 	if err != nil {
 		t.Fatalf("QueryLogicGates assigned error = %v", err)
 	}
-	if len(assigned) != 1 || assigned[0].LogicGateID != logicGate.LogicGateID || len(assigned[0].GVICAssignments) != 2 {
-		t.Fatalf("assigned logic gates = %+v, want gate with GVIC read model", assigned)
+	if len(assigned) != 1 || assigned[0].LogicGateID != logicGate.LogicGateID || len(assigned[0].RACIAssignments) != 2 {
+		t.Fatalf("assigned logic gates = %+v, want gate with RACI read model", assigned)
 	}
 	searchReq := httptest.NewRequest(http.MethodGet, "/v1/logic-gates?company_id="+companyID+"&q=approval&limit=5", nil)
 	searchRec := httptest.NewRecorder()
@@ -316,7 +316,7 @@ func TestLogicGateGVICAssignmentsAPIAndReadModel(t *testing.T) {
 		"company_id":      companyID,
 		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{
-			{"role": domain.GVICRoleConsulted, "principal_type": store.EntityPermissionSubjectUser, "principal_id": outsider.UserID},
+			{"role": domain.RACIRoleConsulted, "principal_type": store.EntityPermissionSubjectUser, "principal_id": outsider.UserID},
 		},
 	})
 	outsiderReq := httptest.NewRequest(http.MethodPut, "/v1/resources/logic_gate/"+logicGate.LogicGateID+"/gvic", bytes.NewReader(outsiderBody))
@@ -324,7 +324,7 @@ func TestLogicGateGVICAssignmentsAPIAndReadModel(t *testing.T) {
 	outsiderRec := httptest.NewRecorder()
 	handler.ServeHTTP(outsiderRec, outsiderReq)
 	if outsiderRec.Code != http.StatusBadRequest || !strings.Contains(outsiderRec.Body.String(), "policy_principal_not_in_company") {
-		t.Fatalf("PUT outsider GVIC status = %d body=%s, want policy_principal_not_in_company", outsiderRec.Code, outsiderRec.Body.String())
+		t.Fatalf("PUT outsider RACI status = %d body=%s, want policy_principal_not_in_company", outsiderRec.Code, outsiderRec.Body.String())
 	}
 
 	legacyRoleBody, _ := json.Marshal(map[string]any{
@@ -339,7 +339,7 @@ func TestLogicGateGVICAssignmentsAPIAndReadModel(t *testing.T) {
 	legacyRoleRec := httptest.NewRecorder()
 	handler.ServeHTTP(legacyRoleRec, legacyRoleReq)
 	if legacyRoleRec.Code != http.StatusBadRequest || !strings.Contains(legacyRoleRec.Body.String(), "invalid_policy") {
-		t.Fatalf("PUT legacy role GVIC status = %d body=%s, want invalid_policy", legacyRoleRec.Code, legacyRoleRec.Body.String())
+		t.Fatalf("PUT legacy role RACI status = %d body=%s, want invalid_policy", legacyRoleRec.Code, legacyRoleRec.Body.String())
 	}
 }
 
@@ -714,23 +714,23 @@ func TestCreateNodeAssignsCreator(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
 		t.Fatalf("decode created node: %v", err)
 	}
-	configured, err := repo.ListResourceGVICAssignments(companyID, store.EntityTypeNode, created.NodeID)
+	configured, err := repo.ListResourceRACIAssignments(companyID, store.EntityTypeNode, created.NodeID)
 	if err != nil {
-		t.Fatalf("ListResourceGVICAssignments() error = %v", err)
+		t.Fatalf("ListResourceRACIAssignments() error = %v", err)
 	}
 	if len(configured) != 0 {
-		t.Fatalf("configured node GVIC = %+v, want no implicit creator source rows", configured)
+		t.Fatalf("configured node RACI = %+v, want no implicit creator source rows", configured)
 	}
-	effective, err := repo.ListResourceGVICEffectiveAssignments(companyID, store.EntityTypeNode, created.NodeID)
+	effective, err := repo.ListResourceRACIEffectiveAssignments(companyID, store.EntityTypeNode, created.NodeID)
 	if err != nil {
-		t.Fatalf("ListResourceGVICEffectiveAssignments() error = %v", err)
+		t.Fatalf("ListResourceRACIEffectiveAssignments() error = %v", err)
 	}
 	if len(effective) != 0 {
-		t.Fatalf("effective node GVIC = %+v, want no implicit creator rows", effective)
+		t.Fatalf("effective node RACI = %+v, want no implicit creator rows", effective)
 	}
 }
 
-func TestUpdateNodeGVICResponsibleRequiresCompanyMembership(t *testing.T) {
+func TestUpdateNodeRACIResponsibleRequiresCompanyMembership(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -763,7 +763,7 @@ func TestUpdateNodeGVICResponsibleRequiresCompanyMembership(t *testing.T) {
 		"company_id":      companyID,
 		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{{
-			"role":           domain.GVICRoleResponsible,
+			"role":           domain.RACIRoleResponsible,
 			"principal_type": store.EntityPermissionSubjectUser,
 			"principal_id":   assignee.UserID,
 		}},
@@ -773,28 +773,28 @@ func TestUpdateNodeGVICResponsibleRequiresCompanyMembership(t *testing.T) {
 	assignRec := httptest.NewRecorder()
 	handler.ServeHTTP(assignRec, assignReq)
 	if assignRec.Code != http.StatusOK {
-		t.Fatalf("PUT node GVIC status = %d body=%s", assignRec.Code, assignRec.Body.String())
+		t.Fatalf("PUT node RACI status = %d body=%s", assignRec.Code, assignRec.Body.String())
 	}
 	var assigned struct {
-		GVICAssignments []domain.ResourceGVICAssignment          `json:"gvic_assignments"`
-		Effective       []domain.ResourceGVICEffectiveAssignment `json:"effective_assignments"`
+		RACIAssignments []domain.ResourceRACIAssignment          `json:"gvic_assignments"`
+		Effective       []domain.ResourceRACIEffectiveAssignment `json:"effective_assignments"`
 	}
 	if err := json.NewDecoder(assignRec.Body).Decode(&assigned); err != nil {
-		t.Fatalf("decode assigned GVIC: %v", err)
+		t.Fatalf("decode assigned RACI: %v", err)
 	}
-	if len(assigned.GVICAssignments) != 1 ||
-		assigned.GVICAssignments[0].Role != domain.GVICRoleResponsible ||
-		assigned.GVICAssignments[0].PrincipalID != assignee.UserID ||
+	if len(assigned.RACIAssignments) != 1 ||
+		assigned.RACIAssignments[0].Role != domain.RACIRoleResponsible ||
+		assigned.RACIAssignments[0].PrincipalID != assignee.UserID ||
 		len(assigned.Effective) != 1 ||
 		assigned.Effective[0].UserID != assignee.UserID {
-		t.Fatalf("assigned GVIC = %+v effective=%+v, want responsible assignee", assigned.GVICAssignments, assigned.Effective)
+		t.Fatalf("assigned RACI = %+v effective=%+v, want responsible assignee", assigned.RACIAssignments, assigned.Effective)
 	}
 
 	outsiderBody, _ := json.Marshal(map[string]any{
 		"company_id":      companyID,
 		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{{
-			"role":           domain.GVICRoleResponsible,
+			"role":           domain.RACIRoleResponsible,
 			"principal_type": store.EntityPermissionSubjectUser,
 			"principal_id":   outsider.UserID,
 		}},
@@ -804,7 +804,7 @@ func TestUpdateNodeGVICResponsibleRequiresCompanyMembership(t *testing.T) {
 	outsiderRec := httptest.NewRecorder()
 	handler.ServeHTTP(outsiderRec, outsiderReq)
 	if outsiderRec.Code != http.StatusBadRequest || !strings.Contains(outsiderRec.Body.String(), "policy_principal_not_in_company") {
-		t.Fatalf("PUT outsider GVIC status = %d body=%s, want policy_principal_not_in_company", outsiderRec.Code, outsiderRec.Body.String())
+		t.Fatalf("PUT outsider RACI status = %d body=%s, want policy_principal_not_in_company", outsiderRec.Code, outsiderRec.Body.String())
 	}
 
 	clearBody, _ := json.Marshal(map[string]any{
@@ -817,17 +817,17 @@ func TestUpdateNodeGVICResponsibleRequiresCompanyMembership(t *testing.T) {
 	clearRec := httptest.NewRecorder()
 	handler.ServeHTTP(clearRec, clearReq)
 	if clearRec.Code != http.StatusOK {
-		t.Fatalf("PUT clear GVIC status = %d body=%s", clearRec.Code, clearRec.Body.String())
+		t.Fatalf("PUT clear RACI status = %d body=%s", clearRec.Code, clearRec.Body.String())
 	}
 	var cleared struct {
-		GVICAssignments []domain.ResourceGVICAssignment          `json:"gvic_assignments"`
-		Effective       []domain.ResourceGVICEffectiveAssignment `json:"effective_assignments"`
+		RACIAssignments []domain.ResourceRACIAssignment          `json:"gvic_assignments"`
+		Effective       []domain.ResourceRACIEffectiveAssignment `json:"effective_assignments"`
 	}
 	if err := json.NewDecoder(clearRec.Body).Decode(&cleared); err != nil {
-		t.Fatalf("decode cleared GVIC: %v", err)
+		t.Fatalf("decode cleared RACI: %v", err)
 	}
-	if len(cleared.GVICAssignments) != 0 || len(cleared.Effective) != 0 {
-		t.Fatalf("cleared GVIC = %+v effective=%+v, want none", cleared.GVICAssignments, cleared.Effective)
+	if len(cleared.RACIAssignments) != 0 || len(cleared.Effective) != 0 {
+		t.Fatalf("cleared RACI = %+v effective=%+v, want none", cleared.RACIAssignments, cleared.Effective)
 	}
 }
 
@@ -1589,15 +1589,15 @@ func TestWorkspaceEntityBatchAssignsCreatedNodesToCreator(t *testing.T) {
 	if payload.Relationships[0].NodeIDA != source.NodeID || payload.Relationships[0].NodeIDB != created.NodeID {
 		t.Fatalf("batch relationship = %+v, want source parent to created child %s", payload.Relationships[0], created.NodeID)
 	}
-	configured, err := repo.ListResourceGVICAssignments(companyID, store.EntityTypeNode, created.NodeID)
+	configured, err := repo.ListResourceRACIAssignments(companyID, store.EntityTypeNode, created.NodeID)
 	if err != nil {
-		t.Fatalf("ListResourceGVICAssignments() error = %v", err)
+		t.Fatalf("ListResourceRACIAssignments() error = %v", err)
 	}
 	if len(configured) != 1 ||
-		configured[0].Role != domain.GVICRoleResponsible ||
+		configured[0].Role != domain.RACIRoleResponsible ||
 		configured[0].PrincipalType != store.EntityPermissionSubjectUser ||
 		configured[0].PrincipalID != creator.UserID {
-		t.Fatalf("configured batch node GVIC = %+v, want creator responsible source row", configured)
+		t.Fatalf("configured batch node RACI = %+v, want creator responsible source row", configured)
 	}
 }
 
@@ -1697,18 +1697,18 @@ func TestWorkspaceEntityBatchCreatesLogicGateWithFolderAndExistingRelationship(t
 	}
 }
 
-func TestWorkspaceEntityBatchAssignsCreatedLogicGateGVICToCreator(t *testing.T) {
+func TestWorkspaceEntityBatchAssignsCreatedLogicGateRACIToCreator(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
 	server := NewServer(repo)
-	companyID := "company-batch-logic-GVIC-test"
-	repo.EnsureCompany(companyID, "Batch Logic GVIC Company")
-	creator, err := repo.UpsertAuthUser("batch-GVIC-creator", "GVIC-creator@example.com", "GVIC Creator")
+	companyID := "company-batch-logic-RACI-test"
+	repo.EnsureCompany(companyID, "Batch Logic RACI Company")
+	creator, err := repo.UpsertAuthUser("batch-RACI-creator", "RACI-creator@example.com", "RACI Creator")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser creator error = %v", err)
 	}
-	if _, err := repo.AddCompanyMembership("batch-GVIC-creator", companyID, "company_user"); err != nil {
+	if _, err := repo.AddCompanyMembership("batch-RACI-creator", companyID, "company_user"); err != nil {
 		t.Fatalf("AddCompanyMembership creator error = %v", err)
 	}
 
@@ -1743,19 +1743,19 @@ func TestWorkspaceEntityBatchAssignsCreatedLogicGateGVICToCreator(t *testing.T) 
 	if len(payload.FolderItems) != 0 {
 		t.Fatalf("logic gate folder items = %+v, want none without explicit folder", payload.FolderItems)
 	}
-	assignments := payload.LogicGates[0].GVICAssignments
-	if len(assignments) != 1 || assignments[0].Role != domain.GVICRoleResponsible || assignments[0].UserID != creator.UserID {
-		t.Fatalf("response GVIC assignments = %+v, want responsible creator", assignments)
+	assignments := payload.LogicGates[0].RACIAssignments
+	if len(assignments) != 1 || assignments[0].Role != domain.RACIRoleResponsible || assignments[0].UserID != creator.UserID {
+		t.Fatalf("response RACI assignments = %+v, want responsible creator", assignments)
 	}
-	if assignments[0].UserDisplayName != "GVIC Creator" || assignments[0].UserEmail != "gvic-creator@example.com" {
-		t.Fatalf("response GVIC user read model = %+v, want creator display fields", assignments[0])
+	if assignments[0].UserDisplayName != "RACI Creator" || assignments[0].UserEmail != "raci-creator@example.com" {
+		t.Fatalf("response RACI user read model = %+v, want creator display fields", assignments[0])
 	}
 	stored, err := repo.GetLogicGate(companyID, payload.LogicGates[0].LogicGateID)
 	if err != nil {
 		t.Fatalf("GetLogicGate error = %v", err)
 	}
-	if len(stored.GVICAssignments) != 1 || stored.GVICAssignments[0].Role != domain.GVICRoleResponsible || stored.GVICAssignments[0].UserID != creator.UserID {
-		t.Fatalf("stored GVIC assignments = %+v, want responsible creator only", stored.GVICAssignments)
+	if len(stored.RACIAssignments) != 1 || stored.RACIAssignments[0].Role != domain.RACIRoleResponsible || stored.RACIAssignments[0].UserID != creator.UserID {
+		t.Fatalf("stored RACI assignments = %+v, want responsible creator only", stored.RACIAssignments)
 	}
 }
 

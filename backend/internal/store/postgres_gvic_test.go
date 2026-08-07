@@ -30,7 +30,7 @@ func TestPostgresGroupMembershipWritesDoNotFanOutPolicyState(t *testing.T) {
 	}
 }
 
-func TestPostgresV2GVICExpandsNestedGroupsOnlyAtReadTime(t *testing.T) {
+func TestPostgresV2RACIExpandsNestedGroupsOnlyAtReadTime(t *testing.T) {
 	raw, err := os.ReadFile("../../db/migrations/20260805_zzzc_v2_gvic_permissions_step2_cutover.sql")
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func TestPostgresV2GVICExpandsNestedGroupsOnlyAtReadTime(t *testing.T) {
 	}
 }
 
-func TestPostgresGVICRuntimeHasNoGroupRepairOrEffectiveProjection(t *testing.T) {
+func TestPostgresRACIRuntimeHasNoGroupRepairOrEffectiveProjection(t *testing.T) {
 	raw, err := os.ReadFile("postgres_gvic.go")
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +71,7 @@ func TestPostgresGVICRuntimeHasNoGroupRepairOrEffectiveProjection(t *testing.T) 
 		"gvic_matrix_projection",
 	} {
 		if strings.Contains(source, forbidden) {
-			t.Fatalf("V2 GVIC runtime retained Step 1 path %q", forbidden)
+			t.Fatalf("V2 RACI runtime retained Step 1 path %q", forbidden)
 		}
 	}
 }

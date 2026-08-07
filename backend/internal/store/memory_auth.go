@@ -526,8 +526,8 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 	entityPermissionsSnapshot := cloneMemoryMap(r.entityPermissions)
 	nodesSnapshot := cloneMemoryMap(r.nodes)
 	nodeLogicGateAssignmentsSnapshot := cloneMemoryMap(r.nodeLogicGateAssignments)
-	logicGateGVICSnapshot := cloneMemorySliceMap(r.logicGateGVIC)
-	sharedInboxGVICSnapshot := cloneMemorySliceMap(r.sharedInboxGVIC)
+	logicGateRACISnapshot := cloneMemorySliceMap(r.logicGateRACI)
+	sharedInboxRACISnapshot := cloneMemorySliceMap(r.sharedInboxRACI)
 	usersSnapshot := cloneMemoryMap(r.users)
 	invitationsSnapshot := cloneMemoryMap(r.invitations)
 	folderSharesSnapshot := cloneMemoryMap(r.folderShares)
@@ -539,8 +539,8 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 		r.entityPermissions = entityPermissionsSnapshot
 		r.nodes = nodesSnapshot
 		r.nodeLogicGateAssignments = nodeLogicGateAssignmentsSnapshot
-		r.logicGateGVIC = logicGateGVICSnapshot
-		r.sharedInboxGVIC = sharedInboxGVICSnapshot
+		r.logicGateRACI = logicGateRACISnapshot
+		r.sharedInboxRACI = sharedInboxRACISnapshot
 		r.users = usersSnapshot
 		r.invitations = invitationsSnapshot
 		r.folderShares = folderSharesSnapshot
@@ -570,7 +570,7 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 			delete(r.entityPermissions, permissionKey)
 		}
 	}
-	for gateKey, assignments := range r.logicGateGVIC {
+	for gateKey, assignments := range r.logicGateRACI {
 		filtered := assignments[:0]
 		for _, assignment := range assignments {
 			if assignment.CompanyID == companyID && assignment.UserID == userID {
@@ -579,12 +579,12 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 			filtered = append(filtered, assignment)
 		}
 		if len(filtered) == 0 {
-			delete(r.logicGateGVIC, gateKey)
+			delete(r.logicGateRACI, gateKey)
 		} else {
-			r.logicGateGVIC[gateKey] = filtered
+			r.logicGateRACI[gateKey] = filtered
 		}
 	}
-	for GVICKey, assignments := range r.sharedInboxGVIC {
+	for RACIKey, assignments := range r.sharedInboxRACI {
 		filtered := assignments[:0]
 		for _, assignment := range assignments {
 			principalType := strings.TrimSpace(assignment.PrincipalType)
@@ -599,9 +599,9 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 			filtered = append(filtered, assignment)
 		}
 		if len(filtered) == 0 {
-			delete(r.sharedInboxGVIC, GVICKey)
+			delete(r.sharedInboxRACI, RACIKey)
 		} else {
-			r.sharedInboxGVIC[GVICKey] = filtered
+			r.sharedInboxRACI[RACIKey] = filtered
 		}
 	}
 
@@ -610,9 +610,9 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 		return DeleteCompanyUserResult{}, r.effectiveAccessErr
 	}
 
-	for rowKey, row := range r.GVICMatrixProjectionRows {
+	for rowKey, row := range r.RACIMatrixProjectionRows {
 		if row.CompanyID == companyID && row.UserID == userID {
-			delete(r.GVICMatrixProjectionRows, rowKey)
+			delete(r.RACIMatrixProjectionRows, rowKey)
 		}
 	}
 	hasRemainingMembership := false
@@ -658,7 +658,7 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 			delete(r.emailConnections, key)
 		}
 	}
-	for gateKey, assignments := range r.logicGateGVIC {
+	for gateKey, assignments := range r.logicGateRACI {
 		filtered := assignments[:0]
 		for _, assignment := range assignments {
 			if assignment.UserID == userID {
@@ -667,12 +667,12 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 			filtered = append(filtered, assignment)
 		}
 		if len(filtered) == 0 {
-			delete(r.logicGateGVIC, gateKey)
+			delete(r.logicGateRACI, gateKey)
 		} else {
-			r.logicGateGVIC[gateKey] = filtered
+			r.logicGateRACI[gateKey] = filtered
 		}
 	}
-	for GVICKey, assignments := range r.sharedInboxGVIC {
+	for RACIKey, assignments := range r.sharedInboxRACI {
 		filtered := assignments[:0]
 		for _, assignment := range assignments {
 			principalType := strings.TrimSpace(assignment.PrincipalType)
@@ -687,9 +687,9 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 			filtered = append(filtered, assignment)
 		}
 		if len(filtered) == 0 {
-			delete(r.sharedInboxGVIC, GVICKey)
+			delete(r.sharedInboxRACI, RACIKey)
 		} else {
-			r.sharedInboxGVIC[GVICKey] = filtered
+			r.sharedInboxRACI[RACIKey] = filtered
 		}
 	}
 	if r.effectiveAccessErr != nil {
@@ -701,9 +701,9 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 			delete(r.effectiveAccess, accessKey)
 		}
 	}
-	for rowKey, row := range r.GVICMatrixProjectionRows {
+	for rowKey, row := range r.RACIMatrixProjectionRows {
 		if row.UserID == userID {
-			delete(r.GVICMatrixProjectionRows, rowKey)
+			delete(r.RACIMatrixProjectionRows, rowKey)
 		}
 	}
 	delete(r.users, user.CognitoSubject)

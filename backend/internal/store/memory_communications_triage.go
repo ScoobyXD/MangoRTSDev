@@ -51,8 +51,8 @@ type memoryCommunicationsTriageConversionSnapshot struct {
 	realtimeOutbox                 map[string]RealtimeOutboxEvent
 	realtimeOutboxSequence         int64
 	workspaceReadVersions          map[string]int64
-	gvicAssignments                map[string]domain.ResourceGVICAssignment
-	gvicEffectiveAssignments       map[string]domain.ResourceGVICEffectiveAssignment
+	gvicAssignments                map[string]domain.ResourceRACIAssignment
+	gvicEffectiveAssignments       map[string]domain.ResourceRACIEffectiveAssignment
 	gvicPolicyRevisions            map[string]int64
 	resourcePermissionRevisions    map[string]int64
 	resourcePolicySequence         int64
@@ -243,7 +243,7 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 	now := time.Now().UTC()
 	result := CommunicationsTriageConversionResult{
 		Target:           input.Target,
-		LogicGate:        r.withLogicGateGVICLocked(logicGate),
+		LogicGate:        r.withLogicGateRACILocked(logicGate),
 		CreatedLogicGate: createdLogicGate,
 		Board:            board,
 	}
@@ -299,7 +299,7 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 			UpdatedTimestamp:     now,
 		})
 		r.syncNodeStatusFromKanbanCardLocked(card)
-		r.syncGVICMatrixProjectionForNodeLocked(input.CompanyID, nodeID)
+		r.syncRACIMatrixProjectionForNodeLocked(input.CompanyID, nodeID)
 		link := communicationsEmailNodeLink{
 			CompanyID:        input.CompanyID,
 			UserID:           input.UserID,
@@ -499,7 +499,7 @@ func (r *MemoryRepo) upsertCommunicationsTriageProjectRelationshipLocked(input C
 	if err != nil {
 		return nil, err
 	}
-	r.syncGVICMatrixProjectionForProjectResourcesLocked(input.CompanyID, []string{nodeID}, []string{input.LogicGateID})
+	r.syncRACIMatrixProjectionForProjectResourcesLocked(input.CompanyID, []string{nodeID}, []string{input.LogicGateID})
 	return []domain.ProjectRelationshipProjection{gateProjection, nodeProjection}, nil
 }
 func (r *MemoryRepo) attachCommunicationsTriageItemsToExistingNodeLocked(input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error) {
@@ -541,7 +541,7 @@ func (r *MemoryRepo) attachCommunicationsTriageItemsToExistingNodeLocked(input C
 	now := time.Now().UTC()
 	result := CommunicationsTriageConversionResult{
 		Target:    input.Target,
-		LogicGate: r.withLogicGateGVICLocked(logicGate),
+		LogicGate: r.withLogicGateRACILocked(logicGate),
 		Board:     board,
 	}
 	result.Target.Header = logicGate.Header

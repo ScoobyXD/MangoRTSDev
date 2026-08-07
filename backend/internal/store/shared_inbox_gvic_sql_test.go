@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestPostgresSharedInboxGVICUsesGenericResourceTable(t *testing.T) {
+func TestPostgresSharedInboxRACIUsesGenericResourceTable(t *testing.T) {
 	raw, err := os.ReadFile("postgres_shared_inbox_gvic.go")
 	if err != nil {
 		t.Fatalf("ReadFile postgres_shared_inbox_gvic.go: %v", err)
@@ -20,7 +20,7 @@ func TestPostgresSharedInboxGVICUsesGenericResourceTable(t *testing.T) {
 		"EntityTypeSharedInbox",
 	} {
 		if !strings.Contains(source, needle) {
-			t.Fatalf("shared inbox GVIC source missing %q", needle)
+			t.Fatalf("shared inbox RACI source missing %q", needle)
 		}
 	}
 	for _, forbidden := range []string{
@@ -30,15 +30,15 @@ func TestPostgresSharedInboxGVICUsesGenericResourceTable(t *testing.T) {
 		"shared_inbox_gvic_group_assignments",
 	} {
 		if strings.Contains(source, forbidden) {
-			t.Fatalf("shared inbox GVIC source should not use %q", forbidden)
+			t.Fatalf("shared inbox RACI source should not use %q", forbidden)
 		}
 	}
 	for _, needle := range []string{
-		"CommunicationsSharedInboxGVICResourceType",
-		"GetResourceGVICPolicy",
+		"CommunicationsSharedInboxRACIResourceType",
+		"GetResourceRACIPolicy",
 	} {
 		if !strings.Contains(source, needle) {
-			t.Fatalf("shared inbox GVIC attachment source missing %q", needle)
+			t.Fatalf("shared inbox RACI attachment source missing %q", needle)
 		}
 	}
 }

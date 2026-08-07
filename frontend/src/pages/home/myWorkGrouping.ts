@@ -1,5 +1,5 @@
 import type { Account } from "../../modules/accounts/accountsApi.js";
-import type { LogicGateGVICRole } from "../../modules/logic-gates/types.js";
+import type { LogicGateRACIRole } from "../../modules/logic-gates/types.js";
 import { buildUniversalNestedGroups, computeUniversalDefaultExpandedGroupIDs, type UniversalGroupValue, type UniversalNestedGroup } from "../../modules/grouping/universalGrouping.js";
 import { getUniversalStatusGroupValue } from "../../modules/grouping/universalStatusGrouping.js";
 
@@ -71,8 +71,8 @@ export type MyWorkResourceRow = {
   projectLabels?: string[];
   people: MyWorkPerson[];
   teams: MyWorkTeam[];
-  gvicRoles: LogicGateGVICRole[];
-  primaryGVICRole?: LogicGateGVICRole;
+  gvicRoles: LogicGateRACIRole[];
+  primaryRACIRole?: LogicGateRACIRole;
   participantUserIDs: string[];
   projectID?: string;
   projectName?: string;
@@ -342,9 +342,9 @@ export function priorityLabel(priority: number): string {
   return "No priority";
 }
 
-export function GVICRoleLabel(role: LogicGateGVICRole): string {
+export function RACIRoleLabel(role: LogicGateRACIRole): string {
   if (role === "responsible") return "Responsible";
-  if (role === "verifier") return "Verifier";
+  if (role === "accountable") return "Accountable";
   if (role === "consulted") return "Consulted";
   return "Informed";
 }

@@ -76,7 +76,7 @@ func (r *MemoryRepo) CreateNodeVerificationRequest(input NodeVerificationRequest
 	now := time.Now().UTC()
 	for _, assignment := range r.gvicEffectiveAssignmentsForResourceLocked(input.CompanyID, EntityTypeNode, input.NodeID) {
 		userID := strings.TrimSpace(assignment.UserID)
-		if assignment.Role != domain.GVICRoleVerifier || userID == "" {
+		if assignment.Role != domain.RACIRoleAccountable || userID == "" {
 			continue
 		}
 		displayName := strings.TrimSpace(assignment.UserDisplayName)

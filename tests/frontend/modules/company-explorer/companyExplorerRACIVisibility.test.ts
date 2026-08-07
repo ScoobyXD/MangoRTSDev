@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import {
-  shouldIncludeGVICCustomRootFolder,
-  shouldShowGVICCompanyScopedFolderShell,
-} from "../../../../frontend/src/modules/company-explorer/companyExplorerGVICVisibility.js";
+  shouldIncludeRACICustomRootFolder,
+  shouldShowRACICompanyScopedFolderShell,
+} from "../../../../frontend/src/modules/company-explorer/companyExplorerRACIVisibility.js";
 
 function run(name: string, fn: () => void): void {
   try {
@@ -15,7 +15,7 @@ function run(name: string, fn: () => void): void {
 }
 
 run("includes company-scoped custom roots before lazy child items are loaded", () => {
-  assert.equal(shouldIncludeGVICCustomRootFolder({
+  assert.equal(shouldIncludeRACICustomRootFolder({
     rootScopeType: "company",
     rootScopeID: null,
     ownerUserIDs: [],
@@ -24,13 +24,13 @@ run("includes company-scoped custom roots before lazy child items are loaded", (
 });
 
 run("keeps user-scoped custom roots tied to the matching user", () => {
-  assert.equal(shouldIncludeGVICCustomRootFolder({
+  assert.equal(shouldIncludeRACICustomRootFolder({
     rootScopeType: "user",
     rootScopeID: "user-a",
     ownerUserIDs: [],
     requestedOwnerUserIDs: ["user-a"],
   }), true);
-  assert.equal(shouldIncludeGVICCustomRootFolder({
+  assert.equal(shouldIncludeRACICustomRootFolder({
     rootScopeType: "user",
     rootScopeID: "user-b",
     ownerUserIDs: [],
@@ -39,13 +39,13 @@ run("keeps user-scoped custom roots tied to the matching user", () => {
 });
 
 run("uses loaded owner ids when custom root child items are available", () => {
-  assert.equal(shouldIncludeGVICCustomRootFolder({
+  assert.equal(shouldIncludeRACICustomRootFolder({
     rootScopeType: "company",
     rootScopeID: null,
     ownerUserIDs: ["user-a"],
     requestedOwnerUserIDs: ["user-a"],
   }), true);
-  assert.equal(shouldIncludeGVICCustomRootFolder({
+  assert.equal(shouldIncludeRACICustomRootFolder({
     rootScopeType: "company",
     rootScopeID: null,
     ownerUserIDs: ["user-b"],
@@ -53,9 +53,9 @@ run("uses loaded owner ids when custom root child items are available", () => {
   }), false);
 });
 
-run("shows company-scoped GVIC child folder shells before their branches are loaded", () => {
-  assert.equal(shouldShowGVICCompanyScopedFolderShell("company"), true);
-  assert.equal(shouldShowGVICCompanyScopedFolderShell(undefined), true);
-  assert.equal(shouldShowGVICCompanyScopedFolderShell("user"), false);
-  assert.equal(shouldShowGVICCompanyScopedFolderShell("team"), false);
+run("shows company-scoped RACI child folder shells before their branches are loaded", () => {
+  assert.equal(shouldShowRACICompanyScopedFolderShell("company"), true);
+  assert.equal(shouldShowRACICompanyScopedFolderShell(undefined), true);
+  assert.equal(shouldShowRACICompanyScopedFolderShell("user"), false);
+  assert.equal(shouldShowRACICompanyScopedFolderShell("team"), false);
 });

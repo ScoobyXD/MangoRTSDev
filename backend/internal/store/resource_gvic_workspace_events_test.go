@@ -6,33 +6,33 @@ import (
 	"testing"
 )
 
-func TestResourceGVICUpdatedWorkspaceEventTargetsOnlyNewOrChangedAssignments(t *testing.T) {
-	before := []domain.ResourceGVICEffectiveAssignment{
-		{UserID: "alice", Role: domain.GVICRoleConsulted},
-		{UserID: "removed", Role: domain.GVICRoleInformed},
+func TestResourceRACIUpdatedWorkspaceEventTargetsOnlyNewOrChangedAssignments(t *testing.T) {
+	before := []domain.ResourceRACIEffectiveAssignment{
+		{UserID: "alice", Role: domain.RACIRoleConsulted},
+		{UserID: "removed", Role: domain.RACIRoleInformed},
 	}
-	after := []domain.ResourceGVICEffectiveAssignment{
-		{UserID: "alice", Role: domain.GVICRoleConsulted},
-		{UserID: "bob", Role: domain.GVICRoleResponsible},
+	after := []domain.ResourceRACIEffectiveAssignment{
+		{UserID: "alice", Role: domain.RACIRoleConsulted},
+		{UserID: "bob", Role: domain.RACIRoleResponsible},
 	}
-	if got := resourceGVICChangedUserIDs(before, after); !reflect.DeepEqual(got, []string{"bob"}) {
+	if got := resourceRACIChangedUserIDs(before, after); !reflect.DeepEqual(got, []string{"bob"}) {
 		t.Fatalf("changed users = %v, want only newly assigned Bob", got)
 	}
 
-	result := ResourceGVICAssignmentMutationResult{
+	result := ResourceRACIAssignmentMutationResult{
 		CompanyID:            "company-1",
 		ResourceType:         EntityTypeNode,
 		ResourceID:           "node-1",
-		Operation:            GVICAssignmentCommandSet,
+		Operation:            RACIAssignmentCommandSet,
 		Changed:              true,
 		EffectiveAssignments: after,
 	}
-	event, ok := resourceGVICUpdatedWorkspaceEventInput(result, before, "actor-1", "node-gvic-1")
+	event, ok := resourceRACIUpdatedWorkspaceEventInput(result, before, "actor-1", "node-gvic-1")
 	if !ok {
-		t.Fatal("expected targeted Node GVIC event")
+		t.Fatal("expected targeted Node RACI event")
 	}
-	if event.Type != NodeGVICUpdatedEventType || event.Payload["node_id"] != "node-1" {
-		t.Fatalf("event = %+v, want Node GVIC update", event)
+	if event.Type != NodeRACIUpdatedEventType || event.Payload["node_id"] != "node-1" {
+		t.Fatalf("event = %+v, want Node RACI update", event)
 	}
 	got, _ := event.Payload["assignment_user_ids"].([]string)
 	if !reflect.DeepEqual(got, []string{"bob"}) {
@@ -40,23 +40,23 @@ func TestResourceGVICUpdatedWorkspaceEventTargetsOnlyNewOrChangedAssignments(t *
 	}
 }
 
-func TestResourceGVICUpdatedWorkspaceEventSkipsUnchangedAndRemovedUsers(t *testing.T) {
-	before := []domain.ResourceGVICEffectiveAssignment{
-		{UserID: "alice", Role: domain.GVICRoleVerifier},
-		{UserID: "removed", Role: domain.GVICRoleInformed},
+func TestResourceRACIUpdatedWorkspaceEventSkipsUnchangedAndRemovedUsers(t *testing.T) {
+	before := []domain.ResourceRACIEffectiveAssignment{
+		{UserID: "alice", Role: domain.RACIRoleAccountable},
+		{UserID: "removed", Role: domain.RACIRoleInformed},
 	}
-	after := []domain.ResourceGVICEffectiveAssignment{
-		{UserID: "alice", Role: domain.GVICRoleVerifier},
+	after := []domain.ResourceRACIEffectiveAssignment{
+		{UserID: "alice", Role: domain.RACIRoleAccountable},
 	}
-	result := ResourceGVICAssignmentMutationResult{
+	result := ResourceRACIAssignmentMutationResult{
 		CompanyID:            "company-1",
 		ResourceType:         EntityTypeLogicGate,
 		ResourceID:           "logic-gate-1",
-		Operation:            GVICAssignmentCommandSet,
+		Operation:            RACIAssignmentCommandSet,
 		Changed:              true,
 		EffectiveAssignments: after,
 	}
-	if event, ok := resourceGVICUpdatedWorkspaceEventInput(result, before, "actor-1", "logic-gate-gvic-1"); ok {
+	if event, ok := resourceRACIUpdatedWorkspaceEventInput(result, before, "actor-1", "logic-gate-gvic-1"); ok {
 		t.Fatalf("unexpected assignment event for unchanged/removed users: %+v", event)
 	}
 }

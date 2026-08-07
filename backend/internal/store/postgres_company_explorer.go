@@ -1729,7 +1729,7 @@ order by created_timestamp asc`, companyID)
 	if err != nil {
 		return nil, err
 	}
-	return r.attachLogicGateGVICAssignments(context.Background(), companyID, items)
+	return r.attachLogicGateRACIAssignments(context.Background(), companyID, items)
 }
 
 func (r *PostgresRepo) ListVisibleCompanyExplorerLogicGateSummaries(companyID, userID string) ([]domain.LogicGate, error) {
@@ -1751,7 +1751,7 @@ order by gate.created_timestamp asc, gate.logic_gate_id::text asc`, companyID, u
 	if err != nil {
 		return nil, err
 	}
-	return r.attachLogicGateGVICAssignments(context.Background(), companyID, items)
+	return r.attachLogicGateRACIAssignments(context.Background(), companyID, items)
 }
 
 func (r *PostgresRepo) ListCompanyExplorerLogicGateSummariesInFolderSubtree(companyID, folderID string) ([]domain.LogicGate, error) {
@@ -1790,7 +1790,7 @@ order by gate.created_timestamp asc`, companyID, folderID)
 	if err != nil {
 		return nil, err
 	}
-	return r.attachLogicGateGVICAssignments(context.Background(), companyID, items)
+	return r.attachLogicGateRACIAssignments(context.Background(), companyID, items)
 }
 
 func (r *PostgresRepo) ListVisibleCompanyExplorerLogicGateSummariesInFolderSubtree(companyID, folderID, userID string) ([]domain.LogicGate, error) {
@@ -1837,7 +1837,7 @@ order by gate.created_timestamp asc, gate.logic_gate_id::text asc`, companyID, f
 	if err != nil {
 		return nil, err
 	}
-	return r.attachLogicGateGVICAssignments(context.Background(), companyID, items)
+	return r.attachLogicGateRACIAssignments(context.Background(), companyID, items)
 }
 
 func (r *PostgresRepo) RemoveCompanyExplorerFolderItem(companyID, itemType, itemID string) error {

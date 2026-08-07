@@ -338,11 +338,11 @@ func TestLegacyKanbanCardMoveCreatesNoNotification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateRACIAssignments(store.LogicGateRACIAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []store.LogicGateGVICAssignmentInput{{
-			Role:   domain.GVICRoleResponsible,
+		Assignments: []store.LogicGateRACIAssignmentInput{{
+			Role:   domain.RACIRoleResponsible,
 			UserID: responsible.UserID,
 		}},
 	}); err != nil {
@@ -362,19 +362,19 @@ func TestLegacyKanbanCardMoveCreatesNoNotification(t *testing.T) {
 	if _, err := repo.AddCompanyMembership("blocked-no-access-subject", companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
-	assignments, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
+	assignments, err := repo.SetLogicGateRACIAssignments(store.LogicGateRACIAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []store.LogicGateGVICAssignmentInput{
-			{Role: domain.GVICRoleResponsible, UserID: responsible.UserID},
-			{Role: domain.GVICRoleConsulted, UserID: consultedNoAccess.UserID},
+		Assignments: []store.LogicGateRACIAssignmentInput{
+			{Role: domain.RACIRoleResponsible, UserID: responsible.UserID},
+			{Role: domain.RACIRoleConsulted, UserID: consultedNoAccess.UserID},
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(assignments) != 2 {
-		t.Fatalf("GVIC assignments = %+v, want responsible and consulted", assignments)
+		t.Fatalf("RACI assignments = %+v, want responsible and consulted", assignments)
 	}
 	board, err := repo.EnsureLogicGateKanbanBoard(companyID, logicGate.LogicGateID, logicGate.Header)
 	if err != nil {
@@ -486,7 +486,7 @@ func TestOldLogicGateAssignmentRoutesAreNotFound(t *testing.T) {
 	handler := server.Routes()
 	companyID := "77777777-7777-4777-8777-777777777770"
 
-	editor, err := repo.UpsertAuthUser("gvic-editor-subject", "gvic-editor@example.com", "GVIC Editor")
+	editor, err := repo.UpsertAuthUser("gvic-editor-subject", "gvic-editor@example.com", "RACI Editor")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -503,7 +503,7 @@ func TestOldLogicGateAssignmentRoutesAreNotFound(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{
 			"company_id": companyID,
 			"assignments": []map[string]string{{
-				"role":    domain.GVICRoleResponsible,
+				"role":    domain.RACIRoleResponsible,
 				"user_id": editor.UserID,
 			}},
 		})
@@ -517,8 +517,8 @@ func TestOldLogicGateAssignmentRoutesAreNotFound(t *testing.T) {
 		}
 	}
 
-	assertNotFound(http.MethodPut, "/v1/logic-gates/"+logicGate.LogicGateID+"/GVIC")
-	assertNotFound(http.MethodPost, "/v1/logic-gates/"+logicGate.LogicGateID+"/GVIC/add")
+	assertNotFound(http.MethodPut, "/v1/logic-gates/"+logicGate.LogicGateID+"/RACI")
+	assertNotFound(http.MethodPost, "/v1/logic-gates/"+logicGate.LogicGateID+"/RACI/add")
 }
 
 func TestNotificationSummaryCountsChangedTargetsForRoleBadges(t *testing.T) {
@@ -563,8 +563,8 @@ func TestNotificationSummaryCountsChangedTargetsForRoleBadges(t *testing.T) {
 			EntityType:      store.EntityTypeLogicGate,
 			EntityID:        logicGate.LogicGateID,
 			Title:           "Node status changed",
-			Surface:         domain.NotificationSurfaceCVIInbox,
-			Role:            domain.GVICRoleConsulted,
+			Surface:         domain.NotificationSurfaceACIInbox,
+			Role:            domain.RACIRoleConsulted,
 			LogicGateID:     logicGate.LogicGateID,
 			NodeID:          nodeID,
 		})
@@ -580,7 +580,7 @@ func TestNotificationSummaryCountsChangedTargetsForRoleBadges(t *testing.T) {
 	if summary.TotalUnread != 7 {
 		t.Fatalf("total unread = %d, want 7", summary.TotalUnread)
 	}
-	if len(summary.RoleCounts) != 1 || summary.RoleCounts[0].Surface != domain.NotificationSurfaceCVIInbox || summary.RoleCounts[0].Role != domain.GVICRoleConsulted || summary.RoleCounts[0].Count != 2 {
+	if len(summary.RoleCounts) != 1 || summary.RoleCounts[0].Surface != domain.NotificationSurfaceACIInbox || summary.RoleCounts[0].Role != domain.RACIRoleConsulted || summary.RoleCounts[0].Count != 2 {
 		t.Fatalf("role counts = %+v, want two changed node targets", summary.RoleCounts)
 	}
 	countsByNode := map[string]int{}
@@ -649,8 +649,8 @@ func TestNodeChatMentionCreatesMentionNotification(t *testing.T) {
 	if !strings.Contains(notifications[0].Title, "mentioned you in chat on Review packet") {
 		t.Fatalf("notification title = %q, want mention target format", notifications[0].Title)
 	}
-	if notifications[0].Surface != domain.NotificationSurfaceCVIInbox || notifications[0].Role != domain.NotificationRoleOther {
-		t.Fatalf("notification routing = %+v, want CVI other node mention", notifications[0])
+	if notifications[0].Surface != domain.NotificationSurfaceACIInbox || notifications[0].Role != domain.NotificationRoleOther {
+		t.Fatalf("notification routing = %+v, want ACI other node mention", notifications[0])
 	}
 	if notifications[0].InformationID != "22222222-2222-4222-8222-222222222299" {
 		t.Fatalf("notification information id = %q, want chat information id", notifications[0].InformationID)
@@ -670,8 +670,8 @@ func TestNodeChatMentionCreatesMentionNotification(t *testing.T) {
 	if len(summary.TypeCounts) != 1 || summary.TypeCounts[0].Type != domain.NotificationEventMentionCreated || summary.TypeCounts[0].Count != 1 {
 		t.Fatalf("summary type counts = %+v, want one mention", summary.TypeCounts)
 	}
-	if len(summary.RoleCounts) != 1 || summary.RoleCounts[0].Surface != domain.NotificationSurfaceCVIInbox || summary.RoleCounts[0].Role != domain.NotificationRoleOther || summary.RoleCounts[0].Count != 1 {
-		t.Fatalf("mention summary role counts = %+v, want one CVI other mention", summary.RoleCounts)
+	if len(summary.RoleCounts) != 1 || summary.RoleCounts[0].Surface != domain.NotificationSurfaceACIInbox || summary.RoleCounts[0].Role != domain.NotificationRoleOther || summary.RoleCounts[0].Count != 1 {
+		t.Fatalf("mention summary role counts = %+v, want one ACI other mention", summary.RoleCounts)
 	}
 	if len(summary.LogicGateCounts) != 0 {
 		t.Fatalf("mention summary logic gate counts = %+v, want none for node without logic gate", summary.LogicGateCounts)
@@ -756,11 +756,11 @@ func TestLogicGateLegacyTextBoxMentionWriteIsRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateRACIAssignments(store.LogicGateRACIAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []store.LogicGateGVICAssignmentInput{{
-			Role:   domain.GVICRoleVerifier,
+		Assignments: []store.LogicGateRACIAssignmentInput{{
+			Role:   domain.RACIRoleAccountable,
 			UserID: mentioned.UserID,
 		}},
 	}); err != nil {
@@ -1070,7 +1070,7 @@ func TestNotificationReadAllCanClearOneNotificationType(t *testing.T) {
 			Title:           "Node updated",
 			BodyPreview:     "Fields changed",
 			Surface:         domain.NotificationSurfaceRInbox,
-			Role:            domain.GVICRoleResponsible,
+			Role:            domain.RACIRoleResponsible,
 			NodeID:          node.NodeID,
 		},
 	}})
@@ -1335,7 +1335,7 @@ func TestClearNotificationsAppliesSurfaceAndRoleFilters(t *testing.T) {
 			EntityID:        node.NodeID,
 			Title:           "Responsible R inbox",
 			Surface:         domain.NotificationSurfaceRInbox,
-			Role:            domain.GVICRoleResponsible,
+			Role:            domain.RACIRoleResponsible,
 			NodeID:          node.NodeID,
 		},
 		{
@@ -1347,7 +1347,7 @@ func TestClearNotificationsAppliesSurfaceAndRoleFilters(t *testing.T) {
 			EntityID:        node.NodeID,
 			Title:           "Consulted R inbox",
 			Surface:         domain.NotificationSurfaceRInbox,
-			Role:            domain.GVICRoleConsulted,
+			Role:            domain.RACIRoleConsulted,
 			NodeID:          node.NodeID,
 		},
 		{
@@ -1357,16 +1357,16 @@ func TestClearNotificationsAppliesSurfaceAndRoleFilters(t *testing.T) {
 			SourceEventID:   "70707070-7070-4070-8070-000000000003",
 			EntityType:      store.EntityTypeNode,
 			EntityID:        node.NodeID,
-			Title:           "Responsible CVI inbox",
-			Surface:         domain.NotificationSurfaceCVIInbox,
-			Role:            domain.GVICRoleResponsible,
+			Title:           "Responsible ACI inbox",
+			Surface:         domain.NotificationSurfaceACIInbox,
+			Role:            domain.RACIRoleResponsible,
 			NodeID:          node.NodeID,
 		},
 	}}); err != nil {
 		t.Fatal(err)
 	}
 
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/notifications?company_id="+companyID+"&surface="+domain.NotificationSurfaceRInbox+"&role="+domain.GVICRoleResponsible, nil)
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/notifications?company_id="+companyID+"&surface="+domain.NotificationSurfaceRInbox+"&role="+domain.RACIRoleResponsible, nil)
 	deleteReq = requestWithActorForNotifications(deleteReq, user, companyID)
 	deleteRec := httptest.NewRecorder()
 	handler.ServeHTTP(deleteRec, deleteReq)
@@ -1390,13 +1390,13 @@ func TestClearNotificationsAppliesSurfaceAndRoleFilters(t *testing.T) {
 		t.Fatalf("remaining notifications after filtered clear = %+v, want 2", remaining)
 	}
 	for _, item := range remaining {
-		if item.Surface == domain.NotificationSurfaceRInbox && item.Role == domain.GVICRoleResponsible {
+		if item.Surface == domain.NotificationSurfaceRInbox && item.Role == domain.RACIRoleResponsible {
 			t.Fatalf("remaining notifications include deleted filtered notification: %+v", remaining)
 		}
 	}
 }
 
-func TestNodeChatWithoutMentionNotifiesNodeGVICOnly(t *testing.T) {
+func TestNodeChatWithoutMentionNotifiesNodeRACIOnly(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -1444,22 +1444,22 @@ func TestNodeChatWithoutMentionNotifiesNodeGVICOnly(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateRACIAssignments(store.LogicGateRACIAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []store.LogicGateGVICAssignmentInput{{
-			Role:   domain.GVICRoleResponsible,
+		Assignments: []store.LogicGateRACIAssignmentInput{{
+			Role:   domain.RACIRoleResponsible,
 			UserID: logicGateAssignee.UserID,
 		}},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.SetResourceGVICAssignments(store.ResourceGVICAssignmentUpdateInput{
+	if _, err := repo.SetResourceRACIAssignments(store.ResourceRACIAssignmentUpdateInput{
 		CompanyID:    companyID,
 		ResourceType: store.EntityTypeNode,
 		ResourceID:   node.NodeID,
-		Assignments: []store.ResourceGVICAssignmentInput{{
-			Role:          domain.GVICRoleResponsible,
+		Assignments: []store.ResourceRACIAssignmentInput{{
+			Role:          domain.RACIRoleResponsible,
 			PrincipalType: store.EntityPermissionSubjectUser,
 			PrincipalID:   assignee.UserID,
 		}},
@@ -1492,7 +1492,7 @@ func TestNodeChatWithoutMentionNotifiesNodeGVICOnly(t *testing.T) {
 	if item.RecipientUserID != assignee.UserID || item.ActorUserID == nil || *item.ActorUserID != author.UserID {
 		t.Fatalf("notification users = %+v, want assignee recipient and author actor", item)
 	}
-	if item.LogicGateID != logicGate.LogicGateID || item.NodeID != node.NodeID || item.Role != domain.GVICRoleResponsible {
+	if item.LogicGateID != logicGate.LogicGateID || item.NodeID != node.NodeID || item.Role != domain.RACIRoleResponsible {
 		t.Fatalf("notification routing = %+v, want Responsible Logic Gate Node routing", item)
 	}
 	if item.Priority == nil || *item.Priority != priority {
@@ -1508,7 +1508,7 @@ func TestNodeChatWithoutMentionNotifiesNodeGVICOnly(t *testing.T) {
 	}
 }
 
-func TestNodeGVICAssignmentAndFieldChangesUseCurrentNodeRole(t *testing.T) {
+func TestNodeRACIAssignmentAndFieldChangesUseCurrentNodeRole(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -1561,25 +1561,25 @@ func TestNodeGVICAssignmentAndFieldChangesUseCurrentNodeRole(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("restrict node access: %v", err)
 	}
-	if _, err := repo.SetResourceGVICAssignments(store.ResourceGVICAssignmentUpdateInput{
+	if _, err := repo.SetResourceRACIAssignments(store.ResourceRACIAssignmentUpdateInput{
 		CompanyID: companyID, ResourceType: store.EntityTypeNode, ResourceID: node.NodeID,
-		Assignments: []store.ResourceGVICAssignmentInput{
-			{Role: domain.GVICRoleConsulted, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: alice.UserID},
-			{Role: domain.GVICRoleInformed, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: charlie.UserID},
+		Assignments: []store.ResourceRACIAssignmentInput{
+			{Role: domain.RACIRoleConsulted, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: alice.UserID},
+			{Role: domain.RACIRoleInformed, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: charlie.UserID},
 		},
 	}); err != nil {
-		t.Fatalf("seed Node GVIC: %v", err)
+		t.Fatalf("seed Node RACI: %v", err)
 	}
 
 	gvicBody, _ := json.Marshal(map[string]any{
 		"company_id":      companyID,
 		"assignment_mode": store.PolicyModeCustomized,
 		"gvic_assignments": []map[string]string{{
-			"role":           domain.GVICRoleConsulted,
+			"role":           domain.RACIRoleConsulted,
 			"principal_type": store.EntityPermissionSubjectUser,
 			"principal_id":   alice.UserID,
 		}, {
-			"role":           domain.GVICRoleResponsible,
+			"role":           domain.RACIRoleResponsible,
 			"principal_type": store.EntityPermissionSubjectUser,
 			"principal_id":   assignee.UserID,
 		}},
@@ -1590,7 +1590,7 @@ func TestNodeGVICAssignmentAndFieldChangesUseCurrentNodeRole(t *testing.T) {
 	gvicRec := httptest.NewRecorder()
 	handler.ServeHTTP(gvicRec, gvicReq)
 	if gvicRec.Code != http.StatusOK {
-		t.Fatalf("PUT node GVIC status = %d body=%s", gvicRec.Code, gvicRec.Body.String())
+		t.Fatalf("PUT node RACI status = %d body=%s", gvicRec.Code, gvicRec.Body.String())
 	}
 
 	updateBody, _ := json.Marshal(map[string]any{
@@ -1616,7 +1616,7 @@ func TestNodeGVICAssignmentAndFieldChangesUseCurrentNodeRole(t *testing.T) {
 	types := map[string]bool{}
 	for _, item := range notifications {
 		types[item.Type] = true
-		if item.Surface != domain.NotificationSurfaceRInbox || item.Role != domain.GVICRoleResponsible || item.NodeID != node.NodeID {
+		if item.Surface != domain.NotificationSurfaceRInbox || item.Role != domain.RACIRoleResponsible || item.NodeID != node.NodeID {
 			t.Fatalf("notification metadata = %+v, want current Node Responsible role", item)
 		}
 		if item.Type == domain.NotificationEventNodeFieldsChanged && (item.Priority == nil || *item.Priority != 2) {
@@ -1634,7 +1634,7 @@ func TestNodeGVICAssignmentAndFieldChangesUseCurrentNodeRole(t *testing.T) {
 	))
 	if len(aliceNotifications) != 1 ||
 		aliceNotifications[0].Type != domain.NotificationEventNodeFieldsChanged ||
-		aliceNotifications[0].Role != domain.GVICRoleConsulted {
+		aliceNotifications[0].Role != domain.RACIRoleConsulted {
 		t.Fatalf("Alice notifications = %+v, want only current-role field update", aliceNotifications)
 	}
 	charlieNotifications := listNotificationsForRequestForTest(t, handler, requestWithActorForNotifications(
@@ -1657,7 +1657,7 @@ func TestNodeGVICAssignmentAndFieldChangesUseCurrentNodeRole(t *testing.T) {
 	if err := json.NewDecoder(summaryRec.Body).Decode(&summary); err != nil {
 		t.Fatalf("decode notification summary: %v", err)
 	}
-	if len(summary.RoleCounts) != 1 || summary.RoleCounts[0].Surface != domain.NotificationSurfaceRInbox || summary.RoleCounts[0].Role != domain.GVICRoleResponsible || summary.RoleCounts[0].Count != 1 {
+	if len(summary.RoleCounts) != 1 || summary.RoleCounts[0].Surface != domain.NotificationSurfaceRInbox || summary.RoleCounts[0].Role != domain.RACIRoleResponsible || summary.RoleCounts[0].Count != 1 {
 		t.Fatalf("summary role counts = %+v, want one current Node Responsible target", summary.RoleCounts)
 	}
 }

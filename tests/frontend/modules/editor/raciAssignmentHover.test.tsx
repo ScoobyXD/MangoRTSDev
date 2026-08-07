@@ -15,7 +15,7 @@ function installGlobal(name: string, value: unknown, restores: Restore[]) {
   });
 }
 
-test("RCVI assignment people and groups list opens immediately on hover and closes when the pointer leaves", async () => {
+test("RACI assignment people and groups list opens immediately on hover and closes when the pointer leaves", async () => {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
     pretendToBeVisual: true,
     url: "http://localhost/",
@@ -63,7 +63,7 @@ test("RCVI assignment people and groups list opens immediately on hover and clos
         linkedNodeMetadataRows={[]}
         linkedNodeHistoryRows={[]}
         canEdit
-        canEditGVIC
+        canEditRACI
         nodePresetFields={null}
         gvicFields={{
           assignments: [{
@@ -95,8 +95,8 @@ test("RCVI assignment people and groups list opens immediately on hover and clos
         onCommitNodeAccountIDs={noop}
         onSetNodeDueDateDraft={noop}
         onCommitNodeDueDateDraft={noop}
-        onAddGVICPrincipal={noop}
-        onRemoveGVICPrincipal={noop}
+        onAddRACIPrincipal={noop}
+        onRemoveRACIPrincipal={noop}
       />,
     ));
 

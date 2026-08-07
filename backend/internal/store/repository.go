@@ -29,8 +29,8 @@ var (
 	ErrInvitationReplaced            = errors.New("invitation replaced")
 	ErrInvitationEmailMismatch       = errors.New("invitation email mismatch")
 	ErrPrincipalNotInCompany         = errors.New("principal not in company")
-	ErrGVICInherited                 = errors.New("GVIC inherited")
-	ErrGVICStorageUnavailable        = errors.New("GVIC storage unavailable")
+	ErrRACIInherited                 = errors.New("RACI inherited")
+	ErrRACIStorageUnavailable        = errors.New("RACI storage unavailable")
 	ErrSharedInboxStorageUnavailable = errors.New("shared inbox storage unavailable")
 	ErrEmailAccountUnavailable       = errors.New("email account unavailable")
 	ErrUploadStateConflict           = errors.New("attachment upload state conflict")
@@ -58,7 +58,7 @@ type Repository interface {
 	WorkGraphRepository
 	LogicGateRepository
 	ProjectRepository
-	GVICRepository
+	RACIRepository
 	EntityPermissionRepository
 	V2PolicyRepository
 	EffectiveAccessRepository
@@ -526,9 +526,9 @@ type LogicGateRepository interface {
 	ListVisibleLogicGatesInFolderSubtree(companyID, folderID, userID string) ([]domain.LogicGate, error)
 	QueryLogicGates(companyID string, query LogicGateQuery) ([]domain.LogicGate, error)
 	QueryVisibleLogicGates(companyID, userID string, query LogicGateQuery) ([]domain.LogicGate, error)
-	SetLogicGateGVICAssignments(input LogicGateGVICAssignmentUpdateInput) ([]domain.LogicGateGVICAssignment, error)
-	AddLogicGateGVICAssignments(input LogicGateGVICAssignmentCommandInput) (LogicGateGVICAssignmentCommandResult, error)
-	RemoveLogicGateGVICAssignments(input LogicGateGVICAssignmentCommandInput) (LogicGateGVICAssignmentCommandResult, error)
+	SetLogicGateRACIAssignments(input LogicGateRACIAssignmentUpdateInput) ([]domain.LogicGateRACIAssignment, error)
+	AddLogicGateRACIAssignments(input LogicGateRACIAssignmentCommandInput) (LogicGateRACIAssignmentCommandResult, error)
+	RemoveLogicGateRACIAssignments(input LogicGateRACIAssignmentCommandInput) (LogicGateRACIAssignmentCommandResult, error)
 	ListLogicGateRelationships(companyID string) ([]domain.LogicGateRelationship, error)
 	ListLogicGateRelationshipsInFolderSubtree(companyID, folderID string) ([]domain.LogicGateRelationship, error)
 	DeleteLogicGateRelationship(companyID, relationshipID string) error
@@ -567,12 +567,12 @@ type ProjectRepository interface {
 	ListProjectRelationshipsForResource(companyID, resourceType, resourceID, viewerUserID string) ([]domain.ProjectRelationshipProjection, error)
 }
 
-type GVICRepository interface {
-	ListResourceGVICAssignments(companyID, resourceType, resourceID string) ([]domain.ResourceGVICAssignment, error)
-	SetResourceGVICAssignments(input ResourceGVICAssignmentUpdateInput) (ResourceGVICAssignmentMutationResult, error)
-	AddResourceGVICAssignments(input ResourceGVICAssignmentCommandInput) (ResourceGVICAssignmentMutationResult, error)
-	RemoveResourceGVICAssignments(input ResourceGVICAssignmentCommandInput) (ResourceGVICAssignmentMutationResult, error)
-	ListResourceGVICEffectiveAssignments(companyID, resourceType, resourceID string) ([]domain.ResourceGVICEffectiveAssignment, error)
+type RACIRepository interface {
+	ListResourceRACIAssignments(companyID, resourceType, resourceID string) ([]domain.ResourceRACIAssignment, error)
+	SetResourceRACIAssignments(input ResourceRACIAssignmentUpdateInput) (ResourceRACIAssignmentMutationResult, error)
+	AddResourceRACIAssignments(input ResourceRACIAssignmentCommandInput) (ResourceRACIAssignmentMutationResult, error)
+	RemoveResourceRACIAssignments(input ResourceRACIAssignmentCommandInput) (ResourceRACIAssignmentMutationResult, error)
+	ListResourceRACIEffectiveAssignments(companyID, resourceType, resourceID string) ([]domain.ResourceRACIEffectiveAssignment, error)
 }
 
 type EntityPermissionRepository interface {
@@ -725,17 +725,17 @@ type LogicGateWorkRepository interface {
 type WorkItemReadRepository interface {
 	ListResponsibleInboxNodes(query WorkItemInboxQuery) ([]domain.Node, error)
 	ListResponsibleInboxNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error)
-	ListCVIInboxLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
-	ListCVIInboxLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
+	ListACIInboxLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
+	ListACIInboxLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
 	ListMyNodes(query WorkItemInboxQuery) ([]domain.Node, error)
 	ListMyNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error)
 	ListMyLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
 	ListMyLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
-	ListMyWorkMatrixRows(query WorkItemInboxQuery) ([]GVICMatrixProjectionRow, error)
+	ListMyWorkMatrixRows(query WorkItemInboxQuery) ([]RACIMatrixProjectionRow, error)
 	ListMyWorkMatrix(query WorkItemInboxQuery) (MyWorkMatrixResponse, error)
-	ListGVICMatrixProjectionRowsForUser(query WorkItemInboxQuery) ([]GVICMatrixProjectionRow, error)
-	ListGVICMatrixProjectionRowsForResources(companyID string, nodeIDs, logicGateIDs []string) ([]GVICMatrixProjectionRow, error)
-	ListGVICMatrixProjectionRowsForLogicGate(companyID, logicGateID string) ([]GVICMatrixProjectionRow, error)
+	ListRACIMatrixProjectionRowsForUser(query WorkItemInboxQuery) ([]RACIMatrixProjectionRow, error)
+	ListRACIMatrixProjectionRowsForResources(companyID string, nodeIDs, logicGateIDs []string) ([]RACIMatrixProjectionRow, error)
+	ListRACIMatrixProjectionRowsForLogicGate(companyID, logicGateID string) ([]RACIMatrixProjectionRow, error)
 	ListKanbanBoardProjectionRows(companyID, logicGateID string, query KanbanCardQuery) ([]KanbanBoardProjectionRow, error)
 	ListKanbanBoardProjectionRowsForNode(companyID, nodeID string) ([]KanbanBoardProjectionRow, error)
 	ListKanbanBoardProjectionRowsForLogicGate(companyID, logicGateID string) ([]KanbanBoardProjectionRow, error)
@@ -788,7 +788,7 @@ type CompanyExplorerRepository interface {
 	DeleteCommunicationsSharedInboxFolder(companyID, folderID string) error
 	RemoveCommunicationsSharedInboxFolder(companyID, folderID string) error
 	SetCommunicationsSharedInboxAccountEmail(companyID, folderID, accountEmail string) (domain.CompanyExplorerFolder, error)
-	SetCommunicationsSharedInboxGVICAssignments(input SharedInboxGVICAssignmentUpdateInput) ([]domain.SharedInboxGVICAssignment, error)
+	SetCommunicationsSharedInboxRACIAssignments(input SharedInboxRACIAssignmentUpdateInput) ([]domain.SharedInboxRACIAssignment, error)
 	ListCompanyExplorerFolderShares(companyID, folderID string) ([]domain.CompanyExplorerFolderShare, error)
 	UpsertCompanyExplorerFolderShare(input CompanyExplorerFolderShareInput) (domain.CompanyExplorerFolderShare, error)
 	DeleteCompanyExplorerFolderShare(companyID, folderID, email string) error
@@ -974,7 +974,7 @@ type CompanyExplorerV2SubscriptionInput struct {
 
 type WorkspaceEntityCommandRepository interface {
 	CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput) (WorkspaceEntityBatchResult, error)
-	CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GVICMatrixNodeCreateResult, error)
+	CreateRACIMatrixNode(input RACIMatrixNodeCreateInput) (RACIMatrixNodeCreateResult, error)
 }
 
 type KanbanRepository interface {
@@ -1096,14 +1096,14 @@ type WorkItemLogicGateInboxItem struct {
 	LogicGateID      string                           `json:"logic_gate_id"`
 	Header           string                           `json:"header"`
 	Roles            []string                         `json:"roles"`
-	GVICAssignments  []domain.LogicGateGVICAssignment `json:"gvic_assignments,omitempty"`
+	RACIAssignments  []domain.LogicGateRACIAssignment `json:"gvic_assignments,omitempty"`
 	CreatedTimestamp time.Time                        `json:"created_timestamp"`
 }
 
 type MyWorkMatrixResponse struct {
 	CompanyID string                    `json:"company_id"`
 	UserID    string                    `json:"user_id"`
-	Rows      []GVICMatrixProjectionRow `json:"rows"`
+	Rows      []RACIMatrixProjectionRow `json:"rows"`
 }
 type ProjectionRow struct {
 	CompanyID                    string           `json:"company_id"`
@@ -1116,7 +1116,7 @@ type ProjectionRow struct {
 	RelationshipID               string           `json:"relationship_id,omitempty"`
 	ResourceType                 string           `json:"resource_type,omitempty"`
 	ResourceID                   string           `json:"resource_id,omitempty"`
-	GVICAssignment               string           `json:"gvic_assignment,omitempty"`
+	RACIAssignment               string           `json:"gvic_assignment,omitempty"`
 	ResponsibleUserIDs           []string         `json:"responsible_user_ids,omitempty"`
 	ParentResourceType           string           `json:"parent_resource_type,omitempty"`
 	ParentResourceID             string           `json:"parent_resource_id,omitempty"`
@@ -1166,9 +1166,9 @@ type ProjectionRow struct {
 	Accounts                     []domain.Account `json:"accounts,omitempty"`
 }
 
-type GVICMatrixProjectionRow = ProjectionRow
+type RACIMatrixProjectionRow = ProjectionRow
 
-type GVICEffectiveAssignmentProjectionRow = ProjectionRow
+type RACIEffectiveAssignmentProjectionRow = ProjectionRow
 
 type KanbanBoardProjectionRow = ProjectionRow
 
@@ -1255,40 +1255,40 @@ type EntityFieldAssignmentInput struct {
 	ActorUserID  string
 }
 
-type ResourceGVICAssignmentInput struct {
+type ResourceRACIAssignmentInput struct {
 	Role          string `json:"role"`
 	PrincipalType string `json:"principal_type"`
 	PrincipalID   string `json:"principal_id"`
 }
 
-type ResourceGVICAssignmentUpdateInput struct {
+type ResourceRACIAssignmentUpdateInput struct {
 	CompanyID          string
 	ResourceType       string
 	ResourceID         string
-	Assignments        []ResourceGVICAssignmentInput
+	Assignments        []ResourceRACIAssignmentInput
 	ActorUserID        string
 	IdempotencyKey     string
 	ApplyToDescendants bool
 }
 
-type ResourceGVICAssignmentCommandInput struct {
+type ResourceRACIAssignmentCommandInput struct {
 	CompanyID          string
 	ResourceType       string
 	ResourceID         string
-	Assignments        []ResourceGVICAssignmentInput
+	Assignments        []ResourceRACIAssignmentInput
 	ActorUserID        string
 	IdempotencyKey     string
 	ApplyToDescendants bool
 }
 
-type ResourceGVICAssignmentMutationResult struct {
+type ResourceRACIAssignmentMutationResult struct {
 	CompanyID            string                                   `json:"company_id"`
 	ResourceType         string                                   `json:"resource_type"`
 	ResourceID           string                                   `json:"resource_id"`
 	Operation            string                                   `json:"operation,omitempty"`
 	Changed              bool                                     `json:"changed"`
-	GVICAssignments      []domain.ResourceGVICAssignment          `json:"gvic_assignments"`
-	EffectiveAssignments []domain.ResourceGVICEffectiveAssignment `json:"effective_assignments,omitempty"`
+	RACIAssignments      []domain.ResourceRACIAssignment          `json:"gvic_assignments"`
+	EffectiveAssignments []domain.ResourceRACIEffectiveAssignment `json:"effective_assignments,omitempty"`
 	Events               []domain.DomainEvent                     `json:"-"`
 }
 
@@ -1580,7 +1580,7 @@ type WorkspaceEntityBatchInput struct {
 	FolderID                 string
 	MutationOrigin           string
 	CreatorUserID            string
-	CreatorLogicGateGVICRole string
+	CreatorLogicGateRACIRole string
 	Items                    []WorkspaceEntityBatchItemInput
 	Relationships            []WorkspaceEntityBatchRelationshipInput
 	TimingRecorder           TimingRecorder
@@ -1611,13 +1611,13 @@ type WorkspaceEntityBatchResult struct {
 	DeferredFolderItems    []DeferredCompanyExplorerFolderItemAssignment `json:"-"`
 }
 
-type GVICMatrixNodeCreateInput struct {
+type RACIMatrixNodeCreateInput struct {
 	CompanyID                string
 	NodeID                   string
 	Title                    string
 	LogicGateID              string
 	CreateLogicGateHeader    string
-	CreatorLogicGateGVICRole string
+	CreatorLogicGateRACIRole string
 	MutationOrigin           string
 	Status                   string
 	ColumnID                 string
@@ -1632,13 +1632,13 @@ type GVICMatrixNodeCreateInput struct {
 	TimingRecorder           TimingRecorder
 }
 
-type GVICMatrixNodeCreateResult struct {
+type RACIMatrixNodeCreateResult struct {
 	Node                     domain.Node                        `json:"node"`
 	LogicGate                *domain.LogicGate                  `json:"logic_gate,omitempty"`
 	Assignment               *domain.NodeLogicGateAssignment    `json:"assignment,omitempty"`
 	Card                     *domain.KanbanCard                 `json:"card,omitempty"`
 	FolderItems              []domain.CompanyExplorerFolderItem `json:"folder_items,omitempty"`
-	GVICMatrixProjectionRows []GVICMatrixProjectionRow          `json:"gvic_projection_rows,omitempty"`
+	RACIMatrixProjectionRows []RACIMatrixProjectionRow          `json:"gvic_projection_rows,omitempty"`
 	Events                   []domain.DomainEvent               `json:"-"`
 }
 type CompanyExplorerFolderItemAssignmentInput struct {
@@ -1656,17 +1656,17 @@ type CompanyExplorerFolderShareInput struct {
 	InvitedByUserID string
 }
 
-type SharedInboxGVICAssignmentInput struct {
+type SharedInboxRACIAssignmentInput struct {
 	Role          string `json:"role"`
 	PrincipalType string `json:"principal_type"`
 	PrincipalID   string `json:"principal_id"`
 	UserID        string `json:"user_id"`
 }
 
-type SharedInboxGVICAssignmentUpdateInput struct {
+type SharedInboxRACIAssignmentUpdateInput struct {
 	CompanyID   string
 	FolderID    string
-	Assignments []SharedInboxGVICAssignmentInput
+	Assignments []SharedInboxRACIAssignmentInput
 }
 
 type CompanyExplorerDeleteTargetInput struct {
@@ -1958,7 +1958,7 @@ type LogicGateNodeAssignmentResult struct {
 	Card                     domain.KanbanCard              `json:"card"`
 	Node                     domain.Node                    `json:"node"`
 	Assignment               domain.NodeLogicGateAssignment `json:"-"`
-	GVICMatrixProjectionRows []GVICMatrixProjectionRow      `json:"gvic_projection_rows,omitempty"`
+	RACIMatrixProjectionRows []RACIMatrixProjectionRow      `json:"gvic_projection_rows,omitempty"`
 	Events                   []domain.DomainEvent           `json:"-"`
 }
 
@@ -1966,7 +1966,7 @@ type LogicGateNodeAssignmentRemoveResult struct {
 	Card                     domain.KanbanCard              `json:"card"`
 	Node                     domain.Node                    `json:"node"`
 	Assignment               domain.NodeLogicGateAssignment `json:"-"`
-	GVICMatrixProjectionRows []GVICMatrixProjectionRow      `json:"gvic_projection_rows,omitempty"`
+	RACIMatrixProjectionRows []RACIMatrixProjectionRow      `json:"gvic_projection_rows,omitempty"`
 	Events                   []domain.DomainEvent           `json:"-"`
 }
 
@@ -2220,39 +2220,39 @@ type NodeViewInput struct {
 	UserID    string
 }
 
-type LogicGateGVICAssignmentInput struct {
+type LogicGateRACIAssignmentInput struct {
 	Role          string `json:"role"`
 	PrincipalType string `json:"principal_type"`
 	PrincipalID   string `json:"principal_id"`
 	UserID        string `json:"user_id"`
 }
 
-type LogicGateGVICAssignmentUpdateInput struct {
+type LogicGateRACIAssignmentUpdateInput struct {
 	CompanyID   string
 	LogicGateID string
-	Assignments []LogicGateGVICAssignmentInput
+	Assignments []LogicGateRACIAssignmentInput
 }
 
 const (
-	LogicGateGVICCommandAdd    = "add"
-	LogicGateGVICCommandRemove = "remove"
+	LogicGateRACICommandAdd    = "add"
+	LogicGateRACICommandRemove = "remove"
 )
 
-type LogicGateGVICAssignmentCommandInput struct {
+type LogicGateRACIAssignmentCommandInput struct {
 	CompanyID      string
 	LogicGateID    string
-	Assignments    []LogicGateGVICAssignmentInput
+	Assignments    []LogicGateRACIAssignmentInput
 	ActorUserID    string
 	IdempotencyKey string
 }
 
-type LogicGateGVICAssignmentCommandResult struct {
+type LogicGateRACIAssignmentCommandResult struct {
 	CompanyID         string                           `json:"company_id"`
 	LogicGateID       string                           `json:"logic_gate_id"`
 	Operation         string                           `json:"operation"`
 	Changed           bool                             `json:"changed"`
-	GVICAssignments   []domain.LogicGateGVICAssignment `json:"gvic_assignments"`
-	BeforeAssignments []domain.LogicGateGVICAssignment `json:"-"`
+	RACIAssignments   []domain.LogicGateRACIAssignment `json:"gvic_assignments"`
+	BeforeAssignments []domain.LogicGateRACIAssignment `json:"-"`
 	Events            []domain.DomainEvent             `json:"-"`
 }
 
@@ -2441,22 +2441,22 @@ func NormalizeKanbanBoardQuery(query KanbanBoardQuery) KanbanBoardQuery {
 	return query
 }
 
-func NormalizeGVICRole(role string) (string, bool) {
+func NormalizeRACIRole(role string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(role)) {
-	case domain.GVICRoleResponsible:
-		return domain.GVICRoleResponsible, true
-	case domain.GVICRoleConsulted:
-		return domain.GVICRoleConsulted, true
-	case domain.GVICRoleVerifier:
-		return domain.GVICRoleVerifier, true
-	case domain.GVICRoleInformed:
-		return domain.GVICRoleInformed, true
+	case domain.RACIRoleResponsible:
+		return domain.RACIRoleResponsible, true
+	case domain.RACIRoleConsulted:
+		return domain.RACIRoleConsulted, true
+	case domain.RACIRoleAccountable:
+		return domain.RACIRoleAccountable, true
+	case domain.RACIRoleInformed:
+		return domain.RACIRoleInformed, true
 	default:
 		return "", false
 	}
 }
 
-func NormalizeGVICResourceType(resourceType string) (string, bool) {
+func NormalizeRACIResourceType(resourceType string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(resourceType)) {
 	case EntityTypeNode:
 		return EntityTypeNode, true
@@ -2475,7 +2475,7 @@ func NormalizeGVICResourceType(resourceType string) (string, bool) {
 	}
 }
 
-func NormalizeGVICPrincipalType(principalType string) (string, bool) {
+func NormalizeRACIPrincipalType(principalType string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(principalType)) {
 	case EntityPermissionSubjectUser:
 		return EntityPermissionSubjectUser, true

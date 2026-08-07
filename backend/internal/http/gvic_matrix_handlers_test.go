@@ -10,11 +10,11 @@ import (
 	"miraeopus/backend/internal/store"
 )
 
-func TestGVICMatrixNodeCreateAndMoveV2IgnoresStaleSourceHint(t *testing.T) {
+func TestRACIMatrixNodeCreateAndMoveV2IgnoresStaleSourceHint(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "77777777-7777-4777-8777-777777777401"
-	repo.EnsureCompany(companyID, "GVICMatrix Matrix HTTP Co")
-	editor := mustLogicGateWorkHTTPUser(t, repo, companyID, "GVICMatrix-matrix-editor")
+	repo.EnsureCompany(companyID, "RACIMatrix Matrix HTTP Co")
+	editor := mustLogicGateWorkHTTPUser(t, repo, companyID, "RACIMatrix-matrix-editor")
 
 	server := NewServer(repo)
 	defer server.Close()
@@ -25,7 +25,7 @@ func TestGVICMatrixNodeCreateAndMoveV2IgnoresStaleSourceHint(t *testing.T) {
 		"company_id":                   companyID,
 		"name":                         "Matrix-created node",
 		"create_logic_gate_header":     "Matrix-created gate",
-		"creator_logic_gate_gvic_role": domain.GVICRoleResponsible,
+		"creator_logic_gate_gvic_role": domain.RACIRoleResponsible,
 		"priority":                     3,
 		"status":                       "pending",
 		"position":                     10,
@@ -34,7 +34,7 @@ func TestGVICMatrixNodeCreateAndMoveV2IgnoresStaleSourceHint(t *testing.T) {
 	if createRec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d body=%s, want 201", createRec.Code, createRec.Body.String())
 	}
-	createPayload := decodeGVICMatrixNodeCreatePayloadForTest(t, createRec)
+	createPayload := decodeRACIMatrixNodeCreatePayloadForTest(t, createRec)
 	if createPayload.Node.NodeID == "" || createPayload.Node.Title != "Matrix-created node" {
 		t.Fatalf("created node = %+v, want titled node", createPayload.Node)
 	}
@@ -44,26 +44,26 @@ func TestGVICMatrixNodeCreateAndMoveV2IgnoresStaleSourceHint(t *testing.T) {
 	if createPayload.Assignment == nil || createPayload.Assignment.LogicGateID != createPayload.LogicGate.LogicGateID || createPayload.Assignment.StatusKey != store.LogicGateWorkStatusPending {
 		t.Fatalf("created assignment = %+v, want pending assignment in created gate", createPayload.Assignment)
 	}
-	if len(createPayload.GVICMatrixProjectionRows) != 0 {
-		t.Fatalf("create response projection rows = %+v, want fast-return response without projection rows", createPayload.GVICMatrixProjectionRows)
+	if len(createPayload.RACIMatrixProjectionRows) != 0 {
+		t.Fatalf("create response projection rows = %+v, want fast-return response without projection rows", createPayload.RACIMatrixProjectionRows)
 	}
-	createProjectionRows := getGVICMatrixProjectionRowsForTest(t, handler, companyID, editor)
+	createProjectionRows := getRACIMatrixProjectionRowsForTest(t, handler, companyID, editor)
 	if !projectionRowsContainNodeGate(createProjectionRows, createPayload.Node.NodeID, createPayload.LogicGate.LogicGateID) {
 		t.Fatalf("projection refetch rows missing created node leaf path: %+v", createProjectionRows)
 	}
 
-	targetGate, err := repo.CreateGVICMatrixNode(store.GVICMatrixNodeCreateInput{
+	targetGate, err := repo.CreateRACIMatrixNode(store.RACIMatrixNodeCreateInput{
 		CompanyID:                companyID,
 		Title:                    "Target gate seed node",
 		CreateLogicGateHeader:    "Target gate",
-		CreatorLogicGateGVICRole: domain.GVICRoleResponsible,
+		CreatorLogicGateRACIRole: domain.RACIRoleResponsible,
 		Priority:                 testPriority(2),
 		PrioritySet:              true,
 		Status:                   "pending",
 		ActorUserID:              editor.UserID,
 	})
 	if err != nil {
-		t.Fatalf("CreateGVICMatrixNode target gate: %v", err)
+		t.Fatalf("CreateRACIMatrixNode target gate: %v", err)
 	}
 	if targetGate.LogicGate == nil {
 		t.Fatalf("target gate missing from seed result")
@@ -85,21 +85,21 @@ func TestGVICMatrixNodeCreateAndMoveV2IgnoresStaleSourceHint(t *testing.T) {
 	if movePayload.Assignment.LogicGateID != targetGate.LogicGate.LogicGateID || movePayload.Assignment.StatusKey != store.LogicGateWorkStatusDone {
 		t.Fatalf("move assignment = %+v, want done in target gate", movePayload.Assignment)
 	}
-	if len(movePayload.GVICMatrixProjectionRows) != 0 {
-		t.Fatalf("move response projection rows = %+v, want fast-return response without projection rows", movePayload.GVICMatrixProjectionRows)
+	if len(movePayload.RACIMatrixProjectionRows) != 0 {
+		t.Fatalf("move response projection rows = %+v, want fast-return response without projection rows", movePayload.RACIMatrixProjectionRows)
 	}
-	moveProjectionRows := getGVICMatrixProjectionRowsForTest(t, handler, companyID, editor)
+	moveProjectionRows := getRACIMatrixProjectionRowsForTest(t, handler, companyID, editor)
 	if projectionRowsContainNodeGate(moveProjectionRows, createPayload.Node.NodeID, targetGate.LogicGate.LogicGateID) {
 		t.Fatalf("move projection refetch rows = %+v, want done node removed from active My Work projection", moveProjectionRows)
 	}
 }
 
-func TestGVICMatrixNodeCreateInExistingLogicGateInheritsCurrentPolicy(t *testing.T) {
+func TestRACIMatrixNodeCreateInExistingLogicGateInheritsCurrentPolicy(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "77777777-7777-4777-8777-777777777402"
-	repo.EnsureCompany(companyID, "GVICMatrix Matrix Creator Co")
-	creator := mustLogicGateWorkHTTPUser(t, repo, companyID, "GVICMatrix-node-creator")
-	responsible := mustLogicGateWorkHTTPUser(t, repo, companyID, "GVICMatrix-node-responsible")
+	repo.EnsureCompany(companyID, "RACIMatrix Matrix Creator Co")
+	creator := mustLogicGateWorkHTTPUser(t, repo, companyID, "RACIMatrix-node-creator")
+	responsible := mustLogicGateWorkHTTPUser(t, repo, companyID, "RACIMatrix-node-responsible")
 
 	batch, err := repo.CreateWorkspaceEntityBatch(store.WorkspaceEntityBatchInput{
 		CompanyID:     companyID,
@@ -117,15 +117,15 @@ func TestGVICMatrixNodeCreateInExistingLogicGateInheritsCurrentPolicy(t *testing
 		t.Fatalf("created logic gates = %d, want 1", len(batch.LogicGates))
 	}
 	logicGate := batch.LogicGates[0]
-	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateRACIAssignments(store.LogicGateRACIAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []store.LogicGateGVICAssignmentInput{{
-			Role:   domain.GVICRoleResponsible,
+		Assignments: []store.LogicGateRACIAssignmentInput{{
+			Role:   domain.RACIRoleResponsible,
 			UserID: responsible.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
+		t.Fatalf("SetLogicGateRACIAssignments: %v", err)
 	}
 
 	server := NewServer(repo)
@@ -144,7 +144,7 @@ func TestGVICMatrixNodeCreateInExistingLogicGateInheritsCurrentPolicy(t *testing
 	if createRec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d body=%s, want 201", createRec.Code, createRec.Body.String())
 	}
-	payload := decodeGVICMatrixNodeCreatePayloadForTest(t, createRec)
+	payload := decodeRACIMatrixNodeCreatePayloadForTest(t, createRec)
 	loaded, err := repo.GetNode(companyID, payload.Node.NodeID)
 	if err != nil {
 		t.Fatalf("GetNode: %v", err)
@@ -152,53 +152,53 @@ func TestGVICMatrixNodeCreateInExistingLogicGateInheritsCurrentPolicy(t *testing
 	if loaded.NodeID != payload.Node.NodeID {
 		t.Fatalf("stored node = %+v, want response node %s", loaded, payload.Node.NodeID)
 	}
-	effective, err := repo.ListResourceGVICEffectiveAssignments(companyID, store.EntityTypeNode, payload.Node.NodeID)
+	effective, err := repo.ListResourceRACIEffectiveAssignments(companyID, store.EntityTypeNode, payload.Node.NodeID)
 	if err != nil {
-		t.Fatalf("ListResourceGVICEffectiveAssignments: %v", err)
+		t.Fatalf("ListResourceRACIEffectiveAssignments: %v", err)
 	}
 	if len(effective) != 1 ||
-		effective[0].Role != domain.GVICRoleResponsible ||
+		effective[0].Role != domain.RACIRoleResponsible ||
 		effective[0].UserID != responsible.UserID ||
 		effective[0].SourceResourceType != store.EntityTypeLogicGate ||
 		effective[0].SourceResourceID != logicGate.LogicGateID ||
 		effective[0].InheritanceType != store.PolicyModeInherited {
-		t.Fatalf("effective node GVIC = %+v, want inherited Responsible assignment from Logic Gate", effective)
+		t.Fatalf("effective node RACI = %+v, want inherited Responsible assignment from Logic Gate", effective)
 	}
 }
 
-type GVICMatrixNodeCreatePayloadForTest struct {
+type RACIMatrixNodeCreatePayloadForTest struct {
 	Node                     domain.Node                        `json:"node"`
 	LogicGate                *domain.LogicGate                  `json:"logic_gate"`
 	Assignment               *domain.NodeLogicGateAssignment    `json:"assignment"`
 	Card                     *domain.KanbanCard                 `json:"card"`
 	FolderItems              []domain.CompanyExplorerFolderItem `json:"folder_items"`
-	GVICMatrixProjectionRows []store.GVICMatrixProjectionRow    `json:"gvic_projection_rows"`
+	RACIMatrixProjectionRows []store.RACIMatrixProjectionRow    `json:"gvic_projection_rows"`
 }
 
-func decodeGVICMatrixNodeCreatePayloadForTest(t *testing.T, rr *httptest.ResponseRecorder) GVICMatrixNodeCreatePayloadForTest {
+func decodeRACIMatrixNodeCreatePayloadForTest(t *testing.T, rr *httptest.ResponseRecorder) RACIMatrixNodeCreatePayloadForTest {
 	t.Helper()
-	var payload GVICMatrixNodeCreatePayloadForTest
+	var payload RACIMatrixNodeCreatePayloadForTest
 	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode GVICMatrix create response: %v body=%s", err, rr.Body.String())
+		t.Fatalf("decode RACIMatrix create response: %v body=%s", err, rr.Body.String())
 	}
 	return payload
 }
 
-func getGVICMatrixProjectionRowsForTest(t *testing.T, handler http.Handler, companyID string, actor domain.User) []store.GVICMatrixProjectionRow {
+func getRACIMatrixProjectionRowsForTest(t *testing.T, handler http.Handler, companyID string, actor domain.User) []store.RACIMatrixProjectionRow {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/v1/work-items/gvic-matrix-projection?company_id="+companyID+"&limit=500", nil)
 	req = requestWithLogicGateWorkActorForTest(req, actor, companyID)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
-		t.Fatalf("GET GVIC projection status = %d body=%s, want 200", rr.Code, rr.Body.String())
+		t.Fatalf("GET RACI projection status = %d body=%s, want 200", rr.Code, rr.Body.String())
 	}
 	var payload struct {
 		Projection string                          `json:"projection"`
-		Rows       []store.GVICMatrixProjectionRow `json:"rows"`
+		Rows       []store.RACIMatrixProjectionRow `json:"rows"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode GVIC projection response: %v body=%s", err, rr.Body.String())
+		t.Fatalf("decode RACI projection response: %v body=%s", err, rr.Body.String())
 	}
 	if payload.Projection != "gvic_matrix" {
 		t.Fatalf("projection = %q, want %q", payload.Projection, "gvic_matrix")
@@ -206,7 +206,7 @@ func getGVICMatrixProjectionRowsForTest(t *testing.T, handler http.Handler, comp
 	return payload.Rows
 }
 
-func projectionRowsContainNodeGate(rows []store.GVICMatrixProjectionRow, nodeID, logicGateID string) bool {
+func projectionRowsContainNodeGate(rows []store.RACIMatrixProjectionRow, nodeID, logicGateID string) bool {
 	for _, row := range rows {
 		if row.NodeID == nodeID && row.LogicGateID != nil && *row.LogicGateID == logicGateID {
 			return true

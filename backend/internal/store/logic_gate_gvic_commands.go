@@ -5,17 +5,17 @@ import (
 	"strings"
 )
 
-const LogicGateGVICUpdatedEventType = "logic_gate_gvic_updated"
+const LogicGateRACIUpdatedEventType = "logic_gate_gvic_updated"
 
-type normalizedLogicGateGVICCommandAssignment struct {
+type normalizedLogicGateRACICommandAssignment struct {
 	role          string
 	principalType string
 	principalID   string
 	userID        string
 }
 
-func normalizeLogicGateGVICAssignmentInput(assignment LogicGateGVICAssignmentInput) (normalizedLogicGateGVICCommandAssignment, error) {
-	role, ok := NormalizeGVICRole(assignment.Role)
+func normalizeLogicGateRACIAssignmentInput(assignment LogicGateRACIAssignmentInput) (normalizedLogicGateRACICommandAssignment, error) {
+	role, ok := NormalizeRACIRole(assignment.Role)
 	principalType := strings.ToLower(strings.TrimSpace(assignment.PrincipalType))
 	principalID := strings.TrimSpace(assignment.PrincipalID)
 	userID := strings.TrimSpace(assignment.UserID)
@@ -27,7 +27,7 @@ func normalizeLogicGateGVICAssignmentInput(assignment LogicGateGVICAssignmentInp
 		principalID = userID
 	}
 	if !ok || principalID == "" {
-		return normalizedLogicGateGVICCommandAssignment{}, ErrInvalid
+		return normalizedLogicGateRACICommandAssignment{}, ErrInvalid
 	}
 	switch principalType {
 	case EntityPermissionSubjectUser:
@@ -37,9 +37,9 @@ func normalizeLogicGateGVICAssignmentInput(assignment LogicGateGVICAssignmentInp
 	case EntityPermissionSubjectGroup:
 		userID = ""
 	default:
-		return normalizedLogicGateGVICCommandAssignment{}, ErrInvalid
+		return normalizedLogicGateRACICommandAssignment{}, ErrInvalid
 	}
-	return normalizedLogicGateGVICCommandAssignment{
+	return normalizedLogicGateRACICommandAssignment{
 		role:          role,
 		principalType: principalType,
 		principalID:   principalID,
@@ -47,14 +47,14 @@ func normalizeLogicGateGVICAssignmentInput(assignment LogicGateGVICAssignmentInp
 	}, nil
 }
 
-func normalizeLogicGateGVICCommandAssignments(assignments []LogicGateGVICAssignmentInput) ([]normalizedLogicGateGVICCommandAssignment, error) {
+func normalizeLogicGateRACICommandAssignments(assignments []LogicGateRACIAssignmentInput) ([]normalizedLogicGateRACICommandAssignment, error) {
 	if len(assignments) == 0 {
 		return nil, ErrInvalid
 	}
 	seen := map[string]bool{}
-	out := make([]normalizedLogicGateGVICCommandAssignment, 0, len(assignments))
+	out := make([]normalizedLogicGateRACICommandAssignment, 0, len(assignments))
 	for _, assignment := range assignments {
-		normalized, err := normalizeLogicGateGVICAssignmentInput(assignment)
+		normalized, err := normalizeLogicGateRACIAssignmentInput(assignment)
 		if err != nil {
 			return nil, err
 		}
@@ -71,15 +71,15 @@ func normalizeLogicGateGVICCommandAssignments(assignments []LogicGateGVICAssignm
 	return out, nil
 }
 
-func cloneLogicGateGVICAssignments(items []domain.LogicGateGVICAssignment) []domain.LogicGateGVICAssignment {
+func cloneLogicGateRACIAssignments(items []domain.LogicGateRACIAssignment) []domain.LogicGateRACIAssignment {
 	if len(items) == 0 {
-		return []domain.LogicGateGVICAssignment{}
+		return []domain.LogicGateRACIAssignment{}
 	}
-	out := append([]domain.LogicGateGVICAssignment{}, items...)
+	out := append([]domain.LogicGateRACIAssignment{}, items...)
 	return out
 }
 
-func logicGateGVICCommandAssignmentPayload(assignments []normalizedLogicGateGVICCommandAssignment) []map[string]string {
+func logicGateRACICommandAssignmentPayload(assignments []normalizedLogicGateRACICommandAssignment) []map[string]string {
 	out := make([]map[string]string, 0, len(assignments))
 	for _, assignment := range assignments {
 		payload := map[string]string{
@@ -95,9 +95,9 @@ func logicGateGVICCommandAssignmentPayload(assignments []normalizedLogicGateGVIC
 	return out
 }
 
-func logicGateGVICChangedUserIDs(before, after []domain.LogicGateGVICAssignment) []string {
-	beforeRoles := highestLogicGateGVICRolesByUser(before)
-	afterRoles := highestLogicGateGVICRolesByUser(after)
+func logicGateRACIChangedUserIDs(before, after []domain.LogicGateRACIAssignment) []string {
+	beforeRoles := highestLogicGateRACIRolesByUser(before)
+	afterRoles := highestLogicGateRACIRolesByUser(after)
 	out := make([]string, 0, len(afterRoles))
 	seen := map[string]bool{}
 	for _, assignment := range after {
@@ -115,43 +115,43 @@ func logicGateGVICChangedUserIDs(before, after []domain.LogicGateGVICAssignment)
 	return out
 }
 
-func highestLogicGateGVICRolesByUser(assignments []domain.LogicGateGVICAssignment) map[string]string {
+func highestLogicGateRACIRolesByUser(assignments []domain.LogicGateRACIAssignment) map[string]string {
 	out := map[string]string{}
 	for _, assignment := range assignments {
 		userID := strings.TrimSpace(assignment.UserID)
-		role, ok := NormalizeGVICRole(assignment.Role)
+		role, ok := NormalizeRACIRole(assignment.Role)
 		if !ok || userID == "" {
 			continue
 		}
-		if logicGateGVICRoleRank(role) > logicGateGVICRoleRank(out[userID]) {
+		if logicGateRACIRoleRank(role) > logicGateRACIRoleRank(out[userID]) {
 			out[userID] = role
 		}
 	}
 	return out
 }
 
-func logicGateGVICRoleRank(role string) int {
+func logicGateRACIRoleRank(role string) int {
 	switch strings.TrimSpace(role) {
-	case domain.GVICRoleResponsible:
+	case domain.RACIRoleResponsible:
 		return 4
-	case domain.GVICRoleConsulted:
+	case domain.RACIRoleAccountable:
 		return 3
-	case domain.GVICRoleVerifier:
+	case domain.RACIRoleConsulted:
 		return 2
-	case domain.GVICRoleInformed:
+	case domain.RACIRoleInformed:
 		return 1
 	default:
 		return 0
 	}
 }
 
-func logicGateGVICUpdatedWorkspaceEventInput(result LogicGateGVICAssignmentCommandResult, commandAssignments []normalizedLogicGateGVICCommandAssignment, input LogicGateGVICAssignmentCommandInput) DomainEventInput {
+func logicGateRACIUpdatedWorkspaceEventInput(result LogicGateRACIAssignmentCommandResult, commandAssignments []normalizedLogicGateRACICommandAssignment, input LogicGateRACIAssignmentCommandInput) DomainEventInput {
 	payload := map[string]any{
 		"logic_gate_id":       result.LogicGateID,
-		"gvic_assignments":    result.GVICAssignments,
+		"gvic_assignments":    result.RACIAssignments,
 		"operation":           result.Operation,
-		"command_assignments": logicGateGVICCommandAssignmentPayload(commandAssignments),
-		"assignment_user_ids": logicGateGVICChangedUserIDs(result.BeforeAssignments, result.GVICAssignments),
+		"command_assignments": logicGateRACICommandAssignmentPayload(commandAssignments),
+		"assignment_user_ids": logicGateRACIChangedUserIDs(result.BeforeAssignments, result.RACIAssignments),
 	}
 	actorUserID := strings.TrimSpace(input.ActorUserID)
 	idempotencyKey := strings.TrimSpace(input.IdempotencyKey)
@@ -165,7 +165,7 @@ func logicGateGVICUpdatedWorkspaceEventInput(result LogicGateGVICAssignmentComma
 		CompanyID:   result.CompanyID,
 		StreamType:  workspaceDomainStreamType,
 		StreamID:    result.CompanyID,
-		Type:        LogicGateGVICUpdatedEventType,
+		Type:        LogicGateRACIUpdatedEventType,
 		ActorUserID: actorUserID,
 		Payload:     payload,
 	}

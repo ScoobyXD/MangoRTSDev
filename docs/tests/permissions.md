@@ -8,7 +8,7 @@ Company-admin and dev-admin identities remain protected because managers cannot 
 ↓
 The complete V2 policy saves with stale-write protection and no documented 1,000-assignment product limit
 ↓
-Live direct, nested-group, and default rules resolve Edit or No Access independently from RCVI
+Live direct, nested-group, and default rules resolve Edit or No Access independently from RACI
 
 Last updated: 2026-08-06
 
@@ -20,7 +20,7 @@ Company membership and the resource's inherited or customized V2 policy resolve 
 ↓
 Direct-user, nearest live nested-group, and default rules are evaluated in that order
 ↓
-Reads hide inaccessible data; mutations require Edit; GVIC never grants authority
+Reads hide inaccessible data; mutations require Edit; RACI never grants authority
 ↓
 Moves, resets, group changes, and ETags resolve current state without descendant policy rewrites
 ↓
@@ -47,8 +47,8 @@ P5 - Default access participates in effective access calculation.
 P6 - Resource permissions support user and group source principals.
 P7 - The canonical V2 permission PUT has no documented 1,000-assignment product limit; request size remains governed by the normal HTTP and database boundaries.
 P8 - Dev admins and company admins resolve company-managed resource access to edit, not to a separate resource-admin tier.
-P9 - GVIC assignments do not grant resource permission access and must not satisfy edit, delete, or mutation authorization checks.
-P10 - GVIC assignments must not elevate a user from no access to edit; edit/delete authority comes only from the resource permission policy.
+P9 - RACI assignments do not grant resource permission access and must not satisfy edit, delete, or mutation authorization checks.
+P10 - RACI assignments must not elevate a user from no access to edit; edit/delete authority comes only from the resource permission policy.
 P11 - If a user lacks edit access, read-style access checks hide the resource instead of exposing it.
 P12 - Resource mutations require edit access; a no-access actor is denied without any intermediate read-only state.
 P13 - Invalid requested access levels return a bad request error.
@@ -73,7 +73,7 @@ P31 - An inherited resource live-resolves the nearest active customized policy i
 P32 - Customizing copies the current effective policy once, applies one complete replacement, and allocates a new customized sequence in the same transaction.
 P33 - Returning to inherited deletes direct rule rows and the customized sequence, then immediately exposes the current effective ancestor policy.
 P34 - Editing a parent changes only that parent. Existing inherited descendants see it live; customized descendants keep their active complete policies.
-P35 - A same-parent reorder leaves the parent-link sequence and current policy unchanged. A real move allocates a new parent-link sequence for permissions and GVIC.
+P35 - A same-parent reorder leaves the parent-link sequence and current policy unchanged. A real move allocates a new parent-link sequence for permissions and RACI.
 P36 - Moving an inherited resource changes its effective parent immediately; moving a customized resource preserves its policy. Detaching an inherited Node materializes its current effective permission policy as customized.
 P37 - Company Explorer folders parent contained folders, projects, and Logic Gates; Logic Gates parent assigned Nodes; Shared Triage folders parent folders and shared inboxes. Project relationships do not create policy parentage.
 P38 - Kanban board/card visibility follows the owning Logic Gate access, but opening a Kanban node detail/editor must perform a fresh node-level access check.
@@ -87,21 +87,21 @@ P45 - Runtime authorization resolves group permission rows from group source tab
 P46 - Ordinary policy writes do not walk descendants. Force-overwrite work stays constant-size as the subtree grows.
 P47 - Settings contain inherited/customized mode, customized sequence, parent-link sequence, and descendant-reset sequence; direct rows exist only for a customized complete policy.
 P48 - A parent link newer than a reset blocks that older reset from retroactively crossing a moved subtree. A later reset from the new ancestry may cross it.
-P49 - Separate monotonic sequence domains are used for GVIC and permissions; wall-clock timestamps never decide policy precedence.
+P49 - Separate monotonic sequence domains are used for RACI and permissions; wall-clock timestamps never decide policy precedence.
 P50 - A reset can make a stored customization inactive without deleting it. Reads explain both the effective source and the overwritten stored source.
 P51 - The frontend has distinct Inherited/Customized controls, Apply to inherited descendants, and separately confirmed Overwrite all descendants controls.
-P52 - Permission audit/explainability identifies direct/default/group resolution, the effective customized source, eligible reset, parent-link boundary, and overwritten customization; it never reports GVIC as an authorization grant.
+P52 - Permission audit/explainability identifies direct/default/group resolution, the effective customized source, eligible reset, parent-link boundary, and overwritten customization; it never reports RACI as an authorization grant.
 P53 - Permission fingerprints include effective source and sequence, eligible reset, parent-link boundary, group-membership version, actor identity, and actor-specific Edit result where exposed.
-P54 - Soft delete for nodes and Company Explorer delete targets requires edit access to the deleted resource or container; no access and GVIC assignments never authorize the delete.
+P54 - Soft delete for nodes and Company Explorer delete targets requires edit access to the deleted resource or container; no access and RACI assignments never authorize the delete.
 P55 - If a user is denied permission-settings visibility, the permissions dialog remains dismissible with the X control and must not attempt to autosave a panel that never loaded editable permission data.
 P56 - Logic Gate work reads return the single actor-specific `can_edit` resource flag while preserving default, direct-user, group, ancestor-application, and company-role authorization semantics.
 P57 - Logic Gate work authorization is evaluated before conditional ETag handling; losing edit access cannot produce a cached `304` or preserve readable board data.
 P58 - Direct or inherited source changes, eligible resets, parent moves, and group-version changes alter the policy fingerprint without descendant version fanout.
 P59 - Company role, group membership, and group hierarchy changes that can alter actor permission flags update the shared group-membership version.
 P60 - Authorization is evaluated before conditional ETag handling, and the actor-specific permission result is part of the ETag so revoked or differently authorized users cannot share an unsafe validator.
-P61 - RCVI Responsible/request-owner data may appear in the Logic Gate header, but RCVI assignments do not set `can_edit`.
+P61 - RACI Responsible/request-owner data may appear in the Logic Gate header, but RACI assignments do not set `can_edit`.
 P62 - Permission mutations still publish no generic permission/workspace event. Instead, before a later Node-chat, mounted-board, or shared-mailbox hint reaches an already-subscribed socket, that narrow publisher resolves the exact current audience and fails closed on lookup errors. A user revoked after subscribing receives no later resource identifiers/hints without needing a reconnect.
-P63 - A newly created email Node first resolves and copies the effective policy from its final parent/source, then becomes customized with one system-managed direct Edit binding for its creator and direct Responsible RCVI. Generic permission replacement cannot widen or remove collaboration participant grants.
+P63 - A newly created email Node first resolves and copies the effective policy from its final parent/source, then becomes customized with one system-managed direct Edit binding for its creator and direct Responsible RACI. Generic permission replacement cannot widen or remove collaboration participant grants.
 P64 - A committed direct user mention or resolved user-group mention snapshots each distinct same-company user as a collaboration participant and adds one system-managed direct edit binding for that user in the same durable transaction. These are user bindings, not live group pointers, so later group changes neither grant nor revoke collaboration access.
 P65 - Collaboration participant membership and its mandatory Node edit binding are append-only for the collaboration lifetime. The collaboration Node policy is system-managed: generic Node permission mutation cannot add a grant, remove/downgrade/replace a participant binding, or change its default away from `no_access`; only the accepted mention-participant path may add a binding. Deleting the mention message has no permission effect.
 P66 - A generic Node permission grant alone does not create email collaboration participation, a triage row, source-mailbox access, or shared-draft access. The existing dev-admin/company-admin bypass remains an administrative access rule but does not silently add the administrator to participant lists, mention notifications, or My Drafts.
@@ -132,7 +132,7 @@ Business logic covered:
 - P45
 
 Given:
-- A company has resources with default access, user source rows, group source rows, and separate GVIC assignments.
+- A company has resources with default access, user source rows, group source rows, and separate RACI assignments.
 - A dev admin, company admin, company manager, group member, and direct user grantee access the same resource.
 - A user is added to a group after the group has already been assigned a resource permission.
 
@@ -141,7 +141,7 @@ Expected:
 - Every effective resource result is exactly edit or no access.
 - Blank, `view`, `admin`, and `manage` inputs are rejected; they do not normalize into another resource permission.
 - Default access, direct user rows, and group rows participate in effective permission access.
-- GVIC assignments do not participate in effective permission access and cannot grant or elevate edit authorization.
+- RACI assignments do not participate in effective permission access and cannot grant or elevate edit authorization.
 - Dev admins and company admins bypass resource permissions.
 - Company managers follow resource permissions.
 - `resource_permissions` stores user/group source rows with explicit access levels.
@@ -263,7 +263,7 @@ Expected:
 - Write count is constant with descendant count, including an intentionally empty customized rule set.
 - Permission explanations identify source, direct/default/group result, reset, parent-link boundary, and inactive stored customization.
 - Group permission rules remain group pointers and are not expanded into one source row per user.
-- GVIC assignments never satisfy permission authorization.
+- RACI assignments never satisfy permission authorization.
 
 ### Scenario P-S5: Explicit Permission Save And Close Autosave
 
@@ -316,7 +316,7 @@ Expected:
 - Direct and inherited policy changes bump the affected gate, while actor membership/hierarchy changes conservatively bump company gate versions.
 - Actor permission identity/flags prevent cross-user validator reuse.
 - Removing edit access returns denial and does not expose cached card data.
-- GVIC assignment alone does not set `can_edit`.
+- RACI assignment alone does not set `can_edit`.
 
 ### Scenario P-S8: Email Collaboration Participant Policy
 

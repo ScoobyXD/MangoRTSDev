@@ -92,7 +92,7 @@ func (s *Server) logicGateWorkETag(_ *http.Request, companyID, logicGateID, acto
 	return strongETagFromString(
 		"logic-gate-work:v3:" + strings.TrimSpace(companyID) + ":" + strings.TrimSpace(logicGateID) + ":" +
 			strings.TrimSpace(actorUserID) + ":" + permissionKey + ":" +
-			fingerprints.GVIC + ":" + fingerprints.Permission + ":" + strconv.FormatInt(version, 10),
+			fingerprints.RACI + ":" + fingerprints.Permission + ":" + strconv.FormatInt(version, 10),
 	), nil
 }
 
@@ -567,7 +567,7 @@ func logicGateWorkAssignmentResultPayload(result store.LogicGateNodeAssignmentRe
 		"assignment":           assignment,
 		"node":                 result.Node,
 		"card":                 card,
-		"gvic_projection_rows": result.GVICMatrixProjectionRows,
+		"gvic_projection_rows": result.RACIMatrixProjectionRows,
 	}
 }
 
@@ -579,7 +579,7 @@ func logicGateWorkAssignmentRemoveResultPayload(result store.LogicGateNodeAssign
 		"assignment":           assignment,
 		"node":                 result.Node,
 		"card":                 card,
-		"gvic_projection_rows": result.GVICMatrixProjectionRows,
+		"gvic_projection_rows": result.RACIMatrixProjectionRows,
 	}
 }
 

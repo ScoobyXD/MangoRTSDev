@@ -72,17 +72,17 @@ func TestLogicGateWorkJSONContractIsKanbanSpecificAndNonRedundant(t *testing.T) 
 	repo := NewMemoryRepo()
 	companyID := "55555555-5555-4555-8555-555555555404"
 	repo.EnsureCompany(companyID, "Logic Gate Work Contract Co")
-	owner := mustCreateGVICMembershipUser(t, repo, "logic-gate-contract-owner", companyID)
+	owner := mustCreateRACIMembershipUser(t, repo, "logic-gate-contract-owner", companyID)
 	logicGate, err := repo.CreateLogicGate(companyID, "Contract Gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
-	if _, err := repo.SetLogicGateGVICAssignments(LogicGateGVICAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateRACIAssignments(LogicGateRACIAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleResponsible, UserID: owner.UserID}},
+		Assignments: []LogicGateRACIAssignmentInput{{Role: domain.RACIRoleResponsible, UserID: owner.UserID}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
+		t.Fatalf("SetLogicGateRACIAssignments: %v", err)
 	}
 	node, err := repo.CreateNode(companyID, "Contract card")
 	if err != nil {
@@ -206,7 +206,7 @@ func TestMemoryLogicGateWorkVersionInvalidatesEveryResponseDependency(t *testing
 	}{
 		{name: "gate header", eventType: "logic_gate_updated", payload: map[string]any{"logic_gate_id": logicGate.LogicGateID}},
 		{name: "gate permission", eventType: "logic_gate_permissions_updated", payload: map[string]any{"logic_gate_id": logicGate.LogicGateID}},
-		{name: "gate GVIC/request owner", eventType: "logic_gate_gvic_updated", payload: map[string]any{"logic_gate_id": logicGate.LogicGateID}},
+		{name: "gate RACI/request owner", eventType: "logic_gate_gvic_updated", payload: map[string]any{"logic_gate_id": logicGate.LogicGateID}},
 		{name: "inherited permission policy", eventType: "company_explorer_folder_permissions_updated", payload: map[string]any{}},
 		{name: "board", eventType: "kanban_board_updated", payload: map[string]any{"board_id": boardID}},
 		{name: "column/status", eventType: "kanban_column_updated", payload: map[string]any{"board_id": boardID}},
@@ -223,18 +223,18 @@ func TestMemoryLogicGateRequestedAssignmentsTrackRequester(t *testing.T) {
 	companyID := "55555555-5555-4555-8555-555555555402"
 	repo.EnsureCompany(companyID, "Logic Gate Request Store Co")
 
-	requester := mustCreateGVICMembershipUser(t, repo, "logic-gate-requester", companyID)
-	responsible := mustCreateGVICMembershipUser(t, repo, "logic-gate-responsible", companyID)
+	requester := mustCreateRACIMembershipUser(t, repo, "logic-gate-requester", companyID)
+	responsible := mustCreateRACIMembershipUser(t, repo, "logic-gate-responsible", companyID)
 	logicGate, err := repo.CreateLogicGate(companyID, "Request Gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
-	if _, err := repo.SetLogicGateGVICAssignments(LogicGateGVICAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateRACIAssignments(LogicGateRACIAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleResponsible, UserID: responsible.UserID}},
+		Assignments: []LogicGateRACIAssignmentInput{{Role: domain.RACIRoleResponsible, UserID: responsible.UserID}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
+		t.Fatalf("SetLogicGateRACIAssignments: %v", err)
 	}
 	node, err := repo.CreateNode(companyID, "Requested work")
 	if err != nil {
@@ -304,8 +304,8 @@ func TestMemoryLogicGateAssignmentsTrackPlacedByUser(t *testing.T) {
 	companyID := "55555555-5555-4555-8555-555555555403"
 	repo.EnsureCompany(companyID, "Logic Gate Placement Store Co")
 
-	creator := mustCreateGVICMembershipUser(t, repo, "logic-gate-placement-creator", companyID)
-	transferActor := mustCreateGVICMembershipUser(t, repo, "logic-gate-placement-transfer", companyID)
+	creator := mustCreateRACIMembershipUser(t, repo, "logic-gate-placement-creator", companyID)
+	transferActor := mustCreateRACIMembershipUser(t, repo, "logic-gate-placement-transfer", companyID)
 	sourceGate, err := repo.CreateLogicGate(companyID, "Placement Source")
 	if err != nil {
 		t.Fatalf("CreateLogicGate source: %v", err)

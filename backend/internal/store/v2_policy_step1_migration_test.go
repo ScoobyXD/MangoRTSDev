@@ -270,7 +270,7 @@ func removeV2PolicyStep1SchemaBlock(t *testing.T, schema string) string {
 func queryV2PolicyStep1PreflightFinal(t *testing.T, db *sql.DB, script string) string {
 	t.Helper()
 	query := strings.TrimSpace(script)
-	query = strings.TrimSpace(strings.TrimPrefix(query, "-- V2 GVIC and permissions Step 1 read-only preflight.\n-- Run in DBeaver after the additive Step 1 migrations. The last row is READY or STOP."))
+	query = strings.TrimSpace(strings.TrimPrefix(query, "-- V2 RACI and permissions Step 1 read-only preflight.\n-- Run in DBeaver after the additive Step 1 migrations. The last row is READY or STOP."))
 	query = strings.TrimSpace(strings.TrimPrefix(query, "begin transaction read only;"))
 	query = strings.TrimSpace(strings.TrimSuffix(query, "commit;"))
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -357,7 +357,7 @@ where company_id='00000000-0000-4000-8000-000000000101'
 		t.Fatal(err)
 	}
 	if nodeRole != "informed" || nodePrincipalType != "group" {
-		t.Fatalf("latest-snapshot node GVIC=%s/%s, want informed/group", nodeRole, nodePrincipalType)
+		t.Fatalf("latest-snapshot node RACI=%s/%s, want informed/group", nodeRole, nodePrincipalType)
 	}
 }
 

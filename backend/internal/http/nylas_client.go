@@ -479,19 +479,19 @@ type NylasEvent struct {
 
 func (c *NylasRESTClient) ExchangeCode(ctx context.Context, code, redirectURI string) (NylasGrant, error) {
 	var payload struct {
-		ClientID     string `json:"client_id"`
-		ClientSecret string `json:"client_secret"`
-		GrantType    string `json:"grant_type"`
-		Code         string `json:"code"`
-		RedirectURI  string `json:"redirect_uri"`
-		CodeVerifier string `json:"code_verifier"`
+		ClientID        string `json:"client_id"`
+		ClientSecret    string `json:"client_secret"`
+		GrantType       string `json:"grant_type"`
+		Code            string `json:"code"`
+		RedirectURI     string `json:"redirect_uri"`
+		CodeAccountable string `json:"code_accountable"`
 	}
 	payload.ClientID = c.clientID
 	payload.ClientSecret = c.apiKey
 	payload.GrantType = "authorization_code"
 	payload.Code = strings.TrimSpace(code)
 	payload.RedirectURI = strings.TrimSpace(redirectURI)
-	payload.CodeVerifier = "nylas"
+	payload.CodeAccountable = "nylas"
 
 	var response struct {
 		NylasGrant

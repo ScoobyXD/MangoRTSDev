@@ -758,7 +758,7 @@ type NodeView struct {
 	Projections          []NodeProjection          `json:"projections"`
 	Relationships        []NodeRelationship        `json:"relationships"`
 	LogicGateAssignments []NodeLogicGateAssignment `json:"logic_gate_assignments"`
-	GVICAssignments      []ResourceGVICAssignment  `json:"gvic_assignments"`
+	RACIAssignments      []ResourceRACIAssignment  `json:"gvic_assignments"`
 	TimelineEvents       []NodeTimelineEvent       `json:"timeline_events"`
 	TimelineEventCount   int                       `json:"timeline_event_count"`
 	InformationCount     int                       `json:"information_count"`
@@ -773,19 +773,19 @@ type LogicGate struct {
 	LogicGateID      string                    `json:"logic_gate_id"`
 	Header           string                    `json:"header"`
 	DefaultAccess    string                    `json:"default_access"`
-	GVICAssignments  []LogicGateGVICAssignment `json:"gvic_assignments,omitempty"`
+	RACIAssignments  []LogicGateRACIAssignment `json:"gvic_assignments,omitempty"`
 	EffectiveAccess  string                    `json:"effective_access_level,omitempty"`
 	CreatedTimestamp time.Time                 `json:"created_timestamp"`
 }
 
 const (
-	GVICRoleResponsible = "responsible"
-	GVICRoleConsulted   = "consulted"
-	GVICRoleVerifier    = "verifier"
-	GVICRoleInformed    = "informed"
+	RACIRoleResponsible = "responsible"
+	RACIRoleAccountable = "accountable"
+	RACIRoleConsulted   = "consulted"
+	RACIRoleInformed    = "informed"
 )
 
-type ResourceGVICAssignment struct {
+type ResourceRACIAssignment struct {
 	CompanyID          string    `json:"company_id"`
 	ResourceType       string    `json:"resource_type"`
 	ResourceID         string    `json:"resource_id"`
@@ -805,7 +805,7 @@ type ResourceGVICAssignment struct {
 	UpdatedTimestamp   time.Time `json:"updated_timestamp"`
 }
 
-type ResourceGVICEffectiveAssignment struct {
+type ResourceRACIEffectiveAssignment struct {
 	CompanyID           string    `json:"company_id"`
 	ResourceType        string    `json:"resource_type"`
 	ResourceID          string    `json:"resource_id"`
@@ -821,7 +821,7 @@ type ResourceGVICEffectiveAssignment struct {
 	UpdatedTimestamp    time.Time `json:"updated_timestamp"`
 }
 
-type LogicGateGVICAssignment struct {
+type LogicGateRACIAssignment struct {
 	CompanyID        string    `json:"company_id"`
 	LogicGateID      string    `json:"logic_gate_id"`
 	Role             string    `json:"role"`
@@ -906,12 +906,12 @@ type LogicGateView struct {
 	LogicGate           LogicGate                 `json:"logic_gate"`
 	Information         []LogicGateInformation    `json:"information"`
 	Projections         []LogicGateProjection     `json:"projections"`
-	GVICAssignments     []LogicGateGVICAssignment `json:"gvic_assignments"`
+	RACIAssignments     []LogicGateRACIAssignment `json:"gvic_assignments"`
 	Relationships       []LogicGateRelationship   `json:"relationships"`
 	Work                LogicGateWorkView         `json:"work"`
 	InformationCount    int                       `json:"information_count"`
 	ProjectionCount     int                       `json:"projection_count"`
-	GVICAssignmentCount int                       `json:"gvic_assignment_count"`
+	RACIAssignmentCount int                       `json:"gvic_assignment_count"`
 	RelationshipsCount  int                       `json:"relationships_count"`
 	AssignmentCount     int                       `json:"assignment_count"`
 	NodeCount           int                       `json:"node_count"`
@@ -1023,7 +1023,7 @@ type ProjectView struct {
 
 // LogicGateWorkHeader is the Kanban-specific Logic Gate metadata needed by the
 // Arena. RequestOwnerUserID is derived from the Responsible user assignment; the
-// full GVIC collection belongs to the Logic Gate details APIs.
+// full RACI collection belongs to the Logic Gate details APIs.
 type LogicGateWorkHeader struct {
 	LogicGateID        string `json:"logic_gate_id"`
 	Header             string `json:"header"`
@@ -1075,14 +1075,14 @@ type CompanyExplorerFolder struct {
 	ScopeType                string                      `json:"scope_type,omitempty"`
 	ScopeID                  *string                     `json:"scope_id,omitempty"`
 	Position                 int                         `json:"position"`
-	GVICAssignments          []SharedInboxGVICAssignment `json:"gvic_assignments,omitempty"`
+	RACIAssignments          []SharedInboxRACIAssignment `json:"gvic_assignments,omitempty"`
 	AccessGrants             []EntityPermission          `json:"access_grants,omitempty"`
 	EffectiveAccess          string                      `json:"effective_access_level,omitempty"`
 	CreatedTimestamp         time.Time                   `json:"created_timestamp"`
 	UpdatedTimestamp         time.Time                   `json:"updated_timestamp"`
 }
 
-type SharedInboxGVICAssignment struct {
+type SharedInboxRACIAssignment struct {
 	CompanyID        string    `json:"company_id"`
 	FolderID         string    `json:"folder_id"`
 	SharedInboxID    string    `json:"shared_inbox_id,omitempty"`
@@ -1209,20 +1209,20 @@ type NodeAccountAssignment struct {
 }
 
 const (
-	NotificationEventLogicGateGVICUpdated      = "logic_gate.gvic_updated"
+	NotificationEventLogicGateRACIUpdated      = "logic_gate.gvic_updated"
 	NotificationEventNodeAssigned              = "node.assigned"
 	NotificationEventNodeVerificationRequested = "node.verification_requested"
 	NotificationEventNodeFieldsChanged         = "node.fields_changed"
 	NotificationEventNodeCommentCreated        = "node.comment_created"
 	NotificationEventMentionCreated            = "mention.created"
 	NotificationEventUrgentMentionCreated      = "mention.urgent_created"
-	NotificationEventCVIInboxChanged           = "cvi_inbox.changed"
-	NotificationEventCVIInboxRCVIUpdated       = "cvi_inbox.RCVI_updated"
+	NotificationEventACIInboxChanged           = "aci_inbox.changed"
+	NotificationEventACIInboxRACIUpdated       = "aci_inbox.RACI_updated"
 )
 
 const (
 	NotificationSurfaceRInbox       = "r_inbox"
-	NotificationSurfaceCVIInbox     = "cvi_inbox"
+	NotificationSurfaceACIInbox     = "aci_inbox"
 	NotificationSurfaceMyTriage     = "my_triage"
 	NotificationSurfaceSharedTriage = "shared_triage"
 )

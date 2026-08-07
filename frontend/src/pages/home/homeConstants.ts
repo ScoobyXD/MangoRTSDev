@@ -1,4 +1,4 @@
-import type { MailboxOption, GVICInboxRole, GVICInboxViewID, GVICInboxStatus, InboxPriority, HomeColumnWidths } from "./homeTypes.js";
+import type { MailboxOption, RACIInboxRole, RACIInboxViewID, RACIInboxStatus, InboxPriority, HomeColumnWidths } from "./homeTypes.js";
 
 export const MAILBOX_OPTIONS: MailboxOption[] = [
   { value: "primary", label: "Inbox" },
@@ -39,16 +39,16 @@ export const HOME_COLUMN_MAX_WIDTHS: HomeColumnWidths = [360, 760, 1600, 1600];
 export const HOME_INBOX_MATRIX_PANEL_MIN_WIDTH = 320;
 export const INBOX_NO_LOGIC_GATE_ID = "__mango_inbox_no_logic_gate__";
 
-export const GVIC_STATUS_COLUMNS: ReadonlyArray<{ status: GVICInboxStatus; letter: string; label: string }> = [
+export const RACI_STATUS_COLUMNS: ReadonlyArray<{ status: RACIInboxStatus; letter: string; label: string }> = [
   { status: "pending", letter: "P", label: "Pending" },
   { status: "in_progress", letter: "IP", label: "In Progress" },
   { status: "review", letter: "R", label: "Review" },
 ];
 
-export const GVIC_INBOX_SECTIONS: ReadonlyArray<{ viewID: GVICInboxViewID; role: GVICInboxRole; letter: string; label: string; title: string }> = [
+export const RACI_INBOX_SECTIONS: ReadonlyArray<{ viewID: RACIInboxViewID; role: RACIInboxRole; letter: string; label: string; title: string }> = [
   { viewID: "r-inbox", role: "responsible", letter: "R", label: "Responsible", title: "Responsible Nodes" },
+  { viewID: "a-inbox", role: "accountable", letter: "A", label: "Accountable", title: "Accountable Nodes" },
   { viewID: "c-inbox", role: "consulted", letter: "C", label: "Consulted", title: "Consulted Nodes" },
-  { viewID: "v-inbox", role: "verifier", letter: "V", label: "Verifier", title: "Verifier Nodes" },
   { viewID: "i-inbox", role: "informed", letter: "I", label: "Informed", title: "Informed Nodes" },
   { viewID: "o-inbox", role: "other", letter: "O", label: "Other", title: "Other Nodes" },
 ];

@@ -32,7 +32,7 @@ func (s *Server) handleCommunicationsSharedInboxes(w http.ResponseWriter, r *htt
 		}
 		if err != nil {
 			log.Printf("communications shared inboxes: failed to list company_id=%s: %v", companyID, err)
-			if errors.Is(err, store.ErrSharedInboxStorageUnavailable) || errors.Is(err, store.ErrGVICStorageUnavailable) {
+			if errors.Is(err, store.ErrSharedInboxStorageUnavailable) || errors.Is(err, store.ErrRACIStorageUnavailable) {
 				writeError(w, http.StatusServiceUnavailable, "shared_inbox_storage_unavailable")
 				return
 			}
@@ -287,7 +287,7 @@ func (s *Server) handleCommunicationsSharedInboxAccess(w http.ResponseWriter, r 
 			writeError(w, http.StatusNotFound, "shared_inbox_not_found")
 			return
 		}
-		if errors.Is(err, store.ErrSharedInboxStorageUnavailable) || errors.Is(err, store.ErrGVICStorageUnavailable) {
+		if errors.Is(err, store.ErrSharedInboxStorageUnavailable) || errors.Is(err, store.ErrRACIStorageUnavailable) {
 			writeError(w, http.StatusServiceUnavailable, "shared_inbox_storage_unavailable")
 			return
 		}
@@ -340,7 +340,7 @@ func (s *Server) handleCommunicationsSharedInboxAccess(w http.ResponseWriter, r 
 			"access_grants":                folder.AccessGrants,
 			"permissions":                  folder.AccessGrants,
 			"effective_access":             effectiveAccess,
-			"gvic_assignments":             folder.GVICAssignments,
+			"gvic_assignments":             folder.RACIAssignments,
 			"can_edit_permissions":         canEditPermissions,
 			"can_edit_manager_permissions": actorCanManageCompany(actor, companyID),
 		})

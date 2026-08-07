@@ -167,7 +167,7 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 	}
 	addSharedTriageFolderRecipients := func(folderID string) error {
 		stop := observeNotificationTiming(recorder, "notifications.recipient_load")
-		roles, err := s.sharedInboxGVICRecipientRoles(event.CompanyID, folderID)
+		roles, err := s.sharedInboxRACIRecipientRoles(event.CompanyID, folderID)
 		stop()
 		if err != nil {
 			return err
@@ -238,13 +238,13 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 				body = nodeTitle + " issue state changed."
 			}
 		}
-	case domain.NotificationEventLogicGateGVICUpdated:
+	case domain.NotificationEventLogicGateRACIUpdated:
 		logicGateID := payloadString(payload, "logic_gate_id")
 		if logicGateID == "" {
 			logicGateID = event.EntityID
 		}
 		assignmentUserIDs := payloadStringSlice(payload, "assignment_user_ids")
-		roles, err := s.logicGateGVICRecipientRoles(event.CompanyID, logicGateID)
+		roles, err := s.logicGateRACIRecipientRoles(event.CompanyID, logicGateID)
 		if err != nil {
 			return nil, err
 		}
@@ -291,7 +291,7 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 		}
 		for _, userID := range payloadStringSlice(payload, "recipient_user_ids") {
 			addRecipient(userID, notificationRecipientMeta{
-				Surface: domain.NotificationSurfaceCVIInbox, Role: domain.GVICRoleVerifier,
+				Surface: domain.NotificationSurfaceACIInbox, Role: domain.RACIRoleAccountable,
 				LogicGateID: logicGateID, NodeID: nodeID, InformationID: timelineEventID,
 			})
 		}
@@ -361,7 +361,7 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 		entityTitle := ""
 		switch event.EntityType {
 		case "logic_gate":
-			roles, err := s.logicGateGVICRecipientRoles(event.CompanyID, event.EntityID)
+			roles, err := s.logicGateRACIRecipientRoles(event.CompanyID, event.EntityID)
 			if err != nil {
 				return nil, err
 			}
@@ -382,7 +382,7 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 				target, ok := store.NotificationPrimaryAccessTarget(event.EntityType, event.EntityID, "", "")
 				if ok {
 					if err := addEffectiveRecipientSubset(target.EntityType, target.EntityID, mentionedUserIDs, func(string) notificationRecipientMeta {
-						return notificationRecipientMeta{Surface: domain.NotificationSurfaceCVIInbox, Role: domain.NotificationRoleOther}
+						return notificationRecipientMeta{Surface: domain.NotificationSurfaceACIInbox, Role: domain.NotificationRoleOther}
 					}); err != nil {
 						return nil, err
 					}
@@ -412,7 +412,7 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 				entityTitle = "a project"
 			}
 			if err := addEffectiveRecipientSubset(store.EntityTypeProject, project.ProjectID, mentionedUserIDs, func(string) notificationRecipientMeta {
-				return notificationRecipientMeta{Surface: domain.NotificationSurfaceCVIInbox, Role: domain.NotificationRoleOther}
+				return notificationRecipientMeta{Surface: domain.NotificationSurfaceACIInbox, Role: domain.NotificationRoleOther}
 			}); err != nil {
 				return nil, err
 			}
@@ -451,7 +451,7 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 			meta.InformationID = informationID
 			recipients[userID] = meta
 		}
-	case domain.NotificationEventCVIInboxChanged:
+	case domain.NotificationEventACIInboxChanged:
 		folderID := payloadString(payload, "folder_id")
 		if folderID == "" {
 			folderID = event.EntityID
@@ -461,7 +461,7 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 		}
 		title = "Shared inbox access updated"
 		body = "Shared inbox access changed."
-	case domain.NotificationEventCVIInboxRCVIUpdated:
+	case domain.NotificationEventACIInboxRACIUpdated:
 		folderID := payloadString(payload, "folder_id")
 		if folderID == "" {
 			folderID = event.EntityID
@@ -469,7 +469,7 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 		if err := addSharedTriageFolderRecipients(folderID); err != nil {
 			return nil, err
 		}
-		title = "Shared inbox GVIC updated"
+		title = "Shared inbox RACI updated"
 		body = "Shared inbox routing roles changed."
 	default:
 		return nil, nil
@@ -564,12 +564,12 @@ func notificationEventFromDomainEvent(event domain.DomainEvent) (notificationPro
 		notificationType = domain.NotificationEventNodeVerificationRequested
 		entityType = store.EntityTypeNode
 		entityID = payloadString(payload, "node_id")
-	case store.NodeGVICUpdatedEventType:
+	case store.NodeRACIUpdatedEventType:
 		notificationType = domain.NotificationEventNodeAssigned
 		entityType = store.EntityTypeNode
 		entityID = payloadString(payload, "node_id")
-	case store.LogicGateGVICUpdatedEventType:
-		notificationType = domain.NotificationEventLogicGateGVICUpdated
+	case store.LogicGateRACIUpdatedEventType:
+		notificationType = domain.NotificationEventLogicGateRACIUpdated
 		entityType = store.EntityTypeLogicGate
 		entityID = payloadString(payload, "logic_gate_id")
 	case domain.NotificationEventNodeCommentCreated:
@@ -589,14 +589,14 @@ func notificationEventFromDomainEvent(event domain.DomainEvent) (notificationPro
 			return notificationProjectionEvent{}, false
 		}
 	case "communications_shared_inbox_gvic_updated":
-		notificationType = domain.NotificationEventCVIInboxRCVIUpdated
+		notificationType = domain.NotificationEventACIInboxRACIUpdated
 		entityType = store.EntityTypeSharedInbox
 		entityID = payloadString(payload, "shared_inbox_id")
 		if entityID == "" {
 			entityID = payloadString(payload, "folder_id")
 		}
 	case "shared_triage_access_updated":
-		notificationType = domain.NotificationEventCVIInboxChanged
+		notificationType = domain.NotificationEventACIInboxChanged
 		entityType = store.EntityTypeSharedInboxFolder
 		if normalized, ok := store.NormalizeEntityType(payloadString(payload, "resource_type")); ok {
 			entityType = normalized
@@ -854,7 +854,7 @@ func mentionAliasOccurrenceStarts(text string, aliases []string, trigger string)
 	return out
 }
 
-func (s *Service) logicGateGVICRecipientRoles(companyID, logicGateID string) (map[string]string, error) {
+func (s *Service) logicGateRACIRecipientRoles(companyID, logicGateID string) (map[string]string, error) {
 	companyID = strings.TrimSpace(companyID)
 	logicGateID = strings.TrimSpace(logicGateID)
 	if companyID == "" || logicGateID == "" {
@@ -863,7 +863,7 @@ func (s *Service) logicGateGVICRecipientRoles(companyID, logicGateID string) (ma
 	return s.gvicRecipientRoles(companyID, store.EntityTypeLogicGate, logicGateID)
 }
 
-func (s *Service) sharedInboxGVICRecipientRoles(companyID, folderID string) (map[string]string, error) {
+func (s *Service) sharedInboxRACIRecipientRoles(companyID, folderID string) (map[string]string, error) {
 	companyID = strings.TrimSpace(companyID)
 	folderID = strings.TrimSpace(folderID)
 	if companyID == "" || folderID == "" {
@@ -880,7 +880,7 @@ func (s *Service) sharedInboxGVICRecipientRoles(companyID, folderID string) (map
 }
 
 func (s *Service) gvicRecipientRoles(companyID, resourceType, resourceID string) (map[string]string, error) {
-	assignments, err := s.Repo.ListResourceGVICEffectiveAssignments(companyID, resourceType, resourceID)
+	assignments, err := s.Repo.ListResourceRACIEffectiveAssignments(companyID, resourceType, resourceID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return map[string]string{}, nil
@@ -893,7 +893,7 @@ func (s *Service) gvicRecipientRoles(companyID, resourceType, resourceID string)
 		if userID == "" {
 			continue
 		}
-		out[userID] = mergeGVICRole(out[userID], assignment.Role)
+		out[userID] = mergeRACIRole(out[userID], assignment.Role)
 	}
 	return out, nil
 }
@@ -964,12 +964,12 @@ func notificationMetaForLogicGateRole(role, logicGateID, nodeID string) notifica
 		NodeID:      strings.TrimSpace(nodeID),
 	}
 	switch role {
-	case domain.GVICRoleResponsible:
+	case domain.RACIRoleResponsible:
 		meta.Surface = domain.NotificationSurfaceRInbox
-	case domain.GVICRoleVerifier, domain.GVICRoleConsulted, domain.GVICRoleInformed:
-		meta.Surface = domain.NotificationSurfaceCVIInbox
+	case domain.RACIRoleAccountable, domain.RACIRoleConsulted, domain.RACIRoleInformed:
+		meta.Surface = domain.NotificationSurfaceACIInbox
 	case domain.NotificationRoleOther:
-		meta.Surface = domain.NotificationSurfaceCVIInbox
+		meta.Surface = domain.NotificationSurfaceACIInbox
 	}
 	return meta
 }
@@ -977,7 +977,7 @@ func notificationMetaForLogicGateRole(role, logicGateID, nodeID string) notifica
 func notificationMetaForEffectiveLogicGateUser(role, logicGateID, nodeID string) notificationRecipientMeta {
 	if normalizeNotificationRole(role) == "" {
 		return notificationRecipientMeta{
-			Surface:     domain.NotificationSurfaceCVIInbox,
+			Surface:     domain.NotificationSurfaceACIInbox,
 			Role:        domain.NotificationRoleOther,
 			LogicGateID: strings.TrimSpace(logicGateID),
 			NodeID:      strings.TrimSpace(nodeID),
@@ -989,7 +989,7 @@ func notificationMetaForEffectiveLogicGateUser(role, logicGateID, nodeID string)
 func notificationMetaForEffectiveNodeUser(node domain.Node, role string) notificationRecipientMeta {
 	if normalizeNotificationRole(role) == "" {
 		return notificationRecipientMeta{
-			Surface:     domain.NotificationSurfaceCVIInbox,
+			Surface:     domain.NotificationSurfaceACIInbox,
 			Role:        domain.NotificationRoleOther,
 			LogicGateID: firstCleanString(node.LogicGateIDs),
 			NodeID:      strings.TrimSpace(node.NodeID),
@@ -1024,7 +1024,7 @@ func mergeNotificationRecipientMeta(current, next notificationRecipientMeta) not
 		return next
 	}
 	roleChanged := false
-	if GVICRoleRank(next.Role) > GVICRoleRank(current.Role) {
+	if RACIRoleRank(next.Role) > RACIRoleRank(current.Role) {
 		current.Role = next.Role
 		roleChanged = true
 	}
@@ -1043,10 +1043,10 @@ func mergeNotificationRecipientMeta(current, next notificationRecipientMeta) not
 	return current
 }
 
-func mergeGVICRole(current, next string) string {
+func mergeRACIRole(current, next string) string {
 	current = normalizeNotificationRole(current)
 	next = normalizeNotificationRole(next)
-	if GVICRoleRank(next) > GVICRoleRank(current) {
+	if RACIRoleRank(next) > RACIRoleRank(current) {
 		return next
 	}
 	return current
@@ -1054,14 +1054,14 @@ func mergeGVICRole(current, next string) string {
 
 func normalizeNotificationRole(role string) string {
 	switch strings.TrimSpace(role) {
-	case domain.GVICRoleResponsible:
-		return domain.GVICRoleResponsible
-	case domain.GVICRoleVerifier:
-		return domain.GVICRoleVerifier
-	case domain.GVICRoleConsulted:
-		return domain.GVICRoleConsulted
-	case domain.GVICRoleInformed:
-		return domain.GVICRoleInformed
+	case domain.RACIRoleResponsible:
+		return domain.RACIRoleResponsible
+	case domain.RACIRoleAccountable:
+		return domain.RACIRoleAccountable
+	case domain.RACIRoleConsulted:
+		return domain.RACIRoleConsulted
+	case domain.RACIRoleInformed:
+		return domain.RACIRoleInformed
 	case domain.NotificationRoleOther:
 		return domain.NotificationRoleOther
 	default:
@@ -1069,15 +1069,15 @@ func normalizeNotificationRole(role string) string {
 	}
 }
 
-func GVICRoleRank(role string) int {
+func RACIRoleRank(role string) int {
 	switch normalizeNotificationRole(role) {
-	case domain.GVICRoleResponsible:
+	case domain.RACIRoleResponsible:
 		return 5
-	case domain.GVICRoleVerifier:
+	case domain.RACIRoleAccountable:
 		return 4
-	case domain.GVICRoleConsulted:
+	case domain.RACIRoleConsulted:
 		return 3
-	case domain.GVICRoleInformed:
+	case domain.RACIRoleInformed:
 		return 2
 	case domain.NotificationRoleOther:
 		return 1

@@ -22,7 +22,7 @@ type PolicyOverwrite struct {
 	Sequence     int64  `json:"sequence"`
 }
 
-type ResourceGVICPolicy struct {
+type ResourceRACIPolicy struct {
 	CompanyID               string                                   `json:"company_id"`
 	ResourceType            string                                   `json:"resource_type"`
 	ResourceID              string                                   `json:"resource_id"`
@@ -30,8 +30,8 @@ type ResourceGVICPolicy struct {
 	EffectiveAssignmentMode string                                   `json:"effective_assignment_mode"`
 	EffectiveSource         PolicySource                             `json:"effective_source"`
 	OverwrittenByAncestor   *PolicyOverwrite                         `json:"overwritten_by_ancestor"`
-	GVICAssignments         []domain.ResourceGVICAssignment          `json:"gvic_assignments"`
-	EffectiveAssignments    []domain.ResourceGVICEffectiveAssignment `json:"effective_assignments"`
+	RACIAssignments         []domain.ResourceRACIAssignment          `json:"gvic_assignments"`
+	EffectiveAssignments    []domain.ResourceRACIEffectiveAssignment `json:"effective_assignments"`
 	Revision                string                                   `json:"revision"`
 }
 
@@ -50,12 +50,12 @@ type ResourcePermissionPolicy struct {
 	Revision                string                    `json:"revision"`
 }
 
-type ResourceGVICPolicyUpdateInput struct {
+type ResourceRACIPolicyUpdateInput struct {
 	CompanyID        string
 	ResourceType     string
 	ResourceID       string
 	AssignmentMode   string
-	Assignments      []ResourceGVICAssignmentInput
+	Assignments      []ResourceRACIAssignmentInput
 	DescendantAction string
 	ExpectedRevision string
 	ActorUserID      string
@@ -76,13 +76,13 @@ type ResourcePermissionPolicyUpdateInput struct {
 }
 
 type ResourcePolicyFingerprints struct {
-	GVIC       string
+	RACI       string
 	Permission string
 }
 
 type V2PolicyRepository interface {
-	GetResourceGVICPolicy(companyID, resourceType, resourceID string) (ResourceGVICPolicy, error)
-	PutResourceGVICPolicy(input ResourceGVICPolicyUpdateInput) (ResourceGVICPolicy, []domain.DomainEvent, error)
+	GetResourceRACIPolicy(companyID, resourceType, resourceID string) (ResourceRACIPolicy, error)
+	PutResourceRACIPolicy(input ResourceRACIPolicyUpdateInput) (ResourceRACIPolicy, []domain.DomainEvent, error)
 	GetResourcePermissionPolicy(companyID, resourceType, resourceID string) (ResourcePermissionPolicy, error)
 	PutResourcePermissionPolicy(input ResourcePermissionPolicyUpdateInput) (ResourcePermissionPolicy, []domain.DomainEvent, error)
 	ResourcePolicyFingerprints(companyID, resourceType, resourceID, userID string) (ResourcePolicyFingerprints, error)

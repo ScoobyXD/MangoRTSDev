@@ -308,7 +308,7 @@ cd C:\Users\Jonat\MangoRTSDev\backend
 go run .\cmd\compact-node-information-from-projections -company-id 11111111-1111-1111-1111-111111111111 -report ..\tmp\node-history-compaction-dry-run.json
 ```
 
-Apply shape, only after Jonat approves, the DB access boundary verifier passes in that exact session, and `node_projection_table` has already been migrated clean:
+Apply shape, only after Jonat approves, the DB access boundary accountable passes in that exact session, and `node_projection_table` has already been migrated clean:
 
 ```powershell
 cd C:\Users\Jonat\MangoRTSDev\backend

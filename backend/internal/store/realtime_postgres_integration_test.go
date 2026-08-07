@@ -169,23 +169,23 @@ func TestPostgresRealtimeProducersAreTransactionallyAtomic(t *testing.T) {
 	}
 
 	t.Run("Node verification request", func(t *testing.T) {
-		verifier, err := repo.UpsertAuthUser("realtime-pg-verifier", "realtime-pg-verifier@example.test", "Realtime PG Verifier")
+		accountable, err := repo.UpsertAuthUser("realtime-pg-accountable", "realtime-pg-accountable@example.test", "Realtime PG Accountable")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := repo.AddCompanyMembership("realtime-pg-verifier", company.CompanyID, "company_user"); err != nil {
+		if _, err := repo.AddCompanyMembership("realtime-pg-accountable", company.CompanyID, "company_user"); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+		if _, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 			CompanyID: company.CompanyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
-			Assignments: []ResourceGVICAssignmentInput{{
-				Role: domain.GVICRoleVerifier, PrincipalType: EntityPermissionSubjectUser, PrincipalID: verifier.UserID,
+			Assignments: []ResourceRACIAssignmentInput{{
+				Role: domain.RACIRoleAccountable, PrincipalType: EntityPermissionSubjectUser, PrincipalID: accountable.UserID,
 			}},
 		}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := db.Exec(`delete from resource_gvic_effective_assignments
-where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid and role='verifier'`, company.CompanyID, node.NodeID); err != nil {
+where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid and role='accountable'`, company.CompanyID, node.NodeID); err != nil {
 			t.Fatal(err)
 		}
 		result, err := repo.CreateNodeVerificationRequest(NodeVerificationRequestInput{
@@ -194,8 +194,8 @@ where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid and 
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(result.TimelineEvent.VerificationRecipients) != 1 || result.TimelineEvent.VerificationRecipients[0].UserID != verifier.UserID {
-			t.Fatalf("verification recipients = %+v, want verifier", result.TimelineEvent.VerificationRecipients)
+		if len(result.TimelineEvent.VerificationRecipients) != 1 || result.TimelineEvent.VerificationRecipients[0].UserID != accountable.UserID {
+			t.Fatalf("verification recipients = %+v, want accountable", result.TimelineEvent.VerificationRecipients)
 		}
 		if len(result.Events) != 1 {
 			t.Fatalf("verification domain events = %+v, want one", result.Events)

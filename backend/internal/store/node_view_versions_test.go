@@ -55,26 +55,26 @@ func TestMemoryNodeViewVersionCoversCanonicalSharedDependencies(t *testing.T) {
 	}
 	version = requireNodeViewVersionAdvanced(t, repo, companyID, node.NodeID, actor.UserID, version)
 
-	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	if _, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID:    companyID,
 		ResourceType: EntityTypeNode,
 		ResourceID:   node.NodeID,
-		Assignments: []ResourceGVICAssignmentInput{{
-			Role:          domain.GVICRoleResponsible,
+		Assignments: []ResourceRACIAssignmentInput{{
+			Role:          domain.RACIRoleResponsible,
 			PrincipalType: EntityPermissionSubjectUser,
 			PrincipalID:   actor.UserID,
 		}},
 		ActorUserID: actor.UserID,
 	}); err != nil {
-		t.Fatalf("SetResourceGVICAssignments: %v", err)
+		t.Fatalf("SetResourceRACIAssignments: %v", err)
 	}
 	version = requireNodeViewVersionAdvanced(t, repo, companyID, node.NodeID, actor.UserID, version)
 	view, err := repo.GetNodeView(NodeViewInput{CompanyID: companyID, NodeID: node.NodeID, UserID: actor.UserID})
 	if err != nil {
-		t.Fatalf("GetNodeView after GVIC mutation: %v", err)
+		t.Fatalf("GetNodeView after RACI mutation: %v", err)
 	}
-	if len(view.GVICAssignments) != 1 || view.GVICAssignments[0].PrincipalID != actor.UserID {
-		t.Fatalf("node view GVIC assignments = %+v, want actor assignment", view.GVICAssignments)
+	if len(view.RACIAssignments) != 1 || view.RACIAssignments[0].PrincipalID != actor.UserID {
+		t.Fatalf("node view RACI assignments = %+v, want actor assignment", view.RACIAssignments)
 	}
 
 	if _, err := repo.CreateNodeRelationship(companyID, node.NodeID, other.NodeID, "Parent", "Child"); err != nil {

@@ -130,11 +130,11 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 	beforeNodeEmailThreads := maps.Clone(r.nodeEmailThreads)
 	beforePermissions := maps.Clone(r.entityPermissions)
 	beforeEffectiveAccess := maps.Clone(r.effectiveAccess)
-	beforeGVICAssignments := maps.Clone(r.gvicAssignments)
-	beforeGVICMatrixProjectionRows := maps.Clone(r.GVICMatrixProjectionRows)
-	beforeGVICV2Settings := maps.Clone(r.gvicV2Settings)
+	beforeRACIAssignments := maps.Clone(r.gvicAssignments)
+	beforeRACIMatrixProjectionRows := maps.Clone(r.RACIMatrixProjectionRows)
+	beforeRACIV2Settings := maps.Clone(r.gvicV2Settings)
 	beforePermissionV2Settings := maps.Clone(r.permissionV2Settings)
-	beforeGVICV2Sequence := r.gvicV2Sequence
+	beforeRACIV2Sequence := r.gvicV2Sequence
 	beforePermissionV2Sequence := r.permissionV2Sequence
 	beforeWorkspaceReadVersions := maps.Clone(r.workspaceReadVersions)
 	restore := func() {
@@ -145,10 +145,10 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 		r.nodeEmailThreads = beforeNodeEmailThreads
 		r.emailThreadDownloadJobs = beforeEmailThreadDownloadJobs
 		r.entityPermissions, r.effectiveAccess = beforePermissions, beforeEffectiveAccess
-		r.gvicAssignments = beforeGVICAssignments
-		r.GVICMatrixProjectionRows = beforeGVICMatrixProjectionRows
-		r.gvicV2Settings, r.permissionV2Settings = beforeGVICV2Settings, beforePermissionV2Settings
-		r.gvicV2Sequence, r.permissionV2Sequence, r.workspaceReadVersions = beforeGVICV2Sequence, beforePermissionV2Sequence, beforeWorkspaceReadVersions
+		r.gvicAssignments = beforeRACIAssignments
+		r.RACIMatrixProjectionRows = beforeRACIMatrixProjectionRows
+		r.gvicV2Settings, r.permissionV2Settings = beforeRACIV2Settings, beforePermissionV2Settings
+		r.gvicV2Sequence, r.permissionV2Sequence, r.workspaceReadVersions = beforeRACIV2Sequence, beforePermissionV2Sequence, beforeWorkspaceReadVersions
 	}
 	if _, ok := r.companies[input.CompanyID]; !ok {
 		return CommunicationsEmailCollaborationEnsureResult{}, ErrNotFound
@@ -241,7 +241,7 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 		restore()
 		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}
-	if _, err := r.customizeNewMemoryResourceGVICForCreatorLocked(input.CompanyID, EntityTypeNode, node.NodeID, domain.GVICRoleResponsible, input.CreatedByUserID); err != nil {
+	if _, err := r.customizeNewMemoryResourceRACIForCreatorLocked(input.CompanyID, EntityTypeNode, node.NodeID, domain.RACIRoleResponsible, input.CreatedByUserID); err != nil {
 		restore()
 		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}

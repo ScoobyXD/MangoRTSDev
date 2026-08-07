@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-func attachPostgresMyWorkResponsibleUserIDs(ctx context.Context, db *sql.DB, companyID string, items []GVICMatrixProjectionRow) error {
+func attachPostgresMyWorkResponsibleUserIDs(ctx context.Context, db *sql.DB, companyID string, items []RACIMatrixProjectionRow) error {
 	if len(items) == 0 {
 		return nil
 	}

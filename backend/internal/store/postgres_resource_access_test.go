@@ -105,7 +105,7 @@ func TestPostgresV2PermissionGraphKeepsGroupSourceEdges(t *testing.T) {
 	}
 	putBody := postgresResourceAccessFunctionBodyForTest(t, string(raw), "func (r *PostgresRepo) PutResourcePermissionPolicy")
 	for _, required := range []string{
-		"validatePostgresGVICPrincipalTx",
+		"validatePostgresRACIPrincipalTx",
 		"permission.SubjectType",
 		"permission.SubjectID",
 		"insert into resource_permissions",

@@ -7,51 +7,51 @@ import (
 )
 
 const (
-	GVICAssignmentCommandSet    = "set"
-	GVICAssignmentCommandAdd    = "add"
-	GVICAssignmentCommandRemove = "remove"
+	RACIAssignmentCommandSet    = "set"
+	RACIAssignmentCommandAdd    = "add"
+	RACIAssignmentCommandRemove = "remove"
 
-	GVICInheritanceDirect             = "direct"
-	GVICInheritanceLogicGateInherited = "logic_gate_inherited"
+	RACIInheritanceDirect             = "direct"
+	RACIInheritanceLogicGateInherited = "logic_gate_inherited"
 )
 
-type resourceGVICKey struct {
+type resourceRACIKey struct {
 	companyID    string
 	resourceType string
 	resourceID   string
 }
 
-type normalizedGVICAssignmentInput struct {
+type normalizedRACIAssignmentInput struct {
 	role          string
 	principalType string
 	principalID   string
 }
 
-func normalizeResourceGVICKey(companyID, resourceType, resourceID string) (resourceGVICKey, error) {
-	resourceType, ok := NormalizeGVICResourceType(resourceType)
+func normalizeResourceRACIKey(companyID, resourceType, resourceID string) (resourceRACIKey, error) {
+	resourceType, ok := NormalizeRACIResourceType(resourceType)
 	companyID = strings.TrimSpace(companyID)
 	resourceID = strings.TrimSpace(resourceID)
 	if companyID == "" || resourceID == "" || !ok {
-		return resourceGVICKey{}, ErrInvalid
+		return resourceRACIKey{}, ErrInvalid
 	}
-	return resourceGVICKey{companyID: companyID, resourceType: resourceType, resourceID: resourceID}, nil
+	return resourceRACIKey{companyID: companyID, resourceType: resourceType, resourceID: resourceID}, nil
 }
 
-func normalizeResourceGVICAssignmentInput(input ResourceGVICAssignmentInput) (normalizedGVICAssignmentInput, error) {
-	role, roleOK := NormalizeGVICRole(input.Role)
-	principalType, principalOK := NormalizeGVICPrincipalType(input.PrincipalType)
+func normalizeResourceRACIAssignmentInput(input ResourceRACIAssignmentInput) (normalizedRACIAssignmentInput, error) {
+	role, roleOK := NormalizeRACIRole(input.Role)
+	principalType, principalOK := NormalizeRACIPrincipalType(input.PrincipalType)
 	principalID := strings.TrimSpace(input.PrincipalID)
 	if !roleOK || !principalOK || principalID == "" {
-		return normalizedGVICAssignmentInput{}, ErrInvalid
+		return normalizedRACIAssignmentInput{}, ErrInvalid
 	}
-	return normalizedGVICAssignmentInput{role: role, principalType: principalType, principalID: principalID}, nil
+	return normalizedRACIAssignmentInput{role: role, principalType: principalType, principalID: principalID}, nil
 }
 
-func normalizeResourceGVICAssignmentInputs(assignments []ResourceGVICAssignmentInput) ([]normalizedGVICAssignmentInput, error) {
+func normalizeResourceRACIAssignmentInputs(assignments []ResourceRACIAssignmentInput) ([]normalizedRACIAssignmentInput, error) {
 	seen := map[string]bool{}
-	out := make([]normalizedGVICAssignmentInput, 0, len(assignments))
+	out := make([]normalizedRACIAssignmentInput, 0, len(assignments))
 	for _, assignment := range assignments {
-		normalized, err := normalizeResourceGVICAssignmentInput(assignment)
+		normalized, err := normalizeResourceRACIAssignmentInput(assignment)
 		if err != nil {
 			return nil, err
 		}
@@ -68,8 +68,8 @@ func normalizeResourceGVICAssignmentInputs(assignments []ResourceGVICAssignmentI
 	return out, nil
 }
 
-func validateResourceGVICAssignmentInputsForOperation(keyValue resourceGVICKey, assignments []normalizedGVICAssignmentInput, operation string) error {
-	if operation == GVICAssignmentCommandRemove {
+func validateResourceRACIAssignmentInputsForOperation(keyValue resourceRACIKey, assignments []normalizedRACIAssignmentInput, operation string) error {
+	if operation == RACIAssignmentCommandRemove {
 		return nil
 	}
 	principalRoles := map[string]string{}
@@ -84,33 +84,33 @@ func validateResourceGVICAssignmentInputsForOperation(keyValue resourceGVICKey, 
 	return nil
 }
 
-func gvicAssignmentInputKey(input normalizedGVICAssignmentInput) string {
+func gvicAssignmentInputKey(input normalizedRACIAssignmentInput) string {
 	return input.role + ":" + input.principalType + ":" + input.principalID
 }
 
-func cloneResourceGVICAssignments(items []domain.ResourceGVICAssignment) []domain.ResourceGVICAssignment {
+func cloneResourceRACIAssignments(items []domain.ResourceRACIAssignment) []domain.ResourceRACIAssignment {
 	if len(items) == 0 {
-		return []domain.ResourceGVICAssignment{}
+		return []domain.ResourceRACIAssignment{}
 	}
-	return append([]domain.ResourceGVICAssignment{}, items...)
+	return append([]domain.ResourceRACIAssignment{}, items...)
 }
 
-func inheritedResourceGVICAssignments(items []domain.ResourceGVICAssignment, resourceType, resourceID, sourceResourceType, sourceResourceID string) []domain.ResourceGVICAssignment {
-	out := cloneResourceGVICAssignments(items)
+func inheritedResourceRACIAssignments(items []domain.ResourceRACIAssignment, resourceType, resourceID, sourceResourceType, sourceResourceID string) []domain.ResourceRACIAssignment {
+	out := cloneResourceRACIAssignments(items)
 	for index := range out {
 		out[index].ResourceType = resourceType
 		out[index].ResourceID = resourceID
 		out[index].SourceResourceType = sourceResourceType
 		out[index].SourceResourceID = sourceResourceID
-		out[index].InheritanceType = GVICInheritanceLogicGateInherited
+		out[index].InheritanceType = RACIInheritanceLogicGateInherited
 		out[index].Inherited = true
 		out[index].ReadOnly = true
 	}
 	return out
 }
 
-func logicGateGVICAssignmentFromResource(item domain.ResourceGVICAssignment) domain.LogicGateGVICAssignment {
-	return domain.LogicGateGVICAssignment{
+func logicGateRACIAssignmentFromResource(item domain.ResourceRACIAssignment) domain.LogicGateRACIAssignment {
+	return domain.LogicGateRACIAssignment{
 		CompanyID:        item.CompanyID,
 		LogicGateID:      item.ResourceID,
 		Role:             item.Role,
@@ -124,17 +124,17 @@ func logicGateGVICAssignmentFromResource(item domain.ResourceGVICAssignment) dom
 	}
 }
 
-func logicGateGVICAssignmentsFromResources(items []domain.ResourceGVICAssignment) []domain.LogicGateGVICAssignment {
-	out := make([]domain.LogicGateGVICAssignment, 0, len(items))
+func logicGateRACIAssignmentsFromResources(items []domain.ResourceRACIAssignment) []domain.LogicGateRACIAssignment {
+	out := make([]domain.LogicGateRACIAssignment, 0, len(items))
 	for _, item := range items {
-		out = append(out, logicGateGVICAssignmentFromResource(item))
+		out = append(out, logicGateRACIAssignmentFromResource(item))
 	}
-	sortLogicGateGVICAssignments(out)
+	sortLogicGateRACIAssignments(out)
 	return out
 }
 
-func sharedInboxGVICAssignmentFromResource(item domain.ResourceGVICAssignment, folderID string) domain.SharedInboxGVICAssignment {
-	return domain.SharedInboxGVICAssignment{
+func sharedInboxRACIAssignmentFromResource(item domain.ResourceRACIAssignment, folderID string) domain.SharedInboxRACIAssignment {
+	return domain.SharedInboxRACIAssignment{
 		CompanyID:        item.CompanyID,
 		FolderID:         folderID,
 		SharedInboxID:    item.ResourceID,
@@ -149,23 +149,23 @@ func sharedInboxGVICAssignmentFromResource(item domain.ResourceGVICAssignment, f
 	}
 }
 
-func sharedInboxGVICAssignmentsFromResources(items []domain.ResourceGVICAssignment, folderID string) []domain.SharedInboxGVICAssignment {
-	out := make([]domain.SharedInboxGVICAssignment, 0, len(items))
+func sharedInboxRACIAssignmentsFromResources(items []domain.ResourceRACIAssignment, folderID string) []domain.SharedInboxRACIAssignment {
+	out := make([]domain.SharedInboxRACIAssignment, 0, len(items))
 	for _, item := range items {
-		out = append(out, sharedInboxGVICAssignmentFromResource(item, folderID))
+		out = append(out, sharedInboxRACIAssignmentFromResource(item, folderID))
 	}
-	sortSharedInboxGVICAssignments(out)
+	sortSharedInboxRACIAssignments(out)
 	return out
 }
 
-func cloneResourceGVICEffectiveAssignments(items []domain.ResourceGVICEffectiveAssignment) []domain.ResourceGVICEffectiveAssignment {
+func cloneResourceRACIEffectiveAssignments(items []domain.ResourceRACIEffectiveAssignment) []domain.ResourceRACIEffectiveAssignment {
 	if len(items) == 0 {
-		return []domain.ResourceGVICEffectiveAssignment{}
+		return []domain.ResourceRACIEffectiveAssignment{}
 	}
-	return append([]domain.ResourceGVICEffectiveAssignment{}, items...)
+	return append([]domain.ResourceRACIEffectiveAssignment{}, items...)
 }
 
-func gvicEffectiveUserIDsForRole(items []domain.ResourceGVICEffectiveAssignment, role string) []string {
+func gvicEffectiveUserIDsForRole(items []domain.ResourceRACIEffectiveAssignment, role string) []string {
 	role = strings.TrimSpace(role)
 	seen := map[string]bool{}
 	out := make([]string, 0)
@@ -184,7 +184,7 @@ func gvicEffectiveUserIDsForRole(items []domain.ResourceGVICEffectiveAssignment,
 	return out
 }
 
-func sortResourceGVICAssignments(items []domain.ResourceGVICAssignment) {
+func sortResourceRACIAssignments(items []domain.ResourceRACIAssignment) {
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].ResourceType != items[j].ResourceType {
 			return items[i].ResourceType < items[j].ResourceType
@@ -207,7 +207,7 @@ func sortResourceGVICAssignments(items []domain.ResourceGVICAssignment) {
 	})
 }
 
-func sortResourceGVICEffectiveAssignments(items []domain.ResourceGVICEffectiveAssignment) {
+func sortResourceRACIEffectiveAssignments(items []domain.ResourceRACIEffectiveAssignment) {
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].ResourceType != items[j].ResourceType {
 			return items[i].ResourceType < items[j].ResourceType
@@ -239,13 +239,13 @@ func sortResourceGVICEffectiveAssignments(items []domain.ResourceGVICEffectiveAs
 
 func gvicRoleSortValue(role string) int {
 	switch role {
-	case domain.GVICRoleResponsible:
+	case domain.RACIRoleResponsible:
 		return 0
-	case domain.GVICRoleConsulted:
+	case domain.RACIRoleAccountable:
 		return 1
-	case domain.GVICRoleVerifier:
+	case domain.RACIRoleConsulted:
 		return 2
-	case domain.GVICRoleInformed:
+	case domain.RACIRoleInformed:
 		return 3
 	default:
 		return 4

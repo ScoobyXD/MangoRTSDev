@@ -16,7 +16,7 @@ test("createWorkspaceEntityBatchCommand posts one workspace entity batch request
     companyID: "company-1",
     entityKind: "logic_gate",
     folderID: "folder-1",
-    creatorLogicGateGVICRole: "responsible",
+    creatorLogicGateRACIRole: "responsible",
     items: [{ client_id: "gate-a", title: "Gate A" }],
     relationships: [{ entity_id_a: "source", client_id_b: "gate-a", a_position: "Input", b_position: "Output" }],
     requestJSON,

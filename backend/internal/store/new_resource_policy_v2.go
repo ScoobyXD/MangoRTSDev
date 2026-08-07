@@ -7,50 +7,50 @@ import (
 	"miraeopus/backend/internal/domain"
 )
 
-// customizeNewMemoryResourceGVICForCreatorLocked implements the one create-workflow
+// customizeNewMemoryResourceRACIForCreatorLocked implements the one create-workflow
 // exception in the V2 contract: copy the new resource's effective source policy,
 // then assign the creator. It refuses to run after the target already owns edges.
-func (r *MemoryRepo) customizeNewMemoryResourceGVICForCreatorLocked(companyID, resourceType, resourceID, role, creatorUserID string) (ResourceGVICPolicy, error) {
-	if !r.ensureV2PolicySettingsLocked(companyID, resourceType, resourceID) || len(r.directMemoryGVICEdgesLocked(companyID, resourceType, resourceID)) != 0 {
-		return ResourceGVICPolicy{}, ErrInvalid
+func (r *MemoryRepo) customizeNewMemoryResourceRACIForCreatorLocked(companyID, resourceType, resourceID, role, creatorUserID string) (ResourceRACIPolicy, error) {
+	if !r.ensureV2PolicySettingsLocked(companyID, resourceType, resourceID) || len(r.directMemoryRACIEdgesLocked(companyID, resourceType, resourceID)) != 0 {
+		return ResourceRACIPolicy{}, ErrInvalid
 	}
-	normalized, err := normalizeResourceGVICAssignmentInputs([]ResourceGVICAssignmentInput{{
+	normalized, err := normalizeResourceRACIAssignmentInputs([]ResourceRACIAssignmentInput{{
 		Role: role, PrincipalType: EntityPermissionSubjectUser, PrincipalID: creatorUserID,
 	}})
 	if err != nil {
-		return ResourceGVICPolicy{}, err
+		return ResourceRACIPolicy{}, err
 	}
-	if err := r.validateGVICPrincipalLocked(companyID, EntityPermissionSubjectUser, creatorUserID); err != nil {
-		return ResourceGVICPolicy{}, err
+	if err := r.validateRACIPrincipalLocked(companyID, EntityPermissionSubjectUser, creatorUserID); err != nil {
+		return ResourceRACIPolicy{}, err
 	}
 	resolved := r.resolveV2PolicyLocked(companyID, resourceType, resourceID, true)
-	edges := r.directMemoryGVICEdgesLocked(companyID, resolved.SourceType, resolved.SourceID)
-	complete := make([]domain.ResourceGVICAssignment, 0, len(edges)+1)
+	edges := r.directMemoryRACIEdgesLocked(companyID, resolved.SourceType, resolved.SourceID)
+	complete := make([]domain.ResourceRACIAssignment, 0, len(edges)+1)
 	for _, edge := range edges {
 		if (edge.PrincipalType == EntityPermissionSubjectUser && edge.PrincipalID == creatorUserID) ||
-			(normalized[0].role == domain.GVICRoleResponsible && edge.Role == domain.GVICRoleResponsible) {
+			(normalized[0].role == domain.RACIRoleResponsible && edge.Role == domain.RACIRoleResponsible) {
 			continue
 		}
 		complete = append(complete, edge)
 	}
-	complete = append(complete, domain.ResourceGVICAssignment{
+	complete = append(complete, domain.ResourceRACIAssignment{
 		Role: normalized[0].role, PrincipalType: EntityPermissionSubjectUser, PrincipalID: creatorUserID,
 	})
-	validation := make([]normalizedGVICAssignmentInput, 0, len(complete))
+	validation := make([]normalizedRACIAssignmentInput, 0, len(complete))
 	for _, edge := range complete {
-		validation = append(validation, normalizedGVICAssignmentInput{role: edge.Role, principalType: edge.PrincipalType, principalID: edge.PrincipalID})
+		validation = append(validation, normalizedRACIAssignmentInput{role: edge.Role, principalType: edge.PrincipalType, principalID: edge.PrincipalID})
 	}
-	keyValue := resourceGVICKey{companyID: companyID, resourceType: resourceType, resourceID: resourceID}
-	if err := validateResourceGVICAssignmentInputsForOperation(keyValue, validation, GVICAssignmentCommandSet); err != nil {
-		return ResourceGVICPolicy{}, err
+	keyValue := resourceRACIKey{companyID: companyID, resourceType: resourceType, resourceID: resourceID}
+	if err := validateResourceRACIAssignmentInputsForOperation(keyValue, validation, RACIAssignmentCommandSet); err != nil {
+		return ResourceRACIPolicy{}, err
 	}
 	settingKey := resourcePolicyKey(companyID, resourceType, resourceID)
 	setting := r.gvicV2Settings[settingKey]
 	setting.Mode = PolicyModeCustomized
-	setting.CustomizedSequence = r.nextGVICV2SequenceLocked()
+	setting.CustomizedSequence = r.nextRACIV2SequenceLocked()
 	r.gvicV2Settings[settingKey] = setting
-	r.replaceMemoryGVICEdgesLocked(companyID, resourceType, resourceID, complete)
-	return r.memoryV2GVICPolicyLocked(companyID, resourceType, resourceID), nil
+	r.replaceMemoryRACIEdgesLocked(companyID, resourceType, resourceID, complete)
+	return r.memoryV2RACIPolicyLocked(companyID, resourceType, resourceID), nil
 }
 
 // customizeNewMemoryResourcePermissionForCreatorLocked copies the effective
@@ -59,7 +59,7 @@ func (r *MemoryRepo) customizeNewMemoryResourcePermissionForCreatorLocked(compan
 	if !r.ensureV2PolicySettingsLocked(companyID, resourceType, resourceID) || len(r.directMemoryPermissionEdgesLocked(companyID, resourceType, resourceID)) != 0 {
 		return ResourcePermissionPolicy{}, ErrInvalid
 	}
-	if err := r.validateGVICPrincipalLocked(companyID, EntityPermissionSubjectUser, creatorUserID); err != nil {
+	if err := r.validateRACIPrincipalLocked(companyID, EntityPermissionSubjectUser, creatorUserID); err != nil {
 		return ResourcePermissionPolicy{}, err
 	}
 	resolved := r.resolveV2PolicyLocked(companyID, resourceType, resourceID, false)
@@ -86,19 +86,19 @@ func (r *MemoryRepo) customizeNewMemoryResourcePermissionForCreatorLocked(compan
 	return r.memoryV2PermissionPolicyLocked(companyID, resourceType, resourceID), nil
 }
 
-// customizeNewPostgresResourceGVICForCreatorTx is restricted to a newly-created
+// customizeNewPostgresResourceRACIForCreatorTx is restricted to a newly-created
 // resource with no target edges, so create workflows cannot turn this into a
 // partial-policy update path.
-func customizeNewPostgresResourceGVICForCreatorTx(ctx context.Context, tx *sql.Tx, keyValue resourceGVICKey, role, creatorUserID string) (ResourceGVICPolicy, error) {
+func customizeNewPostgresResourceRACIForCreatorTx(ctx context.Context, tx *sql.Tx, keyValue resourceRACIKey, role, creatorUserID string) (ResourceRACIPolicy, error) {
 	if err := ensureV2PolicySettingsTx(ctx, tx); err != nil {
-		return ResourceGVICPolicy{}, err
+		return ResourceRACIPolicy{}, err
 	}
 	var directCount int
 	if err := tx.QueryRowContext(ctx, `select count(*) from resource_gvic_assignments where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, keyValue.companyID, keyValue.resourceType, keyValue.resourceID).Scan(&directCount); err != nil {
-		return ResourceGVICPolicy{}, err
+		return ResourceRACIPolicy{}, err
 	}
 	if directCount != 0 {
-		return ResourceGVICPolicy{}, ErrInvalid
+		return ResourceRACIPolicy{}, ErrInvalid
 	}
 	rows, err := tx.QueryContext(ctx, `
 select edge.role,edge.principal_type,edge.principal_id::text
@@ -109,28 +109,28 @@ join resource_gvic_assignments edge
  and edge.resource_id=resolved.source_resource_id
 order by edge.role,edge.principal_type,edge.principal_id::text`, keyValue.companyID, keyValue.resourceType, keyValue.resourceID)
 	if err != nil {
-		return ResourceGVICPolicy{}, err
+		return ResourceRACIPolicy{}, err
 	}
-	complete := []ResourceGVICAssignmentInput{}
+	complete := []ResourceRACIAssignmentInput{}
 	for rows.Next() {
-		var edge ResourceGVICAssignmentInput
+		var edge ResourceRACIAssignmentInput
 		if err := rows.Scan(&edge.Role, &edge.PrincipalType, &edge.PrincipalID); err != nil {
 			rows.Close()
-			return ResourceGVICPolicy{}, err
+			return ResourceRACIPolicy{}, err
 		}
 		if (edge.PrincipalType == EntityPermissionSubjectUser && edge.PrincipalID == creatorUserID) ||
-			(role == domain.GVICRoleResponsible && edge.Role == domain.GVICRoleResponsible) {
+			(role == domain.RACIRoleResponsible && edge.Role == domain.RACIRoleResponsible) {
 			continue
 		}
 		complete = append(complete, edge)
 	}
 	if err := rows.Close(); err != nil {
-		return ResourceGVICPolicy{}, err
+		return ResourceRACIPolicy{}, err
 	}
-	complete = append(complete, ResourceGVICAssignmentInput{
+	complete = append(complete, ResourceRACIAssignmentInput{
 		Role: role, PrincipalType: EntityPermissionSubjectUser, PrincipalID: creatorUserID,
 	})
-	return customizeResourceGVICPolicyTx(ctx, tx, keyValue, complete)
+	return customizeResourceRACIPolicyTx(ctx, tx, keyValue, complete)
 }
 
 func customizeNewPostgresResourcePermissionForCreatorTx(ctx context.Context, tx *sql.Tx, companyID, resourceType, resourceID, creatorUserID string) (ResourcePermissionPolicy, error) {

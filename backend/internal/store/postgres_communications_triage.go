@@ -240,8 +240,8 @@ where company_id=$1 and logic_gate_id=$2`, input.CompanyID, input.LogicGateID).S
 		return CommunicationsTriageConversionResult{}, ErrInvalid
 	}
 	input.Target.Header = logicGate.Header
-	if logicGate.GVICAssignments == nil {
-		logicGate.GVICAssignments = []domain.LogicGateGVICAssignment{}
+	if logicGate.RACIAssignments == nil {
+		logicGate.RACIAssignments = []domain.LogicGateRACIAssignment{}
 	}
 	logicGate.DefaultAccess = defaultResourceAccessOrEdit(logicGate.DefaultAccess)
 	if input.Target.ProjectID != "" {

@@ -23,14 +23,14 @@ func TestNodeVerificationRequestAPIIsIdempotentAndRecipientScoped(t *testing.T) 
 	if err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
-	if _, err := repo.SetResourceGVICAssignments(store.ResourceGVICAssignmentUpdateInput{
+	if _, err := repo.SetResourceRACIAssignments(store.ResourceRACIAssignmentUpdateInput{
 		CompanyID: companyID, ResourceType: store.EntityTypeNode, ResourceID: node.NodeID,
-		Assignments: []store.ResourceGVICAssignmentInput{
-			{Role: domain.GVICRoleVerifier, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: first.UserID},
-			{Role: domain.GVICRoleVerifier, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: second.UserID},
+		Assignments: []store.ResourceRACIAssignmentInput{
+			{Role: domain.RACIRoleAccountable, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: first.UserID},
+			{Role: domain.RACIRoleAccountable, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: second.UserID},
 		},
 	}); err != nil {
-		t.Fatalf("SetResourceGVICAssignments: %v", err)
+		t.Fatalf("SetResourceRACIAssignments: %v", err)
 	}
 
 	create := func() (int, domain.NodeTimelineEvent) {

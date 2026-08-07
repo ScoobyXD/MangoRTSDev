@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-func (s *Server) handleGVICMatrixNodesV2(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleRACIMatrixNodesV2(w http.ResponseWriter, r *http.Request) {
 	timedWriter, timings := startTimedRequest(w)
 	w = timedWriter
 	defer func() {
@@ -56,7 +56,7 @@ func (s *Server) handleGVICMatrixNodesV2(w http.ResponseWriter, r *http.Request)
 	}
 	stop()
 
-	input := store.GVICMatrixNodeCreateInput{CompanyID: companyID, ActorUserID: strings.TrimSpace(actor.User.UserID), MutationOrigin: store.MutationOriginMatrix}
+	input := store.RACIMatrixNodeCreateInput{CompanyID: companyID, ActorUserID: strings.TrimSpace(actor.User.UserID), MutationOrigin: store.MutationOriginMatrix}
 	stop = timings.observeAccounted("request.validate")
 	if nodeID, set, ok := parseOptionalStringField(fields, "node_id"); !ok {
 		stop()
@@ -110,7 +110,7 @@ func (s *Server) handleGVICMatrixNodesV2(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "invalid_creator_logic_gate_gvic_role")
 		return
 	} else if set && role != nil {
-		input.CreatorLogicGateGVICRole = *role
+		input.CreatorLogicGateRACIRole = *role
 	}
 	if origin, set, ok := parseOptionalStringField(fields, "mutation_origin"); !ok {
 		stop()
@@ -127,7 +127,7 @@ func (s *Server) handleGVICMatrixNodesV2(w http.ResponseWriter, r *http.Request)
 	}
 	stop()
 	stop = timings.observeAccounted("request.validate")
-	if !parseGVICMatrixNodeCreateMutationFields(w, fields, &input) {
+	if !parseRACIMatrixNodeCreateMutationFields(w, fields, &input) {
 		stop()
 		return
 	}
@@ -136,9 +136,9 @@ func (s *Server) handleGVICMatrixNodesV2(w http.ResponseWriter, r *http.Request)
 	input.IdempotencyKey = r.Header.Get("Idempotency-Key")
 	input.TimingRecorder = timings
 	stop = timings.observeAccounted("source.transaction")
-	result, err := s.repo.CreateGVICMatrixNode(input)
+	result, err := s.repo.CreateRACIMatrixNode(input)
 	stop()
-	if !writeGVICMatrixNodeCreateError(w, err) {
+	if !writeRACIMatrixNodeCreateError(w, err) {
 		return
 	}
 	s.projectCommittedWorkspaceDerivedEventsWithTiming(result.Events, timings)
@@ -147,17 +147,17 @@ func (s *Server) handleGVICMatrixNodesV2(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusCreated, result)
 }
 
-func (s *Server) handleGVICMatrixNodeByIDV2(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleRACIMatrixNodeByIDV2(w http.ResponseWriter, r *http.Request) {
 	trimmed := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v2/gvic-matrix/nodes/"), "/")
 	parts := strings.Split(trimmed, "/")
 	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || parts[1] != "move" {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	s.handleGVICMatrixNodeMoveV2(w, r, strings.TrimSpace(parts[0]))
+	s.handleRACIMatrixNodeMoveV2(w, r, strings.TrimSpace(parts[0]))
 }
 
-func (s *Server) handleGVICMatrixNodeMoveV2(w http.ResponseWriter, r *http.Request, nodeID string) {
+func (s *Server) handleRACIMatrixNodeMoveV2(w http.ResponseWriter, r *http.Request, nodeID string) {
 	timedWriter, timings := startTimedRequest(w)
 	w = timedWriter
 	defer func() {
@@ -255,7 +255,7 @@ func (s *Server) handleGVICMatrixNodeMoveV2(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, logicGateWorkAssignmentResultPayload(result))
 }
 
-func parseGVICMatrixNodeCreateMutationFields(w http.ResponseWriter, fields map[string]json.RawMessage, input *store.GVICMatrixNodeCreateInput) bool {
+func parseRACIMatrixNodeCreateMutationFields(w http.ResponseWriter, fields map[string]json.RawMessage, input *store.RACIMatrixNodeCreateInput) bool {
 	if status, set, ok := parseOptionalStringField(fields, "status"); !ok {
 		writeError(w, http.StatusBadRequest, "invalid_status")
 		return false
@@ -308,7 +308,7 @@ func parseGVICMatrixNodeCreateMutationFields(w http.ResponseWriter, fields map[s
 	return true
 }
 
-func writeGVICMatrixNodeCreateError(w http.ResponseWriter, err error) bool {
+func writeRACIMatrixNodeCreateError(w http.ResponseWriter, err error) bool {
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_gvic_matrix_node")
 		return false
@@ -326,7 +326,7 @@ func writeGVICMatrixNodeCreateError(w http.ResponseWriter, err error) bool {
 		return false
 	}
 	if err != nil {
-		log.Printf("failed to create GVICMatrix matrix node: %v", err)
+		log.Printf("failed to create RACIMatrix matrix node: %v", err)
 		writeError(w, http.StatusInternalServerError, "failed_to_create_gvic_matrix_node")
 		return false
 	}

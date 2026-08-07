@@ -23,10 +23,10 @@ import {
   collectAllUpdateGroupIDs,
   reconcileExpandedUpdateGroupIDs,
 } from "../../../../frontend/src/pages/home/updatesExpansion.js";
-import { logicGateGVICRolePresentation } from "../../../../frontend/src/modules/logic-gates/gvicPresentation.js";
+import { logicGateRACIRolePresentation } from "../../../../frontend/src/modules/logic-gates/raciPresentation.js";
 import { resolveUpdateGroupSemanticPresentation } from "../../../../frontend/src/pages/home/updatesGroupPresentation.js";
 
-test("the built-in Updates grouping chain is Date, GVIC, Priority, then Logic Gate", () => {
+test("the built-in Updates grouping chain is Date, RACI, Priority, then Logic Gate", () => {
   assert.deepEqual(DEFAULT_UPDATE_GROUPINGS.map((grouping) => grouping.field), [
     "date",
     "gvic",
@@ -162,12 +162,12 @@ test("Updates node panel split clamps, nudges, and emits a two-pane grid", () =>
   assert.match(source, /storeUpdatesNodePanelMainRatio/);
 });
 
-test("GVIC and Priority group titles reuse their semantic raised surfaces", () => {
+test("RACI and Priority group titles reuse their semantic raised surfaces", () => {
   assert.deepEqual([
-    logicGateGVICRolePresentation("responsible").accent,
-    logicGateGVICRolePresentation("consulted").accent,
-    logicGateGVICRolePresentation("verifier").accent,
-    logicGateGVICRolePresentation("informed").accent,
+    logicGateRACIRolePresentation("responsible").accent,
+    logicGateRACIRolePresentation("consulted").accent,
+    logicGateRACIRolePresentation("accountable").accent,
+    logicGateRACIRolePresentation("informed").accent,
   ], ["#f97316", "#2563eb", "#16a34a", "#7c3aed"]);
 
   const other = resolveUpdateGroupSemanticPresentation({ field: "gvic", key: "gvic:other", label: "Other" });

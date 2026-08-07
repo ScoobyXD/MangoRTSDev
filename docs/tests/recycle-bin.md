@@ -21,7 +21,7 @@ Coverage Status:
 RB1 - Recycle Bin reads require a company ID.
 RB2 - Recycle Bin reads, restores, and permanent deletes require an authenticated actor with access to the company.
 RB3 - A recycle-bin item belongs to the user who performed the delete, stored as `deleted_by_user_id`.
-RB4 - Recycle-bin ownership is based on the deletion actor, not the deleted object's creator, assignee, GVIC participant, or current viewer permissions.
+RB4 - Recycle-bin ownership is based on the deletion actor, not the deleted object's creator, assignee, RACI participant, or current viewer permissions.
 RB5 - Normal users list only recycle-bin items where `company_id` and `deleted_by_user_id` both match the current actor.
 RB6 - Recycle-bin rows without a deleting user are not shown in a normal user's Recycle Bin.
 RB7 - Restoring recycle-bin items requires at least one recycle-bin item ID.

@@ -131,7 +131,7 @@ func (s *Server) handleWorkItemResponsibleInbox(w http.ResponseWriter, r *http.R
 	})
 }
 
-func (s *Server) handleWorkItemCVIInbox(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleWorkItemACIInbox(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
@@ -140,9 +140,9 @@ func (s *Server) handleWorkItemCVIInbox(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	items, err := s.repo.ListCVIInboxLogicGatesContext(r.Context(), query)
+	items, err := s.repo.ListACIInboxLogicGatesContext(r.Context(), query)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_cvi_inbox")
+		writeError(w, http.StatusInternalServerError, "failed_to_list_aci_inbox")
 		return
 	}
 	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
@@ -220,7 +220,7 @@ func (s *Server) handleWorkItemMyWorkMatrix(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-func (s *Server) handleWorkItemGVICMatrixProjection(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleWorkItemRACIMatrixProjection(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
@@ -229,7 +229,7 @@ func (s *Server) handleWorkItemGVICMatrixProjection(w http.ResponseWriter, r *ht
 	if !ok {
 		return
 	}
-	rows, err := s.repo.ListGVICMatrixProjectionRowsForUser(query)
+	rows, err := s.repo.ListRACIMatrixProjectionRowsForUser(query)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_list_gvic_matrix_projection")
 		return

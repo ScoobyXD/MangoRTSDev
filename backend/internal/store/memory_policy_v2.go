@@ -28,7 +28,7 @@ type memoryV2ResolvedPolicy struct {
 	ParentFingerprint string
 }
 
-func (r *MemoryRepo) nextGVICV2SequenceLocked() int64 {
+func (r *MemoryRepo) nextRACIV2SequenceLocked() int64 {
 	r.gvicV2Sequence++
 	return r.gvicV2Sequence
 }
@@ -85,25 +85,25 @@ func (r *MemoryRepo) ensureV2PolicySettingsLocked(companyID, resourceType, resou
 		if parentID != "" {
 			gvic.Mode = PolicyModeInherited
 			gvic.ParentResourceType, gvic.ParentResourceID = parentType, parentID
-			gvic.ParentLinkSequence = r.nextGVICV2SequenceLocked()
+			gvic.ParentLinkSequence = r.nextRACIV2SequenceLocked()
 		} else {
-			gvic.CustomizedSequence = r.nextGVICV2SequenceLocked()
+			gvic.CustomizedSequence = r.nextRACIV2SequenceLocked()
 		}
 		r.gvicV2Settings[keyValue] = gvic
 	} else if gvic.ParentResourceType != parentType || gvic.ParentResourceID != parentID {
 		if gvic.ParentResourceID != "" && parentID == "" {
 			resolved := r.resolveV2PolicyLocked(companyID, resourceType, resourceID, true)
 			if resolved.SourceID != "" && (resolved.SourceType != resourceType || resolved.SourceID != resourceID) {
-				r.replaceMemoryGVICEdgesLocked(companyID, resourceType, resourceID, r.directMemoryGVICEdgesLocked(companyID, resolved.SourceType, resolved.SourceID))
+				r.replaceMemoryRACIEdgesLocked(companyID, resourceType, resourceID, r.directMemoryRACIEdgesLocked(companyID, resolved.SourceType, resolved.SourceID))
 				gvic.Mode = PolicyModeCustomized
-				gvic.CustomizedSequence = r.nextGVICV2SequenceLocked()
+				gvic.CustomizedSequence = r.nextRACIV2SequenceLocked()
 			}
 		}
 		gvic.ParentResourceType, gvic.ParentResourceID = parentType, parentID
 		if parentID == "" {
 			gvic.ParentLinkSequence = 0
 		} else {
-			gvic.ParentLinkSequence = r.nextGVICV2SequenceLocked()
+			gvic.ParentLinkSequence = r.nextRACIV2SequenceLocked()
 		}
 		r.gvicV2Settings[keyValue] = gvic
 	}
@@ -251,32 +251,32 @@ func memoryV2Revision(setting memoryV2PolicySetting, resolved memoryV2ResolvedPo
 	return hex.EncodeToString(sum[:])
 }
 
-func (r *MemoryRepo) GetResourceGVICPolicy(companyID, resourceType, resourceID string) (ResourceGVICPolicy, error) {
-	resourceType, ok := NormalizeGVICResourceType(resourceType)
+func (r *MemoryRepo) GetResourceRACIPolicy(companyID, resourceType, resourceID string) (ResourceRACIPolicy, error) {
+	resourceType, ok := NormalizeRACIResourceType(resourceType)
 	companyID, resourceID = strings.TrimSpace(companyID), strings.TrimSpace(resourceID)
 	if !ok || companyID == "" || resourceID == "" {
-		return ResourceGVICPolicy{}, ErrInvalid
+		return ResourceRACIPolicy{}, ErrInvalid
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !r.ensureV2PolicySettingsLocked(companyID, resourceType, resourceID) {
-		return ResourceGVICPolicy{}, ErrNotFound
+		return ResourceRACIPolicy{}, ErrNotFound
 	}
-	return r.memoryV2GVICPolicyLocked(companyID, resourceType, resourceID), nil
+	return r.memoryV2RACIPolicyLocked(companyID, resourceType, resourceID), nil
 }
 
-func (r *MemoryRepo) memoryV2GVICPolicyLocked(companyID, resourceType, resourceID string) ResourceGVICPolicy {
+func (r *MemoryRepo) memoryV2RACIPolicyLocked(companyID, resourceType, resourceID string) ResourceRACIPolicy {
 	keyValue := resourcePolicyKey(companyID, resourceType, resourceID)
 	setting := r.gvicV2Settings[keyValue]
 	resolved := r.resolveV2PolicyLocked(companyID, resourceType, resourceID, true)
-	stored := r.directMemoryGVICEdgesLocked(companyID, resourceType, resourceID)
+	stored := r.directMemoryRACIEdgesLocked(companyID, resourceType, resourceID)
 	if setting.Mode == PolicyModeInherited {
-		stored = []domain.ResourceGVICAssignment{}
+		stored = []domain.ResourceRACIAssignment{}
 	}
-	policy := ResourceGVICPolicy{CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID, AssignmentMode: setting.Mode,
+	policy := ResourceRACIPolicy{CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID, AssignmentMode: setting.Mode,
 		EffectiveAssignmentMode: PolicyModeInherited, EffectiveSource: PolicySource{ResourceType: resolved.SourceType, ResourceID: resolved.SourceID},
-		OverwrittenByAncestor: resolved.OverwrittenBy, GVICAssignments: stored,
-		EffectiveAssignments: r.memoryV2EffectiveGVICLocked(companyID, resourceType, resourceID, resolved),
+		OverwrittenByAncestor: resolved.OverwrittenBy, RACIAssignments: stored,
+		EffectiveAssignments: r.memoryV2EffectiveRACILocked(companyID, resourceType, resourceID, resolved),
 		Revision:             memoryV2Revision(setting, resolved, r.policyV2GroupFingerprintLocked(companyID))}
 	if resolved.SourceType == resourceType && resolved.SourceID == resourceID && resolved.OverwrittenBy == nil {
 		policy.EffectiveAssignmentMode = PolicyModeCustomized
@@ -284,19 +284,19 @@ func (r *MemoryRepo) memoryV2GVICPolicyLocked(companyID, resourceType, resourceI
 	return policy
 }
 
-func (r *MemoryRepo) directMemoryGVICEdgesLocked(companyID, resourceType, resourceID string) []domain.ResourceGVICAssignment {
-	items := []domain.ResourceGVICAssignment{}
+func (r *MemoryRepo) directMemoryRACIEdgesLocked(companyID, resourceType, resourceID string) []domain.ResourceRACIAssignment {
+	items := []domain.ResourceRACIAssignment{}
 	for _, item := range r.gvicAssignments {
 		if item.CompanyID == companyID && item.ResourceType == resourceType && item.ResourceID == resourceID {
 			items = append(items, item)
 		}
 	}
-	sortResourceGVICAssignments(items)
+	sortResourceRACIAssignments(items)
 	return items
 }
 
-func (r *MemoryRepo) replaceMemoryGVICEdgesLocked(companyID, resourceType, resourceID string, inputs []domain.ResourceGVICAssignment) {
-	previous := map[string]domain.ResourceGVICAssignment{}
+func (r *MemoryRepo) replaceMemoryRACIEdgesLocked(companyID, resourceType, resourceID string, inputs []domain.ResourceRACIAssignment) {
+	previous := map[string]domain.ResourceRACIAssignment{}
 	for keyValue, item := range r.gvicAssignments {
 		if item.CompanyID == companyID && item.ResourceType == resourceType && item.ResourceID == resourceID {
 			previous[keyValue] = item
@@ -305,7 +305,7 @@ func (r *MemoryRepo) replaceMemoryGVICEdgesLocked(companyID, resourceType, resou
 	}
 	now := time.Now().UTC()
 	for _, input := range inputs {
-		item := r.resourceGVICAssignmentForPrincipalLocked(resourceGVICKey{companyID: companyID, resourceType: resourceType, resourceID: resourceID}, normalizedGVICAssignmentInput{role: input.Role, principalType: input.PrincipalType, principalID: input.PrincipalID}, now)
+		item := r.resourceRACIAssignmentForPrincipalLocked(resourceRACIKey{companyID: companyID, resourceType: resourceType, resourceID: resourceID}, normalizedRACIAssignmentInput{role: input.Role, principalType: input.PrincipalType, principalID: input.PrincipalID}, now)
 		keyValue := gvicSourceAssignmentKey(companyID, resourceType, resourceID, item.Role, item.PrincipalType, item.PrincipalID)
 		if existing, ok := previous[keyValue]; ok {
 			item.CreatedTimestamp = existing.CreatedTimestamp
@@ -315,27 +315,27 @@ func (r *MemoryRepo) replaceMemoryGVICEdgesLocked(companyID, resourceType, resou
 	}
 }
 
-func (r *MemoryRepo) memoryV2EffectiveGVICLocked(companyID, resourceType, resourceID string, resolved memoryV2ResolvedPolicy) []domain.ResourceGVICEffectiveAssignment {
+func (r *MemoryRepo) memoryV2EffectiveRACILocked(companyID, resourceType, resourceID string, resolved memoryV2ResolvedPolicy) []domain.ResourceRACIEffectiveAssignment {
 	type winner struct {
-		item                domain.ResourceGVICEffectiveAssignment
+		item                domain.ResourceRACIEffectiveAssignment
 		rank, principalRank int
 	}
 	winners := map[string]winner{}
-	for _, edge := range r.directMemoryGVICEdgesLocked(companyID, resolved.SourceType, resolved.SourceID) {
+	for _, edge := range r.directMemoryRACIEdgesLocked(companyID, resolved.SourceType, resolved.SourceID) {
 		userIDs := []string{}
 		if edge.PrincipalType == EntityPermissionSubjectUser {
 			userIDs = []string{edge.PrincipalID}
 		} else {
-			userIDs, _ = r.logicGateGVICUserIDsForGroupLocked(companyID, edge.PrincipalID)
+			userIDs, _ = r.logicGateRACIUserIDsForGroupLocked(companyID, edge.PrincipalID)
 		}
 		for _, userID := range userIDs {
 			user, ok := r.companyUserByIDLocked(companyID, userID)
 			if !ok {
 				continue
 			}
-			item := domain.ResourceGVICEffectiveAssignment{CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID, Role: edge.Role, UserID: userID,
+			item := domain.ResourceRACIEffectiveAssignment{CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID, Role: edge.Role, UserID: userID,
 				SourceResourceType: resolved.SourceType, SourceResourceID: resolved.SourceID, SourcePrincipalType: edge.PrincipalType, SourcePrincipalID: edge.PrincipalID,
-				InheritanceType: GVICInheritanceDirect, UserDisplayName: user.DisplayName, UserEmail: user.Email, UpdatedTimestamp: edge.UpdatedTimestamp}
+				InheritanceType: RACIInheritanceDirect, UserDisplayName: user.DisplayName, UserEmail: user.Email, UpdatedTimestamp: edge.UpdatedTimestamp}
 			if resolved.SourceType != resourceType || resolved.SourceID != resourceID {
 				item.InheritanceType = "inherited"
 			}
@@ -349,96 +349,96 @@ func (r *MemoryRepo) memoryV2EffectiveGVICLocked(companyID, resourceType, resour
 			}
 		}
 	}
-	items := make([]domain.ResourceGVICEffectiveAssignment, 0, len(winners))
+	items := make([]domain.ResourceRACIEffectiveAssignment, 0, len(winners))
 	for _, value := range winners {
 		items = append(items, value.item)
 	}
-	sortResourceGVICEffectiveAssignments(items)
+	sortResourceRACIEffectiveAssignments(items)
 	return items
 }
 
-func (r *MemoryRepo) PutResourceGVICPolicy(input ResourceGVICPolicyUpdateInput) (ResourceGVICPolicy, []domain.DomainEvent, error) {
-	resourceType, ok := NormalizeGVICResourceType(input.ResourceType)
+func (r *MemoryRepo) PutResourceRACIPolicy(input ResourceRACIPolicyUpdateInput) (ResourceRACIPolicy, []domain.DomainEvent, error) {
+	resourceType, ok := NormalizeRACIResourceType(input.ResourceType)
 	mode, modeOK := normalizePolicyMode(input.AssignmentMode)
 	action, actionOK := normalizeDescendantAction(input.DescendantAction)
 	companyID, resourceID := strings.TrimSpace(input.CompanyID), strings.TrimSpace(input.ResourceID)
 	if !ok || !modeOK || !actionOK || companyID == "" || resourceID == "" || (mode == PolicyModeInherited && len(input.Assignments) > 0) {
-		return ResourceGVICPolicy{}, nil, ErrInvalid
+		return ResourceRACIPolicy{}, nil, ErrInvalid
 	}
-	normalized, err := normalizeResourceGVICAssignmentInputs(input.Assignments)
+	normalized, err := normalizeResourceRACIAssignmentInputs(input.Assignments)
 	if err != nil {
-		return ResourceGVICPolicy{}, nil, err
+		return ResourceRACIPolicy{}, nil, err
 	}
-	if err := validateResourceGVICAssignmentInputsForOperation(resourceGVICKey{
+	if err := validateResourceRACIAssignmentInputsForOperation(resourceRACIKey{
 		companyID: companyID, resourceType: resourceType, resourceID: resourceID,
-	}, normalized, GVICAssignmentCommandSet); err != nil {
-		return ResourceGVICPolicy{}, nil, err
+	}, normalized, RACIAssignmentCommandSet); err != nil {
+		return ResourceRACIPolicy{}, nil, err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !r.ensureV2PolicySettingsLocked(companyID, resourceType, resourceID) {
-		return ResourceGVICPolicy{}, nil, ErrNotFound
+		return ResourceRACIPolicy{}, nil, ErrNotFound
 	}
 	idempotencyKey := companyID + ":" + strings.TrimSpace(input.IdempotencyKey)
 	if strings.TrimSpace(input.IdempotencyKey) != "" && r.policyV2Idempotency[idempotencyKey] {
-		return r.memoryV2GVICPolicyLocked(companyID, resourceType, resourceID), []domain.DomainEvent{}, nil
+		return r.memoryV2RACIPolicyLocked(companyID, resourceType, resourceID), []domain.DomainEvent{}, nil
 	}
-	current := r.memoryV2GVICPolicyLocked(companyID, resourceType, resourceID)
+	current := r.memoryV2RACIPolicyLocked(companyID, resourceType, resourceID)
 	if expected := cleanPolicyRevision(input.ExpectedRevision); expected != "" && expected != current.Revision {
-		return ResourceGVICPolicy{}, nil, ErrVersionConflict
+		return ResourceRACIPolicy{}, nil, ErrVersionConflict
 	}
 	if mode == PolicyModeCustomized && input.Assignments == nil {
 		resolved := r.resolveV2PolicyLocked(companyID, resourceType, resourceID, true)
-		sourceEdges := r.directMemoryGVICEdgesLocked(companyID, resolved.SourceType, resolved.SourceID)
-		normalized = make([]normalizedGVICAssignmentInput, 0, len(sourceEdges))
+		sourceEdges := r.directMemoryRACIEdgesLocked(companyID, resolved.SourceType, resolved.SourceID)
+		normalized = make([]normalizedRACIAssignmentInput, 0, len(sourceEdges))
 		for _, edge := range sourceEdges {
-			normalized = append(normalized, normalizedGVICAssignmentInput{
+			normalized = append(normalized, normalizedRACIAssignmentInput{
 				role: edge.Role, principalType: edge.PrincipalType, principalID: edge.PrincipalID,
 			})
 		}
-		if err := validateResourceGVICAssignmentInputsForOperation(resourceGVICKey{
+		if err := validateResourceRACIAssignmentInputsForOperation(resourceRACIKey{
 			companyID: companyID, resourceType: resourceType, resourceID: resourceID,
-		}, normalized, GVICAssignmentCommandSet); err != nil {
-			return ResourceGVICPolicy{}, nil, err
+		}, normalized, RACIAssignmentCommandSet); err != nil {
+			return ResourceRACIPolicy{}, nil, err
 		}
 	}
 	for _, item := range normalized {
-		if err := r.validateGVICPrincipalLocked(companyID, item.principalType, item.principalID); err != nil {
-			return ResourceGVICPolicy{}, nil, err
+		if err := r.validateRACIPrincipalLocked(companyID, item.principalType, item.principalID); err != nil {
+			return ResourceRACIPolicy{}, nil, err
 		}
 	}
 	keyValue := resourcePolicyKey(companyID, resourceType, resourceID)
 	setting := r.gvicV2Settings[keyValue]
 	if mode == PolicyModeInherited {
 		if setting.ParentResourceID == "" {
-			return ResourceGVICPolicy{}, nil, ErrInvalid
+			return ResourceRACIPolicy{}, nil, ErrInvalid
 		}
-		r.replaceMemoryGVICEdgesLocked(companyID, resourceType, resourceID, nil)
+		r.replaceMemoryRACIEdgesLocked(companyID, resourceType, resourceID, nil)
 		setting.Mode, setting.CustomizedSequence = PolicyModeInherited, 0
 	} else {
-		edges := make([]domain.ResourceGVICAssignment, 0, len(normalized))
+		edges := make([]domain.ResourceRACIAssignment, 0, len(normalized))
 		for _, item := range normalized {
-			edges = append(edges, domain.ResourceGVICAssignment{Role: item.role, PrincipalType: item.principalType, PrincipalID: item.principalID})
+			edges = append(edges, domain.ResourceRACIAssignment{Role: item.role, PrincipalType: item.principalType, PrincipalID: item.principalID})
 		}
-		setting.Mode, setting.CustomizedSequence = PolicyModeCustomized, r.nextGVICV2SequenceLocked()
-		r.replaceMemoryGVICEdgesLocked(companyID, resourceType, resourceID, edges)
+		setting.Mode, setting.CustomizedSequence = PolicyModeCustomized, r.nextRACIV2SequenceLocked()
+		r.replaceMemoryRACIEdgesLocked(companyID, resourceType, resourceID, edges)
 	}
 	if action == PolicyDescendantActionIncludingCustomized {
-		setting.DescendantResetSequence = r.nextGVICV2SequenceLocked()
+		setting.DescendantResetSequence = r.nextRACIV2SequenceLocked()
 	}
 	r.gvicV2Settings[keyValue] = setting
 	resultingSequence := setting.CustomizedSequence
 	if action == PolicyDescendantActionIncludingCustomized {
 		resultingSequence = setting.DescendantResetSequence
 	}
-	after := r.memoryV2GVICPolicyLocked(companyID, resourceType, resourceID)
-	userIDs := resourceGVICChangedUserIDs(current.EffectiveAssignments, after.EffectiveAssignments)
+	after := r.memoryV2RACIPolicyLocked(companyID, resourceType, resourceID)
+	userIDs := resourceRACIChangedUserIDs(current.EffectiveAssignments, after.EffectiveAssignments)
 	if resourceType == EntityTypeNode {
 		r.bumpNodeViewVersionLocked(companyID, resourceID)
 	}
-	event, err := r.appendDomainEventLocked(DomainEventInput{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, Type: v2GVICEventType(resourceType), ActorUserID: input.ActorUserID, IdempotencyKey: input.IdempotencyKey, Payload: v2PolicyEventPayload(resourceType, resourceID, map[string]any{"policy_type": "gvic", "assignment_mode": mode, "action": action, "descendant_action": action, "sequence": resultingSequence, "assignment_user_ids": userIDs})})
+	event, err := r.appendDomainEventLocked(DomainEventInput{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, Type: v2RACIEventType(resourceType), ActorUserID: input.ActorUserID, IdempotencyKey: input.IdempotencyKey, Payload: v2PolicyEventPayload(resourceType, resourceID, map[string]any{"policy_type": "gvic", "assignment_mode": mode, "action": action, "descendant_action": action, "sequence": resultingSequence, "assignment_user_ids": userIDs})})
 	if err != nil {
-		return ResourceGVICPolicy{}, nil, err
+		return ResourceRACIPolicy{}, nil, err
 	}
 	if strings.TrimSpace(input.IdempotencyKey) != "" {
 		r.policyV2Idempotency[idempotencyKey] = true
@@ -532,7 +532,7 @@ func (r *MemoryRepo) PutResourcePermissionPolicy(input ResourcePermissionPolicyU
 		return ResourcePermissionPolicy{}, nil, ErrVersionConflict
 	}
 	for _, item := range normalized {
-		if err := r.validateGVICPrincipalLocked(companyID, item.SubjectType, item.SubjectID); err != nil {
+		if err := r.validateRACIPrincipalLocked(companyID, item.SubjectType, item.SubjectID); err != nil {
 			return ResourcePermissionPolicy{}, nil, err
 		}
 	}
@@ -579,7 +579,7 @@ func (r *MemoryRepo) PutResourcePermissionPolicy(input ResourcePermissionPolicyU
 }
 
 func (r *MemoryRepo) ResourcePolicyFingerprints(companyID, resourceType, resourceID, userID string) (ResourcePolicyFingerprints, error) {
-	gvic, err := r.GetResourceGVICPolicy(companyID, resourceType, resourceID)
+	gvic, err := r.GetResourceRACIPolicy(companyID, resourceType, resourceID)
 	if err != nil {
 		return ResourcePolicyFingerprints{}, err
 	}
@@ -588,7 +588,7 @@ func (r *MemoryRepo) ResourcePolicyFingerprints(companyID, resourceType, resourc
 		return ResourcePolicyFingerprints{}, err
 	}
 	return ResourcePolicyFingerprints{
-		GVIC:       gvic.Revision,
+		RACI:       gvic.Revision,
 		Permission: permission.Revision + ":" + strings.TrimSpace(userID),
 	}, nil
 }

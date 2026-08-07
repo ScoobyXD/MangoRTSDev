@@ -68,7 +68,7 @@ func (r *MemoryRepo) CreateCommunicationsSharedInboxFolder(companyID, parentFold
 		item.SharedInboxID = item.FolderID
 	}
 	r.folders[key(companyID, item.FolderID)] = item
-	return r.withSharedInboxGVICLocked(item), nil
+	return r.withSharedInboxRACILocked(item), nil
 }
 
 func (r *MemoryRepo) ListCommunicationsSharedInboxFolders(companyID string) ([]domain.CompanyExplorerFolder, error) {
@@ -84,7 +84,7 @@ func (r *MemoryRepo) ListCommunicationsSharedInboxFolders(companyID string) ([]d
 		if folder.CompanyID != companyID || folder.FolderKind != "communications" {
 			continue
 		}
-		items = append(items, r.withSharedInboxGVICLocked(normalizeMemorySharedInboxFolder(folder)))
+		items = append(items, r.withSharedInboxRACILocked(normalizeMemorySharedInboxFolder(folder)))
 	}
 	sortCompanyExplorerFolders(items)
 	return items, nil
@@ -108,7 +108,7 @@ func (r *MemoryRepo) ListVisibleCommunicationsSharedInboxFolders(companyID, user
 		if !r.userHasEffectiveAccessLocked(companyID, userID, resourceType, folder.FolderID, EntityPermissionEdit) {
 			continue
 		}
-		item := r.withSharedInboxGVICLocked(normalizeMemorySharedInboxFolder(folder))
+		item := r.withSharedInboxRACILocked(normalizeMemorySharedInboxFolder(folder))
 		item.EffectiveAccess = r.effectiveAccessLevelLocked(companyID, userID, resourceType, folder.FolderID, EntityPermissionEdit)
 		if item.EffectiveAccess == "" {
 			continue
@@ -132,7 +132,7 @@ func (r *MemoryRepo) GetCommunicationsSharedInboxFolder(companyID, folderID stri
 	if !ok || item.FolderKind != "communications" {
 		return domain.CompanyExplorerFolder{}, ErrNotFound
 	}
-	return r.withSharedInboxGVICLocked(normalizeMemorySharedInboxFolder(item)), nil
+	return r.withSharedInboxRACILocked(normalizeMemorySharedInboxFolder(item)), nil
 }
 
 func (r *MemoryRepo) MoveCommunicationsSharedInboxFolder(companyID, folderID string, parentFolderID *string, position int) (domain.CompanyExplorerFolder, error) {
@@ -199,7 +199,7 @@ func (r *MemoryRepo) MoveCommunicationsSharedInboxFolder(companyID, folderID str
 	item.Position = position
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.folders[key(companyID, item.FolderID)] = item
-	return r.withSharedInboxGVICLocked(normalizeMemorySharedInboxFolder(item)), nil
+	return r.withSharedInboxRACILocked(normalizeMemorySharedInboxFolder(item)), nil
 }
 
 func (r *MemoryRepo) RenameCommunicationsSharedInboxFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error) {
@@ -219,7 +219,7 @@ func (r *MemoryRepo) RenameCommunicationsSharedInboxFolder(companyID, folderID, 
 	item.Name = name
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.folders[key(companyID, item.FolderID)] = item
-	return r.withSharedInboxGVICLocked(normalizeMemorySharedInboxFolder(item)), nil
+	return r.withSharedInboxRACILocked(normalizeMemorySharedInboxFolder(item)), nil
 }
 
 func (r *MemoryRepo) DeleteCommunicationsSharedInboxFolder(companyID, folderID string) error {
@@ -256,7 +256,7 @@ func (r *MemoryRepo) deleteCommunicationsSharedInboxFolder(companyID, folderID s
 		}
 		for id := range toDelete {
 			delete(r.folders, key(companyID, id))
-			delete(r.sharedInboxGVIC, sharedInboxGVICKey(companyID, id))
+			delete(r.sharedInboxRACI, sharedInboxRACIKey(companyID, id))
 
 		}
 		for permissionKey, permission := range r.entityPermissions {
@@ -323,12 +323,12 @@ func (r *MemoryRepo) deleteCommunicationsSharedInboxFolder(companyID, folderID s
 	}
 	for id := range toDelete {
 		delete(r.folders, key(companyID, id))
-		delete(r.sharedInboxGVIC, sharedInboxGVICKey(companyID, id))
+		delete(r.sharedInboxRACI, sharedInboxRACIKey(companyID, id))
 
 	}
 	for id := range sharedInboxesToDelete {
 		delete(r.folders, key(companyID, id))
-		delete(r.sharedInboxGVIC, sharedInboxGVICKey(companyID, id))
+		delete(r.sharedInboxRACI, sharedInboxRACIKey(companyID, id))
 
 	}
 	if deleteCompanyConnections {

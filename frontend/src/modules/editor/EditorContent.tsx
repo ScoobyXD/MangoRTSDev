@@ -1,15 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmActionMenu } from "../../app/ConfirmActionMenu";
 import { getNodeTitle, canEditResourceAccess, type NodeRecord, type NodeRelationship } from "../nodes/types";
-import { getLogicGateTitle, toLogicGateViewRecord, type LogicGateGVICAssignment, type LogicGateGVICRole, type LogicGateGVICPrincipalType, type LogicGateRecord } from "../logic-gates/types";
+import { getLogicGateTitle, toLogicGateViewRecord, type LogicGateRACIAssignment, type LogicGateRACIRole, type LogicGateRACIPrincipalType, type LogicGateRecord } from "../logic-gates/types";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../dashboardEvents";
 import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, invalidateNodeRecordStoreCaches, primeNodeRecordStoreCaches, type NodeProjectionItem } from "../nodes/nodeRecordStore";
 import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertNodeRelationshipGraphRelationship } from "../nodes/nodeRelationshipGraph";
 import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand } from "../workspace/workspaceEntityCommands";
 import { buildLinkedNodePayload } from "../nodes/relationshipRules";
-import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingleFlight, invalidateLogicGateRecordStoreCaches, patchLogicGateRecordStoreGVICAssignments, type LogicGateProjectionItem } from "../logic-gates/logicGateRecordStore";
+import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingleFlight, invalidateLogicGateRecordStoreCaches, patchLogicGateRecordStoreRACIAssignments, type LogicGateProjectionItem } from "../logic-gates/logicGateRecordStore";
 import { getLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gates/logicGateRelationshipGraph";
-import { patchLogicGateGVICAssignmentsInCommunicationsWorkspaceCache } from "../communications/communicationsApi";
+import { patchLogicGateRACIAssignmentsInCommunicationsWorkspaceCache } from "../communications/communicationsApi";
 import { linkMangoResourceAttachment } from "../attachments/attachmentApi";
 import { createRequestJSON, isAbortError } from "../api/requestJSON";
 import { clearResourceMissing, isTerminalResourceNotFoundError } from "../api/missingResources";
@@ -223,41 +223,41 @@ function editorSaveVersionPreview(version: EditorSaveVersion | null): string {
   }).join("\n\n");
 }
 
-function logicGateGVICAssignmentPrincipalType(assignment: LogicGateGVICAssignment): LogicGateGVICPrincipalType {
-  return (assignment.principal_type?.trim() || "user") as LogicGateGVICPrincipalType;
+function logicGateRACIAssignmentPrincipalType(assignment: LogicGateRACIAssignment): LogicGateRACIPrincipalType {
+  return (assignment.principal_type?.trim() || "user") as LogicGateRACIPrincipalType;
 }
 
-function logicGateGVICAssignmentPrincipalID(assignment: LogicGateGVICAssignment): string {
-  const principalType = logicGateGVICAssignmentPrincipalType(assignment);
+function logicGateRACIAssignmentPrincipalID(assignment: LogicGateRACIAssignment): string {
+  const principalType = logicGateRACIAssignmentPrincipalType(assignment);
   const principalID = assignment.principal_id?.trim() || "";
   const userID = assignment.user_id?.trim() || "";
   if (principalType === "user") return principalID || userID;
   return principalID;
 }
 
-type EditorGVICAssignmentInput = {
-  role: LogicGateGVICRole;
-  principal_type?: LogicGateGVICPrincipalType;
+type EditorRACIAssignmentInput = {
+  role: LogicGateRACIRole;
+  principal_type?: LogicGateRACIPrincipalType;
   principal_id?: string;
   user_id?: string;
 };
 
-type ResourceGVICPayload = {
+type ResourceRACIPayload = {
   assignment_mode: "inherited" | "customized";
   effective_assignment_mode: "inherited" | "customized";
   effective_source: { resource_type: string; resource_id: string; resource_name?: string };
   overwritten_by_ancestor?: { resource_type: string; resource_id: string; sequence: number } | null;
-  gvic_assignments?: LogicGateGVICAssignment[];
+  gvic_assignments?: LogicGateRACIAssignment[];
   effective_assignments?: Array<{
-    role: LogicGateGVICRole;
+    role: LogicGateRACIRole;
     user_id: string;
-    source_principal_type: LogicGateGVICPrincipalType;
+    source_principal_type: LogicGateRACIPrincipalType;
     source_principal_id: string;
   }>;
   revision: string;
 };
 
-function displayGVICAssignments(payload: ResourceGVICPayload): LogicGateGVICAssignment[] {
+function displayRACIAssignments(payload: ResourceRACIPayload): LogicGateRACIAssignment[] {
   if (payload.effective_assignment_mode === "customized") return payload.gvic_assignments ?? [];
   return (payload.effective_assignments ?? []).map((assignment) => ({
     company_id: "",
@@ -269,9 +269,9 @@ function displayGVICAssignments(payload: ResourceGVICPayload): LogicGateGVICAssi
   }));
 }
 
-function toResourceGVICAssignmentInput(assignment: EditorGVICAssignmentInput): {
-  role: LogicGateGVICRole;
-  principal_type: LogicGateGVICPrincipalType;
+function toResourceRACIAssignmentInput(assignment: EditorRACIAssignmentInput): {
+  role: LogicGateRACIRole;
+  principal_type: LogicGateRACIPrincipalType;
   principal_id: string;
 } {
   const principalType = assignment.principal_type?.trim() === "group" ? "group" : "user";
@@ -282,11 +282,11 @@ function toResourceGVICAssignmentInput(assignment: EditorGVICAssignmentInput): {
   };
 }
 
-function normalizeLogicGateGVICAssignments(assignments: LogicGateGVICAssignment[], logicGateID: string): LogicGateGVICAssignment[] {
+function normalizeLogicGateRACIAssignments(assignments: LogicGateRACIAssignment[], logicGateID: string): LogicGateRACIAssignment[] {
   const fallbackLogicGateID = logicGateID.trim();
   return assignments.map((assignment) => {
-    const principalType = logicGateGVICAssignmentPrincipalType(assignment);
-    const principalID = logicGateGVICAssignmentPrincipalID(assignment);
+    const principalType = logicGateRACIAssignmentPrincipalType(assignment);
+    const principalID = logicGateRACIAssignmentPrincipalID(assignment);
     return {
       ...assignment,
       logic_gate_id: assignment.logic_gate_id?.trim() || assignment.resource_id?.trim() || fallbackLogicGateID,
@@ -573,13 +573,13 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [nodePriorityRequirementError, setNodePriorityRequirementError] = useState("");
   const [nodeDueDateDraft, setNodeDueDateDraft] = useState("");
   const [nodeAccounts, setNodeAccounts] = useState<Account[]>([]);
-  const [nodeGVICAssignments, setNodeGVICAssignments] = useState<LogicGateGVICAssignment[]>([]);
-  const [logicGateGVICAssignments, setLogicGateGVICAssignments] = useState<LogicGateGVICAssignment[]>([]);
-  const [gvicPolicyMode, setGVICPolicyMode] = useState<"inherited" | "customized">("customized");
-  const [gvicPolicyOverwrittenByAncestor, setGVICPolicyOverwrittenByAncestor] = useState<ResourceGVICPayload["overwritten_by_ancestor"]>(null);
-  const [gvicPolicyRevision, setGVICPolicyRevision] = useState("");
-  const [logicGateGVICApplyToAssignedNodesBusy, setLogicGateGVICApplyToAssignedNodesBusy] = useState(false);
-  const [logicGateGVICApplyConfirmationOpen, setLogicGateGVICApplyConfirmationOpen] = useState(false);
+  const [nodeRACIAssignments, setNodeRACIAssignments] = useState<LogicGateRACIAssignment[]>([]);
+  const [logicGateRACIAssignments, setLogicGateRACIAssignments] = useState<LogicGateRACIAssignment[]>([]);
+  const [gvicPolicyMode, setRACIPolicyMode] = useState<"inherited" | "customized">("customized");
+  const [gvicPolicyOverwrittenByAncestor, setRACIPolicyOverwrittenByAncestor] = useState<ResourceRACIPayload["overwritten_by_ancestor"]>(null);
+  const [gvicPolicyRevision, setRACIPolicyRevision] = useState("");
+  const [logicGateRACIApplyToAssignedNodesBusy, setLogicGateRACIApplyToAssignedNodesBusy] = useState(false);
+  const [logicGateRACIApplyConfirmationOpen, setLogicGateRACIApplyConfirmationOpen] = useState(false);
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
   const [companyUserGroups, setCompanyUserGroups] = useState<CompanyUserGroup[]>([]);
   const [companyUserGroupMembers, setCompanyUserGroupMembers] = useState<CompanyUserGroupMember[]>([]);
@@ -650,9 +650,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const nodePriorityRequirementTimerRef = useRef<number | null>(null);
   const nodeWorkspaceProjectionsRef = useRef<NodeProjectionItem[]>([]);
   const logicGateWorkspaceProjectionsRef = useRef<LogicGateProjectionItem[]>([]);
-  const logicGateGVICAssignmentsRef = useRef<LogicGateGVICAssignment[]>([]);
-  const logicGateGVICMutationSequenceRef = useRef(0);
-  const logicGateGVICApplyToAssignedNodesRequestRef = useRef(0);
+  const logicGateRACIAssignmentsRef = useRef<LogicGateRACIAssignment[]>([]);
+  const logicGateRACIMutationSequenceRef = useRef(0);
+  const logicGateRACIApplyToAssignedNodesRequestRef = useRef(0);
   const editorSnapshotRefreshTokenRef = useRef(0);
   const linkedEditorTargetRef = useRef<{ kind: "" | "node" | "logic_gate"; id: string }>({ kind: "", id: "" });
   const registerNodeWorkspaceSaveController = useCallback((nodeID: string, controller: NodeWorkspaceSaveController) => {
@@ -973,10 +973,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     return cleanCandidate;
   }, []);
 
-  const applyLogicGateGVICAssignments = useCallback((assignments: LogicGateGVICAssignment[], logicGateID: string): LogicGateGVICAssignment[] => {
-    const normalized = normalizeLogicGateGVICAssignments(assignments, logicGateID);
-    logicGateGVICAssignmentsRef.current = normalized;
-    setLogicGateGVICAssignments(normalized);
+  const applyLogicGateRACIAssignments = useCallback((assignments: LogicGateRACIAssignment[], logicGateID: string): LogicGateRACIAssignment[] => {
+    const normalized = normalizeLogicGateRACIAssignments(assignments, logicGateID);
+    logicGateRACIAssignmentsRef.current = normalized;
+    setLogicGateRACIAssignments(normalized);
     return normalized;
   }, []);
 
@@ -992,8 +992,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setNodeStatus("");
     setNodePriorityDraft("");
     setNodeDueDateDraft("");
-    setNodeGVICAssignments([]);
-    applyLogicGateGVICAssignments([], "");
+    setNodeRACIAssignments([]);
+    applyLogicGateRACIAssignments([], "");
     documentDraftRef.current = "";
     persistedDocumentRef.current = "";
     documentRevisionRef.current = 0;
@@ -1020,7 +1020,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     }
     setDocumentScrollTop(0);
     scheduleIndentGuideUpdate("");
-  }, [applyLogicGateGVICAssignments, scheduleIndentGuideUpdate]);
+  }, [applyLogicGateRACIAssignments, scheduleIndentGuideUpdate]);
 
   const applyLinkedNode = useCallback((nodeID: string, label = "", options: { focusEditor?: boolean } = {}) => {
     const shouldFocusEditor = options.focusEditor !== false;
@@ -1411,177 +1411,177 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     });
   }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, nodeAccounts, nodeLogicGateIDs, nodePriorityDraft, updateNodePresetPatch]);
 
-  const nodeGVICIsInherited = gvicPolicyMode === "inherited";
-  const nodeGVICReadOnlyReason = nodeGVICIsInherited ? "This policy is inherited. Choose RCVI policy: Customized from More editor actions to edit it." : "";
+  const nodeRACIIsInherited = gvicPolicyMode === "inherited";
+  const nodeRACIReadOnlyReason = nodeRACIIsInherited ? "This policy is inherited. Choose RACI policy: Customized from More editor actions to edit it." : "";
 
-  const saveResourceGVICAssignments = useCallback(async (
+  const saveResourceRACIAssignments = useCallback(async (
     resourceType: "node" | "logic_gate",
     resourceID: string,
-    nextAssignments: LogicGateGVICAssignment[] | undefined,
+    nextAssignments: LogicGateRACIAssignment[] | undefined,
     descendantAction: "inherited_only" | "including_customized" = "inherited_only",
     assignmentMode: "inherited" | "customized" = gvicPolicyMode,
   ) => {
     const cleanResourceID = resourceID.trim();
     if (!cleanResourceID) return null;
-    const payload = await requestJSON<ResourceGVICPayload>(`/v1/resources/${resourceType}/${cleanResourceID}/gvic`, {
+    const payload = await requestJSON<ResourceRACIPayload>(`/v1/resources/${resourceType}/${cleanResourceID}/gvic`, {
       method: "PUT",
       headers: gvicPolicyRevision ? { "If-Match": gvicPolicyRevision } : undefined,
       body: JSON.stringify({
         company_id: companyID,
         assignment_mode: assignmentMode,
         ...(assignmentMode === "customized" && nextAssignments !== undefined
-          ? { gvic_assignments: nextAssignments.map(toResourceGVICAssignmentInput) }
+          ? { gvic_assignments: nextAssignments.map(toResourceRACIAssignmentInput) }
           : {}),
         descendant_action: descendantAction,
       }),
     });
     invalidateResourcePolicyDependentCaches(apiBase, companyID);
-    setGVICPolicyMode(payload.assignment_mode);
-    setGVICPolicyOverwrittenByAncestor(payload.overwritten_by_ancestor ?? null);
-    setGVICPolicyRevision(payload.revision);
+    setRACIPolicyMode(payload.assignment_mode);
+    setRACIPolicyOverwrittenByAncestor(payload.overwritten_by_ancestor ?? null);
+    setRACIPolicyRevision(payload.revision);
     return payload;
   }, [apiBase, companyID, gvicPolicyMode, gvicPolicyRevision, requestJSON]);
 
-  const commandResourceGVICAssignments = useCallback(async (
+  const commandResourceRACIAssignments = useCallback(async (
     resourceType: "node" | "logic_gate",
     resourceID: string,
     operation: "add" | "remove",
-    assignments: EditorGVICAssignmentInput[],
+    assignments: EditorRACIAssignmentInput[],
   ) => {
     const changedKeys = new Set(assignments.map((assignment) => {
-      const normalized = toResourceGVICAssignmentInput(assignment);
+      const normalized = toResourceRACIAssignmentInput(assignment);
       return `${normalized.role}:${normalized.principal_type}:${normalized.principal_id}`;
     }));
-    const current = resourceType === "logic_gate" ? logicGateGVICAssignmentsRef.current : nodeGVICAssignments;
+    const current = resourceType === "logic_gate" ? logicGateRACIAssignmentsRef.current : nodeRACIAssignments;
     const next = operation === "remove"
-      ? current.filter((assignment) => !changedKeys.has(`${assignment.role}:${logicGateGVICAssignmentPrincipalType(assignment)}:${logicGateGVICAssignmentPrincipalID(assignment)}`))
+      ? current.filter((assignment) => !changedKeys.has(`${assignment.role}:${logicGateRACIAssignmentPrincipalType(assignment)}:${logicGateRACIAssignmentPrincipalID(assignment)}`))
       : [...current, ...assignments.map((assignment) => ({ ...assignment, company_id: companyID, created_timestamp: new Date().toISOString(), principal_type: assignment.principal_type ?? "user", principal_id: assignment.principal_id ?? assignment.user_id ?? "", user_id: assignment.user_id ?? "" }))];
-    return saveResourceGVICAssignments(resourceType, resourceID, next, "inherited_only", "customized");
-  }, [companyID, nodeGVICAssignments, saveResourceGVICAssignments]);
+    return saveResourceRACIAssignments(resourceType, resourceID, next, "inherited_only", "customized");
+  }, [companyID, nodeRACIAssignments, saveResourceRACIAssignments]);
 
-  const saveNodeGVICAssignments = useCallback(async (nextAssignments: LogicGateGVICAssignment[]) => {
-    if (!linkedNodeID || linkedEntityKind !== "node" || nodeGVICIsInherited) return;
+  const saveNodeRACIAssignments = useCallback(async (nextAssignments: LogicGateRACIAssignment[]) => {
+    if (!linkedNodeID || linkedEntityKind !== "node" || nodeRACIIsInherited) return;
     setError("");
     try {
-      const policy = await saveResourceGVICAssignments("node", linkedNodeID, nextAssignments, "inherited_only", "customized");
+      const policy = await saveResourceRACIAssignments("node", linkedNodeID, nextAssignments, "inherited_only", "customized");
       if (!policy) return;
-      setNodeGVICAssignments(displayGVICAssignments(policy));
+      setNodeRACIAssignments(displayRACIAssignments(policy));
       invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
       invalidateWorkspaceSnapshot(apiBase, companyID);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_update_node_gvic");
     }
-  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, nodeGVICIsInherited, saveResourceGVICAssignments]);
+  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, nodeRACIIsInherited, saveResourceRACIAssignments]);
 
-  const commandLogicGateGVICAssignments = useCallback((
+  const commandLogicGateRACIAssignments = useCallback((
     operation: "add" | "remove",
-    assignment: EditorGVICAssignmentInput,
-    _optimisticAssignments?: LogicGateGVICAssignment[],
+    assignment: EditorRACIAssignmentInput,
+    _optimisticAssignments?: LogicGateRACIAssignment[],
   ) => {
     const logicGateID = linkedNodeID.trim();
     if (!logicGateID || linkedEntityKind !== "logic_gate") return;
-    const previousAssignments = logicGateGVICAssignmentsRef.current;
-    const mutationSequence = ++logicGateGVICMutationSequenceRef.current;
+    const previousAssignments = logicGateRACIAssignmentsRef.current;
+    const mutationSequence = ++logicGateRACIMutationSequenceRef.current;
     editorSnapshotRefreshTokenRef.current += 1;
     setError("");
-    void commandResourceGVICAssignments("logic_gate", logicGateID, operation, [assignment]).then((policy) => {
+    void commandResourceRACIAssignments("logic_gate", logicGateID, operation, [assignment]).then((policy) => {
       const currentTarget = linkedEditorTargetRef.current;
-      if (logicGateGVICMutationSequenceRef.current !== mutationSequence || currentTarget.kind !== "logic_gate" || currentTarget.id !== logicGateID) return;
+      if (logicGateRACIMutationSequenceRef.current !== mutationSequence || currentTarget.kind !== "logic_gate" || currentTarget.id !== logicGateID) return;
       if (!policy) return;
-      const assignments = displayGVICAssignments(policy);
-      applyLogicGateGVICAssignments(assignments, logicGateID);
-      patchLogicGateRecordStoreGVICAssignments(apiBase, companyID, logicGateID, assignments);
-      patchLogicGateGVICAssignmentsInCommunicationsWorkspaceCache(companyID, logicGateID, assignments);
+      const assignments = displayRACIAssignments(policy);
+      applyLogicGateRACIAssignments(assignments, logicGateID);
+      patchLogicGateRecordStoreRACIAssignments(apiBase, companyID, logicGateID, assignments);
+      patchLogicGateRACIAssignmentsInCommunicationsWorkspaceCache(companyID, logicGateID, assignments);
       invalidateWorkspaceSnapshot(apiBase, companyID);
     }).catch((err) => {
       const currentTarget = linkedEditorTargetRef.current;
-      if (logicGateGVICMutationSequenceRef.current === mutationSequence && currentTarget.kind === "logic_gate" && currentTarget.id === logicGateID) {
-        applyLogicGateGVICAssignments(previousAssignments, logicGateID);
+      if (logicGateRACIMutationSequenceRef.current === mutationSequence && currentTarget.kind === "logic_gate" && currentTarget.id === logicGateID) {
+        applyLogicGateRACIAssignments(previousAssignments, logicGateID);
       }
       setError(err instanceof Error ? err.message : "failed_to_update_logic_gate_gvic");
     });
-  }, [apiBase, applyLogicGateGVICAssignments, commandResourceGVICAssignments, companyID, linkedEntityKind, linkedNodeID]);
+  }, [apiBase, applyLogicGateRACIAssignments, commandResourceRACIAssignments, companyID, linkedEntityKind, linkedNodeID]);
 
-  const applyLogicGateGVICToAssignedNodes = useCallback(() => {
+  const applyLogicGateRACIToAssignedNodes = useCallback(() => {
     const logicGateID = linkedNodeID.trim();
-    if (!logicGateID || linkedEntityKind !== "logic_gate" || !linkedEntityCanEdit || logicGateGVICApplyToAssignedNodesBusy) return;
-    const mutationSequence = ++logicGateGVICMutationSequenceRef.current;
-    const applyRequestID = ++logicGateGVICApplyToAssignedNodesRequestRef.current;
+    if (!logicGateID || linkedEntityKind !== "logic_gate" || !linkedEntityCanEdit || logicGateRACIApplyToAssignedNodesBusy) return;
+    const mutationSequence = ++logicGateRACIMutationSequenceRef.current;
+    const applyRequestID = ++logicGateRACIApplyToAssignedNodesRequestRef.current;
     editorSnapshotRefreshTokenRef.current += 1;
-    setLogicGateGVICApplyToAssignedNodesBusy(true);
+    setLogicGateRACIApplyToAssignedNodesBusy(true);
     setError("");
-    void saveResourceGVICAssignments("logic_gate", logicGateID, logicGateGVICAssignmentsRef.current, "including_customized", "customized").then((policy) => {
+    void saveResourceRACIAssignments("logic_gate", logicGateID, logicGateRACIAssignmentsRef.current, "including_customized", "customized").then((policy) => {
       const currentTarget = linkedEditorTargetRef.current;
-      if (logicGateGVICMutationSequenceRef.current !== mutationSequence || currentTarget.kind !== "logic_gate" || currentTarget.id !== logicGateID) return;
+      if (logicGateRACIMutationSequenceRef.current !== mutationSequence || currentTarget.kind !== "logic_gate" || currentTarget.id !== logicGateID) return;
       if (!policy) return;
-      const assignments = displayGVICAssignments(policy);
-      applyLogicGateGVICAssignments(assignments, logicGateID);
-      patchLogicGateRecordStoreGVICAssignments(apiBase, companyID, logicGateID, assignments);
-      patchLogicGateGVICAssignmentsInCommunicationsWorkspaceCache(companyID, logicGateID, assignments);
+      const assignments = displayRACIAssignments(policy);
+      applyLogicGateRACIAssignments(assignments, logicGateID);
+      patchLogicGateRecordStoreRACIAssignments(apiBase, companyID, logicGateID, assignments);
+      patchLogicGateRACIAssignmentsInCommunicationsWorkspaceCache(companyID, logicGateID, assignments);
       invalidateWorkspaceSnapshot(apiBase, companyID);
     }).catch((err) => {
       setError(err instanceof Error ? err.message : "failed_to_apply_logic_gate_gvic_to_nodes");
     }).finally(() => {
-      if (logicGateGVICApplyToAssignedNodesRequestRef.current === applyRequestID) {
-        setLogicGateGVICApplyToAssignedNodesBusy(false);
+      if (logicGateRACIApplyToAssignedNodesRequestRef.current === applyRequestID) {
+        setLogicGateRACIApplyToAssignedNodesBusy(false);
       }
     });
-  }, [apiBase, applyLogicGateGVICAssignments, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, logicGateGVICApplyToAssignedNodesBusy, saveResourceGVICAssignments]);
+  }, [apiBase, applyLogicGateRACIAssignments, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, logicGateRACIApplyToAssignedNodesBusy, saveResourceRACIAssignments]);
 
-  const changeCurrentGVICMode = useCallback((nextMode: "inherited" | "customized") => {
+  const changeCurrentRACIMode = useCallback((nextMode: "inherited" | "customized") => {
     const resourceType = linkedEntityKind === "node" ? "node" : linkedEntityKind === "logic_gate" ? "logic_gate" : null;
     const resourceID = linkedNodeID.trim();
     if (!resourceType || !resourceID || !linkedEntityCanEdit || nextMode === gvicPolicyMode) return;
     setError("");
-    void saveResourceGVICAssignments(resourceType, resourceID, undefined, "inherited_only", nextMode).then((policy) => {
+    void saveResourceRACIAssignments(resourceType, resourceID, undefined, "inherited_only", nextMode).then((policy) => {
       if (!policy) return;
-      const assignments = displayGVICAssignments(policy);
-      if (resourceType === "node") setNodeGVICAssignments(assignments);
-      else applyLogicGateGVICAssignments(assignments, resourceID);
+      const assignments = displayRACIAssignments(policy);
+      if (resourceType === "node") setNodeRACIAssignments(assignments);
+      else applyLogicGateRACIAssignments(assignments, resourceID);
       invalidateWorkspaceSnapshot(apiBase, companyID);
     }).catch((err) => {
       setError(err instanceof Error ? err.message : "failed_to_change_gvic_mode");
     });
-  }, [apiBase, applyLogicGateGVICAssignments, companyID, gvicPolicyMode, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, saveResourceGVICAssignments]);
+  }, [apiBase, applyLogicGateRACIAssignments, companyID, gvicPolicyMode, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, saveResourceRACIAssignments]);
 
-  const applyLogicGateGVICToInheritedDescendants = useCallback(() => {
+  const applyLogicGateRACIToInheritedDescendants = useCallback(() => {
     const logicGateID = linkedNodeID.trim();
-    if (!logicGateID || linkedEntityKind !== "logic_gate" || !linkedEntityCanEdit || logicGateGVICApplyToAssignedNodesBusy) return;
-    const applyRequestID = ++logicGateGVICApplyToAssignedNodesRequestRef.current;
-    setLogicGateGVICApplyToAssignedNodesBusy(true);
+    if (!logicGateID || linkedEntityKind !== "logic_gate" || !linkedEntityCanEdit || logicGateRACIApplyToAssignedNodesBusy) return;
+    const applyRequestID = ++logicGateRACIApplyToAssignedNodesRequestRef.current;
+    setLogicGateRACIApplyToAssignedNodesBusy(true);
     setError("");
-    void saveResourceGVICAssignments(
+    void saveResourceRACIAssignments(
       "logic_gate",
       logicGateID,
-      gvicPolicyMode === "customized" ? logicGateGVICAssignmentsRef.current : undefined,
+      gvicPolicyMode === "customized" ? logicGateRACIAssignmentsRef.current : undefined,
       "inherited_only",
       gvicPolicyMode,
     ).then((policy) => {
       if (!policy) return;
-      applyLogicGateGVICAssignments(displayGVICAssignments(policy), logicGateID);
+      applyLogicGateRACIAssignments(displayRACIAssignments(policy), logicGateID);
       invalidateWorkspaceSnapshot(apiBase, companyID);
     }).catch((err) => {
       setError(err instanceof Error ? err.message : "failed_to_apply_inherited_gvic");
     }).finally(() => {
-      if (logicGateGVICApplyToAssignedNodesRequestRef.current === applyRequestID) {
-        setLogicGateGVICApplyToAssignedNodesBusy(false);
+      if (logicGateRACIApplyToAssignedNodesRequestRef.current === applyRequestID) {
+        setLogicGateRACIApplyToAssignedNodesBusy(false);
       }
     });
-  }, [apiBase, applyLogicGateGVICAssignments, companyID, gvicPolicyMode, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, logicGateGVICApplyToAssignedNodesBusy, saveResourceGVICAssignments]);
+  }, [apiBase, applyLogicGateRACIAssignments, companyID, gvicPolicyMode, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, logicGateRACIApplyToAssignedNodesBusy, saveResourceRACIAssignments]);
 
-  const addNodeGVICPrincipal = useCallback((role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => {
-    if (nodeGVICIsInherited) return;
+  const addNodeRACIPrincipal = useCallback((role: LogicGateRACIRole, principalType: LogicGateRACIPrincipalType, principalID: string) => {
+    if (nodeRACIIsInherited) return;
     const cleanPrincipalID = principalID.trim();
     if (!cleanPrincipalID) return;
-    const existingPrincipalIDsForRole = new Set(nodeGVICAssignments
-      .filter((assignment) => assignment.role === role && logicGateGVICAssignmentPrincipalType(assignment) === principalType)
-      .map((assignment) => logicGateGVICAssignmentPrincipalID(assignment))
+    const existingPrincipalIDsForRole = new Set(nodeRACIAssignments
+      .filter((assignment) => assignment.role === role && logicGateRACIAssignmentPrincipalType(assignment) === principalType)
+      .map((assignment) => logicGateRACIAssignmentPrincipalID(assignment))
       .filter(Boolean));
     if (existingPrincipalIDsForRole.has(cleanPrincipalID)) return;
     if (principalType === "group") {
       const group = companyUserGroups.find((candidate) => candidate.group_id === cleanPrincipalID);
-      void saveNodeGVICAssignments([
-        ...nodeGVICAssignments,
+      void saveNodeRACIAssignments([
+        ...nodeRACIAssignments,
         {
           company_id: companyID,
           resource_id: linkedNodeID,
@@ -1596,8 +1596,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       return;
     }
     const user = companyUsers.find((candidate) => candidate.user_id === cleanPrincipalID);
-    void saveNodeGVICAssignments([
-      ...nodeGVICAssignments,
+    void saveNodeRACIAssignments([
+      ...nodeRACIAssignments,
       {
         company_id: companyID,
         resource_id: linkedNodeID,
@@ -1611,33 +1611,33 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         created_timestamp: new Date().toISOString(),
       },
     ]);
-  }, [companyID, companyUserGroups, companyUsers, linkedNodeID, nodeGVICAssignments, nodeGVICIsInherited, saveNodeGVICAssignments]);
+  }, [companyID, companyUserGroups, companyUsers, linkedNodeID, nodeRACIAssignments, nodeRACIIsInherited, saveNodeRACIAssignments]);
 
-  const removeNodeGVICPrincipal = useCallback((role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => {
-    if (nodeGVICIsInherited) return;
+  const removeNodeRACIPrincipal = useCallback((role: LogicGateRACIRole, principalType: LogicGateRACIPrincipalType, principalID: string) => {
+    if (nodeRACIIsInherited) return;
     const cleanPrincipalID = principalID.trim();
     if (!cleanPrincipalID) return;
-    const next = nodeGVICAssignments.filter((assignment) => !(
+    const next = nodeRACIAssignments.filter((assignment) => !(
       assignment.role === role
-      && logicGateGVICAssignmentPrincipalType(assignment) === principalType
-      && logicGateGVICAssignmentPrincipalID(assignment) === cleanPrincipalID
+      && logicGateRACIAssignmentPrincipalType(assignment) === principalType
+      && logicGateRACIAssignmentPrincipalID(assignment) === cleanPrincipalID
     ));
-    if (next.length === nodeGVICAssignments.length) return;
-    void saveNodeGVICAssignments(next);
-  }, [nodeGVICAssignments, nodeGVICIsInherited, saveNodeGVICAssignments]);
+    if (next.length === nodeRACIAssignments.length) return;
+    void saveNodeRACIAssignments(next);
+  }, [nodeRACIAssignments, nodeRACIIsInherited, saveNodeRACIAssignments]);
 
-  const addLogicGateGVICPrincipal = useCallback((role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => {
+  const addLogicGateRACIPrincipal = useCallback((role: LogicGateRACIRole, principalType: LogicGateRACIPrincipalType, principalID: string) => {
     const cleanPrincipalID = principalID.trim();
     if (!cleanPrincipalID) return;
-    const currentAssignments = logicGateGVICAssignmentsRef.current;
+    const currentAssignments = logicGateRACIAssignmentsRef.current;
     const existingPrincipalIDsForRole = new Set(currentAssignments
-      .filter((assignment) => assignment.role === role && logicGateGVICAssignmentPrincipalType(assignment) === principalType)
-      .map((assignment) => logicGateGVICAssignmentPrincipalID(assignment))
+      .filter((assignment) => assignment.role === role && logicGateRACIAssignmentPrincipalType(assignment) === principalType)
+      .map((assignment) => logicGateRACIAssignmentPrincipalID(assignment))
       .filter(Boolean));
     if (existingPrincipalIDsForRole.has(cleanPrincipalID)) return;
     if (principalType === "group") {
       const group = companyUserGroups.find((candidate) => candidate.group_id === cleanPrincipalID);
-      const optimisticAssignment: LogicGateGVICAssignment = {
+      const optimisticAssignment: LogicGateRACIAssignment = {
         company_id: companyID,
         logic_gate_id: linkedNodeID,
         role,
@@ -1647,14 +1647,14 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         user_id: "",
         created_timestamp: new Date().toISOString(),
       };
-      commandLogicGateGVICAssignments("add", { role, principal_type: "group", principal_id: cleanPrincipalID }, [
+      commandLogicGateRACIAssignments("add", { role, principal_type: "group", principal_id: cleanPrincipalID }, [
         ...currentAssignments,
         optimisticAssignment,
       ]);
       return;
     }
     const user = companyUsers.find((candidate) => candidate.user_id === cleanPrincipalID);
-    const optimisticAssignment: LogicGateGVICAssignment = {
+    const optimisticAssignment: LogicGateRACIAssignment = {
       company_id: companyID,
       logic_gate_id: linkedNodeID,
       role,
@@ -1666,38 +1666,38 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       user_email: user?.email,
       created_timestamp: new Date().toISOString(),
     };
-    commandLogicGateGVICAssignments("add", { role, principal_type: "user", principal_id: cleanPrincipalID, user_id: cleanPrincipalID }, [
+    commandLogicGateRACIAssignments("add", { role, principal_type: "user", principal_id: cleanPrincipalID, user_id: cleanPrincipalID }, [
       ...currentAssignments,
       optimisticAssignment,
     ]);
-  }, [commandLogicGateGVICAssignments, companyID, companyUserGroups, companyUsers, linkedNodeID]);
+  }, [commandLogicGateRACIAssignments, companyID, companyUserGroups, companyUsers, linkedNodeID]);
 
-  const removeLogicGateGVICPrincipal = useCallback((role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => {
+  const removeLogicGateRACIPrincipal = useCallback((role: LogicGateRACIRole, principalType: LogicGateRACIPrincipalType, principalID: string) => {
     const cleanPrincipalID = principalID.trim();
     if (!cleanPrincipalID) return;
-    const currentAssignments = logicGateGVICAssignmentsRef.current;
+    const currentAssignments = logicGateRACIAssignmentsRef.current;
     const next = currentAssignments.filter((assignment) => !(
       assignment.role === role
-      && logicGateGVICAssignmentPrincipalType(assignment) === principalType
-      && logicGateGVICAssignmentPrincipalID(assignment) === cleanPrincipalID
+      && logicGateRACIAssignmentPrincipalType(assignment) === principalType
+      && logicGateRACIAssignmentPrincipalID(assignment) === cleanPrincipalID
     ));
     if (next.length === currentAssignments.length) return;
-    commandLogicGateGVICAssignments("remove", {
+    commandLogicGateRACIAssignments("remove", {
       role,
       principal_type: principalType,
       principal_id: cleanPrincipalID,
       user_id: principalType === "user" ? cleanPrincipalID : undefined,
     }, next);
-  }, [commandLogicGateGVICAssignments]);
+  }, [commandLogicGateRACIAssignments]);
 
   useEffect(() => {
     setIsEditingTitle(false);
     editingTitleActiveRef.current = false;
     committedTitleEditBufferRef.current.reset();
     editingTitleDraftRef.current = "";
-    logicGateGVICApplyToAssignedNodesRequestRef.current += 1;
-    setLogicGateGVICApplyToAssignedNodesBusy(false);
-    setLogicGateGVICApplyConfirmationOpen(false);
+    logicGateRACIApplyToAssignedNodesRequestRef.current += 1;
+    setLogicGateRACIApplyToAssignedNodesBusy(false);
+    setLogicGateRACIApplyConfirmationOpen(false);
   }, [linkedEntityKind, linkedNodeID]);
 
   useEffect(() => {
@@ -2086,8 +2086,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setNodePriorityDraft("");
       setNodeDueDateDraft("");
       setNodeAccounts([]);
-      setNodeGVICAssignments([]);
-      applyLogicGateGVICAssignments([], "");
+      setNodeRACIAssignments([]);
+      applyLogicGateRACIAssignments([], "");
       documentDraftRef.current = "";
       documentRevisionRef.current = 0;
       persistedDocumentRef.current = "";
@@ -2130,7 +2130,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           const [details, projections, gvicPolicy] = await Promise.all([
             getLogicGateRecordSingleFlight(apiBase, companyID, linkedNodeID),
             getLogicGateInformationProjectionSingleFlight(apiBase, companyID, linkedNodeID),
-            requestJSON<ResourceGVICPayload>(`/v1/resources/logic_gate/${linkedNodeID}/gvic?company_id=${encodeURIComponent(companyID)}`),
+            requestJSON<ResourceRACIPayload>(`/v1/resources/logic_gate/${linkedNodeID}/gvic?company_id=${encodeURIComponent(companyID)}`),
           ]);
           const snapshotScope = editorSnapshotScope("logic_gate", linkedNodeID);
           if (!isCurrentLinkedLoad()) return;
@@ -2150,11 +2150,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           setNodeDueDateDraft("");
           setNodeLogicGateIDs([]);
           setNodeAccounts([]);
-          setNodeGVICAssignments([]);
-          applyLogicGateGVICAssignments(displayGVICAssignments(gvicPolicy), linkedNodeID);
-          setGVICPolicyMode(gvicPolicy.assignment_mode);
-          setGVICPolicyOverwrittenByAncestor(gvicPolicy.overwritten_by_ancestor ?? null);
-          setGVICPolicyRevision(gvicPolicy.revision);
+          setNodeRACIAssignments([]);
+          applyLogicGateRACIAssignments(displayRACIAssignments(gvicPolicy), linkedNodeID);
+          setRACIPolicyMode(gvicPolicy.assignment_mode);
+          setRACIPolicyOverwrittenByAncestor(gvicPolicy.overwritten_by_ancestor ?? null);
+          setRACIPolicyRevision(gvicPolicy.revision);
           setNodeWorkspaceProjections([]);
           setLogicGateWorkspaceProjections(projections);
           setNodeWorkspaceLoadedNodeID("");
@@ -2191,7 +2191,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         const [details, projections, gvicPolicy] = await Promise.all([
           getNodeRecordSingleFlight(apiBase, companyID, linkedNodeID),
           getNodeInformationProjectionSingleFlight(apiBase, companyID, linkedNodeID),
-          requestJSON<ResourceGVICPayload>(`/v1/resources/node/${linkedNodeID}/gvic?company_id=${encodeURIComponent(companyID)}`),
+          requestJSON<ResourceRACIPayload>(`/v1/resources/node/${linkedNodeID}/gvic?company_id=${encodeURIComponent(companyID)}`),
         ]);
         if (!isCurrentLinkedLoad()) return;
         const snapshotScope = editorSnapshotScope("node", linkedNodeID);
@@ -2210,11 +2210,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         setNodeDueDateDraft(formatNodeDueDateForEditor(details.node.due_date));
         setNodeLogicGateIDs(details.node.logic_gate_ids ?? []);
         setNodeAccounts(details.node.accounts ?? []);
-        setNodeGVICAssignments(displayGVICAssignments(gvicPolicy));
-        setGVICPolicyMode(gvicPolicy.assignment_mode);
-        setGVICPolicyOverwrittenByAncestor(gvicPolicy.overwritten_by_ancestor ?? null);
-        setGVICPolicyRevision(gvicPolicy.revision);
-        applyLogicGateGVICAssignments([], "");
+        setNodeRACIAssignments(displayRACIAssignments(gvicPolicy));
+        setRACIPolicyMode(gvicPolicy.assignment_mode);
+        setRACIPolicyOverwrittenByAncestor(gvicPolicy.overwritten_by_ancestor ?? null);
+        setRACIPolicyRevision(gvicPolicy.revision);
+        applyLogicGateRACIAssignments([], "");
         setNodeWorkspaceProjections(projections);
         setNodeWorkspaceLoadedNodeID(linkedNodeID);
         setEditorSnapshotLoadedScope(snapshotScope);
@@ -2260,7 +2260,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       }
     })();
     return () => { cancelled = true; };
-  }, [apiBase, applyLogicGateGVICAssignments, clearVisibleDocumentForSelection, companyID, currentUserLoaded, editorDataFormat.gate?.editor_format, focusInformationID, focusRequestID, linkedEntityKind, linkedNodeID, onLogicGateTitleChange, preserveNodeTitle, requestJSON, scheduleIndentGuideUpdate]);
+  }, [apiBase, applyLogicGateRACIAssignments, clearVisibleDocumentForSelection, companyID, currentUserLoaded, editorDataFormat.gate?.editor_format, focusInformationID, focusRequestID, linkedEntityKind, linkedNodeID, onLogicGateTitleChange, preserveNodeTitle, requestJSON, scheduleIndentGuideUpdate]);
 
   const isDarkTheme = theme === "dark";
   const surfaceBackground = isDarkTheme ? "#0f1216" : EDITOR_NEU_PANEL_BACKGROUND;
@@ -2435,24 +2435,24 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             saveStateStorageKey={linkedEntityKind === "logic_gate" && documentInformationID ? mangoTiptapPendingStorageKey({ companyID, resourceType: "logic_gate", resourceID: linkedNodeID, documentID: documentInformationID }) : undefined}
             secondaryActions={linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? [{
               id: "use-inherited-gvic-policy",
-              label: `RCVI policy: Inherited${gvicPolicyMode === "inherited" ? " (current)" : ""}`,
-              disabled: !linkedEntityCanEdit || logicGateGVICApplyToAssignedNodesBusy || gvicPolicyMode === "inherited",
-              onSelect: () => changeCurrentGVICMode("inherited"),
+              label: `RACI policy: Inherited${gvicPolicyMode === "inherited" ? " (current)" : ""}`,
+              disabled: !linkedEntityCanEdit || logicGateRACIApplyToAssignedNodesBusy || gvicPolicyMode === "inherited",
+              onSelect: () => changeCurrentRACIMode("inherited"),
             }, {
               id: "use-customized-gvic-policy",
-              label: `RCVI policy: Customized${gvicPolicyMode === "customized" ? " (current)" : ""}`,
-              disabled: !linkedEntityCanEdit || logicGateGVICApplyToAssignedNodesBusy || gvicPolicyMode === "customized",
-              onSelect: () => changeCurrentGVICMode("customized"),
+              label: `RACI policy: Customized${gvicPolicyMode === "customized" ? " (current)" : ""}`,
+              disabled: !linkedEntityCanEdit || logicGateRACIApplyToAssignedNodesBusy || gvicPolicyMode === "customized",
+              onSelect: () => changeCurrentRACIMode("customized"),
             }, ...(linkedEntityKind === "logic_gate" ? [{
               id: "apply-gvic-to-inherited-descendants",
-              label: logicGateGVICApplyToAssignedNodesBusy ? "Applying" : "Apply to inherited descendants",
-              disabled: !linkedEntityCanEdit || logicGateGVICApplyToAssignedNodesBusy,
-              onSelect: applyLogicGateGVICToInheritedDescendants,
+              label: logicGateRACIApplyToAssignedNodesBusy ? "Applying" : "Apply to inherited descendants",
+              disabled: !linkedEntityCanEdit || logicGateRACIApplyToAssignedNodesBusy,
+              onSelect: applyLogicGateRACIToInheritedDescendants,
             }, {
               id: "overwrite-gvic-descendants",
               label: "Overwrite all descendants, including customized",
-              disabled: !linkedEntityCanEdit || logicGateGVICApplyToAssignedNodesBusy,
-              onSelect: () => setLogicGateGVICApplyConfirmationOpen(true),
+              disabled: !linkedEntityCanEdit || logicGateRACIApplyToAssignedNodesBusy,
+              onSelect: () => setLogicGateRACIApplyConfirmationOpen(true),
             }] : [])] : []}
             onRelationshipTabAnchorChange={updateRelationshipTabAnchor}
             reserveHeaderOffset={!forcedEntityKind}
@@ -2468,7 +2468,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             linkedNodeMetadataRows={linkedNodeMetadataRows}
             linkedNodeHistoryRows={linkedNodeHistoryRows}
             canEdit={linkedEntityCanEdit}
-            canEditGVIC={Boolean(linkedNodeID) && linkedEntityCanEdit}
+            canEditRACI={Boolean(linkedNodeID) && linkedEntityCanEdit}
             compactHeader={compactLinkedDocumentHeader}
             nodePresetFields={linkedEntityKind === "node" ? {
               status: nodeStatus || "",
@@ -2479,13 +2479,13 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               dueDateDraft: nodeDueDateDraft,
             } : null}
             gvicFields={linkedEntityKind === "node" ? {
-              assignments: nodeGVICAssignments,
-              inherited: nodeGVICIsInherited,
-              readOnlyReason: nodeGVICReadOnlyReason,
+              assignments: nodeRACIAssignments,
+              inherited: nodeRACIIsInherited,
+              readOnlyReason: nodeRACIReadOnlyReason,
               mode: gvicPolicyMode,
               overwrittenByAncestor: gvicPolicyOverwrittenByAncestor,
             } : linkedEntityKind === "logic_gate" ? {
-              assignments: logicGateGVICAssignments,
+              assignments: logicGateRACIAssignments,
               mode: gvicPolicyMode,
               overwrittenByAncestor: gvicPolicyOverwrittenByAncestor,
             } : null}
@@ -2507,27 +2507,27 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onCommitNodeAccountIDs={commitNodeAccountIDs}
             onSetNodeDueDateDraft={setNodeDueDateDraft}
             onCommitNodeDueDateDraft={commitNodeDueDateDraft}
-            onAddGVICPrincipal={linkedEntityKind === "node" ? addNodeGVICPrincipal : addLogicGateGVICPrincipal}
-            onRemoveGVICPrincipal={linkedEntityKind === "node" ? removeNodeGVICPrincipal : removeLogicGateGVICPrincipal}
+            onAddRACIPrincipal={linkedEntityKind === "node" ? addNodeRACIPrincipal : addLogicGateRACIPrincipal}
+            onRemoveRACIPrincipal={linkedEntityKind === "node" ? removeNodeRACIPrincipal : removeLogicGateRACIPrincipal}
           />
 
           </div>
         )}
 
-        {logicGateGVICApplyConfirmationOpen && linkedEntityKind === "logic_gate" && (
+        {logicGateRACIApplyConfirmationOpen && linkedEntityKind === "logic_gate" && (
           <ConfirmActionMenu
             title="Overwrite all descendants, including customized?"
-            detail="This invalidates older customized RCVI policies below this resource. Later customizations remain independent."
+            detail="This invalidates older customized RACI policies below this resource. Later customizations remain independent."
             confirmLabel="Overwrite"
             cancelLabel="No"
-            confirmDisabled={!linkedEntityCanEdit || logicGateGVICApplyToAssignedNodesBusy}
+            confirmDisabled={!linkedEntityCanEdit || logicGateRACIApplyToAssignedNodesBusy}
             requireDisplayNameConfirmation={false}
             isDarkTheme={isDarkTheme}
             onConfirm={() => {
-              setLogicGateGVICApplyConfirmationOpen(false);
-              applyLogicGateGVICToAssignedNodes();
+              setLogicGateRACIApplyConfirmationOpen(false);
+              applyLogicGateRACIToAssignedNodes();
             }}
-            onCancel={() => setLogicGateGVICApplyConfirmationOpen(false)}
+            onCancel={() => setLogicGateRACIApplyConfirmationOpen(false)}
           />
         )}
 

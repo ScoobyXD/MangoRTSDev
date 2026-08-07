@@ -10,14 +10,14 @@ import (
 	"strings"
 )
 
-const postgresLogicGateGVICUsersCTE = `
-logic_gate_GVIC_users as (
+const postgresLogicGateRACIUsersCTE = `
+logic_gate_RACI_users as (
   select effective.company_id, effective.resource_id as logic_gate_id, effective.role, effective.user_id
   from resource_gvic_effective_assignments effective
   where effective.resource_type='logic_gate'
 )`
 
-var postgresGVICMatrixNodeProjectionCTE = `
+var postgresRACIMatrixNodeProjectionCTE = `
 with latest_assignment as (
   select distinct on (assignment.company_id, assignment.node_id)
     assignment.*
@@ -79,7 +79,7 @@ with latest_assignment as (
     on effective.company_id=node_row.company_id
    and effective.resource_type='node'
    and effective.resource_id=node_row.node_id
-  where effective.role in ('responsible', 'verifier', 'consulted', 'informed')
+  where effective.role in ('responsible', 'accountable', 'consulted', 'informed')
 ), project_matches as (
   select distinct on (
     assignment_rows.company_id,
@@ -226,7 +226,7 @@ with latest_assignment as (
   from leaf_contexts
 )`
 
-var postgresGVICMatrixLogicGateUsersProjectionCTE = `
+var postgresRACIMatrixLogicGateUsersProjectionCTE = `
 with input_users as (
   select distinct btrim(value)::uuid as user_id
   from unnest(string_to_array($3::text, ',')) as value
@@ -282,7 +282,7 @@ with input_users as (
    and effective.resource_id=node_row.node_id
   join input_users
     on input_users.user_id=effective.user_id
-  where effective.role in ('responsible', 'verifier', 'consulted', 'informed')), project_matches as (
+  where effective.role in ('responsible', 'accountable', 'consulted', 'informed')), project_matches as (
   select distinct on (
     assignment_rows.company_id,
     assignment_rows.user_id,
@@ -428,15 +428,15 @@ with input_users as (
   from leaf_contexts
 )`
 
-func syncPostgresGVICMatrixProjectionForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
-	defer observeTiming(ctx, "repo.syncPostgresGVICMatrixProjectionForNodeTx.total")()
+func syncPostgresRACIMatrixProjectionForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
+	defer observeTiming(ctx, "repo.syncPostgresRACIMatrixProjectionForNodeTx.total")()
 	companyID = cleanUUIDText(companyID)
 	nodeID = cleanUUIDText(nodeID)
 	if ctx == nil || tx == nil || companyID == "" || nodeID == "" {
 		return ErrInvalid
 	}
-	stop := observeTiming(ctx, "repo.syncPostgresGVICMatrixProjectionForNodeTx.delete_stale")
-	if _, err := tx.ExecContext(ctx, postgresGVICMatrixNodeProjectionCTE+`
+	stop := observeTiming(ctx, "repo.syncPostgresRACIMatrixProjectionForNodeTx.delete_stale")
+	if _, err := tx.ExecContext(ctx, postgresRACIMatrixNodeProjectionCTE+`
 delete from gvic_matrix_projection_table entry
 where entry.company_id=$1::uuid
   and entry.node_id=$2::uuid
@@ -450,22 +450,22 @@ where entry.company_id=$1::uuid
 		return err
 	}
 	stop()
-	return upsertPostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID)
+	return upsertPostgresRACIMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID)
 }
 
-func syncPostgresGVICMatrixProjectionForNewNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
-	defer observeTiming(ctx, "repo.syncPostgresGVICMatrixProjectionForNodeTx.total")()
+func syncPostgresRACIMatrixProjectionForNewNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
+	defer observeTiming(ctx, "repo.syncPostgresRACIMatrixProjectionForNodeTx.total")()
 	companyID = cleanUUIDText(companyID)
 	nodeID = cleanUUIDText(nodeID)
 	if ctx == nil || tx == nil || companyID == "" || nodeID == "" {
 		return ErrInvalid
 	}
-	return upsertPostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID)
+	return upsertPostgresRACIMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID)
 }
 
-func upsertPostgresGVICMatrixProjectionForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
-	stop := observeTiming(ctx, "repo.syncPostgresGVICMatrixProjectionForNodeTx.upsert")
-	_, err := tx.ExecContext(ctx, postgresGVICMatrixNodeProjectionCTE+`
+func upsertPostgresRACIMatrixProjectionForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
+	stop := observeTiming(ctx, "repo.syncPostgresRACIMatrixProjectionForNodeTx.upsert")
+	_, err := tx.ExecContext(ctx, postgresRACIMatrixNodeProjectionCTE+`
 insert into gvic_matrix_projection_table (
   company_id,
   projection_row_id,
@@ -525,27 +525,27 @@ do update set
 	return err
 }
 
-func syncPostgresGVICMatrixProjectionForLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
-	users, err := postgresGVICMatrixProjectionUsersForLogicGateTx(ctx, tx, companyID, logicGateID)
+func syncPostgresRACIMatrixProjectionForLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
+	users, err := postgresRACIMatrixProjectionUsersForLogicGateTx(ctx, tx, companyID, logicGateID)
 	if err != nil {
 		return err
 	}
-	current, err := postgresGVICMatrixAssignmentUserIDsTx(ctx, tx, companyID, logicGateID)
+	current, err := postgresRACIMatrixAssignmentUserIDsTx(ctx, tx, companyID, logicGateID)
 	if err != nil {
 		return err
 	}
 	for userID := range current {
 		users[userID] = true
 	}
-	return syncPostgresGVICMatrixProjectionForLogicGateUsersTx(ctx, tx, companyID, logicGateID, mapKeys(users))
+	return syncPostgresRACIMatrixProjectionForLogicGateUsersTx(ctx, tx, companyID, logicGateID, mapKeys(users))
 }
 
-func syncPostgresGVICMatrixProjectionForLogicGateAssignmentsTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, before, after []domain.LogicGateGVICAssignment) error {
-	return syncPostgresGVICMatrixProjectionForLogicGateTx(ctx, tx, companyID, logicGateID)
+func syncPostgresRACIMatrixProjectionForLogicGateAssignmentsTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, before, after []domain.LogicGateRACIAssignment) error {
+	return syncPostgresRACIMatrixProjectionForLogicGateTx(ctx, tx, companyID, logicGateID)
 }
 
-func syncPostgresGVICMatrixProjectionForLogicGateUsersTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, userIDs []string) error {
-	defer observeTiming(ctx, "repo.syncPostgresGVICMatrixProjectionForLogicGateUsersTx.total")()
+func syncPostgresRACIMatrixProjectionForLogicGateUsersTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, userIDs []string) error {
+	defer observeTiming(ctx, "repo.syncPostgresRACIMatrixProjectionForLogicGateUsersTx.total")()
 	companyID = cleanUUIDText(companyID)
 	logicGateID = cleanUUIDText(logicGateID)
 	if ctx == nil || tx == nil || companyID == "" || logicGateID == "" {
@@ -557,8 +557,8 @@ func syncPostgresGVICMatrixProjectionForLogicGateUsersTx(ctx context.Context, tx
 	}
 	sort.Strings(userIDs)
 	userIDsArg := strings.Join(userIDs, ",")
-	stop := observeTiming(ctx, "repo.syncPostgresGVICMatrixProjectionForLogicGateUsersTx.delete_stale")
-	if _, err := tx.ExecContext(ctx, postgresGVICMatrixLogicGateUsersProjectionCTE+`
+	stop := observeTiming(ctx, "repo.syncPostgresRACIMatrixProjectionForLogicGateUsersTx.delete_stale")
+	if _, err := tx.ExecContext(ctx, postgresRACIMatrixLogicGateUsersProjectionCTE+`
 delete from gvic_matrix_projection_table entry
 where entry.company_id=$1::uuid
   and entry.logic_gate_id=$2::uuid
@@ -573,18 +573,18 @@ where entry.company_id=$1::uuid
 		return err
 	}
 	stop()
-	return upsertPostgresGVICMatrixProjectionForLogicGateUsersTx(ctx, tx, companyID, logicGateID, userIDs)
+	return upsertPostgresRACIMatrixProjectionForLogicGateUsersTx(ctx, tx, companyID, logicGateID, userIDs)
 }
 
-func upsertPostgresGVICMatrixProjectionForLogicGateUsersTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, userIDs []string) error {
+func upsertPostgresRACIMatrixProjectionForLogicGateUsersTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, userIDs []string) error {
 	userIDs = cleanUUIDTextSlice(userIDs)
 	if len(userIDs) == 0 {
 		return nil
 	}
 	sort.Strings(userIDs)
 	userIDsArg := strings.Join(userIDs, ",")
-	stop := observeTiming(ctx, "repo.syncPostgresGVICMatrixProjectionForLogicGateUsersTx.upsert")
-	_, err := tx.ExecContext(ctx, postgresGVICMatrixLogicGateUsersProjectionCTE+`
+	stop := observeTiming(ctx, "repo.syncPostgresRACIMatrixProjectionForLogicGateUsersTx.upsert")
+	_, err := tx.ExecContext(ctx, postgresRACIMatrixLogicGateUsersProjectionCTE+`
 insert into gvic_matrix_projection_table (
   company_id,
   projection_row_id,
@@ -644,7 +644,7 @@ do update set
 	return err
 }
 
-func postgresGVICMatrixProjectionRowsForLogicGateUsersTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, userIDs []string) ([]GVICMatrixProjectionRow, error) {
+func postgresRACIMatrixProjectionRowsForLogicGateUsersTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, userIDs []string) ([]RACIMatrixProjectionRow, error) {
 	companyID = cleanUUIDText(companyID)
 	logicGateID = cleanUUIDText(logicGateID)
 	if ctx == nil || tx == nil || companyID == "" || logicGateID == "" {
@@ -652,10 +652,10 @@ func postgresGVICMatrixProjectionRowsForLogicGateUsersTx(ctx context.Context, tx
 	}
 	userIDs = cleanUUIDTextSlice(userIDs)
 	if len(userIDs) == 0 {
-		return []GVICMatrixProjectionRow{}, nil
+		return []RACIMatrixProjectionRow{}, nil
 	}
 	sort.Strings(userIDs)
-	return postgresGVICMatrixProjectionRowsForQueryTx(ctx, tx, `
+	return postgresRACIMatrixProjectionRowsForQueryTx(ctx, tx, `
 with input_users as (
   select distinct btrim(value)::uuid as user_id
   from unnest(string_to_array($3::text, ',')) as value
@@ -708,7 +708,7 @@ order by node_id::text`, companyID, logicGateID)
 	}
 	return out, rows.Err()
 }
-func deletePostgresGVICMatrixProjectionForLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
+func deletePostgresRACIMatrixProjectionForLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
 	_, err := tx.ExecContext(ctx, `
 delete from gvic_matrix_projection_table
 where company_id=$1::uuid
@@ -716,7 +716,7 @@ where company_id=$1::uuid
 	return err
 }
 
-func deletePostgresGVICMatrixProjectionForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
+func deletePostgresRACIMatrixProjectionForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
 	_, err := tx.ExecContext(ctx, `
 delete from gvic_matrix_projection_table
 where company_id=$1::uuid
@@ -724,35 +724,35 @@ where company_id=$1::uuid
 	return err
 }
 
-func (r *PostgresRepo) ListGVICMatrixProjectionRowsForResources(companyID string, nodeIDs, logicGateIDs []string) ([]GVICMatrixProjectionRow, error) {
+func (r *PostgresRepo) ListRACIMatrixProjectionRowsForResources(companyID string, nodeIDs, logicGateIDs []string) ([]RACIMatrixProjectionRow, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	rows, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, nodeIDs, logicGateIDs)
+	rows, err := postgresRACIMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, nodeIDs, logicGateIDs)
 	if err != nil {
 		return nil, err
 	}
 	return rows, tx.Commit()
 }
 
-func (r *PostgresRepo) ListGVICMatrixProjectionRowsForLogicGate(companyID, logicGateID string) ([]GVICMatrixProjectionRow, error) {
+func (r *PostgresRepo) ListRACIMatrixProjectionRowsForLogicGate(companyID, logicGateID string) ([]RACIMatrixProjectionRow, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	rows, err := postgresGVICMatrixProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
+	rows, err := postgresRACIMatrixProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
 	if err != nil {
 		return nil, err
 	}
 	return rows, tx.Commit()
 }
 
-func (r *PostgresRepo) ListGVICMatrixProjectionRowsForUser(query WorkItemInboxQuery) ([]GVICMatrixProjectionRow, error) {
+func (r *PostgresRepo) ListRACIMatrixProjectionRowsForUser(query WorkItemInboxQuery) ([]RACIMatrixProjectionRow, error) {
 	query = NormalizeWorkItemInboxQuery(query)
 	companyID := cleanUUIDText(query.CompanyID)
 	userID := cleanUUIDText(query.UserID)
@@ -781,7 +781,7 @@ select entry.company_id::text,
 from gvic_matrix_projection_table entry
 where entry.company_id=$1::uuid
   and entry.user_id=$2::uuid
-  and entry.gvic_assignment in ('responsible', 'verifier', 'consulted', 'informed')
+  and entry.gvic_assignment in ('responsible', 'accountable', 'consulted', 'informed')
   and mangorts_user_can_access_resource(entry.company_id, 'node', entry.node_id, $4::uuid, 'edit')
   and (entry.logic_gate_id is null or mangorts_user_can_access_resource(entry.company_id, 'logic_gate', entry.logic_gate_id, $4::uuid, 'edit'))
   and (entry.project_id is null or mangorts_user_can_access_resource(entry.company_id, 'project', entry.project_id, $4::uuid, 'edit'))
@@ -791,9 +791,9 @@ limit $3`, companyID, userID, query.Limit, viewerUserID)
 		return nil, err
 	}
 	defer rows.Close()
-	items := make([]GVICMatrixProjectionRow, 0)
+	items := make([]RACIMatrixProjectionRow, 0)
 	for rows.Next() {
-		item, err := scanGVICMatrixProjectionRow(rows)
+		item, err := scanRACIMatrixProjectionRow(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -808,7 +808,7 @@ limit $3`, companyID, userID, query.Limit, viewerUserID)
 	return items, nil
 }
 
-func (r *PostgresRepo) ListMyWorkMatrixRows(query WorkItemInboxQuery) ([]GVICMatrixProjectionRow, error) {
+func (r *PostgresRepo) ListMyWorkMatrixRows(query WorkItemInboxQuery) ([]RACIMatrixProjectionRow, error) {
 	companyID := cleanUUIDText(query.CompanyID)
 	userID := cleanUUIDText(query.UserID)
 	viewerUserID := cleanUUIDText(query.ViewerUserID)
@@ -840,7 +840,7 @@ select entry.company_id::text,
 from gvic_matrix_projection_table entry
 where entry.company_id=$1::uuid
   and entry.user_id=$2::uuid
-  and entry.gvic_assignment in ('responsible', 'verifier', 'consulted', 'informed')
+  and entry.gvic_assignment in ('responsible', 'accountable', 'consulted', 'informed')
   and mangorts_user_can_access_resource(entry.company_id, 'node', entry.node_id, $3::uuid, 'edit')
   and (entry.logic_gate_id is null or mangorts_user_can_access_resource(entry.company_id, 'logic_gate', entry.logic_gate_id, $3::uuid, 'edit'))
   and (entry.project_id is null or mangorts_user_can_access_resource(entry.company_id, 'project', entry.project_id, $3::uuid, 'edit'))
@@ -850,9 +850,9 @@ limit nullif($4, 0)`, companyID, userID, viewerUserID, limit)
 		return nil, err
 	}
 	defer rows.Close()
-	items := make([]GVICMatrixProjectionRow, 0)
+	items := make([]RACIMatrixProjectionRow, 0)
 	for rows.Next() {
-		item, err := scanGVICMatrixProjectionRow(rows)
+		item, err := scanRACIMatrixProjectionRow(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -881,7 +881,7 @@ func (r *PostgresRepo) ListMyWorkMatrix(query WorkItemInboxQuery) (MyWorkMatrixR
 	return MyWorkMatrixResponse{CompanyID: query.CompanyID, UserID: query.UserID, Rows: rows}, nil
 }
 
-func postgresGVICMatrixProjectionRowsForResourcesTx(ctx context.Context, tx *sql.Tx, companyID string, nodeIDs, logicGateIDs []string) ([]GVICMatrixProjectionRow, error) {
+func postgresRACIMatrixProjectionRowsForResourcesTx(ctx context.Context, tx *sql.Tx, companyID string, nodeIDs, logicGateIDs []string) ([]RACIMatrixProjectionRow, error) {
 	companyID = cleanUUIDText(companyID)
 	nodeIDs = cleanUUIDTextSlice(nodeIDs)
 	logicGateIDs = cleanUUIDTextSlice(logicGateIDs)
@@ -889,9 +889,9 @@ func postgresGVICMatrixProjectionRowsForResourcesTx(ctx context.Context, tx *sql
 		return nil, ErrInvalid
 	}
 	if len(nodeIDs) == 0 && len(logicGateIDs) == 0 {
-		return []GVICMatrixProjectionRow{}, nil
+		return []RACIMatrixProjectionRow{}, nil
 	}
-	return postgresGVICMatrixProjectionRowsForQueryTx(ctx, tx, `
+	return postgresRACIMatrixProjectionRowsForQueryTx(ctx, tx, `
 select company_id::text,
        projection_row_id,
        user_id::text,
@@ -918,13 +918,13 @@ where company_id=$1::uuid
 order by user_id::text asc, projection_row_id asc`, companyID, strings.Join(nodeIDs, ","), strings.Join(logicGateIDs, ","))
 }
 
-func postgresGVICMatrixProjectionRowsForLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) ([]GVICMatrixProjectionRow, error) {
+func postgresRACIMatrixProjectionRowsForLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) ([]RACIMatrixProjectionRow, error) {
 	companyID = cleanUUIDText(companyID)
 	logicGateID = cleanUUIDText(logicGateID)
 	if ctx == nil || tx == nil || companyID == "" || logicGateID == "" {
 		return nil, ErrInvalid
 	}
-	return postgresGVICMatrixProjectionRowsForQueryTx(ctx, tx, `
+	return postgresRACIMatrixProjectionRowsForQueryTx(ctx, tx, `
 select company_id::text,
        projection_row_id,
        user_id::text,
@@ -948,15 +948,15 @@ where company_id=$1::uuid
 order by user_id::text asc, projection_row_id asc`, companyID, logicGateID)
 }
 
-func postgresGVICMatrixProjectionRowsForQueryTx(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]GVICMatrixProjectionRow, error) {
+func postgresRACIMatrixProjectionRowsForQueryTx(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]RACIMatrixProjectionRow, error) {
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := make([]GVICMatrixProjectionRow, 0)
+	items := make([]RACIMatrixProjectionRow, 0)
 	for rows.Next() {
-		item, err := scanGVICMatrixProjectionRow(rows)
+		item, err := scanRACIMatrixProjectionRow(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -964,8 +964,8 @@ func postgresGVICMatrixProjectionRowsForQueryTx(ctx context.Context, tx *sql.Tx,
 	}
 	return items, rows.Err()
 }
-func scanGVICMatrixProjectionRow(row interface{ Scan(dest ...any) error }) (GVICMatrixProjectionRow, error) {
-	var item GVICMatrixProjectionRow
+func scanRACIMatrixProjectionRow(row interface{ Scan(dest ...any) error }) (RACIMatrixProjectionRow, error) {
+	var item RACIMatrixProjectionRow
 	var projectID sql.NullString
 	var projectName sql.NullString
 	var logicGateID sql.NullString
@@ -980,7 +980,7 @@ func scanGVICMatrixProjectionRow(row interface{ Scan(dest ...any) error }) (GVIC
 		&item.ProjectionRowID,
 		&item.UserID,
 		&item.NodeName,
-		&item.GVICAssignment,
+		&item.RACIAssignment,
 		&priority,
 		&projectID,
 		&projectName,
@@ -1023,7 +1023,7 @@ func scanGVICMatrixProjectionRow(row interface{ Scan(dest ...any) error }) (GVIC
 	item.Accounts = scanAccountSnapshotsJSON(accountsJSON)
 	return item, err
 }
-func postgresGVICMatrixProjectionUsersForLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) (map[string]bool, error) {
+func postgresRACIMatrixProjectionUsersForLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) (map[string]bool, error) {
 	rows, err := tx.QueryContext(ctx, `
 select distinct user_id::text
 from gvic_matrix_projection_table
@@ -1047,7 +1047,7 @@ where company_id=$1::uuid
 	return users, rows.Err()
 }
 
-func postgresGVICMatrixAssignmentUserIDsTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) (map[string]bool, error) {
+func postgresRACIMatrixAssignmentUserIDsTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) (map[string]bool, error) {
 	rows, err := tx.QueryContext(ctx, `
 select distinct effective.user_id::text
 from node_logic_gate_assignments assignment

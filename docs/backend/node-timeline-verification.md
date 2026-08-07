@@ -1,12 +1,12 @@
-# Process Story: A Verifier group becomes an exact verification snapshot
+# Process Story: A Accountable group becomes an exact verification snapshot
 
-A user creates a verification stamp on a Node with current effective Verifier people and groups
+A user creates a verification stamp on a Node with current effective Accountable people and groups
 ↓
 Mango expands live nested group membership, deduplicates users, and snapshots each recipient once
 ↓
-Later RCVI or membership changes do not rewrite that historical stamp, and each snapshotted recipient can complete only their own check
+Later RACI or membership changes do not rewrite that historical stamp, and each snapshotted recipient can complete only their own check
 ↓
-The request update routes through the CVI surface with the Verifier role while ordinary Node permission remains authoritative
+The request update routes through the ACI surface with the Accountable role while ordinary Node permission remains authoritative
 
 Last updated: 2026-08-06
 
@@ -35,20 +35,20 @@ The transfer and verification rules below remain current. Do not reintroduce the
 
 ## Verification assignment rules
 
-1. Responsible, Consulted, Verifier, and Informed each accept multiple direct user or group principals on Nodes and Logic Gates.
-2. Group principals expand through current members and nested subgroups whenever effective RCVI is read. A verification request converts the current effective Verifier users into stable, individually actionable recipient snapshots.
-3. One direct principal can hold only one role on the same resource; if a user reaches several roles through different sources, the effective order is Responsible, Consulted, Verifier, then Informed.
-4. RCVI responsibility is not authorization. Verifier assignment does not itself grant view, edit, delete, or administrative access.
+1. Responsible, Accountable, Consulted, and Informed each accept multiple direct user or group principals on Nodes and Logic Gates.
+2. Group principals expand through current members and nested subgroups whenever effective RACI is read. A verification request converts the current effective Accountable users into stable, individually actionable recipient snapshots.
+3. One direct principal can hold only one role on the same resource; if a user reaches several roles through different sources, the effective order is Responsible, Accountable, Consulted, then Informed.
+4. RACI responsibility is not authorization. Accountable assignment does not itself grant view, edit, delete, or administrative access.
 
 ## Creating a verification request
 
 1. The Node timeline plus action opens a choice. `New text box` preserves the existing text-box creation behavior; `Verify stamp` creates a verification request. Both choices are neutral at rest and expose the same visible hover and keyboard-focus selection treatment.
 2. Creating a verification request requires current Node edit authorization and a nonblank idempotency key.
 3. Browser CORS preflight must allow both `Idempotency-Key` and the supported `X-Idempotency-Key` alias so a valid verification request reaches the API rather than failing at the transport boundary.
-4. The request snapshots all current effective Node RCVI users whose role is Verifier. PostgreSQL derives that effective set synchronously from canonical RCVI assignments, current company membership, and applicable snapshot rules inside the request transaction instead of trusting the materialized effective-assignment projection. This keeps the request consistent with the RCVI editor even if that rebuildable projection is stale. Duplicate effective users collapse to one recipient by user ID.
-5. At least one Verifier recipient is required. Otherwise the API returns a conflict and no stamp or update is created.
-6. The actor is included in the recipient snapshot when the actor is currently Verifier. The actor may complete their own verification, but does not receive a self-notification.
-7. Later RCVI additions, removals, role changes, group changes, or Logic Gate transfers do not add, remove, or rewrite recipients on an existing stamp.
+4. The request snapshots all current effective Node RACI users whose role is Accountable. PostgreSQL derives that effective set synchronously from canonical RACI assignments, current company membership, and applicable snapshot rules inside the request transaction instead of trusting the materialized effective-assignment projection. This keeps the request consistent with the RACI editor even if that rebuildable projection is stale. Duplicate effective users collapse to one recipient by user ID.
+5. At least one Accountable recipient is required. Otherwise the API returns a conflict and no stamp or update is created.
+6. The actor is included in the recipient snapshot when the actor is currently Accountable. The actor may complete their own verification, but does not receive a self-notification.
+7. Later RACI additions, removals, role changes, group changes, or Logic Gate transfers do not add, remove, or rewrite recipients on an existing stamp.
 8. Every deliberate plus-menu action uses a new idempotency key and may create a new request. Retrying the same key for the same Node returns the original stamp, creates no second domain event, and sends no duplicate updates. Concurrent retries for one Node serialize against the same Node row before insert.
 9. The actor display name and every recipient display name are stored as historical snapshots. User rename or company removal does not rewrite the stamp.
 10. PostgreSQL request creation reads the current Node label from the canonical `nodes.name` column while locking that Node. The label is copied into the verification domain event so recipient Updates identify the correct Node.
@@ -57,11 +57,11 @@ The transfer and verification rules below remain current. Do not reintroduce the
 ## Recipient updates and completion
 
 1. One `node.verification_requested` update is created for each snapshotted recipient except the actor.
-2. The update routes to the CVI Updates surface with RCVI role `verifier`, retains the Node's normal priority context, and uses copy equivalent to `{actor} requested verification from you on {node}`.
+2. The update routes to the ACI Updates surface with RACI role `accountable`, retains the Node's normal priority context, and uses copy equivalent to `{actor} requested verification from you on {node}`.
 3. The update stores the verification timeline event ID as `information_id`. Activating it opens the Node panel and scrolls the compact verification stamp into view.
 4. Each recipient controls only the check beside their own snapshotted name. A non-recipient receives not-found behavior so the API does not reveal the recipient list through completion attempts.
 5. Completion is one-way and idempotent. The first accepted action stores the database timestamp; repeated or concurrent actions retain that original completion timestamp. One recipient never completes another recipient.
-6. Removing a recipient from Verifier after request creation does not retract the historical update or completion right. Losing ordinary Node access still prevents opening or acting on the Node because authorization remains authoritative.
+6. Removing a recipient from Accountable after request creation does not retract the historical update or completion right. Losing ordinary Node access still prevents opening or acting on the Node because authorization remains authoritative.
 7. Completion updates the Node view version so canonical reloads and ETags expose the latest per-person state. The initiating browser also patches the returned stamp immediately.
 
 ## Persistence and rollout

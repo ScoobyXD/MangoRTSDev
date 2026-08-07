@@ -174,7 +174,7 @@ func (r *MemoryRepo) updateNodeLocked(input UpdateNodeInput) (domain.Node, error
 	}
 	r.nodes[k] = node
 	r.bumpNodeViewVersionLocked(input.CompanyID, input.NodeID)
-	r.syncGVICMatrixProjectionForNodeLocked(input.CompanyID, input.NodeID)
+	r.syncRACIMatrixProjectionForNodeLocked(input.CompanyID, input.NodeID)
 	r.syncProjectManagementTimelineProjectionForNodeLocked(input.CompanyID, input.NodeID)
 	return r.withNodeReadModelLocked(node), nil
 }
@@ -307,7 +307,7 @@ func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string) error {
 	if _, ok := r.nodes[k]; !ok {
 		return ErrNotFound
 	}
-	r.deleteGVICMatrixProjectionForNodeLocked(companyID, nodeID)
+	r.deleteRACIMatrixProjectionForNodeLocked(companyID, nodeID)
 	for itemKey, item := range r.projectTimelineItems {
 		if item.CompanyID == companyID && item.EntityType == EntityTypeNode && item.EntityID == nodeID {
 			delete(r.projectTimelineItems, itemKey)

@@ -131,7 +131,7 @@ E2N26 - Mango never invents a replacement Node or text box. If an old text box h
 
 E2N27 - If the thread has no remaining Node placement when the job evaluates its destination set, the automatic job must not create a new placement. The thread remains stored, and a user must deliberately place it again.
 
-E2N28 - Creating an email relationship does not create a permission, assignment, GVIC link, owner link, or participant. Existing Node access rules alone decide who may see the related email.
+E2N28 - Creating an email relationship does not create a permission, assignment, RACI link, owner link, or participant. Existing Node access rules alone decide who may see the related email.
 
 E2N29 - Deliberately placing a thread on a Node or text box enrolls that exact destination to receive future real messages from the same exact provider thread. This is the user consent boundary for automatic sharing.
 
@@ -356,7 +356,7 @@ This must be understandable in the eventual placement UI. Mango must not enroll 
 - Two email threads can occupy the same text box without conflict.
 - A deleted text box is not recreated and does not block a valid Node-wide placement.
 - No current Node destination produces no invented placement.
-- Relationship propagation creates no permission, GVIC, assignment, chat, or draft.
+- Relationship propagation creates no permission, RACI, assignment, chat, or draft.
 - Duplicate propagation is a no-op.
 
 ### Trigger and concurrency behavior

@@ -76,7 +76,7 @@ func (s *Server) nodeViewETag(companyID, nodeID, actorUserID string, flags domai
 	return strongETagFromString(
 		"node-view:v1:" + strings.TrimSpace(companyID) + ":" + strings.TrimSpace(nodeID) + ":" +
 			strings.TrimSpace(actorUserID) + ":" + permissionKey + ":" +
-			fingerprints.GVIC + ":" + fingerprints.Permission + ":" +
+			fingerprints.RACI + ":" + fingerprints.Permission + ":" +
 			strconv.FormatInt(version.Shared, 10) + ":" + strconv.FormatInt(version.User, 10),
 	), nil
 }
@@ -149,7 +149,7 @@ func (s *Server) consolidatedViewETag(r *http.Request, companyID, resource, reso
 	if err != nil {
 		return "", err
 	}
-	return s.workspaceEventETagWithReadVersion(r, companyID, resource+":"+fingerprints.GVIC+":"+fingerprints.Permission, []store.DomainEventStreamQuery{{}}, store.WorkspaceReadVersionQuery{
+	return s.workspaceEventETagWithReadVersion(r, companyID, resource+":"+fingerprints.RACI+":"+fingerprints.Permission, []store.DomainEventStreamQuery{{}}, store.WorkspaceReadVersionQuery{
 		CompanyID: companyID,
 		Scope:     "workspace-snapshot:full",
 	})
@@ -161,12 +161,12 @@ type logicGateViewHTTPResponse struct {
 	LogicGate           domain.LogicGate                 `json:"logic_gate"`
 	Information         []domain.LogicGateInformation    `json:"information"`
 	Projections         []domain.LogicGateProjection     `json:"projections"`
-	GVICAssignments     []domain.LogicGateGVICAssignment `json:"gvic_assignments"`
+	RACIAssignments     []domain.LogicGateRACIAssignment `json:"gvic_assignments"`
 	Relationships       []domain.LogicGateRelationship   `json:"relationships"`
 	Work                *domain.LogicGateWorkView        `json:"work,omitempty"`
 	InformationCount    int                              `json:"information_count"`
 	ProjectionCount     int                              `json:"projection_count"`
-	GVICAssignmentCount int                              `json:"gvic_assignment_count"`
+	RACIAssignmentCount int                              `json:"gvic_assignment_count"`
 	RelationshipsCount  int                              `json:"relationships_count"`
 	AssignmentCount     int                              `json:"assignment_count,omitempty"`
 	NodeCount           int                              `json:"node_count,omitempty"`
@@ -180,8 +180,8 @@ func logicGateCoreViewResponse(companyID, logicGateID string, details domain.Log
 	if details.Relationships == nil {
 		details.Relationships = []domain.LogicGateRelationship{}
 	}
-	if details.LogicGate.GVICAssignments == nil {
-		details.LogicGate.GVICAssignments = []domain.LogicGateGVICAssignment{}
+	if details.LogicGate.RACIAssignments == nil {
+		details.LogicGate.RACIAssignments = []domain.LogicGateRACIAssignment{}
 	}
 	if projections == nil {
 		projections = []domain.LogicGateProjection{}
@@ -192,11 +192,11 @@ func logicGateCoreViewResponse(companyID, logicGateID string, details domain.Log
 		LogicGate:            details.LogicGate,
 		Information:          details.Information,
 		Projections:          projections,
-		GVICAssignments:      details.LogicGate.GVICAssignments,
+		RACIAssignments:      details.LogicGate.RACIAssignments,
 		Relationships:        details.Relationships,
 		InformationCount:     len(details.Information),
 		ProjectionCount:      len(projections),
-		GVICAssignmentCount:  len(details.LogicGate.GVICAssignments),
+		RACIAssignmentCount:  len(details.LogicGate.RACIAssignments),
 		RelationshipsCount:   len(details.Relationships),
 		EffectiveAccessFlags: flags,
 	}
@@ -210,12 +210,12 @@ func logicGateViewResponseWithWork(view domain.LogicGateView) logicGateViewHTTPR
 		LogicGate:            view.LogicGate,
 		Information:          view.Information,
 		Projections:          view.Projections,
-		GVICAssignments:      view.GVICAssignments,
+		RACIAssignments:      view.RACIAssignments,
 		Relationships:        view.Relationships,
 		Work:                 &work,
 		InformationCount:     view.InformationCount,
 		ProjectionCount:      view.ProjectionCount,
-		GVICAssignmentCount:  view.GVICAssignmentCount,
+		RACIAssignmentCount:  view.RACIAssignmentCount,
 		RelationshipsCount:   view.RelationshipsCount,
 		AssignmentCount:      view.AssignmentCount,
 		NodeCount:            view.NodeCount,

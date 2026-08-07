@@ -5,7 +5,7 @@ import {
   throwIfResourceMarkedMissing,
 } from "../api/missingResources.js";
 import { isHTTPNotFoundError, requestJSON } from "../api/requestJSON.js";
-import type { LogicGateDetails, LogicGateGVICAssignment, LogicGateRecord, LogicGateRelationship } from "./types.js";
+import type { LogicGateDetails, LogicGateRACIAssignment, LogicGateRecord, LogicGateRelationship } from "./types.js";
 
 export type LogicGateProjectionItem = {
   company_id: string;
@@ -61,7 +61,7 @@ function cacheLogicGateViewPayload(cacheKey: string, payload: LogicGateViewRespo
   return details;
 }
 
-function normalizeCachedGVICAssignments(assignments: LogicGateGVICAssignment[], logicGateID: string): LogicGateGVICAssignment[] {
+function normalizeCachedRACIAssignments(assignments: LogicGateRACIAssignment[], logicGateID: string): LogicGateRACIAssignment[] {
   return assignments.map((assignment) => ({
     ...assignment,
     logic_gate_id: assignment.logic_gate_id?.trim() || logicGateID,
@@ -119,17 +119,17 @@ export function invalidateLogicGateRecordStorePolicyCachesForCompany(apiBase: st
   }
 }
 
-export function patchLogicGateRecordStoreGVICAssignments(
+export function patchLogicGateRecordStoreRACIAssignments(
   apiBase: string,
   companyID: string,
   logicGateID: string,
-  assignments: LogicGateGVICAssignment[],
+  assignments: LogicGateRACIAssignment[],
 ): void {
   const cleanLogicGateID = logicGateID.trim();
   if (!cleanLogicGateID) return;
   clearResourceMissing({ apiBase, companyID, resourceType: "logic_gate", resourceID: cleanLogicGateID });
   const cacheKey = key(apiBase, companyID, cleanLogicGateID);
-  const nextAssignments = normalizeCachedGVICAssignments(assignments, cleanLogicGateID);
+  const nextAssignments = normalizeCachedRACIAssignments(assignments, cleanLogicGateID);
   bumpViewGeneration(cacheKey);
   viewInflight.delete(cacheKey);
 

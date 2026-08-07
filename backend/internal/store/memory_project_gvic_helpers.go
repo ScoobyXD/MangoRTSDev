@@ -2,7 +2,7 @@ package store
 
 import "strings"
 
-func addProjectRelationshipGVICMatrixResourceIDs(nodeSet, logicGateSet map[string]bool, rows []ProjectRelationshipProjectionRow) {
+func addProjectRelationshipRACIMatrixResourceIDs(nodeSet, logicGateSet map[string]bool, rows []ProjectRelationshipProjectionRow) {
 	for _, row := range rows {
 		resourceType := strings.TrimSpace(row.ResourceType)
 		resourceID := strings.TrimSpace(row.ResourceID)

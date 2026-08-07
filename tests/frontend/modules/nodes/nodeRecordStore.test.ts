@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { clearResourceMissing, isTerminalResourceNotFoundError } from "../../../../frontend/src/modules/api/missingResources.js";
 import {
   getNodeRecordSingleFlight,
-  getNodeGVICAssignmentsSingleFlight,
+  getNodeRACIAssignmentsSingleFlight,
   getNodeInformationProjectionSingleFlight,
   invalidateNodeRecordStoreCaches,
   type NodeProjectionItem,
@@ -142,7 +142,7 @@ test("node view revalidation sends ETag, reuses the retained payload on 304, and
   try {
     const [first, gvicAssignments] = await Promise.all([
       getNodeInformationProjectionSingleFlight(apiBase, companyID, nodeID),
-      getNodeGVICAssignmentsSingleFlight(apiBase, companyID, nodeID),
+      getNodeRACIAssignmentsSingleFlight(apiBase, companyID, nodeID),
     ]);
     await flushPromises();
     assert.equal(first[0]?.information, "etag document");

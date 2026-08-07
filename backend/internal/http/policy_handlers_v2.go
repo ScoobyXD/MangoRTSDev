@@ -11,10 +11,10 @@ import (
 	"strings"
 )
 
-type v2GVICPolicyRequest struct {
+type v2RACIPolicyRequest struct {
 	CompanyID        string                               `json:"company_id"`
 	AssignmentMode   string                               `json:"assignment_mode"`
-	GVICAssignments  *[]store.ResourceGVICAssignmentInput `json:"gvic_assignments"`
+	RACIAssignments  *[]store.ResourceRACIAssignmentInput `json:"gvic_assignments"`
 	DescendantAction string                               `json:"descendant_action"`
 	IdempotencyKey   string                               `json:"idempotency_key"`
 }
@@ -76,7 +76,7 @@ func (s *Server) handleResourceSubresource(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	resourceType, ok := store.NormalizeGVICResourceType(parts[0])
+	resourceType, ok := store.NormalizeRACIResourceType(parts[0])
 	resourceID := strings.TrimSpace(parts[1])
 	if !ok || resourceID == "" {
 		writeError(w, http.StatusBadRequest, "invalid_resource_type")
@@ -92,13 +92,13 @@ func (s *Server) handleResourceSubresource(w http.ResponseWriter, r *http.Reques
 		if !s.requireEntityView(w, r, companyID, resourceType, resourceID, "resource_not_found") {
 			return
 		}
-		policy, err := s.repo.GetResourceGVICPolicy(companyID, resourceType, resourceID)
+		policy, err := s.repo.GetResourceRACIPolicy(companyID, resourceType, resourceID)
 		if writeV2PolicyError(w, err, "failed_to_load_gvic_policy") {
 			return
 		}
 		writeJSONWithPrecomputedETag(w, r, http.StatusOK, policy, policyETag(policy.Revision))
 	case http.MethodPut:
-		var req v2GVICPolicyRequest
+		var req v2RACIPolicyRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_json")
 			return
@@ -115,11 +115,11 @@ func (s *Server) handleResourceSubresource(w http.ResponseWriter, r *http.Reques
 		if actor, ok := authenticatedActor(r); ok {
 			actorUserID = strings.TrimSpace(actor.User.UserID)
 		}
-		var assignments []store.ResourceGVICAssignmentInput
-		if req.GVICAssignments != nil {
-			assignments = *req.GVICAssignments
+		var assignments []store.ResourceRACIAssignmentInput
+		if req.RACIAssignments != nil {
+			assignments = *req.RACIAssignments
 		}
-		policy, events, err := s.repo.PutResourceGVICPolicy(store.ResourceGVICPolicyUpdateInput{
+		policy, events, err := s.repo.PutResourceRACIPolicy(store.ResourceRACIPolicyUpdateInput{
 			CompanyID: req.CompanyID, ResourceType: resourceType, ResourceID: resourceID,
 			AssignmentMode: req.AssignmentMode, Assignments: assignments, DescendantAction: req.DescendantAction,
 			ExpectedRevision: r.Header.Get("If-Match"), ActorUserID: actorUserID,

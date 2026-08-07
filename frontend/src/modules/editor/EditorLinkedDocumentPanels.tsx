@@ -6,12 +6,12 @@ import { normalizeNodeDueDateDraft } from "./editorDates";
 import { AccountFilterControl } from "../accounts/AccountFilterControl";
 import type { Account } from "../accounts/accountsApi";
 import { createOneShotBlurSuppression } from "../realtime/committedEntityTitleUpdates";
-import type { LogicGateGVICAssignment, LogicGateGVICRole, LogicGateGVICPrincipalType } from "../logic-gates/types";
+import type { LogicGateRACIAssignment, LogicGateRACIRole, LogicGateRACIPrincipalType } from "../logic-gates/types";
 import {
-  LOGIC_GATE_GVIC_ROLE_PRESENTATIONS,
-  logicGateGVICRaisedSurfaceStyle,
-  logicGateGVICRolePresentation,
-} from "../logic-gates/gvicPresentation.js";
+  LOGIC_GATE_RACI_ROLE_PRESENTATIONS,
+  logicGateRACIRaisedSurfaceStyle,
+  logicGateRACIRolePresentation,
+} from "../logic-gates/raciPresentation.js";
 import {
   KANBAN_LOGIC_GATE_BACKLOG_COLOR,
   KANBAN_LOGIC_GATE_DONE_COLOR,
@@ -42,7 +42,7 @@ type EditorLinkedDocumentPanelsProps = {
   linkedNodeMetadataRows: Array<{ label: string; value: string }>;
   linkedNodeHistoryRows: string[];
   canEdit: boolean;
-  canEditGVIC?: boolean;
+  canEditRACI?: boolean;
   compactHeader?: boolean;
   nodePresetFields: {
     status: string;
@@ -53,7 +53,7 @@ type EditorLinkedDocumentPanelsProps = {
     dueDateDraft: string;
   } | null;
   gvicFields: {
-    assignments: LogicGateGVICAssignment[];
+    assignments: LogicGateRACIAssignment[];
     inherited?: boolean;
     readOnlyReason?: string;
     mode: "inherited" | "customized";
@@ -77,8 +77,8 @@ type EditorLinkedDocumentPanelsProps = {
   onCommitNodeAccountIDs: (accountIDs: string[]) => void;
   onSetNodeDueDateDraft: React.Dispatch<React.SetStateAction<string>>;
   onCommitNodeDueDateDraft: (draft: string) => void;
-  onAddGVICPrincipal: (role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => void;
-  onRemoveGVICPrincipal: (role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => void;
+  onAddRACIPrincipal: (role: LogicGateRACIRole, principalType: LogicGateRACIPrincipalType, principalID: string) => void;
+  onRemoveRACIPrincipal: (role: LogicGateRACIRole, principalType: LogicGateRACIPrincipalType, principalID: string) => void;
 };
 
 const NODE_PRIORITY_OPTIONS = KANBAN_NODE_PRIORITY_STYLE_OPTIONS;
@@ -94,13 +94,13 @@ const NODE_STATUS_OPTIONS: ReadonlyArray<{ value: NodeStatusValue; label: string
   { value: "done", label: "Done", storageStatus: "Done", color: KANBAN_LOGIC_GATE_DONE_COLOR },
 ];
 
-const GVIC_ROLES = LOGIC_GATE_GVIC_ROLE_PRESENTATIONS;
+const RACI_ROLES = LOGIC_GATE_RACI_ROLE_PRESENTATIONS;
 
-function GVICRoleDisplayLabel(role: LogicGateGVICRole): string {
-  return logicGateGVICRolePresentation(role).label;
+function RACIRoleDisplayLabel(role: LogicGateRACIRole): string {
+  return logicGateRACIRolePresentation(role).label;
 }
 
-const GVIC_FLOATING_LAYER_Z_INDEX = 10060;
+const RACI_FLOATING_LAYER_Z_INDEX = 10060;
 
 type FloatingLayerPosition = {
   left: number;
@@ -162,8 +162,8 @@ function useFloatingLayerPosition(
   return position;
 }
 
-type LogicGateGVICPrincipalPickerOption = {
-  principalType: LogicGateGVICPrincipalType;
+type LogicGateRACIPrincipalPickerOption = {
+  principalType: LogicGateRACIPrincipalType;
   principalID: string;
   label: string;
   meta: string;
@@ -185,28 +185,28 @@ function companyGroupLabel(group: { group_id: string; name?: string } | undefine
   return group?.name?.trim() || fallbackID || "Group";
 }
 
-function logicGateGVICAssignmentPrincipalType(assignment: LogicGateGVICAssignment): LogicGateGVICPrincipalType {
-  return (assignment.principal_type?.trim() || "user") as LogicGateGVICPrincipalType;
+function logicGateRACIAssignmentPrincipalType(assignment: LogicGateRACIAssignment): LogicGateRACIPrincipalType {
+  return (assignment.principal_type?.trim() || "user") as LogicGateRACIPrincipalType;
 }
 
-function logicGateGVICAssignmentPrincipalID(assignment: LogicGateGVICAssignment): string {
-  const principalType = logicGateGVICAssignmentPrincipalType(assignment);
+function logicGateRACIAssignmentPrincipalID(assignment: LogicGateRACIAssignment): string {
+  const principalType = logicGateRACIAssignmentPrincipalType(assignment);
   const principalID = assignment.principal_id?.trim() || "";
   if (principalType === "user") return principalID || assignment.user_id.trim();
   return principalID;
 }
 
-function logicGateGVICAssignmentSubjectKey(assignment: LogicGateGVICAssignment): string {
-  return `${logicGateGVICAssignmentPrincipalType(assignment)}:${logicGateGVICAssignmentPrincipalID(assignment)}`;
+function logicGateRACIAssignmentSubjectKey(assignment: LogicGateRACIAssignment): string {
+  return `${logicGateRACIAssignmentPrincipalType(assignment)}:${logicGateRACIAssignmentPrincipalID(assignment)}`;
 }
 
-function GVICAssignmentLabel(assignment: LogicGateGVICAssignment): string {
-  if (logicGateGVICAssignmentPrincipalType(assignment) === "group") {
-    return assignment.principal_name?.trim() || logicGateGVICAssignmentPrincipalID(assignment) || "Group";
+function RACIAssignmentLabel(assignment: LogicGateRACIAssignment): string {
+  if (logicGateRACIAssignmentPrincipalType(assignment) === "group") {
+    return assignment.principal_name?.trim() || logicGateRACIAssignmentPrincipalID(assignment) || "Group";
   }
   const name = (assignment.user_display_name ?? "").trim();
   const email = (assignment.user_email ?? "").trim();
-  return assignment.principal_name?.trim() || name || email || logicGateGVICAssignmentPrincipalID(assignment) || assignment.user_id;
+  return assignment.principal_name?.trim() || name || email || logicGateRACIAssignmentPrincipalID(assignment) || assignment.user_id;
 }
 
 function validHexColor(value: string): string {
@@ -293,7 +293,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   linkedNodeMetadataRows,
   linkedNodeHistoryRows,
   canEdit,
-  canEditGVIC = canEdit,
+  canEditRACI = canEdit,
   compactHeader = false,
   nodePresetFields,
   gvicFields,
@@ -315,8 +315,8 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   onCommitNodeAccountIDs,
   onSetNodeDueDateDraft,
   onCommitNodeDueDateDraft,
-  onAddGVICPrincipal,
-  onRemoveGVICPrincipal,
+  onAddRACIPrincipal,
+  onRemoveRACIPrincipal,
 }) => {
   const titleBlurSuppressionRef = useRef(createOneShotBlurSuppression());
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
@@ -373,7 +373,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
     window.requestAnimationFrame(() => selectEditableTitleContents(editingTitleRef.current));
   };
   const gvicBoard = gvicFields ? (
-    <GVICAssignmentBoard
+    <RACIAssignmentBoard
       assignments={gvicFields.assignments}
       mode={gvicFields.mode}
       overwrittenByAncestor={gvicFields.overwrittenByAncestor}
@@ -383,10 +383,10 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
       accent={accent}
       panelBackground={panelBackground}
       ruleColor={ruleColor}
-      canEdit={canEditGVIC}
+      canEdit={canEditRACI}
       disabledReason={gvicFields.readOnlyReason}
-      onAddPrincipal={onAddGVICPrincipal}
-      onRemovePrincipal={onRemoveGVICPrincipal}
+      onAddPrincipal={onAddRACIPrincipal}
+      onRemovePrincipal={onRemoveRACIPrincipal}
     />
   ) : null;
   const nodePresetGridStyle: React.CSSProperties = {
@@ -829,7 +829,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   );
 };
 
-function GVICAssignmentBoard({
+function RACIAssignmentBoard({
   assignments,
   mode,
   overwrittenByAncestor,
@@ -844,7 +844,7 @@ function GVICAssignmentBoard({
   onAddPrincipal,
   onRemovePrincipal,
 }: {
-  assignments: LogicGateGVICAssignment[];
+  assignments: LogicGateRACIAssignment[];
   mode: "inherited" | "customized";
   overwrittenByAncestor?: { resource_type: string; resource_id: string; sequence: number } | null;
   companyUsers: Array<{ user_id: string; email?: string; display_name?: string }>;
@@ -855,8 +855,8 @@ function GVICAssignmentBoard({
   ruleColor: string;
   canEdit: boolean;
   disabledReason?: string;
-  onAddPrincipal: (role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => void;
-  onRemovePrincipal: (role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => void;
+  onAddPrincipal: (role: LogicGateRACIRole, principalType: LogicGateRACIPrincipalType, principalID: string) => void;
+  onRemovePrincipal: (role: LogicGateRACIRole, principalType: LogicGateRACIPrincipalType, principalID: string) => void;
 }) {
   return (
     <div style={{ minWidth: 0, width: "100%", display: "grid", gap: 6, overflow: "hidden" }}>
@@ -864,7 +864,7 @@ function GVICAssignmentBoard({
         <div style={{ fontSize: 10, color: "#b45309" }}>This stored customization is inactive because an ancestor overwrite superseded it.</div>
       )}
       <div
-        aria-label="RCVI assignments"
+        aria-label="RACI assignments"
         style={{
           minWidth: 0,
           width: "100%",
@@ -874,8 +874,8 @@ function GVICAssignmentBoard({
           alignItems: "stretch",
         }}
       >
-        {GVIC_ROLES.map((item) => (
-          <GVICRoleEditor
+        {RACI_ROLES.map((item) => (
+          <RACIRoleEditor
             key={item.role}
             role={item.role}
             label={item.label}
@@ -898,7 +898,7 @@ function GVICAssignmentBoard({
   );
 }
 
-function GVICRoleEditor({
+function RACIRoleEditor({
   role,
   label,
   assignments,
@@ -914,10 +914,10 @@ function GVICRoleEditor({
   onAddPrincipal,
   onRemovePrincipal,
 }: {
-  role: LogicGateGVICRole;
+  role: LogicGateRACIRole;
   label: string;
-  assignments: LogicGateGVICAssignment[];
-  allAssignments: LogicGateGVICAssignment[];
+  assignments: LogicGateRACIAssignment[];
+  allAssignments: LogicGateRACIAssignment[];
   companyUsers: Array<{ user_id: string; email?: string; display_name?: string }>;
   companyUserGroups: Array<{ group_id: string; parent_group_id?: string; name: string; position: number }>;
   companyUserGroupMembers: Array<{ group_id: string; user_id: string }>;
@@ -926,8 +926,8 @@ function GVICRoleEditor({
   ruleColor: string;
   canEdit: boolean;
   disabledReason?: string;
-  onAddPrincipal: (role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => void;
-  onRemovePrincipal: (role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => void;
+  onAddPrincipal: (role: LogicGateRACIRole, principalType: LogicGateRACIPrincipalType, principalID: string) => void;
+  onRemovePrincipal: (role: LogicGateRACIRole, principalType: LogicGateRACIPrincipalType, principalID: string) => void;
 }) {
   const floatingPortalTarget = useAppOverlayPortalTarget();
   const inputID = useId();
@@ -944,20 +944,20 @@ function GVICRoleEditor({
   const inputAnchorRef = useRef<HTMLDivElement | null>(null);
   const pickerListRef = useRef<HTMLDivElement | null>(null);
   const occupiedRoleByPrincipalKey = useMemo(() => {
-    const out = new Map<string, LogicGateGVICRole>();
+    const out = new Map<string, LogicGateRACIRole>();
     for (const assignment of allAssignments) {
-      const key = logicGateGVICAssignmentSubjectKey(assignment);
+      const key = logicGateRACIAssignmentSubjectKey(assignment);
       if (key !== "user:" && key !== "group:") out.set(key, assignment.role);
     }
     return out;
   }, [allAssignments]);
-  const roleAccent = logicGateGVICRolePresentation(role).accent;
+  const roleAccent = logicGateRACIRolePresentation(role).accent;
   const inheritedReadOnly = Boolean(disabledReason) && !canEdit;
   const inputPlaceholder = disabledReason ? "Inherited" : "Add user or team";
   const pickerAriaLabel = `${label} users and teams`;
   const assignedSummary = assignments.length === 0
     ? "No assignments"
-    : assignments.map(GVICAssignmentLabel).filter(Boolean).join(", ");
+    : assignments.map(RACIAssignmentLabel).filter(Boolean).join(", ");
   const showAssignedButton = true;
   const assignedListVisible = assignedOpen || assignedHoverOpen;
   const assignmentChipLabel = assignedSummary;
@@ -976,12 +976,12 @@ function GVICRoleEditor({
   };
   const { pickerRows, selectableOptions } = useMemo(() => {
     const query = draft.trim().toLowerCase();
-    const principalState = (principalType: LogicGateGVICPrincipalType, principalID: string, availableMeta: string, currentRoleMeta: string) => {
+    const principalState = (principalType: LogicGateRACIPrincipalType, principalID: string, availableMeta: string, currentRoleMeta: string) => {
       const key = `${principalType}:${principalID}`;
       const occupiedRole = occupiedRoleByPrincipalKey.get(key);
       if (!occupiedRole) return { selectable: true, meta: availableMeta };
       if (occupiedRole === role) return { selectable: false, meta: currentRoleMeta };
-      return { selectable: false, meta: `In ${GVICRoleDisplayLabel(occupiedRole)}` };
+      return { selectable: false, meta: `In ${RACIRoleDisplayLabel(occupiedRole)}` };
     };
     const childrenByParent = new Map<string, Array<{ group_id: string; parent_group_id?: string; name: string; position: number }>>();
     for (const group of companyUserGroups) {
@@ -1021,7 +1021,7 @@ function GVICRoleEditor({
       const fields = [groupLabel, group.group_id].map((field) => field.trim().toLowerCase());
       return fields.some((field) => field.includes(query));
     };
-    const userRowsForGroup = (groupID: string, depth: number): LogicGateGVICPrincipalPickerOption[] => {
+    const userRowsForGroup = (groupID: string, depth: number): LogicGateRACIPrincipalPickerOption[] => {
       const seen = new Set<string>();
       const users = (membersByGroup.get(groupID) ?? [])
         .map((userID) => userByID.get(userID) ?? { user_id: userID })
@@ -1051,7 +1051,7 @@ function GVICRoleEditor({
         };
       });
     };
-    const buildGroupRows = (group: { group_id: string; parent_group_id?: string; name: string; position: number }, depth: number, seenGroups: Set<string>): { rows: LogicGateGVICPrincipalPickerOption[]; matched: boolean } => {
+    const buildGroupRows = (group: { group_id: string; parent_group_id?: string; name: string; position: number }, depth: number, seenGroups: Set<string>): { rows: LogicGateRACIPrincipalPickerOption[]; matched: boolean } => {
       const groupID = group.group_id.trim();
       if (!groupID || seenGroups.has(groupID)) return { rows: [], matched: false };
       const nextSeen = new Set(seenGroups);
@@ -1068,7 +1068,7 @@ function GVICRoleEditor({
       const expanded = query ? true : expandedGroupIDs.has(groupID);
       const hasChildren = childGroups.length > 0 || (membersByGroup.get(groupID) ?? []).length > 0;
       const state = principalState("group", groupID, "Team", "Team added");
-      const rows: LogicGateGVICPrincipalPickerOption[] = [{
+      const rows: LogicGateRACIPrincipalPickerOption[] = [{
         principalType: "group",
         principalID: groupID,
         label: companyGroupLabel(group, groupID),
@@ -1083,7 +1083,7 @@ function GVICRoleEditor({
       return { rows, matched: true };
     };
 
-    const rows: LogicGateGVICPrincipalPickerOption[] = [];
+    const rows: LogicGateRACIPrincipalPickerOption[] = [];
     for (const group of childrenByParent.get("") ?? []) {
       rows.push(...buildGroupRows(group, 0, new Set()).rows);
     }
@@ -1177,7 +1177,7 @@ function GVICRoleEditor({
     setDraft("");
   }, [canEdit]);
 
-  const addPrincipalOption = (option: LogicGateGVICPrincipalPickerOption) => {
+  const addPrincipalOption = (option: LogicGateRACIPrincipalPickerOption) => {
     if (!canEdit || !option.selectable || occupiedRoleByPrincipalKey.has(`${option.principalType}:${option.principalID}`)) return;
     onAddPrincipal(role, option.principalType, option.principalID);
     setDraft("");
@@ -1202,7 +1202,7 @@ function GVICRoleEditor({
     <div
       ref={containerRef}
       style={{
-        ...logicGateGVICRaisedSurfaceStyle(role),
+        ...logicGateRACIRaisedSurfaceStyle(role),
         position: "relative",
         minWidth: 0,
         display: "grid",
@@ -1249,14 +1249,14 @@ function GVICRoleEditor({
             id={`${inputID}-assigned-users`}
             role="listbox"
             aria-label={`${label} people and groups`}
-            style={{ position: "fixed", zIndex: GVIC_FLOATING_LAYER_Z_INDEX + 1, top: assignedListPosition.top, left: assignedListPosition.left, width: assignedListPosition.width, maxHeight: assignedListPosition.maxHeight, overflowY: "auto", padding: 6, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: panelBackground || EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, color: "#111827" }}
+            style={{ position: "fixed", zIndex: RACI_FLOATING_LAYER_Z_INDEX + 1, top: assignedListPosition.top, left: assignedListPosition.left, width: assignedListPosition.width, maxHeight: assignedListPosition.maxHeight, overflowY: "auto", padding: 6, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: panelBackground || EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, color: "#111827" }}
           >
             {assignments.length === 0 ? (
               <div style={{ padding: "8px 10px", color: "#64748b", fontSize: 11, fontWeight: 650 }}>No people or groups</div>
             ) : assignments.map((assignment) => {
-              const principalType = logicGateGVICAssignmentPrincipalType(assignment);
-              const principalID = logicGateGVICAssignmentPrincipalID(assignment);
-              const assignmentLabel = GVICAssignmentLabel(assignment);
+              const principalType = logicGateRACIAssignmentPrincipalType(assignment);
+              const principalID = logicGateRACIAssignmentPrincipalID(assignment);
+              const assignmentLabel = RACIAssignmentLabel(assignment);
               const assignmentAccent = principalType === "group" ? roleAccent : userAccentForName(assignmentLabel || principalID);
               return (
                 <div
@@ -1353,7 +1353,7 @@ function GVICRoleEditor({
             id={`${inputID}-options`}
             role="dialog"
             aria-label={pickerAriaLabel}
-            style={{ position: "fixed", zIndex: GVIC_FLOATING_LAYER_Z_INDEX + 2, top: pickerListPosition.top, left: pickerListPosition.left, width: pickerListPosition.width, maxHeight: pickerListPosition.maxHeight, overflow: "hidden", display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", padding: 6, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: panelBackground || EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, color: "#111827" }}
+            style={{ position: "fixed", zIndex: RACI_FLOATING_LAYER_Z_INDEX + 2, top: pickerListPosition.top, left: pickerListPosition.left, width: pickerListPosition.width, maxHeight: pickerListPosition.maxHeight, overflow: "hidden", display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", padding: 6, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: panelBackground || EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, color: "#111827" }}
           >
             <input
               value={draft}

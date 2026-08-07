@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  addLogicGateGVICAssignments,
+  addLogicGateRACIAssignments,
   addLocalEmailReply,
   archiveEmailMessage,
   archiveEmailMessagesBatch,
@@ -39,7 +39,7 @@ import {
   parseEmailAddressList,
   patchEmailMessagesLogicGatePlacement,
   removeCommunicationsSharedInbox,
-  removeLogicGateGVICAssignments,
+  removeLogicGateRACIAssignments,
   respondToCalendarInvite,
   listEmailCollaborations,
   saveEmailSignature,
@@ -49,7 +49,7 @@ import {
   unarchiveEmailMessage,
   updateEmailMessage,
   updateCommunicationsSharedInbox,
-  updateCommunicationsSharedInboxGVICAssignments,
+  updateCommunicationsSharedInboxRACIAssignments,
   type EmailMessage,
 } from "../../../../frontend/src/modules/communications/communicationsApi.js";
 import { logout } from "../../../../frontend/src/auth/cognitoAuth.js";
@@ -349,7 +349,7 @@ test("shared inbox helpers use communications shared inbox endpoints", async () 
   invalidateCommunicationsCache();
   const calls: Array<{ path: string; method: string; body: unknown }> = [];
   const originalFetch = globalThis.fetch;
-  let sharedGVICAssignments: Array<{ role: string; principal_type: string; principal_id: string }> = [];
+  let sharedRACIAssignments: Array<{ role: string; principal_type: string; principal_id: string }> = [];
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = input.toString();
     calls.push({
@@ -361,12 +361,12 @@ test("shared inbox helpers use communications shared inbox endpoints", async () 
       return jsonResponse({ shared_inboxes: [sharedInbox("shared-1", { name: "Business" })] });
     }
     if (path === "/v1/resources/shared_inbox/shared-1/gvic" && (init?.method ?? "GET") === "GET") {
-      return jsonResponse({ revision: "shared-revision-1", gvic_assignments: sharedGVICAssignments });
+      return jsonResponse({ revision: "shared-revision-1", gvic_assignments: sharedRACIAssignments });
     }
     if (path === "/v1/resources/shared_inbox/shared-1/gvic" && init?.method === "PUT") {
-      const body = JSON.parse(String(init.body)) as { gvic_assignments?: typeof sharedGVICAssignments };
-      sharedGVICAssignments = body.gvic_assignments ?? [];
-      return jsonResponse({ revision: "shared-revision-2", gvic_assignments: sharedGVICAssignments });
+      const body = JSON.parse(String(init.body)) as { gvic_assignments?: typeof sharedRACIAssignments };
+      sharedRACIAssignments = body.gvic_assignments ?? [];
+      return jsonResponse({ revision: "shared-revision-2", gvic_assignments: sharedRACIAssignments });
     }
     if (init?.method === "DELETE") {
       return jsonResponse({ status: "deleted" });
@@ -377,7 +377,7 @@ test("shared inbox helpers use communications shared inbox endpoints", async () 
     const listed = await listCommunicationsSharedInboxes(" company-1 ");
     const created = await createCommunicationsSharedInbox({ companyID: "company-1", name: " Business ", accountEmail: "shared@example.com" });
     const updated = await updateCommunicationsSharedInbox({ companyID: "company-1", folderID: " shared-1 ", name: " Client Facing " });
-    const access = await updateCommunicationsSharedInboxGVICAssignments("company-1", "shared-1", [{ role: "responsible", principal_type: "user", principal_id: "user-1", user_id: "user-1" }]);
+    const access = await updateCommunicationsSharedInboxRACIAssignments("company-1", "shared-1", [{ role: "responsible", principal_type: "user", principal_id: "user-1", user_id: "user-1" }]);
     await deleteCommunicationsSharedInbox("company-1", "shared-1");
     await removeCommunicationsSharedInbox("company-1", "shared-1");
 
@@ -1752,7 +1752,7 @@ test("message page cache is scoped to the active auth session", async () => {
   }
 });
 
-test("logic gate GVIC helpers read then replace one complete V2 policy", async () => {
+test("logic gate RACI helpers read then replace one complete V2 policy", async () => {
   invalidateCommunicationsCache();
   const calls: Array<{ path: string; method: string; body: unknown }> = [];
   const originalFetch = globalThis.fetch;
@@ -1770,9 +1770,9 @@ test("logic gate GVIC helpers read then replace one complete V2 policy", async (
     return jsonResponse({ revision: `revision-${calls.length}`, gvic_assignments: currentAssignments });
   };
   try {
-    const addResult = await addLogicGateGVICAssignments("company-1", "gate 1", [{ role: "responsible", user_id: "user-1" }]);
-    const removeResult = await removeLogicGateGVICAssignments("company-1", "gate 1", [{ role: "responsible", user_id: "user-1" }]);
-    await addLogicGateGVICAssignments("company-1", "gate 1", [{ role: "consulted", principal_type: "group", principal_id: "group-1" }], true);
+    const addResult = await addLogicGateRACIAssignments("company-1", "gate 1", [{ role: "responsible", user_id: "user-1" }]);
+    const removeResult = await removeLogicGateRACIAssignments("company-1", "gate 1", [{ role: "responsible", user_id: "user-1" }]);
+    await addLogicGateRACIAssignments("company-1", "gate 1", [{ role: "consulted", principal_type: "group", principal_id: "group-1" }], true);
     assert.deepEqual(calls, [
       { path: "/v1/resources/logic_gate/gate%201/gvic?company_id=company-1", method: "GET", body: undefined },
       {

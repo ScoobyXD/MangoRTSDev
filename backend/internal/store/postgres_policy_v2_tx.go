@@ -16,23 +16,23 @@ func ensureV2PolicySettingsTx(ctx context.Context, tx *sql.Tx) error {
 	return err
 }
 
-func customizeResourceGVICPolicyTx(ctx context.Context, tx *sql.Tx, keyValue resourceGVICKey, inputs []ResourceGVICAssignmentInput) (ResourceGVICPolicy, error) {
+func customizeResourceRACIPolicyTx(ctx context.Context, tx *sql.Tx, keyValue resourceRACIKey, inputs []ResourceRACIAssignmentInput) (ResourceRACIPolicy, error) {
 	if ctx == nil || tx == nil {
-		return ResourceGVICPolicy{}, ErrInvalid
+		return ResourceRACIPolicy{}, ErrInvalid
 	}
-	normalized, err := normalizeResourceGVICAssignmentInputs(inputs)
+	normalized, err := normalizeResourceRACIAssignmentInputs(inputs)
 	if err != nil {
-		return ResourceGVICPolicy{}, err
+		return ResourceRACIPolicy{}, err
 	}
-	if err := validateResourceGVICAssignmentInputsForOperation(keyValue, normalized, GVICAssignmentCommandSet); err != nil {
-		return ResourceGVICPolicy{}, err
+	if err := validateResourceRACIAssignmentInputsForOperation(keyValue, normalized, RACIAssignmentCommandSet); err != nil {
+		return ResourceRACIPolicy{}, err
 	}
 	if err := ensureV2PolicySettingsTx(ctx, tx); err != nil {
-		return ResourceGVICPolicy{}, err
+		return ResourceRACIPolicy{}, err
 	}
 	for _, assignment := range normalized {
-		if err := validatePostgresGVICPrincipalTx(ctx, tx, keyValue.companyID, assignment.principalType, assignment.principalID); err != nil {
-			return ResourceGVICPolicy{}, err
+		if err := validatePostgresRACIPrincipalTx(ctx, tx, keyValue.companyID, assignment.principalType, assignment.principalID); err != nil {
+			return ResourceRACIPolicy{}, err
 		}
 	}
 	result, err := tx.ExecContext(ctx, `
@@ -43,24 +43,24 @@ set assignment_mode='customized',
 where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`,
 		keyValue.companyID, keyValue.resourceType, keyValue.resourceID)
 	if err != nil {
-		return ResourceGVICPolicy{}, err
+		return ResourceRACIPolicy{}, err
 	}
 	if count, err := result.RowsAffected(); err != nil {
-		return ResourceGVICPolicy{}, err
+		return ResourceRACIPolicy{}, err
 	} else if count != 1 {
-		return ResourceGVICPolicy{}, ErrNotFound
+		return ResourceRACIPolicy{}, ErrNotFound
 	}
 	if _, err := tx.ExecContext(ctx, `delete from resource_gvic_assignments where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, keyValue.companyID, keyValue.resourceType, keyValue.resourceID); err != nil {
-		return ResourceGVICPolicy{}, err
+		return ResourceRACIPolicy{}, err
 	}
 	for _, assignment := range normalized {
 		if _, err := tx.ExecContext(ctx, `
 insert into resource_gvic_assignments(company_id,resource_type,resource_id,role,principal_type,principal_id,created_timestamp,updated_timestamp)
 values($1::uuid,$2,$3::uuid,$4,$5,$6::uuid,now(),now())`, keyValue.companyID, keyValue.resourceType, keyValue.resourceID, assignment.role, assignment.principalType, assignment.principalID); err != nil {
-			return ResourceGVICPolicy{}, err
+			return ResourceRACIPolicy{}, err
 		}
 	}
-	return postgresV2GVICPolicy(ctx, tx, keyValue)
+	return postgresV2RACIPolicy(ctx, tx, keyValue)
 }
 
 func customizeResourcePermissionPolicyTx(ctx context.Context, tx *sql.Tx, companyID, resourceType, resourceID, defaultAccess string, inputs []EntityPermissionInput) (ResourcePermissionPolicy, error) {
@@ -79,7 +79,7 @@ func customizeResourcePermissionPolicyTx(ctx context.Context, tx *sql.Tx, compan
 		return ResourcePermissionPolicy{}, err
 	}
 	for _, permission := range normalized {
-		if err := validatePostgresGVICPrincipalTx(ctx, tx, companyID, permission.SubjectType, permission.SubjectID); err != nil {
+		if err := validatePostgresRACIPrincipalTx(ctx, tx, companyID, permission.SubjectType, permission.SubjectID); err != nil {
 			return ResourcePermissionPolicy{}, err
 		}
 	}

@@ -658,7 +658,7 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 			r.upsertNodeLogicGateAssignmentFromCardLocked(card)
 		}
 		r.syncNodeStatusFromKanbanCardLocked(card)
-		r.syncGVICMatrixProjectionForNodeLocked(input.CompanyID, input.NodeID)
+		r.syncRACIMatrixProjectionForNodeLocked(input.CompanyID, input.NodeID)
 		return card, nil
 	}
 	cardID := strings.TrimSpace(input.CardID)
@@ -767,7 +767,7 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 	if !hadPreviousAssignment || previousAssignment.LogicGateID != input.LogicGateID {
 
 	}
-	r.syncGVICResourceKeysLocked(input.CompanyID, []resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: input.NodeID}})
+	r.syncRACIResourceKeysLocked(input.CompanyID, []resourceRACIKey{{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: input.NodeID}})
 
 	assignment, ok := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, input.LogicGateID)
 	if !ok {
@@ -1003,7 +1003,7 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 		r.kanbanCards[location.mapKey][location.index] = resultCard
 	}
 	r.syncNodeStatusFromKanbanCardLocked(resultCard)
-	r.syncGVICResourceKeysLocked(input.CompanyID, []resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: input.NodeID}})
+	r.syncRACIResourceKeysLocked(input.CompanyID, []resourceRACIKey{{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: input.NodeID}})
 
 	assignment, ok = r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, input.LogicGateID)
 	if !ok {
@@ -1059,7 +1059,7 @@ func (r *MemoryRepo) RemoveLogicGateNodeAssignment(input LogicGateNodeAssignment
 	cards := r.kanbanCards[location.mapKey]
 	r.kanbanCards[location.mapKey] = append(cards[:location.index], cards[location.index+1:]...)
 	r.applyNodeStatusAfterLogicGateAssignmentRemovalLocked(input.CompanyID, input.NodeID, input.FallbackStatus)
-	r.syncGVICResourceKeysLocked(input.CompanyID, []resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: input.NodeID}})
+	r.syncRACIResourceKeysLocked(input.CompanyID, []resourceRACIKey{{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: input.NodeID}})
 
 	result := LogicGateNodeAssignmentRemoveResult{
 		Card:       r.withKanbanCardProjectionFieldsLocked(location.card),
@@ -1121,7 +1121,7 @@ func (r *MemoryRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssignme
 	})
 	r.kanbanCards[location.mapKey][location.index] = card
 	r.syncNodeStatusFromKanbanCardLocked(card)
-	r.syncGVICResourceKeysLocked(input.CompanyID, []resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: input.NodeID}})
+	r.syncRACIResourceKeysLocked(input.CompanyID, []resourceRACIKey{{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: input.NodeID}})
 
 	assignment, ok = r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, input.LogicGateID)
 	if !ok {
@@ -1216,7 +1216,7 @@ type memoryKanbanWorkspaceEventSnapshot struct {
 	nodeLogicGateAssignments map[string]domain.NodeLogicGateAssignment
 	entityPermissions        map[string]domain.EntityPermission
 	effectiveAccess          map[string]domain.EffectiveResourceAccess
-	GVICMatrixProjectionRows map[string]memoryGVICMatrixProjectionRow
+	RACIMatrixProjectionRows map[string]memoryRACIMatrixProjectionRow
 	domainEvents             map[string]domain.DomainEvent
 	workspaceReadVersions    map[string]int64
 }
@@ -1231,7 +1231,7 @@ func (r *MemoryRepo) snapshotKanbanWorkspaceEventStateLocked() memoryKanbanWorks
 		nodeLogicGateAssignments: cloneMemoryMap(r.nodeLogicGateAssignments),
 		entityPermissions:        cloneMemoryMap(r.entityPermissions),
 		effectiveAccess:          cloneMemoryMap(r.effectiveAccess),
-		GVICMatrixProjectionRows: cloneMemoryMap(r.GVICMatrixProjectionRows),
+		RACIMatrixProjectionRows: cloneMemoryMap(r.RACIMatrixProjectionRows),
 		domainEvents:             cloneMemoryMap(r.domainEvents),
 		workspaceReadVersions:    cloneMemoryMap(r.workspaceReadVersions),
 	}
@@ -1246,7 +1246,7 @@ func (r *MemoryRepo) restoreKanbanWorkspaceEventStateLocked(snapshot memoryKanba
 	r.nodeLogicGateAssignments = snapshot.nodeLogicGateAssignments
 	r.entityPermissions = snapshot.entityPermissions
 	r.effectiveAccess = snapshot.effectiveAccess
-	r.GVICMatrixProjectionRows = snapshot.GVICMatrixProjectionRows
+	r.RACIMatrixProjectionRows = snapshot.RACIMatrixProjectionRows
 	r.domainEvents = snapshot.domainEvents
 	r.workspaceReadVersions = snapshot.workspaceReadVersions
 }

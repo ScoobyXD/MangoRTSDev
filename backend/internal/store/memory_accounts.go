@@ -406,7 +406,7 @@ func (r *MemoryRepo) nodeIDsForAccountLocked(companyID, accountID string) []stri
 
 func (r *MemoryRepo) syncProjectionsForAccountNodeIDsLocked(companyID string, nodeIDs []string) {
 	for _, nodeID := range cleanAccountIDs(nodeIDs) {
-		r.syncGVICMatrixProjectionForNodeLocked(companyID, nodeID)
+		r.syncRACIMatrixProjectionForNodeLocked(companyID, nodeID)
 		r.syncProjectManagementTimelineProjectionForNodeLocked(companyID, nodeID)
 	}
 }

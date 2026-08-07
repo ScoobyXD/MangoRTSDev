@@ -2299,12 +2299,12 @@ Next action:
 - Since prod Cognito alias has already been normalized to lowercase, the temporary-password login should now match the correct user.
 - After successful login/new-password flow, verify authenticated `/v1/me`, then clear `bootstrap_admin_emails` from ECS.
 
-Verifier follow-up on 2026-07-06T18:55:05Z:
+Accountable follow-up on 2026-07-06T18:55:05Z:
 
-- Hermes required a fresh ad-hoc verifier after the backend test edits.
-- Created a temporary verifier script under `C:/Users/Jonat/AppData/Local/Temp` with `hermes-verify-` filename prefix.
-- The verifier checked the mixed-case email regression snippets in the three changed backend test files.
-- The verifier ran:
+- Hermes required a fresh ad-hoc accountable after the backend test edits.
+- Created a temporary accountable script under `C:/Users/Jonat/AppData/Local/Temp` with `hermes-verify-` filename prefix.
+- The accountable checked the mixed-case email regression snippets in the three changed backend test files.
+- The accountable ran:
 
 ```text
 go test ./internal/auth ./internal/http
@@ -2312,7 +2312,7 @@ go test ./...
 ```
 
 - Result: `HERMES_VERIFY_OK mixed-case email normalization regression checks passed`.
-- The temporary verifier script was deleted after it ran.
+- The temporary accountable script was deleted after it ran.
 
 This is ad-hoc verification in addition to the normal suite output above, not a separate production deploy.
 
@@ -2442,7 +2442,7 @@ Reason:
 Secret handling:
 
 - Replaced `origin_verify_secret` in local gitignored `infra/aws-prod/terraform.tfvars` without printing the new value.
-- Ran a temporary `hermes-verify-*` script under `C:/Users/Jonat/AppData/Local/Temp` to verify the tfvars file is ignored/untracked and the origin secret was replaced; the verifier script was deleted after use.
+- Ran a temporary `hermes-verify-*` script under `C:/Users/Jonat/AppData/Local/Temp` to verify the tfvars file is ignored/untracked and the origin secret was replaced; the accountable script was deleted after use.
 
 Planning:
 
@@ -2515,7 +2515,7 @@ Actions taken:
 - Created AWS Secrets Manager secret `mangorts/prod/nylas-state-secret` in prod account `828435022930`.
 - Stored a generated random OAuth state-signing secret value without printing it.
 - Set local gitignored `infra/aws-prod/terraform.tfvars` `nylas_state_secret_arn` to the new secret ARN.
-- Verified the tfvars edit with a temporary `hermes-verify-*` script; the verifier script was deleted.
+- Verified the tfvars edit with a temporary `hermes-verify-*` script; the accountable script was deleted.
 
 Safe recorded secret metadata:
 
@@ -2569,7 +2569,7 @@ Actions taken:
 - Generated manifest doc: `docs/important tasks/prod db schema copy prep.md`.
 - Ran the helper with output JSON to a temp path and Markdown to the docs path.
 - Verified the helper with `python -m py_compile scripts/prepare_prod_db_schema_copy.py`.
-- Follow-up ad-hoc verification on 2026-07-06T20:43:15Z used a temporary `hermes-verify-*` script under `C:/Users/Jonat/AppData/Local/Temp`. It ran `git diff --check` for the helper, executed the helper against the repo, verified the manifest counts and row-copy exclusions, then deleted the temporary verifier and generated temp manifest files.
+- Follow-up ad-hoc verification on 2026-07-06T20:43:15Z used a temporary `hermes-verify-*` script under `C:/Users/Jonat/AppData/Local/Temp`. It ran `git diff --check` for the helper, executed the helper against the repo, verified the manifest counts and row-copy exclusions, then deleted the temporary accountable and generated temp manifest files.
 
 Manifest summary:
 
@@ -2667,7 +2667,7 @@ Notes:
 
 ## Step 14 — Agent database-access boundary documented and prepared
 
-Status: repo rules and verifier created; physical AWS/IAM enforcement still needs human setup.
+Status: repo rules and accountable created; physical AWS/IAM enforcement still needs human setup.
 
 Updated on: 2026-07-07T00:02:51Z.
 
@@ -2686,7 +2686,7 @@ Repo changes:
 - Created `docs/security/aws-prod-agent-readonly-permission-set-policy.template.json` as the intended AWS IAM Identity Center inline policy for `mangorts-prod-agent-readonly`.
 - Created `docs/important tasks/prod launch next-agent handoff prompt.md` with a copy-paste prompt for the next agent.
 
-Current verifier result:
+Current accountable result:
 
 ```text
 BOUNDARY_OK admin profile 'mangorts-prod' not active
@@ -2707,7 +2707,7 @@ Policy-template scope after tightening:
 Ad-hoc verification:
 
 - Temporary `hermes-verify-*` scripts under `C:/Users/Jonat/AppData/Local/Temp` verified the boundary script, contract text, and AWS permission-set policy template.
-- Latest policy-template check verified JSON parsing, required allow/deny statements, no Secrets Manager allow, full `secretsmanager:*` deny, required mutation denies, and `git diff --check`; temp verifier was deleted.
+- Latest policy-template check verified JSON parsing, required allow/deny statements, no Secrets Manager allow, full `secretsmanager:*` deny, required mutation denies, and `git diff --check`; temp accountable was deleted.
 
 Not physically enforced yet:
 

@@ -5,19 +5,19 @@ export type LogicGateRecord = ResourceAccessFields & {
   company_id: string;
   logic_gate_id: string;
   header: string;
-  gvic_assignments?: LogicGateGVICAssignment[];
+  gvic_assignments?: LogicGateRACIAssignment[];
   created_timestamp: string;
 };
 
-export type LogicGateGVICRole = "responsible" | "consulted" | "verifier" | "informed";
-export type LogicGateGVICPrincipalType = "user" | "group";
+export type LogicGateRACIRole = "responsible" | "accountable" | "consulted" | "informed";
+export type LogicGateRACIPrincipalType = "user" | "group";
 
-export type LogicGateGVICAssignment = {
+export type LogicGateRACIAssignment = {
   company_id: string;
   logic_gate_id?: string;
   resource_id?: string;
-  role: LogicGateGVICRole;
-  principal_type?: LogicGateGVICPrincipalType;
+  role: LogicGateRACIRole;
+  principal_type?: LogicGateRACIPrincipalType;
   principal_id?: string;
   principal_name?: string;
   user_id: string;

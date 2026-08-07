@@ -23,10 +23,10 @@ import {
   subscribeCommittedEntityTitleUpdates,
 } from "../../../../frontend/src/modules/realtime/committedEntityTitleUpdates.js";
 import {
-  reconcileGVICProjectionLogicGateTitles,
-  reconcileGVICProjectionRowTitles,
-  reconcileGVICProjectionTitlesByUserID,
-} from "../../../../frontend/src/modules/company-explorer/companyExplorerGVICCommittedTitles.js";
+  reconcileRACIProjectionLogicGateTitles,
+  reconcileRACIProjectionRowTitles,
+  reconcileRACIProjectionTitlesByUserID,
+} from "../../../../frontend/src/modules/company-explorer/companyExplorerRACICommittedTitles.js";
 import {
   reconcileCommittedLogicGateRecordTitles,
 } from "../../../../frontend/src/modules/realtime/committedTitleSnapshotReconciliation.js";
@@ -381,7 +381,7 @@ run("latest committed-title registry overlays stale async responses by company, 
   }), stale);
 });
 
-run("committed titles patch every mounted GVIC projection cache without crossing companies or resources", () => {
+run("committed titles patch every mounted RACI projection cache without crossing companies or resources", () => {
   const rows = [
     {
       company_id: "c",
@@ -425,14 +425,14 @@ run("committed titles patch every mounted GVIC projection cache without crossing
   const nodeUpdate = { companyID: "c", entityType: "node" as const, resourceID: "node-a", title: "Renamed node" };
   const gateUpdate = { companyID: "c", entityType: "logic_gate" as const, resourceID: "gate-a", title: "Renamed gate" };
 
-  const nodeRows = reconcileGVICProjectionRowTitles(rows, nodeUpdate, "c");
+  const nodeRows = reconcileRACIProjectionRowTitles(rows, nodeUpdate, "c");
   assert.deepEqual(nodeRows.map((row) => row.node_name), ["Renamed node", "Other node", "Foreign node"]);
   assert.equal(nodeRows[1], rows[1]);
   assert.equal(nodeRows[2], rows[2]);
-  const gateRows = reconcileGVICProjectionRowTitles(nodeRows, gateUpdate, "c");
+  const gateRows = reconcileRACIProjectionRowTitles(nodeRows, gateUpdate, "c");
   assert.deepEqual(gateRows.map((row) => row.logic_gate_name), ["Renamed gate", "Other gate", "Foreign gate"]);
 
-  const renamedLogicGates = reconcileGVICProjectionLogicGateTitles(logicGates, gateUpdate, "c");
+  const renamedLogicGates = reconcileRACIProjectionLogicGateTitles(logicGates, gateUpdate, "c");
   assert.deepEqual(renamedLogicGates.map((gate) => [gate.header, gate.title]), [
     ["Renamed gate", "Renamed gate"],
     ["Other gate", "Other gate"],
@@ -446,8 +446,8 @@ run("committed titles patch every mounted GVIC projection cache without crossing
     "user-a": { rows, logicGates, loaded: true },
     "user-b": { rows: rows.slice(0, 1), logicGates: logicGates.slice(0, 1), loaded: true },
   };
-  const nodeByUser = reconcileGVICProjectionTitlesByUserID(byUser, nodeUpdate, "c");
-  const gateByUser = reconcileGVICProjectionTitlesByUserID(nodeByUser, gateUpdate, "c");
+  const nodeByUser = reconcileRACIProjectionTitlesByUserID(byUser, nodeUpdate, "c");
+  const gateByUser = reconcileRACIProjectionTitlesByUserID(nodeByUser, gateUpdate, "c");
   assert.equal(gateByUser["user-a"]?.rows[0]?.node_name, "Renamed node");
   assert.equal(gateByUser["user-a"]?.rows[0]?.logic_gate_name, "Renamed gate");
   assert.equal(gateByUser["user-a"]?.logicGates[0]?.header, "Renamed gate");
@@ -455,9 +455,9 @@ run("committed titles patch every mounted GVIC projection cache without crossing
   assert.equal(gateByUser["user-b"]?.logicGates[0]?.title, "Renamed gate");
 
   const foreignUpdate = { ...nodeUpdate, companyID: "foreign", title: "Wrong company" };
-  assert.equal(reconcileGVICProjectionRowTitles(gateRows, foreignUpdate, "c"), gateRows);
-  assert.equal(reconcileGVICProjectionLogicGateTitles(renamedLogicGates, foreignUpdate, "c"), renamedLogicGates);
-  assert.equal(reconcileGVICProjectionTitlesByUserID(gateByUser, foreignUpdate, "c"), gateByUser);
+  assert.equal(reconcileRACIProjectionRowTitles(gateRows, foreignUpdate, "c"), gateRows);
+  assert.equal(reconcileRACIProjectionLogicGateTitles(renamedLogicGates, foreignUpdate, "c"), renamedLogicGates);
+  assert.equal(reconcileRACIProjectionTitlesByUserID(gateByUser, foreignUpdate, "c"), gateByUser);
 });
 
 

@@ -55,7 +55,7 @@ PIN14 - The sidebar pin section must not read, write, hydrate, or recover pins f
 PIN15 - The canonical frontend pin API surface is /v1/user-pins, /v1/user-pins/{pin_id}, /v1/user-pins/layout, /v1/user-pin-folders, /v1/user-pin-folders/{folder_id}, and /v1/user-pin-folders/group. Legacy /v1/pins, /v1/user-pins/order, pinsApi, SIDEBAR_PINS_KEY, label, and addedAt compatibility are not allowed.
 PIN16 - The user_pins table is not canonical and must be dropped; backend storage reads and writes the pins table.
 PIN17 - Only pinned nodes and pinned logic gates are valid email drop targets; pinned projects and empty pin-section space are not email drop targets.
-PIN18 - Dropping triage or shared-triage email on a pinned logic gate uses the existing communications conversion path to create node(s) in that logic gate, including the normal priority, permission, GVIC, local cache patching, and event behavior.
+PIN18 - Dropping triage or shared-triage email on a pinned logic gate uses the existing communications conversion path to create node(s) in that logic gate, including the normal priority, permission, RACI, local cache patching, and event behavior.
 PIN19 - Dropping triage or shared-triage email on a pinned node attaches the email to that existing node through the existing node conversion path and must not create a duplicate node.
 PIN20 - Dropping a node on a pinned logic gate assigns the existing node to that logic gate through the normal logic-gate node assignment path and must not duplicate the node.
 PIN21 - Valid pinned email/node drop targets are recognized during dragover from drag MIME types alone; full payload parsing happens only on drop so browser dragover data restrictions do not show a stop cursor over valid pinned nodes or logic gates.
@@ -226,7 +226,7 @@ Expected:
 - Dropping a node on the pinned logic gate assigns the existing node to the logic gate through the normal assignment endpoint without creating a duplicate node.
 - Successful drops show a short green confirmation banner in the pin section.
 - The visible Home triage list and workspace panel handle the committed conversion response locally by keeping the source email row visible and patching its Logic Gate icon state without communications cache invalidation, stale prefetched-page top-up, post-removal fill, message-length prefetch, or repeated reloads.
-- Permission, GVIC assignment, local cache patching, and event behavior come from the existing conversion and assignment paths rather than a pin-specific backend shortcut.
+- Permission, RACI assignment, local cache patching, and event behavior come from the existing conversion and assignment paths rather than a pin-specific backend shortcut.
 
 ### Scenario PIN-S8: Nested Folder Tree And Mixed Ordering
 

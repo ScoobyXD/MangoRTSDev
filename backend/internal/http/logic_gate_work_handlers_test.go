@@ -516,27 +516,27 @@ func TestLogicGateWorkV2StateChangeCreatesNotifications(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
 	}
-	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateRACIAssignments(store.LogicGateRACIAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []store.LogicGateGVICAssignmentInput{{
-			Role:   domain.GVICRoleResponsible,
+		Assignments: []store.LogicGateRACIAssignmentInput{{
+			Role:   domain.RACIRoleResponsible,
 			UserID: viewer.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
+		t.Fatalf("SetLogicGateRACIAssignments: %v", err)
 	}
-	if _, err := repo.SetResourceGVICAssignments(store.ResourceGVICAssignmentUpdateInput{
+	if _, err := repo.SetResourceRACIAssignments(store.ResourceRACIAssignmentUpdateInput{
 		CompanyID:    companyID,
 		ResourceType: store.EntityTypeNode,
 		ResourceID:   node.NodeID,
-		Assignments: []store.ResourceGVICAssignmentInput{{
-			Role:          domain.GVICRoleResponsible,
+		Assignments: []store.ResourceRACIAssignmentInput{{
+			Role:          domain.RACIRoleResponsible,
 			PrincipalType: store.EntityPermissionSubjectUser,
 			PrincipalID:   responsible.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("SetResourceGVICAssignments node: %v", err)
+		t.Fatalf("SetResourceRACIAssignments node: %v", err)
 	}
 
 	server := NewServer(repo)
@@ -561,7 +561,7 @@ func TestLogicGateWorkV2StateChangeCreatesNotifications(t *testing.T) {
 	if item.Type != store.WorkItemLogicGateAssignmentMovedEventType {
 		t.Fatalf("responsible notification type = %q, want %q", item.Type, store.WorkItemLogicGateAssignmentMovedEventType)
 	}
-	if item.Surface != domain.NotificationSurfaceRInbox || item.Role != domain.GVICRoleResponsible {
+	if item.Surface != domain.NotificationSurfaceRInbox || item.Role != domain.RACIRoleResponsible {
 		t.Fatalf("responsible notification metadata = %+v, want responsible R inbox", item)
 	}
 	if item.LogicGateID != logicGate.LogicGateID || item.NodeID != node.NodeID {
@@ -570,7 +570,7 @@ func TestLogicGateWorkV2StateChangeCreatesNotifications(t *testing.T) {
 
 	viewerNotifications := listLogicGateWorkNotificationsForTest(t, handler, companyID, viewer)
 	if len(viewerNotifications) != 0 {
-		t.Fatalf("viewer notifications = %+v, want none without node GVIC role", viewerNotifications)
+		t.Fatalf("viewer notifications = %+v, want none without node RACI role", viewerNotifications)
 	}
 	if got := listLogicGateWorkNotificationsForTest(t, handler, companyID, editor); len(got) != 0 {
 		t.Fatalf("actor self notifications = %+v, want none", got)
@@ -680,7 +680,7 @@ type logicGateWorkMutationPayloadForTest struct {
 	Assignment               domain.NodeLogicGateAssignment  `json:"assignment"`
 	Node                     domain.Node                     `json:"node"`
 	Card                     domain.KanbanCard               `json:"card"`
-	GVICMatrixProjectionRows []store.GVICMatrixProjectionRow `json:"gvic_projection_rows"`
+	RACIMatrixProjectionRows []store.RACIMatrixProjectionRow `json:"gvic_projection_rows"`
 }
 
 func decodeLogicGateWorkMutationPayloadForTest(t *testing.T, rr *httptest.ResponseRecorder) logicGateWorkMutationPayloadForTest {

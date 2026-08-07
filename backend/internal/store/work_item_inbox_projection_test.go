@@ -11,28 +11,28 @@ import (
 func TestMemoryRepoMyWorkRowsAreDerivedFromV2PolicyAtReadTime(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "22222222-2222-4222-8222-222222222451"
-	repo.EnsureCompany(companyID, "GVICMatrix Projection Co")
-	user := mustCreateInboxReadCompanyUser(t, repo, "GVICMatrix-projection-user", companyID, "GVICMatrix-projection@example.com", "GVICMatrix User")
+	repo.EnsureCompany(companyID, "RACIMatrix Projection Co")
+	user := mustCreateInboxReadCompanyUser(t, repo, "RACIMatrix-projection-user", companyID, "RACIMatrix-projection@example.com", "RACIMatrix User")
 
 	standaloneNode, err := repo.CreateNode(companyID, "Standalone node")
 	if err != nil {
 		t.Fatalf("CreateNode standalone: %v", err)
 	}
-	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+	if _, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
 		CompanyID:    companyID,
 		ResourceType: EntityTypeNode,
 		ResourceID:   standaloneNode.NodeID,
-		Assignments: []ResourceGVICAssignmentInput{{
-			Role:          domain.GVICRoleResponsible,
+		Assignments: []ResourceRACIAssignmentInput{{
+			Role:          domain.RACIRoleResponsible,
 			PrincipalType: EntityPermissionSubjectUser,
 			PrincipalID:   user.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("SetResourceGVICAssignments standalone node: %v", err)
+		t.Fatalf("SetResourceRACIAssignments standalone node: %v", err)
 	}
 
 	responsibleGate := mustCreateInboxReadLogicGate(t, repo, companyID, "Responsible gate")
-	mustSetInboxReadLogicGateGVIC(t, repo, companyID, responsibleGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleResponsible, UserID: user.UserID}})
+	mustSetInboxReadLogicGateRACI(t, repo, companyID, responsibleGate.LogicGateID, []LogicGateRACIAssignmentInput{{Role: domain.RACIRoleResponsible, UserID: user.UserID}})
 	responsibleNode, err := repo.CreateNode(companyID, "Responsible node")
 	if err != nil {
 		t.Fatalf("CreateNode responsible: %v", err)
@@ -48,17 +48,17 @@ func TestMemoryRepoMyWorkRowsAreDerivedFromV2PolicyAtReadTime(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus responsible: %v", err)
 	}
-	if _, _, err := repo.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{
+	if _, _, err := repo.PutResourceRACIPolicy(ResourceRACIPolicyUpdateInput{
 		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: responsibleNode.NodeID,
 		AssignmentMode: PolicyModeInherited, DescendantAction: PolicyDescendantActionInheritedOnly,
 	}); err != nil {
-		t.Fatalf("PutResourceGVICPolicy responsible node inherited: %v", err)
+		t.Fatalf("PutResourceRACIPolicy responsible node inherited: %v", err)
 	}
 
-	cviGate := mustCreateInboxReadLogicGate(t, repo, companyID, "CVI gate")
-	mustSetInboxReadLogicGateGVIC(t, repo, companyID, cviGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleVerifier, UserID: user.UserID}})
+	aciGate := mustCreateInboxReadLogicGate(t, repo, companyID, "ACI gate")
+	mustSetInboxReadLogicGateRACI(t, repo, companyID, aciGate.LogicGateID, []LogicGateRACIAssignmentInput{{Role: domain.RACIRoleAccountable, UserID: user.UserID}})
 
-	assertMemoryGVICMatrixProjectionCounts(t, repo, companyID, 0, 0)
+	assertMemoryRACIMatrixProjectionCounts(t, repo, companyID, 0, 0)
 
 	query := WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, Limit: 20}
 	myNodes, err := repo.ListMyNodes(query)
@@ -68,7 +68,7 @@ func TestMemoryRepoMyWorkRowsAreDerivedFromV2PolicyAtReadTime(t *testing.T) {
 	if len(myNodes) != 1 || myNodes[0].NodeID != standaloneNode.NodeID {
 		t.Fatalf("my nodes = %+v, want only standalone assignee node", myNodes)
 	}
-	assertMemoryGVICMatrixProjectionCounts(t, repo, companyID, 2, 2)
+	assertMemoryRACIMatrixProjectionCounts(t, repo, companyID, 2, 2)
 
 	responsibleNodes, err := repo.ListResponsibleInboxNodes(query)
 	if err != nil {
@@ -82,13 +82,13 @@ func TestMemoryRepoMyWorkRowsAreDerivedFromV2PolicyAtReadTime(t *testing.T) {
 		t.Fatalf("responsible node logic_gate_ids = %+v, want %q", responsibleRead.LogicGateIDs, responsibleGate.LogicGateID)
 	}
 
-	cviGates, err := repo.ListCVIInboxLogicGates(query)
+	aciGates, err := repo.ListACIInboxLogicGates(query)
 	if err != nil {
-		t.Fatalf("ListCVIInboxLogicGates: %v", err)
+		t.Fatalf("ListACIInboxLogicGates: %v", err)
 	}
-	cviRead := findInboxReadGate(cviGates, cviGate.LogicGateID)
-	if cviRead == nil || !inboxReadRolesContain(cviRead.Roles, domain.GVICRoleVerifier) {
-		t.Fatalf("CVI gates = %+v, want verifier gate", cviGates)
+	aciRead := findInboxReadGate(aciGates, aciGate.LogicGateID)
+	if aciRead == nil || !inboxReadRolesContain(aciRead.Roles, domain.RACIRoleAccountable) {
+		t.Fatalf("ACI gates = %+v, want accountable gate", aciGates)
 	}
 
 	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
@@ -105,10 +105,10 @@ func TestMemoryRepoMyWorkRowsAreDerivedFromV2PolicyAtReadTime(t *testing.T) {
 		t.Fatalf("ListResponsibleInboxNodes after access change: %v", err)
 	}
 	assertVisibleQueryNodesDoNotContain(t, responsibleNodes, responsibleNode.NodeID)
-	assertMemoryGVICMatrixProjectionCounts(t, repo, companyID, 2, 2)
+	assertMemoryRACIMatrixProjectionCounts(t, repo, companyID, 2, 2)
 }
 
-func TestGVICMatrixProjectionSchemaAndPostgresReadsUseTargetedProjection(t *testing.T) {
+func TestRACIMatrixProjectionSchemaAndPostgresReadsUseTargetedProjection(t *testing.T) {
 	migrationRaw, err := os.ReadFile("../../db/migrations/20260618_z_gvic_node_phase2_cleanup.sql")
 	if err != nil {
 		t.Fatalf("ReadFile migration: %v", err)
@@ -126,7 +126,7 @@ func TestGVICMatrixProjectionSchemaAndPostgresReadsUseTargetedProjection(t *test
 		"delete from company_projection_sequences where projection_name = 'racio_matrix'",
 	} {
 		if !strings.Contains(migration, needle) {
-			t.Fatalf("GVICMatrix migration missing %q", needle)
+			t.Fatalf("RACIMatrix migration missing %q", needle)
 		}
 	}
 
@@ -157,7 +157,7 @@ func TestGVICMatrixProjectionSchemaAndPostgresReadsUseTargetedProjection(t *test
 		"mangorts_user_can_access_resource(gate.company_id,'logic_gate',gate.logic_gate_id,$4::uuid,'edit')",
 	} {
 		if !strings.Contains(postgresReads, needle) {
-			t.Fatalf("Postgres GVICMatrix reads missing %q", needle)
+			t.Fatalf("Postgres RACIMatrix reads missing %q", needle)
 		}
 	}
 
@@ -207,25 +207,25 @@ func TestPostgresMyWorkMatrixReadsFlatNodeLeafProjectionRows(t *testing.T) {
 		}
 	}
 }
-func assertMemoryGVICMatrixProjectionCounts(t *testing.T, repo *MemoryRepo, companyID string, wantNodeRows, wantLogicGateRows int) {
+func assertMemoryRACIMatrixProjectionCounts(t *testing.T, repo *MemoryRepo, companyID string, wantNodeRows, wantLogicGateRows int) {
 	t.Helper()
 	repo.mu.RLock()
 	defer repo.mu.RUnlock()
 	nodeRows := 0
 	logicGateRows := 0
-	for _, row := range repo.GVICMatrixProjectionRows {
+	for _, row := range repo.RACIMatrixProjectionRows {
 		if row.CompanyID != companyID {
 			continue
 		}
 		switch row.ResourceType {
-		case GVICMatrixProjectionResourceNode:
+		case RACIMatrixProjectionResourceNode:
 			nodeRows++
-		case GVICMatrixProjectionResourceLogicGate:
+		case RACIMatrixProjectionResourceLogicGate:
 			logicGateRows++
 		}
 	}
 	if nodeRows != wantNodeRows || logicGateRows != wantLogicGateRows {
-		t.Fatalf("GVICMatrix projection counts node=%d logic_gate=%d, want node=%d logic_gate=%d", nodeRows, logicGateRows, wantNodeRows, wantLogicGateRows)
+		t.Fatalf("RACIMatrix projection counts node=%d logic_gate=%d, want node=%d logic_gate=%d", nodeRows, logicGateRows, wantNodeRows, wantLogicGateRows)
 	}
 }
 

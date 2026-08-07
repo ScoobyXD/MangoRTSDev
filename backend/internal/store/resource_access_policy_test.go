@@ -151,7 +151,7 @@ func TestV2PermissionCustomizeInheritAndForceReset(t *testing.T) {
 	}
 }
 
-func TestV2PermissionRejectsStaleRevisionAndDoesNotGrantThroughGVIC(t *testing.T) {
+func TestV2PermissionRejectsStaleRevisionAndDoesNotGrantThroughRACI(t *testing.T) {
 	repo, companyID, _, userA, _ := newV2PolicyTestRepo(t)
 	node, _ := repo.CreateNode(companyID, "separation")
 	current, _ := repo.GetResourcePermissionPolicy(companyID, EntityTypeNode, node.NodeID)
@@ -160,10 +160,10 @@ func TestV2PermissionRejectsStaleRevisionAndDoesNotGrantThroughGVIC(t *testing.T
 	if _, _, err := repo.PutResourcePermissionPolicy(ResourcePermissionPolicyUpdateInput{CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID, PermissionMode: PolicyModeCustomized, DefaultAccess: &deny, DescendantAction: PolicyDescendantActionInheritedOnly, ExpectedRevision: current.Revision}); err != ErrVersionConflict {
 		t.Fatalf("stale write error=%v", err)
 	}
-	if _, _, err := repo.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID, AssignmentMode: PolicyModeCustomized, Assignments: []ResourceGVICAssignmentInput{{Role: domain.GVICRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: userA.UserID}}, DescendantAction: PolicyDescendantActionInheritedOnly}); err != nil {
+	if _, _, err := repo.PutResourceRACIPolicy(ResourceRACIPolicyUpdateInput{CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID, AssignmentMode: PolicyModeCustomized, Assignments: []ResourceRACIAssignmentInput{{Role: domain.RACIRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: userA.UserID}}, DescendantAction: PolicyDescendantActionInheritedOnly}); err != nil {
 		t.Fatal(err)
 	}
 	if allowed, _ := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, userA.UserID, EntityPermissionEdit); allowed {
-		t.Fatal("GVIC incorrectly granted Edit permission")
+		t.Fatal("RACI incorrectly granted Edit permission")
 	}
 }

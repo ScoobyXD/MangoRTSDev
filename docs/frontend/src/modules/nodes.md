@@ -9,7 +9,7 @@ Nodes remain first-class workspace records with a full Editor, relationship stru
 ## Module ownership
 
 - `frontend/src/modules/nodes/types.ts` owns the shared Node record, projection, relationship, details, and permission types.
-- `frontend/src/modules/nodes/nodeRecordStore.ts` owns coalesced Node detail, projection, GVIC, and missing-resource reads. It has no unread-change fetch, cache, or cleanup write.
+- `frontend/src/modules/nodes/nodeRecordStore.ts` owns coalesced Node detail, projection, RACI, and missing-resource reads. It has no unread-change fetch, cache, or cleanup write.
 - `frontend/src/modules/nodes/nodeRelationshipGraph.ts` owns the in-memory full-workspace Node and relationship snapshot used by Editor, Home, project, and title-reconciliation consumers.
 - `frontend/src/modules/nodes/nodeRelationshipStructure.ts` derives connected structures and parent/peer/child rows without owning persistence.
 - `frontend/src/modules/nodes/relationshipRules.ts` owns the write semantics for parent, peer, and child relationship creation.
@@ -17,8 +17,8 @@ Nodes remain first-class workspace records with a full Editor, relationship stru
 
 ## API and cache contracts
 
-- Node lists, details, updates, permissions, GVIC assignments, relationships, deletion, recycle, and restore use their existing Node APIs.
-- `/v1/workspace/entity-batches` creates Nodes, relationships, folder items, GVIC assignments, and entity mappings. Items contain identity, title, and optional Explorer position only.
+- Node lists, details, updates, permissions, RACI assignments, relationships, deletion, recycle, and restore use their existing Node APIs.
+- `/v1/workspace/entity-batches` creates Nodes, relationships, folder items, RACI assignments, and entity mappings. Items contain identity, title, and optional Explorer position only.
 - Workspace snapshots use `full`, `company_explorer`, or `kanban` scopes. Node relationship snapshots contain Nodes and `node_relationships` only.
 - Committed title updates patch or invalidate Node record, relationship graph, Kanban, Home, Explorer, Project, and dock/pin caches without overwriting an active title draft.
 - Generic live selection connects Explorer, Editor, and Kanban frames. Selection is not persisted as entity geometry.

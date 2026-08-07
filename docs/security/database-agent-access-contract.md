@@ -44,7 +44,7 @@ If no such login exists yet, a human administrator must create it once. Do not t
 
 The read-only connection can be provided directly or through a tunnel. If its credential is stored in a secret manager, access should be limited to that one designated read-only credential; agents do not need general secret-listing or writer-secret access.
 
-## AWS boundary verifier
+## AWS boundary accountable
 
 `scripts/verify_agent_db_access_boundary.py` checks whether an AWS-integrated workflow can see active human/admin AWS profiles or static AWS credentials. It does not connect to PostgreSQL, validate database grants, or provide database access.
 

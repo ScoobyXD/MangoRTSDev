@@ -89,7 +89,7 @@ func NormalizeLogicGateNodeAssignmentIssueInput(input LogicGateNodeAssignmentIss
 	return input, nil
 }
 
-func NormalizeGVICMatrixNodeCreateInput(input GVICMatrixNodeCreateInput) (GVICMatrixNodeCreateInput, error) {
+func NormalizeRACIMatrixNodeCreateInput(input RACIMatrixNodeCreateInput) (RACIMatrixNodeCreateInput, error) {
 	input.CompanyID = strings.TrimSpace(input.CompanyID)
 	input.NodeID = strings.TrimSpace(input.NodeID)
 	input.Title = strings.TrimSpace(input.Title)
@@ -99,27 +99,27 @@ func NormalizeGVICMatrixNodeCreateInput(input GVICMatrixNodeCreateInput) (GVICMa
 	input.Status = NormalizeLogicGateAssignmentStatusTitle(input.Status)
 	input.ColumnID = strings.TrimSpace(input.ColumnID)
 	input.DescriptionSnapshot = strings.TrimSpace(input.DescriptionSnapshot)
-	input.CreatorLogicGateGVICRole = strings.TrimSpace(input.CreatorLogicGateGVICRole)
+	input.CreatorLogicGateRACIRole = strings.TrimSpace(input.CreatorLogicGateRACIRole)
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
 	if input.NodeID == "" {
 		input.NodeID = newUUIDv7String()
 	}
 	if input.CompanyID == "" || input.NodeID == "" || input.Title == "" {
-		return GVICMatrixNodeCreateInput{}, ErrInvalid
+		return RACIMatrixNodeCreateInput{}, ErrInvalid
 	}
 	if input.LogicGateID != "" && input.CreateLogicGateHeader != "" {
-		return GVICMatrixNodeCreateInput{}, ErrInvalid
+		return RACIMatrixNodeCreateInput{}, ErrInvalid
 	}
-	if input.CreatorLogicGateGVICRole != "" {
-		role, ok := NormalizeGVICRole(input.CreatorLogicGateGVICRole)
+	if input.CreatorLogicGateRACIRole != "" {
+		role, ok := NormalizeRACIRole(input.CreatorLogicGateRACIRole)
 		if !ok {
-			return GVICMatrixNodeCreateInput{}, ErrInvalid
+			return RACIMatrixNodeCreateInput{}, ErrInvalid
 		}
-		input.CreatorLogicGateGVICRole = role
+		input.CreatorLogicGateRACIRole = role
 	}
 	if input.PrioritySet && input.Priority != nil && (*input.Priority < 1 || *input.Priority > 5) {
-		return GVICMatrixNodeCreateInput{}, ErrInvalid
+		return RACIMatrixNodeCreateInput{}, ErrInvalid
 	}
 	return input, nil
 }

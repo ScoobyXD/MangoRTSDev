@@ -169,14 +169,14 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 	}
 	if input.CreatorUserID != "" {
 		for _, mapping := range result.EntityMappings {
-			role := domain.GVICRoleResponsible
+			role := domain.RACIRoleResponsible
 			if input.EntityKind == EntityTypeLogicGate {
-				role = input.CreatorLogicGateGVICRole
+				role = input.CreatorLogicGateRACIRole
 			}
 			if role == "" {
 				continue
 			}
-			policy, err := customizeNewPostgresResourceGVICForCreatorTx(ctx, tx, resourceGVICKey{
+			policy, err := customizeNewPostgresResourceRACIForCreatorTx(ctx, tx, resourceRACIKey{
 				companyID: input.CompanyID, resourceType: input.EntityKind, resourceID: mapping.EntityID,
 			}, role, input.CreatorUserID)
 			if err != nil {
@@ -191,7 +191,7 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 			} else {
 				for index := range result.LogicGates {
 					if result.LogicGates[index].LogicGateID == mapping.EntityID {
-						result.LogicGates[index].GVICAssignments = logicGateGVICAssignmentsFromResources(policy.GVICAssignments)
+						result.LogicGates[index].RACIAssignments = logicGateRACIAssignmentsFromResources(policy.RACIAssignments)
 						result.LogicGates[index].EffectiveAccess, _ = r.effectiveAccessLevelForUserTx(ctx, tx, input.CompanyID, input.CreatorUserID, EntityTypeLogicGate, mapping.EntityID)
 					}
 				}

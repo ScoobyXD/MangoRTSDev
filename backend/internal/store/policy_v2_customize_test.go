@@ -8,7 +8,7 @@ import (
 	"miraeopus/backend/internal/domain"
 )
 
-func TestMemoryV2GVICCustomizeWithoutAssignmentsCopiesRawEffectiveSource(t *testing.T) {
+func TestMemoryV2RACICustomizeWithoutAssignmentsCopiesRawEffectiveSource(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "a1000000-0000-4000-8000-000000000001"
 	repo.EnsureCompany(companyID, "Customize Source Co")
@@ -31,26 +31,26 @@ func TestMemoryV2GVICCustomizeWithoutAssignmentsCopiesRawEffectiveSource(t *test
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
-	if _, _, err := repo.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{
+	if _, _, err := repo.PutResourceRACIPolicy(ResourceRACIPolicyUpdateInput{
 		CompanyID: companyID, ResourceType: EntityTypeLogicGate, ResourceID: gate.LogicGateID,
 		AssignmentMode: PolicyModeCustomized, DescendantAction: PolicyDescendantActionInheritedOnly,
-		Assignments: []ResourceGVICAssignmentInput{{
-			Role: domain.GVICRoleConsulted, PrincipalType: EntityPermissionSubjectGroup, PrincipalID: group.GroupID,
+		Assignments: []ResourceRACIAssignmentInput{{
+			Role: domain.RACIRoleConsulted, PrincipalType: EntityPermissionSubjectGroup, PrincipalID: group.GroupID,
 		}},
 	}); err != nil {
 		t.Fatalf("customize gate: %v", err)
 	}
-	if _, _, err := repo.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{
+	if _, _, err := repo.PutResourceRACIPolicy(ResourceRACIPolicyUpdateInput{
 		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
 		AssignmentMode: PolicyModeInherited, DescendantAction: PolicyDescendantActionInheritedOnly,
 	}); err != nil {
 		t.Fatalf("inherit node: %v", err)
 	}
-	current, err := repo.GetResourceGVICPolicy(companyID, EntityTypeNode, node.NodeID)
+	current, err := repo.GetResourceRACIPolicy(companyID, EntityTypeNode, node.NodeID)
 	if err != nil {
-		t.Fatalf("GetResourceGVICPolicy: %v", err)
+		t.Fatalf("GetResourceRACIPolicy: %v", err)
 	}
-	customized, _, err := repo.PutResourceGVICPolicy(ResourceGVICPolicyUpdateInput{
+	customized, _, err := repo.PutResourceRACIPolicy(ResourceRACIPolicyUpdateInput{
 		CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID,
 		AssignmentMode: PolicyModeCustomized, DescendantAction: PolicyDescendantActionInheritedOnly,
 		ExpectedRevision: current.Revision,
@@ -58,30 +58,30 @@ func TestMemoryV2GVICCustomizeWithoutAssignmentsCopiesRawEffectiveSource(t *test
 	if err != nil {
 		t.Fatalf("customize inherited node: %v", err)
 	}
-	if customized.AssignmentMode != PolicyModeCustomized || len(customized.GVICAssignments) != 1 {
+	if customized.AssignmentMode != PolicyModeCustomized || len(customized.RACIAssignments) != 1 {
 		t.Fatalf("customized policy = %+v", customized)
 	}
-	assignment := customized.GVICAssignments[0]
-	if assignment.Role != domain.GVICRoleConsulted || assignment.PrincipalType != EntityPermissionSubjectGroup || assignment.PrincipalID != group.GroupID {
+	assignment := customized.RACIAssignments[0]
+	if assignment.Role != domain.RACIRoleConsulted || assignment.PrincipalType != EntityPermissionSubjectGroup || assignment.PrincipalID != group.GroupID {
 		t.Fatalf("copied assignment = %+v, want raw group pointer", assignment)
 	}
 }
 
-func TestPostgresV2GVICCustomizeCopiesEffectiveSourceBeforePrincipalValidation(t *testing.T) {
+func TestPostgresV2RACICustomizeCopiesEffectiveSourceBeforePrincipalValidation(t *testing.T) {
 	raw, err := os.ReadFile("postgres_policy_v2.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := extractFunctionSourceForTest(t, string(raw), "func (r *PostgresRepo) PutResourceGVICPolicy")
+	body := extractFunctionSourceForTest(t, string(raw), "func (r *PostgresRepo) PutResourceRACIPolicy")
 	copySource := strings.Index(body, "if mode == PolicyModeCustomized && input.Assignments == nil")
 	validateAssignments := strings.Index(body, "for _, assignment := range normalized")
 	if copySource < 0 {
-		t.Fatal("Postgres V2 GVIC customize no longer copies the raw effective source when assignments are omitted")
+		t.Fatal("Postgres V2 RACI customize no longer copies the raw effective source when assignments are omitted")
 	}
 	if validateAssignments < 0 {
-		t.Fatal("Postgres V2 GVIC customize no longer validates normalized assignments")
+		t.Fatal("Postgres V2 RACI customize no longer validates normalized assignments")
 	}
 	if copySource > validateAssignments {
-		t.Fatal("Postgres V2 GVIC customize validates an empty assignment slice before copying the effective source")
+		t.Fatal("Postgres V2 RACI customize validates an empty assignment slice before copying the effective source")
 	}
 }

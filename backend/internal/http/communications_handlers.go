@@ -1532,7 +1532,7 @@ func requireConnectedCompanyEmailStatus(w http.ResponseWriter, connection domain
 func (s *Server) findVisibleSharedInboxFolder(w http.ResponseWriter, actor ActorContext, companyID, folderID, accessLevel string) (domain.CompanyExplorerFolder, bool) {
 	folder, err := s.loadCommunicationsSharedInboxFolder(companyID, folderID)
 	if err != nil {
-		if errors.Is(err, store.ErrSharedInboxStorageUnavailable) || errors.Is(err, store.ErrGVICStorageUnavailable) {
+		if errors.Is(err, store.ErrSharedInboxStorageUnavailable) || errors.Is(err, store.ErrRACIStorageUnavailable) {
 			writeError(w, http.StatusServiceUnavailable, "shared_inbox_storage_unavailable")
 			return domain.CompanyExplorerFolder{}, false
 		}
