@@ -1959,6 +1959,103 @@ func TestCommunicationsHandlersReadProviderAndQueueVisibleIngestion(t *testing.T
 	}
 }
 
+func TestCommunicationsStoredSearchAndSelectedMessageIngestion(t *testing.T) {
+	t.Parallel()
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "stored-email-user"
+	const companyID = "11111111-1111-4111-8111-701300000499"
+	repo.EnsureCompany(companyID, "Stored Email Search Company")
+	user, err := repo.UpsertAuthUser(subject, "stored@example.com", "Stored User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID: user.UserID, Provider: "google", AccountEmail: user.Email, GrantID: "stored-grant", Status: "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+		CompanyID: companyID, PersonalUserID: user.UserID, PersonalAccountEmail: user.Email,
+		AccountEmail: user.Email, Provider: "google", ProviderThreadID: "stored-thread",
+		SelectedMessageID: "stored-message", HistoryComplete: true,
+		Messages: []domain.EmailMessageSnapshot{{
+			ID: "stored-message", ThreadID: "stored-thread", Subject: "Already stored", Date: 100,
+			Unread: true, Folders: []string{"INBOX"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerMessage := NylasMessage{
+		ID: "provider-only", ThreadID: "provider-thread", Subject: "Provider only", Date: 200,
+		Unread: true, Folders: []string{"INBOX"},
+	}
+	nylas := &fakeNylasClient{message: providerMessage, messagesByID: map[string]NylasMessage{"provider-only": providerMessage}}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas,
+	}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
+	base := "company_id=" + url.QueryEscape(companyID) + "&account_email=" + url.QueryEscape(user.Email)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/communications/stored-messages?"+base+"&mailbox=primary&q=Already&limit=12", nil)
+	req.Header.Set("Authorization", token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("stored search status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var storedPage NylasMessagePage
+	if err := json.NewDecoder(rec.Body).Decode(&storedPage); err != nil {
+		t.Fatal(err)
+	}
+	if len(storedPage.Messages) != 1 || storedPage.Messages[0].ID != "stored-message" ||
+		storedPage.Messages[0].EmailMessageID != stored.Messages[0].EmailMessageID {
+		t.Fatalf("stored search page=%+v", storedPage)
+	}
+	if nylas.messageCalls != 0 || nylas.detailCalls != 0 {
+		t.Fatalf("stored search called provider list=%d detail=%d", nylas.messageCalls, nylas.detailCalls)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/v1/communications/messages/provider-only/ingest?"+base, nil)
+	req.Header.Set("Authorization", token)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("selected ingestion status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var ingested struct {
+		Message NylasMessage `json:"message"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&ingested); err != nil {
+		t.Fatal(err)
+	}
+	if ingested.Message.ID != "provider-only" || strings.TrimSpace(ingested.Message.EmailMessageID) == "" {
+		t.Fatalf("ingested message=%+v", ingested.Message)
+	}
+	threads, err := repo.ListCommunicationsEmailThreadsForAccount(store.CommunicationsEmailAccountReadInput{
+		CompanyID: companyID, PersonalUserID: user.UserID, PersonalAccountEmail: user.Email,
+		AccountEmail: user.Email, Provider: "google",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, thread := range threads {
+		for _, message := range thread.Messages {
+			if message.ProviderMessageID == "provider-only" && message.EmailMessageID == ingested.Message.EmailMessageID {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("selected provider message was not durably ingested with the returned Mango message ID")
+	}
+}
+
 func TestMessageNeedsRawMIMEAttachmentRecoveryOnlyForUnresolvedCID(t *testing.T) {
 	t.Parallel()
 

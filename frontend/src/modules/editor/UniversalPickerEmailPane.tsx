@@ -9,6 +9,7 @@ import {
   type EmailMessage,
   type MessagePage,
 } from "../communications/communicationsApi.js";
+import { condenseEmailThreadMessages, emailThreadMessageCount } from "../communications/emailThreads.js";
 import type { EditorEntityLinkRequest } from "./editorEntityLinks.js";
 import {
   EDITOR_NEU_ACTIVE_SURFACE,
@@ -77,14 +78,24 @@ function formatDate(timestamp?: number): string {
     : date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-function appendUniqueMessages(current: EmailMessage[], incoming: EmailMessage[]): EmailMessage[] {
-  const seen = new Set(current.map((message) => message.id));
-  const next = [...current];
-  for (const message of incoming) {
-    if (!message.id.trim() || seen.has(message.id)) continue;
-    seen.add(message.id);
-    next.push(message);
-  }
+export function mergeUniversalPickerEmailMessages(current: EmailMessage[], incoming: EmailMessage[], incomingOrderFirst = false): EmailMessage[] {
+  const currentByID = new Map(current.map((message) => [message.id, message]));
+  const ordered = incomingOrderFirst ? incoming : current;
+  const additions = incomingOrderFirst ? current : incoming;
+  const seen = new Set<string>();
+  const next: EmailMessage[] = [];
+  const append = (message: EmailMessage) => {
+    const messageID = message.id.trim();
+    if (!messageID || seen.has(messageID)) return;
+    const previous = currentByID.get(messageID);
+    const merged = previous && message !== previous
+      ? { ...previous, ...message, email_message_id: message.email_message_id?.trim() || previous.email_message_id }
+      : message;
+    seen.add(messageID);
+    next.push(merged);
+  };
+  for (const message of ordered) append(message);
+  for (const message of additions) append(message);
   return next;
 }
 
@@ -112,20 +123,21 @@ export const UniversalPickerEmailPane = forwardRef<UniversalPickerEmailPaneHandl
   const activeMailboxLabel = mailbox === "spam" ? "Spam" : "All";
   const inboxCount = folderCount(folders, ["inbox"]);
   const starredCount = folderCount(folders, ["starred", "flagged"]);
+  const visibleMessages = useMemo(() => condenseEmailThreadMessages(messages), [messages]);
 
   useImperativeHandle(ref, () => ({
     moveSelection(delta: number) {
-      if (!active || messages.length === 0) return false;
-      setSelectedIndex((current) => (current + delta + messages.length) % messages.length);
+      if (!active || visibleMessages.length === 0) return false;
+      setSelectedIndex((current) => (current + delta + visibleMessages.length) % visibleMessages.length);
       return true;
     },
     chooseSelection() {
-      const message = messages[selectedIndex];
+      const message = visibleMessages[selectedIndex];
       if (!active || busy || !message || !accountEmail) return false;
       onChoose({ message, mailbox, accountEmail });
       return true;
     },
-  }), [accountEmail, active, busy, mailbox, messages, onChoose, selectedIndex]);
+  }), [accountEmail, active, busy, mailbox, onChoose, selectedIndex, visibleMessages]);
 
   useEffect(() => {
     if (!active || accountResolved) return undefined;
@@ -174,26 +186,42 @@ export const UniversalPickerEmailPane = forwardRef<UniversalPickerEmailPaneHandl
     setNextPageToken("");
     setError("");
     const timer = window.setTimeout(() => {
-      const path = `/v1/communications/messages${createMessageQuery({
+      const params = {
         companyID,
         accountEmail,
         mailbox,
         limit: EMAIL_PAGE_SIZE,
         q: query.trim() || undefined,
-      })}`;
-      void requestJSON<MessagePage>(path, { signal: controller.signal })
-        .then((page) => {
+      } as const;
+      const storedPath = `/v1/communications/stored-messages${createMessageQuery(params)}`;
+      const providerPath = `/v1/communications/messages${createMessageQuery(params)}`;
+      void (async () => {
+        let localMessages: EmailMessage[] = [];
+        try {
+          const localPage = await requestJSON<MessagePage>(storedPath, { signal: controller.signal });
           if (cancelled || requestSequenceRef.current !== sequence) return;
-          setMessages(page.messages ?? []);
-          setNextPageToken(page.next_page_token ?? "");
-        })
-        .catch((cause) => {
+          localMessages = localPage.messages ?? [];
+          setMessages(localMessages);
+        } catch (cause) {
           if (cause instanceof DOMException && cause.name === "AbortError") return;
-          if (!cancelled && requestSequenceRef.current === sequence) setError(cause instanceof Error ? cause.message : "Unable to search email.");
-        })
-        .finally(() => {
+          // Provider reconciliation below remains authoritative when no local copy is available.
+        }
+        try {
+          const providerPage = await requestJSON<MessagePage>(providerPath, { signal: controller.signal });
+          if (cancelled || requestSequenceRef.current !== sequence) return;
+          setMessages((current) => mergeUniversalPickerEmailMessages(current, providerPage.messages ?? [], true));
+          setNextPageToken(providerPage.next_page_token ?? "");
+        } catch (cause) {
+          if (cause instanceof DOMException && cause.name === "AbortError") return;
+          if (!cancelled && requestSequenceRef.current === sequence) {
+            setError(localMessages.length > 0
+              ? "Live provider sync failed. Showing Mango's stored email."
+              : cause instanceof Error ? cause.message : "Unable to search email.");
+          }
+        } finally {
           if (!cancelled && requestSequenceRef.current === sequence) setLoading(false);
-        });
+        }
+      })();
     }, query.trim() ? 180 : 0);
     return () => {
       cancelled = true;
@@ -203,9 +231,9 @@ export const UniversalPickerEmailPane = forwardRef<UniversalPickerEmailPaneHandl
   }, [accountEmail, accountResolved, active, companyID, mailbox, query, requestJSON]);
 
   useEffect(() => {
-    if (selectedIndex < messages.length) return;
-    setSelectedIndex(Math.max(0, messages.length - 1));
-  }, [messages.length, selectedIndex]);
+    if (selectedIndex < visibleMessages.length) return;
+    setSelectedIndex(Math.max(0, visibleMessages.length - 1));
+  }, [selectedIndex, visibleMessages.length]);
 
   useEffect(() => {
     const row = listRef.current?.querySelector<HTMLElement>(`[data-universal-picker-email-index="${selectedIndex}"]`);
@@ -228,7 +256,7 @@ export const UniversalPickerEmailPane = forwardRef<UniversalPickerEmailPaneHandl
         q: query.trim() || undefined,
       });
       if (requestSequenceRef.current !== sequence) return;
-      setMessages((current) => appendUniqueMessages(current, page.messages ?? []));
+      setMessages((current) => mergeUniversalPickerEmailMessages(current, page.messages ?? []));
       setNextPageToken(page.next_page_token ?? "");
     } catch (cause) {
       if (requestSequenceRef.current === sequence) setError(cause instanceof Error ? cause.message : "Unable to load more email.");
@@ -263,9 +291,9 @@ export const UniversalPickerEmailPane = forwardRef<UniversalPickerEmailPaneHandl
 
   const statusText = useMemo(() => {
     if (loading) return "Loading email…";
-    if (!error && messages.length === 0) return query.trim() ? "No matching email." : "No email in this folder.";
+    if (!error && visibleMessages.length === 0) return query.trim() ? "No matching email." : "No email in this folder.";
     return "";
-  }, [error, loading, messages.length, query]);
+  }, [error, loading, query, visibleMessages.length]);
 
   return (
     <div data-mango-universal-picker-email-pane="true" style={{ minHeight: 0, display: "grid", gridTemplateRows: "auto minmax(0,1fr)", gap: 8, padding: "0 12px 10px" }}>
@@ -307,8 +335,9 @@ export const UniversalPickerEmailPane = forwardRef<UniversalPickerEmailPaneHandl
       >
         {error && <div role="alert" style={{ margin: 4, padding: 10, border: "1px solid rgba(185,28,28,.24)", borderRadius: 10, background: "rgba(254,242,242,.94)", color: "#991b1b", fontSize: 11, fontWeight: 800 }}>{error}</div>}
         {statusText && <div style={{ padding: "30px 12px", color: "#64748b", textAlign: "center", fontSize: 12 }}>{statusText}</div>}
-        {messages.map((message, index) => {
+        {visibleMessages.map((message, index) => {
           const selected = index === selectedIndex;
+          const threadMessageCount = emailThreadMessageCount(message);
           return (
             <button
               key={message.id}
@@ -342,6 +371,7 @@ export const UniversalPickerEmailPane = forwardRef<UniversalPickerEmailPaneHandl
                 <span style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 7 }}>
                   <MailIcon color={message.unread ? "#0891b2" : "#64748b"} />
                   <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5 }}>{formatAddress(message)}</strong>
+                  {threadMessageCount > 1 && <span aria-label={`${threadMessageCount} messages in thread`} style={{ flex: "0 0 auto", borderRadius: 8, background: "rgba(14,165,233,.12)", color: "#0369a1", padding: "1px 5px", fontSize: 9, fontWeight: 900 }}>{threadMessageCount}</span>}
                 </span>
                 <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: 800 }}>{message.subject || "(no subject)"}</span>
                 <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#64748b", fontSize: 10 }}>{message.snippet || ""}</span>

@@ -427,6 +427,94 @@ order by t.updated_timestamp desc,t.email_thread_id`, input.CompanyID, connectio
 	}
 	return items, nil
 }
+
+func (r *PostgresRepo) ListCommunicationsEmailMessagesForAccount(input CommunicationsEmailAccountReadInput) ([]domain.CommunicationsEmailMessage, error) {
+	input, scope, err := normalizeCommunicationsEmailAccountReadInput(input)
+	if err != nil {
+		return nil, err
+	}
+	ctx := context.Background()
+	var connectionID string
+	if scope.scopeType == CommunicationsEmailCollaborationScopePersonal {
+		err = r.db.QueryRowContext(ctx, `select email_connection_id::text from email_connections
+where company_id=$1::uuid and connection_type='personal'
+  and personal_user_id=$2::uuid and account_email=$3 and provider=$4`,
+			input.CompanyID, scope.personalUserID, scope.personalAccountEmail, input.Provider).Scan(&connectionID)
+	} else {
+		err = r.db.QueryRowContext(ctx, `select connection.email_connection_id::text
+from shared_inboxes inbox
+join email_connections connection on connection.company_id=inbox.company_id
+ and connection.email_connection_id=inbox.company_email_connection_id
+where inbox.company_id=$1::uuid and inbox.shared_inbox_id=$2::uuid
+  and connection.account_email=$3 and connection.provider=$4`,
+			input.CompanyID, scope.sharedInboxID, scope.accountEmail, input.Provider).Scan(&connectionID)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.QueryContext(ctx, `
+select message.company_id::text, message.email_message_id::text, message.email_thread_id::text,
+       thread.provider_thread_id, message.provider_message_id, message.message_order, message.subject,
+       message.sender_snapshot::text, message.to_snapshot::text, message.cc_snapshot::text,
+       message.bcc_snapshot::text, message.reply_to_snapshot::text,
+       coalesce(extract(epoch from message.message_timestamp)::bigint, 0),
+       message.rich_html_body, message.text_fallback, message.snippet, message.unread, message.starred,
+       message.folder_snapshot::text, message.folder_id_snapshot::text, message.attachment_metadata::text,
+       message.download_complete, message.created_timestamp, message.updated_timestamp
+from email_messages message
+join email_threads thread
+  on thread.company_id=message.company_id
+ and thread.email_thread_id=message.email_thread_id
+where thread.company_id=$1::uuid and thread.email_connection_id=$2::uuid
+order by message.message_timestamp desc nulls last, message.provider_message_id`, input.CompanyID, connectionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []domain.CommunicationsEmailMessage{}
+	for rows.Next() {
+		var item domain.CommunicationsEmailMessage
+		var fromJSON, toJSON, ccJSON, bccJSON, replyToJSON string
+		var foldersJSON, folderIDsJSON, attachmentsJSON string
+		var textFallback string
+		if err := rows.Scan(
+			&item.CompanyID, &item.EmailMessageID, &item.EmailThreadID, &item.ProviderThreadID,
+			&item.ProviderMessageID, &item.MessageOrder,
+			&item.Message.Subject, &fromJSON, &toJSON, &ccJSON, &bccJSON,
+			&replyToJSON, &item.Message.Date, &item.Message.Body, &textFallback,
+			&item.Message.Snippet, &item.Message.Unread, &item.Message.Starred,
+			&foldersJSON, &folderIDsJSON, &attachmentsJSON, &item.Message.DownloadComplete,
+			&item.CreatedTimestamp, &item.UpdatedTimestamp,
+		); err != nil {
+			return nil, err
+		}
+		item.Message.ID = item.ProviderMessageID
+		item.Message.EmailMessageID = item.EmailMessageID
+		item.Message.ThreadID = item.ProviderThreadID
+		if item.Message.Snippet == "" {
+			item.Message.Snippet = textFallback
+		}
+		for _, value := range []struct {
+			raw    string
+			target any
+		}{
+			{fromJSON, &item.Message.From}, {toJSON, &item.Message.To},
+			{ccJSON, &item.Message.Cc}, {bccJSON, &item.Message.Bcc},
+			{replyToJSON, &item.Message.ReplyTo}, {foldersJSON, &item.Message.Folders},
+			{folderIDsJSON, &item.Message.FolderIDs}, {attachmentsJSON, &item.Message.Attachments},
+		} {
+			if err := json.Unmarshal([]byte(value.raw), value.target); err != nil {
+				return nil, err
+			}
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (r *PostgresRepo) GetCommunicationsNodeEmailThread(companyID, nodeID, emailThreadID string) (domain.CommunicationsNodeEmailThread, error) {
 	companyID, nodeID, emailThreadID = cleanUUIDText(companyID), cleanUUIDText(nodeID), cleanUUIDText(emailThreadID)
 	if companyID == "" || nodeID == "" || emailThreadID == "" {

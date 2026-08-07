@@ -1263,7 +1263,7 @@ test("the obsolete EmailPickerModal is removed and email attachment uses the uni
   assert.doesNotMatch(universalPicker, /<kbd/);
   assert.match(emailPane, /"primary"[\s\S]*"starred"[\s\S]*"sent"/);
   assert.match(emailPane, /"all"[\s\S]*"spam"/);
-  assert.match(emailPane, /requestJSON<MessagePage>\(path, \{ signal: controller\.signal \}\)[\s\S]*controller\.abort\(\)/);
+  assert.match(emailPane, /requestJSON<MessagePage>\(storedPath, \{ signal: controller\.signal \}\)[\s\S]*requestJSON<MessagePage>\(providerPath, \{ signal: controller\.signal \}\)[\s\S]*controller\.abort\(\)/);
   assert.doesNotMatch(emailPane, /composeOpen|composeDraft|submitCompose|sendEmail\s*\(|<textarea|Schedule send|Save draft|Write a reply|Send message/);
 });
 

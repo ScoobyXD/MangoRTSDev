@@ -1,3 +1,19 @@
+# Process Story: New mail appears live and picker selections always have a durable identity
+
+A Nylas webhook is accepted by the cloud backend and commits its narrow mailbox hint to the shared realtime outbox
+↓
+The exact active My Triage or Shared Triage browser receives that hint, invalidates the exact mailbox cache, and reloads the visible message list and folder counts
+↓
+The Universal picker searches Mango's stored email first so useful local matches paint immediately, then always reconciles the same mailbox/query with Nylas
+↓
+Stored and provider results merge by exact mailbox-scoped provider message ID, preserve a known Mango `email_message_id`, and collapse with the same thread helper used by My Triage and Shared Triage
+↓
+If a chosen provider result has not yet been stored, Mango synchronously ingests that exact authorized message and returns its durable `email_message_id`
+↓
+The existing typed Node or Project attachment command receives that durable identity; provider failure leaves already-painted stored mail visible and never invents a relationship
+
+Last updated: 2026-08-07
+
 # Process Story: A selected email can reference, link, float, chat, and stay visible
 
 A user opens a message in My Triage or Shared Triage
@@ -439,7 +455,30 @@ EMAIL125 - Encountered-email chat auto-open is frontend-only. Selecting a My Tri
 
 EMAIL126 - Every universal picker host renders an explicit transparent outside-click dismiss layer behind the elevated popup; a pointer press on that layer closes the picker without selecting or mutating. In My Triage and Shared Triage, the compact elevated green placement notice is anchored nine pixels left of the floating-Node control. A successful standalone creation paints that notice before publishing the mailbox/reply Node indicator; the indicator follows after 450 milliseconds while the notice remains visible for its normal brief lifetime. A failed creation paints neither success nor a false indicator. Mail Node-indicator activation opens the Node without transient information focus, so the yellow target flash remains exclusive to Updates-row navigation.
 
+EMAIL127 - Exact active-mailbox `message.created`, `message.updated`, and `message.deleted` hints invalidate the exact message-page cache and coalesce one authoritative visible-list reload plus folder reload. First subscription acceptance performs the same canonical reconciliation to close the initial-load race. Folder-only hints reload folders only, selected-detail hints remain selection-owned, local command echoes perform no duplicate provider read, and navigation or disposal cancels obsolete mailbox work.
+
+EMAIL128 - Universal-picker email search is database-first but never treats a nonempty local result as complete provider coverage. Mango paints authorized stored matches immediately, then always queries the same exact personal account, mailbox, and search text at Nylas. Provider success becomes the ordering/metadata authority while preserving known durable Mango IDs; provider failure leaves stored results usable with a visible sync warning. Exact provider message ID within the mailbox scope is the merge identity.
+
+EMAIL129 - The Universal picker, My Triage, and Shared Triage call the same thread-condensation helper. The first/newest ordered message represents the thread; unread, starred, loaded-message count, authoritative provider thread count, and mailbox scope follow the shared rules. Pagination merges raw exact messages before condensation so replies split across pages cannot create duplicate picker rows.
+
+EMAIL130 - Choosing a provider email with no `email_message_id` calls the authenticated exact-mailbox ingestion command before any Node or Project attachment. The backend fetches provider truth, idempotently upserts the mailbox-scoped durable thread/message, returns the real Mango `email_message_id`, and keeps full-thread ingestion prioritized. The later relationship command remains the established typed Node or Project command; no provider ID is substituted for a Mango UUID and no generic relationship or surrogate identity is created.
+
 ## Scenarios
+
+### Scenario EMAIL-S0: Live arrival, resilient search, and safe picker attachment
+
+Business logic covered:
+- EMAIL127 through EMAIL130
+
+Given:
+- The browser has a healthy exact mailbox realtime subscription.
+- A new provider message arrives, or a user searches and chooses an email in the Universal picker.
+
+Expected:
+- The visible triage list reloads after the narrow message hint without a browser refresh.
+- Picker-local results appear before provider reconciliation and remain visible if provider reconciliation fails.
+- Picker rows collapse with the same thread rules as triage.
+- A provider-only selection receives a durable Mango message ID before the typed Node/Project attachment command runs.
 
 ### Scenario EMAIL-S1: Personal Draft Durability
 

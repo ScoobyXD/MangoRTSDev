@@ -305,6 +305,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/communications/email-collaborations", s.handleCommunicationsEmailCollaborations)
 	mux.HandleFunc("/v1/communications/email-collaborations/", s.handleCommunicationsEmailCollaborationByID)
 	mux.HandleFunc("/v1/communications/signature", s.handleCommunicationsEmailSignature)
+	mux.HandleFunc("/v1/communications/stored-messages", s.handleCommunicationsStoredMessages)
 	mux.HandleFunc("/v1/communications/messages", s.handleCommunicationsMessages)
 	mux.HandleFunc("/v1/communications/messages/archive-batch", s.handleCommunicationsMessagesArchiveBatch)
 	mux.HandleFunc("/v1/communications/messages/", s.handleCommunicationsMessageByID)
