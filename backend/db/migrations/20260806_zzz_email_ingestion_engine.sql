@@ -59,6 +59,9 @@ begin
   alter table company_email_connections rename to email_connections;
   alter table email_connections rename column company_email_connection_id to email_connection_id;
   alter table email_connections
+    drop constraint if exists company_email_connections_company_id_account_email_key,
+    drop constraint if exists company_email_connections_company_id_grant_id_key;
+  alter table email_connections
     add column connection_type text,
     add column personal_user_id uuid,
     add column ingestion_started_at timestamptz,
@@ -95,8 +98,6 @@ begin
     alter column last_successful_scan_at set not null;
 
   alter table email_connections
-    drop constraint if exists company_email_connections_company_id_account_email_key,
-    drop constraint if exists company_email_connections_company_id_grant_id_key,
     drop constraint if exists company_email_connections_provider_chk,
     drop constraint if exists company_email_connections_account_email_chk,
     drop constraint if exists company_email_connections_grant_id_nonblank_chk,

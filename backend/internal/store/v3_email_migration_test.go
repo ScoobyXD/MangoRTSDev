@@ -152,6 +152,11 @@ func TestEmailIngestionCutoverRenamesInPlaceAndPreservesCheckpoints(t *testing.T
 			t.Fatalf("email ingestion cutover contains destructive replacement %q", forbidden)
 		}
 	}
+	connectionAccountConstraintDrop := strings.Index(source, "drop constraint if exists company_email_connections_company_id_account_email_key")
+	personalConnectionInsert := strings.Index(source, "insert into email_connections")
+	if connectionAccountConstraintDrop < 0 || personalConnectionInsert < 0 || connectionAccountConstraintDrop > personalConnectionInsert {
+		t.Fatal("shared-only company/account uniqueness must be removed before personal connections are inserted")
+	}
 }
 
 func TestV3EmailCopyEncodesApprovedBusinessRules(t *testing.T) {

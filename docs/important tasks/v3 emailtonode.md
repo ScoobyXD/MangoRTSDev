@@ -4,6 +4,11 @@ Date: August 6, 2026
 
 Status: Approved Phase 1 implementation contract.
 
+The complexity is support work for three simple user actions:
+Put an email somewhere useful.
+Chat with coworkers about it.
+Create a shared reply draft.
+
 ## Process Story
 
 Mango continuously protects a connected mailbox without requiring the user to be logged in.
