@@ -4,6 +4,8 @@ A human operator runs the reviewed RACI role migration against an existing datab
 ↓
 The migration locks and converts only the final live V2 policy, notification, and Recycle Bin tables
 ↓
+Stored notification event names are converted through the real `notifications.notification_type` column
+↓
 Generated becomes Responsible, while Verified or Verifier becomes Accountable
 ↓
 The migration completes without reading, locking, or recreating the retired GVIC matrix projection table
@@ -77,7 +79,7 @@ RACI40 - The editor presents RACI as Responsible (orange #f97316), Accountable (
 RACI41 - Role cards show direct person and group names instead of a numeric People summary; names wrap within the card, and a group name represents its live nested membership.
 RACI42 - Replacing a V2 policy notifies a non-actor user when that user's highest effective RACI role changes, even when the user was already effective before the write.
 RACI43 - Accountable is the green second role and uses the A inbox. The obsolete Verifier role, V inbox, and CVI notification surface are rejected after cutover; migration converts stored Verified or Verifier values to Accountable and CVI notifications to ACI.
-RACI44 - The RACI forward migration uses only live V2 policy, notification, and Recycle Bin storage. It must not read, lock, update, or recreate the retired `gvic_matrix_projection_table`.
+RACI44 - The RACI forward migration uses only live V2 policy, notification, and Recycle Bin storage. Notification event-name conversion uses `notifications.notification_type`; the migration must not reference a nonexistent `notifications.event_type` column or read, lock, update, or recreate the retired `gvic_matrix_projection_table`.
 
 ## Scenarios
 
@@ -105,6 +107,7 @@ Expected:
 - Responsible, accountable, consulted, and informed are accepted after normalization.
 - Legacy Generated, Verified, and Verifier role values are rejected by runtime writes after the migration.
 - The forward migration converts the live role data without reading, locking, updating, or recreating the retired projection table.
+- Stored CVI/RCVI notification event names are converted through `notifications.notification_type`, never a nonexistent `event_type` column.
 - Invalid roles, resource types, principal types, or missing IDs are rejected.
 - Responsible and Accountable do not produce edit/delete permission access.
 - Consulted and informed do not produce edit permission access.

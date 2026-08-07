@@ -90,6 +90,9 @@ func TestRACIRoleMigrationAndSchemaContract(t *testing.T) {
 	if strings.Contains(lower, "gvic_matrix_projection_table") {
 		t.Fatal("RACI migration must not depend on the retired GVIC matrix projection table")
 	}
+	if strings.Contains(lower, "set event_type") || strings.Contains(lower, "where event_type") {
+		t.Fatal("RACI migration must use notifications.notification_type, not a nonexistent event_type column")
+	}
 	for _, required := range []string{
 		"when 'generated' then 'responsible'",
 		"when 'verified' then 'accountable'",
@@ -100,6 +103,8 @@ func TestRACIRoleMigrationAndSchemaContract(t *testing.T) {
 		"when 'responsible' then 1 when 'accountable' then 2 when 'consulted' then 3",
 		"update recycle_bin_items",
 		"set surface='aci_inbox' where surface='cvi_inbox'",
+		"set notification_type = case notification_type",
+		"where notification_type in ('cvi_inbox.changed', 'cvi_inbox.rcvi_updated')",
 		"when 'cvi_inbox.changed' then 'aci_inbox.changed'",
 		"when 'cvi_inbox.rcvi_updated' then 'aci_inbox.raci_updated'",
 	} {

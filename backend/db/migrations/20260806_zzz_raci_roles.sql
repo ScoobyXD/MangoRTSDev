@@ -38,12 +38,12 @@ alter table resource_gvic_assignments
 alter table notifications drop constraint if exists notifications_surface_chk;
 update notifications set surface='aci_inbox' where surface='cvi_inbox';
 update notifications
-set event_type = case event_type
+set notification_type = case notification_type
   when 'cvi_inbox.changed' then 'aci_inbox.changed'
   when 'cvi_inbox.RCVI_updated' then 'aci_inbox.RACI_updated'
-  else event_type
+  else notification_type
 end
-where event_type in ('cvi_inbox.changed', 'cvi_inbox.RCVI_updated');
+where notification_type in ('cvi_inbox.changed', 'cvi_inbox.RCVI_updated');
 alter table notifications
   add constraint notifications_surface_chk
     check (surface = '' or surface in ('r_inbox', 'aci_inbox', 'my_triage', 'shared_triage'));
