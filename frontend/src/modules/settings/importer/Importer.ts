@@ -96,7 +96,7 @@ import Papa from "papaparse";
 const CORS_PROXY_PATH = "https://mango-cors-proxy.mangorts-dev.workers.dev/corsproxy/";
 const API_FOLDER_CREATION_PATHNAME = "/v1/company-explorer/folders"
 
-function assembleDocumentUploadPathname(resourceID: string, resourceType:"logic-gate", documentID="logic-gate-overview"): string{
+function assembleDocumentUploadPathname(resourceID: string, resourceType: string="logic-gate", documentID: string="logic-gate-overview"): string{
     return `/v1/editor-json/${resourceType}/${resourceID}/documents/${documentID}?company_id=${encodeURIComponent(fetchCurrentCompanyID())}`;
 }
 
@@ -216,19 +216,16 @@ async function fetchAndUploadImage(href: string, targetResourceID: string, targe
     const uploadStatus = await uploadMangoAttachment(attachmentRequestJSON, uploadMetadata);
     const attachment = uploadStatus.attachment;
 
-    return attachment;
-
-}
-
-function injectImage(){
-
     // Reuse a method used by the official Mango Tiptap editor to create a Mango-Tiptap image block.
     // TODO: Standardize use of "title"/fetched filename. Currently both are used in different places.
-    const content = createMangoTiptapAttachmentContent(attachment, "center");
+    return createMangoTiptapAttachmentContent(attachment, "center");
+
 }
 
-function createMarkdownAwareMangoAttachmentImageNode(targetResourceID: string, targetResourceType: MangoAttachmentResourceType): Node{
-    
+async function convertMarkdownToMangoTiptap(markdownString: string, targetResourceID: string, targetResourceType: MangoAttachmentResourceType): MangoTiptapDocument {
+
+    // Create a markdown image handler that is able to upload identified images and associate images with
+    // the correct resource (such as a logic gate).
     const markdownAwareMangoAttachmentImageNode = MangoAttachmentImage.extend({
 
         markdownTokenName: "image",
@@ -260,15 +257,6 @@ function createMarkdownAwareMangoAttachmentImageNode(targetResourceID: string, t
             };
         }
     });
-
-    return markdownAwareMangoAttachmentImageNode;
-}
-
-function convertMarkdownToMangoTiptap(markdownString: string, targetResourceID: string, targetResourceType: MangoAttachmentResourceType): MangoTiptapDocument {
-
-    // Create a markdown image handler that is able to upload identified images and associate images with
-    // the correct resource (such as a logic gate).
-    const markdownAwareMangoAttachmentImageNode = createMarkdownAwareMangoAttachmentImageNode(targetResourceID, targetResourceType);
 
     // TODO: Enable reuse of the Mango Tiptap extensions and the conversion editor.
     // Configure the custom Mango extensions for Tiptap. Most options are unused as this editor
@@ -304,8 +292,26 @@ function convertMarkdownToMangoTiptap(markdownString: string, targetResourceID: 
 
     let tiptapDocument = conversionEditor.markdown.parse(markdownString);
 
-    // Walk through the Tiptap document to fetch and upload images.
-    
+    // Walk through the Tiptap document to fetch and upload images. As nodes can be nested, append
+    // nested items to the queue.
+    let nodeQueue = tiptapDocument.content ?? [];
+    while(!(nodeQueue.length <= 0)){
+        let currentNode = nodeQueue.shift;
+        
+        if(currentNode.content){
+            nodeQueue.push.apply(currentNode.content);
+        }
+
+        if(currentNode && currentNode.type == "mangoAttachmentImage"){
+            const href = currentNode.attrs.attachmentId;
+
+            const imageContentJSON = fetchAndUploadImage(href, targetResourceID, targetResourceType);
+
+            // TODO: Develop a method to stay in sync with the format of Mango Image JSONs.
+            currentNode.attrs = imageContentJSON;
+
+        }
+    }
 
     // Finally, convert the Tiptap-format document into a Mango-Tiptap document.
     return convertTiptapToMangoTiptap(tiptapDocument);
@@ -395,7 +401,7 @@ function createLogicGate(logicGateTitle: string, parentFolderID: string){
     return logicGateIDs;
 }
 
-async function attachDocumentToResource(resourceID: string, document: MangoTiptapDocument, resourceType:"logic-gate", documentID="logic-gate-overview"){
+async function attachDocumentToResource(resourceID: string, document: MangoTiptapDocument, resourceType: string="logic-gate", documentID: string="logic-gate-overview"){
 
     const requestURL = assembleDocumentUploadPathname(resourceID, resourceType, documentID);
 
@@ -452,10 +458,14 @@ function wrappedCSVParse(csv: File, parseConfig: any): Promise<any>{
     });
 }
 
-// Parses a single line of a CSV using a parser specialized for the format of the
+// A closure that parses a single line of a CSV using a parser specialized for the format of the
 // current CSV. All imported items will be stored under a single parent folder.
-function setupSpecializedParserAndDisplayProgressCall(specializedParser: Function, parentFolderID: string){
-    return (results: any, parser: any) => {
+function setupSpecializedParserAndDisplayProgressCall(specializedParser: (parsedCSVROW: any) => standardizedImportFields, rootImportFolder: string){
+
+    // Keep track of the name and Mango ID of folders that have been made within the import folder.
+    let createdFolders: Record<string, string> = {};
+
+    return async (results: any, parser: any) => {
 
         // TODO: Enable Error Handling
         if(results.errors) {
@@ -463,6 +473,23 @@ function setupSpecializedParserAndDisplayProgressCall(specializedParser: Functio
         };
 
         const standardizedOutput = specializedParser(results.data);
+
+        const logicGateName = standardizedOutput.title;
+        const parentFolderName = standardizedOutput.parentFolderName;
+        const documentContent = standardizedOutput.documentContent;
+
+        // Create the parent folder if it hasn't already been created.
+        if(logicGateName in createdFolders){
+            const newFolderID = await createFolder(parentFolderName, rootImportFolder);
+            createdFolders[parentFolderName] = newFolderID;
+        }
+
+        // Create the containing logic gate.
+        const newLogicGateID = createLogicGate(logicGateName, createdFolders[parentFolderName]);
+
+        // Parse the document content and attach it to the logic gate.
+        const document = convertMarkdownToMangoTiptap(documentContent, newLogicGateID, "logic_gate");
+        await attachDocumentToResource(newLogicGateID, document)
 
 
         // Update display progress.
@@ -517,12 +544,13 @@ async function parseAndImport(csv: File){
     }
 
     else {
+        throw console.error("Oops, we don't have a parser for the type of file you uploaded at the moment!");
         // TODO: Display an error, as other CSV formats are not currently supported.
     }
 
     // Setup a parent folder for the export.
     const folderName = `${currentDate} ${importSource} Import`;
-    const importFolderID = createFolder(folderName);
+    const importFolderID = await createFolder(folderName);
 
     // Prepare for the full parse.
     const fullCSVParseConfig = {
