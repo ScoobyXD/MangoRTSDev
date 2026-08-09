@@ -184,14 +184,11 @@ func (r *MemoryRepo) SearchCompanyExplorer(query CompanyExplorerSearchQuery) (Co
 		var pathOK bool
 		if entity.EntityType == CompanyExplorerV2EntityNode {
 			locationPath, pathOK = r.companyExplorerNodeSearchLocationPathLocked(query.CompanyID, entity.ResourceID, query.PermissionUserID)
-			if !pathOK {
-				return
-			}
 		} else {
 			locationPath, pathOK = r.companyExplorerV2VisibleLocationPathLocked(rowsQuery, entity.EntityID)
-			if !pathOK {
-				return
-			}
+		}
+		if !pathOK {
+			locationPath = []CompanyExplorerLocationSegment{}
 		}
 		hasChildren := entity.EntityType != CompanyExplorerV2EntityNode && len(r.companyExplorerV2DirectChildEdgesLocked(query.CompanyID, entity.EntityID)) > 0
 		matches = append(matches, CompanyExplorerSearchResult{

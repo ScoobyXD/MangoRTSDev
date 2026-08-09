@@ -363,18 +363,8 @@ with recursive candidates as (
   select candidate.resource_type,
          candidate.resource_id,
          case
-           when $7 and $3='' then true
-           when not ($3='' or coalesce(direct_access.allowed,false)) then false
-           when candidate.resource_type='node' and not exists (
-             select 1 from organization_links link
-             where link.candidate_type=candidate.resource_type and link.candidate_id=candidate.resource_id
-           ) then true
-           else exists (
-             select 1 from ranked_locations location
-             where location.candidate_type=candidate.resource_type
-               and location.candidate_id=candidate.resource_id
-               and location.rank=1
-           )
+           when $3='' then true
+           else coalesce(direct_access.allowed,false)
          end as allowed
   from candidate_batch candidate
   left join target_access direct_access

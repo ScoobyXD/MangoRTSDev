@@ -174,6 +174,53 @@ run("search tree rows merge shared paths and render each matching resource once"
   assert.equal(rows[3]?.hasChildren, false);
 });
 
+run("search tree renders directly authorized results at the root when their locations are restricted", () => {
+  const rows = buildCompanyExplorerSearchTreeRows([
+    {
+      company_id: "c",
+      resource_type: "logic_gate",
+      resource_id: "gate-restricted-path",
+      entity_id: "gate-restricted-path",
+      display_name: "Visible Gate",
+      match_reason: "name_exact",
+      location_path: [],
+      has_children: false,
+      created_timestamp: "1",
+      updated_timestamp: "1",
+    },
+    {
+      company_id: "c",
+      resource_type: "project",
+      resource_id: "project-restricted-path",
+      entity_id: "project-restricted-path",
+      display_name: "Visible Project",
+      match_reason: "name_exact",
+      location_path: [],
+      has_children: false,
+      created_timestamp: "2",
+      updated_timestamp: "2",
+    },
+    {
+      company_id: "c",
+      resource_type: "node",
+      resource_id: "node-restricted-path",
+      entity_id: "node-restricted-path",
+      display_name: "Visible Node",
+      match_reason: "name_exact",
+      location_path: [],
+      has_children: false,
+      created_timestamp: "3",
+      updated_timestamp: "3",
+    },
+  ]);
+
+  assert.deepEqual(rows.map((row) => row.label), ["Visible Gate", "Visible Project", "Visible Node"]);
+  assert.deepEqual(rows.map((row) => row.depth), [0, 0, 0]);
+  assert.deepEqual(rows.map((row) => row.parentEntityID), ["", "", ""]);
+  assert.deepEqual(rows.map((row) => row.folderLabel), ["", "", ""]);
+  assert.equal(rows.every((row) => row.syntheticKind === "search_result"), true);
+});
+
 run("company explorer search debounces and aborts superseded requests", () => {
   const content = readFileSync(resolve(process.cwd(), "frontend/src/modules/company-explorer/CompanyExplorerContent.tsx"), "utf8");
   const api = readFileSync(resolve(process.cwd(), "frontend/src/modules/company-explorer/companyExplorerLazyApi.ts"), "utf8");

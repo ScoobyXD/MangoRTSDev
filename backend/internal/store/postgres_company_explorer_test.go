@@ -185,6 +185,7 @@ func TestPostgresCompanyExplorerCandidateSearchNarrowsBeforePermissionChecks(t *
 		"when 'logic_gate' then 0 when 'node' then 1 when 'project' then 2 when 'folder' then 3",
 		"jsonb_agg(jsonb_build_object",
 		"when $7 then '[]'::jsonb",
+		"when $3='' then true else coalesce(direct_access.allowed,false)",
 		"companyexplorerfinalhaschildrenexpr",
 	} {
 		if !strings.Contains(source, want) {

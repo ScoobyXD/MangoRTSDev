@@ -4,9 +4,9 @@ A user types a nonblank Company Explorer or Universal Picker query
 ↓
 Mango waits briefly for the active query, cancels the superseded request, and ranks a bounded candidate batch directly from the selected source tables
 ↓
-Only after narrowing does Mango resolve each candidate's Edit permission and, when the candidate has an organizational location, the visibility of that exact Logic Gate or Project placement and its folder ancestors
+Only after narrowing does Mango resolve each candidate's Edit permission and separately determine whether its exact Logic Gate, Project, and folder location is fully visible
 ↓
-Company Explorer search returns candidate-specific typed paths and merges common path prefixes so one folder or resource branch is rendered once even when several matches share it
+Company Explorer returns every directly accessible candidate, includes a typed location only when every part is visible, omits the whole restricted location otherwise, and merges common visible path prefixes
 ↓
 The read performs no default-folder repair or company-wide permission scan, while Universal Picker keeps its existing flat result ranking
 
@@ -123,10 +123,11 @@ E61 - Explorer policy reads explain inherited/customized mode, effective source,
 E62 - Moving a subtree after an older force reset protects it through the new parent-link sequence; a later reset from its new ancestry may cross that link.
 E63 - Deleting an Explorer target removes both V2 settings rows and cascading policy edges; deleting only a placement follows root/detach materialization rules without deleting the target.
 E64 - Company Explorer and Editor/Universal Picker entity ranking first read a bounded candidate batch directly from their requested source tables. Permission and location visibility checks run only for that batch, and later ranked batches are checked only when needed to fill the requested authorized result limit. Universal Picker keeps Node, Project, then Logic Gate ranking; Company Explorer keeps Logic Gate, Node, Project, then folder ranking.
-E65 - Company Explorer and Universal Picker location visibility use only each narrowed candidate's exact typed organization links and folder ancestors. Company Explorer placement tables provide those paths but store no permission or RACI assignment rows and are not source tables for entity names.
+E65 - Company Explorer and Universal Picker location visibility use only each narrowed candidate's exact typed organization links and folder ancestors. Company Explorer placement tables provide those paths but store no permission or RACI assignment rows and are not source tables for entity names. A directly accessible candidate remains searchable when its location is restricted.
 E66 - A Company Explorer or Universal Picker search GET performs no default-folder creation, repair, transaction, upsert, or version-triggering write. Default-folder setup belongs to explicit initialization and repair paths.
 E67 - Within one narrowed permission batch, the actor's nested group ancestry is resolved once and reused across candidate resource, location-resource, and folder checks. Effective permission policy still follows each candidate's canonical immediate-parent chain.
 E68 - Company Explorer waits 120 milliseconds before issuing search, aborts the superseded request when the query changes or the search view closes, and never reports an intentional abort as a search failure.
+E69 - Direct Edit permission on a matching Project, Logic Gate, Node, or folder is sufficient to return that item. Company Explorer includes its organizational path only when the location resource and every folder ancestor are also accessible; if any part is `no_access`, the entire path is omitted and only the matched item appears at the search root. Universal Picker likewise returns the directly accessible item without exposing organizational ancestry.
 
 
 ## Bug History
