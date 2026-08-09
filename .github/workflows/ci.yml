@@ -38,6 +38,7 @@ jobs:
       EMAIL_SQS_POSTGRES17_USER: postgres
       EMAIL_SQS_POSTGRES17_PASSWORD: postgres
       MANGORTS_EMAIL_SQS_TEST_DSN: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
+      MANGORTS_REALTIME_PLAN_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/mangorts_realtime_plan_test?sslmode=disable
 
     steps:
       - uses: actions/checkout@v4
@@ -59,7 +60,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes postgresql-client
-          echo "POSTGRES_BIN=$(dirname "$(command -v psql)")" >> "$GITHUB_ENV"
+
+      - name: Create separate realtime plan test database
+        env:
+          PGPASSWORD: postgres
+        run: createdb --host=127.0.0.1 --port=5432 --username=postgres mangorts_realtime_plan_test
 
       - name: Install frontend dependencies
         working-directory: frontend
