@@ -119,7 +119,7 @@ const unsafeDuplicateFixtures = [
 	},
 ];
 
-function installShape({ final = false, ingestionFinal = final, archiveFinal = final, partial = false, extra = false, missing = false } = {}) {
+function installShape({ final = false, ingestionFinal = final, archiveFinal = final, partial = false, extra = false, missing = false, skipIngestionStatusConstraint = false } = {}) {
   sql("drop schema public cascade; create schema public");
   const connections = [...connectionColumns];
   if (extra) connections.push("unexpected_column text");
@@ -130,6 +130,12 @@ function installShape({ final = false, ingestionFinal = final, archiveFinal = fi
   const archive = [...archiveLegacy];
   if (archiveFinal) archive.splice(3, 0, "attempt_token uuid");
   sql(`create table email_connections (${connections.join(",")}); create table email_ingestion_jobs (${ingestion.join(",")}); create table communications_email_archive_job_items (${archive.join(",")})`);
+	if (!skipIngestionStatusConstraint) {
+		const statuses = ingestionFinal
+			? "'accepted','processing','completed','parked','exhausted'"
+			: "'pending','retry','processing','completed','failed'";
+		sql(`alter table email_ingestion_jobs add constraint email_ingestion_jobs_status_chk check (status in (${statuses}))`);
+	}
 }
 
 function requireText(output, value, label) {
@@ -257,7 +263,7 @@ try {
 
 	for (const fixture of unsafeDuplicateFixtures) {
 		console.log(`checking ${fixture.label} rejection before any write`);
-		installShape();
+		installShape({ skipIngestionStatusConstraint: fixture.label === "unknown-status duplicate" });
 		sql(`insert into email_ingestion_jobs(ingestion_job_id,company_id,email_connection_id,provider_message_id,${fixture.columns}) values ('70000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001','unsafe',${fixture.values})`);
 		output = runFile(preflight);
 		requireText(output, fixture.preflightStop, `${fixture.label} preflight`);

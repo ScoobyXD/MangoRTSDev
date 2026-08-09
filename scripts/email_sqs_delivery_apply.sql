@@ -188,15 +188,15 @@ begin
   alter table email_connections add constraint email_connections_status_chk check (
     status in ('connected','disconnected','reauth_required','configuration_required')
   );
+  alter table email_ingestion_jobs
+    drop constraint if exists email_ingestion_jobs_status_chk,
+    drop constraint if exists email_ingestion_jobs_provider_attempt_chk;
   update email_ingestion_jobs
   set status='exhausted',provider_attempt_count=0,attempt_token=null,updated_timestamp=now()
   where status='failed';
   alter table communications_email_archive_job_items drop constraint if exists communications_email_archive_job_items_status_chk;
   alter table communications_email_archive_job_items add constraint communications_email_archive_job_items_status_chk
     check (status in ('pending','processing','archived','failed'));
-  alter table email_ingestion_jobs
-    drop constraint if exists email_ingestion_jobs_status_chk,
-    drop constraint if exists email_ingestion_jobs_provider_attempt_chk;
   alter table email_ingestion_jobs
     alter column status set default 'accepted',
     add constraint email_ingestion_jobs_status_chk check (status in ('accepted','processing','completed','parked','exhausted')),
