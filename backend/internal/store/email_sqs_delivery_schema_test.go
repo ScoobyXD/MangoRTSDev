@@ -15,9 +15,23 @@ func readEmailSQSContractFile(t *testing.T, path string) string {
 	return strings.ToLower(strings.ReplaceAll(string(raw), "\r\n", "\n"))
 }
 
+func assertEmailSQSStatusTransitionOrdering(t *testing.T, label, body string) {
+	t.Helper()
+	dropAt := strings.Index(body, "drop constraint if exists email_ingestion_jobs_status_chk")
+	updateAt := strings.Index(body, "update email_ingestion_jobs\n")
+	addAt := strings.Index(body, "add constraint email_ingestion_jobs_status_chk")
+	if dropAt < 0 || updateAt < 0 || addAt < 0 {
+		t.Fatalf("%s is missing the status transition statements", label)
+	}
+	if !(dropAt < updateAt && updateAt < addAt) {
+		t.Fatalf("%s must drop the legacy status check before failed -> exhausted and add the final check afterward", label)
+	}
+}
+
 func TestEmailSQSSchemaUsesPermanentIdentityAndProviderAttemptFence(t *testing.T) {
 	schema := readEmailSQSContractFile(t, "../../db/schema.sql")
 	migration := readEmailSQSContractFile(t, "../../db/migrations/20260809_zzz_email_sqs_delivery.sql")
+	assertEmailSQSStatusTransitionOrdering(t, "migration", migration)
 	for label, body := range map[string]string{"schema": schema, "migration": migration} {
 		compact := strings.Join(strings.Fields(body), "")
 		for _, required := range []string{
@@ -77,6 +91,7 @@ func TestEmailSQSSchemaUsesPermanentIdentityAndProviderAttemptFence(t *testing.T
 func TestEmailSQSOperatorSQLIsPlainReviewedPostgreSQL(t *testing.T) {
 	preflight := readEmailSQSContractFile(t, "../../../scripts/email_sqs_delivery_preflight.sql")
 	apply := readEmailSQSContractFile(t, "../../../scripts/email_sqs_delivery_apply.sql")
+	assertEmailSQSStatusTransitionOrdering(t, "operator apply", apply)
 	for label, body := range map[string]string{"preflight": preflight, "apply": apply} {
 		for _, forbidden := range []string{"\\set", "\\i", "\\copy", "\\echo"} {
 			if strings.Contains(body, forbidden) {
