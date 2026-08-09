@@ -12,12 +12,14 @@ import (
 )
 
 type communicationsEmailCollaborationRequest struct {
-	CompanyID     string                      `json:"company_id"`
-	SharedInboxID string                      `json:"shared_inbox_id"`
-	AccountEmail  string                      `json:"account_email"`
-	NewNodeID     string                      `json:"new_node_id"`
-	Priority      *int                        `json:"priority"`
-	Message       domain.EmailMessageSnapshot `json:"message"`
+	CompanyID       string                                            `json:"company_id"`
+	SharedInboxID   string                                            `json:"shared_inbox_id"`
+	AccountEmail    string                                            `json:"account_email"`
+	NewNodeID       string                                            `json:"new_node_id"`
+	Priority        *int                                              `json:"priority"`
+	Message         domain.EmailMessageSnapshot                       `json:"message"`
+	LinkedTextBlock *communicationsTriageAtomicNodeInformationRequest `json:"linked_text_block"`
+	InitialChat     *communicationsTriageAtomicNodeInformationRequest `json:"initial_chat"`
 }
 
 func (s *Server) handleCommunicationsEmailCollaborations(w http.ResponseWriter, r *http.Request) {
@@ -72,6 +74,11 @@ func (s *Server) handleCommunicationsEmailCollaborations(w http.ResponseWriter, 
 			writeError(w, http.StatusBadRequest, "invalid_email_node_priority")
 			return
 		}
+		for _, item := range []*communicationsTriageAtomicNodeInformationRequest{req.LinkedTextBlock, req.InitialChat} {
+			if item != nil && rejectDurableInlineFileBytes(w, "email_collaboration_atomic_node_content", item.Information) {
+				return
+			}
+		}
 		scope, ok := s.resolveCommunicationsEmailScope(w, actor, req.CompanyID, req.SharedInboxID, req.AccountEmail, store.EntityPermissionEdit)
 		if !ok {
 			return
@@ -104,11 +111,22 @@ func (s *Server) handleCommunicationsEmailCollaborations(w http.ResponseWriter, 
 			return
 		}
 		providerSnapshot := emailMessageSnapshotFromNylas(providerMessage)
+		nodeActorUserID, nodeActorLabel := nodeChangeActorPayload(r)
+		toNodeInformationInput := func(item *communicationsTriageAtomicNodeInformationRequest) *store.NodeInformationInput {
+			if item == nil {
+				return nil
+			}
+			return &store.NodeInformationInput{
+				CompanyID: req.CompanyID, Type: item.Type, Information: item.Information,
+				InformationID: item.InformationID, ActorUserID: nodeActorUserID, ActorDisplayName: nodeActorLabel,
+			}
+		}
 		result, err := s.repo.EnsureCommunicationsEmailCollaboration(r.Context(), store.CommunicationsEmailCollaborationEnsureInput{
 			CompanyID: req.CompanyID, PersonalUserID: scope.personalUserID,
 			PersonalAccountEmail: scope.personalAccountEmail, SharedInboxID: scope.sharedInboxID,
 			AccountEmail: scope.accountEmail, Provider: connection.Provider, CreatedByUserID: actor.User.UserID,
 			RequestedNodeID: req.NewNodeID, Priority: req.Priority, Message: providerSnapshot,
+			LinkedTextBlock: toNodeInformationInput(req.LinkedTextBlock), InitialChat: toNodeInformationInput(req.InitialChat),
 		})
 		if err != nil {
 			scopeType := "personal"

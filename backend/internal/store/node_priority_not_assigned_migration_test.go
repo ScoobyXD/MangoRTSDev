@@ -21,20 +21,19 @@ func TestNodePriorityNotAssignedMigrationReconcilesEmailRelationshipsSafely(t *t
 		"postgresql_server_version_num",
 		"not between 170000 and 189999",
 		"lock table email_relationships in share row exclusive mode",
-		"mangorts_email_thread_canonical_nodes",
-		"row_number() over",
-		"order by destination.first_created_timestamp",
-		"delete from email_relationships relationship",
-		"relationship.resource_id<>canonical.node_id",
-		"email_chat_linked_to_later_node_requires_review",
-		"mangorts_email_message_preferred_textboxes",
-		"email_message_chat_linked_to_multiple_textboxes",
-		"insert into email_relationships(",
+		"cardinality(actual_columns)<>8",
+		"not actual_columns @> array[",
+		"duplicate_email_semantic_edge",
+		"email_message_linked_to_multiple_textboxes_in_one_node",
 		"chat.textbox_id::text",
 		"email_chat_missing_exact_textbox_relationship",
-		"email_message_already_linked_to_another_textbox",
 		"drop trigger if exists trg_node_logic_gate_assignment_priority",
-		"create trigger trg_email_relationships_one_node_per_thread",
+		"drop trigger if exists trg_email_relationships_one_node_per_thread",
+		"idx_email_relationships_active_identity",
+		"idx_email_relationships_one_node_textbox_per_message",
+		"mangorts_validate_node_email_chat_relationship",
+		"mangorts_protect_node_email_chat_relationship",
+		"idx_email_drafts_active_thread",
 		"node_priority_not_assigned_complete",
 	} {
 		if !strings.Contains(migration, required) {
@@ -48,6 +47,8 @@ func TestNodePriorityNotAssignedMigrationReconcilesEmailRelationshipsSafely(t *t
 		"delete from node_textbox_chats",
 		"delete from email_threads",
 		"delete from email_messages",
+		"email_thread_already_linked_to_multiple_nodes",
+		"email_thread_already_linked_to_another_node",
 	} {
 		if strings.Contains(migration, forbidden) {
 			t.Errorf("priority migration must not contain %q", forbidden)
@@ -57,12 +58,9 @@ func TestNodePriorityNotAssignedMigrationReconcilesEmailRelationshipsSafely(t *t
 	if !strings.HasPrefix(strings.TrimSpace(migration), "begin;\n") || strings.Count(migration, "\ncommit;\n") != 1 {
 		t.Fatal("priority migration must use one complete transaction")
 	}
-	if strings.Index(migration, "row_number() over") > strings.Index(migration, "delete from email_relationships relationship") {
-		t.Fatal("priority migration must choose the earliest Node before deleting later relationships")
-	}
 }
 
-func TestFinalEmailRelationshipShapeSupersedesPriorityMigrationGuard(t *testing.T) {
+func TestCorrectedPriorityAndSQSMigrationsShareTheFinalEmailRelationshipGuard(t *testing.T) {
 	schemaRaw, err := os.ReadFile(filepath.Join("..", "..", "db", "schema.sql"))
 	if err != nil {
 		t.Fatal(err)
@@ -71,36 +69,48 @@ func TestFinalEmailRelationshipShapeSupersedesPriorityMigrationGuard(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	finalMigrationRaw, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "20260809_zzz_email_sqs_delivery.sql"))
+	sqsMigrationRaw, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "20260809_zzz_email_sqs_delivery.sql"))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	schema := strings.ToLower(string(schemaRaw))
-	priorityMigration := strings.ToLower(string(migrationRaw))
-	finalMigration := strings.ToLower(string(finalMigrationRaw))
-	if !strings.Contains(priorityMigration, "create trigger trg_email_relationships_one_node_per_thread") {
-		t.Fatal("priority migration no longer documents the legacy guard that the final migration must remove")
+	for name, body := range map[string]string{
+		"canonical schema":   strings.ToLower(string(schemaRaw)),
+		"priority migration": strings.ToLower(string(migrationRaw)),
+	} {
+		for _, required := range []string{
+			"idx_email_relationships_active_identity",
+			"idx_email_relationships_one_node_textbox_per_message",
+			"mangorts_validate_node_email_chat_relationship",
+			"relationship.resource_id=new.node_id",
+			"relationship.resource_textbox_id=new.textbox_id::text",
+			"mangorts_protect_node_email_chat_relationship",
+			"update of company_id,email_message_id,resource_type,resource_id,resource_textbox_id",
+		} {
+			if !strings.Contains(body, required) {
+				t.Errorf("%s is missing %q", name, required)
+			}
+		}
+		for _, forbidden := range []string{
+			"email_thread_already_linked_to_another_node",
+			"create trigger trg_email_relationships_one_node_per_thread",
+		} {
+			if strings.Contains(body, forbidden) {
+				t.Errorf("%s retains obsolete one-Node rule %q", name, forbidden)
+			}
+		}
+		if name == "canonical schema" && strings.Contains(body, "mangorts_enforce_one_node_per_email_thread") {
+			t.Errorf("%s retains obsolete one-Node enforcement function", name)
+		}
 	}
+	sqsMigration := strings.ToLower(string(sqsMigrationRaw))
 	for _, required := range []string{
 		"drop trigger if exists trg_email_relationships_one_node_per_thread on email_relationships",
 		"drop function if exists mangorts_enforce_one_node_per_email_thread()",
 		"create unique index idx_email_relationships_one_node_textbox_per_message",
 	} {
-		if !strings.Contains(finalMigration, required) {
-			t.Errorf("final migration is missing %q", required)
+		if !strings.Contains(sqsMigration, required) {
+			t.Errorf("SQS migration is missing compatible final relationship guard %q", required)
 		}
-	}
-	for _, forbidden := range []string{
-		"mangorts_enforce_one_node_per_email_thread",
-		"email_thread_already_linked_to_another_node",
-		"trg_email_relationships_one_node_per_thread",
-	} {
-		if strings.Contains(schema, forbidden) {
-			t.Errorf("canonical schema retains obsolete one-thread/one-Node guard %q", forbidden)
-		}
-	}
-	if !strings.Contains(schema, "idx_email_relationships_one_node_textbox_per_message") {
-		t.Fatal("canonical schema is missing the one-textbox-per-message-per-Node unique index")
 	}
 }

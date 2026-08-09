@@ -164,6 +164,7 @@ export function EmailCollaborationChatSurface({
   const [collaboration, setCollaboration] = React.useState<CommunicationsEmailCollaboration | null>(null);
   const [collaborations, setCollaborations] = React.useState<CommunicationsEmailCollaboration[]>([]);
   const [messages, setMessages] = React.useState<EditorTextBlockChatMessage[]>([]);
+  const [nodeIDByChatID, setNodeIDByChatID] = React.useState<Record<string, string>>({});
   const [activeTextBlockID, setActiveTextBlockID] = React.useState("");
   const [sectionLabelsByBlockID, setSectionLabelsByBlockID] = React.useState<Record<string, string>>({});
   const [sectionLabelsByEmailMessageID, setSectionLabelsByEmailMessageID] = React.useState<Record<string, string>>({});
@@ -176,6 +177,7 @@ export function EmailCollaborationChatSurface({
   const [submitting, setSubmitting] = React.useState(false);
   const loadSequenceRef = React.useRef(0);
   const collaborationRef = React.useRef<CommunicationsEmailCollaboration | null>(null);
+  const collaborationsRef = React.useRef<CommunicationsEmailCollaboration[]>([]);
   const selectionInternalEmailMessageIDRef = React.useRef("");
   const sourceLoadKeyRef = React.useRef("");
   const requestedCollaborationIDRef = React.useRef("");
@@ -222,6 +224,7 @@ export function EmailCollaborationChatSurface({
     const nextNodeID = nextCollaboration?.node_id?.trim() ?? "";
     if (!nextNodeID) {
       setMessages([]);
+      setNodeIDByChatID({});
       setSectionLabelsByBlockID({});
       setSectionLabelsByEmailMessageID({});
       setActiveTextBlockID("");
@@ -282,17 +285,87 @@ export function EmailCollaborationChatSurface({
       return chats.filter((chat) => chat.blockID === projection.information_id);
     });
     setMessages(conversationChats);
+    setNodeIDByChatID(Object.fromEntries(conversationChats.map((chat) => [chat.id, nextNodeID])));
     setSectionLabelsByBlockID(blockLabels);
     setSectionLabelsByEmailMessageID(messageLabels);
   }, [apiBase, companyID, message, targetEmailMessageID, threadMessages]);
+
+  const loadThreadProjections = React.useCallback(async (
+    items: CommunicationsEmailCollaboration[],
+    activeDestination: CommunicationsEmailCollaboration | null,
+    expectedLoadSequence?: number,
+  ) => {
+    if (items.length === 0) {
+      setMessages([]);
+      setNodeIDByChatID({});
+      setSectionLabelsByBlockID({});
+      setSectionLabelsByEmailMessageID({});
+      setActiveTextBlockID("");
+      return;
+    }
+    const loaded = await Promise.all(items.map(async (item) => {
+      invalidateNodeRecordStoreCaches(apiBase, companyID, item.node_id);
+      return { item, projections: await getNodeInformationProjectionSingleFlight(apiBase, companyID, item.node_id) };
+    }));
+    if (expectedLoadSequence !== undefined && loadSequenceRef.current !== expectedLoadSequence) return;
+    const conversationMessages = [message, ...threadMessages].filter((candidate, index, all) => (
+      all.findIndex((other) => other.id === candidate.id) === index
+    ));
+    const messageByInternalID = new Map(conversationMessages.flatMap((candidate) => {
+      const internalID = candidate.email_message_id?.trim() ?? "";
+      return internalID ? [[internalID, candidate] as const] : [];
+    }));
+    const blockLabels: Record<string, string> = {};
+    const chatNodes: Record<string, string> = {};
+    const allChats: EditorTextBlockChatMessage[] = [];
+    let activeBlockID = "";
+    for (const { item, projections } of loaded) {
+      const internalEmailMessageID = collaborationTargetMessage.email_message_id?.trim()
+        || (item.message?.id?.trim() === targetEmailMessageID ? item.message.email_message_id?.trim() : "")
+        || "";
+      if (internalEmailMessageID) selectionInternalEmailMessageIDRef.current = internalEmailMessageID;
+      const placement = resolveEmailCollaborationChatPlacement(
+        projections,
+        internalEmailMessageID || targetEmailMessageID,
+        item.attached_email_information_id,
+      );
+      if (activeDestination?.collaboration_id === item.collaboration_id) activeBlockID = placement.blockID;
+      const chats = parseEditorTextBlockChats(projections);
+      const linkedBlocks = listEditorTextBlockProjections(projections).filter((projection) => {
+        const content = parseEditorTextBlockContent(projection.information);
+        const internalIDs = content.emailMessageIDs?.length ? content.emailMessageIDs : content.emailMessageID ? [content.emailMessageID] : [];
+        return internalIDs.some((internalID) => messageByInternalID.has(internalID.trim()));
+      });
+      const nodeTitle = nodes.find((candidate) => candidate.node_id === item.node_id)?.name?.trim()
+        || "Node " + item.node_id.slice(0, 8);
+      for (const projection of linkedBlocks) {
+        blockLabels[projection.information_id] = nodeTitle;
+        for (const chat of chats.filter((candidate) => candidate.blockID === projection.information_id)) {
+          if (!chatNodes[chat.id]) {
+            chatNodes[chat.id] = item.node_id;
+            allChats.push(chat);
+          }
+        }
+      }
+    }
+    setMessages(allChats);
+    setNodeIDByChatID(chatNodes);
+    setSectionLabelsByBlockID(blockLabels);
+    setSectionLabelsByEmailMessageID({});
+    setActiveTextBlockID(activeBlockID);
+  }, [apiBase, collaborationTargetMessage.email_message_id, companyID, message, nodes, targetEmailMessageID, threadMessages]);
 
   const acceptCollaboration = React.useCallback((nextCollaboration: CommunicationsEmailCollaboration | null, publishToMailbox = true) => {
     collaborationRef.current = nextCollaboration;
     setCollaboration(nextCollaboration);
     if (nextCollaboration) {
-      setCollaborations((current) => current.some((item) => item.collaboration_id === nextCollaboration.collaboration_id)
-        ? current.map((item) => item.collaboration_id === nextCollaboration.collaboration_id ? nextCollaboration : item)
-        : [...current, nextCollaboration]);
+      setCollaborations((current) => {
+        const next = current.some((item) => item.collaboration_id === nextCollaboration.collaboration_id)
+          ? current.map((item) => item.collaboration_id === nextCollaboration.collaboration_id ? nextCollaboration : item)
+          : [...current, nextCollaboration];
+        collaborationsRef.current = next;
+        return next;
+      });
     }
     if (nextCollaboration && publishToMailbox) onCollaborationChange?.(nextCollaboration);
   }, [onCollaborationChange]);
@@ -307,11 +380,15 @@ export function EmailCollaborationChatSurface({
     if (!refreshed) return null;
     if (expectedLoadSequence !== undefined && loadSequenceRef.current !== expectedLoadSequence) return null;
     acceptCollaboration(refreshed);
-    await loadProjection(refreshed, expectedLoadSequence);
+    const nextItems = collaborationsRef.current.some((item) => item.collaboration_id === refreshed.collaboration_id)
+      ? collaborationsRef.current.map((item) => item.collaboration_id === refreshed.collaboration_id ? refreshed : item)
+      : [...collaborationsRef.current, refreshed];
+    collaborationsRef.current = nextItems;
+    await loadThreadProjections(nextItems, collaborationRef.current, expectedLoadSequence);
     if (expectedLoadSequence !== undefined && loadSequenceRef.current !== expectedLoadSequence) return null;
     onSuccess();
     return refreshed;
-  }, [acceptCollaboration, companyID, loadProjection, onSuccess]);
+  }, [acceptCollaboration, companyID, loadThreadProjections, onSuccess]);
 
   React.useEffect(() => {
     const previousSourceKey = sourceLoadKeyRef.current;
@@ -326,8 +403,10 @@ export function EmailCollaborationChatSurface({
       pendingNewNodeIDRef.current = "";
       selectionChoiceKeyRef.current = "";
       setCollaboration(null);
+      collaborationsRef.current = [];
       setCollaborations([]);
       setMessages([]);
+      setNodeIDByChatID({});
       setReplyTargetID("");
       setActiveTextBlockID("");
       setActiveMessageID("");
@@ -351,17 +430,13 @@ export function EmailCollaborationChatSurface({
     })
       .then(async (items) => {
         if (loadSequenceRef.current !== requestSequence) return;
+        collaborationsRef.current = items;
         setCollaborations(items);
         const activeCollaborationID = collaborationRef.current?.collaboration_id?.trim() || messageCollaborationIDRef.current;
-        const nextCollaboration = items.find((item) => item.collaboration_id === activeCollaborationID) ?? items[0] ?? null;
+        const nextCollaboration = items.find((item) => item.collaboration_id === activeCollaborationID)
+          ?? (items.length === 1 ? items[0] : null);
         acceptCollaboration(nextCollaboration);
-        if (nextCollaboration) await loadProjection(nextCollaboration, requestSequence);
-        else {
-          setMessages([]);
-          setActiveTextBlockID("");
-          setSectionLabelsByBlockID({});
-          setSectionLabelsByEmailMessageID({});
-        }
+        await loadThreadProjections(items, nextCollaboration, requestSequence);
         if (loadSequenceRef.current === requestSequence) onSuccess();
       })
       .catch((cause) => {
@@ -376,7 +451,7 @@ export function EmailCollaborationChatSurface({
     return () => {
       if (loadSequenceRef.current === requestSequence) loadSequenceRef.current += 1;
     };
-  }, [acceptCollaboration, accountEmail, companyID, enabled, loadProjection, message.id, message.thread_id, onClearSelection, onError, onSuccess, sharedInboxID, sourceKey]);
+  }, [acceptCollaboration, accountEmail, companyID, enabled, loadThreadProjections, message.id, message.thread_id, onClearSelection, onError, onSuccess, sharedInboxID, sourceKey]);
 
   React.useEffect(() => {
     if (!enabled || !messageCollaborationID) return undefined;
@@ -390,7 +465,11 @@ export function EmailCollaborationChatSurface({
       .then(async (resolved) => {
         if (loadSequenceRef.current !== requestSequence || !resolved) return;
         acceptCollaboration(resolved);
-        await loadProjection(resolved, requestSequence);
+        const nextItems = collaborationsRef.current.some((item) => item.collaboration_id === resolved.collaboration_id)
+          ? collaborationsRef.current
+          : [...collaborationsRef.current, resolved];
+        collaborationsRef.current = nextItems;
+        await loadThreadProjections(nextItems, resolved, requestSequence);
         if (loadSequenceRef.current === requestSequence) onSuccess();
       })
       .catch((cause) => {
@@ -405,7 +484,7 @@ export function EmailCollaborationChatSurface({
     return () => {
       if (loadSequenceRef.current === requestSequence) loadSequenceRef.current += 1;
     };
-  }, [acceptCollaboration, companyID, enabled, loadProjection, messageCollaborationID, onError, onSuccess, sourceKey]);
+  }, [acceptCollaboration, companyID, enabled, loadThreadProjections, messageCollaborationID, onError, onSuccess, sourceKey]);
 
   React.useEffect(() => {
     if (!active || !companyID || !collaborationID || !nodeID) return undefined;
@@ -509,7 +588,7 @@ export function EmailCollaborationChatSurface({
         .filter((content) => content.emailMessageID?.trim() !== emailMessageID
           && !content.emailMessageIDs?.some((messageID) => messageID.trim() === emailMessageID))
         .map((content) => content.emailAccent?.trim() ?? "").filter(Boolean);
-      const textBlockWrite = existingLinkedProjection ? undefined : {
+      const textBlockWrite = !includeChat || existingLinkedProjection ? undefined : {
         type: EDITOR_TEXT_BLOCK_TYPE,
         informationID: textBlockID,
         information: buildEditorTextBlockProjectionPayload({
@@ -553,7 +632,7 @@ export function EmailCollaborationChatSurface({
           }),
         };
       }
-      if (shouldAttachEmail) {
+      if (shouldAttachEmail || textBlockWrite || initialChatWrite) {
         const conversionResult = await convertTriageMessagesToExplorerTarget({
           companyID,
           sharedInboxID,
@@ -567,29 +646,6 @@ export function EmailCollaborationChatSurface({
           || attachedEmailInformationID;
         emailMessageID = conversionResult.email_message_ids?.find((messageID) => messageID.trim())?.trim()
           || emailMessageID;
-      } else {
-        if (textBlockWrite) {
-          await requestJSON("/v1/nodes/" + encodeURIComponent(cleanNodeID) + "/information", {
-            method: "POST",
-            json: {
-              company_id: companyID,
-              type: textBlockWrite.type,
-              information_id: textBlockWrite.informationID,
-              information: textBlockWrite.information,
-            },
-          });
-        }
-        if (initialChatWrite) {
-          await requestJSON("/v1/nodes/" + encodeURIComponent(cleanNodeID) + "/information", {
-            method: "POST",
-            json: {
-              company_id: companyID,
-              type: initialChatWrite.type,
-              information_id: initialChatWrite.informationID,
-              information: initialChatWrite.information,
-            },
-          });
-        }
       }
       if (!emailMessageID) throw new Error("email_message_id_missing");
       selectionInternalEmailMessageIDRef.current = emailMessageID;
@@ -683,81 +739,6 @@ export function EmailCollaborationChatSurface({
     setActiveTextBlockID(textBlockID);
     return textBlockID;
   }, [accountEmail, apiBase, collaborationTargetMessage, companyID, message, selection?.messageID, sharedInboxID]);
-  const saveCurrentDraftToCollaboration = React.useCallback(async (activeCollaboration: CommunicationsEmailCollaboration, ensuredTextBlockID = ""): Promise<string> => {
-    const cleanDraft = draft.trim();
-    if (!cleanDraft && draftAttachments.length === 0) return "";
-    const activeNodeID = activeCollaboration.node_id.trim();
-    const activeBlockID = ensuredTextBlockID.trim() || await ensureLinkedEmailTextBlock(activeCollaboration);
-    if (!activeNodeID || !activeBlockID) throw new Error("email_collaboration_node_missing");
-    const selectionEmailMessageID = selectionInternalEmailMessageIDRef.current.trim();
-    if (!replyTargetID && !selectionEmailMessageID) throw new Error("email_message_id_missing");
-    const informationID = generateStableInformationID();
-    const createdTimestamp = new Date().toISOString();
-    const mentions = mentionedPrincipalIDs(cleanDraft, principals);
-    for (const principal of selectedMentionPrincipals) {
-      const principalID = principal.user_id.trim();
-      if (principalID.startsWith(GROUP_MENTION_PREFIX)) {
-        const groupID = principalID.slice(GROUP_MENTION_PREFIX.length).trim();
-        if (groupID && !mentions.mentionedGroupIDs.includes(groupID)) mentions.mentionedGroupIDs.push(groupID);
-      } else if (principalID && !mentions.mentionedUserIDs.includes(principalID)) {
-        mentions.mentionedUserIDs.push(principalID);
-      }
-    }
-    const nextMessage: EditorTextBlockChatMessage = {
-      id: informationID,
-      blockID: activeBlockID,
-      parentID: replyTargetID || undefined,
-      selectionSource: !replyTargetID ? "email" : undefined,
-      selectionMessageID: !replyTargetID ? selectionEmailMessageID : undefined,
-      selectionQuote: !replyTargetID ? selection?.quote : undefined,
-      selectionStart: !replyTargetID ? selection?.startOffset : undefined,
-      selectionEnd: !replyTargetID ? selection?.endOffset : undefined,
-      authorID: author.userID,
-      authorName: author.name,
-      message: cleanDraft,
-      createdTimestamp,
-      attachments: draftAttachments,
-      mentionedUserIDs: mentions.mentionedUserIDs,
-      mentionedGroupIDs: mentions.mentionedGroupIDs,
-    };
-    await requestJSON("/v1/nodes/" + encodeURIComponent(activeNodeID) + "/information", {
-      method: "POST",
-      json: {
-        company_id: companyID,
-        type: EDITOR_TEXT_BLOCK_CHAT_TYPE,
-        information_id: informationID,
-        information: buildEditorTextBlockChatPayload({
-          blockID: activeBlockID,
-          parentID: replyTargetID,
-          selectionSource: !replyTargetID ? "email" : undefined,
-          selectionMessageID: !replyTargetID ? selectionEmailMessageID : undefined,
-          selectionQuote: !replyTargetID ? selection?.quote : undefined,
-          selectionStart: !replyTargetID ? selection?.startOffset : undefined,
-          selectionEnd: !replyTargetID ? selection?.endOffset : undefined,
-          authorID: author.userID,
-          authorName: author.name,
-          message: cleanDraft,
-          createdTimestamp,
-          attachments: draftAttachments,
-          mentionedUserIDs: mentions.mentionedUserIDs,
-          mentionedGroupIDs: mentions.mentionedGroupIDs,
-        }),
-      },
-    });
-    setMessages((current) => current.some((item) => item.id === informationID) ? current : [...current, nextMessage]);
-    setDraft("");
-    setDraftAttachments([]);
-    setSelectedMentionPrincipals([]);
-    setReplyTargetID("");
-    onClearSelection();
-    const refreshSequence = loadSequenceRef.current;
-    void refreshCollaborationByID(activeCollaboration.collaboration_id, refreshSequence).catch((cause) => {
-      if (loadSequenceRef.current !== refreshSequence || isAbortError(cause)) return;
-      onError(formatEmailCollaborationChatError(cause, "Message saved, but chat refresh failed."));
-    });
-    return activeBlockID;
-  }, [author.name, author.userID, companyID, draft, draftAttachments, ensureLinkedEmailTextBlock, message.id, onClearSelection, onError, principals, refreshCollaborationByID, replyTargetID, requestJSON, selectedMentionPrincipals, selection]);
-
   const createEmailNode = React.useCallback(async (priority?: number, logicGateID = "", projectID = "", createNew = false) => {
     if (submitting) return;
     setSubmitting(true);
@@ -767,7 +748,6 @@ export function EmailCollaborationChatSurface({
       if (cleanProjectID && !cleanLogicGateID) throw new Error("A Project email Node must belong to a Logic Gate.");
       const delayFloatingNodeIndicator = createNew;
       const created = await ensureCollaboration(priority, createNew, !delayFloatingNodeIndicator);
-      const linkedTextBlockID = await ensureLinkedEmailTextBlock(created);
       if (cleanLogicGateID) {
         await assignNodeToLogicGateStatus({
           apiBase,
@@ -794,7 +774,6 @@ export function EmailCollaborationChatSurface({
           resourceID: created.node_id,
         });
       }
-      await saveCurrentDraftToCollaboration(created, linkedTextBlockID);
       onSuccess();
       onActionSuccess(
         cleanProjectID
@@ -809,7 +788,7 @@ export function EmailCollaborationChatSurface({
     } finally {
       setSubmitting(false);
     }
-  }, [apiBase, companyID, ensureCollaboration, ensureLinkedEmailTextBlock, message.subject, message.thread_id, onActionRequestHandled, onActionSuccess, onError, onNodeAttachmentChange, onSuccess, saveCurrentDraftToCollaboration, submitting, targetEmailMessageID]);
+  }, [apiBase, companyID, ensureCollaboration, message.subject, message.thread_id, onActionRequestHandled, onActionSuccess, onError, onNodeAttachmentChange, onSuccess, submitting, targetEmailMessageID]);
 
   React.useEffect(() => {
     const request = actionRequest;
@@ -821,11 +800,11 @@ export function EmailCollaborationChatSurface({
       return;
     }
     if (destination.kind === "logic_gate") {
-      void createEmailNode(undefined, destination.logicGateID);
+      void createEmailNode(undefined, destination.logicGateID, "", true);
       return;
     }
     if (destination.kind === "project") {
-      void createEmailNode(undefined, destination.logicGateID, destination.projectID);
+      void createEmailNode(undefined, destination.logicGateID, destination.projectID, true);
       return;
     }
     void createEmailNode(undefined, "", "", true);
@@ -834,22 +813,90 @@ export function EmailCollaborationChatSurface({
   const submit = React.useCallback(async () => {
     const cleanDraft = draft.trim();
     if ((!cleanDraft && draftAttachments.length === 0) || submitting) return;
+    if (collaborations.length > 1 && !collaboration) {
+      onError("Choose the destination Node before sending this chat.");
+      return;
+    }
+    if (collaboration) {
+      await importIntoExistingNode(collaboration.node_id, true);
+      return;
+    }
     setSubmitting(true);
     try {
-      const activeCollaboration = await ensureCollaboration();
-      await saveCurrentDraftToCollaboration(activeCollaboration);
+      const textBlockID = generateStableInformationID();
+      const chatID = generateStableInformationID();
+      const placeholderMessageID = generateStableInformationID();
+      const createdTimestamp = new Date().toISOString();
+      const mentions = mentionedPrincipalIDs(cleanDraft, principals);
+      for (const principal of selectedMentionPrincipals) {
+        const principalID = principal.user_id.trim();
+        if (principalID.startsWith(GROUP_MENTION_PREFIX)) {
+          const groupID = principalID.slice(GROUP_MENTION_PREFIX.length).trim();
+          if (groupID && !mentions.mentionedGroupIDs.includes(groupID)) mentions.mentionedGroupIDs.push(groupID);
+        } else if (principalID && !mentions.mentionedUserIDs.includes(principalID)) {
+          mentions.mentionedUserIDs.push(principalID);
+        }
+      }
+      const created = await ensureEmailCollaboration({
+        companyID,
+        message: collaborationTargetMessage,
+        messageID: targetEmailMessageID,
+        threadID: message.thread_id,
+        sharedInboxID,
+        accountEmail,
+        newNodeID: pendingNewNodeIDRef.current || generateStableInformationID(),
+        linkedTextBlock: {
+          type: EDITOR_TEXT_BLOCK_TYPE,
+          informationID: textBlockID,
+          information: buildEditorTextBlockProjectionPayload({
+            title: "Email: " + (message.subject?.trim() || "Email"),
+            document: "",
+            attachments: [],
+            emailMessageID: placeholderMessageID,
+            emailAccent: editorEmailMessageAccent(placeholderMessageID, []),
+          }),
+        },
+        initialChat: {
+          type: EDITOR_TEXT_BLOCK_CHAT_TYPE,
+          informationID: chatID,
+          information: buildEditorTextBlockChatPayload({
+            blockID: textBlockID,
+            selectionSource: "email",
+            selectionMessageID: placeholderMessageID,
+            selectionQuote: selection?.quote,
+            selectionStart: selection?.startOffset,
+            selectionEnd: selection?.endOffset,
+            authorID: author.userID,
+            authorName: author.name,
+            message: cleanDraft,
+            createdTimestamp,
+            attachments: draftAttachments,
+            mentionedUserIDs: mentions.mentionedUserIDs,
+            mentionedGroupIDs: mentions.mentionedGroupIDs,
+          }),
+        },
+      });
+      pendingNewNodeIDRef.current = "";
+      acceptCollaboration(created);
+      setDraft("");
+      setDraftAttachments([]);
+      setSelectedMentionPrincipals([]);
+      setReplyTargetID("");
+      onClearSelection();
+      await loadProjection(created, loadSequenceRef.current);
       onSuccess();
     } catch (cause) {
       onError(formatEmailCollaborationChatError(cause, "Failed to save email chat. Your message is still here."));
     } finally {
       setSubmitting(false);
     }
-  }, [draft, draftAttachments, ensureCollaboration, onError, onSuccess, saveCurrentDraftToCollaboration, submitting]);
+  }, [acceptCollaboration, accountEmail, author.name, author.userID, collaboration, collaborationTargetMessage, collaborations.length, companyID, draft, draftAttachments, importIntoExistingNode, loadProjection, message.subject, message.thread_id, onClearSelection, onError, onSuccess, principals, selectedMentionPrincipals, selection, sharedInboxID, submitting, targetEmailMessageID]);
   const attachFiles = React.useCallback(async (files: FileList | File[]) => {
     const candidates = Array.from(files);
     if (candidates.length === 0) return;
     try {
-      const activeCollaboration = await ensureCollaboration();
+      if (!collaboration) throw new Error("Choose a Node or send the first text message before adding attachments.");
+      const activeCollaboration = collaboration;
       const activeBlockID = await ensureLinkedEmailTextBlock(activeCollaboration);
       const uploaded = await Promise.all(candidates.map((file) => uploadEditorAttachment(file, {
         requestJSON,
@@ -866,15 +913,16 @@ export function EmailCollaborationChatSurface({
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : "failed_to_upload_chat_attachment");
     }
-  }, [companyID, ensureCollaboration, ensureLinkedEmailTextBlock, onError, onSuccess, requestJSON]);
+  }, [collaboration, companyID, ensureLinkedEmailTextBlock, onError, onSuccess, requestJSON]);
 
   const deleteMessage = React.useCallback(async (messageID: string) => {
     const target = messages.find((item) => item.id === messageID);
-    if (!target || !nodeID || !canDeleteEditorTextBlockChatMessage(target, currentUserID)) return;
+    const targetNodeID = nodeIDByChatID[messageID] || nodeID;
+    if (!target || !targetNodeID || !canDeleteEditorTextBlockChatMessage(target, currentUserID)) return;
     setMessages((current) => current.filter((item) => item.id !== messageID));
     try {
       await requestJSON(
-        "/v1/nodes/" + encodeURIComponent(nodeID) + "/projection/" + encodeURIComponent(messageID)
+        "/v1/nodes/" + encodeURIComponent(targetNodeID) + "/projection/" + encodeURIComponent(messageID)
           + "?company_id=" + encodeURIComponent(companyID),
         { method: "DELETE" },
       );
@@ -887,11 +935,12 @@ export function EmailCollaborationChatSurface({
         onError(formatEmailCollaborationChatError(refreshCause, "Delete failed, and email chat could not refresh."));
       });
     }
-  }, [collaboration, companyID, currentUserID, loadProjection, messages, nodeID, onError, onSuccess, requestJSON]);
+  }, [collaboration, companyID, currentUserID, loadProjection, messages, nodeID, nodeIDByChatID, onError, onSuccess, requestJSON]);
 
   const editMessage = React.useCallback(async (messageID: string, nextText: string) => {
     const existing = messages.find((item) => item.id === messageID);
-    if (!existing || !nodeID || !canEditEditorTextBlockChatMessage(existing, currentUserID)) {
+    const targetNodeID = nodeIDByChatID[messageID] || nodeID;
+    if (!existing || !targetNodeID || !canEditEditorTextBlockChatMessage(existing, currentUserID)) {
       const cause = new Error("cannot_edit_other_users_chat_message");
       onError(cause.message);
       throw cause;
@@ -913,7 +962,7 @@ export function EmailCollaborationChatSurface({
       mentionedGroupIDs: mentions.mentionedGroupIDs,
     } : item));
     try {
-      await requestJSON("/v1/nodes/" + encodeURIComponent(nodeID) + "/projection/" + encodeURIComponent(messageID), {
+      await requestJSON("/v1/nodes/" + encodeURIComponent(targetNodeID) + "/projection/" + encodeURIComponent(messageID), {
         method: "PATCH",
         json: {
           company_id: companyID,
@@ -928,7 +977,7 @@ export function EmailCollaborationChatSurface({
       onError(cause instanceof Error ? cause.message : "failed_to_edit_email_chat");
       throw cause;
     }
-  }, [companyID, currentUserID, messages, nodeID, onError, onSuccess, principals, requestJSON]);
+  }, [companyID, currentUserID, messages, nodeID, nodeIDByChatID, onError, onSuccess, principals, requestJSON]);
 
   const navigateToChatMessage = React.useCallback((chatMessageID: string) => {
     setActiveMessageID(chatMessageID);
@@ -955,7 +1004,7 @@ export function EmailCollaborationChatSurface({
     loadSequenceRef.current = requestSequence;
     setLoading(true);
     try {
-      await loadProjection(nextCollaboration, requestSequence);
+      await loadThreadProjections(collaborationsRef.current, nextCollaboration, requestSequence);
       if (loadSequenceRef.current === requestSequence) onSuccess();
     } catch (cause) {
       if (loadSequenceRef.current === requestSequence && !isAbortError(cause)) {
@@ -964,7 +1013,7 @@ export function EmailCollaborationChatSurface({
     } finally {
       if (loadSequenceRef.current === requestSequence) setLoading(false);
     }
-  }, [acceptCollaboration, loadProjection, onError, onSuccess]);
+  }, [acceptCollaboration, loadThreadProjections, onError, onSuccess]);
 
   const startNewFloatingNodeChat = React.useCallback(() => {
     pendingNewNodeIDRef.current = generateStableInformationID();
@@ -989,14 +1038,18 @@ export function EmailCollaborationChatSurface({
     ]);
     if (selectionChoiceKeyRef.current === choiceKey) return;
     selectionChoiceKeyRef.current = choiceKey;
-    if (collaborations.length > 0) {
+    if (collaborations.length === 1) {
       if (collaboration?.collaboration_id !== collaborations[0].collaboration_id) {
         void selectCollaborationTarget(collaborations[0]);
       }
       return;
     }
+    if (collaborations.length > 1) {
+      acceptCollaboration(null, false);
+      return;
+    }
     startNewFloatingNodeChat();
-  }, [collaboration?.collaboration_id, collaborations, loading, selection, selectCollaborationTarget, startNewFloatingNodeChat]);
+  }, [acceptCollaboration, collaboration?.collaboration_id, collaborations, loading, selection, selectCollaborationTarget, startNewFloatingNodeChat]);
 
   return (
     <aside
@@ -1008,11 +1061,11 @@ export function EmailCollaborationChatSurface({
       style={{
         minWidth: 0,
         minHeight: 0,
-        height: "calc(100% - 78px)",
-        alignSelf: "end",
+        height: "100%",
+        alignSelf: "stretch",
         display: active ? "grid" : "none",
         gridTemplateRows: "minmax(0, 1fr)",
-        padding: "8px 8px 8px 0",
+        padding: "0 8px 0 0",
         overflow: "hidden",
         background: EDITOR_NEU_SURFACE,
       }}
@@ -1023,7 +1076,20 @@ export function EmailCollaborationChatSurface({
         apiBase={apiBase}
         companyID={companyID}
         messages={messages}
-        headerLeading={(
+        headerLeading={collaborations.length > 1 && !collaboration ? (
+          <select
+            aria-label="Chat destination Node"
+            value=""
+            onChange={(event) => {
+              const selected = collaborations.find((item) => item.collaboration_id === event.target.value);
+              if (selected) void selectCollaborationTarget(selected);
+            }}
+            style={{ minWidth: 0, maxWidth: 220 }}
+          >
+            <option value="">Choose destination Node</option>
+            {collaborations.map((item) => <option key={item.collaboration_id} value={item.collaboration_id}>{collaborationNodeLabel(item)}</option>)}
+          </select>
+        ) : (
           <span data-email-chat-node-header="true" style={{ minWidth: 0, display: "inline-flex", alignItems: "center", gap: 7 }}>
             <ExplorerRowIcon kind="node" />
             <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -1043,7 +1109,7 @@ export function EmailCollaborationChatSurface({
         active={active}
         currentUserID={currentUserID}
         activeMessageID={activeMessageID}
-        accent="#4f46e5"
+        accent="#475569"
         surfaceText="#111827"
         panelBackground={EDITOR_NEU_SURFACE}
         strokeColor="rgba(148,163,184,0.34)"

@@ -192,6 +192,19 @@ test("node drag and Universal-picker email attachment retain exact provider mail
   assert.doesNotMatch(editorProjection, /attachments: input\.attachments/);
 });
 
+test("only one exact email message can be dropped onto a Node text box", () => {
+  const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
+
+  assert.match(nodeSurface, /const linkDroppedEmailToTextBlock[\s\S]*const dragged = parseDraggedEmail\(dataTransfer\);[\s\S]*if \(!dragged\) return/);
+  assert.match(nodeSurface, /buildEditorAttachedEmailPayload\(\{ \.\.\.dragged, blockID, linkWholeThread: false \}\)/);
+  assert.match(nodeSurface, /onDragOver=\{\(event\) => \{[\s\S]{0,240}event\.dataTransfer\.types\.includes\(EMAIL_DRAG_MIME\)/);
+  assert.match(nodeSurface, /onDrop=\{\(event\) => \{[\s\S]{0,240}if \(!event\.dataTransfer\.types\.includes\(EMAIL_DRAG_MIME\)\) return/);
+  const textBoxDropStart = nodeSurface.indexOf("const linkDroppedEmailToTextBlock");
+  const textBoxDropEnd = nodeSurface.indexOf("const removeAttachedEmail", textBoxDropStart);
+  assert.ok(textBoxDropStart >= 0 && textBoxDropEnd > textBoxDropStart);
+  assert.doesNotMatch(nodeSurface.slice(textBoxDropStart, textBoxDropEnd), /application\/x-mango-node-attached-email/);
+});
+
 test("triage thread controls and reply resize pointer lifecycle are explicit", () => {
   const calendarInviteCard = source("frontend/src/modules/communications/CalendarInviteCard.tsx");
   const homeParts = source("frontend/src/pages/home/HomeParts.tsx");

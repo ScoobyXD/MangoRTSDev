@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-func TestEmailCollaborationSharedDraftSendUsesExactProviderReplyAllAndFinalizes(t *testing.T) {
+func TestEmailCollaborationSharedDraftSendUsesExactDraftEnvelopeAndFinalizes(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	const companyID = "11111111-1111-4111-8111-701300000311"
 	repo.EnsureCompany(companyID, "Shared draft send")
@@ -114,12 +114,12 @@ func TestEmailCollaborationSharedDraftSendUsesExactProviderReplyAllAndFinalizes(
 	if sent.ReplyToMessageID != "shared-send-source" || sent.IdempotencyKey == "" {
 		t.Fatalf("provider send identity = %+v", sent)
 	}
-	if !nylasAddressesContain(sent.To, "provider-sender@example.com") ||
-		nylasAddressesContain(sent.To, "stale-snapshot@example.com") ||
+	if !nylasAddressesContain(sent.To, "stale-snapshot@example.com") ||
+		nylasAddressesContain(sent.To, "provider-sender@example.com") ||
 		nylasAddressesContain(sent.To, creator.Email) ||
-		!nylasAddressesContain(sent.Cc, "team@example.com") ||
+		nylasAddressesContain(sent.Cc, "team@example.com") ||
 		len(sent.Bcc) != 0 {
-		t.Fatalf("provider-truth Reply All envelope to=%+v cc=%+v bcc=%+v", sent.To, sent.Cc, sent.Bcc)
+		t.Fatalf("exact shared-draft envelope to=%+v cc=%+v bcc=%+v", sent.To, sent.Cc, sent.Bcc)
 	}
 	if _, err := repo.GetCommunicationsEmailDraft(store.CommunicationsEmailDraftGetInput{
 		CompanyID: companyID, DraftID: draft.DraftID, ParticipantUserID: creator.UserID,
@@ -136,6 +136,77 @@ func TestEmailCollaborationSharedDraftSendUsesExactProviderReplyAllAndFinalizes(
 	nylas.mu.Unlock()
 	if sendCalls != 1 {
 		t.Fatalf("completed send retry provider calls=%d, want 1", sendCalls)
+	}
+}
+
+func TestUniversalSharedDraftSendsFromExactPersonalMailboxWithoutCreatingNode(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	const companyID = "11111111-1111-4111-8111-701300000399"
+	repo.EnsureCompany(companyID, "Universal draft without Node")
+	owner, err := repo.UpsertAuthUser("universal-no-node-owner", "no-node@example.com", "No Node Owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(owner.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID: owner.UserID, Provider: "google", AccountEmail: owner.Email,
+		GrantID: "universal-no-node-grant", Status: "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	source := domain.EmailMessageSnapshot{
+		ID: "universal-no-node-source", ThreadID: "universal-no-node-thread", Subject: "Question", DownloadComplete: true,
+		From: []domain.EmailAddressSnapshot{{Email: "customer@example.com"}}, To: []domain.EmailAddressSnapshot{{Email: owner.Email}},
+	}
+	thread, err := repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+		CompanyID: companyID, PersonalUserID: owner.UserID, PersonalAccountEmail: owner.Email,
+		AccountEmail: owner.Email, Provider: "google", ProviderThreadID: source.ThreadID,
+		SelectedMessageID: source.ID, Messages: []domain.EmailMessageSnapshot{source}, HistoryComplete: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedSource := thread.Messages[0].Message
+	storedSource.EmailMessageID = thread.Messages[0].EmailMessageID
+	replyJSON, err := json.Marshal(storedSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err := repo.UpsertCommunicationsEmailDraft(store.CommunicationsEmailDraftInput{
+		CompanyID: companyID, DraftID: "universal-no-node-draft",
+		PersonalUserID: owner.UserID, PersonalAccountEmail: owner.Email, ParticipantUserID: owner.UserID,
+		IsShared: true, CreatedByUserID: owner.UserID, UpdatedByUserID: owner.UserID,
+		Kind: "reply", SourceMessageID: thread.Messages[0].EmailMessageID, AccountEmail: owner.Email,
+		ToRecipients: "customer@example.com", Subject: "Re: Question", BodyEditorHTML: "<p>Answer</p>",
+		ReplyToMessageJSON: string(replyJSON),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{message: NylasMessage{ID: source.ID, ThreadID: source.ThreadID}}
+	server := NewServerWithOptions(repo, ServerOptions{
+		NylasConfig: testNylasConfig(), NylasClient: nylas,
+		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
+	})
+	defer server.Close()
+	server.nylasGate = newNylasRequestGate(0)
+	path := "/v1/communications/drafts/" + draft.DraftID + "/send?company_id=" + companyID + "&account_email=" + owner.Email
+	request := attachmentRequestWithActor(
+		httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString("{\"expected_revision\":1}")),
+		owner, companyID, domain.RoleCompanyUser,
+	)
+	recorder := httptest.NewRecorder()
+	server.Routes().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("no-Node universal send status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if nodes, err := repo.ListNodes(companyID); err != nil || len(nodes) != 0 {
+		t.Fatalf("universal send invented Nodes=%+v err=%v", nodes, err)
+	}
+	if nylas.sendCalls != 1 || nylas.lastSendGrantID != "universal-no-node-grant" || nylas.sent.ReplyToMessageID != source.ID {
+		t.Fatalf("no-Node provider send calls=%d grant=%q request=%+v", nylas.sendCalls, nylas.lastSendGrantID, nylas.sent)
 	}
 }
 

@@ -532,9 +532,6 @@ func postgresSnapshotRecyclePayloadWithCacheTx(ctx context.Context, tx *sql.Tx, 
 			if err := addTable("email_relationships", emailWhere, emailArgs...); err != nil {
 				return nil, err
 			}
-			if err := addTable("email_drafts", "company_id=$1::uuid and email_relationship_id in (select email_relationship_id from email_relationships where "+emailWhere+")", emailArgs...); err != nil {
-				return nil, err
-			}
 		}
 	}
 	accessNodeIDs := nodeIDs

@@ -17,6 +17,7 @@ type communicationsEmailDraftRequest struct {
 	DraftID                string          `json:"draft_id"`
 	SharedInboxID          string          `json:"shared_inbox_id"`
 	AccountEmail           string          `json:"account_email"`
+	SenderAccountEmail     string          `json:"sender_account_email"`
 	Kind                   string          `json:"kind"`
 	SourceMessageID        string          `json:"source_message_id"`
 	ReplyToMessageID       string          `json:"reply_to_message_id"`
@@ -28,6 +29,8 @@ type communicationsEmailDraftRequest struct {
 	ReplyToMessage         json.RawMessage `json:"reply_to_message"`
 	ScheduledSendTimestamp string          `json:"scheduled_send_timestamp"`
 	CollaborationID        string          `json:"collaboration_id"`
+	EmailThreadID          string          `json:"email_thread_id"`
+	OriginNodeID           string          `json:"origin_node_id"`
 	IsShared               bool            `json:"is_shared"`
 	Revision               int64           `json:"revision"`
 }
@@ -51,6 +54,8 @@ type communicationsEmailDraftResponse struct {
 	Kind                   string                      `json:"kind"`
 	SourceMessageID        string                      `json:"source_message_id,omitempty"`
 	CollaborationID        string                      `json:"collaboration_id,omitempty"`
+	EmailThreadID          string                      `json:"email_thread_id,omitempty"`
+	OriginNodeID           string                      `json:"origin_node_id,omitempty"`
 	IsShared               bool                        `json:"is_shared,omitempty"`
 	Revision               int64                       `json:"revision,omitempty"`
 	CreatedByUserID        string                      `json:"created_by_user_id,omitempty"`
@@ -81,6 +86,20 @@ func (s *Server) handleCommunicationsEmailDrafts(w http.ResponseWriter, r *http.
 
 func (s *Server) handleCommunicationsEmailDraftByID(w http.ResponseWriter, r *http.Request) {
 	draftID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/communications/drafts/"), "/")
+	if strings.HasSuffix(draftID, "/send") {
+		draftID = strings.TrimSuffix(draftID, "/send")
+		actor, ok := authenticatedActor(r)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		if r.Method != http.MethodPost || draftID == "" || strings.Contains(draftID, "/") {
+			writeError(w, http.StatusNotFound, "not_found")
+			return
+		}
+		s.handleCommunicationsEmailCollaborationDraftSend(w, r, actor, strings.TrimSpace(r.URL.Query().Get("company_id")), "", draftID)
+		return
+	}
 	if draftID == "" || strings.Contains(draftID, "/") {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
@@ -227,6 +246,13 @@ func (s *Server) handleCommunicationsEmailDraftUpsert(w http.ResponseWriter, r *
 		if !requireCompanyAccess(w, r, companyID) {
 			return
 		}
+		if strings.TrimSpace(req.CollaborationID) == "" || strings.TrimSpace(req.SharedInboxID) != "" || normalizeEmailForCompare(req.AccountEmail) != "" {
+			var ok bool
+			scope, ok = s.resolveCommunicationsEmailDraftScope(w, actor, companyID, req.SharedInboxID, req.AccountEmail, store.EntityPermissionEdit)
+			if !ok {
+				return
+			}
+		}
 	} else {
 		var ok bool
 		scope, ok = s.resolveCommunicationsEmailDraftScope(w, actor, companyID, req.SharedInboxID, req.AccountEmail, store.EntityPermissionEdit)
@@ -255,13 +281,15 @@ func (s *Server) handleCommunicationsEmailDraftUpsert(w http.ResponseWriter, r *
 		SharedInboxID:          scope.sharedInboxID,
 		ParticipantUserID:      actor.User.UserID,
 		CollaborationID:        req.CollaborationID,
+		EmailThreadID:          req.EmailThreadID,
+		OriginNodeID:           req.OriginNodeID,
 		IsShared:               req.IsShared,
 		ExpectedRevision:       req.Revision,
 		CreatedByUserID:        actor.User.UserID,
 		UpdatedByUserID:        actor.User.UserID,
 		Kind:                   firstNonBlank(req.Kind, communicationsEmailDraftKindFromID(draftID)),
 		SourceMessageID:        sourceMessageID,
-		AccountEmail:           scope.accountEmail,
+		AccountEmail:           firstNonBlank(req.SenderAccountEmail, scope.accountEmail),
 		ToRecipients:           req.ToRecipients,
 		CcRecipients:           req.CcRecipients,
 		BccRecipients:          req.BccRecipients,
@@ -592,6 +620,8 @@ func (s *Server) communicationsEmailDraftResponse(draft domain.CommunicationsEma
 		PersonalAccountEmail:   draft.PersonalAccountEmail,
 		SharedInboxID:          draft.SharedInboxID,
 		CollaborationID:        draft.CollaborationID,
+		EmailThreadID:          draft.EmailThreadID,
+		OriginNodeID:           draft.OriginNodeID,
 		IsShared:               draft.IsShared,
 		Revision:               draft.Revision,
 		CreatedByUserID:        draft.CreatedByUserID,

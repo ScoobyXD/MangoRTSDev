@@ -68,23 +68,25 @@ Clearing the quote or closing the unsent chat cancels that preview locally, so n
 ↓
 On the first send, Mango atomically creates the Node text box, links the exact email message to that text box, and creates the chat; failure creates none of them
 ↓
-After success the preview becomes a normal saved text box, while exact-message and whole-thread drops continue to use typed email relationships and reject a different email on an already-linked text box
+After success the preview becomes a normal saved text box; an exact-message drop uses the same typed relationship, while a whole-thread drop is rejected
 
 Last updated: 2026-08-08
 
 # Current Editor Business Logic Laws
 
 1. A Node text box is the required owner of every Node chat.
-2. A Node text box may link to one exact email message or one whole stored email thread.
+2. A Node text box may link to one exact email message. A whole stored email thread never links to a text box.
 3. Dropping an exact email message on a Node text box creates the exact typed message/textbox relationship.
-4. Dropping an attached email thread on a Node text box links every stored thread message to that text box.
-5. A text box already linked to one email message or thread rejects a different email drop.
+4. Dropping an attached email thread on a Node text box is rejected.
+5. A text box already linked to one email message rejects a different email drop.
 6. A Node with priority **Not Assigned** may be assigned or moved to a Logic Gate without a priority prompt or error.
 7. Clicking the chat action for highlighted email text without a linked text box creates only a temporary interface preview and writes no text box, email relationship, or chat to the database.
 8. Clearing the temporary email quote or closing its chat rail cancels the temporary text box and draft without a database delete or cleanup write.
 9. Sending the first temporary email chat atomically creates the Node text box, exact email-message relationship, and chat before the interface becomes a normal saved text box.
+10. One exact email message may link to at most one text box in each Node and may link to a different text box in another Node.
+11. Every email chat remains local to its exact Node, exact text box, and exact linked email message.
 
-Last updated: 2026-08-08
+Last updated: 2026-08-09
 
 # Process Story: Editor policy status follows the draft automatically
 

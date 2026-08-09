@@ -243,6 +243,21 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(ctx context.Context,
 		restore()
 		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}
+	if input.LinkedTextBlock != nil {
+		input.LinkedTextBlock.CompanyID, input.LinkedTextBlock.NodeID = input.CompanyID, node.NodeID
+		if input.InitialChat != nil {
+			input.InitialChat.CompanyID, input.InitialChat.NodeID = input.CompanyID, node.NodeID
+		}
+		conversionInput := CommunicationsTriageConversionInput{
+			CompanyID: input.CompanyID, UserID: input.CreatedByUserID, ActorUserID: input.CreatedByUserID,
+			SharedInboxID: input.SharedInboxID, AccountEmail: input.AccountEmail, NodeID: node.NodeID,
+			MessageIDs: []string{input.Message.ID}, LinkedTextBlock: input.LinkedTextBlock, InitialChat: input.InitialChat,
+		}
+		if err := r.addCommunicationsConversionAtomicWritesLocked(conversionInput, &CommunicationsTriageConversionResult{}); err != nil {
+			restore()
+			return CommunicationsEmailCollaborationEnsureResult{}, err
+		}
+	}
 	if requestedMessageID, sourceID, ok := communicationsEmailIngestionRequest(thread, threadInput); ok {
 		if emailConnectionID := r.emailConnectionIDForThreadLocked(thread); emailConnectionID != "" {
 			if _, _, err := r.ensureCommunicationsEmailIngestionJobLocked(CommunicationsEmailIngestionJobInput{

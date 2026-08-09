@@ -35,6 +35,8 @@ type CommunicationsEmailCollaborationEnsureInput struct {
 	RequestedNodeID      string
 	Priority             *int
 	Message              domain.EmailMessageSnapshot
+	LinkedTextBlock      *NodeInformationInput
+	InitialChat          *NodeInformationInput
 }
 
 type CommunicationsEmailCollaborationEnsureResult struct {
@@ -153,6 +155,24 @@ func normalizeCommunicationsEmailCollaborationEnsureInput(input CommunicationsEm
 	}
 	if input.Priority != nil && (*input.Priority < 1 || *input.Priority > 5) {
 		return CommunicationsEmailCollaborationEnsureInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
+	}
+	if input.LinkedTextBlock == nil && input.InitialChat != nil {
+		return CommunicationsEmailCollaborationEnsureInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
+	}
+	for _, value := range []struct {
+		input        *NodeInformationInput
+		expectedType string
+	}{{input.LinkedTextBlock, "Text box"}, {input.InitialChat, CommunicationsEmailCollaborationChatInformationType}} {
+		if value.input == nil {
+			continue
+		}
+		value.input.Type = strings.TrimSpace(value.input.Type)
+		value.input.Information = strings.TrimSpace(value.input.Information)
+		value.input.InformationID = cleanUUIDText(value.input.InformationID)
+		value.input.ActorUserID = creatorID
+		if value.input.Type != value.expectedType || value.input.Information == "" || value.input.InformationID == "" {
+			return CommunicationsEmailCollaborationEnsureInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
+		}
 	}
 	input.CompanyID = companyID
 	input.PersonalUserID = scope.personalUserID
