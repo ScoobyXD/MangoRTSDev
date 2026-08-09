@@ -76,11 +76,61 @@ func TestPostgresNodeFinalTextboxChatEmailAndAttachmentStorage(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	converged, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: newUUIDv7String(),
+		Type: "Attached email", Information: string(emailPayload), ActorUserID: owner.UserID,
+	})
+	if err != nil || converged.InformationID != emailRelationshipID {
+		t.Fatalf("same Node/message/textbox did not converge to exact relationship: %+v err=%v", converged, err)
+	}
 	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
 		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: newUUIDv7String(),
 		Type: "Attached email", Information: string(emailPayload), ActorUserID: other.UserID,
 	}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("unowned exact email attach err=%v, want ErrInvalid", err)
+	}
+	secondTextboxID := "00000000-0000-4000-8000-000000000509"
+	if _, err := repo.CommitEditorJSONDocument(EditorJSONCommitInput{
+		Document: EditorJSONDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeNode,
+			ResourceID: node.NodeID, DocumentID: secondTextboxID},
+		OperationID: newUUIDv7String(), ClientID: "node-final-second-textbox", ActorUserID: owner.UserID,
+		BaseRevision: 0, SchemaVersion: MangoTiptapSchemaVersion, JSONDocument: document,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	secondTextboxPayload, _ := json.Marshal(map[string]any{
+		"block_id": secondTextboxID, "email_message_id": emailMessageID,
+		"attached_timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: newUUIDv7String(),
+		Type: "Attached email", Information: string(secondTextboxPayload), ActorUserID: owner.UserID,
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("same message in a second textbox of one Node err=%v, want ErrInvalid", err)
+	}
+	secondNode, err := repo.CreateNode(company.CompanyID, "Second exact-message Node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondNodeTextboxID := "00000000-0000-4000-8000-000000000510"
+	if _, err := repo.CommitEditorJSONDocument(EditorJSONCommitInput{
+		Document: EditorJSONDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeNode,
+			ResourceID: secondNode.NodeID, DocumentID: secondNodeTextboxID},
+		OperationID: newUUIDv7String(), ClientID: "node-final-second-node", ActorUserID: owner.UserID,
+		BaseRevision: 0, SchemaVersion: MangoTiptapSchemaVersion, JSONDocument: document,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	secondNodeRelationshipID := "00000000-0000-4000-8000-000000000511"
+	secondNodePayload, _ := json.Marshal(map[string]any{
+		"block_id": secondNodeTextboxID, "email_message_id": emailMessageID,
+		"attached_timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: secondNode.NodeID, InformationID: secondNodeRelationshipID,
+		Type: "Attached email", Information: string(secondNodePayload), ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatalf("same message relationship in a different Node: %v", err)
 	}
 
 	chatID := "00000000-0000-4000-8000-000000000505"
@@ -162,5 +212,19 @@ where company_id=$1::uuid and attachment_id=$2::uuid`, company.CompanyID, attach
 	}
 	if !attachmentActive {
 		t.Fatal("shared attachment was marked pending while its exact email_message owner survived")
+	}
+	if err := repo.DeleteNodeProjection(company.CompanyID, node.NodeID, emailRelationshipID); err != nil {
+		t.Fatalf("delete Node A email relationship: %v", err)
+	}
+	var nodeARelationships, nodeBRelationships, survivingMessages int
+	if err := db.QueryRow(`select
+  (select count(*) from email_relationships where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid and email_message_id=$4::uuid),
+  (select count(*) from email_relationships where company_id=$1::uuid and resource_type='node' and resource_id=$3::uuid and email_message_id=$4::uuid),
+  (select count(*) from email_messages where company_id=$1::uuid and email_message_id=$4::uuid)`,
+		company.CompanyID, node.NodeID, secondNode.NodeID, emailMessageID).Scan(&nodeARelationships, &nodeBRelationships, &survivingMessages); err != nil {
+		t.Fatal(err)
+	}
+	if nodeARelationships != 0 || nodeBRelationships != 1 || survivingMessages != 1 {
+		t.Fatalf("isolated relationship delete left NodeA/NodeB/message=%d/%d/%d", nodeARelationships, nodeBRelationships, survivingMessages)
 	}
 }

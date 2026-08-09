@@ -1,3 +1,15 @@
+# Process Story: One stored email can be worked in several Nodes without sharing textbox ownership
+
+A stored email thread is related Node-wide to Node A and Node B
+↓
+Each Node can expose that thread without copying the thread or messages
+↓
+A textbox relationship points to one exact stored message and one exact textbox in its own Node; another textbox in the same Node converges to the existing link or is rejected, while a textbox in the other Node is allowed
+↓
+Removing Node A's relationship removes only Node A's typed edge and leaves Node B, the thread, its messages, textboxes, chats, and attachment relationships intact
+
+Last updated: 2026-08-09
+
 # Process Story: Policy inheritance follows typed parents without moving permissions into Explorer
 
 A permission or RACI resolver receives one exact resource type and ID
@@ -350,6 +362,14 @@ This propagation is idempotent and MUST NOT recopy an existing message, invent o
 Policy settings and assignments MUST remain in `resource_gvic_settings`, `resource_gvic_assignments`, `resource_permission_settings`, and `resource_permissions`. Company Explorer stores no permission or RACI rows. It contributes only the exact folder-parent and Project/Logic-Gate placement edges already owned by Explorer; Node policy parentage uses the exact Logic Gate assignment, and Shared Inbox policy parentage uses its own typed hierarchy.
 
 Inherited resolution may follow those live typed parent edges, but it MUST NOT copy them into policy tables, invent a generic resource edge, or make Company Explorer a second policy authority. Comparing a saved raw policy with its immediate parent's raw policy may change the policy mode to inherited or customized; it MUST NOT change resource placement, assignment, ownership, or endpoint identity.
+
+### Law 31 — Email threads may span Nodes, while textbox links remain exact and Node-local
+
+One `email_thread_id` and its exact stored messages MAY have Node-wide `email_relationships` in more than one Node. A Node-wide relationship has `resource_type='node'` and a null `resource_textbox_id`; it exposes the thread in that exact Node but does not make that Node the thread owner.
+
+A textbox-specific relationship MUST name one exact `email_message_id`, one exact Node, and one exact textbox in that Node. The same message may be linked to at most one textbox inside one Node. Repeating the same Node/message/textbox command converges to the existing typed edge, a different textbox in that same Node is rejected, and a textbox in a different Node is allowed.
+
+Removing one Node-wide or textbox-specific email relationship deletes only that exact relationship. It MUST NOT delete or rewrite another Node's relationship, the stored thread or message, another Node's textbox or chat, an email chat quote, or any surviving attachment relationship.
 
 ## Required design examples
 

@@ -182,11 +182,12 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(ctx context.Context,
 		existing.EmailThreadID = thread.EmailThreadID
 		existing.Provider = thread.Provider
 		r.emailCollaborations[key(existing.CompanyID, existing.CollaborationID)] = existing
-		if requestedMessageID, ok := communicationsEmailIngestionRequest(thread, threadInput); ok {
+		if requestedMessageID, sourceID, ok := communicationsEmailIngestionRequest(thread, threadInput); ok {
 			if emailConnectionID := r.emailConnectionIDForThreadLocked(thread); emailConnectionID != "" {
 				if _, _, err := r.ensureCommunicationsEmailIngestionJobLocked(CommunicationsEmailIngestionJobInput{
 					CompanyID: input.CompanyID, EmailConnectionID: emailConnectionID, EmailThreadID: thread.EmailThreadID,
 					ProviderMessageID: requestedMessageID, ProviderThreadID: thread.ProviderThreadID, Priority: CommunicationsEmailIngestionPriorityVisible,
+					EnqueueSourceID: sourceID,
 				}); err != nil {
 					restore()
 					return CommunicationsEmailCollaborationEnsureResult{}, err
@@ -239,11 +240,12 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(ctx context.Context,
 	}
 	r.emailCollaborations[key(input.CompanyID, item.CollaborationID)] = item
 	r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, node.NodeID, informationID, thread.EmailThreadID, input.Message.ID, input.CreatedByUserID, now)
-	if requestedMessageID, ok := communicationsEmailIngestionRequest(thread, threadInput); ok {
+	if requestedMessageID, sourceID, ok := communicationsEmailIngestionRequest(thread, threadInput); ok {
 		if emailConnectionID := r.emailConnectionIDForThreadLocked(thread); emailConnectionID != "" {
 			if _, _, err := r.ensureCommunicationsEmailIngestionJobLocked(CommunicationsEmailIngestionJobInput{
 				CompanyID: input.CompanyID, EmailConnectionID: emailConnectionID, EmailThreadID: thread.EmailThreadID,
 				ProviderMessageID: requestedMessageID, ProviderThreadID: thread.ProviderThreadID, Priority: CommunicationsEmailIngestionPriorityVisible,
+				EnqueueSourceID: sourceID,
 			}); err != nil {
 				restore()
 				return CommunicationsEmailCollaborationEnsureResult{}, err

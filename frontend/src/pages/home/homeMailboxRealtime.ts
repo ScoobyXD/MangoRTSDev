@@ -38,6 +38,12 @@ export type HomeMailboxRequestOwner = Readonly<{
 }>;
 export type HomeMailboxFolderOwner = Pick<HomeMailboxRequestOwner, "mailboxScopeKey">;
 
+export type HomeArchiveStatusJob = {
+  jobID: string;
+  realtimeScope: string;
+  messageIDs: readonly string[];
+};
+
 export type HomeMailboxCountOverrideKey = "primary" | "starred";
 export type HomeMailboxCountOverrides = Record<string, Partial<Record<HomeMailboxCountOverrideKey, number>>>;
 
@@ -72,6 +78,16 @@ type HomeMailboxFolderLoadCoordinatorOptions = {
 type HomeMailboxFolderLoadRequest = {
   owner: HomeMailboxFolderOwner;
   refresh: boolean;
+};
+
+type HomeArchiveStatusCoordinatorOptions = {
+  target: HomeMailboxRealtimeTarget;
+  getActiveJobs: () => readonly HomeArchiveStatusJob[];
+  revalidate: (jobID: string) => void | Promise<void>;
+  onError?: (cause: unknown) => void;
+  delayMs?: number;
+  setTimer?: (callback: () => void, delayMs: number) => TimerHandle;
+  clearTimer?: (timer: TimerHandle) => void;
 };
 
 type HomeMailboxFolderLoadState = {
@@ -485,6 +501,91 @@ export function createHomeMailboxRealtimeCoordinator(options: HomeMailboxRealtim
       timer = null;
       pending = null;
       queued = null;
+    },
+  };
+}
+
+export function createHomeArchiveStatusCoordinator(options: HomeArchiveStatusCoordinatorOptions) {
+  const delayMs = options.delayMs ?? 120;
+  const setTimer = options.setTimer ?? ((callback, delay) => setTimeout(callback, delay));
+  const clearTimer = options.clearTimer ?? ((timer) => clearTimeout(timer));
+  let disposed = false;
+  let timer: TimerHandle | null = null;
+  let pending = new Set<string>();
+  let queued = new Set<string>();
+  let inFlight = false;
+
+  const activeJobIDs = (messageID = ""): string[] => {
+    const cleanMessageID = messageID.trim();
+    return options.getActiveJobs()
+      .filter((job) => job.realtimeScope.trim() === options.target.scope)
+      .filter((job) => !cleanMessageID || job.messageIDs.some((id) => id.trim() === cleanMessageID))
+      .map((job) => job.jobID.trim())
+      .filter(Boolean);
+  };
+
+  const start = (jobIDs: Set<string>) => {
+    if (disposed || jobIDs.size === 0) return;
+    if (inFlight) {
+      for (const jobID of jobIDs) queued.add(jobID);
+      return;
+    }
+    inFlight = true;
+    void (async () => {
+      for (const jobID of jobIDs) await options.revalidate(jobID);
+    })()
+      .catch((cause) => options.onError?.(cause))
+      .finally(() => {
+        inFlight = false;
+        const finalPass = queued;
+        queued = new Set<string>();
+        if (finalPass.size > 0) start(finalPass);
+      });
+  };
+
+  const schedule = (jobIDs: readonly string[], immediate = false) => {
+    if (disposed) return;
+    for (const jobID of jobIDs) {
+      const cleanJobID = jobID.trim();
+      if (cleanJobID) pending.add(cleanJobID);
+    }
+    if (pending.size === 0) return;
+    if (immediate && timer === null) {
+      const next = pending;
+      pending = new Set<string>();
+      start(next);
+      return;
+    }
+    if (timer !== null) clearTimer(timer);
+    timer = setTimer(() => {
+      timer = null;
+      const next = pending;
+      pending = new Set<string>();
+      start(next);
+    }, delayMs);
+  };
+
+  return {
+    accepted() {
+      schedule(activeJobIDs());
+    },
+    changed(signal: HomeMailboxRealtimeSignal) {
+      if (disposed || signal.scope.trim() !== options.target.scope) return;
+      const trigger = signal.trigger.trim().toLowerCase();
+      if (trigger !== "message.updated" && trigger !== "message.deleted") return;
+      const messageID = signal.message_id?.trim() ?? "";
+      if (!messageID) return;
+      schedule(activeJobIDs(messageID));
+    },
+    revalidate(jobID: string) {
+      schedule([jobID], true);
+    },
+    dispose() {
+      disposed = true;
+      if (timer !== null) clearTimer(timer);
+      timer = null;
+      pending.clear();
+      queued.clear();
     },
   };
 }

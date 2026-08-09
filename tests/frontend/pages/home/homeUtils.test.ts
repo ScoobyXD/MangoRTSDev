@@ -530,9 +530,11 @@ test("unread-only email cards stay visible when selected", () => {
 
 test("archive jobs close response and reconnect races with one canonical status read", () => {
   const source = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomePage.tsx"), "utf8");
-  assert.match(source, /activeArchiveJobsRef\.current\.set\(result\.archiveJob\.job_id,[\s\S]{0,260}void refreshActiveArchiveJobs\(\)/);
-  assert.match(source, /onAccepted: \(\) => \{[\s\S]{0,160}refreshArchiveJobsRef\.current\(\)/);
-  assert.match(source, /job = await getCommunicationsArchiveJob\(jobID\)/);
+  assert.match(source, /activeArchiveJobsRef\.current\.set\(result\.archiveJob\.job_id,[\s\S]{0,260}requestArchiveJobRevalidation\(result\.archiveJob\.job_id\)/);
+  assert.match(source, /onAccepted: \(\) => \{[\s\S]{0,180}archiveCoordinator\.accepted\(\)/);
+  assert.match(source, /job = await getCommunicationsArchiveJob\(jobID, \{ refresh: true \}\)/);
+  assert.match(source, /markCommunicationsArchiveJobsStaleForMailboxChange/);
+  assert.doesNotMatch(source, /refreshActiveArchiveJobs|refreshArchiveJobsRef/);
   assert.doesNotMatch(source, /setInterval\([^)]*getCommunicationsArchiveJob|archiveJobPoll/);
 });
 

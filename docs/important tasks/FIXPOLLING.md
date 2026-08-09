@@ -269,7 +269,7 @@ PostgreSQL stores:
 
 PostgreSQL does **not** store a timer that decides when another worker may receive the SQS message.
 
-The producer creates the tiny stable marker before it sends the compact SQS message. This is a permanent work identity, not a delivery timer. A request retry reuses it. Rare reconciliation performs one bounded read for markers at least ten minutes old: it may resend only ingestion still `accepted` with no `sqs_accepted_timestamp`, or archive items still `pending` with zero provider starts. It never replaces an identity or resends started, completed, parked, exhausted, or DLQed work.
+The producer creates the tiny stable marker before it sends the compact SQS message. `ingestion_job_id` is the permanent Mango work identity, not a delivery timer. `enqueue_source_id` is only the immutable fingerprint that proves an exact original producer request/delivery retry; it is never another job, lease, or delivery authority. That matching source may finish its own send before SQS acceptance is recorded. Generic/later reconciliation never lists old markers by age, sends another source's ingestion/archive marker, or creates a replacement identity.
 
 When provider work actually begins, PostgreSQL atomically records a new attempt token. It refuses to start attempt 4. Completion or failure is conditional on the same token, so an old delayed worker cannot overwrite a newer attempt. This is ordinary idempotency, not a second queue lease.
 
@@ -291,7 +291,7 @@ AWS's SQS receive count is the delivery and dead-letter authority. PostgreSQL's 
 - AWS can move a message to the dead-letter queue with fewer than three recorded database attempts when the worker crashes before attempt start. The stable job row still prevents automatic recreation.
 - If the worker cannot record the final result, it does not delete the SQS message. AWS moves the message to the dead-letter queue, the alarm fires, and deliberate operator review is required.
 - Permanent connection/configuration failures park the exact connection and delete the message.
-- Reconciliation never creates a replacement identity. It may resend only the same ingestion marker when it is at least about ten minutes old, still `accepted`, and has no `sqs_accepted_timestamp`, or the same archive item while it is still `pending` with zero provider starts. It never touches processing, completed, parked, exhausted, failed, or DLQed work.
+- Reconciliation sends only a newly created stable ingestion job for genuinely missing provider work. An existing accepted, processing, completed, parked, exhausted, archive, or DLQed identity causes zero sends.
 - Manual replay from the dead-letter queue is a deliberate operator action after the underlying problem is understood.
 
 There is no custom exponential backoff scheduler. The fixed SQS visibility interval is the retry delay.
@@ -361,18 +361,20 @@ That control message:
 3. continues with another control message only when another page exists;
 4. never scans every account concurrently;
 5. excludes disconnected, parked, `reauth_required`, and `configuration_required` connections;
-6. performs one bounded repair read for old never-accepted ingestion markers and old never-started archive items, always reusing their IDs;
-7. processes one provider page per SQS delivery;
-8. advances the checkpoint only after the page is durably accepted;
-9. never polls PostgreSQL every few milliseconds and never runs a per-API scheduler.
+6. creates and sends one stable ingestion job only when a discovered provider message has no existing job identity;
+7. lets only a redelivery with the exact same reconciliation fingerprint finish its own accepted job while acceptance is unrecorded; a later schedule and every accepted-recorded, processing, completed, parked, exhausted, archive, or DLQed identity cause zero sends;
+8. processes one provider page per SQS delivery;
+9. advances the checkpoint only after the page is durably represented by new acceptance or an already-existing stable identity;
+10. never polls PostgreSQL every few milliseconds and never runs a per-API scheduler.
 
 The 10-minute schedule is not a 10-minute delay for normal email. Normal email arrives through the webhook immediately.
 
 ## Worker health and scaling
 
 - The worker is a private ECS service outside the ALB.
-- Start with one worker task and small bounded concurrency.
+- DEV deliberately uses one worker task with small bounded concurrency. This correctness cleanup adds no production autoscaling.
 - ReceiveMessage uses 20-second SQS long polling, so an idle worker does not create another hot polling loop.
+- Time waiting in the queue does not start the 10-minute visibility period or 8-minute worker deadline; both begin only when a worker receives the item. The current DEV queue retains waiting items for 14 days.
 - Before the first receive, the worker exits if PostgreSQL final-schema readiness, SQS, Nylas, or external Valkey is unavailable or incomplete. It never substitutes process-local realtime.
 - A persistent SQS Receive error also exits the run so ECS restart backoff owns recovery; an ordinary message failure remains undeleted for native SQS redelivery.
 - ECS replaces an exited essential container.
@@ -482,7 +484,7 @@ The fresh work starts from the new current `main` after this decision record is 
 - SQS receive count, not the PostgreSQL attempt number, controls redelivery and dead-letter movement;
 - PostgreSQL increments only when provider work actually starts and refuses attempt 4;
 - AWS may move a message to the dead-letter queue with fewer than three recorded attempts if the worker crashed before attempt start;
-- reconciliation never recreates an identity; it may resend only an old ingestion marker with no recorded SQS acceptance or an old archive item with zero provider starts, and never touches processing or terminal work;
+- reconciliation sends only newly created stable jobs for genuinely missing provider work and sends zero for every existing ingestion/archive identity, including exhausted and DLQed work;
 - a third-attempt settlement failure is not acknowledged; the dead-letter alarm requires deliberate operator review;
 - permanent `401`, `403`, exact `404 grant.not_found`, and Gmail configuration `400` do not consume all three attempts;
 - a status-write failure remains retryable and is not falsely acknowledged.
@@ -495,7 +497,7 @@ The fresh work starts from the new current `main` after this decision record is 
 - one control message reads one bounded keyset page;
 - one connection message handles one provider page;
 - a missed webhook converges on one stable idempotency identity, and duplicate deliveries perform no duplicate provider work;
-- parked and exhausted work is excluded;
+- accepted, processing, completed, parked, exhausted, archive, and DLQed work is never resent by reconciliation;
 - adding API tasks does not multiply reconciliation.
 
 ### Infrastructure and operations

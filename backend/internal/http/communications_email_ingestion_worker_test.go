@@ -713,7 +713,7 @@ func TestCommunicationsEmailConnectionScanStartsAtActivationAndQueuesRoutineWork
 	}
 }
 
-func TestEmailReconciliationRedeliveryResendsExistingAcceptedMarkerAfterSendFailure(t *testing.T) {
+func TestEmailReconciliationRetriesOnlyTheExactOriginalDiscoverySource(t *testing.T) {
 	repo, owner, _, _ := newEmailCollaborationThreadTestRepo(t)
 	connection, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
 		CompanyID: emailCollaborationThreadTestCompanyID, UserID: owner.UserID,
@@ -753,6 +753,10 @@ func TestEmailReconciliationRedeliveryResendsExistingAcceptedMarkerAfterSendFail
 	if sender.attempts != 2 || len(sender.messages) != 1 || sender.messages[0].JobID == "" {
 		t.Fatalf("SQS sends attempts=%d messages=%+v", sender.attempts, sender.messages)
 	}
+	job, err := repo.GetCommunicationsEmailIngestionJobContext(context.Background(), sender.messages[0].JobID)
+	if err != nil || job.EnqueueSourceID != "reconciliation:"+message.ReconciliationID || job.SQSAcceptedTimestamp == nil {
+		t.Fatalf("exact source retry job=%+v err=%v", job, err)
+	}
 	laterSchedule := message
 	laterSchedule.ReconciliationID = "scheduled-send-retry-later"
 	laterSchedule.ScanStartedAt = scanStarted.Add(10 * time.Minute)
@@ -764,34 +768,88 @@ func TestEmailReconciliationRedeliveryResendsExistingAcceptedMarkerAfterSendFail
 	}
 }
 
-func TestEmailReconciliationRecoversOnlyOldNeverSentStableMarkers(t *testing.T) {
+func TestEmailReconciliationNeverResendsAnyExistingStableJob(t *testing.T) {
 	repo, owner, _, _ := newEmailCollaborationThreadTestRepo(t)
 	connection, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
 		CompanyID: emailCollaborationThreadTestCompanyID, UserID: owner.UserID,
-		Provider: "google", AccountEmail: owner.Email, GrantID: "unsent-recovery-grant", Status: "connected",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ingestionJob, _, err := repo.EnsureCommunicationsEmailIngestionJobContext(context.Background(), store.CommunicationsEmailIngestionJobInput{
-		CompanyID: connection.CompanyID, EmailConnectionID: connection.EmailConnectionID,
-		ProviderMessageID: "old-selected-message", ProviderThreadID: "old-selected-thread",
-		Priority: store.CommunicationsEmailIngestionPriorityVisible,
+		Provider: "google", AccountEmail: owner.Email, GrantID: "existing-jobs-grant", Status: "connected",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	archiveJob, err := repo.CreateCommunicationsArchiveJobContext(context.Background(), store.CommunicationsArchiveJobInput{
 		ActorUserID: owner.UserID, CompanyID: connection.CompanyID, Connection: connection,
-		MessageIDs: []string{"old-archive-message"},
+		MessageIDs: []string{"existing-archive-message"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	scanStarted := time.Now().UTC().Add(emailReconciliationUnsentAge + time.Minute)
+	statuses := []string{"accepted", "accepted-recorded", "processing", "completed", "parked", "exhausted"}
+	providerMessages := make([]NylasMessage, 0, len(statuses))
+	scanStarted := time.Now().UTC().Add(time.Minute)
+	for _, status := range statuses {
+		providerMessageID := "existing-" + status
+		providerMessages = append(providerMessages, NylasMessage{
+			ID: providerMessageID, ThreadID: "thread-" + status, Date: scanStarted.Add(-time.Second).Unix(),
+		})
+		job, created, ensureErr := repo.EnsureCommunicationsEmailIngestionJobContext(context.Background(), store.CommunicationsEmailIngestionJobInput{
+			CompanyID: connection.CompanyID, EmailConnectionID: connection.EmailConnectionID,
+			ProviderMessageID: providerMessageID, ProviderThreadID: "thread-" + status,
+			Priority: store.CommunicationsEmailIngestionPriorityScan,
+		})
+		if ensureErr != nil || !created {
+			t.Fatalf("ensure %s created=%v err=%v", status, created, ensureErr)
+		}
+		switch status {
+		case "accepted-recorded":
+			if err := repo.MarkCommunicationsEmailIngestionJobSQSAcceptedContext(context.Background(), job.IngestionJobID); err != nil {
+				t.Fatal(err)
+			}
+		case "processing":
+			if _, started, err := repo.StartCommunicationsEmailIngestionAttemptContext(context.Background(), job.IngestionJobID); err != nil || !started {
+				t.Fatalf("start processing job started=%v err=%v", started, err)
+			}
+		case "completed":
+			started, ok, err := repo.StartCommunicationsEmailIngestionAttemptContext(context.Background(), job.IngestionJobID)
+			if err != nil || !ok {
+				t.Fatalf("start completed job started=%v err=%v", ok, err)
+			}
+			if err := repo.CompleteCommunicationsEmailIngestionAttemptContext(context.Background(), job.IngestionJobID, started.AttemptToken, nil); err != nil {
+				t.Fatal(err)
+			}
+		case "parked":
+			started, ok, err := repo.StartCommunicationsEmailIngestionAttemptContext(context.Background(), job.IngestionJobID)
+			if err != nil || !ok {
+				t.Fatalf("start parked job started=%v err=%v", ok, err)
+			}
+			if err := repo.ParkCommunicationsEmailIngestionAttemptContext(context.Background(), job.IngestionJobID, started.AttemptToken, "reauth_required", "provider_auth", nil); err != nil {
+				t.Fatal(err)
+			}
+			connection, err = repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+				CompanyID: connection.CompanyID, UserID: owner.UserID, Provider: "google",
+				AccountEmail: owner.Email, GrantID: "existing-jobs-grant", Status: "connected",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		case "exhausted":
+			for attempt := 1; attempt <= store.CommunicationsEmailProviderAttemptLimit; attempt++ {
+				started, ok, err := repo.StartCommunicationsEmailIngestionAttemptContext(context.Background(), job.IngestionJobID)
+				if err != nil || !ok {
+					t.Fatalf("start exhausted job attempt=%d started=%v err=%v", attempt, ok, err)
+				}
+				if err := repo.FailCommunicationsEmailIngestionAttemptContext(context.Background(), job.IngestionJobID, started.AttemptToken, "temporary_provider_failure", nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if fourth, started, err := repo.StartCommunicationsEmailIngestionAttemptContext(context.Background(), job.IngestionJobID); err != nil || started || fourth.ProviderAttemptCount != store.CommunicationsEmailProviderAttemptLimit {
+				t.Fatalf("provider attempt 4 was not refused: job=%+v started=%v err=%v", fourth, started, err)
+			}
+		}
+	}
 	client := &fakeNylasClient{
-		folders:             []NylasFolder{{ID: "unsent-recovery-inbox", SystemFolder: "inbox"}},
-		messagePagesByToken: map[string]NylasMessagePage{"": {}},
+		folders:             []NylasFolder{{ID: "existing-jobs-inbox", SystemFolder: "inbox"}},
+		messagePagesByToken: map[string]NylasMessagePage{"": {Messages: providerMessages}},
 	}
 	sender := &recordingEmailQueueSender{}
 	server := NewServerWithOptions(repo, ServerOptions{
@@ -803,27 +861,26 @@ func TestEmailReconciliationRecoversOnlyOldNeverSentStableMarkers(t *testing.T) 
 	message := emailqueue.Message{
 		SchemaVersion: emailqueue.SchemaVersion, Kind: emailqueue.KindReconciliationConnection,
 		CompanyID: connection.CompanyID, EmailConnectionID: connection.EmailConnectionID,
-		ReconciliationID: "recover-old-stable-markers", ScanStartedAt: scanStarted,
+		ReconciliationID: "existing-jobs-must-not-resend", ScanStartedAt: scanStarted,
 		LowerBound: connection.IngestionStartedAt.Add(-time.Second),
 	}
 	if acknowledged, processErr := server.processEmailReconciliationConnection(context.Background(), message); processErr != nil || !acknowledged {
 		t.Fatalf("recovery acknowledged=%v err=%v", acknowledged, processErr)
 	}
-	if len(sender.messages) != 2 || sender.messages[0].Kind != emailqueue.KindIngestion || sender.messages[0].JobID != ingestionJob.IngestionJobID ||
-		sender.messages[1].Kind != emailqueue.KindArchiveItem || sender.messages[1].JobID != archiveJob.Items[0].JobItemID {
-		t.Fatalf("recovered messages=%+v", sender.messages)
+	if sender.attempts != 0 || len(sender.messages) != 0 {
+		t.Fatalf("reconciliation resent existing jobs: attempts=%d messages=%+v", sender.attempts, sender.messages)
 	}
-	if _, started, startErr := repo.StartCommunicationsArchiveJobItemAttemptContext(context.Background(), archiveJob.Items[0].JobItemID); startErr != nil || !started {
-		t.Fatalf("start recovered archive item started=%v err=%v", started, startErr)
+	if len(archiveJob.Items) != 1 || archiveJob.Items[0].Status != store.CommunicationsArchiveJobItemStatusPending {
+		t.Fatalf("archive item changed during reconciliation: %+v", archiveJob.Items)
 	}
 	later := message
-	later.ScanStartedAt = scanStarted.Add(emailReconciliationUnsentAge)
-	later.ReconciliationID = "do-not-resurrect-started-markers"
+	later.ScanStartedAt = scanStarted.Add(10 * time.Minute)
+	later.ReconciliationID = "do-not-resurrect-dlq-or-terminal-work"
 	if acknowledged, processErr := server.processEmailReconciliationConnection(context.Background(), later); processErr != nil || !acknowledged {
 		t.Fatalf("later reconciliation acknowledged=%v err=%v", acknowledged, processErr)
 	}
-	if len(sender.messages) != 2 {
-		t.Fatalf("later reconciliation resurrected accepted/started work: %+v", sender.messages)
+	if sender.attempts != 0 || len(sender.messages) != 0 {
+		t.Fatalf("later reconciliation resurrected existing work: attempts=%d messages=%+v", sender.attempts, sender.messages)
 	}
 }
 

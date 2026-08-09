@@ -38,6 +38,7 @@ func (r *MemoryRepo) ensureCommunicationsEmailIngestionJobLocked(input Communica
 	input.EmailThreadID = cleanUUIDText(input.EmailThreadID)
 	input.ProviderMessageID = strings.TrimSpace(input.ProviderMessageID)
 	input.ProviderThreadID = strings.TrimSpace(input.ProviderThreadID)
+	input.EnqueueSourceID = strings.TrimSpace(input.EnqueueSourceID)
 	input.Priority = normalizeCommunicationsEmailIngestionPriority(input.Priority)
 	if input.CompanyID == "" || input.EmailConnectionID == "" || input.ProviderMessageID == "" || input.Priority == 0 {
 		return CommunicationsEmailIngestionJob{}, false, ErrInvalid
@@ -75,7 +76,7 @@ func (r *MemoryRepo) ensureCommunicationsEmailIngestionJobLocked(input Communica
 		IngestionJobID: newUUIDv7String(), CompanyID: input.CompanyID,
 		EmailConnectionID: input.EmailConnectionID, EmailThreadID: input.EmailThreadID,
 		ProviderMessageID: input.ProviderMessageID, ProviderThreadID: input.ProviderThreadID,
-		Priority: input.Priority, Status: CommunicationsEmailIngestionJobAccepted,
+		Priority: input.Priority, Status: CommunicationsEmailIngestionJobAccepted, EnqueueSourceID: input.EnqueueSourceID,
 		CreatedTimestamp: now, UpdatedTimestamp: now,
 	}
 	r.emailIngestionJobs[item.IngestionJobID] = item
@@ -113,7 +114,10 @@ func (r *MemoryRepo) MarkCommunicationsEmailIngestionJobSQSAcceptedContext(ctx c
 	return nil
 }
 
-func (r *MemoryRepo) EnsureCommunicationsEmailIngestionJobContext(_ context.Context, input CommunicationsEmailIngestionJobInput) (CommunicationsEmailIngestionJob, bool, error) {
+func (r *MemoryRepo) EnsureCommunicationsEmailIngestionJobContext(ctx context.Context, input CommunicationsEmailIngestionJobInput) (CommunicationsEmailIngestionJob, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return CommunicationsEmailIngestionJob{}, false, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.ensureCommunicationsEmailIngestionJobLocked(input)
@@ -352,36 +356,6 @@ func (r *MemoryRepo) ListCommunicationsEmailIngestionJobsForThreadContext(ctx co
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedTimestamp.Before(out[j].CreatedTimestamp) })
 	return out, nil
-}
-
-func (r *MemoryRepo) ListUnsentCommunicationsEmailIngestionJobsContext(ctx context.Context, companyID, emailConnectionID string, createdBefore time.Time, limit int) ([]CommunicationsEmailIngestionJob, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	companyID, emailConnectionID = cleanUUIDText(companyID), cleanUUIDText(emailConnectionID)
-	if companyID == "" || emailConnectionID == "" || createdBefore.IsZero() || limit <= 0 || limit > 500 {
-		return nil, ErrInvalid
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	items := make([]CommunicationsEmailIngestionJob, 0, limit)
-	for _, item := range r.emailIngestionJobs {
-		if item.CompanyID == companyID && item.EmailConnectionID == emailConnectionID &&
-			item.Status == CommunicationsEmailIngestionJobAccepted && item.SQSAcceptedTimestamp == nil &&
-			!item.CreatedTimestamp.After(createdBefore) {
-			items = append(items, cloneCommunicationsEmailIngestionJob(item))
-		}
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
-			return items[i].IngestionJobID < items[j].IngestionJobID
-		}
-		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
-	})
-	if len(items) > limit {
-		items = items[:limit]
-	}
-	return items, nil
 }
 
 func (r *MemoryRepo) ListCommunicationsEmailThreadNodeIDs(companyID, emailThreadID string) ([]string, error) {

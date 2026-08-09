@@ -157,7 +157,6 @@ type CommunicationsRepository interface {
 	FailCommunicationsArchiveJobItemAttemptContext(ctx context.Context, jobItemID, attemptToken, lastError string, realtimeInputs []RealtimeOutboxInput) error
 	ParkCommunicationsArchiveJobItemAttemptContext(ctx context.Context, jobItemID, attemptToken, companyID, emailConnectionID, connectionStatus, lastError string, realtimeInputs []RealtimeOutboxInput) error
 	ListCommunicationsArchiveJobItemsContext(ctx context.Context, jobID string) ([]CommunicationsArchiveJobItem, error)
-	ListUnsentCommunicationsArchiveJobItemsContext(ctx context.Context, companyID, emailConnectionID string, createdBefore time.Time, limit int) ([]CommunicationsArchiveJobItem, error)
 	ConvertCommunicationsTriageItems(ctx context.Context, input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error)
 	RevertCommunicationsTriageNode(input CommunicationsTriageRevertInput) (CommunicationsTriageRevertResult, error)
 	TransferCommunicationsEmailNode(input CommunicationsEmailNodeTransferInput) (CommunicationsEmailNodeTransferResult, error)
@@ -177,7 +176,6 @@ type CommunicationsRepository interface {
 	FailCommunicationsEmailIngestionAttemptContext(ctx context.Context, jobID, attemptToken, lastError string, realtimeInputs []RealtimeOutboxInput) error
 	ParkCommunicationsEmailIngestionAttemptContext(ctx context.Context, jobID, attemptToken, connectionStatus, lastError string, realtimeInputs []RealtimeOutboxInput) error
 	ListCommunicationsEmailIngestionJobsForThreadContext(ctx context.Context, companyID, emailThreadID string) ([]CommunicationsEmailIngestionJob, error)
-	ListUnsentCommunicationsEmailIngestionJobsContext(ctx context.Context, companyID, emailConnectionID string, createdBefore time.Time, limit int) ([]CommunicationsEmailIngestionJob, error)
 	CheckEmailSQSWorkerSchemaReadinessContext(ctx context.Context) error
 	ListCommunicationsEmailThreadNodeIDs(companyID, emailThreadID string) ([]string, error)
 	GetCommunicationsNodeEmailThread(companyID, nodeID, emailThreadID string) (domain.CommunicationsNodeEmailThread, error)

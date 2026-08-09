@@ -6,8 +6,8 @@ Mango stores imported email content in its own database so opening a Node does n
 
 - `email_threads` is the stable Mango thread record. Provider identifiers are deduplicated inside one exact personal email account or shared email account.
 - `email_messages` stores one stable Mango message row per provider message inside that thread, ordered deterministically.
-- `email_relationships` links an exact internal `email_message_id` to a Node, Project, Logic Gate, or exact textbox. A whole-resource link has a null `resource_textbox_id`.
-- `email_ingestion_jobs` is the permanent company/connection/provider-message identity and provider-attempt result. SQS owns delivery, fixed visibility, redelivery, receive count, and DLQ movement.
+- `email_relationships` links an exact internal `email_message_id` to a Node, Project, Logic Gate, or exact textbox. A whole-resource link has a null `resource_textbox_id`. One thread may have Node-wide links in several Nodes. A textbox link points to one exact message, not the whole thread; the same message has at most one textbox link per Node but may have a different textbox link in another Node.
+- `email_ingestion_jobs.ingestion_job_id` is the sole permanent job, SQS deduplication, and worker lookup identity. `enqueue_source_id` is only the immutable fingerprint permitting the exact original producer delivery to finish an unrecorded send; it is never another job or delivery authority. SQS owns delivery, fixed visibility, redelivery, receive count, and DLQ movement.
 - Email files use `attachments` plus exact `attachment_relationships` owners such as `email_message`, `email_draft`, or `email_signature`.
 
 Message rows retain the envelope, recipients, reply-to, timestamp, rich HTML body, snippet/text fallback, folder/read/starred state, download-complete state, and attachment metadata. Ordinary files, inline CID images, and signature assets are copied once into Mango's private attachment object storage and linked to each authorized Node; bytes, provider credentials, temporary object URLs, and presigned URLs are never copied into Node JSON or job errors. Rich HTML remains immutable email content behind the existing sandboxed/sanitized rendering boundary.
@@ -18,7 +18,7 @@ The Node-wide email column is the only place that displays an imported email or 
 
 Creating a Node from an email follows the ordinary Node workflow and inserts an exact `email_relationships` row. It intentionally creates no special collaboration owner or participant subsystem.
 
-An explicit message/selection import into an existing Node may atomically persist the exact message, relationship, one final `node_textboxes` row, and an optional `node_textbox_chats` row. The relationship and chat hold exact internal message identities; the textbox owns only TipTap JSON.
+An explicit message/selection import into an existing Node may atomically persist the exact message, relationship, one final `node_textboxes` row, and an optional `node_textbox_chats` row. The relationship and chat hold exact internal message identities; the textbox owns only TipTap JSON. Repeating the exact Node/message/textbox command converges to that relationship, a second textbox in the same Node is rejected, and another Node may link the message to its own textbox. Removing one Node's relationship leaves every other Node's relationship, textbox/chat, stored thread/messages, and surviving file ownership intact.
 
 A Triage chat creates or reuses the exact final textbox before writing the final chat row. Every new chat and chat attachment points to the real `textbox_id` or `chat_id`; no legacy chat reader or write destination remains.
 

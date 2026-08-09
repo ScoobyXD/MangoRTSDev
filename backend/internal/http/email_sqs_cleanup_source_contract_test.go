@@ -30,20 +30,23 @@ func TestEmailSQSObsoleteExecutionPathsDoNotReturn(t *testing.T) {
 		"communications_archive_worker.go",
 	} {
 		requireSourceDoesNotContain(t, path,
-			"ThreadDownloadJob", "thread_download_worker", "ChangeMessageVisibility", "context.Background()")
+			"ThreadDownloadJob", "thread_download_worker", "ChangeMessageVisibility", "context.Background()",
+			"recoverUnsentEmailSQSWork", "emailReconciliationUnsentAge", "ListUnsentCommunications")
 	}
-	requireSourceDoesNotContain(t, "../store/repository.go", "EnsureCommunicationsEmailThreadDownloadJobContext", "ThreadDownloadJob")
+	requireSourceDoesNotContain(t, "../store/repository.go",
+		"EnsureCommunicationsEmailThreadDownloadJobContext", "ThreadDownloadJob", "ListUnsentCommunications")
 	for _, path := range []string{
 		"../store/memory_email_ingestion_jobs.go",
 		"../store/postgres_email_ingestion_jobs.go",
 	} {
-		requireSourceDoesNotContain(t, path, "ThreadDownloadJob", "available_at", "processing_started_at", "enqueue_source_id")
+		requireSourceDoesNotContain(t, path, "ThreadDownloadJob", "available_at", "processing_started_at")
 	}
 	requireSourceDoesNotContain(t, "../../../frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx",
 		"storedThreadPollVersion", "setStoredThreadPollVersion", "storedThreadPollTimer",
 		"setTimeout(() => { void refreshStoredThread")
 	requireSourceDoesNotContain(t, "../../../frontend/src/pages/home/HomePage.tsx",
-		"ARCHIVE_BACKGROUND_CONFIRMATION_TIMEOUT_MS", "archivePendingReleaseTimerIDsRef", "releasePendingArchiveMessagesLater")
+		"ARCHIVE_BACKGROUND_CONFIRMATION_TIMEOUT_MS", "archivePendingReleaseTimerIDsRef", "releasePendingArchiveMessagesLater",
+		"refreshActiveArchiveJobs", "refreshArchiveJobsRef")
 	requireSourceDoesNotContain(t, "../../../frontend/src/modules/communications/communicationsApi.ts", "export async function archiveEmailMessage(")
 }
 

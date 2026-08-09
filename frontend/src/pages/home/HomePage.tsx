@@ -25,6 +25,7 @@ import {
   fetchCommunicationsStatus,
 	getEmailCollaborationThread,
 	getCommunicationsArchiveJob,
+  markCommunicationsArchiveJobsStaleForMailboxChange,
   getEmailMessage,
   getEmailSignature,
   getEmailThread,
@@ -50,7 +51,6 @@ import {
   type CompanyUserGroup,
   type CompanyUserGroupMember,
 	type CommunicationsEmailCollaboration,
-	type CommunicationsArchiveJob,
   type CommunicationsSharedInbox,
   type CommunicationsSharedInboxCreateIntent,
   type CommunicationsSharedInboxRACIRole,
@@ -105,7 +105,7 @@ import { UpdatesView } from "./UpdatesView";
 import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "./HomeMailWorkspace";
 import { OutboundEmailUndoBanner } from "../../modules/communications/OutboundEmailUndoBanner";
 import { applyHomeMailSignature, composeHasDraftContent, createHomeMailDraftID, createHomeMailForwardDraftID, createHomeMailReplyDraftID, createHomeMailSharedReplyDraftID, deleteHomeMailDraft, deleteHomeMailDraftRemote, deleteHomeMailDraftsRemote, ensureHomeMailDraftAttachmentTarget, homeMailDraftMatchesScope, homeMailDraftToCompose, homeMailDraftToMessage, homeMailSignatureScopeKey, loadHomeMailDrafts, loadHomeMailSignature, mergeHomeMailDrafts, readHomeMailDrafts, readHomeMailDraftsForScope, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignatureRemote, syncHomeMailDraftFromCompose, type HomeMailDraft } from "./homeMailDrafts";
-import { applyHomeMailboxCountDelta, cancelHomeMailboxListRequestTimers, consumeHomeMailboxLocalMutationEcho, createHomeMailboxFolderLoadCoordinator, createHomeMailboxRealtimeCoordinator, forgetHomeMailboxLocalMutationEchoes, homeMailboxComposeSubmissionIsCurrent, homeMailboxCountKey, homeMailboxFolderOwnerIsCurrent, homeMailboxPendingMessageIDs, homeMailboxPendingMessageKey, homeMailboxRealtimeTargetKey, homeMailboxRequestOwnerIsCurrent, rememberHomeMailboxLocalMutationEchoes, selectHomeMailboxRealtimeTarget, type HomeMailboxCountOverrideKey, type HomeMailboxCountOverrides, type HomeMailboxFolderOwner, type HomeMailboxLocalMutationEchoRegistry, type HomeMailboxRequestOwner } from "./homeMailboxRealtime";
+import { applyHomeMailboxCountDelta, cancelHomeMailboxListRequestTimers, consumeHomeMailboxLocalMutationEcho, createHomeArchiveStatusCoordinator, createHomeMailboxFolderLoadCoordinator, createHomeMailboxRealtimeCoordinator, forgetHomeMailboxLocalMutationEchoes, homeMailboxComposeSubmissionIsCurrent, homeMailboxCountKey, homeMailboxFolderOwnerIsCurrent, homeMailboxPendingMessageIDs, homeMailboxPendingMessageKey, homeMailboxRealtimeTargetKey, homeMailboxRequestOwnerIsCurrent, rememberHomeMailboxLocalMutationEchoes, selectHomeMailboxRealtimeTarget, type HomeMailboxCountOverrideKey, type HomeMailboxCountOverrides, type HomeMailboxFolderOwner, type HomeMailboxLocalMutationEchoRegistry, type HomeMailboxRequestOwner } from "./homeMailboxRealtime";
 import { ARCHIVE_QUEUE_MAX_EMAILS, EVENT_HOME_TRIAGE_CONVERSION_APPLIED, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME, type HomeTriageConversionAppliedDetail } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeRACIMatrixNodeCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, removeMyLogicGateShortcutCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
 import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, condenseEmailThreadMessages, emailMailboxMessageKey, emailMailboxScopeKey, emailMessagesForOrderedPage, emailThreadKey, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, inboxCountPresentation, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRACIRole, logicGateHasRACIRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingEmailThreadMessageIDs, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, mergeEmailMessageIntoScopedMessageList, mergeLogicGateShortcuts, messageListFilterKey, nextEmailMessageAfterRemoval, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, orderEmailConversationMessages, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortEmailConversationMessagesNewestFirst, sortLogicGateShortcuts, sortSharedInboxes, shouldAutoMarkEmailSelectionRead, unreadEmailThreadMessagesForSelection, userCanManageSharedInboxStructure, userHasFullSharedInboxAccess, type EmailConversationOrder } from "./homeUtils";
@@ -579,7 +579,8 @@ export function HomePage({
   const queuedArchiveBatchesRef = useRef<Map<string, QueuedArchiveBatch>>(new Map());
 	const pendingArchiveMessageKeysRef = useRef<Set<string>>(new Set());
 	const activeArchiveJobsRef = useRef<Map<string, QueuedArchiveBatch>>(new Map());
-	const refreshArchiveJobsRef = useRef<() => void>(() => undefined);
+	const revalidateArchiveJobRef = useRef<(jobID: string) => Promise<void>>(async () => undefined);
+	const archiveStatusCoordinatorRef = useRef<ReturnType<typeof createHomeArchiveStatusCoordinator> | null>(null);
 	const archiveQueueFlushTimerRef = useRef<number | null>(null);
   const delayedMailRequestTimerIDsRef = useRef<Set<number>>(new Set());
   const delayedMarkReadTimerByMessageKeyRef = useRef<Map<string, number>>(new Map());
@@ -2099,6 +2100,16 @@ export function HomePage({
         await Promise.all(reads);
       },
     });
+		const archiveCoordinator = createHomeArchiveStatusCoordinator({
+			target: subscribedTarget,
+			getActiveJobs: () => Array.from(activeArchiveJobsRef.current.entries()).map(([jobID, batch]) => ({
+				jobID,
+				realtimeScope: batch.realtimeScope,
+				messageIDs: batch.messageIDs,
+			})),
+			revalidate: (jobID) => revalidateArchiveJobRef.current(jobID),
+		});
+		archiveStatusCoordinatorRef.current = archiveCoordinator;
 		const onMailboxChanged = (change: {
       scope: string;
       trigger: string;
@@ -2107,18 +2118,25 @@ export function HomePage({
       shared_inbox_id?: string;
 		}) => {
 			coordinator.changed(change);
-			refreshArchiveJobsRef.current();
+			markCommunicationsArchiveJobsStaleForMailboxChange({
+				companyID: subscribedTarget.companyID,
+				sharedInboxID: subscribedTarget.sharedInboxID,
+				accountEmail: subscribedTarget.accountEmail,
+			}, change.message_id ?? "");
+			archiveCoordinator.changed(change);
 		};
     const unsubscribe = subscribeRealtimeScope(apiBase, subscribedTarget.companyID, subscribedTarget.scope, {
       onAccepted: () => {
         coordinator.accepted();
-        refreshArchiveJobsRef.current();
+		archiveCoordinator.accepted();
       },
       onMailboxMessageChanged: onMailboxChanged,
       onMailboxFolderChanged: onMailboxChanged,
     });
     return () => {
       coordinator.dispose();
+		archiveCoordinator.dispose();
+		if (archiveStatusCoordinatorRef.current === archiveCoordinator) archiveStatusCoordinatorRef.current = null;
       unsubscribe();
     };
   }, [apiBase, currentMessageFilterKey, mailboxRealtimeSubscriptionKey]);
@@ -2140,26 +2158,31 @@ export function HomePage({
     }
     if (changed) syncQueuedArchiveEmailCount();
   }, [archiveQueueMessageKey, syncQueuedArchiveEmailCount]);
-	const refreshActiveArchiveJobs = useCallback(async () => {
-		for (const [jobID, batch] of Array.from(activeArchiveJobsRef.current.entries())) {
-			let job: CommunicationsArchiveJob;
-			try {
-				job = await getCommunicationsArchiveJob(jobID);
-			} catch {
-				continue;
-			}
-			if (job.status === "pending" || job.status === "processing") continue;
-			activeArchiveJobsRef.current.delete(jobID);
-			forgetPendingArchiveMessages(batch);
-			const failed = job.items.filter((item) => item.status === "failed");
-			if (failed.length > 0 && mailboxRequestOwnerIsCurrent(batch.owner)) {
-				setError(failed.length === 1 ? "Failed to archive 1 message." : `Failed to archive ${failed.length} messages.`);
-				scheduleMessageListRefresh(0, { owner: batch.owner });
-			}
-			scheduleFolderMetadataRefresh({ mailboxScopeKey: batch.owner.mailboxScopeKey });
+	const revalidateArchiveJob = useCallback(async (jobID: string) => {
+		const batch = activeArchiveJobsRef.current.get(jobID);
+		if (!batch) return;
+		let job;
+		try {
+			job = await getCommunicationsArchiveJob(jobID, { refresh: true });
+		} catch {
+			return;
 		}
+		if (job.status === "pending" || job.status === "processing") return;
+		activeArchiveJobsRef.current.delete(jobID);
+		forgetPendingArchiveMessages(batch);
+		const failed = job.items.filter((item) => item.status === "failed");
+		if (failed.length > 0 && mailboxRequestOwnerIsCurrent(batch.owner)) {
+			setError(failed.length === 1 ? "Failed to archive 1 message." : `Failed to archive ${failed.length} messages.`);
+			scheduleMessageListRefresh(0, { owner: batch.owner });
+		}
+		scheduleFolderMetadataRefresh({ mailboxScopeKey: batch.owner.mailboxScopeKey });
 	}, [forgetPendingArchiveMessages, mailboxRequestOwnerIsCurrent, scheduleFolderMetadataRefresh, scheduleMessageListRefresh]);
-	refreshArchiveJobsRef.current = () => { void refreshActiveArchiveJobs(); };
+	revalidateArchiveJobRef.current = revalidateArchiveJob;
+	const requestArchiveJobRevalidation = useCallback((jobID: string) => {
+		const coordinator = archiveStatusCoordinatorRef.current;
+		if (coordinator) coordinator.revalidate(jobID);
+		else void revalidateArchiveJobRef.current(jobID);
+	}, []);
   const archiveQueueCanAccept = useCallback((messageIDs: string[], nextCompanyID: string, sharedInboxID?: string, accountEmail?: string) => {
     const pending = pendingArchiveMessageKeysRef.current;
     let newCount = 0;
@@ -2191,7 +2214,7 @@ export function HomePage({
 			keepPendingUntilConfirmation = Boolean(result?.archiveJob.job_id);
 			if (result?.archiveJob.job_id) {
 				activeArchiveJobsRef.current.set(result.archiveJob.job_id, batch);
-				void refreshActiveArchiveJobs();
+				requestArchiveJobRevalidation(result.archiveJob.job_id);
 			}
         })
         .catch((archiveError) => {
@@ -2209,7 +2232,7 @@ export function HomePage({
           if (!keepPendingUntilConfirmation) scheduleFolderMetadataRefresh({ mailboxScopeKey: batch.owner.mailboxScopeKey });
         });
     }
-	}, [forgetLocalMailboxMutationEchoes, forgetPendingArchiveMessages, handleEmailAccessExpired, mailboxRequestOwnerIsCurrent, refreshActiveArchiveJobs, rememberLocalMailboxMutationEchoes, scheduleFolderMetadataRefresh, scheduleMessageListRefresh]);
+	}, [forgetLocalMailboxMutationEchoes, forgetPendingArchiveMessages, handleEmailAccessExpired, mailboxRequestOwnerIsCurrent, rememberLocalMailboxMutationEchoes, requestArchiveJobRevalidation, scheduleFolderMetadataRefresh, scheduleMessageListRefresh]);
   const queueArchiveMessages = useCallback((args: { companyID: string; sharedInboxID?: string; accountEmail?: string; messageIDs: string[]; owner?: HomeMailboxRequestOwner }): string[] => {
     const messageIDs = cleanIDList(args.messageIDs);
     if (messageIDs.length === 0) return [];
@@ -3099,7 +3122,7 @@ export function HomePage({
 			activeArchiveJobsRef.current.set(result.archiveJob.job_id, {
 				companyID, sharedInboxID, accountEmail, messageIDs: archivedIDs, owner, realtimeScope,
 			});
-			void refreshActiveArchiveJobs();
+			requestArchiveJobRevalidation(result.archiveJob.job_id);
 		}
       const archivedInboxCount = archivedIDs.reduce((count, id) => count + (inboxIDSet.has(id) ? 1 : 0), 0);
       adjustPrimaryMailboxCount(countKey, -archivedInboxCount, primaryCountAtStart);
@@ -3116,7 +3139,7 @@ export function HomePage({
     } finally {
       if (mailboxRequestOwnerIsCurrent(owner)) setBusy("");
     }
-  }, [adjustPrimaryMailboxCount, canMutateCurrentMailView, companyID, currentMailboxRequestOwner, forgetLocalMailboxMutationEchoes, mailboxRequestOwnerIsCurrent, providerMutationAvailableForMessageIDs, providerMutationAvailableForMessages, refreshActiveArchiveJobs, rememberLocalMailboxMutationEchoes, removeMessagesFromVisibleMailList, scheduleFolderMetadataRefresh, scheduleMessageListRefresh]);
+	}, [adjustPrimaryMailboxCount, canMutateCurrentMailView, companyID, currentMailboxRequestOwner, forgetLocalMailboxMutationEchoes, mailboxRequestOwnerIsCurrent, providerMutationAvailableForMessageIDs, providerMutationAvailableForMessages, rememberLocalMailboxMutationEchoes, removeMessagesFromVisibleMailList, requestArchiveJobRevalidation, scheduleFolderMetadataRefresh, scheduleMessageListRefresh]);
   const unarchiveMessages = useCallback(async (messageIDs: string[], exactMessages?: EmailMessage[]) => {
     if (!canMutateCurrentMailView) return;
     const ids = cleanIDList(messageIDs);

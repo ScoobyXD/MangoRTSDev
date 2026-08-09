@@ -13,6 +13,7 @@ select case
   when to_regclass('public.email_connections') is null then 'STOP: email_connections is missing'
   when to_regclass('public.email_ingestion_jobs') is null then 'STOP: email_ingestion_jobs is missing'
   when to_regclass('public.communications_email_archive_job_items') is null then 'STOP: communications_email_archive_job_items is missing'
+  when to_regclass('public.email_relationships') is null then 'STOP: email_relationships is missing'
   else 'READY: required V3 email tables exist'
 end as table_decision;
 
@@ -34,8 +35,8 @@ from (
 union all
 select 'email_ingestion_jobs', actual_count, greatest(legacy_count,final_count),
   case when actual_count=16 and legacy_count=16 then 'READY: exact approved legacy 16-column shape'
-	when actual_count=16 and final_count=16 then 'READY: exact approved final 16-column shape'
-	else 'STOP: expected exact approved legacy 16 or final 16-column shape'
+	when actual_count=17 and final_count=17 then 'READY: exact approved final 17-column shape'
+	else 'STOP: expected exact approved legacy 16 or final 17-column shape'
   end
 from (
   select count(*) as actual_count,
@@ -46,7 +47,7 @@ from (
     ]::text[])) as legacy_count,
     count(*) filter (where column_name = any (array[
       'ingestion_job_id','company_id','email_connection_id','email_thread_id','provider_message_id',
-      'provider_thread_id','priority','status','provider_attempt_count','attempt_token',
+	  'provider_thread_id','priority','status','provider_attempt_count','attempt_token','enqueue_source_id',
       'sqs_accepted_timestamp','last_error','completed_timestamp',
       'failed_timestamp','created_timestamp','updated_timestamp'
     ]::text[])) as final_count
@@ -91,7 +92,7 @@ with connection_shape as (
     ]::text[])) as legacy_count,
     count(*) filter (where column_name = any (array[
       'ingestion_job_id','company_id','email_connection_id','email_thread_id','provider_message_id',
-      'provider_thread_id','priority','status','provider_attempt_count','attempt_token',
+	  'provider_thread_id','priority','status','provider_attempt_count','attempt_token','enqueue_source_id',
       'sqs_accepted_timestamp','last_error','completed_timestamp',
       'failed_timestamp','created_timestamp','updated_timestamp'
     ]::text[])) as final_count
@@ -116,7 +117,7 @@ select case
    and archive_shape.actual_count=12 and archive_shape.legacy_count=12
     then 'READY: all three email SQS tables are in the coherent legacy shape'
   when connection_shape.actual_count=13 and connection_shape.approved_count=13
-	and ingestion_shape.actual_count=16 and ingestion_shape.final_count=16
+	and ingestion_shape.actual_count=17 and ingestion_shape.final_count=17
 	and archive_shape.actual_count=11 and archive_shape.final_count=11
     then 'READY: all three email SQS tables are in the coherent final shape'
   else 'STOP: email SQS tables must be coherently all-legacy or all-final'
@@ -134,7 +135,7 @@ with ingestion_shape as (
     ]::text[])) as legacy_count,
     count(*) filter (where column_name = any (array[
       'ingestion_job_id','company_id','email_connection_id','email_thread_id','provider_message_id',
-      'provider_thread_id','priority','status','provider_attempt_count','attempt_token',
+	  'provider_thread_id','priority','status','provider_attempt_count','attempt_token','enqueue_source_id',
       'sqs_accepted_timestamp','last_error','completed_timestamp',
       'failed_timestamp','created_timestamp','updated_timestamp'
     ]::text[])) as final_count
@@ -188,10 +189,10 @@ select duplicate_group_count as duplicate_stable_identity_groups,
       then format('STOP: %s foreign key(s) reference email_ingestion_jobs',foreign_key_count)
     when ingestion_shape.actual_count=16 and ingestion_shape.legacy_count=16
       then format('READY: legacy migration will collapse exactly %s redundant inactive ingestion job metadata row(s)',redundant_row_count)
-	when ingestion_shape.actual_count=16 and ingestion_shape.final_count=16
+	when ingestion_shape.actual_count=17 and ingestion_shape.final_count=17
      and redundant_row_count=0
       then 'READY: stable ingestion identities are unique in the final shape'
-	when ingestion_shape.actual_count=16 and ingestion_shape.final_count=16
+	when ingestion_shape.actual_count=17 and ingestion_shape.final_count=17
       then format('STOP: final schema contains %s duplicate stable identity group(s) and %s redundant row(s)',duplicate_group_count,redundant_row_count)
     else 'STOP: ingestion identity decision requires an exact legacy or final shape'
   end as identity_decision
@@ -210,3 +211,16 @@ select count(*) filter (where to_jsonb(items)->>'status' in ('pending','retry','
     else 'STOP: legacy archive items must finish or receive deliberate operator review before SQS cutover'
   end as archive_status_decision
 from communications_email_archive_job_items items;
+
+select count(*) as duplicate_node_textbox_message_groups,
+  case when count(*)=0
+    then 'READY: each exact email message is linked to at most one textbox in each Node'
+    else 'STOP: one or more exact email messages are linked to multiple textboxes in the same Node; review those typed relationships before cutover'
+  end as node_textbox_relationship_decision
+from (
+  select 1
+  from email_relationships
+  where resource_type='node' and resource_textbox_id is not null
+  group by company_id,email_message_id,resource_id
+  having count(*) > 1
+) duplicates;

@@ -229,11 +229,12 @@ func (r *MemoryRepo) persistCommunicationsConversionEmailLocked(input Communicat
 	}
 	informationID := r.addEmailProjectionWithThreadLocked(input.CompanyID, input.NodeID, input.SharedInboxID, input.AccountEmail, message, thread.EmailThreadID, now, input.Target.Mode != CommunicationsEmailConversionTargetExistingNode)
 	r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, input.NodeID, informationID, thread.EmailThreadID, message.ID, input.ActorUserID, now)
-	if requestedMessageID, ok := communicationsEmailIngestionRequest(thread, threadInput); ok && thread.EmailConnectionID != "" {
+	if requestedMessageID, sourceID, ok := communicationsEmailIngestionRequest(thread, threadInput); ok && thread.EmailConnectionID != "" {
 		if emailConnectionID := r.emailConnectionIDForThreadLocked(thread); emailConnectionID != "" {
 			if _, _, err := r.ensureCommunicationsEmailIngestionJobLocked(CommunicationsEmailIngestionJobInput{
 				CompanyID: input.CompanyID, EmailConnectionID: emailConnectionID, EmailThreadID: thread.EmailThreadID,
 				ProviderMessageID: requestedMessageID, ProviderThreadID: thread.ProviderThreadID, Priority: CommunicationsEmailIngestionPriorityVisible,
+				EnqueueSourceID: sourceID,
 			}); err != nil {
 				return "", "", "", err
 			}
@@ -253,10 +254,11 @@ func (r *PostgresRepo) persistCommunicationsConversionEmailTx(ctx context.Contex
 	if err != nil {
 		return "", "", "", err
 	}
-	if requestedMessageID, ok := communicationsEmailIngestionRequest(thread, threadInput); ok {
+	if requestedMessageID, sourceID, ok := communicationsEmailIngestionRequest(thread, threadInput); ok {
 		if _, _, err := ensurePostgresCommunicationsEmailIngestionJobTx(ctx, tx, CommunicationsEmailIngestionJobInput{
 			CompanyID: input.CompanyID, EmailConnectionID: thread.EmailConnectionID, EmailThreadID: thread.EmailThreadID,
 			ProviderMessageID: requestedMessageID, ProviderThreadID: thread.ProviderThreadID, Priority: CommunicationsEmailIngestionPriorityVisible,
+			EnqueueSourceID: sourceID,
 		}); err != nil {
 			return "", "", "", err
 		}

@@ -132,7 +132,7 @@ func (s *Server) handleCommunicationsEmailCollaborations(w http.ResponseWriter, 
 			s.wakeRealtimeSpine()
 		}
 		if strings.TrimSpace(result.Collaboration.EmailThreadID) != "" {
-			if err := s.enqueueCommunicationsEmailIngestionJobsForThreads(r.Context(), result.Collaboration.CompanyID, []string{result.Collaboration.EmailThreadID}); err != nil {
+			if err := s.enqueueCommunicationsEmailIngestionJobsForThreads(r.Context(), result.Collaboration.CompanyID, []string{result.Collaboration.EmailThreadID}, store.CommunicationsEmailUserProducerFingerprint(actor.User.UserID)); err != nil {
 				writeError(w, http.StatusServiceUnavailable, "failed_to_queue_email_ingestion")
 				return
 			}

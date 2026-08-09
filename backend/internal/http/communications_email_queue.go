@@ -21,8 +21,6 @@ const (
 	emailReconciliationControlPageSize  = 10
 	emailReconciliationProviderPageSize = 200
 	emailReconciliationOverlap          = 5 * time.Minute
-	emailReconciliationUnsentAge        = 10 * time.Minute
-	emailReconciliationUnsentPageSize   = 200
 )
 
 func (s *Server) enqueueCommunicationsEmailIngestionJob(ctx context.Context, job store.CommunicationsEmailIngestionJob) error {
@@ -41,7 +39,7 @@ func (s *Server) enqueueCommunicationsEmailIngestionJob(ctx context.Context, job
 	return s.repo.MarkCommunicationsEmailIngestionJobSQSAcceptedContext(ctx, job.IngestionJobID)
 }
 
-func (s *Server) enqueueCommunicationsEmailIngestionJobsForThreads(ctx context.Context, companyID string, threadIDs []string) error {
+func (s *Server) enqueueCommunicationsEmailIngestionJobsForThreads(ctx context.Context, companyID string, threadIDs []string, producerFingerprint string) error {
 	if s == nil || s.emailQueue == nil {
 		return errors.New("email SQS sender is not configured")
 	}
@@ -57,7 +55,8 @@ func (s *Server) enqueueCommunicationsEmailIngestionJobsForThreads(ctx context.C
 			return err
 		}
 		for _, job := range jobs {
-			if job.Status != store.CommunicationsEmailIngestionJobAccepted && job.Status != store.CommunicationsEmailIngestionJobProcessing {
+			if job.Status != store.CommunicationsEmailIngestionJobAccepted || job.SQSAcceptedTimestamp != nil ||
+				strings.TrimSpace(job.EnqueueSourceID) != strings.TrimSpace(producerFingerprint) {
 				continue
 			}
 			if err := s.enqueueCommunicationsEmailIngestionJob(ctx, job); err != nil {
@@ -378,9 +377,6 @@ func (s *Server) processEmailReconciliationConnection(ctx context.Context, messa
 	if connection.Status != "connected" || strings.TrimSpace(connection.GrantID) == "" {
 		return true, nil
 	}
-	if err := s.recoverUnsentEmailSQSWork(ctx, connection, message.ScanStartedAt); err != nil {
-		return false, err
-	}
 	var folders []NylasFolder
 	err = s.withCommunicationsNylasGate(ctx, connection, func(callCtx context.Context) error {
 		var callErr error
@@ -413,17 +409,19 @@ func (s *Server) processEmailReconciliationConnection(ctx context.Context, messa
 		if strings.TrimSpace(providerMessage.ID) == "" || providerMessage.Date < connection.IngestionStartedAt.Unix() {
 			continue
 		}
-		job, _, err := s.repo.EnsureCommunicationsEmailIngestionJobContext(ctx, store.CommunicationsEmailIngestionJobInput{
+		job, created, err := s.repo.EnsureCommunicationsEmailIngestionJobContext(ctx, store.CommunicationsEmailIngestionJobInput{
 			CompanyID:         connection.CompanyID,
 			EmailConnectionID: connection.EmailConnectionID,
 			ProviderMessageID: providerMessage.ID,
 			ProviderThreadID:  providerMessage.ThreadID,
 			Priority:          store.CommunicationsEmailIngestionPriorityScan,
+			EnqueueSourceID:   "reconciliation:" + strings.TrimSpace(message.ReconciliationID),
 		})
 		if err != nil {
 			return false, err
 		}
-		if job.Status != store.CommunicationsEmailIngestionJobAccepted || job.SQSAcceptedTimestamp != nil {
+		if !created && (job.Status != store.CommunicationsEmailIngestionJobAccepted || job.SQSAcceptedTimestamp != nil ||
+			strings.TrimSpace(job.EnqueueSourceID) != "reconciliation:"+strings.TrimSpace(message.ReconciliationID)) {
 			continue
 		}
 		if err := s.enqueueCommunicationsEmailIngestionJob(ctx, job); err != nil {
@@ -442,39 +440,6 @@ func (s *Server) processEmailReconciliationConnection(ctx context.Context, messa
 		return false, err
 	}
 	return true, nil
-}
-
-func (s *Server) recoverUnsentEmailSQSWork(ctx context.Context, connection domain.UserEmailConnection, scanStartedAt time.Time) error {
-	if scanStartedAt.IsZero() {
-		scanStartedAt = time.Now().UTC()
-	}
-	createdBefore := scanStartedAt.UTC().Add(-emailReconciliationUnsentAge)
-	jobs, err := s.repo.ListUnsentCommunicationsEmailIngestionJobsContext(
-		ctx, connection.CompanyID, connection.EmailConnectionID, createdBefore, emailReconciliationUnsentPageSize,
-	)
-	if err != nil {
-		return err
-	}
-	for _, job := range jobs {
-		if err := s.enqueueCommunicationsEmailIngestionJob(ctx, job); err != nil {
-			return err
-		}
-	}
-	items, err := s.repo.ListUnsentCommunicationsArchiveJobItemsContext(
-		ctx, connection.CompanyID, connection.EmailConnectionID, createdBefore, emailReconciliationUnsentPageSize,
-	)
-	if err != nil {
-		return err
-	}
-	for _, item := range items {
-		if err := s.emailQueue.Send(ctx, emailqueue.Message{
-			SchemaVersion: emailqueue.SchemaVersion, Kind: emailqueue.KindArchiveItem,
-			JobID: item.JobItemID, CompanyID: item.CompanyID, EmailConnectionID: connection.EmailConnectionID,
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (s *Server) settleEmailReconciliationProviderError(ctx context.Context, connection domain.UserEmailConnection, providerErr error) (bool, error) {

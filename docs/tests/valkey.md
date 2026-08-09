@@ -16,6 +16,18 @@ Those browsers reload the canonical document from Mango, while a browser with un
 
 Last updated: 2026-08-09
 
+# Process Story: Archive completion wakes the selected mailbox without carrying status
+
+The private worker commits an exact archive result and compact mailbox outbox notice in PostgreSQL
+↓
+Valkey wakes only browsers subscribed to that exact selected mailbox
+↓
+The existing mailbox coordinator marks affected cached archive status stale and refreshes only active/visible exact jobs, with one active pass plus at most one final queued pass
+↓
+The browser reads canonical PostgreSQL status over HTTP; Valkey never carries a job, email, or provider payload
+
+Last updated: 2026-08-09
+
 ## The simple route
 
 `Editor → Mango API → PostgreSQL → Valkey → subscribed API tasks → matching browsers`
@@ -38,6 +50,7 @@ PostgreSQL stores the truth. Valkey only announces that committed truth changed.
 12. Before a task has certified its recovery position, realtime ticket and WebSocket admission return `503 realtime_not_ready`. Normal durable HTTP saves remain available.
 13. Deployed DEV requires the private external Valkey configuration. A process-local backplane exists only for local development and tests; it is not a deployed multi-task fallback.
 14. Valkey uses TLS, IAM access, a channel-specific permission, private networking, and no general database-key commands.
+15. Archive status and downloading attached-email completion reuse the existing exact-mailbox subscription. Relevant hints trigger canonical HTTP reads, inactive archive cache entries become stale until opened, and unrelated hints trigger no archive read. There is no timer or second subscription/cache authority.
 
 ## Failure behavior
 

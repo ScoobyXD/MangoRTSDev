@@ -1260,12 +1260,25 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const createEmailTextBlock = useCallback((messageID: string, quote = "") => {
     const cleanMessageID = messageID.trim();
     if (!editorTextCanEdit || !cleanMessageID) return "";
+    const existingBlock = blocks.find((block) => block.emailMessageID?.trim() === cleanMessageID);
+    if (existingBlock) {
+      focusBlockIDRef.current = existingBlock.id;
+      setActiveRowBlockID(existingBlock.id);
+      setOpenEditorBlockIDs((current) => new Set(current).add(existingBlock.id));
+      setClosedEditorBlockIDs((current) => {
+        if (!current.has(existingBlock.id)) return current;
+        const next = new Set(current);
+        next.delete(existingBlock.id);
+        return next;
+      });
+      setFocusedTextBlockID(existingBlock.id);
+      return existingBlock.id;
+    }
     const now = new Date().toISOString();
     const blockID = generateStableInformationID();
     const sourceEmail = nodeAttachedEmails.find((email) => email.emailMessageID === cleanMessageID || email.id === cleanMessageID);
-    const existingMessageAccent = blocks.find((block) => block.emailMessageID?.trim() === cleanMessageID)?.emailAccent?.trim() ?? "";
     const unavailableAccents = blocks.filter((block) => block.emailMessageID?.trim() !== cleanMessageID).map((block) => block.emailAccent ?? "");
-    const emailAccent = existingMessageAccent || editorEmailMessageAccent(cleanMessageID, unavailableAccents);
+    const emailAccent = editorEmailMessageAccent(cleanMessageID, unavailableAccents);
     const cleanQuote = quote.trim();
     const initialContent = createEmailLinkedNodeTextBlockContent({
       title: sourceEmail?.subject.trim() ? `Email: ${sourceEmail.subject.trim()}` : "Email text box",

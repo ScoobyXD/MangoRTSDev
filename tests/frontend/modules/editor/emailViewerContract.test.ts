@@ -85,6 +85,8 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeSurface, /const revealNodeEmailMessage = useCallback/);
   assert.match(nodeSurface, /revealNodeEmailMessage\(linkedEmailMessageID\)/);
   assert.match(nodeSurface, /const linkedEmailMessageID = block.emailMessageID/);
+  assert.match(nodeSurface, /const existingBlock = blocks\.find\(\(block\) => block\.emailMessageID\?\.trim\(\) === cleanMessageID\)/);
+  assert.match(nodeSurface, /if \(existingBlock\) \{[\s\S]{0,520}return existingBlock\.id/);
   assert.match(nodeSurface, /messageID=\{linkedEmailMessageID\}/);
   assert.match(nodeSurface, /emails=\{nodeAttachedEmails\}/);
   assert.doesNotMatch(nodeSurface, /Show linked email in email column/);

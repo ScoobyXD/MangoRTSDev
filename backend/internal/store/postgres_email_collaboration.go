@@ -196,10 +196,11 @@ func (r *PostgresRepo) EnsureCommunicationsEmailCollaboration(ctx context.Contex
 		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("persist_email_thread", err)
 	}
 	if existing, lookupErr := postgresEmailCollaborationLookupForEnsure(ctx, tx, input, scope); lookupErr == nil {
-		if mid, ok := communicationsEmailIngestionRequest(thread, threadInput); ok && thread.EmailConnectionID != "" {
+		if mid, sourceID, ok := communicationsEmailIngestionRequest(thread, threadInput); ok && thread.EmailConnectionID != "" {
 			if _, _, err := ensurePostgresCommunicationsEmailIngestionJobTx(ctx, tx, CommunicationsEmailIngestionJobInput{
 				CompanyID: input.CompanyID, EmailConnectionID: thread.EmailConnectionID, EmailThreadID: thread.EmailThreadID,
 				ProviderMessageID: mid, ProviderThreadID: thread.ProviderThreadID, Priority: CommunicationsEmailIngestionPriorityVisible,
+				EnqueueSourceID: sourceID,
 			}); err != nil {
 				return CommunicationsEmailCollaborationEnsureResult{}, err
 			}
@@ -223,10 +224,11 @@ values($1::uuid,$2::uuid,$3,$4,'no_access',now())`, input.CompanyID, nodeID, com
 	if err := linkPostgresCommunicationsEmailThreadToNodeTx(ctx, tx, input.CompanyID, nodeID, relationshipID, thread.EmailThreadID, input.Message.ID, input.CreatedByUserID); err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}
-	if mid, ok := communicationsEmailIngestionRequest(thread, threadInput); ok && thread.EmailConnectionID != "" {
+	if mid, sourceID, ok := communicationsEmailIngestionRequest(thread, threadInput); ok && thread.EmailConnectionID != "" {
 		if _, _, err := ensurePostgresCommunicationsEmailIngestionJobTx(ctx, tx, CommunicationsEmailIngestionJobInput{
 			CompanyID: input.CompanyID, EmailConnectionID: thread.EmailConnectionID, EmailThreadID: thread.EmailThreadID,
 			ProviderMessageID: mid, ProviderThreadID: thread.ProviderThreadID, Priority: CommunicationsEmailIngestionPriorityVisible,
+			EnqueueSourceID: sourceID,
 		}); err != nil {
 			return CommunicationsEmailCollaborationEnsureResult{}, err
 		}

@@ -252,13 +252,16 @@ func TestMemoryCommunicationsEmailIngestionJobsAreDurableAndIdempotent(t *testin
 	jobInput := CommunicationsEmailIngestionJobInput{
 		CompanyID: companyID, EmailConnectionID: thread.EmailConnectionID, EmailThreadID: thread.EmailThreadID,
 		ProviderMessageID: thread.RootProviderMessageID, ProviderThreadID: thread.ProviderThreadID, Priority: CommunicationsEmailIngestionPriorityVisible,
+		EnqueueSourceID: "original-producer-fingerprint",
 	}
 	first, created, err := repo.EnsureCommunicationsEmailIngestionJobContext(context.Background(), jobInput)
 	if err != nil || !created {
 		t.Fatalf("first durable job = %+v created=%v err=%v", first, created, err)
 	}
-	second, created, err := repo.EnsureCommunicationsEmailIngestionJobContext(context.Background(), jobInput)
-	if err != nil || created || second.IngestionJobID != first.IngestionJobID {
+	secondInput := jobInput
+	secondInput.EnqueueSourceID = "later-unrelated-producer"
+	second, created, err := repo.EnsureCommunicationsEmailIngestionJobContext(context.Background(), secondInput)
+	if err != nil || created || second.IngestionJobID != first.IngestionJobID || second.EnqueueSourceID != jobInput.EnqueueSourceID {
 		t.Fatalf("duplicate ensure = %+v created=%v err=%v", second, created, err)
 	}
 
@@ -360,9 +363,9 @@ func TestMemoryCommunicationsEmailThreadLaterManualMessageReusesThreadAndQueuesO
 	if updated.EmailThreadID != stored.EmailThreadID || len(updated.Messages) != 2 || updated.Messages[0].EmailMessageID != oldMangoMessageID {
 		t.Fatalf("later message forked stored thread: before=%+v after=%+v", stored, updated)
 	}
-	messageID, ok := communicationsEmailIngestionRequest(updated, later)
-	if !ok || messageID != "provider-new" {
-		t.Fatalf("later ingestion request = message=%q ok=%v", messageID, ok)
+	messageID, sourceID, ok := communicationsEmailIngestionRequest(updated, later)
+	if !ok || messageID != "provider-new" || sourceID != CommunicationsEmailUserProducerFingerprint(userID) {
+		t.Fatalf("later ingestion request = message=%q source=%q ok=%v", messageID, sourceID, ok)
 	}
 	jobInput := CommunicationsEmailIngestionJobInput{
 		CompanyID: companyID, EmailConnectionID: updated.EmailConnectionID, EmailThreadID: updated.EmailThreadID,

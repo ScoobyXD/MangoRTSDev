@@ -793,12 +793,19 @@ func (s *Server) ingestCommunicationsMessage(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if connection.EmailConnectionID != "" {
-		job, _, err := s.repo.EnsureCommunicationsEmailIngestionJobContext(r.Context(), store.CommunicationsEmailIngestionJobInput{
+		job, created, err := s.repo.EnsureCommunicationsEmailIngestionJobContext(r.Context(), store.CommunicationsEmailIngestionJobInput{
 			CompanyID: companyID, EmailConnectionID: connection.EmailConnectionID,
 			EmailThreadID: thread.EmailThreadID, ProviderMessageID: message.ID,
 			ProviderThreadID: message.ThreadID, Priority: store.CommunicationsEmailIngestionPriorityVisible,
+			EnqueueSourceID: store.CommunicationsEmailUserProducerFingerprint(actorUserID),
 		})
-		if err != nil || s.enqueueCommunicationsEmailIngestionJob(r.Context(), job) != nil {
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, "failed_to_queue_email_ingestion")
+			return
+		}
+		if (created || (job.Status == store.CommunicationsEmailIngestionJobAccepted && job.SQSAcceptedTimestamp == nil &&
+			job.EnqueueSourceID == store.CommunicationsEmailUserProducerFingerprint(actorUserID))) &&
+			s.enqueueCommunicationsEmailIngestionJob(r.Context(), job) != nil {
 			writeError(w, http.StatusServiceUnavailable, "failed_to_queue_email_ingestion")
 			return
 		}

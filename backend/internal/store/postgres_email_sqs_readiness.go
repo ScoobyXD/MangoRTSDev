@@ -15,7 +15,7 @@ var emailSQSFinalColumns = map[string][]string{
 	"email_ingestion_jobs": {
 		"ingestion_job_id", "company_id", "email_connection_id", "email_thread_id", "provider_message_id",
 		"provider_thread_id", "priority", "status", "provider_attempt_count", "attempt_token",
-		"sqs_accepted_timestamp", "last_error", "completed_timestamp",
+		"enqueue_source_id", "sqs_accepted_timestamp", "last_error", "completed_timestamp",
 		"failed_timestamp", "created_timestamp", "updated_timestamp",
 	},
 	"communications_email_archive_job_items": {

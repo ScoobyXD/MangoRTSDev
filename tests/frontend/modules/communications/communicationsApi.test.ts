@@ -16,6 +16,7 @@ import {
   ensureEmailCollaboration,
   fetchCommunicationsStatus,
   getCalendarInviteEvent,
+  getCommunicationsArchiveJob,
   getEmailMessage,
   getEmailCollaborationThread,
   getEmailSignature,
@@ -36,6 +37,7 @@ import {
   listNodeFolderItems,
   listNodes,
   markCommunicationsWorkspacePanelStale,
+  markCommunicationsArchiveJobsStaleForMailboxChange,
   mergeEmailMessageIntoMessageList,
   parseEmailAddressList,
   patchEmailMessagesLogicGatePlacement,
@@ -1080,6 +1082,53 @@ test("archive job acceptance keeps cached starred messages out of Inbox", async 
     assert.deepEqual((await listEmailMessages({ mailbox: "starred", limit: 25 })).messages.map((item) => [item.id, item.starred]), [["msg-1", true]]);
     assert.deepEqual((await listEmailMessages({ mailbox: "primary", limit: 25 })).messages.map((item) => item.id), ["msg-2"]);
     assert.equal(calls.filter((path) => path.includes("mailbox=primary")).length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("archive job cache becomes stale only for its exact mailbox message and revalidates with ETag", async () => {
+  invalidateCommunicationsCache();
+  const originalFetch = globalThis.fetch;
+  const job = archiveJob(["message-1"], "job-cache-1");
+  const statusRequests: Headers[] = [];
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = input.toString();
+    if (path.includes("archive-batch")) return jsonResponse({ archive_job: job });
+    if (path.includes("archive-jobs/job-cache-1")) {
+      const headers = new Headers(init?.headers);
+      statusRequests.push(headers);
+      if (headers.get("If-None-Match") === '"archive-v1"') {
+        return new Response(null, { status: 304, headers: { ETag: '"archive-v1"' } });
+      }
+      return new Response(JSON.stringify({ archive_job: job }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", ETag: '"archive-v1"' },
+      });
+    }
+    return jsonResponse({});
+  };
+  try {
+    await archiveEmailMessagesBatch(["message-1"], undefined, "company-1", { accountEmail: "owner@example.com" });
+    await getCommunicationsArchiveJob("job-cache-1");
+    assert.equal(statusRequests.length, 1, "queue acceptance is followed by one canonical status read");
+
+    assert.deepEqual(markCommunicationsArchiveJobsStaleForMailboxChange({
+      companyID: "company-1", accountEmail: "other@example.com",
+    }, "message-1"), []);
+    assert.deepEqual(markCommunicationsArchiveJobsStaleForMailboxChange({
+      companyID: "company-1", accountEmail: "owner@example.com",
+    }, "unrelated-message"), []);
+    assert.equal(statusRequests.length, 1, "unrelated hints perform no archive read");
+
+    assert.deepEqual(markCommunicationsArchiveJobsStaleForMailboxChange({
+      companyID: "company-1", accountEmail: "owner@example.com",
+    }, "message-1"), ["job-cache-1"]);
+    assert.equal(statusRequests.length, 1, "inactive cache invalidation does not fetch immediately");
+    await getCommunicationsArchiveJob("job-cache-1");
+    assert.equal(statusRequests.length, 2);
+    assert.equal(statusRequests[1]?.get("If-None-Match"), '"archive-v1"');
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();

@@ -3544,6 +3544,10 @@ create unique index if not exists idx_email_relationships_active_identity
     coalesce(resource_textbox_id, '')
   );
 
+create unique index if not exists idx_email_relationships_one_node_textbox_per_message
+  on email_relationships(company_id, email_message_id, resource_id)
+  where resource_type='node' and resource_textbox_id is not null;
+
 create table if not exists node_textboxes_history (
   company_id uuid not null,
   node_id uuid not null,
@@ -3899,6 +3903,7 @@ create table if not exists email_ingestion_jobs (
   status text not null default 'accepted',
 	provider_attempt_count integer not null default 0,
 	attempt_token uuid,
+	enqueue_source_id text not null default '',
 	sqs_accepted_timestamp timestamptz,
 	last_error text not null default '',
   completed_timestamp timestamptz,

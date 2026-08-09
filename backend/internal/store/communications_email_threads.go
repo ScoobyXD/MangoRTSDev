@@ -95,6 +95,7 @@ type CommunicationsEmailIngestionJob struct {
 	Status               string     `json:"status"`
 	ProviderAttemptCount int        `json:"provider_attempt_count"`
 	AttemptToken         string     `json:"-"`
+	EnqueueSourceID      string     `json:"-"`
 	SQSAcceptedTimestamp *time.Time `json:"-"`
 	LastError            string     `json:"last_error,omitempty"`
 	CompletedTimestamp   *time.Time `json:"completed_timestamp,omitempty"`
@@ -110,6 +111,15 @@ type CommunicationsEmailIngestionJobInput struct {
 	ProviderMessageID string
 	ProviderThreadID  string
 	Priority          int
+	EnqueueSourceID   string
+}
+
+func CommunicationsEmailUserProducerFingerprint(userID string) string {
+	userID = cleanUUIDText(userID)
+	if userID == "" {
+		return ""
+	}
+	return "user:" + userID
 }
 
 func communicationsEmailMessageDownloadComplete(thread domain.CommunicationsEmailThread, providerMessageID string) bool {
@@ -265,15 +275,16 @@ func communicationsEmailThreadForMessages(thread domain.CommunicationsEmailThrea
 	return thread
 }
 
-func communicationsEmailIngestionRequest(thread domain.CommunicationsEmailThread, input CommunicationsEmailThreadUpsertInput) (string, bool) {
+func communicationsEmailIngestionRequest(thread domain.CommunicationsEmailThread, input CommunicationsEmailThreadUpsertInput) (string, string, bool) {
 	if !input.RequestDownload || input.RequestedByUserID == "" {
-		return "", false
+		return "", "", false
 	}
+	sourceID := CommunicationsEmailUserProducerFingerprint(input.RequestedByUserID)
 	if strings.TrimSpace(thread.ProviderThreadID) != "" && !thread.HistoryComplete {
-		return thread.RootProviderMessageID, thread.RootProviderMessageID != ""
+		return thread.RootProviderMessageID, sourceID, thread.RootProviderMessageID != ""
 	}
 	if !communicationsEmailMessageDownloadComplete(thread, input.SelectedMessageID) {
-		return input.SelectedMessageID, true
+		return input.SelectedMessageID, sourceID, true
 	}
-	return "", false
+	return "", "", false
 }

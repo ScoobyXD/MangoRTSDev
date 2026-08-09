@@ -336,43 +336,6 @@ func (r *MemoryRepo) ListCommunicationsArchiveJobItemsContext(ctx context.Contex
 	return items, nil
 }
 
-func (r *MemoryRepo) ListUnsentCommunicationsArchiveJobItemsContext(ctx context.Context, companyID, emailConnectionID string, createdBefore time.Time, limit int) ([]CommunicationsArchiveJobItem, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	companyID, emailConnectionID = cleanUUIDText(companyID), cleanUUIDText(emailConnectionID)
-	if companyID == "" || emailConnectionID == "" || createdBefore.IsZero() || limit <= 0 || limit > 500 {
-		return nil, ErrInvalid
-	}
-	connection, err := r.GetEmailConnectionByIDContext(ctx, companyID, emailConnectionID)
-	if err != nil {
-		return nil, err
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	items := make([]CommunicationsArchiveJobItem, 0, limit)
-	for _, item := range r.communicationsArchiveJobItems {
-		matchesConnection := item.ConnectionScope == "personal" && item.ActorUserID == connection.UserID && item.AccountEmail == connection.AccountEmail
-		if item.ConnectionScope == "shared" {
-			matchesConnection = item.CompanyEmailConnectionID == firstNonBlank(connection.CompanyEmailConnectionID, connection.EmailConnectionID)
-		}
-		if item.CompanyID == companyID && matchesConnection && item.Status == CommunicationsArchiveJobItemStatusPending &&
-			item.ProviderAttemptCount == 0 && !item.CreatedTimestamp.After(createdBefore) {
-			items = append(items, CloneCommunicationsArchiveJobItem(item))
-		}
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
-			return items[i].JobItemID < items[j].JobItemID
-		}
-		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
-	})
-	if len(items) > limit {
-		items = items[:limit]
-	}
-	return items, nil
-}
-
 func (r *MemoryRepo) updateCommunicationsArchiveJobStatusLocked(jobID string, now time.Time) {
 	job, ok := r.communicationsArchiveJobs[jobID]
 	if !ok {

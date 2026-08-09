@@ -7,6 +7,7 @@ import type { LogicGateRACIAssignment, LogicGateRACIRole, LogicGateRACIPrincipal
 import type { ProjectRelationshipProjection } from "../project-management/projectManagementApi.js";
 import { markWorkspaceSnapshotScopeStale } from "../workspace/workspaceSnapshotCache.js";
 import { invalidateResourcePolicyDependentCaches } from "../permissions/resourcePolicyCaches.js";
+import { requestJSONWithMeta } from "../api/requestJSON.js";
 import { scheduleOutboundEmailDispatch } from "./outboundEmailUndo.js";
 
 export type EmailProvider = "google" | "microsoft";
@@ -301,6 +302,21 @@ export type ArchiveEmailMessagesBatchOptions = {
 	accountEmail?: string;
 };
 
+export type CommunicationsArchiveJobMailboxScope = {
+	companyID?: string;
+	sharedInboxID?: string;
+	accountEmail?: string;
+};
+
+type CommunicationsArchiveJobCacheEntry = {
+	job: CommunicationsArchiveJob;
+	etag: string;
+	fresh: boolean;
+	companyID: string;
+	sharedInboxID: string;
+	accountEmail: string;
+};
+
 export type MergeEmailMessageOptions = {
   prependIfMissing?: boolean;
   maxMessages?: number;
@@ -566,6 +582,8 @@ const foldersCache = new Map<string, CacheEntry<EmailFolder[]>>();
 const messagePageCache = new Map<string, CacheEntry<MessagePage>>();
 const messageDetailCache = new Map<string, MessageDetailCacheEntry>();
 const emailThreadCache = new Map<string, CacheEntry<EmailThread>>();
+const archiveJobCache = new Map<string, CommunicationsArchiveJobCacheEntry>();
+const archiveJobInflight = new Map<string, Promise<CommunicationsArchiveJob>>();
 const recentArchivedMessages = new Map<string, ScopedMessageCacheEntry>();
 const recentPrimaryMessages = new Map<string, ScopedMessageCacheEntry>();
 const recentStarredMessages = new Map<string, ScopedMessageCacheEntry>();
@@ -862,6 +880,7 @@ export async function updateEmailMessage(messageID: string, update: { unread?: b
 }
 
 export async function archiveEmailMessagesBatch(messageIDs: string[], sharedInboxID?: string, companyID?: string, options: ArchiveEmailMessagesBatchOptions = {}): Promise<CommunicationsArchiveJob> {
+	ensureCommunicationsCacheAuthScope();
 	const ids = cleanIDs(messageIDs);
 	if (ids.length === 0) throw new Error("email_message_ids_required");
   const queryParams = new URLSearchParams();
@@ -877,17 +896,109 @@ export async function archiveEmailMessagesBatch(messageIDs: string[], sharedInbo
     body: JSON.stringify({ message_ids: ids }),
   });
 	const job = payload.archive_job;
+	cacheCommunicationsArchiveJob(job, { companyID, sharedInboxID, accountEmail: options.accountEmail }, false);
 	for (const messageID of cleanIDs(job.accepted_message_ids ?? [])) {
 		markCachedMessageArchived(messageID, { companyID, sharedInboxID, accountEmail: options.accountEmail });
 	}
 	return job;
 }
 
-export async function getCommunicationsArchiveJob(jobID: string): Promise<CommunicationsArchiveJob> {
+export async function getCommunicationsArchiveJob(jobID: string, options: { refresh?: boolean } = {}): Promise<CommunicationsArchiveJob> {
+	ensureCommunicationsCacheAuthScope();
 	const cleanJobID = jobID.trim();
 	if (!cleanJobID) throw new Error("archive_job_id_required");
-	const payload = await apiFetchJSON<{ archive_job: CommunicationsArchiveJob }>(`/v1/communications/archive-jobs/${encodeURIComponent(cleanJobID)}`);
-	return payload.archive_job;
+	const cached = archiveJobCache.get(cleanJobID);
+	if (!options.refresh && cached?.fresh) return cloneCommunicationsArchiveJob(cached.job);
+	const inflight = archiveJobInflight.get(cleanJobID);
+	if (inflight) return cloneCommunicationsArchiveJob(await inflight);
+	const headers = new Headers();
+	if (cached?.etag) headers.set("If-None-Match", cached.etag);
+	const request = requestJSONWithMeta<{ archive_job: CommunicationsArchiveJob }>(
+		readAuthConfig().apiBase,
+		`/v1/communications/archive-jobs/${encodeURIComponent(cleanJobID)}`,
+		{ headers },
+	).then((response) => {
+		const job = response.notModified ? cached?.job : response.body?.archive_job;
+		if (!job) throw new Error("archive_job_304_without_cached_payload");
+		cacheCommunicationsArchiveJob(job, cached ?? {}, true, response.etag?.trim() || cached?.etag || "");
+		return cloneCommunicationsArchiveJob(job);
+	}).finally(() => {
+		if (archiveJobInflight.get(cleanJobID) === request) archiveJobInflight.delete(cleanJobID);
+	});
+	archiveJobInflight.set(cleanJobID, request);
+	return cloneCommunicationsArchiveJob(await request);
+}
+
+export function markCommunicationsArchiveJobsStaleForMailboxChange(
+	scope: CommunicationsArchiveJobMailboxScope,
+	messageID: string,
+): string[] {
+	ensureCommunicationsCacheAuthScope();
+	const cleanMessageID = messageID.trim();
+	if (!cleanMessageID) return [];
+	const normalized = normalizeCommunicationsArchiveJobMailboxScope(scope);
+	const staleJobIDs: string[] = [];
+	for (const [jobID, entry] of archiveJobCache) {
+		if (!communicationsArchiveJobScopeMatches(entry, normalized)) continue;
+		const messageMatches = entry.job.accepted_message_ids.some((id) => id.trim() === cleanMessageID)
+			|| entry.job.items.some((item) => item.message_id.trim() === cleanMessageID);
+		if (!messageMatches) continue;
+		entry.fresh = false;
+		staleJobIDs.push(jobID);
+	}
+	return staleJobIDs;
+}
+
+function cacheCommunicationsArchiveJob(
+	job: CommunicationsArchiveJob,
+	scope: CommunicationsArchiveJobMailboxScope | Partial<CommunicationsArchiveJobCacheEntry>,
+	fresh: boolean,
+	etag = "",
+): void {
+	const cleanJobID = job.job_id.trim();
+	if (!cleanJobID) return;
+	const previous = archiveJobCache.get(cleanJobID);
+	const normalized = normalizeCommunicationsArchiveJobMailboxScope({
+		companyID: scope.companyID ?? previous?.companyID,
+		sharedInboxID: scope.sharedInboxID ?? previous?.sharedInboxID,
+		accountEmail: scope.accountEmail ?? previous?.accountEmail,
+	});
+	archiveJobCache.set(cleanJobID, {
+		job: cloneCommunicationsArchiveJob(job),
+		etag: etag.trim() || previous?.etag || "",
+		fresh,
+		...normalized,
+	});
+}
+
+function normalizeCommunicationsArchiveJobMailboxScope(scope: CommunicationsArchiveJobMailboxScope): {
+	companyID: string;
+	sharedInboxID: string;
+	accountEmail: string;
+} {
+	const sharedInboxID = scope.sharedInboxID?.trim() ?? "";
+	return {
+		companyID: scope.companyID?.trim() ?? "",
+		sharedInboxID,
+		accountEmail: sharedInboxID ? "" : scope.accountEmail?.trim().toLowerCase() ?? "",
+	};
+}
+
+function communicationsArchiveJobScopeMatches(
+	entry: Pick<CommunicationsArchiveJobCacheEntry, "companyID" | "sharedInboxID" | "accountEmail">,
+	scope: ReturnType<typeof normalizeCommunicationsArchiveJobMailboxScope>,
+): boolean {
+	return entry.companyID === scope.companyID
+		&& entry.sharedInboxID === scope.sharedInboxID
+		&& entry.accountEmail === scope.accountEmail;
+}
+
+function cloneCommunicationsArchiveJob(job: CommunicationsArchiveJob): CommunicationsArchiveJob {
+	return {
+		...job,
+		accepted_message_ids: [...(job.accepted_message_ids ?? [])],
+		items: (job.items ?? []).map((item) => ({ ...item })),
+	};
 }
 
 export async function unarchiveEmailMessage(messageID: string, sharedInboxID?: string, companyID?: string, accountEmail?: string): Promise<EmailMessage> {
@@ -1765,6 +1876,8 @@ export function invalidateCommunicationsCache(scope?: { status?: boolean; folder
     recentStarredMessages.clear();
     communicationsReadCache.clear();
     communicationsReadInflight.clear();
+	archiveJobCache.clear();
+	archiveJobInflight.clear();
   }
 }
 

@@ -376,10 +376,11 @@ func (r *MemoryRepo) ImportCommunicationsEmailIntoNode(input CommunicationsNodeE
 		Type: info.Type, Information: information, CreatedTimestamp: now, UpdatedTimestamp: now,
 	}
 	r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, input.NodeID, input.InformationID, thread.EmailThreadID, selected.ID, input.CreatedByUserID, now)
-	if requestedMessageID, ok := communicationsEmailIngestionRequest(thread, input.Thread); ok {
+	if requestedMessageID, sourceID, ok := communicationsEmailIngestionRequest(thread, input.Thread); ok {
 		if _, _, err := r.ensureCommunicationsEmailIngestionJobLocked(CommunicationsEmailIngestionJobInput{
 			CompanyID: input.CompanyID, EmailConnectionID: r.emailConnectionIDForThreadLocked(thread), EmailThreadID: thread.EmailThreadID,
 			ProviderMessageID: requestedMessageID, ProviderThreadID: thread.ProviderThreadID, Priority: CommunicationsEmailIngestionPriorityVisible,
+			EnqueueSourceID: sourceID,
 		}); err != nil {
 			return CommunicationsNodeEmailImportResult{}, err
 		}

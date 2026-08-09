@@ -161,7 +161,7 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 			}
 			log.Printf("stored nylas message.opened read status user_id=%s scope=%s company_id=%s company_email_connection_id=%s grant_id=%s message_id=%s status=%s signal_count=%d last_signal=%s", grantContext.connection.UserID, status.ScopeType, status.CompanyID, status.CompanyEmailConnectionID, grantID, status.MessageID, status.Status, status.SignalCount, status.LastSignalTimestamp.Format(time.RFC3339))
 		}
-		if err := s.applyCommunicationsWebhookChange(r.Context(), duplicate, grantContext, change); err != nil {
+		if err := s.applyCommunicationsWebhookChange(r.Context(), duplicate, receiptKey, grantContext, change); err != nil {
 			log.Printf("failed to deliver communications webhook change grant_id=%s trigger=%s message_id=%s: %v", grantID, change.Trigger, change.MessageID, err)
 			s.nylasWebhooks.forget(receiptKey)
 			writeError(w, http.StatusInternalServerError, "failed_to_deliver_email_change")
@@ -352,7 +352,7 @@ func (s *Server) applyNylasWebhookCacheInvalidationForAccountScope(accountScope 
 	}
 }
 
-func (s *Server) applyCommunicationsWebhookChange(ctx context.Context, duplicate bool, grantContext communicationsWebhookGrantContext, change nylasWebhookChange) error {
+func (s *Server) applyCommunicationsWebhookChange(ctx context.Context, duplicate bool, receiptKey string, grantContext communicationsWebhookGrantContext, change nylasWebhookChange) error {
 	if change.Trigger == "grant.expired" || change.Trigger == "grant.updated" {
 		status := "reauth_required"
 		if change.Trigger == "grant.updated" {
@@ -372,13 +372,18 @@ func (s *Server) applyCommunicationsWebhookChange(ctx context.Context, duplicate
 		if s.emailQueue == nil {
 			return errors.New("email SQS sender is not configured")
 		}
-		job, _, err := s.repo.EnsureCommunicationsEmailIngestionJobContext(ctx, store.CommunicationsEmailIngestionJobInput{
+		job, created, err := s.repo.EnsureCommunicationsEmailIngestionJobContext(ctx, store.CommunicationsEmailIngestionJobInput{
 			CompanyID: grantContext.connection.CompanyID, EmailConnectionID: grantContext.connection.EmailConnectionID,
 			ProviderMessageID: change.MessageID, ProviderThreadID: change.ThreadID,
-			Priority: store.CommunicationsEmailIngestionPriorityLive,
+			Priority:        store.CommunicationsEmailIngestionPriorityLive,
+			EnqueueSourceID: "webhook:" + strings.TrimSpace(receiptKey),
 		})
 		if err != nil {
 			return fmt.Errorf("queue live email ingestion: %w", err)
+		}
+		if !created && (job.Status != store.CommunicationsEmailIngestionJobAccepted || job.SQSAcceptedTimestamp != nil ||
+			job.EnqueueSourceID != "webhook:"+strings.TrimSpace(receiptKey)) {
+			return nil
 		}
 		if err := s.enqueueCommunicationsEmailIngestionJob(ctx, job); err != nil {
 			return fmt.Errorf("queue live email ingestion: %w", err)

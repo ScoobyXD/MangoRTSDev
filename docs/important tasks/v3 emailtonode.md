@@ -1,3 +1,15 @@
+# Process Story: One durable email thread can support separate Node workspaces
+
+Node A and Node B each relate to the same stored email thread through their own typed Node-wide edges
+↓
+An exact message may link to one textbox in Node A and a different textbox in Node B, but never two textboxes inside the same Node
+↓
+Repeating the same Node/message/textbox command converges to the existing relationship
+↓
+Deleting either Node's relationship leaves the other Node, its textbox/chat, the stored email, and surviving file relationships intact
+
+Last updated: 2026-08-09
+
 # Process Story: Triage email uses the universal reference and link controls
 
 A user selects a message in My Triage or Shared Triage
@@ -157,13 +169,15 @@ E2N29 - Creating an email relationship does not create permissions, RACI assignm
 
 E2N30 - Message finalization and automatic Node-wide relationship creation are one database transaction. The Node icon must not appear before the relationship commit succeeds.
 
-E2N31 - Relationship uniqueness remains company, internal Mango message, resource type, resource ID, and optional textbox ID. Repeated processing cannot create duplicate Node edges.
+E2N31 - Relationship identity remains company, internal Mango message, resource type, resource ID, and optional textbox ID. Repeated processing cannot create duplicate exact edges. One thread/message may have Node-wide relationships in several Nodes.
+
+E2N31A - A textbox relationship owns only one exact email message in one exact Node textbox; it never owns the whole thread. The same message is limited to one textbox per Node, may use a different textbox in another Node, and an exact repeat converges to the existing relationship. Removing one Node's edge never deletes another Node's edge, textbox, chat, stored email truth, or surviving attachment relationship.
 
 ### Webhooks and priority
 
 E2N32 - The fast path is a verified Nylas message.created webhook containing an exact grant ID and provider message ID.
 
-E2N33 - The webhook validates its signature, resolves one exact connection, durably enqueues one job, preserves existing mailbox cache invalidation/live hints, wakes the worker, and returns. It performs no thread download.
+E2N33 - The webhook validates its signature, resolves one exact connection, sends one stable ingestion identity to SQS, records acceptance, and returns. It performs no thread download and publishes no mailbox hint before durable ingestion commits.
 
 E2N34 - Nylas webhook delivery is at least once. Duplicate deliveries must converge on the same active job and the same final stored message.
 
@@ -185,6 +199,8 @@ E2N39 - Provider and attachment calls use the existing per-grant Nylas request g
 
 E2N39A - Reconciliation control, one-page connection discovery, and ingestion are separate compact SQS message kinds under the same worker shutdown context. Live and visible-triage identities keep their higher job priority, and no database claimant loop exists.
 
+E2N39B - Time waiting in the SQS backlog does not start the ten-minute visibility or eight-minute worker deadline; both begin only when the item is received. The current DEV queue retains work for fourteen days and deliberately uses one private ECS worker task with bounded concurrency. This correctness cleanup adds no production autoscaling.
+
 ### Rare bounded checkpoint reconciliation
 
 E2N40 - Webhooks are the fast path. A rare scheduled reconciliation control, about every ten minutes and disabled by default until staged DEV rollout, is the bounded reliability path while users are logged out. No API task scans accounts every 30 seconds.
@@ -193,11 +209,11 @@ E2N41 - One connection reconciliation covers Inbox messages received after last_
 
 E2N42 - The overlap prevents timestamp-boundary loss. Job and message uniqueness make overlap duplicates harmless.
 
-E2N43 - Reconciliation uses Nylas's supported message-list pagination and received-time filters. One SQS message reads one bounded provider page and sends a continuation for the next page. It enqueues stable identities and does not download bodies in discovery.
+E2N43 - Reconciliation uses Nylas's supported message-list pagination and received-time filters. One SQS message reads one bounded provider page and sends a continuation for the next page. For a discovered provider message it creates and sends only when no `ingestion_job_id` exists. `enqueue_source_id` is only the immutable original-delivery fingerprint, never another job or delivery authority; an exact redelivery may finish its own accepted job while acceptance is unrecorded, but a later schedule sends zero for the existing job. Discovery does not download bodies.
 
-E2N44 - last_successful_scan_at advances to scan_started_at only after every page in that window has been read and every discovered message identity has been accepted by SQS and marked accepted in PostgreSQL.
+E2N44 - `last_successful_scan_at` advances to `scan_started_at` only after every page in that window has been read and every discovered message is durably represented: a newly created identity was accepted by SQS and marked accepted, or the stable identity already existed and therefore required no send.
 
-E2N45 - A failed page, SQS send, or acceptance-marker write leaves last_successful_scan_at unchanged so the same window is safely retried.
+E2N45 - A failed page, new-job SQS send, or acceptance-marker write leaves `last_successful_scan_at` unchanged so the same window is safely retried. Redelivery of that exact reconciliation source may finish only its own accepted/unrecorded send. A different/later schedule sends nothing for an existing accepted, processing, completed, parked, exhausted, archive, or DLQed identity.
 
 E2N46 - The FIFO control group serializes reconciliation control, and the permanent email connection ID serializes each connection's work. Duplicate controls or overlapping windows still reuse the stable ingestion identity, so no leader election is required.
 
@@ -314,7 +330,7 @@ verified message.created
 -> atomically add Node-wide relationships for newly completed messages
 -> publish exact mailbox and Node invalidations
 
-If cancellation or an ambiguous send failure leaves that durable ingestion marker without `sqs_accepted_timestamp`, the next bounded reconciliation after about ten minutes resends the same identity. The same pass may resend an archive item only while it is still pending with zero provider starts. It never creates a replacement or touches started, completed, parked, exhausted, or DLQed work.
+If cancellation or an ambiguous send failure leaves that durable ingestion marker without `sqs_accepted_timestamp`, only the exact original producer fingerprint may retry the same identity. A generic/later reconciliation schedule sees the existing `ingestion_job_id` and sends nothing. It never lists age-based unsent work, resends an archive marker, creates a replacement, or rescues completed, parked, exhausted, or DLQed work.
 
 ### Visible triage email
 
@@ -333,7 +349,7 @@ grant.expired or provider 401
 -> update same connection and mark connected
 -> the next rare bounded reconciliation control resumes the checkpoint window
 -> no reconnect scanner, hot database poller, or automatic DLQ replay runs
--> enqueue backlog jobs
+-> create and enqueue only genuinely missing stable backlog jobs; existing jobs produce zero sends
 -> advance checkpoint only after durable enqueue completes
 -> process live and visible jobs before old backlog
 

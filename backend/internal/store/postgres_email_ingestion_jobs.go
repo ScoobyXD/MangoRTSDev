@@ -6,7 +6,6 @@ import (
 	"errors"
 	"sort"
 	"strings"
-	"time"
 )
 
 type communicationsEmailIngestionJobScanner interface {
@@ -16,7 +15,7 @@ type communicationsEmailIngestionJobScanner interface {
 const postgresCommunicationsEmailIngestionJobColumns = `
 ingestion_job_id::text,company_id::text,email_connection_id::text,
 coalesce(email_thread_id::text,''),provider_message_id,provider_thread_id,priority,
-	status,provider_attempt_count,coalesce(attempt_token::text,''),sqs_accepted_timestamp,
+	status,provider_attempt_count,coalesce(attempt_token::text,''),enqueue_source_id,sqs_accepted_timestamp,
 last_error,completed_timestamp,failed_timestamp,created_timestamp,updated_timestamp`
 
 func scanPostgresCommunicationsEmailIngestionJob(row communicationsEmailIngestionJobScanner) (CommunicationsEmailIngestionJob, error) {
@@ -25,7 +24,7 @@ func scanPostgresCommunicationsEmailIngestionJob(row communicationsEmailIngestio
 	err := row.Scan(
 		&item.IngestionJobID, &item.CompanyID, &item.EmailConnectionID, &item.EmailThreadID,
 		&item.ProviderMessageID, &item.ProviderThreadID, &item.Priority,
-		&item.Status, &item.ProviderAttemptCount, &item.AttemptToken, &sqsAccepted,
+		&item.Status, &item.ProviderAttemptCount, &item.AttemptToken, &item.EnqueueSourceID, &sqsAccepted,
 		&item.LastError, &completed, &failed, &item.CreatedTimestamp, &item.UpdatedTimestamp,
 	)
 	if sqsAccepted.Valid {
@@ -64,6 +63,7 @@ func ensurePostgresCommunicationsEmailIngestionJobTx(
 	input.EmailThreadID = cleanUUIDText(input.EmailThreadID)
 	input.ProviderMessageID = strings.TrimSpace(input.ProviderMessageID)
 	input.ProviderThreadID = strings.TrimSpace(input.ProviderThreadID)
+	input.EnqueueSourceID = strings.TrimSpace(input.EnqueueSourceID)
 	input.Priority = normalizeCommunicationsEmailIngestionPriority(input.Priority)
 	if input.CompanyID == "" || input.EmailConnectionID == "" {
 		return CommunicationsEmailIngestionJob{}, false, ErrInvalid
@@ -146,15 +146,15 @@ limit 1`, input.CompanyID, input.EmailConnectionID, input.ProviderMessageID))
 insert into email_ingestion_jobs (
  ingestion_job_id,company_id,email_connection_id,email_thread_id,
 	 provider_message_id,provider_thread_id,priority,status,
-	 provider_attempt_count,sqs_accepted_timestamp,last_error,
+	 provider_attempt_count,enqueue_source_id,sqs_accepted_timestamp,last_error,
  created_timestamp,updated_timestamp
 ) values (
  $1::uuid,$2::uuid,$3::uuid,nullif($4,'')::uuid,$5,$6,$7,
-	 'accepted',0,null,'',now(),now()
+	 'accepted',0,$8,null,'',now(),now()
 )
 returning `+postgresCommunicationsEmailIngestionJobColumns,
 		newUUIDv7String(), input.CompanyID, input.EmailConnectionID, input.EmailThreadID,
-		input.ProviderMessageID, input.ProviderThreadID, input.Priority))
+		input.ProviderMessageID, input.ProviderThreadID, input.Priority, input.EnqueueSourceID))
 	if err != nil {
 		return CommunicationsEmailIngestionJob{}, false, err
 	}
@@ -428,32 +428,6 @@ where company_id=$1::uuid and email_thread_id=$2::uuid)`, companyID, emailThread
 		}
 	}
 	return items, nil
-}
-
-func (r *PostgresRepo) ListUnsentCommunicationsEmailIngestionJobsContext(ctx context.Context, companyID, emailConnectionID string, createdBefore time.Time, limit int) ([]CommunicationsEmailIngestionJob, error) {
-	companyID, emailConnectionID = cleanUUIDText(companyID), cleanUUIDText(emailConnectionID)
-	if companyID == "" || emailConnectionID == "" || createdBefore.IsZero() || limit <= 0 || limit > 500 {
-		return nil, ErrInvalid
-	}
-	rows, err := r.db.QueryContext(ctx, `select `+postgresCommunicationsEmailIngestionJobColumns+`
-from email_ingestion_jobs
-where company_id=$1::uuid and email_connection_id=$2::uuid
-  and status='accepted' and sqs_accepted_timestamp is null and created_timestamp <= $3
-order by created_timestamp,ingestion_job_id
-limit $4`, companyID, emailConnectionID, createdBefore, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := make([]CommunicationsEmailIngestionJob, 0, limit)
-	for rows.Next() {
-		item, scanErr := scanPostgresCommunicationsEmailIngestionJob(rows)
-		if scanErr != nil {
-			return nil, scanErr
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
 }
 
 func (r *PostgresRepo) ListCommunicationsEmailThreadNodeIDs(companyID, emailThreadID string) ([]string, error) {

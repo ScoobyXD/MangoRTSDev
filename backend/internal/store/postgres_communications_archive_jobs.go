@@ -447,28 +447,6 @@ order by item.created_timestamp asc, item.job_item_id asc`, jobID)
 	return items, nil
 }
 
-func (r *PostgresRepo) ListUnsentCommunicationsArchiveJobItemsContext(ctx context.Context, companyID, emailConnectionID string, createdBefore time.Time, limit int) ([]CommunicationsArchiveJobItem, error) {
-	companyID, emailConnectionID = cleanUUIDText(companyID), cleanUUIDText(emailConnectionID)
-	if companyID == "" || emailConnectionID == "" || createdBefore.IsZero() || limit <= 0 || limit > 500 {
-		return nil, ErrInvalid
-	}
-	rows, err := r.db.QueryContext(ctx, `select `+communicationsArchiveJobItemSelectColumns+`
-from communications_email_archive_job_items item
-join communications_email_archive_jobs job on job.archive_job_id=item.archive_job_id
-join email_connections connection on connection.company_id=$1::uuid and connection.email_connection_id=$2::uuid
-where job.company_id=$1::uuid
-  and item.status='pending' and item.provider_attempt_count=0 and item.created_timestamp <= $3
-  and ((job.connection_scope='personal' and job.actor_user_id=connection.personal_user_id and job.account_email=connection.account_email)
-    or (job.connection_scope='shared' and job.company_email_connection_id=connection.email_connection_id))
-order by item.created_timestamp,item.job_item_id
-limit $4`, companyID, emailConnectionID, createdBefore, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanCommunicationsArchiveJobItems(rows)
-}
-
 func updatePostgresCommunicationsArchiveJobStatusTx(ctx context.Context, tx *sql.Tx, jobID string) error {
 	var activeCount, failedCount int
 	if err := tx.QueryRowContext(ctx, `
