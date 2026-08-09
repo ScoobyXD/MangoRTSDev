@@ -1,3 +1,17 @@
+# Current My Triage Email Chat Laws
+
+1. One thread-level chat button opens and closes the chat rail for the selected email conversation.
+2. Individual email messages do not show separate chat buttons or overflow menus.
+3. Highlighting email text shows a chat action first and does not automatically fill the composer.
+4. Clicking the highlight action opens the rail, places the quote in the composer, and focuses it without writing to the database.
+5. The thread chat rail is one scrollable view divided by exact Node, message, and text box.
+6. Each chat group header shows only its Node icon and Node title.
+7. If the thread has several Nodes, the user chooses which Node receives a new chat; Mango never guesses.
+8. One universal shared draft is visible from My Triage and every related Node without being related to a Node text box.
+9. A My Triage-created shared draft invents no origin Node and does not auto-open a draft panel in any Node.
+
+Last updated: 2026-08-09
+
 # Process Story: My Triage conversion queues durable email completion
 
 A user converts or links one exact personal-account provider message through the established typed Node, Logic Gate, or Project command
@@ -24,25 +38,15 @@ The browser observes success or failure from canonical archive-job reads; no com
 
 Last updated: 2026-08-09
 
-# Process Story: My Triage opens one thread chat without creating empty records
+# Process Story: My Triage opens one thread rail for Node-local chats without creating empty records
 
 A user opens one personal email conversation and uses the thread chat toggle or the chat action on highlighted text
 ↓
-One thread-level rail opens, divided by exact message; individual messages show no separate chat button or overflow menu
+One thread-level rail opens, divided by exact Node, message, and text box; individual messages show no separate chat button or overflow menu
 ↓
-The rail header shows only the owning Node, and a temporary quote/text-box preview remains local until the user sends a real chat
+Each group header shows only its Node icon and title, and a temporary quote/text-box preview remains local until the user sends a real chat
 ↓
-The first send atomically creates any missing text box, exact email relationship, and chat; closing an unsent preview writes and deletes nothing
-
-Last updated: 2026-08-08
-
-# Current My Triage Email Chat Laws
-
-1. One thread-level chat button opens and closes the chat rail for the selected email conversation.
-2. Individual email messages do not show separate chat buttons or overflow menus.
-3. Highlighting email text shows a chat action first and does not automatically fill the composer.
-4. The thread chat rail is one scrollable view divided into exact-message sections.
-5. The rail header shows only the owning Node icon and Node name.
+The first send atomically creates any missing text box, exact email relationship, and chat in the chosen Node; closing an unsent preview writes and deletes nothing
 
 Last updated: 2026-08-08
 
@@ -207,9 +211,9 @@ MT126 - The top sender/subject line reserves only the width actually occupied by
 MT127 - Compact spacing must not change card meaning or accessibility: unread keeps its top-left dot and text emphasis without a blue/thick outer frame, selected keeps its independent full-card pressed surface, thread count retains its conditional icon, truncation uses ellipsis, and pointer/keyboard/drag targets remain usable.
 MT128 - My Triage email rows come only from the active connected personal mailbox's canonical provider list. A Node attachment, stored collaboration snapshot, chat mention, or permanent collaboration participation never creates a My Triage email row for someone whose mailbox did not return that message.
 MT129 - When a canonical My Triage provider row matches a collaboration by immutable personal mailbox plus provider thread/message identity, Mango annotates that provider row with collaboration/Node identity for chat and shared-draft actions. Provider unread/starred/attachment/thread state remains authoritative, and no collaboration snapshot may become a separate or fallback row.
-MT130 - One chat toggle in the My Triage thread header opens and closes the one thread chat rail. Opening or selecting a row never auto-opens the rail. Reading, selecting text, closing, and abandoning an empty composer create nothing. If no Node is associated, the first nonempty comment creates a floating Node with priority **Not Assigned**, no Logic Gate, and one exact linked text box. My Triage and Node read and write the same canonical ChatPane history.
-MT131 - Selecting email body text shows a chat action and captures the exact message ID, trimmed quote, and text offsets without opening the rail or filling the composer. Clicking that action opens the rail and places the quote in the composer. Individual reply cards have no chat button or three-dot menu. The thread's one Node owns the comment, and sending uses only its exact-message linked text box while navigation preserves the single scroll surface.
-MT132 - Reply All exposes an explicit Create Shared Draft action for the exact selected message. The resulting collaboration draft follows EMAIL65 through EMAIL69 and appears once in My Drafts with source-mailbox and shared-state context, distinct from the user's private personal drafts.
+MT130 - One chat toggle in the My Triage thread header opens and closes one rail grouped by exact Node, message, and text box. Opening or selecting a row never auto-opens it. Reading, selecting text, closing, and abandoning an empty composer create nothing. If no Node is associated, the first nonempty comment creates a floating Node with priority **Not Assigned**, no Logic Gate, and one exact linked text box. If several Nodes are associated, the user chooses the destination Node before send.
+MT131 - Selecting email body text shows a chat action and captures the exact message ID, trimmed quote, and text offsets without opening the rail or filling the composer. Clicking that action opens the rail, places the quote in the composer, and focuses it. Individual reply cards have no chat button or three-dot menu. Sending uses the chosen Node's exact-message text box, and each group header shows only that Node's icon and title.
+MT132 - Reply, Reply All, and Create Shared Draft create or reopen the one universal active draft for the exact thread. A My Triage-created draft has no invented origin Node and does not auto-open in any Node; every related Node shows its active-draft count and may open the same draft on demand.
 MT133 - A collaboration shared draft sends immediately through EMAIL68. Its compose footer does not expose scheduled send, and the My Triage browser scheduler ignores shared drafts even if legacy/local state contains a timestamp.
 MT134 - Unsynchronized personal fallback drafts survive Mango `401`, unclassified `403`, provider reauthorization/disconnection `409`, `5xx`, and network failures. Only explicit access/company revocation or definitive scope deletion purges the exact personal account; another personal account/shared inbox remains untouched.
 MT135 - Personal draft loads use exact-scope generations plus local revisions. An older load cannot overwrite a newer load, save, delete, remote save completion, or a different personal account; stale callers return the current exact-scope draft set and browser storage preserves every unrelated scope.
@@ -242,7 +246,7 @@ MT158 - Once a My Triage conversation has its email Node, its row and associated
 
 MT158 picker interaction detail - The top toolbar has one thread Chat toggle, one separate Node-plus button that immediately creates a floating Node with priority **Not Assigned**, and a `## Ready!` launcher for the shared universal picker. Opening the picker defaults to `##` link mode. With an empty picker query, Backspace changes to `#` reference mode and pressing `#` restores link mode. Reference mode opens the exact Node, Logic Gate, or Project without changing the email. Link mode searches the shared pinned/workspace resource set: an existing Node submits directly, a Logic Gate submits immediately with **Not Assigned**, and a Project submits after its Logic Gate choice. Success stays on the email under a temporary green overlay, reconciles connected Node presentation, and preserves the durable thread route, exact message-linked text box, shared accent, and no transient `not_found` card.
 
-MT158 placement detail - A provider-only row is accepted with its Nylas message ID; the existing-Node import creates and returns the internal `email_message_id` before the exact-message text box is written. Direct existing-Node imports immediately add the Node indicator to the selected My Triage header, mailbox card, loaded replies, and connected-chat list. A later reply without an internal ID is imported into the thread's one Node. Logic Gate linking immediately creates a new email Node in that gate with priority **Not Assigned**; Project linking creates a new email Node with **Not Assigned** after its Logic Gate selection. All choices use literal typed IDs and the existing placement commands.
+MT158 placement detail - A provider-only row is accepted with its Nylas message ID; the existing-Node import creates and returns the internal `email_message_id` before any deliberate exact-message text-box link is written. Direct existing-Node imports immediately add that Node destination to the selected My Triage header, mailbox card, loaded replies, and connected-chat list. A later reply without an internal ID inherits every Node-wide destination already used by the thread. Logic Gate linking immediately creates a new email Node in that gate with priority **Not Assigned**; Project linking creates a new email Node with **Not Assigned** after its Logic Gate selection. All choices use literal typed IDs and the existing placement commands.
 MT159 - In a personal email collaboration, every chat comment authored by the current user has an inline Edit action after it is sent. Other participants' comments have no Edit action. Saving preserves the comment's email/message linkage, reply/source context, attachments, original author/creation time, and thread position; it updates mention participation through the established atomic collaboration path and displays Edited after canonical reconciliation.
 MT160 - For a connected personal account, the canonical provider message page for the exact company, user, normalized account, mailbox, search, unread filter, and page token is authoritative for list membership. A Node/email-collaboration snapshot may annotate a matching provider message or thread with Node/chat identity, but it must never manufacture a My Triage row when that exact provider result contains no match.
 MT161 - After normal Archive or Archive page and go next removes a personal message from the displayed page, no same-source collaboration snapshot, stale Inbox/unread metadata, cached detail, prefetch result, selection change, or list merge may reinsert it. The row may reappear only when a later canonical provider list actually returns it, including after a real archive-job failure; the user must never need to click the stale row to make it disappear.
@@ -755,7 +759,7 @@ Business logic covered:
 - MT138
 
 Given:
-- A personal email owner selects text, clicks the resulting chat action, and mentions another user or group in the thread's one Node chat.
+- A personal email owner selects text, clicks the resulting chat action, chooses the destination when the thread has several Nodes, and mentions another user or group in that Node-local chat.
 - One participant is not a provider recipient, and another participant can also see the provider-owned row.
 - A participant creates a shared draft from Reply All.
 - The email thread may have zero or one Node association; a floating-Node ensure or first-comment request may fail before retry succeeds.

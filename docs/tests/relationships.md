@@ -1,32 +1,37 @@
-# Process Story: One email thread stays on one Node and first chat creation is atomic
+# Current Email Relationship Business Logic Laws
 
-A stored email message is linked through `email_relationships` to one exact Node and, when needed, one exact Node text box
+1. `email_relationships` remains the typed authority that connects an exact internal email message to a Node and optionally to one exact Node text box.
+2. One stored email thread may have Node-wide relationships in multiple Nodes, and one Node may have multiple stored email threads.
+3. One exact email message may have at most one textbox-specific relationship in each Node.
+4. The same exact email message may link to different text boxes in different Nodes.
+5. The database enforces semantic-edge uniqueness and the one-textbox-per-message-per-Node law under concurrent writes.
+6. A newly completed message inherits every distinct Node-wide destination already present for its thread.
+7. New-message ingestion never creates or copies a textbox-specific relationship, chat, or shared-draft display state.
+8. An email-selection chat is valid only when the exact internal email message has an `email_relationships` row for that chat's exact Node and Node text box.
+9. Opening an email-selection chat preview creates no text box, email relationship, or chat relationship.
+10. Sending the first chat from an email-selection preview atomically creates the exact Node-local text box, email-to-textbox relationship, and text-box chat, or creates none of them.
+11. Cancelling an unsent email-selection chat preview requires no relationship deletion because no relationship has been written.
+12. A universal shared draft belongs to its exact email thread, not to a Node or text box.
+13. Showing a universal shared draft in a Node is presentation state and never creates a draft-to-textbox relationship.
+14. Email-to-Node, email-to-textbox, chat, and draft rules do not create a generic resource registry, surrogate identity, or untyped edge.
+
+Last updated: 2026-08-09
+
+# Process Story: One email thread can appear in several Nodes while message work stays Node-local
+
+A stored email thread may have exact Node-wide `email_relationships` in several Nodes
 ↓
-The database permits whole-Node and textbox links inside that Node but rejects a relationship that would attach the same stored thread to another Node, including concurrent writes
+Each newly completed message inherits every distinct Node-wide destination already used by that thread, but never inherits a text-box destination
+↓
+Inside each Node, one exact message may link to one exact Node text box; the same message may link to a different text box in another Node
 ↓
 Opening a highlighted-email chat preview creates no relationship or resource
 ↓
-The first send atomically creates the exact text box, message-to-textbox relationship, and chat, or creates none of them
+The first send atomically creates the exact Node-local text box, message-to-textbox relationship, and chat, or creates none of them
 ↓
 Every endpoint keeps its literal typed identity; no registry, surrogate identity, or generic untyped edge is introduced
 
 Last updated: 2026-08-08
-
-# Current Email Relationship Business Logic Laws
-
-1. `email_relationships` remains the typed authority that connects an exact internal email message to a Node and optionally to one exact Node text box.
-2. One stored email thread may have Node relationships for only one Node. Whole-Node and textbox-specific relationships inside that same Node are allowed.
-3. One exact email message may have at most one textbox-specific relationship inside its Node.
-4. The database enforces the one-Node-per-thread and one-textbox-per-message laws under concurrent writes.
-5. The priority cutover keeps the Node destination with the earliest email relationship and removes only later Node email relationships from a previously duplicated thread.
-6. The cutover does not delete Nodes or valid chats and backfills a missing exact message-to-textbox relationship for a surviving email chat.
-7. An email-selection chat is valid only when the exact internal email message has an `email_relationships` row for that chat's exact Node text box.
-8. Opening an email-selection chat preview creates no text box, email relationship, or chat relationship.
-9. Sending the first chat from an email-selection preview atomically creates the exact Node text box, email-to-textbox relationship, and text-box chat, or creates none of them.
-10. Cancelling an unsent email-selection chat preview requires no relationship deletion because no relationship has been written.
-11. Email-to-textbox links do not create a generic resource registry, surrogate identity, or untyped edge.
-
-Last updated: 2026-08-09
 
 # Process Story: Policy inheritance follows typed parents without moving permissions into Explorer
 
