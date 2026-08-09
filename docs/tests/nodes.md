@@ -1,23 +1,29 @@
-# Process Story: An email Node keeps one exact thread, text box, and chat
-
-An email creates or reuses one Node whose priority may remain **Not Assigned** with or without a Logic Gate assignment
-↓
-That stored email thread may relate only to this Node, and every email chat belongs to one exact Node text box
-↓
-An existing linked text box shows its exact message and receives later chat immediately
-↓
-When the text box does not yet exist, the first send atomically creates the text box, exact email relationship, and chat
-
-Last updated: 2026-08-08
-
 # Current Node Business Logic Laws
 
 1. A new Node defaults to priority **Not Assigned**.
 2. **Not Assigned** is stored as a null Node priority; numeric priorities remain limited to 1 through 5.
 3. A Node may be assigned to a Logic Gate while its priority is **Not Assigned**.
-4. An email thread may belong to only one Node.
-5. Every email chat in a Node belongs to one exact Node text box.
-6. An email-linked text box exposes the exact linked email message and owns every chat about that message.
+4. An email thread may belong to multiple Nodes, and one Node may contain multiple email threads.
+5. A newly ingested message inherits every Node-wide destination already used by its thread and no text-box destination.
+6. Only an exact email message may link to a Node text box; a whole thread may not.
+7. One exact email message may link to at most one text box per Node and may link to a different text box in another Node.
+8. Every email chat in a Node belongs to one exact email message and that message's exact local text box.
+9. Chats about the same email message in different Nodes remain separate.
+10. One active shared draft is universal to the thread and is never related to a text box.
+11. Only the draft's origin Node auto-opens its text-box-shaped draft panel; every other related Node exposes a count and opens or closes that panel only when clicked.
+12. The draft's origin Node link, shared content, editable **From** account, and revision remain the same from every Node and triage surface.
+
+Last updated: 2026-08-09
+
+# Process Story: An email thread can appear in several Nodes while each Node keeps its own text box and chat
+
+An email thread is attached to one or more Nodes whose priority may remain **Not Assigned** with or without a Logic Gate assignment
+↓
+Every stored and newly ingested message receives each Node-wide destination already used by the thread
+↓
+Inside each Node, an exact message may link to one local text box and every chat remains owned by that Node and text box
+↓
+When the local text box does not yet exist, the first send atomically creates the text box, exact email relationship, and chat
 
 Last updated: 2026-08-08
 
