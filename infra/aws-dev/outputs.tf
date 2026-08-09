@@ -48,6 +48,21 @@ output "ecs_service_name" {
   value       = module.platform.ecs_service_name
 }
 
+output "realtime_valkey_cache_name" {
+  description = "Development ElastiCache Serverless Valkey cache name."
+  value       = module.platform.realtime_valkey_cache_name
+}
+
+output "realtime_valkey_endpoint" {
+  description = "Private TLS Valkey endpoint used by the development API tasks."
+  value       = module.platform.realtime_valkey_endpoint
+}
+
+output "realtime_valkey_user_id" {
+  description = "IAM-authenticated development Valkey user ID."
+  value       = module.platform.realtime_valkey_user_id
+}
+
 output "ecs_subnet_ids" {
   description = "Private subnet IDs used by ECS tasks."
   value       = module.platform.ecs_subnet_ids

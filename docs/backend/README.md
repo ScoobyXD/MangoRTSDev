@@ -75,9 +75,9 @@ See `infra/aws-dev/ecs_alb.tf` and `docs/mangorts-dev-platform.md` for the curre
 
 ## Database mode and safety behavior
 
-- `APP_ENV=dev` (default): if `DB_HOST` is missing/unreachable, backend can fall back to in-memory repo.
-- `APP_ENV=staging` or `APP_ENV=prod`: backend is **fail-fast** and requires working PostgreSQL.
-- You can explicitly allow fallback with `ALLOW_INMEMORY_FALLBACK=true` for temporary demos only.
+- `APP_ENV` never selects repository durability. Every deployed runtime requires working PostgreSQL.
+- A no-database local demo may select the in-memory repository only by leaving `DB_HOST` unset and explicitly setting `ALLOW_INMEMORY_FALLBACK=true`.
+- Once `DB_HOST` is configured, open, connection, and schema-readiness failures always terminate startup. `ALLOW_INMEMORY_FALLBACK` cannot turn a configured database failure into an empty in-memory service.
 
 Required DB env vars when using PostgreSQL:
 - `DB_HOST`

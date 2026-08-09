@@ -1,3 +1,23 @@
+# Process Story: Committed realtime events cross API tasks without hot database polling
+
+An authenticated HTTP command commits product state and its compact `realtime_outbox` row in one PostgreSQL transaction
+↓
+The API response acknowledges that durable commit immediately and wakes the lifecycle-owned publisher; it never waits for Valkey I/O or current-audience lookup
+↓
+The publisher sends that committed event ID, revision, exact scope, and compact hint to the private Valkey channel, with one bounded retry scheduler for publish failures
+↓
+Every API task receives the hint, deduplicates it, rechecks the exact current audience where required, and fans out only through its local WebSocket registry
+↓
+If Valkey disconnects, durable HTTP saves keep succeeding while reconnect uses bounded exponential backoff and jitter
+↓
+Startup first certifies the current published cursor with one bounded retry loop; only then may reconnect or a detected sequence gap perform fixed-limit indexed outbox recovery, wait for in-flight writers, and treat unused `BIGSERIAL` values as harmless gaps
+↓
+Until that cursor is certified and the subscriber/spine loops are launched, realtime ticket and WebSocket admission return retryable `503 realtime_not_ready` without minting or consuming a ticket or registering a socket; durable HTTP commands remain available
+↓
+No API task queries `realtime_outbox` every 75 milliseconds, no full document or keystroke enters Valkey, and deployed DEV fails fast without both its Terraform-wired Valkey configuration and a ready PostgreSQL repository
+
+Last updated: 2026-08-08
+
 # Process Story: A healthy heartbeat cannot be overridden by one rejected optional subscription
 
 The authenticated realtime socket receives server `ready` and completes the application heartbeat challenge
@@ -111,8 +131,71 @@ RW59 - Global realtime health is transport/authentication/heartbeat truth, not t
 RW59 - Logic Gate document writes use `/v1/editor-json/logic_gate/{logic_gate_id}/documents/{document_id}` and `logic_gate_textboxes`. A legacy text information write returns `editor_collaboration_required`; every unsupported legacy information type returns `logic_gate_information_type_not_supported`; neither path writes `logic_gate_information` or `logic_gate_projection_table`.
 RW60 - `project_information_created` and `project_information_deleted` advance the `projects`, unfiltered Company Explorer, and Project-folder Company Explorer read-version scopes. Conditional reads after either event must not reuse an older ETag or return an incorrect `304`.
 RW61 - Node Map and Logic Gate Map are fully retired. The backend exposes no Map layout or Map workspace route, accepts or returns no Map coordinates or position results, creates no Map-derived task, publishes no Map realtime event, and maintains no Map read-version scope or cache key. Historical shipped migrations remain records only.
+RW62 - PostgreSQL product rows and `realtime_outbox` are the durable source of truth. Valkey carries only a best-effort committed-event signal; it is not document storage, an acknowledgement authority, or a replacement for transactional outbox atomicity.
+RW63 - An API task may publish an outbox event only after its enclosing product transaction commits. An ordinary mutation acknowledges that durable enqueue and wakes the lifecycle-owned publisher without waiting for broker I/O or current-audience lookup. The Valkey envelope contains only event sequence, stable event ID, resource revision, exact company/scope, event/resource identity, existing audience boundary, compact payload, and creation time. It never contains every keystroke, a complete editor document, attachment bytes, credentials, or claim/lease internals.
+RW64 - Every API task subscribes to the one environment Valkey channel. A received event can reach clients only after event ID/revision deduplication, ordered sequence handling, exact-scope current authorization where required, and the existing local WebSocket registry; a task never broadcasts to all company sockets merely because Valkey delivered a message.
+RW65 - Valkey subscribe/reconnect and publish retry use bounded exponential backoff with nonzero jitter and automatically resubscribe with a fresh short-lived IAM credential. Duplicate event ID/revision deliveries are harmless. One authorization-retry timer owns its deadline; later broker hints and recovery signals cannot bypass that deadline or multiply timers.
+RW66 - Valkey or outbox-claim storage failure does not roll back, delay, or reject an already-durable HTTP save. The unpublished outbox row remains retryable, realtime may be delayed, and broker failure attempts to release its fixed claim batch with a short storage deadline, switching to the API-task lifecycle when the initiating context was canceled. One controlled publish timer retries broker, mark, and claim failures even if the subscription stays healthy; producer wakes during backoff do not create a database retry storm. If claim release is incomplete, that timer cannot fire before the 15-second claim lease expires, and the resulting lease-safe claim pass resolves the outstanding failure state even when it finds no row. A failed or zero claim must never strand pending work until the ten-minute safety cadence.
+RW67 - Normal realtime dispatch has no periodic 75 ms database query. Before publisher, subscriber, or recovery loops start, one lifecycle-owned bootstrap must successfully read the current published cursor. A failed initial cursor read retries only that cursor query with bounded exponential backoff and jitter; buffered producer wakes remain coalesced, and no uncertified-zero history replay, list query, subscriber, publisher, or timer multiplication is allowed. During that uncertified window durable HTTP commands remain available, but realtime ticket and WebSocket admission return retryable `503 realtime_not_ready`; the server must not mint or consume a ticket, accept or register a socket, or expose a client that can miss an event another task publishes before cursor certification. Certification launches the subscriber and spine loops before admission opens. Admission does not wait for broker subscription readiness: any event published after the certified cursor but before that readiness must be recovered forward from the certified cursor when the subscriber becomes ready. Every current-cursor and published-list recovery snapshot has both a short caller deadline and a PostgreSQL lock deadline. Timeout or storage failure leaves the cursor unchanged and schedules exactly one lifecycle-owned bounded recovery retry; later signals cannot bypass its deadline or multiply timers. Other spine-owned claim, publication-state, claim-release, and audience storage calls also have short deadlines, so a database network stall cannot freeze the sole spine indefinitely. After certification, outbox recovery runs only at subscriber readiness/reconnect, a detected gap/overflow, a self-signal after four full fixed-size batches, one controlled storage retry, and a bounded ten-minute safety cadence. Recovery waits for in-flight outbox writers, uses fixed limits and sequence indexes, and may cross only sequence values thereby certified as nonexistent; it never waits forever for a rolled-back `BIGSERIAL` value or computes a table-wide `min`/`max` aggregate. Adding idle API tasks therefore adds no steady-state outbox polling work.
+RW68 - HTTP request contexts reach durable realtime enqueue calls, while the cancelable API-task lifecycle context owns broker publication, audience authorization, subscriber dispatch, recovery, claim cleanup after request cancellation, and delayed retry work. `context.Background` creates only deliberate top-level application lifecycles.
+RW69 - Simple local development may explicitly use the process-local backplane when no Valkey variables are configured. Terraform-managed DEV sets `MANGORTS_VALKEY_REQUIRED=true`; missing or partial coordinates fail startup instead of silently isolating ECS tasks. Its private ElastiCache Serverless security group accepts TCP 6379-6380 only from the ECS task security group. First creation waits for the updated GitHub deploy-policy attachment, and task registration/service rollout wait for the exact runtime `elasticache:Connect` policy attachment.
+RW70 - `APP_ENV` never authorizes the in-memory repository. No-database local mode requires both an absent `DB_HOST` and explicit `ALLOW_INMEMORY_FALLBACK=true`. Once a PostgreSQL host is configured, open, connection, or schema-readiness failure terminates startup for every runtime role, including a future email worker; a deployed API must never pass health checks against an empty in-memory repository after database failure.
 
 ## Scenarios
+
+### Scenario RW-S0: Valkey Outage Delays Hints Without Delaying Durable Saves
+
+Business logic covered:
+- RW10
+- RW41
+- RW62 through RW70
+
+Given:
+- Two development API tasks have exact authorized WebSocket subscribers.
+- PostgreSQL is available and Valkey may be connected, duplicated, disconnected, or reconnecting.
+
+Expected:
+- A successful HTTP mutation commits its product state and durable outbox event before publication.
+- When Valkey is healthy, both API tasks receive the compact event and only their exact authorized local subscribers receive one ordered hint.
+- Duplicate delivery does not produce a second socket message.
+- During a Valkey outage the HTTP mutation still succeeds, the outbox row remains unpublished/retryable, and idle tasks do not query the outbox on a 75 ms cadence.
+- Reconnect resubscribes, publishes pending committed rows, performs fixed-limit indexed gap recovery, and delivers the delayed hint without a database retry storm.
+- Full editor documents remain on canonical HTTP reads and writes; Valkey carries only the compact revision hint.
+
+### Scenario RW-S0A: Deployed Runtime Requires PostgreSQL
+
+Business logic covered:
+- RW62
+- RW70
+
+Given:
+- A Terraform-managed development task has `APP_ENV=dev` and `ALLOW_INMEMORY_FALLBACK=false`.
+- Its PostgreSQL host is missing, unreachable, or has an unready application schema.
+
+Expected:
+- Repository construction returns the startup error; the API never starts its health endpoint against an empty in-memory repository.
+- The same repository selection remains fail-closed for every runtime role, including a later email-worker mode.
+
+### Scenario RW-S0B: Realtime Waits For A Certified Initial Cursor
+
+Business logic covered:
+- RW62
+- RW63
+- RW67
+
+Given:
+- PostgreSQL returns transient errors for the initial current-published-cursor query while durable mutations continue to enqueue outbox rows.
+- Retained published history already exists.
+- Another API task may publish an event while this task remains uncertified, and may publish another event after certification but before this task's broker subscription becomes ready.
+
+Expected:
+- One lifecycle bootstrap retries only the cursor query with bounded exponential backoff and jitter.
+- No publisher, subscriber, published-row list, or recovery loop starts before cursor certification, and producer wakes remain coalesced.
+- Realtime ticket and WebSocket attempts receive retryable `503 realtime_not_ready` before certification; no ticket is minted or consumed and no socket is accepted or registered.
+- After the cursor query succeeds, realtime starts from that certified position and drains newly pending durable work without replaying retained history.
+- Admission opens after the loops launch. Subscriber-ready recovery delivers an event published after the certified cursor but before broker readiness, while an event published before certification was never promised to a socket because no socket could be admitted.
+- A blocked recovery lock/list query times out without moving the cursor; durable request enqueues remain independent, and one backoff timer retries recovery in order after storage becomes available.
+- A claim query error arms one bounded publish retry without another producer wake. If broker/mark failure cannot release a lease, repeated wakes cannot bypass the lease-safe retry deadline; publication resumes at or after lease expiry without a hot loop.
 
 ### Scenario RW-S1: Editor Save Uses HTTP As The Durable Source Of Truth
 

@@ -116,6 +116,14 @@ resource "aws_ecs_task_definition" "backend" {
           { name = "DB_USER", value = local.db_user },
           { name = "DB_SSLMODE", value = "require" }
         ],
+        var.realtime_valkey_enabled ? [
+          { name = "MANGORTS_VALKEY_REQUIRED", value = "true" },
+          { name = "MANGORTS_VALKEY_ENDPOINT", value = "${aws_elasticache_serverless_cache.realtime[0].endpoint[0].address}:${aws_elasticache_serverless_cache.realtime[0].endpoint[0].port}" },
+          { name = "MANGORTS_VALKEY_REGION", value = var.aws_region },
+          { name = "MANGORTS_VALKEY_CACHE_NAME", value = aws_elasticache_serverless_cache.realtime[0].name },
+          { name = "MANGORTS_VALKEY_USER_ID", value = aws_elasticache_user.realtime[0].user_id },
+          { name = "MANGORTS_VALKEY_CHANNEL", value = var.realtime_valkey_channel }
+        ] : [],
         local.attachment_storage_enabled ? concat([
           { name = "MANGORTS_ATTACHMENT_S3_BUCKET", value = trimspace(var.attachment_s3_bucket) },
           { name = "MANGORTS_ATTACHMENT_AWS_REGION", value = var.aws_region },
@@ -158,6 +166,8 @@ resource "aws_ecs_task_definition" "backend" {
       }
     }
   ])
+
+  depends_on = [aws_iam_role_policy_attachment.ecs_task_realtime_valkey]
 }
 
 resource "aws_ecs_service" "backend" {
@@ -181,5 +191,8 @@ resource "aws_ecs_service" "backend" {
     container_port   = var.container_port
   }
 
-  depends_on = [aws_lb_listener_rule.cloudfront_to_backend]
+  depends_on = [
+    aws_lb_listener_rule.cloudfront_to_backend,
+    aws_iam_role_policy_attachment.ecs_task_realtime_valkey,
+  ]
 }

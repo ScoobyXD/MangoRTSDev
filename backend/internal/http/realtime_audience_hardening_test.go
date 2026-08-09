@@ -96,9 +96,12 @@ func TestRealtimeAudienceResolutionUsesOnlyExactLocalSubscribersWithDeadline(t *
 	if err != nil {
 		t.Fatalf("publish current audience: %v", err)
 	}
-	if delivered != 2 {
-		t.Fatalf("delivered = %d, want both connections for the one allowed user", delivered)
+	if delivered != 0 {
+		t.Fatalf("queued delivery count = %d, want asynchronous acknowledgement", delivered)
 	}
+	waitForBackplaneCondition(t, func() bool {
+		return len(repo.snapshotCalls()) == 1 && len(allowedNetworkA.messages(t)) == 1 && len(allowedNetworkB.messages(t)) == 1
+	}, "deadline-bound audience resolution and asynchronous exact-scope fanout")
 	calls := repo.snapshotCalls()
 	if len(calls) != 1 {
 		t.Fatalf("audience resolution calls = %d, want one", len(calls))
@@ -120,7 +123,7 @@ func TestRealtimeAudienceResolutionUsesOnlyExactLocalSubscribersWithDeadline(t *
 	}
 }
 
-func TestSharedMailboxPublicationDistinguishesNoSubscriberFromAudienceFailure(t *testing.T) {
+func TestSharedMailboxPublicationAcknowledgesDurableEnqueueBeforeAudienceRetry(t *testing.T) {
 	transient := errors.New("temporary audience lookup failure")
 	repo := &controlledRealtimeAudienceRepo{
 		Repository: store.NewMemoryRepo(),
@@ -138,9 +141,10 @@ func TestSharedMailboxPublicationDistinguishesNoSubscriberFromAudienceFailure(t 
 		Trigger:   "message.created",
 		MessageID: "message-1",
 	})
-	if !errors.Is(err, transient) {
-		t.Fatalf("shared publication error = %v, want transient lookup failure", err)
+	if err != nil {
+		t.Fatalf("shared publication acknowledgement waited for audience lookup: %v", err)
 	}
+	waitForBackplaneCondition(t, func() bool { return len(repo.snapshotCalls()) == 1 }, "asynchronous audience lookup failure")
 	if calls := repo.snapshotCalls(); len(calls) != 1 || !calls[0].hasDeadline {
 		t.Fatalf("audience calls after failure = %+v, want one deadline-bound lookup", calls)
 	}
@@ -293,7 +297,7 @@ func waitForPublishedRealtimeOutboxSequence(t *testing.T, repo store.RealtimeOut
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
-		sequence, err := repo.CurrentPublishedRealtimeOutboxSequence()
+		sequence, err := repo.CurrentPublishedRealtimeOutboxSequence(context.Background())
 		if err != nil {
 			t.Fatalf("CurrentPublishedRealtimeOutboxSequence: %v", err)
 		}

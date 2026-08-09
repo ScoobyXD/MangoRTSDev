@@ -192,6 +192,42 @@ variable "backend_desired_count" {
   default     = 2
 }
 
+variable "realtime_valkey_enabled" {
+  description = "Create the private development ElastiCache Serverless Valkey realtime backplane."
+  type        = bool
+  default     = true
+}
+
+variable "realtime_valkey_channel" {
+  description = "Exact Pub/Sub channel used for compact committed realtime events."
+  type        = string
+  default     = "mangorts:realtime:v1"
+}
+
+variable "realtime_valkey_major_engine_version" {
+  description = "Development Valkey major engine version."
+  type        = string
+  default     = "7"
+}
+
+variable "realtime_valkey_max_data_storage_gb" {
+  description = "Maximum development Valkey serverless storage in GB."
+  type        = number
+  default     = 1
+}
+
+variable "realtime_valkey_max_ecpu_per_second" {
+  description = "Maximum development Valkey serverless ECPUs per second."
+  type        = number
+  default     = 1000
+}
+
+variable "realtime_valkey_alarm_action_arns" {
+  description = "Optional alarm action ARNs for development Valkey alerts."
+  type        = list(string)
+  default     = []
+}
+
 variable "attachment_s3_bucket" {
   description = "Private S3 bucket used by the Mango attachment system in dev."
   type        = string

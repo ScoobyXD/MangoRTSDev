@@ -46,6 +46,9 @@ func TestRealtimeDeliveryFailureClosesAndRemovesConnectionWithDistinctMetric(t *
 
 	started := time.Now()
 	server.publishRealtimeMessage(companyID, scope, map[string]any{"type": "test"})
+	waitForBackplaneCondition(t, func() bool {
+		return stalledNetworkConn.closeCalls == 1 && len(healthyNetworkConn.messages(t)) == 1
+	}, "failed websocket removal and healthy asynchronous delivery")
 	if !stalledNetworkConn.writeDeadlineSet {
 		t.Fatal("stalled websocket write did not set a bounded deadline")
 	}
@@ -88,6 +91,7 @@ func TestRealtimeDeliveryFailureClosesAndRemovesConnectionWithDistinctMetric(t *
 
 	stalledWritesAfterFailure := stalledNetworkConn.writeCalls
 	server.publishRealtimeMessage(companyID, scope, map[string]any{"type": "retry"})
+	waitForBackplaneCondition(t, func() bool { return len(healthyNetworkConn.messages(t)) == 2 }, "healthy retry delivery")
 	if stalledNetworkConn.writeCalls != stalledWritesAfterFailure {
 		t.Fatalf("removed stalled connection received another write: before=%d after=%d", stalledWritesAfterFailure, stalledNetworkConn.writeCalls)
 	}
@@ -109,6 +113,9 @@ func TestRealtimeDeliveryFailureClosesAndRemovesConnectionWithDistinctMetric(t *
 	server.realtimeRegistry.removeConnection(healthyConn.id)
 	healthyConn.close()
 	server.publishRealtimeMessage(companyID, scope, map[string]any{"type": "after-unsubscribe"})
+	waitForBackplaneCondition(t, func() bool {
+		return metrics.Snapshot().Operational[noSubscriberKey].Count == 1
+	}, "asynchronous no-subscriber metric")
 	snapshot = metrics.Snapshot()
 	if got := snapshot.Operational[noSubscriberKey]; got.Count != 1 || got.TotalValue != 1 {
 		t.Fatalf("no-subscriber metric after healthy removal = %+v, want one skipped publish", got)
@@ -143,11 +150,7 @@ func TestRealtimePublishFanoutIsBoundedAndConcurrent(t *testing.T) {
 		defer conn.close()
 	}
 
-	done := make(chan struct{})
-	go func() {
-		server.publishRealtimeMessage(companyID, scope, map[string]any{"type": "fanout.test"})
-		close(done)
-	}()
+	server.publishRealtimeMessage(companyID, scope, map[string]any{"type": "fanout.test"})
 
 	seen := map[string]bool{}
 	for len(seen) < realtimePublishFanoutLimit {
@@ -164,11 +167,7 @@ func TestRealtimePublishFanoutIsBoundedAndConcurrent(t *testing.T) {
 	default:
 	}
 	close(release)
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("bounded fan-out did not finish after stalled writes were released")
-	}
+	waitForBackplaneCondition(t, func() bool { return server.realtimeRegistry.connectionCount() == 0 }, "bounded fan-out completion")
 	for len(entered) > 0 {
 		seen[<-entered] = true
 	}
@@ -203,29 +202,15 @@ func TestRealtimeConcurrentPublishesPreservePerConnectionEventOrder(t *testing.T
 	server.realtimeRegistry.subscribe(conn, scope)
 	defer conn.close()
 
-	firstDone := make(chan struct{})
-	go func() {
-		server.publishRealtimeMessage(companyID, scope, map[string]any{"sequence": 1})
-		close(firstDone)
-	}()
+	server.publishRealtimeMessage(companyID, scope, map[string]any{"sequence": 1})
 	select {
 	case <-networkConn.entered:
 	case <-time.After(time.Second):
 		t.Fatal("first publish did not reach the controlled connection")
 	}
-	secondDone := make(chan struct{})
-	go func() {
-		server.publishRealtimeMessage(companyID, scope, map[string]any{"sequence": 2})
-		close(secondDone)
-	}()
+	server.publishRealtimeMessage(companyID, scope, map[string]any{"sequence": 2})
 	close(networkConn.release)
-	for _, done := range []<-chan struct{}{firstDone, secondDone} {
-		select {
-		case <-done:
-		case <-time.After(time.Second):
-			t.Fatal("ordered publish did not complete")
-		}
-	}
+	waitForBackplaneCondition(t, func() bool { return len(networkConn.messages(t)) == 2 }, "ordered asynchronous delivery")
 	messages := networkConn.messages(t)
 	if len(messages) != 2 || messages[0]["sequence"] != float64(1) || messages[1]["sequence"] != float64(2) {
 		t.Fatalf("published order = %+v, want sequence 1 then 2", messages)
@@ -517,6 +502,7 @@ func TestRealtimePublicationRejectsMissingResourceWithPermissiveResolvedAudience
 	if delivered != 0 {
 		t.Fatalf("missing-resource delivery count = %d, want 0", delivered)
 	}
+	waitForBackplaneCondition(t, func() bool { return repo.audienceLookups == 1 }, "missing-resource audience resolution")
 	if repo.audienceLookups != 1 {
 		t.Fatalf("audience resolutions = %d, want 1", repo.audienceLookups)
 	}

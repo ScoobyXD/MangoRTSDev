@@ -1,12 +1,16 @@
 package store
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"time"
 )
 
-func (r *MemoryRepo) EnqueueRealtimeOutbox(input RealtimeOutboxInput) (RealtimeOutboxEvent, error) {
+func (r *MemoryRepo) EnqueueRealtimeOutbox(ctx context.Context, input RealtimeOutboxInput) (RealtimeOutboxEvent, error) {
+	if err := ctx.Err(); err != nil {
+		return RealtimeOutboxEvent{}, err
+	}
 	input, err := normalizeRealtimeOutboxInput(input)
 	if err != nil {
 		return RealtimeOutboxEvent{}, err
@@ -38,7 +42,10 @@ func (r *MemoryRepo) enqueueRealtimeOutboxLocked(input RealtimeOutboxInput) (Rea
 	return cloneRealtimeOutboxEvent(item), nil
 }
 
-func (r *MemoryRepo) ClaimRealtimeOutbox(query RealtimeOutboxClaimQuery) ([]RealtimeOutboxEvent, error) {
+func (r *MemoryRepo) ClaimRealtimeOutbox(ctx context.Context, query RealtimeOutboxClaimQuery) ([]RealtimeOutboxEvent, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	query = normalizeRealtimeOutboxClaimQuery(query)
 	now := time.Now().UTC()
 	r.mu.Lock()
@@ -74,7 +81,10 @@ func (r *MemoryRepo) ClaimRealtimeOutbox(query RealtimeOutboxClaimQuery) ([]Real
 	return claimed, nil
 }
 
-func (r *MemoryRepo) MarkRealtimeOutboxPublished(eventID, claimToken string) error {
+func (r *MemoryRepo) MarkRealtimeOutboxPublished(ctx context.Context, eventID, claimToken string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	eventID, claimToken = strings.TrimSpace(eventID), strings.TrimSpace(claimToken)
 	if eventID == "" || claimToken == "" {
 		return ErrInvalid
@@ -94,7 +104,10 @@ func (r *MemoryRepo) MarkRealtimeOutboxPublished(eventID, claimToken string) err
 	return nil
 }
 
-func (r *MemoryRepo) MarkRealtimeOutboxFailed(eventID, claimToken, category string) error {
+func (r *MemoryRepo) MarkRealtimeOutboxFailed(ctx context.Context, eventID, claimToken, category string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	eventID, claimToken, category = strings.TrimSpace(eventID), strings.TrimSpace(claimToken), strings.TrimSpace(category)
 	if eventID == "" || claimToken == "" {
 		return ErrInvalid
@@ -116,7 +129,10 @@ func (r *MemoryRepo) MarkRealtimeOutboxFailed(eventID, claimToken, category stri
 	return nil
 }
 
-func (r *MemoryRepo) ListPublishedRealtimeOutboxAfter(sequence int64, limit int) ([]RealtimeOutboxEvent, error) {
+func (r *MemoryRepo) ListPublishedRealtimeOutboxAfter(ctx context.Context, sequence int64, limit int) ([]RealtimeOutboxEvent, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if sequence < 0 {
 		return nil, ErrInvalid
 	}
@@ -147,7 +163,10 @@ func (r *MemoryRepo) ListPublishedRealtimeOutboxAfter(sequence int64, limit int)
 	return items, nil
 }
 
-func (r *MemoryRepo) CurrentPublishedRealtimeOutboxSequence() (int64, error) {
+func (r *MemoryRepo) CurrentPublishedRealtimeOutboxSequence(ctx context.Context) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.contiguousPublishedRealtimeOutboxSequenceLocked(), nil

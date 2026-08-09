@@ -33,6 +33,15 @@ existing_db_security_group_id   = "sg-0123456789abcdef0"
 # Phase-1 bootstrap should keep this empty. CI sets an immutable git-SHA image URI after ECR exists.
 backend_image_uri = ""
 
+# Private, TLS-only, IAM-authenticated Valkey Pub/Sub backplane for committed
+# realtime outbox events. No cache password or other secret is stored in tfvars.
+realtime_valkey_enabled              = true
+realtime_valkey_channel              = "mangorts:realtime:v1"
+realtime_valkey_major_engine_version = "7"
+realtime_valkey_max_data_storage_gb  = 1
+realtime_valkey_max_ecpu_per_second  = 1000
+realtime_valkey_alarm_action_arns    = []
+
 # Private attachment storage and browser-to-S3 control-plane policy. The bucket
 # CORS/lifecycle configuration is Terraform-owned after an approved apply.
 attachment_s3_bucket                      = "mangorts-dev-attachments"

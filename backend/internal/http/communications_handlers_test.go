@@ -3137,7 +3137,7 @@ func TestNylasWebhookDeliveryFailureForgetsReceiptSoProviderRetryCanRecover(t *t
 	}
 }
 
-func TestSharedNylasWebhookAudienceFailureRetriesOpenedWithoutInflatingSignalCount(t *testing.T) {
+func TestSharedNylasWebhookAudienceFailureRetriesFromDurableOutboxWithoutInflatingSignalCount(t *testing.T) {
 	baseRepo := store.NewMemoryRepo()
 	companyID := "70707070-7070-4070-8070-707070707199"
 	baseRepo.EnsureCompany(companyID, "Shared webhook retry company")
@@ -3188,18 +3188,16 @@ func TestSharedNylasWebhookAudienceFailureRetriesOpenedWithoutInflatingSignalCou
 		return rec
 	}
 	first := send()
-	if first.Code != http.StatusInternalServerError || !strings.Contains(first.Body.String(), "failed_to_deliver_email_change") {
-		t.Fatalf("first shared retryable delivery status=%d body=%s", first.Code, first.Body.String())
+	if first.Code != http.StatusOK {
+		t.Fatalf("durably queued shared delivery status=%d body=%s", first.Code, first.Body.String())
 	}
+	waitForBackplaneCondition(t, func() bool { return repo.callCount() == 1 }, "first asynchronous shared audience lookup")
 	if messages := networkConn.messages(t); len(messages) != 0 {
 		t.Fatalf("failed shared audience lookup delivered messages: %+v", messages)
 	}
-	second := send()
-	if second.Code != http.StatusOK {
-		t.Fatalf("retried shared delivery status=%d body=%s", second.Code, second.Body.String())
-	}
+	waitForBackplaneCondition(t, func() bool { return repo.callCount() == 2 && len(networkConn.messages(t)) == 1 }, "lifecycle-owned durable audience retry")
 	if repo.callCount() != 2 {
-		t.Fatalf("shared audience calls = %d, want failed lookup plus retry", repo.callCount())
+		t.Fatalf("shared audience calls = %d, want failed lookup plus outbox retry", repo.callCount())
 	}
 	messages := networkConn.messages(t)
 	if len(messages) != 1 || messages[0]["message_id"] != "retry-shared-message" {

@@ -472,6 +472,7 @@ Backend:
 ```powershell
 cd "$env:USERPROFILE\MangoRTSDev\backend"
 $env:APP_ENV="dev"
+$env:ALLOW_INMEMORY_FALLBACK="true"
 $env:AUTH_MODE="disabled"
 $env:MANGORTS_ALLOWED_ORIGIN="http://localhost:5173"
 $env:MANGORTS_ADDR=":8080"
@@ -481,7 +482,7 @@ go run .\cmd\miraeopus-api
 Expected logs:
 
 ```text
-using in-memory repository (DB_HOST not set, dev/fallback mode)
+using explicitly allowed in-memory repository (DB_HOST not set)
 miraeopus-api listening on :8080
 ```
 

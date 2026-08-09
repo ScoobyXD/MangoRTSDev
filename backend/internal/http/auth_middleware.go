@@ -72,6 +72,12 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// Gate before consumeRealtimeTicketActor: an initialization retry must
+		// not burn a one-time cookie or register a socket against an uncertified
+		// outbox cursor.
+		if r.URL.Path == "/v1/realtime/ws" && isWebSocketUpgradeRequest(r) && s.rejectRealtimeAdmissionWhileUnready(w) {
+			return
+		}
 		if actor, ok := s.consumeRealtimeTicketActor(r); ok {
 			ctx := context.WithValue(r.Context(), actorContextKey{}, actor)
 			next.ServeHTTP(w, r.WithContext(ctx))
