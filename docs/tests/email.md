@@ -6,18 +6,18 @@
 4. Selecting a Project requires one Project Logic Gate choice, then creates a new email Node there with priority **Not Assigned**.
 5. One stored email thread may belong to only one Node. A second Node relationship for the same stored thread is rejected.
 6. Every email chat belongs to one exact Node text box. Mango does not create unlinked email chats.
-7. A Node text box may link to one exact email message or one whole email thread. A whole-thread link links every stored message in that thread to the same text box.
+7. One exact email message may link to at most one text box inside its Node. An email thread never links to a text box.
 8. An email chat may quote highlighted text from an exact linked email message and stores that message ID, quote, and offsets on the text-box chat.
 9. Highlighting email text only shows the **Turn highlighted email text into a chat** action. The quote enters the composer and the chat rail opens only after that action is clicked.
 10. My Triage and Shared Triage show one chat rail for the whole email thread, with visually separated sections for linked email messages.
 11. If the email already has a linked text box, a new chat is appended there. If its Node exists without a linked text box, Mango previews the new text box and creates the text box, exact email link, and chat together only when the first chat is sent. If no Node exists, Mango creates a floating Node, text box, email link, and chat without a Node popup.
 12. The email thread header owns the one chat toggle. Individual messages do not show chat buttons or overflow menus.
 13. The email chat header shows only the Node icon and Node name.
-14. Dragging an exact email message onto a Node text box links that message. Dragging an attached thread links all stored messages in that thread.
+14. Dragging an exact email message onto a Node text box links that message. Dragging an email thread onto a text box is rejected.
 15. Shared drafts retain their exact email account and stay available to authorized collaborators through the same email/Node work context.
 16. Clearing a highlighted-email quote or closing its unsent chat rail cancels the temporary chat and text box without creating or deleting database rows.
 
-Last updated: 2026-08-08
+Last updated: 2026-08-09
 
 # Historical Process Story: A selected email can reference, link, float, chat, and stay visible
 

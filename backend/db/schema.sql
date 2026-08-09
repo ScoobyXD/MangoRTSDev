@@ -3541,13 +3541,26 @@ begin
   ) then
     raise exception 'email_thread_already_linked_to_another_node' using errcode='23505';
   end if;
+  if new.resource_textbox_id is not null and exists (
+    select 1
+    from email_relationships relationship
+    where relationship.company_id=new.company_id
+      and relationship.email_message_id=new.email_message_id
+      and relationship.resource_type='node'
+      and relationship.resource_id=new.resource_id
+      and relationship.resource_textbox_id is not null
+      and relationship.resource_textbox_id<>new.resource_textbox_id
+      and relationship.email_relationship_id<>new.email_relationship_id
+  ) then
+    raise exception 'email_message_already_linked_to_another_textbox' using errcode='23505';
+  end if;
   return new;
 end;
 $$;
 
 drop trigger if exists trg_email_relationships_one_node_per_thread on email_relationships;
 create trigger trg_email_relationships_one_node_per_thread
-before insert or update of company_id,email_thread_id,resource_type,resource_id
+before insert or update of company_id,email_thread_id,email_message_id,resource_type,resource_id,resource_textbox_id
 on email_relationships
 for each row execute function mangorts_enforce_one_node_per_email_thread();
 
