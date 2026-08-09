@@ -2358,6 +2358,8 @@ type CommunicationsEmailDraftInput struct {
 	CreatedByUserID        string
 	ParticipantUserID      string
 	CollaborationID        string
+	EmailThreadID          string
+	OriginNodeID           string
 	IsShared               bool
 	ExpectedRevision       int64
 	UpdatedByUserID        string
@@ -2393,12 +2395,15 @@ func (e *VersionConflictError) Error() string { return ErrVersionConflict.Error(
 func (e *VersionConflictError) Unwrap() error { return ErrVersionConflict }
 
 type CommunicationsEmailDraftSendClaimInput struct {
-	CompanyID         string
-	DraftID           string
-	CollaborationID   string
-	ParticipantUserID string
-	ExpectedRevision  int64
-	ProviderGrantID   string
+	CompanyID            string
+	DraftID              string
+	CollaborationID      string
+	ParticipantUserID    string
+	PersonalUserID       string
+	PersonalAccountEmail string
+	SharedInboxID        string
+	ExpectedRevision     int64
+	ProviderGrantID      string
 	// Now is an internal clock override used by deterministic repository and
 	// handler tests. Production callers leave it zero.
 	Now time.Time

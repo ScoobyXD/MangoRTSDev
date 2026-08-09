@@ -242,9 +242,6 @@ func (r *MemoryRepo) persistCommunicationsConversionEmailLocked(input Communicat
 	if err != nil {
 		return "", "", "", err
 	}
-	if r.communicationsEmailThreadLinkedToAnotherNodeLocked(input.CompanyID, input.NodeID, thread.EmailThreadID) {
-		return "", "", "", ErrAlreadyExists
-	}
 	informationID := r.addEmailProjectionWithThreadLocked(input.CompanyID, input.NodeID, input.SharedInboxID, input.AccountEmail, message, thread.EmailThreadID, now, input.Target.Mode != CommunicationsEmailConversionTargetExistingNode)
 	if _, err := r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, input.NodeID, informationID, thread.EmailThreadID, message.ID, input.ActorUserID, now); err != nil {
 		return "", "", "", err

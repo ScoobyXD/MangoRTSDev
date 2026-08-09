@@ -569,32 +569,18 @@ select pg_advisory_xact_lock(
 )`, companyID, emailThreadID); err != nil {
 		return err
 	}
-	var linkedToAnotherNode bool
-	if err := tx.QueryRowContext(ctx, `
-select exists (
-  select 1
-  from email_relationships relationship
-  where relationship.company_id=$1::uuid
-    and relationship.email_thread_id=$2::uuid
-    and relationship.resource_type='node'
-    and relationship.resource_id<>$3::uuid
-)`, companyID, emailThreadID, nodeID).Scan(&linkedToAnotherNode); err != nil {
-		return err
-	}
-	if linkedToAnotherNode {
-		return ErrAlreadyExists
-	}
 	result, err := tx.ExecContext(ctx, `
 insert into email_relationships (
   company_id, email_relationship_id, email_thread_id, email_message_id,
   resource_type, resource_id, resource_textbox_id, created_timestamp
 )
-select $1::uuid, $3::uuid, $4::uuid, message.email_message_id,
+select $1::uuid,
+       case when message.provider_message_id=$5 then $3::uuid else gen_random_uuid() end,
+       $4::uuid, message.email_message_id,
        'node', $2::uuid, null, now()
 from email_messages message
 where message.company_id=$1::uuid
   and message.email_thread_id=$4::uuid
-  and message.provider_message_id=$5
 on conflict do nothing`, companyID, nodeID, relationshipID, emailThreadID, selectedMessageID)
 	if err != nil {
 		return err

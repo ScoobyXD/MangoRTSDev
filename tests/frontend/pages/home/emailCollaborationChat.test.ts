@@ -215,12 +215,12 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(detail, /data-email-selection-chat-action="true"[\s\S]*onTextSelection\(\{ quote, startOffset, endOffset \}\)/);
 
   assert.match(surface, /listEmailCollaborations\(\{[\s\S]*setCollaborations\(items\)/);
-  assert.match(surface, /headerLeading=\{\([\s\S]*data-email-chat-node-header="true"[\s\S]*<ExplorerRowIcon kind="node"/);
+  assert.match(surface, /headerLeading=\{collaborations\.length > 1[\s\S]*data-email-chat-node-header="true"[\s\S]*<ExplorerRowIcon kind="node"/);
   assert.match(surface, /sectionLabelsByBlockID=\{sectionLabelsByBlockID\}/);
   assert.doesNotMatch(surface, /EmailCollaborationParticipantRoster|setChatTargetMenuOpen|onClose/);
   assert.match(surface, /const startNewFloatingNodeChat[\s\S]*pendingNewNodeIDRef\.current = generateStableInformationID\(\)[\s\S]*acceptCollaboration\(null\)/);
   assert.match(surface, /const ensureLinkedEmailTextBlock[\s\S]*convertTriageMessagesToExplorerTarget\([\s\S]*linkedTextBlock/);
-  assert.match(surface, /const submit = React\.useCallback\(async \(\) =>[\s\S]*await ensureCollaboration\(\)[\s\S]*saveCurrentDraftToCollaboration/);
+  assert.match(surface, /const submit = React\.useCallback\(async \(\) =>[\s\S]*collaborations\.length > 1 && !collaboration[\s\S]*ensureEmailCollaboration\(\{[\s\S]*linkedTextBlock:[\s\S]*initialChat:/);
   assert.doesNotMatch(surface, /Choose email node priority|setPriorityMenuOpen|data-email-action-popover|aria-label="Close email comments"/);
   assert.match(surface, /const importedCollaborations = await listEmailCollaborations/);
   assert.doesNotMatch(surface, /parseEditorAttachedEmails|resolveEmailCollaboration\(/);

@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { AppModalPortal, useAppFloatingMenuDismissal, useAppOverlayPortalTarget, useAppViewportAnchorRect } from "../../app/AppModalPortal.js";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { ExplorerEntityIcon } from "../../icons/index.js";
-import { downloadEmailAttachment, getEmailCollaborationThread, getEmailMessage, getEmailSignature, getEmailThread, getNodeEmailThread, listEmailMessages, sendEmail, type EmailAddress, type EmailAttachment, type EmailMessage } from "../communications/communicationsApi";
+import { downloadEmailAttachment, getEmailCollaborationThread, getEmailMessage, getEmailSignature, getEmailThread, getNodeEmailThread, listEmailDrafts, listEmailMessages, saveEmailDraft, sendEmail, sendEmailCollaborationDraft, type CommunicationsEmailDraft, type EmailAddress, type EmailAttachment, type EmailMessage } from "../communications/communicationsApi";
 import { CalendarInviteCard } from "../communications/CalendarInviteCard";
 import { OutboundEmailUndoBanner } from "../communications/OutboundEmailUndoBanner";
 import { isOutboundEmailUndoneError } from "../communications/outboundEmailUndo";
@@ -63,6 +63,7 @@ import {
   writeImageClipboardData,
   writeImageToSystemClipboard,
 } from "./editorImages";
+
 import {
   buildMentionOptions,
   EDITOR_MENTION_MENU_MAX_HEIGHT_PX,
@@ -114,6 +115,12 @@ import {
   type TextBlockSelectionDraft,
   userAccentForName,
 } from "./NodeWorkspaceSurfaceShared";
+
+function universalEmailDraftFingerprint(input: {
+  sender: string; to: string; cc: string; bcc: string; subject: string; body: string;
+}): string {
+  return JSON.stringify([input.sender.trim().toLowerCase(), input.to, input.cc, input.bcc, input.subject, input.body]);
+}
 
 const MangoTiptapEditor = React.lazy(async () => {
   const module = await import("./tiptap/MangoTiptapEditor.js");
@@ -1182,8 +1189,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                 return (
                   <React.Fragment key={thread.message.id}>
                     {sectionLabel && previousSectionKey !== sectionKey && (
-                      <div data-email-chat-message-section="true" style={{ borderTop: index > 0 ? `1px solid ${ruleColor}` : undefined, padding: index > 0 ? "11px 2px 2px" : "2px 2px", color: "#475569", fontSize: 10.5, fontWeight: 850 }}>
-                        {sectionLabel}
+                      <div data-email-chat-message-section="true" style={{ borderTop: index > 0 ? `1px solid ${ruleColor}` : undefined, padding: index > 0 ? "11px 2px 2px" : "2px 2px", color: "#475569", fontSize: 10.5, fontWeight: 850, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <ExplorerEntityIcon kind="node" />
+                        <span>{sectionLabel}</span>
                       </div>
                     )}
                     <ChatThreadItem
@@ -3437,6 +3445,8 @@ const AttachedEmailThreadCard: React.FC<{
   const [loadError, setLoadError] = useState("");
   const [threadDownloadStatus, setThreadDownloadStatus] = useState<EmailThreadDownloadStatus>("complete");
   const handledFocusMessageRequestRef = useRef("");
+  const [activeSharedDraft, setActiveSharedDraft] = useState<CommunicationsEmailDraft | null>(null);
+  const autoOpenedSharedDraftRef = useRef("");
 
   useEffect(() => {
     let cancelled = false;
@@ -3468,6 +3478,26 @@ const AttachedEmailThreadCard: React.FC<{
       if (refreshTimer) clearTimeout(refreshTimer);
     };
   }, [companyID, email, nodeID]);
+
+  useEffect(() => {
+    const durableThreadID = email.emailThreadID?.trim() ?? "";
+    if (!durableThreadID || !email.collaborationID?.trim()) {
+      setActiveSharedDraft(null);
+      return;
+    }
+    let cancelled = false;
+    void listEmailDrafts(companyID, {}).then((drafts) => {
+      if (cancelled) return;
+      const draft = drafts.find((candidate) => candidate.is_shared && candidate.email_thread_id?.trim() === durableThreadID) ?? null;
+      setActiveSharedDraft(draft);
+      if (draft?.origin_node_id?.trim() === nodeID.trim() && autoOpenedSharedDraftRef.current !== draft.draft_id) {
+        autoOpenedSharedDraftRef.current = draft.draft_id;
+        onSelect();
+        onReply(draft.reply_to_message?.id?.trim() || email.messageID, true);
+      }
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [companyID, email.collaborationID, email.emailThreadID, email.messageID, nodeID, onReply, onSelect]);
 
   const initialFocusProviderMessageID = initialFocusMessageID?.trim() === email.emailMessageID
     ? email.messageID
@@ -3510,7 +3540,7 @@ const AttachedEmailThreadCard: React.FC<{
     boxShadow: "1px 1px 4px rgba(174,174,192,0.14), -1px -1px 4px rgba(255,255,255,0.76)",
   });
   const replyComposerOpen = Boolean(replyTargetMessageID.trim());
-  const replyAvailable = editable && !email.collaborationID?.trim();
+  const replyAvailable = editable;
   const internalMessageIDForProvider = (providerMessageID: string): string => {
     const cleanProviderMessageID = providerMessageID.trim();
     return threadMessages.find((message) => message.id.trim() === cleanProviderMessageID)?.email_message_id?.trim()
@@ -3594,13 +3624,28 @@ const AttachedEmailThreadCard: React.FC<{
             background: rootMessageAccent ? `linear-gradient(90deg, ${rootMessageAccent}30, ${rootMessageAccent}0c 58%, rgba(255,255,255,0.96))` : undefined,
           }}
         >
-          <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr) auto auto auto${hasThreadChildren ? " 22px" : ""}`, alignItems: "center", gap: 7 }}>
+          <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr) auto${activeSharedDraft ? " auto" : ""} auto auto${hasThreadChildren ? " 22px" : ""}`, alignItems: "center", gap: 7 }}>
             <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 900 }}>{email.subject}</span>
             <span style={{ fontSize: 9.5, fontWeight: 800, color: accent, whiteSpace: "nowrap" }}>{formatTimestamp(email.date)}</span>
+            {activeSharedDraft && (
+              <button
+                type="button"
+                title="Toggle universal shared draft"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (replyComposerOpen) onReplyComplete();
+                  else onReply(activeSharedDraft.reply_to_message?.id?.trim() || email.messageID, true);
+                }}
+                style={replyButtonStyle(true)}
+              >
+                Draft 1
+              </button>
+            )}
             <button
               type="button"
               disabled={!replyAvailable}
-              title={replyAvailable ? "Reply" : "Open this collaboration in Triage to create or send a shared draft"}
+              title="Reply"
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -3614,7 +3659,7 @@ const AttachedEmailThreadCard: React.FC<{
             <button
               type="button"
               disabled={!replyAvailable}
-              title={replyAvailable ? "Reply all" : "Open this collaboration in Triage to create or send a shared draft"}
+              title="Reply all"
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -5468,6 +5513,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [sharedDraft, setSharedDraft] = useState<CommunicationsEmailDraft | null>(null);
+  const [senderAccountDraft, setSenderAccountDraft] = useState(accountEmail?.trim() ?? "");
+  const lastSharedDraftSavedFingerprintRef = useRef("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const replyEditorControllerRef = useRef<UnifiedRichEditorFormattingController | null>(null);
   const appliedInitialReplyTargetRef = useRef("");
@@ -5482,6 +5530,37 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const [emailHighlightsByMessageID, setEmailHighlightsByMessageID] = useState<EmailLocalHighlightsByMessageID>(() => ({
     [messageID]: readStoredEmailLocalHighlights(messageID),
   }));
+  const universalDraftEnabled = Boolean(collaborationID?.trim() && emailThreadID?.trim() && nodeID.trim());
+  const applySharedDraft = useCallback((draft: CommunicationsEmailDraft) => {
+    setSharedDraft(draft);
+    setSenderAccountDraft(draft.account_email?.trim() || accountEmail?.trim() || "");
+    setToDraft(draft.to_recipients);
+    setCcDraft(draft.cc_recipients);
+    setBccDraft(draft.bcc_recipients);
+    setSubjectDraft(draft.subject);
+    setBodyDraft(draft.body_editor_html);
+    lastSharedDraftSavedFingerprintRef.current = universalEmailDraftFingerprint({
+      sender: draft.account_email ?? "", to: draft.to_recipients, cc: draft.cc_recipients,
+      bcc: draft.bcc_recipients, subject: draft.subject, body: draft.body_editor_html,
+    });
+    const sourceProviderMessageID = draft.reply_to_message?.id?.trim() || "";
+    if (sourceProviderMessageID) setReplyTargetMessageID(sourceProviderMessageID);
+  }, [accountEmail]);
+
+  useEffect(() => {
+    if (!universalDraftEnabled) {
+      setSharedDraft(null);
+      return;
+    }
+    let cancelled = false;
+    void listEmailDrafts(companyID, {}).then((drafts) => {
+      if (cancelled) return;
+      const activeDraft = drafts.find((draft) => draft.is_shared && draft.email_thread_id?.trim() === emailThreadID?.trim()) ?? null;
+      setSharedDraft(activeDraft);
+      if (activeDraft?.origin_node_id?.trim() === nodeID.trim()) applySharedDraft(activeDraft);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [applySharedDraft, companyID, emailThreadID, nodeID, universalDraftEnabled]);
 
   mailboxSignatureStateRef.current = mailboxSignatureState;
   replySubmissionIdentityRef.current = { messageID, replyTargetMessageID, scopeKey: mailboxSignatureScopeKey };
@@ -5696,7 +5775,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const recipients = parseEmailAddressDraft(toDraft);
   const ccRecipients = parseEmailAddressDraft(ccDraft);
   const bccRecipients = parseEmailAddressDraft(bccDraft);
-  const providerReplyAvailable = editable && !collaborationID?.trim() && !singleMessageOnly;
+  const providerReplyAvailable = editable && !singleMessageOnly;
   const replyEditingEnabled = providerReplyAvailable && !sending;
   const canSend = replyEditingEnabled && Boolean(message) && Boolean(replyTargetMessageID) && (recipients.length + ccRecipients.length + bccRecipients.length) > 0 && subjectDraft.trim() && editorBodyHasEmailContent(bodyDraft);
   const replyEditorLineCount = useMemo(() => estimateEditorBodyLineCount(bodyDraft), [bodyDraft]);
@@ -5844,6 +5923,42 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     });
   }, [mailboxSignatureScopeKey, mailboxSignatureState, replyTargetMessageID]);
 
+  const openUniversalDraft = useCallback(async (target: EmailMessage, replyAll: boolean) => {
+    if (!universalDraftEnabled) return null;
+    if (sharedDraft) {
+      applySharedDraft(sharedDraft);
+      setReplyAllMode(replyAll);
+      return sharedDraft;
+    }
+    const sourceMessageID = target.email_message_id?.trim() || "";
+    if (!sourceMessageID) throw new Error("email_message_id_missing");
+    const recipientDrafts = replyAll ? replyAllAddressDrafts(target, senderAccountDraft || accountEmail) : null;
+    const saved = await saveEmailDraft({
+      companyID,
+      draftID: `draft:reply:thread:${emailThreadID?.trim()}`,
+      sharedInboxID: mailboxScope.sharedInboxID,
+      accountEmail: mailboxScope.accountEmail,
+      senderAccountEmail: senderAccountDraft || accountEmail,
+      kind: "reply",
+      sourceMessageID,
+      replyToMessageID: target.id,
+      to: recipientDrafts?.to ?? formatAddressList(target.reply_to?.length ? target.reply_to : target.from),
+      cc: recipientDrafts?.cc ?? "",
+      bcc: "",
+      subject: replySubject(target.subject || message?.subject || ""),
+      bodyEditorHTML: bodyDraft,
+      replyToMessage: target,
+      collaborationID: collaborationID?.trim(),
+      emailThreadID: emailThreadID?.trim(),
+      originNodeID: nodeID.trim(),
+      sharedDraft: true,
+      revision: 0,
+    });
+    applySharedDraft(saved);
+    setReplyAllMode(replyAll);
+    return saved;
+  }, [accountEmail, applySharedDraft, bodyDraft, collaborationID, companyID, emailThreadID, mailboxScope.accountEmail, mailboxScope.sharedInboxID, message?.subject, nodeID, senderAccountDraft, sharedDraft, universalDraftEnabled]);
+
   useEffect(() => {
     const targetID = initialReplyTargetMessageID?.trim() ?? "";
     if (!targetID) {
@@ -5863,8 +5978,15 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setBccDraft("");
     setSubjectDraft(replySubject(target.subject || message?.subject || ""));
     ensureReplySignature(target.id);
+    if (universalDraftEnabled) {
+      void openUniversalDraft(target, initialReplyAll).catch((cause) => {
+        const nextError = cause instanceof Error ? cause.message : "failed_to_open_shared_email_draft";
+        setError(nextError);
+        onError(nextError);
+      });
+    }
     window.requestAnimationFrame(() => replyEditorControllerRef.current?.focus());
-  }, [accountEmail, displayThreadMessages, editable, ensureReplySignature, initialReplyAll, initialReplyTargetMessageID, message?.subject, messageID]);
+  }, [accountEmail, displayThreadMessages, editable, ensureReplySignature, initialReplyAll, initialReplyTargetMessageID, message?.subject, messageID, onError, openUniversalDraft, universalDraftEnabled]);
 
   const readEmailSelectionDraft = useCallback((): EmailSelectionDraft | null => {
     if (!canUseEmailSelection) return null;
@@ -6001,11 +6123,100 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setBccDraft("");
     setSubjectDraft(replySubject(target.subject || message?.subject || ""));
     ensureReplySignature(target.id);
+    if (universalDraftEnabled) {
+      void openUniversalDraft(target, replyAll).catch((cause) => {
+        const nextError = cause instanceof Error ? cause.message : "failed_to_open_shared_email_draft";
+        setError(nextError);
+        onError(nextError);
+      });
+    }
     window.requestAnimationFrame(() => replyEditorControllerRef.current?.focus());
-  }, [accountEmail, ensureReplySignature, message?.subject, replyAllMode, replyEditingEnabled, replyTargetMessageID]);
+  }, [accountEmail, ensureReplySignature, message?.subject, onError, openUniversalDraft, replyAllMode, replyEditingEnabled, replyTargetMessageID, universalDraftEnabled]);
+
+  useEffect(() => {
+    if (!universalDraftEnabled || !sharedDraft || !replyTargetMessage || sending) return undefined;
+    const fingerprint = universalEmailDraftFingerprint({
+      sender: senderAccountDraft, to: toDraft, cc: ccDraft, bcc: bccDraft, subject: subjectDraft, body: bodyDraft,
+    });
+    if (fingerprint === lastSharedDraftSavedFingerprintRef.current) return undefined;
+    const timer = window.setTimeout(() => {
+      void saveEmailDraft({
+        companyID,
+        draftID: sharedDraft.draft_id,
+        sharedInboxID: mailboxScope.sharedInboxID,
+        accountEmail: mailboxScope.accountEmail,
+        senderAccountEmail: senderAccountDraft || accountEmail,
+        kind: "reply",
+        sourceMessageID: sharedDraft.source_message_id,
+        replyToMessageID: sharedDraft.reply_to_message?.id,
+        to: toDraft,
+        cc: ccDraft,
+        bcc: bccDraft,
+        subject: subjectDraft,
+        bodyEditorHTML: bodyDraft,
+        replyToMessage: sharedDraft.reply_to_message,
+        collaborationID: collaborationID?.trim(),
+        emailThreadID: emailThreadID?.trim(),
+        originNodeID: sharedDraft.origin_node_id,
+        sharedDraft: true,
+        revision: sharedDraft.revision ?? 0,
+      }).then((saved) => {
+        lastSharedDraftSavedFingerprintRef.current = fingerprint;
+        setSharedDraft(saved);
+      }).catch((cause) => {
+        const nextError = cause instanceof Error ? cause.message : "failed_to_save_shared_email_draft";
+        setError(nextError);
+        onError(nextError);
+      });
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [accountEmail, bccDraft, bodyDraft, ccDraft, collaborationID, companyID, emailThreadID, mailboxScope.accountEmail, mailboxScope.sharedInboxID, onError, replyTargetMessage, senderAccountDraft, sending, sharedDraft, subjectDraft, toDraft, universalDraftEnabled]);
 
   const submitReply = () => {
     if (!message || !replyTargetMessage || !canSend) return;
+    if (universalDraftEnabled && sharedDraft && collaborationID?.trim()) {
+      setSending(true);
+      setError("");
+      void saveEmailDraft({
+        companyID,
+        draftID: sharedDraft.draft_id,
+        sharedInboxID: mailboxScope.sharedInboxID,
+        accountEmail: mailboxScope.accountEmail,
+        senderAccountEmail: senderAccountDraft || accountEmail,
+        kind: "reply",
+        sourceMessageID: sharedDraft.source_message_id,
+        replyToMessageID: sharedDraft.reply_to_message?.id,
+        to: toDraft,
+        cc: ccDraft,
+        bcc: bccDraft,
+        subject: subjectDraft,
+        bodyEditorHTML: replyEditorControllerRef.current?.flush() ?? bodyDraft,
+        replyToMessage: sharedDraft.reply_to_message,
+        collaborationID: collaborationID.trim(),
+        emailThreadID: emailThreadID?.trim(),
+        originNodeID: sharedDraft.origin_node_id,
+        sharedDraft: true,
+        revision: sharedDraft.revision ?? 0,
+      }).then((saved) => sendEmailCollaborationDraft({
+        companyID,
+        collaborationID: collaborationID.trim(),
+        draftID: saved.draft_id,
+        expectedRevision: saved.revision ?? 0,
+      })).then((result) => {
+        setSentReplies((current) => [...current, result.message]);
+        setSharedDraft(null);
+        setReplyTargetMessageID("");
+        setReplyAllMode(false);
+        setBodyDraft("");
+        setDraftAttachments([]);
+        onReplyComplete?.();
+      }).catch((cause) => {
+        const nextError = cause instanceof Error ? cause.message : "failed_to_send_shared_email_draft";
+        setError(nextError);
+        onError(nextError);
+      }).finally(() => setSending(false));
+      return;
+    }
     const submittedIdentity = {
       messageID: message.id,
       replyTargetMessageID: replyTargetMessage.id,
@@ -6565,6 +6776,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
               </div>
             )}
             <div style={{ display: "grid", gridTemplateColumns: "42px minmax(0, 1fr)", gap: 6, alignItems: "center", color: surfaceText, fontSize: 10.5, fontWeight: 850 }}>
+              <span>From:</span>
+              <input value={senderAccountDraft} disabled={!replyEditingEnabled} onChange={(event) => setSenderAccountDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
               <span>To:</span>
               <input value={toDraft} disabled={!replyEditingEnabled} onChange={(event) => setToDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
               <span>Cc:</span>

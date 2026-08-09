@@ -53,7 +53,7 @@ func TestMemorySharedEmailDraftClaimLifecycleAndImmutableIdentity(t *testing.T) 
 		ParticipantUserID: creator.UserID, IsShared: true, ExpectedRevision: 0,
 		CreatedByUserID: creator.UserID, UpdatedByUserID: creator.UserID,
 		Kind: "compose", SourceMessageID: collaboration.RootMessageID,
-		AccountEmail: "spoofed@example.com", ToRecipients: "attacker@example.com",
+		AccountEmail: creator.Email, ToRecipients: "customer@example.com",
 		Subject: "Shared reply", BodyEditorHTML: "<p>First</p>", ReplyToMessageJSON: "{}",
 	})
 	if err != nil {
@@ -61,9 +61,7 @@ func TestMemorySharedEmailDraftClaimLifecycleAndImmutableIdentity(t *testing.T) 
 	}
 	if !draft.IsShared || draft.Kind != "reply" || draft.Revision != 1 ||
 		draft.SourceMessageID != collaboration.RootMessageID || draft.AccountEmail != creator.Email ||
-		!strings.Contains(draft.ToRecipients, "customer@example.com") ||
-		!strings.Contains(draft.CcRecipients, participant.Email) ||
-		strings.Contains(draft.ToRecipients, "attacker@example.com") {
+		draft.ToRecipients != "customer@example.com" {
 		t.Fatalf("canonical shared draft = %+v", draft)
 	}
 
@@ -77,15 +75,15 @@ func TestMemorySharedEmailDraftClaimLifecycleAndImmutableIdentity(t *testing.T) 
 		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
 		ParticipantUserID: creator.UserID,
 	})
-	if err != nil || len(mailboxDrafts) != 0 {
-		t.Fatalf("explicit mailbox draft list leaked shared draft = %+v err=%v", mailboxDrafts, err)
+	if err != nil || len(mailboxDrafts) != 1 || mailboxDrafts[0].DraftID != draftID {
+		t.Fatalf("source mailbox universal draft list = %+v err=%v", mailboxDrafts, err)
 	}
 
 	updated, err := repo.UpsertCommunicationsEmailDraft(CommunicationsEmailDraftInput{
 		CompanyID: companyID, DraftID: draftID, CollaborationID: collaboration.CollaborationID,
 		ParticipantUserID: participant.UserID, IsShared: true, ExpectedRevision: 1,
 		UpdatedByUserID: participant.UserID, Kind: "forward", SourceMessageID: "retarget-attempt",
-		AccountEmail: "attacker@example.com", ToRecipients: "attacker@example.com",
+		ToRecipients: "attacker@example.com", CcRecipients: "team@example.com",
 		Subject: "Participant edit", BodyEditorHTML: "<p>Second</p>",
 		ReplyToMessageJSON: "{\"id\":\"retarget-attempt\",\"thread_id\":\"other-thread\"}",
 	})
@@ -94,25 +92,27 @@ func TestMemorySharedEmailDraftClaimLifecycleAndImmutableIdentity(t *testing.T) 
 	}
 	if updated.Revision != 2 || updated.SourceMessageID != draft.SourceMessageID ||
 		updated.ReplyToMessageJSON != draft.ReplyToMessageJSON ||
-		updated.ToRecipients != draft.ToRecipients || updated.CcRecipients != draft.CcRecipients ||
+		updated.ToRecipients != "attacker@example.com" || updated.CcRecipients != "team@example.com" ||
 		updated.Subject != "Participant edit" || updated.BodyEditorHTML != "<p>Second</p>" {
 		t.Fatalf("identity-preserving update = %+v, original=%+v", updated, draft)
 	}
 
-	_, err = repo.UpsertCommunicationsEmailDraft(CommunicationsEmailDraftInput{
+	reopened, err := repo.UpsertCommunicationsEmailDraft(CommunicationsEmailDraftInput{
 		CompanyID: companyID, DraftID: "duplicate-shared-draft", CollaborationID: collaboration.CollaborationID,
 		ParticipantUserID: creator.UserID, IsShared: true, ExpectedRevision: 0,
 		CreatedByUserID: creator.UserID, UpdatedByUserID: creator.UserID,
 		SourceMessageID: collaboration.RootMessageID, Subject: "Duplicate", BodyEditorHTML: "<p>Duplicate</p>",
 	})
-	if !errors.Is(err, ErrAlreadyExists) {
-		t.Fatalf("duplicate active source error = %v, want ErrAlreadyExists", err)
+	if err != nil || reopened.DraftID != draftID || reopened.Revision != updated.Revision {
+		t.Fatalf("universal draft reopen = %+v err=%v, want existing active draft", reopened, err)
 	}
 
 	_, err = repo.UpsertCommunicationsEmailDraft(CommunicationsEmailDraftInput{
 		CompanyID: companyID, DraftID: draftID, CollaborationID: collaboration.CollaborationID,
 		ParticipantUserID: creator.UserID, IsShared: true, ExpectedRevision: 1,
-		UpdatedByUserID: creator.UserID, Subject: "Stale edit", BodyEditorHTML: "<p>Stale</p>",
+		UpdatedByUserID: creator.UserID, Kind: "reply", SourceMessageID: draft.SourceMessageID,
+		AccountEmail: creator.Email, ToRecipients: updated.ToRecipients,
+		Subject: "Stale edit", BodyEditorHTML: "<p>Stale</p>", ReplyToMessageJSON: updated.ReplyToMessageJSON,
 	})
 	var conflict *VersionConflictError
 	if !errors.As(err, &conflict) || conflict.CurrentRevision != 2 {

@@ -74,6 +74,7 @@ export type EmailFolder = {
 
 export type EmailMessage = {
   email_message_id?: string;
+  email_thread_id?: string;
   id: string;
   detail_fetched?: boolean;
   thread_id?: string;
@@ -401,6 +402,8 @@ export type CommunicationsEmailDraft = {
   updated_timestamp: string;
   attachments?: CommunicationsEmailDraftAttachment[];
   collaboration_id?: string;
+  email_thread_id?: string;
+  origin_node_id?: string;
   is_shared?: boolean;
   revision?: number;
   updated_by_user_id?: string;
@@ -431,6 +434,7 @@ export type SaveCommunicationsEmailDraftInput = {
   draftID: string;
   sharedInboxID?: string;
   accountEmail?: string;
+  senderAccountEmail?: string;
   kind?: "compose" | "reply" | "forward";
   sourceMessageID?: string;
   replyToMessageID?: string;
@@ -442,6 +446,8 @@ export type SaveCommunicationsEmailDraftInput = {
   replyToMessage?: EmailMessage | null;
   scheduledSendTimestamp?: string;
   collaborationID?: string;
+  emailThreadID?: string;
+  originNodeID?: string;
   sharedDraft?: boolean;
   revision?: number;
 };
@@ -490,6 +496,8 @@ export type EnsureCommunicationsEmailCollaborationInput = ListCommunicationsEmai
   message: EmailMessage;
   newNodeID?: string;
   priority?: number;
+  linkedTextBlock?: { type: string; information: string; informationID: string };
+  initialChat?: { type: string; information: string; informationID: string };
 };
 
 export type CommunicationsEmailCollaborationThread = {
@@ -1078,6 +1086,16 @@ export async function ensureEmailCollaboration(input: EnsureCommunicationsEmailC
         new_node_id: input.newNodeID?.trim() || undefined,
         priority: input.priority,
         message: input.message,
+        linked_text_block: input.linkedTextBlock ? {
+          type: input.linkedTextBlock.type,
+          information: input.linkedTextBlock.information,
+          information_id: input.linkedTextBlock.informationID,
+        } : undefined,
+        initial_chat: input.initialChat ? {
+          type: input.initialChat.type,
+          information: input.initialChat.information,
+          information_id: input.initialChat.informationID,
+        } : undefined,
       }),
     },
   );
@@ -1086,21 +1104,28 @@ export async function ensureEmailCollaboration(input: EnsureCommunicationsEmailC
 
 export async function sendEmailCollaborationDraft(input: {
   companyID: string;
-  collaborationID: string;
+  collaborationID?: string;
   draftID: string;
   expectedRevision: number;
+  sharedInboxID?: string;
+  accountEmail?: string;
 }): Promise<SendCommunicationsEmailCollaborationDraftResult> {
   const companyID = input.companyID.trim();
-  const collaborationID = input.collaborationID.trim();
+  const collaborationID = input.collaborationID?.trim() ?? "";
   const draftID = input.draftID.trim();
   const expectedRevision = Math.trunc(input.expectedRevision);
-  if (!companyID || !collaborationID || !draftID || expectedRevision <= 0) {
+  if (!companyID || !draftID || expectedRevision <= 0 || (!collaborationID && !input.sharedInboxID?.trim() && !input.accountEmail?.trim())) {
     throw new Error("email_collaboration_draft_send_input_required");
   }
   const query = new URLSearchParams({ company_id: companyID });
+  if (input.sharedInboxID?.trim()) query.set("shared_inbox_id", input.sharedInboxID.trim());
+  if (input.accountEmail?.trim()) query.set("account_email", input.accountEmail.trim());
+  const path = collaborationID
+    ? `/v1/communications/email-collaborations/${encodeURIComponent(collaborationID)}/drafts/${encodeURIComponent(draftID)}/send`
+    : `/v1/communications/drafts/${encodeURIComponent(draftID)}/send`;
   return scheduleOutboundEmailDispatch(async () => {
     const payload = await apiFetchJSON<SendCommunicationsEmailCollaborationDraftResult>(
-      `/v1/communications/email-collaborations/${encodeURIComponent(collaborationID)}/drafts/${encodeURIComponent(draftID)}/send?${query.toString()}`,
+      `${path}?${query.toString()}`,
       {
         method: "POST",
         body: JSON.stringify({ expected_revision: expectedRevision }),
@@ -1128,6 +1153,7 @@ export async function saveEmailDraft(input: SaveCommunicationsEmailDraftInput): 
       draft_id: cleanDraftID,
       shared_inbox_id: input.sharedInboxID?.trim() || undefined,
       account_email: input.accountEmail?.trim() || undefined,
+      sender_account_email: input.senderAccountEmail?.trim() || undefined,
       kind: input.kind,
       source_message_id: input.sourceMessageID?.trim() || undefined,
       reply_to_message_id: input.replyToMessageID?.trim() || undefined,
@@ -1139,6 +1165,8 @@ export async function saveEmailDraft(input: SaveCommunicationsEmailDraftInput): 
       reply_to_message: input.replyToMessage ?? null,
       scheduled_send_timestamp: scheduledSendTimestamp,
       collaboration_id: input.collaborationID?.trim() || undefined,
+      email_thread_id: input.emailThreadID?.trim() || undefined,
+      origin_node_id: input.originNodeID?.trim() || undefined,
       is_shared: input.sharedDraft === true || undefined,
       revision: Number.isFinite(input.revision) ? Math.max(0, Math.trunc(input.revision ?? 0)) : undefined,
     }),

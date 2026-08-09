@@ -441,3 +441,45 @@ func TestCommunicationsEmailThreadDurableDownloadSchemaContract(t *testing.T) {
 		}
 	}
 }
+
+func TestMemoryEmailThreadPropagatesCompletedMessagesToEveryNodeDestination(t *testing.T) {
+	repo := NewMemoryRepo()
+	const companyID = "11111111-1111-4111-8111-111111111199"
+	repo.EnsureCompany(companyID, "Multi-Node email propagation")
+	owner := mustEmailCollaborationGuardUser(t, repo, companyID, "multi-node-owner", "multi-node@example.com", domain.RoleCompanyUser)
+	base := CommunicationsEmailCollaborationEnsureInput{
+		CompanyID: companyID, PersonalUserID: owner.UserID, PersonalAccountEmail: owner.Email,
+		AccountEmail: owner.Email, Provider: "google", CreatedByUserID: owner.UserID,
+		Message: domain.EmailMessageSnapshot{ID: "multi-node-root", ThreadID: "multi-node-thread", DownloadComplete: true},
+	}
+	base.RequestedNodeID = "11111111-1111-4111-8111-111111111191"
+	first, err := repo.EnsureCommunicationsEmailCollaboration(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base.RequestedNodeID = "11111111-1111-4111-8111-111111111192"
+	second, err := repo.EnsureCommunicationsEmailCollaboration(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Collaboration.NodeID == second.Collaboration.NodeID {
+		t.Fatal("distinct Node destinations collapsed")
+	}
+	if _, err := repo.UpsertCommunicationsEmailThread(CommunicationsEmailThreadUpsertInput{
+		CompanyID: companyID, PersonalUserID: owner.UserID, PersonalAccountEmail: owner.Email,
+		AccountEmail: owner.Email, Provider: "google", ProviderThreadID: "multi-node-thread",
+		SelectedMessageID: "multi-node-reply",
+		Messages:          []domain.EmailMessageSnapshot{{ID: "multi-node-reply", ThreadID: "multi-node-thread", DownloadComplete: true}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nodes := map[string]bool{}
+	for _, destination := range repo.nodeEmailThreads {
+		if destination.CompanyID == companyID && destination.EmailThreadID == first.Collaboration.EmailThreadID {
+			nodes[destination.NodeID] = true
+		}
+	}
+	if len(nodes) != 2 || !nodes[first.Collaboration.NodeID] || !nodes[second.Collaboration.NodeID] {
+		t.Fatalf("thread destinations=%v, want both Nodes after new completed message", nodes)
+	}
+}

@@ -3520,46 +3520,9 @@ create unique index if not exists idx_email_relationships_active_identity
     coalesce(resource_textbox_id, '')
   );
 
-create or replace function mangorts_enforce_one_node_per_email_thread()
-returns trigger language plpgsql as $$
-begin
-  if new.resource_type <> 'node' then
-    return new;
-  end if;
-  perform pg_advisory_xact_lock(hashtextextended(new.company_id::text || ':' || new.email_thread_id::text, 0));
-  if exists (
-    select 1
-    from email_relationships relationship
-    where relationship.company_id=new.company_id
-      and relationship.email_thread_id=new.email_thread_id
-      and relationship.resource_type='node'
-      and relationship.resource_id<>new.resource_id
-      and relationship.email_relationship_id<>new.email_relationship_id
-  ) then
-    raise exception 'email_thread_already_linked_to_another_node' using errcode='23505';
-  end if;
-  if new.resource_textbox_id is not null and exists (
-    select 1
-    from email_relationships relationship
-    where relationship.company_id=new.company_id
-      and relationship.email_message_id=new.email_message_id
-      and relationship.resource_type='node'
-      and relationship.resource_id=new.resource_id
-      and relationship.resource_textbox_id is not null
-      and relationship.resource_textbox_id<>new.resource_textbox_id
-      and relationship.email_relationship_id<>new.email_relationship_id
-  ) then
-    raise exception 'email_message_already_linked_to_another_textbox' using errcode='23505';
-  end if;
-  return new;
-end;
-$$;
-
-drop trigger if exists trg_email_relationships_one_node_per_thread on email_relationships;
-create trigger trg_email_relationships_one_node_per_thread
-before insert or update of company_id,email_thread_id,email_message_id,resource_type,resource_id,resource_textbox_id
-on email_relationships
-for each row execute function mangorts_enforce_one_node_per_email_thread();
+create unique index if not exists idx_email_relationships_one_node_textbox_per_message
+  on email_relationships(company_id,email_message_id,resource_id)
+  where resource_type='node' and resource_textbox_id is not null;
 
 create table if not exists node_textboxes_history (
   company_id uuid not null,
@@ -3785,10 +3748,69 @@ after insert or update of company_id,resource_type,resource_id,resource_textbox_
 on email_relationships deferrable initially immediate
 for each row execute function mangorts_validate_email_relationship_resource();
 
+create or replace function mangorts_validate_node_email_chat_relationship()
+returns trigger language plpgsql as $$
+begin
+  if new.selection_source='email' and new.deleted_timestamp is null and not exists (
+    select 1
+    from email_relationships relationship
+    where relationship.company_id=new.company_id
+      and relationship.resource_type='node'
+      and relationship.resource_id=new.node_id
+      and relationship.resource_textbox_id=new.textbox_id::text
+      and relationship.email_message_id=new.selection_email_message_id
+  ) then
+    raise exception 'email chat requires exact Node message textbox relationship' using errcode='23503';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_validate_node_email_chat_relationship on node_textbox_chats;
+create constraint trigger trg_validate_node_email_chat_relationship
+after insert or update of company_id,node_id,textbox_id,selection_source,selection_email_message_id,deleted_timestamp
+on node_textbox_chats deferrable initially immediate
+for each row execute function mangorts_validate_node_email_chat_relationship();
+
+create or replace function mangorts_protect_node_email_chat_relationship()
+returns trigger language plpgsql as $$
+begin
+  if old.resource_type='node' and old.resource_textbox_id is not null and exists (
+    select 1
+    from node_textbox_chats chat
+    where chat.company_id=old.company_id
+      and chat.node_id=old.resource_id
+      and chat.textbox_id::text=old.resource_textbox_id
+      and chat.selection_source='email'
+      and chat.selection_email_message_id=old.email_message_id
+      and chat.deleted_timestamp is null
+  ) and not exists (
+    select 1
+    from email_relationships relationship
+    where relationship.company_id=old.company_id
+      and relationship.email_relationship_id<>old.email_relationship_id
+      and relationship.resource_type='node'
+      and relationship.resource_id=old.resource_id
+      and relationship.resource_textbox_id=old.resource_textbox_id
+      and relationship.email_message_id=old.email_message_id
+  ) then
+    raise exception 'email relationship is required by an active Node chat' using errcode='23503';
+  end if;
+  return old;
+end;
+$$;
+
+drop trigger if exists trg_protect_node_email_chat_relationship on email_relationships;
+create constraint trigger trg_protect_node_email_chat_relationship
+after delete or update of company_id,email_message_id,resource_type,resource_id,resource_textbox_id
+on email_relationships deferrable initially deferred
+for each row execute function mangorts_protect_node_email_chat_relationship();
+
 create table if not exists email_drafts (
   company_id uuid not null,
   draft_id text not null,
-  email_relationship_id uuid,
+  email_thread_id uuid,
+  origin_node_id uuid,
   source_email_message_id uuid,
   email_account_type text not null,
   personal_user_id uuid,
@@ -3818,8 +3840,10 @@ create table if not exists email_drafts (
   updated_timestamp timestamptz not null default now(),
   deleted_timestamp timestamptz,
   primary key (company_id,draft_id),
-  foreign key (company_id,email_relationship_id)
-    references email_relationships(company_id,email_relationship_id) on delete set null,
+  foreign key (company_id,email_thread_id)
+    references email_threads(company_id,email_thread_id) on delete cascade,
+  foreign key (company_id,origin_node_id)
+    references nodes(company_id,node_id) on delete set null (origin_node_id),
   foreign key (company_id,source_email_message_id)
     references email_messages(company_id,email_message_id) on delete restrict,
   foreign key (company_id,sent_email_message_id)
@@ -3844,6 +3868,9 @@ create table if not exists email_drafts (
   constraint email_drafts_sender_account_email_chk check (
     sender_account_email='' or sender_account_email=lower(btrim(sender_account_email))
   ),
+  constraint email_drafts_origin_node_chk check (
+    origin_node_id is null or email_thread_id is not null
+  ),
   constraint email_drafts_kind_chk check (kind in ('compose','reply','forward')),
   constraint email_drafts_revision_chk check (revision > 0),
   constraint email_drafts_send_state_chk check (send_state in ('draft','sending','sent'))
@@ -3855,9 +3882,12 @@ create index if not exists idx_email_drafts_personal_updated
 create index if not exists idx_email_drafts_shared_updated
   on email_drafts(company_id,shared_inbox_id,updated_timestamp desc)
   where deleted_timestamp is null and email_account_type='shared_email_account';
-create index if not exists idx_email_drafts_relationship_updated
-  on email_drafts(company_id,email_relationship_id,updated_timestamp desc)
-  where deleted_timestamp is null and email_relationship_id is not null;
+create unique index if not exists idx_email_drafts_active_thread
+  on email_drafts(company_id,email_thread_id)
+  where deleted_timestamp is null and email_thread_id is not null;
+create index if not exists idx_email_drafts_origin_node
+  on email_drafts(company_id,origin_node_id,updated_timestamp desc)
+  where deleted_timestamp is null and origin_node_id is not null;
 
 create table if not exists email_signatures (
   company_id uuid not null,

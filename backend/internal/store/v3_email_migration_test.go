@@ -41,13 +41,18 @@ func TestV3EmailExpansionIsAdditiveAndOperatorGated(t *testing.T) {
 			"create table if not exists email_signatures",
 			"create table if not exists attachment_relationships",
 			"email_account_type in ('personal_email_account','shared_email_account')",
-			"references email_relationships(company_id,email_relationship_id) on delete set null",
 			"attachment_relationship_id uuid not null",
 		} {
 			if !strings.Contains(strings.ReplaceAll(sqlText, " ", ""), strings.ReplaceAll(required, " ", "")) {
 				t.Errorf("schema expansion is missing %q", required)
 			}
 		}
+	}
+	if !strings.Contains(strings.ReplaceAll(expand, " ", ""), strings.ReplaceAll("references email_relationships(company_id,email_relationship_id) on delete set null", " ", "")) {
+		t.Error("historical expansion lost its original relationship-scoped draft foreign key")
+	}
+	if !strings.Contains(strings.ReplaceAll(schema, " ", ""), strings.ReplaceAll("references email_threads(company_id,email_thread_id) on delete cascade", " ", "")) {
+		t.Error("canonical schema is missing the universal thread draft foreign key")
 	}
 	if !strings.Contains(expand, "create table if not exists email_thread_download_jobs") {
 		t.Error("historical expansion lost the original download job table")

@@ -42,7 +42,7 @@ func (s *Server) handleCommunicationsEmailCollaborationDraftSend(w http.Response
 	companyID = strings.TrimSpace(companyID)
 	collaborationID = strings.TrimSpace(collaborationID)
 	draftID = strings.TrimSpace(draftID)
-	if companyID == "" || collaborationID == "" || draftID == "" || req.ExpectedRevision <= 0 {
+	if companyID == "" || draftID == "" || req.ExpectedRevision <= 0 {
 		writeError(w, http.StatusBadRequest, "company_id_draft_id_and_expected_revision_required")
 		return
 	}
@@ -54,18 +54,61 @@ func (s *Server) handleCommunicationsEmailCollaborationDraftSend(w http.Response
 		writeError(w, http.StatusServiceUnavailable, "nylas_not_configured")
 		return
 	}
-	collaboration, err := s.repo.GetCommunicationsEmailCollaboration(companyID, collaborationID, actor.User.UserID)
-	if err != nil {
-		s.writeEmailCollaborationStoreError(w, err, "failed_to_load_email_collaboration")
+	var collaboration domain.CommunicationsEmailCollaboration
+	var scope resolvedCommunicationsEmailScope
+	var draftGetInput store.CommunicationsEmailDraftGetInput
+	if collaborationID != "" {
+		var err error
+		collaboration, err = s.repo.GetCommunicationsEmailCollaboration(companyID, collaborationID, actor.User.UserID)
+		if err != nil {
+			s.writeEmailCollaborationStoreError(w, err, "failed_to_load_email_collaboration")
+			return
+		}
+		draftGetInput = store.CommunicationsEmailDraftGetInput{
+			CompanyID: companyID, DraftID: draftID, ParticipantUserID: actor.User.UserID,
+		}
+	} else {
+		var ok bool
+		scope, ok = s.resolveCommunicationsEmailDraftScope(w, actor, companyID,
+			r.URL.Query().Get("shared_inbox_id"), r.URL.Query().Get("account_email"), store.EntityPermissionEdit)
+		if !ok {
+			return
+		}
+		draftGetInput = scope.draftGetInput(companyID, draftID)
+		draftGetInput.ParticipantUserID = actor.User.UserID
+	}
+	draftBeforeClaim, err := s.repo.GetCommunicationsEmailDraft(draftGetInput)
+	if err != nil || !draftBeforeClaim.IsShared ||
+		(collaborationID != "" && strings.TrimSpace(draftBeforeClaim.EmailThreadID) != strings.TrimSpace(collaboration.EmailThreadID)) {
+		writeError(w, http.StatusNotFound, "email_draft_not_found")
 		return
 	}
-	connection, ok := s.emailCollaborationSourceConnection(w, collaboration, actor.User.UserID)
+	var connection domain.UserEmailConnection
+	var ok bool
+	if collaborationID != "" && normalizeEmailForCompare(draftBeforeClaim.AccountEmail) == normalizeEmailForCompare(collaboration.AccountEmail) {
+		connection, ok = s.emailCollaborationSourceConnection(w, collaboration, actor.User.UserID)
+	} else if collaborationID == "" && strings.TrimSpace(draftBeforeClaim.SharedInboxID) != "" &&
+		normalizeEmailForCompare(draftBeforeClaim.AccountEmail) == normalizeEmailForCompare(scope.accountEmail) {
+		companyConnection, connectionErr := s.repo.GetCompanyEmailConnectionByAccountEmail(companyID, draftBeforeClaim.AccountEmail)
+		if connectionErr != nil {
+			writeError(w, http.StatusConflict, "shared_inbox_email_account_not_connected")
+			return
+		}
+		connection, ok = requireConnectedCompanyEmailStatus(w, companyConnection, actor.User.UserID)
+	} else {
+		connection, ok = s.resolveActorPersonalEmailConnection(w, actor.User.UserID, draftBeforeClaim.AccountEmail)
+		if ok {
+			connection, ok = requireConnectedEmailStatus(w, connection)
+		}
+	}
 	if !ok {
 		return
 	}
 	claim, err := s.repo.ClaimCommunicationsEmailDraftSend(store.CommunicationsEmailDraftSendClaimInput{
 		CompanyID: companyID, DraftID: draftID, CollaborationID: collaborationID,
-		ParticipantUserID: actor.User.UserID, ExpectedRevision: req.ExpectedRevision, ProviderGrantID: connection.GrantID,
+		ParticipantUserID: actor.User.UserID, PersonalUserID: scope.personalUserID,
+		PersonalAccountEmail: scope.personalAccountEmail, SharedInboxID: scope.sharedInboxID,
+		ExpectedRevision: req.ExpectedRevision, ProviderGrantID: connection.GrantID,
 	})
 	if err != nil {
 		s.writeCommunicationsEmailDraftSendClaimError(w, err, req.ExpectedRevision, companyID, draftID, actor.User.UserID)
@@ -83,6 +126,11 @@ func (s *Server) handleCommunicationsEmailCollaborationDraftSend(w http.Response
 		}
 	}
 	draft := claim.Draft
+	if normalizeEmailForCompare(draft.AccountEmail) != normalizeEmailForCompare(connection.AccountEmail) {
+		releaseFreshPreProviderClaim()
+		writeError(w, http.StatusConflict, "email_draft_sender_account_changed")
+		return
+	}
 	if draft.Kind != "reply" || strings.TrimSpace(draft.SourceMessageID) == "" {
 		releaseFreshPreProviderClaim()
 		writeError(w, http.StatusConflict, "shared_email_draft_reply_source_required")
@@ -117,17 +165,19 @@ func (s *Server) handleCommunicationsEmailCollaborationDraftSend(w http.Response
 		s.writeNylasError(w, r, connection, err)
 		return
 	}
+	expectedProviderThreadID := strings.TrimSpace(collaboration.ProviderThreadID)
+	if expectedProviderThreadID == "" {
+		expectedProviderThreadID = strings.TrimSpace(storedSource.ThreadID)
+	}
 	if strings.TrimSpace(sourceMessage.ID) != providerSourceMessageID ||
-		(strings.TrimSpace(collaboration.ProviderThreadID) != "" &&
-			strings.TrimSpace(sourceMessage.ThreadID) != strings.TrimSpace(collaboration.ProviderThreadID)) {
+		(expectedProviderThreadID != "" && strings.TrimSpace(sourceMessage.ThreadID) != expectedProviderThreadID) {
 		releaseFreshPreProviderClaim()
 		writeError(w, http.StatusConflict, "shared_email_draft_source_mismatch")
 		return
 	}
-	providerSource := emailMessageSnapshotFromNylas(sourceMessage)
-	toRecipients, ccRecipients := store.CanonicalCommunicationsEmailReplyAllEnvelope(providerSource, collaboration.AccountEmail)
 	sendReq := NylasSendMessageRequest{
-		To: draftRecipientAddresses(toRecipients), Cc: draftRecipientAddresses(ccRecipients),
+		To: draftRecipientAddresses(draft.ToRecipients), Cc: draftRecipientAddresses(draft.CcRecipients),
+		Bcc:     draftRecipientAddresses(draft.BccRecipients),
 		Subject: strings.TrimSpace(draft.Subject), Body: strings.TrimSpace(draft.BodyEditorHTML),
 		ReplyToMessageID: providerSourceMessageID, IdempotencyKey: claim.IdempotencyKey,
 	}

@@ -22,11 +22,13 @@ func TestEmailDraftSourceRetentionSchemaContract(t *testing.T) {
 		}
 	}
 	for _, required := range []string{
-		"references email_relationships(company_id,email_relationship_id) on delete set null",
+		"references email_threads(company_id,email_thread_id) on delete cascade",
+		"references nodes(company_id,node_id) on delete set null",
 		"references email_messages(company_id,email_message_id) on delete restrict",
 		"deleted_timestamp timestamptz",
 		"send_idempotency_key text",
 		"sent_email_message_id uuid",
+		"origin_node_id uuid",
 	} {
 		if !strings.Contains(strings.Join(strings.Fields(draftTable), " "), strings.Join(strings.Fields(required), " ")) {
 			t.Fatalf("final email_drafts missing retention/safe-send contract %q", required)

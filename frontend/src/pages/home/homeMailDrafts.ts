@@ -600,7 +600,13 @@ export async function deleteHomeMailDraftRemote(companyID: string, userID: strin
   if (existing.sharedDraft) {
     // Revision-checked shared discard is server-authoritative. Keep the local
     // copy intact when another participant already saved a newer revision.
-    await deleteEmailDraft(companyID, draftID, { revision: existing.revision });
+    await deleteEmailDraft(companyID, draftID, {
+      sharedInboxID: existing.sharedInboxID || existing.replyToMessage?.collaboration_shared_inbox_id || undefined,
+      accountEmail: existing.sharedInboxID || existing.replyToMessage?.collaboration_shared_inbox_id
+        ? undefined
+        : (existing.replyToMessage?.collaboration_account_email || existing.accountEmail || undefined),
+      revision: existing.revision,
+    });
     deleteHomeMailDraft(companyID, userID, draftID);
     return loadHomeMailDrafts(companyID, userID);
   }
@@ -638,7 +644,13 @@ export async function deleteHomeMailDraftsRemote(companyID: string, userID: stri
   if (sharedDrafts.length > 0) {
     await Promise.all(sharedDrafts.map((draft) => queueHomeMailDraftRemoteMutation(
       homeMailDraftRemoteMutationKey(companyID, userID, draft.id, draft.sharedInboxID, draft.accountEmail),
-      () => deleteEmailDraft(companyID, draft.id, { revision: draft.revision }),
+      () => deleteEmailDraft(companyID, draft.id, {
+        sharedInboxID: draft.sharedInboxID || draft.replyToMessage?.collaboration_shared_inbox_id || undefined,
+        accountEmail: draft.sharedInboxID || draft.replyToMessage?.collaboration_shared_inbox_id
+          ? undefined
+          : (draft.replyToMessage?.collaboration_account_email || draft.accountEmail || undefined),
+        revision: draft.revision,
+      }),
     )));
   }
   deleteHomeMailDrafts(companyID, userID, draftIDs);
@@ -657,11 +669,16 @@ export async function deleteHomeMailDraftsRemote(companyID: string, userID: stri
 }
 
 async function saveHomeMailDraftToDatabase(draft: HomeMailDraft): Promise<HomeMailDraft | null> {
+  const sourceSharedInboxID = draft.sharedInboxID || draft.replyToMessage?.collaboration_shared_inbox_id?.trim() || "";
+  const sourceAccountEmail = sourceSharedInboxID
+    ? ""
+    : (draft.replyToMessage?.collaboration_account_email?.trim() || draft.accountEmail);
   const saved = await saveEmailDraft({
     companyID: draft.companyID,
     draftID: draft.id,
-    sharedInboxID: draft.sharedInboxID || undefined,
-    accountEmail: draft.accountEmail || undefined,
+    sharedInboxID: sourceSharedInboxID || undefined,
+    accountEmail: sourceAccountEmail || undefined,
+    senderAccountEmail: draft.accountEmail || undefined,
     kind: draft.kind,
     sourceMessageID: draft.replyToMessage?.email_message_id?.trim() || undefined,
     replyToMessageID: draft.kind === "reply" ? draft.replyToMessageID || undefined : undefined,

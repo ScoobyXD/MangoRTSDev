@@ -145,6 +145,23 @@ where relationship.company_id=$1::uuid and relationship.resource_type='node'
  and (nullif($8,'')::uuid is null or mangorts_user_can_access_resource(
    relationship.company_id,relationship.resource_type,relationship.resource_id,nullif($8,'')::uuid,'edit'))
  and (nullif($9,'')::uuid is null or relationship.resource_id=nullif($9,'')::uuid)
+ and relationship.email_relationship_id=(
+   select destination.email_relationship_id
+   from email_relationships destination
+   where destination.company_id=relationship.company_id
+     and destination.email_thread_id=relationship.email_thread_id
+     and destination.resource_type='node'
+     and destination.resource_id=relationship.resource_id
+     and destination.resource_textbox_id is null
+   order by case when exists (
+     select 1 from email_messages requested_message
+     where requested_message.company_id=destination.company_id
+       and requested_message.email_message_id=destination.email_message_id
+       and requested_message.provider_message_id=$6
+   ) then 0 else 1 end,
+   destination.created_timestamp,destination.email_relationship_id
+   limit 1
+ )
 order by relationship.created_timestamp desc limit 1`, companyID, scope.scopeType, scope.personalUserID,
 		scope.personalAccountEmail, scope.sharedInboxID, messageID, threadID, participantUserID, nodeID))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -221,6 +238,20 @@ values($1::uuid,$2::uuid,$3,$4,'no_access',now())`, input.CompanyID, nodeID, com
 	if err := linkPostgresCommunicationsEmailThreadToNodeTx(ctx, tx, input.CompanyID, nodeID, relationshipID, thread.EmailThreadID, input.Message.ID, input.CreatedByUserID); err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}
+	if input.LinkedTextBlock != nil {
+		input.LinkedTextBlock.CompanyID, input.LinkedTextBlock.NodeID = input.CompanyID, nodeID
+		if input.InitialChat != nil {
+			input.InitialChat.CompanyID, input.InitialChat.NodeID = input.CompanyID, nodeID
+		}
+		conversionInput := CommunicationsTriageConversionInput{
+			CompanyID: input.CompanyID, UserID: input.CreatedByUserID, ActorUserID: input.CreatedByUserID,
+			SharedInboxID: input.SharedInboxID, AccountEmail: input.AccountEmail, NodeID: nodeID,
+			MessageIDs: []string{input.Message.ID}, LinkedTextBlock: input.LinkedTextBlock, InitialChat: input.InitialChat,
+		}
+		if err := r.addCommunicationsConversionAtomicWritesTx(ctx, tx, conversionInput, &CommunicationsTriageConversionResult{}); err != nil {
+			return CommunicationsEmailCollaborationEnsureResult{}, err
+		}
+	}
 	if ds, mid, ok := communicationsEmailThreadDownloadRequest(thread, threadInput); ok {
 		if _, _, err := ensurePostgresCommunicationsEmailThreadDownloadJobTx(ctx, tx, input.CompanyID, thread.EmailThreadID, ds, mid, input.CreatedByUserID); err != nil {
 			return CommunicationsEmailCollaborationEnsureResult{}, err
@@ -265,6 +296,23 @@ where relationship.company_id=$1::uuid and relationship.resource_type='node'
  and ((nullif($7,'') is not null and thread.provider_thread_id=$7)
    or (nullif($6,'') is not null and message.provider_message_id=$6))
  and mangorts_user_can_access_resource(relationship.company_id,relationship.resource_type,relationship.resource_id,$8::uuid,'edit')
+ and relationship.email_relationship_id=(
+   select destination.email_relationship_id
+   from email_relationships destination
+   where destination.company_id=relationship.company_id
+     and destination.email_thread_id=relationship.email_thread_id
+     and destination.resource_type='node'
+     and destination.resource_id=relationship.resource_id
+     and destination.resource_textbox_id is null
+   order by case when exists (
+     select 1 from email_messages requested_message
+     where requested_message.company_id=destination.company_id
+       and requested_message.email_message_id=destination.email_message_id
+       and requested_message.provider_message_id=$6
+   ) then 0 else 1 end,
+   destination.created_timestamp,destination.email_relationship_id
+   limit 1
+ )
 order by relationship.created_timestamp desc,relationship.email_relationship_id`, input.CompanyID, scope.scopeType, scope.personalUserID,
 		scope.personalAccountEmail, scope.sharedInboxID, input.MessageID, input.ThreadID, input.ParticipantUserID)
 	if err != nil {

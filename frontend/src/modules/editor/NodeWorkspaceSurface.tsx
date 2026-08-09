@@ -2237,35 +2237,28 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const linkDroppedEmailToTextBlock = useCallback(async (blockID: string, dataTransfer: DataTransfer) => {
     if (!canEdit) return;
     const dragged = parseDraggedEmail(dataTransfer);
-    const attachedMessageID = dataTransfer.getData("application/x-mango-node-attached-email").trim();
-    const attached = attachedMessageID
-      ? attachedEmails.find((email) => email.messageID === attachedMessageID || email.emailMessageID === attachedMessageID)
-      : undefined;
-    if (!dragged && !attached) return;
+    if (!dragged) return;
     const block = blocks.find((candidate) => candidate.id === blockID);
     if (!block) return;
-    const primaryEmailMessageID = dragged?.emailMessageID ?? attached?.emailMessageID ?? "";
+    const primaryEmailMessageID = dragged.emailMessageID;
     if ((block.emailMessageID || block.emailMessageIDs?.length) && !textBlockHasEmailMessage(block, primaryEmailMessageID)) {
       throw new Error("This text box is already linked to another email message or thread.");
     }
-    if (dragged) await attachEmail(dragged);
-    const relationshipTargets = attached ? [attached] : [dragged!];
-    for (const email of relationshipTargets) {
-      await requestJSON<unknown>(`/v1/nodes/${nodeID}/information`, {
-        method: "POST",
-        body: JSON.stringify({
-          company_id: companyID,
-          type: EDITOR_ATTACHED_EMAIL_TYPE,
-          information: buildEditorAttachedEmailPayload({ ...email, blockID, linkWholeThread: Boolean(attached) }),
-          information_id: generateStableInformationID(),
-        }),
-      });
-    }
+    await attachEmail(dragged);
+    await requestJSON<unknown>(`/v1/nodes/${nodeID}/information`, {
+      method: "POST",
+      body: JSON.stringify({
+        company_id: companyID,
+        type: EDITOR_ATTACHED_EMAIL_TYPE,
+        information: buildEditorAttachedEmailPayload({ ...dragged, blockID, linkWholeThread: false }),
+        information_id: generateStableInformationID(),
+      }),
+    });
     setBlocks((current) => current.map((candidate) => candidate.id === blockID
       ? { ...candidate, emailMessageID: primaryEmailMessageID, emailMessageIDs: [primaryEmailMessageID], emailAccent: candidate.emailAccent || editorEmailMessageAccent(primaryEmailMessageID) }
       : candidate));
     onProjectionMutation();
-  }, [attachEmail, attachedEmails, blocks, canEdit, companyID, nodeID, onProjectionMutation, requestJSON]);
+  }, [attachEmail, blocks, canEdit, companyID, nodeID, onProjectionMutation, requestJSON]);
 
   const removeAttachedEmail = useCallback(async (emailID: string) => {
     if (!canEdit || !nodeID || !companyID) return;
@@ -3308,14 +3301,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                   className={`mango-fixed-editor-row${blockSaveNeedsFailureAttention ? " mango-editor-save-failed-frame" : ""}`}
                   onDragOver={(event) => {
                     if (!canEdit || block.temporaryEmailChat) return;
-                    if (event.dataTransfer.types.includes(EMAIL_DRAG_MIME) || event.dataTransfer.types.includes("application/x-mango-node-attached-email")) {
+                    if (event.dataTransfer.types.includes(EMAIL_DRAG_MIME)) {
                       event.preventDefault();
                       event.dataTransfer.dropEffect = "link";
                     }
                   }}
                   onDrop={(event) => {
                     if (!canEdit || block.temporaryEmailChat) return;
-                    if (!event.dataTransfer.types.includes(EMAIL_DRAG_MIME) && !event.dataTransfer.types.includes("application/x-mango-node-attached-email")) return;
+                    if (!event.dataTransfer.types.includes(EMAIL_DRAG_MIME)) return;
                     event.preventDefault();
                     event.stopPropagation();
                     void linkDroppedEmailToTextBlock(block.id, event.dataTransfer).catch((cause) => {

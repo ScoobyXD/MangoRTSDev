@@ -24,7 +24,7 @@ func (r *MemoryRepo) ListCommunicationsEmailDrafts(input CommunicationsEmailDraf
 		if draft.CompanyID != companyID || draft.DeletedTimestamp != nil {
 			continue
 		}
-		include := !draft.IsShared && scope.matchesDraft(draft)
+		include := scope.matchesDraft(draft)
 		if participantOnly {
 			include = r.isSharedEmailDraftParticipantLocked(draft, input.ParticipantUserID)
 		}
@@ -52,7 +52,7 @@ func (r *MemoryRepo) GetCommunicationsEmailDraft(input CommunicationsEmailDraftG
 	defer r.mu.RUnlock()
 
 	draft, ok := r.emailDrafts[communicationsEmailDraftKey(companyID, draftID)]
-	authorized := ok && !draft.IsShared && scope.matchesDraft(draft)
+	authorized := ok && scope.matchesDraft(draft)
 	if participantOnly {
 		authorized = ok && r.isSharedEmailDraftParticipantLocked(draft, input.ParticipantUserID)
 	}
@@ -142,7 +142,7 @@ func (r *MemoryRepo) SoftDeleteCommunicationsEmailDraft(input CommunicationsEmai
 
 	key := communicationsEmailDraftKey(companyID, draftID)
 	draft, ok := r.emailDrafts[key]
-	authorized := ok && !draft.IsShared && scope.matchesDraft(draft)
+	authorized := ok && scope.matchesDraft(draft)
 	if participantOnly {
 		authorized = ok && r.isSharedEmailDraftParticipantLocked(draft, input.ParticipantUserID)
 	}
@@ -262,6 +262,8 @@ func normalizeCommunicationsEmailDraftInput(input CommunicationsEmailDraftInput)
 		PersonalUserID:         scope.personalUserID,
 		PersonalAccountEmail:   scope.personalAccountEmail,
 		SharedInboxID:          scope.sharedInboxID,
+		EmailThreadID:          cleanUUIDText(input.EmailThreadID),
+		OriginNodeID:           cleanUUIDText(input.OriginNodeID),
 		CreatedByUserID:        strings.TrimSpace(input.CreatedByUserID),
 		UpdatedByUserID:        strings.TrimSpace(input.UpdatedByUserID),
 		Kind:                   kind,

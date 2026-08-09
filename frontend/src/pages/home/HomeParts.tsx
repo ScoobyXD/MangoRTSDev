@@ -6497,7 +6497,7 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
             onClick={onToggleEmailChat}
             style={{ ...mailPanelSmallButtonStyle, flex: "0 0 auto", minWidth: 34, minHeight: 32, display: "grid", placeItems: "center", padding: "0 8px", marginLeft: 7 }}
           >
-            <ChatIcon color={chatOpen ? "#4f46e5" : "rgba(71,85,105,0.88)"} />
+            <ChatIcon color={chatOpen ? "#475569" : "rgba(71,85,105,0.88)"} />
           </button>
         )}
       </div>
