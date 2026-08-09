@@ -10,6 +10,13 @@ declare
   ingestion_is_legacy boolean;
   archive_is_legacy boolean;
   duplicate_identity_count bigint;
+  redundant_identity_row_count bigint;
+  unsafe_duplicate_row_count bigint;
+  conflicting_email_thread_group_count bigint;
+  conflicting_provider_thread_group_count bigint;
+  ingestion_reference_count bigint;
+  collapsed_identity_row_count bigint;
+  remaining_duplicate_identity_count bigint;
   legacy_active_count bigint;
 begin
   if current_setting('server_version_num')::integer < 170000
@@ -23,6 +30,11 @@ begin
      or to_regclass('public.communications_email_archive_job_items') is null then
     raise exception 'STOP: required V3 email tables are missing';
   end if;
+
+  lock table public.email_connections,
+    public.email_ingestion_jobs,
+    public.communications_email_archive_job_items
+    in share row exclusive mode;
 
   select count(*), count(*) filter (where column_name = any (array[
     'email_connection_id','company_id','connection_type','personal_user_id','provider','account_email',
@@ -95,16 +107,88 @@ begin
       legacy_active_count;
   end if;
 
-  select count(*) into duplicate_identity_count
+  select count(*),coalesce(sum(identity_count-1),0),
+    coalesce(sum(unsafe_row_count),0),
+    count(*) filter (where email_thread_variant_count>1),
+    count(*) filter (where provider_thread_variant_count>1)
+  into duplicate_identity_count,redundant_identity_row_count,
+    unsafe_duplicate_row_count,conflicting_email_thread_group_count,
+    conflicting_provider_thread_group_count
   from (
-    select company_id,email_connection_id,provider_message_id
+    select count(*) as identity_count,
+      count(*) filter (where status is null or status not in ('completed','failed')) as unsafe_row_count,
+      count(distinct email_thread_id) filter (where email_thread_id is not null) as email_thread_variant_count,
+      count(distinct btrim(provider_thread_id)) filter (where nullif(btrim(provider_thread_id),'') is not null) as provider_thread_variant_count
     from email_ingestion_jobs
     group by company_id,email_connection_id,provider_message_id
     having count(*) > 1
   ) duplicates;
-  if duplicate_identity_count <> 0 then
-    raise exception 'STOP: % duplicate stable ingestion job identity group(s) require review',
-      duplicate_identity_count;
+
+  if not ingestion_is_legacy and redundant_identity_row_count <> 0 then
+    raise exception 'STOP: final email_ingestion_jobs contains % duplicate stable identity group(s) and % redundant row(s)',
+      duplicate_identity_count,redundant_identity_row_count;
+  end if;
+
+  if ingestion_is_legacy and redundant_identity_row_count <> 0 then
+    if unsafe_duplicate_row_count <> 0 then
+      raise exception 'STOP: % duplicate stable identity row(s) are not inactive completed/failed legacy history',
+        unsafe_duplicate_row_count;
+    end if;
+    if conflicting_email_thread_group_count <> 0 then
+      raise exception 'STOP: % duplicate stable identity group(s) contain conflicting non-null email_thread_id values',
+        conflicting_email_thread_group_count;
+    end if;
+    if conflicting_provider_thread_group_count <> 0 then
+      raise exception 'STOP: % duplicate stable identity group(s) contain conflicting nonblank provider_thread_id values',
+        conflicting_provider_thread_group_count;
+    end if;
+
+    select count(*) into ingestion_reference_count
+    from pg_constraint
+    where contype='f'
+      and confrelid='public.email_ingestion_jobs'::regclass;
+    if ingestion_reference_count <> 0 then
+      raise exception 'STOP: cannot collapse redundant ingestion metadata because % foreign key(s) reference public.email_ingestion_jobs',
+        ingestion_reference_count;
+    end if;
+
+    with ranked as (
+      select ingestion_job_id,
+        row_number() over (
+          partition by company_id,email_connection_id,provider_message_id
+          order by case
+              when status='completed' and last_error is distinct from 'superseded_by_email_ingestion_cutover' then 0
+              when status='failed' then 1
+              else 2
+            end,
+            case when email_thread_id is not null then 0 else 1 end,
+            case when nullif(btrim(provider_thread_id),'') is not null then 0 else 1 end,
+            created_timestamp asc nulls last,
+            ingestion_job_id asc
+        ) as identity_rank
+      from email_ingestion_jobs
+    )
+    delete from email_ingestion_jobs jobs
+    using ranked
+    where jobs.ingestion_job_id=ranked.ingestion_job_id
+      and ranked.identity_rank>1;
+    get diagnostics collapsed_identity_row_count = row_count;
+    if collapsed_identity_row_count <> redundant_identity_row_count then
+      raise exception 'STOP: expected to collapse exactly % redundant ingestion metadata row(s), deleted %',
+        redundant_identity_row_count,collapsed_identity_row_count;
+    end if;
+
+    select count(*) into remaining_duplicate_identity_count
+    from (
+      select 1
+      from email_ingestion_jobs
+      group by company_id,email_connection_id,provider_message_id
+      having count(*) > 1
+    ) duplicates;
+    if remaining_duplicate_identity_count <> 0 then
+      raise exception 'STOP: % duplicate stable ingestion identity group(s) remain after legacy metadata collapse',
+        remaining_duplicate_identity_count;
+    end if;
   end if;
 
   if ingestion_is_legacy then

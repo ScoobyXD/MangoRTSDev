@@ -1,3 +1,19 @@
+# Process Story: DEV cutover collapses only safe legacy job metadata
+
+With old API and email writers stopped, the read-only PostgreSQL 17 preflight reports only aggregate duplicate counts: groups, exact redundant rows, inactive-status violations, synthetic cutover completions, conflicting Mango/provider thread identities, and foreign-key references
+↓
+The preflight says READY only for a coherent legacy schema whose duplicate rows are all completed or failed, agree on every nonempty thread identity, and have no foreign-key dependents; final-schema duplicates and every unsafe state remain STOP
+↓
+The one human-run transaction locks the three cutover tables and rechecks every shape and data gate before its first write
+↓
+For each safe legacy identity, one permanent marker wins deterministically: genuine completion before failure before synthetic cutover completion; within that class a row carrying the agreed thread metadata wins, followed by earliest creation time and ascending UUID
+↓
+The transaction deletes exactly the reported redundant `email_ingestion_jobs` metadata rows, asserts that no duplicate remains, and leaves email threads, messages, attachments, and attachment relationships byte-for-byte unchanged
+↓
+Only then does the transaction finish the SQS schema conversion and create the exact unique stable-identity index; a final-schema rerun safely preserves the same data and final contract
+
+Last updated: 2026-08-09
+
 # Process Story: New mail crosses SQS once and realtime follows durable truth
 
 A signed Nylas `message.created` webhook resolves the exact permanent personal or shared email connection
@@ -474,7 +490,7 @@ EMAIL121A - Provider 401/403 and exact 404 `grant.not_found` park only that perm
 
 EMAIL121B - This phase propagates only Node-wide email relationships. When a message becomes complete, the message upsert and insertion of its missing relationships to every current Node-wide destination of that thread commit atomically. It does not copy the whole thread, create a relationship for an unknown/unplaced thread, grant access, choose a Node, or propagate textbox-specific placement. Chats, shared drafts, picker redesign, and automatic textbox association remain outside this phase.
 
-EMAIL121C - The DEV cutover preflight refuses to proceed while any legacy database-delivered ingestion or archive item is pending, processing, or retrying. Those items must finish under the old deployment or receive deliberate operator review before the SQS schema transaction. The cutover does not merge, supersede, translate, or recreate job identities.
+EMAIL121C - The DEV cutover preflight refuses to proceed while any legacy database-delivered ingestion or archive item is pending, processing, or retrying. It reports aggregate stable-identity duplicate groups, exact redundant rows, inactive-status violations, synthetic cutover completions, conflicting non-null Mango thread IDs, conflicting nonblank provider thread IDs, and foreign-key references without exposing mailbox/provider identifiers. A coherent legacy duplicate group may collapse only when every row is completed or failed, every populated thread identity agrees, and no foreign key references ingestion jobs. The locked transaction rechecks those gates, retains genuine completion before failure before `superseded_by_email_ingestion_cutover` synthetic completion, then within that class prefers agreed thread metadata, earliest `created_timestamp`, and ascending `ingestion_job_id`. It deletes only redundant `email_ingestion_jobs` metadata, asserts the exact count and zero remaining duplicates, preserves all email/thread/attachment data byte-for-byte, then creates the unique stable identity index. Final-schema duplicates remain STOP; an already-final unique state reruns safely without changing its data or final contract.
 
 EMAIL121D - My Triage and Shared Triage keep the provider-thread indicator when a collapsed card represents multiple real messages. Their Node indicator is enriched only from an accessible Node-wide relationship matching the exact company, permanent email connection, and provider message ID. A placement in another mailbox with the same provider message ID never supplies the icon. After the email transaction commits, the worker durably inserts one narrow outbox event whose deterministic identity derives from the stable ingestion job plus the exact company/audience scope. Personal delivery uses only `job.company_id`, exact user, and exact account; it never fans out across the user's other company memberships. Outbox-insert failure leaves the SQS item undeleted. Once that row exists, duplicate completion is an outbox no-op except an optional post-commit Valkey wake, and Valkey failure is recovered asynchronously without repeating provider work.
 

@@ -44,6 +44,15 @@ func TestEmailSQSSchemaUsesPermanentIdentityAndProviderAttemptFence(t *testing.T
 		"email sqs tables must be coherently all-legacy or all-final",
 		"current_setting('server_version_num')::integer < 170000",
 		"current_setting('server_version_num')::integer >= 180000",
+		"lock table public.email_connections",
+		"status is null or status not in ('completed','failed')",
+		"conflicting non-null email_thread_id values",
+		"conflicting nonblank provider_thread_id values",
+		"superseded_by_email_ingestion_cutover",
+		"created_timestamp asc nulls last",
+		"ingestion_job_id asc",
+		"get diagnostics collapsed_identity_row_count = row_count",
+		"duplicate stable ingestion identity group(s) remain after legacy metadata collapse",
 	} {
 		if !strings.Contains(migration, required) {
 			t.Errorf("migration is missing %q", required)
@@ -57,6 +66,11 @@ func TestEmailSQSSchemaUsesPermanentIdentityAndProviderAttemptFence(t *testing.T
 	}
 	if strings.Contains(schema, "idx_email_ingestion_jobs_claim") || strings.Contains(schema, "idx_communications_email_archive_job_items_claim") {
 		t.Fatal("canonical schema retains a legacy email claimant index")
+	}
+	for _, forbiddenDelete := range []string{"delete from email_threads", "delete from email_messages", "delete from attachments", "delete from attachment_relationships"} {
+		if strings.Contains(migration, forbiddenDelete) {
+			t.Errorf("migration deletes durable email truth with %q", forbiddenDelete)
+		}
 	}
 }
 
@@ -88,6 +102,13 @@ func TestEmailSQSOperatorSQLIsPlainReviewedPostgreSQL(t *testing.T) {
 		"ready: all three email sqs tables are in the coherent legacy shape",
 		"ready: all three email sqs tables are in the coherent final shape",
 		"stop: email sqs tables must be coherently all-legacy or all-final",
+		"redundant_legacy_rows_to_collapse",
+		"unsafe_duplicate_rows",
+		"synthetic_completed_duplicate_rows",
+		"conflicting_email_thread_group_count",
+		"conflicting_provider_thread_group_count",
+		"ingestion_job_foreign_keys",
+		"ready: legacy migration will collapse exactly %s redundant inactive ingestion job metadata row(s)",
 	} {
 		if !strings.Contains(preflight, required) {
 			t.Errorf("preflight is missing %q", required)

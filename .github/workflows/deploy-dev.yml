@@ -41,6 +41,7 @@ env:
 
 jobs:
   deploy:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: development
 
@@ -350,7 +351,7 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          : "${TF_PLAN_AGE_RECIPIENT:?Set protected development environment variable TF_PLAN_AGE_RECIPIENT}"
+          : "${TF_PLAN_AGE_RECIPIENT:?Set development environment variable TF_PLAN_AGE_RECIPIENT after the human deployment-gate decision}"
           sudo apt-get update
           sudo apt-get install --yes age
           PLAN_ARCHIVE="$RUNNER_TEMP/mangorts-dev-tfplan.tar"
@@ -386,8 +387,8 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          : "${TF_PLAN_AGE_IDENTITY:?Set dedicated protected development environment secret TF_PLAN_AGE_IDENTITY}"
-          : "${TF_PLAN_AGE_RECIPIENT:?Set protected development environment variable TF_PLAN_AGE_RECIPIENT}"
+          : "${TF_PLAN_AGE_IDENTITY:?Set dedicated development environment secret TF_PLAN_AGE_IDENTITY after the human deployment-gate decision}"
+          : "${TF_PLAN_AGE_RECIPIENT:?Set development environment variable TF_PLAN_AGE_RECIPIENT after the human deployment-gate decision}"
           sudo apt-get update
           sudo apt-get install --yes age
           CIPHERTEXT="$RUNNER_TEMP/mangorts-dev-tfplan-ciphertext/mangorts-dev-tfplan.tar.age"
@@ -603,7 +604,8 @@ jobs:
             echo "- Worker enabled: ${EMAIL_WORKER_ENABLED}"
             echo "- Schedule enabled: ${EMAIL_SCHEDULE_ENABLED}"
             echo ""
-            echo "Review the exact Terraform plan output in this protected run, then dispatch apply-reviewed-plan with this run ID and the exact same inputs. Only the age-encrypted plan bundle is retained between runs."
+            echo "Review the exact Terraform plan output in this environment-scoped manual run, then dispatch apply-reviewed-plan from main with this run ID and the exact same inputs. Only the age-encrypted plan bundle is retained between runs."
+            echo "This is manual exact-plan self-review, not independent approval: the current private-repository plan cannot require environment reviewers or branch protection, and a repository writer could modify this workflow."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove runner-local Terraform secret material
