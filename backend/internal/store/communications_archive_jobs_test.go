@@ -40,14 +40,14 @@ func TestCommunicationsArchiveJobSkipsDuplicateActiveItems(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateCommunicationsArchiveJob second: %v", err)
 	}
-	if second.CreatedItemCount != 1 || len(second.Items) != 2 || second.Items[0].JobItemID != first.Items[0].JobItemID || second.Items[1].MessageID != "message-3" {
+	if second.JobID != first.JobID || second.CreatedItemCount != 1 || len(second.Items) != 2 || second.Items[0].JobItemID != first.Items[0].JobItemID || second.Items[1].MessageID != "message-3" {
 		t.Fatalf("second job = %+v, want the existing active marker plus one new item", second)
 	}
 	firstItems, err := repo.ListCommunicationsArchiveJobItemsContext(context.Background(), first.JobID)
 	if err != nil {
 		t.Fatalf("ListCommunicationsArchiveJobItems: %v", err)
 	}
-	if len(firstItems) != 2 || len(second.Items) != 2 {
+	if len(firstItems) != 3 || len(second.Items) != 2 {
 		t.Fatalf("stable items first=%+v second=%+v", firstItems, second.Items)
 	}
 }
@@ -76,13 +76,13 @@ func TestCommunicationsArchiveJobRetryAndFinalFailureBookkeeping(t *testing.T) {
 	itemID := job.Items[0].JobItemID
 	for attemptNumber := 1; attemptNumber <= 3; attemptNumber++ {
 		attempt, started, err := repo.StartCommunicationsArchiveJobItemAttemptContext(context.Background(), itemID)
-		if err != nil || !started || attempt.AttemptCount != attemptNumber || attempt.Status != CommunicationsArchiveJobItemStatusProcessing {
+		if err != nil || !started || attempt.ProviderAttemptCount != attemptNumber || attempt.Status != CommunicationsArchiveJobItemStatusProcessing {
 			t.Fatalf("attempt %d = %+v started=%v err=%v", attemptNumber, attempt, started, err)
 		}
 		if attempt.AttemptToken == "" {
 			t.Fatalf("attempt %d has no settlement token", attemptNumber)
 		}
-		if err := repo.FailCommunicationsArchiveJobItemAttemptContext(context.Background(), itemID, attempt.AttemptToken, "nylas_request_rejected"); err != nil {
+		if err := repo.FailCommunicationsArchiveJobItemAttemptContext(context.Background(), itemID, attempt.AttemptToken, "nylas_request_rejected", nil); err != nil {
 			t.Fatalf("fail attempt %d: %v", attemptNumber, err)
 		}
 	}
@@ -90,7 +90,7 @@ func TestCommunicationsArchiveJobRetryAndFinalFailureBookkeeping(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListCommunicationsArchiveJobItems: %v", err)
 	}
-	if len(items) != 1 || items[0].Status != CommunicationsArchiveJobItemStatusFailed || items[0].AttemptCount != 3 || items[0].AttemptToken != "" || items[0].FailedTimestamp == nil || items[0].LastError != "nylas_request_rejected" {
+	if len(items) != 1 || items[0].Status != CommunicationsArchiveJobItemStatusFailed || items[0].ProviderAttemptCount != 3 || items[0].AttemptToken != "" || items[0].FailedTimestamp == nil || items[0].LastError != "nylas_request_rejected" {
 		t.Fatalf("final items = %+v, want failed item", items)
 	}
 }
@@ -124,10 +124,10 @@ func TestCommunicationsArchiveJobSettlementRejectsStaleAttemptToken(t *testing.T
 	if err != nil || !started || first.AttemptToken == second.AttemptToken {
 		t.Fatalf("start second attempt: first=%+v second=%+v started=%v err=%v", first, second, started, err)
 	}
-	if err := repo.CompleteCommunicationsArchiveJobItemAttemptContext(context.Background(), second.JobItemID, first.AttemptToken); !errors.Is(err, ErrNotFound) {
+	if err := repo.CompleteCommunicationsArchiveJobItemAttemptContext(context.Background(), second.JobItemID, first.AttemptToken, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("stale settlement error=%v, want ErrNotFound", err)
 	}
-	if err := repo.CompleteCommunicationsArchiveJobItemAttemptContext(context.Background(), second.JobItemID, second.AttemptToken); err != nil {
+	if err := repo.CompleteCommunicationsArchiveJobItemAttemptContext(context.Background(), second.JobItemID, second.AttemptToken, nil); err != nil {
 		t.Fatalf("current settlement: %v", err)
 	}
 }

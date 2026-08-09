@@ -39,8 +39,10 @@ func TestEmailSQSSchemaUsesPermanentIdentityAndProviderAttemptFence(t *testing.T
 			"provider_attempt_count",
 			"attempt_token",
 			"enqueue_source_id",
+			"sqs_accepted_timestamp",
 			"status in ('accepted','processing','completed','parked','exhausted')",
 			"idx_email_ingestion_jobs_stable_message",
+			"idx_email_relationships_one_node_textbox_per_message",
 		} {
 			if !strings.Contains(compact, strings.Join(strings.Fields(required), "")) {
 				t.Errorf("%s is missing %q", label, required)
@@ -48,11 +50,16 @@ func TestEmailSQSSchemaUsesPermanentIdentityAndProviderAttemptFence(t *testing.T
 		}
 	}
 	for _, required := range []string{
-		"communications_email_archive_job_items must be exact legacy 12 or exact final 13 columns",
-		"email_ingestion_jobs must be exact legacy 16 or exact final 19 columns",
+		"communications_email_archive_job_items must be exact legacy 12 or exact final 11 columns",
+		"email_ingestion_jobs must be exact legacy 16 or exact final 17 columns",
 		"email_connections must have exactly the approved 13 columns",
-		"alter table communications_email_archive_job_items\n      add column attempt_token uuid",
+		"add column provider_attempt_count integer not null default 0",
+		"add column attempt_token uuid",
+		"add column enqueue_source_id text not null default ''",
 		"drop index if exists idx_email_ingestion_jobs_claim",
+		"drop trigger if exists trg_email_relationships_one_node_per_thread on email_relationships",
+		"drop function if exists mangorts_enforce_one_node_per_email_thread()",
+		"drop index if exists idx_email_relationships_one_node_textbox_per_message",
 		"drop index if exists idx_communications_email_archive_job_items_claim",
 		"provider_attempt_count between 0 and 3",
 		"email sqs tables must be coherently all-legacy or all-final",
@@ -67,6 +74,7 @@ func TestEmailSQSSchemaUsesPermanentIdentityAndProviderAttemptFence(t *testing.T
 		"ingestion_job_id asc",
 		"get diagnostics collapsed_identity_row_count = row_count",
 		"duplicate stable ingestion identity group(s) remain after legacy metadata collapse",
+		"exact email message/node pair(s) are linked to more than one textbox",
 	} {
 		if !strings.Contains(migration, required) {
 			t.Errorf("migration is missing %q", required)
@@ -80,6 +88,14 @@ func TestEmailSQSSchemaUsesPermanentIdentityAndProviderAttemptFence(t *testing.T
 	}
 	if strings.Contains(schema, "idx_email_ingestion_jobs_claim") || strings.Contains(schema, "idx_communications_email_archive_job_items_claim") {
 		t.Fatal("canonical schema retains a legacy email claimant index")
+	}
+	if strings.Contains(schema, "trg_email_relationships_one_node_per_thread") || strings.Contains(schema, "mangorts_enforce_one_node_per_email_thread") {
+		t.Fatal("canonical schema retains the obsolete one-thread/one-Node guard")
+	}
+	for _, obsolete := range []string{"available_at", "processing_started_at"} {
+		if strings.Contains(schema, obsolete) {
+			t.Errorf("canonical schema retains obsolete email SQS field %q", obsolete)
+		}
 	}
 	for _, forbiddenDelete := range []string{"delete from email_threads", "delete from email_messages", "delete from attachments", "delete from attachment_relationships"} {
 		if strings.Contains(migration, forbiddenDelete) {
@@ -109,11 +125,19 @@ func TestEmailSQSOperatorSQLIsPlainReviewedPostgreSQL(t *testing.T) {
 		t.Fatal("operator apply is not one explicit transaction")
 	}
 	for _, required := range []string{
+		"drop trigger if exists trg_email_relationships_one_node_per_thread on email_relationships",
+		"drop function if exists mangorts_enforce_one_node_per_email_thread()",
+	} {
+		if !strings.Contains(apply, required) {
+			t.Errorf("operator apply is missing %q", required)
+		}
+	}
+	for _, required := range []string{
 		"exact approved 13-column shape",
 		"exact approved legacy 16-column shape",
-		"exact approved final 19-column shape",
+		"exact approved final 17-column shape",
 		"exact approved legacy 12-column shape",
-		"exact approved final 13-column shape",
+		"exact approved final 11-column shape",
 		"ready: all three email sqs tables are in the coherent legacy shape",
 		"ready: all three email sqs tables are in the coherent final shape",
 		"stop: email sqs tables must be coherently all-legacy or all-final",
@@ -124,6 +148,8 @@ func TestEmailSQSOperatorSQLIsPlainReviewedPostgreSQL(t *testing.T) {
 		"conflicting_provider_thread_group_count",
 		"ingestion_job_foreign_keys",
 		"ready: legacy migration will collapse exactly %s redundant inactive ingestion job metadata row(s)",
+		"ready: each exact email message is linked to at most one textbox in each node",
+		"stop: one or more exact email messages are linked to multiple textboxes in the same node",
 	} {
 		if !strings.Contains(preflight, required) {
 			t.Errorf("preflight is missing %q", required)

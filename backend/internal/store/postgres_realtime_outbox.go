@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"time"
 )
 
 const realtimeOutboxContiguousPublishedSequenceSQL = `coalesce(
@@ -100,6 +99,15 @@ func (r *PostgresRepo) enqueueRealtimeOutboxTx(ctx context.Context, tx *sql.Tx, 
 		input.ResourceID, input.Permission, input.ResourceRevision, []byte(input.Payload), allowed, input.AudienceRestricted,
 	)
 	return scanRealtimeOutboxEvent(row)
+}
+
+func (r *PostgresRepo) enqueueRealtimeOutboxInputsTx(ctx context.Context, tx *sql.Tx, inputs []RealtimeOutboxInput) error {
+	for _, input := range inputs {
+		if _, err := r.enqueueRealtimeOutboxTx(ctx, tx, input); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *PostgresRepo) ClaimRealtimeOutbox(ctx context.Context, query RealtimeOutboxClaimQuery) ([]RealtimeOutboxEvent, error) {
@@ -308,5 +316,3 @@ func realtimeOutboxMutationResult(result sql.Result, err error) error {
 	}
 	return nil
 }
-
-var _ = time.Second

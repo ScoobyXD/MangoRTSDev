@@ -1621,17 +1621,16 @@ create table if not exists communications_email_archive_job_items (
   archive_job_id uuid not null references communications_email_archive_jobs(archive_job_id) on delete cascade,
   message_id text not null,
   status text not null default 'pending',
-  attempt_count integer not null default 0,
-  attempt_token uuid,
-  last_error text not null default '',
-  available_at timestamptz not null default now(),
-  processing_started_at timestamptz,
+	provider_attempt_count integer not null default 0,
+	attempt_token uuid,
+	last_error text not null default '',
   archived_timestamp timestamptz,
   failed_timestamp timestamptz,
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
   constraint communications_email_archive_job_items_message_chk check (btrim(message_id) <> ''),
-  constraint communications_email_archive_job_items_status_chk check (status in ('pending', 'processing', 'archived', 'failed')),
+	constraint communications_email_archive_job_items_status_chk check (status in ('pending', 'processing', 'archived', 'failed')),
+	constraint communications_email_archive_job_items_provider_attempt_chk check (provider_attempt_count between 0 and 3),
   unique (archive_job_id, message_id)
 );
 
@@ -3520,46 +3519,9 @@ create unique index if not exists idx_email_relationships_active_identity
     coalesce(resource_textbox_id, '')
   );
 
-create or replace function mangorts_enforce_one_node_per_email_thread()
-returns trigger language plpgsql as $$
-begin
-  if new.resource_type <> 'node' then
-    return new;
-  end if;
-  perform pg_advisory_xact_lock(hashtextextended(new.company_id::text || ':' || new.email_thread_id::text, 0));
-  if exists (
-    select 1
-    from email_relationships relationship
-    where relationship.company_id=new.company_id
-      and relationship.email_thread_id=new.email_thread_id
-      and relationship.resource_type='node'
-      and relationship.resource_id<>new.resource_id
-      and relationship.email_relationship_id<>new.email_relationship_id
-  ) then
-    raise exception 'email_thread_already_linked_to_another_node' using errcode='23505';
-  end if;
-  if new.resource_textbox_id is not null and exists (
-    select 1
-    from email_relationships relationship
-    where relationship.company_id=new.company_id
-      and relationship.email_message_id=new.email_message_id
-      and relationship.resource_type='node'
-      and relationship.resource_id=new.resource_id
-      and relationship.resource_textbox_id is not null
-      and relationship.resource_textbox_id<>new.resource_textbox_id
-      and relationship.email_relationship_id<>new.email_relationship_id
-  ) then
-    raise exception 'email_message_already_linked_to_another_textbox' using errcode='23505';
-  end if;
-  return new;
-end;
-$$;
-
-drop trigger if exists trg_email_relationships_one_node_per_thread on email_relationships;
-create trigger trg_email_relationships_one_node_per_thread
-before insert or update of company_id,email_thread_id,email_message_id,resource_type,resource_id,resource_textbox_id
-on email_relationships
-for each row execute function mangorts_enforce_one_node_per_email_thread();
+create unique index if not exists idx_email_relationships_one_node_textbox_per_message
+  on email_relationships(company_id, email_message_id, resource_id)
+  where resource_type='node' and resource_textbox_id is not null;
 
 create table if not exists node_textboxes_history (
   company_id uuid not null,
@@ -3914,13 +3876,11 @@ create table if not exists email_ingestion_jobs (
   provider_thread_id text not null default '',
   priority smallint not null default 30,
   status text not null default 'accepted',
-  attempt_count integer not null default 0,
-  provider_attempt_count integer not null default 0,
-  attempt_token uuid,
-  enqueue_source_id text not null default '',
-  last_error text not null default '',
-  available_at timestamptz not null default now(),
-  processing_started_at timestamptz,
+	provider_attempt_count integer not null default 0,
+	attempt_token uuid,
+	enqueue_source_id text not null default '',
+	sqs_accepted_timestamp timestamptz,
+	last_error text not null default '',
   completed_timestamp timestamptz,
   failed_timestamp timestamptz,
   created_timestamp timestamptz not null default now(),
@@ -3934,8 +3894,7 @@ create table if not exists email_ingestion_jobs (
   constraint email_ingestion_jobs_status_chk check (
     status in ('accepted','processing','completed','parked','exhausted')
   ),
-  constraint email_ingestion_jobs_attempt_chk check (attempt_count >= 0),
-  constraint email_ingestion_jobs_provider_attempt_chk check (provider_attempt_count between 0 and 3)
+	constraint email_ingestion_jobs_provider_attempt_chk check (provider_attempt_count between 0 and 3)
 );
 create unique index if not exists idx_email_ingestion_jobs_stable_message
   on email_ingestion_jobs(company_id,email_connection_id,provider_message_id);

@@ -19,7 +19,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -447,7 +446,7 @@ func (s *Server) handleCommunicationsMessagesArchiveBatch(w http.ResponseWriter,
 		return
 	}
 	for key := range r.URL.Query() {
-		if key != "company_id" && key != "shared_inbox_id" && key != "account_email" && key != "background" {
+		if key != "company_id" && key != "shared_inbox_id" && key != "account_email" {
 			writeError(w, http.StatusBadRequest, "unsupported_email_query_param")
 			return
 		}
@@ -487,81 +486,74 @@ func (s *Server) handleCommunicationsMessagesArchiveBatch(w http.ResponseWriter,
 		writeError(w, http.StatusBadRequest, "email_message_ids_required")
 		return
 	}
-	if isTruthyQueryValue(r.URL.Query().Get("background")) {
-		job, err := s.repo.CreateCommunicationsArchiveJobContext(r.Context(), store.CommunicationsArchiveJobInput{
-			ActorUserID:   actor.User.UserID,
-			CompanyID:     companyID,
-			SharedInboxID: sharedInboxID,
-			Connection:    connection,
-			MessageIDs:    messageIDs,
-		})
-		if err != nil {
-			log.Printf("failed to create communications archive job user_id=%s company_id=%s shared_inbox_id=%s: %v", actor.User.UserID, companyID, sharedInboxID, err)
-			writeError(w, http.StatusInternalServerError, "failed_to_create_archive_job")
-			return
-		}
-		if s.emailQueue == nil {
-			writeError(w, http.StatusServiceUnavailable, "email_queue_not_configured")
-			return
-		}
-		for _, item := range job.Items {
-			if err := s.emailQueue.Send(r.Context(), emailqueue.Message{
-				SchemaVersion: emailqueue.SchemaVersion, Kind: emailqueue.KindArchiveItem,
-				JobID: item.JobItemID, CompanyID: companyID, EmailConnectionID: connection.EmailConnectionID,
-			}); err != nil {
-				writeError(w, http.StatusServiceUnavailable, "failed_to_queue_archive_job")
-				return
-			}
-		}
-		writeJSON(w, http.StatusAccepted, map[string]any{
-			"job_id":       job.JobID,
-			"accepted_ids": job.AcceptedMessageIDs,
-			"archived_ids": []string{},
-			"failed":       []communicationsArchiveBatchFailure{},
-		})
+	if s.emailQueue == nil {
+		writeError(w, http.StatusServiceUnavailable, "email_queue_not_configured")
 		return
 	}
-
-	archiveFolderID := ""
-	if connection.Provider != "google" {
-		emailFolders, err := s.communicationsFolders(r.Context(), connection, false)
-		if err != nil {
-			s.writeNylasError(w, r, connection, err)
-			return
-		}
-		archiveFolderID = findNylasArchiveFolderID(emailFolders)
-		if archiveFolderID == "" {
-			writeError(w, http.StatusConflict, "archive_folder_unavailable")
-			return
-		}
-	}
-
-	result := s.archiveCommunicationsMessagesBatch(r.Context(), connection, companyID, sharedInboxID, messageIDs, archiveFolderID)
-	if result.retryAfter != "" {
-		w.Header().Set("Retry-After", result.retryAfter)
-	}
-	if err := s.applyCommunicationsArchiveBatchResult(connection, companyID, sharedInboxID, result); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_store_archived_email_batch")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"archived_ids": result.ArchivedIDs,
-		"failed":       result.Failed,
+	job, err := s.repo.CreateCommunicationsArchiveJobContext(r.Context(), store.CommunicationsArchiveJobInput{
+		ActorUserID: actor.User.UserID, CompanyID: companyID, SharedInboxID: sharedInboxID,
+		Connection: connection, MessageIDs: messageIDs,
 	})
+	if err != nil {
+		log.Printf("failed to create communications archive job user_id=%s company_id=%s shared_inbox_id=%s: %v", actor.User.UserID, companyID, sharedInboxID, err)
+		writeError(w, http.StatusInternalServerError, "failed_to_create_archive_job")
+		return
+	}
+	for _, item := range job.Items {
+		if !store.CommunicationsArchiveJobItemStatusIsActive(item.Status) {
+			continue
+		}
+		if err := s.emailQueue.Send(r.Context(), emailqueue.Message{
+			SchemaVersion: emailqueue.SchemaVersion, Kind: emailqueue.KindArchiveItem,
+			JobID: item.JobItemID, CompanyID: companyID, EmailConnectionID: connection.EmailConnectionID,
+		}); err != nil {
+			writeError(w, http.StatusServiceUnavailable, "failed_to_queue_archive_job")
+			return
+		}
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"archive_job": job})
 }
 
-func (s *Server) applyCommunicationsArchiveBatchResult(connection domain.UserEmailConnection, _, _ string, result communicationsArchiveBatchResult) error {
-	if len(result.ArchivedIDs) == 0 {
-		return nil
+func (s *Server) handleCommunicationsArchiveJobByID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
 	}
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	jobID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/communications/archive-jobs/"), "/")
+	if jobID == "" || strings.Contains(jobID, "/") {
+		writeError(w, http.StatusNotFound, "archive_job_not_found")
+		return
+	}
+	job, err := s.repo.GetCommunicationsArchiveJobContext(r.Context(), jobID)
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusNotFound, "archive_job_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_load_archive_job")
+		return
+	}
+	if job.ActorUserID != actor.User.UserID || job.CompanyID == "" {
+		writeError(w, http.StatusNotFound, "archive_job_not_found")
+		return
+	}
+	if !requireCompanyAccess(w, r, job.CompanyID) {
+		return
+	}
+	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"archive_job": job})
+}
+
+func (s *Server) applyCommunicationsArchivedMessage(connection domain.UserEmailConnection, messageID string, message NylasMessage) {
 	now := time.Now().UTC()
 	cacheScope := communicationsConnectionCacheScope(connection)
-	s.commCache.removeMessagesFromPages(connection.UserID, cacheScope, result.ArchivedIDs, "primary", now)
-	for _, message := range result.Messages {
-		s.commCache.patchMessagePages(connection.UserID, cacheScope, message, now)
-	}
-	s.invalidateCommunicationsMessageMutations(connection.UserID, cacheScope, result.ArchivedIDs, true)
-	return nil
+	s.commCache.removeMessagesFromPages(connection.UserID, cacheScope, []string{messageID}, "primary", now)
+	s.commCache.patchMessagePages(connection.UserID, cacheScope, message, now)
+	s.invalidateCommunicationsMessageMutations(connection.UserID, cacheScope, []string{messageID}, true)
 }
 func (s *Server) handleCommunicationsThreadByID(w http.ResponseWriter, r *http.Request) {
 	threadID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/communications/threads/"), "/")
@@ -620,7 +612,7 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 		action = "attachment"
 		attachmentID = strings.TrimSpace(parts[2])
 	}
-	if messageID == "" || len(parts) > 3 || (len(parts) == 2 && action != "archive" && action != "unarchive" && action != "ingest") || (len(parts) == 3 && action != "attachment") {
+	if messageID == "" || len(parts) > 3 || (len(parts) == 2 && action != "unarchive" && action != "ingest") || (len(parts) == 3 && action != "attachment") {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
@@ -691,14 +683,6 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 			return
 		}
 		s.ingestCommunicationsMessage(w, r, connection, companyID, sharedInboxID, messageID, actor.User.UserID)
-		return
-	}
-	if action == "archive" {
-		if r.Method != http.MethodPost {
-			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
-			return
-		}
-		s.archiveCommunicationsMessage(w, r, connection, companyID, sharedInboxID, messageID)
 		return
 	}
 	if action == "unarchive" {
@@ -809,13 +793,19 @@ func (s *Server) ingestCommunicationsMessage(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if connection.EmailConnectionID != "" {
-		job, _, err := s.repo.EnsureCommunicationsEmailIngestionJobContext(r.Context(), store.CommunicationsEmailIngestionJobInput{
+		job, created, err := s.repo.EnsureCommunicationsEmailIngestionJobContext(r.Context(), store.CommunicationsEmailIngestionJobInput{
 			CompanyID: companyID, EmailConnectionID: connection.EmailConnectionID,
 			EmailThreadID: thread.EmailThreadID, ProviderMessageID: message.ID,
 			ProviderThreadID: message.ThreadID, Priority: store.CommunicationsEmailIngestionPriorityVisible,
-			EnqueueSourceID: requestCorrelationID(r),
+			EnqueueSourceID: store.CommunicationsEmailUserProducerFingerprint(actorUserID),
 		})
-		if err != nil || s.enqueueCommunicationsEmailIngestionJob(r.Context(), job) != nil {
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, "failed_to_queue_email_ingestion")
+			return
+		}
+		if (created || (job.Status == store.CommunicationsEmailIngestionJobAccepted && job.SQSAcceptedTimestamp == nil &&
+			job.EnqueueSourceID == store.CommunicationsEmailUserProducerFingerprint(actorUserID))) &&
+			s.enqueueCommunicationsEmailIngestionJob(r.Context(), job) != nil {
 			writeError(w, http.StatusServiceUnavailable, "failed_to_queue_email_ingestion")
 			return
 		}
@@ -876,34 +866,6 @@ func (s *Server) downloadCommunicationsAttachment(w http.ResponseWriter, r *http
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(content)
 }
-func (s *Server) archiveCommunicationsMessage(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection, companyID, sharedInboxID, messageID string) {
-	archiveFolderID := ""
-	if connection.Provider != "google" {
-		emailFolders, err := s.communicationsFolders(r.Context(), connection, false)
-		if err != nil {
-			s.writeNylasError(w, r, connection, err)
-			return
-		}
-		archiveFolderID = findNylasArchiveFolderID(emailFolders)
-		if archiveFolderID == "" {
-			writeError(w, http.StatusConflict, "archive_folder_unavailable")
-			return
-		}
-	}
-
-	archived, err := s.archiveCommunicationsMessageByID(r.Context(), connection, companyID, sharedInboxID, messageID, archiveFolderID)
-	if err != nil {
-		s.writeNylasError(w, r, connection, err)
-		return
-	}
-	now := time.Now().UTC()
-	cacheScope := communicationsConnectionCacheScope(connection)
-	s.commCache.removeMessagesFromPages(connection.UserID, cacheScope, []string{messageID}, "primary", now)
-	s.commCache.patchMessagePages(connection.UserID, cacheScope, archived, now)
-	s.invalidateCommunicationsMessageMutations(connection.UserID, cacheScope, []string{messageID}, true)
-	writeJSON(w, http.StatusOK, map[string]any{"message": archived})
-}
-
 func (s *Server) unarchiveCommunicationsMessage(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection, companyID, sharedInboxID, messageID string) {
 	inboxFolderID := ""
 	if connection.Provider != "google" {
@@ -930,113 +892,6 @@ func (s *Server) unarchiveCommunicationsMessage(w http.ResponseWriter, r *http.R
 	s.commCache.patchMessagePages(connection.UserID, cacheScope, restored, now)
 	s.invalidateCommunicationsMessageMutations(connection.UserID, cacheScope, []string{messageID}, true)
 	writeJSON(w, http.StatusOK, map[string]any{"message": restored})
-}
-
-type communicationsArchiveBatchFailure struct {
-	MessageID string `json:"message_id"`
-	Error     string `json:"error"`
-}
-
-type communicationsArchiveBatchResult struct {
-	ArchivedIDs []string                            `json:"archived_ids"`
-	Failed      []communicationsArchiveBatchFailure `json:"failed"`
-	Messages    []NylasMessage
-	retryAfter  string
-}
-
-func (s *Server) archiveCommunicationsMessagesBatch(ctx context.Context, connection domain.UserEmailConnection, companyID, sharedInboxID string, messageIDs []string, archiveFolderID string) communicationsArchiveBatchResult {
-	workers := communicationsArchiveBatchConcurrency
-	if workers <= 0 || workers > len(messageIDs) {
-		workers = len(messageIDs)
-	}
-	jobs := make(chan string)
-	var mu sync.Mutex
-	result := communicationsArchiveBatchResult{
-		ArchivedIDs: make([]string, 0, len(messageIDs)),
-		Failed:      []communicationsArchiveBatchFailure{},
-	}
-	var wg sync.WaitGroup
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for messageID := range jobs {
-				archived, err := s.archiveCommunicationsMessageByID(ctx, connection, companyID, sharedInboxID, messageID, archiveFolderID)
-				mu.Lock()
-				if err != nil {
-					result.Failed = append(result.Failed, communicationsArchiveBatchFailure{
-						MessageID: messageID,
-						Error:     communicationsMutationErrorCode(err),
-					})
-					if result.retryAfter == "" {
-						var apiErr NylasAPIError
-						if errors.As(err, &apiErr) {
-							result.retryAfter = strings.TrimSpace(apiErr.RetryAfter)
-						}
-					}
-					var apiErr NylasAPIError
-					if errors.As(err, &apiErr) && (apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden) {
-						s.markCommunicationsConnectionReauthRequired(connection)
-					}
-				} else {
-					result.ArchivedIDs = append(result.ArchivedIDs, firstNonBlank(archived.ID, messageID))
-					result.Messages = append(result.Messages, archived)
-				}
-				mu.Unlock()
-			}
-		}()
-	}
-	for _, messageID := range messageIDs {
-		select {
-		case <-ctx.Done():
-			mu.Lock()
-			result.Failed = append(result.Failed, communicationsArchiveBatchFailure{
-				MessageID: messageID,
-				Error:     communicationsMutationErrorCode(ctx.Err()),
-			})
-			mu.Unlock()
-		case jobs <- messageID:
-		}
-	}
-	close(jobs)
-	wg.Wait()
-	return result
-}
-
-func (s *Server) archiveCommunicationsMessageByID(ctx context.Context, connection domain.UserEmailConnection, companyID, sharedInboxID, messageID, archiveFolderID string) (NylasMessage, error) {
-	messageID = strings.TrimSpace(messageID)
-	if messageID == "" {
-		return NylasMessage{}, store.ErrInvalid
-	}
-	folders := []string{strings.TrimSpace(archiveFolderID)}
-	if connection.Provider == "google" {
-		message, err := s.communicationsMessageForFolderMutation(ctx, connection, companyID, sharedInboxID, messageID)
-		if err != nil {
-			return NylasMessage{}, err
-		}
-		folders = archiveMessageFolderIDs(connection.Provider, message.Folders, "")
-	} else if folders[0] == "" {
-		emailFolders, err := s.communicationsFolders(ctx, connection, false)
-		if err != nil {
-			return NylasMessage{}, err
-		}
-		folderID := findNylasArchiveFolderID(emailFolders)
-		if folderID == "" {
-			return NylasMessage{}, errCommunicationsArchiveUnavailable
-		}
-		folders = []string{folderID}
-	}
-
-	var archived NylasMessage
-	err := s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
-		var err error
-		archived, err = s.nylasClient.UpdateMessage(ctx, connection.GrantID, messageID, NylasMessageUpdate{Folders: folders})
-		return err
-	})
-	if archived.ID == "" {
-		archived.ID = messageID
-	}
-	return archived, err
 }
 
 func (s *Server) unarchiveCommunicationsMessageByID(ctx context.Context, connection domain.UserEmailConnection, companyID, sharedInboxID, messageID, inboxFolderID string) (NylasMessage, error) {
@@ -1184,7 +1039,7 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	message = communicationsSendResponseWithLocalContent(message, sendReq)
-	internalMessageID, err := s.persistCommunicationsSentMessage(cleanCompanyID, strings.TrimSpace(r.URL.Query().Get("shared_inbox_id")), connection, message)
+	internalMessageID, err := s.persistCommunicationsSentMessage(r.Context(), cleanCompanyID, strings.TrimSpace(r.URL.Query().Get("shared_inbox_id")), connection, message)
 	if err != nil {
 		log.Printf("communications sent message persistence failed user_id=%s message_id=%s err=%v", connection.UserID, message.ID, err)
 		writeError(w, http.StatusInternalServerError, "failed_to_store_sent_email")
@@ -1205,7 +1060,7 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusCreated, map[string]any{"message": message})
 }
 
-func (s *Server) persistCommunicationsSentMessage(companyID, sharedInboxID string, connection domain.UserEmailConnection, message NylasMessage) (string, error) {
+func (s *Server) persistCommunicationsSentMessage(ctx context.Context, companyID, sharedInboxID string, connection domain.UserEmailConnection, message NylasMessage) (string, error) {
 	companyID = strings.TrimSpace(companyID)
 	sharedInboxID = strings.TrimSpace(sharedInboxID)
 	if companyID == "" || strings.TrimSpace(message.ID) == "" {
@@ -1225,7 +1080,7 @@ func (s *Server) persistCommunicationsSentMessage(companyID, sharedInboxID strin
 		input.PersonalAccountEmail = normalizeEmailForCompare(connection.AccountEmail)
 		input.AccountEmail = input.PersonalAccountEmail
 	}
-	thread, err := s.repo.UpsertCommunicationsEmailThread(input)
+	thread, err := s.repo.UpsertCommunicationsEmailThreadContext(ctx, input)
 	if err != nil {
 		return "", err
 	}
@@ -1536,9 +1391,6 @@ func (s *Server) handleNylasOAuthCallback(w http.ResponseWriter, r *http.Request
 			eventName = "company_explorer_folder_updated"
 		}
 		s.publishWorkspaceEvent(sharedInboxCompanyID, eventName, map[string]any{"folder_id": item.FolderID, "shared_inbox_id": item.SharedInboxID, "folder_kind": item.FolderKind, "resource_type": store.EntityTypeSharedInbox, "folder": item})
-	}
-	if connection.EmailConnectionID != "" {
-		_ = s.enqueueCommunicationsReconciliationControl(r.Context(), "reconnect-"+connection.EmailConnectionID)
 	}
 	log.Printf("nylas_oauth_callback outcome=success request_id=%s user_id=%s provider=%s account_email=%s scope=%s strict_email=%t grant=%s", requestCorrelationID(r), state.UserID, provider, normalizeEmailForCompare(grant.Email), connectionScope, state.StrictEmail, grantIDLogValue(grant.GrantID))
 	s.redirectCommunicationsSuccess(w, r, connection, createdSharedInboxID)

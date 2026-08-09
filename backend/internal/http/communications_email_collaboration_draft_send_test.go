@@ -32,7 +32,7 @@ func TestEmailCollaborationSharedDraftSendUsesExactProviderReplyAllAndFinalizes(
 	}); err != nil {
 		t.Fatal(err)
 	}
-	ensured, err := repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
+	ensured, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), store.CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
 		AccountEmail: creator.Email, Provider: "google", CreatedByUserID: creator.UserID,
 		Message: domain.EmailMessageSnapshot{
@@ -203,7 +203,7 @@ func TestEmailCollaborationSharedDraftSendRecoversDurableCompletionFailureWithSa
 	}); err != nil {
 		t.Fatal(err)
 	}
-	ensured, err := repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
+	ensured, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), store.CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
 		AccountEmail: creator.Email, Provider: "google", CreatedByUserID: creator.UserID,
 		Message: domain.EmailMessageSnapshot{
@@ -410,7 +410,7 @@ func seedEmailCollaborationSharedDraftRecoveryHTTPTest(t *testing.T, companyID, 
 	}
 	sourceID := "shared-send-recovery-source-" + suffix
 	threadID := "shared-send-recovery-thread-" + suffix
-	ensured, err := repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
+	ensured, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), store.CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: owner.UserID, PersonalAccountEmail: owner.Email,
 		AccountEmail: owner.Email, Provider: "google", CreatedByUserID: owner.UserID,
 		Message: domain.EmailMessageSnapshot{

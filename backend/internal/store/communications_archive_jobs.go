@@ -61,7 +61,7 @@ type CommunicationsArchiveJobItem struct {
 	CompanyEmailConnectionID string     `json:"company_email_connection_id,omitempty"`
 	MessageID                string     `json:"message_id"`
 	Status                   string     `json:"status"`
-	AttemptCount             int        `json:"attempt_count"`
+	ProviderAttemptCount     int        `json:"provider_attempt_count"`
 	AttemptToken             string     `json:"-"`
 	LastError                string     `json:"last_error,omitempty"`
 	ArchivedTimestamp        *time.Time `json:"archived_timestamp,omitempty"`

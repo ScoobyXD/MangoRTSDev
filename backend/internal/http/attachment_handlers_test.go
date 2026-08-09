@@ -453,7 +453,7 @@ func TestEmailRelationshipNodeChatAttachmentUsesOrdinaryNodePermissions(t *testi
 	creator := createUser("attachment-collab-creator", "creator@example.com", domain.RoleCompanyUser)
 	participant := createUser("attachment-collab-participant", "participant@example.com", domain.RoleCompanyUser)
 	admin := createUser("attachment-collab-admin", "admin@example.com", domain.RoleCompanyAdmin)
-	created, err := repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
+	created, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), store.CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
 		AccountEmail: creator.Email, Provider: "google", CreatedByUserID: creator.UserID,
 		Message: domain.EmailMessageSnapshot{

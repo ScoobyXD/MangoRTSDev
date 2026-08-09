@@ -238,8 +238,15 @@ func TestEmailCollaborationCreationAllowsFloatingNodeWithoutPriority(t *testing.
 	}
 	request.NewNodeID = "019fd5d8-0000-7000-8000-000000000002"
 	third := performEmailCollaborationCreationTestRequest(t, repo, client, owner, domain.RoleCompanyUser, request)
-	if third.Code != http.StatusConflict {
-		t.Fatalf("second target status=%d, want 409 body=%s", third.Code, third.Body.String())
+	if third.Code != http.StatusCreated {
+		t.Fatalf("second target status=%d, want 201 body=%s", third.Code, third.Body.String())
+	}
+	nodes, err = repo.ListNodes(emailCollaborationThreadTestCompanyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 2 {
+		t.Fatalf("second target nodes=%+v, want two Node-wide destinations", nodes)
 	}
 
 	server := newEmailCollaborationThreadTestServer(repo, client)
@@ -260,10 +267,18 @@ func TestEmailCollaborationCreationAllowsFloatingNodeWithoutPriority(t *testing.
 	if err := json.NewDecoder(listResponse.Body).Decode(&listResult); err != nil {
 		t.Fatal(err)
 	}
-	if len(listResult.Collaborations) != 1 || listResult.Collaborations[0].NodeID != requestedNodeID {
-		t.Fatalf("listed collaborations=%+v, want only the thread's original Node chat", listResult.Collaborations)
+	listedNodeIDs := make(map[string]struct{}, len(listResult.Collaborations))
+	for _, collaboration := range listResult.Collaborations {
+		listedNodeIDs[collaboration.NodeID] = struct{}{}
 	}
-
+	if len(listResult.Collaborations) != 2 {
+		t.Fatalf("listed collaborations=%+v, want both Node-wide destinations", listResult.Collaborations)
+	}
+	for _, nodeID := range []string{requestedNodeID, request.NewNodeID} {
+		if _, ok := listedNodeIDs[nodeID]; !ok {
+			t.Fatalf("listed collaborations=%+v, missing Node %s", listResult.Collaborations, nodeID)
+		}
+	}
 }
 
 func TestEmailCollaborationCreationRejectsInvalidPriorityBeforeProviderRead(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func cloneCommunicationsEmailThreadDownloadJob(item CommunicationsEmailThreadDownloadJob) CommunicationsEmailThreadDownloadJob {
+func cloneCommunicationsEmailIngestionJob(item CommunicationsEmailIngestionJob) CommunicationsEmailIngestionJob {
 	if item.CompletedTimestamp != nil {
 		value := *item.CompletedTimestamp
 		item.CompletedTimestamp = &value
@@ -16,19 +16,23 @@ func cloneCommunicationsEmailThreadDownloadJob(item CommunicationsEmailThreadDow
 		value := *item.FailedTimestamp
 		item.FailedTimestamp = &value
 	}
+	if item.SQSAcceptedTimestamp != nil {
+		value := *item.SQSAcceptedTimestamp
+		item.SQSAcceptedTimestamp = &value
+	}
 	return item
 }
 
-func communicationsEmailThreadDownloadJobActive(status string) bool {
+func communicationsEmailIngestionJobActive(status string) bool {
 	switch status {
-	case CommunicationsEmailThreadDownloadJobAccepted, CommunicationsEmailThreadDownloadJobProcessing:
+	case CommunicationsEmailIngestionJobAccepted, CommunicationsEmailIngestionJobProcessing:
 		return true
 	default:
 		return false
 	}
 }
 
-func (r *MemoryRepo) ensureCommunicationsEmailIngestionJobLocked(input CommunicationsEmailIngestionJobInput) (CommunicationsEmailThreadDownloadJob, bool, error) {
+func (r *MemoryRepo) ensureCommunicationsEmailIngestionJobLocked(input CommunicationsEmailIngestionJobInput) (CommunicationsEmailIngestionJob, bool, error) {
 	input.CompanyID = cleanUUIDText(input.CompanyID)
 	input.EmailConnectionID = cleanUUIDText(input.EmailConnectionID)
 	input.EmailThreadID = cleanUUIDText(input.EmailThreadID)
@@ -37,21 +41,21 @@ func (r *MemoryRepo) ensureCommunicationsEmailIngestionJobLocked(input Communica
 	input.EnqueueSourceID = strings.TrimSpace(input.EnqueueSourceID)
 	input.Priority = normalizeCommunicationsEmailIngestionPriority(input.Priority)
 	if input.CompanyID == "" || input.EmailConnectionID == "" || input.ProviderMessageID == "" || input.Priority == 0 {
-		return CommunicationsEmailThreadDownloadJob{}, false, ErrInvalid
+		return CommunicationsEmailIngestionJob{}, false, ErrInvalid
 	}
 	if input.EmailThreadID != "" {
 		thread, ok := r.emailThreads[key(input.CompanyID, input.EmailThreadID)]
 		if !ok {
-			return CommunicationsEmailThreadDownloadJob{}, false, ErrNotFound
+			return CommunicationsEmailIngestionJob{}, false, ErrNotFound
 		}
 		if input.ProviderThreadID == "" {
 			input.ProviderThreadID = thread.ProviderThreadID
 		}
 	}
-	for jobID, item := range r.emailThreadDownloadJobs {
+	for jobID, item := range r.emailIngestionJobs {
 		if item.CompanyID == input.CompanyID && item.EmailConnectionID == input.EmailConnectionID &&
 			item.ProviderMessageID == input.ProviderMessageID {
-			if communicationsEmailThreadDownloadJobActive(item.Status) {
+			if communicationsEmailIngestionJobActive(item.Status) {
 				if input.Priority < item.Priority {
 					item.Priority = input.Priority
 				}
@@ -62,21 +66,20 @@ func (r *MemoryRepo) ensureCommunicationsEmailIngestionJobLocked(input Communica
 					item.ProviderThreadID = input.ProviderThreadID
 				}
 				item.UpdatedTimestamp = time.Now().UTC()
-				r.emailThreadDownloadJobs[jobID] = item
+				r.emailIngestionJobs[jobID] = item
 			}
-			return cloneCommunicationsEmailThreadDownloadJob(item), false, nil
+			return cloneCommunicationsEmailIngestionJob(item), false, nil
 		}
 	}
 	now := time.Now().UTC()
-	item := CommunicationsEmailThreadDownloadJob{
-		DownloadJobID: newUUIDv7String(), CompanyID: input.CompanyID,
+	item := CommunicationsEmailIngestionJob{
+		IngestionJobID: newUUIDv7String(), CompanyID: input.CompanyID,
 		EmailConnectionID: input.EmailConnectionID, EmailThreadID: input.EmailThreadID,
 		ProviderMessageID: input.ProviderMessageID, ProviderThreadID: input.ProviderThreadID,
-		Priority: input.Priority, Status: CommunicationsEmailThreadDownloadJobAccepted,
-		EnqueueSourceID:  input.EnqueueSourceID,
+		Priority: input.Priority, Status: CommunicationsEmailIngestionJobAccepted, EnqueueSourceID: input.EnqueueSourceID,
 		CreatedTimestamp: now, UpdatedTimestamp: now,
 	}
-	r.emailThreadDownloadJobs[item.DownloadJobID] = item
+	r.emailIngestionJobs[item.IngestionJobID] = item
 	if input.EmailThreadID != "" {
 		threadKey := key(input.CompanyID, input.EmailThreadID)
 		thread := r.emailThreads[threadKey]
@@ -85,97 +88,95 @@ func (r *MemoryRepo) ensureCommunicationsEmailIngestionJobLocked(input Communica
 		thread.UpdatedTimestamp = now
 		r.emailThreads[threadKey] = thread
 	}
-	return cloneCommunicationsEmailThreadDownloadJob(item), true, nil
+	return cloneCommunicationsEmailIngestionJob(item), true, nil
 }
 
-func (r *MemoryRepo) EnsureCommunicationsEmailIngestionJobContext(_ context.Context, input CommunicationsEmailIngestionJobInput) (CommunicationsEmailThreadDownloadJob, bool, error) {
+func (r *MemoryRepo) MarkCommunicationsEmailIngestionJobSQSAcceptedContext(ctx context.Context, jobID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	jobID = cleanUUIDText(jobID)
+	if jobID == "" {
+		return ErrInvalid
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	item, ok := r.emailIngestionJobs[jobID]
+	if !ok {
+		return ErrNotFound
+	}
+	if item.SQSAcceptedTimestamp == nil {
+		now := time.Now().UTC()
+		item.SQSAcceptedTimestamp = &now
+		item.UpdatedTimestamp = now
+		r.emailIngestionJobs[jobID] = item
+	}
+	return nil
+}
+
+func (r *MemoryRepo) EnsureCommunicationsEmailIngestionJobContext(ctx context.Context, input CommunicationsEmailIngestionJobInput) (CommunicationsEmailIngestionJob, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return CommunicationsEmailIngestionJob{}, false, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.ensureCommunicationsEmailIngestionJobLocked(input)
 }
 
-func (r *MemoryRepo) ensureCommunicationsEmailThreadDownloadJobLocked(companyID, emailThreadID, downloadScope, requestedProviderMessageID, requestedByUserID string) (CommunicationsEmailThreadDownloadJob, bool, error) {
-	companyID, emailThreadID = cleanUUIDText(companyID), cleanUUIDText(emailThreadID)
-	downloadScope = normalizeCommunicationsEmailThreadDownloadScope(downloadScope)
-	requestedProviderMessageID = strings.TrimSpace(requestedProviderMessageID)
-	requestedByUserID = cleanUUIDText(requestedByUserID)
-	if companyID == "" || emailThreadID == "" || downloadScope == "" || requestedByUserID == "" {
-		return CommunicationsEmailThreadDownloadJob{}, false, ErrInvalid
-	}
-	thread, ok := r.emailThreads[key(companyID, emailThreadID)]
-	if !ok {
-		return CommunicationsEmailThreadDownloadJob{}, false, ErrNotFound
-	}
-	if requestedProviderMessageID == "" {
-		requestedProviderMessageID = thread.RootProviderMessageID
-	}
-	if requestedProviderMessageID == "" {
-		return CommunicationsEmailThreadDownloadJob{}, false, ErrInvalid
-	}
-	connectionID := thread.EmailConnectionID
-	if connectionID == "" {
-		connectionID = r.emailConnectionIDForThreadLocked(thread)
-	}
-	return r.ensureCommunicationsEmailIngestionJobLocked(CommunicationsEmailIngestionJobInput{
-		CompanyID: companyID, EmailConnectionID: connectionID, EmailThreadID: emailThreadID,
-		ProviderMessageID: requestedProviderMessageID, ProviderThreadID: thread.ProviderThreadID,
-		Priority: CommunicationsEmailIngestionPriorityVisible,
-	})
-}
-
-func (r *MemoryRepo) EnsureCommunicationsEmailThreadDownloadJobContext(_ context.Context, companyID, emailThreadID, downloadScope, requestedProviderMessageID, requestedByUserID string) (CommunicationsEmailThreadDownloadJob, bool, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.ensureCommunicationsEmailThreadDownloadJobLocked(companyID, emailThreadID, downloadScope, requestedProviderMessageID, requestedByUserID)
-}
-
-func (r *MemoryRepo) GetCommunicationsEmailIngestionJobContext(_ context.Context, jobID string) (CommunicationsEmailThreadDownloadJob, error) {
+func (r *MemoryRepo) GetCommunicationsEmailIngestionJobContext(_ context.Context, jobID string) (CommunicationsEmailIngestionJob, error) {
 	jobID = cleanUUIDText(jobID)
 	if jobID == "" {
-		return CommunicationsEmailThreadDownloadJob{}, ErrInvalid
+		return CommunicationsEmailIngestionJob{}, ErrInvalid
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	item, ok := r.emailThreadDownloadJobs[jobID]
+	item, ok := r.emailIngestionJobs[jobID]
 	if !ok {
-		return CommunicationsEmailThreadDownloadJob{}, ErrNotFound
+		return CommunicationsEmailIngestionJob{}, ErrNotFound
 	}
-	return cloneCommunicationsEmailThreadDownloadJob(item), nil
+	return cloneCommunicationsEmailIngestionJob(item), nil
 }
 
-func (r *MemoryRepo) StartCommunicationsEmailIngestionAttemptContext(_ context.Context, jobID string) (CommunicationsEmailThreadDownloadJob, bool, error) {
+func (r *MemoryRepo) StartCommunicationsEmailIngestionAttemptContext(_ context.Context, jobID string) (CommunicationsEmailIngestionJob, bool, error) {
 	jobID = cleanUUIDText(jobID)
 	if jobID == "" {
-		return CommunicationsEmailThreadDownloadJob{}, false, ErrInvalid
+		return CommunicationsEmailIngestionJob{}, false, ErrInvalid
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	item, ok := r.emailThreadDownloadJobs[jobID]
+	item, ok := r.emailIngestionJobs[jobID]
 	if !ok {
-		return CommunicationsEmailThreadDownloadJob{}, false, ErrNotFound
+		return CommunicationsEmailIngestionJob{}, false, ErrNotFound
 	}
-	if item.Status != CommunicationsEmailThreadDownloadJobAccepted && item.Status != CommunicationsEmailThreadDownloadJobProcessing {
-		return cloneCommunicationsEmailThreadDownloadJob(item), false, nil
+	if item.Status != CommunicationsEmailIngestionJobAccepted && item.Status != CommunicationsEmailIngestionJobProcessing {
+		return cloneCommunicationsEmailIngestionJob(item), false, nil
 	}
 	now := time.Now().UTC()
 	if item.ProviderAttemptCount >= CommunicationsEmailProviderAttemptLimit {
-		item.Status = CommunicationsEmailThreadDownloadJobExhausted
+		item.Status = CommunicationsEmailIngestionJobExhausted
 		item.AttemptToken = ""
 		item.FailedTimestamp = &now
 		item.UpdatedTimestamp = now
-		r.emailThreadDownloadJobs[jobID] = item
-		return cloneCommunicationsEmailThreadDownloadJob(item), false, nil
+		r.emailIngestionJobs[jobID] = item
+		return cloneCommunicationsEmailIngestionJob(item), false, nil
 	}
 	item.ProviderAttemptCount++
-	item.Status = CommunicationsEmailThreadDownloadJobProcessing
+	item.Status = CommunicationsEmailIngestionJobProcessing
 	item.AttemptToken = newUUIDv7String()
 	item.LastError = ""
 	item.UpdatedTimestamp = now
-	r.emailThreadDownloadJobs[jobID] = item
-	return cloneCommunicationsEmailThreadDownloadJob(item), true, nil
+	r.emailIngestionJobs[jobID] = item
+	return cloneCommunicationsEmailIngestionJob(item), true, nil
 }
 
-func (r *MemoryRepo) CompleteCommunicationsEmailIngestionAttemptContext(_ context.Context, downloadJobID, attemptToken string) error {
+func (r *MemoryRepo) CompleteCommunicationsEmailIngestionAttemptContext(ctx context.Context, downloadJobID, attemptToken string, realtimeInputs []RealtimeOutboxInput) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	realtimeInputs, err := normalizeRealtimeOutboxInputs(realtimeInputs)
+	if err != nil {
+		return err
+	}
 	downloadJobID = cleanUUIDText(downloadJobID)
 	attemptToken = cleanUUIDText(attemptToken)
 	if downloadJobID == "" || attemptToken == "" {
@@ -183,26 +184,36 @@ func (r *MemoryRepo) CompleteCommunicationsEmailIngestionAttemptContext(_ contex
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	item, ok := r.emailThreadDownloadJobs[downloadJobID]
+	item, ok := r.emailIngestionJobs[downloadJobID]
 	if !ok {
 		return ErrNotFound
 	}
-	if item.Status != CommunicationsEmailThreadDownloadJobProcessing || item.AttemptToken != attemptToken {
+	if item.Status != CommunicationsEmailIngestionJobProcessing || item.AttemptToken != attemptToken {
 		return ErrNotFound
 	}
+	if r.realtimeOutboxErr != nil {
+		return r.realtimeOutboxErr
+	}
 	now := time.Now().UTC()
-	item.Status = CommunicationsEmailThreadDownloadJobCompleted
+	item.Status = CommunicationsEmailIngestionJobCompleted
 	item.LastError = ""
 	item.CompletedTimestamp = &now
 	item.FailedTimestamp = nil
 	item.AttemptToken = ""
 	item.UpdatedTimestamp = now
-	r.emailThreadDownloadJobs[downloadJobID] = item
+	r.emailIngestionJobs[downloadJobID] = item
 	r.updateMemoryEmailThreadDownloadStatusLocked(item, now, false)
-	return nil
+	return r.enqueueRealtimeOutboxInputsLocked(realtimeInputs)
 }
 
-func (r *MemoryRepo) FailCommunicationsEmailIngestionAttemptContext(_ context.Context, downloadJobID, attemptToken, lastError string) error {
+func (r *MemoryRepo) FailCommunicationsEmailIngestionAttemptContext(ctx context.Context, downloadJobID, attemptToken, lastError string, realtimeInputs []RealtimeOutboxInput) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	realtimeInputs, err := normalizeRealtimeOutboxInputs(realtimeInputs)
+	if err != nil {
+		return err
+	}
 	downloadJobID = cleanUUIDText(downloadJobID)
 	attemptToken = cleanUUIDText(attemptToken)
 	lastError = strings.TrimSpace(lastError)
@@ -211,29 +222,39 @@ func (r *MemoryRepo) FailCommunicationsEmailIngestionAttemptContext(_ context.Co
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	item, ok := r.emailThreadDownloadJobs[downloadJobID]
+	item, ok := r.emailIngestionJobs[downloadJobID]
 	if !ok {
 		return ErrNotFound
 	}
-	if item.Status != CommunicationsEmailThreadDownloadJobProcessing || item.AttemptToken != attemptToken {
+	if item.Status != CommunicationsEmailIngestionJobProcessing || item.AttemptToken != attemptToken {
 		return ErrNotFound
 	}
+	if r.realtimeOutboxErr != nil {
+		return r.realtimeOutboxErr
+	}
 	now := time.Now().UTC()
-	item.Status = CommunicationsEmailThreadDownloadJobAccepted
+	item.Status = CommunicationsEmailIngestionJobAccepted
 	item.LastError = lastError
 	item.AttemptToken = ""
 	item.UpdatedTimestamp = now
 	final := item.ProviderAttemptCount >= CommunicationsEmailProviderAttemptLimit
 	if final {
-		item.Status = CommunicationsEmailThreadDownloadJobExhausted
+		item.Status = CommunicationsEmailIngestionJobExhausted
 		item.FailedTimestamp = &now
 	}
-	r.emailThreadDownloadJobs[downloadJobID] = item
+	r.emailIngestionJobs[downloadJobID] = item
 	r.updateMemoryEmailThreadDownloadStatusLocked(item, now, final)
-	return nil
+	return r.enqueueRealtimeOutboxInputsLocked(realtimeInputs)
 }
 
-func (r *MemoryRepo) ParkCommunicationsEmailIngestionAttemptContext(_ context.Context, jobID, attemptToken, connectionStatus, lastError string) error {
+func (r *MemoryRepo) ParkCommunicationsEmailIngestionAttemptContext(ctx context.Context, jobID, attemptToken, connectionStatus, lastError string, realtimeInputs []RealtimeOutboxInput) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	realtimeInputs, err := normalizeRealtimeOutboxInputs(realtimeInputs)
+	if err != nil {
+		return err
+	}
 	jobID, attemptToken = cleanUUIDText(jobID), cleanUUIDText(attemptToken)
 	connectionStatus, lastError = strings.TrimSpace(connectionStatus), strings.TrimSpace(lastError)
 	if jobID == "" || attemptToken == "" || lastError == "" ||
@@ -242,9 +263,12 @@ func (r *MemoryRepo) ParkCommunicationsEmailIngestionAttemptContext(_ context.Co
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	item, ok := r.emailThreadDownloadJobs[jobID]
-	if !ok || item.Status != CommunicationsEmailThreadDownloadJobProcessing || item.AttemptToken != attemptToken {
+	item, ok := r.emailIngestionJobs[jobID]
+	if !ok || item.Status != CommunicationsEmailIngestionJobProcessing || item.AttemptToken != attemptToken {
 		return ErrNotFound
+	}
+	if r.realtimeOutboxErr != nil {
+		return r.realtimeOutboxErr
 	}
 	updatedConnection := false
 	for connectionKey, connection := range r.emailConnections {
@@ -271,17 +295,17 @@ func (r *MemoryRepo) ParkCommunicationsEmailIngestionAttemptContext(_ context.Co
 		return ErrNotFound
 	}
 	now := time.Now().UTC()
-	item.Status = CommunicationsEmailThreadDownloadJobParked
+	item.Status = CommunicationsEmailIngestionJobParked
 	item.LastError = lastError
 	item.AttemptToken = ""
 	item.FailedTimestamp = &now
 	item.UpdatedTimestamp = now
-	r.emailThreadDownloadJobs[jobID] = item
+	r.emailIngestionJobs[jobID] = item
 	r.updateMemoryEmailThreadDownloadStatusLocked(item, now, true)
-	return nil
+	return r.enqueueRealtimeOutboxInputsLocked(realtimeInputs)
 }
 
-func (r *MemoryRepo) updateMemoryEmailThreadDownloadStatusLocked(item CommunicationsEmailThreadDownloadJob, now time.Time, final bool) {
+func (r *MemoryRepo) updateMemoryEmailThreadDownloadStatusLocked(item CommunicationsEmailIngestionJob, now time.Time, final bool) {
 	if item.EmailThreadID == "" {
 		return
 	}
@@ -297,21 +321,21 @@ func (r *MemoryRepo) updateMemoryEmailThreadDownloadStatusLocked(item Communicat
 	if final {
 		thread.DownloadStatus = CommunicationsEmailThreadDownloadFailed
 	}
-	for _, candidate := range r.emailThreadDownloadJobs {
-		if candidate.CompanyID == item.CompanyID && candidate.EmailThreadID == item.EmailThreadID && communicationsEmailThreadDownloadJobActive(candidate.Status) {
+	for _, candidate := range r.emailIngestionJobs {
+		if candidate.CompanyID == item.CompanyID && candidate.EmailThreadID == item.EmailThreadID && communicationsEmailIngestionJobActive(candidate.Status) {
 			thread.DownloadStatus = CommunicationsEmailThreadDownloadDownloading
 			break
 		}
 	}
 	thread.LastDownloadError = item.LastError
-	if item.Status == CommunicationsEmailThreadDownloadJobCompleted {
+	if item.Status == CommunicationsEmailIngestionJobCompleted {
 		thread.LastDownloadError = ""
 	}
 	thread.UpdatedTimestamp = now
 	r.emailThreads[threadKey] = thread
 }
 
-func (r *MemoryRepo) ListCommunicationsEmailThreadDownloadJobsContext(ctx context.Context, companyID, emailThreadID string) ([]CommunicationsEmailThreadDownloadJob, error) {
+func (r *MemoryRepo) ListCommunicationsEmailIngestionJobsForThreadContext(ctx context.Context, companyID, emailThreadID string) ([]CommunicationsEmailIngestionJob, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -324,10 +348,10 @@ func (r *MemoryRepo) ListCommunicationsEmailThreadDownloadJobsContext(ctx contex
 	if _, ok := r.emailThreads[key(companyID, emailThreadID)]; !ok {
 		return nil, ErrNotFound
 	}
-	out := []CommunicationsEmailThreadDownloadJob{}
-	for _, item := range r.emailThreadDownloadJobs {
+	out := []CommunicationsEmailIngestionJob{}
+	for _, item := range r.emailIngestionJobs {
 		if item.CompanyID == companyID && item.EmailThreadID == emailThreadID {
-			out = append(out, cloneCommunicationsEmailThreadDownloadJob(item))
+			out = append(out, cloneCommunicationsEmailIngestionJob(item))
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedTimestamp.Before(out[j].CreatedTimestamp) })

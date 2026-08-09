@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"miraeopus/backend/internal/domain"
 	"strings"
@@ -16,7 +17,7 @@ func TestMemorySharedEmailDraftClaimLifecycleAndImmutableIdentity(t *testing.T) 
 	participant := mustEmailCollaborationGuardUser(t, repo, companyID, "shared-draft-participant", "participant@example.com", domain.RoleCompanyUser)
 	outsider := mustEmailCollaborationGuardUser(t, repo, companyID, "shared-draft-outsider", "outsider@example.com", domain.RoleCompanyUser)
 
-	created, err := repo.EnsureCommunicationsEmailCollaboration(CommunicationsEmailCollaborationEnsureInput{
+	created, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
 		AccountEmail: creator.Email, Provider: "google", CreatedByUserID: creator.UserID,
 		Message: domain.EmailMessageSnapshot{
@@ -214,7 +215,7 @@ func seedSharedEmailDraftRecoveryTest(t *testing.T, suffix string) (*MemoryRepo,
 	companyID := "11111111-1111-4111-8111-7013000004" + suffix
 	repo.EnsureCompany(companyID, "Shared draft recovery")
 	owner := mustEmailCollaborationGuardUser(t, repo, companyID, "shared-draft-recovery-"+suffix, "recovery-"+suffix+"@example.com", domain.RoleCompanyUser)
-	ensured, err := repo.EnsureCommunicationsEmailCollaboration(CommunicationsEmailCollaborationEnsureInput{
+	ensured, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: owner.UserID, PersonalAccountEmail: owner.Email,
 		AccountEmail: owner.Email, Provider: "google", CreatedByUserID: owner.UserID,
 		Message: domain.EmailMessageSnapshot{

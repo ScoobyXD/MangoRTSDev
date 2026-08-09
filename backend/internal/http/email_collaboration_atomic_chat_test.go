@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"miraeopus/backend/internal/domain"
@@ -18,7 +19,7 @@ func TestEmailRelationshipChatUsesOrdinaryNodePermissions(t *testing.T) {
 	creator := mustHTTPEmailCollaborationGuardUser(t, repo, companyID, "atomic-http-creator", "atomic-http-creator@example.com", domain.RoleCompanyUser)
 	target := mustHTTPEmailCollaborationGuardUser(t, repo, companyID, "atomic-http-target", "atomic-http-target@example.com", domain.RoleCompanyUser)
 	outsider := mustHTTPEmailCollaborationGuardUser(t, repo, companyID, "atomic-http-outsider", "atomic-http-outsider@example.com", domain.RoleCompanyUser)
-	created, err := repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
+	created, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), store.CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
 		AccountEmail: creator.Email, Provider: "google", CreatedByUserID: creator.UserID,
 		Message: domain.EmailMessageSnapshot{ID: "atomic-http-message", ThreadID: "atomic-http-thread", Subject: "Atomic HTTP chat"},

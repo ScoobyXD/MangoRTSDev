@@ -85,6 +85,8 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeSurface, /const revealNodeEmailMessage = useCallback/);
   assert.match(nodeSurface, /revealNodeEmailMessage\(linkedEmailMessageID\)/);
   assert.match(nodeSurface, /const linkedEmailMessageID = block.emailMessageID/);
+  assert.match(nodeSurface, /const existingBlock = blocks\.find\(\(block\) => textBlockHasEmailMessage\(block, cleanMessageID\)\)/);
+  assert.match(nodeSurface, /if \(existingBlock\) \{[\s\S]{0,520}return existingBlock\.id/);
   assert.match(nodeSurface, /messageID=\{linkedEmailMessageID\}/);
   assert.match(nodeSurface, /emails=\{nodeAttachedEmails\}/);
   assert.doesNotMatch(nodeSurface, /Show linked email in email column/);
@@ -151,11 +153,14 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeParts, /data-node-linked-email-preview="true"/);
   assert.match(nodeParts, /resolveLinkedEmailPreview/);
   assert.match(nodeParts, /loadAttachedEmailThreadPreview/);
-  assert.match(nodeParts, /preview.downloadStatus === "downloading"/);
+  assert.match(nodeParts, /setThreadDownloadStatus\(preview\.downloadStatus\)/);
+  assert.match(nodeParts, /threadDownloadStatus !== "downloading"/);
   assert.match(nodeParts, /data-email-thread-download-status={threadDownloadStatus}/);
   assert.match(nodeParts, /Downloading the rest of this email thread/);
   assert.match(nodeParts, /storedThreadDownloadStatus !== "downloading"/);
-  assert.match(nodeParts, /setStoredThreadPollVersion/);
+  assert.match(nodeParts, /subscribeRealtimeScope\(apiBase, companyID, scope/);
+  assert.match(nodeParts, /refreshStoredThreadRef\.current\(\)/);
+  assert.doesNotMatch(nodeParts, /setStoredThreadPollVersion|storedThreadPollTimer|setInterval/);
   assert.match(nodeParts, /initialFocusMessageID=\{resolvedPreview.focusMessageID\}/);
   assert.match(nodeParts, /singleMessageOnly/);
   assert.match(nodeParts, /data-email-single-message=\{singleMessageOnly \? "true" : undefined\}/);

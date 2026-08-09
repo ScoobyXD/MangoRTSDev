@@ -82,11 +82,25 @@ const ingestionLegacy = [
   "last_error text", "available_at timestamptz", "processing_started_at timestamptz", "completed_timestamp timestamptz",
   "failed_timestamp timestamptz", "created_timestamp timestamptz",
 ];
-const ingestionFinalAdditions = ["enqueue_source_id text", "attempt_token uuid", "provider_attempt_count integer"];
+const ingestionFinalColumns = [
+  "status text", "provider_message_id text", "ingestion_job_id uuid primary key", "updated_timestamp timestamptz", "company_id uuid",
+  "email_connection_id uuid", "email_thread_id uuid", "provider_thread_id text", "priority smallint", "provider_attempt_count integer",
+  "attempt_token uuid", "enqueue_source_id text", "sqs_accepted_timestamp timestamptz", "last_error text", "completed_timestamp timestamptz",
+  "failed_timestamp timestamptz", "created_timestamp timestamptz",
+];
 const archiveLegacy = [
   "status text", "message_id text", "job_item_id uuid", "archive_job_id uuid", "attempt_count integer", "last_error text",
   "available_at timestamptz", "processing_started_at timestamptz", "archived_timestamp timestamptz", "failed_timestamp timestamptz",
   "created_timestamp timestamptz", "updated_timestamp timestamptz",
+];
+const archiveFinalColumns = [
+  "status text", "message_id text", "job_item_id uuid", "archive_job_id uuid", "provider_attempt_count integer", "attempt_token uuid",
+  "last_error text", "archived_timestamp timestamptz", "failed_timestamp timestamptz", "created_timestamp timestamptz",
+  "updated_timestamp timestamptz",
+];
+const relationshipColumns = [
+	"company_id uuid", "email_relationship_id uuid", "email_message_id uuid", "resource_type text",
+	"resource_id uuid", "resource_textbox_id text",
 ];
 const unsafeDuplicateFixtures = [
 	{
@@ -123,13 +137,11 @@ function installShape({ final = false, ingestionFinal = final, archiveFinal = fi
   sql("drop schema public cascade; create schema public");
   const connections = [...connectionColumns];
   if (extra) connections.push("unexpected_column text");
-  const ingestion = [...ingestionLegacy];
-  if (ingestionFinal) ingestion.splice(4, 0, ...ingestionFinalAdditions);
-  if (partial) ingestion.splice(4, 0, ingestionFinalAdditions[0]);
+  const ingestion = [...(ingestionFinal ? ingestionFinalColumns : ingestionLegacy)];
+  if (partial) ingestion.splice(4, 0, "sqs_accepted_timestamp timestamptz");
   if (missing) ingestion.splice(ingestion.findIndex((column) => column.startsWith("last_error ")), 1);
-  const archive = [...archiveLegacy];
-  if (archiveFinal) archive.splice(3, 0, "attempt_token uuid");
-  sql(`create table email_connections (${connections.join(",")}); create table email_ingestion_jobs (${ingestion.join(",")}); create table communications_email_archive_job_items (${archive.join(",")})`);
+  const archive = [...(archiveFinal ? archiveFinalColumns : archiveLegacy)];
+  sql(`create table email_connections (${connections.join(",")}); create table email_ingestion_jobs (${ingestion.join(",")}); create table communications_email_archive_job_items (${archive.join(",")}); create table email_relationships (${relationshipColumns.join(",")})`);
 	if (!skipIngestionStatusConstraint) {
 		const statuses = ingestionFinal
 			? "'accepted','processing','completed','parked','exhausted'"
@@ -148,6 +160,16 @@ function rowCount(table) {
 
 function installLegacyDuplicateHistory() {
 	installShape();
+	sql(`
+		create function mangorts_enforce_one_node_per_email_thread() returns trigger language plpgsql as $$
+		begin
+			return new;
+		end
+		$$;
+		create trigger trg_email_relationships_one_node_per_thread
+		before insert or update on email_relationships
+		for each row execute function mangorts_enforce_one_node_per_email_thread()
+	`);
 	const rows = [];
 	for (const [group, size] of [2, 2, 4, 4, 2, 5].entries()) {
 		for (let item = 1; item <= size; item += 1) {
@@ -212,13 +234,29 @@ try {
   requireText(output, "READY: exact approved legacy 16-column shape", "reordered legacy ingestion");
   requireText(output, "READY: exact approved legacy 12-column shape", "reordered legacy archive");
 	requireText(output, "READY: all three email SQS tables are in the coherent legacy shape", "coherent legacy state");
+	requireText(output, "READY: each exact email message is linked to at most one textbox in each Node", "legacy relationship cardinality");
 
 	console.log("checking reordered final shape");
   installShape({ final: true });
   output = runFile(preflight);
-  requireText(output, "READY: exact approved final 19-column shape", "reordered final ingestion");
-  requireText(output, "READY: exact approved final 13-column shape", "reordered final archive");
+  requireText(output, "READY: exact approved final 17-column shape", "reordered final ingestion");
+  requireText(output, "READY: exact approved final 11-column shape", "reordered final archive");
 	requireText(output, "READY: all three email SQS tables are in the coherent final shape", "coherent final state");
+	requireText(output, "READY: each exact email message is linked to at most one textbox in each Node", "final relationship cardinality");
+
+	console.log("checking exact-message Node textbox cardinality before any write");
+	installShape();
+	sql("insert into email_relationships(company_id,email_relationship_id,email_message_id,resource_type,resource_id,resource_textbox_id) values ('20000000-0000-0000-0000-000000000001','91000000-0000-0000-0000-000000000001','92000000-0000-0000-0000-000000000001','node','93000000-0000-0000-0000-000000000001','textbox-a'),('20000000-0000-0000-0000-000000000001','91000000-0000-0000-0000-000000000002','92000000-0000-0000-0000-000000000001','node','93000000-0000-0000-0000-000000000002','textbox-b')");
+	output = runFile(preflight);
+	requireText(output, "READY: each exact email message is linked to at most one textbox in each Node", "same message in different Nodes");
+	sql("insert into email_relationships(company_id,email_relationship_id,email_message_id,resource_type,resource_id,resource_textbox_id) values ('20000000-0000-0000-0000-000000000001','91000000-0000-0000-0000-000000000003','92000000-0000-0000-0000-000000000001','node','93000000-0000-0000-0000-000000000001','textbox-c')");
+	output = runFile(preflight);
+	requireText(output, "STOP: one or more exact email messages are linked to multiple textboxes in the same Node", "same message in two textboxes of one Node");
+	if (version >= 170000 && version < 180000) {
+		output = runFile(apply, true);
+		requireText(output, "exact email message/Node pair(s) are linked to more than one textbox", "same-Node relationship apply");
+		if (rowCount("email_relationships") !== 3) throw new Error("relationship-cardinality STOP wrote relationship changes");
+	}
 
 	for (const [label, shape] of [
 		["final ingestion with legacy archive", { ingestionFinal: true, archiveFinal: false }],
@@ -298,7 +336,7 @@ try {
 		installShape({ partial: true });
 		const before = shapeCounts();
 		output = runFile(apply, true);
-		requireText(output, "STOP: email_ingestion_jobs must be exact legacy 16 or exact final 19 columns", "partial-drift apply");
+		requireText(output, "STOP: email_ingestion_jobs must be exact legacy 16 or exact final 17 columns", "partial-drift apply");
 		if (shapeCounts() !== before) throw new Error("partial-drift apply STOP wrote schema changes");
 		console.log("checking deterministic inactive legacy identity collapse");
 		installLegacyDuplicateHistory();
@@ -308,7 +346,7 @@ try {
 		const durableBefore = durableEmailSnapshot();
 		if (rowCount("email_ingestion_jobs") !== 19) throw new Error("legacy duplicate fixture did not contain 19 job metadata rows");
 		runFile(apply);
-		if (shapeCounts() !== "[13, 19, 13]") throw new Error(`PostgreSQL 17 apply did not produce final shape: ${shapeCounts()}`);
+		if (shapeCounts() !== "[13, 17, 11]") throw new Error(`PostgreSQL 17 apply did not produce final shape: ${shapeCounts()}`);
 		if (rowCount("email_ingestion_jobs") !== 6) throw new Error("migration did not collapse exactly 13 redundant job metadata rows");
 		const retained = sql("select string_agg(ingestion_job_id::text,',' order by provider_message_id) from email_ingestion_jobs");
 		for (const retainedID of [101, 202, 303, 403, 501, 605]) {
@@ -320,8 +358,14 @@ try {
 		requireText(output, "READY: stable ingestion identities are unique in the final shape", "PostgreSQL 17 stable identity index state");
 		output = sql("select pg_get_indexdef(indexrelid) from pg_index where indexrelid='public.idx_email_ingestion_jobs_stable_message'::regclass");
 		requireText(output, "CREATE UNIQUE INDEX idx_email_ingestion_jobs_stable_message ON public.email_ingestion_jobs", "PostgreSQL 17 stable identity index definition");
+		output = sql("select pg_get_indexdef(indexrelid) from pg_index where indexrelid='public.idx_email_relationships_one_node_textbox_per_message'::regclass");
+		requireText(output, "CREATE UNIQUE INDEX idx_email_relationships_one_node_textbox_per_message ON public.email_relationships USING btree (company_id, email_message_id, resource_id) WHERE ((resource_type = 'node'::text) AND (resource_textbox_id IS NOT NULL))", "PostgreSQL 17 Node textbox relationship index definition");
+		output = sql("select count(*) from pg_trigger where tgname='trg_email_relationships_one_node_per_thread' and not tgisinternal");
+		if (!/\b0\b/.test(output)) throw new Error("PostgreSQL 17 apply retained the obsolete one-thread/one-Node trigger");
+		output = sql("select to_regprocedure('public.mangorts_enforce_one_node_per_email_thread()') is null");
+		requireText(output, "t", "PostgreSQL 17 obsolete one-thread/one-Node function removal");
 		runFile(apply);
-		if (shapeCounts() !== "[13, 19, 13]") throw new Error(`PostgreSQL 17 idempotent rerun changed final shape: ${shapeCounts()}`);
+		if (shapeCounts() !== "[13, 17, 11]") throw new Error(`PostgreSQL 17 idempotent rerun changed final shape: ${shapeCounts()}`);
 		if (rowCount("email_ingestion_jobs") !== 6 || durableEmailSnapshot() !== durableBefore) throw new Error("PostgreSQL 17 idempotent rerun changed migrated data");
 
 		console.log("checking final-shape duplicate rejection before any write");
@@ -331,12 +375,12 @@ try {
 		requireText(output, "STOP: final schema contains 1 duplicate stable identity group(s) and 1 redundant row(s)", "final duplicate preflight");
 		output = runFile(apply, true);
 		requireText(output, "STOP: final email_ingestion_jobs contains 1 duplicate stable identity group(s) and 1 redundant row(s)", "final duplicate apply");
-		if (shapeCounts() !== "[13, 19, 13]" || rowCount("email_ingestion_jobs") !== 2) throw new Error("final duplicate STOP wrote changes");
+		if (shapeCounts() !== "[13, 17, 11]" || rowCount("email_ingestion_jobs") !== 2) throw new Error("final duplicate STOP wrote changes");
 
 		console.log("restoring a valid PostgreSQL 17 final schema for repository integration tests");
 		installLegacyDuplicateHistory();
 		runFile(apply);
-		if (shapeCounts() !== "[13, 19, 13]" || rowCount("email_ingestion_jobs") !== 6) throw new Error("final PostgreSQL 17 integration fixture is not ready");
+		if (shapeCounts() !== "[13, 17, 11]" || rowCount("email_ingestion_jobs") !== 6) throw new Error("final PostgreSQL 17 integration fixture is not ready");
   }
 
   console.log(`email SQS disposable PostgreSQL contract passed on server_version_num=${version}`);

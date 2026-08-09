@@ -242,16 +242,19 @@ func (r *MemoryRepo) persistCommunicationsConversionEmailLocked(input Communicat
 	if err != nil {
 		return "", "", "", err
 	}
-	if r.communicationsEmailThreadLinkedToAnotherNodeLocked(input.CompanyID, input.NodeID, thread.EmailThreadID) {
-		return "", "", "", ErrAlreadyExists
-	}
 	informationID := r.addEmailProjectionWithThreadLocked(input.CompanyID, input.NodeID, input.SharedInboxID, input.AccountEmail, message, thread.EmailThreadID, now, input.Target.Mode != CommunicationsEmailConversionTargetExistingNode)
 	if _, err := r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, input.NodeID, informationID, thread.EmailThreadID, message.ID, input.ActorUserID, now); err != nil {
 		return "", "", "", err
 	}
-	if downloadScope, requestedMessageID, ok := communicationsEmailThreadDownloadRequest(thread, threadInput); ok {
-		if _, _, err := r.ensureCommunicationsEmailThreadDownloadJobLocked(input.CompanyID, thread.EmailThreadID, downloadScope, requestedMessageID, threadInput.RequestedByUserID); err != nil {
-			return "", "", "", err
+	if requestedMessageID, sourceID, ok := communicationsEmailIngestionRequest(thread, threadInput); ok && thread.EmailConnectionID != "" {
+		if emailConnectionID := r.emailConnectionIDForThreadLocked(thread); emailConnectionID != "" {
+			if _, _, err := r.ensureCommunicationsEmailIngestionJobLocked(CommunicationsEmailIngestionJobInput{
+				CompanyID: input.CompanyID, EmailConnectionID: emailConnectionID, EmailThreadID: thread.EmailThreadID,
+				ProviderMessageID: requestedMessageID, ProviderThreadID: thread.ProviderThreadID, Priority: CommunicationsEmailIngestionPriorityVisible,
+				EnqueueSourceID: sourceID,
+			}); err != nil {
+				return "", "", "", err
+			}
 		}
 	}
 	return informationID, thread.EmailThreadID, internalEmailMessageIDForProvider(thread, message.ID), nil
@@ -268,9 +271,12 @@ func (r *PostgresRepo) persistCommunicationsConversionEmailTx(ctx context.Contex
 	if err != nil {
 		return "", "", "", err
 	}
-	if downloadScope, requestedMessageID, ok := communicationsEmailThreadDownloadRequest(thread, threadInput); ok {
-		if _, _, err := ensurePostgresCommunicationsEmailThreadDownloadJobTx(ctx, tx, input.CompanyID,
-			thread.EmailThreadID, downloadScope, requestedMessageID, threadInput.RequestedByUserID); err != nil {
+	if requestedMessageID, sourceID, ok := communicationsEmailIngestionRequest(thread, threadInput); ok {
+		if _, _, err := ensurePostgresCommunicationsEmailIngestionJobTx(ctx, tx, CommunicationsEmailIngestionJobInput{
+			CompanyID: input.CompanyID, EmailConnectionID: thread.EmailConnectionID, EmailThreadID: thread.EmailThreadID,
+			ProviderMessageID: requestedMessageID, ProviderThreadID: thread.ProviderThreadID, Priority: CommunicationsEmailIngestionPriorityVisible,
+			EnqueueSourceID: sourceID,
+		}); err != nil {
 			return "", "", "", err
 		}
 	}

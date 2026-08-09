@@ -1,6 +1,10 @@
 -- DEV email SQS cutover. This migration changes only the permanent connection
--- parking state and the existing ingestion job's idempotency/attempt contract.
+-- parking state, the existing ingestion job's idempotency/attempt contract,
+-- and the final exact-message/Node-textbox cardinality rule.
 -- It does not create a database queue, delivery lease, or retry schedule.
+-- enqueue_source_id is only the original producer fingerprint that permits
+-- that exact producer delivery to finish an unrecorded send; ingestion_job_id
+-- remains the sole job, SQS deduplication, and worker lookup identity.
 
 do $migration$
 declare
@@ -18,6 +22,7 @@ declare
   collapsed_identity_row_count bigint;
   remaining_duplicate_identity_count bigint;
   legacy_active_count bigint;
+  duplicate_node_textbox_message_count bigint;
 begin
   if current_setting('server_version_num')::integer < 170000
      or current_setting('server_version_num')::integer >= 180000 then
@@ -27,14 +32,29 @@ begin
 
   if to_regclass('public.email_connections') is null
      or to_regclass('public.email_ingestion_jobs') is null
-     or to_regclass('public.communications_email_archive_job_items') is null then
+     or to_regclass('public.communications_email_archive_job_items') is null
+     or to_regclass('public.email_relationships') is null then
     raise exception 'STOP: required V3 email tables are missing';
   end if;
 
   lock table public.email_connections,
     public.email_ingestion_jobs,
-    public.communications_email_archive_job_items
+    public.communications_email_archive_job_items,
+    public.email_relationships
     in share row exclusive mode;
+
+  select count(*) into duplicate_node_textbox_message_count
+  from (
+    select 1
+    from email_relationships
+    where resource_type='node' and resource_textbox_id is not null
+    group by company_id,email_message_id,resource_id
+    having count(*) > 1
+  ) duplicates;
+  if duplicate_node_textbox_message_count <> 0 then
+    raise exception 'STOP: % exact email message/Node pair(s) are linked to more than one textbox; review those typed relationships before cutover',
+      duplicate_node_textbox_message_count;
+  end if;
 
   select count(*), count(*) filter (where column_name = any (array[
     'email_connection_id','company_id','connection_type','personal_user_id','provider','account_email',
@@ -56,20 +76,20 @@ begin
       'processing_started_at','completed_timestamp','failed_timestamp','created_timestamp','updated_timestamp'
     ]::text[])),
     count(*) filter (where column_name = any (array[
-      'ingestion_job_id','company_id','email_connection_id','email_thread_id','provider_message_id',
-      'provider_thread_id','priority','status','attempt_count','provider_attempt_count','attempt_token',
-      'enqueue_source_id','last_error','available_at','processing_started_at','completed_timestamp',
-      'failed_timestamp','created_timestamp','updated_timestamp'
+		'ingestion_job_id','company_id','email_connection_id','email_thread_id','provider_message_id',
+		'provider_thread_id','priority','status','provider_attempt_count','attempt_token','enqueue_source_id',
+		'sqs_accepted_timestamp','last_error','completed_timestamp',
+		'failed_timestamp','created_timestamp','updated_timestamp'
     ]::text[]))
   into column_count, legacy_column_count, final_column_count
   from information_schema.columns
   where table_schema='public' and table_name='email_ingestion_jobs';
   if column_count = 16 and legacy_column_count = 16 then
     ingestion_is_legacy := true;
-  elsif column_count = 19 and final_column_count = 19 then
+	elsif column_count = 17 and final_column_count = 17 then
     ingestion_is_legacy := false;
   else
-    raise exception 'STOP: email_ingestion_jobs must be exact legacy 16 or exact final 19 columns; found total %, legacy-approved %, final-approved %',
+		raise exception 'STOP: email_ingestion_jobs must be exact legacy 16 or exact final 17 columns; found total %, legacy-approved %, final-approved %',
       column_count, legacy_column_count, final_column_count;
   end if;
 
@@ -79,18 +99,18 @@ begin
       'processing_started_at','archived_timestamp','failed_timestamp','created_timestamp','updated_timestamp'
     ]::text[])),
     count(*) filter (where column_name = any (array[
-      'job_item_id','archive_job_id','message_id','status','attempt_count','attempt_token','last_error',
-      'available_at','processing_started_at','archived_timestamp','failed_timestamp','created_timestamp','updated_timestamp'
+		'job_item_id','archive_job_id','message_id','status','provider_attempt_count','attempt_token','last_error',
+		'archived_timestamp','failed_timestamp','created_timestamp','updated_timestamp'
     ]::text[]))
   into column_count, legacy_column_count, final_column_count
   from information_schema.columns
   where table_schema='public' and table_name='communications_email_archive_job_items';
   if column_count = 12 and legacy_column_count = 12 then
     archive_is_legacy := true;
-  elsif column_count = 13 and final_column_count = 13 then
+	elsif column_count = 11 and final_column_count = 11 then
     archive_is_legacy := false;
   else
-    raise exception 'STOP: communications_email_archive_job_items must be exact legacy 12 or exact final 13 columns; found total %, legacy-approved %, final-approved %',
+		raise exception 'STOP: communications_email_archive_job_items must be exact legacy 12 or exact final 11 columns; found total %, legacy-approved %, final-approved %',
       column_count, legacy_column_count, final_column_count;
   end if;
 
@@ -191,15 +211,26 @@ begin
     end if;
   end if;
 
-  if ingestion_is_legacy then
-    alter table email_ingestion_jobs
-      add column provider_attempt_count integer not null default 0,
-      add column attempt_token uuid,
-      add column enqueue_source_id text not null default '';
-  end if;
-  if archive_is_legacy then
-    alter table communications_email_archive_job_items
-      add column attempt_token uuid;
+	if ingestion_is_legacy then
+		drop index if exists idx_email_ingestion_jobs_claim;
+		alter table email_ingestion_jobs drop constraint if exists email_ingestion_jobs_attempt_chk;
+		alter table email_ingestion_jobs
+			add column provider_attempt_count integer not null default 0,
+			add column attempt_token uuid,
+			add column enqueue_source_id text not null default '',
+			add column sqs_accepted_timestamp timestamptz,
+			drop column attempt_count,
+			drop column available_at,
+			drop column processing_started_at;
+	end if;
+	if archive_is_legacy then
+		drop index if exists idx_communications_email_archive_job_items_claim;
+		alter table communications_email_archive_job_items
+			add column provider_attempt_count integer not null default 0,
+			add column attempt_token uuid,
+			drop column attempt_count,
+			drop column available_at,
+			drop column processing_started_at;
   end if;
 
   alter table email_connections
@@ -217,11 +248,14 @@ begin
   set status='exhausted',provider_attempt_count=0,attempt_token=null,updated_timestamp=now()
   where status='failed';
 
-  alter table communications_email_archive_job_items
-    drop constraint if exists communications_email_archive_job_items_status_chk;
-  alter table communications_email_archive_job_items
-    add constraint communications_email_archive_job_items_status_chk
-    check (status in ('pending','processing','archived','failed'));
+	alter table communications_email_archive_job_items
+		drop constraint if exists communications_email_archive_job_items_status_chk,
+		drop constraint if exists communications_email_archive_job_items_provider_attempt_chk;
+	alter table communications_email_archive_job_items
+		add constraint communications_email_archive_job_items_status_chk
+		check (status in ('pending','processing','archived','failed')),
+		add constraint communications_email_archive_job_items_provider_attempt_chk
+		check (provider_attempt_count between 0 and 3);
 
   alter table email_ingestion_jobs
     alter column status set default 'accepted',
@@ -238,5 +272,11 @@ begin
   drop index if exists idx_email_ingestion_jobs_stable_message;
   create unique index idx_email_ingestion_jobs_stable_message
     on email_ingestion_jobs(company_id,email_connection_id,provider_message_id);
+  drop trigger if exists trg_email_relationships_one_node_per_thread on email_relationships;
+  drop function if exists mangorts_enforce_one_node_per_email_thread();
+  drop index if exists idx_email_relationships_one_node_textbox_per_message;
+  create unique index idx_email_relationships_one_node_textbox_per_message
+    on email_relationships(company_id,email_message_id,resource_id)
+    where resource_type='node' and resource_textbox_id is not null;
 end
 $migration$;

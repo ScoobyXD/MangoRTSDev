@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -14,7 +15,7 @@ func TestMemoryEmailConversionAtomicallyPersistsEmailThreadTextBoxAndInitialChat
 	textBlockID := "44444444-4444-4444-8444-444444444492"
 	chatID := "55555555-5555-4555-8555-555555555592"
 
-	result, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
+	result, err := repo.ConvertCommunicationsTriageItems(context.Background(), CommunicationsTriageConversionInput{
 		UserID: user.UserID, CompanyID: companyID, AccountEmail: user.Email,
 		ActorUserID: user.UserID, PermissionUserID: user.UserID,
 		Target:     CommunicationsTriageConversionTarget{Mode: CommunicationsEmailConversionTargetExistingNode, NodeID: node.NodeID},
@@ -86,7 +87,7 @@ func TestMemoryEmailConversionRollsBackEveryAtomicImportWrite(t *testing.T) {
 	forced := errors.New("forced initial chat outbox failure")
 	repo.realtimeOutboxErr = forced
 
-	_, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
+	_, err := repo.ConvertCommunicationsTriageItems(context.Background(), CommunicationsTriageConversionInput{
 		UserID: user.UserID, CompanyID: companyID, AccountEmail: user.Email,
 		ActorUserID: user.UserID,
 		Target:      CommunicationsTriageConversionTarget{Mode: CommunicationsEmailConversionTargetExistingNode, NodeID: node.NodeID},

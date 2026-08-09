@@ -26,7 +26,7 @@ func TestRealtimeWebSocketUnauthenticatedHandshakeRejected(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "88888888-8888-4888-8888-888888888001"
 	repo.EnsureCompany(companyID, "Realtime Auth Co")
-	server := NewServerWithOptions(repo, ServerOptions{AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{}}})
+	server := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{}}}))
 	defer server.Close()
 
 	status := realtimeHandshakeStatusForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, "")
@@ -43,9 +43,9 @@ func TestRealtimeWebSocketSignedTicketWorksAcrossServerInstances(t *testing.T) {
 	validator := &tokenClaimsValidator{claims: map[string]auth.Claims{
 		token: {Subject: user.CognitoSubject, Email: user.Email, Name: user.DisplayName},
 	}}
-	serverA := NewServerWithOptions(repo, ServerOptions{AuthValidator: validator, RealtimeTicketSecret: "shared-realtime-ticket-secret"})
+	serverA := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{AuthValidator: validator, RealtimeTicketSecret: "shared-realtime-ticket-secret"}))
 	defer serverA.Close()
-	serverB := NewServerWithOptions(repo, ServerOptions{AuthValidator: validator, RealtimeTicketSecret: "shared-realtime-ticket-secret"})
+	serverB := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{AuthValidator: validator, RealtimeTicketSecret: "shared-realtime-ticket-secret"}))
 	defer serverB.Close()
 
 	ticketCookie := mintRealtimeTicketCookieForTest(t, serverA.Routes(), companyID, token)
@@ -115,10 +115,10 @@ func TestRealtimeWebSocketQueryTicketRejectedEvenWithValidCookie(t *testing.T) {
 	companyID := "87878787-8787-4787-8787-878787878787"
 	token := "query-ticket-cookie-token"
 	user := mustRealtimeAuthUser(t, repo, companyID, "query-ticket-cookie-user", domain.RoleCompanyUser)
-	server := NewServerWithOptions(repo, ServerOptions{
+	server := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{
 		AuthValidator:        &tokenClaimsValidator{claims: map[string]auth.Claims{token: {Subject: user.CognitoSubject, Email: user.Email, Name: user.DisplayName}}},
 		RealtimeTicketSecret: "query-ticket-cookie-secret",
-	})
+	}))
 	defer server.Close()
 
 	cookie := mintRealtimeTicketCookieForTest(t, server.Routes(), companyID, token)
@@ -324,10 +324,10 @@ func TestRealtimeWebSocketTicketHandshakeSendsReady(t *testing.T) {
 	companyID := "12121212-1212-4121-8121-121212121212"
 	token := "realtime-ticket-token"
 	user := mustRealtimeAuthUser(t, repo, companyID, "realtime-ticket", domain.RoleCompanyUser)
-	server := NewServerWithOptions(repo, ServerOptions{
+	server := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{
 		AuthValidator:        &tokenClaimsValidator{claims: map[string]auth.Claims{token: {Subject: user.CognitoSubject, Email: user.Email, Name: user.DisplayName}}},
 		RealtimeTicketSecret: "test-realtime-ticket-secret",
-	})
+	}))
 	defer server.Close()
 	cookie := mintRealtimeTicketCookieForTest(t, server.Routes(), companyID, token)
 	client := openRealtimeWebSocketWithCookieForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, cookie)
@@ -592,7 +592,7 @@ func TestRealtimeSubscriptionLimitKeepsDuplicatesIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := NewServerWithOptions(repo, ServerOptions{DisableNotificationCleanup: true})
+	server := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{DisableNotificationCleanup: true}))
 	defer server.Close()
 	networkConn := &recordingRealtimeNetConn{}
 	conn := &realtimeConnection{
@@ -655,14 +655,14 @@ func TestRealtimeNodeChatPublicationReauthorizesAfterSubscription(t *testing.T) 
 	}); err != nil {
 		t.Fatal(err)
 	}
-	revokedItem, err := repo.AddNodeInformationWithActor(store.NodeInformationInput{
+	_, err = repo.AddNodeInformationWithActor(store.NodeInformationInput{
 		CompanyID: companyID, NodeID: node.NodeID, Type: "Text block chat",
 		Information: `{"block_id":"revoked-block"}`, InformationID: "32323232-3232-4232-8232-000000000001",
 	})
 	if err != nil {
 		t.Fatalf("AddNodeInformationWithActor revoked: %v", err)
 	}
-	server.publishNodeChatCreated(companyID, node.NodeID, "32323232-3232-4232-8232-000000000001", revokedItem)
+	server.wakeRealtimeSpine()
 	client.assertNoMessage(t)
 	if server.realtimeRegistry.scopeSubscriptionCount(companyID, scope) != 1 {
 		t.Fatal("revocation test lost its existing subscription")
@@ -670,14 +670,14 @@ func TestRealtimeNodeChatPublicationReauthorizesAfterSubscription(t *testing.T) 
 	if _, err := repo.SetEntityPermissions(grant); err != nil {
 		t.Fatal(err)
 	}
-	restoredItem, err := repo.AddNodeInformationWithActor(store.NodeInformationInput{
+	_, err = repo.AddNodeInformationWithActor(store.NodeInformationInput{
 		CompanyID: companyID, NodeID: node.NodeID, Type: "Text block chat",
 		Information: `{"block_id":"restored-block"}`, InformationID: "32323232-3232-4232-8232-000000000002",
 	})
 	if err != nil {
 		t.Fatalf("AddNodeInformationWithActor restored: %v", err)
 	}
-	server.publishNodeChatCreated(companyID, node.NodeID, "32323232-3232-4232-8232-000000000002", restoredItem)
+	server.wakeRealtimeSpine()
 	if message := client.readJSON(t); message["type"] != realtimeMessageChatCreated || message["message_id"] != "32323232-3232-4232-8232-000000000002" {
 		t.Fatalf("restored chat publication = %+v", message)
 	}
@@ -716,7 +716,7 @@ func TestRealtimeKanbanPublicationReauthorizesAfterSubscription(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	server.publishKanbanChanged(companyID, boardID, "revoked-change")
+	publishKanbanChangedForTest(t, server, companyID, boardID, "revoked-change")
 	client.assertNoMessage(t)
 	if server.realtimeRegistry.scopeSubscriptionCount(companyID, scope) != 1 {
 		t.Fatal("revocation test lost its existing board subscription")
@@ -724,7 +724,7 @@ func TestRealtimeKanbanPublicationReauthorizesAfterSubscription(t *testing.T) {
 	if _, err := repo.SetEntityPermissions(grant); err != nil {
 		t.Fatal(err)
 	}
-	server.publishKanbanChanged(companyID, boardID, "restored-change")
+	publishKanbanChangedForTest(t, server, companyID, boardID, "restored-change")
 	if message := client.readJSON(t); message["type"] != realtimeMessageKanbanChanged || message["change_type"] != "restored-change" {
 		t.Fatalf("restored board publication = %+v", message)
 	}
@@ -848,7 +848,7 @@ func TestRealtimeKanbanCommittedEventsPublishOnlyMountedBoardScope(t *testing.T)
 	if renamed["type"] != realtimeMessageKanbanChanged || renamed["board_id"] != boardID || renamed["change_type"] != "node_updated" {
 		t.Fatalf("node rename kanban message = %+v", renamed)
 	}
-	server.publishKanbanChanged(companyID, "99999999-9999-4999-8999-999999999999", "unmounted_change")
+	publishKanbanChangedForTest(t, server, companyID, "99999999-9999-4999-8999-999999999999", "unmounted_change")
 	client.assertNoMessage(t)
 }
 
@@ -937,13 +937,13 @@ func TestRealtimeWebSocketNotificationCreatedRoutesOnlyToRecipientScope(t *testi
 	tokenB := "notification-created-b-token"
 	userA := mustRealtimeAuthUser(t, repo, companyID, "notification-created-a", domain.RoleCompanyUser)
 	userB := mustRealtimeAuthUser(t, repo, companyID, "notification-created-b", domain.RoleCompanyUser)
-	server := NewServerWithOptions(repo, ServerOptions{
+	server := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{
 		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
 			tokenA: {Subject: userA.CognitoSubject, Email: userA.Email, Name: userA.DisplayName},
 			tokenB: {Subject: userB.CognitoSubject, Email: userB.Email, Name: userB.DisplayName},
 		}},
 		DisableNotificationCleanup: true,
-	})
+	}))
 	defer server.Close()
 
 	clientA := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenA)
@@ -990,13 +990,13 @@ func TestRealtimeWebSocketNotificationDeletedRoutesOnlyToRecipientScope(t *testi
 	tokenB := "notification-deleted-b-token"
 	userA := mustRealtimeAuthUser(t, repo, companyID, "notification-deleted-a", domain.RoleCompanyUser)
 	userB := mustRealtimeAuthUser(t, repo, companyID, "notification-deleted-b", domain.RoleCompanyUser)
-	server := NewServerWithOptions(repo, ServerOptions{
+	server := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{
 		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
 			tokenA: {Subject: userA.CognitoSubject, Email: userA.Email, Name: userA.DisplayName},
 			tokenB: {Subject: userB.CognitoSubject, Email: userB.Email, Name: userB.DisplayName},
 		}},
 		DisableNotificationCleanup: true,
-	})
+	}))
 	defer server.Close()
 
 	clientA := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenA)
@@ -1049,13 +1049,13 @@ func TestRealtimeWebSocketNotificationsClearedRoutesAggregateToRecipientScope(t 
 	tokenB := "notifications-cleared-b-token"
 	userA := mustRealtimeAuthUser(t, repo, companyID, "notifications-cleared-a", domain.RoleCompanyUser)
 	userB := mustRealtimeAuthUser(t, repo, companyID, "notifications-cleared-b", domain.RoleCompanyUser)
-	server := NewServerWithOptions(repo, ServerOptions{
+	server := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{
 		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
 			tokenA: {Subject: userA.CognitoSubject, Email: userA.Email, Name: userA.DisplayName},
 			tokenB: {Subject: userB.CognitoSubject, Email: userB.Email, Name: userB.DisplayName},
 		}},
 		DisableNotificationCleanup: true,
-	})
+	}))
 	defer server.Close()
 
 	clientA := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenA)
@@ -1128,9 +1128,9 @@ func mustRealtimeAuthUser(t *testing.T, repo *store.MemoryRepo, companyID, subje
 }
 
 func newRealtimeAuthServerForTest(repo *store.MemoryRepo, token string, user domain.User) *Server {
-	return NewServerWithOptions(repo, ServerOptions{AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
+	return NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
 		token: {Subject: user.CognitoSubject, Email: user.Email, Name: user.DisplayName},
-	}}})
+	}}}))
 }
 
 type realtimeWSClientForTest struct {

@@ -149,13 +149,14 @@ type CommunicationsRepository interface {
 	UpsertCommunicationsMessageReadStatusContext(ctx context.Context, input CommunicationsMessageReadStatusInput) (domain.CommunicationsMessageReadStatus, error)
 	ListCommunicationsMessageReadStatuses(input CommunicationsMessageReadStatusListInput) ([]domain.CommunicationsMessageReadStatus, error)
 	CreateCommunicationsArchiveJobContext(ctx context.Context, input CommunicationsArchiveJobInput) (CommunicationsArchiveJob, error)
+	GetCommunicationsArchiveJobContext(ctx context.Context, jobID string) (CommunicationsArchiveJob, error)
 	GetCommunicationsArchiveJobItemContext(ctx context.Context, jobItemID string) (CommunicationsArchiveJobItem, error)
 	StartCommunicationsArchiveJobItemAttemptContext(ctx context.Context, jobItemID string) (CommunicationsArchiveJobItem, bool, error)
-	CompleteCommunicationsArchiveJobItemAttemptContext(ctx context.Context, jobItemID, attemptToken string) error
-	FailCommunicationsArchiveJobItemAttemptContext(ctx context.Context, jobItemID, attemptToken, lastError string) error
-	ParkCommunicationsArchiveJobItemAttemptContext(ctx context.Context, jobItemID, attemptToken, companyID, emailConnectionID, connectionStatus, lastError string) error
+	CompleteCommunicationsArchiveJobItemAttemptContext(ctx context.Context, jobItemID, attemptToken string, realtimeInputs []RealtimeOutboxInput) error
+	FailCommunicationsArchiveJobItemAttemptContext(ctx context.Context, jobItemID, attemptToken, lastError string, realtimeInputs []RealtimeOutboxInput) error
+	ParkCommunicationsArchiveJobItemAttemptContext(ctx context.Context, jobItemID, attemptToken, companyID, emailConnectionID, connectionStatus, lastError string, realtimeInputs []RealtimeOutboxInput) error
 	ListCommunicationsArchiveJobItemsContext(ctx context.Context, jobID string) ([]CommunicationsArchiveJobItem, error)
-	ConvertCommunicationsTriageItems(input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error)
+	ConvertCommunicationsTriageItems(ctx context.Context, input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error)
 	RevertCommunicationsTriageNode(input CommunicationsTriageRevertInput) (CommunicationsTriageRevertResult, error)
 	TransferCommunicationsEmailNode(input CommunicationsEmailNodeTransferInput) (CommunicationsEmailNodeTransferResult, error)
 	ListCommunicationsEmailPlacements(userID, companyID string, messageIDs []string) ([]domain.CommunicationsEmailPlacement, error)
@@ -166,19 +167,19 @@ type CommunicationsRepository interface {
 	GetCommunicationsEmailThreadContext(ctx context.Context, companyID, emailThreadID string) (domain.CommunicationsEmailThread, error)
 	ListCommunicationsEmailThreadsForAccount(input CommunicationsEmailAccountReadInput) ([]domain.CommunicationsEmailThread, error)
 	ListCommunicationsEmailMessagesForAccount(input CommunicationsEmailAccountReadInput) ([]domain.CommunicationsEmailMessage, error)
-	EnsureCommunicationsEmailIngestionJobContext(ctx context.Context, input CommunicationsEmailIngestionJobInput) (CommunicationsEmailThreadDownloadJob, bool, error)
-	EnsureCommunicationsEmailThreadDownloadJobContext(ctx context.Context, companyID, emailThreadID, downloadScope, requestedProviderMessageID, requestedByUserID string) (CommunicationsEmailThreadDownloadJob, bool, error)
-	GetCommunicationsEmailIngestionJobContext(ctx context.Context, jobID string) (CommunicationsEmailThreadDownloadJob, error)
-	StartCommunicationsEmailIngestionAttemptContext(ctx context.Context, jobID string) (CommunicationsEmailThreadDownloadJob, bool, error)
-	CompleteCommunicationsEmailIngestionAttemptContext(ctx context.Context, jobID, attemptToken string) error
-	FailCommunicationsEmailIngestionAttemptContext(ctx context.Context, jobID, attemptToken, lastError string) error
-	ParkCommunicationsEmailIngestionAttemptContext(ctx context.Context, jobID, attemptToken, connectionStatus, lastError string) error
-	ListCommunicationsEmailThreadDownloadJobsContext(ctx context.Context, companyID, emailThreadID string) ([]CommunicationsEmailThreadDownloadJob, error)
+	EnsureCommunicationsEmailIngestionJobContext(ctx context.Context, input CommunicationsEmailIngestionJobInput) (CommunicationsEmailIngestionJob, bool, error)
+	GetCommunicationsEmailIngestionJobContext(ctx context.Context, jobID string) (CommunicationsEmailIngestionJob, error)
+	MarkCommunicationsEmailIngestionJobSQSAcceptedContext(ctx context.Context, jobID string) error
+	StartCommunicationsEmailIngestionAttemptContext(ctx context.Context, jobID string) (CommunicationsEmailIngestionJob, bool, error)
+	CompleteCommunicationsEmailIngestionAttemptContext(ctx context.Context, jobID, attemptToken string, realtimeInputs []RealtimeOutboxInput) error
+	FailCommunicationsEmailIngestionAttemptContext(ctx context.Context, jobID, attemptToken, lastError string, realtimeInputs []RealtimeOutboxInput) error
+	ParkCommunicationsEmailIngestionAttemptContext(ctx context.Context, jobID, attemptToken, connectionStatus, lastError string, realtimeInputs []RealtimeOutboxInput) error
+	ListCommunicationsEmailIngestionJobsForThreadContext(ctx context.Context, companyID, emailThreadID string) ([]CommunicationsEmailIngestionJob, error)
 	CheckEmailSQSWorkerSchemaReadinessContext(ctx context.Context) error
 	ListCommunicationsEmailThreadNodeIDs(companyID, emailThreadID string) ([]string, error)
 	GetCommunicationsNodeEmailThread(companyID, nodeID, emailThreadID string) (domain.CommunicationsNodeEmailThread, error)
 	ImportCommunicationsEmailIntoNode(input CommunicationsNodeEmailImportInput) (CommunicationsNodeEmailImportResult, error)
-	EnsureCommunicationsEmailCollaboration(input CommunicationsEmailCollaborationEnsureInput) (CommunicationsEmailCollaborationEnsureResult, error)
+	EnsureCommunicationsEmailCollaboration(ctx context.Context, input CommunicationsEmailCollaborationEnsureInput) (CommunicationsEmailCollaborationEnsureResult, error)
 	ListCommunicationsEmailCollaborations(input CommunicationsEmailCollaborationListInput) ([]domain.CommunicationsEmailCollaboration, error)
 	GetCommunicationsEmailCollaboration(companyID, collaborationID, participantUserID string) (domain.CommunicationsEmailCollaboration, error)
 	AddCommunicationsEmailCollaborationParticipants(input CommunicationsEmailCollaborationParticipantInput) (CommunicationsEmailCollaborationParticipantResult, error)

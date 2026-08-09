@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -19,7 +20,7 @@ type failingEmailCollaborationEnsureRepo struct {
 	err error
 }
 
-func (r failingEmailCollaborationEnsureRepo) EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput) (store.CommunicationsEmailCollaborationEnsureResult, error) {
+func (r failingEmailCollaborationEnsureRepo) EnsureCommunicationsEmailCollaboration(context.Context, store.CommunicationsEmailCollaborationEnsureInput) (store.CommunicationsEmailCollaborationEnsureResult, error) {
 	return store.CommunicationsEmailCollaborationEnsureResult{}, r.err
 }
 

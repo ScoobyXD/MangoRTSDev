@@ -1,13 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import type { CompanyUser, CommunicationsSharedInbox, CommunicationsSharedInboxRACIAssignment, CommunicationsSharedInboxRACIRole, EmailMessage, SendEmailInput, UserLogicGateShortcut } from "../../../../frontend/src/modules/communications/communicationsApi.js";
+import type { CompanyUser, CommunicationsArchiveJob, CommunicationsSharedInbox, CommunicationsSharedInboxRACIAssignment, CommunicationsSharedInboxRACIRole, EmailMessage, SendEmailInput, UserLogicGateShortcut } from "../../../../frontend/src/modules/communications/communicationsApi.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../../../frontend/src/modules/folders/companyExplorerFolders.js";
 import type { LogicGateAssignmentCommandResult, RACIMatrixProjectionRow } from "../../../../frontend/src/modules/kanban/kanbanApi.js";
 import type { KanbanBoard, KanbanCard } from "../../../../frontend/src/modules/kanban/shared.js";
 import type { NodeRecord } from "../../../../frontend/src/modules/nodes/types.js";
 import { EDITOR_RICH_TEXT_PREFIX } from "../../../../frontend/src/modules/editor/richTextEditing.js";
 import { INBOX_NO_LOGIC_GATE_ID } from "../../../../frontend/src/pages/home/homeConstants.js";
-import { addMyLogicGateShortcutsCommand, addSharedInboxRACIPrincipalCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeRACIMatrixNodeCommand, deleteHomeMailMessagesCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, removeMyLogicGateShortcutCommand, removeSharedInboxRACIPrincipalCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessage, type HomeArchiveEmailMessagesBatch, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateRACIMatrixNode, type HomeDeleteEmailMessage, type HomeDropAssignNodeToLogicGateStatus, type HomeMoveMyWorkNodeToCell, type HomeRemoveMyLogicGateShortcut, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInboxRACIAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
+import { addMyLogicGateShortcutsCommand, addSharedInboxRACIPrincipalCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeRACIMatrixNodeCommand, deleteHomeMailMessagesCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, removeMyLogicGateShortcutCommand, removeSharedInboxRACIPrincipalCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessagesBatch, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateRACIMatrixNode, type HomeDeleteEmailMessage, type HomeDropAssignNodeToLogicGateStatus, type HomeMoveMyWorkNodeToCell, type HomeRemoveMyLogicGateShortcut, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInboxRACIAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
 import { appendHomeMailPlainText, applyHomeMailSignature, composeHasDraftContent, homeMailBodyHasSignature, homeMailDraftToMessage, homeMailSignatureScopeKey, loadHomeMailSignature, readHomeMailSignature, saveHomeMailSignatureRemote } from "../../../../frontend/src/pages/home/homeMailDrafts.js";
 import { emptyCompose } from "../../../../frontend/src/pages/home/homeTypes.js";
 
@@ -366,6 +366,23 @@ function emailMessage(id: string, overrides: Partial<EmailMessage> = {}): EmailM
     starred: false,
     ...overrides,
   };
+}
+
+function archiveJob(messageIDs: string[]): CommunicationsArchiveJob {
+	const ids = Array.from(new Set(messageIDs));
+	return {
+		job_id: "archive-job-1",
+		status: "pending",
+		requested_count: ids.length,
+		accepted_message_ids: ids,
+		items: ids.map((messageID, index) => ({
+			job_item_id: `archive-job-item-${index + 1}`,
+			job_id: "archive-job-1",
+			message_id: messageID,
+			status: "pending",
+			provider_attempt_count: 0,
+		})),
+	};
 }
 
 function sharedInbox(id: string, overrides: Partial<CommunicationsSharedInbox> = {}): CommunicationsSharedInbox {
@@ -944,10 +961,10 @@ test("Home triage conversion command owns cache, event, and graph side effects",
 });
 
 test("Home mail message commands normalize ids and preserve one exact personal or shared mailbox", async () => {
-  const calls: Array<{ action: string; companyID: string; messageID: string; sharedInboxID?: string; accountEmail?: string; update?: unknown }> = [];
-  const archiveEmailMessage: HomeArchiveEmailMessage = async (messageID, sharedInboxID, companyID, accountEmail) => {
-    calls.push({ action: "archive", companyID: companyID ?? "", messageID, sharedInboxID, accountEmail });
-    return emailMessage(messageID, { folders: ["archive"] });
+	const calls: Array<{ action: string; companyID: string; messageID: string; sharedInboxID?: string; accountEmail?: string; update?: unknown }> = [];
+	const archiveEmailMessagesBatch: HomeArchiveEmailMessagesBatch = async (messageIDs, sharedInboxID, companyID, options) => {
+		for (const messageID of messageIDs) calls.push({ action: "archive", companyID: companyID ?? "", messageID, sharedInboxID, accountEmail: options?.accountEmail });
+		return archiveJob(messageIDs);
   };
   const unarchiveEmailMessage: HomeUnarchiveEmailMessage = async (messageID, sharedInboxID, companyID, accountEmail) => {
     calls.push({ action: "unarchive", companyID: companyID ?? "", messageID, sharedInboxID, accountEmail });
@@ -961,11 +978,11 @@ test("Home mail message commands normalize ids and preserve one exact personal o
     return emailMessage(messageID, { unread: update.unread ?? true, starred: update.starred ?? false });
   };
 
-  await archiveHomeMailMessagesCommand({ companyID: "company-1", sharedInboxID: " shared-1 ", accountEmail: "ignored@example.test", messageIDs: [" message-1 ", "message-2", "message-1"], archiveEmailMessage });
+	await archiveHomeMailMessagesCommand({ companyID: "company-1", sharedInboxID: " shared-1 ", accountEmail: "ignored@example.test", messageIDs: [" message-1 ", "message-2", "message-1"], archiveEmailMessagesBatch });
   await unarchiveHomeMailMessagesCommand({ companyID: "company-1", sharedInboxID: "shared-1", accountEmail: "ignored@example.test", messageIDs: ["message-3"], unarchiveEmailMessage });
   await deleteHomeMailMessagesCommand({ companyID: "company-1", sharedInboxID: "shared-1", accountEmail: "ignored@example.test", messageIDs: ["message-4"], deleteEmailMessage });
   const updated = await updateHomeMailMessageCommand({ companyID: "company-1", sharedInboxID: "shared-1", accountEmail: "ignored@example.test", messageID: " message-5 ", update: { unread: false }, updateEmailMessage });
-  await archiveHomeMailMessagesCommand({ companyID: "company-1", accountEmail: " OWNER@Example.TEST ", messageIDs: ["message-6"], archiveEmailMessage });
+	await archiveHomeMailMessagesCommand({ companyID: "company-1", accountEmail: " OWNER@Example.TEST ", messageIDs: ["message-6"], archiveEmailMessagesBatch });
   await unarchiveHomeMailMessagesCommand({ companyID: "company-1", accountEmail: " OWNER@Example.TEST ", messageIDs: ["message-7"], unarchiveEmailMessage });
   await deleteHomeMailMessagesCommand({ companyID: "company-1", accountEmail: " OWNER@Example.TEST ", messageIDs: ["message-8"], deleteEmailMessage });
   await updateHomeMailMessageCommand({ companyID: "company-1", accountEmail: " OWNER@Example.TEST ", messageID: "message-9", update: { starred: true }, updateEmailMessage });
@@ -985,15 +1002,11 @@ test("Home mail message commands normalize ids and preserve one exact personal o
   assert.equal(updated?.message.unread, false);
 });
 
-test("Home archive command sends message IDs in one exact mailbox background batch", async () => {
-  const calls: Array<{ messageIDs: string[]; sharedInboxID?: string; companyID?: string; accountEmail?: string; background?: boolean }> = [];
-  const archiveEmailMessagesBatch: HomeArchiveEmailMessagesBatch = async (messageIDs, sharedInboxID, companyID, options) => {
-    calls.push({ messageIDs, sharedInboxID, companyID, accountEmail: options?.accountEmail, background: options?.background });
-    return {
-      accepted_ids: messageIDs,
-      archived_ids: [],
-      failed: [],
-    };
+test("Home archive command sends message IDs in one exact mailbox batch and returns its job identity", async () => {
+	const calls: Array<{ messageIDs: string[]; sharedInboxID?: string; companyID?: string; accountEmail?: string }> = [];
+	const archiveEmailMessagesBatch: HomeArchiveEmailMessagesBatch = async (messageIDs, sharedInboxID, companyID, options) => {
+		calls.push({ messageIDs, sharedInboxID, companyID, accountEmail: options?.accountEmail });
+		return archiveJob(messageIDs);
   };
 
   const result = await archiveHomeMailMessagesCommand({
@@ -1004,12 +1017,11 @@ test("Home archive command sends message IDs in one exact mailbox background bat
     archiveEmailMessagesBatch,
   });
 
-  assert.deepEqual(calls, [
-    { companyID: "company-1", sharedInboxID: "shared-1", accountEmail: undefined, messageIDs: ["message-1", "message-2", "message-3", "message-4", "message-5", "message-6"], background: true },
-  ]);
-  assert.deepEqual(result?.messageIDs, ["message-1", "message-2", "message-3", "message-4", "message-5", "message-6"]);
-  assert.equal(result?.accepted, true);
-  assert.equal(result?.failed, undefined);
+	assert.deepEqual(calls, [
+		{ companyID: "company-1", sharedInboxID: "shared-1", accountEmail: undefined, messageIDs: ["message-1", "message-2", "message-3", "message-4", "message-5", "message-6"] },
+	]);
+	assert.deepEqual(result?.messageIDs, ["message-1", "message-2", "message-3", "message-4", "message-5", "message-6"]);
+	assert.equal(result?.archiveJob.job_id, "archive-job-1");
 
   await archiveHomeMailMessagesCommand({
     companyID: "company-1",
@@ -1017,13 +1029,12 @@ test("Home archive command sends message IDs in one exact mailbox background bat
     messageIDs: ["message-7"],
     archiveEmailMessagesBatch,
   });
-  assert.deepEqual(calls[1], {
+	assert.deepEqual(calls[1], {
     companyID: "company-1",
     sharedInboxID: undefined,
     accountEmail: "second@example.test",
     messageIDs: ["message-7"],
-    background: true,
-  });
+	});
 });
 
 test("Home compose command validates send payloads and preserves body spacing", async () => {

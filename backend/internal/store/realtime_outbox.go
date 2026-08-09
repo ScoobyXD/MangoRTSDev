@@ -81,6 +81,18 @@ func normalizeRealtimeOutboxInput(input RealtimeOutboxInput) (RealtimeOutboxInpu
 	return input, nil
 }
 
+func normalizeRealtimeOutboxInputs(inputs []RealtimeOutboxInput) ([]RealtimeOutboxInput, error) {
+	normalized := make([]RealtimeOutboxInput, 0, len(inputs))
+	for _, input := range inputs {
+		item, err := normalizeRealtimeOutboxInput(input)
+		if err != nil {
+			return nil, err
+		}
+		normalized = append(normalized, item)
+	}
+	return normalized, nil
+}
+
 func normalizeRealtimeOutboxClaimQuery(query RealtimeOutboxClaimQuery) RealtimeOutboxClaimQuery {
 	if query.Limit <= 0 || query.Limit > RealtimeOutboxClaimMaxLimit {
 		query.Limit = 100

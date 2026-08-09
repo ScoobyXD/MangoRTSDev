@@ -5,6 +5,7 @@ import {
   applyHomeMailboxCountDelta,
   consumeHomeMailboxLocalMutationEcho,
   cancelHomeMailboxListRequestTimers,
+  createHomeArchiveStatusCoordinator,
   createHomeMailboxFolderLoadCoordinator,
   createHomeMailboxRealtimeCoordinator,
   forgetHomeMailboxLocalMutationEchoes,
@@ -403,6 +404,66 @@ test("presentation navigation drops stale list work but preserves exact-scope fo
   coordinator.dispose();
   assert.equal(timers.size, 0);
   assert.equal(plans.length, 1, "scope disposal cancels pending work");
+});
+
+test("archive status uses one active pass plus one queued final pass for relevant hints only", async () => {
+  const timers = fakeTimers();
+  const target = personalTarget();
+  const passes: string[] = [];
+  const completions: Array<() => void> = [];
+  const coordinator = createHomeArchiveStatusCoordinator({
+    target,
+    getActiveJobs: () => [{
+      jobID: "archive-job-1",
+      realtimeScope: target.scope,
+      messageIDs: ["message-1"],
+    }],
+    revalidate: (jobID) => new Promise<void>((resolve) => {
+      passes.push(jobID);
+      completions.push(resolve);
+    }),
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  });
+
+  coordinator.revalidate("archive-job-1");
+  assert.deepEqual(passes, ["archive-job-1"]);
+  for (let index = 0; index < 20; index += 1) {
+    coordinator.changed({ scope: target.scope, trigger: "message.updated", message_id: "message-1" });
+  }
+  coordinator.changed({ scope: target.scope, trigger: "message.updated", message_id: "unrelated-message" });
+  coordinator.changed({ scope: personalTarget("other@example.com").scope, trigger: "message.updated", message_id: "message-1" });
+  assert.equal(timers.size, 1, "twenty relevant hints share one delayed final pass");
+  assert.equal(timers.runNext(), true);
+  assert.deepEqual(passes, ["archive-job-1"], "the final pass waits behind the active read");
+
+  completions.shift()?.();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(passes, ["archive-job-1", "archive-job-1"]);
+  completions.shift()?.();
+  await Promise.resolve();
+  coordinator.dispose();
+  assert.equal(timers.size, 0);
+});
+
+test("archive subscription acceptance reads only active jobs for the selected exact mailbox", () => {
+  const timers = fakeTimers();
+  const target = sharedTarget("inbox-1");
+  const passes: string[] = [];
+  const coordinator = createHomeArchiveStatusCoordinator({
+    target,
+    getActiveJobs: () => [
+      { jobID: "selected-job", realtimeScope: target.scope, messageIDs: ["selected-message"] },
+      { jobID: "other-job", realtimeScope: sharedTarget("inbox-2").scope, messageIDs: ["other-message"] },
+    ],
+    revalidate: (jobID) => { passes.push(jobID); },
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  });
+  coordinator.accepted();
+  assert.equal(timers.runNext(), true);
+  assert.deepEqual(passes, ["selected-job"]);
+  coordinator.dispose();
 });
 
 test("mailbox-owned timers and async completions cannot mutate a newly selected mailbox", async () => {

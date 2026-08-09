@@ -62,7 +62,7 @@ func TestNodePriorityNotAssignedMigrationReconcilesEmailRelationshipsSafely(t *t
 	}
 }
 
-func TestCanonicalEmailRelationshipGuardMatchesPriorityMigration(t *testing.T) {
+func TestFinalEmailRelationshipShapeSupersedesPriorityMigrationGuard(t *testing.T) {
 	schemaRaw, err := os.ReadFile(filepath.Join("..", "..", "db", "schema.sql"))
 	if err != nil {
 		t.Fatal(err)
@@ -71,22 +71,36 @@ func TestCanonicalEmailRelationshipGuardMatchesPriorityMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	finalMigrationRaw, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "20260809_zzz_email_sqs_delivery.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	for name, body := range map[string]string{
-		"canonical schema":   strings.ToLower(string(schemaRaw)),
-		"priority migration": strings.ToLower(string(migrationRaw)),
+	schema := strings.ToLower(string(schemaRaw))
+	priorityMigration := strings.ToLower(string(migrationRaw))
+	finalMigration := strings.ToLower(string(finalMigrationRaw))
+	if !strings.Contains(priorityMigration, "create trigger trg_email_relationships_one_node_per_thread") {
+		t.Fatal("priority migration no longer documents the legacy guard that the final migration must remove")
+	}
+	for _, required := range []string{
+		"drop trigger if exists trg_email_relationships_one_node_per_thread on email_relationships",
+		"drop function if exists mangorts_enforce_one_node_per_email_thread()",
+		"create unique index idx_email_relationships_one_node_textbox_per_message",
 	} {
-		for _, required := range []string{
-			"mangorts_enforce_one_node_per_email_thread",
-			"email_thread_already_linked_to_another_node",
-			"email_message_already_linked_to_another_textbox",
-			"relationship.email_message_id=new.email_message_id",
-			"relationship.resource_textbox_id<>new.resource_textbox_id",
-			"update of company_id,email_thread_id,email_message_id,resource_type,resource_id,resource_textbox_id",
-		} {
-			if !strings.Contains(body, required) {
-				t.Errorf("%s is missing %q", name, required)
-			}
+		if !strings.Contains(finalMigration, required) {
+			t.Errorf("final migration is missing %q", required)
 		}
+	}
+	for _, forbidden := range []string{
+		"mangorts_enforce_one_node_per_email_thread",
+		"email_thread_already_linked_to_another_node",
+		"trg_email_relationships_one_node_per_thread",
+	} {
+		if strings.Contains(schema, forbidden) {
+			t.Errorf("canonical schema retains obsolete one-thread/one-Node guard %q", forbidden)
+		}
+	}
+	if !strings.Contains(schema, "idx_email_relationships_one_node_textbox_per_message") {
+		t.Fatal("canonical schema is missing the one-textbox-per-message-per-Node unique index")
 	}
 }

@@ -23,20 +23,23 @@ const (
 	emailReconciliationOverlap          = 5 * time.Minute
 )
 
-func (s *Server) enqueueCommunicationsEmailIngestionJob(ctx context.Context, job store.CommunicationsEmailThreadDownloadJob) error {
+func (s *Server) enqueueCommunicationsEmailIngestionJob(ctx context.Context, job store.CommunicationsEmailIngestionJob) error {
 	if s == nil || s.emailQueue == nil {
 		return errors.New("email SQS sender is not configured")
 	}
-	return s.emailQueue.Send(ctx, emailqueue.Message{
+	if err := s.emailQueue.Send(ctx, emailqueue.Message{
 		SchemaVersion:     emailqueue.SchemaVersion,
 		Kind:              emailqueue.KindIngestion,
-		JobID:             job.DownloadJobID,
+		JobID:             job.IngestionJobID,
 		CompanyID:         job.CompanyID,
 		EmailConnectionID: job.EmailConnectionID,
-	})
+	}); err != nil {
+		return err
+	}
+	return s.repo.MarkCommunicationsEmailIngestionJobSQSAcceptedContext(ctx, job.IngestionJobID)
 }
 
-func (s *Server) enqueueCommunicationsEmailThreadJobs(ctx context.Context, companyID string, threadIDs []string) error {
+func (s *Server) enqueueCommunicationsEmailIngestionJobsForThreads(ctx context.Context, companyID string, threadIDs []string, producerFingerprint string) error {
 	if s == nil || s.emailQueue == nil {
 		return errors.New("email SQS sender is not configured")
 	}
@@ -47,12 +50,13 @@ func (s *Server) enqueueCommunicationsEmailThreadJobs(ctx context.Context, compa
 			continue
 		}
 		seen[threadID] = true
-		jobs, err := s.repo.ListCommunicationsEmailThreadDownloadJobsContext(ctx, companyID, threadID)
+		jobs, err := s.repo.ListCommunicationsEmailIngestionJobsForThreadContext(ctx, companyID, threadID)
 		if err != nil {
 			return err
 		}
 		for _, job := range jobs {
-			if job.Status != store.CommunicationsEmailThreadDownloadJobAccepted && job.Status != store.CommunicationsEmailThreadDownloadJobProcessing {
+			if job.Status != store.CommunicationsEmailIngestionJobAccepted || job.SQSAcceptedTimestamp != nil ||
+				strings.TrimSpace(job.EnqueueSourceID) != strings.TrimSpace(producerFingerprint) {
 				continue
 			}
 			if err := s.enqueueCommunicationsEmailIngestionJob(ctx, job); err != nil {
@@ -61,19 +65,6 @@ func (s *Server) enqueueCommunicationsEmailThreadJobs(ctx context.Context, compa
 		}
 	}
 	return nil
-}
-
-func (s *Server) enqueueCommunicationsReconciliationControl(ctx context.Context, source string) error {
-	if s == nil || s.emailQueue == nil {
-		return errors.New("email SQS sender is not configured")
-	}
-	now := time.Now().UTC()
-	return s.emailQueue.Send(ctx, emailqueue.Message{
-		SchemaVersion:    emailqueue.SchemaVersion,
-		Kind:             emailqueue.KindReconciliationControl,
-		ReconciliationID: strings.TrimSpace(source) + "-" + now.Format("20060102T1504"),
-		ScanStartedAt:    now,
-	})
 }
 
 // RunEmailWorker owns only process lifecycle and bounded concurrency. SQS owns
@@ -180,24 +171,24 @@ func (s *Server) processEmailIngestionDelivery(ctx context.Context, message emai
 		return false, store.ErrInvalid
 	}
 	switch job.Status {
-	case store.CommunicationsEmailThreadDownloadJobCompleted:
-		err := s.publishCommunicationsEmailIngestionCompletionContext(ctx, job)
+	case store.CommunicationsEmailIngestionJobCompleted:
+		err := s.publishCommunicationsEmailIngestionStatusContext(ctx, job)
 		return err == nil, err
-	case store.CommunicationsEmailThreadDownloadJobParked:
+	case store.CommunicationsEmailIngestionJobParked:
 		return true, nil
-	case store.CommunicationsEmailThreadDownloadJobExhausted:
+	case store.CommunicationsEmailIngestionJobExhausted:
 		return false, nil
 	}
-	job, started, err := s.repo.StartCommunicationsEmailIngestionAttemptContext(ctx, job.DownloadJobID)
+	job, started, err := s.repo.StartCommunicationsEmailIngestionAttemptContext(ctx, job.IngestionJobID)
 	if err != nil {
 		return false, err
 	}
 	if !started {
 		switch job.Status {
-		case store.CommunicationsEmailThreadDownloadJobCompleted:
-			err := s.publishCommunicationsEmailIngestionCompletionContext(ctx, job)
+		case store.CommunicationsEmailIngestionJobCompleted:
+			err := s.publishCommunicationsEmailIngestionStatusContext(ctx, job)
 			return err == nil, err
-		case store.CommunicationsEmailThreadDownloadJobParked:
+		case store.CommunicationsEmailIngestionJobParked:
 			return true, nil
 		default:
 			return false, nil
@@ -205,32 +196,58 @@ func (s *Server) processEmailIngestionDelivery(ctx context.Context, message emai
 	}
 	workErr := s.processCommunicationsEmailIngestionProviderWork(ctx, job)
 	if workErr == nil {
-		if err := s.repo.CompleteCommunicationsEmailIngestionAttemptContext(ctx, job.DownloadJobID, job.AttemptToken); err != nil {
-			return false, err
-		}
-		job, err = s.repo.GetCommunicationsEmailIngestionJobContext(ctx, job.DownloadJobID)
+		settled := job
+		settled.Status = store.CommunicationsEmailIngestionJobCompleted
+		realtimeInputs, err := s.communicationsEmailIngestionStatusRealtimeInputs(ctx, settled)
 		if err != nil {
 			return false, err
 		}
-		err = s.publishCommunicationsEmailIngestionCompletionContext(ctx, job)
-		return err == nil, err
+		if err := s.repo.CompleteCommunicationsEmailIngestionAttemptContext(ctx, job.IngestionJobID, job.AttemptToken, realtimeInputs); err != nil {
+			return false, err
+		}
+		s.wakeRealtimeSpine()
+		return true, nil
 	}
 	code := communicationsEmailWorkErrorCode(workErr)
 	if errors.Is(workErr, errCommunicationsEmailConnectionReauthRequired) {
-		if err := s.repo.ParkCommunicationsEmailIngestionAttemptContext(ctx, job.DownloadJobID, job.AttemptToken, "reauth_required", code); err != nil {
+		settled := job
+		settled.Status = store.CommunicationsEmailIngestionJobParked
+		realtimeInputs, err := s.communicationsEmailIngestionStatusRealtimeInputs(ctx, settled)
+		if err != nil {
 			return false, err
 		}
+		if err := s.repo.ParkCommunicationsEmailIngestionAttemptContext(ctx, job.IngestionJobID, job.AttemptToken, "reauth_required", code, realtimeInputs); err != nil {
+			return false, err
+		}
+		s.wakeRealtimeSpine()
 		return true, nil
 	}
 	if errors.Is(workErr, errCommunicationsEmailConnectionConfigurationRequired) {
-		if err := s.repo.ParkCommunicationsEmailIngestionAttemptContext(ctx, job.DownloadJobID, job.AttemptToken, "configuration_required", code); err != nil {
+		settled := job
+		settled.Status = store.CommunicationsEmailIngestionJobParked
+		realtimeInputs, err := s.communicationsEmailIngestionStatusRealtimeInputs(ctx, settled)
+		if err != nil {
 			return false, err
 		}
+		if err := s.repo.ParkCommunicationsEmailIngestionAttemptContext(ctx, job.IngestionJobID, job.AttemptToken, "configuration_required", code, realtimeInputs); err != nil {
+			return false, err
+		}
+		s.wakeRealtimeSpine()
 		return true, nil
 	}
-	if err := s.repo.FailCommunicationsEmailIngestionAttemptContext(ctx, job.DownloadJobID, job.AttemptToken, code); err != nil {
+	settled := job
+	settled.Status = store.CommunicationsEmailIngestionJobAccepted
+	if settled.ProviderAttemptCount >= store.CommunicationsEmailProviderAttemptLimit {
+		settled.Status = store.CommunicationsEmailIngestionJobExhausted
+	}
+	realtimeInputs, err := s.communicationsEmailIngestionStatusRealtimeInputs(ctx, settled)
+	if err != nil {
 		return false, err
 	}
+	if err := s.repo.FailCommunicationsEmailIngestionAttemptContext(ctx, job.IngestionJobID, job.AttemptToken, code, realtimeInputs); err != nil {
+		return false, err
+	}
+	s.wakeRealtimeSpine()
 	return false, workErr
 }
 
@@ -242,17 +259,30 @@ func communicationsEmailWorkErrorCode(err error) string {
 		return "email_connection_configuration_required"
 	case errors.Is(err, errCommunicationsEmailAttachmentUnavailable):
 		return "email_attachment_download_failed"
-	case errors.Is(err, errCommunicationsEmailThreadDownloadUnavailable), errors.Is(err, errEmailCollaborationSourceUnavailable):
+	case errors.Is(err, errCommunicationsEmailIngestionUnavailable), errors.Is(err, errEmailCollaborationSourceUnavailable):
 		return "email_thread_source_unavailable"
 	default:
 		return communicationsMutationErrorCode(err)
 	}
 }
 
-func (s *Server) publishCommunicationsEmailIngestionCompletionContext(ctx context.Context, job store.CommunicationsEmailThreadDownloadJob) error {
-	connection, err := s.repo.GetEmailConnectionByIDContext(ctx, job.CompanyID, job.EmailConnectionID)
+func (s *Server) publishCommunicationsEmailIngestionStatusContext(ctx context.Context, job store.CommunicationsEmailIngestionJob) error {
+	inputs, err := s.communicationsEmailIngestionStatusRealtimeInputs(ctx, job)
 	if err != nil {
 		return err
+	}
+	for _, input := range inputs {
+		if _, err := s.enqueueRealtimeOutboxAndWake(ctx, input); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Server) communicationsEmailIngestionStatusRealtimeInputs(ctx context.Context, job store.CommunicationsEmailIngestionJob) ([]store.RealtimeOutboxInput, error) {
+	connection, err := s.repo.GetEmailConnectionByIDContext(ctx, job.CompanyID, job.EmailConnectionID)
+	if err != nil {
+		return nil, err
 	}
 	change := nylasWebhookChange{
 		Trigger: "message.updated", MessageID: strings.TrimSpace(job.ProviderMessageID),
@@ -261,33 +291,38 @@ func (s *Server) publishCommunicationsEmailIngestionCompletionContext(ctx contex
 	if communicationsMessageReadStatusScopeTypeForConnection(connection) != "shared" {
 		s.applyNylasWebhookCacheInvalidation(connection.UserID, communicationsConnectionCacheScope(connection), change)
 		scope := realtimePersonalMailboxScope(connection.UserID, connection.AccountEmail)
-		return s.publishPersonalMailboxWebhookHintContext(
-			ctx, job.CompanyID, connection.UserID, connection.AccountEmail,
-			emailIngestionCompletionEventID(job.DownloadJobID, job.CompanyID, scope), change,
-		)
+		input, err := personalMailboxWebhookHintInput(job.CompanyID, connection.UserID, connection.AccountEmail,
+			emailIngestionStatusEventID(job, scope), change)
+		return []store.RealtimeOutboxInput{input}, err
 	}
-	s.applyNylasWebhookCacheInvalidationForAccountScope(communicationsConnectionCacheScope(connection), change)
 	sharedInboxIDs, err := s.communicationsSharedInboxIDsForCompanyEmailConnectionContext(ctx, companyEmailConnectionFromUserConnectionForHTTP(connection))
 	if err != nil {
-		return err
+		return nil, err
 	}
+	if len(sharedInboxIDs) == 0 {
+		return nil, store.ErrNotFound
+	}
+	s.applyNylasWebhookCacheInvalidationForAccountScope(communicationsConnectionCacheScope(connection), change)
+	inputs := make([]store.RealtimeOutboxInput, 0, len(sharedInboxIDs))
 	for _, sharedInboxID := range sharedInboxIDs {
 		scope := realtimeSharedMailboxScope(sharedInboxID)
-		if err := s.publishSharedMailboxWebhookHintContext(
-			ctx, job.CompanyID, sharedInboxID,
-			emailIngestionCompletionEventID(job.DownloadJobID, job.CompanyID, scope), change,
-		); err != nil {
-			return fmt.Errorf("publish completed shared mailbox hint: %w", err)
+		input, err := sharedMailboxWebhookHintInput(job.CompanyID, sharedInboxID,
+			emailIngestionStatusEventID(job, scope), change)
+		if err != nil {
+			return nil, fmt.Errorf("build shared mailbox ingestion hint: %w", err)
 		}
+		inputs = append(inputs, input)
 	}
-	return nil
+	return inputs, nil
 }
 
-func emailIngestionCompletionEventID(jobID, companyID, scope string) string {
+func emailIngestionStatusEventID(job store.CommunicationsEmailIngestionJob, scope string) string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{
-		"mangorts-email-ingestion-completion-v1",
-		strings.TrimSpace(jobID),
-		strings.TrimSpace(companyID),
+		"mangorts-email-ingestion-status-v2",
+		strings.TrimSpace(job.IngestionJobID),
+		fmt.Sprint(job.ProviderAttemptCount),
+		strings.TrimSpace(job.Status),
+		strings.TrimSpace(job.CompanyID),
 		strings.TrimSpace(scope),
 	}, "\x1f")))
 	raw := sum[:16]
@@ -380,13 +415,13 @@ func (s *Server) processEmailReconciliationConnection(ctx context.Context, messa
 			ProviderMessageID: providerMessage.ID,
 			ProviderThreadID:  providerMessage.ThreadID,
 			Priority:          store.CommunicationsEmailIngestionPriorityScan,
-			EnqueueSourceID:   message.ReconciliationID,
+			EnqueueSourceID:   "reconciliation:" + strings.TrimSpace(message.ReconciliationID),
 		})
 		if err != nil {
 			return false, err
 		}
-		if !created && (job.Status != store.CommunicationsEmailThreadDownloadJobAccepted ||
-			strings.TrimSpace(job.EnqueueSourceID) != strings.TrimSpace(message.ReconciliationID)) {
+		if !created && (job.Status != store.CommunicationsEmailIngestionJobAccepted || job.SQSAcceptedTimestamp != nil ||
+			strings.TrimSpace(job.EnqueueSourceID) != "reconciliation:"+strings.TrimSpace(message.ReconciliationID)) {
 			continue
 		}
 		if err := s.enqueueCommunicationsEmailIngestionJob(ctx, job); err != nil {
