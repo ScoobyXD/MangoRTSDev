@@ -4,7 +4,6 @@
 //██ Invariants ██
 //████████████████
 
-// - The "editorSurface" for imports is: "imported".
 // - Import images default to being centered.
 // - Imported items are placed inside a clearly-marked import folder.
 
@@ -13,7 +12,14 @@
 //███████████████████████
 
 // TODO: Improve error handling.
-// TODO: Locate official Papaparse TYpes
+// TODO: Annotate with proper Papaparse types.
+// TODO: Create a custom editor surface and image source for imports.
+// TODO: Determine if the document upload cap can be increased.
+// TODO: Identify duplicate imports requested on the same day.
+// TODO: Add concurrency for uploading items.
+// TODO: Consider rate limits for uploading items.
+// TODO: Consider retries for uploading failed items.
+// TODO: Handle upload cancellation.
 
 
 
@@ -21,7 +27,8 @@
 //██ Imports ██
 //█████████████
 
-import { Editor, Node } from "@tiptap/core";
+// TODO: Determine if the "Node" import from Tiptap core may be required in the future.
+import { Editor } from "@tiptap/core";
 import { Markdown } from "@tiptap/markdown";
 
 // Helper code to allow us to determine the currently active company.
@@ -41,7 +48,7 @@ import {
 } from "../editor/tiptap/mangoTiptapDocument.js";
 
 import { 
-    createMangoTiptapExtensionOptions,
+    type MangoTiptapExtensionOptions,
     createMangoTiptapExtensions,
     MangoAttachmentImage,
     normalizeMangoTiptapBlockIDs,
@@ -74,14 +81,18 @@ import {
 
 import {
     type CompanyExplorerV2Row,
-    // companyExplorerFolders,
-} from "../folders/companyExplorerFolders.js";
+} from "../folders/companyExplorerLazyApi.js";
 
 // Import commands to create logic gates.
 import {
     createWorkspaceEntityBatchCommand,
     createWorkspaceEntityBatchClientID,
 } from "../workspace/workspaceEntityCommands.js";
+
+// Import a helper type to parse createWorkspaceEntityBatchCommand responses.
+import {
+    type CompanyExplorerWorkspaceEntityBatchResponse
+} from "../company-explorer/CompanyExplorerContentModel.js";
 
 // Import the Papaparse CSV Parser.
 import Papa from "papaparse";
@@ -96,7 +107,7 @@ import Papa from "papaparse";
 const CORS_PROXY_PATH = "https://mango-cors-proxy.mangorts-dev.workers.dev/corsproxy/";
 const API_FOLDER_CREATION_PATHNAME = "/v1/company-explorer/folders"
 
-function assembleDocumentUploadPathname(resourceID: string, resourceType: string="logic-gate", documentID: string="logic-gate-overview"): string{
+function assembleDocumentUploadPathname(resourceID: string, resourceType: string="logic_gate", documentID: string="logic-gate-overview"): string{
     return `/v1/editor-json/${resourceType}/${resourceID}/documents/${documentID}?company_id=${encodeURIComponent(fetchCurrentCompanyID())}`;
 }
 
@@ -110,7 +121,14 @@ const DEFAULT_CSV_PARSE_CONFIG = {
 type standardizedImportFields = {
     title: string,
     documentContent: string,
-    parentFolderName: string,
+
+    // Nearly all imported items are stored within logical groups Mango interprets at folders
+    // such as "Teams" in Linear.
+    // On some occasions an object being imported may require the creation of two folders at once,
+    // such as a ClickUp SOP stored inside a folder inside a space.
+    // In all cases folder name order should be specified in a top down array of strings:
+    // For Example: [..., greatGrandparentFolderName, grandparentFolderName, parentFolderName]
+    folderHierarchy: string[]
 }
 
 //██████████████████████████████
@@ -138,6 +156,7 @@ async function fetchFileThroughProxy(fileUrl: string, proxyPath: string): Promis
 
     let request = new Request(proxyUrl);
 
+    // TODO: Properly handle and display fetching errors.
     let response = await fetch(request);
     let blob = await response.blob();
 
@@ -146,7 +165,7 @@ async function fetchFileThroughProxy(fileUrl: string, proxyPath: string): Promis
 
     // TODO: Imporve Error Handling.
     if(!contentDisposition){
-        throw console.error("");
+        throw new Error("We couldn't find the metadata we were expecting when we were attempting to download your picture!");
         
     }
 
@@ -199,7 +218,9 @@ async function fetchAndUploadImage(href: string, targetResourceID: string, targe
             // Optional Fields
             // informationID: null,
             // messageID: null,
-            editorSurface: "imported",
+
+            // TODO: Implement a custom "imported" editor surface.
+            editorSurface: "logic_gate_editor",
             // sourceProvider: null,
             // originalWidth: null,
             // originalHeight: null,
@@ -222,7 +243,7 @@ async function fetchAndUploadImage(href: string, targetResourceID: string, targe
 
 }
 
-async function convertMarkdownToMangoTiptap(markdownString: string, targetResourceID: string, targetResourceType: MangoAttachmentResourceType): MangoTiptapDocument {
+async function convertMarkdownToMangoTiptap(markdownString: string, targetResourceID: string, targetResourceType: MangoAttachmentResourceType): Promise<MangoTiptapDocument> {
 
     // Create a markdown image handler that is able to upload identified images and associate images with
     // the correct resource (such as a logic gate).
@@ -234,7 +255,7 @@ async function convertMarkdownToMangoTiptap(markdownString: string, targetResour
             // Token attributes are provided by Marked/MarkedJS, the Markdown parsing library
             // Tiptap's Markdown parsing utility relies on.
             // The attributes provided for "Image" tokens include: "type", "raw", "href", "title", "text", and "tokens".
-            const title = token.title;
+            const title = token.title ?? "Imported Image";
             const href = token.href;
 
             // Return placeholder content with the image link for later fetching and parsing.
@@ -261,61 +282,68 @@ async function convertMarkdownToMangoTiptap(markdownString: string, targetResour
     // TODO: Enable reuse of the Mango Tiptap extensions and the conversion editor.
     // Configure the custom Mango extensions for Tiptap. Most options are unused as this editor
     // is headless and is not user-facing.
-    const mangoTiptapExtensionOptions = createMangoTiptapExtensionOptions({
+    const mangoTiptapExtensionOptions = {
         editable: false,
 
         // Seems to hande editor drag-and-drop.
-        onImageFiles: false,
-
+        // onImageFiles: ,
 
         attachmentImageExtension: markdownAwareMangoAttachmentImageNode,
 
         // TODO: Determine if cross-user mentions may be useful to preserve in future import setups.
         // At the moment, we also aren't importing cross-user mentions.
-        mentionUsers: false,
-        getMentionUsers: false,
-
-        // Seems to handle searches for other entities.
-        searchEntityLinks: false,
-        onEntityLinkSearchError: false,
+        // mentionUsers: ,
+        // getMentionUsers: ,
         
-    });
+    };
 
     // Create a Mango editor and use it to parse the provided markdown into a Tiptap document.
     const mangoTiptapExtensions = createMangoTiptapExtensions(mangoTiptapExtensionOptions);
     const conversionEditor = new Editor({
         extensions: [
             Markdown,
-            mangoTiptapExtensions,
+            ...mangoTiptapExtensions,
         ]
     });
 
-    let tiptapDocument = conversionEditor.markdown.parse(markdownString);
 
-    // Walk through the Tiptap document to fetch and upload images. As nodes can be nested, append
-    // nested items to the queue.
-    let nodeQueue = tiptapDocument.content ?? [];
-    while(!(nodeQueue.length <= 0)){
-        let currentNode = nodeQueue.shift;
-        
-        if(currentNode.content){
-            nodeQueue.push.apply(currentNode.content);
-        }
+    // If the markdown string is empty, respond immediately with an empty Mango Tiptap Document.
+    if(!markdownString || markdownString === ""){
 
-        if(currentNode && currentNode.type == "mangoAttachmentImage"){
-            const href = currentNode.attrs.attachmentId;
-
-            const imageContentJSON = fetchAndUploadImage(href, targetResourceID, targetResourceType);
-
-            // TODO: Develop a method to stay in sync with the format of Mango Image JSONs.
-            currentNode.attrs = imageContentJSON;
-
-        }
+        let emptyDocument = createEmptyMangoTiptapDocument();
+        emptyDocument.document = normalizeMangoTiptapBlockIDs(document);
+        return emptyDocument;
     }
 
-    // Finally, convert the Tiptap-format document into a Mango-Tiptap document.
-    return convertTiptapToMangoTiptap(tiptapDocument);
+    else{
 
+        let tiptapDocument = conversionEditor.markdown.parse(markdownString);
+
+        // Walk through the Tiptap document to fetch and upload images. As nodes can be nested, append
+        // nested items to the queue.
+        let nodeQueue = tiptapDocument.content ?? [];
+        while(nodeQueue.length > 0){
+            let currentNode = nodeQueue.shift();
+            
+            if(currentNode.content){
+                nodeQueue.push(...(currentNode.content));
+            }
+
+            if(currentNode && currentNode.type == "mangoAttachmentImage"){
+                const href = currentNode.attrs.attachmentId;
+
+                const imageContentJSON = fetchAndUploadImage(href, targetResourceID, targetResourceType);
+
+                // TODO: Develop a method to stay in sync with the format of Mango Image JSONs.
+                currentNode.attrs = imageContentJSON.attrs;
+
+            }
+        }
+
+        // Finally, convert the Tiptap-format document into a Mango-Tiptap document.
+        return convertTiptapToMangoTiptap(tiptapDocument);
+
+    }
 }
 
 // Wraps Tiptap documents in a Mango wrapper and assigns Mango block IDs
@@ -336,40 +364,45 @@ function convertTiptapToMangoTiptap(document: any): MangoTiptapDocument {
 // Newly created folders are placed at the top of the explorer list.
 // Returns the "entity_id" of the newly created row.
 async function createFolder(folderName: string, parentFolderID: string=""): Promise<string>{
+
     let folderCreationStatus = await requestJSON<CompanyExplorerV2Row>(API_FOLDER_CREATION_PATHNAME, {
         method: "POST",
         body: JSON.stringify({
-            company_id: getActiveCompanyID(),
+            company_id: fetchCurrentCompanyID(),
             parent_folder_id: parentFolderID,
             name: folderName,
             position: 0,
         }),
     });
 
+    // TODO: Improve error handling and properly surface errors.
     return folderCreationStatus.entity_id;
 
 }
 
-function createLogicGate(logicGateTitle: string, parentFolderID: string){
+// TODO: Support creation of multiple logic gates at once to better utilize the batch command API.
+async function createLogicGate(logicGateTitle: string, parentFolderID: string){
 
     const newLogicGateID = createWorkspaceEntityBatchClientID("imported-logic-gate");
 
-    // This adapter function accepts the two parameters provided during a call by
-    // "createWorkspaceEntityBatchCommand" (the function that can create logic gates)
-    // and injects the server's origin API base path before making a real "requestJSON" request.
-    // Much of this block of code has been taken from other (non-exported) places in the codebase.
-    // TODO: For some reason, custom versions of this adapter occur all over the frontend code.
-    type AdaptedCreateRequestJSON = <T>(apiBase: string, path: string, init?: RequestJSONInit) => Promise<T>;
-    function bindTwoCallToThreeCallRequestJSON(apiBase: string, requestJSON: AdaptedCreateRequestJSON){
-        // This line makes use of a shorthand method of declaring a function.
-        return <T>(path: string, init?: RequestInit): Promise<T> => requestJSON<T>(fetchApiBase(), path, init as RequestJSONInit);
-    }
+    // TODO: This additional logic may not be needed, as it may be fully implemented by the "createRequestJSON" function. Cleanup may be required.
+    // // This adapter function accepts the two parameters provided during a call by
+    // // "createWorkspaceEntityBatchCommand" (the function that can create logic gates)
+    // // and injects the server's origin API base path before making a real "requestJSON" request.
+    // // Much of this block of code has been taken from other (non-exported) places in the codebase.
+    // // TODO: For some reason, custom versions of this adapter occur all over the frontend code.
+    // type AdaptedCreateRequestJSON = <T>(apiBase: string, path: string, init?: RequestJSONInit) => Promise<T>;
+    // function bindTwoCallToThreeCallRequestJSON(apiBase: string, requestJSON: AdaptedCreateRequestJSON){
+    //     // This line makes use of a shorthand method of declaring a function.
+    //     return <T>(path: string, init?: RequestInit): Promise<T> => requestJSON<T>(fetchApiBase(), path, init as RequestJSONInit);
+    // }
 
-    const commandStatus = createWorkspaceEntityBatchCommand({
+    const commandStatus = await createWorkspaceEntityBatchCommand<CompanyExplorerWorkspaceEntityBatchResponse>({
         companyID: fetchCurrentCompanyID(),
         entityKind: "logic_gate",
         folderID: parentFolderID,
 
+        // TODO: Create an "importer" mutationOrigin.
         // At this moment, a brief LLM-based search suggests this is the only
         // origin that doesn't place created nodes into the default folder
         // if no folderID is provided.
@@ -392,13 +425,16 @@ function createLogicGate(logicGateTitle: string, parentFolderID: string){
         //     a_position: "Parent",
         //     b_position: "Child"
         // }],
-        requestJSON: bindTwoCallToThreeCallRequestJSON,
+
+        // TODO: Cle
+        // requestJSON: bindTwoCallToThreeCallRequestJSON,
+        requestJSON: createRequestJSON(fetchApiBase()),
     });
 
     const logicGateIDs = commandStatus.logicgates;
 
     // TODO: Before returning, better understand the return type of a logic gate fetch.
-    return logicGateIDs;
+    return logicGateIDs?.[0];
 }
 
 async function attachDocumentToResource(resourceID: string, document: MangoTiptapDocument, resourceType: string="logic-gate", documentID: string="logic-gate-overview"){
@@ -410,7 +446,8 @@ async function attachDocumentToResource(resourceID: string, document: MangoTipta
         body: JSON.stringify({
             operation_id: generateStableInformationID(),
             client_id: "mango-importer",
-            base_revision: 1,
+            // TODO: Verify the proper base_version on a new document.
+            base_revision: 0,
             schema_version: 1,
             // NOTE: It seems as if the whole wrapped Mango-Tiptap is passed in.
             document,
@@ -460,39 +497,60 @@ function wrappedCSVParse(csv: File, parseConfig: any): Promise<any>{
 
 // A closure that parses a single line of a CSV using a parser specialized for the format of the
 // current CSV. All imported items will be stored under a single parent folder.
-function setupSpecializedParserAndDisplayProgressCall(specializedParser: (parsedCSVROW: any) => standardizedImportFields, rootImportFolder: string){
+async function setupSpecializedParserAndDisplayProgressCall(specializedParser: (parsedCSVROW: any) => standardizedImportFields, rootImportFolder: string){
 
     // Keep track of the name and Mango ID of folders that have been made within the import folder.
     let createdFolders: Record<string, string> = {};
 
     return async (results: any, parser: any) => {
 
+        // Pause the parser to handle the current input.
+        parser.pause();
+
         // TODO: Enable Error Handling
-        if(results.errors) {
-            console.error(results.errors)
-        };
+        if(results.errors.length > 0) {
+            console.error(results.errors);
+        }
 
         const standardizedOutput = specializedParser(results.data);
 
-        const logicGateName = standardizedOutput.title;
-        const parentFolderName = standardizedOutput.parentFolderName;
+        const logicGateName = standardizedOutput.title ?? "Imported Document";
         const documentContent = standardizedOutput.documentContent;
+        const folderHierarchy = standardizedOutput.folderHierarchy;
 
-        // Create the parent folder if it hasn't already been created.
-        if(logicGateName in createdFolders){
-            const newFolderID = await createFolder(parentFolderName, rootImportFolder);
-            createdFolders[parentFolderName] = newFolderID;
+        // Work through the folder hierarchy from top down, creating higher-level folders before lower-level folders.
+        // Already created folders are cached.
+        for(let i = 0; i < folderHierarchy.length; i++){
+            
+            const currentFolderName = folderHierarchy[i];
+
+            // If the current folder is at the top of the folder hierarchy, make it directly under the root import folder.
+            // Otherwise, make it underneath the folder located one level up in the hierarchy.
+            const parentFolderName = (i == 0) ? rootImportFolder : folderHierarchy[i - 1];
+
+            // Create the parent folder if it hasn't already been created.
+            if(!(currentFolderName in createdFolders)){
+                const newFolderID = await createFolder(currentFolderName, parentFolderName);
+                createdFolders[currentFolderName] = newFolderID;
+            }
         }
 
+        // Now identify the parent folder of the current logic gate being created, the last folder in the hierarchy.
+        // If, for some reason, no folders were given, place the new node directly under the root import folder.
+        const currentParentFolder = folderHierarchy.at(-1) ?? rootImportFolder;
+
         // Create the containing logic gate.
-        const newLogicGateID = createLogicGate(logicGateName, createdFolders[parentFolderName]);
+        const newLogicGateID = await createLogicGate(logicGateName, createdFolders[currentParentFolder]);
 
         // Parse the document content and attach it to the logic gate.
-        const document = convertMarkdownToMangoTiptap(documentContent, newLogicGateID, "logic_gate");
+        const document = await convertMarkdownToMangoTiptap(documentContent, newLogicGateID, "logic_gate");
         await attachDocumentToResource(newLogicGateID, document)
 
 
         // Update display progress.
+
+        // Resume parsing.
+        parser.resume
     }
 }
 
@@ -500,17 +558,20 @@ function parseLinearTask(parsedCSVRow: any): standardizedImportFields{
     return {
         title: parsedCSVRow["Title"],
         documentContent: parsedCSVRow["Description"],
-        parentFolderName: parsedCSVRow["Team"],
-    }
+        folderHierarchy: [parsedCSVRow["Team"]],
+    };
 }
 
 function parseClickUpTask(parsedCSVRow: any): standardizedImportFields{
 
-        return {
+    // Split the folder hierarchy into pieces and remove any surrounding whitespace (done using "map").
+    const folderHierarchy = parsedCSVRow["Space Name"].split(">").map( (value: string) => { value.trim(); } );
+
+    return {
         title: parsedCSVRow["Title"],
         documentContent: parsedCSVRow["Description"],
-        parentFolderName: parsedCSVRow["Team"],
-    }
+        folderHierarchy,
+    };
 
 }
 
@@ -519,16 +580,22 @@ async function parseAndImport(csv: File){
     let importSource = "";
 
     // Get and Parse the Current Import Date
+    // TODO: Ensure ISO date formatting sufficiently matches local time expectations.
     const currentISODate = new Date();
     const currentDate = currentISODate.toISOString().split("T")[0];
 
     // Read the headers of the CSV.
     const headersOnlyCSVConfig = {
         ...DEFAULT_CSV_PARSE_CONFIG,
-        preview: 5,
+        preview: 2,
     }
 
-    const headers = (await wrappedCSVParse(csv, headersOnlyCSVConfig)).meta.fields;
+    const headers = (await wrappedCSVParse(csv, headersOnlyCSVConfig))?.meta?.fields;
+
+    // TODO: Improve error handling and reporting.
+    if(!headers){
+        throw new Error("Headers couldn't be found for this CSV. At the moment we're unable to tell where it came from.");
+    }
 
     // Branch based on the type of CSV Imported.
     let specializedTaskParser;
@@ -544,7 +611,7 @@ async function parseAndImport(csv: File){
     }
 
     else {
-        throw console.error("Oops, we don't have a parser for the type of file you uploaded at the moment!");
+        throw new Error("Oops, we are unable to read the type of file you provided at the moment!");
         // TODO: Display an error, as other CSV formats are not currently supported.
     }
 
@@ -556,6 +623,10 @@ async function parseAndImport(csv: File){
     const fullCSVParseConfig = {
         ...DEFAULT_CSV_PARSE_CONFIG,
         step: setupSpecializedParserAndDisplayProgressCall(specializedTaskParser, importFolderID),
+
+        // TODO: A cleaner adapter may be required to work with both promises and Papaparse.
+        // Disable workers to allow pausing of the parser for compatability with a promise-based step-function.
+        worker: false,
 
     };
 
