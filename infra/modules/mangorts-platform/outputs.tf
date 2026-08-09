@@ -48,6 +48,21 @@ output "ecs_service_name" {
   value       = try(aws_ecs_service.backend[0].name, "")
 }
 
+output "realtime_valkey_cache_name" {
+  description = "Development ElastiCache Serverless Valkey cache name."
+  value       = try(aws_elasticache_serverless_cache.realtime[0].name, "")
+}
+
+output "realtime_valkey_endpoint" {
+  description = "Private TLS Valkey endpoint used by the development ECS tasks."
+  value       = try("${aws_elasticache_serverless_cache.realtime[0].endpoint[0].address}:${aws_elasticache_serverless_cache.realtime[0].endpoint[0].port}", "")
+}
+
+output "realtime_valkey_user_id" {
+  description = "IAM-authenticated Valkey user ID used by the development ECS task role."
+  value       = try(aws_elasticache_user.realtime[0].user_id, "")
+}
+
 output "ecs_subnet_ids" {
   description = "Private subnet IDs used by ECS tasks."
   value       = local.ecs_subnet_ids

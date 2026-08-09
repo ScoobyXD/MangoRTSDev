@@ -343,7 +343,7 @@ func (s *Server) applyNylasWebhookCacheInvalidationForAccountScope(accountScope 
 	}
 }
 
-func (s *Server) applyCommunicationsWebhookChange(_ context.Context, grantContext communicationsWebhookGrantContext, change nylasWebhookChange) error {
+func (s *Server) applyCommunicationsWebhookChange(ctx context.Context, grantContext communicationsWebhookGrantContext, change nylasWebhookChange) error {
 	if change.Trigger == "grant.expired" || change.Trigger == "grant.updated" {
 		status := "reauth_required"
 		if change.Trigger == "grant.updated" {
@@ -375,7 +375,7 @@ func (s *Server) applyCommunicationsWebhookChange(_ context.Context, grantContex
 	}
 	if communicationsMessageReadStatusScopeTypeForConnection(grantContext.connection) != "shared" {
 		s.applyNylasWebhookCacheInvalidation(grantContext.connection.UserID, grantContext.cacheScope, change)
-		return s.publishPersonalMailboxWebhookHint(grantContext.connection.UserID, grantContext.connection.AccountEmail, change)
+		return s.publishPersonalMailboxWebhookHintContext(ctx, grantContext.connection.UserID, grantContext.connection.AccountEmail, change)
 	}
 	s.applyNylasWebhookCacheInvalidationForAccountScope(grantContext.cacheScope, change)
 	if len(grantContext.sharedInboxIDs) == 0 {
@@ -387,7 +387,7 @@ func (s *Server) applyCommunicationsWebhookChange(_ context.Context, grantContex
 		if sharedInboxID == "" {
 			continue
 		}
-		if err := s.publishSharedMailboxWebhookHint(grantContext.connection.CompanyID, sharedInboxID, change); err != nil {
+		if err := s.publishSharedMailboxWebhookHintContext(ctx, grantContext.connection.CompanyID, sharedInboxID, change); err != nil {
 			return fmt.Errorf("publish shared mailbox %s webhook hint: %w", sharedInboxID, err)
 		}
 	}
@@ -395,6 +395,10 @@ func (s *Server) applyCommunicationsWebhookChange(_ context.Context, grantContex
 }
 
 func (s *Server) publishPersonalMailboxWebhookHint(userID, accountEmail string, change nylasWebhookChange) error {
+	return s.publishPersonalMailboxWebhookHintContext(s.realtimeContext(), userID, accountEmail, change)
+}
+
+func (s *Server) publishPersonalMailboxWebhookHintContext(ctx context.Context, userID, accountEmail string, change nylasWebhookChange) error {
 	userID = strings.TrimSpace(userID)
 	accountEmail = normalizeEmailForCompare(accountEmail)
 	if userID == "" || !isRealtimeAccountEmail(accountEmail) {
@@ -415,19 +419,24 @@ func (s *Server) publishPersonalMailboxWebhookHint(userID, accountEmail string, 
 			continue
 		}
 		publishedCompanies[companyID] = struct{}{}
-		s.publishRealtimeMessage(companyID, scope, realtimeMailboxWebhookMessage(companyID, scope, "", change))
+		s.publishRealtimeMessageContext(ctx, companyID, scope, realtimeMailboxWebhookMessage(companyID, scope, "", change))
 	}
 	return nil
 }
 
 func (s *Server) publishSharedMailboxWebhookHint(companyID, sharedInboxID string, change nylasWebhookChange) error {
+	return s.publishSharedMailboxWebhookHintContext(s.realtimeContext(), companyID, sharedInboxID, change)
+}
+
+func (s *Server) publishSharedMailboxWebhookHintContext(ctx context.Context, companyID, sharedInboxID string, change nylasWebhookChange) error {
 	companyID = strings.TrimSpace(companyID)
 	sharedInboxID = strings.TrimSpace(sharedInboxID)
 	if companyID == "" || sharedInboxID == "" {
 		return store.ErrInvalid
 	}
 	scope := realtimeSharedMailboxScope(sharedInboxID)
-	_, err := s.publishRealtimeMessageToCurrentEntityAudienceResult(
+	_, err := s.publishRealtimeMessageToCurrentEntityAudienceResultContext(
+		ctx,
 		companyID,
 		scope,
 		store.EntityTypeSharedInbox,

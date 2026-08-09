@@ -45,6 +45,12 @@ module "platform" {
   backend_cpu                               = var.backend_cpu
   backend_memory                            = var.backend_memory
   backend_desired_count                     = var.backend_desired_count
+  realtime_valkey_enabled                   = var.realtime_valkey_enabled
+  realtime_valkey_channel                   = var.realtime_valkey_channel
+  realtime_valkey_major_engine_version      = var.realtime_valkey_major_engine_version
+  realtime_valkey_max_data_storage_gb       = var.realtime_valkey_max_data_storage_gb
+  realtime_valkey_max_ecpu_per_second       = var.realtime_valkey_max_ecpu_per_second
+  realtime_valkey_alarm_action_arns         = var.realtime_valkey_alarm_action_arns
   attachment_s3_bucket                      = var.attachment_s3_bucket
   attachment_direct_upload_enabled          = var.attachment_direct_upload_enabled
   attachment_max_browser_upload_bytes       = var.attachment_max_browser_upload_bytes

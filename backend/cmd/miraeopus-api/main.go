@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -14,13 +15,18 @@ import (
 	"strings"
 	"time"
 
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	httpapi "miraeopus/backend/internal/http"
+	"miraeopus/backend/internal/realtime"
 	"miraeopus/backend/internal/store"
 )
 
 func main() {
-	repo, cleanup := buildRepository()
+	repo, cleanup, err := buildRepository()
+	if err != nil {
+		log.Fatal(err)
+	}
 	defer cleanup()
 	nylasConfig := buildNylasConfig()
 	var authValidator httpapi.AuthTokenValidator
@@ -53,6 +59,7 @@ func main() {
 		NylasConfig:          nylasConfig,
 		AttachmentStorage:    httpapi.NewS3AttachmentStorageFromEnv(),
 		RealtimeTicketSecret: secretEnvValue("MANGORTS_REALTIME_TICKET_SECRET", "realtime_ticket_secret", "ticket_secret", "MANGORTS_REALTIME_TICKET_SECRET"),
+		RealtimeBackplane:    buildRealtimeBackplane(),
 	})
 	defer server.Close()
 
@@ -79,56 +86,145 @@ func main() {
 	}
 }
 
-func buildRepository() (store.Repository, func()) {
-	host := os.Getenv("DB_HOST")
-	allowFallback := strings.EqualFold(os.Getenv("ALLOW_INMEMORY_FALLBACK"), "true")
-	appEnv := getenvDefault("APP_ENV", "dev")
-
-	if host == "" {
-		if appEnv == "dev" || allowFallback {
-			log.Println("using in-memory repository (DB_HOST not set, dev/fallback mode)")
-			return store.NewMemoryRepo(), func() {}
-		}
-		log.Fatal("DB_HOST is required when APP_ENV is not dev")
+func buildRealtimeBackplane() realtime.Backplane {
+	config, useLocal, err := realtimeBackplaneEnvironmentFromLookup(os.Getenv)
+	if err != nil {
+		log.Fatal(err)
 	}
+	if useLocal {
+		log.Print("using process-local realtime backplane (MANGORTS_VALKEY_ENDPOINT not set)")
+		return realtime.NewLocalBackplane()
+	}
+	// This is deliberate top-level application initialization. Credential
+	// retrieval itself remains lazy and uses the ECS task role in dev.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	awsConfig, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(config.Region))
+	if err != nil {
+		log.Fatalf("load AWS config for Valkey IAM authentication: %v", err)
+	}
+	authProvider, err := realtime.NewIAMAuthProvider(config.CacheName, config.UserID, config.Region, awsConfig.Credentials)
+	if err != nil {
+		log.Fatalf("configure Valkey IAM authentication: %v", err)
+	}
+	backplane, err := realtime.NewValkeyBackplane(realtime.ValkeyConfig{
+		Endpoint: config.Endpoint, Channel: config.Channel, Auth: authProvider,
+	})
+	if err != nil {
+		log.Fatalf("configure Valkey realtime backplane: %v", err)
+	}
+	log.Printf("using TLS/IAM Valkey realtime backplane cache=%s region=%s", config.CacheName, config.Region)
+	return backplane
+}
 
-	port := getenvDefault("DB_PORT", "5432")
-	user := getenvDefault("DB_USER", "postgres")
-	password := os.Getenv("DB_PASSWORD")
-	dbName := getenvDefault("DB_NAME", "postgres")
-	sslMode := getenvDefault("DB_SSLMODE", "require")
-	connectTimeoutSeconds := envIntDefault("DB_CONNECT_TIMEOUT_SECONDS", 5)
+type realtimeBackplaneEnvironment struct {
+	Endpoint  string
+	Region    string
+	CacheName string
+	UserID    string
+	Channel   string
+}
 
-	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s connect_timeout=%d", host, port, user, password, dbName, sslMode, connectTimeoutSeconds)
+func realtimeBackplaneEnvironmentFromLookup(getenv func(string) string) (realtimeBackplaneEnvironment, bool, error) {
+	trimmed := func(key string) string { return strings.TrimSpace(getenv(key)) }
+	required := false
+	if raw := trimmed("MANGORTS_VALKEY_REQUIRED"); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			return realtimeBackplaneEnvironment{}, false, fmt.Errorf("MANGORTS_VALKEY_REQUIRED must be true or false")
+		}
+		required = parsed
+	}
+	config := realtimeBackplaneEnvironment{
+		Endpoint:  trimmed("MANGORTS_VALKEY_ENDPOINT"),
+		Region:    trimmed("MANGORTS_VALKEY_REGION"),
+		CacheName: trimmed("MANGORTS_VALKEY_CACHE_NAME"),
+		UserID:    trimmed("MANGORTS_VALKEY_USER_ID"),
+		Channel:   trimmed("MANGORTS_VALKEY_CHANNEL"),
+	}
+	if config.Region == "" {
+		config.Region = trimmed("AWS_REGION")
+	}
+	if config.Region == "" {
+		config.Region = trimmed("AWS_DEFAULT_REGION")
+	}
+	anyValkeyConfig := config.Endpoint != "" || trimmed("MANGORTS_VALKEY_REGION") != "" || config.CacheName != "" || config.UserID != "" || config.Channel != ""
+	if !anyValkeyConfig && !required {
+		return realtimeBackplaneEnvironment{}, true, nil
+	}
+	if config.Endpoint == "" || config.Region == "" || config.CacheName == "" || config.UserID == "" || config.Channel == "" {
+		return realtimeBackplaneEnvironment{}, false, fmt.Errorf("Valkey realtime is required or partially configured; set MANGORTS_VALKEY_ENDPOINT, MANGORTS_VALKEY_REGION (or AWS_REGION), MANGORTS_VALKEY_CACHE_NAME, MANGORTS_VALKEY_USER_ID, and MANGORTS_VALKEY_CHANNEL")
+	}
+	return config, false, nil
+}
+
+type repositoryStartupConfig struct {
+	Host                  string
+	Port                  string
+	User                  string
+	Password              string
+	DatabaseName          string
+	SSLMode               string
+	ConnectTimeoutSeconds int
+}
+
+type repositoryOpenFunc func(repositoryStartupConfig) (store.Repository, func(), error)
+
+func buildRepository() (store.Repository, func(), error) {
+	return buildRepositoryFromEnvironment(os.Getenv, openPostgresRepository)
+}
+
+func buildRepositoryFromEnvironment(getenv func(string) string, openPostgres repositoryOpenFunc) (store.Repository, func(), error) {
+	trimmed := func(key string) string { return strings.TrimSpace(getenv(key)) }
+	defaulted := func(key, fallback string) string {
+		if value := trimmed(key); value != "" {
+			return value
+		}
+		return fallback
+	}
+	host := trimmed("DB_HOST")
+	allowMemory := strings.EqualFold(trimmed("ALLOW_INMEMORY_FALLBACK"), "true")
+	if host == "" {
+		if !allowMemory {
+			return nil, nil, fmt.Errorf("DB_HOST is required unless ALLOW_INMEMORY_FALLBACK=true explicitly selects local in-memory mode")
+		}
+		log.Print("using explicitly allowed in-memory repository (DB_HOST not set)")
+		return store.NewMemoryRepo(), func() {}, nil
+	}
+	config := repositoryStartupConfig{
+		Host: host, Port: defaulted("DB_PORT", "5432"), User: defaulted("DB_USER", "postgres"),
+		Password: getenv("DB_PASSWORD"), DatabaseName: defaulted("DB_NAME", "postgres"),
+		SSLMode: defaulted("DB_SSLMODE", "require"), ConnectTimeoutSeconds: 5,
+	}
+	if raw := trimmed("DB_CONNECT_TIMEOUT_SECONDS"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value <= 0 {
+			return nil, nil, fmt.Errorf("DB_CONNECT_TIMEOUT_SECONDS must be a positive integer")
+		}
+		config.ConnectTimeoutSeconds = value
+	}
+	return openPostgres(config)
+}
+
+func openPostgresRepository(config repositoryStartupConfig) (store.Repository, func(), error) {
+	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s connect_timeout=%d", config.Host, config.Port, config.User, config.Password, config.DatabaseName, config.SSLMode, config.ConnectTimeoutSeconds)
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
-		if appEnv == "dev" || allowFallback {
-			log.Printf("failed to open postgres (%v), falling back to in-memory repository", err)
-			return store.NewMemoryRepo(), func() {}
-		}
-		log.Fatalf("failed to open postgres in %s: %v", appEnv, err)
+		return nil, nil, fmt.Errorf("open PostgreSQL: %w", err)
 	}
 	if err := db.Ping(); err != nil {
 		_ = db.Close()
-		if appEnv == "dev" || allowFallback {
-			log.Printf("failed to connect postgres (%v), falling back to in-memory repository", err)
-			return store.NewMemoryRepo(), func() {}
-		}
-		log.Fatalf("failed to connect postgres in %s: %v", appEnv, err)
+		return nil, nil, fmt.Errorf("connect PostgreSQL: %w", err)
 	}
 	configureDatabasePool(db)
 	repo := store.NewPostgresRepo(db)
 	if err := repo.CheckApplicationSchemaReadiness(); err != nil {
 		_ = db.Close()
-		if appEnv == "dev" || allowFallback {
-			log.Printf("postgres application schema is not ready (%v), falling back to in-memory repository", err)
-			return store.NewMemoryRepo(), func() {}
-		}
-		log.Fatalf("postgres application schema is not ready in %s: %v", appEnv, err)
+		return nil, nil, fmt.Errorf("PostgreSQL application schema is not ready: %w", err)
 	}
 
-	log.Printf("using postgres repository host=%s db=%s sslmode=%s", host, dbName, sslMode)
-	return repo, func() { _ = db.Close() }
+	log.Printf("using postgres repository host=%s db=%s sslmode=%s", config.Host, config.DatabaseName, config.SSLMode)
+	return repo, func() { _ = db.Close() }, nil
 }
 
 func getenvDefault(key, fallback string) string {

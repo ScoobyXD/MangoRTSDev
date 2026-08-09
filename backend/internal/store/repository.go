@@ -1048,12 +1048,12 @@ type DomainEventRepository interface {
 }
 
 type RealtimeOutboxRepository interface {
-	EnqueueRealtimeOutbox(input RealtimeOutboxInput) (RealtimeOutboxEvent, error)
-	ClaimRealtimeOutbox(query RealtimeOutboxClaimQuery) ([]RealtimeOutboxEvent, error)
-	MarkRealtimeOutboxPublished(eventID, claimToken string) error
-	MarkRealtimeOutboxFailed(eventID, claimToken, category string) error
-	ListPublishedRealtimeOutboxAfter(sequence int64, limit int) ([]RealtimeOutboxEvent, error)
-	CurrentPublishedRealtimeOutboxSequence() (int64, error)
+	EnqueueRealtimeOutbox(ctx context.Context, input RealtimeOutboxInput) (RealtimeOutboxEvent, error)
+	ClaimRealtimeOutbox(ctx context.Context, query RealtimeOutboxClaimQuery) ([]RealtimeOutboxEvent, error)
+	MarkRealtimeOutboxPublished(ctx context.Context, eventID, claimToken string) error
+	MarkRealtimeOutboxFailed(ctx context.Context, eventID, claimToken, category string) error
+	ListPublishedRealtimeOutboxAfter(ctx context.Context, sequence int64, limit int) ([]RealtimeOutboxEvent, error)
+	CurrentPublishedRealtimeOutboxSequence(ctx context.Context) (int64, error)
 }
 
 type EditorJSONRepository interface {

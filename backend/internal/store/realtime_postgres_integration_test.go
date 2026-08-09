@@ -295,7 +295,7 @@ func TestPostgresRealtimeOutboxRetryAndDuplicateCompletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = db.Exec("delete from companies where company_id=$1::uuid", company.CompanyID) })
-	event, err := repo.EnqueueRealtimeOutbox(RealtimeOutboxInput{
+	event, err := repo.EnqueueRealtimeOutbox(context.Background(), RealtimeOutboxInput{
 		CompanyID: company.CompanyID, Scope: "notifications:user:dispatcher-test",
 		EventType: "notification.created", Payload: []byte(`{"type":"notification.created"}`),
 	})
@@ -306,21 +306,21 @@ func TestPostgresRealtimeOutboxRetryAndDuplicateCompletion(t *testing.T) {
 	if err := db.QueryRow("select published_timestamp is not null from realtime_outbox where event_id=$1::uuid", event.EventID).Scan(&published); err != nil || published {
 		t.Fatalf("post-commit retryable row published=%v err=%v", published, err)
 	}
-	claimed, err := repo.ClaimRealtimeOutbox(RealtimeOutboxClaimQuery{Limit: 10, LeaseDuration: time.Second})
+	claimed, err := repo.ClaimRealtimeOutbox(context.Background(), RealtimeOutboxClaimQuery{Limit: 10, LeaseDuration: time.Second})
 	if err != nil || len(claimed) != 1 {
 		t.Fatalf("first claim=%+v err=%v", claimed, err)
 	}
-	if err := repo.MarkRealtimeOutboxFailed(event.EventID, claimed[0].ClaimToken, "simulated_prepublication_failure"); err != nil {
+	if err := repo.MarkRealtimeOutboxFailed(context.Background(), event.EventID, claimed[0].ClaimToken, "simulated_prepublication_failure"); err != nil {
 		t.Fatal(err)
 	}
-	claimed, err = repo.ClaimRealtimeOutbox(RealtimeOutboxClaimQuery{Limit: 10, LeaseDuration: time.Second})
+	claimed, err = repo.ClaimRealtimeOutbox(context.Background(), RealtimeOutboxClaimQuery{Limit: 10, LeaseDuration: time.Second})
 	if err != nil || len(claimed) != 1 || claimed[0].AttemptCount != 2 {
 		t.Fatalf("retry claim=%+v err=%v", claimed, err)
 	}
-	if err := repo.MarkRealtimeOutboxPublished(event.EventID, claimed[0].ClaimToken); err != nil {
+	if err := repo.MarkRealtimeOutboxPublished(context.Background(), event.EventID, claimed[0].ClaimToken); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.MarkRealtimeOutboxPublished(event.EventID, claimed[0].ClaimToken); err != nil {
+	if err := repo.MarkRealtimeOutboxPublished(context.Background(), event.EventID, claimed[0].ClaimToken); err != nil {
 		t.Fatalf("duplicate publication completion must be idempotent: %v", err)
 	}
 }

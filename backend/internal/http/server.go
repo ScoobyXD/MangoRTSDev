@@ -5,11 +5,13 @@ import (
 	"miraeopus/backend/internal/auth"
 	"miraeopus/backend/internal/modules/kanban"
 	"miraeopus/backend/internal/notifications"
+	"miraeopus/backend/internal/realtime"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -39,15 +41,36 @@ type Server struct {
 	repo                                                store.Repository
 	realtimeRegistry                                    *realtimeSubscriptionRegistry
 	realtimeTickets                                     *realtimeTicketStore
+	realtimeBackplane                                   realtime.Backplane
+	realtimeSpineContext                                context.Context
 	realtimeSpineCancel                                 context.CancelFunc
 	realtimeSpineWake                                   chan struct{}
-	realtimeSpinePollInterval                           time.Duration
+	realtimeSpineRecovery                               chan struct{}
+	realtimeSpineInbound                                chan []byte
+	realtimeSpineSafetyInterval                         time.Duration
+	realtimeSpineStorageTimeout                         time.Duration
+	realtimeSpineClaimLease                             time.Duration
 	realtimeSpineDisabled                               bool
+	realtimeSpineReady                                  atomic.Bool
 	realtimeSpineMu                                     sync.Mutex
+	realtimeSpinePublishMu                              sync.Mutex
+	realtimeSpinePublishRetryAttempts                   int
+	realtimeSpinePublishRetryAt                         time.Time
+	realtimeSpinePublishRetryTimer                      *time.Timer
+	realtimeSpinePublishRetryGeneration                 uint64
+	realtimeSpinePublishLeaseRetryPending               bool
 	realtimeSpineCursor                                 int64
+	realtimeSpinePending                                map[int64]store.RealtimeOutboxEvent
+	realtimeSpineDedupe                                 *realtimeEventDeduper
 	realtimeSpineRetrySequence                          int64
 	realtimeSpineRetryAttempts                          int
 	realtimeSpineRetryAt                                time.Time
+	realtimeSpineRetryTimer                             *time.Timer
+	realtimeSpineRetryGeneration                        uint64
+	realtimeSpineRecoveryRetryAttempts                  int
+	realtimeSpineRecoveryRetryAt                        time.Time
+	realtimeSpineRecoveryRetryTimer                     *time.Timer
+	realtimeSpineRecoveryRetryGeneration                uint64
 	notifications                                       *notifications.Service
 	kanban                                              *kanban.Service
 	workspaceDerivedCatchupCancel                       context.CancelFunc
@@ -113,7 +136,10 @@ type ServerOptions struct {
 	AttachmentStorage                                   AttachmentObjectStorage
 	AttachmentVariantEnsurer                            AttachmentImageVariantEnsurer
 	RealtimeTicketSecret                                string
-	RealtimeSpinePollInterval                           time.Duration
+	RealtimeBackplane                                   realtime.Backplane
+	RealtimeSpineSafetyInterval                         time.Duration
+	RealtimeSpineStorageTimeout                         time.Duration
+	RealtimeSpineClaimLease                             time.Duration
 	DisableRealtimeSpine                                bool
 	MaxRequestBodyBytes                                 int64
 	WorkspaceDerivedCatchupInterval                     time.Duration
@@ -159,6 +185,10 @@ func normalizeBootstrapDevAdminConfig(config BootstrapDevAdminConfig) BootstrapD
 }
 
 func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server {
+	// This deliberate top-level lifecycle exists even when the worker is disabled,
+	// so every synchronous realtime repository call still has a real cancelable
+	// server context instead of creating its own background context.
+	realtimeSpineContext, realtimeSpineCancel := context.WithCancel(context.Background())
 	notificationCleanupInterval := options.NotificationCleanupInterval
 	if notificationCleanupInterval <= 0 {
 		notificationCleanupInterval = defaultNotificationCleanupInterval
@@ -203,9 +233,18 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		repo:                                                repo,
 		realtimeRegistry:                                    newRealtimeSubscriptionRegistry(),
 		realtimeTickets:                                     newRealtimeTicketStore(realtimeTicketSecret),
+		realtimeBackplane:                                   options.RealtimeBackplane,
+		realtimeSpineContext:                                realtimeSpineContext,
+		realtimeSpineCancel:                                 realtimeSpineCancel,
 		realtimeSpineWake:                                   make(chan struct{}, 1),
-		realtimeSpinePollInterval:                           options.RealtimeSpinePollInterval,
+		realtimeSpineRecovery:                               make(chan struct{}, 1),
+		realtimeSpineInbound:                                make(chan []byte, 512),
+		realtimeSpineSafetyInterval:                         options.RealtimeSpineSafetyInterval,
+		realtimeSpineStorageTimeout:                         options.RealtimeSpineStorageTimeout,
+		realtimeSpineClaimLease:                             options.RealtimeSpineClaimLease,
 		realtimeSpineDisabled:                               options.DisableRealtimeSpine,
+		realtimeSpinePending:                                map[int64]store.RealtimeOutboxEvent{},
+		realtimeSpineDedupe:                                 newRealtimeEventDeduper(4096),
 		notifications:                                       notifications.NewService(repo),
 		kanban:                                              kanban.NewService(repo),
 		workspaceDerivedCatchupInterval:                     workspaceDerivedCatchupInterval,
@@ -261,8 +300,23 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 }
 
 func (s *Server) Close() {
-	if s.realtimeSpineCancel != nil {
+	if s != nil {
+		s.realtimeSpineReady.Store(false)
+	}
+	if s != nil && s.realtimeSpineCancel != nil {
 		s.realtimeSpineCancel()
+	}
+	if s != nil {
+		s.realtimeSpineMu.Lock()
+		s.clearRealtimeSpineRetryLocked()
+		s.clearRealtimeRecoveryRetryLocked()
+		s.realtimeSpineMu.Unlock()
+		s.realtimeSpinePublishMu.Lock()
+		s.clearRealtimePublishRetryLocked()
+		s.realtimeSpinePublishMu.Unlock()
+	}
+	if s.realtimeBackplane != nil {
+		s.realtimeBackplane.Close()
 	}
 	if s.attachmentUploadCleanupCancel != nil {
 		s.attachmentUploadCleanupCancel()

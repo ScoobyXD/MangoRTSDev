@@ -1,3 +1,23 @@
+# Process Story: A saved editor revision reaches every API task through Valkey
+
+A Node, Project, or Logic Gate editor batches local Tiptap JSON and sends its authenticated HTTP save
+↓
+PostgreSQL atomically commits the canonical textbox revision and one compact `realtime_outbox` event before returning Saved
+↓
+The accepting API task returns Saved after the durable commit and only wakes the lifecycle-owned publisher; the browser never waits for Valkey I/O
+↓
+The background publisher sends only the committed revision hint to the private Valkey channel with bounded retry
+↓
+Every API task deduplicates and orders that hint, rechecks the exact current editor audience, and writes only its matching local sockets
+↓
+Another clean browser fetches the canonical full document over HTTP, while a browser with unsaved work keeps its protected local generation
+↓
+If Valkey is unavailable the durable save still succeeds immediately, and bounded reconnect/recovery later delivers the hint without reviving 75 ms database polling or stalling on unused `BIGSERIAL` values
+↓
+If an API task cannot yet certify its realtime cursor, editor ticket/socket admission retries on `503 realtime_not_ready`; no socket is admitted until the task can recover every event after its certified cursor
+
+Last updated: 2026-08-08
+
 # Process Story: First-click activation keeps trailing line breaks stable
 
 A sleeping Node, Project, or Logic Gate editor shows a saved paragraph followed by another block
@@ -614,6 +634,7 @@ ED132 - A primary-pointer caret click in a sleeping or active Tiptap editor pres
 ED133 - Backspace or Delete with a collapsed caret on a simple empty numbered, bulleted, or Checkbox item removes the marker but retains the item's paragraph as one ordinary blank row at that exact document position, with the caret on that row. When an older saved item also owns later blocks and has a preceding list peer, those later blocks move intact to that peer and retain their exact content, order, formatting, block identity, and structural level. Without a preceding peer, the preserved blocks replace the empty item ahead of any remaining list items. Deletion must not jump the caret to the preceding row or repeatedly indent, outdent, merge, or otherwise re-parent preserved blocks; text deletion and noncollapsed range deletion retain the editor's native behavior.
 ED134 - Node, Project, and Logic Gate policy surfaces show Inherited and Customized only as automatic status. Authorized users edit the policy directly in either state; exact unordered equality with the immediate parent's raw pointers returns to Inherited, any difference is Customized, and the backend decides the stored mode again inside the save transaction. Descendant actions appear only when descendants exist and use the exact labels Apply to non-customized descendants and Apply to every descendant, with confirmation required for the latter.
 ED135 - A saved hard break at the end of a paragraph remains explicit JSON. When another block follows that paragraph, first-click activation must not expose ProseMirror's additional browser-only trailing-break helper as a new empty row. The live surface must match the sleeping surface without adding, removing, or saving document nodes and without changing annotation positions. A hard break at the end of the document retains the helper row required for normal caret editing.
+ED136 - Editor durability remains HTTP plus PostgreSQL. The same save transaction commits the canonical textbox revision and compact outbox event, and Saved is acknowledged after that commit without waiting for Valkey I/O or audience lookup. A lifecycle-owned publisher then carries only the committed event ID/revision and exact-scope hint across API tasks with bounded retry. Every receiving task deduplicates and orders the hint, rechecks the current exact editor audience, and uses its local WebSocket registry; bounded indexed recovery certifies unused `BIGSERIAL` values rather than stalling later revisions. A task with an uncertified initial cursor returns retryable `503 realtime_not_ready` from editor ticket/socket admission without minting or consuming the ticket or accepting the socket; after certification launches its loops, admission opens and subscriber-ready recovery delivers every later published revision. A clean remote editor fetches the full canonical document over HTTP, unsaved local work remains protected, and Valkey outage delays only realtime hints without failing or delaying durable saves or starting 75 ms outbox polling.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -1924,6 +1945,7 @@ Expected:
 Business logic covered:
 - ED95 through ED105
 - ED110 through ED112
+- ED136
 
 Given:
 - A user edits a Node, Project, or Logic Gate Tiptap document while a prior save may still be in flight.
@@ -1945,6 +1967,7 @@ Expected:
 - The status icon owns Pending, Saving, Saved, and Save failed without rerendering the complete parent surface. A failed page session remains visibly failed under ED104 even when later work commits.
 - Exact recovery wins over the canonical snapshot until replay/deduplication or an explicit conflict decision resolves it. IndexedDB failure is visible and never represented as safe recovery.
 - Realtime refresh fetches the committed document only for a browser with no unsaved generation, retained failed operation, scheduled snapshot, or in-flight request. A latched ED104 warning alone does not create unsaved work.
+- Cross-task realtime carries only the committed revision hint through Valkey; PostgreSQL and the HTTP snapshot remain canonical, and a Valkey outage cannot fail the durable save or start hot outbox polling.
 - Zero-annotation documents perform no annotation scan; changed-range block identity and mapped decorations avoid complete-document work on ordinary keystrokes.
 - Sleeping rows render the latest document without placing a complete-document React update in the critical save task.
 

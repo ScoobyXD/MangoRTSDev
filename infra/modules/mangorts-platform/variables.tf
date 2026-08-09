@@ -199,6 +199,57 @@ variable "backend_desired_count" {
   default     = 1
 }
 
+variable "realtime_valkey_enabled" {
+  description = "Create the development-only ElastiCache Serverless Valkey realtime backplane."
+  type        = bool
+  default     = false
+}
+
+variable "realtime_valkey_channel" {
+  description = "Exact Valkey Pub/Sub channel used for compact committed realtime events."
+  type        = string
+  default     = "mangorts:realtime:v1"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9:_-]{1,128}$", var.realtime_valkey_channel))
+    error_message = "realtime_valkey_channel must be 1-128 characters using letters, numbers, colon, underscore, or hyphen."
+  }
+}
+
+variable "realtime_valkey_major_engine_version" {
+  description = "Development Valkey major engine version. IAM authentication requires Valkey 7.2 or newer."
+  type        = string
+  default     = "7"
+}
+
+variable "realtime_valkey_max_data_storage_gb" {
+  description = "Maximum development serverless-cache data storage in GB."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.realtime_valkey_max_data_storage_gb >= 1 && var.realtime_valkey_max_data_storage_gb <= 5000
+    error_message = "realtime_valkey_max_data_storage_gb must be between 1 and 5000."
+  }
+}
+
+variable "realtime_valkey_max_ecpu_per_second" {
+  description = "Maximum development serverless-cache processing units per second."
+  type        = number
+  default     = 1000
+
+  validation {
+    condition     = var.realtime_valkey_max_ecpu_per_second >= 1000 && var.realtime_valkey_max_ecpu_per_second <= 15000000
+    error_message = "realtime_valkey_max_ecpu_per_second must be between 1000 and 15000000."
+  }
+}
+
+variable "realtime_valkey_alarm_action_arns" {
+  description = "Optional SNS or incident-response actions for development Valkey CloudWatch alarms."
+  type        = list(string)
+  default     = []
+}
+
 variable "attachment_s3_bucket" {
   description = "Private S3 bucket used by the Mango attachment system. Leave empty to disable attachment object storage."
   type        = string

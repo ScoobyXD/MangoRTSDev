@@ -104,6 +104,7 @@ Simple local run:
 # Terminal 1
 cd C:\Users\<user>\MangoRTSDev\backend
 $env:APP_ENV="dev"
+$env:ALLOW_INMEMORY_FALLBACK="true"
 $env:AUTH_MODE="disabled"
 $env:MANGORTS_ALLOWED_ORIGIN="http://localhost:5173"
 go run .\cmd\miraeopus-api

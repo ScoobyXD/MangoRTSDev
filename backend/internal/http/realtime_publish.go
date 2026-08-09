@@ -13,7 +13,11 @@ import (
 const realtimePublicationAuthorizationTimeout = 2 * time.Second
 
 func (s *Server) publishRealtimeMessage(companyID, scope string, message any) int {
-	return s.publishRealtimeMessageWithAudience(companyID, scope, nil, message)
+	return s.publishRealtimeMessageWithAudienceContext(s.realtimeContext(), companyID, scope, nil, message)
+}
+
+func (s *Server) publishRealtimeMessageContext(ctx context.Context, companyID, scope string, message any) int {
+	return s.publishRealtimeMessageWithAudienceContext(ctx, companyID, scope, nil, message)
 }
 
 func realtimeAllowedUserIDs(userIDs []string) map[string]struct{} {
@@ -45,6 +49,10 @@ func (s *Server) publishRealtimeMessageToCurrentEntityAudience(companyID, scope,
 }
 
 func (s *Server) publishRealtimeMessageToCurrentEntityAudienceResult(companyID, scope, resourceType, resourceID, permission string, message any) (int, error) {
+	return s.publishRealtimeMessageToCurrentEntityAudienceResultContext(s.realtimeContext(), companyID, scope, resourceType, resourceID, permission, message)
+}
+
+func (s *Server) publishRealtimeMessageToCurrentEntityAudienceResultContext(ctx context.Context, companyID, scope, resourceType, resourceID, permission string, message any) (int, error) {
 	companyID = strings.TrimSpace(companyID)
 	scope = strings.TrimSpace(scope)
 	resourceType = strings.TrimSpace(resourceType)
@@ -57,25 +65,20 @@ func (s *Server) publishRealtimeMessageToCurrentEntityAudienceResult(companyID, 
 	if err != nil {
 		return 0, err
 	}
-	var preauthorized map[string]struct{}
-	if s.realtimeRegistry.hasSubscribers(companyID, scope) {
-		unlock := s.realtimeRegistry.lockPublishScope(companyID, scope)
-		preauthorized, err = s.resolveRealtimeEntityAudienceUnlocked(companyID, scope, resourceType, resourceID, permission)
-		unlock()
-		if err != nil {
-			return 0, err
-		}
-	}
-	_, delivered, err := s.enqueueRealtimeOutboxAndFlush(store.RealtimeOutboxInput{
+	_, err = s.enqueueRealtimeOutboxAndWake(ctx, store.RealtimeOutboxInput{
 		CompanyID: companyID, Scope: scope, EventType: eventType, ResourceType: resourceType,
 		ResourceID: resourceID, Permission: permission, Payload: payload,
-	}, preauthorized)
-	return delivered, err
+	})
+	return 0, err
 }
 
 func (s *Server) resolveRealtimeEntityAudienceUnlocked(companyID, scope, resourceType, resourceID, permission string) (map[string]struct{}, error) {
+	return s.resolveRealtimeEntityAudienceWithContextUnlocked(s.realtimeContext(), companyID, scope, resourceType, resourceID, permission)
+}
+
+func (s *Server) resolveRealtimeEntityAudienceWithContextUnlocked(parent context.Context, companyID, scope, resourceType, resourceID, permission string) (map[string]struct{}, error) {
 	candidateUserIDs := s.realtimeRegistry.scopeUserIDs(companyID, scope)
-	ctx, cancel := context.WithTimeout(context.Background(), realtimePublicationAuthorizationTimeout)
+	ctx, cancel := context.WithTimeout(parent, realtimePublicationAuthorizationTimeout)
 	defer cancel()
 	exists, userIDs, err := s.repo.ResolveEffectiveUsersForResource(ctx, companyID, resourceType, resourceID, permission, candidateUserIDs)
 	if err != nil {
@@ -90,6 +93,10 @@ func (s *Server) resolveRealtimeEntityAudienceUnlocked(companyID, scope, resourc
 }
 
 func (s *Server) publishRealtimeMessageWithAudience(companyID, scope string, allowedUserIDs map[string]struct{}, message any) int {
+	return s.publishRealtimeMessageWithAudienceContext(s.realtimeContext(), companyID, scope, allowedUserIDs, message)
+}
+
+func (s *Server) publishRealtimeMessageWithAudienceContext(ctx context.Context, companyID, scope string, allowedUserIDs map[string]struct{}, message any) int {
 	companyID = strings.TrimSpace(companyID)
 	scope = strings.TrimSpace(scope)
 	if s == nil || companyID == "" || scope == "" {
@@ -100,14 +107,14 @@ func (s *Server) publishRealtimeMessageWithAudience(companyID, scope string, all
 		log.Printf("failed to marshal realtime message company_id=%s scope_type=%s: %v", companyID, realtimeScopeType(scope), err)
 		return 0
 	}
-	_, delivered, err := s.enqueueRealtimeOutboxAndFlush(store.RealtimeOutboxInput{
+	_, err = s.enqueueRealtimeOutboxAndWake(ctx, store.RealtimeOutboxInput{
 		CompanyID: companyID, Scope: scope, EventType: eventType, Payload: payload,
 		AllowedUserIDs: realtimeAllowedUserIDList(allowedUserIDs), AudienceRestricted: allowedUserIDs != nil,
-	}, nil)
+	})
 	if err != nil {
 		return 0
 	}
-	return delivered
+	return 0
 }
 
 func realtimeMessagePayload(message any) (json.RawMessage, string, error) {

@@ -231,6 +231,9 @@ func (s *Server) handleRealtimeTicket(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
+	if s.rejectRealtimeAdmissionWhileUnready(w) {
+		return
+	}
 	actor, ok := authenticatedActor(r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
