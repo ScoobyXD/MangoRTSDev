@@ -43,7 +43,7 @@ MW10 - My Work cache keys include company, surface scope, and target user IDs.
 MW11 - My Work has no realtime subscription; it loads canonical rows for the selected target users when the surface opens or explicitly refreshes.
 MW12 - My Work matrix cells group work by `gvic_assignment` and `priority`.
 MW13 - Role buckets sort Responsible, Accountable, Consulted, then Informed.
-MW14 - Priority buckets sort 1, 2, 3, 4, 5, then no priority.
+MW14 - Priority buckets sort 1, 2, 3, 4, 5, then **Not Assigned**.
 MW15 - Projects and logic gates are display/path context only; they must not appear as standalone My Work leaves.
 MW16 - `node_id` is the actual work item for every My Work row.
 MW17 - Every row uses the Node's current effective RACI policy. An inherited assigned Node resolves through its Logic Gate; an active customized Node resolves itself.
@@ -134,7 +134,7 @@ Given:
 Expected:
 - Cells are grouped by role and priority.
 - Roles sort Responsible, Accountable, Consulted, Informed.
-- Priorities sort 1 through 5, then no priority.
+- Priorities sort 1 through 5, then **Not Assigned**.
 - Standalone node paths with closed, archived, done, complete, or completed status are excluded unless an active project context keeps the node visible.
 - Closed, archived, done, complete, and completed project contexts are excluded.
 - A standalone `Done` node is excluded.

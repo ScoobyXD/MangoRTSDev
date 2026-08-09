@@ -339,7 +339,7 @@ export function priorityLabel(priority: number): string {
   if (priority === 3) return "3 Tomorrow";
   if (priority === 4) return "4 Sprint (1 week)";
   if (priority === 5) return "5 Later (low priority)";
-  return "No priority";
+  return "Not Assigned";
 }
 
 export function RACIRoleLabel(role: LogicGateRACIRole): string {

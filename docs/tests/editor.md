@@ -32,6 +32,34 @@ No empty row appears, no block is created or removed, and the caret, scroll posi
 
 Last updated: 2026-08-07
 
+# Process Story: A highlighted email chat becomes durable only on first send
+
+A user highlights exact text in an email attached to a Node and chooses the chat action
+↓
+Mango shows a temporary text-box and quote preview without writing a text box, email relationship, or chat
+↓
+Clearing the quote or closing the unsent chat cancels that preview locally, so no database cleanup is needed
+↓
+On the first send, Mango atomically creates the Node text box, links the exact email message to that text box, and creates the chat; failure creates none of them
+↓
+After success the preview becomes a normal saved text box, while exact-message and whole-thread drops continue to use typed email relationships and reject a different email on an already-linked text box
+
+Last updated: 2026-08-08
+
+# Current Editor Business Logic Laws
+
+1. A Node text box is the required owner of every Node chat.
+2. A Node text box may link to one exact email message or one whole stored email thread.
+3. Dropping an exact email message on a Node text box creates the exact typed message/textbox relationship.
+4. Dropping an attached email thread on a Node text box links every stored thread message to that text box.
+5. A text box already linked to one email message or thread rejects a different email drop.
+6. A Node with priority **Not Assigned** may be assigned or moved to a Logic Gate without a priority prompt or error.
+7. Clicking the chat action for highlighted email text without a linked text box creates only a temporary interface preview and writes no text box, email relationship, or chat to the database.
+8. Clearing the temporary email quote or closing its chat rail cancels the temporary text box and draft without a database delete or cleanup write.
+9. Sending the first temporary email chat atomically creates the Node text box, exact email-message relationship, and chat before the interface becomes a normal saved text box.
+
+Last updated: 2026-08-08
+
 # Process Story: Editor policy status follows the draft automatically
 
 An authorized user opens RACI or permissions for a Node, Project, or Logic Gate

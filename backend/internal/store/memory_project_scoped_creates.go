@@ -215,17 +215,13 @@ func (r *MemoryRepo) assignInitialProjectScopedNodeToLogicGateLocked(input Proje
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
-	if _, ok := logicGateAssignmentInputPriority(assignmentInput); !ok && !logicGateAssignmentNodeHasPriority(r.nodes[key(assignmentInput.CompanyID, assignmentInput.NodeID)].Priority) {
-		return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
-	}
 	if assignmentInput.PrioritySet {
 		priority, ok := logicGateAssignmentInputPriority(assignmentInput)
 		if !ok {
-			return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
+			return LogicGateNodeAssignmentResult{}, ErrInvalid
 		}
 		nodeValue := r.nodes[key(assignmentInput.CompanyID, assignmentInput.NodeID)]
-		value := *priority
-		nodeValue.Priority = &value
+		nodeValue.Priority = cloneIntPointer(priority)
 		r.nodes[key(assignmentInput.CompanyID, assignmentInput.NodeID)] = nodeValue
 	}
 	card, err := r.upsertKanbanCardLocked(KanbanCardMutationInput{

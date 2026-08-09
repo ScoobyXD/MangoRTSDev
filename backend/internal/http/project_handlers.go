@@ -739,8 +739,6 @@ func (s *Server) writeProjectMutationError(w http.ResponseWriter, err error, fal
 		writeError(w, http.StatusConflict, "project_already_exists")
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, "project_not_found")
-	case errors.Is(err, store.ErrPriorityRequired):
-		writeError(w, http.StatusBadRequest, "priority_required")
 	default:
 		writeError(w, http.StatusInternalServerError, fallback)
 	}

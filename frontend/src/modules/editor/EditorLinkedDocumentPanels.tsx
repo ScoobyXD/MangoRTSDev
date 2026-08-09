@@ -47,7 +47,6 @@ type EditorLinkedDocumentPanelsProps = {
   nodePresetFields: {
     status: string;
     priorityDraft: string;
-    priorityRequirementError?: string;
     accounts: Account[];
     accountOptions: Account[];
     dueDateDraft: string;
@@ -358,8 +357,6 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   const priorityMenuRef = useRef<HTMLSpanElement | null>(null);
   const dueDatePickerRef = useRef<HTMLInputElement | null>(null);
   const selectedPriority = NODE_PRIORITY_OPTIONS.find((option) => option.value === (nodePresetFields?.priorityDraft || "0")) ?? NODE_PRIORITY_OPTIONS[0];
-  const priorityRequirementError = nodePresetFields?.priorityRequirementError ?? "";
-  const priorityHasRequirementError = Boolean(priorityRequirementError);
   const selectedStatus = NODE_STATUS_OPTIONS.find((option) => option.value === normalizeNodeStatusValue(nodePresetFields?.status ?? ""));
   const displayStatusColor = selectedStatus?.color ?? "#64748b";
   const displayStatusLabel = selectedStatus?.label ?? displayNodeStatusFallback(nodePresetFields?.status ?? "");
@@ -725,7 +722,6 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                       type="button"
                       aria-haspopup="listbox"
                       aria-expanded={canEdit && priorityMenuOpen}
-                      aria-invalid={priorityHasRequirementError}
                       disabled={!canEdit}
                       onClick={() => {
                         if (!canEdit) return;
@@ -741,10 +737,10 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                         gridTemplateColumns: "minmax(0, 1fr) 18px",
                         alignItems: "center",
                         gap: 7,
-                        border: `1px solid ${priorityHasRequirementError ? "#334155" : selectedPriority.borderColor}`,
+                        border: `1px solid ${selectedPriority.borderColor}`,
                         borderRadius: 6,
-                        background: priorityHasRequirementError ? "rgba(100,116,139,0.08)" : selectedPriority.surface,
-                        color: priorityHasRequirementError ? "#334155" : selectedPriority.color,
+                        background: selectedPriority.surface,
+                        color: selectedPriority.color,
                         font: "inherit",
                         fontSize: 11.5,
                         fontWeight: 600,
@@ -752,12 +748,12 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                         cursor: canEdit ? "pointer" : "default",
                         opacity: canEdit ? 1 : 0.62,
                         textAlign: "left",
-                        boxShadow: priorityHasRequirementError ? "0 0 0 2px rgba(100,116,139,0.18)" : `0 8px 18px ${selectedPriority.glow}, inset 1px 1px 0 rgba(255,255,255,0.86)`,
+                        boxShadow: `0 8px 18px ${selectedPriority.glow}, inset 1px 1px 0 rgba(255,255,255,0.86)`,
                       }}
                     >
                       <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedPriority.label}</span>
                       <span aria-hidden="true" style={{ display: "grid", placeItems: "center", color: "currentColor" }}>
-                        {selectedPriority.value !== "0" ? <PriorityCheckIcon color={priorityHasRequirementError ? "#334155" : selectedPriority.color} /> : null}
+                        {selectedPriority.value !== "0" ? <PriorityCheckIcon color={selectedPriority.color} /> : null}
                       </span>
                     </button>
                     {canEdit && priorityMenuOpen && (
@@ -825,7 +821,6 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                       </div>
                     )}
                   </span>
-                  {priorityRequirementError && <span style={{ color: "#b00020", fontSize: 11, fontWeight: 800, lineHeight: 1.2 }}>{priorityRequirementError}</span>}
                 </span>
               </label>
             </div>

@@ -253,6 +253,13 @@ function formatTextBlockMetadataTimestamp(value: string | number | undefined): s
   return `${time} ${day}`;
 }
 
+function textBlockHasEmailMessage(block: Pick<TextBlockState, "emailMessageID" | "emailMessageIDs">, messageID: string): boolean {
+  const cleanMessageID = messageID.trim();
+  if (!cleanMessageID) return false;
+  return block.emailMessageID?.trim() === cleanMessageID
+    || block.emailMessageIDs?.some((candidate) => candidate.trim() === cleanMessageID) === true;
+}
+
 function clampTextSidePaneWidth(value: number, maxWidth = TEXT_SIDE_PANE_MAX_WIDTH_PX): number {
   if (!Number.isFinite(value)) return TEXT_SIDE_PANE_DEFAULT_WIDTH_PX;
   const safeMaxWidth = Math.max(TEXT_SIDE_PANE_MIN_WIDTH_PX, Math.min(TEXT_SIDE_PANE_MAX_WIDTH_PX, Math.round(maxWidth)));
@@ -468,7 +475,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   companyID,
   nodeID,
   canEdit,
-  nodePriorityDraft,
   assignedLogicGateIDs,
   apiBase,
   projections,
@@ -495,7 +501,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   onProjectionMutation,
   onCreateNodeFromImage,
   onAssignToLogicGate,
-  onRequireNodePriorityForLogicGateAssignment,
   onSelectionFontSizeChange,
   onSelectionInlineFormatChange,
   onSelectionHighlightColorChange,
@@ -513,6 +518,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const attachmentUploadScopeRef = useRef({ companyID, nodeID, canEdit, generation: 0 });
   const nodeAttachmentUploadFilesRef = useRef(new Map<string, { file: File; blockID: string; controller?: AbortController }>());
   const contentByBlockRef = useRef(new Map<string, EditorTextBlockContent>());
+  const temporaryEmailChatBlocksRef = useRef(new Map<string, TextBlockState>());
+  const chatSubmissionsInProgressRef = useRef(new Set<string>());
   const documentScrollMemoryRef = useRef(createEditorScrollMemory());
   const focusBlockIDRef = useRef("");
   const handledFocusRequestRef = useRef("");
@@ -700,12 +707,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const primaryAssignedProject = sortedNodeProjectRelationships[0] ?? null;
   const primaryAssignedProjectID = primaryAssignedProject?.project_id?.trim() ?? "";
   const primaryAssignedProjectLabel = primaryAssignedProject ? projectRelationshipLabel(primaryAssignedProject) : "";
-  const nodePriorityUnassignedForLogicGate = useMemo(() => {
-    const raw = nodePriorityDraft.trim();
-    if (!raw || raw === "0") return true;
-    const parsed = Number(raw);
-    return !Number.isInteger(parsed) || parsed < 1 || parsed > 5;
-  }, [nodePriorityDraft]);
   const focusTargetBlockID = useMemo(() => {
     const targetID = focusInformationID?.trim() ?? "";
     const emailMessageID = focusEmailMessageID?.trim() ?? "";
@@ -717,11 +718,11 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     const attachedEmail = nodeAttachedEmails.find((email) => email.id === targetID || email.messageID === targetID || email.emailMessageID === emailMessageID);
     if (attachedEmail) {
-      const linkedBlock = blocks.find((block) => block.emailMessageID === attachedEmail.emailMessageID)
+      const linkedBlock = blocks.find((block) => textBlockHasEmailMessage(block, attachedEmail.emailMessageID))
         ?? (attachedEmail.blockID ? blocks.find((block) => block.id === attachedEmail.blockID) : undefined);
       return linkedBlock?.id || emailOriginChatHostBlockID || blocks[0]?.id || "";
     }
-    if (emailMessageID) return blocks.find((block) => block.emailMessageID === emailMessageID)?.id || emailOriginChatHostBlockID || blocks[0]?.id || "";
+    if (emailMessageID) return blocks.find((block) => textBlockHasEmailMessage(block, emailMessageID))?.id || emailOriginChatHostBlockID || blocks[0]?.id || "";
     return "";
   }, [blocks, chatMessages, emailOriginChatBlockID, emailOriginChatHostBlockID, focusEmailMessageID, focusInformationID, nodeAttachedEmails]);
   const focusTargetIndex = useMemo(
@@ -948,6 +949,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     for (const timer of saveTimersRef.current.values()) window.clearTimeout(timer);
     saveTimersRef.current.clear();
     contentByBlockRef.current = new Map();
+    temporaryEmailChatBlocksRef.current.clear();
+    chatSubmissionsInProgressRef.current.clear();
   }, [companyID, nodeID]);
 
   useEffect(() => {
@@ -975,6 +978,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         document: content.document,
         attachments: content.attachments ?? [],
         emailMessageID: content.emailMessageID,
+        emailMessageIDs: content.emailMessageIDs,
         emailAccent: content.emailAccent,
         createdTimestamp: item.created_timestamp,
         updatedTimestamp: item.updated_timestamp,
@@ -988,17 +992,20 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       setAttachedEmails(parsedAttachedEmails);
       return;
     }
-    setBlocks(textBlocks);
-    contentByBlockRef.current = new Map(textBlocks.map((block) => [block.id, { title: block.title, document: block.document, attachments: block.attachments, emailMessageID: block.emailMessageID, emailAccent: block.emailAccent }]));
+    const serverBlockIDs = new Set(textBlocks.map((block) => block.id));
+    const temporaryBlocks = Array.from(temporaryEmailChatBlocksRef.current.values()).filter((block) => !serverBlockIDs.has(block.id));
+    const renderedTextBlocks = [...temporaryBlocks, ...textBlocks];
+    setBlocks(renderedTextBlocks);
+    contentByBlockRef.current = new Map(renderedTextBlocks.map((block) => [block.id, { title: block.title, document: block.document, attachments: block.attachments, emailMessageID: block.emailMessageID, emailMessageIDs: block.emailMessageIDs, emailAccent: block.emailAccent }]));
     textBlockProjectionSaveController.replaceBlocksAsHasNotChanged(textBlocks.map((block) => ({
       blockID: block.id,
-      content: { title: block.title, document: block.document, attachments: block.attachments, emailMessageID: block.emailMessageID, emailAccent: block.emailAccent },
+      content: { title: block.title, document: block.document, attachments: block.attachments, emailMessageID: block.emailMessageID, emailMessageIDs: block.emailMessageIDs, emailAccent: block.emailAccent },
       revision: serverRevisionByInformationID.get(block.id) ?? 0,
     })));
     setChatMessages(parsedChatMessages);
     setAttachedEmails(parsedAttachedEmails);
     const nodeChanged = loadedNodeScopeRef.current !== paneLayoutScope;
-    const blockIDs = new Set(textBlocks.map((block) => block.id));
+    const blockIDs = new Set(renderedTextBlocks.map((block) => block.id));
     const loadedEmailOrigin = parsedAttachedEmails.find((email) => email.createdFromEmail) ?? null;
     const emailOriginChatID = loadedEmailOrigin?.id.trim() ?? "";
     const emailOriginHostBlockID = resolveLegacyEmailChatHostBlockID(textBlocks, loadedEmailOrigin);
@@ -1013,7 +1020,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const defaultChatBlockIDSet = new Set(defaultChatBlockIDs);
     setExpandedLinkedEmailBlockIDs((current) => {
       if (nodeChanged) return new Set();
-      const linkedBlockIDs = new Set(textBlocks.filter((block) => Boolean(block.emailMessageID?.trim())).map((block) => block.id));
+      const linkedBlockIDs = new Set(textBlocks.filter((block) => Boolean(block.emailMessageID?.trim() || block.emailMessageIDs?.length)).map((block) => block.id));
       return new Set(Array.from(current).filter((blockID) => linkedBlockIDs.has(blockID)));
     });
     const emailIDsByBlock = new Map<string, Set<string>>();
@@ -1263,8 +1270,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const now = new Date().toISOString();
     const blockID = generateStableInformationID();
     const sourceEmail = nodeAttachedEmails.find((email) => email.emailMessageID === cleanMessageID || email.id === cleanMessageID);
-    const existingMessageAccent = blocks.find((block) => block.emailMessageID?.trim() === cleanMessageID)?.emailAccent?.trim() ?? "";
-    const unavailableAccents = blocks.filter((block) => block.emailMessageID?.trim() !== cleanMessageID).map((block) => block.emailAccent ?? "");
+    const existingMessageAccent = blocks.find((block) => textBlockHasEmailMessage(block, cleanMessageID))?.emailAccent?.trim() ?? "";
+    const unavailableAccents = blocks.filter((block) => !textBlockHasEmailMessage(block, cleanMessageID)).map((block) => block.emailAccent ?? "");
     const emailAccent = existingMessageAccent || editorEmailMessageAccent(cleanMessageID, unavailableAccents);
     const cleanQuote = quote.trim();
     const initialContent = createEmailLinkedNodeTextBlockContent({
@@ -1282,6 +1289,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       document: initialContent.document,
       attachments: [],
       emailMessageID: cleanMessageID,
+      emailMessageIDs: [cleanMessageID],
       emailAccent,
       createdTimestamp: now,
       updatedTimestamp: now,
@@ -1311,6 +1319,110 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     return blockID;
   }, [blocks, companyID, editorTextCanEdit, nodeAttachedEmails, nodeID, textBlockProjectionSaveController]);
 
+  const stageEmailSelectionChatTextBlock = useCallback((messageID: string) => {
+    const cleanMessageID = messageID.trim();
+    if (!editorTextCanEdit || !cleanMessageID) return "";
+    const alreadyStaged = Array.from(temporaryEmailChatBlocksRef.current.values())
+      .find((block) => textBlockHasEmailMessage(block, cleanMessageID));
+    if (alreadyStaged) return alreadyStaged.id;
+    const now = new Date().toISOString();
+    const blockID = generateStableInformationID();
+    const sourceEmail = nodeAttachedEmails.find((email) => email.emailMessageID === cleanMessageID || email.id === cleanMessageID);
+    const unavailableAccents = blocks.map((block) => block.emailAccent ?? "");
+    const emailAccent = editorEmailMessageAccent(cleanMessageID, unavailableAccents);
+    const initialContent = createEmailLinkedNodeTextBlockContent({
+      title: sourceEmail?.subject.trim() ? `Email: ${sourceEmail.subject.trim()}` : "Email text box",
+      messageID: cleanMessageID,
+      accent: emailAccent,
+    });
+    const temporaryBlock: TextBlockState = {
+      id: blockID,
+      title: initialContent.title,
+      document: "",
+      attachments: [],
+      emailMessageID: cleanMessageID,
+      emailMessageIDs: [cleanMessageID],
+      emailAccent,
+      temporaryEmailChat: true,
+      createdTimestamp: now,
+      updatedTimestamp: now,
+      pending: false,
+    };
+    temporaryEmailChatBlocksRef.current.set(blockID, temporaryBlock);
+    contentByBlockRef.current.set(blockID, initialContent);
+    setBlocks((current) => [temporaryBlock, ...current.filter((block) => block.id !== blockID)]);
+    setClosedEditorBlockIDs((current) => {
+      if (!current.has(blockID)) return current;
+      const next = new Set(current);
+      next.delete(blockID);
+      return next;
+    });
+    setOpenEditorBlockIDs((current) => new Set(current).add(blockID));
+    setActiveRowBlockID(blockID);
+    return blockID;
+  }, [blocks, editorTextCanEdit, nodeAttachedEmails]);
+
+  const cancelTemporaryEmailChatDraft = useCallback((blockID: string, anchor?: TextBlockSelectionAnchor) => {
+    if (!temporaryEmailChatBlocksRef.current.has(blockID)) return false;
+    temporaryEmailChatBlocksRef.current.delete(blockID);
+    contentByBlockRef.current.delete(blockID);
+    textBlockProjectionSaveController.removeBlock(blockID);
+    setBlocks((current) => current.filter((block) => block.id !== blockID));
+    setChatMessages((current) => current.filter((message) => message.blockID !== blockID));
+    setChatDrafts((current) => {
+      if (!(blockID in current)) return current;
+      const next = { ...current };
+      delete next[blockID];
+      return next;
+    });
+    setChatDraftEntityLinks((current) => {
+      if (!(blockID in current)) return current;
+      const next = { ...current };
+      delete next[blockID];
+      return next;
+    });
+    setChatDraftAttachments((current) => {
+      if (!(blockID in current)) return current;
+      const next = { ...current };
+      delete next[blockID];
+      return next;
+    });
+    setChatReplyTargets((current) => {
+      if (!(blockID in current)) return current;
+      const next = { ...current };
+      delete next[blockID];
+      return next;
+    });
+    setChatSelectionAnchors((current) => {
+      if (!(blockID in current)) return current;
+      const next = { ...current };
+      delete next[blockID];
+      return next;
+    });
+    setOpenEditorBlockIDs((current) => { const next = new Set(current); next.delete(blockID); return next; });
+    setOpenChatBlockIDs((current) => { const next = new Set(current); next.delete(blockID); return next; });
+    setClosedEditorBlockIDs((current) => { const next = new Set(current); next.delete(blockID); return next; });
+    setClosedChatBlockIDs((current) => { const next = new Set(current); next.delete(blockID); return next; });
+    setExpandedLinkedEmailBlockIDs((current) => { const next = new Set(current); next.delete(blockID); return next; });
+    setActiveChatBlockID((current) => current === blockID ? "" : current);
+    setActiveRowBlockID((current) => current === blockID ? "" : current);
+    setFocusedTextBlockID((current) => current === blockID ? "" : current);
+    if (anchor?.source === "email" && anchor.messageID?.trim() && anchor.quote.trim()) {
+      const emailAnchor = {
+        messageID: anchor.messageID.trim(),
+        quote: anchor.quote.trim(),
+        startOffset: anchor.startOffset,
+        endOffset: anchor.endOffset,
+      };
+      removeStoredEmailLocalHighlight(emailAnchor.messageID, emailAnchor);
+      setEmailHighlightRemovalRequest((current) => ({
+        ...emailAnchor,
+        requestID: (current?.requestID ?? 0) + 1,
+      }));
+    }
+    return true;
+  }, [textBlockProjectionSaveController]);
+
   useEffect(() => {
     if (!shouldCreateInitialTextBlock({
       canEdit,
@@ -1334,13 +1446,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       document: patch.document ?? existing.document,
       attachments: patch.attachments ?? existing.attachments ?? [],
       emailMessageID: patch.emailMessageID ?? existing.emailMessageID,
+      emailMessageIDs: patch.emailMessageIDs ?? existing.emailMessageIDs,
       emailAccent: patch.emailAccent ?? existing.emailAccent,
     };
     setBlocks((current) => current.map((block) => {
       if (block.id !== blockID) return block;
       return { ...block, ...nextContent };
     }));
-    if (patch.title !== undefined || patch.attachments !== undefined || patch.emailMessageID !== undefined || patch.emailAccent !== undefined) {
+    if (patch.title !== undefined || patch.attachments !== undefined || patch.emailMessageID !== undefined || patch.emailMessageIDs !== undefined || patch.emailAccent !== undefined) {
       scheduleTextBlockSave(blockID, nextContent, markHistory);
     }
   }, [canEdit, scheduleTextBlockSave]);
@@ -1669,6 +1782,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, []);
   const submitChat = useCallback(async (blockID: string) => {
     if (!canEdit) return;
+    if (chatSubmissionsInProgressRef.current.has(blockID)) return;
     const { message, entityLinks } = trimEditorChatDraft(chatDrafts[blockID] ?? "", chatDraftEntityLinks[blockID] ?? []);
     const attachments = chatDraftAttachments[blockID] ?? [];
     if (!editorChatAttachmentsReadyForSubmit(attachments)) return;
@@ -1677,6 +1791,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const id = generateStableInformationID();
     const parentID = chatReplyTargets[blockID] ?? "";
     const selectionAnchor = parentID ? undefined : chatSelectionAnchors[blockID];
+    const createEmailTextBoxOnSend = temporaryEmailChatBlocksRef.current.has(blockID);
+    if (createEmailTextBoxOnSend && (selectionAnchor?.source !== "email" || !selectionAnchor.messageID?.trim())) return;
     const mentionedUserIDs = mentionedUserIDsFromChatDraft(message, companyUsers);
     const nextMessage: EditorTextBlockChatMessage = {
       id,
@@ -1734,6 +1850,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       next.delete(blockID);
       return next;
     });
+    chatSubmissionsInProgressRef.current.add(blockID);
     try {
       await requestJSON<unknown>(`/v1/nodes/${nodeID}/information`, {
         method: "POST",
@@ -1742,6 +1859,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           type: EDITOR_TEXT_BLOCK_CHAT_TYPE,
           information: buildEditorTextBlockChatPayload({
             blockID,
+            createEmailTextBoxOnSend,
             parentID,
             selectionSource: selectionAnchor?.source,
             selectionBlockID: selectionAnchor?.blockID,
@@ -1760,11 +1878,28 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           information_id: id,
         }),
       });
+      if (createEmailTextBoxOnSend) {
+        temporaryEmailChatBlocksRef.current.delete(blockID);
+        const content = contentByBlockRef.current.get(blockID);
+        if (content) textBlockProjectionSaveController.replaceBlockAsHasNotChanged({ blockID, content, revision: 0 });
+        setBlocks((current) => current.map((block) => block.id === blockID
+          ? { ...block, temporaryEmailChat: false, pending: false }
+          : block));
+        markEditorHistoryChanged({ companyID, resourceType: "node", resourceID: nodeID });
+      }
       onProjectionMutation();
     } catch (cause) {
+      setChatMessages((current) => current.filter((item) => item.id !== id));
+      setChatDrafts((current) => ({ ...current, [blockID]: message }));
+      if (entityLinks.length > 0) setChatDraftEntityLinks((current) => ({ ...current, [blockID]: entityLinks }));
+      if (attachments.length > 0) setChatDraftAttachments((current) => ({ ...current, [blockID]: attachments }));
+      if (parentID) setChatReplyTargets((current) => ({ ...current, [blockID]: parentID }));
+      if (selectionAnchor) setChatSelectionAnchors((current) => ({ ...current, [blockID]: selectionAnchor }));
       onError(cause instanceof Error ? cause.message : "failed_to_save_chat_message");
+    } finally {
+      chatSubmissionsInProgressRef.current.delete(blockID);
     }
-  }, [author.name, author.userID, canEdit, chatDraftAttachments, chatDraftEntityLinks, chatDrafts, chatReplyTargets, chatSelectionAnchors, companyID, companyUsers, nodeID, onError, onProjectionMutation, requestJSON]);
+  }, [author.name, author.userID, canEdit, chatDraftAttachments, chatDraftEntityLinks, chatDrafts, chatReplyTargets, chatSelectionAnchors, companyID, companyUsers, nodeID, onError, onProjectionMutation, requestJSON, textBlockProjectionSaveController]);
 
   const deleteChatMessage = useCallback(async (messageID: string) => {
     if (!canEdit) return;
@@ -2099,6 +2234,39 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
   }, [attachedEmails, canEdit, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
 
+  const linkDroppedEmailToTextBlock = useCallback(async (blockID: string, dataTransfer: DataTransfer) => {
+    if (!canEdit) return;
+    const dragged = parseDraggedEmail(dataTransfer);
+    const attachedMessageID = dataTransfer.getData("application/x-mango-node-attached-email").trim();
+    const attached = attachedMessageID
+      ? attachedEmails.find((email) => email.messageID === attachedMessageID || email.emailMessageID === attachedMessageID)
+      : undefined;
+    if (!dragged && !attached) return;
+    const block = blocks.find((candidate) => candidate.id === blockID);
+    if (!block) return;
+    const primaryEmailMessageID = dragged?.emailMessageID ?? attached?.emailMessageID ?? "";
+    if ((block.emailMessageID || block.emailMessageIDs?.length) && !textBlockHasEmailMessage(block, primaryEmailMessageID)) {
+      throw new Error("This text box is already linked to another email message or thread.");
+    }
+    if (dragged) await attachEmail(dragged);
+    const relationshipTargets = attached ? [attached] : [dragged!];
+    for (const email of relationshipTargets) {
+      await requestJSON<unknown>(`/v1/nodes/${nodeID}/information`, {
+        method: "POST",
+        body: JSON.stringify({
+          company_id: companyID,
+          type: EDITOR_ATTACHED_EMAIL_TYPE,
+          information: buildEditorAttachedEmailPayload({ ...email, blockID, linkWholeThread: Boolean(attached) }),
+          information_id: generateStableInformationID(),
+        }),
+      });
+    }
+    setBlocks((current) => current.map((candidate) => candidate.id === blockID
+      ? { ...candidate, emailMessageID: primaryEmailMessageID, emailMessageIDs: [primaryEmailMessageID], emailAccent: candidate.emailAccent || editorEmailMessageAccent(primaryEmailMessageID) }
+      : candidate));
+    onProjectionMutation();
+  }, [attachEmail, attachedEmails, blocks, canEdit, companyID, nodeID, onProjectionMutation, requestJSON]);
+
   const removeAttachedEmail = useCallback(async (emailID: string) => {
     if (!canEdit || !nodeID || !companyID) return;
     const cleanEmailID = emailID.trim();
@@ -2186,10 +2354,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const linkEntityFromEditor = useCallback(async (entity: EditorEntityLink) => {
     if (!canEdit) throw new Error("You do not have permission to edit this Node.");
     if (entity.entityType === "logic_gate") {
-      if (nodePriorityUnassignedForLogicGate) {
-        onRequireNodePriorityForLogicGateAssignment();
-        throw new Error("Must give node a priority");
-      }
       const logicGateID = entity.entityID.trim();
       if (!logicGateID) throw new Error("Select a Logic Gate to link.");
       await onAssignToLogicGate(logicGateID);
@@ -2219,8 +2383,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     throw new Error("A Node can only be linked to a Logic Gate, Project, or Email.");
   }, [
-    attachEmail, canEdit, companyID, loadNodeTimelineEvents, nodeID, nodePriorityUnassignedForLogicGate,
-    onAssignToLogicGate, onRequireNodePriorityForLogicGateAssignment,
+    attachEmail, canEdit, companyID, loadNodeTimelineEvents, nodeID, onAssignToLogicGate,
   ]);
 
   const chooseHeaderLinkedEntity = useCallback(async (entity: EditorEntityLink, mode: UniversalEntityPickerMode) => {
@@ -2275,7 +2438,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
   const revealEmailTextBlock = useCallback((messageID: string) => {
     const cleanMessageID = messageID.trim();
-    const block = blocks.find((candidate) => candidate.emailMessageID?.trim() === cleanMessageID);
+    const block = blocks.find((candidate) => textBlockHasEmailMessage(candidate, cleanMessageID));
     if (!block) return;
     setNodeEmailNavigationRequest(null);
     setActiveRowBlockID(block.id);
@@ -2388,7 +2551,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         && (item.blockID === emailOriginChatBlockID || blocks.some((block) => block.id === item.blockID))
       ));
       const anchoredBlockID = anchoredChat?.blockID === emailOriginChatBlockID
-        ? blocks.find((block) => block.emailMessageID === cleanEmailMessageID)?.id || emailOriginChatHostBlockID || blocks[0]?.id || ""
+        ? blocks.find((block) => textBlockHasEmailMessage(block, cleanEmailMessageID))?.id || emailOriginChatHostBlockID || blocks[0]?.id || ""
         : anchoredChat?.blockID ?? "";
       if (anchoredChat && anchoredBlockID) {
         handledFocusRequestRef.current = requestKey;
@@ -2549,12 +2712,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       return next;
     });
   };
-  const nodeEmailMessageAccents = Object.fromEntries(blocks
-    .filter((block) => Boolean(block.emailMessageID?.trim()))
-    .map((block) => [
-      block.emailMessageID!.trim(),
-      block.emailAccent?.trim() || editorEmailMessageAccent(block.emailMessageID!.trim()),
-    ]));
+  const nodeEmailMessageAccents = Object.fromEntries(blocks.flatMap((block) => {
+    const messageIDs = block.emailMessageIDs?.length ? block.emailMessageIDs : block.emailMessageID ? [block.emailMessageID] : [];
+    return messageIDs.map((messageID) => [
+      messageID.trim(),
+      block.emailAccent?.trim() || editorEmailMessageAccent(messageID.trim()),
+    ] as const).filter(([messageID]) => Boolean(messageID));
+  }));
   const activeNodeEmailChatMessage = activeChatBlockID
     ? chatMessages.find((message) => message.id === activeChatMessageIDs[activeChatBlockID])
     : undefined;
@@ -2571,8 +2735,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     : null;
   const openEmailSelectionChat = (messageID: string, selection: { quote: string; startOffset: number; endOffset: number; x: number; y: number }) => {
-    const existingBlockID = blocks.find((block) => block.emailMessageID === messageID)?.id ?? "";
-    const blockID = existingBlockID || createEmailTextBlock(messageID, selection.quote);
+    const existingBlockID = blocks.find((block) => textBlockHasEmailMessage(block, messageID))?.id ?? "";
+    const blockID = existingBlockID || stageEmailSelectionChatTextBlock(messageID);
     if (!blockID) return;
     openSelectionChat({
       blockID,
@@ -3005,6 +3169,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             resourceAttachment,
           }));
           const clearSelectionAnchor = () => {
+            if (cancelTemporaryEmailChatDraft(chatBlockID, selectionAnchor)) return;
             setChatSelectionAnchors((current) => {
               if (!(chatBlockID in current)) return current;
               const next = { ...current };
@@ -3016,6 +3181,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             setFocusedTextBlockID("");
             if (chatPaneIsVisible) {
               clearSelectionAnchor();
+              if (block.temporaryEmailChat) return;
               setActiveChatBlockID("");
               setOpenChatBlockIDs((current) => {
                 if (!current.has(chatBlockID)) return current;
@@ -3140,6 +3306,22 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 <div
                   data-node-text-box-row={block.id}
                   className={`mango-fixed-editor-row${blockSaveNeedsFailureAttention ? " mango-editor-save-failed-frame" : ""}`}
+                  onDragOver={(event) => {
+                    if (!canEdit || block.temporaryEmailChat) return;
+                    if (event.dataTransfer.types.includes(EMAIL_DRAG_MIME) || event.dataTransfer.types.includes("application/x-mango-node-attached-email")) {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "link";
+                    }
+                  }}
+                  onDrop={(event) => {
+                    if (!canEdit || block.temporaryEmailChat) return;
+                    if (!event.dataTransfer.types.includes(EMAIL_DRAG_MIME) && !event.dataTransfer.types.includes("application/x-mango-node-attached-email")) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    void linkDroppedEmailToTextBlock(block.id, event.dataTransfer).catch((cause) => {
+                      onError(cause instanceof Error ? cause.message : "failed_to_link_email_to_text_box");
+                    });
+                  }}
                   style={{ height: linkedEmailExpanded ? "auto" : TEXT_BLOCK_ROW_HEIGHT, minHeight: TEXT_BLOCK_ROW_HEIGHT, minWidth: 0, display: "grid", gridTemplateRows: linkedEmailExpanded ? "38px auto" : "38px minmax(0, 1fr)", borderWidth: 1, borderStyle: "solid", borderColor: textBlockIsFocused ? "transparent" : blockEmailAccent || EDITOR_NEU_SOFT_BORDER, borderLeftWidth: blockEmailAccent ? 4 : 1, borderLeftColor: blockEmailAccent || (textBlockIsFocused ? "transparent" : EDITOR_NEU_SOFT_BORDER), borderRadius: 14, background: blockEmailAccent ? "#ffffff" : `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${textBlockIsFocused ? EDITOR_NEU_EDGE_FRAME : "linear-gradient(135deg, rgba(255,255,255,0.76), rgba(255,255,255,0.76))"} border-box`, overflow: linkedEmailExpanded ? "visible" : "hidden", boxShadow: textBlockIsFocused ? "8px 8px 20px rgba(174,174,192,0.26), -7px -7px 16px rgba(255,255,255,0.92), 0 0 18px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.88)" : EDITOR_NEU_SHADOW }}
                 >
                   <div
@@ -3168,9 +3350,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                           <TextEditorIcon color={accent} />
                           <span>Editor</span>
                         </button>
-                        <EditorSaveStatusIcon state={blockSaveFallback} storageKey={blockSaveStorageKey} compact />
-                        <EditorSavedTimestamp storageKey={blockSaveStorageKey} fallbackUpdatedTimestamp={block.updatedTimestamp} createdTimestamp={block.createdTimestamp} formatTimestamp={formatTextBlockMetadataTimestamp} />
-                        <AttachmentCountDropdown
+                        {!block.temporaryEmailChat && <EditorSaveStatusIcon state={blockSaveFallback} storageKey={blockSaveStorageKey} compact />}
+                        {!block.temporaryEmailChat && <EditorSavedTimestamp storageKey={blockSaveStorageKey} fallbackUpdatedTimestamp={block.updatedTimestamp} createdTimestamp={block.createdTimestamp} formatTimestamp={formatTextBlockMetadataTimestamp} />}
+                        {!block.temporaryEmailChat && <AttachmentCountDropdown
                           items={blockAttachmentDropdownItems}
                           apiBase={apiBase}
                           companyID={companyID}
@@ -3183,8 +3365,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                           onAddFiles={canEdit ? (files) => addTextBlockAttachments(block.id, files) : undefined}
                           onRemove={canEdit ? (item) => { void deleteNodeAttachment(item.resourceAttachment); } : undefined}
                           onError={onError}
-                        />
-                        {canEdit && <TextBlockActionsMenu accent={accent} surfaceText={surfaceText} panelBackground={panelBackground} strokeColor={strokeColor} onDelete={(position) => requestDeleteTextBlock(block.id, position)} />}
+                        />}
+                        {canEdit && !block.temporaryEmailChat && <TextBlockActionsMenu accent={accent} surfaceText={surfaceText} panelBackground={panelBackground} strokeColor={strokeColor} onDelete={(position) => requestDeleteTextBlock(block.id, position)} />}
                       </div>
                       <div data-node-pane-header="chat" style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 5 }}>
                         {emailOriginPrimaryRow && emailChatParticipantRoster}
@@ -3228,6 +3410,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                           )}
                           {editorPaneIsVisible && (
                             <div className="mango-pane-enter" style={{ minWidth: 0, minHeight: 0, height: editorPaneHeight, overflow: "hidden" }}>
+                          {block.temporaryEmailChat ? (
+                            <div
+                              data-node-text-block-id={block.id}
+                              aria-label="Pending email chat text box"
+                              style={{ minHeight: TEXT_BLOCK_MIN_HEIGHT, height: TEXT_BLOCK_MIN_HEIGHT, background: "rgba(255,255,255,0.72)" }}
+                            />
+                          ) : (
                           <NodeTextBlockEditor
                             blockID={block.id}
                             editable={editorTextCanEdit}
@@ -3287,6 +3476,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                             onSelectionHighlightColorChange={onSelectionHighlightColorChange}
                             onSelectionTextAlignmentChange={onSelectionTextAlignmentChange}
                           />
+                          )}
                             </div>
                           )}
                         </div>
@@ -3320,6 +3510,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     ruleColor={ruleColor}
                     replyTargetID={chatReplyTargets[chatBlockID] ?? ""}
                     draftAttachments={chatDraftAttachments[chatBlockID] ?? []}
+                    attachmentsEnabled={!block.temporaryEmailChat}
                     heightStorageKey={`node-editor-chat-pane-height-v1:${companyID}:${nodeID}:${chatBlockID}`}
                     fixedHeight={chatPaneHeight}
                     onFocus={focusChat}

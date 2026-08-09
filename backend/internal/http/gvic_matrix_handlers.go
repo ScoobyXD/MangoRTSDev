@@ -313,10 +313,6 @@ func writeRACIMatrixNodeCreateError(w http.ResponseWriter, err error) bool {
 		writeError(w, http.StatusBadRequest, "invalid_gvic_matrix_node")
 		return false
 	}
-	if errors.Is(err, store.ErrPriorityRequired) {
-		writeError(w, http.StatusBadRequest, "priority_required")
-		return false
-	}
 	if errors.Is(err, store.ErrPrincipalNotInCompany) {
 		writeError(w, http.StatusBadRequest, "assignee_user_not_in_company")
 		return false

@@ -1,4 +1,5 @@
 import React from "react";
+import { ExplorerRowIcon } from "../../icons/index.js";
 import { readAuthConfig } from "../../auth/cognitoAuth";
 import { createRequestJSON, isAbortError } from "../../modules/api/requestJSON";
 import {
@@ -22,17 +23,13 @@ import {
   EDITOR_TEXT_BLOCK_CHAT_TYPE,
   EDITOR_TEXT_BLOCK_TYPE,
   listEditorTextBlockProjections,
+  parseEditorTextBlockChats,
   parseEditorTextBlockContent,
   type EditorChatAttachment,
   type EditorTextBlockChatMessage,
 } from "../../modules/editor/editorProjection";
 import { ChatPane } from "../../modules/editor/NodeWorkspaceSurfaceParts";
 import {
-  EDITOR_NEU_ACTIVE_SURFACE,
-  EDITOR_NEU_EDGE_FRAME,
-  EDITOR_NEU_PANEL_SHADOW,
-  EDITOR_NEU_SHADOW,
-  EDITOR_NEU_SOFT_BORDER,
   EDITOR_NEU_SURFACE,
   uploadEditorAttachment,
   type TextBlockSelectionAnchor,
@@ -46,7 +43,6 @@ import type { NodeRecord } from "../../modules/nodes/types";
 import { assignNodeToLogicGateStatus } from "../../modules/kanban/kanbanApi";
 import { upsertProjectRelationship } from "../../modules/project-management/projectManagementApi";
 import { subscribeRealtimeScope } from "../../modules/realtime/realtimeWebSocket";
-import { EmailCollaborationParticipantRoster } from "./EmailCollaborationParticipantRoster";
 import {
   emailNodeImportRequired,
   formatEmailCollaborationChatError,
@@ -64,11 +60,11 @@ export type EmailCollaborationSelection = {
 
 type EmailCollaborationChatSurfaceProps = {
   active: boolean;
-  onClose: () => void;
   id?: string;
   companyID: string;
   currentUserID: string;
   message: EmailMessage;
+  threadMessages?: EmailMessage[];
   targetMessage?: EmailMessage;
   sharedInboxID?: string;
   accountEmail?: string;
@@ -89,31 +85,6 @@ type EmailCollaborationChatSurfaceProps = {
 };
 
 const GROUP_MENTION_PREFIX = "group:";
-const EMAIL_ACTION_TEXT = "#334155";
-const EMAIL_ACTION_ACCENT = "#4f46e5";
-const emailActionSurfaceStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 6,
-  border: "1px solid transparent",
-  borderRadius: 14,
-  background: `${EDITOR_NEU_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
-  color: EMAIL_ACTION_TEXT,
-  padding: 10,
-  boxShadow: EDITOR_NEU_PANEL_SHADOW,
-};
-const emailActionOptionStyle: React.CSSProperties = {
-  minHeight: 31,
-  border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-  borderRadius: 9,
-  background: EDITOR_NEU_SURFACE,
-  color: EMAIL_ACTION_TEXT,
-  padding: "5px 9px",
-  textAlign: "left",
-  fontSize: 10.5,
-  fontWeight: 850,
-  boxShadow: EDITOR_NEU_SHADOW,
-};
-
 function collaborationMentionPrincipals(
   users: CompanyUser[],
   groups: CompanyUserGroup[],
@@ -165,11 +136,11 @@ function mentionedPrincipalIDs(draft: string, principals: MentionableCompanyUser
 
 export function EmailCollaborationChatSurface({
   active,
-  onClose,
   id,
   companyID,
   currentUserID,
   message,
+  threadMessages = [],
   targetMessage,
   sharedInboxID,
   accountEmail,
@@ -194,13 +165,14 @@ export function EmailCollaborationChatSurface({
   const [collaborations, setCollaborations] = React.useState<CommunicationsEmailCollaboration[]>([]);
   const [messages, setMessages] = React.useState<EditorTextBlockChatMessage[]>([]);
   const [activeTextBlockID, setActiveTextBlockID] = React.useState("");
+  const [sectionLabelsByBlockID, setSectionLabelsByBlockID] = React.useState<Record<string, string>>({});
+  const [sectionLabelsByEmailMessageID, setSectionLabelsByEmailMessageID] = React.useState<Record<string, string>>({});
   const [draft, setDraft] = React.useState("");
   const [draftAttachments, setDraftAttachments] = React.useState<EditorChatAttachment[]>([]);
   const [selectedMentionPrincipals, setSelectedMentionPrincipals] = React.useState<MentionableCompanyUser[]>([]);
   const [replyTargetID, setReplyTargetID] = React.useState("");
   const [activeMessageID, setActiveMessageID] = React.useState("");
   const [loading, setLoading] = React.useState(true);
-  const [chatTargetMenuOpen, setChatTargetMenuOpen] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const loadSequenceRef = React.useRef(0);
   const collaborationRef = React.useRef<CommunicationsEmailCollaboration | null>(null);
@@ -250,15 +222,17 @@ export function EmailCollaborationChatSurface({
     const nextNodeID = nextCollaboration?.node_id?.trim() ?? "";
     if (!nextNodeID) {
       setMessages([]);
+      setSectionLabelsByBlockID({});
+      setSectionLabelsByEmailMessageID({});
       setActiveTextBlockID("");
       return;
     }
     invalidateNodeRecordStoreCaches(apiBase, companyID, nextNodeID);
     const projections = await getNodeInformationProjectionSingleFlight(apiBase, companyID, nextNodeID);
     if (expectedLoadSequence !== undefined && loadSequenceRef.current !== expectedLoadSequence) return;
-    const internalEmailMessageID = nextCollaboration?.root_message_id?.trim()
-      || collaborationTargetMessage.email_message_id?.trim()
-      || message.email_message_id?.trim()
+    const internalEmailMessageID = collaborationTargetMessage.email_message_id?.trim()
+      || (message.id.trim() === targetEmailMessageID ? message.email_message_id?.trim() : "")
+      || (nextCollaboration?.message?.id?.trim() === targetEmailMessageID ? nextCollaboration.root_message_id?.trim() : "")
       || "";
     if (internalEmailMessageID) selectionInternalEmailMessageIDRef.current = internalEmailMessageID;
     const placement = resolveEmailCollaborationChatPlacement(
@@ -267,8 +241,50 @@ export function EmailCollaborationChatSurface({
       nextCollaboration?.attached_email_information_id,
     );
     setActiveTextBlockID(placement.blockID);
-    setMessages(placement.messages);
-  }, [apiBase, companyID, targetEmailMessageID]);
+    const conversationMessages = [message, ...threadMessages].filter((candidate, index, items) => (
+      items.findIndex((item) => item.id === candidate.id) === index
+    ));
+    const messageByInternalID = new Map(conversationMessages.flatMap((candidate) => {
+      const internalID = candidate.email_message_id?.trim() ?? "";
+      return internalID ? [[internalID, candidate] as const] : [];
+    }));
+    const chats = parseEditorTextBlockChats(projections);
+    const linkedBlocks = listEditorTextBlockProjections(projections).filter((projection) => {
+      const content = parseEditorTextBlockContent(projection.information);
+      const internalIDs = content.emailMessageIDs?.length ? content.emailMessageIDs : content.emailMessageID ? [content.emailMessageID] : [];
+      return internalIDs.some((internalID) => messageByInternalID.has(internalID.trim()));
+    });
+    if (linkedBlocks.length === 0) {
+      setMessages(placement.messages);
+      setSectionLabelsByBlockID({});
+      setSectionLabelsByEmailMessageID({});
+      return;
+    }
+    const blockLabels: Record<string, string> = {};
+    const messageLabels: Record<string, string> = {};
+    const conversationChats = linkedBlocks.flatMap((projection) => {
+      const content = parseEditorTextBlockContent(projection.information);
+      const internalIDs = content.emailMessageIDs?.length ? content.emailMessageIDs : content.emailMessageID ? [content.emailMessageID] : [];
+      const candidates = internalIDs.map((internalID) => messageByInternalID.get(internalID.trim())).filter((candidate): candidate is EmailMessage => Boolean(candidate));
+      const candidate = candidates[0];
+      const sender = candidate?.from?.map((address) => address.name?.trim() || address.email?.trim()).filter(Boolean).join(", ") || "Email message";
+      const date = candidate?.date ? new Date(candidate.date * 1000).toLocaleString() : "";
+      blockLabels[projection.information_id] = candidates.length > 1
+        ? `${candidates.length} messages in this email thread`
+        : date ? `${sender} · ${date}` : sender;
+      for (const internalID of internalIDs) {
+        const exact = messageByInternalID.get(internalID.trim());
+        if (!exact) continue;
+        const exactSender = exact.from?.map((address) => address.name?.trim() || address.email?.trim()).filter(Boolean).join(", ") || "Email message";
+        const exactDate = exact.date ? new Date(exact.date * 1000).toLocaleString() : "";
+        messageLabels[internalID.trim()] = exactDate ? `${exactSender} · ${exactDate}` : exactSender;
+      }
+      return chats.filter((chat) => chat.blockID === projection.information_id);
+    });
+    setMessages(conversationChats);
+    setSectionLabelsByBlockID(blockLabels);
+    setSectionLabelsByEmailMessageID(messageLabels);
+  }, [apiBase, companyID, message, targetEmailMessageID, threadMessages]);
 
   const acceptCollaboration = React.useCallback((nextCollaboration: CommunicationsEmailCollaboration | null, publishToMailbox = true) => {
     collaborationRef.current = nextCollaboration;
@@ -318,7 +334,6 @@ export function EmailCollaborationChatSurface({
       setDraft("");
       setDraftAttachments([]);
       setSelectedMentionPrincipals([]);
-      setChatTargetMenuOpen(false);
       setSubmitting(false);
       if (previousSourceKey) onClearSelection();
     }
@@ -344,6 +359,8 @@ export function EmailCollaborationChatSurface({
         else {
           setMessages([]);
           setActiveTextBlockID("");
+          setSectionLabelsByBlockID({});
+          setSectionLabelsByEmailMessageID({});
         }
         if (loadSequenceRef.current === requestSequence) onSuccess();
       })
@@ -477,16 +494,20 @@ export function EmailCollaborationChatSurface({
       let attachedEmailInformationID = collaboration?.attached_email_information_id?.trim() ?? "";
       const existingTextBlockProjections = listEditorTextBlockProjections(targetProjections);
       const existingLinkedProjection = emailMessageID
-        ? existingTextBlockProjections.find((projection) => (
-          parseEditorTextBlockContent(projection.information).emailMessageID?.trim() === emailMessageID
-        ))
+        ? existingTextBlockProjections.find((projection) => {
+          const content = parseEditorTextBlockContent(projection.information);
+          return content.emailMessageID?.trim() === emailMessageID
+            || content.emailMessageIDs?.some((messageID) => messageID.trim() === emailMessageID);
+        })
         : undefined;
       const textBlockID = existingLinkedProjection?.information_id ?? generateStableInformationID();
       const existingEmailContents = existingTextBlockProjections.map((projection) => parseEditorTextBlockContent(projection.information));
       const existingMessageAccent = existingEmailContents
-        .find((content) => content.emailMessageID?.trim() === emailMessageID)?.emailAccent?.trim() ?? "";
+        .find((content) => content.emailMessageID?.trim() === emailMessageID
+          || content.emailMessageIDs?.some((messageID) => messageID.trim() === emailMessageID))?.emailAccent?.trim() ?? "";
       const existingEmailAccents = existingEmailContents
-        .filter((content) => content.emailMessageID?.trim() !== emailMessageID)
+        .filter((content) => content.emailMessageID?.trim() !== emailMessageID
+          && !content.emailMessageIDs?.some((messageID) => messageID.trim() === emailMessageID))
         .map((content) => content.emailAccent?.trim() ?? "").filter(Boolean);
       const textBlockWrite = existingLinkedProjection ? undefined : {
         type: EDITOR_TEXT_BLOCK_TYPE,
@@ -744,7 +765,6 @@ export function EmailCollaborationChatSurface({
       const cleanLogicGateID = logicGateID.trim();
       const cleanProjectID = projectID.trim();
       if (cleanProjectID && !cleanLogicGateID) throw new Error("A Project email Node must belong to a Logic Gate.");
-      if (cleanLogicGateID && !priority) throw new Error("A Logic Gate email Node requires a priority.");
       const delayFloatingNodeIndicator = createNew;
       const created = await ensureCollaboration(priority, createNew, !delayFloatingNodeIndicator);
       const linkedTextBlockID = await ensureLinkedEmailTextBlock(created);
@@ -801,11 +821,11 @@ export function EmailCollaborationChatSurface({
       return;
     }
     if (destination.kind === "logic_gate") {
-      void createEmailNode(destination.priority, destination.logicGateID);
+      void createEmailNode(undefined, destination.logicGateID);
       return;
     }
     if (destination.kind === "project") {
-      void createEmailNode(destination.priority, destination.logicGateID, destination.projectID);
+      void createEmailNode(undefined, destination.logicGateID, destination.projectID);
       return;
     }
     void createEmailNode(undefined, "", "", true);
@@ -928,7 +948,6 @@ export function EmailCollaborationChatSurface({
   };
 
   const selectCollaborationTarget = React.useCallback(async (nextCollaboration: CommunicationsEmailCollaboration) => {
-    setChatTargetMenuOpen(false);
     pendingNewNodeIDRef.current = "";
     acceptCollaboration(nextCollaboration);
     setReplyTargetID("");
@@ -948,7 +967,6 @@ export function EmailCollaborationChatSurface({
   }, [acceptCollaboration, loadProjection, onError, onSuccess]);
 
   const startNewFloatingNodeChat = React.useCallback(() => {
-    setChatTargetMenuOpen(false);
     pendingNewNodeIDRef.current = generateStableInformationID();
     acceptCollaboration(null);
     setMessages([]);
@@ -960,7 +978,6 @@ export function EmailCollaborationChatSurface({
   React.useEffect(() => {
     if (!selection) {
       selectionChoiceKeyRef.current = "";
-      setChatTargetMenuOpen(false);
       return;
     }
     if (loading) return;
@@ -972,12 +989,7 @@ export function EmailCollaborationChatSurface({
     ]);
     if (selectionChoiceKeyRef.current === choiceKey) return;
     selectionChoiceKeyRef.current = choiceKey;
-    if (collaborations.length > 1) {
-      setChatTargetMenuOpen(true);
-      return;
-    }
-    setChatTargetMenuOpen(false);
-    if (collaborations.length === 1) {
+    if (collaborations.length > 0) {
       if (collaboration?.collaboration_id !== collaborations[0].collaboration_id) {
         void selectCollaborationTarget(collaborations[0]);
       }
@@ -996,110 +1008,31 @@ export function EmailCollaborationChatSurface({
       style={{
         minWidth: 0,
         minHeight: 0,
-        height: "100%",
+        height: "calc(100% - 78px)",
+        alignSelf: "end",
         display: active ? "grid" : "none",
-        gridTemplateRows: "auto minmax(0, 1fr)",
-        gap: 6,
+        gridTemplateRows: "minmax(0, 1fr)",
         padding: "8px 8px 8px 0",
         overflow: "hidden",
         background: EDITOR_NEU_SURFACE,
       }}
     >
-      <div style={{ display: "grid", gap: 6 }}>
-        {(loading || submitting) && (
-          <div role="status" style={{ color: "rgba(100,116,139,0.78)", fontSize: 10.5, fontWeight: 800, padding: "2px 8px" }}>
-            {loading ? "Loading chat" : "Saving comment"}
-          </div>
-        )}
-        {collaborations.length > 0 && (
-          <div aria-label="Connected email Node chats" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 5, padding: "0 4px" }}>
-            <strong style={{ color: "#64748b", fontSize: 10 }}>Node chats</strong>
-            {collaborations.map((item) => {
-              const selected = collaboration?.collaboration_id === item.collaboration_id;
-              return (
-                <button
-                  data-email-connected-chat-box="true"
-                  data-active={selected ? "true" : "false"}
-                  key={item.collaboration_id}
-                  type="button"
-                  disabled={loading}
-                  onClick={() => { void selectCollaborationTarget(item); }}
-                  style={{
-                    ...emailActionOptionStyle,
-                    minHeight: 27,
-                    padding: "3px 8px",
-                    border: selected ? "1px solid transparent" : emailActionOptionStyle.border,
-                    background: selected
-                      ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`
-                      : emailActionOptionStyle.background,
-                    color: selected ? EMAIL_ACTION_ACCENT : EMAIL_ACTION_TEXT,
-                    cursor: loading ? "wait" : "pointer",
-                  }}
-                >
-                  {collaborationNodeLabel(item)}
-                </button>
-              );
-            })}
-            {!collaboration && (
-              <span style={{ color: EMAIL_ACTION_ACCENT, fontSize: 10.5, fontWeight: 850 }}>
-                New floating Node
-              </span>
-            )}
-          </div>
-        )}
-        {chatTargetMenuOpen && (
-          <div
-            data-email-comment-target-picker="true"
-            role="dialog"
-            aria-label="Choose Node for email comment"
-            style={{ ...emailActionSurfaceStyle, margin: "0 4px" }}
-          >
-            <strong style={{ color: EMAIL_ACTION_ACCENT, fontSize: 11 }}>Choose where this comment belongs</strong>
-            {collaborations.map((item) => (
-              <button
-                data-email-comment-target-option="node"
-                key={item.collaboration_id}
-                type="button"
-                onClick={() => { void selectCollaborationTarget(item); }}
-                style={{ ...emailActionOptionStyle, cursor: "pointer" }}
-              >
-                {collaborationNodeLabel(item)}
-              </button>
-            ))}
-            <button
-              data-email-comment-target-option="floating"
-              type="button"
-              onClick={startNewFloatingNodeChat}
-              style={{ ...emailActionOptionStyle, cursor: "pointer" }}
-            >
-              Create floating node (a node without a Logic Gate)
-            </button>
-          </div>
-        )}
-      </div>
       <ChatPane
         blockID={blockID || "email-collaboration"}
         editable
         apiBase={apiBase}
         companyID={companyID}
         messages={messages}
-        headerTrailing={(
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <EmailCollaborationParticipantRoster collaboration={collaboration} companyUsers={companyUsers} companyUserGroups={companyUserGroups} currentUserID={currentUserID} />
-            <button
-              type="button"
-              aria-label="Close email comments"
-              onClick={() => {
-                selectionChoiceKeyRef.current = "";
-                setChatTargetMenuOpen(false);
-                onClose();
-              }}
-              style={{ border: 0, background: "transparent", color: "#64748b", cursor: "pointer", fontSize: 10.5, fontWeight: 800 }}
-            >
-              Close
-            </button>
+        headerLeading={(
+          <span data-email-chat-node-header="true" style={{ minWidth: 0, display: "inline-flex", alignItems: "center", gap: 7 }}>
+            <ExplorerRowIcon kind="node" />
+            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {collaboration ? collaborationNodeLabel(collaboration) : message.subject?.trim() || "New email Node"}
+            </span>
           </span>
         )}
+        sectionLabelsByBlockID={sectionLabelsByBlockID}
+        sectionLabelsByEmailMessageID={sectionLabelsByEmailMessageID}
         selectionAnchor={selectionAnchor}
         draft={draft}
         companyUsers={principals}
@@ -1110,7 +1043,7 @@ export function EmailCollaborationChatSurface({
         active={active}
         currentUserID={currentUserID}
         activeMessageID={activeMessageID}
-        accent="#f97316"
+        accent="#4f46e5"
         surfaceText="#111827"
         panelBackground={EDITOR_NEU_SURFACE}
         strokeColor="rgba(148,163,184,0.34)"
@@ -1120,7 +1053,11 @@ export function EmailCollaborationChatSurface({
         onMentionPrincipal={rememberMentionPrincipal}
         onActivateMessage={setActiveMessageID}
         onNavigateToMessage={navigateToChatMessage}
-        onReply={setReplyTargetID}
+        onReply={(messageID) => {
+          const replyMessage = messages.find((item) => item.id === messageID);
+          if (replyMessage?.blockID) setActiveTextBlockID(replyMessage.blockID);
+          setReplyTargetID(messageID);
+        }}
         onEditMessage={editMessage}
         onDeleteMessage={(messageID) => { void deleteMessage(messageID); }}
         onClearReply={() => setReplyTargetID("")}

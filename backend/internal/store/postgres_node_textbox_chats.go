@@ -12,6 +12,7 @@ import (
 
 type nodeTextboxChatPayload struct {
 	BlockID            string          `json:"block_id"`
+	CreateEmailTextbox bool            `json:"create_email_textbox_on_send"`
 	ParentID           string          `json:"parent_id"`
 	SelectionSource    string          `json:"selection_source"`
 	SelectionBlockID   string          `json:"selection_block_id"`
@@ -28,6 +29,61 @@ type nodeTextboxChatPayload struct {
 	EntityLinks        json.RawMessage `json:"entity_links"`
 	MentionedUserIDs   json.RawMessage `json:"mentioned_user_ids"`
 	MentionedGroupIDs  json.RawMessage `json:"mentioned_group_ids"`
+}
+
+func createPostgresEmailSelectionTextboxForFirstChatTx(ctx context.Context, tx *sql.Tx, input NodeInformationInput, payload nodeTextboxChatPayload) error {
+	if !payload.CreateEmailTextbox {
+		return nil
+	}
+	textboxID := cleanUUIDText(payload.BlockID)
+	selectionTextboxID := cleanUUIDText(payload.SelectionBlockID)
+	emailMessageID := cleanUUIDText(payload.SelectionMessageID)
+	if textboxID == "" || selectionTextboxID != textboxID || emailMessageID == "" ||
+		strings.TrimSpace(payload.ParentID) != "" || strings.ToLower(strings.TrimSpace(payload.SelectionSource)) != "email" ||
+		strings.TrimSpace(payload.SelectionQuote) == "" {
+		return ErrInvalid
+	}
+	var textboxExists, nodeWideEmailExists bool
+	if err := tx.QueryRowContext(ctx, `select exists(
+  select 1 from node_textboxes
+  where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid
+), exists(
+  select 1 from email_relationships
+  where company_id=$1::uuid
+    and email_message_id=$4::uuid
+    and resource_type='node'
+    and resource_id=$2::uuid
+    and resource_textbox_id is null
+)`, input.CompanyID, input.NodeID, textboxID, emailMessageID).Scan(&textboxExists, &nodeWideEmailExists); err != nil {
+		return err
+	}
+	if textboxExists || !nodeWideEmailExists {
+		return ErrInvalid
+	}
+	ref := EditorJSONDocumentRef{
+		CompanyID: input.CompanyID, ResourceType: EntityTypeNode,
+		ResourceID: input.NodeID, DocumentID: textboxID,
+	}
+	storage, ok := postgresEditorTextboxStorageFor(ref)
+	if !ok {
+		return ErrInvalid
+	}
+	if err := insertEmptyPostgresEditorTextboxTx(ctx, tx, storage, ref); err != nil {
+		return err
+	}
+	attachedPayload, err := json.Marshal(nodeAttachedEmailPayload{
+		BlockID: textboxID, EmailMessageID: emailMessageID,
+		AttachedTimestamp: time.Now().UTC().Format(time.RFC3339Nano), LinkScope: "message",
+	})
+	if err != nil {
+		return err
+	}
+	relationshipID := newUUIDv7String()
+	_, err = addPostgresNodeEmailRelationshipTx(ctx, tx, NodeInformationInput{
+		CompanyID: input.CompanyID, NodeID: input.NodeID, InformationID: relationshipID,
+		Type: "Attached email", Information: string(attachedPayload), ActorUserID: input.ActorUserID,
+	}, relationshipID)
+	return err
 }
 
 type normalizedNodeTextboxChat struct {
@@ -185,45 +241,13 @@ func normalizeNodeTextboxChatPayload(ctx context.Context, tx *sql.Tx, companyID 
 		var canSelect bool
 		if err := tx.QueryRowContext(ctx, `select exists(
   select 1
-  from email_messages message
-  join email_threads thread
-    on thread.company_id=message.company_id
-   and thread.email_thread_id=message.email_thread_id
-  join email_connections connection
-    on connection.company_id=thread.company_id
-   and connection.email_connection_id=thread.email_connection_id
-  where message.company_id=$1::uuid
-    and message.email_message_id=$2::uuid
-    and (
-      (connection.connection_type='personal' and connection.personal_user_id=$3::uuid)
-      or exists (
-        select 1 from shared_inboxes inbox
-        where inbox.company_id=thread.company_id
-          and inbox.company_email_connection_id=thread.email_connection_id
-          and mangorts_user_can_access_resource(
-            $1::uuid,'shared_inbox',inbox.shared_inbox_id,$3::uuid,'edit'
-          )
-      )
-      or exists (
-        select 1
-        from email_relationships relationship
-        where relationship.company_id=message.company_id
-          and relationship.email_message_id=message.email_message_id
-          and relationship.resource_type='node'
-          and relationship.resource_id=$4::uuid
-      )
-      or exists (
-        select 1
-        from node_textbox_chats chat
-        where chat.company_id=message.company_id
-          and chat.node_id=$4::uuid
-          and chat.chat_id=nullif($5,'')::uuid
-          and chat.deleted_timestamp is null
-          and chat.selection_source='email'
-          and chat.selection_email_message_id=message.email_message_id
-      )
-    )
-)`, companyID, selectionEmailMessageID, input.ActorUserID, input.NodeID, cleanUUIDText(input.InformationID)).Scan(&canSelect); err != nil {
+  from email_relationships relationship
+  where relationship.company_id=$1::uuid
+    and relationship.email_message_id=$2::uuid
+    and relationship.resource_type='node'
+    and relationship.resource_id=$3::uuid
+    and relationship.resource_textbox_id=$4::text
+)`, companyID, selectionEmailMessageID, input.NodeID, payload.BlockID).Scan(&canSelect); err != nil {
 			return normalizedNodeTextboxChat{}, err
 		}
 		if !canSelect {
@@ -413,6 +437,13 @@ func upsertPostgresNodeTextboxChatTx(ctx context.Context, tx *sql.Tx, input Node
 	chatID = cleanUUIDText(chatID)
 	if chatID == "" {
 		return domain.NodeProjection{}, false, ErrInvalid
+	}
+	var rawPayload nodeTextboxChatPayload
+	if err := json.Unmarshal([]byte(input.Information), &rawPayload); err != nil {
+		return domain.NodeProjection{}, false, ErrInvalid
+	}
+	if err := createPostgresEmailSelectionTextboxForFirstChatTx(ctx, tx, input, rawPayload); err != nil {
+		return domain.NodeProjection{}, false, err
 	}
 	chat, err := normalizeNodeTextboxChatPayload(ctx, tx, input.CompanyID, input)
 	if err != nil {

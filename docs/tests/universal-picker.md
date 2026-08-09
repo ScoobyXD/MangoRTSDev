@@ -1,3 +1,24 @@
+# Process Story: Email linking chooses an exact destination without forcing priority
+
+A user opens the Universal Picker from one selected email
+↓
+Reference mode opens the exact chosen resource without changing the email
+↓
+Linking to an existing Node uses that Node; linking to a Logic Gate creates the email Node there immediately; linking to a Project asks only for its Logic Gate
+↓
+Every newly created email Node starts with priority **Not Assigned** and uses the established typed placement command
+
+Last updated: 2026-08-08
+
+# Current Universal Picker Email Laws
+
+1. Linking a selected email to an existing Node uses that exact Node.
+2. Linking a selected email to a Logic Gate immediately creates its Node there with priority **Not Assigned**.
+3. Linking a selected email to a Project requires only the Project Logic Gate choice and creates the Node with priority **Not Assigned**.
+4. Reference mode opens the exact selected resource without changing the email.
+
+Last updated: 2026-08-08
+
 # Process Story: Universal search narrows first and authorizes only the finalists
 
 A non-admin types a nonblank query in the Universal Picker
@@ -102,7 +123,7 @@ UP32 - Node-to-Logic-Gate uses the existing priority-valid assign-or-move comman
 
 UP33 - Linking an email to a Node or using a Node Attach email action uses the existing exact-message Node import/attachment command. Linking an email to a Project or using Project Attach email uses the existing Project exact-message attachment command. Before either typed command, the picker ensures the exact provider message is durably ingested when necessary and supplies its real Mango `email_message_id` plus account/mailbox scope rather than a surrogate picker identity.
 
-UP34 - From a selected email, choosing an existing Node reuses that Node through exact-message import. Choosing a Logic Gate creates the email Node only after valid priority selection and assigns it with the established Logic Gate command. Choosing a Project requires valid priority plus a Logic Gate choice and then uses the established typed Project/Logic Gate commands.
+UP34 - From a selected email, choosing an existing Node reuses that Node through exact-message import. Choosing a Logic Gate immediately creates the email Node there with priority **Not Assigned**. Choosing a Project requires only a Logic Gate choice and then uses the established typed Project/Logic Gate commands.
 
 UP35 - Reference-mode selection never creates a relationship. In an editor it inserts the typed entity atom; in a selected-email host it opens the exact target. A reference chip remains independent from any existing relationship represented by the same two resources.
 

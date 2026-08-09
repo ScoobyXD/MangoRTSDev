@@ -426,23 +426,21 @@ export function HomeMailWorkspace({
   const clearEmailActionRequest = React.useCallback(() => setEmailActionRequest(null), []);
   const emailNavigationSequenceRef = React.useRef(0);
   const clearEmailSelection = React.useCallback(() => setEmailSelection(null), []);
-  const suppressAssociationAutoOpenKeyRef = React.useRef("");
   const navigateToEmailSelection = React.useCallback((selection: EmailCollaborationSelection) => {
     emailNavigationSequenceRef.current += 1;
     setEmailNavigation({ ...selection, requestID: emailNavigationSequenceRef.current });
   }, []);
-  const closeEmailChat = React.useCallback(() => setEmailChatSession(null), []);
+  const toggleEmailChat = React.useCallback(() => {
+    if (!emailChatKey) return;
+    setEmailChatSession((current) => current?.key === emailChatKey
+      ? { key: emailChatKey, visible: !current.visible }
+      : { key: emailChatKey, visible: true });
+  }, [emailChatKey]);
   const sendEmailToNodeDestination = React.useCallback((destination: EmailNodeDestination) => {
     if (!selectedMessage) return;
     setEmailSelection({ messageID: selectedMessage.id, quote: "", startOffset: 0, endOffset: 0 });
-    suppressAssociationAutoOpenKeyRef.current = emailChatKey;
     setEmailActionRequest((current) => nextEmailNodeDestinationRequest(current, destination));
   }, [emailChatKey, selectedMessage]);
-  const commentOnEmailReply = React.useCallback((message: EmailMessage) => {
-    if (!emailChatKey) return;
-    setEmailSelection({ messageID: message.id, quote: "", startOffset: 0, endOffset: 0 });
-    setEmailChatSession({ key: emailChatKey, visible: true });
-  }, [emailChatKey]);
   const commentOnEmailSelection = React.useCallback((selection: EmailCollaborationSelection) => {
     if (!emailChatKey) return;
     setEmailSelection(selection);
@@ -475,15 +473,6 @@ export function HomeMailWorkspace({
     setEmailCollaborationError("");
     setEmailActionNotice(null);
   }, [activeViewID, emailChatKey, selectedMessageRowKey]);
-  React.useEffect(() => {
-    if (!emailChatKey || !selectedMessage?.collaboration_node_id?.trim()) return;
-    if (suppressAssociationAutoOpenKeyRef.current === emailChatKey) {
-      suppressAssociationAutoOpenKeyRef.current = "";
-      return;
-    }
-    setEmailChatSession({ key: emailChatKey, visible: true });
-  }, [emailChatKey, selectedMessage?.collaboration_id, selectedMessage?.collaboration_node_id]);
-
   const triageAdvanceEnabled = isArchivableListView && mailbox === "primary";
   const advanceDisabled = !canAdvanceTriagePage || !!busy || loadingMessages || loadingMoreMessages || messages.length === 0;
   const allDropdownActive = mailbox === "all" || mailbox === "spam";
@@ -992,6 +981,7 @@ export function HomeMailWorkspace({
                 archiveLabel={archiveLabel}
                 busy={!!busy}
                 chatAvailable={emailChatAvailable}
+                chatOpen={emailChatVisible}
                 emailNodeDestinationSearch={(
                   <EmailNodeDestinationSearch
                     companyID={companyID}
@@ -1015,7 +1005,7 @@ export function HomeMailWorkspace({
                 onToggleRead={onToggleRead}
                 onToggleStar={onToggleStar}
                 onEmailSelection={commentOnEmailSelection}
-                onCommentOnMessage={commentOnEmailReply}
+                onToggleEmailChat={toggleEmailChat}
                 selectionNavigation={emailNavigation}
                 onOpenCollaborationNode={onOpenCollaborationNode}
                 onOpenLogicGate={openEmailLogicGate}
@@ -1023,12 +1013,12 @@ export function HomeMailWorkspace({
             )}
             {(emailChatMounted || emailActionRequest) && (
               <EmailCollaborationChatSurface
-                onClose={closeEmailChat}
                 active={emailChatVisible}
                 id="email-collaboration-chat"
                 companyID={companyID}
                 currentUserID={currentUserID}
                 message={selectedMessage}
+                threadMessages={selectedThreadMessages}
                 targetMessage={selectedThreadMessages.find((threadMessage) => threadMessage.id === emailSelection?.messageID)}
                 sharedInboxID={selectedMessage.collaboration_shared_inbox_id || (activeViewID.startsWith("shared:") ? activeViewID.slice("shared:".length).trim() : undefined)}
                 accountEmail={selectedMessage.collaboration_account_email || accountEmail}

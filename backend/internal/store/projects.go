@@ -7,12 +7,11 @@ import (
 )
 
 const (
-	ProjectDefaultStatus             = "Active"
-	ProjectHealthOnTrack             = "On Track"
-	ProjectHealthAtRisk              = "AT RISK"
-	ProjectHealthOffTrack            = "Off Track"
-	ProjectMaxStatusLen              = 80
-	ProjectScopedNodeDefaultPriority = 3
+	ProjectDefaultStatus  = "Active"
+	ProjectHealthOnTrack  = "On Track"
+	ProjectHealthAtRisk   = "AT RISK"
+	ProjectHealthOffTrack = "Off Track"
+	ProjectMaxStatusLen   = 80
 )
 
 func NormalizeProjectInput(input ProjectInput, requireProjectID bool) (ProjectInput, error) {
@@ -268,10 +267,6 @@ func normalizeProjectScopedNodeLogicGateAssignment(input *ProjectScopedNodeLogic
 	}
 	if item.LogicGateID == "" {
 		return nil, ErrInvalid
-	}
-	if item.Priority == nil {
-		priority := ProjectScopedNodeDefaultPriority
-		item.Priority = &priority
 	}
 	if item.Priority != nil && (*item.Priority < 1 || *item.Priority > 5) {
 		return nil, ErrInvalid

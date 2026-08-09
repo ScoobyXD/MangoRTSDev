@@ -494,7 +494,6 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
       scope: `node:${NODE_ID}`,
       nodeID: NODE_ID,
       canEdit: true,
-      nodePriorityDraft: "3",
       assignedLogicGateIDs: [] as string[],
       companyUsers: [],
       editorSequence: 1,
@@ -1327,7 +1326,6 @@ test("real Node, Project, and Logic Gate page hosts load JSON editors and preser
         scope={`node:${hostNodeID}`}
         nodeID={hostNodeID}
         canEdit
-        nodePriorityDraft="3"
         assignedLogicGateIDs={[]}
         projections={[nodeProjection, attachedEmail]}
         companyUsers={[]}

@@ -525,7 +525,8 @@ test("mail thread detail supports exact-message replies, saved editor sizing, an
   assert.match(homeParts, /data-email-timeline-item="true"/);
   assert.match(homeParts, /data-email-message-id=\{message\.id\}/);
   assert.match(homeParts, /data-email-message-sources=\{emailThreadMessageSourceLabel\(message\)\}/);
-  assert.match(homeParts, /data-email-message-actions="true"/);
+  assert.doesNotMatch(homeParts, /data-email-message-actions="true"/);
+  assert.match(homeParts, /data-email-thread-chat-toggle="true"/);
   assert.match(homeParts, /data-email-primary-reply-actions="true"/);
   assert.match(homeParts, /data-email-conversation-count=\{conversationMessages\.length\}/);
   assert.match(homeParts, /conversationScrollRef\.current[\s\S]*scrollTop = scrollContainer\.scrollHeight/);

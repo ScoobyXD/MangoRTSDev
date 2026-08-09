@@ -1,3 +1,24 @@
+# Process Story: Logic Gate placement accepts a Node with no assigned priority
+
+A user places or moves a normal or email-created Node into one exact Logic Gate
+↓
+The command accepts priority **Not Assigned** and writes the Requested assignment plus its Kanban projection
+↓
+The Node remains **Not Assigned** through later Logic Gate moves
+↓
+Only an explicit numeric priority choice changes that value
+
+Last updated: 2026-08-08
+
+# Current Logic Gate Business Logic Laws
+
+1. A Node does not need a numeric priority before it is assigned or moved to a Logic Gate.
+2. A Node whose priority is **Not Assigned** remains **Not Assigned** unless the user explicitly chooses a numeric priority.
+3. Choosing a Logic Gate in the email Universal Linker immediately creates the email Node there with Requested status and priority **Not Assigned**.
+4. Logic Gate assignment storage and Kanban projection storage accept a null Node priority.
+
+Last updated: 2026-08-08
+
 # Process Story: A Logic Gate assigns live RACI responsibility
 
 A user assigns people or groups to Responsible, Accountable, Consulted, or Informed on a Logic Gate
@@ -141,7 +162,7 @@ LG56 - Current Logic Gate attached-email access comes only from an exact active 
 LG57 - Legacy Logic Gate information writes are closed: text writes require the editor JSON contract, and unsupported legacy information types are rejected. There is no compatibility read, fallback, or dual write.
 LG58 - Logic Gate deletion and recycle capture use final textbox/history, exact email relationships, and modular attachment cleanup. Removing one attachment owner retains a shared file, while final-owner cleanup follows the pending-delete, S3-before-Postgres, retry-safe lifecycle.
 LG59 - Dropping `logic_gate_information` and `logic_gate_projection_table` is a separate human operation. It requires PostgreSQL 17.x, exact unordered schema evidence, a reconciled copy, no-current-writer proof, smoke/recycle verification, soak and snapshot confirmation, no surviving dependency, and explicit operator approval.
-LG60 - Universal picker link mode in a Node editor may target only a Logic Gate or Project. A Logic Gate target requires a valid priority and uses the existing assignment/move command with Requested as the destination status.
+LG60 - Universal picker link mode in a Node editor may target only a Logic Gate or Project. A Logic Gate target uses the existing assignment/move command with Requested as the destination status and accepts priority **Not Assigned**.
 LG61 - The picker does not define transfer history. The existing cross-Gate move command creates exactly one immutable transfer stamp; initial assignment, same-Gate assignment, status movement, and Project association create none.
 LG62 - Universal picker link mode in a Logic Gate editor may target only a Project. It creates or reuses the exact existing Logic Gate/Project relationship and does not create a Project-scoped Logic Gate.
 LG63 - Reference mode remains available for Nodes, Logic Gates, and Projects in every Logic Gate editor. Reference-chip deletion changes only the editor document and never reverses a Gate assignment, transfer, or Project association.

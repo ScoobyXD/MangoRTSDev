@@ -16,7 +16,6 @@ import {
 } from "../../modules/editor/UniversalEntityPicker.js";
 import type { LogicGateRecord } from "../../modules/logic-gates/types.js";
 import type { EmailNodeDestination } from "./emailCollaborationChat.js";
-import { INBOX_PRIORITIES } from "./homeConstants.js";
 
 type EmailNodeDestinationSearchProps = {
   companyID: string;
@@ -95,14 +94,11 @@ export function EmailNodeDestinationSearch({
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const [pickerAnchor, setPickerAnchor] = React.useState<UniversalEntityPickerAnchor>({ left: 24, top: 56 });
   const [pendingLink, setPendingLink] = React.useState<EditorEntityLink | null>(null);
-  const [priority, setPriority] = React.useState("");
   const [projectLogicGateID, setProjectLogicGateID] = React.useState("");
-  const selectedPriority = Number(priority);
 
   const closePicker = React.useCallback(() => setPickerOpen(false), []);
   const resetPendingLink = React.useCallback(() => {
     setPendingLink(null);
-    setPriority("");
     setProjectLogicGateID("");
   }, []);
   const openPicker = React.useCallback(() => {
@@ -147,26 +143,22 @@ export function EmailNodeDestinationSearch({
       onSubmit({ kind: "node", nodeID: entity.entityID });
       return;
     }
-    setPriority("");
+    if (entity.entityType === "logic_gate") {
+      onSubmit({ kind: "logic_gate", logicGateID: entity.entityID });
+      return;
+    }
     setProjectLogicGateID("");
     setPendingLink(entity);
   }, [onError, onOpenEntity, onSubmit]);
 
-  const submitPendingLink = React.useCallback((overrides: { priority?: number; projectLogicGateID?: string } = {}) => {
+  const submitPendingLink = React.useCallback((overrides: { projectLogicGateID?: string } = {}) => {
     if (!pendingLink || busy) return;
-    const activePriority = overrides.priority ?? selectedPriority;
     const activeProjectLogicGateID = overrides.projectLogicGateID ?? projectLogicGateID;
-    if (!Number.isInteger(activePriority) || activePriority < 1 || activePriority > 5) return;
-    if (pendingLink.entityType === "logic_gate") {
-      resetPendingLink();
-      onSubmit({ kind: "logic_gate", logicGateID: pendingLink.entityID, priority: activePriority });
-      return;
-    }
     if (pendingLink.entityType === "project" && activeProjectLogicGateID) {
       resetPendingLink();
-      onSubmit({ kind: "project", projectID: pendingLink.entityID, logicGateID: activeProjectLogicGateID, priority: activePriority });
+      onSubmit({ kind: "project", projectID: pendingLink.entityID, logicGateID: activeProjectLogicGateID });
     }
-  }, [busy, onSubmit, pendingLink, projectLogicGateID, resetPendingLink, selectedPriority]);
+  }, [busy, onSubmit, pendingLink, projectLogicGateID, resetPendingLink]);
 
   const createFloatingNode = () => {
     if (busy) return;
@@ -245,31 +237,7 @@ export function EmailNodeDestinationSearch({
               <span style={{ color: "#64748b", fontSize: 9.5 }}>{pendingLink.entityType === "logic_gate" ? "Create a new email Node in this Logic Gate" : "Create a new email Node in this Project"}</span>
             </span>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: pendingLink.entityType === "project" ? "minmax(0, 0.9fr) minmax(0, 1.1fr)" : "minmax(0, 1fr)", gap: 7, alignItems: "start" }}>
-            <section aria-label="Email Node priority" style={{ minWidth: 0, display: "grid", gap: 4, color: "#64748b", fontSize: 9.5, fontWeight: 850 }}>
-              <span>Choose priority</span>
-              <div data-email-node-priority-choices="pre-open" role="group" aria-label="Email Node priority choices" style={choiceGroupStyle}>
-                {INBOX_PRIORITIES.map((item) => {
-                  const selected = priority === String(item.value);
-                  return (
-                    <button
-                      key={item.value}
-                      type="button"
-                      data-email-node-priority-option={item.value}
-                      aria-pressed={selected}
-                      onClick={() => {
-                        setPriority(String(item.value));
-                        if (pendingLink.entityType !== "project" || projectLogicGateID) submitPendingLink({ priority: item.value });
-                      }}
-                      style={destinationChoiceStyle(selected)}
-                    >
-                      <span style={{ width: 23, height: 23, borderRadius: 7, display: "grid", placeItems: "center", background: selected ? "rgba(79,70,229,0.12)" : "rgba(226,232,240,0.68)", color: selected ? "#4f46e5" : "#64748b", fontSize: 10, fontWeight: 900 }}>{item.value}</span>
-                      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10.25, fontWeight: 800 }}>{item.label.replace(/^\d+\s*/, "")}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 7, alignItems: "start" }}>
             {pendingLink.entityType === "project" && (
               <section aria-label="Project Logic Gate" style={{ minWidth: 0, display: "grid", gap: 4, color: "#64748b", fontSize: 9.5, fontWeight: 850 }}>
                 <span>Choose Logic Gate</span>
@@ -284,7 +252,7 @@ export function EmailNodeDestinationSearch({
                         aria-pressed={selected}
                         onClick={() => {
                           setProjectLogicGateID(logicGate.logic_gate_id);
-                          if (Number.isInteger(selectedPriority) && selectedPriority >= 1 && selectedPriority <= 5) submitPendingLink({ projectLogicGateID: logicGate.logic_gate_id });
+                          submitPendingLink({ projectLogicGateID: logicGate.logic_gate_id });
                         }}
                         style={destinationChoiceStyle(selected)}
                       >

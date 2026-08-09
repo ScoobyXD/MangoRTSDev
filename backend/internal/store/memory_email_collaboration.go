@@ -229,7 +229,10 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 		CreatedTimestamp: now, UpdatedTimestamp: now,
 	}
 	r.emailCollaborations[key(input.CompanyID, item.CollaborationID)] = item
-	r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, node.NodeID, informationID, thread.EmailThreadID, input.Message.ID, input.CreatedByUserID, now)
+	if _, err := r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, node.NodeID, informationID, thread.EmailThreadID, input.Message.ID, input.CreatedByUserID, now); err != nil {
+		restore()
+		return CommunicationsEmailCollaborationEnsureResult{}, err
+	}
 	if downloadScope, requestedMessageID, ok := communicationsEmailThreadDownloadRequest(thread, threadInput); ok {
 		if _, _, err := r.ensureCommunicationsEmailThreadDownloadJobLocked(input.CompanyID, thread.EmailThreadID, downloadScope, requestedMessageID, input.CreatedByUserID); err != nil {
 			restore()

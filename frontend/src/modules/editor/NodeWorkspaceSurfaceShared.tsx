@@ -28,7 +28,6 @@ export type NodeWorkspaceSurfaceProps = {
   scope: string;
   nodeID: string;
   canEdit: boolean;
-  nodePriorityDraft: string;
   assignedLogicGateIDs: string[];
   projections: NodeProjectionItem[];
   companyUsers: MentionableCompanyUser[];
@@ -54,7 +53,6 @@ export type NodeWorkspaceSurfaceProps = {
   onProjectionMutation: () => void;
   onCreateNodeFromImage: (request: NodeImageNodeRequest) => Promise<void>;
   onAssignToLogicGate: (logicGateID: string) => Promise<void>;
-  onRequireNodePriorityForLogicGateAssignment: () => void;
   onSelectionFontSizeChange?: (fontSize: number) => void;
   onSelectionInlineFormatChange?: (format: EditorSelectionInlineFormatState) => void;
   onSelectionHighlightColorChange?: (color: EditorHighlightColor | null) => void;
@@ -78,7 +76,9 @@ export type TextBlockState = {
   document: string;
   attachments: EditorChatAttachment[];
   emailMessageID?: string;
+  emailMessageIDs?: string[];
   emailAccent?: string;
+  temporaryEmailChat?: boolean;
   createdTimestamp: string;
   updatedTimestamp: string;
   pending: boolean;

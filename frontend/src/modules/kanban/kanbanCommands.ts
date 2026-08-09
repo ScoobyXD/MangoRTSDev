@@ -304,11 +304,6 @@ export async function addExplorerNodesToKanbanColumnCommand(args: {
   }
 
   const logicGateID = logicGateIDFromKanbanBoardID(context.boardID);
-  const hasValidPriority = typeof priority === "number" && Number.isInteger(priority) && priority >= 1 && priority <= 5;
-  if (logicGateID && !hasValidPriority) {
-    throw new Error("logic_gate_priority_required");
-  }
-
   const firstPosition = nextCardPosition(cards, columnID);
   const timestamp = now();
   const optimisticCards = dedupedItems.map((item, index): KanbanCard => ({

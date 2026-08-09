@@ -1,3 +1,30 @@
+# Process Story: One email thread stays on one Node and first chat creation is atomic
+
+A stored email message is linked through `email_relationships` to one exact Node and, when needed, one exact Node text box
+↓
+The database permits whole-Node and textbox links inside that Node but rejects a relationship that would attach the same stored thread to another Node, including concurrent writes
+↓
+Opening a highlighted-email chat preview creates no relationship or resource
+↓
+The first send atomically creates the exact text box, message-to-textbox relationship, and chat, or creates none of them
+↓
+Every endpoint keeps its literal typed identity; no registry, surrogate identity, or generic untyped edge is introduced
+
+Last updated: 2026-08-08
+
+# Current Email Relationship Business Logic Laws
+
+1. `email_relationships` remains the typed authority that connects an exact internal email message to a Node and optionally to one exact Node text box.
+2. One stored email thread may have Node relationships for only one Node. Whole-Node and textbox-specific relationships inside that same Node are allowed.
+3. The database enforces the one-Node-per-thread law under concurrent writes before accepting an email relationship.
+4. An email-selection chat is valid only when the exact internal email message has an `email_relationships` row for that chat's exact Node text box.
+5. Opening an email-selection chat preview creates no text box, email relationship, or chat relationship.
+6. Sending the first chat from an email-selection preview atomically creates the exact Node text box, email-to-textbox relationship, and text-box chat, or creates none of them.
+7. Cancelling an unsent email-selection chat preview requires no relationship deletion because no relationship has been written.
+8. Email-to-textbox links do not create a generic resource registry, surrogate identity, or untyped edge.
+
+Last updated: 2026-08-08
+
 # Process Story: Policy inheritance follows typed parents without moving permissions into Explorer
 
 A permission or RACI resolver receives one exact resource type and ID

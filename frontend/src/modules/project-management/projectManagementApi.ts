@@ -452,7 +452,7 @@ export async function createProjectNode(input: {
       company_id: input.companyID,
       title: input.title,
       position: input.position ?? 0,
-      initial_assignment: { logic_gate_id: logicGateID, position: input.position ?? 0, priority: 3 },
+      initial_assignment: { logic_gate_id: logicGateID, position: input.position ?? 0 },
     }),
   });
 }

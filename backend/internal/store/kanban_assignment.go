@@ -30,18 +30,17 @@ func NormalizeLogicGateNodeAssignmentInput(input LogicGateNodeAssignmentInput) (
 }
 
 func logicGateAssignmentInputPriority(input LogicGateNodeAssignmentInput) (*int, bool) {
-	if !input.PrioritySet || input.Priority == nil {
+	if !input.PrioritySet {
 		return nil, false
+	}
+	if input.Priority == nil {
+		return nil, true
 	}
 	priority := *input.Priority
 	if priority < 1 || priority > 5 {
 		return nil, false
 	}
 	return &priority, true
-}
-
-func logicGateAssignmentNodeHasPriority(priority *int) bool {
-	return priority != nil && *priority >= 1 && *priority <= 5
 }
 
 func NormalizeLogicGateNodeAssignmentMoveInput(input LogicGateNodeAssignmentMoveInput) (LogicGateNodeAssignmentMoveInput, error) {

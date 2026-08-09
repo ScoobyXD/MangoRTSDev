@@ -1,3 +1,24 @@
+# Process Story: Not Assigned Nodes can enter and move through Kanban
+
+A new Node starts with priority **Not Assigned**, stored as null
+↓
+The user assigns or moves that Node to a Logic Gate without a priority prompt or error
+↓
+Kanban stores and displays the normal work assignment while keeping priority **Not Assigned**
+↓
+Only an explicit numeric priority choice changes the Node to priority 1 through 5
+
+Last updated: 2026-08-08
+
+# Current Kanban Priority Business Logic Laws
+
+1. Every new Node defaults to priority **Not Assigned**.
+2. **Not Assigned** is a valid displayed priority state and is stored as null.
+3. Logic Gate assignment and movement do not require a numeric Node priority.
+4. Choosing a numeric priority explicitly changes the Node to that value; omitting priority preserves **Not Assigned**.
+
+Last updated: 2026-08-08
+
 # Process Story: Responsible users control requested Logic Gate work
 
 A Node enters a Logic Gate's Requested column with its requesting user recorded
@@ -57,7 +78,7 @@ KB12 - A card's column is the visible status unless the card is explicitly marke
 KB13 - Issue cards visually override normal status display as `Issue` wherever issue-specific card state is shown.
 KB14 - The requested column is a special Logic Gate lane for work proposed to the Logic Gate owner.
 KB15 - The backlog column is a special Logic Gate lane for declined, canceled, or unaccepted requested work.
-KB16 - Logic Gate Kanban cards require a priority when they are created or dropped into a Logic Gate board.
+KB16 - Logic Gate Kanban cards may use priority **Not Assigned** when they are created or dropped into a Logic Gate board.
 KB17 - Moving a Logic Gate Kanban card to another column updates the Logic Gate assignment status.
 KB18 - Reordering cards in a column updates sparse card position values without changing the underlying node.
 KB19 - Reordering columns updates column position values and does not alter card membership.
@@ -84,7 +105,7 @@ KB36 - By-person grouping uses the person who originally created or transferred 
 KB37 - Missing by-person provenance is grouped under `No person`.
 KB38 - Account grouping uses assigned accounts. A card with multiple accounts can appear in each matching account subgroup.
 KB39 - A card with no account appears under `No account`.
-KB40 - Priority grouping uses node/card priority values 1 through 5 and places missing priority under `No priority`.
+KB40 - Priority grouping uses Node priority values 1 through 5 and places a null priority under **Not Assigned**.
 KB41 - Saved Logic Gate Kanban groupings must use `principal = user`.
 KB42 - Saved Logic Gate Kanban groupings must reject group/team principals.
 KB43 - Saved Logic Gate Kanban groupings must reject fields that belong to My Work, Updates, or Kanban status-only behavior, such as project, logic gate, team, type, or status.
@@ -140,7 +161,7 @@ KB80 - When Date Added sorting is disabled, card-to-card drops within a column c
 KB81 - Dragging a card to another status column must remain available whether Date Added sorting is enabled or disabled.
 KB82 - A grouped Logic Gate Kanban board can update priority by dropping a card onto a supported priority group header or onto a card in a different visible priority group.
 KB83 - Priority grouped drops update real priority values 1 through 5 only.
-KB84 - Dropping onto `No priority` does not clear priority until clear-priority drop semantics are deliberately designed.
+KB84 - Dropping onto **Not Assigned** does not clear priority until clear-priority drop semantics are deliberately designed.
 KB85 - Priority grouped drops can also move the card to the target status column when the target priority group is in a different column.
 KB86 - When Date Added sorting is enabled, priority grouped drops update priority and status but do not write a manual position.
 KB87 - When Date Added sorting is disabled, priority grouped drops may also write a manual sparse position so the moved card lands at the visible drop point.
@@ -159,7 +180,7 @@ KB99 - The initial email-to-Logic-Gate conversion sets the source email to unsta
 KB100 - Node editor popups opened from Kanban mount through the shared body-level modal layer above Key Views, Explorer, Search Explorer, and board-local stacking contexts. They expose a fullscreen toggle in the popup header; fullscreen changes the same mounted editor to browser-viewport geometry while preserving the previous board-relative popup size and position for restoration.
 KB101 - Dragging a triage/mailbox email directly onto a Logic Gate Kanban column converts it into a direct email-created node card on that Logic Gate board and in that target column.
 KB102 - Direct email-to-Kanban column drops use the same exact-mailbox triage drag payload and Home conversion reconciliation event as Company Explorer email drops. Personal drops retain normalized `account_email`; shared drops retain `shared_inbox_id` and suppress personal identity, so source rows, local freshness suppression, Logic Gate icons, and unstarred state reconcile only in the source mailbox.
-KB103 - Dropping an email onto a supported priority group inside a Logic Gate Kanban column applies that priority while still using the column as the assignment status target; dropping onto ordinary column or card space uses the backend default priority.
+KB103 - Dropping an email onto a supported priority group inside a Logic Gate Kanban column applies that priority while still using the column as the assignment status target; dropping onto ordinary column or card space uses priority **Not Assigned**.
 KB104 - After a direct email-to-Kanban column drop succeeds, the created node opens in the normal node popup.
 
 ### New node insertion
@@ -287,7 +308,7 @@ Expected:
 - Dropping a card into a supported priority group updates the card's priority to that group value.
 - Dropping a card into a supported priority group in another column updates both priority and status.
 - Priority grouped drops write manual position only when Date Added sorting is disabled.
-- Dropping onto `No priority`, by-person, due-date, or account group headers does not silently mutate those fields.
+- Dropping onto **Not Assigned**, by-person, due-date, or account group headers does not silently mutate those fields.
 - No matrix cells are shown.
 - Hidden cards do not contribute to subgroup headers or counts.
 
@@ -496,7 +517,7 @@ Expected:
 - The card exposes `created_from_email = true` and shows the email-created marker.
 - The created node opens in the normal node popup after the drop succeeds.
 - The conversion records the actor as the placed-by user.
-- If the drop target is a supported priority group, the created node/card uses that priority; otherwise the backend default priority is used.
+- If the drop target is a supported priority group, the created Node/card uses that priority; otherwise it uses priority **Not Assigned**.
 - The source Home mail row is reconciled through the local conversion event, including Logic Gate placement and `unstarred_message_ids`.
 - The created attached-email projection records `account_email` and, for Shared Triage, `shared_inbox_id` so later node email actions retain the source mailbox scope.
 - The conversion command emits no broad workspace or communications WebSocket event, and local command-result reconciliation does not force a broad Home reload after the response updated the board; a later exact-mailbox provider update remains independently eligible for canonical reconciliation.

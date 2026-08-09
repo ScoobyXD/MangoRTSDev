@@ -53,8 +53,8 @@ func TestMemoryEmailConversionCommandCreatesAssignedWorkItemWithProvenanceAndEve
 	if node.Title != message.Subject || node.Status == nil || *node.Status != "In Progress" {
 		t.Fatalf("node = %+v, want email title and In Progress status", node)
 	}
-	if node.Priority == nil || *node.Priority != CommunicationsTriageConversionDefaultPriority {
-		t.Fatalf("node priority = %+v, want default %d", node.Priority, CommunicationsTriageConversionDefaultPriority)
+	if node.Priority != nil {
+		t.Fatalf("node priority = %+v, want Not Assigned", node.Priority)
 	}
 	if !stringSliceContains(node.LogicGateIDs, logicGate.LogicGateID) {
 		t.Fatalf("node logic_gate_ids = %+v, want %s", node.LogicGateIDs, logicGate.LogicGateID)

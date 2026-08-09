@@ -563,6 +563,27 @@ limit 1`, companyID, nodeID, emailThreadID).Scan(
 }
 
 func linkPostgresCommunicationsEmailThreadToNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, relationshipID, emailThreadID, selectedMessageID, _ string) error {
+	if _, err := tx.ExecContext(ctx, `
+select pg_advisory_xact_lock(
+  hashtextextended($1::text || ':' || $2::text, 0)
+)`, companyID, emailThreadID); err != nil {
+		return err
+	}
+	var linkedToAnotherNode bool
+	if err := tx.QueryRowContext(ctx, `
+select exists (
+  select 1
+  from email_relationships relationship
+  where relationship.company_id=$1::uuid
+    and relationship.email_thread_id=$2::uuid
+    and relationship.resource_type='node'
+    and relationship.resource_id<>$3::uuid
+)`, companyID, emailThreadID, nodeID).Scan(&linkedToAnotherNode); err != nil {
+		return err
+	}
+	if linkedToAnotherNode {
+		return ErrAlreadyExists
+	}
 	result, err := tx.ExecContext(ctx, `
 insert into email_relationships (
   company_id, email_relationship_id, email_thread_id, email_message_id,

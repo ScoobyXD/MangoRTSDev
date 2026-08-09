@@ -314,7 +314,19 @@ func (r *MemoryRepo) GetCommunicationsNodeEmailThread(companyID, nodeID, emailTh
 	return item, nil
 }
 
-func (r *MemoryRepo) linkCommunicationsEmailThreadToNodeLocked(companyID, nodeID, informationID, emailThreadID, selectedMessageID, actorUserID string, now time.Time) domain.CommunicationsNodeEmailThread {
+func (r *MemoryRepo) communicationsEmailThreadLinkedToAnotherNodeLocked(companyID, nodeID, emailThreadID string) bool {
+	for _, existing := range r.nodeEmailThreads {
+		if existing.CompanyID == companyID && existing.EmailThreadID == emailThreadID && existing.NodeID != nodeID {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *MemoryRepo) linkCommunicationsEmailThreadToNodeLocked(companyID, nodeID, informationID, emailThreadID, selectedMessageID, actorUserID string, now time.Time) (domain.CommunicationsNodeEmailThread, error) {
+	if r.communicationsEmailThreadLinkedToAnotherNodeLocked(companyID, nodeID, emailThreadID) {
+		return domain.CommunicationsNodeEmailThread{}, ErrAlreadyExists
+	}
 	selectedInternalMessageID := cleanUUIDText(selectedMessageID)
 	if thread, ok := r.emailThreads[key(companyID, emailThreadID)]; ok {
 		for _, message := range thread.Messages {
@@ -330,7 +342,7 @@ func (r *MemoryRepo) linkCommunicationsEmailThreadToNodeLocked(companyID, nodeID
 		CreatedByUserID: actorUserID, CreatedTimestamp: now,
 	}
 	r.nodeEmailThreads[memoryNodeEmailThreadKey(companyID, nodeID, emailThreadID)] = link
-	return link
+	return link, nil
 }
 
 func (r *MemoryRepo) ImportCommunicationsEmailIntoNode(input CommunicationsNodeEmailImportInput) (CommunicationsNodeEmailImportResult, error) {
@@ -349,6 +361,9 @@ func (r *MemoryRepo) ImportCommunicationsEmailIntoNode(input CommunicationsNodeE
 	thread, err := r.upsertCommunicationsEmailThreadLocked(input.Thread)
 	if err != nil {
 		return CommunicationsNodeEmailImportResult{}, err
+	}
+	if r.communicationsEmailThreadLinkedToAnotherNodeLocked(input.CompanyID, input.NodeID, thread.EmailThreadID) {
+		return CommunicationsNodeEmailImportResult{}, ErrAlreadyExists
 	}
 	if input.InformationID == "" {
 		input.InformationID = newUUIDv7String()
@@ -375,7 +390,9 @@ func (r *MemoryRepo) ImportCommunicationsEmailIntoNode(input CommunicationsNodeE
 		CompanyID: input.CompanyID, NodeID: input.NodeID, InformationID: input.InformationID,
 		Type: info.Type, Information: information, CreatedTimestamp: now, UpdatedTimestamp: now,
 	}
-	r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, input.NodeID, input.InformationID, thread.EmailThreadID, selected.ID, input.CreatedByUserID, now)
+	if _, err := r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, input.NodeID, input.InformationID, thread.EmailThreadID, selected.ID, input.CreatedByUserID, now); err != nil {
+		return CommunicationsNodeEmailImportResult{}, err
+	}
 	if downloadScope, requestedMessageID, ok := communicationsEmailThreadDownloadRequest(thread, input.Thread); ok {
 		if _, _, err := r.ensureCommunicationsEmailThreadDownloadJobLocked(input.CompanyID, thread.EmailThreadID, downloadScope, requestedMessageID, input.Thread.RequestedByUserID); err != nil {
 			return CommunicationsNodeEmailImportResult{}, err

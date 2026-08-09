@@ -137,6 +137,14 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeSurface, /defaultOpenTextBlockChatIDs/);
   assert.match(nodeSurface, /if \(!emailOriginNode\) return chatMessagesByBlock;[\s\S]*displayed\.set\(emailOriginChatHostBlockID, \[\.\.\.legacyMessages, \.\.\.directMessages\]/);
   assert.match(nodeSurface, /<LinkedEmailPreviewPane/);
+  assert.match(nodeSurface, /const stageEmailSelectionChatTextBlock = useCallback/);
+  assert.match(nodeSurface, /temporaryEmailChatBlocksRef\.current\.set\(blockID, temporaryBlock\)/);
+  assert.match(nodeSurface, /const blockID = existingBlockID \|\| stageEmailSelectionChatTextBlock\(messageID\)/);
+  assert.match(nodeSurface, /const createEmailTextBoxOnSend = temporaryEmailChatBlocksRef\.current\.has\(blockID\)/);
+  assert.match(nodeSurface, /createEmailTextBoxOnSend,/);
+  assert.match(nodeSurface, /cancelTemporaryEmailChatDraft\(chatBlockID, selectionAnchor\)/);
+  assert.match(nodeSurface, /removeStoredEmailLocalHighlight\(emailAnchor\.messageID, emailAnchor\)/);
+  assert.match(nodeSurface, /temporaryEmailChat: false/);
   assert.match(nodeSurface, /data-node-pane-header="editor"/);
   assert.match(nodeSurface, /data-node-pane-header="chat"/);
   assert.match(nodeSurface, /<ChatPane[\s\S]{0,420}hideHeader/);

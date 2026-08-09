@@ -1,3 +1,26 @@
+# Process Story: An email Node keeps one exact thread, text box, and chat
+
+An email creates or reuses one Node whose priority may remain **Not Assigned** with or without a Logic Gate assignment
+↓
+That stored email thread may relate only to this Node, and every email chat belongs to one exact Node text box
+↓
+An existing linked text box shows its exact message and receives later chat immediately
+↓
+When the text box does not yet exist, the first send atomically creates the text box, exact email relationship, and chat
+
+Last updated: 2026-08-08
+
+# Current Node Business Logic Laws
+
+1. A new Node defaults to priority **Not Assigned**.
+2. **Not Assigned** is stored as a null Node priority; numeric priorities remain limited to 1 through 5.
+3. A Node may be assigned to a Logic Gate while its priority is **Not Assigned**.
+4. An email thread may belong to only one Node.
+5. Every email chat in a Node belongs to one exact Node text box.
+6. An email-linked text box exposes the exact linked email message and owns every chat about that message.
+
+Last updated: 2026-08-08
+
 # Process Story: Node headers show assignments and linking controls clearly
 
 A user opens a Node through Editor, Updates, or another supported Node surface

@@ -1952,7 +1952,7 @@ function getUpdateGroupValues(
     const priorityOrder = resolveUpdatePriorityGroupOrder(priority);
     return option
       ? [{ key: `priority:${option.value}`, label: option.label.replace(/\u00a0/g, " "), ...priorityOrder }]
-      : [{ key: "priority:none", label: "No priority", sortValue: 99, sortLast: true }];
+      : [{ key: "priority:none", label: "Not Assigned", sortValue: 99, sortLast: true }];
   }
   if (field === "status") {
     const nodeID = row.node?.id.trim() ?? "";

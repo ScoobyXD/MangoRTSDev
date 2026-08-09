@@ -30,8 +30,8 @@ export type EmailCollaborationPanelAction = "create" | "import";
 
 export type EmailNodeDestination =
   | { kind: "node"; nodeID: string }
-  | { kind: "logic_gate"; logicGateID: string; priority: number }
-  | { kind: "project"; projectID: string; logicGateID: string; priority: number }
+  | { kind: "logic_gate"; logicGateID: string }
+  | { kind: "project"; projectID: string; logicGateID: string }
   | { kind: "standalone" };
 
 export type EmailCollaborationActionRequest = {
@@ -94,9 +94,11 @@ export function resolveEmailCollaborationChatPlacement(
 ): EmailCollaborationChatPlacement {
   const cleanMessageID = emailMessageID.trim();
   const chats = parseEditorTextBlockChats(projections);
-  const linkedTextBlocks = listEditorTextBlockProjections(projections).filter((projection) => (
-    parseEditorTextBlockContent(projection.information).emailMessageID?.trim() === cleanMessageID
-  ));
+  const linkedTextBlocks = listEditorTextBlockProjections(projections).filter((projection) => {
+    const content = parseEditorTextBlockContent(projection.information);
+    return content.emailMessageID?.trim() === cleanMessageID
+      || content.emailMessageIDs?.some((messageID) => messageID.trim() === cleanMessageID);
+  });
   const textBlockWithChat = linkedTextBlocks.find((projection) => (
     chats.some((chat) => chat.blockID === projection.information_id)
   ));
