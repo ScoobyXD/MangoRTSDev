@@ -576,7 +576,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [editorSnapshotLoadedScope, setEditorSnapshotLoadedScope] = useState("");
   const [nodeStatus, setNodeStatus] = useState("");
   const [nodePriorityDraft, setNodePriorityDraft] = useState("");
-  const [nodePriorityRequirementError, setNodePriorityRequirementError] = useState("");
   const [nodeDueDateDraft, setNodeDueDateDraft] = useState("");
   const [nodeAccounts, setNodeAccounts] = useState<Account[]>([]);
   const [nodeRACIAssignments, setNodeRACIAssignments] = useState<LogicGateRACIAssignment[]>([]);
@@ -654,7 +653,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const nodeWorkspaceSaveControllersRef = useRef(new Map<string, NodeWorkspaceSaveController>());
   const saveVersionStatusTimerRef = useRef<number | null>(null);
   const saveVersionsRequestRef = useRef(0);
-  const nodePriorityRequirementTimerRef = useRef<number | null>(null);
   const nodeWorkspaceProjectionsRef = useRef<NodeProjectionItem[]>([]);
   const logicGateWorkspaceProjectionsRef = useRef<LogicGateProjectionItem[]>([]);
   const logicGateRACIAssignmentsRef = useRef<LogicGateRACIAssignment[]>([]);
@@ -893,15 +891,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [activeTab, linkedEntityAccessDenied, loadEditorSaveVersions]);
 
 
-  const showNodePriorityRequirementError = useCallback(() => {
-    const message = "Must give node a priority";
-    setNodePriorityRequirementError(message);
-    if (nodePriorityRequirementTimerRef.current !== null) window.clearTimeout(nodePriorityRequirementTimerRef.current);
-    nodePriorityRequirementTimerRef.current = window.setTimeout(() => {
-      nodePriorityRequirementTimerRef.current = null;
-      setNodePriorityRequirementError("");
-    }, 2_400);
-  }, []);
   const updateSelectionFontSize = useCallback((nextFontSize: number) => {
     setSelectionFontSize(clampEditorSelectionFontSize(nextFontSize));
   }, []);
@@ -1336,7 +1325,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setError("Priority must be 1 through 5");
       return;
     }
-    setNodePriorityRequirementError("");
     void updateNodePresetPatch({ priority: parsed });
   }, [updateNodePresetPatch]);
 
@@ -1969,7 +1957,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [companyID, editorDataFormat.gate?.editor_format, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, loadEditorSaveVersions, refreshEditorSnapshot, requestJSON, saveVersions, showSaveVersionStatus]);
 
   useEffect(() => () => {
-    if (nodePriorityRequirementTimerRef.current !== null) window.clearTimeout(nodePriorityRequirementTimerRef.current);
     if (saveVersionStatusTimerRef.current !== null) window.clearTimeout(saveVersionStatusTimerRef.current);
   }, []);
 
@@ -1977,11 +1964,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     attachmentHydrationCleanupRef.current?.();
     attachmentHydrationCleanupRef.current = null;
   }, []);
-
-  useEffect(() => {
-    setNodePriorityRequirementError("");
-  }, [linkedEntityKind, linkedNodeID]);
-
 
   useEffect(() => {
     if (forcedEntityKind) return;
@@ -2454,7 +2436,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             nodePresetFields={linkedEntityKind === "node" ? {
               status: nodeStatus || "",
               priorityDraft: nodePriorityDraft,
-              priorityRequirementError: nodePriorityRequirementError,
               accounts: nodeAccounts,
               accountOptions: nodeAccountOptions,
               dueDateDraft: nodeDueDateDraft,
@@ -2593,7 +2574,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             scope={scope}
             nodeID={linkedNodeID}
             canEdit={linkedEntityCanEdit}
-            nodePriorityDraft={nodePriorityDraft}
             assignedLogicGateIDs={nodeLogicGateIDs}
             projections={nodeWorkspaceProjections}
             companyUsers={companyUsers}
@@ -2619,7 +2599,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onProjectionMutation={handleNodeWorkspaceProjectionMutation}
             onCreateNodeFromImage={createNodeFromImageDocument}
             onAssignToLogicGate={assignLinkedNodeToLogicGate}
-            onRequireNodePriorityForLogicGateAssignment={showNodePriorityRequirementError}
             onSelectionFontSizeChange={updateSelectionFontSize}
             onSelectionInlineFormatChange={updateSelectionInlineFormat}
             onSelectionHighlightColorChange={setSelectionHighlightColor}

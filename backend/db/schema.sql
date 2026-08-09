@@ -1299,31 +1299,6 @@ create index if not exists idx_node_logic_gate_assignments_logic_gate_position
 create unique index if not exists idx_node_logic_gate_assignments_compat_card
   on node_logic_gate_assignments(company_id, compatibility_board_id, compatibility_card_id);
 
-create or replace function enforce_node_logic_gate_assignment_priority()
-returns trigger
-language plpgsql
-as $$
-begin
-  if not exists (
-    select 1
-    from nodes n
-    where n.company_id = new.company_id
-      and n.node_id = new.node_id
-      and n.priority between 1 and 5
-  ) then
-    raise exception 'node_logic_gate_assignment_priority_required'
-      using errcode = '23514';
-  end if;
-  return new;
-end;
-$$;
-
-drop trigger if exists trg_node_logic_gate_assignment_priority on node_logic_gate_assignments;
-create trigger trg_node_logic_gate_assignment_priority
-before insert or update of company_id, node_id on node_logic_gate_assignments
-for each row
-execute function enforce_node_logic_gate_assignment_priority();
-
 -- Disposable Logic Gate Kanban read model. Source truth remains nodes,
 -- logic_gates, node_logic_gate_assignments, and access/GVIC tables.
 create table if not exists kanban_board_projection (
@@ -3547,6 +3522,34 @@ create unique index if not exists idx_email_relationships_active_identity
     company_id, email_message_id, resource_type, resource_id,
     coalesce(resource_textbox_id, '')
   );
+
+create or replace function mangorts_enforce_one_node_per_email_thread()
+returns trigger language plpgsql as $$
+begin
+  if new.resource_type <> 'node' then
+    return new;
+  end if;
+  perform pg_advisory_xact_lock(hashtextextended(new.company_id::text || ':' || new.email_thread_id::text, 0));
+  if exists (
+    select 1
+    from email_relationships relationship
+    where relationship.company_id=new.company_id
+      and relationship.email_thread_id=new.email_thread_id
+      and relationship.resource_type='node'
+      and relationship.resource_id<>new.resource_id
+      and relationship.email_relationship_id<>new.email_relationship_id
+  ) then
+    raise exception 'email_thread_already_linked_to_another_node' using errcode='23505';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_email_relationships_one_node_per_thread on email_relationships;
+create trigger trg_email_relationships_one_node_per_thread
+before insert or update of company_id,email_thread_id,resource_type,resource_id
+on email_relationships
+for each row execute function mangorts_enforce_one_node_per_email_thread();
 
 create table if not exists node_textboxes_history (
   company_id uuid not null,

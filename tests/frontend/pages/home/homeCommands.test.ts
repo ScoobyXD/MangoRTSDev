@@ -928,6 +928,19 @@ test("Home triage conversion command owns cache, event, and graph side effects",
     messageIDs: ["message-3"],
     priority: 4,
   });
+  await convertMessagesToLogicGateCommand({
+    apiBase: "https://api.example.test",
+    companyID: "company-1",
+    logicGateID: "gate-1",
+    messageIDs: ["message-4"],
+    convertTriageMessagesToLogicGate,
+  });
+  assert.deepEqual(convertCalls[2], {
+    companyID: "company-1",
+    logicGateID: "gate-1",
+    messageIDs: ["message-4"],
+    priority: undefined,
+  });
 });
 
 test("Home mail message commands normalize ids and preserve one exact personal or shared mailbox", async () => {

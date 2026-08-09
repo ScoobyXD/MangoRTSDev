@@ -15,6 +15,7 @@ type nodeAttachedEmailPayload struct {
 	BlockID           string `json:"block_id"`
 	EmailMessageID    string `json:"email_message_id"`
 	AttachedTimestamp string `json:"attached_timestamp"`
+	LinkScope         string `json:"link_scope"`
 }
 
 func nodeTextboxBodyFromProjectionInformation(information string) (json.RawMessage, error) {
@@ -56,6 +57,8 @@ select textbox.company_id::text, textbox.node_id::text, textbox.textbox_id::text
        $3 || jsonb_build_object(
          'title', '',
          'document', (textbox.body_json->'document')::text,
+         'email_message_id', coalesce(linked_email.email_message_id, ''),
+         'email_message_ids', coalesce(linked_email.email_message_ids, '[]'::jsonb),
          'attachments', coalesce((
            select jsonb_agg(jsonb_build_object(
              'id', attachment.attachment_id::text, 'attachment_id', attachment.attachment_id::text,
@@ -73,7 +76,19 @@ select textbox.company_id::text, textbox.node_id::text, textbox.textbox_id::text
          ), '[]'::jsonb)
        )::text,
        false, textbox.revision, textbox.created_timestamp, textbox.updated_timestamp
-from node_textboxes textbox`
+from node_textboxes textbox
+left join lateral (
+  select (array_agg(relationship.email_message_id::text order by message.message_order,message.provider_message_id))[1] as email_message_id,
+         jsonb_agg(relationship.email_message_id::text order by message.message_order,message.provider_message_id) as email_message_ids
+  from email_relationships relationship
+  join email_messages message
+    on message.company_id=relationship.company_id
+   and message.email_message_id=relationship.email_message_id
+  where relationship.company_id=textbox.company_id
+    and relationship.resource_type='node'
+    and relationship.resource_id=textbox.node_id
+    and relationship.resource_textbox_id=textbox.textbox_id::text
+) linked_email on true`
 
 const postgresNodeEmailRelationshipProjectionSelect = `
 select relationship.company_id::text, relationship.resource_id::text,
@@ -189,8 +204,12 @@ func addPostgresNodeEmailRelationshipTx(ctx context.Context, tx *sql.Tx, input N
 	}
 	payload.BlockID = cleanUUIDText(payload.BlockID)
 	payload.EmailMessageID = cleanUUIDText(payload.EmailMessageID)
+	payload.LinkScope = strings.ToLower(strings.TrimSpace(payload.LinkScope))
+	if payload.LinkScope == "" {
+		payload.LinkScope = "message"
+	}
 	actorUserID := cleanUUIDText(input.ActorUserID)
-	if payload.EmailMessageID == "" || actorUserID == "" {
+	if payload.EmailMessageID == "" || actorUserID == "" || (payload.LinkScope != "message" && payload.LinkScope != "thread") {
 		return domain.NodeProjection{}, ErrInvalid
 	}
 	if existing, found, err := postgresNodeFinalProjectionTx(ctx, tx, input.CompanyID, input.NodeID, relationshipID); err != nil {
@@ -241,10 +260,23 @@ where message.company_id=$1::uuid and message.email_message_id=$2::uuid
 	if err != nil {
 		return domain.NodeProjection{}, err
 	}
-	_, err = tx.ExecContext(ctx, `insert into email_relationships(
+	if payload.LinkScope == "thread" {
+		_, err = tx.ExecContext(ctx, `insert into email_relationships(
+  company_id,email_relationship_id,email_thread_id,email_message_id,resource_type,resource_id,resource_textbox_id,created_timestamp
+)
+select $1::uuid,
+       case when message.email_message_id=$4::uuid then $2::uuid else gen_random_uuid() end,
+       $3::uuid,message.email_message_id,'node',$5::uuid,nullif($6,''),$7
+from email_messages message
+where message.company_id=$1::uuid and message.email_thread_id=$3::uuid
+on conflict do nothing`,
+			input.CompanyID, relationshipID, emailThreadID, payload.EmailMessageID, input.NodeID, payload.BlockID, attachedAt)
+	} else {
+		_, err = tx.ExecContext(ctx, `insert into email_relationships(
   company_id,email_relationship_id,email_thread_id,email_message_id,resource_type,resource_id,resource_textbox_id,created_timestamp
 ) values($1::uuid,$2::uuid,$3::uuid,$4::uuid,'node',$5::uuid,nullif($6,''),$7)`,
-		input.CompanyID, relationshipID, emailThreadID, payload.EmailMessageID, input.NodeID, payload.BlockID, attachedAt)
+			input.CompanyID, relationshipID, emailThreadID, payload.EmailMessageID, input.NodeID, payload.BlockID, attachedAt)
+	}
 	if err != nil {
 		return domain.NodeProjection{}, err
 	}

@@ -290,11 +290,11 @@ func TestLogicGateAssignmentMovePriorityOmittedNullAndValue(t *testing.T) {
 		NodeID:      node.NodeID,
 		PrioritySet: true,
 	})
-	if !errors.Is(err, store.ErrPriorityRequired) {
-		t.Fatalf("MoveLogicGateNodeAssignment clear priority err = %v, want priority required", err)
+	if err != nil {
+		t.Fatalf("MoveLogicGateNodeAssignment clear priority: %v", err)
 	}
-	if cleared.Node.NodeID != "" {
-		t.Fatalf("cleared priority result = %+v, want zero result on rejected move", cleared)
+	if cleared.Node.NodeID != node.NodeID || cleared.Node.Priority != nil {
+		t.Fatalf("cleared priority result = %+v, want the node with Not Assigned priority", cleared)
 	}
 
 	newPriority := 5

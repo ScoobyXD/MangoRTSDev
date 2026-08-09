@@ -484,10 +484,6 @@ func (s *Server) handleWorkItemLogicGateAssignments(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusBadRequest, "invalid_logic_gate_assignment")
 		return
 	}
-	if errors.Is(err, store.ErrPriorityRequired) {
-		writeError(w, http.StatusBadRequest, "priority_required")
-		return
-	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "logic_gate_column_or_node_not_found")
 		return
@@ -587,10 +583,6 @@ func (s *Server) handleWorkItemLogicGateAssignmentMove(w http.ResponseWriter, r 
 	result, err := s.kanban.MoveLogicGateNodeAssignment(input)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_logic_gate_assignment_move")
-		return
-	}
-	if errors.Is(err, store.ErrPriorityRequired) {
-		writeError(w, http.StatusBadRequest, "priority_required")
 		return
 	}
 	if errors.Is(err, store.ErrNotFound) {

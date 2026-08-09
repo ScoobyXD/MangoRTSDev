@@ -601,14 +601,10 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 	if _, ok := r.nodes[key(input.CompanyID, input.NodeID)]; !ok {
 		return domain.KanbanCard{}, ErrNotFound
 	}
+	node := r.nodes[key(input.CompanyID, input.NodeID)]
 
 	k := boardKey(input.CompanyID, input.BoardID)
 	board := r.ensureKanbanBoardLocked(input.CompanyID, input.BoardID, input.BoardID)
-	nodeKey := key(input.CompanyID, input.NodeID)
-	node := r.nodes[nodeKey]
-	if board.LogicGateID != nil && !logicGateAssignmentNodeHasPriority(node.Priority) {
-		return domain.KanbanCard{}, ErrPriorityRequired
-	}
 	if board.LogicGateID != nil {
 		for boardKeyValue, cards := range r.kanbanCards {
 			nextCards := cards[:0]
@@ -716,9 +712,6 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 	nodeKey := key(input.CompanyID, input.NodeID)
 	var createdNode domain.Node
 	if _, ok := r.nodes[nodeKey]; !ok {
-		if _, ok := logicGateAssignmentInputPriority(input); !ok {
-			return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
-		}
 		if input.CreateNodeTitle == "" {
 			return LogicGateNodeAssignmentResult{}, ErrNotFound
 		}
@@ -727,8 +720,6 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 			r.restoreWorkItemAssignmentEventStateLocked(snapshot)
 			return LogicGateNodeAssignmentResult{}, err
 		}
-	} else if _, ok := logicGateAssignmentInputPriority(input); !ok && !logicGateAssignmentNodeHasPriority(r.nodes[nodeKey].Priority) {
-		return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
 	}
 	previousAssignment, hadPreviousAssignment := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, "")
 	placedByUserID := strings.TrimSpace(previousAssignment.PlacedByUserID)
@@ -739,11 +730,10 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 	if input.PrioritySet {
 		priority, ok := logicGateAssignmentInputPriority(input)
 		if !ok {
-			return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
+			return LogicGateNodeAssignmentResult{}, ErrInvalid
 		}
 		node := r.nodes[nodeKey]
-		value := *priority
-		node.Priority = &value
+		node.Priority = cloneIntPointer(priority)
 		r.nodes[nodeKey] = node
 	}
 
@@ -943,14 +933,11 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 	if input.PrioritySet {
 		priority, ok := logicGateAssignmentInputPriority(LogicGateNodeAssignmentInput{Priority: input.Priority, PrioritySet: true})
 		if !ok {
-			return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
+			return LogicGateNodeAssignmentResult{}, ErrInvalid
 		}
 		node = r.nodes[nodeKey]
-		value := *priority
-		node.Priority = &value
+		node.Priority = cloneIntPointer(priority)
 		r.nodes[nodeKey] = node
-	} else if !logicGateAssignmentNodeHasPriority(node.Priority) {
-		return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
 	}
 
 	resultCard := card

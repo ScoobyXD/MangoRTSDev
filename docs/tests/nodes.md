@@ -1,4 +1,15 @@
-# Process Story: Node headers show assignments and linking controls clearly
+# Current Node Business Logic Laws
+
+1. A new Node defaults to priority **Not Assigned**.
+2. **Not Assigned** is stored as a null Node priority; numeric priorities remain limited to 1 through 5.
+3. A Node may be assigned to a Logic Gate while its priority is **Not Assigned**.
+4. An email thread may belong to only one Node.
+5. Every email chat in a Node belongs to one exact Node text box.
+6. An email-linked text box exposes the exact linked email message and owns every chat about that message.
+
+Last updated: 2026-08-08
+
+# Historical Process Story: Node headers show assignments and linking controls clearly
 
 A user opens a Node through Editor, Updates, or another supported Node surface
 ↓

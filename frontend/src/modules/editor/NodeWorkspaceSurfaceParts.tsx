@@ -84,6 +84,7 @@ import {
   ChatIcon,
   type ChatThreadNode,
   countChatThreadDescendants,
+  EMAIL_DRAG_MIME,
   formatAddressList,
   formatFileSize,
   formatTimestamp,
@@ -91,6 +92,7 @@ import {
   initialsForName,
   isImageAttachment,
   MailIcon,
+  messageAttachmentPayload,
   PaperclipIcon,
   PlusIcon,
   TextEditorIcon,
@@ -626,7 +628,10 @@ type ChatPaneProps = {
   entityRequestJSON?: EditorEntityLinkRequest;
   messages: EditorTextBlockChatMessage[];
   emailPane?: React.ReactNode;
+  headerLeading?: React.ReactNode;
   headerTrailing?: React.ReactNode;
+  sectionLabelsByBlockID?: Record<string, string>;
+  sectionLabelsByEmailMessageID?: Record<string, string>;
   hideHeader?: boolean;
   activeTab?: "chat" | "email";
   selectionAnchor?: TextBlockSelectionAnchor;
@@ -689,7 +694,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   entityRequestJSON,
   messages,
   emailPane,
+  headerLeading,
   headerTrailing,
+  sectionLabelsByBlockID = {},
+  sectionLabelsByEmailMessageID = {},
   hideHeader = false,
   activeTab = "chat",
   selectionAnchor,
@@ -735,6 +743,18 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const messageFocusRequestPendingRef = useRef(false);
   const mentionCloseTimerRef = useRef<number | null>(null);
   const threads = useMemo(() => buildChatThreads(messages), [messages]);
+  const sectionedThreads = useMemo(() => {
+    const messageOrder = new Map(Object.keys(sectionLabelsByEmailMessageID).map((messageID, index) => [messageID, index]));
+    const blockOrder = new Map(Object.keys(sectionLabelsByBlockID).map((textBlockID, index) => [textBlockID, messageOrder.size + index]));
+    if (messageOrder.size === 0 && blockOrder.size === 0) return threads;
+    return threads.map((thread, index) => ({ thread, index })).sort((left, right) => {
+      const leftMessageID = left.thread.message.selectionMessageID?.trim() ?? "";
+      const rightMessageID = right.thread.message.selectionMessageID?.trim() ?? "";
+      const leftOrder = messageOrder.get(leftMessageID) ?? blockOrder.get(left.thread.message.blockID) ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = messageOrder.get(rightMessageID) ?? blockOrder.get(right.thread.message.blockID) ?? Number.MAX_SAFE_INTEGER;
+      return leftOrder - rightOrder || left.index - right.index;
+    }).map(({ thread }) => thread);
+  }, [sectionLabelsByBlockID, sectionLabelsByEmailMessageID, threads]);
   const replyTarget = replyTargetID ? messages.find((message) => message.id === replyTargetID) : undefined;
   const canSubmit = editable && editorChatAttachmentsReadyForSubmit(draftAttachments) && (draft.trim().length > 0 || draftAttachments.length > 0);
   const [storedHeight, setStoredHeight] = useState(() => readStoredChatPaneHeight(heightStorageKey));
@@ -1075,7 +1095,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       >
         {!hideHeader && (
         <div data-chat-pane-header="true" style={{ minHeight: 34, display: "flex", alignItems: "center", gap: 6, borderBottom: `1px solid ${ruleColor}`, padding: "5px 7px", color: surfaceText, fontSize: 11, fontWeight: 800, background: "linear-gradient(90deg, rgba(255,241,242,0.60), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.62))" }}>
-          {hasEmailPane ? (
+          {headerLeading ?? (hasEmailPane ? (
             <>
               <button
                 type="button"
@@ -1136,7 +1156,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               <ChatIcon color={active ? accent : "rgba(100,116,139,0.85)"} />
               <span>Chat</span>
             </>
-          )}
+          ))}
           {headerTrailing && (
             <div style={{ minWidth: 0, marginLeft: "auto", display: "flex", alignItems: "center", justifyContent: "flex-end", overflow: "hidden" }}>
               {headerTrailing}
@@ -1151,31 +1171,44 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         ) : (
           <>
             <div ref={messageListRef} className="editor-document-scroll mango-pane-enter" style={{ minHeight: 0, display: "grid", alignContent: "start", gap: 8, overflowY: "auto", overflowX: "hidden", padding: "9px 8px", ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
-              {threads.map((thread) => (
-                <ChatThreadItem
-                  key={thread.message.id}
-                  node={thread}
-                  depth={0}
-                  isLastSibling={false}
-                  apiBase={apiBase}
-                  companyID={companyID}
-                  currentUserID={currentUserID}
-                  editable={editable}
-                  activeMessageID={activeMessageID}
-                  companyUsers={companyUsers}
-                  accent={accent}
-                  surfaceText={surfaceText}
-                  ruleColor={ruleColor}
-                  collapsedThreadIDs={collapsedThreadIDs}
-                  onToggleCollapse={toggleThreadCollapse}
-                  onActivate={onActivateMessage}
-                  onNavigate={onNavigateToMessage}
-                  onReply={handleReply}
-                  onEdit={onEditMessage}
-                  onDelete={onDeleteMessage}
-                  onPreviewImage={setPreviewAttachment}
-                />
-              ))}
+              {sectionedThreads.map((thread, index) => {
+                const sectionKey = thread.message.selectionMessageID?.trim() || thread.message.blockID;
+                const previousSectionKey = index > 0
+                  ? sectionedThreads[index - 1].message.selectionMessageID?.trim() || sectionedThreads[index - 1].message.blockID
+                  : "";
+                const sectionLabel = sectionLabelsByEmailMessageID[sectionKey] ?? sectionLabelsByBlockID[thread.message.blockID] ?? "";
+                return (
+                  <React.Fragment key={thread.message.id}>
+                    {sectionLabel && previousSectionKey !== sectionKey && (
+                      <div data-email-chat-message-section="true" style={{ borderTop: index > 0 ? `1px solid ${ruleColor}` : undefined, padding: index > 0 ? "11px 2px 2px" : "2px 2px", color: "#475569", fontSize: 10.5, fontWeight: 850 }}>
+                        {sectionLabel}
+                      </div>
+                    )}
+                    <ChatThreadItem
+                      node={thread}
+                      depth={0}
+                      isLastSibling={false}
+                      apiBase={apiBase}
+                      companyID={companyID}
+                      currentUserID={currentUserID}
+                      editable={editable}
+                      activeMessageID={activeMessageID}
+                      companyUsers={companyUsers}
+                      accent={accent}
+                      surfaceText={surfaceText}
+                      ruleColor={ruleColor}
+                      collapsedThreadIDs={collapsedThreadIDs}
+                      onToggleCollapse={toggleThreadCollapse}
+                      onActivate={onActivateMessage}
+                      onNavigate={onNavigateToMessage}
+                      onReply={handleReply}
+                      onEdit={onEditMessage}
+                      onDelete={onDeleteMessage}
+                      onPreviewImage={setPreviewAttachment}
+                    />
+                  </React.Fragment>
+                );
+              })}
             </div>
             <div style={{ display: "grid", gap: 6, padding: 8, borderTop: `1px solid ${ruleColor}` }}>
           {selectionAnchor && active && (
@@ -6167,6 +6200,20 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                   data-email-message-id={threadMessage.id}
                   data-email-single-message={singleMessageOnly ? "true" : undefined}
                   data-email-message-sources={emailThreadMessageSourceLabel(threadMessage)}
+                  draggable={editable && Boolean(threadMessage.email_message_id?.trim())}
+                  onDragStart={(event) => {
+                    if (!editable || !threadMessage.email_message_id?.trim()) {
+                      event.preventDefault();
+                      return;
+                    }
+                    event.dataTransfer.effectAllowed = "link";
+                    event.dataTransfer.setData(EMAIL_DRAG_MIME, JSON.stringify(messageAttachmentPayload(
+                      threadMessage,
+                      mailboxScope.sharedInboxID,
+                      mailboxScope.accountEmail,
+                    )));
+                    event.dataTransfer.setData("text/plain", threadMessage.subject || threadMessage.id);
+                  }}
                   style={{
                     minWidth: 0,
                     display: "grid",

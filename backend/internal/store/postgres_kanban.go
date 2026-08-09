@@ -384,19 +384,15 @@ where company_id=$1::uuid and logic_gate_id=$2::uuid`, input.CompanyID, input.Lo
 	}
 
 	var canonicalNodeTitle string
-	var nodePriority sql.NullInt64
 	var createdNode domain.Node
 	deferCreatedNodeFolderItem := input.MutationOrigin == MutationOriginMatrix || input.MutationOrigin == MutationOriginKanban
 	stop = observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.node_read")
 	if err := tx.QueryRowContext(ctx, `
-select name, priority
-from nodes
-where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&canonicalNodeTitle, &nodePriority); err != nil {
+	select name
+	from nodes
+	where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&canonicalNodeTitle); err != nil {
 		stop()
 		if errors.Is(err, sql.ErrNoRows) {
-			if _, ok := logicGateAssignmentInputPriority(input); !ok {
-				return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
-			}
 			if input.CreateNodeTitle == "" {
 				return LogicGateNodeAssignmentResult{}, ErrNotFound
 			}
@@ -414,9 +410,6 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&canoni
 		} else {
 			return LogicGateNodeAssignmentResult{}, err
 		}
-	} else if _, ok := logicGateAssignmentInputPriority(input); !ok && (!nodePriority.Valid || nodePriority.Int64 < 1 || nodePriority.Int64 > 5) {
-		stop()
-		return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
 	} else {
 		stop()
 	}
@@ -424,13 +417,13 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&canoni
 	if input.PrioritySet {
 		priority, ok := logicGateAssignmentInputPriority(input)
 		if !ok {
-			return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
+			return LogicGateNodeAssignmentResult{}, ErrInvalid
 		}
 		stop = observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.priority_write")
 		if _, err := tx.ExecContext(ctx, `
 update nodes
 set priority=$3::smallint
-where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); err != nil {
+	where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, priority); err != nil {
 			stop()
 			return LogicGateNodeAssignmentResult{}, err
 		}
@@ -570,26 +563,17 @@ where company_id=$1::uuid and logic_gate_id=$2::uuid`, input.CompanyID, input.Lo
 		return LogicGateNodeAssignmentResult{}, fmt.Errorf("move target status resolution: %w", err)
 	}
 
-	var nodePriority sql.NullInt64
-	if err := tx.QueryRowContext(ctx, `
-select priority
-from nodes
-where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&nodePriority); err != nil {
-		return LogicGateNodeAssignmentResult{}, fmt.Errorf("move node priority read: %w", err)
-	}
 	if input.PrioritySet {
 		priority, ok := logicGateAssignmentInputPriority(LogicGateNodeAssignmentInput{Priority: input.Priority, PrioritySet: true})
 		if !ok {
-			return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
+			return LogicGateNodeAssignmentResult{}, ErrInvalid
 		}
 		if _, err := tx.ExecContext(ctx, `
 update nodes
 set priority=$3::smallint
-where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); err != nil {
+	where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, priority); err != nil {
 			return LogicGateNodeAssignmentResult{}, fmt.Errorf("move node priority write: %w", err)
 		}
-	} else if !nodePriority.Valid || nodePriority.Int64 < 1 || nodePriority.Int64 > 5 {
-		return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
 	}
 
 	position := assignment.Position

@@ -211,6 +211,21 @@ limit 1`, input.CompanyID, input.NodeID, input.MessageIDs[0], input.SharedInboxI
 	if _, err := r.addCommunicationsConversionInformationTx(ctx, tx, *input.LinkedTextBlock); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, `
+insert into email_relationships(
+  company_id,email_relationship_id,email_thread_id,email_message_id,
+  resource_type,resource_id,resource_textbox_id,created_timestamp
+)
+select company_id,gen_random_uuid(),email_thread_id,email_message_id,
+       'node',resource_id,$3::text,clock_timestamp()
+from email_relationships
+where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid
+  and email_message_id=$4::uuid and resource_textbox_id is null
+order by created_timestamp desc
+limit 1
+on conflict do nothing`, input.CompanyID, input.NodeID, input.LinkedTextBlock.InformationID, emailMessageID); err != nil {
+		return err
+	}
 	result.LinkedTextBlockID = input.LinkedTextBlock.InformationID
 	if input.InitialChat != nil {
 		if _, err := r.addCommunicationsConversionInformationTx(ctx, tx, *input.InitialChat); err != nil {
@@ -227,8 +242,13 @@ func (r *MemoryRepo) persistCommunicationsConversionEmailLocked(input Communicat
 	if err != nil {
 		return "", "", "", err
 	}
+	if r.communicationsEmailThreadLinkedToAnotherNodeLocked(input.CompanyID, input.NodeID, thread.EmailThreadID) {
+		return "", "", "", ErrAlreadyExists
+	}
 	informationID := r.addEmailProjectionWithThreadLocked(input.CompanyID, input.NodeID, input.SharedInboxID, input.AccountEmail, message, thread.EmailThreadID, now, input.Target.Mode != CommunicationsEmailConversionTargetExistingNode)
-	r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, input.NodeID, informationID, thread.EmailThreadID, message.ID, input.ActorUserID, now)
+	if _, err := r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, input.NodeID, informationID, thread.EmailThreadID, message.ID, input.ActorUserID, now); err != nil {
+		return "", "", "", err
+	}
 	if downloadScope, requestedMessageID, ok := communicationsEmailThreadDownloadRequest(thread, threadInput); ok {
 		if _, _, err := r.ensureCommunicationsEmailThreadDownloadJobLocked(input.CompanyID, thread.EmailThreadID, downloadScope, requestedMessageID, threadInput.RequestedByUserID); err != nil {
 			return "", "", "", err

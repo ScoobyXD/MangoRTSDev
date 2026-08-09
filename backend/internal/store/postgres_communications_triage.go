@@ -315,7 +315,7 @@ for update`, input.UserID, messageID).Scan(&rawMessage); errors.Is(err, sql.ErrN
 		nodeTitle := emailNodeTitle(message)
 		if _, err := tx.ExecContext(ctx, `
 insert into nodes (company_id, node_id, name, priority, created_timestamp)
-values ($1, $2, $3, $4::smallint, now())`, input.CompanyID, nodeID, nodeTitle, *input.Priority); err != nil {
+values ($1, $2, $3, $4::smallint, now())`, input.CompanyID, nodeID, nodeTitle, input.Priority); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 
@@ -436,8 +436,8 @@ func (r *PostgresRepo) finishCommunicationsTriageConversionTx(ctx context.Contex
 func (r *PostgresRepo) attachCommunicationsTriageItemsToStandaloneNodeTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error) {
 	updateResult, err := tx.ExecContext(ctx, `
 update nodes
-set priority=$3::smallint
-where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *input.Priority)
+set priority=case when $3::boolean then $4::smallint else priority end
+where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, input.PrioritySet, input.Priority)
 	if err != nil {
 		return CommunicationsTriageConversionResult{}, err
 	}
@@ -534,7 +534,7 @@ for update`, input.UserID, messageID).Scan(&rawMessage); errors.Is(err, sql.ErrN
 		nodeTitle := emailNodeTitle(message)
 		if _, err := tx.ExecContext(ctx, `
 insert into nodes (company_id, node_id, name, priority, created_timestamp)
-values ($1, $2, $3, $4::smallint, now())`, input.CompanyID, nodeID, nodeTitle, *input.Priority); err != nil {
+values ($1, $2, $3, $4::smallint, now())`, input.CompanyID, nodeID, nodeTitle, input.Priority); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 		emailInput := input
@@ -628,8 +628,8 @@ func (r *PostgresRepo) attachCommunicationsTriageItemsToExistingNodeTx(ctx conte
 	board := synthesizeKanbanBoardFromLogicGate(logicGate, 1000)
 	updateResult, err := tx.ExecContext(ctx, `
 update nodes
-set priority=$3::smallint
-where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *input.Priority)
+set priority=case when $3::boolean then $4::smallint else priority end
+where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, input.PrioritySet, input.Priority)
 	if err != nil {
 		return CommunicationsTriageConversionResult{}, err
 	}

@@ -195,6 +195,7 @@ test("parses titled node text block content payloads with legacy fallback", () =
     document: "<!-- mango-editor-html-v1 --><b>Ship it</b>",
     attachments: [{ id: "attachment-2", attachmentID: "attachment-2", name: "diagram.png", type: "image/png", size: 128, dataURL: undefined }],
     emailMessageID: "message-9",
+    emailMessageIDs: ["message-9"],
     emailAccent: "#0ea5e9",
   });
   assert.deepEqual(parseEditorTextBlockContent("legacy text"), {

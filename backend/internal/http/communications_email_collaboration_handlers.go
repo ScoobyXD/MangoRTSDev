@@ -253,6 +253,8 @@ func (s *Server) writeEmailCollaborationStoreError(w http.ResponseWriter, err er
 		writeError(w, http.StatusBadRequest, "email_collaboration_principal_not_in_company")
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, "email_collaboration_not_found")
+	case errors.Is(err, store.ErrAlreadyExists):
+		writeError(w, http.StatusConflict, "email_thread_already_linked_to_node")
 	case store.IsEmailCollaborationStorageNotReady(err):
 		writeError(w, http.StatusServiceUnavailable, "email_collaboration_storage_not_ready")
 	default:

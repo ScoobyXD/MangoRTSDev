@@ -72,7 +72,7 @@ export const KANBAN_NODE_PRIORITY_STYLE_OPTIONS = [
   },
   {
     value: "0",
-    label: "Unassigned to a Logic Gate",
+    label: "Not Assigned",
     color: "#64748b",
     borderColor: "rgba(100, 116, 139, 0.28)",
     surface: "linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(241, 245, 249, 0.76))",
@@ -783,7 +783,7 @@ function getKanbanPriorityGroupLabel(priority: number): string {
   if (priority === 3) return "3\u00A0\u00A0Tomorrow";
   if (priority === 4) return "4\u00A0\u00A0Sprint (1 week)";
   if (priority === 5) return "5\u00A0\u00A0Later (low priority)";
-  return "No priority";
+  return "Not Assigned";
 }
 
 export function getKanbanPriorityFromGroupKey(key: string): number | null {

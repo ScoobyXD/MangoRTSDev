@@ -5842,11 +5842,13 @@ function AutoHeightEmailBodyFrame({ srcDoc, minHeight, fillAvailableHeight = fal
   const cleanupRef = React.useRef<() => void>(() => undefined);
   const [selectedImage, setSelectedImage] = React.useState<{ src: string; filename: string } | null>(null);
   const [previewImage, setPreviewImage] = React.useState<{ src: string; filename: string } | null>(null);
+  const [pendingTextSelection, setPendingTextSelection] = React.useState<(Omit<EmailCollaborationSelection, "messageID"> & { left: number; top: number }) | null>(null);
 
   React.useEffect(() => () => cleanupRef.current(), []);
   React.useEffect(() => {
     setSelectedImage(null);
     setPreviewImage(null);
+    setPendingTextSelection(null);
   }, [srcDoc]);
 
   const applySelectionNavigation = React.useCallback(() => {
@@ -5907,7 +5909,14 @@ function AutoHeightEmailBodyFrame({ srcDoc, minHeight, fillAvailableHeight = fal
       prefixRange.setEnd(range.startContainer, range.startOffset);
       const leadingWhitespace = rawQuote.length - rawQuote.trimStart().length;
       const startOffset = prefixRange.toString().length + leadingWhitespace;
-      onTextSelection({ quote, startOffset, endOffset: startOffset + quote.length });
+      const bounds = range.getBoundingClientRect();
+      setPendingTextSelection({
+        quote,
+        startOffset,
+        endOffset: startOffset + quote.length,
+        left: Math.max(8, Math.min(frame.clientWidth - 36, bounds.right - 12)),
+        top: Math.max(8, bounds.top - 34),
+      });
     };
     const images = Array.from(frameDocument.images);
     const imageCleanups: Array<() => void> = [];
@@ -5968,6 +5977,22 @@ function AutoHeightEmailBodyFrame({ srcDoc, minHeight, fillAvailableHeight = fal
             onClick={() => downloadURL(selectedImage.src, selectedImage.filename)}
           >
             Download image
+          </button>
+        )}
+        {pendingTextSelection && onTextSelection && (
+          <button
+            type="button"
+            data-email-selection-chat-action="true"
+            title="Turn highlighted email text into a chat"
+            aria-label="Turn highlighted email text into a chat"
+            onClick={() => {
+              const { quote, startOffset, endOffset } = pendingTextSelection;
+              onTextSelection({ quote, startOffset, endOffset });
+              setPendingTextSelection(null);
+            }}
+            style={{ ...mailPanelSmallButtonStyle, position: "absolute", zIndex: 4, left: pendingTextSelection.left, top: pendingTextSelection.top, width: 30, minWidth: 30, height: 28, minHeight: 28, display: "grid", placeItems: "center", padding: 0, boxShadow: "0 8px 18px rgba(15,23,42,0.18)" }}
+          >
+            <ChatIcon color="rgba(71,85,105,0.9)" />
           </button>
         )}
         <iframe
@@ -6092,7 +6117,7 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
   return { srcDoc };
 }
 
-function EmailConversationMessage({ message, companyID, sharedInboxID, accountEmail, fill, expanded, latest, timelineStart, timelineEnd, busy, calendarResponseAvailable, loadingBody = false, selectionNavigation, onToggleExpanded, onLoadBody, onReply, onReplyAll, onCreateSharedDraft, onForward, onEmailSelection, onCommentOnMessage }: {
+function EmailConversationMessage({ message, companyID, sharedInboxID, accountEmail, fill, expanded, latest, timelineStart, timelineEnd, busy, calendarResponseAvailable, loadingBody = false, selectionNavigation, onToggleExpanded, onLoadBody, onReply, onReplyAll, onEmailSelection }: {
   message: EmailMessage;
   companyID: string;
   sharedInboxID?: string;
@@ -6110,10 +6135,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
   onLoadBody: () => void;
   onReply: (message: EmailMessage) => void;
   onReplyAll: (message: EmailMessage) => void;
-  onCreateSharedDraft: (message: EmailMessage) => void;
-  onForward: (message: EmailMessage) => void;
   onEmailSelection?: (selection: EmailCollaborationSelection) => void;
-  onCommentOnMessage?: (message: EmailMessage) => void;
 }) {
   const allAttachments = React.useMemo(
     () => (message.attachments ?? []).filter((attachment) => emailAttachmentFileName(attachment) || emailAttachmentHasResolvableContent(attachment)),
@@ -6197,33 +6219,6 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
               )}
             </span>
           </button>
-          {onCommentOnMessage && (
-            <button
-              type="button"
-              disabled={busy}
-              title="Chat about this email message"
-              aria-label={`Chat about message from ${formatAddressList(message.from) || "Unknown sender"}`}
-              onClick={() => onCommentOnMessage(message)}
-              style={{ ...mailPanelSmallButtonStyle, minWidth: 32, minHeight: 30, display: "grid", placeItems: "center", padding: "0 8px" }}
-            >
-              <ChatIcon color="rgba(71,85,105,0.85)" />
-            </button>
-          )}
-          <details data-email-message-actions="true" style={{ position: "relative", flex: "0 0 auto" }}>
-            <summary
-              aria-label={`Actions for message from ${formatAddressList(message.from) || "Unknown sender"}`}
-              title="Message actions"
-              style={{ ...mailPanelSmallButtonStyle, minWidth: 32, minHeight: 30, display: "grid", placeItems: "center", padding: "0 8px", listStyle: "none", cursor: "pointer" }}
-            >
-              •••
-            </summary>
-            <div aria-label="Message actions" style={{ position: "absolute", zIndex: 5, top: "calc(100% + 5px)", right: 0, minWidth: 172, display: "grid", gap: 5, padding: 7, border: "1px solid rgba(148,163,184,0.24)", borderRadius: 10, background: "rgba(248,250,252,0.98)", boxShadow: "7px 7px 18px rgba(148,163,184,0.25), -4px -4px 12px rgba(255,255,255,0.9)" }}>
-              <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReply(message)}>Reply</button>
-              <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReplyAll(message)}>Reply all</button>
-              <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onCreateSharedDraft(message)}>Create shared draft</button>
-              <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onForward(message)}>Forward</button>
-            </div>
-          </details>
         </div>
         {expanded && (!bodyLoaded ? (
           <div style={emailBodyLoadingStyle}>
@@ -6292,7 +6287,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
     </article>
   );
 }
-export function MessageDetail({ message, threadMessages = [], nodes, companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, emailNodeDestinationSearch, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onCommentOnMessage, onOpenCollaborationNode, onOpenLogicGate }: {
+export function MessageDetail({ message, threadMessages = [], nodes, companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, chatOpen, emailNodeDestinationSearch, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onToggleEmailChat, onOpenCollaborationNode, onOpenLogicGate }: {
   message: EmailMessage;
   threadMessages?: EmailMessage[];
   nodes: NodeRecord[];
@@ -6305,6 +6300,7 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
   busy: boolean;
   deleteAvailable: boolean;
   chatAvailable: boolean;
+  chatOpen: boolean;
   emailNodeDestinationSearch: React.ReactNode;
   selectionNavigation?: EmailCollaborationNavigation | null;
   onLoadMessageBody: (messageID: string) => Promise<EmailMessage | null>;
@@ -6317,7 +6313,7 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
   onToggleRead: () => void;
   onToggleStar: () => void;
   onEmailSelection?: (selection: EmailCollaborationSelection) => void;
-  onCommentOnMessage?: (message: EmailMessage) => void;
+  onToggleEmailChat: () => void;
   onOpenCollaborationNode?: (message: EmailMessage) => void;
   onOpenLogicGate?: (logicGateID: string) => void;
 }) {
@@ -6441,7 +6437,7 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
         </div>
         {loading && <span style={mutedSmallStyle}>Loading</span>}
       </div>
-      <div style={{ ...toolbarStyle, alignItems: "center", flexWrap: "nowrap", minWidth: 0 }}>
+      <div style={{ ...toolbarStyle, display: "flex", alignItems: "center", flexWrap: "nowrap", minWidth: 0 }}>
         <div className="mango-editor-header-scroll" style={{ minWidth: 0, display: "flex", flexWrap: "nowrap", alignItems: "center", gap: 6, overflowX: "auto", overflowY: "hidden" }}>
           {!singleMessage && (
             <>
@@ -6491,6 +6487,19 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
             </div>
           )}
         </div>
+        {chatAvailable && (
+          <button
+            type="button"
+            data-email-thread-chat-toggle="true"
+            aria-label={chatOpen ? "Close email thread chat" : "Open email thread chat"}
+            title={chatOpen ? "Close email thread chat" : "Open email thread chat"}
+            aria-pressed={chatOpen}
+            onClick={onToggleEmailChat}
+            style={{ ...mailPanelSmallButtonStyle, flex: "0 0 auto", minWidth: 34, minHeight: 32, display: "grid", placeItems: "center", padding: "0 8px", marginLeft: 7 }}
+          >
+            <ChatIcon color={chatOpen ? "#4f46e5" : "rgba(71,85,105,0.88)"} />
+          </button>
+        )}
       </div>
       <div ref={conversationScrollRef} data-email-conversation-scroll="true" data-email-conversation-count={conversationMessages.length} style={bodyContainerStyle}>
         {conversationMessages.map((conversationMessage, index) => (
@@ -6513,10 +6522,7 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
             onLoadBody={() => { void loadConversationMessageBody(conversationMessage); }}
             onReply={(replyMessage) => runMessageAction(replyMessage, onReply)}
             onReplyAll={(replyMessage) => runMessageAction(replyMessage, onReplyAll)}
-            onCreateSharedDraft={(replyMessage) => runMessageAction(replyMessage, onCreateSharedDraft)}
-            onForward={(forwardMessage) => runMessageAction(forwardMessage, onForward)}
             onEmailSelection={onEmailSelection}
-            onCommentOnMessage={onCommentOnMessage}
           />
         ))}
       </div>

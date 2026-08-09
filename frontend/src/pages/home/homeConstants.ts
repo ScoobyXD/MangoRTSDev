@@ -59,4 +59,5 @@ export const INBOX_PRIORITIES: ReadonlyArray<{ value: InboxPriority; label: stri
   { value: 3, label: "3\u00A0\u00A0Tomorrow" },
   { value: 4, label: "4\u00A0\u00A0Sprint (1 week)" },
   { value: 5, label: "5\u00A0\u00A0Later (low priority)" },
+  { value: 0, label: "Not Assigned" },
 ];

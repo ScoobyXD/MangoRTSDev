@@ -1,4 +1,16 @@
-# Process Story: Editor policy status follows the draft automatically
+# Current Editor Business Logic Laws
+
+1. A Node text box is the required owner of every Node chat.
+2. A Node text box may link to one exact email message or one whole stored email thread.
+3. Dropping an exact email message on a Node text box creates the exact typed message/textbox relationship.
+4. Dropping an attached email thread on a Node text box links every stored thread message to that text box.
+5. A text box already linked to one email message or thread rejects a different email drop.
+6. A Node with priority **Not Assigned** may be assigned or moved to a Logic Gate without a priority prompt or error.
+7. New or changed editor business logic is documented as strict numbered laws, not scenarios.
+
+Last updated: 2026-08-08
+
+# Historical Process Story: Editor policy status follows the draft automatically
 
 An authorized user opens RACI or permissions for a Node, Project, or Logic Gate
 ↓

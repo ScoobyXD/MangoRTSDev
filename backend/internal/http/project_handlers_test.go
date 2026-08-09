@@ -114,8 +114,8 @@ func TestProjectScopedNodeCreateRequiresInitialAssignmentLogicGateEditAccess(t *
 	if err := json.Unmarshal(rr.Body.Bytes(), &createPayload); err != nil {
 		t.Fatalf("decode project node create response: %v", err)
 	}
-	if createPayload.Node.Priority == nil || *createPayload.Node.Priority != store.ProjectScopedNodeDefaultPriority {
-		t.Fatalf("created node priority = %+v, want %d", createPayload.Node.Priority, store.ProjectScopedNodeDefaultPriority)
+	if createPayload.Node.Priority != nil {
+		t.Fatalf("created node priority = %+v, want Not Assigned", createPayload.Node.Priority)
 	}
 }
 

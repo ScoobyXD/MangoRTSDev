@@ -1,4 +1,11 @@
-# Process Story: RACI grouping shares the pale Kanban palette
+# Current Updates Priority Laws
+
+1. A null Node priority displays as **Not Assigned** in Updates.
+2. Updates reuses the shared Node priority label and styling instead of inventing a separate missing-priority state.
+
+Last updated: 2026-08-08
+
+# Historical Process Story: RACI grouping shares the pale Kanban palette
 
 An Updates user groups notifications by RACI
 ↓
@@ -102,7 +109,7 @@ U50 - Update row copy keeps the actor first, the specific verb second, and the p
 U51 - Logic Gate IDs and labels remain available for grouping, filtering, resource opening, sorting, and navigation, but are not repeated inside individual Updates row copy. Node rows still name the node; a direct Logic Gate notification uses concise action copy without a per-row Logic Gate chip or label.
 U52 - Update row tone is determined by update type: urgent mentions reserve red with a ! marker, normal mentions reserve orange with an @ marker, new/added/appended actions use blue, changed/updated actions use purple, and deleted/removed actions use dark mellow red.
 U53 - Mention tones override other row tones for the notification sent to the mentioned user: urgent ! mention is highest priority, then normal @ mention, then the underlying chat, editor, field, or attachment action.
-U54 - Status and priority values shown inside update rows must reuse the same shared visual tokens as node status and node priority controls; Updates must not hardcode separate status or priority colors, fonts, icons, or pill styles. Node notifications persist the current Node priority as update context, row/group rendering prefers that stored value, and a missing priority remains No priority rather than being invented as priority zero.
+U54 - Status and priority values shown inside update rows must reuse the same shared visual tokens as node status and node priority controls; Updates must not hardcode separate status or priority colors, fonts, icons, or pill styles. Node notifications persist the current Node priority as update context, row/group rendering prefers that stored value, and a null priority displays as **Not Assigned** rather than being invented as priority zero.
 U55 - Entity icons shown inside update rows must come from a shared app icon registry or equivalent shared token source for nodes, emails, folders, projects, and future reusable entities; Updates must not define local copies of those icons. Logic Gate icons remain shared for grouping headers and other resource surfaces, but U51 excludes them from individual row copy.
 U56 - Assignment and permission tones follow the exact action subtype: newly assigned, newly granted, or newly attached uses blue; changed or updated uses purple; removed or revoked uses dark mellow red.
 U57 - The canonical row wording in the Update Row Copy table is the source of truth for update display text; changing row wording requires updating this file.
@@ -621,7 +628,7 @@ Expected:
 - Every Node-origin mention, chat, and field update uses current effective Node RACI routing and role labels; Logic Gate-only users receive none of those Node updates.
 - The Logic Gate-origin mention uses current effective Logic Gate RACI routing.
 - Only Bob receives the assignment update. Alice, Charlie, unrelated users, and the actor receive no assignment update.
-- Node updates store and display the Node priority. Missing priority stays No priority rather than becoming priority zero.
+- Node updates store and display the Node priority. A null priority displays as **Not Assigned** rather than becoming priority zero.
 - Visibility checks the Node for Node-owned notifications even when the notification also stores a Logic Gate grouping ID.
 
 ### Scenario U-S15: Readable Actors And Editable Seen-History Dates

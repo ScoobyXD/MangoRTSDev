@@ -527,10 +527,6 @@ func writeLogicGateWorkMutationError(w http.ResponseWriter, err error, fallback 
 		writeError(w, http.StatusBadRequest, "invalid_logic_gate_work_assignment")
 		return false
 	}
-	if errors.Is(err, store.ErrPriorityRequired) {
-		writeError(w, http.StatusBadRequest, "priority_required")
-		return false
-	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "logic_gate_work_assignment_not_found")
 		return false

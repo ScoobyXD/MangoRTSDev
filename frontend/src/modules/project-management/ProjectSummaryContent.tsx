@@ -1684,7 +1684,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         accountEmail,
         target,
         messageIDs,
-        priority: 3,
       });
       const nextRelationships = result.project_relationships ?? [];
       if (nextRelationships.length > 0) {

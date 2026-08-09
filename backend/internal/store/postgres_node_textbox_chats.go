@@ -185,45 +185,13 @@ func normalizeNodeTextboxChatPayload(ctx context.Context, tx *sql.Tx, companyID 
 		var canSelect bool
 		if err := tx.QueryRowContext(ctx, `select exists(
   select 1
-  from email_messages message
-  join email_threads thread
-    on thread.company_id=message.company_id
-   and thread.email_thread_id=message.email_thread_id
-  join email_connections connection
-    on connection.company_id=thread.company_id
-   and connection.email_connection_id=thread.email_connection_id
-  where message.company_id=$1::uuid
-    and message.email_message_id=$2::uuid
-    and (
-      (connection.connection_type='personal' and connection.personal_user_id=$3::uuid)
-      or exists (
-        select 1 from shared_inboxes inbox
-        where inbox.company_id=thread.company_id
-          and inbox.company_email_connection_id=thread.email_connection_id
-          and mangorts_user_can_access_resource(
-            $1::uuid,'shared_inbox',inbox.shared_inbox_id,$3::uuid,'edit'
-          )
-      )
-      or exists (
-        select 1
-        from email_relationships relationship
-        where relationship.company_id=message.company_id
-          and relationship.email_message_id=message.email_message_id
-          and relationship.resource_type='node'
-          and relationship.resource_id=$4::uuid
-      )
-      or exists (
-        select 1
-        from node_textbox_chats chat
-        where chat.company_id=message.company_id
-          and chat.node_id=$4::uuid
-          and chat.chat_id=nullif($5,'')::uuid
-          and chat.deleted_timestamp is null
-          and chat.selection_source='email'
-          and chat.selection_email_message_id=message.email_message_id
-      )
-    )
-)`, companyID, selectionEmailMessageID, input.ActorUserID, input.NodeID, cleanUUIDText(input.InformationID)).Scan(&canSelect); err != nil {
+  from email_relationships relationship
+  where relationship.company_id=$1::uuid
+    and relationship.email_message_id=$2::uuid
+    and relationship.resource_type='node'
+    and relationship.resource_id=$3::uuid
+    and relationship.resource_textbox_id=$4::text
+)`, companyID, selectionEmailMessageID, input.NodeID, payload.BlockID).Scan(&canSelect); err != nil {
 			return normalizedNodeTextboxChat{}, err
 		}
 		if !canSelect {

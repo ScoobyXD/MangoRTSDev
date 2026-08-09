@@ -254,12 +254,11 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 			return CommunicationsTriageConversionResult{}, ErrNotFound
 		}
 		nodeID := newUUIDv7String()
-		priority := *input.Priority
 		node := domain.Node{
 			CompanyID:        input.CompanyID,
 			NodeID:           nodeID,
 			Title:            emailNodeTitle(triageItem.Message),
-			Priority:         &priority,
+			Priority:         cloneIntPointer(input.Priority),
 			CreatedTimestamp: now,
 		}
 		r.nodes[key(input.CompanyID, nodeID)] = node
@@ -376,8 +375,9 @@ func (r *MemoryRepo) attachCommunicationsTriageItemsToStandaloneNodeLocked(input
 	if !ok {
 		return CommunicationsTriageConversionResult{}, ErrNotFound
 	}
-	priority := *input.Priority
-	node.Priority = &priority
+	if input.PrioritySet {
+		node.Priority = cloneIntPointer(input.Priority)
+	}
 	r.nodes[key(input.CompanyID, input.NodeID)] = node
 
 	now := time.Now().UTC()
@@ -427,12 +427,11 @@ func (r *MemoryRepo) convertCommunicationsTriageItemsToExplorerTargetLocked(inpu
 			return CommunicationsTriageConversionResult{}, ErrNotFound
 		}
 		nodeID := newUUIDv7String()
-		priority := *input.Priority
 		node := domain.Node{
 			CompanyID:        input.CompanyID,
 			NodeID:           nodeID,
 			Title:            emailNodeTitle(triageItem.Message),
-			Priority:         &priority,
+			Priority:         cloneIntPointer(input.Priority),
 			CreatedTimestamp: now,
 		}
 		r.nodes[key(input.CompanyID, nodeID)] = node
@@ -533,8 +532,9 @@ func (r *MemoryRepo) attachCommunicationsTriageItemsToExistingNodeLocked(input C
 		return CommunicationsTriageConversionResult{}, ErrNotFound
 	}
 
-	priority := *input.Priority
-	node.Priority = &priority
+	if input.PrioritySet {
+		node.Priority = cloneIntPointer(input.Priority)
+	}
 	r.nodes[key(input.CompanyID, input.NodeID)] = node
 	r.syncNodeStatusFromKanbanCardLocked(card)
 

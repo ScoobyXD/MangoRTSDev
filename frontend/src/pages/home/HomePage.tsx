@@ -3415,7 +3415,6 @@ export function HomePage({
           threadID,
           sharedInboxID: sourceSharedInboxID,
           accountEmail: sourceAccountEmail,
-          priority: 3,
         });
       }
       applyEmailCollaborationChange(collaboration);

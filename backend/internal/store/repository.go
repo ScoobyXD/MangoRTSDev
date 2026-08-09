@@ -19,7 +19,6 @@ var (
 	ErrSendInProgress                = errors.New("send in progress")
 	ErrSendRecoveryExpired           = errors.New("send recovery window expired")
 	ErrSendRecoverySourceChanged     = errors.New("send recovery source changed")
-	ErrPriorityRequired              = errors.New("priority required")
 	ErrDirectProjectLogicGate        = errors.New("logic gates cannot be added directly to projects")
 	ErrProjectNodeLogicGateRequired  = errors.New("project nodes must belong to a logic gate")
 	ErrProjectNodeInAnotherProject   = errors.New("node already belongs to another project")

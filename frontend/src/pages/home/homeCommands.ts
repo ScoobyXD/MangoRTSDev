@@ -825,7 +825,7 @@ export async function convertMessagesToExplorerTargetCommand(args: {
   accountEmail?: string;
   target: CommunicationsTriageConversionTarget;
   messageIDs: string[];
-  priority: number;
+  priority?: number;
   convertTriageMessagesToExplorerTarget?: HomeConvertTriageMessagesToExplorerTarget;
   invalidateKanbanBoardList?: typeof defaultInvalidateKanbanBoardListCache;
   invalidateKanbanBoardContents?: HomeKanbanBoardContentsInvalidator;
@@ -841,7 +841,9 @@ export async function convertMessagesToExplorerTargetCommand(args: {
   const messageIDs = cleanIDList(args.messageIDs);
   if (!companyID || messageIDs.length === 0 || !explorerConversionTargetIsValid(args.target)) return null;
 
-  const priority = Number.isInteger(args.priority) && args.priority >= 1 && args.priority <= 5 ? args.priority : 3;
+  const priority = typeof args.priority === "number" && Number.isInteger(args.priority) && args.priority >= 1 && args.priority <= 5
+    ? args.priority
+    : undefined;
   const convertTriageMessagesToExplorerTarget = args.convertTriageMessagesToExplorerTarget ?? defaultConvertTriageMessagesToExplorerTarget;
   const sharedInboxID = args.sharedInboxID?.trim() || undefined;
   const accountEmail = sharedInboxID ? undefined : args.accountEmail?.trim().toLowerCase() || undefined;
@@ -896,7 +898,7 @@ export async function convertMessagesToLogicGateCommand(args: {
   logicGateID: string;
   nodeID?: string;
   messageIDs: string[];
-  priority: number;
+  priority?: number;
   convertTriageMessagesToLogicGate?: HomeConvertTriageMessagesToLogicGate;
   invalidateKanbanBoardList?: typeof defaultInvalidateKanbanBoardListCache;
   invalidateKanbanBoardContents?: HomeKanbanBoardContentsInvalidator;
@@ -913,7 +915,9 @@ export async function convertMessagesToLogicGateCommand(args: {
   const messageIDs = cleanIDList(args.messageIDs);
   if (!logicGateID || messageIDs.length === 0) return null;
 
-  const priority = Number.isInteger(args.priority) && args.priority >= 1 && args.priority <= 5 ? args.priority : 3;
+  const priority = typeof args.priority === "number" && Number.isInteger(args.priority) && args.priority >= 1 && args.priority <= 5
+    ? args.priority
+    : undefined;
   const convertTriageMessagesToLogicGate = args.convertTriageMessagesToLogicGate ?? defaultConvertTriageMessagesToLogicGate;
   const conversionInput: Parameters<HomeConvertTriageMessagesToLogicGate>[0] = {
     companyID: args.companyID,
