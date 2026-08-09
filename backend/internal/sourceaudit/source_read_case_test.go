@@ -20,13 +20,13 @@ func TestSourceReadPathLiteralsMatchGitCase(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
 	backendRoot := filepath.Join(repoRoot, "backend")
 
-	cmd := exec.Command("git", "-C", repoRoot, "ls-files", "backend")
+	cmd := exec.Command("git", "-C", repoRoot, "ls-files", "-z")
 	out, err := cmd.Output()
 	if err != nil {
 		t.Skipf("git ls-files unavailable for source case audit: %v", err)
 	}
 	tracked := map[string]struct{}{}
-	for _, line := range strings.Split(string(out), "\n") {
+	for _, line := range strings.Split(string(out), "\x00") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
