@@ -27,8 +27,12 @@ test("runtime access is exact cache/user connect plus an exact Pub/Sub channel",
   assert.match(valkey, /aws_elasticache_serverless_cache\.realtime\[0\]\.arn/);
   assert.match(valkey, /aws_elasticache_user\.realtime\[0\]\.arn/);
   assert.match(valkey, /variable\s*=\s*"aws:SourceVpc"/);
-  assert.match(valkey, /&\$\{var\.realtime_valkey_channel\}/);
-  assert.match(valkey, /\+cluster\|slots \+cluster\|shards \+publish \+subscribe \+unsubscribe/);
+  assert.match(
+    valkey,
+    /access_string\s*=\s*"on ~\* &\$\{var\.realtime_valkey_channel\} \+@connection \+cluster\|slots \+cluster\|shards \+@pubsub"/,
+  );
+  assert.doesNotMatch(valkey, /\+@all\b/);
+  assert.doesNotMatch(valkey, /\+(?:publish|subscribe|unsubscribe)\b/);
   assert.doesNotMatch(valkey, /password|no-password-required/i);
 });
 
@@ -65,13 +69,18 @@ test("serverless alarms use the required clusterId dimension", () => {
   for (const alarm of [
     "realtime_valkey_no_connections",
     "realtime_valkey_auth_failures",
+    "realtime_valkey_command_authorization_failures",
     "realtime_valkey_write_latency",
     "realtime_valkey_throttled",
     "realtime_valkey_ecpu_capacity",
   ]) {
     assert.match(valkey, new RegExp(`resource "aws_cloudwatch_metric_alarm" "${alarm}"`));
   }
-  assert.equal((valkey.match(/clusterId\s*=\s*aws_elasticache_serverless_cache\.realtime\[0\]\.name/g) ?? []).length, 5);
+  assert.match(
+    valkey,
+    /resource "aws_cloudwatch_metric_alarm" "realtime_valkey_command_authorization_failures"\s*\{[\s\S]*?count\s*=\s*var\.realtime_valkey_enabled \? 1 : 0[\s\S]*?metric_name\s*=\s*"CommandAuthorizationFailures"[\s\S]*?alarm_actions\s*=\s*var\.realtime_valkey_alarm_action_arns[\s\S]*?clusterId\s*=\s*aws_elasticache_serverless_cache\.realtime\[0\]\.name[\s\S]*?\n\}/,
+  );
+  assert.equal((valkey.match(/clusterId\s*=\s*aws_elasticache_serverless_cache\.realtime\[0\]\.name/g) ?? []).length, 6);
 });
 
 test("the dev root enables and wires the backplane explicitly", () => {

@@ -40,7 +40,7 @@ resource "aws_elasticache_user" "realtime" {
   user_id       = local.realtime_valkey_user_name
   user_name     = local.realtime_valkey_user_name
   engine        = "valkey"
-  access_string = "on ~* &${var.realtime_valkey_channel} +@connection +cluster|slots +cluster|shards +publish +subscribe +unsubscribe"
+  access_string = "on ~* &${var.realtime_valkey_channel} +@connection +cluster|slots +cluster|shards +@pubsub"
 
   authentication_mode {
     type = "iam"
@@ -142,6 +142,27 @@ resource "aws_cloudwatch_metric_alarm" "realtime_valkey_auth_failures" {
   alarm_description   = "Valkey rejected one or more authentication attempts."
   namespace           = "AWS/ElastiCache"
   metric_name         = "AuthenticationFailures"
+  statistic           = "Sum"
+  period              = 60
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = var.realtime_valkey_alarm_action_arns
+
+  dimensions = {
+    clusterId = aws_elasticache_serverless_cache.realtime[0].name
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "realtime_valkey_command_authorization_failures" {
+  count = var.realtime_valkey_enabled ? 1 : 0
+
+  alarm_name          = "${local.name_prefix}-realtime-valkey-command-authorization-failures"
+  alarm_description   = "Valkey rejected one or more commands that the realtime user was not authorized to run."
+  namespace           = "AWS/ElastiCache"
+  metric_name         = "CommandAuthorizationFailures"
   statistic           = "Sum"
   period              = 60
   evaluation_periods  = 1
