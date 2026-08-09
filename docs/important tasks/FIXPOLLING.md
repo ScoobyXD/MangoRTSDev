@@ -1,764 +1,585 @@
-# Process Story: Mango reacts to real work instead of continuously asking whether work exists
+# Process Story: Mango reacts to events instead of continuously polling
 
-A user pauses typing and Mango commits the editor save through authenticated HTTP
-
-↓
-
-The durable database transaction finishes first and records one small realtime event
+A user pauses typing and Mango saves the committed editor change through authenticated HTTP
 
 ↓
 
-Valkey immediately tells every running API backend about that committed event
+PostgreSQL stores the durable business change and its small realtime outbox event
 
 ↓
 
-Each backend sends the hint only to its own authorized browsers subscribed to that exact editor
+Valkey immediately announces that committed event to every running API task
 
 ↓
 
-Separately, Nylas sends Mango a verified webhook when a mailbox changes
+Each API task sends the hint only to its own authorized browsers subscribed to that exact editor
 
 ↓
 
-Mango places one exact, small email job onto SQS and quickly acknowledges Nylas
+Separately, Nylas sends Mango a verified webhook when an exact connected mailbox changes
 
 ↓
 
-One bounded email worker downloads the exact affected message or thread and saves it durably
+Mango places one small exact-account job onto SQS and acknowledges Nylas only after SQS accepts it
 
 ↓
 
-Rare bounded reconciliation repairs a missed notification without returning to hot database or provider polling
+One worker downloads one bounded unit of email work and saves the durable result in PostgreSQL
 
-Last updated: 2026-08-08
+↓
+
+Success deletes the SQS message; temporary failure is delivered again by AWS at most twice; permanent account failure parks only that exact connection
+
+↓
+
+One rare bounded reconciliation signal repairs a missed webhook without restoring hot database or Nylas polling
+
+Last updated: 2026-08-09
 
 # Fix Polling
 
-Status: Approved implementation plan. This file records the incident, the current behavior, the chosen architecture, the rollout order, and the tests required before the work is complete. It does not itself change runtime behavior or AWS resources.
+## Current status
+
+- **DEV Valkey realtime replacement: complete, merged, deployed, and live-verified.**
+- **The 75 ms PostgreSQL realtime polling loop is gone in DEV.**
+- **The first SQS implementation attempt was rejected and abandoned.** It must not be merged, copied, or used as the starting point for the replacement.
+- **The replacement SQS implementation must start from current `main` and follow the simpler design in this document.**
+- **Production is out of scope.** Nothing in this task authorizes production infrastructure, deployment, database, Nylas, or secret changes.
+
+The abandoned SQS worktree was:
+
+```text
+Worktree: C:\Users\Jonat\.codex\worktrees\01ce\MangoRTSDev
+Branch: codex/implementing-dev-sqs-email-worker0000726
+Last committed candidate: 7737ed0f260028182b9abc98c8cd6c315fc7c761
+Final state: dirty, incomplete, unverified, archived, and never merged or deployed
+```
 
 ## Executive decision
 
-Mango currently uses PostgreSQL as both the durable source of truth and a high-frequency signaling system. It also uses repeated Nylas and PostgreSQL scans to discover email work that the existing webhook path can already announce. Multiple ECS backend tasks multiply all of these loops.
+Mango uses three services for three separate jobs:
 
-The replacement is deliberately simple:
+| Need | Owner | Simple rule |
+| --- | --- | --- |
+| Durable product data and idempotency | PostgreSQL | Store committed truth and the latest attempt/result; do not act as a hot queue |
+| Tell every API task about one committed realtime event | Valkey Pub/Sub | Broadcast a small hint; PostgreSQL remains authoritative |
+| Give one email job to one worker | AWS SQS FIFO | SQS owns delivery, retries, visibility, and the dead-letter queue |
+
+The email path is deliberately small:
+
+```text
+Nylas webhook
+  -> Mango API verifies and resolves the exact permanent connection
+  -> SQS FIFO job
+  -> one private ECS email worker
+  -> exact Nylas read or mutation
+  -> PostgreSQL durable result
+  -> post-commit Valkey mailbox hint when needed
+```
+
+Mango must not build a second queue inside PostgreSQL. It must not synchronize an SQS receipt with a database ownership lease. It must not extend SQS visibility with heartbeats. It must not invent its own retry scheduler.
+
+## What caused the emergency
+
+On 2026-08-08, the DEV Aurora PostgreSQL database was observed at approximately 100% CPU utilization per ACU while ACU utilization was also at 100%.
+
+The primary measured cause was the realtime outbox loop:
+
+- every backend process queried `realtime_outbox` every 75 ms;
+- one loop produced approximately 13.33 queries per second;
+- the observed table scan rate was approximately 40.15 sequential scans per second, consistent with three live backend processes;
+- `realtime_outbox` contained approximately 114,600 rows;
+- PostgreSQL statistics showed approximately 66.9 million sequential scans and approximately 4.19 trillion tuples read;
+- the database was committing roughly 100 transactions per second during the saturated period.
+
+The email system added separate unnecessary pressure:
+
+- every API task scanned connected email accounts every 30 seconds;
+- every API task asked PostgreSQL for ingestion jobs every 250 ms;
+- the archive worker also asked PostgreSQL for work every 250 ms;
+- adding API tasks multiplied those loops;
+- two permanently broken Nylas connections remained marked `connected`, causing the same provider failures every 30 seconds.
+
+Valkey removed the primary realtime load. SQS must remove the remaining email polling without introducing another ownership system.
+
+## Valkey result: completed and verified
+
+### Final design
 
 - PostgreSQL remains the durable source of truth.
-- Valkey becomes the cross-backend realtime announcement system.
-- SQS becomes the email work queue.
-- Nylas webhooks become the normal new-email trigger.
-- EventBridge Scheduler creates one rare email reconciliation signal approximately every 10 minutes.
-- Indexed, bounded database recovery remains as a safety net, never as a hot normal path.
-- Permanent provider failures change connection status and stop retrying.
-- Existing typed editor, permission, email-connection, email-message, and email-relationship identities remain authoritative.
+- The product transaction commits first and records a compact realtime outbox event.
+- Request handling only durably enqueues/wakes publication; it does not wait several seconds for Valkey.
+- A background publisher sends the compact event to the exact Valkey channel.
+- Every API task subscribes and uses its existing local authorization and WebSocket registry.
+- Recovery runs on startup, reconnect, or a detected gap through bounded indexed PostgreSQL reads.
+- Idle API tasks do not poll PostgreSQL every 75 ms.
+- If Valkey is unavailable, product saves remain durable and realtime hints recover later.
 
-Valkey and SQS are not interchangeable:
+### DEV infrastructure
 
-| Need | Service | Delivery shape |
-| --- | --- | --- |
-| Tell every API backend that one committed editor/mailbox event exists | Valkey Pub/Sub | Every subscribed backend receives the announcement |
-| Give one email download/archive/reconciliation job to one worker | SQS FIFO | One worker processes the job; other workers do not repeat it |
+- private ElastiCache Serverless Valkey;
+- private DEV VPC subnets;
+- TLS and IAM authentication;
+- security-group ingress only from the ECS API security group on TCP 6379-6380;
+- exact channel authorization using `+@pubsub`, without `+@all` or unrestricted key commands;
+- exact runtime `elasticache:Connect` permissions;
+- connection, authorization-failure, capacity, and command monitoring;
+- no production resources and no database-schema change.
 
-## Incident summary
+### Live verification
 
-On 2026-08-08, the development Aurora PostgreSQL database was observed at approximately 100% CPU utilization per ACU while ACU utilization was also at 100%. The supplied CloudWatch view showed sustained CPU saturation beginning around August 5, elevated database connections, frequent commits, and intermittent active/blocked transaction spikes.
+The corrected Valkey deployment completed on DEV ECS task definition revision 181.
 
-The strongest measured database evidence points to the realtime outbox loop as the primary continuous load source:
+After the old 75 ms tasks drained:
 
-- `realtime_outbox` contained approximately 114,600 rows during the read-only sample.
-- PostgreSQL statistics showed approximately 66.9 million sequential scans and approximately 4.19 trillion tuples read from that table since the relevant statistics reset.
-- The current scan rate was approximately 40.15 sequential scans per second.
-- One 75 ms loop produces about 13.33 polls per second. The observed 40.15 rate is almost exactly three loops.
-- That implies approximately three live backend processes at the sample time, even though Terraform requests two steady-state tasks. A rolling ECS deployment or live override can temporarily create a third task.
-- The database was also committing roughly 100 transactions per second in the observed window, consistent with background loops generating work even when user activity was low.
+- RDS CPU fell from approximately 100% to approximately 27%;
+- ACU utilization fell from approximately 100% to approximately 75%;
+- commit throughput fell from approximately 97-100 per second to approximately 25 per second;
+- database connections stabilized around 8;
+- the old realtime polling query disappeared from the latest Performance Insights window;
+- Valkey Pub/Sub commands appeared normally;
+- command authorization failures were zero for consecutive complete minutes;
+- channel authorization failures remained zero;
+- no subscriber reconnect storm, panic, or fatal log appeared from the corrected revision.
 
-The email loops add avoidable provider and database pressure, amplify with backend count, and contain a permanent-error retry bug. The investigation did not prove that email polling alone caused the 100% CPU condition. It is a separate confirmed design problem that must also be removed.
+This proves that the 75 ms realtime polling loop was the main continuous RDS CPU driver. The remaining email scanner is smaller but still wasteful and incorrect.
 
-The original report of roughly 12-second regular-user Node loads may be amplified by the saturated database. The Node endpoints still require separate performance verification after database pressure is removed:
+### Valkey lessons retained
 
-- `GET /v1/nodes` lists all visible Nodes and may perform company-wide permission work.
-- `GET /v1/nodes/{id}` loads one Node and filters its relationships.
+- The ALB distributes requests and WebSocket upgrades; it does not relay application events between ECS tasks.
+- WebSockets remain attached to the task that accepted them.
+- Valkey is a cross-task announcement system, not storage.
+- A durable save must never wait on Valkey availability.
+- Realtime admission must remain unavailable until recovery/subscription state is safe.
+- Recovery queries must have deadlines, fixed limits, indexed ordering, and no cursor-zero history replay.
+- Deployed DEV must fail closed when required PostgreSQL or Valkey configuration is absent.
 
-Valkey and SQS do not excuse inefficient Node permission queries. They first remove the constant background competition so endpoint-specific profiling becomes trustworthy.
+## The email problem that remains
 
-## Current AWS request shape
+### Hot polling to remove
 
-The repository's intended deployment is:
+The replacement must remove, not preserve:
 
-```text
-Browser
-  -> CloudFront
-  -> Application Load Balancer
-  -> one of the ECS Fargate API tasks
-```
+- the per-API 30-second connected-account Nylas scanner;
+- the per-API 250 ms ingestion-job claim loop;
+- the per-API 250 ms archive-job claim loop;
+- wake channels used only to interrupt those loops;
+- any fallback that restarts those polling loops when SQS is unavailable.
 
-The repository configuration is appropriate for load balancing:
+The safe failure mode is a visible SQS backlog and an alarm, not a provider or database retry storm.
 
-- Dev and production both request two backend tasks.
-- The ALB target group uses IP targets, which is correct for Fargate `awsvpc` networking.
-- The ALB checks `/healthz`.
-- ECS tasks are private and accept application traffic only from the ALB security group.
-- CloudFront forwards `/v1/*` and `/v2/*` to the ALB without API caching.
-- The realtime WebSocket is `/v1/realtime/ws`.
-- The backend sends a WebSocket ping every 25 seconds, below the ALB's 60-second default idle timeout.
+### Known broken connections
 
-AWS service responsibilities are different:
-
-- ECS starts, replaces, and maintains the requested number of backend tasks.
-- The ALB chooses a healthy task for each HTTP request or WebSocket upgrade.
-- A WebSocket remains attached to the task that accepted it.
-- The ALB does not relay application events between tasks.
-- Backend A and backend B are not different programs. They are separate running copies of the same Mango backend image with separate in-memory WebSocket registries.
-
-The cross-task delivery problem is therefore an application backplane problem, not an ALB misconfiguration. Cookie stickiness would not solve it because two different users viewing the same editor can still be attached to different tasks.
-
-Live AWS ECS desired/running counts, deployment state, target health, and live ALB attributes were not verified during the investigation because the designated read-only AWS agent profile was unavailable. Human/admin AWS profiles were intentionally not used.
-
-## Confirmed realtime polling problem
-
-### Current code path
-
-`backend/internal/http/realtime_spine.go` defines:
-
-- a 75 ms default poll interval;
-- one realtime spine per backend process;
-- an immediate flush after local wake signals;
-- a database claim of unpublished outbox rows;
-- a database read of published rows after each process's cursor;
-- local delivery through that process's own in-memory WebSocket subscription registry.
-
-Every backend process therefore asks PostgreSQL for outbox state approximately 13.33 times per second. Two steady tasks create approximately 26.67 loops per second. Three tasks create approximately 40 loops per second.
-
-This polling was introduced to solve a real correctness problem: a save handled by backend A must reach a WebSocket connected to backend B. The problem is valid. The database polling implementation is not.
-
-### Expensive query
-
-`backend/internal/store/postgres_realtime_outbox.go` currently finds the contiguous published boundary with this shape:
-
-```sql
-select coalesce(
-  min(outbox_sequence) filter (where published_timestamp is null) - 1,
-  max(outbox_sequence),
-  0
-)
-from realtime_outbox;
-```
-
-That aggregate appears in both the current-sequence read and the published-events query. PostgreSQL can repeatedly inspect the growing table instead of performing one tiny bounded lookup. Running it every 75 ms from every backend makes its cost grow with both history and backend count.
-
-### Relevant Git history
-
-- `eb4b56f9f7024cf969368e96025a4d1ab4ee9a33` (`Implement automatic email ingestion`, 2026-08-06) introduced the current automatic email ingestion system and its scanner/worker loops.
-- `3a8dda0d9cdd10fb7049894bb0e9014efcd5c11c` (`Fix realtime outbox polling database load`, 2026-08-07) replaced the full aggregate with bounded ordered probes and added a regression test.
-- `0d3073d385a3496a43a4962f1760c845cc3bfd75` reverted that fix shortly afterward on the branch where those commits existed.
-- Neither the fix nor its revert is an ancestor of this task's starting HEAD. The current code nevertheless contains the original aggregate query and does not contain the bounded-query regression test.
-
-The bounded indexed query is a valid emergency mitigation and a required property of any recovery path. It is not the final architecture because even a cheap query should not execute every 75 ms on every idle backend.
-
-### Request cancellation issue
-
-The realtime outbox repository uses `context.Background()` for normal enqueue, claim, mark, cursor, and event-list database calls. The spine itself is correctly given a server-lifecycle cancellation context, but that context is not propagated into these repository calls.
-
-Consequences:
-
-- Shutting down the server cannot promptly cancel an in-flight outbox query.
-- A slow query can continue consuming PostgreSQL resources after the caller no longer needs it.
-- The same pattern is dangerous when used in request-owned work because browser cancellation cannot reach PostgreSQL.
-
-The implementation must pass the real worker or request context through the repository boundary. `context.Background()` remains appropriate only when deliberately creating the top-level server lifecycle context.
-
-## Confirmed email polling problems
-
-### Current connection scanner
-
-`backend/internal/http/communications_email_thread_download_worker.go` currently starts two loops inside every API backend:
-
-- an email connection scanner every 30 seconds;
-- an email download-job database poll every 250 ms.
-
-Every 30 seconds, every backend process:
-
-1. reads all connections whose Mango status is `connected`;
-2. calls Nylas `ListFolders` for each connection;
-3. identifies Inbox;
-4. calls paginated Nylas `ListMessages` with a five-minute overlap;
-5. writes durable ingestion jobs for discovered messages;
-6. advances the scan checkpoint only after successful discovery.
-
-This design multiplies Nylas calls and database work by backend count. Existing uniqueness constraints prevent many duplicate final rows, but uniqueness does not make repeated discovery free.
-
-### Current download worker
-
-Every 250 ms, every API backend calls the database to claim a small batch of email download jobs. This loop is not checking download progress for the browser. It is using PostgreSQL as a queue and repeatedly asking whether work exists.
-
-The worker's actual download and persistence rules are valuable and should be preserved. The hot database polling used to find work should be removed.
-
-The communications archive worker has the same 250 ms database-queue pattern. It should move to the same SQS worker boundary, using a distinct job kind and the existing durable archive job rows for status.
-
-### Mango already has the webhook fast path
-
-Mango already exposes and protects `/nylas/webhook`:
-
-- CloudFront and WAF route it to the backend.
-- The handler verifies the Nylas HMAC signature.
-- It understands `message.created`, `message.updated`, `message.deleted`, folder events, `message.opened`, `grant.expired`, and `grant.updated`.
-- A `message.created` event already ensures one durable ingestion job for the exact Mango connection/message and wakes the local worker.
-
-The system therefore already has an event-driven foundation. The 30-second scanner is a reliability fallback running as if it were the primary path.
-
-The current webhook duplicate receipt cache is in process memory, has a two-minute TTL, and is not shared across ECS tasks. Durable job/message uniqueness already provides the important final idempotency. SQS FIFO deduplication will reduce immediate duplicate work, but the worker must remain idempotent because Nylas and SQS both permit redelivery.
-
-### Broken connection retry loop
-
-Two user-reported connection failures repeated every 30 seconds:
+The supplied repeating failures were:
 
 ```text
-company_id=11111111-1111-1111-1111-111111111111
 connection_id=6c54ac7d-6dc8-dbee-e614-a0e2d8c7cd8a
-nylas_api_404_grant.not_found: No Grant found for this Grant ID.
+404 grant.not_found
 ```
 
 ```text
-company_id=11111111-1111-1111-1111-111111111111
 connection_id=0aae6e73-48bd-7022-1cfb-768e2246019d
-nylas_api_400_general_error: Google Workspace/Gmail API precondition check failed.
+400 Google Workspace/Gmail API precondition failure
 ```
 
-Reported connection interpretation:
+Required behavior:
 
-- one Mango connection refers to an old or deleted Nylas grant;
-- one has Google authorization but Gmail is not enabled or correctly configured;
-- Mango still labels both as `connected`;
-- the current normalization stops normal scanning for only a limited set of authentication failures, so these 404 and 400 results never change the status and retry forever.
+- `401`, `403`, or exact `404 grant.not_found`: set only that permanent connection to `reauth_required`, then acknowledge the SQS job;
+- Google/Gmail configuration `400`: set only that permanent connection to `configuration_required`, then acknowledge the SQS job;
+- if the status update fails, do not acknowledge the SQS job;
+- a separate valid grant, including the reported `mangotestxd@gmail.com` grant, must remain untouched;
+- parked connections are excluded from automatic reconciliation until explicitly repaired;
+- reconnect updates the same permanent connection and may enqueue one bounded catch-up.
 
-The Nylas dashboard also showed a separate valid Google grant for `mangotestxd@gmail.com`, Grant ID `60d86c88-5fa4-4ecd-a080-a2364e8b1b2e`, updated August 7, 2026. That valid grant is evidence that the global Nylas application is not uniformly broken. It must not be disconnected or treated as the source of the two failing connection logs. Exact connection-to-grant mapping must be verified with designated read-only database access during implementation without exposing provider credentials.
+## Why the first SQS attempt was abandoned
 
-## Architecture after the fix
+The first implementation did not fail because SQS is inherently complicated. It failed because Mango kept PostgreSQL acting as a second queue owner.
 
-```text
-EDITOR / REALTIME
+The design accumulated:
 
-Browser save over HTTP
-  -> PostgreSQL transaction: business data + durable realtime outbox row
-  -> Valkey publish of a small committed event
-  -> all API backend subscribers receive it
-  -> each backend authorizes and fans out only to its own exact WebSocket subscribers
+- SQS receipt visibility;
+- a separate PostgreSQL processing lease;
+- recurring SQS visibility heartbeats;
+- database lease timing that had to match visibility timing;
+- a separate work deadline and settlement window;
+- worker health tied to heartbeat activity;
+- several FIFO lanes for one connection;
+- batch claims that could leave unprocessed rows marked `processing`;
+- six-attempt retry state split between SQS receive count and PostgreSQL attempt count;
+- ten-minute repair logic capable of recreating exhausted work;
+- a large destructive archive-identity migration unrelated to the minimum SQS cutover;
+- several deployment modes needed mainly because that destructive migration made old and new API images incompatible.
 
-EMAIL INGESTION
+Review correctly found repeated contradictions:
 
-Nylas message.created webhook
-  -> Mango verifies signature and resolves exact permanent email connection
-  -> SQS FIFO email job
-  -> dedicated ECS email worker
-  -> exact Nylas message/thread/attachment reads
-  -> PostgreSQL durable email records and typed relationships
-  -> Valkey mailbox hint after commit
+- SQS could redeliver while PostgreSQL still considered the old worker the owner;
+- a canceled worker could lose the context needed to record failure;
+- visibility-only receives could exhaust the SQS budget without performing real work;
+- repair could recreate work after the dead-letter queue;
+- the health check could kill a valid busy worker;
+- one archive batch could leave many claimed items stuck;
+- the proposed deployment workflow could start an incompatible API during migration.
 
-EMAIL RECOVERY
+The mistake was responding to those findings by adding more timing and recovery machinery. The correct response is to remove the duplicate database queue ownership.
 
-EventBridge Scheduler approximately every 10 minutes
-  -> one SQS reconciliation tick
-  -> worker selects due connected accounts in a bounded batch
-  -> one ordered reconcile job per exact email connection
-  -> checkpointed, paginated, bounded Nylas catch-up
-```
+Nothing from that abandoned implementation is an approved design precedent.
 
-## Valkey implementation plan
+## Final simple SQS decisions
 
-### What Valkey is responsible for
+### AWS owns delivery
 
-Valkey is a fast cross-process announcement system. It is not the source of truth and does not contain editable documents, email bodies, attachments, permissions, or relationships.
+AWS SQS already provides:
 
-The event payload contains only what the existing realtime delivery path needs, such as:
+- durable queue storage;
+- delivery to one consumer;
+- FIFO ordering by message group;
+- duplicate reduction;
+- visibility while one worker processes;
+- automatic redelivery when a message is not deleted;
+- a dead-letter queue after a fixed receive count;
+- encryption and CloudWatch metrics.
 
-- stable event ID;
+Mango uses those features directly.
+
+### Fixed visibility; no heartbeats
+
+- The queue uses one fixed visibility timeout.
+- The starting target is **10 minutes** and must be confirmed against measured worst-case bounded email work before deployment.
+- One worker attempt has a fixed hard deadline of **8 minutes**.
+- Ordinary database settlement calls remain short and must finish before SQS visibility expires.
+- Mango never extends visibility with a heartbeat.
+- Mango never shortens visibility to implement custom backoff.
+- A crash may delay retry until the fixed visibility expires. That delay is accepted because it keeps correctness simple.
+- Normal new email does not wait for the visibility timeout. Work begins immediately; the timeout matters only after a crash or temporary failure.
+
+### No PostgreSQL delivery lease
+
+PostgreSQL stores:
+
+- the stable job/idempotency key;
+- status such as accepted, processing, completed, parked, or exhausted;
+- the number of provider-processing attempts that actually started;
+- safe error category and timestamps;
+- durable email, attachment, archive, and relationship results.
+
+PostgreSQL does **not** store a timer that decides when another worker may receive the SQS message.
+
+The producer creates the tiny stable job row before it sends the compact SQS message. This row is a permanent record that Mango already accepted that exact work identity; it is not a delivery timer. A Nylas request or the currently delivered reconciliation message may retry a failed SQS send using the same identity, but a later reconciliation scan must not create a second job for that identity.
+
+When provider work actually begins, PostgreSQL atomically records a new attempt token. It refuses to start attempt 4. Completion or failure is conditional on the same token, so an old delayed worker cannot overwrite a newer attempt. This is ordinary idempotency, not a second queue lease.
+
+### Three total SQS deliveries
+
+SQS `maxReceiveCount` is **3** for each queued message:
+
+1. first normal attempt;
+2. first automatic retry;
+3. final automatic retry;
+4. then AWS moves the message to the dead-letter queue.
+
+AWS's SQS receive count is the delivery and dead-letter authority. PostgreSQL's counter records only provider-processing attempts that actually started. They are intentionally not claimed to be equal: a worker can crash after SQS delivers a message but before PostgreSQL records an attempt.
+
+- Success deletes the SQS message.
+- An already-completed duplicate deletes the SQS message without repeating provider work.
+- A temporary failure records the safe failure and does not delete the message. SQS redelivers it after the fixed visibility timeout until AWS reaches its receive limit.
+- A third provider-processing attempt records `exhausted`. Atomic attempt start refuses attempt 4 even if a duplicate queue message exists.
+- AWS can move a message to the dead-letter queue with fewer than three recorded database attempts when the worker crashes before attempt start. The stable job row still prevents automatic recreation.
+- If the worker cannot record the final result, it does not delete the SQS message. AWS moves the message to the dead-letter queue, the alarm fires, and deliberate operator review is required.
+- Permanent connection/configuration failures park the exact connection and delete the message.
+- Reconciliation never re-enqueues an existing stable job identity, regardless of whether its last recorded status is accepted, processing, completed, parked, or exhausted. It also refuses any identity whose durable provider-attempt count is already 3.
+- Manual replay from the dead-letter queue is a deliberate operator action after the underlying problem is understood.
+
+There is no custom exponential backoff scheduler. The fixed SQS visibility interval is the retry delay.
+
+### One bounded unit per message
+
+One SQS delivery performs one bounded unit:
+
+- one exact provider message/thread ingestion job;
+- one exact archive item;
+- one exact connection reconciliation page;
+- or one small reconciliation control page.
+
+The worker never pre-claims a large archive batch. A continuation is another small SQS message.
+
+Provider calls occur outside long PostgreSQL transactions. Email bodies, attachment bytes, OAuth tokens, and provider secrets never enter SQS.
+
+### One FIFO group per permanent connection
+
+- Every provider/account work message uses the permanent `email_connection_id` as its message group ID.
+- Different connections can run concurrently.
+- One connection remains ordered.
+- Reconciliation is bounded so it cannot place an unbounded backlog ahead of live work.
+- Do not create foreground/background/mutation ownership lanes for the same connection in the first implementation.
+- The global reconciliation trigger uses one fixed control-only group ID, `reconciliation-control`. It does not perform provider/account work and is not a second ownership lane for any mailbox.
+
+### Minimal message payload
+
+The SQS message contains only safe identifiers and routing facts:
+
+- schema version;
+- job kind;
 - company ID;
-- exact subscription scope;
-- event type;
-- typed resource identity and committed revision;
-- compact hint payload;
-- existing audience restriction metadata when required.
+- permanent email connection ID;
+- stable event or job ID;
+- provider message/thread ID when required;
+- safe timestamps or checkpoint token when required.
 
-### AWS infrastructure
+It does not contain bodies, subjects, recipients, attachments, credentials, provider tokens, secrets, or presigned URLs.
 
-Create AWS-managed ElastiCache Serverless for Valkey with:
+### API acknowledgement rule
 
-- placement in Mango's private VPC/subnets;
-- encryption in transit;
-- encryption at rest where supported/configured;
-- a dedicated security group;
-- inbound access only from the ECS API-task security group on the required Valkey ports;
-- no public endpoint;
-- authentication material managed through AWS, never committed to the repository;
-- least-privilege ECS task permissions;
-- connection, failure, latency, and capacity alarms.
+For a valid Nylas webhook:
 
-The existing Terraform module and the production Terraform layout must both describe the intended resources. Live creation or modification of AWS resources requires the normal explicit deployment approval and environment separation.
+1. verify the signature;
+2. resolve the exact permanent connection;
+3. durably create or find the tiny stable job identity before enqueueing;
+4. send the message to SQS using a short request-derived deadline;
+5. return success only after SQS accepts it.
 
-### Backend connection
+If SQS send fails, return a retryable response so Nylas can retry the same stable identity. The FIFO deduplication ID is that stable identity. A duplicate webhook must independently wait for successful SQS acceptance; one request's failed send must not be hidden by another in-flight receipt cache entry.
 
-Add one maintained Go Valkey/Redis-protocol client dependency. Each API backend process maintains:
+The API does not download provider email inside the webhook request.
 
-- one normal publishing client/pool;
-- one long-lived subscriber connection;
-- automatic reconnect and resubscription with exponential backoff and jitter;
-- a bounded local deduplication window keyed by event ID;
-- clear health and failure metrics that do not expose payloads or secrets.
+## Rare reconciliation
 
-The WebSocket connection registry remains local to each backend. Valkey does not replace it.
+Webhooks are the normal path. Reconciliation is only insurance for a notification that never reached SQS.
 
-### Database-first publication rule
+EventBridge Scheduler sends one control message approximately every 10 minutes. It uses the fixed `reconciliation-control` message group ID. The FIFO work queue has content-based deduplication enabled because Scheduler requires it for a FIFO SQS target.
 
-The durable product transaction remains first:
+Scheduler delivery is deliberately bounded to **2 retries** and a **5-minute maximum event age**. Its own delivery dead-letter queue is a separate encrypted **Standard** SQS queue, because EventBridge Scheduler does not support a FIFO dead-letter queue.
 
-1. validate authorization and the exact typed resource;
-2. commit the editor/chat/notification/mailbox mutation and realtime outbox row in one PostgreSQL transaction;
-3. after commit, publish the exact outbox event to Valkey;
-4. every API backend receives the event and runs the existing local authorization/fan-out path;
-5. mark the outbox event published only after the Valkey publish is accepted;
-6. treat duplicate event delivery as harmless through the stable event ID and committed revision.
+That control message:
 
-No WebSocket message is evidence that a database save succeeded. The initiating HTTP response remains the save acknowledgement.
+1. runs one indexed query for a small page of due `connected` connections;
+2. enqueues at most one bounded reconcile message per exact connection;
+3. continues with another control message only when another page exists;
+4. never scans every account concurrently;
+5. excludes disconnected, parked, `reauth_required`, `configuration_required`, and every already-existing stable job identity, including accepted, processing, completed, or exhausted work;
+6. processes one provider page per SQS delivery;
+7. advances the checkpoint only after the page is durably accepted;
+8. never polls PostgreSQL every few milliseconds and never runs a per-API scheduler.
 
-### Normal typing behavior remains unchanged
+The 10-minute schedule is not a 10-minute delay for normal email. Normal email arrives through the webhook immediately.
 
-- The browser renders typing locally.
-- Ordinary Node and Project editor saving begins after approximately 500 ms of quiet, the existing maximum-delay rule, focus loss, or close.
-- Logic Gate structured operations retain their established micro-batch contract.
-- Writes remain authenticated HTTP commands.
-- Mango never sends every raw keystroke directly through WebSocket or Valkey.
-- Valkey carries only committed change hints.
+## Worker health and scaling
 
-### Recovery without hot polling
+- The worker is a private ECS service outside the ALB.
+- Start with one worker task and small bounded concurrency.
+- ReceiveMessage uses 20-second SQS long polling, so an idle worker does not create another hot polling loop.
+- The worker process exits if required PostgreSQL, SQS, Nylas, or schema configuration is unavailable.
+- ECS replaces an exited essential container.
+- Health is not based on the age of the last completed job or a visibility heartbeat.
+- CloudWatch alarms cover running task count, queue age, visible backlog, and dead-letter count.
+- Queue age is the primary signal for a live-but-stuck worker.
+- Scale only after measured queue age or throughput shows one worker is insufficient.
 
-Valkey Pub/Sub has at-most-once delivery. The existing PostgreSQL outbox therefore remains the durable recovery record.
+## Minimal database and schema rule
 
-Recovery runs only:
+The fresh implementation starts by auditing the current `main` schema and reuses existing durable ingestion/archive job identities where they already satisfy exact typed relationship rules.
 
-- once when an API process starts;
-- after the Valkey subscriber reconnects;
-- after a detected cursor gap;
-- on a rare periodic safety interval, approximately 10 minutes, if still required after failure testing.
+It must not copy the abandoned destructive archive-identity migration merely because it already exists in another worktree.
 
-Every recovery read must:
+Rules:
 
-- use bounded ordered index probes;
-- fetch a fixed maximum batch;
-- continue in bounded batches only while actual backlog exists;
-- stop immediately when caught up;
-- use the real worker cancellation context;
-- never execute the current table-wide `min/max/filter` aggregate;
-- never return to a 75 ms idle ticker.
+- prefer no schema change;
+- if `configuration_required` needs a database check-constraint change, use one small PostgreSQL 17-compatible additive migration and update the canonical schema/UI/Process Stories together;
+- do not add processing-lease, visibility-heartbeat, retry-scheduler, or compatibility columns;
+- do not combine unrelated archive identity cleanup with the SQS cutover;
+- every operator migration requires a read-only preflight and one human-run transaction;
+- agents do not write to a live database.
 
-If Valkey is unavailable, user saves remain durable. Realtime fan-out may be delayed, the outbox remains pending, reconnect uses bounded backoff, and recovery publishes the missing events after service returns.
+## DEV-only implementation and rollout
 
-### What is removed
+The fresh work starts from the new current `main` after this decision record is merged.
 
-After rollout and verification, remove rather than preserve:
-
-- the 75 ms realtime database ticker;
-- the normal-path read of all published events after every idle tick;
-- obsolete interval configuration and tests that assume database polling is the backplane;
-- any compatibility path that silently falls back to hot polling when Valkey is unavailable.
-
-The safe failure mode is delayed realtime with durable saves, not a database retry storm.
-
-## SQS email implementation plan
-
-### What SQS is responsible for
-
-SQS is a durable work queue. A job should be processed by one email worker, not broadcast to every API backend.
-
-Use one FIFO queue for ordered provider work plus one FIFO dead-letter queue. The main queue supports small typed job kinds:
-
-- `webhook_event` for verified Nylas mailbox/grant events;
-- `download_message` for an exact durable ingestion job;
-- `reconcile_connection` for one exact checkpoint catch-up;
-- `archive_messages` for an existing durable archive job;
-- any future provider mutation only after its business contract is documented.
-
-Using one queue and grouping by permanent `email_connection_id` preserves ordering for one mailbox while allowing different mailboxes to run in parallel.
-
-### Queue identity and payload
-
-- SQS message group ID: the permanent Mango `email_connection_id`. The single scheduler control tick uses one fixed control group and creates connection-specific jobs before provider work begins.
-- SQS deduplication ID: stable Nylas webhook ID or stable Mango job/idempotency ID.
-- Internal identity: permanent typed Mango connection ID, never the mutable provider grant ID alone.
-- Payload: job kind and small stable identifiers only.
-- Never include OAuth tokens, Nylas API keys, webhook secrets, message bodies, attachment bytes, presigned URLs, or unnecessary addresses/subjects.
-
-### Webhook fast path
-
-For Nylas `POST /nylas/webhook`:
-
-1. read the raw body within a strict size limit;
-2. verify the HMAC signature before trusting any identifier;
-3. parse the supported event and resolve the exact permanent personal/shared Mango connection;
-4. send one compact FIFO message using the stable provider event ID;
-5. return `200 OK` only after SQS accepts the message;
-6. return `503 Service Unavailable` if SQS cannot accept it so Nylas treats the failure as temporary;
-7. perform no Nylas message/thread/attachment download inside the webhook request.
-
-Nylas requires a quick response, retries selected temporary failures, and provides at-least-once delivery. Worker idempotency is therefore mandatory even with FIFO deduplication.
-
-### Dedicated worker
-
-Run a small ECS email-worker service from the same Mango backend image in an explicit worker mode:
-
-- it is not registered with the ALB;
-- it serves no browser requests or WebSockets;
-- it long-polls SQS using AWS's supported wait behavior;
-- it starts at one ECS task with bounded provider/database concurrency;
-- ECS restarts it if it fails;
-- SQS retains work while it is unavailable;
-- additional worker tasks can be added only when queue-age evidence requires them;
-- FIFO message groups ensure two workers never process the same mailbox concurrently.
-
-SQS long polling is not Mango database or Nylas polling. AWS holds a queue receive request until a message exists or the wait expires. An idle email worker performs no repeated PostgreSQL job claim and no provider mailbox scan.
-
-### Message ingestion work
-
-For `message.created`:
-
-1. load the exact permanent Mango email connection and its current provider grant metadata;
-2. reject cross-company, wrong-scope, missing, disconnected, or unhealthy connection use;
-3. idempotently ensure the existing durable ingestion job;
-4. fetch the exact authoritative Nylas message;
-5. confirm it is at/after the ingestion boundary and in Inbox;
-6. fetch the exact provider thread when existing business rules require thread completion;
-7. download only missing/incomplete messages and attachments;
-8. commit messages and any derived typed Node-wide email relationships under existing relationship laws;
-9. mark the durable Mango job complete;
-10. publish a compact mailbox/realtime hint through Valkey only after commit;
-11. delete the SQS message only after successful completion.
-
-The existing `email_connection_id` remains the permanent identity. Reauthentication can replace grant metadata without rewriting queued jobs or relationships.
-
-### Archive work
-
-Existing browser archive commands continue to create durable archive job/job-item rows before returning Accepted. After commit they send one `archive_messages` SQS message containing only the stable job identity.
-
-The email worker performs the existing provider mutation and writes final durable job-item state. The API backend no longer checks the archive job table every 250 ms. Browser-visible status remains a canonical read of the durable archive job when that surface needs it.
-
-### Bounded retries and connection status
-
-Provider outcomes must be classified before retrying:
-
-| Provider outcome | Mango action | Automatic retry |
-| --- | --- | --- |
-| `401` or `403` authentication/authorization failure | Set the exact connection to `reauth_required`; preserve stored mail/checkpoint/jobs | No repeated provider calls until reauthentication |
-| `404 grant.not_found` | Set the exact connection to `reauth_required`; preserve stored data and show that the provider grant is missing | No |
-| Gmail/Workspace `400` precondition or configuration failure | Set the exact connection to `configuration_required`; show repair guidance | No |
-| Explicit `grant.expired` webhook | Set `reauth_required` | No |
-| Valid `grant.updated`/successful reconnect | Return the same permanent connection to `connected` and enqueue one reconcile job | Not applicable |
-| `429` rate limit | Honor `Retry-After` when present | Yes, bounded |
-| Provider `5xx`, timeout, or temporary network failure | Keep the job available with increasing delay and jitter | Yes, bounded |
-| Invalid Mango identity, cross-company scope, or malformed job | Record terminal safe failure | No |
-
-Temporary retry policy must be finite. The intended simple schedule is an immediate attempt followed by increasing delays, capped at a small fixed attempt count. Exhausted work moves to the dead-letter queue and raises an alarm. It does not silently loop forever.
-
-If `configuration_required` is not an existing allowed database status, the implementation must add one deliberate PostgreSQL 17-compatible migration, canonical schema change, UI state, and Process Story update. It must not overload Mango `401` or log the user out for a provider configuration problem.
-
-### Rare reconciliation
-
-Webhooks remain the normal path, but a rare checkpoint catch-up is required because webhook endpoints can fail or be unavailable and Nylas does not promise historical backfill while a webhook is inactive.
-
-Use one EventBridge Scheduler rule at approximately 10-minute cadence:
-
-1. EventBridge places one reconciliation tick onto SQS.
-2. One email worker runs one indexed database query for connected accounts whose checkpoint is due.
-3. It creates at most one FIFO `reconcile_connection` job per due exact connection.
-4. Work is staggered and bounded so accounts do not hit Nylas or PostgreSQL simultaneously.
-5. Each connection scans only after `last_successful_scan_at` minus the existing small overlap and at/before its scan start.
-6. Pagination, pages, messages, provider concurrency, and total runtime are capped.
-7. The checkpoint advances only after every discovered identity is durably accepted.
-8. Broken, disconnected, `reauth_required`, and `configuration_required` connections are excluded.
-
-Initial activation, explicit reconnect, and a deliberate user repair action may enqueue one immediate connection reconciliation. They do not run downloads inside OAuth or browser requests.
-
-### What is removed
-
-After rollout and verification, remove rather than preserve:
-
-- the per-backend 30-second connected-account scanner;
-- the per-backend 250 ms email ingestion job database poll;
-- the per-backend 250 ms communications archive job database poll;
-- wake channels whose only purpose was to interrupt those tickers;
-- the rule allowing every backend instance to scan the same connection;
-- infinite or status-blind retry behavior for permanent 400/404 failures;
-- any compatibility path that silently restarts hot database polling when SQS is unavailable.
-
-The safe failure mode is queued/delayed email work, visible queue age, and an alarm—not a retry storm.
-
-## Existing contracts that implementation must update
-
-This plan intentionally changes business logic currently recorded elsewhere. Implementation is incomplete until the relevant Process Stories and numbered laws are updated in the same change.
-
-At minimum review and update:
-
-- `docs/tests/REST API & WebSocket.md` for Valkey cross-worker publication, recovery, failure, and removal of hot database polling;
-- `docs/tests/editor.md` only where committed realtime delivery/recovery wording changes; autosave timing and HTTP ownership remain unchanged;
-- `docs/important tasks/v3 emailtonode.md`, especially the explicit SQS exclusion and E2N40-E2N53 scanner/reconnect rules;
-- `docs/tests/email.md` for webhook receipt, provider error, and mailbox realtime behavior;
-- `docs/tests/my-triage.md` and `docs/tests/shared-triage.md` for SQS-backed durable archive work if archive polling is migrated;
-- `docs/tests/relationships.md` before changing any email connection, message, attachment, or Node relationship behavior.
-
-The implementation must not create:
-
-- a central resource registry;
-- an untyped generic relationship;
-- a translated/surrogate resource identity;
-- a second provider grant as the Mango connection identity;
-- a compatibility layer that preserves obsolete polling.
-
-## Implementation order
-
-Valkey and SQS must be separate reviewable commits and separate production rollouts. They must not be one giant deployment.
-
-### Phase 0: Baseline and emergency protection
-
-- Capture RDS CPU/ACU, sessions, commits, top SQL, `realtime_outbox` scan rate, and table/index statistics using designated read-only access.
-- Capture current ECS desired/running task count and deployment state through designated read-only AWS access.
-- Confirm the current Nylas webhook subscriptions and states without modifying them.
-- Recreate and verify the bounded-index realtime query test from the reverted fix as emergency protection if RDS remains saturated before Valkey is ready.
-- Do not treat increased ACU capacity as the architectural fix.
-- Do not modify live AWS, RDS, Nylas, or connection status without the required approval.
-
-### Phase 1: Valkey infrastructure and backend support
-
-- Add private ElastiCache Serverless Valkey Terraform, security, IAM/configuration, and alarms.
-- Add the Go client and server lifecycle handling.
-- Publish committed outbox events and subscribe every API task.
-- Reuse exact local authorization and WebSocket fan-out.
-- Add startup/reconnect/gap recovery using bounded indexed reads.
-- Add unit, integration, multi-instance, failure, and query-budget tests.
-- Update the realtime/editor Process Stories.
-
-### Phase 2: Valkey rollout
-
-- Create Valkey first without changing production traffic.
-- Verify network/TLS/authentication from an approved non-user-facing task.
-- Deploy API tasks through the normal ECS rolling deployment.
-- Verify a save handled by one task reaches a WebSocket on another task.
-- Verify database scan rate and CPU fall.
-- Verify a Valkey interruption delays hints but never loses durable saves.
-- Remove the old 75 ms path after all running tasks use Valkey.
-
-### Phase 3: SQS infrastructure and email worker
-
-- Add FIFO queue, dead-letter queue, encryption, least-privilege IAM, queue policy, retention, visibility timeout, and alarms.
-- Add EventBridge Scheduler's rare reconciliation tick.
-- Add the explicit ECS email-worker mode/service using the same image.
-- Change verified webhooks and durable manual jobs to publish small SQS messages.
-- Move ingestion and archive job execution behind the SQS worker.
-- Implement permanent/transient provider error classification.
-- Update the email/triage Process Stories.
-
-### Phase 4: SQS rollout
-
-- Confirm Nylas webhook triggers include required message and grant events.
-- Deploy the queue and worker before removing any old path.
-- Send official Nylas test events and verify deduplication.
-- Verify real message ingestion for personal and shared connections.
-- Verify one repaired/reconnected mailbox performs one bounded catch-up.
-- Verify the known 400/404 cases change status once and stop.
-- Verify queue age, worker concurrency, provider calls, and database load.
-- Remove the 30-second and 250 ms loops after the queue path is healthy.
-
-### Phase 5: Soak and cleanup
-
-- Soak across normal traffic, an ECS rolling deployment, a backend restart, a Valkey reconnect, and an email-worker restart.
-- Confirm no old ticker, interval, environment variable, wake channel, or test preserves the retired design.
-- Confirm dead-letter queues are empty or every entry is understood.
-- Confirm CloudWatch alarms and operational runbooks name safe remediation steps.
-- Run the complete repository verification gate.
-
-## Required realtime tests
-
-### Correctness
-
-- A committed editor save handled by API task A reaches an authorized browser whose WebSocket is attached to task B.
-- An unauthorized user or wrong-company subscriber receives nothing.
-- Only the exact Node, Project, Logic Gate, mailbox, notification, or board subscription receives its event.
-- No event is published before the database transaction commits.
-- A rolled-back transaction publishes nothing.
-- Duplicate Valkey delivery does not duplicate an operation or canonical refresh.
-- WebSocket ticket issuance on one task and upgrade on another remains valid.
-- Ordinary typing remains local and uses the existing save batching, not per-keystroke messages.
-
-### Failure and recovery
-
-- Valkey unavailable before publish: save succeeds, outbox remains recoverable, retry backs off.
-- API process dies after database commit and before Valkey publish: recovery publishes the event.
-- Subscriber disconnects during publication: reconnect recovery fills the gap.
-- API process restarts: it resumes from the correct durable cursor.
-- Valkey delivers a duplicate after uncertainty: event ID/revision deduplication is harmless.
-- Recovery respects cancellation and shuts down promptly.
-
-### Performance
-
-- An idle API backend executes no 75 ms outbox query.
-- Two, three, or four API tasks do not multiply idle PostgreSQL scans.
-- Recovery queries use the intended indexes and fixed limits under realistic outbox history.
-- No table-wide outbox aggregate appears in the hot or recovery path.
-- Commit-to-fan-out latency remains within the existing realtime target.
-
-## Required email tests
-
-### Webhook and queue
-
-- Valid signature plus `message.created` produces one FIFO job and returns promptly.
-- Invalid signature produces no job.
-- Duplicate Nylas webhook IDs and later duplicate provider events converge safely.
-- SQS send failure returns a retryable webhook response and creates no false success.
-- Oversized/truncated Nylas notifications enqueue identifiers and fetch canonical provider state in the worker.
-- Personal and shared connection resolution remains exact and company-scoped.
-
-### Worker correctness
-
-- One job is processed by one worker.
-- Different connection groups can progress concurrently; one connection remains ordered.
-- A worker crash before SQS delete causes safe redelivery.
-- A completed durable message, attachment, or relationship is not duplicated.
-- Provider calls occur outside long database transactions.
-- Email bodies and attachment bytes never enter SQS or logs.
-- Archive Accepted state remains durable and separate from confirmed provider completion.
-
-### Error handling
-
-- `401` and `403` set `reauth_required` and stop provider retry.
-- `404 grant.not_found` changes the exact broken connection status and stops.
-- Gmail/Workspace `400` precondition changes to `configuration_required` and stops.
-- A valid unrelated grant remains connected.
-- `429` honors the provider delay and remains bounded.
-- Temporary `5xx`/network failures retry with increasing delay, then enter the dead-letter queue.
-- A dead-letter entry raises an alarm and contains only safe identifiers/categories.
-- Repair/reconnect updates the same permanent connection and enqueues one reconciliation job.
-
-### Polling removal and reconciliation
-
-- No API backend lists all connected accounts every 30 seconds.
-- No API backend claims email download or archive jobs every 250 ms.
-- EventBridge produces one rare reconciliation tick.
-- Reconciliation excludes non-connected accounts, caps account/page/message/provider concurrency, and advances checkpoints only after durable acceptance.
-- Multiple ECS API tasks do not multiply reconciliation.
-- A missed webhook is eventually recovered without duplicate durable messages.
+### Stage 1: implementation and offline verification
+
+- implement the smallest end-to-end webhook -> SQS -> worker -> PostgreSQL path;
+- add the DEV queue, FIFO dead-letter queue, encryption, least-privilege IAM, alarms, and private worker service;
+- keep worker and reconciliation disabled by default;
+- preserve the deployed Valkey resources and exact channel ACL;
+- remove hot email polling instead of retaining it as fallback;
+- run unit, disposable PostgreSQL, Terraform, and complete repository tests;
+- obtain two independent reviews of backend correctness and DEV infrastructure.
+
+### Stage 2: first reviewed DEV deployment with features off
+
+- review the complete Terraform plan before apply;
+- use the normal DEV deployment to create queues, IAM, alarms, log group, and a disabled schedule while deploying a schema-compatible API;
+- the exact worker and reconciliation flags default off, so the worker does not start and the schedule does not run;
+- do not modify production;
+- verify queue attributes, redrive policy with `maxReceiveCount=3`, encryption, IAM, and alarms.
+
+### Stage 3: minimal schema step, only if required
+
+- stop if the fresh implementation proves no migration is required;
+- otherwise run the read-only PostgreSQL 17 preflight;
+- take a verified DEV recovery point;
+- a human applies the one small transaction in DBeaver;
+- verify the final schema before deploying code that requires it.
+
+### Stage 4: enable one worker, then reconciliation
+
+- verify the compatible API with worker/schedule still disabled: health, OAuth, Nylas signature handling, SQS send failure, and Valkey realtime;
+- review a second Terraform plan that changes only the worker flag to one task, then apply it;
+- verify one real personal and one real shared connection job;
+- review a third Terraform plan that changes only the schedule flag, then apply it only after direct jobs work;
+- verify known 404/400 accounts park once and stop;
+- verify no message receives more than three automatic SQS deliveries, dead-letter work stays parked, and reconciliation never recreates its stable identity.
+
+### Rollback
+
+- disable the worker and schedule;
+- keep the queue, dead-letter queue, durable jobs, and compatible API for diagnosis;
+- do not restore hot polling;
+- do not replay dead-letter work until the failure is understood;
+- if a human migration occurred, follow its reviewed recovery procedure rather than guessing or partially reversing schema.
+
+## Required tests
+
+### Webhook and exact identity
+
+- valid `message.created` sends one compact FIFO job and returns promptly;
+- invalid signature sends nothing;
+- SQS send failure returns a retryable response;
+- concurrent duplicate webhooks each require successful SQS acceptance;
+- personal and shared connections resolve by exact permanent typed identity;
+- no shared-account email-address fallback is allowed;
+- a valid unrelated grant remains unchanged when another grant fails.
+
+### Worker and idempotency
+
+- one delivery that reaches provider processing starts exactly one durable attempt; a worker may crash after SQS delivery but before attempt start;
+- one message performs one bounded unit;
+- success commits before SQS delete;
+- crash before delete redelivers safely;
+- completed redelivery performs no second provider operation;
+- old attempt completion cannot overwrite a newer attempt;
+- archive processing claims one item only;
+- provider calls use cancellable contexts and no long database transaction;
+- request cancellation reaches PostgreSQL;
+- no `context.Background()` escapes from request-owned or worker-owned database work.
+
+### Retry and dead-letter behavior
+
+- the queue has fixed visibility and no heartbeat/change-visibility loop;
+- SQS receive count, not the PostgreSQL attempt number, controls redelivery and dead-letter movement;
+- PostgreSQL increments only when provider work actually starts and refuses attempt 4;
+- AWS may move a message to the dead-letter queue with fewer than three recorded attempts if the worker crashed before attempt start;
+- reconciliation never recreates any existing stable job identity, including a job left accepted or processing by a crash;
+- a third-attempt settlement failure is not acknowledged; the dead-letter alarm requires deliberate operator review;
+- permanent `401`, `403`, exact `404 grant.not_found`, and Gmail configuration `400` do not consume all three attempts;
+- a status-write failure remains retryable and is not falsely acknowledged.
+
+### Reconciliation and polling removal
+
+- no API task lists connected accounts every 30 seconds;
+- no API task or worker asks PostgreSQL for jobs every 250 ms;
+- EventBridge produces one rare control message;
+- one control message reads one bounded keyset page;
+- one connection message handles one provider page;
+- a missed webhook converges on one stable idempotency identity, and duplicate deliveries perform no duplicate provider work;
+- parked and exhausted work is excluded;
+- adding API tasks does not multiply reconciliation.
+
+### Infrastructure and operations
+
+- DEV flags default off;
+- worker is private and outside the ALB;
+- queue and dead-letter queue are FIFO and encrypted;
+- the FIFO work queue has content-based deduplication enabled;
+- redrive `maxReceiveCount` is exactly 3;
+- visibility is fixed and no heartbeat permission/path exists;
+- worker receives use 20-second long polling;
+- worker IAM contains only required queue, attachment, Valkey-wake, and secret access;
+- Scheduler trust uses the exact schedule-group ARN and source account;
+- Scheduler uses the stable `reconciliation-control` group ID, 2 retries, and a 5-minute maximum event age;
+- Scheduler's delivery DLQ is a separate encrypted Standard queue;
+- queue age, worker running count, and both DLQs have actionable alarms;
+- Valkey `+@pubsub`, exact channel restriction, and authorization alarm remain unchanged;
+- no production file or resource changes.
 
 ## Acceptance measurements
 
-The rollout is not complete merely because messages appear to work. It must show:
+The SQS work is complete only when DEV shows:
 
-- RDS CPU and ACU utilization return to a stable range under ordinary traffic.
-- `realtime_outbox` sequential-scan rate falls from approximately 40 per second to effectively zero while idle.
-- Idle API tasks perform no realtime outbox table scan.
-- Idle email workers perform no PostgreSQL job claim and no Nylas mailbox scan.
-- Editor saves remain durable during Valkey interruption.
-- Queue age remains low during normal operation.
-- SQS dead-letter count is zero or fully explained.
-- Nylas webhook response time remains safely below its 10-second requirement.
-- The two known permanent provider failures do not repeat every 30 seconds.
-- Cross-instance editor and mailbox delivery succeeds during a normal ECS rolling deployment.
+- no 30-second Nylas account scanner;
+- no 250 ms ingestion or archive database claimant;
+- idle email infrastructure produces no continuous PostgreSQL work;
+- normal webhook email begins immediately;
+- queue age remains low during ordinary operation;
+- one simulated temporary failure retries no more than three total deliveries;
+- dead-letter work stays dead until deliberate operator replay;
+- known permanent 400/404 accounts stop calling Nylas automatically;
+- valid accounts continue working;
+- RDS CPU, ACU, sessions, commits, and top SQL remain stable;
+- Valkey realtime behavior remains healthy during the separate email rollout.
 
-Recommended operational measurements:
+## Security and relationship requirements
 
-- RDS CPU, ACU utilization, active sessions, blocked transactions, commit throughput, query latency, and top SQL;
-- PostgreSQL outbox/job table scan and tuple-read deltas;
-- Valkey publish failures, subscriber reconnects, active connections, message count, and commit-to-fan-out latency;
-- SQS visible/in-flight message count, age of oldest message, receive count, delete count, and dead-letter count;
-- Nylas calls by operation/status category and per-connection bounded attempt count;
-- email worker job duration, success, terminal failure, retry, and backlog.
-
-## Security and privacy requirements
-
-- Use only designated database-enforced read-only credentials for live investigation and verification queries.
-- Never retrieve, print, copy, or store database writer/admin credentials, AWS session tokens, Nylas API keys, OAuth tokens, webhook secrets, or unrelated secrets.
-- Do not write to a live database during agent investigation.
-- Use AWS SSO profiles and keep dev/prod separate.
-- Valkey and SQS remain private AWS resources with least-privilege task roles/security groups.
-- Enable AWS-managed encryption and avoid secrets in Terraform state/configuration where possible.
-- Do not put message bodies, attachments, subjects, addresses, tokens, or presigned URLs into Valkey, SQS, metrics, DLQs, or logs.
-- Safe logs may contain stable Mango IDs, fixed operation names, status categories, and attempt counts.
-- Preserve exact company scope, permanent typed connection identity, and existing Node authorization before any realtime or email delivery.
+- Follow `docs/security/database-agent-access-contract.md`.
+- Read and follow `docs/tests/relationships.md` before changing email, attachment, Node, or permission relationships.
+- Use only designated database-enforced read-only credentials for live inspection.
+- Agents never receive, print, copy, or store writer/admin passwords, OAuth tokens, Nylas keys, webhook secrets, AWS session tokens, or unrelated secrets.
+- Agents never write to a live database.
+- Use AWS SSO profiles and keep DEV and production separate.
+- SQS messages, DLQs, Valkey payloads, metrics, and logs contain identifiers and safe categories only.
+- Preserve exact company scope and permanent email connection identity.
+- No central registry, untyped generic relationship, surrogate identity, or account-email fallback.
 
 ## Explicit non-goals
 
-- Do not send every keystroke over WebSocket or Valkey.
-- Do not store canonical documents or emails in Valkey.
-- Do not use Valkey as a durable queue.
-- Do not use SQS as a broadcast system for editor subscribers.
-- Do not introduce Kafka, a custom broker, custom leader election, or Valkey Streams without measured evidence that the simpler design is insufficient.
-- Do not make the ALB sticky to hide shared-state problems.
-- Do not remove the durable PostgreSQL realtime outbox or durable email/archive job records.
-- Do not make Nylas provider state the Mango relationship identity.
-- Do not combine Valkey and SQS into one unreviewable deployment.
-- Do not preserve the old polling loops as automatic fallbacks.
+- No PostgreSQL job polling loop.
+- No SQS visibility heartbeat.
+- No PostgreSQL delivery lease.
+- No custom retry scheduler or exponential backoff engine.
+- No more than three total automatic attempts.
+- No automatic dead-letter replay.
+- No large archive batch claim.
+- No separate foreground/background/mutation ownership lanes in the first version.
+- No Kafka, custom broker, leader election, or Valkey Streams.
+- No email bodies, attachment bytes, or secrets in SQS.
+- No unrelated destructive email-schema cleanup.
+- No production implementation or deployment in this task.
+- No reuse of the abandoned SQS worktree.
 
-## Investigation verification and gaps
+## Completion checklist
 
-Verified from repository code and history:
+### Valkey
 
-- 75 ms realtime spine interval and per-process startup;
-- full-table aggregate shape in the current PostgreSQL realtime cursor path;
-- `context.Background()` in the outbox repository hot methods;
-- 30-second per-process email connection scanner;
-- 250 ms per-process email ingestion worker poll;
-- 250 ms communications archive worker poll;
-- existing verified Nylas webhook path and `message.created` durable job creation;
-- dev/prod Terraform desired backend count of two;
-- correct Fargate IP target group, health check, CloudFront/API routing, private ECS ingress, and WebSocket heartbeat contract;
-- recent automatic email-ingestion commit and the separate fix/revert history for the realtime query.
+- [x] Capture the realtime polling baseline and root cause.
+- [x] Add private DEV ElastiCache Serverless Valkey, IAM, security groups, and alarms.
+- [x] Add cross-task publish/subscribe and bounded durable recovery.
+- [x] Remove the 75 ms idle PostgreSQL ticker.
+- [x] Merge and push reviewed Valkey changes to `main`.
+- [x] Deploy corrected `+@pubsub` ACL to DEV.
+- [x] Verify Pub/Sub commands, zero authorization failures, stable ECS tasks, and major RDS load reduction.
 
-Verified through designated read-only database access during the investigation:
+### Fresh SQS implementation
 
-- outbox row scale and PostgreSQL table statistics described in the incident summary;
-- approximately 40.15 current sequential scans per second, consistent with three 75 ms loops;
-- no live database writes were performed.
-
-Provided by operator logs/screenshots and requiring exact live mapping confirmation during implementation:
-
-- sustained RDS CPU/ACU saturation;
-- the two repeating connection IDs and 404/400 categories;
-- the reported deleted-grant and Gmail-configuration interpretation;
-- the separate valid `mangotestxd@gmail.com` Nylas grant.
-
-Still missing or not verified:
-
-- live ECS desired/running/pending task counts at the exact incident timestamps;
-- live ALB target health and CloudFront/ALB configuration drift from Terraform;
-- Performance Insights top-SQL/AAS breakdown for the complete incident window;
-- exact connection-to-grant mapping for the two broken Mango connections;
-- current Nylas webhook destination state and exact subscribed triggers in the affected environment;
-- production-scale SQS throughput, Valkey connection, and cost measurements;
-- post-fix Node endpoint plans after database contention is removed.
-
-## Implementation completion checklist
-
-- [ ] Capture current live baselines with approved read-only access.
-- [ ] Add bounded-index outbox recovery queries and cancellation propagation.
-- [ ] Add private ElastiCache Serverless Valkey and alarms.
-- [ ] Add Valkey publish/subscribe, deduplication, reconnect, and recovery.
-- [ ] Prove cross-task editor delivery and remove the 75 ms ticker.
-- [ ] Add FIFO email queue, DLQ, encryption, IAM, and alarms.
-- [ ] Add the dedicated ECS email-worker mode/service.
-- [ ] Make Nylas webhook acceptance enqueue SQS and return quickly.
-- [ ] Route durable ingestion and archive work through SQS.
-- [ ] Add permanent/transient Nylas error classification and repair states.
-- [ ] Add one approximately 10-minute EventBridge reconciliation tick.
-- [ ] Remove 30-second and 250 ms database/provider polling loops.
-- [ ] Update all affected Process Stories and numbered business laws.
-- [ ] Run targeted unit/integration/failure/performance tests.
-- [ ] Run the complete repository verification gate.
-- [ ] Roll out Valkey and SQS separately with metrics and rollback evidence.
-- [ ] Confirm RDS CPU/ACU, scan rates, queue age, and known broken-account behavior.
+- [ ] Start a completely new worktree from the post-documentation `main`.
+- [ ] Audit the current schema and implement the smallest exact job model.
+- [ ] Add DEV FIFO queue, FIFO DLQ, IAM, encryption, alarms, and disabled schedule.
+- [ ] Set fixed visibility, no heartbeat, and `maxReceiveCount=3`.
+- [ ] Add the private worker with at most three provider-processing starts per stable job and no database lease.
+- [ ] Route verified Nylas events and archive items to one bounded SQS unit.
+- [ ] Add exact 400/404 parking and status-write failure handling.
+- [ ] Add one bounded 10-minute reconciliation control path.
+- [ ] Remove 30-second and 250 ms polling loops without fallback.
+- [ ] Update all affected Process Stories and numbered laws.
+- [ ] Pass focused, disposable PostgreSQL, Terraform, infrastructure, and complete repository tests.
+- [ ] Obtain independent backend and infrastructure approval.
+- [ ] Merge and push only the reviewed fresh branch.
+- [ ] Roll out and test DEV in separate guarded stages.
 
 ## Primary references
 
-- AWS Application Load Balancer WebSocket/stickiness behavior: <https://docs.aws.amazon.com/elasticloadbalancing/latest/application/edit-target-group-attributes.html>
-- AWS ECS with Application Load Balancers: <https://docs.aws.amazon.com/AmazonECS/latest/developerguide/alb.html>
-- AWS ECS deployment task-count behavior: <https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-options.html>
-- AWS ElastiCache deployment choices: <https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/WhatIs.deployment.html>
-- Valkey Pub/Sub and at-most-once semantics: <https://valkey.io/topics/pubsub/>
-- Nylas webhook delivery, retries, security, and failure states: <https://developer.nylas.com/docs/v3/notifications/?redirect=webhooks>
-- Nylas `message.created` payload: <https://developer.nylas.com/docs/reference/notifications/messages/message-created/>
 - AWS SQS FIFO queues: <https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-fifo-queues.html>
-- AWS SQS visibility timeout, retries, and dead-letter queues: <https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html>
+- AWS SQS visibility timeout: <https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html>
+- AWS SQS dead-letter queues: <https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html>
 - AWS EventBridge Scheduler to SQS: <https://docs.aws.amazon.com/scheduler/latest/UserGuide/getting-started.html>
+- AWS ECS with Application Load Balancers: <https://docs.aws.amazon.com/AmazonECS/latest/developerguide/alb.html>
+- AWS ElastiCache IAM authentication: <https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/auth-iam.html>
+- Valkey Pub/Sub: <https://valkey.io/topics/pubsub/>
+- Nylas webhook notifications: <https://developer.nylas.com/docs/v3/notifications/?redirect=webhooks>
