@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
   addLogicGateRACIAssignments,
   addLocalEmailReply,
-  archiveEmailMessage,
   archiveEmailMessagesBatch,
   createFolderQuery,
   createCommunicationsSharedInbox,
@@ -872,8 +871,8 @@ test("read and archive overlays never cross personal and shared mailbox cache sc
     if (init?.method === "PUT") {
       return jsonResponse({ message: message("collision-1", { subject: "Shared", folders: ["INBOX"], unread: true }) });
     }
-    if (path.includes("/archive")) {
-      return jsonResponse({ message: message("collision-1", { subject: "Shared", folders: ["INBOX"], unread: false }) });
+    if (path.includes("archive-batch")) {
+		return jsonResponse({ archive_job: archiveJob(["collision-1"]) });
     }
     if (path.includes("mailbox=primary") && path.includes("shared_inbox_id=shared-1")) {
       sharedFetches += 1;
@@ -901,7 +900,7 @@ test("read and archive overlays never cross personal and shared mailbox cache sc
       [["Shared", false]],
     );
 
-    await archiveEmailMessage("collision-1", "shared-1", "company-1");
+		await archiveEmailMessagesBatch(["collision-1"], "shared-1", "company-1");
     assert.deepEqual((await listEmailMessages(personalParams)).messages.map((item) => item.subject), ["Personal"]);
     assert.deepEqual((await listEmailMessages(sharedParams)).messages.map((item) => item.id), []);
     assert.equal(personalFetches, 1);
@@ -930,8 +929,8 @@ test("realtime settlement lets canonical mail win only for the exact personal ac
     if (path.includes("/unarchive")) {
       return jsonResponse({ message: message("primary-only", { subject: `Optimistic primary ${mailbox}`, folders: ["INBOX"] }) });
     }
-    if (path.includes("/archive")) {
-      return jsonResponse({ message: message("collision-1", { subject: `Optimistic ${mailbox}`, folders: ["INBOX"] }) });
+    if (path.includes("archive-batch")) {
+		return jsonResponse({ archive_job: archiveJob(["collision-1"]) });
     }
     if (init?.method === "PUT") {
       return jsonResponse({ message: message("collision-1", { subject: `Optimistic starred ${mailbox}`, folders: ["INBOX"], starred: true }) });
@@ -945,9 +944,9 @@ test("realtime settlement lets canonical mail win only for the exact personal ac
   try {
     await Promise.all([listEmailMessages(accountA), listEmailMessages(accountB), listEmailMessages(shared)]);
     await Promise.all([
-      archiveEmailMessage("collision-1", undefined, "company-1", "a@example.com"),
-      archiveEmailMessage("collision-1", undefined, "company-1", "b@example.com"),
-      archiveEmailMessage("collision-1", "shared-1", "company-1"),
+      archiveEmailMessagesBatch(["collision-1"], undefined, "company-1", { accountEmail: "a@example.com" }),
+      archiveEmailMessagesBatch(["collision-1"], undefined, "company-1", { accountEmail: "b@example.com" }),
+      archiveEmailMessagesBatch(["collision-1"], "shared-1", "company-1"),
     ]);
 
     settleCommunicationsMailboxMessageOverlays(accountA, "collision-1");
@@ -1034,8 +1033,8 @@ test("archive updates add messages to archive and all overlays even before those
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input: RequestInfo | URL) => {
     const path = input.toString();
-    if (path.includes("/archive")) {
-      return jsonResponse({ message: message("msg-1", { date: 300, folders: ["INBOX"], starred: true }) });
+    if (path.includes("archive-batch")) {
+		return jsonResponse({ archive_job: archiveJob(["msg-1"]) });
     }
     if (path.includes("mailbox=primary")) return jsonResponse({ messages: [message("msg-1", { date: 300, folders: ["INBOX"], starred: true })] });
     if (path.includes("mailbox=archive")) return jsonResponse({ messages: [] });
@@ -1045,7 +1044,7 @@ test("archive updates add messages to archive and all overlays even before those
   };
   try {
     await listEmailMessages({ mailbox: "primary", limit: 25 });
-    await archiveEmailMessage("msg-1");
+		await archiveEmailMessagesBatch(["msg-1"]);
 
     assert.deepEqual((await listEmailMessages({ mailbox: "primary", limit: 25 })).messages.map((item) => item.id), []);
     assert.deepEqual((await listEmailMessages({ mailbox: "archive", limit: 25 })).messages.map((item) => [item.id, item.starred]), [["msg-1", true]]);
@@ -1057,7 +1056,7 @@ test("archive updates add messages to archive and all overlays even before those
   }
 });
 
-test("background archive acceptance keeps cached starred messages out of Inbox", async () => {
+test("archive job acceptance keeps cached starred messages out of Inbox", async () => {
   invalidateCommunicationsCache();
   const calls: string[] = [];
   const originalFetch = globalThis.fetch;
@@ -1066,17 +1065,17 @@ test("background archive acceptance keeps cached starred messages out of Inbox",
     calls.push(path);
     if (path.includes("archive-batch")) {
       assert.equal(init?.method, "POST");
-      return jsonResponse({ job_id: "job-1", accepted_ids: ["msg-1"], archived_ids: [], failed: [] });
+			return jsonResponse({ archive_job: archiveJob(["msg-1"], "job-1") });
     }
     if (path.includes("mailbox=primary")) return jsonResponse({ messages: [message("msg-1", { date: 300, folders: ["INBOX"], starred: true }), message("msg-2", { date: 200, folders: ["INBOX"] })] });
     return jsonResponse({ messages: [] });
   };
   try {
     assert.deepEqual((await listEmailMessages({ mailbox: "primary", limit: 25 })).messages.map((item) => item.id), ["msg-1", "msg-2"]);
-    const accepted = await archiveEmailMessagesBatch(["msg-1"], undefined, undefined, { background: true });
+		const accepted = await archiveEmailMessagesBatch(["msg-1"]);
 
-    assert.equal(accepted.job_id, "job-1");
-    assert.deepEqual(accepted.accepted_ids, ["msg-1"]);
+		assert.equal(accepted.job_id, "job-1");
+		assert.deepEqual(accepted.accepted_message_ids, ["msg-1"]);
     assert.deepEqual((await listEmailMessages({ mailbox: "primary", limit: 25 })).messages.map((item) => item.id), ["msg-2"]);
     assert.deepEqual((await listEmailMessages({ mailbox: "starred", limit: 25 })).messages.map((item) => [item.id, item.starred]), [["msg-1", true]]);
     assert.deepEqual((await listEmailMessages({ mailbox: "primary", limit: 25 })).messages.map((item) => item.id), ["msg-2"]);
@@ -1087,33 +1086,27 @@ test("background archive acceptance keeps cached starred messages out of Inbox",
   }
 });
 
-test("archive helpers call mailbox action endpoints", async () => {
+test("archive batch and unarchive helpers call the canonical mailbox endpoints", async () => {
   invalidateCommunicationsCache();
   const calls: Array<{ path: string; method: string; body?: unknown }> = [];
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    calls.push({ path: input.toString(), method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : undefined });
-    if (input.toString().includes("archive-batch")) {
-      return jsonResponse({ archived_ids: ["msg 2", "msg 3"], failed: [{ message_id: "msg 4", error: "nylas_rate_limited" }] });
-    }
-    return jsonResponse({ message: message("msg 1") });
-  };
-  try {
-    await archiveEmailMessage("msg 1");
-    await unarchiveEmailMessage("msg 1");
-    await archiveEmailMessage("msg 2", "shared-1", "company-1");
-    const batch = await archiveEmailMessagesBatch(["msg 2", "msg 3", "msg 2", "msg 4"], "shared-1", "company-1");
-    assert.deepEqual(batch, {
-      accepted_ids: [],
-      archived_ids: ["msg 2", "msg 3"],
-      failed: [{ message_id: "msg 4", error: "nylas_rate_limited" }],
-      job_id: undefined,
-    });
-    assert.deepEqual(calls, [
-      { path: "/v1/communications/messages/msg%201/archive", method: "POST", body: undefined },
-      { path: "/v1/communications/messages/msg%201/unarchive", method: "POST", body: undefined },
-      { path: "/v1/communications/messages/msg%202/archive?company_id=company-1&shared_inbox_id=shared-1", method: "POST", body: undefined },
-      {
+	globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+		calls.push({ path: input.toString(), method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : undefined });
+		if (input.toString().includes("archive-batch")) {
+			const ids = (init?.body ? JSON.parse(String(init.body)) : { message_ids: [] }).message_ids as string[];
+			return jsonResponse({ archive_job: archiveJob(ids) });
+		}
+		return jsonResponse({ message: message("msg 1") });
+	};
+	try {
+		await archiveEmailMessagesBatch(["msg 1"]);
+		await unarchiveEmailMessage("msg 1");
+		const batch = await archiveEmailMessagesBatch(["msg 2", "msg 3", "msg 2", "msg 4"], "shared-1", "company-1");
+		assert.deepEqual(batch.accepted_message_ids, ["msg 2", "msg 3", "msg 4"]);
+		assert.deepEqual(calls, [
+			{ path: "/v1/communications/messages/archive-batch", method: "POST", body: { message_ids: ["msg 1"] } },
+			{ path: "/v1/communications/messages/msg%201/unarchive", method: "POST", body: undefined },
+			{
         path: "/v1/communications/messages/archive-batch?company_id=company-1&shared_inbox_id=shared-1",
         method: "POST",
         body: { message_ids: ["msg 2", "msg 3", "msg 4"] },
@@ -1850,6 +1843,23 @@ function message(id: string, patch: Partial<EmailMessage> = {}): EmailMessage {
     from: patch.from,
     to: patch.to,
   };
+}
+
+function archiveJob(messageIDs: string[], jobID = "archive-job-1") {
+	const ids = Array.from(new Set(messageIDs));
+	return {
+		job_id: jobID,
+		status: "pending",
+		requested_count: ids.length,
+		accepted_message_ids: ids,
+		items: ids.map((messageID, index) => ({
+			job_item_id: `${jobID}-item-${index + 1}`,
+			job_id: jobID,
+			message_id: messageID,
+			status: "pending",
+			provider_attempt_count: 0,
+		})),
+	};
 }
 
 function sharedInbox(id: string, patch: Record<string, unknown> = {}) {

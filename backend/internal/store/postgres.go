@@ -49,7 +49,7 @@ func (r *PostgresRepo) CheckApplicationSchemaReadiness() error {
 		{"email_ingestion_jobs", "priority"},
 		{"email_ingestion_jobs", "provider_attempt_count"},
 		{"email_ingestion_jobs", "attempt_token"},
-		{"email_ingestion_jobs", "enqueue_source_id"},
+		{"email_ingestion_jobs", "sqs_accepted_timestamp"},
 		{"communications_email_archive_job_items", "attempt_token"},
 		{"email_messages", "email_message_id"},
 		{"email_relationships", "resource_textbox_id"},

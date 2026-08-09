@@ -7,7 +7,10 @@ import (
 	"time"
 )
 
-func (r *MemoryRepo) CreateCommunicationsArchiveJobContext(_ context.Context, input CommunicationsArchiveJobInput) (CommunicationsArchiveJob, error) {
+func (r *MemoryRepo) CreateCommunicationsArchiveJobContext(ctx context.Context, input CommunicationsArchiveJobInput) (CommunicationsArchiveJob, error) {
+	if err := ctx.Err(); err != nil {
+		return CommunicationsArchiveJob{}, err
+	}
 	input, err := NormalizeCommunicationsArchiveJobInput(input)
 	if err != nil {
 		return CommunicationsArchiveJob{}, err
@@ -21,21 +24,40 @@ func (r *MemoryRepo) CreateCommunicationsArchiveJobContext(_ context.Context, in
 	}
 
 	now := time.Now().UTC()
-	job := CommunicationsArchiveJob{
-		JobID:                    newUUIDv7String(),
-		ActorUserID:              input.ActorUserID,
-		CompanyID:                input.CompanyID,
-		SharedInboxID:            input.SharedInboxID,
-		ConnectionScope:          input.Connection.Scope,
-		Provider:                 input.Connection.Provider,
-		AccountEmail:             input.Connection.AccountEmail,
-		GrantID:                  input.Connection.GrantID,
-		CompanyEmailConnectionID: input.Connection.CompanyEmailConnectionID,
-		Status:                   CommunicationsArchiveJobStatusPending,
-		RequestedCount:           len(input.MessageIDs),
-		AcceptedMessageIDs:       append([]string(nil), input.MessageIDs...),
-		CreatedTimestamp:         now,
-		UpdatedTimestamp:         now,
+	job := CommunicationsArchiveJob{}
+	for _, existing := range r.communicationsArchiveJobs {
+		if existing.Status == CommunicationsArchiveJobStatusPending &&
+			existing.ActorUserID == input.ActorUserID && existing.CompanyID == input.CompanyID &&
+			existing.SharedInboxID == input.SharedInboxID && existing.ConnectionScope == input.Connection.Scope &&
+			existing.AccountEmail == input.Connection.AccountEmail &&
+			(job.JobID == "" || existing.CreatedTimestamp.Before(job.CreatedTimestamp)) {
+			job = CloneCommunicationsArchiveJob(existing)
+		}
+	}
+	reusedJob := job.JobID != ""
+	if !reusedJob {
+		job = CommunicationsArchiveJob{
+			JobID:                    newUUIDv7String(),
+			ActorUserID:              input.ActorUserID,
+			CompanyID:                input.CompanyID,
+			SharedInboxID:            input.SharedInboxID,
+			ConnectionScope:          input.Connection.Scope,
+			Provider:                 input.Connection.Provider,
+			AccountEmail:             input.Connection.AccountEmail,
+			GrantID:                  input.Connection.GrantID,
+			CompanyEmailConnectionID: input.Connection.CompanyEmailConnectionID,
+			Status:                   CommunicationsArchiveJobStatusPending,
+			RequestedCount:           len(input.MessageIDs),
+			AcceptedMessageIDs:       append([]string(nil), input.MessageIDs...),
+			CreatedTimestamp:         now,
+			UpdatedTimestamp:         now,
+		}
+	} else {
+		job.RequestedCount = len(input.MessageIDs)
+		job.AcceptedMessageIDs = append([]string(nil), input.MessageIDs...)
+		job.Items = nil
+		job.CreatedItemCount = 0
+		job.UpdatedTimestamp = now
 	}
 	r.communicationsArchiveJobs[job.JobID] = job
 
@@ -64,7 +86,7 @@ func (r *MemoryRepo) CreateCommunicationsArchiveJobContext(_ context.Context, in
 		job.Items = append(job.Items, CloneCommunicationsArchiveJobItem(item))
 		job.CreatedItemCount++
 	}
-	if job.CreatedItemCount == 0 {
+	if job.CreatedItemCount == 0 && !reusedJob {
 		completedAt := now
 		job.Status = CommunicationsArchiveJobStatusCompleted
 		job.CompletedTimestamp = &completedAt
@@ -107,6 +129,37 @@ func (r *MemoryRepo) GetCommunicationsArchiveJobItemContext(_ context.Context, j
 	return CloneCommunicationsArchiveJobItem(item), nil
 }
 
+func (r *MemoryRepo) GetCommunicationsArchiveJobContext(ctx context.Context, jobID string) (CommunicationsArchiveJob, error) {
+	if err := ctx.Err(); err != nil {
+		return CommunicationsArchiveJob{}, err
+	}
+	jobID = cleanUUIDText(jobID)
+	if jobID == "" {
+		return CommunicationsArchiveJob{}, ErrInvalid
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	job, ok := r.communicationsArchiveJobs[jobID]
+	if !ok {
+		return CommunicationsArchiveJob{}, ErrNotFound
+	}
+	job.Items = nil
+	job.AcceptedMessageIDs = nil
+	for _, item := range r.communicationsArchiveJobItems {
+		if item.JobID == jobID {
+			job.Items = append(job.Items, CloneCommunicationsArchiveJobItem(item))
+			job.AcceptedMessageIDs = append(job.AcceptedMessageIDs, item.MessageID)
+		}
+	}
+	sort.Slice(job.Items, func(i, j int) bool {
+		if !job.Items[i].CreatedTimestamp.Equal(job.Items[j].CreatedTimestamp) {
+			return job.Items[i].CreatedTimestamp.Before(job.Items[j].CreatedTimestamp)
+		}
+		return job.Items[i].JobItemID < job.Items[j].JobItemID
+	})
+	return CloneCommunicationsArchiveJob(job), nil
+}
+
 func (r *MemoryRepo) StartCommunicationsArchiveJobItemAttemptContext(_ context.Context, jobItemID string) (CommunicationsArchiveJobItem, bool, error) {
 	jobItemID = cleanUUIDText(jobItemID)
 	if jobItemID == "" {
@@ -118,12 +171,12 @@ func (r *MemoryRepo) StartCommunicationsArchiveJobItemAttemptContext(_ context.C
 	if !ok {
 		return CommunicationsArchiveJobItem{}, false, ErrNotFound
 	}
-	if (item.Status != CommunicationsArchiveJobItemStatusPending && item.Status != CommunicationsArchiveJobItemStatusProcessing) || item.AttemptCount >= 3 {
+	if (item.Status != CommunicationsArchiveJobItemStatusPending && item.Status != CommunicationsArchiveJobItemStatusProcessing) || item.ProviderAttemptCount >= 3 {
 		return CloneCommunicationsArchiveJobItem(item), false, nil
 	}
 	now := time.Now().UTC()
 	item.Status = CommunicationsArchiveJobItemStatusProcessing
-	item.AttemptCount++
+	item.ProviderAttemptCount++
 	item.AttemptToken = newUUIDv7String()
 	item.LastError = ""
 	item.UpdatedTimestamp = now
@@ -131,7 +184,14 @@ func (r *MemoryRepo) StartCommunicationsArchiveJobItemAttemptContext(_ context.C
 	return CloneCommunicationsArchiveJobItem(item), true, nil
 }
 
-func (r *MemoryRepo) CompleteCommunicationsArchiveJobItemAttemptContext(_ context.Context, jobItemID, attemptToken string) error {
+func (r *MemoryRepo) CompleteCommunicationsArchiveJobItemAttemptContext(ctx context.Context, jobItemID, attemptToken string, realtimeInputs []RealtimeOutboxInput) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	realtimeInputs, err := normalizeRealtimeOutboxInputs(realtimeInputs)
+	if err != nil {
+		return err
+	}
 	jobItemID, attemptToken = cleanUUIDText(jobItemID), cleanUUIDText(attemptToken)
 	if jobItemID == "" || attemptToken == "" {
 		return ErrInvalid
@@ -142,6 +202,9 @@ func (r *MemoryRepo) CompleteCommunicationsArchiveJobItemAttemptContext(_ contex
 	if !ok || item.Status != CommunicationsArchiveJobItemStatusProcessing || item.AttemptToken != attemptToken {
 		return ErrNotFound
 	}
+	if r.realtimeOutboxErr != nil {
+		return r.realtimeOutboxErr
+	}
 	now := time.Now().UTC()
 	item.Status = CommunicationsArchiveJobItemStatusArchived
 	item.ArchivedTimestamp = &now
@@ -149,10 +212,17 @@ func (r *MemoryRepo) CompleteCommunicationsArchiveJobItemAttemptContext(_ contex
 	item.UpdatedTimestamp = now
 	r.communicationsArchiveJobItems[jobItemID] = item
 	r.updateCommunicationsArchiveJobStatusLocked(item.JobID, now)
-	return nil
+	return r.enqueueRealtimeOutboxInputsLocked(realtimeInputs)
 }
 
-func (r *MemoryRepo) FailCommunicationsArchiveJobItemAttemptContext(_ context.Context, jobItemID, attemptToken, lastError string) error {
+func (r *MemoryRepo) FailCommunicationsArchiveJobItemAttemptContext(ctx context.Context, jobItemID, attemptToken, lastError string, realtimeInputs []RealtimeOutboxInput) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	realtimeInputs, err := normalizeRealtimeOutboxInputs(realtimeInputs)
+	if err != nil {
+		return err
+	}
 	jobItemID, attemptToken = cleanUUIDText(jobItemID), cleanUUIDText(attemptToken)
 	lastError = trimCommunicationsArchiveJobLastError(lastError)
 	if jobItemID == "" || attemptToken == "" || lastError == "" {
@@ -164,21 +234,31 @@ func (r *MemoryRepo) FailCommunicationsArchiveJobItemAttemptContext(_ context.Co
 	if !ok || item.Status != CommunicationsArchiveJobItemStatusProcessing || item.AttemptToken != attemptToken {
 		return ErrNotFound
 	}
+	if r.realtimeOutboxErr != nil {
+		return r.realtimeOutboxErr
+	}
 	now := time.Now().UTC()
 	item.Status = CommunicationsArchiveJobItemStatusPending
 	item.LastError = lastError
 	item.AttemptToken = ""
 	item.UpdatedTimestamp = now
-	if item.AttemptCount >= 3 {
+	if item.ProviderAttemptCount >= 3 {
 		item.Status = CommunicationsArchiveJobItemStatusFailed
 		item.FailedTimestamp = &now
 	}
 	r.communicationsArchiveJobItems[jobItemID] = item
 	r.updateCommunicationsArchiveJobStatusLocked(item.JobID, now)
-	return nil
+	return r.enqueueRealtimeOutboxInputsLocked(realtimeInputs)
 }
 
-func (r *MemoryRepo) ParkCommunicationsArchiveJobItemAttemptContext(_ context.Context, jobItemID, attemptToken, companyID, emailConnectionID, connectionStatus, lastError string) error {
+func (r *MemoryRepo) ParkCommunicationsArchiveJobItemAttemptContext(ctx context.Context, jobItemID, attemptToken, companyID, emailConnectionID, connectionStatus, lastError string, realtimeInputs []RealtimeOutboxInput) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	realtimeInputs, err := normalizeRealtimeOutboxInputs(realtimeInputs)
+	if err != nil {
+		return err
+	}
 	jobItemID, attemptToken = cleanUUIDText(jobItemID), cleanUUIDText(attemptToken)
 	companyID, emailConnectionID = cleanUUIDText(companyID), cleanUUIDText(emailConnectionID)
 	connectionStatus, lastError = normalizeEmailConnectionStatus(connectionStatus), trimCommunicationsArchiveJobLastError(lastError)
@@ -191,6 +271,9 @@ func (r *MemoryRepo) ParkCommunicationsArchiveJobItemAttemptContext(_ context.Co
 	item, ok := r.communicationsArchiveJobItems[jobItemID]
 	if !ok || item.CompanyID != companyID || item.Status != CommunicationsArchiveJobItemStatusProcessing || item.AttemptToken != attemptToken {
 		return ErrNotFound
+	}
+	if r.realtimeOutboxErr != nil {
+		return r.realtimeOutboxErr
 	}
 	updated := false
 	for key, connection := range r.emailConnections {
@@ -220,7 +303,7 @@ func (r *MemoryRepo) ParkCommunicationsArchiveJobItemAttemptContext(_ context.Co
 	item.UpdatedTimestamp = now
 	r.communicationsArchiveJobItems[jobItemID] = item
 	r.updateCommunicationsArchiveJobStatusLocked(item.JobID, now)
-	return nil
+	return r.enqueueRealtimeOutboxInputsLocked(realtimeInputs)
 }
 
 func (r *MemoryRepo) ListCommunicationsArchiveJobItemsContext(ctx context.Context, jobID string) ([]CommunicationsArchiveJobItem, error) {
@@ -250,6 +333,43 @@ func (r *MemoryRepo) ListCommunicationsArchiveJobItemsContext(ctx context.Contex
 		}
 		return items[i].JobItemID < items[j].JobItemID
 	})
+	return items, nil
+}
+
+func (r *MemoryRepo) ListUnsentCommunicationsArchiveJobItemsContext(ctx context.Context, companyID, emailConnectionID string, createdBefore time.Time, limit int) ([]CommunicationsArchiveJobItem, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	companyID, emailConnectionID = cleanUUIDText(companyID), cleanUUIDText(emailConnectionID)
+	if companyID == "" || emailConnectionID == "" || createdBefore.IsZero() || limit <= 0 || limit > 500 {
+		return nil, ErrInvalid
+	}
+	connection, err := r.GetEmailConnectionByIDContext(ctx, companyID, emailConnectionID)
+	if err != nil {
+		return nil, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	items := make([]CommunicationsArchiveJobItem, 0, limit)
+	for _, item := range r.communicationsArchiveJobItems {
+		matchesConnection := item.ConnectionScope == "personal" && item.ActorUserID == connection.UserID && item.AccountEmail == connection.AccountEmail
+		if item.ConnectionScope == "shared" {
+			matchesConnection = item.CompanyEmailConnectionID == firstNonBlank(connection.CompanyEmailConnectionID, connection.EmailConnectionID)
+		}
+		if item.CompanyID == companyID && matchesConnection && item.Status == CommunicationsArchiveJobItemStatusPending &&
+			item.ProviderAttemptCount == 0 && !item.CreatedTimestamp.After(createdBefore) {
+			items = append(items, CloneCommunicationsArchiveJobItem(item))
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
+			return items[i].JobItemID < items[j].JobItemID
+		}
+		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+	})
+	if len(items) > limit {
+		items = items[:limit]
+	}
 	return items, nil
 }
 

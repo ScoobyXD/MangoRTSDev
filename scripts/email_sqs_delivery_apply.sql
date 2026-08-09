@@ -57,14 +57,14 @@ begin
     ]::text[])),
     count(*) filter (where column_name = any (array[
       'ingestion_job_id','company_id','email_connection_id','email_thread_id','provider_message_id',
-      'provider_thread_id','priority','status','attempt_count','provider_attempt_count','attempt_token',
-      'enqueue_source_id','last_error','available_at','processing_started_at','completed_timestamp',
-      'failed_timestamp','created_timestamp','updated_timestamp'
+		'provider_thread_id','priority','status','provider_attempt_count','attempt_token',
+		'sqs_accepted_timestamp','last_error','completed_timestamp',
+		'failed_timestamp','created_timestamp','updated_timestamp'
     ]::text[])) into column_count, legacy_column_count, final_column_count
   from information_schema.columns where table_schema='public' and table_name='email_ingestion_jobs';
   if column_count = 16 and legacy_column_count = 16 then ingestion_is_legacy := true;
-  elsif column_count = 19 and final_column_count = 19 then ingestion_is_legacy := false;
-  else raise exception 'STOP: email_ingestion_jobs must be exact legacy 16 or exact final 19 columns; found total %, legacy-approved %, final-approved %', column_count, legacy_column_count, final_column_count;
+	elsif column_count = 16 and final_column_count = 16 then ingestion_is_legacy := false;
+	else raise exception 'STOP: email_ingestion_jobs must be exact legacy 16 or exact final 16 columns; found total %, legacy-approved %, final-approved %', column_count, legacy_column_count, final_column_count;
   end if;
 
   select count(*),
@@ -73,13 +73,13 @@ begin
       'processing_started_at','archived_timestamp','failed_timestamp','created_timestamp','updated_timestamp'
     ]::text[])),
     count(*) filter (where column_name = any (array[
-      'job_item_id','archive_job_id','message_id','status','attempt_count','attempt_token','last_error',
-      'available_at','processing_started_at','archived_timestamp','failed_timestamp','created_timestamp','updated_timestamp'
+		'job_item_id','archive_job_id','message_id','status','provider_attempt_count','attempt_token','last_error',
+		'archived_timestamp','failed_timestamp','created_timestamp','updated_timestamp'
     ]::text[])) into column_count, legacy_column_count, final_column_count
   from information_schema.columns where table_schema='public' and table_name='communications_email_archive_job_items';
   if column_count = 12 and legacy_column_count = 12 then archive_is_legacy := true;
-  elsif column_count = 13 and final_column_count = 13 then archive_is_legacy := false;
-  else raise exception 'STOP: communications_email_archive_job_items must be exact legacy 12 or exact final 13 columns; found total %, legacy-approved %, final-approved %', column_count, legacy_column_count, final_column_count;
+	elsif column_count = 11 and final_column_count = 11 then archive_is_legacy := false;
+	else raise exception 'STOP: communications_email_archive_job_items must be exact legacy 12 or exact final 11 columns; found total %, legacy-approved %, final-approved %', column_count, legacy_column_count, final_column_count;
   end if;
 
   if ingestion_is_legacy <> archive_is_legacy then
@@ -174,14 +174,25 @@ begin
     end if;
   end if;
 
-  if ingestion_is_legacy then
-    alter table email_ingestion_jobs
-      add column provider_attempt_count integer not null default 0,
-      add column attempt_token uuid,
-      add column enqueue_source_id text not null default '';
-  end if;
-  if archive_is_legacy then
-    alter table communications_email_archive_job_items add column attempt_token uuid;
+	if ingestion_is_legacy then
+		drop index if exists idx_email_ingestion_jobs_claim;
+		alter table email_ingestion_jobs drop constraint if exists email_ingestion_jobs_attempt_chk;
+		alter table email_ingestion_jobs
+			add column provider_attempt_count integer not null default 0,
+			add column attempt_token uuid,
+			add column sqs_accepted_timestamp timestamptz,
+			drop column attempt_count,
+			drop column available_at,
+			drop column processing_started_at;
+	end if;
+	if archive_is_legacy then
+		drop index if exists idx_communications_email_archive_job_items_claim;
+		alter table communications_email_archive_job_items
+			add column provider_attempt_count integer not null default 0,
+			add column attempt_token uuid,
+			drop column attempt_count,
+			drop column available_at,
+			drop column processing_started_at;
   end if;
 
   alter table email_connections drop constraint if exists email_connections_status_chk;
@@ -194,9 +205,12 @@ begin
   update email_ingestion_jobs
   set status='exhausted',provider_attempt_count=0,attempt_token=null,updated_timestamp=now()
   where status='failed';
-  alter table communications_email_archive_job_items drop constraint if exists communications_email_archive_job_items_status_chk;
-  alter table communications_email_archive_job_items add constraint communications_email_archive_job_items_status_chk
-    check (status in ('pending','processing','archived','failed'));
+	alter table communications_email_archive_job_items
+		drop constraint if exists communications_email_archive_job_items_status_chk,
+		drop constraint if exists communications_email_archive_job_items_provider_attempt_chk;
+	alter table communications_email_archive_job_items
+		add constraint communications_email_archive_job_items_status_chk check (status in ('pending','processing','archived','failed')),
+		add constraint communications_email_archive_job_items_provider_attempt_chk check (provider_attempt_count between 0 and 3);
   alter table email_ingestion_jobs
     alter column status set default 'accepted',
     add constraint email_ingestion_jobs_status_chk check (status in ('accepted','processing','completed','parked','exhausted')),

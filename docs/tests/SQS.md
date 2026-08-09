@@ -4,7 +4,7 @@ Nylas tells Mango that a new email exists
 ↓
 The Mango API verifies the notification, finds the exact connected account, and creates or finds one permanent small job identity
 ↓
-The Mango API sends that identity to SQS and acknowledges Nylas only after SQS accepts it
+The Mango API sends that identity to SQS, records the acceptance, and acknowledges Nylas only after both steps succeed
 ↓
 One private worker receives one bounded job and downloads the required provider data
 ↓
@@ -28,13 +28,14 @@ SQS owns delivery and retries. PostgreSQL stores results and prevents duplicate 
 2. The API verifies the webhook signature and resolves the exact permanent personal or shared email connection.
 3. One provider message has one permanent job identity: company + email connection + provider message.
 4. The API stores or finds that identity before sending it to SQS. Duplicate webhooks reuse the same identity.
-5. The API reports success to Nylas only after SQS accepts the compact message. If SQS rejects it, Mango returns a retryable failure so Nylas can send it again.
-6. An SQS message contains identifiers only. It never contains an email body, attachment bytes, provider token, credential, secret, or presigned URL.
-7. DEV runs one private worker task outside the load balancer. Its default limit is three messages being processed at the same time.
-8. One SQS delivery processes one bounded unit. It never claims a large database batch.
-9. The worker stores the provider result and exact typed relationships in PostgreSQL before acknowledging SQS.
-10. The required `realtime_outbox` notice must also be durable before SQS acknowledgement. Valkey publication itself happens afterward and does not repeat provider work.
-11. A repeated delivery sees the same permanent job identity and does not repeat completed provider work.
+5. The API reports success to Nylas only after SQS accepts the compact message and PostgreSQL records `sqs_accepted_timestamp`. If SQS rejects it, Mango returns a retryable failure so Nylas can send it again.
+6. Cancellation or an ambiguous failure after marker creation leaves that same stable marker eligible for a resend. A request retry or rare reconciliation resends the same identity; it never creates a replacement marker.
+7. An SQS message contains identifiers only. It never contains an email body, attachment bytes, provider token, credential, secret, or presigned URL.
+8. DEV runs one private worker task outside the load balancer. Its default limit is three messages being processed at the same time.
+9. One SQS delivery processes one bounded unit. It never claims a large database batch.
+10. The worker stores the provider result and exact typed relationships in PostgreSQL before acknowledging SQS.
+11. The required `realtime_outbox` notice must also be durable before SQS acknowledgement. Valkey publication itself happens afterward and does not repeat provider work.
+12. A repeated delivery sees the same permanent job identity and does not repeat completed provider work.
 
 ## Retry timing
 
@@ -78,8 +79,9 @@ Webhooks can occasionally be lost. Reconciliation is only the safety net:
 4. One connection message reads at most one provider page of 200 messages at a time.
 5. Reconciliation uses a 5-minute overlap around its saved checkpoint so a boundary event is not missed.
 6. It skips disconnected, parked, `reauth_required`, and `configuration_required` connections.
-7. It never creates a new job when the same permanent identity already exists, including accepted, processing, completed, parked, exhausted, or dead-lettered work.
-8. It never scans all accounts concurrently and never asks PostgreSQL for work every few milliseconds.
+7. Before the provider page, it performs one bounded read for markers at least 10 minutes old. It may resend an `accepted` ingestion identity only when `sqs_accepted_timestamp` is still null, and an archive item only while it is still `pending` with zero provider starts. Both reuse the existing identity.
+8. It never resends ingestion whose SQS acceptance is recorded, or any work that has started processing, completed, parked, exhausted, or reached the dead-letter queue.
+9. It never scans all accounts concurrently and never asks PostgreSQL for work every few milliseconds.
 
 ## Things this design intentionally does not have
 
@@ -93,21 +95,14 @@ Webhooks can occasionally be lost. Reconciliation is only the safety net:
 - no process-local email worker fallback;
 - no email bodies, attachments, or secrets inside SQS messages.
 
-## Current cleanup audit before DEV rollout
+## Final cleanup shape before DEV rollout
 
-The normal inbound-email path and the rare reconciliation path use SQS, and the old 30-second and 250-millisecond backend loops are gone. The wider email area is not yet fully converted:
-
-- the single-message archive endpoint can still call Nylas directly inside the API request;
-- the non-background archive-batch option can still launch local API goroutines that call Nylas directly, although the normal Home screen requests background SQS work;
-- the background archive API returns a job ID, but there is not yet an archive-job read endpoint and the Home screen does not use that job ID;
-- one attached-email editor state still reloads once per second while a stored thread says `downloading`;
-- old `ThreadDownloadJob` names and an old ensure-job wrapper remain beside the new ingestion API;
-- one reconciliation enqueue helper has no production caller;
-- old delivery-era job columns remain even though the fixed SQS design does not use them as a lease or retry scheduler;
-- some collaboration/conversion producers still start PostgreSQL work with `context.Background()`. A canceled request can therefore leave a durable marker without a successful SQS send, and current reconciliation may skip that existing marker;
-- one older planning document still says reconnection wakes an email scanner that no longer exists.
-
-The SQS worker and reconciliation schedule remain disabled by default. These cleanup items should be resolved and tested before the DEV worker is enabled.
+- Every archive provider mutation is one compact SQS item. The single-message API archive route, non-background batch mode, API goroutine, and background switch are removed.
+- Archive creation returns one durable job identity. After storing it, the browser performs one canonical status read to close a fast-completion race. If it is still active, a compact post-commit mailbox hint or subscription reacceptance triggers the next canonical read; no archive timer or full job payload enters Valkey.
+- Attached-email thread completion uses that same mailbox hint and one canonical HTTP read, with no one-second timer.
+- One ingestion-job API and one ingestion worker naming layer remain. Old download-job wrappers, claimant files, reconciliation enqueue residue, and delivery-era lease/scheduler columns are gone.
+- `sqs_accepted_timestamp` distinguishes accepted ingestion from a marker that must be safely resent after cancellation or an ambiguous failure. Archive recovery is limited to an existing `pending` item with zero provider starts.
+- The worker and reconciliation schedule remain disabled by default until the human migration and staged DEV rollout.
 
 ## Required regression checks
 
@@ -123,7 +118,8 @@ The SQS worker and reconciliation schedule remain disabled by default. These cle
 - Idle email infrastructure performs no continuous PostgreSQL polling.
 - The old 30-second and 250-millisecond loop functions and configuration do not exist.
 - Every provider archive write goes through SQS; no public API path runs archive provider work in-process.
-- Background archive completion has one canonical read endpoint used by the browser.
+- Archive completion has one canonical read endpoint used by the browser.
 - No attached-email browser state polls once per second for ingestion completion.
 - Request cancellation reaches the PostgreSQL job creation and SQS send path without stranding a permanent marker.
+- Rare reconciliation reuses old never-accepted ingestion IDs and old never-started archive item IDs, but cannot recreate started or terminal work.
 - Old ingestion wrappers, dead enqueue helpers, obsolete delivery columns, and stale scanner documentation are removed.

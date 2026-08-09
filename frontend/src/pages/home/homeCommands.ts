@@ -1,6 +1,5 @@
 import {
-  archiveEmailMessage as defaultArchiveEmailMessage,
-  archiveEmailMessagesBatch as defaultArchiveEmailMessagesBatch,
+	archiveEmailMessagesBatch as defaultArchiveEmailMessagesBatch,
   addMyLogicGateShortcuts as defaultAddMyLogicGateShortcuts,
   convertTriageMessagesToExplorerTarget as defaultConvertTriageMessagesToExplorerTarget,
   convertTriageMessagesToLogicGate as defaultConvertTriageMessagesToLogicGate,
@@ -18,7 +17,7 @@ import { requestJSON as defaultRequestJSON, type RequestJSONInit } from "../../m
 import type { LogicGateRACIRole, LogicGateRecord } from "../../modules/logic-gates/types.js";
 import type {
   CompanyUser,
-  ArchiveEmailMessagesBatchResult,
+	CommunicationsArchiveJob,
   CommunicationsSharedInbox,
   CommunicationsSharedInboxRACIAssignment,
   CommunicationsSharedInboxRACIRole,
@@ -72,7 +71,6 @@ export type HomeBulkMoveLogicGateAssignment = (
 
 export type HomeCreateRACIMatrixNode = typeof defaultCreateRACIMatrixNode;
 
-export type HomeArchiveEmailMessage = typeof defaultArchiveEmailMessage;
 export type HomeArchiveEmailMessagesBatch = typeof defaultArchiveEmailMessagesBatch;
 export type HomeUnarchiveEmailMessage = typeof defaultUnarchiveEmailMessage;
 export type HomeDeleteEmailMessage = typeof defaultDeleteEmailMessage;
@@ -117,9 +115,11 @@ export type HomeExplorerTriageConversionCommandResult = {
 };
 
 export type HomeMailMessagesCommandResult = {
-  messageIDs: string[];
-  accepted?: boolean;
-  failed?: ArchiveEmailMessagesBatchResult["failed"];
+	messageIDs: string[];
+};
+
+export type HomeMailArchiveCommandResult = HomeMailMessagesCommandResult & {
+	archiveJob: CommunicationsArchiveJob;
 };
 
 export type HomeMailMessageCommandResult = {
@@ -210,41 +210,21 @@ export async function archiveHomeMailMessagesCommand(args: {
   sharedInboxID?: string;
   accountEmail?: string;
   messageIDs: string[];
-  archiveEmailMessage?: HomeArchiveEmailMessage;
-  archiveEmailMessagesBatch?: HomeArchiveEmailMessagesBatch;
-}): Promise<HomeMailMessagesCommandResult | null> {
+	archiveEmailMessagesBatch?: HomeArchiveEmailMessagesBatch;
+}): Promise<HomeMailArchiveCommandResult | null> {
   const messageIDs = cleanIDList(args.messageIDs);
   if (messageIDs.length === 0) return null;
   const sharedInboxID = args.sharedInboxID?.trim() || undefined;
-  if (args.archiveEmailMessage && !args.archiveEmailMessagesBatch) {
-    const archiveEmailMessage = args.archiveEmailMessage;
-    const accountEmail = sharedInboxID ? undefined : args.accountEmail?.trim().toLowerCase() || undefined;
-    await Promise.all(messageIDs.map((messageID) => archiveEmailMessage(messageID, sharedInboxID, args.companyID, accountEmail)));
-    return { messageIDs };
-  }
-  const archiveEmailMessagesBatch = args.archiveEmailMessagesBatch ?? defaultArchiveEmailMessagesBatch;
-  const accountEmail = sharedInboxID ? undefined : args.accountEmail?.trim().toLowerCase() || undefined;
-  let result: ArchiveEmailMessagesBatchResult;
-  try {
-    result = await archiveEmailMessagesBatch(messageIDs, sharedInboxID, args.companyID, {
-      background: true,
-      accountEmail,
-    });
+	const archiveEmailMessagesBatch = args.archiveEmailMessagesBatch ?? defaultArchiveEmailMessagesBatch;
+	const accountEmail = sharedInboxID ? undefined : args.accountEmail?.trim().toLowerCase() || undefined;
+	let archiveJob: CommunicationsArchiveJob;
+	try {
+		archiveJob = await archiveEmailMessagesBatch(messageIDs, sharedInboxID, args.companyID, { accountEmail });
   } catch (archiveError) {
     const error = archiveError instanceof Error ? archiveError.message : "archive_failed";
     throw new Error(error);
   }
-  const acceptedIDs = cleanIDList(result.accepted_ids ?? []);
-  const archivedIDs = cleanIDList(result.archived_ids ?? []);
-  const failed = result.failed ?? [];
-  if (archivedIDs.length === 0 && failed.length > 0) {
-    throw new Error(failed[0]?.error || "archive_failed");
-  }
-  return {
-    messageIDs: archivedIDs.length > 0 ? archivedIDs : acceptedIDs.length > 0 ? acceptedIDs : messageIDs,
-    accepted: acceptedIDs.length > 0 && archivedIDs.length === 0 && failed.length === 0,
-    failed: failed.length ? failed : undefined,
-  };
+	return { messageIDs: cleanIDList(archiveJob.accepted_message_ids), archiveJob };
 }
 
 export async function unarchiveHomeMailMessagesCommand(args: {

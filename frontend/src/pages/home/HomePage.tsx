@@ -23,7 +23,8 @@ import {
   fetchCommunicationsAuthURL,
   fetchCommunicationsWorkspacePanel,
   fetchCommunicationsStatus,
-  getEmailCollaborationThread,
+	getEmailCollaborationThread,
+	getCommunicationsArchiveJob,
   getEmailMessage,
   getEmailSignature,
   getEmailThread,
@@ -48,7 +49,8 @@ import {
   type CompanyUser,
   type CompanyUserGroup,
   type CompanyUserGroupMember,
-  type CommunicationsEmailCollaboration,
+	type CommunicationsEmailCollaboration,
+	type CommunicationsArchiveJob,
   type CommunicationsSharedInbox,
   type CommunicationsSharedInboxCreateIntent,
   type CommunicationsSharedInboxRACIRole,
@@ -170,7 +172,6 @@ function applyLocalReadOverlays(messages: EmailMessage[], locallyReadMessageKeys
 
 const MISSING_LOGIC_GATE_REPAIR_CONCURRENCY = 4;
 const MISSING_LOGIC_GATE_REPAIR_FAILURE_TTL_MS = 5 * 60_000;
-const ARCHIVE_BACKGROUND_CONFIRMATION_TIMEOUT_MS = 3 * 60_000;
 const PRIMARY_TRIAGE_PAGE_FILL_MAX_REQUESTS = 4;
 const EMAIL_DETAIL_FOREGROUND_GRACE_MS = 250;
 const EMAIL_THREAD_PREVIEW_MAX_PAGES = 8;
@@ -576,9 +577,10 @@ export function HomePage({
   const messageListOrderRef = useRef<EmailConversationOrder>("newest");
   const initialViewIDRef = useRef<HomeViewID>(initialViewID);
   const queuedArchiveBatchesRef = useRef<Map<string, QueuedArchiveBatch>>(new Map());
-  const pendingArchiveMessageKeysRef = useRef<Set<string>>(new Set());
-  const archiveQueueFlushTimerRef = useRef<number | null>(null);
-  const archivePendingReleaseTimerIDsRef = useRef<Set<number>>(new Set());
+	const pendingArchiveMessageKeysRef = useRef<Set<string>>(new Set());
+	const activeArchiveJobsRef = useRef<Map<string, QueuedArchiveBatch>>(new Map());
+	const refreshArchiveJobsRef = useRef<() => void>(() => undefined);
+	const archiveQueueFlushTimerRef = useRef<number | null>(null);
   const delayedMailRequestTimerIDsRef = useRef<Set<number>>(new Set());
   const delayedMarkReadTimerByMessageKeyRef = useRef<Map<string, number>>(new Map());
   const markReadMutationTokenByMessageKeyRef = useRef<Map<string, number>>(new Map());
@@ -1045,12 +1047,11 @@ export function HomePage({
         window.clearTimeout(archiveQueueFlushTimerRef.current);
         archiveQueueFlushTimerRef.current = null;
       }
-      for (const timerID of archivePendingReleaseTimerIDsRef.current) window.clearTimeout(timerID);
-      archivePendingReleaseTimerIDsRef.current.clear();
       for (const timerID of delayedMailRequestTimerIDsRef.current) window.clearTimeout(timerID);
       delayedMailRequestTimerIDsRef.current.clear();
       delayedMarkReadTimerByMessageKeyRef.current.clear();
-      queuedArchiveBatchesRef.current.clear();
+		queuedArchiveBatchesRef.current.clear();
+		activeArchiveJobsRef.current.clear();
       pendingArchiveMessageKeysRef.current.clear();
       pendingStarredMessageIDsRef.current.clear();
     };
@@ -1276,9 +1277,8 @@ export function HomePage({
           window.clearTimeout(archiveQueueFlushTimerRef.current);
           archiveQueueFlushTimerRef.current = null;
         }
-        for (const timerID of archivePendingReleaseTimerIDsRef.current) window.clearTimeout(timerID);
-        archivePendingReleaseTimerIDsRef.current.clear();
-        queuedArchiveBatchesRef.current.clear();
+		queuedArchiveBatchesRef.current.clear();
+		activeArchiveJobsRef.current.clear();
         pendingArchiveMessageKeysRef.current.clear();
         setQueuedArchiveEmailCount(0);
         pendingStarredMessageIDsRef.current.clear();
@@ -1304,9 +1304,8 @@ export function HomePage({
       window.clearTimeout(archiveQueueFlushTimerRef.current);
       archiveQueueFlushTimerRef.current = null;
     }
-    for (const timerID of archivePendingReleaseTimerIDsRef.current) window.clearTimeout(timerID);
-    archivePendingReleaseTimerIDsRef.current.clear();
-    queuedArchiveBatchesRef.current.clear();
+	queuedArchiveBatchesRef.current.clear();
+	activeArchiveJobsRef.current.clear();
     pendingArchiveMessageKeysRef.current.clear();
     setQueuedArchiveEmailCount(0);
     pendingStarredMessageIDsRef.current.clear();
@@ -2100,17 +2099,21 @@ export function HomePage({
         await Promise.all(reads);
       },
     });
-    const onMailboxChanged = (change: {
+		const onMailboxChanged = (change: {
       scope: string;
       trigger: string;
       message_id?: string;
       thread_id?: string;
       shared_inbox_id?: string;
-    }) => {
-      coordinator.changed(change);
-    };
+		}) => {
+			coordinator.changed(change);
+			refreshArchiveJobsRef.current();
+		};
     const unsubscribe = subscribeRealtimeScope(apiBase, subscribedTarget.companyID, subscribedTarget.scope, {
-      onAccepted: () => coordinator.accepted(),
+      onAccepted: () => {
+        coordinator.accepted();
+        refreshArchiveJobsRef.current();
+      },
       onMailboxMessageChanged: onMailboxChanged,
       onMailboxFolderChanged: onMailboxChanged,
     });
@@ -2137,13 +2140,26 @@ export function HomePage({
     }
     if (changed) syncQueuedArchiveEmailCount();
   }, [archiveQueueMessageKey, syncQueuedArchiveEmailCount]);
-  const releasePendingArchiveMessagesLater = useCallback((batch: QueuedArchiveBatch) => {
-    const timerID = window.setTimeout(() => {
-      archivePendingReleaseTimerIDsRef.current.delete(timerID);
-      forgetPendingArchiveMessages(batch);
-    }, ARCHIVE_BACKGROUND_CONFIRMATION_TIMEOUT_MS);
-    archivePendingReleaseTimerIDsRef.current.add(timerID);
-  }, [forgetPendingArchiveMessages]);
+	const refreshActiveArchiveJobs = useCallback(async () => {
+		for (const [jobID, batch] of Array.from(activeArchiveJobsRef.current.entries())) {
+			let job: CommunicationsArchiveJob;
+			try {
+				job = await getCommunicationsArchiveJob(jobID);
+			} catch {
+				continue;
+			}
+			if (job.status === "pending" || job.status === "processing") continue;
+			activeArchiveJobsRef.current.delete(jobID);
+			forgetPendingArchiveMessages(batch);
+			const failed = job.items.filter((item) => item.status === "failed");
+			if (failed.length > 0 && mailboxRequestOwnerIsCurrent(batch.owner)) {
+				setError(failed.length === 1 ? "Failed to archive 1 message." : `Failed to archive ${failed.length} messages.`);
+				scheduleMessageListRefresh(0, { owner: batch.owner });
+			}
+			scheduleFolderMetadataRefresh({ mailboxScopeKey: batch.owner.mailboxScopeKey });
+		}
+	}, [forgetPendingArchiveMessages, mailboxRequestOwnerIsCurrent, scheduleFolderMetadataRefresh, scheduleMessageListRefresh]);
+	refreshArchiveJobsRef.current = () => { void refreshActiveArchiveJobs(); };
   const archiveQueueCanAccept = useCallback((messageIDs: string[], nextCompanyID: string, sharedInboxID?: string, accountEmail?: string) => {
     const pending = pendingArchiveMessageKeysRef.current;
     let newCount = 0;
@@ -2172,15 +2188,11 @@ export function HomePage({
         messageIDs: batch.messageIDs,
       })
         .then((result) => {
-          keepPendingUntilConfirmation = result?.accepted === true;
-          if (keepPendingUntilConfirmation) releasePendingArchiveMessagesLater(batch);
-          const failed = result?.failed ?? [];
-          const failedIDs = failed.map((item) => item.message_id);
-          if (failedIDs.length > 0) forgetLocalMailboxMutationEchoes("message.updated", failedIDs, batch.realtimeScope);
-          if (failed.length > 0 && mailboxRequestOwnerIsCurrent(batch.owner)) {
-            setError(failed.length === 1 ? "Failed to archive 1 message." : `Failed to archive ${failed.length} messages.`);
-            scheduleMessageListRefresh(0, { owner: batch.owner });
-          }
+			keepPendingUntilConfirmation = Boolean(result?.archiveJob.job_id);
+			if (result?.archiveJob.job_id) {
+				activeArchiveJobsRef.current.set(result.archiveJob.job_id, batch);
+				void refreshActiveArchiveJobs();
+			}
         })
         .catch((archiveError) => {
           forgetLocalMailboxMutationEchoes("message.updated", batch.messageIDs, batch.realtimeScope);
@@ -2197,7 +2209,7 @@ export function HomePage({
           if (!keepPendingUntilConfirmation) scheduleFolderMetadataRefresh({ mailboxScopeKey: batch.owner.mailboxScopeKey });
         });
     }
-  }, [forgetLocalMailboxMutationEchoes, forgetPendingArchiveMessages, handleEmailAccessExpired, mailboxRequestOwnerIsCurrent, releasePendingArchiveMessagesLater, rememberLocalMailboxMutationEchoes, scheduleFolderMetadataRefresh, scheduleMessageListRefresh]);
+	}, [forgetLocalMailboxMutationEchoes, forgetPendingArchiveMessages, handleEmailAccessExpired, mailboxRequestOwnerIsCurrent, refreshActiveArchiveJobs, rememberLocalMailboxMutationEchoes, scheduleFolderMetadataRefresh, scheduleMessageListRefresh]);
   const queueArchiveMessages = useCallback((args: { companyID: string; sharedInboxID?: string; accountEmail?: string; messageIDs: string[]; owner?: HomeMailboxRequestOwner }): string[] => {
     const messageIDs = cleanIDList(args.messageIDs);
     if (messageIDs.length === 0) return [];
@@ -3081,24 +3093,21 @@ export function HomePage({
     });
     try {
       rememberLocalMailboxMutationEchoes("message.updated", ids, realtimeScope);
-      const result = await archiveHomeMailMessagesCommand({ companyID, sharedInboxID, accountEmail, messageIDs: ids });
-      const archivedIDs = cleanIDList(result?.messageIDs ?? ids);
+		const result = await archiveHomeMailMessagesCommand({ companyID, sharedInboxID, accountEmail, messageIDs: ids });
+		const archivedIDs = cleanIDList(result?.messageIDs ?? ids);
+		if (result?.archiveJob.job_id) {
+			activeArchiveJobsRef.current.set(result.archiveJob.job_id, {
+				companyID, sharedInboxID, accountEmail, messageIDs: archivedIDs, owner, realtimeScope,
+			});
+			void refreshActiveArchiveJobs();
+		}
       const archivedInboxCount = archivedIDs.reduce((count, id) => count + (inboxIDSet.has(id) ? 1 : 0), 0);
       adjustPrimaryMailboxCount(countKey, -archivedInboxCount, primaryCountAtStart);
       if (!mailboxRequestOwnerIsCurrent(owner)) return;
-      const failed = result?.failed ?? [];
-      if (!selectAfterRemoval) setSelectedMessageIDs(new Set());
-      const failedIDs = failed.map((item) => item.message_id);
-      if (failedIDs.length > 0) forgetLocalMailboxMutationEchoes("message.updated", failedIDs, realtimeScope);
-      if (!selectAfterRemoval) setSelectionAnchorMessageID("");
-      setMessageContextMenu(null);
-      if (failed.length > 0) {
-        setError(failed.length === 1 ? "Failed to archive 1 message." : `Failed to archive ${failed.length} messages.`);
-        scheduleMessageListRefresh(0, { owner });
-      } else {
-        setNotice(ids.length === 1 ? "Message archived." : `${ids.length} messages archived.`);
-      }
-      scheduleFolderMetadataRefresh({ mailboxScopeKey: owner.mailboxScopeKey });
+		if (!selectAfterRemoval) setSelectedMessageIDs(new Set());
+		if (!selectAfterRemoval) setSelectionAnchorMessageID("");
+		setMessageContextMenu(null);
+		setNotice(ids.length === 1 ? "Message archive queued." : `${ids.length} message archives queued.`);
     } catch (archiveError) {
       forgetLocalMailboxMutationEchoes("message.updated", ids, realtimeScope);
       if (!mailboxRequestOwnerIsCurrent(owner)) return;
@@ -3107,7 +3116,7 @@ export function HomePage({
     } finally {
       if (mailboxRequestOwnerIsCurrent(owner)) setBusy("");
     }
-  }, [adjustPrimaryMailboxCount, canMutateCurrentMailView, companyID, currentMailboxRequestOwner, forgetLocalMailboxMutationEchoes, mailboxRequestOwnerIsCurrent, providerMutationAvailableForMessageIDs, providerMutationAvailableForMessages, rememberLocalMailboxMutationEchoes, removeMessagesFromVisibleMailList, scheduleFolderMetadataRefresh, scheduleMessageListRefresh]);
+  }, [adjustPrimaryMailboxCount, canMutateCurrentMailView, companyID, currentMailboxRequestOwner, forgetLocalMailboxMutationEchoes, mailboxRequestOwnerIsCurrent, providerMutationAvailableForMessageIDs, providerMutationAvailableForMessages, refreshActiveArchiveJobs, rememberLocalMailboxMutationEchoes, removeMessagesFromVisibleMailList, scheduleFolderMetadataRefresh, scheduleMessageListRefresh]);
   const unarchiveMessages = useCallback(async (messageIDs: string[], exactMessages?: EmailMessage[]) => {
     if (!canMutateCurrentMailView) return;
     const ids = cleanIDList(messageIDs);

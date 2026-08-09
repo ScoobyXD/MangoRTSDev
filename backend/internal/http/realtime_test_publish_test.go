@@ -1,22 +1,65 @@
 package httpapi
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"miraeopus/backend/internal/domain"
+	"miraeopus/backend/internal/realtime"
 	"miraeopus/backend/internal/store"
 	"strings"
+	"testing"
 )
 
-// These direct helpers exist only for transport/audience tests. Production
-// persisted mutations must reach this boundary through the durable outbox.
-func (s *Server) publishKanbanChanged(companyID, boardID, changeType string) {
+// enqueueRealtimeTestMessage exercises the production durable outbox boundary.
+// Its caller must explicitly construct a local backplane, just as local
+// development does; the lifecycle publisher remains the only delivery path.
+func enqueueRealtimeTestMessage(t *testing.T, s *Server, companyID, scope string, message any) {
+	t.Helper()
+	payload, eventType, err := realtimeMessagePayload(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.enqueueRealtimeOutboxAndWake(context.Background(), store.RealtimeOutboxInput{
+		CompanyID: companyID, Scope: scope, EventType: eventType, Payload: payload,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if s.realtimeBackplane == nil {
+		t.Fatal("realtime test server requires an explicit backplane")
+	}
+}
+
+func enqueueRealtimeEntityTestMessage(t *testing.T, s *Server, companyID, scope, resourceType, resourceID, permission string, message any) {
+	t.Helper()
+	payload, eventType, err := realtimeMessagePayload(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.enqueueRealtimeOutboxAndWake(context.Background(), store.RealtimeOutboxInput{
+		CompanyID: companyID, Scope: scope, EventType: eventType, Payload: payload,
+		ResourceType: resourceType, ResourceID: resourceID, Permission: permission,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if s.realtimeBackplane == nil {
+		t.Fatal("realtime test server requires an explicit backplane")
+	}
+}
+
+func explicitLocalRealtimeTestOptions(options ServerOptions) ServerOptions {
+	options.RealtimeBackplane = realtime.NewLocalBackplane()
+	return options
+}
+
+func publishKanbanChangedForTest(t *testing.T, s *Server, companyID, boardID, changeType string) {
+	t.Helper()
 	scope := realtimeBoardScope(boardID)
 	logicGateID := store.LogicGateIDFromKanbanBoardID(boardID)
 	if logicGateID == "" {
 		return
 	}
-	s.publishRealtimeMessageToCurrentEntityAudience(companyID, scope, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionEdit, realtimeKanbanChangedMessage{
+	enqueueRealtimeEntityTestMessage(t, s, companyID, scope, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionEdit, realtimeKanbanChangedMessage{
 		Type:       realtimeMessageKanbanChanged,
 		CompanyID:  strings.TrimSpace(companyID),
 		Scope:      scope,
@@ -25,7 +68,8 @@ func (s *Server) publishKanbanChanged(companyID, boardID, changeType string) {
 	})
 }
 
-func (s *Server) publishKanbanChangesForEvents(events []domain.DomainEvent) {
+func publishKanbanChangesForEventsForTest(t *testing.T, s *Server, events []domain.DomainEvent) {
+	t.Helper()
 	type boardChange struct {
 		companyID  string
 		boardID    string
@@ -69,7 +113,7 @@ func (s *Server) publishKanbanChangesForEvents(events []domain.DomainEvent) {
 		}
 	}
 	for _, change := range changes {
-		s.publishKanbanChanged(change.companyID, change.boardID, change.changeType)
+		publishKanbanChangedForTest(t, s, change.companyID, change.boardID, change.changeType)
 	}
 }
 

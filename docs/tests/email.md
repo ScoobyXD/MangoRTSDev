@@ -32,15 +32,17 @@ Temporary failure leaves the SQS item undeleted for AWS redelivery; permanent ac
 
 Last updated: 2026-08-09
 
-# Process Story: Background archive completion is read, not pushed
+# Process Story: Archive completion uses canonical reads without polling
 
-An accepted background archive request creates one permanent exact-message marker and sends one compact SQS unit
+An archive request creates or reuses one pending job identity and one permanent exact-message marker, then sends one compact SQS unit per message
 ↓
 The worker archives that exact provider message and settles only with its exact attempt token
 ↓
 The archive job and item rows remain the canonical completion or failure record
 ↓
-The browser observes that state through the canonical archive job read; the worker publishes no communications WebSocket completion event
+The worker commits a compact exact-mailbox hint after the status change; it never puts the job, email, or provider response in Valkey
+↓
+After recording the returned identity, the browser reads once to close a fast-completion race. If the job is still active, the exact hint or subscription reacceptance triggers the next canonical archive-job read, with no timer or browser polling
 
 Last updated: 2026-08-09
 
@@ -181,7 +183,7 @@ V3EMAIL9 - Existing normalized content is preferred. A retained legacy snapshot 
 
 V3EMAIL10 - `email_relationships` connects one exact internal message to a Node, Project, or Logic Gate, optionally at one textbox. It replaces old collaboration, conversion, placement, and Node-thread association tables.
 
-V3EMAIL11 - In the three-message example, explicitly attaching message 2 to a Node first stores that selected provider message and creates one relationship for message 2. The deliberate download job may then add the remaining current thread messages to the same stored thread; it never duplicates the thread or its messages.
+V3EMAIL11 - In the three-message example, explicitly attaching message 2 to a Node first stores that selected provider message and creates one relationship for message 2. The canonical ingestion job may then add the remaining current thread messages to the same stored thread; it never duplicates the thread or its messages.
 
 V3EMAIL12 - A whole-resource relationship has a null textbox ID. A textbox relationship contains the exact textbox ID, and the database verifies that the textbox belongs to the selected resource type and resource ID.
 
@@ -466,7 +468,7 @@ EMAIL102 - Forward is an explicit compose kind, separate from Reply. It retains 
 EMAIL103 - Home and node-attached email use one calendar-invitation card backed by an authenticated raw-MIME UID lookup and the authoritative Nylas event. When supplied, the card shows title, time and timezone, organizer, guests, location, current RSVP state, Join meeting, Copy link, and Open calendar. Accept, Tentative, and Decline show saved state only after provider success; permission/provider failures never invent event or RSVP state.
 EMAIL104 - Manual Split conversation and Merge conversations controls are intentionally outside the current email-thread scope. Canonical provider/header identity, exact mailbox scoping, oldest-to-newest presentation, and one visible item per canonical message remain the thread contract; subject/body resemblance alone never groups or separates messages.
 EMAIL105 - The normal Archive action in an open My Triage or Shared Triage email archives that exact selected provider message, removes its visible row, selects the row immediately below it, and opens that next detail automatically. If the archived row was last, Mango selects the nearest previous row; if no row remains, the detail clears. The separate Archive page and go next action retains its fixed-page behavior.
-EMAIL105A - Background archive creates one durable item marker per exact mailbox message before sending one compact SQS message per item. If a request sends some items and a later send fails, retry reuses and resends every still-pending marker instead of creating a replacement or stranding it without a database poller. The exact permanent email connection remains the FIFO group, PostgreSQL fences each provider attempt with its token, and AWS receive count owns redelivery and DLQ movement. Completion and failure are observed only through canonical archive job reads; archive workers publish no communications WebSocket completion event.
+EMAIL105A - Archive has one SQS-only provider path. The removed single-message route and removed non-background/local-goroutine batch path can never call Nylas inside an API process. One request creates or reuses one pending archive job identity and one durable item marker per exact mailbox message before sending one compact SQS message per item. If a send fails, retry returns the same pending job identity and resends the same item marker instead of creating a replacement or stranding it without a database poller. The exact permanent email connection remains the FIFO group, PostgreSQL fences each provider attempt with its token, and AWS receive count owns redelivery and DLQ movement. PostgreSQL is status truth. The browser reads once after recording the returned identity to close a fast-completion race; if still active, a deterministic compact mailbox hint or subscription reacceptance triggers the next canonical archive-job read. Valkey carries no job/email data and no timer polls status.
 EMAIL106 - A non-primary mailbox tab with a next page but no actual list scroll range automatically appends pages until the list becomes scrollable or the provider reports exhaustion. This prevents condensed All, Starred, Sent, Spam, or Archive results from trapping the user on a short first page; ordinary scroll continues loading near the bottom without replacing the selected detail.
 EMAIL107 - While the selected detail owner is already fetching a message/thread, the mounted conversation viewer must not start a competing newest-message body hydration. Same-key caches and in-flight coalescing remain a safety net, but the visible contract is one stable loading transition from row preview to the complete canonical timeline, never a one-message/detail blip followed by repeated thread reconstruction.
 EMAIL108 - Personal Email, My Triage, and Shared Triage use the same ordered mailbox actions: Inbox, Starred, Sent, and the All/Spam dropdown form four equal top controls; Compose, My Drafts, and Archive page/next always form three equal lower controls in fixed positions. The lower workflow actions rest on lightly tinted blue-violet, violet-fuchsia, and cyan-teal elevated surfaces. Compose or My Drafts receives its full gradient only when it is the single selected destination; Archive page/next receives stronger teal interaction feedback when available and remains visibly disabled, never removed, on mailbox tabs where that action is inappropriate. The All and Spam menu rows show a clear hover and keyboard-focus highlight across the full row without a dead gap between options.
@@ -484,7 +486,7 @@ EMAIL117 - AWS SQS alone owns email delivery, fixed visibility, redelivery, rece
 EMAIL118 - Message persistence includes HTML body (and provider text when available), subject, snippet, timestamp, From, To, Cc, Bcc, Reply-To, provider message/thread IDs, folders needed for faithful display, and deterministic chronological order. HTML stays immutable email HTML rather than being translated into editable Node JSON. Rendering sanitizes it and blocks active/unsafe content. Empty Bcc or body is a valid stored value and must not be mistaken for an incomplete download.
 EMAIL119 - Every ordinary attachment, inline CID image, and signature asset referenced by the imported message is copied into Mango-owned private object storage and linked through Mango attachment metadata to every authorized Node that displays the thread. Retry uses stable identity so the same provider attachment is stored once. A Node collaborator downloads through Mango authorization and never through the source user's Nylas grant. Failure of one attachment leaves the readable message and completed siblings available while the job remains retryable/partially failed.
 EMAIL120 - Stored messages are ordered by provider timestamp ascending with immutable Nylas message ID as the deterministic tie-breaker; UI reversal is presentation-only. `history_complete=true` means the provider thread was completely downloaded as observed by that reconciliation job, not that the external thread can never receive another message. A later automatic or explicit reconciliation may append a newer, older, or same-timestamp real message and recomputes order without changing stable Mango message IDs.
-EMAIL121 - Every connection stores a permanent Mango ID, `ingestion_started_at`, and `last_successful_scan_at`. EventBridge sends one `reconciliation-control` FIFO message about every ten minutes. One control delivery reads one bounded connection page; each exact-connection delivery reads one bounded provider page after an overlap-protected checkpoint and never launches a historical whole-mailbox import. A continuation is accepted by SQS before the current delivery is deleted, and the checkpoint advances only after the final provider page is durably represented. Reconciliation never creates a replacement for an existing stable identity. Its durable creation-origin identity permits only the same control delivery to retry an ambiguous or failed child send; a later scheduled control identity never resends an accepted marker left by prior or DLQed work, and processing, terminal, and parked work remains untouched.
+EMAIL121 - Every connection stores a permanent Mango ID, `ingestion_started_at`, and `last_successful_scan_at`. EventBridge sends one `reconciliation-control` FIFO message about every ten minutes. One control delivery reads one bounded connection page; each exact-connection delivery first reads one bounded set of markers at least ten minutes old, then reads one bounded provider page after an overlap-protected checkpoint, and never launches a historical whole-mailbox import. A continuation is accepted by SQS before the current delivery is deleted, and the checkpoint advances only after the final provider page is durably represented. Reconciliation never creates a replacement identity. It may resend only an `accepted` ingestion identity whose `sqs_accepted_timestamp` is null or an archive item that is still `pending` with zero provider starts. Recorded ingestion acceptance and all started, completed, parked, exhausted, or DLQed work remain untouched.
 
 EMAIL121A - Provider 401/403 and exact 404 `grant.not_found` park only that permanent connection as `reauth_required`; the known Google/Gmail 400 precondition failure parks it as `configuration_required`. The exact job and connection status update must succeed before SQS acknowledgement. Reauthorizing the same mailbox updates the same permanent connection without changing `ingestion_started_at` or `last_successful_scan_at`; a bounded reconciliation control message may resume from the checkpoint. Another valid connection is never changed.
 
@@ -510,12 +512,14 @@ EMAIL129 - The Universal picker, My Triage, and Shared Triage call the same thre
 
 EMAIL130 - Choosing a provider email with no `email_message_id` calls the authenticated exact-mailbox ingestion command before any Node or Project attachment. The backend fetches provider truth, idempotently upserts the mailbox-scoped durable thread/message, returns the real Mango `email_message_id`, and keeps full-thread ingestion prioritized. The later relationship command remains the established typed Node or Project command; no provider ID is substituted for a Mango UUID and no generic relationship or surrogate identity is created.
 
+EMAIL131 - A stored attached-email thread in `downloading` state is event-driven. Node and Project surfaces perform one initial canonical read, subscribe to the exact personal-account or shared-inbox mailbox scope, and perform one canonical thread read for a matching worker post-commit hint. They never run the retired one-second timer, never replace it with another polling interval, and never treat the compact hint as email truth.
+
 ## Scenarios
 
 ### Scenario EMAIL-S0: Live arrival, resilient search, and safe picker attachment
 
 Business logic covered:
-- EMAIL127 through EMAIL130
+- EMAIL127 through EMAIL131
 
 Given:
 - The browser has a healthy exact mailbox realtime subscription.
@@ -861,7 +865,7 @@ Expected:
 - Every participant can read the Mango-stored thread snapshot and Mango-stored attachments without receiving provider credentials, an auto-forwarded provider copy, or access to the source mailbox.
 - The source email appears only in a participant's active My Triage or Shared Triage when that exact provider mailbox response returns it. Mentioned nonrecipients retain stored-thread and Node/chat access but receive no email-list row.
 - A participant who is also a provider recipient sees the one provider-owned row annotated with collaboration identity by exact source scope plus provider thread/message identity.
-- A verified webhook or checkpoint scan enqueues the later provider message without waiting for a user session. Background ingestion appends each missing real message once and gives it the thread's existing Node-wide destination for all authorized Node collaborators.
+- A verified webhook or rare bounded checkpoint reconciliation enqueues the later provider message without waiting for a user session. Background ingestion appends each missing real message once and gives it the thread's existing Node-wide destination for all authorized Node collaborators.
 - Similar subject text, participants, or body content in another thread or mailbox never joins the collaboration.
 
 ### Scenario EMAIL-S15: Shared Reply-All Draft Concurrency, Send, And Discard

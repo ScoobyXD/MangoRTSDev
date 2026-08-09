@@ -2,7 +2,7 @@
 
 The API verifies a Nylas webhook, resolves the exact permanent email connection, and creates/finds one tiny stable PostgreSQL job identity
 ↓
-The API returns webhook success only after the compact FIFO message is accepted by SQS; every duplicate request independently requires a successful send
+The API returns webhook success only after the compact FIFO message is accepted by SQS and that acceptance is durably marked; every duplicate request independently requires a successful send
 ↓
 One private worker receives one bounded unit with an eight-minute context, starts one exact-token provider attempt, and commits the email result
 ↓
@@ -14,15 +14,15 @@ AWS receive count controls redelivery/DLQ movement, PostgreSQL refuses provider 
 
 Last updated: 2026-08-09
 
-# Process Story: Archive completion stays on canonical HTTP reads
+# Process Story: Archive completion uses canonical reads without polling
 
 The archive request returns its durable job identity after the exact SQS item is accepted
 ↓
 The private worker settles the exact provider archive result in PostgreSQL
 ↓
-The browser reads the canonical job resource to observe completion or failure
+The same transaction records a compact exact-mailbox realtime hint; Valkey carries no archive job, email body, or provider result
 ↓
-No archive-completion communications WebSocket event is produced, so realtime remains reserved for mailbox data changes already covered by their canonical paths
+After recording the returned identity, the browser reads once to close a fast-completion race. If the job remains active, the exact hint or subscription reacceptance triggers the next canonical job read; no timer polls the resource
 
 Last updated: 2026-08-09
 
@@ -168,12 +168,13 @@ RW67 - Normal realtime dispatch has no periodic 75 ms database query. Before pub
 RW68 - HTTP request contexts reach durable realtime enqueue calls, while the cancelable API-task lifecycle context owns broker publication, audience authorization, subscriber dispatch, recovery, claim cleanup after request cancellation, and delayed retry work. `context.Background` creates only deliberate top-level application lifecycles.
 RW69 - Simple local development may explicitly use the process-local backplane when no Valkey variables are configured. Terraform-managed DEV sets `MANGORTS_VALKEY_REQUIRED=true`; missing or partial coordinates fail startup instead of silently isolating ECS tasks. Its private ElastiCache Serverless security group accepts TCP 6379-6380 only from the ECS task security group. First creation waits for the updated GitHub deploy-policy attachment, and task registration/service rollout wait for the exact runtime `elasticache:Connect` policy attachment.
 RW70 - `APP_ENV` never authorizes the in-memory repository. No-database local mode requires both an absent `DB_HOST` and explicit `ALLOW_INMEMORY_FALLBACK=true`. Once a PostgreSQL host is configured, open, connection, or schema-readiness failure terminates startup for every runtime role, including the private email worker; a deployed API must never pass health checks against an empty in-memory repository after database failure.
-RW71 - A valid Nylas `message.created` webhook resolves the exact permanent email connection, creates/finds one permanent company/connection/provider-message identity, and returns success only after SQS accepts that compact job. The request performs no provider download, cache invalidation, or pre-ingestion realtime publish. A duplicate request may reuse the identity and stable deduplication ID but must make its own successful SQS send attempt; an in-flight receipt cannot hide another request's send failure.
+RW71 - A valid Nylas `message.created` webhook resolves the exact permanent email connection, creates/finds one permanent company/connection/provider-message identity, and returns success only after SQS accepts that compact job and PostgreSQL records `sqs_accepted_timestamp`. The request performs no provider download, cache invalidation, or pre-ingestion realtime publish. A duplicate request reuses the identity and stable deduplication ID but must make its own successful SQS send attempt when acceptance is not recorded; an in-flight receipt cannot hide another request's send failure.
 RW72 - The DEV email worker receives one SQS item at a time with 20-second long polling, an eight-minute attempt context, and no visibility change API. AWS fixed visibility, receive count, redelivery, and DLQ movement are authoritative. PostgreSQL increments only a provider-processing start, fences settlement by the exact attempt token, and refuses attempt 4; it has no claim/reclaim lease, availability timer, or retry scheduler.
-RW73 - Every webhook lookup, receipt/status write, transaction, and query uses the HTTP request context; cancellation must stop blocked PostgreSQL work. Worker/provider/database work uses the bounded attempt context. After the provider/email transaction commits, the worker must durably insert the required deterministic realtime outbox row before SQS deletion. The event identity derives from the stable job plus exact company/audience scope, so completed redelivery—including after SQS delete failure—does no provider work and creates no second outbox event. Once the row is committed, Valkey publication is lifecycle-owned asynchronous work: broker failure does not block SQS acknowledgement or repeat provider work, and the existing realtime spine recovers the row.
+RW73 - Every webhook lookup, marker/acceptance write, transaction, SQS send, and query uses the HTTP request context; cancellation must stop blocked PostgreSQL and SQS work. Worker/provider/database work uses the bounded attempt context. Cancellation or an ambiguous failure after marker creation leaves the stable identity with no acceptance timestamp, so request retry or reconciliation may resend only that same identity. After the provider/email transaction commits, the worker must durably insert the required deterministic realtime outbox row before SQS deletion. The event identity derives from the stable job plus exact company/audience scope, so completed redelivery—including after SQS delete failure—does no provider work and creates no second outbox event. Once the row is committed, Valkey publication is lifecycle-owned asynchronous work: broker failure does not block SQS acknowledgement or repeat provider work, and the existing realtime spine recovers the row.
 RW74 - Provider 401/403 and exact 404 `grant.not_found` atomically park only the exact connection as `reauth_required`; the known Google/Gmail 400 precondition failure parks it as `configuration_required`. Status-write failure leaves the SQS item undeleted. Rare EventBridge reconciliation uses only `reconciliation-control` for control messages and the permanent email connection ID for provider work, reads one bounded connection/provider page per message, and never recreates an existing stable job identity or automatically replays DLQ work.
 RW75 - Before its first receive, the private worker requires PostgreSQL with the exact final schema, complete Nylas configuration, an SQS sender/receiver, and connected external Valkey; it never substitutes process-local realtime. A persistent SQS Receive error ends the worker so ECS restart backoff applies, while ordinary item failure remains native SQS redelivery.
-RW76 - Background archive completion and failure are observed through canonical archive job reads. The archive worker never publishes a communications WebSocket completion event.
+RW76 - Every archive provider mutation is one compact SQS item; the API has no single-message provider archive route, non-background batch mode, local archive goroutine, or background switch. A retry reuses the same active archive job and item identities. PostgreSQL is status truth. After recording the returned job identity, the browser performs one canonical `GET /v1/communications/archive-jobs/{job_id}` read to close a fast-completion race. If the job remains active, the worker's deterministic compact exact-mailbox hint or subscription reacceptance causes the next canonical read. Valkey never carries the job or email payload, and the browser never polls job status.
+RW77 - An attached-email surface whose stored thread is `downloading` performs its initial canonical HTTP read, subscribes to the exact personal-account or shared-inbox mailbox scope, and performs one new canonical thread read only after the worker's post-commit hint. It installs no one-second timer and never replaces that timer with another polling loop.
 
 ## Scenarios
 

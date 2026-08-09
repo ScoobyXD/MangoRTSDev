@@ -134,9 +134,10 @@ func TestMemoryCommunicationsEmailThreadStaysDownloadingDuringLaterReconciliatio
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := repo.EnsureCommunicationsEmailThreadDownloadJobContext(context.Background(),
-		input.CompanyID, stored.EmailThreadID, CommunicationsEmailThreadDownloadScopeMessage, "provider-new", input.PersonalUserID,
-	); err != nil {
+	if _, _, err := repo.EnsureCommunicationsEmailIngestionJobContext(context.Background(), CommunicationsEmailIngestionJobInput{
+		CompanyID: input.CompanyID, EmailConnectionID: stored.EmailConnectionID, EmailThreadID: stored.EmailThreadID,
+		ProviderMessageID: "provider-new", ProviderThreadID: stored.ProviderThreadID, Priority: CommunicationsEmailIngestionPriorityVisible,
+	}); err != nil {
 		t.Fatal(err)
 	}
 	input.SelectedMessageID = "provider-new"
@@ -235,7 +236,7 @@ func TestCommunicationsEmailThreadSchemaKeepsBodiesAndMetadataOutOfHotProjection
 		}
 	}
 }
-func TestMemoryCommunicationsEmailThreadDownloadJobsAreDurableAndIdempotent(t *testing.T) {
+func TestMemoryCommunicationsEmailIngestionJobsAreDurableAndIdempotent(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-111111111196"
 	userID := "22222222-2222-4222-8222-222222222296"
@@ -248,20 +249,24 @@ func TestMemoryCommunicationsEmailThreadDownloadJobsAreDurableAndIdempotent(t *t
 		t.Fatal(err)
 	}
 
-	first, created, err := repo.EnsureCommunicationsEmailThreadDownloadJobContext(context.Background(), companyID, thread.EmailThreadID, CommunicationsEmailThreadDownloadScopeFullThread, "", userID)
+	jobInput := CommunicationsEmailIngestionJobInput{
+		CompanyID: companyID, EmailConnectionID: thread.EmailConnectionID, EmailThreadID: thread.EmailThreadID,
+		ProviderMessageID: thread.RootProviderMessageID, ProviderThreadID: thread.ProviderThreadID, Priority: CommunicationsEmailIngestionPriorityVisible,
+	}
+	first, created, err := repo.EnsureCommunicationsEmailIngestionJobContext(context.Background(), jobInput)
 	if err != nil || !created {
 		t.Fatalf("first durable job = %+v created=%v err=%v", first, created, err)
 	}
-	second, created, err := repo.EnsureCommunicationsEmailThreadDownloadJobContext(context.Background(), companyID, thread.EmailThreadID, CommunicationsEmailThreadDownloadScopeFullThread, "", userID)
-	if err != nil || created || second.DownloadJobID != first.DownloadJobID {
+	second, created, err := repo.EnsureCommunicationsEmailIngestionJobContext(context.Background(), jobInput)
+	if err != nil || created || second.IngestionJobID != first.IngestionJobID {
 		t.Fatalf("duplicate ensure = %+v created=%v err=%v", second, created, err)
 	}
 
-	attempt, started, err := repo.StartCommunicationsEmailIngestionAttemptContext(context.Background(), first.DownloadJobID)
-	if err != nil || !started || attempt.ProviderAttemptCount != 1 || attempt.Status != CommunicationsEmailThreadDownloadJobProcessing || attempt.AttemptToken == "" {
+	attempt, started, err := repo.StartCommunicationsEmailIngestionAttemptContext(context.Background(), first.IngestionJobID)
+	if err != nil || !started || attempt.ProviderAttemptCount != 1 || attempt.Status != CommunicationsEmailIngestionJobProcessing || attempt.AttemptToken == "" {
 		t.Fatalf("first attempt = %+v started=%v err=%v", attempt, started, err)
 	}
-	if err := repo.FailCommunicationsEmailIngestionAttemptContext(context.Background(), first.DownloadJobID, attempt.AttemptToken, "email_thread_source_unavailable"); err != nil {
+	if err := repo.FailCommunicationsEmailIngestionAttemptContext(context.Background(), first.IngestionJobID, attempt.AttemptToken, "email_thread_source_unavailable", nil); err != nil {
 		t.Fatal(err)
 	}
 	retrying, err := repo.GetCommunicationsEmailThread(companyID, thread.EmailThreadID)
@@ -271,19 +276,19 @@ func TestMemoryCommunicationsEmailThreadDownloadJobsAreDurableAndIdempotent(t *t
 	if retrying.DownloadStatus != CommunicationsEmailThreadDownloadDownloading {
 		t.Fatalf("retrying thread status = %q, want downloading", retrying.DownloadStatus)
 	}
-	attempt, started, err = repo.StartCommunicationsEmailIngestionAttemptContext(context.Background(), first.DownloadJobID)
+	attempt, started, err = repo.StartCommunicationsEmailIngestionAttemptContext(context.Background(), first.IngestionJobID)
 	if err != nil || !started || attempt.ProviderAttemptCount != 2 {
 		t.Fatalf("second attempt = %+v started=%v err=%v", attempt, started, err)
 	}
-	if err := repo.CompleteCommunicationsEmailIngestionAttemptContext(context.Background(), first.DownloadJobID, attempt.AttemptToken); err != nil {
+	if err := repo.CompleteCommunicationsEmailIngestionAttemptContext(context.Background(), first.IngestionJobID, attempt.AttemptToken, nil); err != nil {
 		t.Fatal(err)
 	}
-	jobs, err := repo.ListCommunicationsEmailThreadDownloadJobsContext(context.Background(), companyID, thread.EmailThreadID)
-	if err != nil || len(jobs) != 1 || jobs[0].Status != CommunicationsEmailThreadDownloadJobCompleted {
+	jobs, err := repo.ListCommunicationsEmailIngestionJobsForThreadContext(context.Background(), companyID, thread.EmailThreadID)
+	if err != nil || len(jobs) != 1 || jobs[0].Status != CommunicationsEmailIngestionJobCompleted {
 		t.Fatalf("jobs = %+v err=%v", jobs, err)
 	}
-	completedDuplicate, created, err := repo.EnsureCommunicationsEmailThreadDownloadJobContext(context.Background(), companyID, thread.EmailThreadID, CommunicationsEmailThreadDownloadScopeFullThread, "", userID)
-	if err != nil || created || completedDuplicate.DownloadJobID != first.DownloadJobID {
+	completedDuplicate, created, err := repo.EnsureCommunicationsEmailIngestionJobContext(context.Background(), jobInput)
+	if err != nil || created || completedDuplicate.IngestionJobID != first.IngestionJobID {
 		t.Fatalf("completed duplicate ensure = %+v created=%v err=%v", completedDuplicate, created, err)
 	}
 }
@@ -307,23 +312,23 @@ func TestMemoryCommunicationsEmailIngestionAttemptsAreFencedAndStopAtThree(t *te
 			t.Fatalf("ensure %s created=%v err=%v", item.messageID, created, err)
 		}
 	}
-	var job CommunicationsEmailThreadDownloadJob
-	for _, candidate := range repo.emailThreadDownloadJobs {
+	var job CommunicationsEmailIngestionJob
+	for _, candidate := range repo.emailIngestionJobs {
 		if candidate.ProviderMessageID == "live-message" {
 			job = candidate
 		}
 	}
 	for attemptNumber := 1; attemptNumber <= 3; attemptNumber++ {
-		attempt, started, err := repo.StartCommunicationsEmailIngestionAttemptContext(context.Background(), job.DownloadJobID)
+		attempt, started, err := repo.StartCommunicationsEmailIngestionAttemptContext(context.Background(), job.IngestionJobID)
 		if err != nil || !started || attempt.ProviderAttemptCount != attemptNumber {
 			t.Fatalf("attempt %d = %+v started=%v err=%v", attemptNumber, attempt, started, err)
 		}
-		if err := repo.FailCommunicationsEmailIngestionAttemptContext(context.Background(), job.DownloadJobID, attempt.AttemptToken, "provider_failed"); err != nil {
+		if err := repo.FailCommunicationsEmailIngestionAttemptContext(context.Background(), job.IngestionJobID, attempt.AttemptToken, "provider_failed", nil); err != nil {
 			t.Fatal(err)
 		}
 	}
-	terminal, started, err := repo.StartCommunicationsEmailIngestionAttemptContext(context.Background(), job.DownloadJobID)
-	if err != nil || started || terminal.Status != CommunicationsEmailThreadDownloadJobExhausted || terminal.ProviderAttemptCount != 3 {
+	terminal, started, err := repo.StartCommunicationsEmailIngestionAttemptContext(context.Background(), job.IngestionJobID)
+	if err != nil || started || terminal.Status != CommunicationsEmailIngestionJobExhausted || terminal.ProviderAttemptCount != 3 {
 		t.Fatalf("terminal attempt = %+v started=%v err=%v", terminal, started, err)
 	}
 }
@@ -355,16 +360,20 @@ func TestMemoryCommunicationsEmailThreadLaterManualMessageReusesThreadAndQueuesO
 	if updated.EmailThreadID != stored.EmailThreadID || len(updated.Messages) != 2 || updated.Messages[0].EmailMessageID != oldMangoMessageID {
 		t.Fatalf("later message forked stored thread: before=%+v after=%+v", stored, updated)
 	}
-	scope, messageID, ok := communicationsEmailThreadDownloadRequest(updated, later)
-	if !ok || scope != CommunicationsEmailThreadDownloadScopeMessage || messageID != "provider-new" {
-		t.Fatalf("later download request = scope=%q message=%q ok=%v", scope, messageID, ok)
+	messageID, ok := communicationsEmailIngestionRequest(updated, later)
+	if !ok || messageID != "provider-new" {
+		t.Fatalf("later ingestion request = message=%q ok=%v", messageID, ok)
 	}
-	job, created, err := repo.EnsureCommunicationsEmailThreadDownloadJobContext(context.Background(), companyID, updated.EmailThreadID, scope, messageID, userID)
+	jobInput := CommunicationsEmailIngestionJobInput{
+		CompanyID: companyID, EmailConnectionID: updated.EmailConnectionID, EmailThreadID: updated.EmailThreadID,
+		ProviderMessageID: messageID, ProviderThreadID: updated.ProviderThreadID, Priority: CommunicationsEmailIngestionPriorityVisible,
+	}
+	job, created, err := repo.EnsureCommunicationsEmailIngestionJobContext(context.Background(), jobInput)
 	if err != nil || !created || job.Priority != CommunicationsEmailIngestionPriorityVisible || job.ProviderMessageID != "provider-new" {
 		t.Fatalf("later job=%+v created=%v err=%v", job, created, err)
 	}
-	duplicate, created, err := repo.EnsureCommunicationsEmailThreadDownloadJobContext(context.Background(), companyID, updated.EmailThreadID, scope, messageID, userID)
-	if err != nil || created || duplicate.DownloadJobID != job.DownloadJobID {
+	duplicate, created, err := repo.EnsureCommunicationsEmailIngestionJobContext(context.Background(), jobInput)
+	if err != nil || created || duplicate.IngestionJobID != job.IngestionJobID {
 		t.Fatalf("later duplicate=%+v created=%v err=%v", duplicate, created, err)
 	}
 }

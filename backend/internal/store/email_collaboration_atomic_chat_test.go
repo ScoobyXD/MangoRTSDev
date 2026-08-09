@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"miraeopus/backend/internal/domain"
@@ -17,14 +18,14 @@ func TestMemoryEmailCollaborationEnsureConvergesFallbackAndKnownThread(t *testin
 	creator := mustEmailCollaborationGuardUser(t, repo, companyID, "convergence-creator", "creator-convergence@example.com", domain.RoleCompanyUser)
 	peer := mustEmailCollaborationGuardUser(t, repo, companyID, "convergence-peer", "peer-convergence@example.com", domain.RoleCompanyUser)
 
-	first, err := repo.EnsureCommunicationsEmailCollaboration(CommunicationsEmailCollaborationEnsureInput{
+	first, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "support@example.com", Provider: "google", CreatedByUserID: creator.UserID,
 		Message: domain.EmailMessageSnapshot{ID: "fallback-message", Subject: "Fallback first", Snippet: "initial", Date: 10},
 	})
 	if err != nil || !first.Created {
 		t.Fatalf("first EnsureCommunicationsEmailCollaboration = %+v err=%v", first, err)
 	}
-	second, err := repo.EnsureCommunicationsEmailCollaboration(CommunicationsEmailCollaborationEnsureInput{
+	second, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "support@example.com", Provider: "google", CreatedByUserID: peer.UserID,
 		Message: domain.EmailMessageSnapshot{ID: "fallback-message", ThreadID: "provider-thread"},
 	})
@@ -41,14 +42,14 @@ func TestMemoryEmailCollaborationEnsureConvergesFallbackAndKnownThread(t *testin
 		t.Fatalf("source-authorized ensure must not implicitly add a participant: %+v", second.Collaboration.Participants)
 	}
 
-	future, err := repo.EnsureCommunicationsEmailCollaboration(CommunicationsEmailCollaborationEnsureInput{
+	future, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "support@example.com", Provider: "google", CreatedByUserID: peer.UserID,
 		Message: domain.EmailMessageSnapshot{ID: "future-message", ThreadID: "provider-thread", Subject: "Fallback first", Snippet: "new", Date: 20},
 	})
 	if err != nil || future.Collaboration.CollaborationID != first.Collaboration.CollaborationID || future.Collaboration.LatestMessageID != first.Collaboration.LatestMessageID {
 		t.Fatalf("thread ensure = %+v err=%v, want the original exact-message relationship", future, err)
 	}
-	otherScope, err := repo.EnsureCommunicationsEmailCollaboration(CommunicationsEmailCollaborationEnsureInput{
+	otherScope, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, SharedInboxID: otherSharedInboxID, AccountEmail: "other@example.com", Provider: "google", CreatedByUserID: creator.UserID,
 		Message: domain.EmailMessageSnapshot{ID: "fallback-message", ThreadID: "provider-thread", Subject: "Other mailbox", Date: 20},
 	})
@@ -81,7 +82,7 @@ func TestMemoryEmailCollaborationConcurrentFallbackAndKnownThreadEnsureConverge(
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
-			results[index], errs[index] = repo.EnsureCommunicationsEmailCollaboration(inputs[index])
+			results[index], errs[index] = repo.EnsureCommunicationsEmailCollaboration(context.Background(), inputs[index])
 		}(index)
 	}
 	wg.Wait()
@@ -230,7 +231,7 @@ func setupAtomicEmailCollaboration(t *testing.T) (*MemoryRepo, string, domain.Us
 	repo.EnsureCompany(companyID, "Atomic collaboration")
 	creator := mustEmailCollaborationGuardUser(t, repo, companyID, "atomic-creator", "atomic-creator@example.com", domain.RoleCompanyUser)
 	participant := mustEmailCollaborationGuardUser(t, repo, companyID, "atomic-participant", "atomic-participant@example.com", domain.RoleCompanyUser)
-	created, err := repo.EnsureCommunicationsEmailCollaboration(CommunicationsEmailCollaborationEnsureInput{
+	created, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email, Provider: "google",
 		AccountEmail: creator.Email, CreatedByUserID: creator.UserID,
 		Message: domain.EmailMessageSnapshot{ID: "atomic-message", ThreadID: "atomic-thread", Subject: "Atomic chat"},

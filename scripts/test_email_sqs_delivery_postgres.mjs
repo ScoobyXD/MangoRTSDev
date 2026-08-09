@@ -82,11 +82,21 @@ const ingestionLegacy = [
   "last_error text", "available_at timestamptz", "processing_started_at timestamptz", "completed_timestamp timestamptz",
   "failed_timestamp timestamptz", "created_timestamp timestamptz",
 ];
-const ingestionFinalAdditions = ["enqueue_source_id text", "attempt_token uuid", "provider_attempt_count integer"];
+const ingestionFinalColumns = [
+  "status text", "provider_message_id text", "ingestion_job_id uuid primary key", "updated_timestamp timestamptz", "company_id uuid",
+  "email_connection_id uuid", "email_thread_id uuid", "provider_thread_id text", "priority smallint", "provider_attempt_count integer",
+  "attempt_token uuid", "sqs_accepted_timestamp timestamptz", "last_error text", "completed_timestamp timestamptz",
+  "failed_timestamp timestamptz", "created_timestamp timestamptz",
+];
 const archiveLegacy = [
   "status text", "message_id text", "job_item_id uuid", "archive_job_id uuid", "attempt_count integer", "last_error text",
   "available_at timestamptz", "processing_started_at timestamptz", "archived_timestamp timestamptz", "failed_timestamp timestamptz",
   "created_timestamp timestamptz", "updated_timestamp timestamptz",
+];
+const archiveFinalColumns = [
+  "status text", "message_id text", "job_item_id uuid", "archive_job_id uuid", "provider_attempt_count integer", "attempt_token uuid",
+  "last_error text", "archived_timestamp timestamptz", "failed_timestamp timestamptz", "created_timestamp timestamptz",
+  "updated_timestamp timestamptz",
 ];
 const unsafeDuplicateFixtures = [
 	{
@@ -123,12 +133,10 @@ function installShape({ final = false, ingestionFinal = final, archiveFinal = fi
   sql("drop schema public cascade; create schema public");
   const connections = [...connectionColumns];
   if (extra) connections.push("unexpected_column text");
-  const ingestion = [...ingestionLegacy];
-  if (ingestionFinal) ingestion.splice(4, 0, ...ingestionFinalAdditions);
-  if (partial) ingestion.splice(4, 0, ingestionFinalAdditions[0]);
+  const ingestion = [...(ingestionFinal ? ingestionFinalColumns : ingestionLegacy)];
+  if (partial) ingestion.splice(4, 0, "sqs_accepted_timestamp timestamptz");
   if (missing) ingestion.splice(ingestion.findIndex((column) => column.startsWith("last_error ")), 1);
-  const archive = [...archiveLegacy];
-  if (archiveFinal) archive.splice(3, 0, "attempt_token uuid");
+  const archive = [...(archiveFinal ? archiveFinalColumns : archiveLegacy)];
   sql(`create table email_connections (${connections.join(",")}); create table email_ingestion_jobs (${ingestion.join(",")}); create table communications_email_archive_job_items (${archive.join(",")})`);
 	if (!skipIngestionStatusConstraint) {
 		const statuses = ingestionFinal
@@ -216,8 +224,8 @@ try {
 	console.log("checking reordered final shape");
   installShape({ final: true });
   output = runFile(preflight);
-  requireText(output, "READY: exact approved final 19-column shape", "reordered final ingestion");
-  requireText(output, "READY: exact approved final 13-column shape", "reordered final archive");
+  requireText(output, "READY: exact approved final 16-column shape", "reordered final ingestion");
+  requireText(output, "READY: exact approved final 11-column shape", "reordered final archive");
 	requireText(output, "READY: all three email SQS tables are in the coherent final shape", "coherent final state");
 
 	for (const [label, shape] of [
@@ -298,7 +306,7 @@ try {
 		installShape({ partial: true });
 		const before = shapeCounts();
 		output = runFile(apply, true);
-		requireText(output, "STOP: email_ingestion_jobs must be exact legacy 16 or exact final 19 columns", "partial-drift apply");
+		requireText(output, "STOP: email_ingestion_jobs must be exact legacy 16 or exact final 16 columns", "partial-drift apply");
 		if (shapeCounts() !== before) throw new Error("partial-drift apply STOP wrote schema changes");
 		console.log("checking deterministic inactive legacy identity collapse");
 		installLegacyDuplicateHistory();
@@ -308,7 +316,7 @@ try {
 		const durableBefore = durableEmailSnapshot();
 		if (rowCount("email_ingestion_jobs") !== 19) throw new Error("legacy duplicate fixture did not contain 19 job metadata rows");
 		runFile(apply);
-		if (shapeCounts() !== "[13, 19, 13]") throw new Error(`PostgreSQL 17 apply did not produce final shape: ${shapeCounts()}`);
+		if (shapeCounts() !== "[13, 16, 11]") throw new Error(`PostgreSQL 17 apply did not produce final shape: ${shapeCounts()}`);
 		if (rowCount("email_ingestion_jobs") !== 6) throw new Error("migration did not collapse exactly 13 redundant job metadata rows");
 		const retained = sql("select string_agg(ingestion_job_id::text,',' order by provider_message_id) from email_ingestion_jobs");
 		for (const retainedID of [101, 202, 303, 403, 501, 605]) {
@@ -321,7 +329,7 @@ try {
 		output = sql("select pg_get_indexdef(indexrelid) from pg_index where indexrelid='public.idx_email_ingestion_jobs_stable_message'::regclass");
 		requireText(output, "CREATE UNIQUE INDEX idx_email_ingestion_jobs_stable_message ON public.email_ingestion_jobs", "PostgreSQL 17 stable identity index definition");
 		runFile(apply);
-		if (shapeCounts() !== "[13, 19, 13]") throw new Error(`PostgreSQL 17 idempotent rerun changed final shape: ${shapeCounts()}`);
+		if (shapeCounts() !== "[13, 16, 11]") throw new Error(`PostgreSQL 17 idempotent rerun changed final shape: ${shapeCounts()}`);
 		if (rowCount("email_ingestion_jobs") !== 6 || durableEmailSnapshot() !== durableBefore) throw new Error("PostgreSQL 17 idempotent rerun changed migrated data");
 
 		console.log("checking final-shape duplicate rejection before any write");
@@ -331,12 +339,12 @@ try {
 		requireText(output, "STOP: final schema contains 1 duplicate stable identity group(s) and 1 redundant row(s)", "final duplicate preflight");
 		output = runFile(apply, true);
 		requireText(output, "STOP: final email_ingestion_jobs contains 1 duplicate stable identity group(s) and 1 redundant row(s)", "final duplicate apply");
-		if (shapeCounts() !== "[13, 19, 13]" || rowCount("email_ingestion_jobs") !== 2) throw new Error("final duplicate STOP wrote changes");
+		if (shapeCounts() !== "[13, 16, 11]" || rowCount("email_ingestion_jobs") !== 2) throw new Error("final duplicate STOP wrote changes");
 
 		console.log("restoring a valid PostgreSQL 17 final schema for repository integration tests");
 		installLegacyDuplicateHistory();
 		runFile(apply);
-		if (shapeCounts() !== "[13, 19, 13]" || rowCount("email_ingestion_jobs") !== 6) throw new Error("final PostgreSQL 17 integration fixture is not ready");
+		if (shapeCounts() !== "[13, 16, 11]" || rowCount("email_ingestion_jobs") !== 6) throw new Error("final PostgreSQL 17 integration fixture is not ready");
   }
 
   console.log(`email SQS disposable PostgreSQL contract passed on server_version_num=${version}`);

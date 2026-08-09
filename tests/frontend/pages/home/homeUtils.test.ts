@@ -528,6 +528,14 @@ test("unread-only email cards stay visible when selected", () => {
   assert.match(source, /!shouldAutoMarkEmailSelectionRead\(unreadOnlyRef\.current\)/);
 });
 
+test("archive jobs close response and reconnect races with one canonical status read", () => {
+  const source = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomePage.tsx"), "utf8");
+  assert.match(source, /activeArchiveJobsRef\.current\.set\(result\.archiveJob\.job_id,[\s\S]{0,260}void refreshActiveArchiveJobs\(\)/);
+  assert.match(source, /onAccepted: \(\) => \{[\s\S]{0,160}refreshArchiveJobsRef\.current\(\)/);
+  assert.match(source, /job = await getCommunicationsArchiveJob\(jobID\)/);
+  assert.doesNotMatch(source, /setInterval\([^)]*getCommunicationsArchiveJob|archiveJobPoll/);
+});
+
 test("selecting an aggregated unread thread targets every loaded unread member and leaves unrelated threads alone", () => {
   const rawMessages = [
     emailMessage("latest-read", "thread-1", 300, { unread: false }),

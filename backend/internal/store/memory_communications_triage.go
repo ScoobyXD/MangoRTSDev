@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
 	"miraeopus/backend/internal/domain"
 	"sort"
@@ -160,7 +161,10 @@ func (r *MemoryRepo) UpsertCommunicationsTriageItem(userID string, message domai
 	return item, nil
 }
 
-func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error) {
+func (r *MemoryRepo) ConvertCommunicationsTriageItems(ctx context.Context, input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error) {
+	if err := ctx.Err(); err != nil {
+		return CommunicationsTriageConversionResult{}, err
+	}
 	input, err := NormalizeCommunicationsTriageConversionInput(input)
 	if err != nil {
 		return CommunicationsTriageConversionResult{}, err

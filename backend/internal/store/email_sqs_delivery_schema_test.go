@@ -38,7 +38,7 @@ func TestEmailSQSSchemaUsesPermanentIdentityAndProviderAttemptFence(t *testing.T
 			"configuration_required",
 			"provider_attempt_count",
 			"attempt_token",
-			"enqueue_source_id",
+			"sqs_accepted_timestamp",
 			"status in ('accepted','processing','completed','parked','exhausted')",
 			"idx_email_ingestion_jobs_stable_message",
 		} {
@@ -48,10 +48,11 @@ func TestEmailSQSSchemaUsesPermanentIdentityAndProviderAttemptFence(t *testing.T
 		}
 	}
 	for _, required := range []string{
-		"communications_email_archive_job_items must be exact legacy 12 or exact final 13 columns",
-		"email_ingestion_jobs must be exact legacy 16 or exact final 19 columns",
+		"communications_email_archive_job_items must be exact legacy 12 or exact final 11 columns",
+		"email_ingestion_jobs must be exact legacy 16 or exact final 16 columns",
 		"email_connections must have exactly the approved 13 columns",
-		"alter table communications_email_archive_job_items\n      add column attempt_token uuid",
+		"add column provider_attempt_count integer not null default 0",
+		"add column attempt_token uuid",
 		"drop index if exists idx_email_ingestion_jobs_claim",
 		"drop index if exists idx_communications_email_archive_job_items_claim",
 		"provider_attempt_count between 0 and 3",
@@ -80,6 +81,11 @@ func TestEmailSQSSchemaUsesPermanentIdentityAndProviderAttemptFence(t *testing.T
 	}
 	if strings.Contains(schema, "idx_email_ingestion_jobs_claim") || strings.Contains(schema, "idx_communications_email_archive_job_items_claim") {
 		t.Fatal("canonical schema retains a legacy email claimant index")
+	}
+	for _, obsolete := range []string{"enqueue_source_id", "available_at", "processing_started_at"} {
+		if strings.Contains(schema, obsolete) {
+			t.Errorf("canonical schema retains obsolete email SQS field %q", obsolete)
+		}
 	}
 	for _, forbiddenDelete := range []string{"delete from email_threads", "delete from email_messages", "delete from attachments", "delete from attachment_relationships"} {
 		if strings.Contains(migration, forbiddenDelete) {
@@ -111,9 +117,9 @@ func TestEmailSQSOperatorSQLIsPlainReviewedPostgreSQL(t *testing.T) {
 	for _, required := range []string{
 		"exact approved 13-column shape",
 		"exact approved legacy 16-column shape",
-		"exact approved final 19-column shape",
+		"exact approved final 16-column shape",
 		"exact approved legacy 12-column shape",
-		"exact approved final 13-column shape",
+		"exact approved final 11-column shape",
 		"ready: all three email sqs tables are in the coherent legacy shape",
 		"ready: all three email sqs tables are in the coherent final shape",
 		"stop: email sqs tables must be coherently all-legacy or all-final",

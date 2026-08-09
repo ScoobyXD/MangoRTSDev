@@ -47,16 +47,17 @@ PostgreSQL stores the truth. Valkey only announces that committed truth changed.
 - A rare 10-minute safety pass can recover a missed wake or broker notice.
 - Another browser always reloads PostgreSQL truth; it never treats a Valkey notice as the document itself.
 
-## Current cleanup audit
+## Final code path
 
-The old 75-millisecond runtime poller is fully removed. Current `main` still has a few code-cleanup candidates that do not change runtime behavior:
+There is one obvious route for committed realtime work:
 
-- two PostgreSQL helpers contain nearly the same realtime-outbox insert SQL;
-- several thin publication helper functions all lead to the same durable outbox path;
-- a few feature-named functions now do nothing except wake the shared realtime publisher;
-- the server has a second defensive process-local backplane fallback in addition to the normal local-development setup.
+`product transaction inserts one outbox row → handler calls the common wake → lifecycle publisher sends a compact Valkey hint → each API task's spine performs the only local WebSocket delivery`
 
-These do not poll PostgreSQL, bypass Valkey in deployed DEV, or produce two events. They should still be consolidated so the code has one obvious path.
+- Editor transactions use the same canonical transaction insert helper as every other product transaction; the older editor-specific SQL helper is removed.
+- The old publication adapter chain and its obsolete delivered-count result are removed. Tests enqueue real durable outbox rows instead of keeping production wrappers for test convenience.
+- Node-chat and Kanban mutation sites call the common post-commit wake directly. Required pre-delete audience data remains in the transaction's exact outbox row.
+- `startRealtimeSpine` never invents a process-local backplane. Simple local construction and tests pass `LocalBackplane` explicitly; deployed DEV still fails closed when external Valkey is required.
+- PostgreSQL keeps the full outbox event. Valkey carries only the compact committed-event hint, and the task-local spine remains the sole WebSocket delivery boundary.
 
 ## Required regression checks
 

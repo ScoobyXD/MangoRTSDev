@@ -41,7 +41,7 @@ If that stored thread is already on one or more Nodes, each newly completed mess
 
 My Triage and Shared Triage remain responsive. Their visible email cards are a high-priority recovery signal and can enqueue ingestion immediately. A thread indicator shows that the provider card represents a thread. After a new message and its Node relationship commit, the Node indicator appears; clicking it opens the existing Node and shows the newly appended message inside the stored thread.
 
-If a Nylas grant expires, Mango keeps the permanent connection, stored mail, checkpoint, and pending jobs. The user reauthenticates the same connection. Mango then catches up from the saved checkpoint in the background. Live webhook jobs and emails currently visible in My Triage or Shared Triage run before older reconnect-backlog jobs, so catch-up never blocks login or normal triage.
+If a Nylas grant expires, Mango keeps the permanent connection, stored mail, checkpoint, and durable jobs. The user reauthenticates the same connection. The next rare scheduled reconciliation catches up from the saved checkpoint in the background; the OAuth request does not start a scanner or provider download. Live webhook jobs and emails currently visible in My Triage or Shared Triage run before reconciliation backlog, so catch-up never blocks login or normal triage. Parked or DLQed work still requires deliberate review and is never replayed automatically.
 
 ## Product Goal
 
@@ -77,7 +77,7 @@ This contract does not implement:
 
 - Email connection: Mango's permanent internal record for one connected mailbox.
 - Ingestion boundary: ingestion_started_at, set exactly once when ingestion is activated.
-- Scan checkpoint: last_successful_scan_at, the end of the latest mailbox window whose discovered messages were all durably queued.
+- Reconciliation checkpoint: last_successful_scan_at, the end of the latest mailbox window whose discovered messages were all durably accepted by SQS.
 - Provider message ID: Nylas's message identity within one exact connection.
 - Provider thread ID: Nylas's thread identity within one exact connection.
 - Mango email thread ID: Mango's permanent internal thread identity.
@@ -85,7 +85,7 @@ This contract does not implement:
 - Node-wide placement: an email_relationships row whose resource_type is node and whose resource_textbox_id is null.
 - Live job: a job created directly from a verified new-message webhook.
 - Visible-triage job: a job created because the message is currently visible in My Triage or Shared Triage.
-- Backlog job: a job discovered by a checkpoint scan, including reconnect catch-up.
+- Backlog job: a job discovered by rare checkpoint reconciliation, including reconnect catch-up.
 
 ## Business Logic Laws
 
@@ -175,46 +175,45 @@ E2N36 - Job priority order is:
 
 1. live message-created webhook jobs;
 2. emails visible in My Triage or Shared Triage;
-3. ordinary periodic checkpoint scan jobs;
-4. older reconnect-backlog jobs.
+3. rare checkpoint-reconciliation backlog, including reconnect catch-up.
 
 E2N37 - A newer higher-priority job may run before older backlog work. Priority changes processing order only; it never bypasses company, connection, Inbox, thread, or relationship validation.
 
 E2N38 - Within the same priority, jobs run oldest available first.
 
-E2N39 - Provider and attachment calls use the existing per-grant Nylas request gate. The worker claims only a small bounded batch and never creates unbounded parallel provider calls.
+E2N39 - Provider and attachment calls use the existing per-grant Nylas request gate. One SQS delivery owns one bounded unit, and the private worker has fixed bounded concurrency; it never claims a PostgreSQL batch or creates unbounded parallel provider calls.
 
-E2N39A - Checkpoint discovery and ingestion processing run in separate background loops under the same server shutdown lifecycle. A long reconnect scan may continue discovering backlog, but it cannot block the worker from claiming already queued live or visible-triage jobs.
+E2N39A - Reconciliation control, one-page connection discovery, and ingestion are separate compact SQS message kinds under the same worker shutdown context. Live and visible-triage identities keep their higher job priority, and no database claimant loop exists.
 
-### Checkpoint scans
+### Rare bounded checkpoint reconciliation
 
-E2N40 - Webhooks are the fast path, but a backend checkpoint scan is the reliability path. It runs while users are logged out.
+E2N40 - Webhooks are the fast path. A rare scheduled reconciliation control, about every ten minutes and disabled by default until staged DEV rollout, is the bounded reliability path while users are logged out. No API task scans accounts every 30 seconds.
 
-E2N41 - A scan covers Inbox messages received after last_successful_scan_at minus a small fixed overlap and at or before scan_started_at.
+E2N41 - One connection reconciliation covers Inbox messages received after last_successful_scan_at minus a small fixed overlap and at or before scan_started_at.
 
 E2N42 - The overlap prevents timestamp-boundary loss. Job and message uniqueness make overlap duplicates harmless.
 
-E2N43 - Scans paginate with Nylas's supported message-list pagination and received-time filters. They enqueue identities; they do not download bodies inside the scan loop.
+E2N43 - Reconciliation uses Nylas's supported message-list pagination and received-time filters. One SQS message reads one bounded provider page and sends a continuation for the next page. It enqueues stable identities and does not download bodies in discovery.
 
-E2N44 - last_successful_scan_at advances to scan_started_at only after every page in that window has been read and every discovered message has been durably enqueued.
+E2N44 - last_successful_scan_at advances to scan_started_at only after every page in that window has been read and every discovered message identity has been accepted by SQS and marked accepted in PostgreSQL.
 
-E2N45 - A failed page or failed enqueue leaves last_successful_scan_at unchanged so the entire window is safely retried.
+E2N45 - A failed page, SQS send, or acceptance-marker write leaves last_successful_scan_at unchanged so the same window is safely retried.
 
-E2N46 - Multiple backend instances may scan the same connection. Active-job uniqueness and final message uniqueness make this safe without a separate leader-election system.
+E2N46 - The FIFO control group serializes reconciliation control, and the permanent email connection ID serializes each connection's work. Duplicate controls or overlapping windows still reuse the stable ingestion identity, so no leader election is required.
 
 ### Expiry, disconnect, and reconnect
 
 E2N47 - Mango subscribes to grant.expired and grant.updated and also treats a provider 401 as an expiration signal.
 
-E2N48 - Expiration changes the connection status to reauth_required. It does not delete the grant record in Mango, reset checkpoints, erase mail, or fail waiting ingestion jobs permanently.
+E2N48 - Expiration changes only the exact connection status to reauth_required. It does not delete the Mango connection, reset checkpoints, or erase stored mail. The exact failed job is parked for deliberate review instead of burning all deliveries or being automatically replayed.
 
-E2N49 - Jobs waiting on reauthentication do not burn through the normal provider retry limit. They become available again after the connection returns to connected.
+E2N49 - A permanent 401, 403, exact grant.not_found 404, or Gmail configuration 400 parks the exact job and connection without burning all three deliveries. Reauthentication reconnects that same connection, but parked or DLQed work is not automatically resurrected.
 
-E2N50 - The user reauthenticates through the normal Nylas OAuth flow. The OAuth callback updates the same Mango connection and wakes both the scanner and worker.
+E2N50 - The user reauthenticates through the normal Nylas OAuth flow. The OAuth callback updates the same Mango connection only; it does not wake a scanner or run provider work. The next rare reconciliation control resumes the checkpoint window.
 
 E2N51 - Reconnect never downloads mail inside login, OAuth callback, or page-load requests. Catch-up always runs in the background.
 
-E2N52 - Nylas can replay a large notification burst after a short outage and may provide no notification backfill after a longer outage. Mango always performs its own checkpoint catch-up after reconnect.
+E2N52 - Nylas can replay a large notification burst after a short outage and may provide no notification backfill after a longer outage. Mango's next rare scheduled reconciliation performs bounded checkpoint catch-up after reconnect.
 
 E2N53 - Replay notifications and checkpoint discoveries use the same job identity. Receiving both cannot duplicate stored messages or relationships.
 
@@ -263,7 +262,7 @@ Required columns:
 - provider;
 - account_email;
 - grant_id;
-- status: connected, disconnected, or reauth_required;
+- status: connected, disconnected, reauth_required, or configuration_required;
 - connected_by_user_id;
 - ingestion_started_at;
 - last_successful_scan_at;
@@ -284,7 +283,7 @@ email_threads is altered in place:
 
 ### email_ingestion_jobs
 
-email_thread_download_jobs is renamed and altered in place to email_ingestion_jobs:
+email_ingestion_jobs is the one canonical ingestion table. The old download-job table name, worker name, wrapper API, and compatibility aliases do not remain in active code:
 
 - ingestion_job_id;
 - company_id;
@@ -293,9 +292,11 @@ email_thread_download_jobs is renamed and altered in place to email_ingestion_jo
 - provider_message_id;
 - provider_thread_id when known;
 - priority;
-- status, attempt count, error, availability, lease, and completion timestamps.
+- status (`accepted`, `processing`, `completed`, `parked`, or `exhausted`);
+- provider_attempt_count and exact attempt_token fencing;
+- sqs_accepted_timestamp, error, and completion/failure timestamps.
 
-One active job is allowed for the same company, connection, and provider message. Completed historical jobs may coexist.
+One permanent job identity is allowed for the same company, connection, and provider message. The final SQS shape has no `attempt_count`, `available_at`, `processing_started_at`, database lease, claimant, or custom retry schedule.
 
 ## Exact Runtime Flows
 
@@ -304,13 +305,16 @@ One active job is allowed for the same company, connection, and provider message
 verified message.created
 -> resolve exact email connection by grant
 -> ensure priority live job
--> invalidate mailbox cache and publish existing mailbox hint
--> return 200
+-> send the stable compact identity to SQS
+-> record sqs_accepted_timestamp
+-> return 200 only after both steps succeed
 -> worker validates boundary and Inbox
 -> worker reconciles full available thread
 -> store only missing/incomplete messages
 -> atomically add Node-wide relationships for newly completed messages
 -> publish exact mailbox and Node invalidations
+
+If cancellation or an ambiguous send failure leaves that durable ingestion marker without `sqs_accepted_timestamp`, the next bounded reconciliation after about ten minutes resends the same identity. The same pass may resend an archive item only while it is still pending with zero provider starts. It never creates a replacement or touches started, completed, parked, exhausted, or DLQed work.
 
 ### Visible triage email
 
@@ -327,8 +331,8 @@ grant.expired or provider 401
 -> preserve checkpoint and waiting jobs
 -> user reauthenticates
 -> update same connection and mark connected
--> wake scanner
--> scan checkpoint window in pages
+-> the next rare bounded reconciliation control resumes the checkpoint window
+-> no reconnect scanner, hot database poller, or automatic DLQ replay runs
 -> enqueue backlog jobs
 -> advance checkpoint only after durable enqueue completes
 -> process live and visible jobs before old backlog
@@ -353,7 +357,7 @@ The database rollout must:
 
 1. preflight PostgreSQL 17.x compatibility and exact expected source columns;
 2. stop on ambiguous personal connection-to-company mapping;
-3. rename and alter existing tables in place;
+3. alter the existing canonical tables into the exact final shape without compatibility readers or dual writes;
 4. preserve all existing UUIDs, messages, relationships, drafts, signatures, and attachments;
 5. set both checkpoint timestamps to the rollout transaction timestamp for existing rows;
 6. verify source/destination connection counts before dropping user_email_connections;
@@ -367,8 +371,8 @@ Required tests include:
 - a known Node thread appends only missing messages;
 - Node-wide relationships propagate only to newly completed messages;
 - text-box rows do not propagate;
-- duplicate webhooks and overlapping scans are idempotent;
-- scan checkpoints advance only after complete durable enqueue;
+- duplicate webhooks and overlapping reconciliation windows are idempotent;
+- reconciliation checkpoints advance only after complete durable SQS acceptance;
 - expired connections preserve jobs and checkpoints;
 - reconnect backlog does not block login and has lower priority than live/visible work;
 - My Triage and Shared Triage show thread and Node indicators correctly;
@@ -376,7 +380,7 @@ Required tests include:
 
 ## Nylas Operational Basis
 
-Nylas documents that expired grants should be reauthenticated rather than deleted, preserving the grant and sync state. Nylas also documents that short outages can cause notification replay while outages longer than 72 hours are not backfilled. Mango therefore treats webhooks as the fast path and its saved checkpoint scan as the permanent reliability path.
+Nylas documents that expired grants should be reauthenticated rather than deleted, preserving the grant and sync state. Nylas also documents that short outages can cause notification replay while outages longer than 72 hours are not backfilled. Mango therefore treats webhooks as the fast path and rare scheduled saved-checkpoint reconciliation as the permanent reliability path.
 
 - https://developer.nylas.com/docs/cookbook/use-cases/build/handle-grant-expiry/
 - https://developer.nylas.com/docs/reference/api/webhook-notifications/

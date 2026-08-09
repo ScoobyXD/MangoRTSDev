@@ -1646,17 +1646,16 @@ create table if not exists communications_email_archive_job_items (
   archive_job_id uuid not null references communications_email_archive_jobs(archive_job_id) on delete cascade,
   message_id text not null,
   status text not null default 'pending',
-  attempt_count integer not null default 0,
-  attempt_token uuid,
-  last_error text not null default '',
-  available_at timestamptz not null default now(),
-  processing_started_at timestamptz,
+	provider_attempt_count integer not null default 0,
+	attempt_token uuid,
+	last_error text not null default '',
   archived_timestamp timestamptz,
   failed_timestamp timestamptz,
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
   constraint communications_email_archive_job_items_message_chk check (btrim(message_id) <> ''),
-  constraint communications_email_archive_job_items_status_chk check (status in ('pending', 'processing', 'archived', 'failed')),
+	constraint communications_email_archive_job_items_status_chk check (status in ('pending', 'processing', 'archived', 'failed')),
+	constraint communications_email_archive_job_items_provider_attempt_chk check (provider_attempt_count between 0 and 3),
   unique (archive_job_id, message_id)
 );
 
@@ -3898,13 +3897,10 @@ create table if not exists email_ingestion_jobs (
   provider_thread_id text not null default '',
   priority smallint not null default 30,
   status text not null default 'accepted',
-  attempt_count integer not null default 0,
-  provider_attempt_count integer not null default 0,
-  attempt_token uuid,
-  enqueue_source_id text not null default '',
-  last_error text not null default '',
-  available_at timestamptz not null default now(),
-  processing_started_at timestamptz,
+	provider_attempt_count integer not null default 0,
+	attempt_token uuid,
+	sqs_accepted_timestamp timestamptz,
+	last_error text not null default '',
   completed_timestamp timestamptz,
   failed_timestamp timestamptz,
   created_timestamp timestamptz not null default now(),
@@ -3918,8 +3914,7 @@ create table if not exists email_ingestion_jobs (
   constraint email_ingestion_jobs_status_chk check (
     status in ('accepted','processing','completed','parked','exhausted')
   ),
-  constraint email_ingestion_jobs_attempt_chk check (attempt_count >= 0),
-  constraint email_ingestion_jobs_provider_attempt_chk check (provider_attempt_count between 0 and 3)
+	constraint email_ingestion_jobs_provider_attempt_chk check (provider_attempt_count between 0 and 3)
 );
 create unique index if not exists idx_email_ingestion_jobs_stable_message
   on email_ingestion_jobs(company_id,email_connection_id,provider_message_id);

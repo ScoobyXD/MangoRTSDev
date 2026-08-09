@@ -376,8 +376,11 @@ func (r *MemoryRepo) ImportCommunicationsEmailIntoNode(input CommunicationsNodeE
 		Type: info.Type, Information: information, CreatedTimestamp: now, UpdatedTimestamp: now,
 	}
 	r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, input.NodeID, input.InformationID, thread.EmailThreadID, selected.ID, input.CreatedByUserID, now)
-	if downloadScope, requestedMessageID, ok := communicationsEmailThreadDownloadRequest(thread, input.Thread); ok {
-		if _, _, err := r.ensureCommunicationsEmailThreadDownloadJobLocked(input.CompanyID, thread.EmailThreadID, downloadScope, requestedMessageID, input.Thread.RequestedByUserID); err != nil {
+	if requestedMessageID, ok := communicationsEmailIngestionRequest(thread, input.Thread); ok {
+		if _, _, err := r.ensureCommunicationsEmailIngestionJobLocked(CommunicationsEmailIngestionJobInput{
+			CompanyID: input.CompanyID, EmailConnectionID: r.emailConnectionIDForThreadLocked(thread), EmailThreadID: thread.EmailThreadID,
+			ProviderMessageID: requestedMessageID, ProviderThreadID: thread.ProviderThreadID, Priority: CommunicationsEmailIngestionPriorityVisible,
+		}); err != nil {
 			return CommunicationsNodeEmailImportResult{}, err
 		}
 	}

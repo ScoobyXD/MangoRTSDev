@@ -660,8 +660,11 @@ where relationship.company_id=$1::uuid
 		input.CompanyID, input.NodeID, thread.EmailThreadID, selectedProviderMessageID).Scan(&input.InformationID); err != nil {
 		return CommunicationsNodeEmailImportResult{}, err
 	}
-	if downloadScope, requestedMessageID, ok := communicationsEmailThreadDownloadRequest(thread, input.Thread); ok {
-		if _, _, err := ensurePostgresCommunicationsEmailThreadDownloadJobTx(ctx, tx, input.CompanyID, thread.EmailThreadID, downloadScope, requestedMessageID, input.Thread.RequestedByUserID); err != nil {
+	if requestedMessageID, ok := communicationsEmailIngestionRequest(thread, input.Thread); ok {
+		if _, _, err := ensurePostgresCommunicationsEmailIngestionJobTx(ctx, tx, CommunicationsEmailIngestionJobInput{
+			CompanyID: input.CompanyID, EmailConnectionID: thread.EmailConnectionID, EmailThreadID: thread.EmailThreadID,
+			ProviderMessageID: requestedMessageID, ProviderThreadID: thread.ProviderThreadID, Priority: CommunicationsEmailIngestionPriorityVisible,
+		}); err != nil {
 			return CommunicationsNodeEmailImportResult{}, err
 		}
 	}

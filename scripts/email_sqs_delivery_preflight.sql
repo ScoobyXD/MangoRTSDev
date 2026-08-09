@@ -34,8 +34,8 @@ from (
 union all
 select 'email_ingestion_jobs', actual_count, greatest(legacy_count,final_count),
   case when actual_count=16 and legacy_count=16 then 'READY: exact approved legacy 16-column shape'
-       when actual_count=19 and final_count=19 then 'READY: exact approved final 19-column shape'
-       else 'STOP: expected exact approved legacy 16 or final 19-column shape'
+	when actual_count=16 and final_count=16 then 'READY: exact approved final 16-column shape'
+	else 'STOP: expected exact approved legacy 16 or final 16-column shape'
   end
 from (
   select count(*) as actual_count,
@@ -46,8 +46,8 @@ from (
     ]::text[])) as legacy_count,
     count(*) filter (where column_name = any (array[
       'ingestion_job_id','company_id','email_connection_id','email_thread_id','provider_message_id',
-      'provider_thread_id','priority','status','attempt_count','provider_attempt_count','attempt_token',
-      'enqueue_source_id','last_error','available_at','processing_started_at','completed_timestamp',
+      'provider_thread_id','priority','status','provider_attempt_count','attempt_token',
+      'sqs_accepted_timestamp','last_error','completed_timestamp',
       'failed_timestamp','created_timestamp','updated_timestamp'
     ]::text[])) as final_count
   from information_schema.columns
@@ -56,8 +56,8 @@ from (
 union all
 select 'communications_email_archive_job_items', actual_count, greatest(legacy_count,final_count),
   case when actual_count=12 and legacy_count=12 then 'READY: exact approved legacy 12-column shape'
-       when actual_count=13 and final_count=13 then 'READY: exact approved final 13-column shape'
-       else 'STOP: expected exact approved legacy 12 or final 13-column shape'
+	when actual_count=11 and final_count=11 then 'READY: exact approved final 11-column shape'
+	else 'STOP: expected exact approved legacy 12 or final 11-column shape'
   end
 from (
   select count(*) as actual_count,
@@ -66,8 +66,8 @@ from (
       'processing_started_at','archived_timestamp','failed_timestamp','created_timestamp','updated_timestamp'
     ]::text[])) as legacy_count,
     count(*) filter (where column_name = any (array[
-      'job_item_id','archive_job_id','message_id','status','attempt_count','attempt_token','last_error',
-      'available_at','processing_started_at','archived_timestamp','failed_timestamp','created_timestamp','updated_timestamp'
+      'job_item_id','archive_job_id','message_id','status','provider_attempt_count','attempt_token','last_error',
+      'archived_timestamp','failed_timestamp','created_timestamp','updated_timestamp'
     ]::text[])) as final_count
   from information_schema.columns
   where table_schema='public' and table_name='communications_email_archive_job_items'
@@ -91,8 +91,8 @@ with connection_shape as (
     ]::text[])) as legacy_count,
     count(*) filter (where column_name = any (array[
       'ingestion_job_id','company_id','email_connection_id','email_thread_id','provider_message_id',
-      'provider_thread_id','priority','status','attempt_count','provider_attempt_count','attempt_token',
-      'enqueue_source_id','last_error','available_at','processing_started_at','completed_timestamp',
+      'provider_thread_id','priority','status','provider_attempt_count','attempt_token',
+      'sqs_accepted_timestamp','last_error','completed_timestamp',
       'failed_timestamp','created_timestamp','updated_timestamp'
     ]::text[])) as final_count
   from information_schema.columns
@@ -104,8 +104,8 @@ with connection_shape as (
       'processing_started_at','archived_timestamp','failed_timestamp','created_timestamp','updated_timestamp'
     ]::text[])) as legacy_count,
     count(*) filter (where column_name = any (array[
-      'job_item_id','archive_job_id','message_id','status','attempt_count','attempt_token','last_error',
-      'available_at','processing_started_at','archived_timestamp','failed_timestamp','created_timestamp','updated_timestamp'
+      'job_item_id','archive_job_id','message_id','status','provider_attempt_count','attempt_token','last_error',
+      'archived_timestamp','failed_timestamp','created_timestamp','updated_timestamp'
     ]::text[])) as final_count
   from information_schema.columns
   where table_schema='public' and table_name='communications_email_archive_job_items'
@@ -116,8 +116,8 @@ select case
    and archive_shape.actual_count=12 and archive_shape.legacy_count=12
     then 'READY: all three email SQS tables are in the coherent legacy shape'
   when connection_shape.actual_count=13 and connection_shape.approved_count=13
-   and ingestion_shape.actual_count=19 and ingestion_shape.final_count=19
-   and archive_shape.actual_count=13 and archive_shape.final_count=13
+	and ingestion_shape.actual_count=16 and ingestion_shape.final_count=16
+	and archive_shape.actual_count=11 and archive_shape.final_count=11
     then 'READY: all three email SQS tables are in the coherent final shape'
   else 'STOP: email SQS tables must be coherently all-legacy or all-final'
 end as coherent_shape_decision
@@ -134,8 +134,8 @@ with ingestion_shape as (
     ]::text[])) as legacy_count,
     count(*) filter (where column_name = any (array[
       'ingestion_job_id','company_id','email_connection_id','email_thread_id','provider_message_id',
-      'provider_thread_id','priority','status','attempt_count','provider_attempt_count','attempt_token',
-      'enqueue_source_id','last_error','available_at','processing_started_at','completed_timestamp',
+      'provider_thread_id','priority','status','provider_attempt_count','attempt_token',
+      'sqs_accepted_timestamp','last_error','completed_timestamp',
       'failed_timestamp','created_timestamp','updated_timestamp'
     ]::text[])) as final_count
   from information_schema.columns
@@ -188,10 +188,10 @@ select duplicate_group_count as duplicate_stable_identity_groups,
       then format('STOP: %s foreign key(s) reference email_ingestion_jobs',foreign_key_count)
     when ingestion_shape.actual_count=16 and ingestion_shape.legacy_count=16
       then format('READY: legacy migration will collapse exactly %s redundant inactive ingestion job metadata row(s)',redundant_row_count)
-    when ingestion_shape.actual_count=19 and ingestion_shape.final_count=19
+	when ingestion_shape.actual_count=16 and ingestion_shape.final_count=16
      and redundant_row_count=0
       then 'READY: stable ingestion identities are unique in the final shape'
-    when ingestion_shape.actual_count=19 and ingestion_shape.final_count=19
+	when ingestion_shape.actual_count=16 and ingestion_shape.final_count=16
       then format('STOP: final schema contains %s duplicate stable identity group(s) and %s redundant row(s)',duplicate_group_count,redundant_row_count)
     else 'STOP: ingestion identity decision requires an exact legacy or final shape'
   end as identity_decision

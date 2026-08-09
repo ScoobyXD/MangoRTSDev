@@ -135,7 +135,7 @@ func TestDeletedEmailDraftAttachmentLinkIsRetiredButSentMessageLinkSurvives(t *t
 	const draftID = "deleted-attachment-draft"
 	draftOnlyAttachmentID := seedLiveEmailDraftAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, "owner-a@example.com", draftID, "draft-only.txt", "text/plain", []byte("draft-only"))
 	sentAttachmentID := seedEmailAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, draftID, "sent.txt", "text/plain", []byte("sent"))
-	ensured, err := fixture.repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
+	ensured, err := fixture.repo.EnsureCommunicationsEmailCollaboration(context.Background(), store.CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: fixture.companyID, PersonalUserID: fixture.owner.UserID,
 		PersonalAccountEmail: "owner-a@example.com", AccountEmail: "owner-a@example.com", Provider: "google",
 		CreatedByUserID: fixture.owner.UserID,

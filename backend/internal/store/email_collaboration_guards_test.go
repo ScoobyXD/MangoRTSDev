@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"miraeopus/backend/internal/domain"
 	"testing"
 )
@@ -10,7 +11,7 @@ func TestMemoryEmailRelationshipUsesOrdinaryNodePermissionsAndDeletesOnlyTheRela
 	companyID := "11111111-1111-4111-8111-701300000001"
 	repo.EnsureCompany(companyID, "Email relationship company")
 	creator := mustEmailCollaborationGuardUser(t, repo, companyID, "email-node-creator", "creator@example.com", domain.RoleCompanyUser)
-	created, err := repo.EnsureCommunicationsEmailCollaboration(CommunicationsEmailCollaborationEnsureInput{
+	created, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
 		AccountEmail: creator.Email, Provider: "google", CreatedByUserID: creator.UserID,
 		Message: domain.EmailMessageSnapshot{ID: "email-node-message", ThreadID: "email-node-thread", Subject: "Email node subject"},

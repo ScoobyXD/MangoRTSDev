@@ -735,7 +735,7 @@ Expected:
 - Its canonical attached-email projection preserves source mailbox/thread provenance, and the collaboration Node creates no Company Explorer item or default Nodes folder.
 - The email and Node mounts show the same durable chat IDs and shared ChatPane behavior, including parent indentation, anchor navigation, mentions, attachments, deletion ownership, and Node chat reconciliation.
 - The creator and mentioned participant keep direct edit access while nonparticipants are denied.
-- The verified webhook or checkpoint scan enqueues the future provider message without downloading inside the request or requiring either participant to open Mango.
+- The verified webhook or rare bounded checkpoint reconciliation enqueues the future provider message without downloading inside the request or requiring either participant to open Mango.
 - The background worker reuses the mailbox-scoped durable thread, appends each missing real provider message once, copies only its missing Node-wide destination, and does not create a second Node source or projection.
 
 ### Scenario N-S20: Annotation Navigation, Attached Files, And Reply Signature
@@ -893,7 +893,7 @@ Given:
 - A new Nylas message joins the provider thread today.
 
 When:
-- A verified webhook or checkpoint scan enqueues today's message while Joe and Bob may both be logged out.
+- A verified webhook or rare bounded checkpoint reconciliation enqueues today's message while Joe and Bob may both be logged out.
 
 Expected:
 - Joe initially sees yesterday's complete Mango-stored snapshot; opening the Node does not call Nylas or discover today's message itself.

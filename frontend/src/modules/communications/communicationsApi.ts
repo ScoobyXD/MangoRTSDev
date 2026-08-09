@@ -280,16 +280,25 @@ export type MessagePage = {
   next_page_token?: string;
 };
 
-export type ArchiveEmailMessagesBatchResult = {
-  job_id?: string;
-  accepted_ids?: string[];
-  archived_ids: string[];
-  failed: Array<{ message_id: string; error: string }>;
+export type CommunicationsArchiveJobItem = {
+	job_item_id: string;
+	job_id: string;
+	message_id: string;
+	status: "pending" | "processing" | "archived" | "failed";
+	provider_attempt_count: number;
+	last_error?: string;
+};
+
+export type CommunicationsArchiveJob = {
+	job_id: string;
+	status: "pending" | "processing" | "completed" | "failed";
+	requested_count: number;
+	accepted_message_ids: string[];
+	items: CommunicationsArchiveJobItem[];
 };
 
 export type ArchiveEmailMessagesBatchOptions = {
-  background?: boolean;
-  accountEmail?: string;
+	accountEmail?: string;
 };
 
 export type MergeEmailMessageOptions = {
@@ -852,54 +861,33 @@ export async function updateEmailMessage(messageID: string, update: { unread?: b
   return message;
 }
 
-export async function archiveEmailMessage(messageID: string, sharedInboxID?: string, companyID?: string, accountEmail?: string): Promise<EmailMessage> {
-  const query = createMailboxMessageMutationQuery(sharedInboxID, companyID, accountEmail);
-  const scope = { companyID, sharedInboxID, accountEmail };
-  const cached = findCachedEmailMessage(messageID, scope);
-  const payload = await apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/${encodeURIComponent(messageID)}/archive${query}`, {
-    method: "POST",
-  });
-  const message = archivedEmailMessageForLocalLists({
-    ...(cached ?? {}),
-    ...payload.message,
-    starred: cached?.starred ?? payload.message.starred,
-  });
-  recentPrimaryMessages.delete(scopedMessageCacheKey(message.id, scope));
-  rememberRecentlyArchivedMessage(message, scope);
-  if (message.starred) rememberRecentlyStarredMessage(message, scope);
-  applyEmailMessageToCachedPages(message, { prependIfMissing: true, ...scope });
-  return message;
-}
-
-export async function archiveEmailMessagesBatch(messageIDs: string[], sharedInboxID?: string, companyID?: string, options: ArchiveEmailMessagesBatchOptions = {}): Promise<ArchiveEmailMessagesBatchResult> {
-  const ids = cleanIDs(messageIDs);
-  if (ids.length === 0) return { archived_ids: [], failed: [] };
+export async function archiveEmailMessagesBatch(messageIDs: string[], sharedInboxID?: string, companyID?: string, options: ArchiveEmailMessagesBatchOptions = {}): Promise<CommunicationsArchiveJob> {
+	const ids = cleanIDs(messageIDs);
+	if (ids.length === 0) throw new Error("email_message_ids_required");
   const queryParams = new URLSearchParams();
   const cleanCompanyID = companyID?.trim() ?? "";
   const cleanSharedInboxID = sharedInboxID?.trim() ?? "";
   if (cleanCompanyID) queryParams.set("company_id", cleanCompanyID);
   if (cleanSharedInboxID) queryParams.set("shared_inbox_id", cleanSharedInboxID);
   if (!cleanSharedInboxID && options.accountEmail?.trim()) queryParams.set("account_email", options.accountEmail.trim().toLowerCase());
-  if (options.background) queryParams.set("background", "true");
   const rawQuery = queryParams.toString();
   const query = rawQuery ? `?${rawQuery}` : "";
-  const payload = await apiFetchJSON<Partial<ArchiveEmailMessagesBatchResult>>(`/v1/communications/messages/archive-batch${query}`, {
+	const payload = await apiFetchJSON<{ archive_job: CommunicationsArchiveJob }>(`/v1/communications/messages/archive-batch${query}`, {
     method: "POST",
     body: JSON.stringify({ message_ids: ids }),
   });
-  const acceptedIDs = cleanIDs(payload.accepted_ids ?? []);
-  const archivedIDs = cleanIDs(payload.archived_ids ?? []);
-  for (const messageID of cleanIDs([...acceptedIDs, ...archivedIDs])) {
-    markCachedMessageArchived(messageID, { companyID, sharedInboxID, accountEmail: options.accountEmail });
-  }
-  return {
-    job_id: payload.job_id?.trim() || undefined,
-    accepted_ids: acceptedIDs,
-    archived_ids: archivedIDs,
-    failed: (payload.failed ?? [])
-      .map((item) => ({ message_id: item.message_id?.trim() ?? "", error: item.error?.trim() ?? "archive_failed" }))
-      .filter((item) => item.message_id),
-  };
+	const job = payload.archive_job;
+	for (const messageID of cleanIDs(job.accepted_message_ids ?? [])) {
+		markCachedMessageArchived(messageID, { companyID, sharedInboxID, accountEmail: options.accountEmail });
+	}
+	return job;
+}
+
+export async function getCommunicationsArchiveJob(jobID: string): Promise<CommunicationsArchiveJob> {
+	const cleanJobID = jobID.trim();
+	if (!cleanJobID) throw new Error("archive_job_id_required");
+	const payload = await apiFetchJSON<{ archive_job: CommunicationsArchiveJob }>(`/v1/communications/archive-jobs/${encodeURIComponent(cleanJobID)}`);
+	return payload.archive_job;
 }
 
 export async function unarchiveEmailMessage(messageID: string, sharedInboxID?: string, companyID?: string, accountEmail?: string): Promise<EmailMessage> {

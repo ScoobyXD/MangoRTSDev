@@ -491,7 +491,7 @@ func commitPostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONCommit
 	if err != nil {
 		return EditorJSONCommit{}, err
 	}
-	if err := insertRealtimeOutboxTx(ctx, tx, RealtimeOutboxInput{
+	if _, err := r.enqueueRealtimeOutboxTx(ctx, tx, RealtimeOutboxInput{
 		EventID: eventID, CompanyID: input.Document.CompanyID, Scope: scope,
 		EventType: EditorJSONSnapshotEventType, ResourceType: input.Document.ResourceType,
 		ResourceID: input.Document.ResourceID, Permission: EntityPermissionEdit,
@@ -597,7 +597,7 @@ where company_id=$1::uuid and project_id=$2::uuid and textbox_id=$3`,
 		"document_id": input.Document.DocumentID, "resource_revision": nextRevision, "committed_at": now,
 		"operation_id": input.OperationID, "client_id": input.ClientID,
 	})
-	if err := insertRealtimeOutboxTx(ctx, tx, RealtimeOutboxInput{
+	if _, err := r.enqueueRealtimeOutboxTx(ctx, tx, RealtimeOutboxInput{
 		EventID: eventID, CompanyID: input.Document.CompanyID, Scope: scope,
 		EventType: EditorJSONDeletedEventType, ResourceType: input.Document.ResourceType,
 		ResourceID: input.Document.ResourceID, Permission: EntityPermissionEdit,

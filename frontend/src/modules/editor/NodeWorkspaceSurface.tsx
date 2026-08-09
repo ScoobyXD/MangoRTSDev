@@ -2763,11 +2763,11 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               )}
             </div>
           )}
-          <AttachmentCountDropdown
+			<AttachmentCountDropdown
             items={nodeAttachmentDropdownItems}
             uploads={nodeAttachmentUploadDropdownItems}
             apiBase={apiBase}
-            companyID={companyID}
+				companyID={companyID}
             accent={accent}
             surfaceText={surfaceText}
             align="left"
@@ -2865,11 +2865,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             {...(!nodeEmailColumnVisible ? { inert: "" } : {})}
             style={{ gridColumn: "1", position: "sticky", top: 38, alignSelf: "start", zIndex: 2, minWidth: 0, height: nodeWorkspaceViewportHeight, minHeight: nodeWorkspaceViewportHeight, boxSizing: "border-box", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: panelBackground, backgroundClip: "padding-box", overflow: "hidden", opacity: nodeEmailColumnVisible ? 1 : 0, transform: nodeEmailColumnVisible ? "translateX(0) scale(1)" : "translateX(-10px) scale(0.985)", pointerEvents: nodeEmailColumnVisible ? "auto" : "none", boxShadow: EDITOR_NEU_SHADOW, transition: "opacity 180ms ease, transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1)" }}
           >
-            <AttachedEmailOrganizerPane
+			<AttachedEmailOrganizerPane
               emails={nodeAttachedEmails}
               nodeID={nodeID}
               apiBase={apiBase}
-              companyID={companyID}
+				companyID={companyID}
+				currentUserID={author.userID}
               companyUsers={companyUsers}
               attachmentRequestJSON={requestJSON}
               attachmentResourceType="node"
@@ -3207,6 +3208,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                                 nodeID={nodeID}
                                 apiBase={apiBase}
                                 companyID={companyID}
+                                currentUserID={author.userID}
                                 companyUsers={companyUsers}
                                 attachmentRequestJSON={requestJSON}
                                 attachmentResourceType="node"

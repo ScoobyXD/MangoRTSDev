@@ -2474,10 +2474,10 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         </div>
       </div>
       {permissionsOpen && (
-        <EntityPermissionsDialog
+		<EntityPermissionsDialog
           requestJSON={permissionsRequestJSON}
           apiBase={apiBase}
-          companyID={companyID}
+								companyID={companyID}
           entityType="project"
           entityID={projectID}
           title={project?.name || projectID}
@@ -2672,10 +2672,11 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                   }}
                                 >Attach email</button>
                               </div>
-                              <AttachedEmailOrganizerPane
+							<AttachedEmailOrganizerPane
                                 emails={attachedEmailsByBlockID.get(block.id) ?? []}
                                 apiBase={apiBase}
-                                companyID={companyID}
+								companyID={companyID}
+								currentUserID={currentUserID}
                                 attachmentRequestJSON={attachmentRequestJSON}
                                 attachmentResourceType="project"
                                 attachmentResourceID={projectID}

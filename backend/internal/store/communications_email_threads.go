@@ -13,15 +13,12 @@ const (
 	CommunicationsEmailThreadDownloadComplete    = "complete"
 	CommunicationsEmailThreadDownloadFailed      = "failed"
 
-	CommunicationsEmailThreadDownloadScopeFullThread = "full_thread"
-	CommunicationsEmailThreadDownloadScopeMessage    = "message"
-
-	CommunicationsEmailThreadDownloadJobAccepted   = "accepted"
-	CommunicationsEmailThreadDownloadJobProcessing = "processing"
-	CommunicationsEmailThreadDownloadJobCompleted  = "completed"
-	CommunicationsEmailThreadDownloadJobParked     = "parked"
-	CommunicationsEmailThreadDownloadJobExhausted  = "exhausted"
-	CommunicationsEmailProviderAttemptLimit        = 3
+	CommunicationsEmailIngestionJobAccepted   = "accepted"
+	CommunicationsEmailIngestionJobProcessing = "processing"
+	CommunicationsEmailIngestionJobCompleted  = "completed"
+	CommunicationsEmailIngestionJobParked     = "parked"
+	CommunicationsEmailIngestionJobExhausted  = "exhausted"
+	CommunicationsEmailProviderAttemptLimit   = 3
 
 	CommunicationsEmailIngestionPriorityLive    = 10
 	CommunicationsEmailIngestionPriorityVisible = 20
@@ -87,8 +84,8 @@ type CommunicationsNodeEmailImportResult struct {
 	EmailThread   domain.CommunicationsEmailThread `json:"email_thread"`
 }
 
-type CommunicationsEmailThreadDownloadJob struct {
-	DownloadJobID        string     `json:"ingestion_job_id"`
+type CommunicationsEmailIngestionJob struct {
+	IngestionJobID       string     `json:"ingestion_job_id"`
 	CompanyID            string     `json:"company_id"`
 	EmailConnectionID    string     `json:"email_connection_id"`
 	EmailThreadID        string     `json:"email_thread_id,omitempty"`
@@ -98,7 +95,7 @@ type CommunicationsEmailThreadDownloadJob struct {
 	Status               string     `json:"status"`
 	ProviderAttemptCount int        `json:"provider_attempt_count"`
 	AttemptToken         string     `json:"-"`
-	EnqueueSourceID      string     `json:"-"`
+	SQSAcceptedTimestamp *time.Time `json:"-"`
 	LastError            string     `json:"last_error,omitempty"`
 	CompletedTimestamp   *time.Time `json:"completed_timestamp,omitempty"`
 	FailedTimestamp      *time.Time `json:"failed_timestamp,omitempty"`
@@ -113,18 +110,6 @@ type CommunicationsEmailIngestionJobInput struct {
 	ProviderMessageID string
 	ProviderThreadID  string
 	Priority          int
-	EnqueueSourceID   string
-}
-
-func normalizeCommunicationsEmailThreadDownloadScope(value string) string {
-	switch strings.TrimSpace(value) {
-	case CommunicationsEmailThreadDownloadScopeFullThread:
-		return CommunicationsEmailThreadDownloadScopeFullThread
-	case CommunicationsEmailThreadDownloadScopeMessage:
-		return CommunicationsEmailThreadDownloadScopeMessage
-	default:
-		return ""
-	}
 }
 
 func communicationsEmailMessageDownloadComplete(thread domain.CommunicationsEmailThread, providerMessageID string) bool {
@@ -280,15 +265,15 @@ func communicationsEmailThreadForMessages(thread domain.CommunicationsEmailThrea
 	return thread
 }
 
-func communicationsEmailThreadDownloadRequest(thread domain.CommunicationsEmailThread, input CommunicationsEmailThreadUpsertInput) (string, string, bool) {
+func communicationsEmailIngestionRequest(thread domain.CommunicationsEmailThread, input CommunicationsEmailThreadUpsertInput) (string, bool) {
 	if !input.RequestDownload || input.RequestedByUserID == "" {
-		return "", "", false
+		return "", false
 	}
 	if strings.TrimSpace(thread.ProviderThreadID) != "" && !thread.HistoryComplete {
-		return CommunicationsEmailThreadDownloadScopeFullThread, "", true
+		return thread.RootProviderMessageID, thread.RootProviderMessageID != ""
 	}
 	if !communicationsEmailMessageDownloadComplete(thread, input.SelectedMessageID) {
-		return CommunicationsEmailThreadDownloadScopeMessage, input.SelectedMessageID, true
+		return input.SelectedMessageID, true
 	}
-	return "", "", false
+	return "", false
 }

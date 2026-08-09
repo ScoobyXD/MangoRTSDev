@@ -42,6 +42,18 @@ func (r *MemoryRepo) enqueueRealtimeOutboxLocked(input RealtimeOutboxInput) (Rea
 	return cloneRealtimeOutboxEvent(item), nil
 }
 
+func (r *MemoryRepo) enqueueRealtimeOutboxInputsLocked(inputs []RealtimeOutboxInput) error {
+	if r.realtimeOutboxErr != nil {
+		return r.realtimeOutboxErr
+	}
+	for _, input := range inputs {
+		if _, err := r.enqueueRealtimeOutboxLocked(input); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (r *MemoryRepo) ClaimRealtimeOutbox(ctx context.Context, query RealtimeOutboxClaimQuery) ([]RealtimeOutboxEvent, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

@@ -66,7 +66,7 @@ func runEmailCollaborationAttachmentAuthorizationBoundary(t *testing.T, scope st
 			ContentType: "text/plain", Size: int64(len(body)),
 		}},
 	}
-	ensured, err := repo.EnsureCommunicationsEmailCollaboration(ensureInput)
+	ensured, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), ensureInput)
 	if err != nil {
 		t.Fatal(err)
 	}

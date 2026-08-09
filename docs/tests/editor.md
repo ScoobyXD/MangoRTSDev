@@ -1,3 +1,17 @@
+# Process Story: A downloading attached email wakes exactly one canonical read
+
+The Node or Project attached-email surface performs its initial canonical thread read
+↓
+If PostgreSQL says the stored thread is still downloading, the surface subscribes to that exact personal-account or shared-inbox mailbox scope
+↓
+The private SQS worker finishes durable ingestion and commits the same compact post-commit mailbox hint used by ordinary mail
+↓
+Valkey wakes the exact subscribed browser without carrying the thread, body, attachment, credential, or URL
+↓
+The surface performs one canonical HTTP thread read and updates from PostgreSQL truth; no one-second timer or replacement poller exists
+
+Last updated: 2026-08-09
+
 # Process Story: A saved editor revision reaches every API task through Valkey
 
 A Node, Project, or Logic Gate editor batches local Tiptap JSON and sends its authenticated HTTP save
@@ -635,6 +649,7 @@ ED133 - Backspace or Delete with a collapsed caret on a simple empty numbered, b
 ED134 - Node, Project, and Logic Gate policy surfaces show Inherited and Customized only as automatic status. Authorized users edit the policy directly in either state; exact unordered equality with the immediate parent's raw pointers returns to Inherited, any difference is Customized, and the backend decides the stored mode again inside the save transaction. Descendant actions appear only when descendants exist and use the exact labels Apply to non-customized descendants and Apply to every descendant, with confirmation required for the latter.
 ED135 - A saved hard break at the end of a paragraph remains explicit JSON. When another block follows that paragraph, first-click activation must not expose ProseMirror's additional browser-only trailing-break helper as a new empty row. The live surface must match the sleeping surface without adding, removing, or saving document nodes and without changing annotation positions. A hard break at the end of the document retains the helper row required for normal caret editing.
 ED136 - Editor durability remains HTTP plus PostgreSQL. The same save transaction commits the canonical textbox revision and compact outbox event, and Saved is acknowledged after that commit without waiting for Valkey I/O or audience lookup. A lifecycle-owned publisher then carries only the committed event ID/revision and exact-scope hint across API tasks with bounded retry. Every receiving task deduplicates and orders the hint, rechecks the current exact editor audience, and uses its local WebSocket registry; bounded indexed recovery certifies unused `BIGSERIAL` values rather than stalling later revisions. A task with an uncertified initial cursor returns retryable `503 realtime_not_ready` from editor ticket/socket admission without minting or consuming the ticket or accepting the socket; after certification launches its loops, admission opens and subscriber-ready recovery delivers every later published revision. A clean remote editor fetches the full canonical document over HTTP, unsaved local work remains protected, and Valkey outage delays only realtime hints without failing or delaying durable saves or starting 75 ms outbox polling.
+ED137 - A Node or Project attached-email surface never polls a `downloading` stored thread. It performs one initial canonical read, holds the exact mailbox subscription while downloading, and performs one canonical thread read for a matching post-commit mailbox hint. PostgreSQL remains truth and the compact hint contains no email body, attachment, credential, secret, or presigned URL.
 
 ### Required Unified Rich-Editor Surface Inventory
 

@@ -14,13 +14,13 @@ var emailSQSFinalColumns = map[string][]string{
 	},
 	"email_ingestion_jobs": {
 		"ingestion_job_id", "company_id", "email_connection_id", "email_thread_id", "provider_message_id",
-		"provider_thread_id", "priority", "status", "attempt_count", "provider_attempt_count", "attempt_token",
-		"enqueue_source_id", "last_error", "available_at", "processing_started_at", "completed_timestamp",
+		"provider_thread_id", "priority", "status", "provider_attempt_count", "attempt_token",
+		"sqs_accepted_timestamp", "last_error", "completed_timestamp",
 		"failed_timestamp", "created_timestamp", "updated_timestamp",
 	},
 	"communications_email_archive_job_items": {
-		"job_item_id", "archive_job_id", "message_id", "status", "attempt_count", "attempt_token", "last_error",
-		"available_at", "processing_started_at", "archived_timestamp", "failed_timestamp", "created_timestamp",
+		"job_item_id", "archive_job_id", "message_id", "status", "provider_attempt_count", "attempt_token", "last_error",
+		"archived_timestamp", "failed_timestamp", "created_timestamp",
 		"updated_timestamp",
 	},
 }
@@ -51,6 +51,11 @@ var emailSQSFinalConstraints = []emailSQSConstraintContract{
 		table:      "communications_email_archive_job_items",
 		name:       "communications_email_archive_job_items_status_chk",
 		definition: "CHECK (status = ANY (ARRAY['pending'::text, 'processing'::text, 'archived'::text, 'failed'::text]))",
+	},
+	{
+		table:      "communications_email_archive_job_items",
+		name:       "communications_email_archive_job_items_provider_attempt_chk",
+		definition: "CHECK (provider_attempt_count >= 0 AND provider_attempt_count <= 3)",
 	},
 }
 

@@ -19,10 +19,10 @@ import (
 
 func TestRealtimeDeliveryFailureClosesAndRemovesConnectionWithDistinctMetric(t *testing.T) {
 	metrics := NewInMemoryMetricsRecorder()
-	server := NewServerWithOptions(store.NewMemoryRepo(), ServerOptions{
+	server := NewServerWithOptions(store.NewMemoryRepo(), explicitLocalRealtimeTestOptions(ServerOptions{
 		DisableNotificationCleanup: true,
 		Metrics:                    metrics,
-	})
+	}))
 	defer server.Close()
 
 	companyID := "91919191-9191-4191-8191-919191919191"
@@ -45,7 +45,7 @@ func TestRealtimeDeliveryFailureClosesAndRemovesConnectionWithDistinctMetric(t *
 	defer healthyConn.close()
 
 	started := time.Now()
-	server.publishRealtimeMessage(companyID, scope, map[string]any{"type": "test"})
+	enqueueRealtimeTestMessage(t, server, companyID, scope, map[string]any{"type": "test"})
 	waitForBackplaneCondition(t, func() bool {
 		return stalledNetworkConn.closeCalls == 1 && len(healthyNetworkConn.messages(t)) == 1
 	}, "failed websocket removal and healthy asynchronous delivery")
@@ -90,7 +90,7 @@ func TestRealtimeDeliveryFailureClosesAndRemovesConnectionWithDistinctMetric(t *
 	}
 
 	stalledWritesAfterFailure := stalledNetworkConn.writeCalls
-	server.publishRealtimeMessage(companyID, scope, map[string]any{"type": "retry"})
+	enqueueRealtimeTestMessage(t, server, companyID, scope, map[string]any{"type": "retry"})
 	waitForBackplaneCondition(t, func() bool { return len(healthyNetworkConn.messages(t)) == 2 }, "healthy retry delivery")
 	if stalledNetworkConn.writeCalls != stalledWritesAfterFailure {
 		t.Fatalf("removed stalled connection received another write: before=%d after=%d", stalledWritesAfterFailure, stalledNetworkConn.writeCalls)
@@ -112,7 +112,7 @@ func TestRealtimeDeliveryFailureClosesAndRemovesConnectionWithDistinctMetric(t *
 
 	server.realtimeRegistry.removeConnection(healthyConn.id)
 	healthyConn.close()
-	server.publishRealtimeMessage(companyID, scope, map[string]any{"type": "after-unsubscribe"})
+	enqueueRealtimeTestMessage(t, server, companyID, scope, map[string]any{"type": "after-unsubscribe"})
 	waitForBackplaneCondition(t, func() bool {
 		return metrics.Snapshot().Operational[noSubscriberKey].Count == 1
 	}, "asynchronous no-subscriber metric")
@@ -124,10 +124,10 @@ func TestRealtimeDeliveryFailureClosesAndRemovesConnectionWithDistinctMetric(t *
 
 func TestRealtimePublishFanoutIsBoundedAndConcurrent(t *testing.T) {
 	metrics := NewInMemoryMetricsRecorder()
-	server := NewServerWithOptions(store.NewMemoryRepo(), ServerOptions{
+	server := NewServerWithOptions(store.NewMemoryRepo(), explicitLocalRealtimeTestOptions(ServerOptions{
 		DisableNotificationCleanup: true,
 		Metrics:                    metrics,
-	})
+	}))
 	defer server.Close()
 
 	companyID := "97979797-9797-4797-8797-979797979797"
@@ -150,7 +150,7 @@ func TestRealtimePublishFanoutIsBoundedAndConcurrent(t *testing.T) {
 		defer conn.close()
 	}
 
-	server.publishRealtimeMessage(companyID, scope, map[string]any{"type": "fanout.test"})
+	enqueueRealtimeTestMessage(t, server, companyID, scope, map[string]any{"type": "fanout.test"})
 
 	seen := map[string]bool{}
 	for len(seen) < realtimePublishFanoutLimit {
@@ -189,7 +189,7 @@ func TestRealtimePublishFanoutIsBoundedAndConcurrent(t *testing.T) {
 }
 
 func TestRealtimeConcurrentPublishesPreservePerConnectionEventOrder(t *testing.T) {
-	server := NewServerWithOptions(store.NewMemoryRepo(), ServerOptions{DisableNotificationCleanup: true})
+	server := NewServerWithOptions(store.NewMemoryRepo(), explicitLocalRealtimeTestOptions(ServerOptions{DisableNotificationCleanup: true}))
 	defer server.Close()
 
 	companyID := "99999999-9999-4999-8999-999999999998"
@@ -202,13 +202,13 @@ func TestRealtimeConcurrentPublishesPreservePerConnectionEventOrder(t *testing.T
 	server.realtimeRegistry.subscribe(conn, scope)
 	defer conn.close()
 
-	server.publishRealtimeMessage(companyID, scope, map[string]any{"sequence": 1})
+	enqueueRealtimeTestMessage(t, server, companyID, scope, map[string]any{"sequence": 1})
 	select {
 	case <-networkConn.entered:
 	case <-time.After(time.Second):
 		t.Fatal("first publish did not reach the controlled connection")
 	}
-	server.publishRealtimeMessage(companyID, scope, map[string]any{"sequence": 2})
+	enqueueRealtimeTestMessage(t, server, companyID, scope, map[string]any{"sequence": 2})
 	close(networkConn.release)
 	waitForBackplaneCondition(t, func() bool { return len(networkConn.messages(t)) == 2 }, "ordered asynchronous delivery")
 	messages := networkConn.messages(t)
@@ -218,7 +218,7 @@ func TestRealtimeConcurrentPublishesPreservePerConnectionEventOrder(t *testing.T
 }
 
 func TestRealtimeStalledScopeDoesNotBlockUnrelatedScopePublish(t *testing.T) {
-	server := NewServerWithOptions(store.NewMemoryRepo(), ServerOptions{DisableNotificationCleanup: true})
+	server := NewServerWithOptions(store.NewMemoryRepo(), explicitLocalRealtimeTestOptions(ServerOptions{DisableNotificationCleanup: true}))
 	defer server.Close()
 
 	companyID := "99999999-9999-4999-8999-999999999990"
@@ -245,7 +245,7 @@ func TestRealtimeStalledScopeDoesNotBlockUnrelatedScopePublish(t *testing.T) {
 	defer healthyConn.close()
 	stalledDone := make(chan struct{})
 	go func() {
-		server.publishRealtimeMessage(companyID, stalledScope, map[string]any{"scope": "stalled"})
+		enqueueRealtimeTestMessage(t, server, companyID, stalledScope, map[string]any{"scope": "stalled"})
 		close(stalledDone)
 	}()
 	select {
@@ -256,7 +256,7 @@ func TestRealtimeStalledScopeDoesNotBlockUnrelatedScopePublish(t *testing.T) {
 
 	healthyDone := make(chan struct{})
 	go func() {
-		server.publishRealtimeMessage(companyID, healthyScope, map[string]any{"scope": "healthy"})
+		enqueueRealtimeTestMessage(t, server, companyID, healthyScope, map[string]any{"scope": "healthy"})
 		close(healthyDone)
 	}()
 	select {
@@ -308,7 +308,7 @@ func TestRealtimeQueuedPublicationsReauthorizeInsideExactScopeOrdering(t *testin
 				permission = store.EntityPermissionEdit
 				scope = realtimeChatScope(node.NodeID)
 				publish = func(server *Server) {
-					item, err := base.AddNodeInformationWithActor(store.NodeInformationInput{
+					_, err := base.AddNodeInformationWithActor(store.NodeInformationInput{
 						CompanyID: companyID, NodeID: node.NodeID, Type: "Text block chat",
 						Information: `{"block_id":"queued-chat-block"}`, InformationID: "71717171-7171-4171-8171-000000000001",
 					})
@@ -316,7 +316,7 @@ func TestRealtimeQueuedPublicationsReauthorizeInsideExactScopeOrdering(t *testin
 						t.Errorf("AddNodeInformationWithActor: %v", err)
 						return
 					}
-					server.publishNodeChatCreated(companyID, node.NodeID, "71717171-7171-4171-8171-000000000001", item)
+					server.wakeRealtimeSpine()
 				}
 			case "kanban":
 				gate, err := base.CreateLogicGate(companyID, "Queued board")
@@ -328,7 +328,7 @@ func TestRealtimeQueuedPublicationsReauthorizeInsideExactScopeOrdering(t *testin
 				boardID := store.LogicGateKanbanBoardID(gate.LogicGateID)
 				scope = realtimeBoardScope(boardID)
 				publish = func(server *Server) {
-					server.publishKanbanChanged(companyID, boardID, "queued-change")
+					publishKanbanChangedForTest(t, server, companyID, boardID, "queued-change")
 				}
 			case "shared_mailbox":
 				if _, err := base.UpsertCompanyEmailConnection(store.CompanyEmailConnectionInput{
@@ -363,7 +363,7 @@ func TestRealtimeQueuedPublicationsReauthorizeInsideExactScopeOrdering(t *testin
 
 			audienceLookups := make(chan struct{}, 2)
 			repo := &recordingRealtimeAudienceRepo{Repository: base, lookups: audienceLookups}
-			server := NewServerWithOptions(repo, ServerOptions{DisableNotificationCleanup: true})
+			server := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{DisableNotificationCleanup: true}))
 			defer server.Close()
 			networkConn := &recordingRealtimeNetConn{}
 			conn := &realtimeConnection{id: "queued-" + surface, companyID: companyID, userID: user.UserID, conn: networkConn}
@@ -441,7 +441,7 @@ func TestRealtimeQueuedPublicationsReauthorizeInsideExactScopeOrdering(t *testin
 func TestRealtimeNodeUpdatedSkipsKanbanProjectionLookupWithoutLocalBoardSubscribers(t *testing.T) {
 	base := store.NewMemoryRepo()
 	repo := &recordingKanbanProjectionLookupRepo{Repository: base}
-	server := NewServerWithOptions(repo, ServerOptions{DisableNotificationCleanup: true})
+	server := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{DisableNotificationCleanup: true}))
 	defer server.Close()
 
 	companyID := "92929292-9292-4292-8292-929292929292"
@@ -458,7 +458,7 @@ func TestRealtimeNodeUpdatedSkipsKanbanProjectionLookupWithoutLocalBoardSubscrib
 	server.realtimeRegistry.subscribe(otherCompanyConn, realtimeBoardScope(store.LogicGateKanbanBoardID("95959595-9595-4595-8595-959595959595")))
 	defer otherCompanyConn.close()
 
-	server.publishKanbanChangesForEvents([]domain.DomainEvent{event})
+	publishKanbanChangesForEventsForTest(t, server, []domain.DomainEvent{event})
 	if repo.nodeLookups != 0 {
 		t.Fatalf("Kanban projection node lookups = %d, want 0 without a same-company board subscriber", repo.nodeLookups)
 	}
@@ -466,7 +466,7 @@ func TestRealtimeNodeUpdatedSkipsKanbanProjectionLookupWithoutLocalBoardSubscrib
 	localConn := &realtimeConnection{id: "local-board-connection", companyID: companyID, conn: &recordingRealtimeNetConn{}}
 	server.realtimeRegistry.subscribe(localConn, realtimeBoardScope(store.LogicGateKanbanBoardID("96969696-9696-4696-8696-969696969696")))
 	defer localConn.close()
-	server.publishKanbanChangesForEvents([]domain.DomainEvent{event})
+	publishKanbanChangesForEventsForTest(t, server, []domain.DomainEvent{event})
 	if repo.nodeLookups != 1 {
 		t.Fatalf("Kanban projection node lookups = %d, want 1 with a same-company board subscriber", repo.nodeLookups)
 	}
@@ -475,7 +475,7 @@ func TestRealtimeNodeUpdatedSkipsKanbanProjectionLookupWithoutLocalBoardSubscrib
 func TestRealtimePublicationRejectsMissingResourceWithPermissiveResolvedAudience(t *testing.T) {
 	base := store.NewMemoryRepo()
 	repo := &missingRealtimeEntityPermissiveAudienceRepo{Repository: base}
-	server := NewServerWithOptions(repo, ServerOptions{DisableNotificationCleanup: true})
+	server := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{DisableNotificationCleanup: true}))
 	defer server.Close()
 
 	companyID := "81818181-8181-4181-8181-818181818181"
@@ -491,17 +491,9 @@ func TestRealtimePublicationRejectsMissingResourceWithPermissiveResolvedAudience
 	server.realtimeRegistry.subscribe(conn, scope)
 	defer conn.close()
 
-	delivered := server.publishRealtimeMessageToCurrentEntityAudience(
-		companyID,
-		scope,
-		store.EntityTypeNode,
-		nodeID,
-		store.EntityPermissionEdit,
+	enqueueRealtimeEntityTestMessage(t, server, companyID, scope, store.EntityTypeNode, nodeID, store.EntityPermissionEdit,
 		map[string]any{"type": "chat.created"},
 	)
-	if delivered != 0 {
-		t.Fatalf("missing-resource delivery count = %d, want 0", delivered)
-	}
 	waitForBackplaneCondition(t, func() bool { return repo.audienceLookups == 1 }, "missing-resource audience resolution")
 	if repo.audienceLookups != 1 {
 		t.Fatalf("audience resolutions = %d, want 1", repo.audienceLookups)

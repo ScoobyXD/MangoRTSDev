@@ -45,6 +45,7 @@ Last updated: 2026-08-09
 - **The first SQS implementation attempt was rejected and abandoned.** It must not be merged, copied, or used as the starting point for the replacement.
 - **The replacement SQS implementation must start from current `main` and follow the simpler design in this document.**
 - **The fresh DEV implementation now exists on its review branch with worker/schedule flags off; offline verification and review must finish before any rollout or integration.**
+- **The pre-rollout cleanup now has one archive SQS path, one ingestion API, event-driven archive/attached-email reads, and one realtime outbox/wake/spine path. It is still only a local worker-branch change until separately reviewed and integrated.**
 - **Production is out of scope.** Nothing in this task authorizes production infrastructure, deployment, database, Nylas, or secret changes.
 
 The abandoned SQS worktree was:
@@ -268,7 +269,7 @@ PostgreSQL stores:
 
 PostgreSQL does **not** store a timer that decides when another worker may receive the SQS message.
 
-The producer creates the tiny stable job row before it sends the compact SQS message. This row is a permanent record that Mango already accepted that exact work identity; it is not a delivery timer. A Nylas request or the currently delivered reconciliation message may retry a failed SQS send using the same identity. Reconciliation stores its exact control identity at creation and may resend an accepted marker only when that origin still matches; a later ten-minute control identity neither recreates nor resends prior or DLQed poison work.
+The producer creates the tiny stable marker before it sends the compact SQS message. This is a permanent work identity, not a delivery timer. A request retry reuses it. Rare reconciliation performs one bounded read for markers at least ten minutes old: it may resend only ingestion still `accepted` with no `sqs_accepted_timestamp`, or archive items still `pending` with zero provider starts. It never replaces an identity or resends started, completed, parked, exhausted, or DLQed work.
 
 When provider work actually begins, PostgreSQL atomically records a new attempt token. It refuses to start attempt 4. Completion or failure is conditional on the same token, so an old delayed worker cannot overwrite a newer attempt. This is ordinary idempotency, not a second queue lease.
 
@@ -290,7 +291,7 @@ AWS's SQS receive count is the delivery and dead-letter authority. PostgreSQL's 
 - AWS can move a message to the dead-letter queue with fewer than three recorded database attempts when the worker crashes before attempt start. The stable job row still prevents automatic recreation.
 - If the worker cannot record the final result, it does not delete the SQS message. AWS moves the message to the dead-letter queue, the alarm fires, and deliberate operator review is required.
 - Permanent connection/configuration failures park the exact connection and delete the message.
-- Reconciliation never re-enqueues an existing stable job identity, regardless of whether its last recorded status is accepted, processing, completed, parked, or exhausted. It also refuses any identity whose durable provider-attempt count is already 3.
+- Reconciliation never creates a replacement identity. It may resend only the same ingestion marker when it is at least about ten minutes old, still `accepted`, and has no `sqs_accepted_timestamp`, or the same archive item while it is still `pending` with zero provider starts. It never touches processing, completed, parked, exhausted, failed, or DLQed work.
 - Manual replay from the dead-letter queue is a deliberate operator action after the underlying problem is understood.
 
 There is no custom exponential backoff scheduler. The fixed SQS visibility interval is the retry delay.
@@ -359,10 +360,11 @@ That control message:
 2. enqueues at most one bounded reconcile message per exact connection;
 3. continues with another control message only when another page exists;
 4. never scans every account concurrently;
-5. excludes disconnected, parked, `reauth_required`, `configuration_required`, and every already-existing stable job identity, including accepted, processing, completed, or exhausted work;
-6. processes one provider page per SQS delivery;
-7. advances the checkpoint only after the page is durably accepted;
-8. never polls PostgreSQL every few milliseconds and never runs a per-API scheduler.
+5. excludes disconnected, parked, `reauth_required`, and `configuration_required` connections;
+6. performs one bounded repair read for old never-accepted ingestion markers and old never-started archive items, always reusing their IDs;
+7. processes one provider page per SQS delivery;
+8. advances the checkpoint only after the page is durably accepted;
+9. never polls PostgreSQL every few milliseconds and never runs a per-API scheduler.
 
 The 10-minute schedule is not a 10-minute delay for normal email. Normal email arrives through the webhook immediately.
 
@@ -422,7 +424,7 @@ The fresh work starts from the new current `main` after this decision record is 
 ### Stage 3: atomic human schema cutover
 
 - stop and drain every old API/email writer before preflight and keep it stopped through the transaction;
-- run the exact read-only PostgreSQL 17 preflight. It accepts only coherent unordered exact states: all three tables at legacy (`email_connections` unchanged 13, ingestion 16, archive items 12) or all three at final (`email_connections` unchanged 13, ingestion 19 with exactly the three approved additions, archive items 13 with exactly `attempt_token` added). Any cross-table mixed state is STOP before a write;
+- run the exact read-only PostgreSQL 17 preflight. It accepts only coherent unordered exact states: all three tables at legacy (`email_connections` unchanged 13, ingestion 16, archive items 12) or all three at final (`email_connections` unchanged 13, ingestion 16 after replacing the three delivery-era fields with `provider_attempt_count`, `attempt_token`, and `sqs_accepted_timestamp`, archive items 11 after replacing its three delivery-era fields with `provider_attempt_count` and `attempt_token`). Any cross-table mixed state is STOP before a write;
 - stop if that preflight finds any legacy database-delivered ingestion or archive item still pending, processing, or retrying; let the old deployment finish it or perform deliberate operator review before cutover;
 - review the aggregate duplicate report without mailbox/provider identifiers. It must show stable-identity group count, exact redundant-row count, rows outside completed/failed, synthetic cutover-completed rows, conflicting non-null Mango thread groups, conflicting nonblank provider thread groups, and foreign-key references. READY requires zero unsafe/conflicting/reference counts in a coherent legacy state; final-schema duplicates are STOP;
 - take a verified DEV recovery point;
@@ -480,7 +482,7 @@ The fresh work starts from the new current `main` after this decision record is 
 - SQS receive count, not the PostgreSQL attempt number, controls redelivery and dead-letter movement;
 - PostgreSQL increments only when provider work actually starts and refuses attempt 4;
 - AWS may move a message to the dead-letter queue with fewer than three recorded attempts if the worker crashed before attempt start;
-- reconciliation never recreates any existing stable job identity, including a job left accepted or processing by a crash;
+- reconciliation never recreates an identity; it may resend only an old ingestion marker with no recorded SQS acceptance or an old archive item with zero provider starts, and never touches processing or terminal work;
 - a third-attempt settlement failure is not acknowledged; the dead-letter alarm requires deliberate operator review;
 - permanent `401`, `403`, exact `404 grant.not_found`, and Gmail configuration `400` do not consume all three attempts;
 - a status-write failure remains retryable and is not falsely acknowledged.

@@ -143,11 +143,14 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeParts, /data-node-linked-email-preview="true"/);
   assert.match(nodeParts, /resolveLinkedEmailPreview/);
   assert.match(nodeParts, /loadAttachedEmailThreadPreview/);
-  assert.match(nodeParts, /preview.downloadStatus === "downloading"/);
+  assert.match(nodeParts, /setThreadDownloadStatus\(preview\.downloadStatus\)/);
+  assert.match(nodeParts, /threadDownloadStatus !== "downloading"/);
   assert.match(nodeParts, /data-email-thread-download-status={threadDownloadStatus}/);
   assert.match(nodeParts, /Downloading the rest of this email thread/);
   assert.match(nodeParts, /storedThreadDownloadStatus !== "downloading"/);
-  assert.match(nodeParts, /setStoredThreadPollVersion/);
+  assert.match(nodeParts, /subscribeRealtimeScope\(apiBase, companyID, scope/);
+  assert.match(nodeParts, /refreshStoredThreadRef\.current\(\)/);
+  assert.doesNotMatch(nodeParts, /setStoredThreadPollVersion|storedThreadPollTimer|setInterval/);
   assert.match(nodeParts, /initialFocusMessageID=\{resolvedPreview.focusMessageID\}/);
   assert.match(nodeParts, /singleMessageOnly/);
   assert.match(nodeParts, /data-email-single-message=\{singleMessageOnly \? "true" : undefined\}/);
