@@ -184,12 +184,11 @@ func postgresEmailCollaborationLookupForEnsure(ctx context.Context, q emailColla
 	return postgresEmailCollaborationLookup(ctx, q, input.CompanyID, scope, input.Message.ID, "", "", input.RequestedNodeID)
 }
 
-func (r *PostgresRepo) EnsureCommunicationsEmailCollaboration(input CommunicationsEmailCollaborationEnsureInput) (CommunicationsEmailCollaborationEnsureResult, error) {
+func (r *PostgresRepo) EnsureCommunicationsEmailCollaboration(ctx context.Context, input CommunicationsEmailCollaborationEnsureInput) (CommunicationsEmailCollaborationEnsureResult, error) {
 	input, scope, err := normalizeCommunicationsEmailCollaborationEnsureInput(input)
 	if err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}
-	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("begin_transaction", err)
@@ -214,8 +213,12 @@ func (r *PostgresRepo) EnsureCommunicationsEmailCollaboration(input Communicatio
 		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("persist_email_thread", err)
 	}
 	if existing, lookupErr := postgresEmailCollaborationLookupForEnsure(ctx, tx, input, scope); lookupErr == nil {
-		if ds, mid, ok := communicationsEmailThreadDownloadRequest(thread, threadInput); ok {
-			if _, _, err := ensurePostgresCommunicationsEmailThreadDownloadJobTx(ctx, tx, input.CompanyID, thread.EmailThreadID, ds, mid, input.CreatedByUserID); err != nil {
+		if mid, sourceID, ok := communicationsEmailIngestionRequest(thread, threadInput); ok && thread.EmailConnectionID != "" {
+			if _, _, err := ensurePostgresCommunicationsEmailIngestionJobTx(ctx, tx, CommunicationsEmailIngestionJobInput{
+				CompanyID: input.CompanyID, EmailConnectionID: thread.EmailConnectionID, EmailThreadID: thread.EmailThreadID,
+				ProviderMessageID: mid, ProviderThreadID: thread.ProviderThreadID, Priority: CommunicationsEmailIngestionPriorityVisible,
+				EnqueueSourceID: sourceID,
+			}); err != nil {
 				return CommunicationsEmailCollaborationEnsureResult{}, err
 			}
 		}
@@ -252,8 +255,12 @@ values($1::uuid,$2::uuid,$3,$4,'no_access',now())`, input.CompanyID, nodeID, com
 			return CommunicationsEmailCollaborationEnsureResult{}, err
 		}
 	}
-	if ds, mid, ok := communicationsEmailThreadDownloadRequest(thread, threadInput); ok {
-		if _, _, err := ensurePostgresCommunicationsEmailThreadDownloadJobTx(ctx, tx, input.CompanyID, thread.EmailThreadID, ds, mid, input.CreatedByUserID); err != nil {
+	if mid, sourceID, ok := communicationsEmailIngestionRequest(thread, threadInput); ok && thread.EmailConnectionID != "" {
+		if _, _, err := ensurePostgresCommunicationsEmailIngestionJobTx(ctx, tx, CommunicationsEmailIngestionJobInput{
+			CompanyID: input.CompanyID, EmailConnectionID: thread.EmailConnectionID, EmailThreadID: thread.EmailThreadID,
+			ProviderMessageID: mid, ProviderThreadID: thread.ProviderThreadID, Priority: CommunicationsEmailIngestionPriorityVisible,
+			EnqueueSourceID: sourceID,
+		}); err != nil {
 			return CommunicationsEmailCollaborationEnsureResult{}, err
 		}
 	}

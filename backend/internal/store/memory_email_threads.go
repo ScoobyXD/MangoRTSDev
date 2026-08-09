@@ -350,9 +350,6 @@ func (r *MemoryRepo) ImportCommunicationsEmailIntoNode(input CommunicationsNodeE
 	if err != nil {
 		return CommunicationsNodeEmailImportResult{}, err
 	}
-	if existing, ok := r.nodeEmailThreads[memoryNodeEmailThreadKey(input.CompanyID, input.NodeID, thread.EmailThreadID)]; ok {
-		return CommunicationsNodeEmailImportResult{InformationID: existing.InformationID, EmailThread: thread}, nil
-	}
 	if input.InformationID == "" {
 		input.InformationID = newUUIDv7String()
 	}
@@ -381,8 +378,12 @@ func (r *MemoryRepo) ImportCommunicationsEmailIntoNode(input CommunicationsNodeE
 	if _, err := r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, input.NodeID, input.InformationID, thread.EmailThreadID, selected.ID, input.CreatedByUserID, now); err != nil {
 		return CommunicationsNodeEmailImportResult{}, err
 	}
-	if downloadScope, requestedMessageID, ok := communicationsEmailThreadDownloadRequest(thread, input.Thread); ok {
-		if _, _, err := r.ensureCommunicationsEmailThreadDownloadJobLocked(input.CompanyID, thread.EmailThreadID, downloadScope, requestedMessageID, input.Thread.RequestedByUserID); err != nil {
+	if requestedMessageID, sourceID, ok := communicationsEmailIngestionRequest(thread, input.Thread); ok {
+		if _, _, err := r.ensureCommunicationsEmailIngestionJobLocked(CommunicationsEmailIngestionJobInput{
+			CompanyID: input.CompanyID, EmailConnectionID: r.emailConnectionIDForThreadLocked(thread), EmailThreadID: thread.EmailThreadID,
+			ProviderMessageID: requestedMessageID, ProviderThreadID: thread.ProviderThreadID, Priority: CommunicationsEmailIngestionPriorityVisible,
+			EnqueueSourceID: sourceID,
+		}); err != nil {
 			return CommunicationsNodeEmailImportResult{}, err
 		}
 	}

@@ -71,7 +71,7 @@ func TestRealtimeAudienceResolutionUsesOnlyExactLocalSubscribersWithDeadline(t *
 		exists:     true,
 		allowed:    []string{"11111111-1111-4111-8111-111111111111"},
 	}
-	server := NewServerWithOptions(repo, ServerOptions{DisableNotificationCleanup: true})
+	server := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{DisableNotificationCleanup: true}))
 	defer server.Close()
 
 	companyID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -85,20 +85,9 @@ func TestRealtimeAudienceResolutionUsesOnlyExactLocalSubscribersWithDeadline(t *
 	deniedNetwork := subscribeRecordingRealtimeConnection(t, server, "denied", companyID, deniedUserID, scope)
 	unrelatedNetwork := subscribeRecordingRealtimeConnection(t, server, "unrelated", companyID, unrelatedUserID, realtimeChatScope("cccccccc-cccc-4ccc-8ccc-cccccccccccc"))
 
-	delivered, err := server.publishRealtimeMessageToCurrentEntityAudienceResult(
-		companyID,
-		scope,
-		store.EntityTypeNode,
-		nodeID,
-		store.EntityPermissionEdit,
+	enqueueRealtimeEntityTestMessage(t, server, companyID, scope, store.EntityTypeNode, nodeID, store.EntityPermissionEdit,
 		map[string]any{"type": "chat.created"},
 	)
-	if err != nil {
-		t.Fatalf("publish current audience: %v", err)
-	}
-	if delivered != 0 {
-		t.Fatalf("queued delivery count = %d, want asynchronous acknowledgement", delivered)
-	}
 	waitForBackplaneCondition(t, func() bool {
 		return len(repo.snapshotCalls()) == 1 && len(allowedNetworkA.messages(t)) == 1 && len(allowedNetworkB.messages(t)) == 1
 	}, "deadline-bound audience resolution and asynchronous exact-scope fanout")
@@ -129,7 +118,7 @@ func TestSharedMailboxPublicationAcknowledgesDurableEnqueueBeforeAudienceRetry(t
 		Repository: store.NewMemoryRepo(),
 		resolveErr: transient,
 	}
-	server := NewServerWithOptions(repo, ServerOptions{DisableNotificationCleanup: true})
+	server := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{DisableNotificationCleanup: true}))
 	defer server.Close()
 
 	companyID := "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
@@ -185,7 +174,7 @@ func TestCapturedKanbanDeletePublishesAfterResourceIsGone(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	server := NewServerWithOptions(repo, ServerOptions{DisableNotificationCleanup: true})
+	server := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{DisableNotificationCleanup: true}))
 	defer server.Close()
 
 	boardID := store.LogicGateKanbanBoardID(gate.LogicGateID)
@@ -209,7 +198,7 @@ func TestCapturedKanbanDeletePublishesAfterResourceIsGone(t *testing.T) {
 	if messages := deniedNetwork.messages(t); len(messages) != 0 {
 		t.Fatalf("unauthorized subscriber received deletion tombstone: %+v", messages)
 	}
-	server.publishKanbanChanged(companyID, boardID, "ordinary_post_delete_change")
+	publishKanbanChangedForTest(t, server, companyID, boardID, "ordinary_post_delete_change")
 	if messages := allowedNetwork.messages(t); len(messages) != 1 {
 		t.Fatalf("ordinary post-delete publication bypassed existence reauthorization: %+v", messages)
 	}
@@ -245,7 +234,7 @@ func TestNodeDeleteBoardRefreshReauthorizesTheSurvivingLogicGate(t *testing.T) {
 		exists:     true,
 		allowed:    []string{beforeCapture.UserID},
 	}
-	server := NewServerWithOptions(repo, ServerOptions{DisableNotificationCleanup: true})
+	server := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{DisableNotificationCleanup: true}))
 	defer server.Close()
 	waitForPublishedRealtimeOutboxSequence(t, repo, 1)
 

@@ -106,7 +106,7 @@ func newEmailCollaborationThreadTestRepo(t *testing.T) (*store.MemoryRepo, domai
 
 func ensureEmailCollaborationThreadTestCollaboration(t *testing.T, repo *store.MemoryRepo, input store.CommunicationsEmailCollaborationEnsureInput) domain.CommunicationsEmailCollaboration {
 	t.Helper()
-	result, err := repo.EnsureCommunicationsEmailCollaboration(input)
+	result, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
 	}

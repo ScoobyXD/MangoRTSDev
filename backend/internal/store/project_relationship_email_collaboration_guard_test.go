@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"miraeopus/backend/internal/domain"
 	"os"
 	"strings"
@@ -19,7 +20,7 @@ func TestMemoryProjectRelationshipAllowsEmailNodeAndPreservesEmailOrigin(t *test
 		t.Fatalf("CreateProject: %v", err)
 	}
 	priority := 3
-	collaborationResult, err := repo.EnsureCommunicationsEmailCollaboration(CommunicationsEmailCollaborationEnsureInput{
+	collaborationResult, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: user.UserID, PersonalAccountEmail: user.Email,
 		AccountEmail: user.Email, Provider: "google", CreatedByUserID: user.UserID, Priority: &priority,
 		Message: domain.EmailMessageSnapshot{ID: "project-email-message", ThreadID: "project-email-thread", Subject: "Project email node"},

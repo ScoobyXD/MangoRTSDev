@@ -12,7 +12,6 @@ import (
 	"io"
 	"log"
 	"miraeopus/backend/internal/domain"
-	"miraeopus/backend/internal/emailqueue"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"sort"
@@ -162,7 +161,7 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 			}
 			log.Printf("stored nylas message.opened read status user_id=%s scope=%s company_id=%s company_email_connection_id=%s grant_id=%s message_id=%s status=%s signal_count=%d last_signal=%s", grantContext.connection.UserID, status.ScopeType, status.CompanyID, status.CompanyEmailConnectionID, grantID, status.MessageID, status.Status, status.SignalCount, status.LastSignalTimestamp.Format(time.RFC3339))
 		}
-		if err := s.applyCommunicationsWebhookChange(r.Context(), receiptKey, duplicate, grantContext, change); err != nil {
+		if err := s.applyCommunicationsWebhookChange(r.Context(), duplicate, receiptKey, grantContext, change); err != nil {
 			log.Printf("failed to deliver communications webhook change grant_id=%s trigger=%s message_id=%s: %v", grantID, change.Trigger, change.MessageID, err)
 			s.nylasWebhooks.forget(receiptKey)
 			writeError(w, http.StatusInternalServerError, "failed_to_deliver_email_change")
@@ -353,7 +352,7 @@ func (s *Server) applyNylasWebhookCacheInvalidationForAccountScope(accountScope 
 	}
 }
 
-func (s *Server) applyCommunicationsWebhookChange(ctx context.Context, enqueueSourceID string, duplicate bool, grantContext communicationsWebhookGrantContext, change nylasWebhookChange) error {
+func (s *Server) applyCommunicationsWebhookChange(ctx context.Context, duplicate bool, receiptKey string, grantContext communicationsWebhookGrantContext, change nylasWebhookChange) error {
 	if change.Trigger == "grant.expired" || change.Trigger == "grant.updated" {
 		status := "reauth_required"
 		if change.Trigger == "grant.updated" {
@@ -373,18 +372,20 @@ func (s *Server) applyCommunicationsWebhookChange(ctx context.Context, enqueueSo
 		if s.emailQueue == nil {
 			return errors.New("email SQS sender is not configured")
 		}
-		job, _, err := s.repo.EnsureCommunicationsEmailIngestionJobContext(ctx, store.CommunicationsEmailIngestionJobInput{
+		job, created, err := s.repo.EnsureCommunicationsEmailIngestionJobContext(ctx, store.CommunicationsEmailIngestionJobInput{
 			CompanyID: grantContext.connection.CompanyID, EmailConnectionID: grantContext.connection.EmailConnectionID,
 			ProviderMessageID: change.MessageID, ProviderThreadID: change.ThreadID,
-			Priority: store.CommunicationsEmailIngestionPriorityLive, EnqueueSourceID: enqueueSourceID,
+			Priority:        store.CommunicationsEmailIngestionPriorityLive,
+			EnqueueSourceID: "webhook:" + strings.TrimSpace(receiptKey),
 		})
 		if err != nil {
 			return fmt.Errorf("queue live email ingestion: %w", err)
 		}
-		if err := s.emailQueue.Send(ctx, emailqueue.Message{
-			SchemaVersion: emailqueue.SchemaVersion, Kind: emailqueue.KindIngestion, JobID: job.DownloadJobID,
-			CompanyID: job.CompanyID, EmailConnectionID: job.EmailConnectionID,
-		}); err != nil {
+		if !created && (job.Status != store.CommunicationsEmailIngestionJobAccepted || job.SQSAcceptedTimestamp != nil ||
+			job.EnqueueSourceID != "webhook:"+strings.TrimSpace(receiptKey)) {
+			return nil
+		}
+		if err := s.enqueueCommunicationsEmailIngestionJob(ctx, job); err != nil {
 			return fmt.Errorf("queue live email ingestion: %w", err)
 		}
 		return nil
@@ -414,40 +415,56 @@ func (s *Server) applyCommunicationsWebhookChange(ctx context.Context, enqueueSo
 }
 
 func (s *Server) publishPersonalMailboxWebhookHintContext(ctx context.Context, companyID, userID, accountEmail, eventID string, change nylasWebhookChange) error {
+	input, err := personalMailboxWebhookHintInput(companyID, userID, accountEmail, eventID, change)
+	if err != nil {
+		return err
+	}
+	_, err = s.enqueueRealtimeOutboxAndWake(ctx, input)
+	return err
+}
+
+func personalMailboxWebhookHintInput(companyID, userID, accountEmail, eventID string, change nylasWebhookChange) (store.RealtimeOutboxInput, error) {
 	companyID = strings.TrimSpace(companyID)
 	userID = strings.TrimSpace(userID)
 	accountEmail = normalizeEmailForCompare(accountEmail)
 	if companyID == "" || userID == "" || !isRealtimeAccountEmail(accountEmail) {
-		return store.ErrInvalid
+		return store.RealtimeOutboxInput{}, store.ErrInvalid
 	}
 	scope := realtimePersonalMailboxScope(userID, accountEmail)
 	payload, eventType, err := realtimeMessagePayload(realtimeMailboxWebhookMessage(companyID, scope, "", change))
 	if err != nil {
-		return err
+		return store.RealtimeOutboxInput{}, err
 	}
-	_, err = s.enqueueRealtimeOutboxAndWake(ctx, store.RealtimeOutboxInput{
+	return store.RealtimeOutboxInput{
 		EventID: eventID, CompanyID: companyID, Scope: scope, EventType: eventType, Payload: payload,
-	})
-	return err
+	}, nil
 }
 
 func (s *Server) publishSharedMailboxWebhookHintContext(ctx context.Context, companyID, sharedInboxID, eventID string, change nylasWebhookChange) error {
+	input, err := sharedMailboxWebhookHintInput(companyID, sharedInboxID, eventID, change)
+	if err != nil {
+		return err
+	}
+	_, err = s.enqueueRealtimeOutboxAndWake(ctx, input)
+	return err
+}
+
+func sharedMailboxWebhookHintInput(companyID, sharedInboxID, eventID string, change nylasWebhookChange) (store.RealtimeOutboxInput, error) {
 	companyID = strings.TrimSpace(companyID)
 	sharedInboxID = strings.TrimSpace(sharedInboxID)
 	if companyID == "" || sharedInboxID == "" {
-		return store.ErrInvalid
+		return store.RealtimeOutboxInput{}, store.ErrInvalid
 	}
 	scope := realtimeSharedMailboxScope(sharedInboxID)
 	payload, eventType, err := realtimeMessagePayload(realtimeMailboxWebhookMessage(companyID, scope, sharedInboxID, change))
 	if err != nil {
-		return err
+		return store.RealtimeOutboxInput{}, err
 	}
-	_, err = s.enqueueRealtimeOutboxAndWake(ctx, store.RealtimeOutboxInput{
+	return store.RealtimeOutboxInput{
 		EventID: eventID, CompanyID: companyID, Scope: scope, EventType: eventType,
 		ResourceType: store.EntityTypeSharedInbox, ResourceID: sharedInboxID,
 		Permission: store.EntityPermissionEdit, Payload: payload,
-	})
-	return err
+	}, nil
 }
 
 func realtimeMailboxWebhookMessage(companyID, scope, sharedInboxID string, change nylasWebhookChange) realtimeMailboxChangedMessage {

@@ -204,7 +204,6 @@ func (s *Server) handleNodeChatCommentEdit(w http.ResponseWriter, r *http.Reques
 
 	s.recordMentionNotifications(r, req.CompanyID, "node", nodeID, informationID, existing.Type, updatedInformation)
 	s.publishWorkspaceEvent(req.CompanyID, "node_chat_comment_updated", map[string]any{"node_id": nodeID, "information_id": informationID})
-	s.publishNodeChatUpdated(req.CompanyID, nodeID, informationID)
 	writeJSON(w, http.StatusOK, projection)
 }
 

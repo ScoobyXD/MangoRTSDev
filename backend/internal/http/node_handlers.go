@@ -289,7 +289,6 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			}
 			deletedByUserID := actor.User.UserID
 			targets := []store.CompanyExplorerDeleteTargetInput{{Kind: "node", ID: nodeID}}
-			capturedBoardDeletes := s.captureKanbanBoardsForDeleteTargets(companyID, targets)
 			stop = timings.observeAccounted("source.transaction")
 			var result store.CompanyExplorerDeleteResult
 			var err error
@@ -308,7 +307,6 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			}
 			stop = timings.observeAccounted("events.publish.enqueue")
 			s.publishCommittedWorkspaceEvents(result.Events)
-			s.publishCapturedKanbanDeletes(companyID, capturedBoardDeletes)
 			stop()
 			writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "targets": result.Targets})
 			return
@@ -647,8 +645,6 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 		}
 		// Clearing an editor document removes the latest hot-read projection only.
 		// The append-only information history stays intact for audit/debug paths.
-		chatBlockID := ""
-		deletingChat := false
 		projections, listErr := s.repo.ListNodeProjections(companyID, nodeID)
 		if listErr != nil {
 			writeChatCommentEditError(w, listErr, "failed_to_load_chat_comment")
@@ -660,7 +656,6 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		chatBlockID, deletingChat = nodeChatProjectionDetails(projections, informationID)
 		if chatComment, found := findNodeChatComment(projections, informationID); found {
 			actorUserID, _ := nodeChangeActorPayload(r)
 			if !chatCommentOwnedBy(chatComment.Information, actorUserID) {
@@ -690,9 +685,6 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.publishWorkspaceEvent(companyID, "node_projection_deleted", map[string]any{"node_id": nodeID, "information_id": informationID})
-		if deletingChat {
-			s.publishNodeChatDeleted(companyID, nodeID, chatBlockID, informationID)
-		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 		return
 	}
@@ -763,8 +755,6 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 		if mentionInformationID == "" {
 			mentionInformationID = item.InformationID
 		}
-		s.publishNodeChatCreated(req.CompanyID, nodeID, mentionInformationID, item)
-
 		s.recordMentionNotifications(r, req.CompanyID, "node", nodeID, mentionInformationID, req.Type, req.Information)
 		s.recordNodeChatNotification(r, req.CompanyID, nodeID, mentionInformationID, req.Type, req.Information)
 		writeJSON(w, http.StatusCreated, item)

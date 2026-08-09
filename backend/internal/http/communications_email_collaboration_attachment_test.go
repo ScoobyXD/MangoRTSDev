@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
@@ -35,7 +36,7 @@ func TestEmailRelationshipAttachmentRouteUsesInternalMessageIDAndStoredBytes(t *
 	body := []byte("stored relationship attachment")
 	attachmentID := store.NewUUIDv7String()
 	const providerAttachmentID = "provider-attachment-id"
-	ensured, err := repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
+	ensured, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), store.CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
 		AccountEmail: creator.Email, Provider: "google", CreatedByUserID: creator.UserID,
 		Message: domain.EmailMessageSnapshot{

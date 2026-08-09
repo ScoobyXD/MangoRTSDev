@@ -209,7 +209,9 @@ func addPostgresNodeEmailRelationshipTx(ctx context.Context, tx *sql.Tx, input N
 		payload.LinkScope = "message"
 	}
 	actorUserID := cleanUUIDText(input.ActorUserID)
-	if payload.EmailMessageID == "" || actorUserID == "" || (payload.LinkScope != "message" && payload.LinkScope != "thread") {
+	if payload.EmailMessageID == "" || actorUserID == "" ||
+		(payload.LinkScope != "message" && payload.LinkScope != "thread") ||
+		(payload.LinkScope == "thread" && payload.BlockID != "") {
 		return domain.NodeProjection{}, ErrInvalid
 	}
 	if existing, found, err := postgresNodeFinalProjectionTx(ctx, tx, input.CompanyID, input.NodeID, relationshipID); err != nil {
@@ -260,6 +262,20 @@ where message.company_id=$1::uuid and message.email_message_id=$2::uuid
 	if err != nil {
 		return domain.NodeProjection{}, err
 	}
+	if payload.BlockID != "" {
+		existing, existingTextboxID, found, err := postgresNodeMessageTextboxEmailProjectionTx(
+			ctx, tx, input.CompanyID, input.NodeID, payload.EmailMessageID,
+		)
+		if err != nil {
+			return domain.NodeProjection{}, err
+		}
+		if found {
+			if existingTextboxID != payload.BlockID {
+				return domain.NodeProjection{}, ErrInvalid
+			}
+			return existing, nil
+		}
+	}
 	if payload.LinkScope == "thread" {
 		_, err = tx.ExecContext(ctx, `insert into email_relationships(
   company_id,email_relationship_id,email_thread_id,email_message_id,resource_type,resource_id,resource_textbox_id,created_timestamp
@@ -274,13 +290,76 @@ on conflict do nothing`,
 	} else {
 		_, err = tx.ExecContext(ctx, `insert into email_relationships(
   company_id,email_relationship_id,email_thread_id,email_message_id,resource_type,resource_id,resource_textbox_id,created_timestamp
-) values($1::uuid,$2::uuid,$3::uuid,$4::uuid,'node',$5::uuid,nullif($6,''),$7)`,
+) values($1::uuid,$2::uuid,$3::uuid,$4::uuid,'node',$5::uuid,nullif($6,''),$7)
+on conflict do nothing`,
 			input.CompanyID, relationshipID, emailThreadID, payload.EmailMessageID, input.NodeID, payload.BlockID, attachedAt)
 	}
 	if err != nil {
 		return domain.NodeProjection{}, err
 	}
 	projection, found, err := postgresNodeFinalProjectionTx(ctx, tx, input.CompanyID, input.NodeID, relationshipID)
+	if err != nil {
+		return domain.NodeProjection{}, err
+	}
+	if found {
+		return projection, nil
+	}
+	if payload.BlockID != "" {
+		existing, existingTextboxID, found, err := postgresNodeMessageTextboxEmailProjectionTx(
+			ctx, tx, input.CompanyID, input.NodeID, payload.EmailMessageID,
+		)
+		if err != nil {
+			return domain.NodeProjection{}, err
+		}
+		if !found || existingTextboxID != payload.BlockID {
+			return domain.NodeProjection{}, ErrInvalid
+		}
+		return existing, nil
+	}
+	return postgresNodeMessageWideEmailProjectionTx(ctx, tx, input.CompanyID, input.NodeID, payload.EmailMessageID)
+}
+
+func postgresNodeMessageTextboxEmailProjectionTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	companyID, nodeID, emailMessageID string,
+) (domain.NodeProjection, string, bool, error) {
+	var relationshipID, textboxID string
+	err := tx.QueryRowContext(ctx, `select email_relationship_id::text,resource_textbox_id
+from email_relationships
+where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid
+  and email_message_id=$3::uuid and resource_textbox_id is not null
+order by created_timestamp,email_relationship_id
+limit 1`, companyID, nodeID, emailMessageID).Scan(&relationshipID, &textboxID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.NodeProjection{}, "", false, nil
+	}
+	if err != nil {
+		return domain.NodeProjection{}, "", false, err
+	}
+	projection, found, err := postgresNodeFinalProjectionTx(ctx, tx, companyID, nodeID, relationshipID)
+	return projection, textboxID, found, err
+}
+
+func postgresNodeMessageWideEmailProjectionTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	companyID, nodeID, emailMessageID string,
+) (domain.NodeProjection, error) {
+	var relationshipID string
+	err := tx.QueryRowContext(ctx, `select email_relationship_id::text
+from email_relationships
+where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid
+  and email_message_id=$3::uuid and resource_textbox_id is null
+order by created_timestamp,email_relationship_id
+limit 1`, companyID, nodeID, emailMessageID).Scan(&relationshipID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.NodeProjection{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.NodeProjection{}, err
+	}
+	projection, found, err := postgresNodeFinalProjectionTx(ctx, tx, companyID, nodeID, relationshipID)
 	if err != nil {
 		return domain.NodeProjection{}, err
 	}

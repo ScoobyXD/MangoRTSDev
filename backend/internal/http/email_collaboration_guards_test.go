@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"miraeopus/backend/internal/domain"
@@ -18,7 +19,7 @@ func TestEmailRelationshipHTTPUsesOrdinaryNodeSemanticsAndDeletesOnlyRelationshi
 	creator := mustHTTPEmailCollaborationGuardUser(t, repo, companyID, "email-node-http-creator", "creator@example.com", domain.RoleCompanyUser)
 	target := mustHTTPEmailCollaborationGuardUser(t, repo, companyID, "email-node-http-target", "target@example.com", domain.RoleCompanyUser)
 	admin := mustHTTPEmailCollaborationGuardUser(t, repo, companyID, "email-node-http-admin", "admin@example.com", domain.RoleCompanyAdmin)
-	created, err := repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
+	created, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), store.CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
 		AccountEmail: creator.Email, Provider: "google", CreatedByUserID: creator.UserID,
 		Message: domain.EmailMessageSnapshot{

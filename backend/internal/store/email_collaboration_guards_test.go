@@ -1,7 +1,9 @@
 package store
 
 import (
+	"context"
 	"miraeopus/backend/internal/domain"
+	"slices"
 	"testing"
 )
 
@@ -10,7 +12,7 @@ func TestMemoryEmailRelationshipUsesOrdinaryNodePermissionsAndDeletesOnlyTheRela
 	companyID := "11111111-1111-4111-8111-701300000001"
 	repo.EnsureCompany(companyID, "Email relationship company")
 	creator := mustEmailCollaborationGuardUser(t, repo, companyID, "email-node-creator", "creator@example.com", domain.RoleCompanyUser)
-	created, err := repo.EnsureCommunicationsEmailCollaboration(CommunicationsEmailCollaborationEnsureInput{
+	created, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
 		AccountEmail: creator.Email, Provider: "google", CreatedByUserID: creator.UserID,
 		Message: domain.EmailMessageSnapshot{ID: "email-node-message", ThreadID: "email-node-thread", Subject: "Email node subject"},
@@ -19,6 +21,30 @@ func TestMemoryEmailRelationshipUsesOrdinaryNodePermissionsAndDeletesOnlyTheRela
 		t.Fatalf("EnsureCommunicationsEmailCollaboration: %v", err)
 	}
 	relationship := created.Collaboration
+	storedThread, err := repo.GetCommunicationsEmailThread(companyID, relationship.EmailThreadID)
+	if err != nil || len(storedThread.Messages) != 1 {
+		t.Fatalf("GetCommunicationsEmailThread before second Node link: %+v err=%v", storedThread, err)
+	}
+	secondNode, err := repo.CreateNode(companyID, "Second email relationship Node")
+	if err != nil {
+		t.Fatalf("CreateNode second relationship host: %v", err)
+	}
+	secondInformationID := NewUUIDv7String()
+	if _, err := repo.ImportCommunicationsEmailIntoNode(CommunicationsNodeEmailImportInput{
+		CompanyID: companyID, NodeID: secondNode.NodeID, CreatedByUserID: creator.UserID, InformationID: secondInformationID,
+		Thread: CommunicationsEmailThreadUpsertInput{
+			CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
+			AccountEmail: creator.Email, Provider: storedThread.Provider, ProviderThreadID: storedThread.ProviderThreadID,
+			SelectedMessageID: storedThread.Messages[0].ProviderMessageID, Messages: []domain.EmailMessageSnapshot{storedThread.Messages[0].Message},
+			HistoryComplete: true,
+		},
+	}); err != nil {
+		t.Fatalf("ImportCommunicationsEmailIntoNode second relationship host: %v", err)
+	}
+	nodeIDs, err := repo.ListCommunicationsEmailThreadNodeIDs(companyID, relationship.EmailThreadID)
+	if err != nil || len(nodeIDs) != 2 || !slices.Contains(nodeIDs, relationship.NodeID) || !slices.Contains(nodeIDs, secondNode.NodeID) {
+		t.Fatalf("thread Node identities = %+v err=%v, want both exact Nodes", nodeIDs, err)
+	}
 	for _, folder := range repo.folders {
 		if folder.CompanyID == companyID && folder.Name == "Nodes" {
 			t.Fatalf("email collaboration created obsolete Company Explorer Nodes folder: %+v", folder)
@@ -50,6 +76,13 @@ func TestMemoryEmailRelationshipUsesOrdinaryNodePermissionsAndDeletesOnlyTheRela
 	}
 	if _, err := repo.GetNode(companyID, relationship.NodeID); err != nil {
 		t.Fatalf("relationship deletion removed host Node: %v", err)
+	}
+	if second, err := repo.GetCommunicationsNodeEmailThread(companyID, secondNode.NodeID, relationship.EmailThreadID); err != nil || second.InformationID != secondInformationID {
+		t.Fatalf("deleting Node A relationship changed Node B relationship: %+v err=%v", second, err)
+	}
+	nodeIDs, err = repo.ListCommunicationsEmailThreadNodeIDs(companyID, relationship.EmailThreadID)
+	if err != nil || len(nodeIDs) != 1 || nodeIDs[0] != secondNode.NodeID {
+		t.Fatalf("thread Node identities after isolated delete = %+v err=%v", nodeIDs, err)
 	}
 	thread, err := repo.GetCommunicationsEmailThread(companyID, relationship.EmailThreadID)
 	if err != nil || len(thread.Messages) != 1 || thread.Messages[0].EmailMessageID == "" {

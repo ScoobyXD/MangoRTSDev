@@ -1,3 +1,29 @@
+# Process Story: Email-linked textboxes remain exact to their own Node
+
+A person links one exact stored email message from Node A's email column to a textbox
+↓
+Repeating that action focuses the existing Node A textbox instead of creating another relationship
+↓
+The same message may be linked to a different textbox in Node B, because Node B owns its own editor and chat surface
+↓
+Deleting Node A's relationship leaves Node B's textbox, chat, relationship, and the shared durable email truth intact
+
+Last updated: 2026-08-09
+
+# Process Story: A downloading attached email wakes exactly one canonical read
+
+The Node or Project attached-email surface performs its initial canonical thread read
+↓
+If PostgreSQL says the stored thread is still downloading, the surface subscribes to that exact personal-account or shared-inbox mailbox scope
+↓
+The private SQS worker finishes durable ingestion and commits the same compact post-commit mailbox hint used by ordinary mail
+↓
+Valkey wakes the exact subscribed browser without carrying the thread, body, attachment, credential, or URL
+↓
+The surface performs one canonical HTTP thread read and updates from PostgreSQL truth; no one-second timer or replacement poller exists
+
+Last updated: 2026-08-09
+
 # Process Story: A saved editor revision reaches every API task through Valkey
 
 A Node, Project, or Logic Gate editor batches local Tiptap JSON and sends its authenticated HTTP save
@@ -42,23 +68,25 @@ Clearing the quote or closing the unsent chat cancels that preview locally, so n
 ↓
 On the first send, Mango atomically creates the Node text box, links the exact email message to that text box, and creates the chat; failure creates none of them
 ↓
-After success the preview becomes a normal saved text box, while exact-message and whole-thread drops continue to use typed email relationships and reject a different email on an already-linked text box
+After success the preview becomes a normal saved text box; an exact-message drop uses the same typed relationship, while a whole-thread drop is rejected
 
 Last updated: 2026-08-08
 
 # Current Editor Business Logic Laws
 
 1. A Node text box is the required owner of every Node chat.
-2. A Node text box may link to one exact email message or one whole stored email thread.
+2. A Node text box may link to one exact email message. A whole stored email thread never links to a text box.
 3. Dropping an exact email message on a Node text box creates the exact typed message/textbox relationship.
-4. Dropping an attached email thread on a Node text box links every stored thread message to that text box.
-5. A text box already linked to one email message or thread rejects a different email drop.
+4. Dropping an attached email thread on a Node text box is rejected.
+5. A text box already linked to one email message rejects a different email drop.
 6. A Node with priority **Not Assigned** may be assigned or moved to a Logic Gate without a priority prompt or error.
 7. Clicking the chat action for highlighted email text without a linked text box creates only a temporary interface preview and writes no text box, email relationship, or chat to the database.
 8. Clearing the temporary email quote or closing its chat rail cancels the temporary text box and draft without a database delete or cleanup write.
 9. Sending the first temporary email chat atomically creates the Node text box, exact email-message relationship, and chat before the interface becomes a normal saved text box.
+10. One exact email message may link to at most one text box in each Node and may link to a different text box in another Node.
+11. Every email chat remains local to its exact Node, exact text box, and exact linked email message.
 
-Last updated: 2026-08-08
+Last updated: 2026-08-09
 
 # Process Story: Editor policy status follows the draft automatically
 
@@ -663,6 +691,8 @@ ED133 - Backspace or Delete with a collapsed caret on a simple empty numbered, b
 ED134 - Node, Project, and Logic Gate policy surfaces show Inherited and Customized only as automatic status. Authorized users edit the policy directly in either state; exact unordered equality with the immediate parent's raw pointers returns to Inherited, any difference is Customized, and the backend decides the stored mode again inside the save transaction. Descendant actions appear only when descendants exist and use the exact labels Apply to non-customized descendants and Apply to every descendant, with confirmation required for the latter.
 ED135 - A saved hard break at the end of a paragraph remains explicit JSON. When another block follows that paragraph, first-click activation must not expose ProseMirror's additional browser-only trailing-break helper as a new empty row. The live surface must match the sleeping surface without adding, removing, or saving document nodes and without changing annotation positions. A hard break at the end of the document retains the helper row required for normal caret editing.
 ED136 - Editor durability remains HTTP plus PostgreSQL. The same save transaction commits the canonical textbox revision and compact outbox event, and Saved is acknowledged after that commit without waiting for Valkey I/O or audience lookup. A lifecycle-owned publisher then carries only the committed event ID/revision and exact-scope hint across API tasks with bounded retry. Every receiving task deduplicates and orders the hint, rechecks the current exact editor audience, and uses its local WebSocket registry; bounded indexed recovery certifies unused `BIGSERIAL` values rather than stalling later revisions. A task with an uncertified initial cursor returns retryable `503 realtime_not_ready` from editor ticket/socket admission without minting or consuming the ticket or accepting the socket; after certification launches its loops, admission opens and subscriber-ready recovery delivers every later published revision. A clean remote editor fetches the full canonical document over HTTP, unsaved local work remains protected, and Valkey outage delays only realtime hints without failing or delaying durable saves or starting 75 ms outbox polling.
+ED137 - A Node or Project attached-email surface never polls a `downloading` stored thread. It performs one initial canonical read, holds the exact mailbox subscription while downloading, and performs one canonical thread read for a matching post-commit mailbox hint. PostgreSQL remains truth and the compact hint contains no email body, attachment, credential, secret, or presigned URL.
+ED138 - A Node editor may create at most one textbox relationship for an exact email message inside that Node. Repeating the same message action focuses and reuses the existing textbox and typed edge; a conflicting second textbox is rejected by the backend and database. The same message may have an independent textbox relationship in a different Node. Removing either Node's edge does not delete or rewrite the other Node's textbox, chat, relationship, stored message/thread, or surviving attachment ownership.
 
 ### Required Unified Rich-Editor Surface Inventory
 

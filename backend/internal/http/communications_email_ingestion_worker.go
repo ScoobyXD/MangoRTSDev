@@ -14,13 +14,24 @@ import (
 )
 
 var (
-	errCommunicationsEmailThreadDownloadUnavailable = errors.New("email thread download unavailable")
-	errCommunicationsEmailAttachmentUnavailable     = errors.New("email attachment unavailable")
+	errCommunicationsEmailIngestionUnavailable  = errors.New("email ingestion unavailable")
+	errCommunicationsEmailAttachmentUnavailable = errors.New("email attachment unavailable")
 )
 
-func (s *Server) processCommunicationsEmailIngestionProviderWork(ctx context.Context, job store.CommunicationsEmailThreadDownloadJob) error {
+func (s *Server) processCommunicationsEmailIngestionProviderWork(ctx context.Context, job store.CommunicationsEmailIngestionJob) error {
+	// A status/outbox transaction can fail after provider data was stored. On
+	// redelivery, reuse that durable truth instead of repeating provider calls.
+	if strings.TrimSpace(job.EmailThreadID) != "" {
+		thread, err := s.repo.GetCommunicationsEmailThreadContext(ctx, job.CompanyID, job.EmailThreadID)
+		if err == nil && thread.HistoryComplete && storedEmailMessageDownloadComplete(thread, job.ProviderMessageID) {
+			return nil
+		}
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+	}
 	if s.nylasClient == nil {
-		return errCommunicationsEmailThreadDownloadUnavailable
+		return errCommunicationsEmailIngestionUnavailable
 	}
 	connection, err := s.repo.GetEmailConnectionByIDContext(ctx, job.CompanyID, job.EmailConnectionID)
 	if err != nil {

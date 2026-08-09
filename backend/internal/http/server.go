@@ -147,7 +147,7 @@ type ServerOptions struct {
 }
 
 func NewServer(repo store.Repository) *Server {
-	return NewServerWithOptions(repo, ServerOptions{})
+	return NewServerWithOptions(repo, ServerOptions{RealtimeBackplane: realtime.NewLocalBackplane()})
 }
 
 func normalizeBootstrapDevAdminConfig(config BootstrapDevAdminConfig) BootstrapDevAdminConfig {
@@ -317,6 +317,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/communications/stored-messages", s.handleCommunicationsStoredMessages)
 	mux.HandleFunc("/v1/communications/messages", s.handleCommunicationsMessages)
 	mux.HandleFunc("/v1/communications/messages/archive-batch", s.handleCommunicationsMessagesArchiveBatch)
+	mux.HandleFunc("/v1/communications/archive-jobs/", s.handleCommunicationsArchiveJobByID)
 	mux.HandleFunc("/v1/communications/messages/", s.handleCommunicationsMessageByID)
 	mux.HandleFunc("/v1/communications/calendar-invites/respond", s.handleCommunicationsCalendarInviteResponse)
 	mux.HandleFunc("/v1/communications/calendar-invites/event", s.handleCommunicationsCalendarInviteEvent)

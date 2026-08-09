@@ -155,13 +155,12 @@ returning user_id::text, message_id, message, created_timestamp, updated_timesta
 	return item, err
 }
 
-func (r *PostgresRepo) ConvertCommunicationsTriageItems(input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error) {
+func (r *PostgresRepo) ConvertCommunicationsTriageItems(ctx context.Context, input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error) {
 	input, err := NormalizeCommunicationsTriageConversionInput(input)
 	if err != nil {
 		return CommunicationsTriageConversionResult{}, err
 	}
 
-	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return CommunicationsTriageConversionResult{}, err

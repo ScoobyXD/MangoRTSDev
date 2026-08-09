@@ -121,7 +121,7 @@ func (s *Server) handleCommunicationsEmailCollaborations(w http.ResponseWriter, 
 				InformationID: item.InformationID, ActorUserID: nodeActorUserID, ActorDisplayName: nodeActorLabel,
 			}
 		}
-		result, err := s.repo.EnsureCommunicationsEmailCollaboration(store.CommunicationsEmailCollaborationEnsureInput{
+		result, err := s.repo.EnsureCommunicationsEmailCollaboration(r.Context(), store.CommunicationsEmailCollaborationEnsureInput{
 			CompanyID: req.CompanyID, PersonalUserID: scope.personalUserID,
 			PersonalAccountEmail: scope.personalAccountEmail, SharedInboxID: scope.sharedInboxID,
 			AccountEmail: scope.accountEmail, Provider: connection.Provider, CreatedByUserID: actor.User.UserID,
@@ -150,7 +150,7 @@ func (s *Server) handleCommunicationsEmailCollaborations(w http.ResponseWriter, 
 			s.wakeRealtimeSpine()
 		}
 		if strings.TrimSpace(result.Collaboration.EmailThreadID) != "" {
-			if err := s.enqueueCommunicationsEmailThreadJobs(r.Context(), result.Collaboration.CompanyID, []string{result.Collaboration.EmailThreadID}); err != nil {
+			if err := s.enqueueCommunicationsEmailIngestionJobsForThreads(r.Context(), result.Collaboration.CompanyID, []string{result.Collaboration.EmailThreadID}, store.CommunicationsEmailUserProducerFingerprint(actor.User.UserID)); err != nil {
 				writeError(w, http.StatusServiceUnavailable, "failed_to_queue_email_ingestion")
 				return
 			}

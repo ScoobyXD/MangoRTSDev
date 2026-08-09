@@ -73,7 +73,7 @@ func (s *Server) startRealtimeSpine() {
 		return
 	}
 	if s.realtimeBackplane == nil {
-		s.realtimeBackplane = realtime.NewLocalBackplane()
+		return
 	}
 	ctx := s.realtimeSpineContext
 	if err := s.initializeRealtimeSpineCursor(ctx); err == nil {
@@ -655,18 +655,6 @@ func (s *Server) enqueueRealtimeOutboxAndWake(ctx context.Context, input store.R
 	if s == nil || s.repo == nil {
 		return store.RealtimeOutboxEvent{}, store.ErrInvalid
 	}
-	event, err := s.enqueueRealtimeOutbox(ctx, input)
-	if err != nil {
-		return store.RealtimeOutboxEvent{}, err
-	}
-	s.wakeRealtimeSpine()
-	return event, nil
-}
-
-func (s *Server) enqueueRealtimeOutbox(ctx context.Context, input store.RealtimeOutboxInput) (store.RealtimeOutboxEvent, error) {
-	if s == nil || s.repo == nil {
-		return store.RealtimeOutboxEvent{}, store.ErrInvalid
-	}
 	event, err := s.repo.EnqueueRealtimeOutbox(ctx, input)
 	if err != nil {
 		log.Printf("realtime_outbox_enqueue_failed company_id=%s scope_type=%s error_category=%s", strings.TrimSpace(input.CompanyID), realtimeScopeType(input.Scope), realtimeSpineErrorCategory(err))
@@ -674,6 +662,7 @@ func (s *Server) enqueueRealtimeOutbox(ctx context.Context, input store.Realtime
 		return store.RealtimeOutboxEvent{}, err
 	}
 	s.recordOperationalMetric("realtime.outbox_enqueued_count", realtimeScopeType(input.Scope), 1, 0)
+	s.wakeRealtimeSpine()
 	return event, nil
 }
 

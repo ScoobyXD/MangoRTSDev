@@ -60,12 +60,16 @@ func TestNodePriorityNotAssignedMigrationReconcilesEmailRelationshipsSafely(t *t
 	}
 }
 
-func TestCanonicalEmailRelationshipGuardMatchesPriorityMigration(t *testing.T) {
+func TestCorrectedPriorityAndSQSMigrationsShareTheFinalEmailRelationshipGuard(t *testing.T) {
 	schemaRaw, err := os.ReadFile(filepath.Join("..", "..", "db", "schema.sql"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	migrationRaw, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "20260808_node_priority_not_assigned.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqsMigrationRaw, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "20260809_zzz_email_sqs_delivery.sql"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,13 +91,26 @@ func TestCanonicalEmailRelationshipGuardMatchesPriorityMigration(t *testing.T) {
 				t.Errorf("%s is missing %q", name, required)
 			}
 		}
-		for _, forbidden := range []string{"email_thread_already_linked_to_another_node"} {
+		for _, forbidden := range []string{
+			"email_thread_already_linked_to_another_node",
+			"create trigger trg_email_relationships_one_node_per_thread",
+		} {
 			if strings.Contains(body, forbidden) {
 				t.Errorf("%s retains obsolete one-Node rule %q", name, forbidden)
 			}
 		}
 		if name == "canonical schema" && strings.Contains(body, "mangorts_enforce_one_node_per_email_thread") {
 			t.Errorf("%s retains obsolete one-Node enforcement function", name)
+		}
+	}
+	sqsMigration := strings.ToLower(string(sqsMigrationRaw))
+	for _, required := range []string{
+		"drop trigger if exists trg_email_relationships_one_node_per_thread on email_relationships",
+		"drop function if exists mangorts_enforce_one_node_per_email_thread()",
+		"create unique index idx_email_relationships_one_node_textbox_per_message",
+	} {
+		if !strings.Contains(sqsMigration, required) {
+			t.Errorf("SQS migration is missing compatible final relationship guard %q", required)
 		}
 	}
 }

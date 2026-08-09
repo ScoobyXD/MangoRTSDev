@@ -16,6 +16,18 @@ Those browsers reload the canonical document from Mango, while a browser with un
 
 Last updated: 2026-08-09
 
+# Process Story: Archive completion wakes the selected mailbox without carrying status
+
+The private worker commits an exact archive result and compact mailbox outbox notice in PostgreSQL
+↓
+Valkey wakes only browsers subscribed to that exact selected mailbox
+↓
+The existing mailbox coordinator marks affected cached archive status stale and refreshes only active/visible exact jobs, with one active pass plus at most one final queued pass
+↓
+The browser reads canonical PostgreSQL status over HTTP; Valkey never carries a job, email, or provider payload
+
+Last updated: 2026-08-09
+
 ## The simple route
 
 `Editor → Mango API → PostgreSQL → Valkey → subscribed API tasks → matching browsers`
@@ -38,6 +50,7 @@ PostgreSQL stores the truth. Valkey only announces that committed truth changed.
 12. Before a task has certified its recovery position, realtime ticket and WebSocket admission return `503 realtime_not_ready`. Normal durable HTTP saves remain available.
 13. Deployed DEV requires the private external Valkey configuration. A process-local backplane exists only for local development and tests; it is not a deployed multi-task fallback.
 14. Valkey uses TLS, IAM access, a channel-specific permission, private networking, and no general database-key commands.
+15. Archive status and downloading attached-email completion reuse the existing exact-mailbox subscription. Relevant hints trigger canonical HTTP reads, inactive archive cache entries become stale until opened, and unrelated hints trigger no archive read. There is no timer or second subscription/cache authority.
 
 ## Failure behavior
 
@@ -47,16 +60,17 @@ PostgreSQL stores the truth. Valkey only announces that committed truth changed.
 - A rare 10-minute safety pass can recover a missed wake or broker notice.
 - Another browser always reloads PostgreSQL truth; it never treats a Valkey notice as the document itself.
 
-## Current cleanup audit
+## Final code path
 
-The old 75-millisecond runtime poller is fully removed. Current `main` still has a few code-cleanup candidates that do not change runtime behavior:
+There is one obvious route for committed realtime work:
 
-- two PostgreSQL helpers contain nearly the same realtime-outbox insert SQL;
-- several thin publication helper functions all lead to the same durable outbox path;
-- a few feature-named functions now do nothing except wake the shared realtime publisher;
-- the server has a second defensive process-local backplane fallback in addition to the normal local-development setup.
+`product transaction inserts one outbox row → handler calls the common wake → lifecycle publisher sends a compact Valkey hint → each API task's spine performs the only local WebSocket delivery`
 
-These do not poll PostgreSQL, bypass Valkey in deployed DEV, or produce two events. They should still be consolidated so the code has one obvious path.
+- Editor transactions use the same canonical transaction insert helper as every other product transaction; the older editor-specific SQL helper is removed.
+- The old publication adapter chain and its obsolete delivered-count result are removed. Tests enqueue real durable outbox rows instead of keeping production wrappers for test convenience.
+- Node-chat and Kanban mutation sites call the common post-commit wake directly. Required pre-delete audience data remains in the transaction's exact outbox row.
+- `startRealtimeSpine` never invents a process-local backplane. Simple local construction and tests pass `LocalBackplane` explicitly; deployed DEV still fails closed when external Valkey is required.
+- PostgreSQL keeps the full outbox event. Valkey carries only the compact committed-event hint, and the task-local spine remains the sole WebSocket delivery boundary.
 
 ## Required regression checks
 

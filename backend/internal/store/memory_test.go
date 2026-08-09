@@ -1374,7 +1374,7 @@ func TestMemoryRepoConvertCommunicationsTriageItemsAddsAttachedEmailProjection(t
 		t.Fatalf("UpsertCommunicationsTriageItem failed: %v", err)
 	}
 
-	result, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
+	result, err := repo.ConvertCommunicationsTriageItems(context.Background(), CommunicationsTriageConversionInput{
 		UserID:       user.UserID,
 		CompanyID:    companyID,
 		AccountEmail: user.Email,
@@ -1564,7 +1564,7 @@ func TestMemoryRepo_MoveLogicGateAssignmentMovesCommunicationsEmailPlacementToFi
 	if _, err := repo.UpsertCommunicationsTriageItem(user.UserID, message); err != nil {
 		t.Fatalf("UpsertCommunicationsTriageItem: %v", err)
 	}
-	converted, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
+	converted, err := repo.ConvertCommunicationsTriageItems(context.Background(), CommunicationsTriageConversionInput{
 		UserID:       user.UserID,
 		CompanyID:    companyID,
 		AccountEmail: user.Email,

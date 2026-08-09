@@ -351,13 +351,9 @@ func TestRealtimeBackplaneDeliversAcrossAPITasksThroughExactLocalRegistries(t *t
 	firstConnection := subscribeRecordingRealtimeConnection(t, first, "api-task-1", companyID, userID, scope)
 	secondConnection := subscribeRecordingRealtimeConnection(t, second, "api-task-2", companyID, userID, scope)
 
-	delivered, err := first.publishRealtimeMessageToCurrentEntityAudienceResult(
-		companyID, scope, store.EntityTypeNode, nodeID, store.EntityPermissionEdit,
+	enqueueRealtimeEntityTestMessage(t, first, companyID, scope, store.EntityTypeNode, nodeID, store.EntityPermissionEdit,
 		map[string]any{"type": "chat.message.created", "message_id": "message-1"},
 	)
-	if err != nil || delivered != 0 {
-		t.Fatalf("publisher enqueue acknowledgement=%d err=%v", delivered, err)
-	}
 	waitForBackplaneCondition(t, func() bool {
 		return len(firstConnection.messages(t)) == 1 && len(secondConnection.messages(t)) == 1
 	}, "both API task deliveries")
@@ -380,20 +376,12 @@ func TestRealtimeBackplaneOutageKeepsDurableEventAndDoesNotPoll(t *testing.T) {
 	scope := realtimeChatScope(nodeID)
 	connection := subscribeRecordingRealtimeConnection(t, server, "outage", companyID, userID, scope)
 
-	delivered, err := server.publishRealtimeMessageToCurrentEntityAudienceResult(
-		companyID, scope, store.EntityTypeNode, nodeID, store.EntityPermissionEdit,
+	enqueueRealtimeEntityTestMessage(t, server, companyID, scope, store.EntityTypeNode, nodeID, store.EntityPermissionEdit,
 		map[string]any{"type": "chat.message.created", "message_id": "durable-during-outage"},
 	)
-	if err != nil || delivered != 0 {
-		t.Fatalf("outage publication delivery=%d err=%v", delivered, err)
-	}
-	delivered, err = server.publishRealtimeMessageToCurrentEntityAudienceResult(
-		companyID, scope, store.EntityTypeNode, nodeID, store.EntityPermissionEdit,
+	enqueueRealtimeEntityTestMessage(t, server, companyID, scope, store.EntityTypeNode, nodeID, store.EntityPermissionEdit,
 		map[string]any{"type": "chat.message.updated", "message_id": "second-durable-during-outage"},
 	)
-	if err != nil || delivered != 0 {
-		t.Fatalf("second outage publication delivery=%d err=%v", delivered, err)
-	}
 	waitForBackplaneCondition(t, func() bool { return backplane.publishCalls.Load() >= 1 }, "initial failed broker publish")
 	sequence, err := base.CurrentPublishedRealtimeOutboxSequence(context.Background())
 	if err != nil || sequence != 0 {
@@ -427,7 +415,7 @@ func TestRealtimeMutationAcknowledgementsDoNotWaitOrSerializeBehindBrokerOutage(
 	done := make(chan struct{}, producers)
 	for index := range producers {
 		go func(index int) {
-			server.publishRealtimeMessage(companyID, scope, map[string]any{"type": "outage.ack", "index": index})
+			enqueueRealtimeTestMessage(t, server, companyID, scope, map[string]any{"type": "outage.ack", "index": index})
 			done <- struct{}{}
 		}(index)
 	}
@@ -458,7 +446,7 @@ func TestRealtimePublishFailureRetriesWhileSubscriptionRemainsHealthy(t *testing
 	backplane.mu.Lock()
 	backplane.down = true
 	backplane.mu.Unlock()
-	server.publishRealtimeMessage(companyID, scope, map[string]any{"type": "publish.retry"})
+	enqueueRealtimeTestMessage(t, server, companyID, scope, map[string]any{"type": "publish.retry"})
 	waitForBackplaneCondition(t, func() bool { return backplane.publishCalls.Load() == 1 }, "failed publish on a healthy subscription")
 	backplane.mu.Lock()
 	backplane.down = false
@@ -987,7 +975,7 @@ func TestRealtimeOutboxRepositoryCallsHonorCanceledContext(t *testing.T) {
 	defer server.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := server.enqueueRealtimeOutbox(ctx, store.RealtimeOutboxInput{
+	_, err := server.enqueueRealtimeOutboxAndWake(ctx, store.RealtimeOutboxInput{
 		CompanyID: "66666666-6666-4666-8666-666666666666", Scope: "notifications:user:test",
 		EventType: "notification.created", Payload: json.RawMessage(`{"type":"notification.created"}`),
 	})

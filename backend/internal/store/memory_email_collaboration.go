@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"maps"
 	"miraeopus/backend/internal/domain"
 	"sort"
@@ -112,7 +113,10 @@ func (r *MemoryRepo) reconcileEnsuredEmailCollaborationLocked(existing domain.Co
 	return existing
 }
 
-func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input CommunicationsEmailCollaborationEnsureInput) (CommunicationsEmailCollaborationEnsureResult, error) {
+func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(ctx context.Context, input CommunicationsEmailCollaborationEnsureInput) (CommunicationsEmailCollaborationEnsureResult, error) {
+	if err := ctx.Err(); err != nil {
+		return CommunicationsEmailCollaborationEnsureResult{}, err
+	}
 	input, scope, err := normalizeCommunicationsEmailCollaborationEnsureInput(input)
 	if err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, err
@@ -126,7 +130,7 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 	beforeParticipants := maps.Clone(r.emailCollaborationParticipants)
 	beforeEmailThreads := maps.Clone(r.emailThreads)
 	beforeEmailThreadScopeIDs := maps.Clone(r.emailThreadScopeIDs)
-	beforeEmailThreadDownloadJobs := maps.Clone(r.emailThreadDownloadJobs)
+	beforeEmailIngestionJobs := maps.Clone(r.emailIngestionJobs)
 	beforeNodeEmailThreads := maps.Clone(r.nodeEmailThreads)
 	beforePermissions := maps.Clone(r.entityPermissions)
 	beforeEffectiveAccess := maps.Clone(r.effectiveAccess)
@@ -143,7 +147,7 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 		r.emailThreads = beforeEmailThreads
 		r.emailThreadScopeIDs = beforeEmailThreadScopeIDs
 		r.nodeEmailThreads = beforeNodeEmailThreads
-		r.emailThreadDownloadJobs = beforeEmailThreadDownloadJobs
+		r.emailIngestionJobs = beforeEmailIngestionJobs
 		r.entityPermissions, r.effectiveAccess = beforePermissions, beforeEffectiveAccess
 		r.gvicAssignments = beforeRACIAssignments
 		r.RACIMatrixProjectionRows = beforeRACIMatrixProjectionRows
@@ -178,10 +182,16 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 		existing.EmailThreadID = thread.EmailThreadID
 		existing.Provider = thread.Provider
 		r.emailCollaborations[key(existing.CompanyID, existing.CollaborationID)] = existing
-		if downloadScope, requestedMessageID, ok := communicationsEmailThreadDownloadRequest(thread, threadInput); ok {
-			if _, _, err := r.ensureCommunicationsEmailThreadDownloadJobLocked(input.CompanyID, thread.EmailThreadID, downloadScope, requestedMessageID, input.CreatedByUserID); err != nil {
-				restore()
-				return CommunicationsEmailCollaborationEnsureResult{}, err
+		if requestedMessageID, sourceID, ok := communicationsEmailIngestionRequest(thread, threadInput); ok {
+			if emailConnectionID := r.emailConnectionIDForThreadLocked(thread); emailConnectionID != "" {
+				if _, _, err := r.ensureCommunicationsEmailIngestionJobLocked(CommunicationsEmailIngestionJobInput{
+					CompanyID: input.CompanyID, EmailConnectionID: emailConnectionID, EmailThreadID: thread.EmailThreadID,
+					ProviderMessageID: requestedMessageID, ProviderThreadID: thread.ProviderThreadID, Priority: CommunicationsEmailIngestionPriorityVisible,
+					EnqueueSourceID: sourceID,
+				}); err != nil {
+					restore()
+					return CommunicationsEmailCollaborationEnsureResult{}, err
+				}
 			}
 		}
 		information := communicationsEmailAttachedProjectionPayloadWithThread(existing.AttachedEmailInformationID, existing.CollaborationID, thread.EmailThreadID, input)
@@ -248,10 +258,16 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(input Communications
 			return CommunicationsEmailCollaborationEnsureResult{}, err
 		}
 	}
-	if downloadScope, requestedMessageID, ok := communicationsEmailThreadDownloadRequest(thread, threadInput); ok {
-		if _, _, err := r.ensureCommunicationsEmailThreadDownloadJobLocked(input.CompanyID, thread.EmailThreadID, downloadScope, requestedMessageID, input.CreatedByUserID); err != nil {
-			restore()
-			return CommunicationsEmailCollaborationEnsureResult{}, err
+	if requestedMessageID, sourceID, ok := communicationsEmailIngestionRequest(thread, threadInput); ok {
+		if emailConnectionID := r.emailConnectionIDForThreadLocked(thread); emailConnectionID != "" {
+			if _, _, err := r.ensureCommunicationsEmailIngestionJobLocked(CommunicationsEmailIngestionJobInput{
+				CompanyID: input.CompanyID, EmailConnectionID: emailConnectionID, EmailThreadID: thread.EmailThreadID,
+				ProviderMessageID: requestedMessageID, ProviderThreadID: thread.ProviderThreadID, Priority: CommunicationsEmailIngestionPriorityVisible,
+				EnqueueSourceID: sourceID,
+			}); err != nil {
+				restore()
+				return CommunicationsEmailCollaborationEnsureResult{}, err
+			}
 		}
 	}
 
