@@ -20,8 +20,8 @@ terraform apply tfplan
 This phase creates ECR, Cognito, S3, CloudFront, ALB, Route 53, ACM, WAF, IAM/OIDC, and shared networking/security resources. It intentionally does not create the ECS task definition or service until a backend image URI exists.
 
 8. Save the `github_deploy_role_arn` output as GitHub secret `AWS_DEV_DEPLOY_ROLE_ARN`.
-9. Create a protected GitHub environment named `development`. Before the new environment-bound workflow is used, run one separately reviewed DEV IAM bootstrap from the existing branch-trusted path so the deploy role trusts both the current branch subject and the exact `repo:<owner>/<repository>:environment:development` OIDC subject. The module adds that DEV environment subject by default and leaves non-DEV trust unchanged.
-10. Generate one `age` X25519 identity outside the repository. Store the private `AGE-SECRET-KEY-...` value only as the `development` environment secret `TF_PLAN_AGE_IDENTITY`, and store its matching public `age1...` recipient as the environment variable `TF_PLAN_AGE_RECIPIENT`. Require the intended environment reviewers. Never put either private identity or a plaintext Terraform plan in a repository file or artifact.
+9. Use the existing GitHub environment named `development` only to scope DEV values. The current private-repository plan does not support required environment reviewers or deployment-branch restrictions, so this environment is not an independent approval gate. Before the environment-bound workflow is used, run one separately reviewed DEV IAM bootstrap from the existing branch-trusted path so the deploy role trusts both the current branch subject and the exact `repo:<owner>/<repository>:environment:development` OIDC subject. The module adds that DEV environment subject by default and leaves non-DEV trust unchanged.
+10. Leave `TF_PLAN_AGE_IDENTITY` and `TF_PLAN_AGE_RECIPIENT` unconfigured until a human chooses an available GitHub plan/permission change, an external approval gate, or explicitly accepts manual self-review. The workflow keeps both inputs mandatory. After that decision, generate one `age` X25519 identity outside the repository, store the private `AGE-SECRET-KEY-...` value only as the `development` environment secret `TF_PLAN_AGE_IDENTITY`, and store its matching public `age1...` recipient as the environment variable `TF_PLAN_AGE_RECIPIENT`. Never put either private identity or a plaintext Terraform plan in a repository file or artifact.
 11. Set the remaining GitHub variables/secrets used by `.github/workflows/deploy-dev.yml`, including state backend values, Terraform inputs, `AWS_REGION`, `ORIGIN_VERIFY_SECRET`, and a nonempty `TF_EMAIL_WORKER_ALARM_ACTION_ARNS` JSON array before any nonzero SQS-enabled API stage.
 12. To enable Communications, store the Nylas API key and OAuth state secret in AWS Secrets Manager, then set the GitHub Nylas variables listed below. Provider-side synchronization requires a Nylas webhook destination and webhook secret after the first deploy exposes the webhook URL; browser mail surfaces remain canonical HTTP loads/manual refresh and do not use MangoRTS WebSocket delivery.
 13. Apply database schema/migrations from a machine that can reach the DB, then bootstrap the first dev admin. Prefer setting `TF_BOOTSTRAP_DEV_ADMIN_EMAILS` for the first deploy, signing in once, and clearing it after the dev admin can invite users. The older manual fallback is to seed the dev company membership after the first Cognito user exists.
@@ -32,7 +32,7 @@ Required secrets:
 
 - `AWS_DEV_DEPLOY_ROLE_ARN`
 - `ORIGIN_VERIFY_SECRET`
-- `TF_PLAN_AGE_IDENTITY` in the protected `development` environment only
+- `TF_PLAN_AGE_IDENTITY` in the `development` environment only, intentionally unconfigured pending the human deployment-gate decision
 
 During migration from the old dev Basic Auth setup, the workflow can fall back to the existing `DEV_BASIC_AUTH_PASSWORD` secret as origin-verification secret material. Prefer creating `ORIGIN_VERIFY_SECRET` and removing the old secret after a successful deploy.
 
@@ -51,7 +51,7 @@ Required variables:
 - `TF_DEV_COMPANY_ID`
 - `TF_COGNITO_DOMAIN_PREFIX`
 - `TF_EMAIL_WORKER_ALARM_ACTION_ARNS` as a nonempty JSON string array before any nonzero SQS-enabled API, worker, or schedule stage
-- `TF_PLAN_AGE_RECIPIENT` in the protected `development` environment
+- `TF_PLAN_AGE_RECIPIENT` in the `development` environment, intentionally unconfigured pending the same decision
 - `TF_EMAIL_FROM_ADDRESS` once SES sender verification is ready
 - `TF_BOOTSTRAP_DEV_ADMIN_EMAILS` for first deploy only, then clear it
 
@@ -126,9 +126,11 @@ aws secretsmanager create-secret `
 
 ## Normal Deploy
 
-The workflow `.github/workflows/deploy-dev.yml` currently runs manually through `workflow_dispatch` only. This is intentional while the first AWS dev deploy is being stabilized. Re-enable `push` deploys only after repeated dev deploys are boring and reliable.
+The workflow `.github/workflows/deploy-dev.yml` currently runs manually through `workflow_dispatch` only and refuses every ref except `refs/heads/main` before the deploy job starts. This is intentional while the first AWS dev deploy is being stabilized. Re-enable `push` deploys only after repeated dev deploys are boring and reliable.
 
-The workflow separates `plan` from `apply-reviewed-plan`. The plan remains reviewable in the protected run log. Its exact binary plan, redacted text rendering, checksum, and rollout metadata are packed and encrypted with `age`; only the `.tar.age` ciphertext crosses runs. The protected apply run derives the recipient from `TF_PLAN_AGE_IDENTITY`, verifies it matches `TF_PLAN_AGE_RECIPIENT`, decrypts only in runner temporary storage, verifies the exact plan checksum and rollout identity, and applies that binary. Plaintext plan, tfvars, identity, and decrypted bundle are never uploaded and are removed from the runner at job completion.
+The workflow separates `plan` from `apply-reviewed-plan`. The plan remains reviewable in the environment-scoped manual run log. Its exact binary plan, redacted text rendering, checksum, and rollout metadata are packed and encrypted with `age`; only the `.tar.age` ciphertext crosses runs. The apply run derives the recipient from `TF_PLAN_AGE_IDENTITY`, verifies it matches `TF_PLAN_AGE_RECIPIENT`, decrypts only in runner temporary storage, verifies the exact plan checksum and rollout identity, and applies that binary. Plaintext plan, tfvars, identity, and decrypted bundle are never uploaded and are removed from the runner at job completion.
+
+This is manual exact-plan self-review, not independent approval. Under the current private-repository GitHub plan, the `development` environment cannot require reviewers or deployment-branch restrictions, and a repository writer could modify the workflow. Keep the age inputs unconfigured until a human chooses the GitHub plan/permissions change, an external gate, or explicit acceptance of that limitation.
 
 It performs:
 
@@ -139,7 +141,7 @@ It performs:
 5. Read the ECR repository URL from Terraform state.
 6. Build and push backend image tagged with the git SHA.
 7. Run `terraform plan` with that immutable backend image URI, encrypt and retain only the exact ciphertext, and stop for review.
-8. On a separate protected dispatch, download, decrypt, verify, and apply only that exact reviewed plan.
+8. On a separate environment-scoped manual dispatch from `main`, download, decrypt, verify, and apply only that exact reviewed plan.
 9. Read frontend/Cognito outputs from Terraform state.
 10. Build the frontend with Cognito and API env vars.
 11. Sync `frontend/dist` to S3.

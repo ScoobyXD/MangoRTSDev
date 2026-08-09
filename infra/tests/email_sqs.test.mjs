@@ -106,6 +106,7 @@ test("DEV workflow separates reviewable infrastructure, worker, and schedule pla
 	assert.match(devWorkflow, /worker-only\)[\s\S]*?EMAIL_WORKER_ENABLED=true[\s\S]*?EMAIL_SCHEDULE_ENABLED=false/);
 	assert.match(devWorkflow, /schedule-only\)[\s\S]*?EMAIL_WORKER_ENABLED=true[\s\S]*?EMAIL_SCHEDULE_ENABLED=true/);
 	assert.match(devWorkflow, /environment: development/);
+	assert.match(devWorkflow, /jobs:\s*\n\s*deploy:\s*\n\s*if: github\.ref == 'refs\/heads\/main'\s*\n\s*runs-on: ubuntu-latest/);
 	assert.match(devWorkflow, /TF_PLAN_AGE_RECIPIENT/);
 	assert.match(devWorkflow, /secrets\.TF_PLAN_AGE_IDENTITY/);
 	assert.match(devWorkflow, /age --encrypt[\s\S]*?mangorts-dev-tfplan\.tar\.age/);
@@ -116,6 +117,10 @@ test("DEV workflow separates reviewable infrastructure, worker, and schedule pla
 	assert.doesNotMatch(devWorkflow, /terraform apply -auto-approve/);
 	assert.match(devWorkflow, /TF_EMAIL_WORKER_ALARM_ACTION_ARNS/);
 	assert.match(devWorkflow, /API_DESIRED_COUNT" != "0" \|\| "\$EMAIL_WORKER_ENABLED" == "true"[\s\S]*?TF_EMAIL_WORKER_ALARM_ACTION_ARNS_NORMALIZED/);
+	assert.match(devWorkflow, /environment-scoped manual run/);
+	assert.match(devWorkflow, /manual exact-plan self-review, not independent approval/);
+	assert.match(devWorkflow, /repository writer could modify this workflow/);
+	assert.doesNotMatch(devWorkflow, /protected (?:development|run|job)/i);
 
 	const upload = devWorkflow.match(/- name: Upload encrypted exact Terraform plan[\s\S]*?if-no-files-found: error/)?.[0] ?? "";
 	assert.match(upload, /actions\/upload-artifact@v4/);

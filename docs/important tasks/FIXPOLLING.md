@@ -391,6 +391,7 @@ Rules:
 - if `configuration_required` needs a database check-constraint change, use one small PostgreSQL 17-compatible additive migration and update the canonical schema/UI/Process Stories together;
 - do not add processing-lease, visibility-heartbeat, retry-scheduler, or compatibility columns;
 - do not combine unrelated archive identity cleanup with the SQS cutover;
+- the one legacy cutover may collapse redundant `email_ingestion_jobs` metadata only after aggregate preflight and a locked transactional recheck prove every duplicate row is completed/failed, populated Mango/provider thread identities agree, and no foreign key references ingestion jobs. Retention is deterministic: genuine completion, then failure, then synthetic `superseded_by_email_ingestion_cutover` completion; within a class prefer rows carrying the agreed thread metadata, then earliest creation time and ascending UUID. Delete no email, thread, attachment, relationship, or archive data;
 - every operator migration requires a read-only preflight and one human-run transaction;
 - agents do not write to a live database.
 
@@ -414,7 +415,7 @@ The fresh work starts from the new current `main` after this decision record is 
 - `email_sqs_enabled` may remain DEV-default `true` to bootstrap queues/IAM, but the worker and reconciliation flags default off;
 - the new API image is **not** compatible with the legacy email schema and must not be launched before the migration;
 - the normal DEV workflow accepts an explicit API desired count, including `0` for migration maintenance. Queue/IAM bootstrap may leave the old API active only when its current image and desired count are preserved; otherwise the reviewed maintenance plan scales the old API to zero and does not launch the new image;
-- plan and apply are separate protected workflow operations. Review Terraform's redacted plan output in the plan-run log. The runner bundles the exact binary plan, redacted rendering, checksum, and rollout identity, encrypts that bundle with `age`, deletes the plaintext bundle, and uploads only ciphertext. Apply downloads that exact ciphertext, decrypts it only inside the protected `development` job with its dedicated environment secret, verifies recipient, checksum, source SHA, stage, schema confirmation, worker/schedule flags, and API count, then applies that exact binary plan;
+- plan and apply are separate environment-scoped manual operations restricted to `main`. Review Terraform's redacted plan output in the plan-run log. The runner bundles the exact binary plan, redacted rendering, checksum, and rollout identity, encrypts that bundle with `age`, deletes the plaintext bundle, and uploads only ciphertext. Apply downloads that exact ciphertext, decrypts it only inside the `development` job with its dedicated environment secret, verifies recipient, checksum, source SHA, stage, schema confirmation, worker/schedule flags, and API count, then applies that exact binary plan. This is exact-plan self-review, not independent approval: the current private-repository plan cannot enforce environment reviewers or branch protection, and a repository writer could modify the workflow. Keep the required age values unconfigured until a human chooses a GitHub plan/permissions change, an external gate, or explicitly accepts that limitation;
 - do not modify production;
 - verify queue attributes, redrive policy with `maxReceiveCount=3`, encryption, IAM, and alarms.
 
@@ -423,8 +424,9 @@ The fresh work starts from the new current `main` after this decision record is 
 - stop and drain every old API/email writer before preflight and keep it stopped through the transaction;
 - run the exact read-only PostgreSQL 17 preflight. It accepts only coherent unordered exact states: all three tables at legacy (`email_connections` unchanged 13, ingestion 16, archive items 12) or all three at final (`email_connections` unchanged 13, ingestion 19 with exactly the three approved additions, archive items 13 with exactly `attempt_token` added). Any cross-table mixed state is STOP before a write;
 - stop if that preflight finds any legacy database-delivered ingestion or archive item still pending, processing, or retrying; let the old deployment finish it or perform deliberate operator review before cutover;
+- review the aggregate duplicate report without mailbox/provider identifiers. It must show stable-identity group count, exact redundant-row count, rows outside completed/failed, synthetic cutover-completed rows, conflicting non-null Mango thread groups, conflicting nonblank provider thread groups, and foreign-key references. READY requires zero unsafe/conflicting/reference counts in a coherent legacy state; final-schema duplicates are STOP;
 - take a verified DEV recovery point;
-- a human applies the one small plain-SQL transaction in DBeaver;
+- a human applies the one small plain-SQL transaction in DBeaver. It locks and rechecks before writing, collapses only the reported safe redundant ingestion metadata with the canonical ranking, asserts the exact deleted count and zero remaining duplicates, and does not delete email/thread/attachment truth;
 - verify the final schema and keep worker/schedule off before deploying code that requires it.
 
 ### Stage 4: new API, then one worker, then reconciliation
