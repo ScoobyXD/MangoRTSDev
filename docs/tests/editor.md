@@ -7,6 +7,9 @@
 5. A text box already linked to one email message or thread rejects a different email drop.
 6. A Node with priority **Not Assigned** may be assigned or moved to a Logic Gate without a priority prompt or error.
 7. New or changed editor business logic is documented as strict numbered laws, not scenarios.
+8. Clicking the chat action for highlighted email text without a linked text box creates only a temporary interface preview and writes no text box, email relationship, or chat to the database.
+9. Clearing the temporary email quote or closing its chat rail cancels the temporary text box and draft without a database delete or cleanup write.
+10. Sending the first temporary email chat atomically creates the Node text box, exact email-message relationship, and chat before the interface becomes a normal saved text box.
 
 Last updated: 2026-08-08
 

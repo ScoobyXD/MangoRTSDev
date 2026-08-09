@@ -639,6 +639,7 @@ type ChatPaneProps = {
   draftEntityLinks?: EditorChatEntityLink[];
   companyUsers: MentionableCompanyUser[];
   draftAttachments: EditorChatAttachment[];
+  attachmentsEnabled?: boolean;
   replyTargetID: string;
   heightStorageKey: string;
   fixedHeight?: number;
@@ -705,6 +706,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   draftEntityLinks = [],
   companyUsers,
   draftAttachments,
+  attachmentsEnabled = true,
   replyTargetID,
   heightStorageKey,
   fixedHeight,
@@ -1372,12 +1374,12 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               type="button"
               aria-label="Add attachment"
               title="Add attachment"
-              disabled={!editable}
+              disabled={!editable || !attachmentsEnabled}
               onClick={() => {
                 focusComposer();
-                fileInputRef.current?.click();
+                if (attachmentsEnabled) fileInputRef.current?.click();
               }}
-              style={{ width: 32, height: 32, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: editable ? "pointer" : "default", opacity: editable ? 1 : 0.46, boxShadow: EDITOR_NEU_SHADOW }}
+              style={{ width: 32, height: 32, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: editable && attachmentsEnabled ? "pointer" : "default", opacity: editable && attachmentsEnabled ? 1 : 0.46, boxShadow: EDITOR_NEU_SHADOW }}
             >
               <PlusIcon color={accent} />
             </button>
