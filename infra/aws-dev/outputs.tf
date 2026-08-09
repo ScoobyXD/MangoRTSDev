@@ -48,6 +48,26 @@ output "ecs_service_name" {
   value       = module.platform.ecs_service_name
 }
 
+output "email_work_queue_url" {
+  description = "DEV FIFO email work queue URL."
+  value       = module.platform.email_work_queue_url
+}
+
+output "email_work_dlq_url" {
+  description = "DEV FIFO email work DLQ URL."
+  value       = module.platform.email_work_dlq_url
+}
+
+output "email_scheduler_dlq_url" {
+  description = "DEV Standard Scheduler DLQ URL."
+  value       = module.platform.email_scheduler_dlq_url
+}
+
+output "email_worker_service_name" {
+  description = "Private DEV email worker ECS service name when enabled."
+  value       = module.platform.email_worker_service_name
+}
+
 output "realtime_valkey_cache_name" {
   description = "Development ElastiCache Serverless Valkey cache name."
   value       = module.platform.realtime_valkey_cache_name

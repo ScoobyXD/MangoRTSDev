@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -16,7 +17,7 @@ func TestMemoryRepoCommunicationsMessageReadStatusesSeparatePersonalAccounts(t *
 	}
 
 	signalAt := time.Date(2026, time.July, 13, 12, 0, 0, 0, time.UTC)
-	accountA, err := repo.UpsertCommunicationsMessageReadStatus(CommunicationsMessageReadStatusInput{
+	accountA, err := repo.UpsertCommunicationsMessageReadStatusContext(context.Background(), CommunicationsMessageReadStatusInput{
 		UserID:               user.UserID,
 		PersonalAccountEmail: "  Account-A@Example.com ",
 		MessageID:            "provider-message-collision",
@@ -28,7 +29,7 @@ func TestMemoryRepoCommunicationsMessageReadStatusesSeparatePersonalAccounts(t *
 	if err != nil {
 		t.Fatalf("upsert account A: %v", err)
 	}
-	accountB, err := repo.UpsertCommunicationsMessageReadStatus(CommunicationsMessageReadStatusInput{
+	accountB, err := repo.UpsertCommunicationsMessageReadStatusContext(context.Background(), CommunicationsMessageReadStatusInput{
 		UserID:               user.UserID,
 		PersonalAccountEmail: "account-b@example.com",
 		MessageID:            "provider-message-collision",
@@ -75,7 +76,7 @@ func TestMemoryRepoCommunicationsMessageReadStatusesSeparatePersonalAccounts(t *
 	}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("broad user-only receipt list error = %v, want ErrInvalid", err)
 	}
-	if _, err := repo.UpsertCommunicationsMessageReadStatus(CommunicationsMessageReadStatusInput{
+	if _, err := repo.UpsertCommunicationsMessageReadStatusContext(context.Background(), CommunicationsMessageReadStatusInput{
 		UserID:    user.UserID,
 		MessageID: "new-provider-message",
 		Status:    "likely_read",
@@ -101,14 +102,14 @@ func TestMemoryRepoCommunicationsMessageReadStatusSameSignalIsIdempotent(t *test
 		SignalTimestamp:      signalAt,
 	}
 
-	first, err := repo.UpsertCommunicationsMessageReadStatus(input)
+	first, err := repo.UpsertCommunicationsMessageReadStatusContext(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.SignalCount != 1 {
 		t.Fatalf("first implicit signal count = %d, want 1", first.SignalCount)
 	}
-	retry, err := repo.UpsertCommunicationsMessageReadStatus(input)
+	retry, err := repo.UpsertCommunicationsMessageReadStatusContext(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +118,7 @@ func TestMemoryRepoCommunicationsMessageReadStatusSameSignalIsIdempotent(t *test
 	}
 
 	input.SignalTimestamp = signalAt.Add(time.Second)
-	later, err := repo.UpsertCommunicationsMessageReadStatus(input)
+	later, err := repo.UpsertCommunicationsMessageReadStatusContext(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
 	}

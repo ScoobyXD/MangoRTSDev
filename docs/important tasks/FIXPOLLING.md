@@ -44,6 +44,7 @@ Last updated: 2026-08-09
 - **The 75 ms PostgreSQL realtime polling loop is gone in DEV.**
 - **The first SQS implementation attempt was rejected and abandoned.** It must not be merged, copied, or used as the starting point for the replacement.
 - **The replacement SQS implementation must start from current `main` and follow the simpler design in this document.**
+- **The fresh DEV implementation now exists on its review branch with worker/schedule flags off; offline verification and review must finish before any rollout or integration.**
 - **Production is out of scope.** Nothing in this task authorizes production infrastructure, deployment, database, Nylas, or secret changes.
 
 The abandoned SQS worktree was:
@@ -74,10 +75,13 @@ Nylas webhook
   -> one private ECS email worker
   -> exact Nylas read or mutation
   -> PostgreSQL durable result
-  -> post-commit Valkey mailbox hint when needed
+  -> durable realtime outbox row
+  -> asynchronous Valkey mailbox hint when needed
 ```
 
 Mango must not build a second queue inside PostgreSQL. It must not synchronize an SQS receipt with a database ownership lease. It must not extend SQS visibility with heartbeats. It must not invent its own retry scheduler.
+
+The acknowledgement boundary is also fixed: if the durable email result or required realtime outbox row is missing, the worker does not delete the SQS message. Once both exist, Valkey is no longer part of the SQS acknowledgement. The existing realtime spine owns delayed Valkey publication and recovery, so a broker outage never repeats completed provider work.
 
 ## What caused the emergency
 
@@ -264,7 +268,7 @@ PostgreSQL stores:
 
 PostgreSQL does **not** store a timer that decides when another worker may receive the SQS message.
 
-The producer creates the tiny stable job row before it sends the compact SQS message. This row is a permanent record that Mango already accepted that exact work identity; it is not a delivery timer. A Nylas request or the currently delivered reconciliation message may retry a failed SQS send using the same identity, but a later reconciliation scan must not create a second job for that identity.
+The producer creates the tiny stable job row before it sends the compact SQS message. This row is a permanent record that Mango already accepted that exact work identity; it is not a delivery timer. A Nylas request or the currently delivered reconciliation message may retry a failed SQS send using the same identity. Reconciliation stores its exact control identity at creation and may resend an accepted marker only when that origin still matches; a later ten-minute control identity neither recreates nor resends prior or DLQed poison work.
 
 When provider work actually begins, PostgreSQL atomically records a new attempt token. It refuses to start attempt 4. Completion or failure is conditional on the same token, so an old delayed worker cannot overwrite a newer attempt. This is ordinary idempotency, not a second queue lease.
 
@@ -367,7 +371,8 @@ The 10-minute schedule is not a 10-minute delay for normal email. Normal email a
 - The worker is a private ECS service outside the ALB.
 - Start with one worker task and small bounded concurrency.
 - ReceiveMessage uses 20-second SQS long polling, so an idle worker does not create another hot polling loop.
-- The worker process exits if required PostgreSQL, SQS, Nylas, or schema configuration is unavailable.
+- Before the first receive, the worker exits if PostgreSQL final-schema readiness, SQS, Nylas, or external Valkey is unavailable or incomplete. It never substitutes process-local realtime.
+- A persistent SQS Receive error also exits the run so ECS restart backoff owns recovery; an ordinary message failure remains undeleted for native SQS redelivery.
 - ECS replaces an exited essential container.
 - Health is not based on the age of the last completed job or a visibility heartbeat.
 - CloudWatch alarms cover running task count, queue age, visible backlog, and dead-letter count.
@@ -406,35 +411,41 @@ The fresh work starts from the new current `main` after this decision record is 
 ### Stage 2: first reviewed DEV deployment with features off
 
 - review the complete Terraform plan before apply;
-- use the normal DEV deployment to create queues, IAM, alarms, log group, and a disabled schedule while deploying a schema-compatible API;
-- the exact worker and reconciliation flags default off, so the worker does not start and the schedule does not run;
+- `email_sqs_enabled` may remain DEV-default `true` to bootstrap queues/IAM, but the worker and reconciliation flags default off;
+- the new API image is **not** compatible with the legacy email schema and must not be launched before the migration;
+- the normal DEV workflow accepts an explicit API desired count, including `0` for migration maintenance. Queue/IAM bootstrap may leave the old API active only when its current image and desired count are preserved; otherwise the reviewed maintenance plan scales the old API to zero and does not launch the new image;
+- plan and apply are separate protected workflow operations. Review Terraform's redacted plan output in the plan-run log. The runner bundles the exact binary plan, redacted rendering, checksum, and rollout identity, encrypts that bundle with `age`, deletes the plaintext bundle, and uploads only ciphertext. Apply downloads that exact ciphertext, decrypts it only inside the protected `development` job with its dedicated environment secret, verifies recipient, checksum, source SHA, stage, schema confirmation, worker/schedule flags, and API count, then applies that exact binary plan;
 - do not modify production;
 - verify queue attributes, redrive policy with `maxReceiveCount=3`, encryption, IAM, and alarms.
 
-### Stage 3: minimal schema step, only if required
+### Stage 3: atomic human schema cutover
 
-- stop if the fresh implementation proves no migration is required;
-- otherwise run the read-only PostgreSQL 17 preflight;
+- stop and drain every old API/email writer before preflight and keep it stopped through the transaction;
+- run the exact read-only PostgreSQL 17 preflight. It accepts only coherent unordered exact states: all three tables at legacy (`email_connections` unchanged 13, ingestion 16, archive items 12) or all three at final (`email_connections` unchanged 13, ingestion 19 with exactly the three approved additions, archive items 13 with exactly `attempt_token` added). Any cross-table mixed state is STOP before a write;
+- stop if that preflight finds any legacy database-delivered ingestion or archive item still pending, processing, or retrying; let the old deployment finish it or perform deliberate operator review before cutover;
 - take a verified DEV recovery point;
-- a human applies the one small transaction in DBeaver;
-- verify the final schema before deploying code that requires it.
+- a human applies the one small plain-SQL transaction in DBeaver;
+- verify the final schema and keep worker/schedule off before deploying code that requires it.
 
-### Stage 4: enable one worker, then reconciliation
+### Stage 4: new API, then one worker, then reconciliation
 
-- verify the compatible API with worker/schedule still disabled: health, OAuth, Nylas signature handling, SQS send failure, and Valkey realtime;
-- review a second Terraform plan that changes only the worker flag to one task, then apply it;
+- provide at least one reviewed alarm action ARN, then review and apply the infrastructure/API stage with the migrated-schema confirmation, explicit nonzero API desired count, and worker/schedule still disabled. Terraform itself rejects every nonzero SQS-enabled API plan without both migration confirmation and an alarm action, including plans created outside the workflow;
+- verify the new API: health, OAuth, Nylas signature handling, SQS send failure, and Valkey realtime;
+- review the worker-only plan that changes only the worker flag to one task and apply that exact encrypted saved plan;
 - verify one real personal and one real shared connection job;
-- review a third Terraform plan that changes only the schedule flag, then apply it only after direct jobs work;
+- review the schedule-only plan that changes only the schedule flag, then apply that exact saved plan only after direct jobs work;
 - verify known 404/400 accounts park once and stop;
 - verify no message receives more than three automatic SQS deliveries, dead-letter work stays parked, and reconciliation never recreates its stable identity.
 
 ### Rollback
 
 - disable the worker and schedule;
-- keep the queue, dead-letter queue, durable jobs, and compatible API for diagnosis;
+- before migration, the old API may resume only against the unchanged legacy schema;
+- after migration, do **not** run the old API against the new schema. Keep worker/schedule disabled and roll the new code/schema forward, or restore the verified recovery point before restoring the old API;
+- keep the queue, dead-letter queue, and durable jobs for diagnosis when rolling forward;
 - do not restore hot polling;
 - do not replay dead-letter work until the failure is understood;
-- if a human migration occurred, follow its reviewed recovery procedure rather than guessing or partially reversing schema.
+- never attempt an ad hoc reverse migration.
 
 ## Required tests
 
@@ -456,7 +467,7 @@ The fresh work starts from the new current `main` after this decision record is 
 - crash before delete redelivers safely;
 - completed redelivery performs no second provider operation;
 - old attempt completion cannot overwrite a newer attempt;
-- archive processing claims one item only;
+- archive processing handles one exact item only;
 - provider calls use cancellable contexts and no long database transaction;
 - request cancellation reaches PostgreSQL;
 - no `context.Background()` escapes from request-owned or worker-owned database work.
@@ -485,18 +496,20 @@ The fresh work starts from the new current `main` after this decision record is 
 
 ### Infrastructure and operations
 
-- DEV flags default off;
+- `email_sqs_enabled` may default true for DEV queue bootstrap; worker and reconciliation schedule flags default off;
 - worker is private and outside the ALB;
 - queue and dead-letter queue are FIFO and encrypted;
 - the FIFO work queue has content-based deduplication enabled;
 - redrive `maxReceiveCount` is exactly 3;
 - visibility is fixed and no heartbeat permission/path exists;
 - worker receives use 20-second long polling;
+- persistent Receive failure exits the worker for ECS restart backoff, while ordinary message failure stays with SQS redelivery;
 - worker IAM contains only required queue, attachment, Valkey-wake, and secret access;
+- worker startup requires final-schema confirmation, PostgreSQL readiness, complete Nylas/SQS/external-Valkey configuration, and actionable alarm ARNs before the first receive;
 - Scheduler trust uses the exact schedule-group ARN and source account;
 - Scheduler uses the stable `reconciliation-control` group ID, 2 retries, and a 5-minute maximum event age;
 - Scheduler's delivery DLQ is a separate encrypted Standard queue;
-- queue age, worker running count, and both DLQs have actionable alarms;
+- queue age, worker running count, and both DLQs have actionable alarms; a nonzero SQS-enabled API is forbidden until an alarm action ARN is configured, so queue alarms are actionable before the API can enqueue;
 - Valkey `+@pubsub`, exact channel restriction, and authorization alarm remain unchanged;
 - no production file or resource changes.
 
@@ -558,17 +571,17 @@ The SQS work is complete only when DEV shows:
 
 ### Fresh SQS implementation
 
-- [ ] Start a completely new worktree from the post-documentation `main`.
-- [ ] Audit the current schema and implement the smallest exact job model.
-- [ ] Add DEV FIFO queue, FIFO DLQ, IAM, encryption, alarms, and disabled schedule.
-- [ ] Set fixed visibility, no heartbeat, and `maxReceiveCount=3`.
-- [ ] Add the private worker with at most three provider-processing starts per stable job and no database lease.
-- [ ] Route verified Nylas events and archive items to one bounded SQS unit.
-- [ ] Add exact 400/404 parking and status-write failure handling.
-- [ ] Add one bounded 10-minute reconciliation control path.
-- [ ] Remove 30-second and 250 ms polling loops without fallback.
-- [ ] Update all affected Process Stories and numbered laws.
-- [ ] Pass focused, disposable PostgreSQL, Terraform, infrastructure, and complete repository tests.
+- [x] Start a completely new worktree from the post-documentation `main`.
+- [x] Audit the current schema and implement the smallest exact job model.
+- [x] Add DEV FIFO queue, FIFO DLQ, IAM, encryption, alarms, and disabled schedule.
+- [x] Set fixed visibility, no heartbeat, and `maxReceiveCount=3`.
+- [x] Add the private worker with at most three provider-processing starts per stable job and no database lease.
+- [x] Route verified Nylas events and archive items to one bounded SQS unit.
+- [x] Add exact 400/404 parking and status-write failure handling.
+- [x] Add one bounded 10-minute reconciliation control path.
+- [x] Remove 30-second and 250 ms polling loops without fallback.
+- [x] Update all affected Process Stories and numbered laws.
+- [x] Pass focused, disposable PostgreSQL, Terraform, infrastructure, and complete repository tests.
 - [ ] Obtain independent backend and infrastructure approval.
 - [ ] Merge and push only the reviewed fresh branch.
 - [ ] Roll out and test DEV in separate guarded stages.

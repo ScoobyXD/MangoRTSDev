@@ -335,11 +335,14 @@ insert into shared_inboxes (
 }
 
 func (r *PostgresRepo) ListCommunicationsSharedInboxFolders(companyID string) ([]domain.CompanyExplorerFolder, error) {
+	return r.ListCommunicationsSharedInboxFoldersContext(context.Background(), companyID)
+}
+
+func (r *PostgresRepo) ListCommunicationsSharedInboxFoldersContext(ctx context.Context, companyID string) ([]domain.CompanyExplorerFolder, error) {
 	companyID = cleanUUIDText(companyID)
 	if companyID == "" {
 		return nil, ErrInvalid
 	}
-	ctx := context.Background()
 	rows, err := r.db.QueryContext(ctx, communicationsSharedInboxItemsCTE+`
 select company_id,
        folder_id,

@@ -5,17 +5,22 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"miraeopus/backend/internal/auth"
+	"miraeopus/backend/internal/emailqueue"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	httpapi "miraeopus/backend/internal/http"
 	"miraeopus/backend/internal/realtime"
@@ -23,6 +28,13 @@ import (
 )
 
 func main() {
+	runtimeRole := strings.ToLower(strings.TrimSpace(getenvDefault("MANGORTS_RUNTIME_ROLE", "api")))
+	if runtimeRole != "api" && runtimeRole != "email-worker" {
+		log.Fatal("MANGORTS_RUNTIME_ROLE must be api or email-worker")
+	}
+	if runtimeRole == "email-worker" && strings.TrimSpace(os.Getenv("DB_HOST")) == "" {
+		log.Fatal("DB_HOST is required for the email worker")
+	}
 	repo, cleanup, err := buildRepository()
 	if err != nil {
 		log.Fatal(err)
@@ -45,6 +57,21 @@ func main() {
 	if testAuthHeaderEnabled {
 		log.Print("test-only authentication header enabled")
 	}
+	emailSQS, err := buildEmailQueue()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if runtimeRole == "email-worker" && emailSQS == nil {
+		log.Fatal("MANGORTS_EMAIL_WORK_QUEUE_URL is required for the email worker")
+	}
+	nylasClient := buildNylasClient(nylasConfig)
+	if runtimeRole == "email-worker" && nylasClient == nil {
+		log.Fatal("NYLAS_CLIENT_ID, NYLAS_API_KEY, and NYLAS_API_BASE_URL are required for the email worker")
+	}
+	realtimeBackplane, externalRealtime, err := buildRealtimeBackplane(runtimeRole == "email-worker")
+	if err != nil {
+		log.Fatal(err)
+	}
 	server := httpapi.NewServerWithOptions(repo, httpapi.ServerOptions{
 		AuthValidator:         authValidator,
 		TestAuthHeaderEnabled: testAuthHeaderEnabled,
@@ -55,13 +82,26 @@ func main() {
 			Emails:      splitScopes(os.Getenv("MANGORTS_BOOTSTRAP_DEV_ADMIN_EMAILS")),
 			CompanyName: getenvDefault("MANGORTS_BOOTSTRAP_DEV_COMPANY_NAME", "MangoRTS Bootstrap"),
 		},
-		NylasClient:          buildNylasClient(),
-		NylasConfig:          nylasConfig,
-		AttachmentStorage:    httpapi.NewS3AttachmentStorageFromEnv(),
-		RealtimeTicketSecret: secretEnvValue("MANGORTS_REALTIME_TICKET_SECRET", "realtime_ticket_secret", "ticket_secret", "MANGORTS_REALTIME_TICKET_SECRET"),
-		RealtimeBackplane:    buildRealtimeBackplane(),
+		NylasClient:                 nylasClient,
+		NylasConfig:                 nylasConfig,
+		AttachmentStorage:           httpapi.NewS3AttachmentStorageFromEnv(),
+		RealtimeTicketSecret:        secretEnvValue("MANGORTS_REALTIME_TICKET_SECRET", "realtime_ticket_secret", "ticket_secret", "MANGORTS_REALTIME_TICKET_SECRET"),
+		RealtimeBackplane:           realtimeBackplane,
+		EmailQueue:                  emailSQS,
+		EmailWorkerOnly:             runtimeRole == "email-worker",
+		EmailWorkerExternalRealtime: runtimeRole == "email-worker" && externalRealtime,
 	})
 	defer server.Close()
+	if runtimeRole == "email-worker" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		log.Printf("email worker started concurrency=%d", envIntDefault("MANGORTS_EMAIL_WORKER_CONCURRENCY", 3))
+		err := server.RunEmailWorker(ctx, emailSQS, envIntDefault("MANGORTS_EMAIL_WORKER_CONCURRENCY", 3))
+		if err != nil && !errors.Is(err, context.Canceled) {
+			log.Fatal(err)
+		}
+		return
+	}
 
 	addr := os.Getenv("MANGORTS_ADDR")
 	if addr == "" {
@@ -86,14 +126,35 @@ func main() {
 	}
 }
 
-func buildRealtimeBackplane() realtime.Backplane {
+func buildEmailQueue() (*emailqueue.SQS, error) {
+	queueURL := strings.TrimSpace(os.Getenv("MANGORTS_EMAIL_WORK_QUEUE_URL"))
+	if queueURL == "" {
+		return nil, nil
+	}
+	region := getenvDefault("AWS_REGION", getenvDefault("AWS_DEFAULT_REGION", ""))
+	if region == "" {
+		return nil, fmt.Errorf("AWS_REGION is required when MANGORTS_EMAIL_WORK_QUEUE_URL is set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	config, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
+	if err != nil {
+		return nil, fmt.Errorf("load AWS config for email SQS: %w", err)
+	}
+	return emailqueue.NewSQS(sqs.NewFromConfig(config), queueURL)
+}
+
+func buildRealtimeBackplane(requireExternal bool) (realtime.Backplane, bool, error) {
 	config, useLocal, err := realtimeBackplaneEnvironmentFromLookup(os.Getenv)
 	if err != nil {
-		log.Fatal(err)
+		return nil, false, err
 	}
 	if useLocal {
+		if requireExternal {
+			return nil, false, errors.New("complete external Valkey configuration is required for the email worker")
+		}
 		log.Print("using process-local realtime backplane (MANGORTS_VALKEY_ENDPOINT not set)")
-		return realtime.NewLocalBackplane()
+		return realtime.NewLocalBackplane(), false, nil
 	}
 	// This is deliberate top-level application initialization. Credential
 	// retrieval itself remains lazy and uses the ECS task role in dev.
@@ -101,20 +162,20 @@ func buildRealtimeBackplane() realtime.Backplane {
 	defer cancel()
 	awsConfig, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(config.Region))
 	if err != nil {
-		log.Fatalf("load AWS config for Valkey IAM authentication: %v", err)
+		return nil, false, fmt.Errorf("load AWS config for Valkey IAM authentication: %w", err)
 	}
 	authProvider, err := realtime.NewIAMAuthProvider(config.CacheName, config.UserID, config.Region, awsConfig.Credentials)
 	if err != nil {
-		log.Fatalf("configure Valkey IAM authentication: %v", err)
+		return nil, false, fmt.Errorf("configure Valkey IAM authentication: %w", err)
 	}
 	backplane, err := realtime.NewValkeyBackplane(realtime.ValkeyConfig{
 		Endpoint: config.Endpoint, Channel: config.Channel, Auth: authProvider,
 	})
 	if err != nil {
-		log.Fatalf("configure Valkey realtime backplane: %v", err)
+		return nil, false, fmt.Errorf("configure Valkey realtime backplane: %w", err)
 	}
 	log.Printf("using TLS/IAM Valkey realtime backplane cache=%s region=%s", config.CacheName, config.Region)
-	return backplane
+	return backplane, true, nil
 }
 
 type realtimeBackplaneEnvironment struct {
@@ -363,9 +424,8 @@ func secretEnvValue(name string, propertyNames ...string) string {
 	return raw
 }
 
-func buildNylasClient() httpapi.NylasClient {
-	config := buildNylasConfig()
-	if !config.IsConfigured() {
+func buildNylasClient(config httpapi.NylasConfig) httpapi.NylasClient {
+	if strings.TrimSpace(config.ClientID) == "" || strings.TrimSpace(config.APIKey) == "" || strings.TrimSpace(config.APIBaseURL) == "" {
 		return nil
 	}
 	return httpapi.NewNylasRESTClient(config.APIBaseURL, config.APIKey, config.ClientID)

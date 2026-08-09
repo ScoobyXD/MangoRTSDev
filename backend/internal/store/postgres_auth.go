@@ -93,12 +93,16 @@ func (r *PostgresRepo) GetAuthUserByEmail(email string) (domain.User, error) {
 }
 
 func (r *PostgresRepo) ListUserMemberships(userID string) ([]domain.CompanyMembership, error) {
+	return r.ListUserMembershipsContext(context.Background(), userID)
+}
+
+func (r *PostgresRepo) ListUserMembershipsContext(ctx context.Context, userID string) ([]domain.CompanyMembership, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, ErrInvalid
 	}
 
-	rows, err := r.db.Query(
+	rows, err := r.db.QueryContext(ctx,
 		`select cm.company_id, c.name, cm.user_id, cm.role, cm.created_timestamp, cm.updated_timestamp
 		 from company_memberships cm
 		 join companies c on c.company_id = cm.company_id

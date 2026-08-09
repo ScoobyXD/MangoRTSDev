@@ -131,7 +131,7 @@ type CompanyUserOnboarding = {
   invite_email_status: string;
   invite_email_error?: string;
   invite_accepted: boolean;
-  google_connection_status: "connected" | "not_connected" | "reauth_required" | string;
+  google_connection_status: "connected" | "not_connected" | "reauth_required" | "configuration_required" | string;
   google_connection_account_email?: string;
 };
 
@@ -155,7 +155,7 @@ type SettingsSelectOption = {
 type CommunicationsStatus = {
   configured: boolean;
   connected: boolean;
-  status: "connected" | "disconnected" | "reauth_required" | string;
+  status: "connected" | "disconnected" | "reauth_required" | "configuration_required" | string;
   connection?: {
     provider?: string;
     account_email?: string;
@@ -1106,15 +1106,22 @@ function ConnectGooglePage({ onNavigate, onLogout }: { onNavigate: (path: string
   };
 
   const unavailable = status && !status.configured;
+  const configurationRequired = status?.status === "configuration_required";
   return (
     <AuthPanel title="Connect Google" error={error}>
       <div style={authFormStyle}>
         <div style={authInfoMessageStyle}>
-          {googleConnected ? "Google connected." : unavailable ? "Google connection is not configured for this environment." : "Connect Google to finish Mango onboarding."}
+          {googleConnected
+            ? "Google connected."
+            : unavailable
+              ? "Google connection is not configured for this environment."
+              : configurationRequired
+                ? "Google/Gmail configuration needs attention before mail syncing can resume."
+                : "Connect Google to finish Mango onboarding."}
         </div>
         {!unavailable && !googleConnected && (
           <AuthPrimaryButton type="button" disabled={busy} onClick={() => void startGoogleConnection()}>
-            {busy ? "Connecting" : status?.status === "reauth_required" ? "Reconnect Google" : "Connect Google"}
+            {busy ? "Connecting" : status?.status === "reauth_required" || configurationRequired ? "Reconnect Google" : "Connect Google"}
           </AuthPrimaryButton>
         )}
         <div style={authActionRowStyle}>
@@ -2015,6 +2022,7 @@ function onboardingStatusLabels(item: CompanyUserOnboarding): string[] {
   if (item.invite_accepted || item.invitation_status === "accepted") labels.push("Invite accepted");
   if (item.google_connection_status === "connected") labels.push("Google connected");
   else if (item.google_connection_status === "reauth_required") labels.push("Google connection invalid / expired");
+  else if (item.google_connection_status === "configuration_required") labels.push("Google/Gmail configuration required");
   else labels.push("Google not connected");
   return labels;
 }

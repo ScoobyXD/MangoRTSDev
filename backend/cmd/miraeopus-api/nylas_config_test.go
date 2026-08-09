@@ -37,3 +37,21 @@ func TestBuildNylasConfigExtractsJSONSecretValues(t *testing.T) {
 		t.Fatal("config is not configured")
 	}
 }
+
+func TestBuildNylasClientNeedsOnlyProviderCallConfiguration(t *testing.T) {
+	t.Setenv("NYLAS_CLIENT_ID", "worker-client-id")
+	t.Setenv("NYLAS_API_KEY", "worker-api-key")
+	t.Setenv("NYLAS_API_BASE_URL", "https://api.us.nylas.com")
+	t.Setenv("NYLAS_REDIRECT_URI", "")
+	t.Setenv("NYLAS_FRONTEND_REDIRECT_URL", "")
+	t.Setenv("NYLAS_STATE_SECRET", "")
+	t.Setenv("NYLAS_WEBHOOK_SECRET", "")
+
+	config := buildNylasConfig()
+	if config.IsConfigured() {
+		t.Fatal("worker-only provider configuration unexpectedly enables OAuth")
+	}
+	if client := buildNylasClient(config); client == nil {
+		t.Fatal("worker-only provider configuration did not create a Nylas client")
+	}
+}

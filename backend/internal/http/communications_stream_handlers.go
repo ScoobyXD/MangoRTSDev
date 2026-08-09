@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"miraeopus/backend/internal/domain"
+	"miraeopus/backend/internal/emailqueue"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"sort"
@@ -88,8 +89,17 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 	}
 	receiptKey, receiptFirstSeenAt, duplicate := s.nylasWebhooks.remember(body, time.Now().UTC())
 	if duplicate {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-		return
+		hasQueueableCreation := false
+		for _, change := range changes {
+			if change.Trigger == "message.created" && strings.TrimSpace(change.MessageID) != "" {
+				hasQueueableCreation = true
+				break
+			}
+		}
+		if !hasQueueableCreation {
+			writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+			return
+		}
 	}
 	grantContexts := map[string]communicationsWebhookGrantContext{}
 	missingGrants := map[string]struct{}{}
@@ -110,7 +120,7 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 		grantContext, ok := grantContexts[grantID]
 		if !ok {
 			var err error
-			grantContext, err = s.loadCommunicationsWebhookGrantContext(grantID)
+			grantContext, err = s.loadCommunicationsWebhookGrantContext(r.Context(), grantID)
 			if errors.Is(err, store.ErrNotFound) {
 				missingGrants[grantID] = struct{}{}
 				continue
@@ -130,7 +140,7 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 			if signalAt.IsZero() {
 				signalAt = receiptFirstSeenAt
 			}
-			status, err := s.repo.UpsertCommunicationsMessageReadStatus(store.CommunicationsMessageReadStatusInput{
+			status, err := s.repo.UpsertCommunicationsMessageReadStatusContext(r.Context(), store.CommunicationsMessageReadStatusInput{
 				ScopeType:                communicationsMessageReadStatusScopeTypeForConnection(grantContext.connection),
 				UserID:                   grantContext.connection.UserID,
 				PersonalAccountEmail:     communicationsMessageReadStatusPersonalAccountEmailForConnection(grantContext.connection),
@@ -152,7 +162,7 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 			}
 			log.Printf("stored nylas message.opened read status user_id=%s scope=%s company_id=%s company_email_connection_id=%s grant_id=%s message_id=%s status=%s signal_count=%d last_signal=%s", grantContext.connection.UserID, status.ScopeType, status.CompanyID, status.CompanyEmailConnectionID, grantID, status.MessageID, status.Status, status.SignalCount, status.LastSignalTimestamp.Format(time.RFC3339))
 		}
-		if err := s.applyCommunicationsWebhookChange(r.Context(), grantContext, change); err != nil {
+		if err := s.applyCommunicationsWebhookChange(r.Context(), receiptKey, duplicate, grantContext, change); err != nil {
 			log.Printf("failed to deliver communications webhook change grant_id=%s trigger=%s message_id=%s: %v", grantID, change.Trigger, change.MessageID, err)
 			s.nylasWebhooks.forget(receiptKey)
 			writeError(w, http.StatusInternalServerError, "failed_to_deliver_email_change")
@@ -162,12 +172,12 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *Server) loadCommunicationsWebhookGrantContext(grantID string) (communicationsWebhookGrantContext, error) {
+func (s *Server) loadCommunicationsWebhookGrantContext(ctx context.Context, grantID string) (communicationsWebhookGrantContext, error) {
 	grantID = strings.TrimSpace(grantID)
 	if grantID == "" {
 		return communicationsWebhookGrantContext{}, store.ErrInvalid
 	}
-	connection, err := s.repo.GetUserEmailConnectionByGrantID(grantID)
+	connection, err := s.repo.GetUserEmailConnectionByGrantIDContext(ctx, grantID)
 	if err == nil {
 		connection.Scope = firstNonBlank(connection.Scope, "personal")
 		return communicationsWebhookGrantContext{
@@ -179,14 +189,14 @@ func (s *Server) loadCommunicationsWebhookGrantContext(grantID string) (communic
 		return communicationsWebhookGrantContext{}, err
 	}
 
-	companyConnection, err := s.repo.GetCompanyEmailConnectionByGrantID(grantID)
+	companyConnection, err := s.repo.GetCompanyEmailConnectionByGrantIDContext(ctx, grantID)
 	if errors.Is(err, store.ErrNotFound) {
 		return communicationsWebhookGrantContext{}, store.ErrNotFound
 	}
 	if err != nil {
 		return communicationsWebhookGrantContext{}, err
 	}
-	sharedInboxIDs, err := s.communicationsSharedInboxIDsForCompanyEmailConnection(companyConnection)
+	sharedInboxIDs, err := s.communicationsSharedInboxIDsForCompanyEmailConnectionContext(ctx, companyConnection)
 	if err != nil {
 		return communicationsWebhookGrantContext{}, err
 	}
@@ -343,39 +353,48 @@ func (s *Server) applyNylasWebhookCacheInvalidationForAccountScope(accountScope 
 	}
 }
 
-func (s *Server) applyCommunicationsWebhookChange(ctx context.Context, grantContext communicationsWebhookGrantContext, change nylasWebhookChange) error {
+func (s *Server) applyCommunicationsWebhookChange(ctx context.Context, enqueueSourceID string, duplicate bool, grantContext communicationsWebhookGrantContext, change nylasWebhookChange) error {
 	if change.Trigger == "grant.expired" || change.Trigger == "grant.updated" {
 		status := "reauth_required"
 		if change.Trigger == "grant.updated" {
 			status = "connected"
 		}
 		if communicationsMessageReadStatusScopeTypeForConnection(grantContext.connection) == "shared" {
-			if _, err := s.repo.UpdateCompanyEmailConnectionStatus(grantContext.connection.CompanyID, grantContext.connection.CompanyEmailConnectionID, status); err != nil {
+			if _, err := s.repo.UpdateCompanyEmailConnectionStatusContext(ctx, grantContext.connection.CompanyID, grantContext.connection.CompanyEmailConnectionID, status); err != nil {
 				return err
 			}
-		} else if _, err := s.repo.UpdateUserEmailConnectionStatus(grantContext.connection.UserID, grantContext.connection.AccountEmail, status); err != nil {
+		} else if _, err := s.repo.UpdateUserEmailConnectionStatusContext(ctx, grantContext.connection.UserID, grantContext.connection.AccountEmail, status); err != nil {
 			return err
-		}
-		if status == "connected" {
-			s.wakeCommunicationsEmailThreadDownloadWorker()
-			s.wakeCommunicationsEmailConnectionScanner()
 		}
 		return nil
 	}
 	if change.Trigger == "message.created" && change.MessageID != "" &&
 		grantContext.connection.CompanyID != "" && grantContext.connection.EmailConnectionID != "" {
-		if _, _, err := s.repo.EnsureCommunicationsEmailIngestionJob(store.CommunicationsEmailIngestionJobInput{
+		if s.emailQueue == nil {
+			return errors.New("email SQS sender is not configured")
+		}
+		job, _, err := s.repo.EnsureCommunicationsEmailIngestionJobContext(ctx, store.CommunicationsEmailIngestionJobInput{
 			CompanyID: grantContext.connection.CompanyID, EmailConnectionID: grantContext.connection.EmailConnectionID,
 			ProviderMessageID: change.MessageID, ProviderThreadID: change.ThreadID,
-			Priority: store.CommunicationsEmailIngestionPriorityLive,
+			Priority: store.CommunicationsEmailIngestionPriorityLive, EnqueueSourceID: enqueueSourceID,
+		})
+		if err != nil {
+			return fmt.Errorf("queue live email ingestion: %w", err)
+		}
+		if err := s.emailQueue.Send(ctx, emailqueue.Message{
+			SchemaVersion: emailqueue.SchemaVersion, Kind: emailqueue.KindIngestion, JobID: job.DownloadJobID,
+			CompanyID: job.CompanyID, EmailConnectionID: job.EmailConnectionID,
 		}); err != nil {
 			return fmt.Errorf("queue live email ingestion: %w", err)
 		}
-		s.wakeCommunicationsEmailThreadDownloadWorker()
+		return nil
+	}
+	if duplicate {
+		return nil
 	}
 	if communicationsMessageReadStatusScopeTypeForConnection(grantContext.connection) != "shared" {
 		s.applyNylasWebhookCacheInvalidation(grantContext.connection.UserID, grantContext.cacheScope, change)
-		return s.publishPersonalMailboxWebhookHintContext(ctx, grantContext.connection.UserID, grantContext.connection.AccountEmail, change)
+		return s.publishPersonalMailboxWebhookHintContext(ctx, grantContext.connection.CompanyID, grantContext.connection.UserID, grantContext.connection.AccountEmail, "", change)
 	}
 	s.applyNylasWebhookCacheInvalidationForAccountScope(grantContext.cacheScope, change)
 	if len(grantContext.sharedInboxIDs) == 0 {
@@ -387,63 +406,47 @@ func (s *Server) applyCommunicationsWebhookChange(ctx context.Context, grantCont
 		if sharedInboxID == "" {
 			continue
 		}
-		if err := s.publishSharedMailboxWebhookHintContext(ctx, grantContext.connection.CompanyID, sharedInboxID, change); err != nil {
+		if err := s.publishSharedMailboxWebhookHintContext(ctx, grantContext.connection.CompanyID, sharedInboxID, "", change); err != nil {
 			return fmt.Errorf("publish shared mailbox %s webhook hint: %w", sharedInboxID, err)
 		}
 	}
 	return nil
 }
 
-func (s *Server) publishPersonalMailboxWebhookHint(userID, accountEmail string, change nylasWebhookChange) error {
-	return s.publishPersonalMailboxWebhookHintContext(s.realtimeContext(), userID, accountEmail, change)
-}
-
-func (s *Server) publishPersonalMailboxWebhookHintContext(ctx context.Context, userID, accountEmail string, change nylasWebhookChange) error {
+func (s *Server) publishPersonalMailboxWebhookHintContext(ctx context.Context, companyID, userID, accountEmail, eventID string, change nylasWebhookChange) error {
+	companyID = strings.TrimSpace(companyID)
 	userID = strings.TrimSpace(userID)
 	accountEmail = normalizeEmailForCompare(accountEmail)
-	if userID == "" || !isRealtimeAccountEmail(accountEmail) {
+	if companyID == "" || userID == "" || !isRealtimeAccountEmail(accountEmail) {
 		return store.ErrInvalid
 	}
-	memberships, err := s.repo.ListUserMemberships(userID)
-	if err != nil {
-		return fmt.Errorf("load personal mailbox memberships: %w", err)
-	}
 	scope := realtimePersonalMailboxScope(userID, accountEmail)
-	publishedCompanies := map[string]struct{}{}
-	for _, membership := range memberships {
-		companyID := strings.TrimSpace(membership.CompanyID)
-		if companyID == "" {
-			continue
-		}
-		if _, published := publishedCompanies[companyID]; published {
-			continue
-		}
-		publishedCompanies[companyID] = struct{}{}
-		s.publishRealtimeMessageContext(ctx, companyID, scope, realtimeMailboxWebhookMessage(companyID, scope, "", change))
+	payload, eventType, err := realtimeMessagePayload(realtimeMailboxWebhookMessage(companyID, scope, "", change))
+	if err != nil {
+		return err
 	}
-	return nil
+	_, err = s.enqueueRealtimeOutboxAndWake(ctx, store.RealtimeOutboxInput{
+		EventID: eventID, CompanyID: companyID, Scope: scope, EventType: eventType, Payload: payload,
+	})
+	return err
 }
 
-func (s *Server) publishSharedMailboxWebhookHint(companyID, sharedInboxID string, change nylasWebhookChange) error {
-	return s.publishSharedMailboxWebhookHintContext(s.realtimeContext(), companyID, sharedInboxID, change)
-}
-
-func (s *Server) publishSharedMailboxWebhookHintContext(ctx context.Context, companyID, sharedInboxID string, change nylasWebhookChange) error {
+func (s *Server) publishSharedMailboxWebhookHintContext(ctx context.Context, companyID, sharedInboxID, eventID string, change nylasWebhookChange) error {
 	companyID = strings.TrimSpace(companyID)
 	sharedInboxID = strings.TrimSpace(sharedInboxID)
 	if companyID == "" || sharedInboxID == "" {
 		return store.ErrInvalid
 	}
 	scope := realtimeSharedMailboxScope(sharedInboxID)
-	_, err := s.publishRealtimeMessageToCurrentEntityAudienceResultContext(
-		ctx,
-		companyID,
-		scope,
-		store.EntityTypeSharedInbox,
-		sharedInboxID,
-		store.EntityPermissionEdit,
-		realtimeMailboxWebhookMessage(companyID, scope, sharedInboxID, change),
-	)
+	payload, eventType, err := realtimeMessagePayload(realtimeMailboxWebhookMessage(companyID, scope, sharedInboxID, change))
+	if err != nil {
+		return err
+	}
+	_, err = s.enqueueRealtimeOutboxAndWake(ctx, store.RealtimeOutboxInput{
+		EventID: eventID, CompanyID: companyID, Scope: scope, EventType: eventType,
+		ResourceType: store.EntityTypeSharedInbox, ResourceID: sharedInboxID,
+		Permission: store.EntityPermissionEdit, Payload: payload,
+	})
 	return err
 }
 
@@ -474,14 +477,13 @@ func realtimeMailboxWebhookMessage(companyID, scope, sharedInboxID string, chang
 	}
 }
 
-func (s *Server) communicationsSharedInboxIDsForCompanyEmailConnection(connection domain.CompanyEmailConnection) ([]string, error) {
+func (s *Server) communicationsSharedInboxIDsForCompanyEmailConnectionContext(ctx context.Context, connection domain.CompanyEmailConnection) ([]string, error) {
 	companyID := strings.TrimSpace(connection.CompanyID)
 	connectionID := strings.TrimSpace(connection.CompanyEmailConnectionID)
-	accountEmail := normalizeEmailForCompare(connection.AccountEmail)
 	if companyID == "" || connectionID == "" {
 		return nil, store.ErrInvalid
 	}
-	items, err := s.repo.ListCommunicationsSharedInboxFolders(companyID)
+	items, err := s.repo.ListCommunicationsSharedInboxFoldersContext(ctx, companyID)
 	if err != nil {
 		return nil, err
 	}
@@ -491,11 +493,7 @@ func (s *Server) communicationsSharedInboxIDsForCompanyEmailConnection(connectio
 		if store.CommunicationsSharedInboxResourceType(item) != store.EntityTypeSharedInbox {
 			continue
 		}
-		matchesConnection := strings.TrimSpace(item.CompanyEmailConnectionID) == connectionID
-		if !matchesConnection && accountEmail != "" && item.AccountEmail != nil {
-			matchesConnection = normalizeEmailForCompare(*item.AccountEmail) == accountEmail
-		}
-		if !matchesConnection {
+		if strings.TrimSpace(item.CompanyEmailConnectionID) != connectionID {
 			continue
 		}
 		sharedInboxID := firstNonBlank(item.SharedInboxID, item.FolderID)

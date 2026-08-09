@@ -21,7 +21,7 @@ func (s *Server) downloadEmailCollaborationAttachment(
 		writeError(w, http.StatusNotFound, "email_attachment_not_found")
 		return
 	}
-	thread, err := s.repo.GetCommunicationsEmailThread(collaboration.CompanyID, collaboration.EmailThreadID)
+	thread, err := s.repo.GetCommunicationsEmailThreadContext(r.Context(), collaboration.CompanyID, collaboration.EmailThreadID)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "email_attachment_not_found")
 		return

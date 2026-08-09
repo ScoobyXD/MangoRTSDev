@@ -45,6 +45,14 @@ module "platform" {
   backend_cpu                               = var.backend_cpu
   backend_memory                            = var.backend_memory
   backend_desired_count                     = var.backend_desired_count
+  email_sqs_enabled                         = var.email_sqs_enabled
+  email_worker_enabled                      = var.email_worker_enabled
+  email_sqs_database_migration_complete     = var.email_sqs_database_migration_complete
+  email_reconciliation_schedule_enabled     = var.email_reconciliation_schedule_enabled
+  email_worker_concurrency                  = var.email_worker_concurrency
+  email_worker_cpu                          = var.email_worker_cpu
+  email_worker_memory                       = var.email_worker_memory
+  email_worker_alarm_action_arns            = var.email_worker_alarm_action_arns
   realtime_valkey_enabled                   = var.realtime_valkey_enabled
   realtime_valkey_channel                   = var.realtime_valkey_channel
   realtime_valkey_major_engine_version      = var.realtime_valkey_major_engine_version

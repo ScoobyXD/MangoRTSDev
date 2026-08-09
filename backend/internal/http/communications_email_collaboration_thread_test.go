@@ -116,8 +116,8 @@ func ensureEmailCollaborationThreadTestCollaboration(t *testing.T, repo *store.M
 func newEmailCollaborationThreadTestServer(repo store.Repository, client NylasClient) *Server {
 	server := NewServerWithOptions(repo, ServerOptions{
 		NylasClient: client, NylasConfig: testNylasConfig(),
-		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true, DisableCommunicationsArchiveWorker: true,
-		DisableCommunicationsEmailThreadDownloadWorker: true,
+		EmailQueue:                     &recordingEmailQueueSender{},
+		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
 	})
 	server.nylasGate = newNylasRequestGate(0)
 	return server

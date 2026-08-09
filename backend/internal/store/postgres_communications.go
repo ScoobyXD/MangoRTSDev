@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -163,13 +164,12 @@ func (r *PostgresRepo) GetCompanyEmailConnectionByID(companyID, connectionID str
 	return companyEmailConnectionFromUserConnection(connection), err
 }
 
-func (r *PostgresRepo) GetCompanyEmailConnectionByGrantID(grantID string) (domain.CompanyEmailConnection, error) {
+func (r *PostgresRepo) GetCompanyEmailConnectionByGrantIDContext(ctx context.Context, grantID string) (domain.CompanyEmailConnection, error) {
 	grantID = strings.TrimSpace(grantID)
 	if grantID == "" {
 		return domain.CompanyEmailConnection{}, ErrInvalid
 	}
-
-	connection, err := scanPostgresEmailConnection(r.db.QueryRow(
+	connection, err := scanPostgresEmailConnection(r.db.QueryRowContext(ctx,
 		`select `+postgresEmailConnectionColumns+`
 		 from email_connections
 		 where grant_id = $1
@@ -181,13 +181,12 @@ func (r *PostgresRepo) GetCompanyEmailConnectionByGrantID(grantID string) (domai
 	return companyEmailConnectionFromUserConnection(connection), err
 }
 
-func (r *PostgresRepo) GetUserEmailConnectionByGrantID(grantID string) (domain.UserEmailConnection, error) {
+func (r *PostgresRepo) GetUserEmailConnectionByGrantIDContext(ctx context.Context, grantID string) (domain.UserEmailConnection, error) {
 	grantID = strings.TrimSpace(grantID)
 	if grantID == "" {
 		return domain.UserEmailConnection{}, ErrInvalid
 	}
-
-	connection, err := scanPostgresEmailConnection(r.db.QueryRow(
+	connection, err := scanPostgresEmailConnection(r.db.QueryRowContext(ctx,
 		`select `+postgresEmailConnectionColumns+`
 		 from email_connections
 		 where grant_id=$1 and connection_type='personal'`, grantID))
@@ -197,12 +196,12 @@ func (r *PostgresRepo) GetUserEmailConnectionByGrantID(grantID string) (domain.U
 	return connection, err
 }
 
-func (r *PostgresRepo) GetEmailConnectionByID(companyID, connectionID string) (domain.UserEmailConnection, error) {
+func (r *PostgresRepo) GetEmailConnectionByIDContext(ctx context.Context, companyID, connectionID string) (domain.UserEmailConnection, error) {
 	companyID, connectionID = cleanUUIDText(companyID), cleanUUIDText(connectionID)
 	if companyID == "" || connectionID == "" {
 		return domain.UserEmailConnection{}, ErrInvalid
 	}
-	connection, err := scanPostgresEmailConnection(r.db.QueryRow(
+	connection, err := scanPostgresEmailConnection(r.db.QueryRowContext(ctx,
 		`select `+postgresEmailConnectionColumns+`
 		 from email_connections
 		 where company_id=$1::uuid and email_connection_id=$2::uuid`,
@@ -213,10 +212,18 @@ func (r *PostgresRepo) GetEmailConnectionByID(companyID, connectionID string) (d
 	return connection, err
 }
 
-func (r *PostgresRepo) ListConnectedEmailConnections() ([]domain.UserEmailConnection, error) {
-	rows, err := r.db.Query(`select ` + postgresEmailConnectionColumns + `
-		from email_connections where status='connected'
-		order by last_successful_scan_at,email_connection_id`)
+func (r *PostgresRepo) ListDueEmailConnectionsContext(ctx context.Context, cutoff time.Time, afterConnectionID string, limit int) ([]domain.UserEmailConnection, error) {
+	afterConnectionID = cleanUUIDText(afterConnectionID)
+	if cutoff.IsZero() || limit <= 0 || limit > 100 {
+		return nil, ErrInvalid
+	}
+	rows, err := r.db.QueryContext(ctx, `select `+postgresEmailConnectionColumns+`
+		from email_connections
+		where status='connected'
+		  and last_successful_scan_at < $1
+		  and ($2='' or email_connection_id > $2::uuid)
+		order by email_connection_id
+		limit $3`, cutoff.UTC(), afterConnectionID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -310,11 +317,6 @@ func (r *PostgresRepo) UpsertUserEmailConnection(input UserEmailConnectionInput)
 		   updated_timestamp = now()
 		 returning `+postgresEmailConnectionColumns,
 		newUUIDv7String(), companyID, userID, provider, accountEmail, grantID, status))
-	if err == nil && status == "connected" {
-		_, err = r.db.Exec(`update email_ingestion_jobs set available_at=now(),updated_timestamp=now()
-where company_id=$1::uuid and email_connection_id=$2::uuid
-  and status in ('pending','retry')`, connection.CompanyID, connection.EmailConnectionID)
-	}
 	return connection, err
 }
 
@@ -390,11 +392,6 @@ func (r *PostgresRepo) UpsertCompanyEmailConnection(input CompanyEmailConnection
 		status,
 		connectedByUserID,
 	))
-	if err == nil && status == "connected" {
-		_, err = r.db.Exec(`update email_ingestion_jobs set available_at=now(),updated_timestamp=now()
-where company_id=$1::uuid and email_connection_id=$2::uuid
-  and status in ('pending','retry')`, connection.CompanyID, connection.EmailConnectionID)
-	}
 	return companyEmailConnectionFromUserConnection(connection), err
 }
 
@@ -421,10 +418,25 @@ func (r *PostgresRepo) UpdateCompanyEmailConnectionStatus(companyID, connectionI
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.CompanyEmailConnection{}, ErrNotFound
 	}
-	if err == nil && status == "connected" {
-		_, err = r.db.Exec(`update email_ingestion_jobs set available_at=now(),updated_timestamp=now()
-where company_id=$1::uuid and email_connection_id=$2::uuid
-  and status in ('pending','retry')`, connection.CompanyID, connection.EmailConnectionID)
+	return companyEmailConnectionFromUserConnection(connection), err
+}
+
+func (r *PostgresRepo) UpdateCompanyEmailConnectionStatusContext(ctx context.Context, companyID, connectionID, status string) (domain.CompanyEmailConnection, error) {
+	companyID = strings.TrimSpace(companyID)
+	connectionID = cleanUUIDText(connectionID)
+	status = normalizeEmailConnectionStatus(status)
+	if companyID == "" || connectionID == "" || status == "" {
+		return domain.CompanyEmailConnection{}, ErrInvalid
+	}
+	connection, err := scanPostgresEmailConnection(r.db.QueryRowContext(ctx,
+		`update email_connections
+		 set status = $3, updated_timestamp = now()
+		 where company_id = $1::uuid and connection_type='shared' and email_connection_id = $2::uuid
+		 returning `+postgresEmailConnectionColumns,
+		companyID, connectionID, status,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.CompanyEmailConnection{}, ErrNotFound
 	}
 	return companyEmailConnectionFromUserConnection(connection), err
 }
@@ -452,10 +464,25 @@ func (r *PostgresRepo) UpdateUserEmailConnectionStatus(userID, accountEmail, sta
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.UserEmailConnection{}, ErrNotFound
 	}
-	if err == nil && status == "connected" {
-		_, err = r.db.Exec(`update email_ingestion_jobs set available_at=now(),updated_timestamp=now()
-where company_id=$1::uuid and email_connection_id=$2::uuid
-  and status in ('pending','retry')`, connection.CompanyID, connection.EmailConnectionID)
+	return connection, err
+}
+
+func (r *PostgresRepo) UpdateUserEmailConnectionStatusContext(ctx context.Context, userID, accountEmail, status string) (domain.UserEmailConnection, error) {
+	userID = strings.TrimSpace(userID)
+	accountEmail = normalizeEmail(accountEmail)
+	status = normalizeEmailConnectionStatus(status)
+	if userID == "" || accountEmail == "" || status == "" {
+		return domain.UserEmailConnection{}, ErrInvalid
+	}
+	connection, err := scanPostgresEmailConnection(r.db.QueryRowContext(ctx,
+		`update email_connections
+		 set status = $2, updated_timestamp = now()
+		 where connection_type='personal' and personal_user_id = $1::uuid and account_email = $3
+		 returning `+postgresEmailConnectionColumns,
+		userID, status, accountEmail,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.UserEmailConnection{}, ErrNotFound
 	}
 	return connection, err
 }
@@ -488,12 +515,12 @@ func (r *PostgresRepo) DeleteUserEmailConnection(userID string) error {
 	return nil
 }
 
-func (r *PostgresRepo) UpdateEmailConnectionScanCheckpoint(companyID, connectionID string, checkpoint time.Time) error {
+func (r *PostgresRepo) UpdateEmailConnectionScanCheckpointContext(ctx context.Context, companyID, connectionID string, checkpoint time.Time) error {
 	companyID, connectionID = cleanUUIDText(companyID), cleanUUIDText(connectionID)
 	if companyID == "" || connectionID == "" || checkpoint.IsZero() {
 		return ErrInvalid
 	}
-	result, err := r.db.Exec(`update email_connections
+	result, err := r.db.ExecContext(ctx, `update email_connections
 		set last_successful_scan_at=greatest(last_successful_scan_at,$3),updated_timestamp=now()
 		where company_id=$1::uuid and email_connection_id=$2::uuid and status='connected'`,
 		companyID, connectionID, checkpoint.UTC())
@@ -510,7 +537,32 @@ func (r *PostgresRepo) UpdateEmailConnectionScanCheckpoint(companyID, connection
 	return nil
 }
 
-func (r *PostgresRepo) UpsertCommunicationsMessageReadStatus(input CommunicationsMessageReadStatusInput) (domain.CommunicationsMessageReadStatus, error) {
+func (r *PostgresRepo) UpdateEmailConnectionStatusByIDContext(ctx context.Context, companyID, connectionID, status string) error {
+	companyID, connectionID = cleanUUIDText(companyID), cleanUUIDText(connectionID)
+	status = normalizeEmailConnectionStatus(status)
+	if companyID == "" || connectionID == "" || status == "" {
+		return ErrInvalid
+	}
+	result, err := r.db.ExecContext(ctx, `update email_connections set status=$3,updated_timestamp=now()
+		where company_id=$1::uuid and email_connection_id=$2::uuid`, companyID, connectionID, status)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *PostgresRepo) UpsertCommunicationsMessageReadStatusContext(ctx context.Context, input CommunicationsMessageReadStatusInput) (domain.CommunicationsMessageReadStatus, error) {
+	return r.upsertCommunicationsMessageReadStatusContext(ctx, input)
+}
+
+func (r *PostgresRepo) upsertCommunicationsMessageReadStatusContext(ctx context.Context, input CommunicationsMessageReadStatusInput) (domain.CommunicationsMessageReadStatus, error) {
 	scope, ok := communicationsMessageReadStatusScope(input.ScopeType, input.UserID, input.PersonalAccountEmail, input.CompanyID, input.CompanyEmailConnectionID, input.SharedInboxID)
 	if !ok {
 		return domain.CommunicationsMessageReadStatus{}, ErrInvalid
@@ -534,12 +586,12 @@ func (r *PostgresRepo) UpsertCommunicationsMessageReadStatus(input Communication
 		initialCount = 1
 	}
 	signalTimestamps := normalizeCommunicationsMessageReadSignalTimestamps(signalAt, input.SignalTimestamps)
-	tx, err := r.db.Begin()
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.CommunicationsMessageReadStatus{}, err
 	}
 
-	result, err := scanCommunicationsMessageReadReceiptSummary(tx.QueryRow(`
+	result, err := scanCommunicationsMessageReadReceiptSummary(tx.QueryRowContext(ctx, `
 insert into communications_message_read_receipt_summaries (
   receipt_scope_type,
   receipt_scope_id,
@@ -592,7 +644,7 @@ returning receipt_scope_type, receipt_scope_id, coalesce(user_id::text, ''), coa
 		return domain.CommunicationsMessageReadStatus{}, err
 	}
 	for _, timestamp := range signalTimestamps {
-		if _, err := tx.Exec(`
+		if _, err := tx.ExecContext(ctx, `
 insert into communications_message_read_receipt_signals (receipt_scope_type, receipt_scope_id, message_id, signal_timestamp)
 values ($1, $2, $3, $4)
 on conflict do nothing`, scope.ScopeType, scope.ScopeID, messageID, timestamp); err != nil {
@@ -600,7 +652,7 @@ on conflict do nothing`, scope.ScopeType, scope.ScopeID, messageID, timestamp); 
 			return domain.CommunicationsMessageReadStatus{}, err
 		}
 	}
-	signalRows, err := tx.Query(`
+	signalRows, err := tx.QueryContext(ctx, `
 select signal_timestamp
 from communications_message_read_receipt_signals
 where receipt_scope_type = $1 and receipt_scope_id = $2 and message_id = $3

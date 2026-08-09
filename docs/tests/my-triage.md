@@ -1,3 +1,29 @@
+# Process Story: My Triage conversion queues durable email completion
+
+A user converts or links one exact personal-account provider message through the established typed Node, Logic Gate, or Project command
+↓
+The workspace/email relationship transaction commits and creates or finds the permanent connection/provider-message ingestion identity
+↓
+The API sends that compact identity to SQS using the exact permanent email connection FIFO group
+↓
+The command reports queue failure as retryable instead of starting provider work in the request or restoring a database worker poller
+↓
+The private worker completes missing thread/files later; a duplicate conversion or queue delivery reuses the same identity and cannot duplicate provider work
+
+Last updated: 2026-08-09
+
+# Process Story: My Triage archive completion stays canonical
+
+The browser submits one frozen page and receives a durable archive job identity only after every exact item is accepted by SQS
+↓
+The private worker handles one exact provider message per delivery with no database claimant or reclaim timer
+↓
+PostgreSQL records the token-fenced item result while SQS owns redelivery and DLQ movement
+↓
+The browser observes success or failure from canonical archive-job reads; no communications WebSocket completion event is sent
+
+Last updated: 2026-08-09
+
 # Process Story: My Triage references or links an email without losing its place
 
 Jonat opens a personal email. A row already associated with a Node opens the right chat column; an unassociated row does not auto-open chat. The toolbar keeps a separate Node-plus button for an immediate floating Node and a `## Ready!` launcher for the shared universal picker. The picker starts in link mode; Backspace on its empty search changes to `#` reference, pressing `#` changes back to link, and clicking anywhere outside the popup dismisses it. Reference opens a resource without changing the email. Link reuses an exact existing Node or creates an email Node in the chosen Logic Gate/Project through the existing typed commands. Floating-Node success first shows a compact elevated green notice immediately left of its button, then publishes the Node indicator; opening that indicator opens the Node normally without the Updates-only yellow flash.
@@ -65,9 +91,9 @@ MT47 - Local mail commands patch the affected visible or selected message from t
 MT48 - Personal scope `mailbox:personal:account:<user_id>:<normalized_account_email>` requires that exact authenticated user/account relationship. Multiple personal accounts cannot wake one another, the removed `mailbox:personal:user:<user_id>` shape is invalid, and broad communications scopes are unsupported.
 MT49 - A local triage conversion applies the committed response once and does not use a full message-list reload as the default reconciliation path.
 MT50 - A background archive response may return Accepted only after the backend has written a durable archive job and job-item rows for the accepted message IDs.
-MT51 - Accepted archive job items must survive API process restart and be claimable by a backend worker until each item reaches archived or failed.
-MT52 - The backend archive worker must claim pending or retryable job items with a processing lease so concurrent workers do not mutate the same active item at the same time.
-MT53 - Retryable archive failures such as provider rate limits or transient provider errors must be recorded with attempt count, last error, and next available time instead of being dropped from memory.
+MT51 - Accepted archive job items survive API process restart because each permanent exact-message marker has one compact SQS delivery identity until it reaches archived, failed, or the work DLQ.
+MT52 - The private worker handles one exact archive item per SQS message, atomically starts its token-fenced provider attempt, and never claims/reclaims a PostgreSQL batch or uses a database delivery lease/timer. The permanent email connection ID is the FIFO group.
+MT53 - Retryable archive failures such as provider rate limits or transient provider errors record the safe attempt/error result and leave the SQS message undeleted. Fixed visibility, receive count, redelivery, and DLQ movement belong only to AWS; PostgreSQL has no `available_at` retry scheduler.
 MT54 - Final archive failures and successful archive completions are recorded durably on job items and exposed by canonical archive-job reads; they do not publish communications WebSocket events.
 MT55 - Duplicate active archive submissions for the same actor, mailbox scope, account, and message must not create duplicate active job items or duplicate provider archive attempts.
 MT56 - My Triage archive jobs must use the actor's personal email connection, while Shared Triage archive jobs must preserve company/shared-inbox scope and use the shared mailbox connection that was authorized at acceptance time.
@@ -146,7 +172,7 @@ MT113 - Advance directly consumes the exact personal mailbox/filter/page-token p
 MT114 - Initial next-page prefetch and provider mark-read yield foreground priority to the selected detail request while preserving immediate optimistic unread UI.
 MT115 - Clicking a different personal thread replaces prior thread state immediately; stale results cannot reinsert old cards.
 MT116 - Personal thread history uses bounded preview pages and lazy per-card body/attachment hydration. Collapsed cards perform no attachment-content reads, while Expand all intentionally hydrates all cards.
-MT117 - First personal-account subscription acceptance and reconnect acceptance invalidate reusable exact-account cache state but start zero provider reads and never replace the visible list. Signed external `message.created`, `message.updated` (including moves), `message.deleted`, and folder hints use one active/one-queued-final coordinator only for folder metadata and directly identified selected detail; burst signals never overlap those reads. Matching local mutation echoes are consumed before invalidation. Equivalent resource-object replacement retains the same subscription and produces no acceptance/provider read.
+MT117 - First personal-account subscription acceptance and reconnect acceptance invalidate reusable exact-account cache state but start zero provider reads and never replace the visible list. A raw external `message.created` webhook publishes nothing before ingestion; the worker's deterministic post-ingestion hint and true already-stored `message.updated` (including moves), `message.deleted`, and folder hints use one active/one-queued-final coordinator only for folder metadata and directly identified selected detail. Burst signals never overlap those reads. Matching local mutation echoes are consumed before invalidation. Equivalent resource-object replacement retains the same subscription and produces no acceptance/provider read.
 MT118 - A personal mailbox hint received while another Home view/account is selected performs no provider GET. Navigation cancels/discards timers and pending work captured for the old exact request key, and opening the intended account performs its canonical load; Account A never invalidates or refreshes Account B. A hint that matched selected message/thread A is also discarded for detail purposes if selection B is active when its debounce or queued-final turn executes.
 MT119 - Selecting an unread personal email by pointer, Enter, or Space immediately removes its unread dot/frame, updates the selected card and unread counter, and persists read state through the scoped provider command. Stale list/detail refreshes cannot resurrect unread while that command is authoritative; failure rolls the row/counter back, invalidates detail cache, and surfaces the established error.
 MT120 - Selecting away from a successfully read personal message never marks it unread. A later provider or realtime refresh preserves the committed read state.
@@ -202,6 +228,8 @@ MT162 - Attaching an email or thread to a Node changes collaboration metadata an
 MT163 - Standalone collaboration snapshots are forbidden in My Triage, including when a participant cannot access or navigate the immutable source mailbox. That participant retains Node/chat and stored-thread access through the Node and collaboration surfaces, but the mention never manufactures an email-list row. Automated coverage must prove matching-row annotation, missing-row suppression after archive and refresh, thread matching, exact-account isolation, and foreign-source suppression.
 
 MT164 - My Triage universal-picker reference and link popups own one transparent outside-click dismiss layer: a pointer press anywhere outside the elevated popup closes it without selecting a resource or writing a relationship. Floating-Node success renders a compact elevated green status immediately left of the Node-plus button before the mailbox/reply Node indicator is published; the indicator follows after 450 milliseconds while the notice remains briefly visible. Failure publishes neither a success notice nor a false indicator. Activating a mail Node indicator opens the Node without an information-focus request or transient yellow flash; that yellow target flash is reserved for Updates-row activation.
+
+MT165 - A My Triage conversion or selected-message import commits its typed business relationship and creates/finds the permanent ingestion identity before sending the compact job to SQS under the exact permanent personal email connection group. SQS failure is retryable and never starts an in-request provider download or a database polling fallback. Duplicate commands and deliveries reuse the same identity.
 
 ## Scenarios
 
@@ -402,7 +430,7 @@ Expected:
 - First acceptance and reconnect acceptance only mark reusable exact-account cache state stale and perform zero provider reads; a signed external message/folder webhook may coalesce metadata or directly affected detail without polling or list replacement.
 - Clicking an email row, focusing the email body, and clicking back into the list do not reload, blank, or replace the message list.
 - Browser focus and visibility changes do not force a message-list refresh.
-- Relevant external `message.created`, `message.updated` (including moves), and `message.deleted` hints invalidate future list reads and reconcile folder metadata; directly affected selected detail may reload, while the open list and unrelated detail remain untouched.
+- A raw `message.created` webhook enqueues ingestion without a hint. The worker's deterministic post-commit hint and true already-stored `message.updated` (including moves) or `message.deleted` hints invalidate future list reads and reconcile folder metadata; directly affected selected detail may reload, while the open list and unrelated detail remain untouched.
 - Mail hinted while another view/account is active issues no provider GET and appears on the intended account's next canonical open. Local committed commands still patch affected visible or selected rows.
 - Local conversion from the user's own email-to-Logic-Gate drop keeps source rows in place and patches Logic Gate icon state from the committed result without clearing caches, reusing stale prefetched pages, post-removal prefetching, repeated mail GETs, workspace panel GET bursts, or visible list blanking.
 - The backend sets converted source emails to unstarred after successful conversion, the response includes successfully updated IDs in `unstarred_message_ids`, and the visible Home list reconciles locally without loading replacement Starred rows.

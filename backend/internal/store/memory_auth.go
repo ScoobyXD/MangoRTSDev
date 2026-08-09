@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"miraeopus/backend/internal/domain"
 	"slices"
 	"strings"
@@ -77,6 +78,13 @@ func (r *MemoryRepo) GetAuthUserByEmail(email string) (domain.User, error) {
 }
 
 func (r *MemoryRepo) ListUserMemberships(userID string) ([]domain.CompanyMembership, error) {
+	return r.ListUserMembershipsContext(context.Background(), userID)
+}
+
+func (r *MemoryRepo) ListUserMembershipsContext(ctx context.Context, userID string) ([]domain.CompanyMembership, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, ErrInvalid

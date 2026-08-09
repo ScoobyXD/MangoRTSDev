@@ -165,9 +165,12 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 	result.UnstarredMessageIDs = s.unstarConvertedCommunicationsMessages(r.Context(), connection, sourceMessagesByID, conversionInput.MessageIDs)
 	s.publishCommittedWorkspaceEvents(result.Events)
 	for _, emailThreadID := range result.EmailThreadIDs {
-		_ = s.linkStoredEmailThreadAttachments(conversionInput.CompanyID, emailThreadID, actor.User.UserID)
+		_ = s.linkStoredEmailThreadAttachments(r.Context(), conversionInput.CompanyID, emailThreadID, actor.User.UserID)
 	}
-	s.wakeCommunicationsEmailThreadDownloadWorker()
+	if err := s.enqueueCommunicationsEmailThreadJobs(r.Context(), conversionInput.CompanyID, result.EmailThreadIDs); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "failed_to_queue_email_ingestion")
+		return
+	}
 	writeJSON(w, http.StatusCreated, result)
 }
 

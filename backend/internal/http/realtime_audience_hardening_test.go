@@ -137,7 +137,7 @@ func TestSharedMailboxPublicationAcknowledgesDurableEnqueueBeforeAudienceRetry(t
 	scope := realtimeSharedMailboxScope(sharedInboxID)
 	subscribeRecordingRealtimeConnection(t, server, "shared-audience-error", companyID, "44444444-4444-4444-8444-444444444444", scope)
 
-	err := server.publishSharedMailboxWebhookHint(companyID, sharedInboxID, nylasWebhookChange{
+	err := server.publishSharedMailboxWebhookHintContext(context.Background(), companyID, sharedInboxID, "", nylasWebhookChange{
 		Trigger:   "message.created",
 		MessageID: "message-1",
 	})
@@ -150,7 +150,7 @@ func TestSharedMailboxPublicationAcknowledgesDurableEnqueueBeforeAudienceRetry(t
 	}
 
 	server.realtimeRegistry.removeConnection("shared-audience-error")
-	if err := server.publishSharedMailboxWebhookHint(companyID, sharedInboxID, nylasWebhookChange{
+	if err := server.publishSharedMailboxWebhookHintContext(context.Background(), companyID, sharedInboxID, "", nylasWebhookChange{
 		Trigger:   "message.created",
 		MessageID: "message-2",
 	}); err != nil {

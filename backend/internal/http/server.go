@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"miraeopus/backend/internal/auth"
+	"miraeopus/backend/internal/emailqueue"
 	"miraeopus/backend/internal/modules/kanban"
 	"miraeopus/backend/internal/notifications"
 	"miraeopus/backend/internal/realtime"
@@ -38,125 +39,111 @@ type BootstrapDevAdminConfig struct {
 }
 
 type Server struct {
-	repo                                                store.Repository
-	realtimeRegistry                                    *realtimeSubscriptionRegistry
-	realtimeTickets                                     *realtimeTicketStore
-	realtimeBackplane                                   realtime.Backplane
-	realtimeSpineContext                                context.Context
-	realtimeSpineCancel                                 context.CancelFunc
-	realtimeSpineWake                                   chan struct{}
-	realtimeSpineRecovery                               chan struct{}
-	realtimeSpineInbound                                chan []byte
-	realtimeSpineSafetyInterval                         time.Duration
-	realtimeSpineStorageTimeout                         time.Duration
-	realtimeSpineClaimLease                             time.Duration
-	realtimeSpineDisabled                               bool
-	realtimeSpineReady                                  atomic.Bool
-	realtimeSpineMu                                     sync.Mutex
-	realtimeSpinePublishMu                              sync.Mutex
-	realtimeSpinePublishRetryAttempts                   int
-	realtimeSpinePublishRetryAt                         time.Time
-	realtimeSpinePublishRetryTimer                      *time.Timer
-	realtimeSpinePublishRetryGeneration                 uint64
-	realtimeSpinePublishLeaseRetryPending               bool
-	realtimeSpineCursor                                 int64
-	realtimeSpinePending                                map[int64]store.RealtimeOutboxEvent
-	realtimeSpineDedupe                                 *realtimeEventDeduper
-	realtimeSpineRetrySequence                          int64
-	realtimeSpineRetryAttempts                          int
-	realtimeSpineRetryAt                                time.Time
-	realtimeSpineRetryTimer                             *time.Timer
-	realtimeSpineRetryGeneration                        uint64
-	realtimeSpineRecoveryRetryAttempts                  int
-	realtimeSpineRecoveryRetryAt                        time.Time
-	realtimeSpineRecoveryRetryTimer                     *time.Timer
-	realtimeSpineRecoveryRetryGeneration                uint64
-	notifications                                       *notifications.Service
-	kanban                                              *kanban.Service
-	workspaceDerivedCatchupCancel                       context.CancelFunc
-	workspaceDerivedCatchupInterval                     time.Duration
-	workspaceDerivedCatchupLimit                        int
-	notificationCleanupCancel                           context.CancelFunc
-	notificationCleanupInterval                         time.Duration
-	notificationRetentionDuration                       time.Duration
-	notificationCleanupLimit                            int
-	notificationCleanupDisabled                         bool
-	communicationsArchiveWorkerCancel                   context.CancelFunc
-	communicationsArchiveWorkerWake                     chan struct{}
-	communicationsArchiveWorkerInterval                 time.Duration
-	communicationsArchiveWorkerBatchLimit               int
-	communicationsArchiveWorkerLeaseTimeout             time.Duration
-	communicationsArchiveWorkerDisabled                 bool
-	metrics                                             MetricsRecorder
-	communicationsEmailThreadDownloadWorkerCancel       context.CancelFunc
-	communicationsEmailThreadDownloadWorkerWake         chan struct{}
-	communicationsEmailConnectionScannerWake            chan struct{}
-	communicationsEmailThreadDownloadWorkerInterval     time.Duration
-	communicationsEmailThreadDownloadWorkerBatchLimit   int
-	communicationsEmailThreadDownloadWorkerLeaseTimeout time.Duration
-	communicationsEmailThreadDownloadWorkerDisabled     bool
-	commCache                                           *communicationsCache
-	communicationsFolderFlights                         singleflight.Group
-	communicationsMessageFlights                        singleflight.Group
-	communicationsMessagePageFlights                    singleflight.Group
-	nylasGate                                           *nylasRequestGate
-	nylasWebhooks                                       *nylasWebhookReceiptCache
-	authValidator                                       AuthTokenValidator
-	testAuthHeaderEnabled                               bool
-	authCache                                           *authMembershipCache
-	cognitoAdmin                                        CognitoAdminClient
-	emailSender                                         AuthEmailSender
-	appBaseURL                                          string
-	bootstrapDevAdmin                                   BootstrapDevAdminConfig
-	nylasClient                                         NylasClient
-	nylasConfig                                         NylasConfig
-	attachmentStorage                                   AttachmentObjectStorage
-	attachmentVariantEnsurer                            AttachmentImageVariantEnsurer
-	attachmentRemoteImageDownloader                     attachmentRemoteImageDownloader
-	attachmentDirectUpload                              attachmentDirectUploadConfig
-	attachmentUploadCleanupCancel                       context.CancelFunc
-	attachmentUploadCleanupDisabled                     bool
-	attachmentDeletionCleanupCancel                     context.CancelFunc
-	attachmentDeletionCleanupWake                       chan struct{}
-	maxBodyBytes                                        int64
+	repo                                   store.Repository
+	realtimeRegistry                       *realtimeSubscriptionRegistry
+	realtimeTickets                        *realtimeTicketStore
+	realtimeBackplane                      realtime.Backplane
+	realtimeSpineContext                   context.Context
+	realtimeSpineCancel                    context.CancelFunc
+	realtimeSpineWake                      chan struct{}
+	realtimeSpineRecovery                  chan struct{}
+	realtimeSpineInbound                   chan []byte
+	realtimeSpineSafetyInterval            time.Duration
+	realtimeSpineStorageTimeout            time.Duration
+	realtimeSpineClaimLease                time.Duration
+	realtimeSpineDisabled                  bool
+	realtimeSpineReady                     atomic.Bool
+	realtimeSpineMu                        sync.Mutex
+	realtimeSpinePublishMu                 sync.Mutex
+	realtimeSpinePublishRetryAttempts      int
+	realtimeSpinePublishRetryAt            time.Time
+	realtimeSpinePublishRetryTimer         *time.Timer
+	realtimeSpinePublishRetryGeneration    uint64
+	realtimeSpinePublishLeaseRetryPending  bool
+	realtimeSpineCursor                    int64
+	realtimeSpinePending                   map[int64]store.RealtimeOutboxEvent
+	realtimeSpineDedupe                    *realtimeEventDeduper
+	realtimeSpineInitialBackplaneReady     chan struct{}
+	realtimeSpineInitialBackplaneReadyOnce sync.Once
+	realtimeSpineRetrySequence             int64
+	realtimeSpineRetryAttempts             int
+	realtimeSpineRetryAt                   time.Time
+	realtimeSpineRetryTimer                *time.Timer
+	realtimeSpineRetryGeneration           uint64
+	realtimeSpineRecoveryRetryAttempts     int
+	realtimeSpineRecoveryRetryAt           time.Time
+	realtimeSpineRecoveryRetryTimer        *time.Timer
+	realtimeSpineRecoveryRetryGeneration   uint64
+	notifications                          *notifications.Service
+	kanban                                 *kanban.Service
+	workspaceDerivedCatchupCancel          context.CancelFunc
+	workspaceDerivedCatchupInterval        time.Duration
+	workspaceDerivedCatchupLimit           int
+	notificationCleanupCancel              context.CancelFunc
+	notificationCleanupInterval            time.Duration
+	notificationRetentionDuration          time.Duration
+	notificationCleanupLimit               int
+	notificationCleanupDisabled            bool
+	metrics                                MetricsRecorder
+	commCache                              *communicationsCache
+	communicationsFolderFlights            singleflight.Group
+	communicationsMessageFlights           singleflight.Group
+	communicationsMessagePageFlights       singleflight.Group
+	nylasGate                              *nylasRequestGate
+	nylasWebhooks                          *nylasWebhookReceiptCache
+	authValidator                          AuthTokenValidator
+	testAuthHeaderEnabled                  bool
+	authCache                              *authMembershipCache
+	cognitoAdmin                           CognitoAdminClient
+	emailSender                            AuthEmailSender
+	emailQueue                             emailqueue.Sender
+	emailWorkerExternalRealtime            bool
+	appBaseURL                             string
+	bootstrapDevAdmin                      BootstrapDevAdminConfig
+	nylasClient                            NylasClient
+	nylasConfig                            NylasConfig
+	attachmentStorage                      AttachmentObjectStorage
+	attachmentVariantEnsurer               AttachmentImageVariantEnsurer
+	attachmentRemoteImageDownloader        attachmentRemoteImageDownloader
+	attachmentDirectUpload                 attachmentDirectUploadConfig
+	attachmentUploadCleanupCancel          context.CancelFunc
+	attachmentUploadCleanupDisabled        bool
+	attachmentDeletionCleanupCancel        context.CancelFunc
+	attachmentDeletionCleanupWake          chan struct{}
+	maxBodyBytes                           int64
 }
 
 type ServerOptions struct {
-	DisableAttachmentUploadCleanup                      bool
-	AuthValidator                                       AuthTokenValidator
-	TestAuthHeaderEnabled                               bool
-	AuthMembershipCacheTTL                              time.Duration
-	AuthMembershipCacheMaxEntries                       int
-	CognitoAdmin                                        CognitoAdminClient
-	EmailSender                                         AuthEmailSender
-	AppBaseURL                                          string
-	BootstrapDevAdmin                                   BootstrapDevAdminConfig
-	NylasClient                                         NylasClient
-	NylasConfig                                         NylasConfig
-	AttachmentStorage                                   AttachmentObjectStorage
-	AttachmentVariantEnsurer                            AttachmentImageVariantEnsurer
-	RealtimeTicketSecret                                string
-	RealtimeBackplane                                   realtime.Backplane
-	RealtimeSpineSafetyInterval                         time.Duration
-	RealtimeSpineStorageTimeout                         time.Duration
-	RealtimeSpineClaimLease                             time.Duration
-	DisableRealtimeSpine                                bool
-	MaxRequestBodyBytes                                 int64
-	WorkspaceDerivedCatchupInterval                     time.Duration
-	WorkspaceDerivedCatchupLimit                        int
-	NotificationCleanupInterval                         time.Duration
-	NotificationRetentionDuration                       time.Duration
-	NotificationCleanupLimit                            int
-	DisableNotificationCleanup                          bool
-	CommunicationsArchiveWorkerInterval                 time.Duration
-	CommunicationsArchiveWorkerBatchLimit               int
-	CommunicationsArchiveWorkerLeaseTimeout             time.Duration
-	DisableCommunicationsArchiveWorker                  bool
-	Metrics                                             MetricsRecorder
-	CommunicationsEmailThreadDownloadWorkerInterval     time.Duration
-	CommunicationsEmailThreadDownloadWorkerBatchLimit   int
-	CommunicationsEmailThreadDownloadWorkerLeaseTimeout time.Duration
-	DisableCommunicationsEmailThreadDownloadWorker      bool
+	DisableAttachmentUploadCleanup  bool
+	AuthValidator                   AuthTokenValidator
+	TestAuthHeaderEnabled           bool
+	AuthMembershipCacheTTL          time.Duration
+	AuthMembershipCacheMaxEntries   int
+	CognitoAdmin                    CognitoAdminClient
+	EmailSender                     AuthEmailSender
+	EmailQueue                      emailqueue.Sender
+	EmailWorkerOnly                 bool
+	EmailWorkerExternalRealtime     bool
+	AppBaseURL                      string
+	BootstrapDevAdmin               BootstrapDevAdminConfig
+	NylasClient                     NylasClient
+	NylasConfig                     NylasConfig
+	AttachmentStorage               AttachmentObjectStorage
+	AttachmentVariantEnsurer        AttachmentImageVariantEnsurer
+	RealtimeTicketSecret            string
+	RealtimeBackplane               realtime.Backplane
+	RealtimeSpineSafetyInterval     time.Duration
+	RealtimeSpineStorageTimeout     time.Duration
+	RealtimeSpineClaimLease         time.Duration
+	DisableRealtimeSpine            bool
+	MaxRequestBodyBytes             int64
+	WorkspaceDerivedCatchupInterval time.Duration
+	WorkspaceDerivedCatchupLimit    int
+	NotificationCleanupInterval     time.Duration
+	NotificationRetentionDuration   time.Duration
+	NotificationCleanupLimit        int
+	DisableNotificationCleanup      bool
+	Metrics                         MetricsRecorder
 }
 
 func NewServer(repo store.Repository) *Server {
@@ -195,24 +182,6 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 	}
 	notificationRetentionDuration := store.NormalizeNotificationRetentionDuration(options.NotificationRetentionDuration)
 	notificationCleanupLimit := store.NormalizeNotificationCleanupLimit(options.NotificationCleanupLimit)
-	communicationsArchiveWorkerInterval := options.CommunicationsArchiveWorkerInterval
-	if communicationsArchiveWorkerInterval <= 0 {
-		communicationsArchiveWorkerInterval = defaultCommunicationsArchiveWorkerInterval
-	}
-	communicationsArchiveWorkerBatchLimit := options.CommunicationsArchiveWorkerBatchLimit
-	if communicationsArchiveWorkerBatchLimit <= 0 {
-		communicationsArchiveWorkerBatchLimit = defaultCommunicationsArchiveWorkerBatchLimit
-	}
-	communicationsArchiveWorkerLeaseTimeout := store.NormalizeCommunicationsArchiveJobProcessingLeaseTimeout(options.CommunicationsArchiveWorkerLeaseTimeout)
-	communicationsEmailThreadDownloadWorkerInterval := options.CommunicationsEmailThreadDownloadWorkerInterval
-	if communicationsEmailThreadDownloadWorkerInterval <= 0 {
-		communicationsEmailThreadDownloadWorkerInterval = defaultCommunicationsEmailThreadDownloadWorkerInterval
-	}
-	communicationsEmailThreadDownloadWorkerBatchLimit := options.CommunicationsEmailThreadDownloadWorkerBatchLimit
-	if communicationsEmailThreadDownloadWorkerBatchLimit <= 0 {
-		communicationsEmailThreadDownloadWorkerBatchLimit = defaultCommunicationsEmailThreadDownloadBatchLimit
-	}
-	communicationsEmailThreadDownloadWorkerLeaseTimeout := store.NormalizeCommunicationsEmailThreadDownloadLease(options.CommunicationsEmailThreadDownloadWorkerLeaseTimeout)
 	workspaceDerivedCatchupInterval := options.WorkspaceDerivedCatchupInterval
 	if workspaceDerivedCatchupInterval <= 0 {
 		workspaceDerivedCatchupInterval = workspaceDerivedDomainEventCatchupInterval
@@ -230,71 +199,63 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		realtimeTicketSecret = strings.TrimSpace(options.NylasConfig.StateSecret)
 	}
 	server := &Server{
-		repo:                                                repo,
-		realtimeRegistry:                                    newRealtimeSubscriptionRegistry(),
-		realtimeTickets:                                     newRealtimeTicketStore(realtimeTicketSecret),
-		realtimeBackplane:                                   options.RealtimeBackplane,
-		realtimeSpineContext:                                realtimeSpineContext,
-		realtimeSpineCancel:                                 realtimeSpineCancel,
-		realtimeSpineWake:                                   make(chan struct{}, 1),
-		realtimeSpineRecovery:                               make(chan struct{}, 1),
-		realtimeSpineInbound:                                make(chan []byte, 512),
-		realtimeSpineSafetyInterval:                         options.RealtimeSpineSafetyInterval,
-		realtimeSpineStorageTimeout:                         options.RealtimeSpineStorageTimeout,
-		realtimeSpineClaimLease:                             options.RealtimeSpineClaimLease,
-		realtimeSpineDisabled:                               options.DisableRealtimeSpine,
-		realtimeSpinePending:                                map[int64]store.RealtimeOutboxEvent{},
-		realtimeSpineDedupe:                                 newRealtimeEventDeduper(4096),
-		notifications:                                       notifications.NewService(repo),
-		kanban:                                              kanban.NewService(repo),
-		workspaceDerivedCatchupInterval:                     workspaceDerivedCatchupInterval,
-		workspaceDerivedCatchupLimit:                        workspaceDerivedCatchupLimit,
-		notificationCleanupInterval:                         notificationCleanupInterval,
-		notificationRetentionDuration:                       notificationRetentionDuration,
-		notificationCleanupLimit:                            notificationCleanupLimit,
-		notificationCleanupDisabled:                         options.DisableNotificationCleanup,
-		communicationsArchiveWorkerWake:                     make(chan struct{}, 1),
-		communicationsArchiveWorkerInterval:                 communicationsArchiveWorkerInterval,
-		communicationsArchiveWorkerBatchLimit:               communicationsArchiveWorkerBatchLimit,
-		communicationsArchiveWorkerLeaseTimeout:             communicationsArchiveWorkerLeaseTimeout,
-		communicationsArchiveWorkerDisabled:                 options.DisableCommunicationsArchiveWorker,
-		communicationsEmailThreadDownloadWorkerWake:         make(chan struct{}, 1),
-		communicationsEmailConnectionScannerWake:            make(chan struct{}, 1),
-		communicationsEmailThreadDownloadWorkerInterval:     communicationsEmailThreadDownloadWorkerInterval,
-		communicationsEmailThreadDownloadWorkerBatchLimit:   communicationsEmailThreadDownloadWorkerBatchLimit,
-		communicationsEmailThreadDownloadWorkerLeaseTimeout: communicationsEmailThreadDownloadWorkerLeaseTimeout,
-		communicationsEmailThreadDownloadWorkerDisabled:     options.DisableCommunicationsEmailThreadDownloadWorker,
-		metrics:                         metrics,
-		commCache:                       newCommunicationsCache(),
-		nylasGate:                       newNylasRequestGate(communicationsNylasMinRequestInterval),
-		nylasWebhooks:                   newNylasWebhookReceiptCache(),
-		authValidator:                   options.AuthValidator,
-		testAuthHeaderEnabled:           options.TestAuthHeaderEnabled,
-		authCache:                       newAuthMembershipCache(options.AuthMembershipCacheTTL, options.AuthMembershipCacheMaxEntries),
-		cognitoAdmin:                    options.CognitoAdmin,
-		emailSender:                     options.EmailSender,
-		appBaseURL:                      strings.TrimSpace(options.AppBaseURL),
-		bootstrapDevAdmin:               normalizeBootstrapDevAdminConfig(options.BootstrapDevAdmin),
-		nylasClient:                     options.NylasClient,
-		nylasConfig:                     options.NylasConfig,
-		attachmentStorage:               options.AttachmentStorage,
-		attachmentVariantEnsurer:        options.AttachmentVariantEnsurer,
-		attachmentRemoteImageDownloader: newSafeAttachmentRemoteImageDownloader(),
-		attachmentDirectUpload:          attachmentDirectUploadConfigFromEnv(),
-		attachmentUploadCleanupDisabled: options.DisableAttachmentUploadCleanup,
-		attachmentDeletionCleanupWake:   make(chan struct{}, 1),
-		maxBodyBytes:                    options.MaxRequestBodyBytes,
+		repo:                               repo,
+		realtimeRegistry:                   newRealtimeSubscriptionRegistry(),
+		realtimeTickets:                    newRealtimeTicketStore(realtimeTicketSecret),
+		realtimeBackplane:                  options.RealtimeBackplane,
+		realtimeSpineContext:               realtimeSpineContext,
+		realtimeSpineCancel:                realtimeSpineCancel,
+		realtimeSpineWake:                  make(chan struct{}, 1),
+		realtimeSpineRecovery:              make(chan struct{}, 1),
+		realtimeSpineInbound:               make(chan []byte, 512),
+		realtimeSpineSafetyInterval:        options.RealtimeSpineSafetyInterval,
+		realtimeSpineStorageTimeout:        options.RealtimeSpineStorageTimeout,
+		realtimeSpineClaimLease:            options.RealtimeSpineClaimLease,
+		realtimeSpineDisabled:              options.DisableRealtimeSpine,
+		realtimeSpinePending:               map[int64]store.RealtimeOutboxEvent{},
+		realtimeSpineDedupe:                newRealtimeEventDeduper(4096),
+		realtimeSpineInitialBackplaneReady: make(chan struct{}),
+		notifications:                      notifications.NewService(repo),
+		kanban:                             kanban.NewService(repo),
+		workspaceDerivedCatchupInterval:    workspaceDerivedCatchupInterval,
+		workspaceDerivedCatchupLimit:       workspaceDerivedCatchupLimit,
+		notificationCleanupInterval:        notificationCleanupInterval,
+		notificationRetentionDuration:      notificationRetentionDuration,
+		notificationCleanupLimit:           notificationCleanupLimit,
+		notificationCleanupDisabled:        options.DisableNotificationCleanup,
+		metrics:                            metrics,
+		commCache:                          newCommunicationsCache(),
+		nylasGate:                          newNylasRequestGate(communicationsNylasMinRequestInterval),
+		nylasWebhooks:                      newNylasWebhookReceiptCache(),
+		authValidator:                      options.AuthValidator,
+		testAuthHeaderEnabled:              options.TestAuthHeaderEnabled,
+		authCache:                          newAuthMembershipCache(options.AuthMembershipCacheTTL, options.AuthMembershipCacheMaxEntries),
+		cognitoAdmin:                       options.CognitoAdmin,
+		emailSender:                        options.EmailSender,
+		emailQueue:                         options.EmailQueue,
+		emailWorkerExternalRealtime:        options.EmailWorkerExternalRealtime,
+		appBaseURL:                         strings.TrimSpace(options.AppBaseURL),
+		bootstrapDevAdmin:                  normalizeBootstrapDevAdminConfig(options.BootstrapDevAdmin),
+		nylasClient:                        options.NylasClient,
+		nylasConfig:                        options.NylasConfig,
+		attachmentStorage:                  options.AttachmentStorage,
+		attachmentVariantEnsurer:           options.AttachmentVariantEnsurer,
+		attachmentRemoteImageDownloader:    newSafeAttachmentRemoteImageDownloader(),
+		attachmentDirectUpload:             attachmentDirectUploadConfigFromEnv(),
+		attachmentUploadCleanupDisabled:    options.DisableAttachmentUploadCleanup,
+		attachmentDeletionCleanupWake:      make(chan struct{}, 1),
+		maxBodyBytes:                       options.MaxRequestBodyBytes,
 	}
 	if server.attachmentVariantEnsurer == nil && server.attachmentStorage != nil {
 		server.attachmentVariantEnsurer = repositoryAttachmentImageVariantEnsurer{repo: repo, storage: server.attachmentStorage}
 	}
-	server.initializeWorkspaceDerivedDomainEventCheckpoints(context.Background())
-	server.startAttachmentUploadCleanup()
-	server.startAttachmentDeletionCleanup()
-	server.startWorkspaceDerivedDomainEventCatchup()
-	server.startNotificationCleanup()
-	server.startCommunicationsArchiveWorker()
-	server.startCommunicationsEmailThreadDownloadWorker()
+	if !options.EmailWorkerOnly {
+		server.initializeWorkspaceDerivedDomainEventCheckpoints(context.Background())
+		server.startAttachmentUploadCleanup()
+		server.startAttachmentDeletionCleanup()
+		server.startWorkspaceDerivedDomainEventCatchup()
+		server.startNotificationCleanup()
+	}
 	server.startRealtimeSpine()
 	return server
 }
@@ -329,12 +290,6 @@ func (s *Server) Close() {
 	}
 	if s.notificationCleanupCancel != nil {
 		s.notificationCleanupCancel()
-	}
-	if s.communicationsArchiveWorkerCancel != nil {
-		s.communicationsArchiveWorkerCancel()
-	}
-	if s.communicationsEmailThreadDownloadWorkerCancel != nil {
-		s.communicationsEmailThreadDownloadWorkerCancel()
 	}
 }
 

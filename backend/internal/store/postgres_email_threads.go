@@ -342,7 +342,10 @@ where target.company_id=$1::uuid and target.email_message_id=ordered.email_messa
 }
 
 func (r *PostgresRepo) UpsertCommunicationsEmailThread(input CommunicationsEmailThreadUpsertInput) (domain.CommunicationsEmailThread, error) {
-	ctx := context.Background()
+	return r.UpsertCommunicationsEmailThreadContext(context.Background(), input)
+}
+
+func (r *PostgresRepo) UpsertCommunicationsEmailThreadContext(ctx context.Context, input CommunicationsEmailThreadUpsertInput) (domain.CommunicationsEmailThread, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.CommunicationsEmailThread{}, err
@@ -359,11 +362,15 @@ func (r *PostgresRepo) UpsertCommunicationsEmailThread(input CommunicationsEmail
 }
 
 func (r *PostgresRepo) GetCommunicationsEmailThread(companyID, emailThreadID string) (domain.CommunicationsEmailThread, error) {
+	return r.GetCommunicationsEmailThreadContext(context.Background(), companyID, emailThreadID)
+}
+
+func (r *PostgresRepo) GetCommunicationsEmailThreadContext(ctx context.Context, companyID, emailThreadID string) (domain.CommunicationsEmailThread, error) {
 	companyID, emailThreadID = cleanUUIDText(companyID), cleanUUIDText(emailThreadID)
 	if companyID == "" || emailThreadID == "" {
 		return domain.CommunicationsEmailThread{}, ErrInvalid
 	}
-	return postgresCommunicationsEmailThreadByID(context.Background(), r.db, companyID, emailThreadID)
+	return postgresCommunicationsEmailThreadByID(ctx, r.db, companyID, emailThreadID)
 }
 
 func (r *PostgresRepo) ListCommunicationsEmailThreadsForAccount(input CommunicationsEmailAccountReadInput) ([]domain.CommunicationsEmailThread, error) {

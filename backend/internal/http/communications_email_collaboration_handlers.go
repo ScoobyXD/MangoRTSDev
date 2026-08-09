@@ -131,9 +131,14 @@ func (s *Server) handleCommunicationsEmailCollaborations(w http.ResponseWriter, 
 			status = http.StatusCreated
 			s.wakeRealtimeSpine()
 		}
-		s.wakeCommunicationsEmailThreadDownloadWorker()
 		if strings.TrimSpace(result.Collaboration.EmailThreadID) != "" {
-			_ = s.linkStoredEmailThreadAttachments(result.Collaboration.CompanyID, result.Collaboration.EmailThreadID, actor.User.UserID)
+			if err := s.enqueueCommunicationsEmailThreadJobs(r.Context(), result.Collaboration.CompanyID, []string{result.Collaboration.EmailThreadID}); err != nil {
+				writeError(w, http.StatusServiceUnavailable, "failed_to_queue_email_ingestion")
+				return
+			}
+		}
+		if strings.TrimSpace(result.Collaboration.EmailThreadID) != "" {
+			_ = s.linkStoredEmailThreadAttachments(r.Context(), result.Collaboration.CompanyID, result.Collaboration.EmailThreadID, actor.User.UserID)
 		}
 		writeJSON(w, status, result)
 	default:
@@ -216,7 +221,7 @@ func (s *Server) handleCommunicationsEmailCollaborationByID(w http.ResponseWrite
 		var loaded bool
 		if !loaded && strings.TrimSpace(item.EmailThreadID) != "" {
 			var loadErr error
-			thread, loadErr = s.repo.GetCommunicationsEmailThread(companyID, item.EmailThreadID)
+			thread, loadErr = s.repo.GetCommunicationsEmailThreadContext(r.Context(), companyID, item.EmailThreadID)
 			loaded = loadErr == nil
 		}
 		if loaded {

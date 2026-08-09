@@ -60,12 +60,15 @@ v.created_timestamp,
 v.updated_timestamp`
 
 func (r *PostgresRepo) CreateAttachmentWithResourceLink(input AttachmentCreateInput) (domain.Attachment, domain.ResourceAttachment, error) {
+	return r.CreateAttachmentWithResourceLinkContext(context.Background(), input)
+}
+
+func (r *PostgresRepo) CreateAttachmentWithResourceLinkContext(ctx context.Context, input AttachmentCreateInput) (domain.Attachment, domain.ResourceAttachment, error) {
 	attachment, link, err := normalizeAttachmentCreateInput(input)
 	if err != nil {
 		return domain.Attachment{}, domain.ResourceAttachment{}, err
 	}
 
-	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Attachment{}, domain.ResourceAttachment{}, err
@@ -182,6 +185,21 @@ where a.company_id=$1::uuid
 	attachment.Variants = variants
 	attachment.ResourceLinks = links
 	return attachment, nil
+}
+
+func (r *PostgresRepo) AttachmentExistsContext(ctx context.Context, companyID, attachmentID string) (bool, error) {
+	companyID, attachmentID = cleanUUIDText(companyID), cleanUUIDText(attachmentID)
+	if companyID == "" || attachmentID == "" {
+		return false, ErrInvalid
+	}
+	var exists bool
+	if err := r.db.QueryRowContext(ctx, `select exists(
+select 1 from attachments
+where company_id=$1::uuid and attachment_id=$2::uuid and deleted_timestamp is null
+)`, companyID, attachmentID).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
 }
 
 func (r *PostgresRepo) PreparePermanentAttachmentDeletion(ctx context.Context, companyID, attachmentID, resourceType, resourceID string) (AttachmentDeletionPlan, error) {
@@ -605,11 +623,14 @@ order by v.attachment_id, v.preview_type`, companyID, resourceType, resourceID)
 }
 
 func (r *PostgresRepo) LinkResourceAttachment(input ResourceAttachmentInput) (domain.ResourceAttachment, error) {
+	return r.LinkResourceAttachmentContext(context.Background(), input)
+}
+
+func (r *PostgresRepo) LinkResourceAttachmentContext(ctx context.Context, input ResourceAttachmentInput) (domain.ResourceAttachment, error) {
 	link, err := normalizeResourceAttachmentInput(input)
 	if err != nil {
 		return domain.ResourceAttachment{}, err
 	}
-	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.ResourceAttachment{}, err

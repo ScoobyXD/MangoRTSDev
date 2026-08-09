@@ -320,7 +320,6 @@ func realtimeBackplaneTestOptions(backplane rt.Backplane) ServerOptions {
 	return ServerOptions{
 		RealtimeBackplane: backplane, RealtimeSpineSafetyInterval: time.Hour,
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
-		DisableCommunicationsArchiveWorker: true, DisableCommunicationsEmailThreadDownloadWorker: true,
 	}
 }
 

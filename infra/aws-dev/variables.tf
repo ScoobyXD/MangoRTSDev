@@ -190,6 +190,69 @@ variable "backend_desired_count" {
   description = "Number of backend tasks for dev."
   type        = number
   default     = 2
+
+  validation {
+    condition     = var.backend_desired_count >= 0 && floor(var.backend_desired_count) == var.backend_desired_count
+    error_message = "backend_desired_count must be a whole number of zero or more."
+  }
+}
+
+variable "email_sqs_enabled" {
+  description = "Create the DEV email SQS queues and API send permission."
+  type        = bool
+  default     = true
+}
+
+variable "email_worker_enabled" {
+  description = "Run the single private DEV email worker after a separate reviewed enable plan."
+  type        = bool
+  default     = false
+}
+
+variable "email_sqs_database_migration_complete" {
+  description = "Explicit reviewed confirmation that the DEV database has the final email SQS schema."
+  type        = bool
+  default     = false
+}
+
+variable "email_reconciliation_schedule_enabled" {
+  description = "Enable rare DEV email reconciliation after a separate reviewed enable plan."
+  type        = bool
+  default     = false
+}
+
+variable "email_worker_concurrency" {
+  description = "Bounded concurrency inside the single DEV email worker task."
+  type        = number
+  default     = 3
+
+  validation {
+    condition     = var.email_worker_concurrency >= 1 && var.email_worker_concurrency <= 8 && floor(var.email_worker_concurrency) == var.email_worker_concurrency
+    error_message = "email_worker_concurrency must be a whole number from 1 through 8."
+  }
+}
+
+variable "email_worker_cpu" {
+  description = "Fargate CPU units for the private DEV email worker."
+  type        = number
+  default     = 1024
+}
+
+variable "email_worker_memory" {
+  description = "Fargate memory MiB for the private DEV email worker."
+  type        = number
+  default     = 2048
+}
+
+variable "email_worker_alarm_action_arns" {
+  description = "Alarm action ARNs for DEV email queue, worker, and Scheduler alerts; required before a nonzero SQS-enabled API, worker, or schedule stage."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for arn in var.email_worker_alarm_action_arns : can(regex("^arn:[^:]+:[^:]+:[^:]*:[^:]*:.+$", arn))])
+    error_message = "email_worker_alarm_action_arns must contain only AWS ARNs."
+  }
 }
 
 variable "realtime_valkey_enabled" {

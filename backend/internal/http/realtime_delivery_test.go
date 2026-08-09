@@ -345,7 +345,7 @@ func TestRealtimeQueuedPublicationsReauthorizeInsideExactScopeOrdering(t *testin
 				resourceID = folder.FolderID
 				scope = realtimeSharedMailboxScope(folder.FolderID)
 				publish = func(server *Server) {
-					server.publishSharedMailboxWebhookHint(companyID, folder.FolderID, nylasWebhookChange{
+					_ = server.publishSharedMailboxWebhookHintContext(context.Background(), companyID, folder.FolderID, "", nylasWebhookChange{
 						Trigger: "message.created", MessageID: "queued-shared-message",
 					})
 				}

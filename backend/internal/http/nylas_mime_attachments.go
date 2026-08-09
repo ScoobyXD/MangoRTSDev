@@ -20,33 +20,41 @@ import (
 )
 
 func (s *Server) attachRawMIMEAttachmentsIfMissing(ctx context.Context, connection domain.UserEmailConnection, message NylasMessage) NylasMessage {
-	if message.RawMIMEAttachmentsRecovered || !messageNeedsRawMIMEAttachmentRecovery(message) || s.nylasClient == nil || strings.TrimSpace(connection.GrantID) == "" || strings.TrimSpace(message.ID) == "" {
+	recovered, err := s.attachRawMIMEAttachmentsIfMissingResult(ctx, connection, message)
+	if err != nil {
 		return message
+	}
+	return recovered
+}
+
+func (s *Server) attachRawMIMEAttachmentsIfMissingResult(ctx context.Context, connection domain.UserEmailConnection, message NylasMessage) (NylasMessage, error) {
+	if message.RawMIMEAttachmentsRecovered || !messageNeedsRawMIMEAttachmentRecovery(message) || s.nylasClient == nil || strings.TrimSpace(connection.GrantID) == "" || strings.TrimSpace(message.ID) == "" {
+		return message, nil
 	}
 	rawMIME, err := s.nylasClient.GetMessageRawMIME(ctx, connection.GrantID, message.ID)
 	if err != nil {
 		log.Printf("communications_attachment_raw_mime outcome=fetch_failed user_id=%s provider=%s account_email=%s scope=%s message_id=%s grant=%s err=%v", connection.UserID, connection.Provider, connection.AccountEmail, connection.Scope, message.ID, grantIDLogValue(connection.GrantID), err)
-		return message
+		return message, err
 	}
 	message.RawMIMEAttachmentsRecovered = true
 	attachments := nylasAttachmentsFromRawMIME(rawMIME)
 	if len(attachments) == 0 {
 		log.Printf("communications_attachment_raw_mime outcome=no_attachments user_id=%s provider=%s account_email=%s scope=%s message_id=%s grant=%s raw_mime_bytes=%d", connection.UserID, connection.Provider, connection.AccountEmail, connection.Scope, message.ID, grantIDLogValue(connection.GrantID), len(rawMIME))
-		return message
+		return message, nil
 	}
 	if len(message.Attachments) == 0 {
 		message.Attachments = attachments
 		log.Printf("communications_attachment_raw_mime outcome=attachments_recovered user_id=%s provider=%s account_email=%s scope=%s message_id=%s grant=%s attachment_count=%d raw_mime_bytes=%d", connection.UserID, connection.Provider, connection.AccountEmail, connection.Scope, message.ID, grantIDLogValue(connection.GrantID), len(attachments), len(rawMIME))
-		return message
+		return message, nil
 	}
 	merged, changed := mergeRawMIMEAttachments(message.Attachments, attachments, rawMIMEBodyCIDReferences(message.Body))
 	if !changed {
 		log.Printf("communications_attachment_raw_mime outcome=no_merge_needed user_id=%s provider=%s account_email=%s scope=%s message_id=%s grant=%s raw_attachment_count=%d raw_mime_bytes=%d", connection.UserID, connection.Provider, connection.AccountEmail, connection.Scope, message.ID, grantIDLogValue(connection.GrantID), len(attachments), len(rawMIME))
-		return message
+		return message, nil
 	}
 	message.Attachments = merged
 	log.Printf("communications_attachment_raw_mime outcome=attachments_merged user_id=%s provider=%s account_email=%s scope=%s message_id=%s grant=%s attachment_count=%d raw_attachment_count=%d raw_mime_bytes=%d", connection.UserID, connection.Provider, connection.AccountEmail, connection.Scope, message.ID, grantIDLogValue(connection.GrantID), len(merged), len(attachments), len(rawMIME))
-	return message
+	return message, nil
 }
 
 var rawMIMEBodyCIDPattern = regexp.MustCompile(`(?i)\bcid:([^"'\s>)]+)`)

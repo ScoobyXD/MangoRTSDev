@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"miraeopus/backend/internal/domain"
@@ -1189,7 +1190,7 @@ func TestMemoryRepoUserEmailConnectionsArePersonalOnly(t *testing.T) {
 	if _, err := repo.GetUserEmailConnection(user.UserID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("personal after delete error = %v, want ErrNotFound", err)
 	}
-	if _, err := repo.GetUserEmailConnectionByGrantID("shared-grant"); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.GetUserEmailConnectionByGrantIDContext(context.Background(), "shared-grant"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("shared grant user lookup error = %v, want ErrNotFound", err)
 	}
 	companyConnection, err = repo.GetCompanyEmailConnectionByAccountEmail(companyID, "shared@example.com")
@@ -1240,10 +1241,10 @@ func TestMemoryRepoUserEmailConnectionRequiresPersonalAccountEmail(t *testing.T)
 	if err := repo.DeleteUserEmailConnection(user.UserID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.GetUserEmailConnectionByGrantID("profile-grant"); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.GetUserEmailConnectionByGrantIDContext(context.Background(), "profile-grant"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("connection after delete error = %v, want ErrNotFound", err)
 	}
-	if _, err := repo.GetUserEmailConnectionByGrantID("mailbox-grant"); err != nil {
+	if _, err := repo.GetUserEmailConnectionByGrantIDContext(context.Background(), "mailbox-grant"); err != nil {
 		t.Fatalf("mismatched personal account should remain by grant: %v", err)
 	}
 }
@@ -1334,7 +1335,7 @@ func TestMemoryRepoUserEmailConnectionReclaimsDuplicateGrant(t *testing.T) {
 	if _, err := repo.GetUserEmailConnection(oldUser.UserID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("old user connection error = %v, want ErrNotFound", err)
 	}
-	loaded, err := repo.GetUserEmailConnectionByGrantID("same-grant")
+	loaded, err := repo.GetUserEmailConnectionByGrantIDContext(context.Background(), "same-grant")
 	if err != nil {
 		t.Fatal(err)
 	}

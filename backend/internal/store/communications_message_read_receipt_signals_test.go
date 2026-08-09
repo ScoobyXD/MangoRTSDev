@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -23,7 +24,7 @@ func TestMemoryCommunicationsReadReceiptStoresObservedSignals(t *testing.T) {
 		SignalTimestamps:     []time.Time{second, first, second},
 		SignalCount:          3,
 	}
-	status, err := repo.UpsertCommunicationsMessageReadStatus(input)
+	status, err := repo.UpsertCommunicationsMessageReadStatusContext(context.Background(), input)
 	if err != nil {
 		t.Fatalf("UpsertCommunicationsMessageReadStatus: %v", err)
 	}
@@ -35,7 +36,7 @@ func TestMemoryCommunicationsReadReceiptStoresObservedSignals(t *testing.T) {
 	input.SignalTimestamp = third
 	input.SignalTimestamps = []time.Time{third}
 	input.SignalCount = 4
-	if _, err := repo.UpsertCommunicationsMessageReadStatus(input); err != nil {
+	if _, err := repo.UpsertCommunicationsMessageReadStatusContext(context.Background(), input); err != nil {
 		t.Fatalf("second UpsertCommunicationsMessageReadStatus: %v", err)
 	}
 	statuses, err := repo.ListCommunicationsMessageReadStatuses(CommunicationsMessageReadStatusListInput{

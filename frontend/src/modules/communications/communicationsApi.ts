@@ -16,7 +16,7 @@ export type EmailConnection = {
   provider: EmailProvider;
   account_email: string;
   scope?: "personal" | "shared" | string;
-  status: "connected" | "disconnected" | "reauth_required";
+  status: "connected" | "disconnected" | "reauth_required" | "configuration_required";
   created_timestamp: string;
   updated_timestamp: string;
 };
@@ -24,7 +24,7 @@ export type EmailConnection = {
 export type CommunicationsStatus = {
   configured: boolean;
   connected: boolean;
-  status: "connected" | "disconnected" | "reauth_required";
+  status: "connected" | "disconnected" | "reauth_required" | "configuration_required";
   connection?: EmailConnection;
 };
 

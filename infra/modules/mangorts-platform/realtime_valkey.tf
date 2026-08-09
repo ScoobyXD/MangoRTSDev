@@ -114,6 +114,13 @@ resource "aws_iam_role_policy_attachment" "ecs_task_realtime_valkey" {
   policy_arn = aws_iam_policy.ecs_task_realtime_valkey[0].arn
 }
 
+resource "aws_iam_role_policy_attachment" "email_worker_realtime_valkey" {
+  count = var.email_sqs_enabled && var.realtime_valkey_enabled ? 1 : 0
+
+  role       = aws_iam_role.email_worker[0].name
+  policy_arn = aws_iam_policy.ecs_task_realtime_valkey[0].arn
+}
+
 resource "aws_cloudwatch_metric_alarm" "realtime_valkey_no_connections" {
   count = var.realtime_valkey_enabled ? 1 : 0
 

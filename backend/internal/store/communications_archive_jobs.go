@@ -6,9 +6,6 @@ import (
 	"time"
 )
 
-const CommunicationsArchiveJobClaimMaxLimit = 100
-const DefaultCommunicationsArchiveJobProcessingLeaseTimeout = 5 * time.Minute
-
 const (
 	CommunicationsArchiveJobStatusPending    = "pending"
 	CommunicationsArchiveJobStatusProcessing = "processing"
@@ -19,7 +16,6 @@ const (
 const (
 	CommunicationsArchiveJobItemStatusPending    = "pending"
 	CommunicationsArchiveJobItemStatusProcessing = "processing"
-	CommunicationsArchiveJobItemStatusRetry      = "retry"
 	CommunicationsArchiveJobItemStatusArchived   = "archived"
 	CommunicationsArchiveJobItemStatusFailed     = "failed"
 )
@@ -66,9 +62,8 @@ type CommunicationsArchiveJobItem struct {
 	MessageID                string     `json:"message_id"`
 	Status                   string     `json:"status"`
 	AttemptCount             int        `json:"attempt_count"`
+	AttemptToken             string     `json:"-"`
 	LastError                string     `json:"last_error,omitempty"`
-	AvailableAt              time.Time  `json:"available_at"`
-	ProcessingStartedAt      *time.Time `json:"processing_started_at,omitempty"`
 	ArchivedTimestamp        *time.Time `json:"archived_timestamp,omitempty"`
 	FailedTimestamp          *time.Time `json:"failed_timestamp,omitempty"`
 	CreatedTimestamp         time.Time  `json:"created_timestamp"`
@@ -116,23 +111,9 @@ func NormalizeCommunicationsArchiveJobInput(input CommunicationsArchiveJobInput)
 	return input, nil
 }
 
-func NormalizeCommunicationsArchiveJobClaimLimit(limit int) int {
-	if limit <= 0 || limit > CommunicationsArchiveJobClaimMaxLimit {
-		return 25
-	}
-	return limit
-}
-
-func NormalizeCommunicationsArchiveJobProcessingLeaseTimeout(timeout time.Duration) time.Duration {
-	if timeout <= 0 {
-		return DefaultCommunicationsArchiveJobProcessingLeaseTimeout
-	}
-	return timeout
-}
-
 func CommunicationsArchiveJobItemStatusIsActive(status string) bool {
 	switch strings.TrimSpace(status) {
-	case CommunicationsArchiveJobItemStatusPending, CommunicationsArchiveJobItemStatusProcessing, CommunicationsArchiveJobItemStatusRetry:
+	case CommunicationsArchiveJobItemStatusPending, CommunicationsArchiveJobItemStatusProcessing:
 		return true
 	default:
 		return false
@@ -155,7 +136,6 @@ func CloneCommunicationsArchiveJobItems(items []CommunicationsArchiveJobItem) []
 }
 
 func CloneCommunicationsArchiveJobItem(item CommunicationsArchiveJobItem) CommunicationsArchiveJobItem {
-	item.ProcessingStartedAt = cloneTimePointer(item.ProcessingStartedAt)
 	item.ArchivedTimestamp = cloneTimePointer(item.ArchivedTimestamp)
 	item.FailedTimestamp = cloneTimePointer(item.FailedTimestamp)
 	return item

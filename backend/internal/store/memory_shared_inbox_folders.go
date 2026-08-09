@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"miraeopus/backend/internal/domain"
 	"strings"
 	"time"
@@ -72,6 +73,13 @@ func (r *MemoryRepo) CreateCommunicationsSharedInboxFolder(companyID, parentFold
 }
 
 func (r *MemoryRepo) ListCommunicationsSharedInboxFolders(companyID string) ([]domain.CompanyExplorerFolder, error) {
+	return r.ListCommunicationsSharedInboxFoldersContext(context.Background(), companyID)
+}
+
+func (r *MemoryRepo) ListCommunicationsSharedInboxFoldersContext(ctx context.Context, companyID string) ([]domain.CompanyExplorerFolder, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	companyID = strings.TrimSpace(companyID)
 	if companyID == "" {
 		return nil, ErrInvalid

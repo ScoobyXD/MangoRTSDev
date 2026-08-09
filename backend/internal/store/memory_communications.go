@@ -1,6 +1,8 @@
 package store
 
 import (
+	"context"
+	"errors"
 	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
@@ -28,7 +30,7 @@ func (r *MemoryRepo) GetUserEmailConnection(userID string) (domain.UserEmailConn
 	return domain.UserEmailConnection{}, ErrNotFound
 }
 
-func (r *MemoryRepo) GetEmailConnectionByID(companyID, connectionID string) (domain.UserEmailConnection, error) {
+func (r *MemoryRepo) GetEmailConnectionByIDContext(_ context.Context, companyID, connectionID string) (domain.UserEmailConnection, error) {
 	companyID = cleanUUIDText(companyID)
 	connectionID = cleanUUIDText(connectionID)
 	if companyID == "" || connectionID == "" {
@@ -47,9 +49,14 @@ func (r *MemoryRepo) GetEmailConnectionByID(companyID, connectionID string) (dom
 	return domain.UserEmailConnection{}, ErrNotFound
 }
 
-func (r *MemoryRepo) ListConnectedEmailConnections() ([]domain.UserEmailConnection, error) {
+func (r *MemoryRepo) ListDueEmailConnectionsContext(ctx context.Context, cutoff time.Time, afterConnectionID string, limit int) ([]domain.UserEmailConnection, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if cutoff.IsZero() || limit <= 0 || limit > 100 {
+		return nil, ErrInvalid
+	}
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 	connections := make([]domain.UserEmailConnection, 0, len(r.emailConnections)+len(r.companyEmailConnections))
 	for _, connection := range r.emailConnections {
 		if connection.Status == "connected" {
@@ -61,13 +68,21 @@ func (r *MemoryRepo) ListConnectedEmailConnections() ([]domain.UserEmailConnecti
 			connections = append(connections, companyEmailConnectionAsUser(connection))
 		}
 	}
+	r.mu.RUnlock()
 	sort.Slice(connections, func(i, j int) bool {
-		if connections[i].CompanyID != connections[j].CompanyID {
-			return connections[i].CompanyID < connections[j].CompanyID
-		}
 		return connections[i].EmailConnectionID < connections[j].EmailConnectionID
 	})
-	return connections, nil
+	out := make([]domain.UserEmailConnection, 0, limit)
+	for _, connection := range connections {
+		if connection.EmailConnectionID <= afterConnectionID || !connection.LastSuccessfulScanAt.Before(cutoff) {
+			continue
+		}
+		out = append(out, connection)
+		if len(out) == limit {
+			break
+		}
+	}
+	return out, nil
 }
 
 func (r *MemoryRepo) ListUserEmailConnections(userID string) ([]domain.UserEmailConnection, error) {
@@ -127,7 +142,10 @@ func (r *MemoryRepo) GetCompanyEmailConnectionByID(companyID, connectionID strin
 	return connection, nil
 }
 
-func (r *MemoryRepo) GetCompanyEmailConnectionByGrantID(grantID string) (domain.CompanyEmailConnection, error) {
+func (r *MemoryRepo) GetCompanyEmailConnectionByGrantIDContext(ctx context.Context, grantID string) (domain.CompanyEmailConnection, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.CompanyEmailConnection{}, err
+	}
 	grantID = strings.TrimSpace(grantID)
 	if grantID == "" {
 		return domain.CompanyEmailConnection{}, ErrInvalid
@@ -144,7 +162,10 @@ func (r *MemoryRepo) GetCompanyEmailConnectionByGrantID(grantID string) (domain.
 	return domain.CompanyEmailConnection{}, ErrNotFound
 }
 
-func (r *MemoryRepo) GetUserEmailConnectionByGrantID(grantID string) (domain.UserEmailConnection, error) {
+func (r *MemoryRepo) GetUserEmailConnectionByGrantIDContext(ctx context.Context, grantID string) (domain.UserEmailConnection, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.UserEmailConnection{}, err
+	}
 	grantID = strings.TrimSpace(grantID)
 	if grantID == "" {
 		return domain.UserEmailConnection{}, ErrInvalid
@@ -239,9 +260,6 @@ func (r *MemoryRepo) UpsertUserEmailConnection(input UserEmailConnectionInput) (
 	connection.Status = status
 	connection.UpdatedTimestamp = now
 	r.emailConnections[connectionKey] = connection
-	if connection.Status == "connected" {
-		r.wakeMemoryEmailIngestionJobsLocked(connection.CompanyID, connection.EmailConnectionID, now)
-	}
 	return connection, nil
 }
 
@@ -305,9 +323,6 @@ func (r *MemoryRepo) upsertCompanyEmailConnectionLocked(companyID, connectionID,
 	connection.ConnectedByUserID = connectedByUserID
 	connection.UpdatedTimestamp = now
 	r.companyEmailConnections[connectionKey] = connection
-	if connection.Status == "connected" {
-		r.wakeMemoryEmailIngestionJobsLocked(connection.CompanyID, connection.EmailConnectionID, now)
-	}
 	return connection
 }
 
@@ -330,10 +345,14 @@ func (r *MemoryRepo) UpdateCompanyEmailConnectionStatus(companyID, connectionID,
 	connection.Status = status
 	connection.UpdatedTimestamp = time.Now().UTC()
 	r.companyEmailConnections[connectionKey] = connection
-	if connection.Status == "connected" {
-		r.wakeMemoryEmailIngestionJobsLocked(connection.CompanyID, connection.EmailConnectionID, connection.UpdatedTimestamp)
-	}
 	return connection, nil
+}
+
+func (r *MemoryRepo) UpdateCompanyEmailConnectionStatusContext(ctx context.Context, companyID, connectionID, status string) (domain.CompanyEmailConnection, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.CompanyEmailConnection{}, err
+	}
+	return r.UpdateCompanyEmailConnectionStatus(companyID, connectionID, status)
 }
 
 func (r *MemoryRepo) UpdateUserEmailConnectionStatus(userID, accountEmail, status string) (domain.UserEmailConnection, error) {
@@ -354,22 +373,14 @@ func (r *MemoryRepo) UpdateUserEmailConnectionStatus(userID, accountEmail, statu
 	connection.Status = status
 	connection.UpdatedTimestamp = time.Now().UTC()
 	r.emailConnections[emailConnectionKey(userID, accountEmail)] = connection
-	if connection.Status == "connected" {
-		r.wakeMemoryEmailIngestionJobsLocked(connection.CompanyID, connection.EmailConnectionID, connection.UpdatedTimestamp)
-	}
 	return connection, nil
 }
 
-func (r *MemoryRepo) wakeMemoryEmailIngestionJobsLocked(companyID, connectionID string, now time.Time) {
-	for jobID, job := range r.emailThreadDownloadJobs {
-		if job.CompanyID != companyID || job.EmailConnectionID != connectionID ||
-			(job.Status != CommunicationsEmailThreadDownloadJobPending && job.Status != CommunicationsEmailThreadDownloadJobRetry) {
-			continue
-		}
-		job.AvailableAt = now
-		job.UpdatedTimestamp = now
-		r.emailThreadDownloadJobs[jobID] = job
+func (r *MemoryRepo) UpdateUserEmailConnectionStatusContext(ctx context.Context, userID, accountEmail, status string) (domain.UserEmailConnection, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.UserEmailConnection{}, err
 	}
+	return r.UpdateUserEmailConnectionStatus(userID, accountEmail, status)
 }
 
 func (r *MemoryRepo) DeleteUserEmailConnection(userID string) error {
@@ -395,7 +406,7 @@ func (r *MemoryRepo) DeleteUserEmailConnection(userID string) error {
 	return ErrNotFound
 }
 
-func (r *MemoryRepo) UpdateEmailConnectionScanCheckpoint(companyID, connectionID string, checkpoint time.Time) error {
+func (r *MemoryRepo) UpdateEmailConnectionScanCheckpointContext(_ context.Context, companyID, connectionID string, checkpoint time.Time) error {
 	companyID = cleanUUIDText(companyID)
 	connectionID = cleanUUIDText(connectionID)
 	checkpoint = checkpoint.UTC()
@@ -418,6 +429,33 @@ func (r *MemoryRepo) UpdateEmailConnectionScanCheckpoint(companyID, connectionID
 		return ErrNotFound
 	}
 	connection.LastSuccessfulScanAt = checkpoint
+	connection.UpdatedTimestamp = time.Now().UTC()
+	r.companyEmailConnections[connectionKey] = connection
+	return nil
+}
+
+func (r *MemoryRepo) UpdateEmailConnectionStatusByIDContext(_ context.Context, companyID, connectionID, status string) error {
+	companyID, connectionID = cleanUUIDText(companyID), cleanUUIDText(connectionID)
+	status = normalizeEmailConnectionStatus(status)
+	if companyID == "" || connectionID == "" || status == "" {
+		return ErrInvalid
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for connectionKey, connection := range r.emailConnections {
+		if connection.CompanyID == companyID && connection.EmailConnectionID == connectionID {
+			connection.Status = status
+			connection.UpdatedTimestamp = time.Now().UTC()
+			r.emailConnections[connectionKey] = connection
+			return nil
+		}
+	}
+	connectionKey := companyEmailConnectionKey(companyID, connectionID)
+	connection, ok := r.companyEmailConnections[connectionKey]
+	if !ok {
+		return ErrNotFound
+	}
+	connection.Status = status
 	connection.UpdatedTimestamp = time.Now().UTC()
 	r.companyEmailConnections[connectionKey] = connection
 	return nil
@@ -447,7 +485,7 @@ func (r *MemoryRepo) personalEmailConnectionForUserLocked(userID string) (domain
 	return connection, key, true
 }
 
-func (r *MemoryRepo) UpsertCommunicationsMessageReadStatus(input CommunicationsMessageReadStatusInput) (domain.CommunicationsMessageReadStatus, error) {
+func (r *MemoryRepo) upsertCommunicationsMessageReadStatus(input CommunicationsMessageReadStatusInput) (domain.CommunicationsMessageReadStatus, error) {
 	scope, ok := communicationsMessageReadStatusScope(input.ScopeType, input.UserID, input.PersonalAccountEmail, input.CompanyID, input.CompanyEmailConnectionID, input.SharedInboxID)
 	if !ok {
 		return domain.CommunicationsMessageReadStatus{}, ErrInvalid
@@ -523,6 +561,20 @@ func (r *MemoryRepo) UpsertCommunicationsMessageReadStatus(input CommunicationsM
 	next.UpdatedTimestamp = now
 	r.messageReadStatuses[key] = next
 	return next, nil
+}
+
+func (r *MemoryRepo) UpsertCommunicationsMessageReadStatusContext(ctx context.Context, input CommunicationsMessageReadStatusInput) (domain.CommunicationsMessageReadStatus, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.CommunicationsMessageReadStatus{}, err
+	}
+	return r.upsertCommunicationsMessageReadStatus(input)
+}
+
+func (r *MemoryRepo) CheckEmailSQSWorkerSchemaReadinessContext(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return errors.New("email SQS worker requires PostgreSQL final schema")
 }
 
 func (r *MemoryRepo) ListCommunicationsMessageReadStatuses(input CommunicationsMessageReadStatusListInput) ([]domain.CommunicationsMessageReadStatus, error) {
@@ -704,6 +756,8 @@ func normalizeEmailConnectionStatus(status string) string {
 		return "disconnected"
 	case "reauth_required":
 		return "reauth_required"
+	case "configuration_required":
+		return "configuration_required"
 	default:
 		return ""
 	}
