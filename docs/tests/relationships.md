@@ -16,14 +16,17 @@ Last updated: 2026-08-08
 
 1. `email_relationships` remains the typed authority that connects an exact internal email message to a Node and optionally to one exact Node text box.
 2. One stored email thread may have Node relationships for only one Node. Whole-Node and textbox-specific relationships inside that same Node are allowed.
-3. The database enforces the one-Node-per-thread law under concurrent writes before accepting an email relationship.
-4. An email-selection chat is valid only when the exact internal email message has an `email_relationships` row for that chat's exact Node text box.
-5. Opening an email-selection chat preview creates no text box, email relationship, or chat relationship.
-6. Sending the first chat from an email-selection preview atomically creates the exact Node text box, email-to-textbox relationship, and text-box chat, or creates none of them.
-7. Cancelling an unsent email-selection chat preview requires no relationship deletion because no relationship has been written.
-8. Email-to-textbox links do not create a generic resource registry, surrogate identity, or untyped edge.
+3. One exact email message may have at most one textbox-specific relationship inside its Node.
+4. The database enforces the one-Node-per-thread and one-textbox-per-message laws under concurrent writes.
+5. The priority cutover keeps the Node destination with the earliest email relationship and removes only later Node email relationships from a previously duplicated thread.
+6. The cutover does not delete Nodes or valid chats and backfills a missing exact message-to-textbox relationship for a surviving email chat.
+7. An email-selection chat is valid only when the exact internal email message has an `email_relationships` row for that chat's exact Node text box.
+8. Opening an email-selection chat preview creates no text box, email relationship, or chat relationship.
+9. Sending the first chat from an email-selection preview atomically creates the exact Node text box, email-to-textbox relationship, and text-box chat, or creates none of them.
+10. Cancelling an unsent email-selection chat preview requires no relationship deletion because no relationship has been written.
+11. Email-to-textbox links do not create a generic resource registry, surrogate identity, or untyped edge.
 
-Last updated: 2026-08-08
+Last updated: 2026-08-09
 
 # Process Story: Policy inheritance follows typed parents without moving permissions into Explorer
 
