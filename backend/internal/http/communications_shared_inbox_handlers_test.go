@@ -516,6 +516,10 @@ func (r sharedInboxListErrorRepo) ListCommunicationsSharedInboxFolders(companyID
 	return nil, r.err
 }
 
+func (r sharedInboxListErrorRepo) ListCommunicationsSharedInboxFoldersContext(context.Context, string) ([]domain.CompanyExplorerFolder, error) {
+	return nil, r.err
+}
+
 func (r sharedInboxListErrorRepo) ListVisibleCommunicationsSharedInboxFolders(companyID, userID string) ([]domain.CompanyExplorerFolder, error) {
 	return nil, r.err
 }

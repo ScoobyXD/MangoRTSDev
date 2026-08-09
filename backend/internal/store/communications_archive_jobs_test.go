@@ -1,9 +1,10 @@
 package store
 
 import (
+	"context"
+	"errors"
 	"miraeopus/backend/internal/domain"
 	"testing"
-	"time"
 )
 
 func TestCommunicationsArchiveJobSkipsDuplicateActiveItems(t *testing.T) {
@@ -20,7 +21,7 @@ func TestCommunicationsArchiveJobSkipsDuplicateActiveItems(t *testing.T) {
 		GrantID:      "grant-archive-job",
 		Status:       "connected",
 	}
-	first, err := repo.CreateCommunicationsArchiveJob(CommunicationsArchiveJobInput{
+	first, err := repo.CreateCommunicationsArchiveJobContext(context.Background(), CommunicationsArchiveJobInput{
 		ActorUserID: user.UserID,
 		Connection:  connection,
 		MessageIDs:  []string{"message-1", "message-2", "message-1"},
@@ -31,7 +32,7 @@ func TestCommunicationsArchiveJobSkipsDuplicateActiveItems(t *testing.T) {
 	if first.CreatedItemCount != 2 || len(first.Items) != 2 {
 		t.Fatalf("first job = %+v, want two unique items", first)
 	}
-	second, err := repo.CreateCommunicationsArchiveJob(CommunicationsArchiveJobInput{
+	second, err := repo.CreateCommunicationsArchiveJobContext(context.Background(), CommunicationsArchiveJobInput{
 		ActorUserID: user.UserID,
 		Connection:  connection,
 		MessageIDs:  []string{"message-1", "message-3"},
@@ -39,15 +40,15 @@ func TestCommunicationsArchiveJobSkipsDuplicateActiveItems(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateCommunicationsArchiveJob second: %v", err)
 	}
-	if second.CreatedItemCount != 1 || len(second.Items) != 1 || second.Items[0].MessageID != "message-3" {
-		t.Fatalf("second job = %+v, want only non-active duplicate item", second)
+	if second.CreatedItemCount != 1 || len(second.Items) != 2 || second.Items[0].JobItemID != first.Items[0].JobItemID || second.Items[1].MessageID != "message-3" {
+		t.Fatalf("second job = %+v, want the existing active marker plus one new item", second)
 	}
-	claimed, err := repo.ClaimCommunicationsArchiveJobItems(10, time.Minute)
+	firstItems, err := repo.ListCommunicationsArchiveJobItemsContext(context.Background(), first.JobID)
 	if err != nil {
-		t.Fatalf("ClaimCommunicationsArchiveJobItems: %v", err)
+		t.Fatalf("ListCommunicationsArchiveJobItems: %v", err)
 	}
-	if len(claimed) != 3 {
-		t.Fatalf("claimed = %+v, want three active unique messages", claimed)
+	if len(firstItems) != 2 || len(second.Items) != 2 {
+		t.Fatalf("stable items first=%+v second=%+v", firstItems, second.Items)
 	}
 }
 
@@ -57,7 +58,7 @@ func TestCommunicationsArchiveJobRetryAndFinalFailureBookkeeping(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	job, err := repo.CreateCommunicationsArchiveJob(CommunicationsArchiveJobInput{
+	job, err := repo.CreateCommunicationsArchiveJobContext(context.Background(), CommunicationsArchiveJobInput{
 		ActorUserID: user.UserID,
 		Connection: domain.UserEmailConnection{
 			UserID:       user.UserID,
@@ -72,32 +73,61 @@ func TestCommunicationsArchiveJobRetryAndFinalFailureBookkeeping(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateCommunicationsArchiveJob: %v", err)
 	}
-	claimed, err := repo.ClaimCommunicationsArchiveJobItems(10, time.Minute)
-	if err != nil {
-		t.Fatalf("ClaimCommunicationsArchiveJobItems: %v", err)
+	itemID := job.Items[0].JobItemID
+	for attemptNumber := 1; attemptNumber <= 3; attemptNumber++ {
+		attempt, started, err := repo.StartCommunicationsArchiveJobItemAttemptContext(context.Background(), itemID)
+		if err != nil || !started || attempt.AttemptCount != attemptNumber || attempt.Status != CommunicationsArchiveJobItemStatusProcessing {
+			t.Fatalf("attempt %d = %+v started=%v err=%v", attemptNumber, attempt, started, err)
+		}
+		if attempt.AttemptToken == "" {
+			t.Fatalf("attempt %d has no settlement token", attemptNumber)
+		}
+		if err := repo.FailCommunicationsArchiveJobItemAttemptContext(context.Background(), itemID, attempt.AttemptToken, "nylas_request_rejected"); err != nil {
+			t.Fatalf("fail attempt %d: %v", attemptNumber, err)
+		}
 	}
-	if len(claimed) != 1 || claimed[0].AttemptCount != 1 || claimed[0].Status != CommunicationsArchiveJobItemStatusProcessing {
-		t.Fatalf("claimed = %+v, want one processing attempt", claimed)
-	}
-	future := time.Now().UTC().Add(time.Hour)
-	if err := repo.MarkCommunicationsArchiveJobItemFailed(claimed[0].JobItemID, "nylas_rate_limited", future, false); err != nil {
-		t.Fatalf("MarkCommunicationsArchiveJobItemFailed retry: %v", err)
-	}
-	early, err := repo.ClaimCommunicationsArchiveJobItems(10, time.Minute)
-	if err != nil {
-		t.Fatalf("ClaimCommunicationsArchiveJobItems early: %v", err)
-	}
-	if len(early) != 0 {
-		t.Fatalf("early retry claim = %+v, want none before available_at", early)
-	}
-	if err := repo.MarkCommunicationsArchiveJobItemFailed(claimed[0].JobItemID, "nylas_request_rejected", time.Time{}, true); err != nil {
-		t.Fatalf("MarkCommunicationsArchiveJobItemFailed final: %v", err)
-	}
-	items, err := repo.ListCommunicationsArchiveJobItems(job.JobID)
+	items, err := repo.ListCommunicationsArchiveJobItemsContext(context.Background(), job.JobID)
 	if err != nil {
 		t.Fatalf("ListCommunicationsArchiveJobItems: %v", err)
 	}
-	if len(items) != 1 || items[0].Status != CommunicationsArchiveJobItemStatusFailed || items[0].FailedTimestamp == nil || items[0].LastError != "nylas_request_rejected" {
+	if len(items) != 1 || items[0].Status != CommunicationsArchiveJobItemStatusFailed || items[0].AttemptCount != 3 || items[0].AttemptToken != "" || items[0].FailedTimestamp == nil || items[0].LastError != "nylas_request_rejected" {
 		t.Fatalf("final items = %+v, want failed item", items)
+	}
+}
+
+func TestCommunicationsArchiveJobSettlementRejectsStaleAttemptToken(t *testing.T) {
+	repo := NewMemoryRepo()
+	user, err := repo.UpsertAuthUser("archive-token-user", "archive-token@example.com", "Archive Token User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := repo.CreateCommunicationsArchiveJobContext(context.Background(), CommunicationsArchiveJobInput{
+		ActorUserID: user.UserID,
+		Connection: domain.UserEmailConnection{
+			UserID:       user.UserID,
+			Provider:     "google",
+			AccountEmail: user.Email,
+			Scope:        "personal",
+			GrantID:      "grant-token",
+			Status:       "connected",
+		},
+		MessageIDs: []string{"message-token"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, started, err := repo.StartCommunicationsArchiveJobItemAttemptContext(context.Background(), job.Items[0].JobItemID)
+	if err != nil || !started {
+		t.Fatalf("start first attempt: item=%+v started=%v err=%v", first, started, err)
+	}
+	second, started, err := repo.StartCommunicationsArchiveJobItemAttemptContext(context.Background(), job.Items[0].JobItemID)
+	if err != nil || !started || first.AttemptToken == second.AttemptToken {
+		t.Fatalf("start second attempt: first=%+v second=%+v started=%v err=%v", first, second, started, err)
+	}
+	if err := repo.CompleteCommunicationsArchiveJobItemAttemptContext(context.Background(), second.JobItemID, first.AttemptToken); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("stale settlement error=%v, want ErrNotFound", err)
+	}
+	if err := repo.CompleteCommunicationsArchiveJobItemAttemptContext(context.Background(), second.JobItemID, second.AttemptToken); err != nil {
+		t.Fatalf("current settlement: %v", err)
 	}
 }

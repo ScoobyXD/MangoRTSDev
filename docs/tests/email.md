@@ -1,6 +1,36 @@
+# Process Story: New mail crosses SQS once and realtime follows durable truth
+
+A signed Nylas `message.created` webhook resolves the exact permanent personal or shared email connection
+↓
+Mango creates or finds one permanent connection/provider-message job identity, sends that compact identity to the encrypted FIFO queue, and returns success only after SQS accepts it
+↓
+One private worker receives one item with a fixed ten-minute visibility window and an eight-minute attempt deadline; it never claims batches, extends visibility, or polls PostgreSQL for work
+↓
+The worker atomically starts one provider attempt with an exact token, stores provider truth and typed relationships, and refuses a fourth provider-processing start
+↓
+After the email result commits, Mango must durably insert the required realtime outbox row before deleting the SQS message
+↓
+Valkey publication remains asynchronous: a Valkey outage does not repeat provider work, because the committed outbox row is recovered by the existing realtime spine
+↓
+Temporary failure leaves the SQS item undeleted for AWS redelivery; permanent account failure parks only the exact connection; work reaching the DLQ waits for deliberate operator review
+
+Last updated: 2026-08-09
+
+# Process Story: Background archive completion is read, not pushed
+
+An accepted background archive request creates one permanent exact-message marker and sends one compact SQS unit
+↓
+The worker archives that exact provider message and settles only with its exact attempt token
+↓
+The archive job and item rows remain the canonical completion or failure record
+↓
+The browser observes that state through the canonical archive job read; the worker publishes no communications WebSocket completion event
+
+Last updated: 2026-08-09
+
 # Process Story: New mail appears live and picker selections always have a durable identity
 
-A Nylas webhook is accepted by the cloud backend and commits its narrow mailbox hint to the shared realtime outbox
+A Nylas webhook is accepted only after its compact stable job reaches SQS; the worker later commits provider truth and its narrow mailbox hint to the shared realtime outbox
 ↓
 The exact active My Triage or Shared Triage browser receives that hint, invalidates the exact mailbox cache, and reloads the visible message list and folder counts
 ↓
@@ -12,7 +42,7 @@ If a chosen provider result has not yet been stored, Mango synchronously ingests
 ↓
 The existing typed Node or Project attachment command receives that durable identity; provider failure leaves already-painted stored mail visible and never invents a relationship
 
-Last updated: 2026-08-07
+Last updated: 2026-08-09
 
 # Process Story: A selected email can reference, link, float, chat, and stay visible
 
@@ -36,7 +66,7 @@ Last updated: 2026-08-07
 
 An email connection becomes eligible for ingestion at its stored `ingestion_started_at` boundary
 ↓
-Signed Nylas `message.created` webhooks, visible My Triage/Shared Triage rows, and the checkpoint scanner enqueue the exact provider message into one durable priority queue
+Signed Nylas `message.created` webhooks normally enqueue the exact provider message into SQS; explicit selected-message imports may enqueue the same stable identity, and rare EventBridge reconciliation repairs a missed webhook
 ↓
 The worker rejects pre-boundary or non-Inbox discovery messages, then reconciles the complete real provider thread available in that mailbox without copying an already-complete Mango message
 ↓
@@ -44,9 +74,9 @@ An unknown thread is stored with no Node relationship; a known thread's newly co
 ↓
 My Triage and Shared Triage remain provider-owned lists, while their stored-message placement enrichment shows the Node icon and opens the already-updated Mango thread
 ↓
-Expired grants pause jobs without consuming attempts; same-connection reauthorization preserves the activation boundary and checkpoint, and duplicate-safe checkpoint catch-up runs behind new live and visible work
+Permanent grant/configuration failures park only the exact connection; same-connection reauthorization preserves the activation boundary and checkpoint, and rare bounded reconciliation never recreates an existing stable job identity
 
-Last updated: 2026-08-06
+Last updated: 2026-08-09
 
 # Process Story: Email collaboration creates a standalone Node
 
@@ -84,7 +114,7 @@ Last updated: 2026-08-06
 
 Coverage Status:
 
-- Business Logic Covered By Scenarios: The V3 schema, data-copy checkpoint, final-delta rerun, application cutover, deployment, smoke checks, and legacy email-table retirement are complete in development. The scenarios below cover provider-backed mailbox reads without persistence, explicit-import-only V3 storage, internal message IDs, exact account scope, ordinary resource permissions, normalized file ownership, relationship-only deletion, durable draft send recovery, and read-only schema readiness.
+- Business Logic Covered By Scenarios: The V3 schema, data-copy checkpoint, final-delta rerun, application cutover, deployment, smoke checks, and legacy email-table retirement are complete in development. The scenarios below cover provider-backed mailbox reads without list-time persistence, webhook/SQS automatic ingestion, selected-message imports, internal message IDs, exact account scope, ordinary resource permissions, normalized file ownership, relationship-only deletion, durable draft send recovery, and read-only schema readiness.
 - Exact mailbox hardening is covered by `homeMailboxRealtime.test.ts`, `homeUtils.test.ts`, `unifiedRichEditorContract.test.ts`, `communications_singleflight_cancellation_test.go`, `realtime_audience_hardening_test.go`, `nylas_webhook_receipts_test.go`, and focused communications/store tests for retry-safe open receipts and exact-account migration ordering.
 - Business Logic Covered By Automated Tests: Partial (`tests/frontend/pages/home/homeCommands.test.ts` covers send payload construction, Mango attachment references, and mailbox-scoped signature save ordering; `tests/frontend/pages/home/homeMailboxRealtime.test.ts` covers exact active targets, first/reconnect acceptance, event mapping, coalescing, queued-final work, and navigation cancellation; `tests/frontend/pages/home/homeMailDrafts.test.ts` covers provider/auth error retention versus exact revocation purge, out-of-order loads, local save/delete fencing, multiple personal accounts, and live-draft preparation before attachment upload; `tests/frontend/modules/editor/richTextEditing.test.ts` and `unifiedRichEditorContract.test.ts` cover rich email behavior. Backend communications/realtime/attachment tests cover exact mailbox routing, provider send boundaries, S3 attachment resolution, live email-draft attachment authorization, deleted-draft denial, sent-message survival, and durable inline-byte rejection. Broader mounted compose/signature endpoint coverage remains partial.)
 - Outbound attachment tests in `backend/internal/http/communications_handlers_test.go` and `backend/internal/http/nylas_client_test.go` cover early validation, tenant/link authorization, the complete metadata limit preflight, lazy exact-length multipart streaming, inline CID fields, cancellation, provider rejection, and body cleanup.
@@ -358,7 +388,7 @@ EMAIL40 - Received body text and HTML render before inline CID downloads finish.
 EMAIL41 - Normal detail reads use mailbox-scoped frontend/backend caches and same-key in-flight coalescing without `refresh=true`. Raw MIME is not part of an ordinary body-only detail critical path; calendar RSVP and concrete unresolved inline-content recovery remain authenticated raw-MIME uses.
 EMAIL42 - Missing recipients and empty subject/body without a valid attachment reference are rejected before attachment authorization, repository expansion, S3, or Nylas send work. Attachment-only email remains valid. Every referenced Mango attachment then completes tenant-scoped original metadata and active-link authorization preflight; nonnegative sizes are summed without overflow and an aggregate above exactly 24,000,000 bytes is rejected before any object opens.
 EMAIL43 - Provider-ready outbound attachments are metadata plus exact size and a lazy opener, separate from inbound `NylasAttachment.Content`. Once the Nylas gate admits the send, S3 bytes stream exactly once into a deterministic-Content-Length multipart request with preserved order, filenames, content types, CID/inline semantics, and exact bytes. Length mismatch, short/long/error readers, cancellation, and provider failure close every opened body; no outbound base64 round trip or complete multipart buffer is allowed.
-EMAIL44 - Signed provider message/folder webhooks publish compact exact-mailbox hints after exact server-cache invalidation and webhook deduplication. Personal hints target `mailbox:personal:account:{user_id}:{normalized_account_email}`; shared hints target `mailbox:shared:{shared_inbox_id}` after current-audience filtering. First acceptance and reconnect acceptance each perform one coalesced canonical folder/list reconciliation, closing the initial-list-to-subscribe race. `message.created` also enqueues the exact provider message as priority-10 live ingestion work; the worker, not the webhook body, fetches and validates provider truth. `message.updated` (including moves) and `message.deleted` reconcile the active list/folders; folder changes reconcile folder metadata; and directly identified selected message/thread changes reconcile detail. Unrelated new mail does not refetch selected detail, and webhook payload bodies are never trusted as durable email truth.
+EMAIL44 - Signed provider webhooks use two distinct paths. `message.created` creates/finds and enqueues the exact priority-10 ingestion job, then returns without invalidating mailbox caches or publishing a pre-ingestion realtime hint; the worker, not the webhook body, fetches and validates provider truth. After the email transaction and deterministic durable outbox event commit, the worker wakes realtime for only `job.company_id` and the exact personal account or shared inbox. True already-stored `message.updated` (including moves), `message.deleted`, and folder changes still publish compact exact-mailbox hints after exact cache invalidation and webhook deduplication. First and reconnect acceptance each perform one canonical reconciliation, directly identified selected changes may refresh detail, unrelated new mail does not refetch selected detail, and webhook bodies are never durable email truth.
 EMAIL45 - Thread reconstruction supports external-initiated, Mango-user-initiated, alternating inbound/outbound replies, and forwards without guessing. Provider thread IDs or exact supported reply metadata may establish membership; subject similarity never does, cross-mailbox IDs cannot merge, duplicates collapse by message ID, and unresolved one-offs remain single conversations.
 EMAIL46 - An unread card always has the unread dot, unread text emphasis, and accessible unread state, but it must not receive the retired blue/thick outer card frame. Pointer or keyboard open optimistically clears unread UI and decrements/recomputes the visible count before the scoped provider command completes; success survives selection/realtime refresh, while failure rolls back accurately and surfaces the established error. Pending-read timers, overlays, and responses are keyed by authenticated mailbox plus provider message ID and may mutate only the captured list/filter and selection generation, so identical provider IDs or stale completions cannot cross users, personal accounts, shared inboxes, searches, or selections. Selection uses the separate full-card Mango selection surface and accessible pressed state.
 EMAIL47 - Draft scope columns are immutable across upsert conflicts, soft deletion, and known-ID reuse. List/get/delete store predicates include exact scope, shared account email is canonicalized from the inbox, and cross-user/account/inbox IDs cannot be read, taken over, reassigned, updated, or deleted.
@@ -420,6 +450,7 @@ EMAIL102 - Forward is an explicit compose kind, separate from Reply. It retains 
 EMAIL103 - Home and node-attached email use one calendar-invitation card backed by an authenticated raw-MIME UID lookup and the authoritative Nylas event. When supplied, the card shows title, time and timezone, organizer, guests, location, current RSVP state, Join meeting, Copy link, and Open calendar. Accept, Tentative, and Decline show saved state only after provider success; permission/provider failures never invent event or RSVP state.
 EMAIL104 - Manual Split conversation and Merge conversations controls are intentionally outside the current email-thread scope. Canonical provider/header identity, exact mailbox scoping, oldest-to-newest presentation, and one visible item per canonical message remain the thread contract; subject/body resemblance alone never groups or separates messages.
 EMAIL105 - The normal Archive action in an open My Triage or Shared Triage email archives that exact selected provider message, removes its visible row, selects the row immediately below it, and opens that next detail automatically. If the archived row was last, Mango selects the nearest previous row; if no row remains, the detail clears. The separate Archive page and go next action retains its fixed-page behavior.
+EMAIL105A - Background archive creates one durable item marker per exact mailbox message before sending one compact SQS message per item. If a request sends some items and a later send fails, retry reuses and resends every still-pending marker instead of creating a replacement or stranding it without a database poller. The exact permanent email connection remains the FIFO group, PostgreSQL fences each provider attempt with its token, and AWS receive count owns redelivery and DLQ movement. Completion and failure are observed only through canonical archive job reads; archive workers publish no communications WebSocket completion event.
 EMAIL106 - A non-primary mailbox tab with a next page but no actual list scroll range automatically appends pages until the list becomes scrollable or the provider reports exhaustion. This prevents condensed All, Starred, Sent, Spam, or Archive results from trapping the user on a short first page; ordinary scroll continues loading near the bottom without replacing the selected detail.
 EMAIL107 - While the selected detail owner is already fetching a message/thread, the mounted conversation viewer must not start a competing newest-message body hydration. Same-key caches and in-flight coalescing remain a safety net, but the visible contract is one stable loading transition from row preview to the complete canonical timeline, never a one-message/detail blip followed by repeated thread reconstruction.
 EMAIL108 - Personal Email, My Triage, and Shared Triage use the same ordered mailbox actions: Inbox, Starred, Sent, and the All/Spam dropdown form four equal top controls; Compose, My Drafts, and Archive page/next always form three equal lower controls in fixed positions. The lower workflow actions rest on lightly tinted blue-violet, violet-fuchsia, and cyan-teal elevated surfaces. Compose or My Drafts receives its full gradient only when it is the single selected destination; Archive page/next receives stronger teal interaction feedback when available and remains visibly disabled, never removed, on mailbox tabs where that action is inappropriate. The All and Spam menu rows show a clear hover and keyboard-focus highlight across the full row without a dead gap between options.
@@ -429,25 +460,25 @@ EMAIL111 - The selected My Triage or Shared Triage message toolbar keeps ordinar
 EMAIL111 interaction detail - Priority choices remain pre-open only after a `##` Logic Gate or Project selection, and Project Logic Gate choices remain individual elevated options; clicking the final required option submits without a native dropdown. Floating creation bypasses the picker and both choice groups. A direct existing-Node import annotates the matching mailbox row and every loaded thread reply immediately after the established import succeeds. In `#` mode, choosing an email reference opens the exact stored personal/shared mailbox scope without creating an email-to-email relationship.
 EMAIL112 - My Triage and Shared Triage email-collaboration chats use the same author-only inline comment editor as Node and Project chat. Editing recomputes direct-user and user-group mention IDs from the saved text, atomically preserves the source email/text-box relationship and existing collaboration payload, adds any newly resolved participants through the normal append-only participant path, and reconciles other mounted viewers through the exact Node `chat.message.updated` hint. Failed saves roll back the optimistic row while retaining the draft for retry.
 
-EMAIL113 - Automatic discovery starts from a provider message ID and durable email-connection ID; it does not require a Mango thread/message/Node ID to exist first. Webhook, visible-list, and scan producers only enqueue immutable provider identity plus priority. The worker loads the connection, fetches provider truth, enforces the activation and Inbox boundary, then creates/reuses durable thread/message rows. Existing explicit Node-import commands may still attach a selected message, but they are not the automatic-ingestion authority.
+EMAIL113 - Automatic discovery starts from a provider message ID and permanent `email_connection_id`; it does not require a Mango thread/message/Node ID to exist first. A signed webhook creates or finds the permanent stable job identity before sending a compact job to SQS, and returns success only after SQS accepts that request. Explicit selected-message imports may enqueue the same identity. A rare bounded reconciliation message repairs missed webhook delivery; provider-backed list reads do not create background work.
 EMAIL114 - Provider identity is always mailbox-scoped. The primary message key is company plus immutable personal-user/account or shared-inbox scope plus Nylas message ID. The primary thread key is the same mailbox scope plus Nylas thread ID, falling back to the selected Nylas message ID only when Nylas supplies no thread ID. An RFC `Message-ID` header may be retained as secondary evidence but is not the primary key. Subject, participants, dates, snippets, bodies, and visual similarity never identify or merge messages or threads.
-EMAIL115 - Before storing work, ingestion checks the exact connection-scoped Nylas message ID. If a complete message already exists, Mango reuses it and performs no storage copy. If the message exists but its body or attachments are incomplete, Mango resumes only missing work. Concurrent webhook, visible-list, scanner, reconnect, and explicit-import producers converge through database uniqueness and one active job per connection/provider-message; a higher-priority producer lowers the existing job's priority instead of creating another job.
+EMAIL115 - Before storing work, ingestion checks the exact connection-scoped Nylas message ID. If a complete message already exists, Mango reuses it and performs no storage copy. If the message exists but its body or attachments are incomplete, Mango resumes only missing work. Webhook, reconciliation, reconnect, duplicate SQS delivery, and explicit-import producers converge through one permanent unique job per company/connection/provider-message. No producer recreates that identity after accepted, processing, completed, parked, or exhausted status.
 EMAIL116 - If the eligible trigger is new, the worker checks its exact connection-scoped Nylas thread ID. With no stored thread, Mango creates one thread with no Node relationship and reconciles the complete real provider thread available in that mailbox, including real older messages. With an existing thread, Mango appends only missing/incomplete messages and files, preserving every stable stored ID. Quoted history inside one provider message never becomes fabricated messages. A thread that predates activation is allowed only because a qualifying post-activation Inbox trigger identified it.
-EMAIL117 - `email_ingestion_jobs` is database-backed, leased, and retryable across request completion or server restart, and a job may exist before any Mango thread row. At most one active job exists per company/connection/provider-message. Claim order is priority then availability/creation: live webhook 10, visible My/Shared Triage 20, routine scan 30, old reconnect backlog 40. A worker records attempts, uses bounded exponential retry for transient provider/storage errors, resumes missing messages/files, and marks permanent or exhausted failures visibly.
+EMAIL117 - AWS SQS alone owns email delivery, fixed visibility, redelivery, receive count, and DLQ movement. The encrypted FIFO work queue uses exact permanent `email_connection_id` groups, ten-minute visibility, 20-second long polling, and `maxReceiveCount=3`; one worker attempt has an eight-minute deadline. PostgreSQL keeps a permanent idempotency marker, not a delivery lease: it increments only provider-processing starts, fences settlement with the exact attempt token, and atomically refuses attempt 4. Mango has no claim/reclaim scan, availability timer, visibility heartbeat, custom retry scheduler, or automatic DLQ replay.
 EMAIL118 - Message persistence includes HTML body (and provider text when available), subject, snippet, timestamp, From, To, Cc, Bcc, Reply-To, provider message/thread IDs, folders needed for faithful display, and deterministic chronological order. HTML stays immutable email HTML rather than being translated into editable Node JSON. Rendering sanitizes it and blocks active/unsafe content. Empty Bcc or body is a valid stored value and must not be mistaken for an incomplete download.
 EMAIL119 - Every ordinary attachment, inline CID image, and signature asset referenced by the imported message is copied into Mango-owned private object storage and linked through Mango attachment metadata to every authorized Node that displays the thread. Retry uses stable identity so the same provider attachment is stored once. A Node collaborator downloads through Mango authorization and never through the source user's Nylas grant. Failure of one attachment leaves the readable message and completed siblings available while the job remains retryable/partially failed.
 EMAIL120 - Stored messages are ordered by provider timestamp ascending with immutable Nylas message ID as the deterministic tie-breaker; UI reversal is presentation-only. `history_complete=true` means the provider thread was completely downloaded as observed by that reconciliation job, not that the external thread can never receive another message. A later automatic or explicit reconciliation may append a newer, older, or same-timestamp real message and recomputes order without changing stable Mango message IDs.
-EMAIL121 - Every connection stores a permanent Mango ID, `ingestion_started_at`, and `last_successful_scan_at`. Existing rows receive the rollout transaction timestamp; a newly connected user receives the connection-activation timestamp. Routine scans query only Inbox messages after an overlap-protected checkpoint and never launch a historical whole-mailbox import. The checkpoint advances only after every returned page was durably enqueued. New live and visible work outranks old reconnect backlog.
+EMAIL121 - Every connection stores a permanent Mango ID, `ingestion_started_at`, and `last_successful_scan_at`. EventBridge sends one `reconciliation-control` FIFO message about every ten minutes. One control delivery reads one bounded connection page; each exact-connection delivery reads one bounded provider page after an overlap-protected checkpoint and never launches a historical whole-mailbox import. A continuation is accepted by SQS before the current delivery is deleted, and the checkpoint advances only after the final provider page is durably represented. Reconciliation never creates a replacement for an existing stable identity. Its durable creation-origin identity permits only the same control delivery to retry an ambiguous or failed child send; a later scheduled control identity never resends an accepted marker left by prior or DLQed work, and processing, terminal, and parked work remains untouched.
 
-EMAIL121A - `grant.expired` or a provider 401/403 marks the connection `reauth_required`. Pending jobs remain durable and reauth waits do not consume attempts. Reauthorizing the same mailbox updates the same connection/grant row without changing `ingestion_started_at` or `last_successful_scan_at`; catch-up resumes from the checkpoint in the background. Webhook replay under 72 hours is harmless because enqueue/storage is idempotent; beyond the provider replay window the checkpoint scan is authoritative.
+EMAIL121A - Provider 401/403 and exact 404 `grant.not_found` park only that permanent connection as `reauth_required`; the known Google/Gmail 400 precondition failure parks it as `configuration_required`. The exact job and connection status update must succeed before SQS acknowledgement. Reauthorizing the same mailbox updates the same permanent connection without changing `ingestion_started_at` or `last_successful_scan_at`; a bounded reconciliation control message may resume from the checkpoint. Another valid connection is never changed.
 
 EMAIL121B - This phase propagates only Node-wide email relationships. When a message becomes complete, the message upsert and insertion of its missing relationships to every current Node-wide destination of that thread commit atomically. It does not copy the whole thread, create a relationship for an unknown/unplaced thread, grant access, choose a Node, or propagate textbox-specific placement. Chats, shared drafts, picker redesign, and automatic textbox association remain outside this phase.
 
-EMAIL121C - The in-place job migration preserves every legacy job row. When an old active full-thread job and old active message job resolve to the same connection/provider-message identity, the oldest remains active and each later redundant active row becomes completed with superseded_by_email_ingestion_cutover. The retained job performs the same full provider-thread reconciliation, so no email work is lost.
+EMAIL121C - The DEV cutover preflight refuses to proceed while any legacy database-delivered ingestion or archive item is pending, processing, or retrying. Those items must finish under the old deployment or receive deliberate operator review before the SQS schema transaction. The cutover does not merge, supersede, translate, or recreate job identities.
 
-EMAIL121D - My Triage and Shared Triage keep the provider-thread indicator when a collapsed card represents multiple real messages. Their Node indicator is enriched only from an accessible Node-wide relationship matching the exact company, permanent email connection, and provider message ID. A placement in another mailbox with the same provider message ID never supplies the icon. Successful background ingestion invalidates the mailbox projection and publishes a narrow refresh hint so the icon can appear without a full application reload.
+EMAIL121D - My Triage and Shared Triage keep the provider-thread indicator when a collapsed card represents multiple real messages. Their Node indicator is enriched only from an accessible Node-wide relationship matching the exact company, permanent email connection, and provider message ID. A placement in another mailbox with the same provider message ID never supplies the icon. After the email transaction commits, the worker durably inserts one narrow outbox event whose deterministic identity derives from the stable ingestion job plus the exact company/audience scope. Personal delivery uses only `job.company_id`, exact user, and exact account; it never fans out across the user's other company memberships. Outbox-insert failure leaves the SQS item undeleted. Once that row exists, duplicate completion is an outbox no-op except an optional post-commit Valkey wake, and Valkey failure is recovered asynchronously without repeating provider work.
 
-EMAIL121E - A completed ingestion job is final for that exact company, email connection, and provider message identity. Repeated triage views or duplicate webhooks reuse it and do not enqueue a fresh provider download.
+EMAIL121E - A completed ingestion job is final for that exact company, email connection, and provider message identity. A duplicate webhook request still independently waits for SQS acceptance so another request's send failure cannot be hidden. If SQS deletion fails after successful email and outbox commits, redelivery performs no second provider operation and creates no second outbox event; it may only reuse the deterministic event identity and wake the existing realtime recovery path.
 EMAIL122 - After a successful mailbox-scoped star or unstar command, that committed value overlays stale provider list responses in the exact personal email account or shared email account across Primary, Starred, All, and other visible mailbox pages. A stale refresh cannot reverse the visible result; Starred membership follows the overlaid value. The overlay is removed only by an exact-scope settlement hint or its bounded expiry, and it never crosses another personal account or shared inbox even when provider message IDs collide.
 EMAIL123 - Triage star reconciliation treats an unscoped visible row with the same provider message ID as the current exact mailbox scope when the committed command response supplies that scope. The committed response updates that row, while preserving only same-ID rows that explicitly identify a different personal or shared mailbox scope.
 EMAIL124 - The Node-wide email column is bounded to the available Node workspace height, is sticky below the Node toolbar, and scrolls long email content inside its own pane. Scrolling the outer text-box timeline leaves the email column in view. Opening a long email never increases the outer virtualized timeline height, hides unrelated text boxes below it, or creates a blank right side; the outer Node scroll remains driven by text-box rows.
@@ -455,7 +486,7 @@ EMAIL125 - Encountered-email chat auto-open is frontend-only. Selecting a My Tri
 
 EMAIL126 - Every universal picker host renders an explicit transparent outside-click dismiss layer behind the elevated popup; a pointer press on that layer closes the picker without selecting or mutating. In My Triage and Shared Triage, the compact elevated green placement notice is anchored nine pixels left of the floating-Node control. A successful standalone creation paints that notice before publishing the mailbox/reply Node indicator; the indicator follows after 450 milliseconds while the notice remains visible for its normal brief lifetime. A failed creation paints neither success nor a false indicator. Mail Node-indicator activation opens the Node without transient information focus, so the yellow target flash remains exclusive to Updates-row navigation.
 
-EMAIL127 - Exact active-mailbox `message.created`, `message.updated`, and `message.deleted` hints invalidate the exact message-page cache and coalesce one authoritative visible-list reload plus folder reload. First subscription acceptance performs the same canonical reconciliation to close the initial-load race. Folder-only hints reload folders only, selected-detail hints remain selection-owned, local command echoes perform no duplicate provider read, and navigation or disposal cancels obsolete mailbox work.
+EMAIL127 - The worker's deterministic post-ingestion mailbox hint and exact active-mailbox `message.updated`/`message.deleted` hints invalidate the exact message-page cache and coalesce one authoritative visible-list reload plus folder reload. A raw `message.created` webhook produces no hint before ingestion. First subscription acceptance performs the same canonical reconciliation to close the initial-load race. Folder-only hints reload folders only, selected-detail hints remain selection-owned, local command echoes perform no duplicate provider read, and navigation or disposal cancels obsolete mailbox work.
 
 EMAIL128 - Universal-picker email search is database-first but never treats a nonempty local result as complete provider coverage. Mango paints authorized stored matches immediately, then always queries the same exact personal account, mailbox, and search text at Nylas. Provider success becomes the ordering/metadata authority while preserving known durable Mango IDs; provider failure leaves stored results usable with a visible sync warning. Exact provider message ID within the mailbox scope is the merge identity.
 
@@ -732,7 +763,7 @@ Expected:
 - A signed, deduplicated exact-mailbox hint is authorized for only the selected connected personal account or exact shared inbox. First acceptance discovers mail committed after the initial list, reconnect acceptance performs one recovery, and the matching active list/folders refresh canonically without polling.
 - Bursts use one active refresh plus at most one queued final refresh. Navigating cancels/discards the old request key; personal Account A, personal Account B, and Shared Inbox A never invalidate or issue provider GETs for one another.
 - Shared root/headings/grouping/plain-folder and other off-view states retain no fallback mailbox subscription and perform no hint-triggered GET.
-- `message.created`, `message.updated` (including moves), `message.deleted`, and folder changes reconcile only relevant canonical state; directly named selected message/thread changes refresh detail, while an unrelated new message does not.
+- `message.created` only enqueues durable ingestion and publishes nothing before provider truth is stored. The worker's one deterministic post-commit hint, plus true already-stored `message.updated` (including moves), `message.deleted`, and folder changes, reconcile only relevant canonical state; directly named selected changes refresh detail, while unrelated new mail does not.
 - Conversation detail contains all provider-listed sent and received members, including the intervening Mango reply, without duplicate IDs, subject-based merging, cross-scope history, or loss of valid one-offs/forwards.
 - The unread dot/frame and visible count clear immediately on pointer/Enter/Space open and stay cleared after success; a failed provider write rolls back and reports the error. The selected full-card surface remains distinct.
 - The row shows a thread icon only for the proven multi-message conversation.
@@ -1131,13 +1162,13 @@ Given:
 - Today Nylas has one new reply with a new Nylas message ID and the same mailbox-scoped Nylas thread ID.
 
 When:
-- The user first re-imports an already stored old message, then a webhook, visible triage list, or checkpoint scan enqueues today's new reply.
+- The user first re-imports an already stored old message, then a webhook or rare reconciliation delivery sends today's new reply through the exact connection FIFO group.
 
 Expected:
 - Re-importing the old message reuses its stored message, thread, Node source, text-box link, files, and any active job; it performs no duplicate provider download.
 - Automatic reconciliation recognizes the existing thread, appends only missing real provider messages, and downloads only their missing files.
 - Old Mango message IDs and stored bytes do not change; the deterministic order is recomputed and the exact-message linked text box is created/reused once.
-- Node open and collaborator reads remain provider-read-free. Durable webhook/checkpoint ingestion adds today's reply even when every user is logged out.
+- Node open and collaborator reads remain provider-read-free. Durable webhook/reconciliation ingestion adds today's reply even when every user is logged out.
 
 ### Scenario EMAIL-S31: Partial Failure And Collaborator Without Nylas
 
@@ -1151,7 +1182,28 @@ Given:
 
 Expected:
 - Bob and Joe can immediately read every completed Mango-stored message and file; the one failure does not blank or roll back the import.
-- The durable job records safe retry state and resumes only missing work after backoff or restart without duplicating stored data.
+- The exact attempt token prevents stale settlement, the SQS message remains undeleted, and AWS controls redelivery and DLQ movement without a database availability timer or custom backoff scheduler.
+
+### Scenario EMAIL-S31A: Durable Hint Boundary Does Not Repeat Provider Work
+
+Business logic covered:
+- EMAIL117
+- EMAIL121D
+- EMAIL121E
+
+Given:
+- One SQS ingestion delivery has successfully stored provider truth and completed its exact attempt.
+
+When:
+- The required realtime outbox insert first fails, then a later redelivery inserts it successfully.
+- In a separate run, the outbox insert succeeds while Valkey publication is unavailable.
+- In a third run, the email result and deterministic outbox event commit, but SQS deletion fails and AWS redelivers the same completed job.
+
+Expected:
+- Outbox-insert failure leaves the SQS message undeleted, but redelivery sees the completed stable job and performs no second provider operation.
+- Once the durable outbox row exists, the SQS message is acknowledged even during the Valkey outage.
+- The existing realtime spine later publishes that committed row after Valkey recovery; provider work remains exactly once.
+- Delete-failure redelivery reuses the same exact event ID, leaves one durable outbox event, and performs no provider call.
 
 ### Scenario EMAIL-S32: Star State Survives Stale Personal And Shared Triage Refreshes
 

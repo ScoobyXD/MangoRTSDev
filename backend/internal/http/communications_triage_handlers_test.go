@@ -41,6 +41,7 @@ func TestCommunicationsTriageConvertUsesCommittedEmailConversionCommandEvents(t 
 	server := NewServerWithOptions(repo, ServerOptions{
 		NylasConfig: testNylasConfig(),
 		NylasClient: nylas,
+		EmailQueue:  &recordingEmailQueueSender{},
 	})
 
 	body, _ := json.Marshal(map[string]any{
@@ -148,6 +149,7 @@ func TestCommunicationsTriageConvertUsesSharedInboxConnection(t *testing.T) {
 	server := NewServerWithOptions(repo, ServerOptions{
 		NylasConfig: testNylasConfig(),
 		NylasClient: nylas,
+		EmailQueue:  &recordingEmailQueueSender{},
 	})
 
 	body, _ := json.Marshal(map[string]any{
@@ -234,7 +236,7 @@ func TestCommunicationsTriageConvertSelectsExactOwnedPersonalAccount(t *testing.
 		From:     []NylasEmailAddress{{Email: "customer@example.com"}},
 		Starred:  true,
 	}}
-	server := NewServerWithOptions(repo, ServerOptions{NylasConfig: testNylasConfig(), NylasClient: nylas})
+	server := NewServerWithOptions(repo, ServerOptions{NylasConfig: testNylasConfig(), NylasClient: nylas, EmailQueue: &recordingEmailQueueSender{}})
 	body, _ := json.Marshal(map[string]any{
 		"company_id":    companyID,
 		"logic_gate_id": logicGate.LogicGateID,

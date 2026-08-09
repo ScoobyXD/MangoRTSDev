@@ -42,7 +42,8 @@ function runBackendGoTests() {
 
 run("Frontend relationship semantics tests", "npm run test:node-relationships", resolve(repoRoot, "frontend"));
 run("Frontend production build", "npm run build", resolve(repoRoot, "frontend"));
+run("Email SQS disposable PostgreSQL contract", "node scripts/test_email_sqs_delivery_postgres.mjs", repoRoot);
 runBackendGoTests();
-run("Infrastructure contract tests", "node --test infra/tests/attachment_direct_upload.test.mjs infra/tests/ci_workflow.test.mjs infra/tests/valkey_realtime.test.mjs", repoRoot);
+run("Infrastructure contract tests", "node --test infra/tests/attachment_direct_upload.test.mjs infra/tests/ci_workflow.test.mjs infra/tests/email_sqs.test.mjs infra/tests/valkey_realtime.test.mjs", repoRoot);
 
 console.log("\nAll test suites passed.");

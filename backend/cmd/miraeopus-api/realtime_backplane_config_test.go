@@ -13,6 +13,22 @@ func TestRealtimeBackplaneEnvironmentAllowsExplicitlyUnconfiguredLocalDevelopmen
 	}
 }
 
+func TestEmailWorkerRealtimeBackplaneRejectsProcessLocalFallback(t *testing.T) {
+	for _, key := range []string{
+		"MANGORTS_VALKEY_REQUIRED",
+		"MANGORTS_VALKEY_ENDPOINT",
+		"MANGORTS_VALKEY_REGION",
+		"MANGORTS_VALKEY_CACHE_NAME",
+		"MANGORTS_VALKEY_USER_ID",
+		"MANGORTS_VALKEY_CHANNEL",
+	} {
+		t.Setenv(key, "")
+	}
+	if _, _, err := buildRealtimeBackplane(true); err == nil {
+		t.Fatal("email worker accepted the process-local realtime backplane")
+	}
+}
+
 func TestRealtimeBackplaneEnvironmentFailsWhenDeployedConfigurationIsRequiredButMissing(t *testing.T) {
 	_, _, err := realtimeBackplaneEnvironmentFromLookup(realtimeEnvironmentLookup(map[string]string{
 		"MANGORTS_VALKEY_REQUIRED": "true",

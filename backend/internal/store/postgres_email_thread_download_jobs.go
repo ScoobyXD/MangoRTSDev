@@ -6,7 +6,6 @@ import (
 	"errors"
 	"sort"
 	"strings"
-	"time"
 )
 
 type communicationsEmailIngestionJobScanner interface {
@@ -16,22 +15,18 @@ type communicationsEmailIngestionJobScanner interface {
 const postgresCommunicationsEmailIngestionJobColumns = `
 ingestion_job_id::text,company_id::text,email_connection_id::text,
 coalesce(email_thread_id::text,''),provider_message_id,provider_thread_id,priority,
-status,attempt_count,last_error,available_at,processing_started_at,
-completed_timestamp,failed_timestamp,created_timestamp,updated_timestamp`
+status,provider_attempt_count,coalesce(attempt_token::text,''),enqueue_source_id,
+last_error,completed_timestamp,failed_timestamp,created_timestamp,updated_timestamp`
 
 func scanPostgresCommunicationsEmailIngestionJob(row communicationsEmailIngestionJobScanner) (CommunicationsEmailThreadDownloadJob, error) {
 	var item CommunicationsEmailThreadDownloadJob
-	var processing, completed, failed sql.NullTime
+	var completed, failed sql.NullTime
 	err := row.Scan(
 		&item.DownloadJobID, &item.CompanyID, &item.EmailConnectionID, &item.EmailThreadID,
 		&item.ProviderMessageID, &item.ProviderThreadID, &item.Priority,
-		&item.Status, &item.AttemptCount, &item.LastError, &item.AvailableAt,
-		&processing, &completed, &failed, &item.CreatedTimestamp, &item.UpdatedTimestamp,
+		&item.Status, &item.ProviderAttemptCount, &item.AttemptToken, &item.EnqueueSourceID,
+		&item.LastError, &completed, &failed, &item.CreatedTimestamp, &item.UpdatedTimestamp,
 	)
-	if processing.Valid {
-		value := processing.Time
-		item.ProcessingStartedAt = &value
-	}
 	if completed.Valid {
 		value := completed.Time
 		item.CompletedTimestamp = &value
@@ -47,8 +42,7 @@ func normalizeCommunicationsEmailIngestionPriority(priority int) int {
 	switch priority {
 	case CommunicationsEmailIngestionPriorityLive,
 		CommunicationsEmailIngestionPriorityVisible,
-		CommunicationsEmailIngestionPriorityScan,
-		CommunicationsEmailIngestionPriorityBacklog:
+		CommunicationsEmailIngestionPriorityScan:
 		return priority
 	default:
 		return CommunicationsEmailIngestionPriorityScan
@@ -65,6 +59,7 @@ func ensurePostgresCommunicationsEmailIngestionJobTx(
 	input.EmailThreadID = cleanUUIDText(input.EmailThreadID)
 	input.ProviderMessageID = strings.TrimSpace(input.ProviderMessageID)
 	input.ProviderThreadID = strings.TrimSpace(input.ProviderThreadID)
+	input.EnqueueSourceID = strings.TrimSpace(input.EnqueueSourceID)
 	input.Priority = normalizeCommunicationsEmailIngestionPriority(input.Priority)
 	if input.CompanyID == "" || input.EmailConnectionID == "" {
 		return CommunicationsEmailThreadDownloadJob{}, false, ErrInvalid
@@ -112,14 +107,14 @@ update email_ingestion_jobs
 set priority=least(priority,$4),
     email_thread_id=coalesce(email_thread_id,nullif($5,'')::uuid),
     provider_thread_id=case when provider_thread_id='' then $6 else provider_thread_id end,
-    available_at=least(available_at,now()),updated_timestamp=now()
+    updated_timestamp=now()
 where company_id=$1::uuid and email_connection_id=$2::uuid and provider_message_id=$3
-  and status in ('pending','processing','retry')
+  and status in ('accepted','processing')
 returning `+postgresCommunicationsEmailIngestionJobColumns,
 		input.CompanyID, input.EmailConnectionID, input.ProviderMessageID, input.Priority,
 		input.EmailThreadID, input.ProviderThreadID))
 	if err == nil {
-		if input.EmailThreadID != "" {
+		if input.EmailThreadID != "" && communicationsEmailThreadDownloadJobActive(item.Status) {
 			if _, err := tx.ExecContext(ctx, `update email_threads
 set download_status='downloading',last_download_error='',updated_timestamp=now()
 where company_id=$1::uuid and email_thread_id=$2::uuid`,
@@ -136,8 +131,6 @@ where company_id=$1::uuid and email_thread_id=$2::uuid`,
 select `+postgresCommunicationsEmailIngestionJobColumns+`
 from email_ingestion_jobs
 where company_id=$1::uuid and email_connection_id=$2::uuid and provider_message_id=$3
-  and status='completed'
-order by completed_timestamp desc nulls last,updated_timestamp desc
 limit 1`, input.CompanyID, input.EmailConnectionID, input.ProviderMessageID))
 	if err == nil {
 		return item, false, nil
@@ -148,15 +141,16 @@ limit 1`, input.CompanyID, input.EmailConnectionID, input.ProviderMessageID))
 	item, err = scanPostgresCommunicationsEmailIngestionJob(tx.QueryRowContext(ctx, `
 insert into email_ingestion_jobs (
  ingestion_job_id,company_id,email_connection_id,email_thread_id,
- provider_message_id,provider_thread_id,priority,status,attempt_count,last_error,
- available_at,created_timestamp,updated_timestamp
+ provider_message_id,provider_thread_id,priority,status,attempt_count,
+ provider_attempt_count,enqueue_source_id,last_error,
+ created_timestamp,updated_timestamp
 ) values (
  $1::uuid,$2::uuid,$3::uuid,nullif($4,'')::uuid,$5,$6,$7,
- 'pending',0,'',now(),now(),now()
+ 'accepted',0,0,$8,'',now(),now()
 )
 returning `+postgresCommunicationsEmailIngestionJobColumns,
 		newUUIDv7String(), input.CompanyID, input.EmailConnectionID, input.EmailThreadID,
-		input.ProviderMessageID, input.ProviderThreadID, input.Priority))
+		input.ProviderMessageID, input.ProviderThreadID, input.Priority, input.EnqueueSourceID))
 	if err != nil {
 		return CommunicationsEmailThreadDownloadJob{}, false, err
 	}
@@ -171,8 +165,7 @@ where company_id=$1::uuid and email_thread_id=$2::uuid`,
 	return item, true, nil
 }
 
-func (r *PostgresRepo) EnsureCommunicationsEmailIngestionJob(input CommunicationsEmailIngestionJobInput) (CommunicationsEmailThreadDownloadJob, bool, error) {
-	ctx := context.Background()
+func (r *PostgresRepo) EnsureCommunicationsEmailIngestionJobContext(ctx context.Context, input CommunicationsEmailIngestionJobInput) (CommunicationsEmailThreadDownloadJob, bool, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return CommunicationsEmailThreadDownloadJob{}, false, err
@@ -211,10 +204,9 @@ from email_threads where company_id=$1::uuid and email_thread_id=$2::uuid`,
 	})
 }
 
-func (r *PostgresRepo) EnsureCommunicationsEmailThreadDownloadJob(
-	companyID, emailThreadID, downloadScope, requestedProviderMessageID, requestedByUserID string,
+func (r *PostgresRepo) EnsureCommunicationsEmailThreadDownloadJobContext(
+	ctx context.Context, companyID, emailThreadID, downloadScope, requestedProviderMessageID, requestedByUserID string,
 ) (CommunicationsEmailThreadDownloadJob, bool, error) {
-	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return CommunicationsEmailThreadDownloadJob{}, false, err
@@ -232,48 +224,63 @@ func (r *PostgresRepo) EnsureCommunicationsEmailThreadDownloadJob(
 	return item, created, nil
 }
 
-func (r *PostgresRepo) ClaimCommunicationsEmailThreadDownloadJobs(limit int, lease time.Duration) ([]CommunicationsEmailThreadDownloadJob, error) {
-	limit = NormalizeCommunicationsEmailThreadDownloadClaimLimit(limit)
-	lease = NormalizeCommunicationsEmailThreadDownloadLease(lease)
-	staleBefore := time.Now().UTC().Add(-lease)
-	rows, err := r.db.Query(`
-with candidates as (
- select ingestion_job_id
- from email_ingestion_jobs
- where ((status in ('pending','retry') and available_at<=now())
-        or (status='processing' and processing_started_at<$2))
- order by priority,available_at,created_timestamp
- limit $1 for update skip locked
-), claimed as (
- update email_ingestion_jobs target
- set status='processing',attempt_count=target.attempt_count+1,
-     processing_started_at=now(),updated_timestamp=now()
- from candidates
- where target.ingestion_job_id=candidates.ingestion_job_id
- returning target.*
-)
-select `+postgresCommunicationsEmailIngestionJobColumns+` from claimed`, limit, staleBefore)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []CommunicationsEmailThreadDownloadJob{}
-	for rows.Next() {
-		item, scanErr := scanPostgresCommunicationsEmailIngestionJob(rows)
-		if scanErr != nil {
-			return nil, scanErr
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
-}
-
-func (r *PostgresRepo) MarkCommunicationsEmailThreadDownloadJobCompleted(jobID string) error {
+func (r *PostgresRepo) GetCommunicationsEmailIngestionJobContext(ctx context.Context, jobID string) (CommunicationsEmailThreadDownloadJob, error) {
 	jobID = cleanUUIDText(jobID)
 	if jobID == "" {
+		return CommunicationsEmailThreadDownloadJob{}, ErrInvalid
+	}
+	item, err := scanPostgresCommunicationsEmailIngestionJob(r.db.QueryRowContext(ctx, `select `+postgresCommunicationsEmailIngestionJobColumns+`
+from email_ingestion_jobs where ingestion_job_id=$1::uuid`, jobID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return CommunicationsEmailThreadDownloadJob{}, ErrNotFound
+	}
+	return item, err
+}
+
+func (r *PostgresRepo) StartCommunicationsEmailIngestionAttemptContext(ctx context.Context, jobID string) (CommunicationsEmailThreadDownloadJob, bool, error) {
+	jobID = cleanUUIDText(jobID)
+	if jobID == "" {
+		return CommunicationsEmailThreadDownloadJob{}, false, ErrInvalid
+	}
+	token := newUUIDv7String()
+	item, err := scanPostgresCommunicationsEmailIngestionJob(r.db.QueryRowContext(ctx, `
+update email_ingestion_jobs
+set status='processing',provider_attempt_count=provider_attempt_count+1,
+    attempt_token=$2::uuid,last_error='',updated_timestamp=now()
+where ingestion_job_id=$1::uuid
+  and status in ('accepted','processing')
+  and provider_attempt_count < 3
+returning `+postgresCommunicationsEmailIngestionJobColumns, jobID, token))
+	if err == nil {
+		return item, true, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return CommunicationsEmailThreadDownloadJob{}, false, err
+	}
+	item, err = r.GetCommunicationsEmailIngestionJobContext(ctx, jobID)
+	if err != nil {
+		return CommunicationsEmailThreadDownloadJob{}, false, err
+	}
+	if item.ProviderAttemptCount >= CommunicationsEmailProviderAttemptLimit &&
+		(item.Status == CommunicationsEmailThreadDownloadJobAccepted || item.Status == CommunicationsEmailThreadDownloadJobProcessing) {
+		item, err = scanPostgresCommunicationsEmailIngestionJob(r.db.QueryRowContext(ctx, `
+update email_ingestion_jobs
+set status='exhausted',attempt_token=null,
+    failed_timestamp=coalesce(failed_timestamp,now()),updated_timestamp=now()
+where ingestion_job_id=$1::uuid and provider_attempt_count>=3
+returning `+postgresCommunicationsEmailIngestionJobColumns, jobID))
+		if err != nil {
+			return CommunicationsEmailThreadDownloadJob{}, false, err
+		}
+	}
+	return item, false, nil
+}
+
+func (r *PostgresRepo) CompleteCommunicationsEmailIngestionAttemptContext(ctx context.Context, jobID, attemptToken string) error {
+	jobID, attemptToken = cleanUUIDText(jobID), cleanUUIDText(attemptToken)
+	if jobID == "" || attemptToken == "" {
 		return ErrInvalid
 	}
-	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -281,10 +288,11 @@ func (r *PostgresRepo) MarkCommunicationsEmailThreadDownloadJobCompleted(jobID s
 	defer tx.Rollback()
 	var companyID, threadID string
 	err = tx.QueryRowContext(ctx, `update email_ingestion_jobs
-set status='completed',last_error='',processing_started_at=null,
+set status='completed',last_error='',
+    attempt_token=null,
     completed_timestamp=now(),failed_timestamp=null,updated_timestamp=now()
-where ingestion_job_id=$1::uuid
-returning company_id::text,coalesce(email_thread_id::text,'')`, jobID).Scan(&companyID, &threadID)
+where ingestion_job_id=$1::uuid and status='processing' and attempt_token=$2::uuid
+returning company_id::text,coalesce(email_thread_id::text,'')`, jobID, attemptToken).Scan(&companyID, &threadID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -296,7 +304,7 @@ returning company_id::text,coalesce(email_thread_id::text,'')`, jobID).Scan(&com
 set download_status=case when exists(
  select 1 from email_ingestion_jobs job
  where job.company_id=thread.company_id and job.email_thread_id=thread.email_thread_id
-   and job.status in ('pending','processing','retry')
+   and job.status in ('accepted','processing')
 ) then 'downloading' when thread.history_complete then 'complete' else 'partial' end,
 last_download_error='',updated_timestamp=now()
 where company_id=$1::uuid and email_thread_id=$2::uuid`, companyID, threadID)
@@ -307,16 +315,11 @@ where company_id=$1::uuid and email_thread_id=$2::uuid`, companyID, threadID)
 	return tx.Commit()
 }
 
-func (r *PostgresRepo) MarkCommunicationsEmailThreadDownloadJobFailed(jobID, lastError string, availableAt time.Time, final bool) error {
-	jobID, lastError = cleanUUIDText(jobID), strings.TrimSpace(lastError)
-	if jobID == "" || lastError == "" {
+func (r *PostgresRepo) FailCommunicationsEmailIngestionAttemptContext(ctx context.Context, jobID, attemptToken, lastError string) error {
+	jobID, attemptToken, lastError = cleanUUIDText(jobID), cleanUUIDText(attemptToken), strings.TrimSpace(lastError)
+	if jobID == "" || attemptToken == "" || lastError == "" {
 		return ErrInvalid
 	}
-	status := CommunicationsEmailThreadDownloadJobRetry
-	if final {
-		status = CommunicationsEmailThreadDownloadJobFailed
-	}
-	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -324,13 +327,13 @@ func (r *PostgresRepo) MarkCommunicationsEmailThreadDownloadJobFailed(jobID, las
 	defer tx.Rollback()
 	var companyID, threadID string
 	err = tx.QueryRowContext(ctx, `update email_ingestion_jobs
-set status=$2,last_error=$3,available_at=$4,processing_started_at=null,
-    attempt_count=case when $3='email_connection_reauth_required'
-      then greatest(attempt_count-1,0) else attempt_count end,
-    failed_timestamp=case when $2='failed' then now() else null end,updated_timestamp=now()
-where ingestion_job_id=$1::uuid
+set status=case when provider_attempt_count>=3 then 'exhausted' else 'accepted' end,
+    last_error=$3,attempt_token=null,
+    failed_timestamp=case when provider_attempt_count>=3 then now() else null end,
+    updated_timestamp=now()
+where ingestion_job_id=$1::uuid and status='processing' and attempt_token=$2::uuid
 returning company_id::text,coalesce(email_thread_id::text,'')`,
-		jobID, status, lastError, availableAt.UTC()).Scan(&companyID, &threadID)
+		jobID, attemptToken, lastError).Scan(&companyID, &threadID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -338,26 +341,75 @@ returning company_id::text,coalesce(email_thread_id::text,'')`,
 		return err
 	}
 	if threadID != "" {
-		threadStatus := CommunicationsEmailThreadDownloadDownloading
-		if final {
-			threadStatus = CommunicationsEmailThreadDownloadFailed
-		}
 		if _, err := tx.ExecContext(ctx, `update email_threads
-set download_status=$3,last_download_error=$4,updated_timestamp=now()
+set download_status=case when exists(
+      select 1 from email_ingestion_jobs job
+      where job.company_id=email_threads.company_id
+        and job.email_thread_id=email_threads.email_thread_id
+        and job.status in ('accepted','processing')
+    ) then 'downloading' else 'failed' end,
+    last_download_error=$3,updated_timestamp=now()
 where company_id=$1::uuid and email_thread_id=$2::uuid`,
-			companyID, threadID, threadStatus, lastError); err != nil {
+			companyID, threadID, lastError); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
 }
 
-func (r *PostgresRepo) ListCommunicationsEmailThreadDownloadJobs(companyID, emailThreadID string) ([]CommunicationsEmailThreadDownloadJob, error) {
+func (r *PostgresRepo) ParkCommunicationsEmailIngestionAttemptContext(ctx context.Context, jobID, attemptToken, connectionStatus, lastError string) error {
+	jobID, attemptToken = cleanUUIDText(jobID), cleanUUIDText(attemptToken)
+	connectionStatus, lastError = strings.TrimSpace(connectionStatus), strings.TrimSpace(lastError)
+	if jobID == "" || attemptToken == "" || lastError == "" ||
+		(connectionStatus != "reauth_required" && connectionStatus != "configuration_required") {
+		return ErrInvalid
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var companyID, connectionID, threadID string
+	err = tx.QueryRowContext(ctx, `update email_ingestion_jobs
+set status='parked',last_error=$3,attempt_token=null,
+    failed_timestamp=now(),updated_timestamp=now()
+where ingestion_job_id=$1::uuid and status='processing' and attempt_token=$2::uuid
+returning company_id::text,email_connection_id::text,coalesce(email_thread_id::text,'')`,
+		jobID, attemptToken, lastError).Scan(&companyID, &connectionID, &threadID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `update email_connections
+set status=$3,updated_timestamp=now()
+where company_id=$1::uuid and email_connection_id=$2::uuid`, companyID, connectionID, connectionStatus)
+	if err != nil {
+		return err
+	}
+	if affected, err := result.RowsAffected(); err != nil || affected != 1 {
+		if err != nil {
+			return err
+		}
+		return ErrNotFound
+	}
+	if threadID != "" {
+		if _, err := tx.ExecContext(ctx, `update email_threads
+set download_status='failed',last_download_error=$3,updated_timestamp=now()
+where company_id=$1::uuid and email_thread_id=$2::uuid`, companyID, threadID, lastError); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (r *PostgresRepo) ListCommunicationsEmailThreadDownloadJobsContext(ctx context.Context, companyID, emailThreadID string) ([]CommunicationsEmailThreadDownloadJob, error) {
 	companyID, emailThreadID = cleanUUIDText(companyID), cleanUUIDText(emailThreadID)
 	if companyID == "" || emailThreadID == "" {
 		return nil, ErrInvalid
 	}
-	rows, err := r.db.Query(`select `+postgresCommunicationsEmailIngestionJobColumns+`
+	rows, err := r.db.QueryContext(ctx, `select `+postgresCommunicationsEmailIngestionJobColumns+`
 from email_ingestion_jobs where company_id=$1::uuid and email_thread_id=$2::uuid
 order by created_timestamp`, companyID, emailThreadID)
 	if err != nil {
@@ -377,7 +429,7 @@ order by created_timestamp`, companyID, emailThreadID)
 	}
 	if len(items) == 0 {
 		var exists bool
-		if err := r.db.QueryRow(`select exists(select 1 from email_threads
+		if err := r.db.QueryRowContext(ctx, `select exists(select 1 from email_threads
 where company_id=$1::uuid and email_thread_id=$2::uuid)`, companyID, emailThreadID).Scan(&exists); err != nil {
 			return nil, err
 		}

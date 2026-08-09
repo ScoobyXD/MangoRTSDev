@@ -62,7 +62,6 @@ func TestEmailRelationshipAttachmentRouteUsesInternalMessageIDAndStoredBytes(t *
 	server := NewServerWithOptions(repo, ServerOptions{
 		NylasConfig: testNylasConfig(), NylasClient: client, AttachmentStorage: storage,
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
-		DisableCommunicationsArchiveWorker: true,
 	})
 	defer server.Close()
 

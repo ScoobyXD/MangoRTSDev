@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
@@ -483,7 +484,7 @@ func TestRealtimePersonalMailboxScopesRequireExactExistingAccountAndPublishIndep
 	}
 
 	change := nylasWebhookChange{Trigger: "message.created", MessageID: "mail-a", ThreadID: "thread-a", OccurredAt: time.Now().UTC()}
-	if err := server.publishPersonalMailboxWebhookHint(user.UserID, "account-a@example.com", change); err != nil {
+	if err := server.publishPersonalMailboxWebhookHintContext(context.Background(), companyID, user.UserID, "account-a@example.com", "", change); err != nil {
 		t.Fatalf("publish account A hint: %v", err)
 	}
 	if message := client.readJSON(t); message["type"] != realtimeMessageMailboxMessageChanged || message["scope"] != scopeA || message["message_id"] != "mail-a" {
@@ -492,7 +493,7 @@ func TestRealtimePersonalMailboxScopesRequireExactExistingAccountAndPublishIndep
 	client.assertNoMessage(t)
 	change.MessageID = "mail-b"
 	change.ThreadID = "thread-b"
-	if err := server.publishPersonalMailboxWebhookHint(user.UserID, "account-b@example.com", change); err != nil {
+	if err := server.publishPersonalMailboxWebhookHintContext(context.Background(), companyID, user.UserID, "account-b@example.com", "", change); err != nil {
 		t.Fatalf("publish account B hint: %v", err)
 	}
 	if message := client.readJSON(t); message["scope"] != scopeB || message["message_id"] != "mail-b" {

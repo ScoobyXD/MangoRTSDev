@@ -11,6 +11,7 @@ import (
 	"log"
 	"mime"
 	"miraeopus/backend/internal/domain"
+	"miraeopus/backend/internal/emailqueue"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"net/url"
@@ -487,7 +488,7 @@ func (s *Server) handleCommunicationsMessagesArchiveBatch(w http.ResponseWriter,
 		return
 	}
 	if isTruthyQueryValue(r.URL.Query().Get("background")) {
-		job, err := s.repo.CreateCommunicationsArchiveJob(store.CommunicationsArchiveJobInput{
+		job, err := s.repo.CreateCommunicationsArchiveJobContext(r.Context(), store.CommunicationsArchiveJobInput{
 			ActorUserID:   actor.User.UserID,
 			CompanyID:     companyID,
 			SharedInboxID: sharedInboxID,
@@ -499,7 +500,19 @@ func (s *Server) handleCommunicationsMessagesArchiveBatch(w http.ResponseWriter,
 			writeError(w, http.StatusInternalServerError, "failed_to_create_archive_job")
 			return
 		}
-		s.wakeCommunicationsArchiveWorker()
+		if s.emailQueue == nil {
+			writeError(w, http.StatusServiceUnavailable, "email_queue_not_configured")
+			return
+		}
+		for _, item := range job.Items {
+			if err := s.emailQueue.Send(r.Context(), emailqueue.Message{
+				SchemaVersion: emailqueue.SchemaVersion, Kind: emailqueue.KindArchiveItem,
+				JobID: item.JobItemID, CompanyID: companyID, EmailConnectionID: connection.EmailConnectionID,
+			}); err != nil {
+				writeError(w, http.StatusServiceUnavailable, "failed_to_queue_archive_job")
+				return
+			}
+		}
 		writeJSON(w, http.StatusAccepted, map[string]any{
 			"job_id":       job.JobID,
 			"accepted_ids": job.AcceptedMessageIDs,
@@ -773,7 +786,7 @@ func (s *Server) ingestCommunicationsMessage(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	snapshot := emailMessageSnapshotFromNylas(message)
-	input := s.communicationsEmailThreadInputForConnection(connection, snapshot, snapshot.ThreadID == "")
+	input := s.communicationsEmailThreadInputForConnection(r.Context(), connection, snapshot, snapshot.ThreadID == "")
 	input.CompanyID = companyID
 	input.RequestedByUserID = actorUserID
 	if sharedInboxID != "" {
@@ -785,7 +798,7 @@ func (s *Server) ingestCommunicationsMessage(w http.ResponseWriter, r *http.Requ
 		input.PersonalUserID = connection.UserID
 		input.PersonalAccountEmail = connection.AccountEmail
 	}
-	thread, err := s.repo.UpsertCommunicationsEmailThread(input)
+	thread, err := s.repo.UpsertCommunicationsEmailThreadContext(r.Context(), input)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_ingest_email_message")
 		return
@@ -796,14 +809,15 @@ func (s *Server) ingestCommunicationsMessage(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if connection.EmailConnectionID != "" {
-		if _, _, err := s.repo.EnsureCommunicationsEmailIngestionJob(store.CommunicationsEmailIngestionJobInput{
+		job, _, err := s.repo.EnsureCommunicationsEmailIngestionJobContext(r.Context(), store.CommunicationsEmailIngestionJobInput{
 			CompanyID: companyID, EmailConnectionID: connection.EmailConnectionID,
 			EmailThreadID: thread.EmailThreadID, ProviderMessageID: message.ID,
 			ProviderThreadID: message.ThreadID, Priority: store.CommunicationsEmailIngestionPriorityVisible,
-		}); err != nil {
-			log.Printf("failed to continue selected email ingestion company_id=%s connection_id=%s message_id=%s: %v", companyID, connection.EmailConnectionID, message.ID, err)
-		} else {
-			s.wakeCommunicationsEmailThreadDownloadWorker()
+			EnqueueSourceID: requestCorrelationID(r),
+		})
+		if err != nil || s.enqueueCommunicationsEmailIngestionJob(r.Context(), job) != nil {
+			writeError(w, http.StatusServiceUnavailable, "failed_to_queue_email_ingestion")
+			return
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"message": message})
@@ -1345,13 +1359,13 @@ func communicationsOAuthStateTargetsPersonalMailbox(state nylasOAuthStatePayload
 	return requestedEmail != "" && userEmail != "" && requestedEmail == userEmail
 }
 
-func (s *Server) userCanManageSharedInboxStructure(companyID, userID string) (bool, error) {
+func (s *Server) userCanManageSharedInboxStructure(ctx context.Context, companyID, userID string) (bool, error) {
 	companyID = strings.TrimSpace(companyID)
 	userID = strings.TrimSpace(userID)
 	if companyID == "" || userID == "" {
 		return false, nil
 	}
-	memberships, err := s.repo.ListUserMemberships(userID)
+	memberships, err := s.repo.ListUserMembershipsContext(ctx, userID)
 	if err != nil {
 		return false, err
 	}
@@ -1442,7 +1456,7 @@ func (s *Server) handleNylasOAuthCallback(w http.ResponseWriter, r *http.Request
 	var companyConnection domain.CompanyEmailConnection
 	sharedInboxCompanyID := strings.TrimSpace(state.SharedInboxCompanyID)
 	if connectionScope == "shared" && sharedInboxCompanyID != "" {
-		allowed, roleErr := s.userCanManageSharedInboxStructure(sharedInboxCompanyID, state.UserID)
+		allowed, roleErr := s.userCanManageSharedInboxStructure(r.Context(), sharedInboxCompanyID, state.UserID)
 		if roleErr != nil {
 			s.deleteNylasOAuthGrantBestEffort(r.Context(), requestCorrelationID(r), "shared_inbox_role_check_failed", grant)
 			log.Printf("nylas_oauth_callback outcome=redirect reason=shared_inbox_role_check_failed request_id=%s user_id=%s company_id=%s provider=%s account_email=%s scope=%s grant=%s err=%v", requestCorrelationID(r), state.UserID, sharedInboxCompanyID, provider, normalizeEmailForCompare(grant.Email), connectionScope, grantIDLogValue(grant.GrantID), roleErr)
@@ -1523,8 +1537,9 @@ func (s *Server) handleNylasOAuthCallback(w http.ResponseWriter, r *http.Request
 		}
 		s.publishWorkspaceEvent(sharedInboxCompanyID, eventName, map[string]any{"folder_id": item.FolderID, "shared_inbox_id": item.SharedInboxID, "folder_kind": item.FolderKind, "resource_type": store.EntityTypeSharedInbox, "folder": item})
 	}
-	s.wakeCommunicationsEmailThreadDownloadWorker()
-	s.wakeCommunicationsEmailConnectionScanner()
+	if connection.EmailConnectionID != "" {
+		_ = s.enqueueCommunicationsReconciliationControl(r.Context(), "reconnect-"+connection.EmailConnectionID)
+	}
 	log.Printf("nylas_oauth_callback outcome=success request_id=%s user_id=%s provider=%s account_email=%s scope=%s strict_email=%t grant=%s", requestCorrelationID(r), state.UserID, provider, normalizeEmailForCompare(grant.Email), connectionScope, state.StrictEmail, grantIDLogValue(grant.GrantID))
 	s.redirectCommunicationsSuccess(w, r, connection, createdSharedInboxID)
 }
@@ -2038,24 +2053,6 @@ func (s *Server) enrichCommunicationsMessagePage(userID, companyID string, page 
 
 func (s *Server) enrichCommunicationsMessagePageForConnection(connection domain.UserEmailConnection, companyID string, page NylasMessagePage) NylasMessagePage {
 	page = cloneNylasMessagePage(page)
-	queued := false
-	for _, message := range page.Messages {
-		if connection.EmailConnectionID == "" || strings.TrimSpace(message.ID) == "" {
-			continue
-		}
-		if _, _, err := s.repo.EnsureCommunicationsEmailIngestionJob(store.CommunicationsEmailIngestionJobInput{
-			CompanyID: companyID, EmailConnectionID: connection.EmailConnectionID,
-			ProviderMessageID: message.ID, ProviderThreadID: message.ThreadID,
-			Priority: store.CommunicationsEmailIngestionPriorityVisible,
-		}); err != nil {
-			log.Printf("failed to prioritize visible email ingestion company_id=%s connection_id=%s message_id=%s: %v", companyID, connection.EmailConnectionID, message.ID, err)
-			continue
-		}
-		queued = true
-	}
-	if queued {
-		s.wakeCommunicationsEmailThreadDownloadWorker()
-	}
 	page.Messages = s.enrichCommunicationsMessagesReadStatuses(connection, page.Messages)
 	page.Messages = s.enrichCommunicationsMessagesPlacementsForConnection(connection, companyID, page.Messages)
 	return page

@@ -10,6 +10,13 @@ import (
 )
 
 func (r *MemoryRepo) CreateAttachmentWithResourceLink(input AttachmentCreateInput) (domain.Attachment, domain.ResourceAttachment, error) {
+	return r.CreateAttachmentWithResourceLinkContext(context.Background(), input)
+}
+
+func (r *MemoryRepo) CreateAttachmentWithResourceLinkContext(ctx context.Context, input AttachmentCreateInput) (domain.Attachment, domain.ResourceAttachment, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Attachment{}, domain.ResourceAttachment{}, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -50,6 +57,16 @@ func (r *MemoryRepo) GetAttachment(companyID, attachmentID string) (domain.Attac
 	attachment.Variants = r.attachmentVariantsLocked(attachment.AttachmentID)
 	attachment.ResourceLinks = r.resourceAttachmentLinksLocked(attachment.CompanyID, attachment.AttachmentID, false)
 	return cloneAttachment(attachment), nil
+}
+
+func (r *MemoryRepo) AttachmentExistsContext(ctx context.Context, companyID, attachmentID string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	attachment, ok := r.attachments[attachmentKey(companyID, attachmentID)]
+	return ok && attachment.DeletedTimestamp == nil, nil
 }
 
 func (r *MemoryRepo) PreparePermanentAttachmentDeletion(ctx context.Context, companyID, attachmentID, resourceType, resourceID string) (AttachmentDeletionPlan, error) {
@@ -293,6 +310,13 @@ func (r *MemoryRepo) ListResourceAttachments(companyID, resourceType, resourceID
 }
 
 func (r *MemoryRepo) LinkResourceAttachment(input ResourceAttachmentInput) (domain.ResourceAttachment, error) {
+	return r.LinkResourceAttachmentContext(context.Background(), input)
+}
+
+func (r *MemoryRepo) LinkResourceAttachmentContext(ctx context.Context, input ResourceAttachmentInput) (domain.ResourceAttachment, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.ResourceAttachment{}, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

@@ -128,7 +128,10 @@ func (s *Server) retryRealtimeSpineBootstrap(ctx context.Context, attempt int, f
 func (s *Server) runInitializedRealtimeSpine(ctx context.Context) {
 	initialReady := make(chan struct{})
 	var initialReadyOnce sync.Once
-	go s.runRealtimeSubscriber(ctx, func() { initialReadyOnce.Do(func() { close(initialReady) }) })
+	go s.runRealtimeSubscriber(ctx, func() {
+		initialReadyOnce.Do(func() { close(initialReady) })
+		s.realtimeSpineInitialBackplaneReadyOnce.Do(func() { close(s.realtimeSpineInitialBackplaneReady) })
+	})
 	go s.runRealtimeSpine(ctx)
 	// Admission opens after the durable cursor is certified and both lifecycle
 	// loops have been launched. It does not wait for broker readiness: the

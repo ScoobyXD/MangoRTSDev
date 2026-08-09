@@ -84,7 +84,6 @@ func runEmailCollaborationAttachmentAuthorizationBoundary(t *testing.T, scope st
 	server := NewServerWithOptions(repo, ServerOptions{
 		NylasConfig: testNylasConfig(), NylasClient: client, AttachmentStorage: storage,
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
-		DisableCommunicationsArchiveWorker: true,
 	})
 	defer server.Close()
 

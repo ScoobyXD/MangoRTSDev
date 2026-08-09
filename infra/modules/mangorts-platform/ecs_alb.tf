@@ -69,6 +69,43 @@ resource "aws_ecs_cluster" "main" {
     name  = "containerInsights"
     value = "enabled"
   }
+
+  lifecycle {
+    precondition {
+      condition = !(
+        var.email_sqs_enabled &&
+        var.backend_desired_count > 0
+      ) || var.email_sqs_database_migration_complete
+      error_message = "A nonzero SQS-enabled API desired count requires email_sqs_database_migration_complete=true."
+    }
+
+    precondition {
+      condition = !(
+        var.email_sqs_enabled &&
+        var.backend_desired_count > 0
+      ) || length(var.email_worker_alarm_action_arns) > 0
+      error_message = "A nonzero SQS-enabled API desired count requires at least one email alarm action ARN."
+    }
+
+    precondition {
+      condition = !var.email_worker_enabled || (
+        var.email_sqs_enabled &&
+        local.backend_service_enabled &&
+        local.email_worker_dependencies_configured
+      )
+      error_message = "DEV email worker enablement requires SQS, an immutable backend image, the final migrated schema, complete DB/Nylas/Valkey configuration, and at least one alarm action ARN."
+    }
+
+    precondition {
+      condition = !var.email_reconciliation_schedule_enabled || (
+        var.email_sqs_enabled &&
+        var.email_worker_enabled &&
+        local.backend_service_enabled &&
+        local.email_worker_dependencies_configured
+      )
+      error_message = "DEV email reconciliation enablement requires the fully configured worker stage and an immutable backend image."
+    }
+  }
 }
 
 resource "aws_ecs_task_definition" "backend" {
@@ -108,6 +145,7 @@ resource "aws_ecs_task_definition" "backend" {
           { name = "MANGORTS_APP_URL", value = "https://${local.app_domain}" },
           { name = "MANGORTS_API_URL", value = "https://${local.api_domain}" },
           { name = "MANGORTS_EMAIL_FROM", value = var.email_from_address },
+          { name = "MANGORTS_RUNTIME_ROLE", value = "api" },
           { name = "MANGORTS_BOOTSTRAP_DEV_ADMIN_EMAILS", value = var.bootstrap_admin_emails },
           { name = "MANGORTS_BOOTSTRAP_DEV_COMPANY_NAME", value = var.bootstrap_company_name },
           { name = "DB_HOST", value = local.db_host },
@@ -135,6 +173,9 @@ resource "aws_ecs_task_definition" "backend" {
           ], trimspace(var.attachment_s3_presign_endpoint) != "" ? [
           { name = "MANGORTS_ATTACHMENT_S3_PRESIGN_ENDPOINT", value = trimspace(var.attachment_s3_presign_endpoint) }
         ] : []) : [],
+        var.email_sqs_enabled ? [
+          { name = "MANGORTS_EMAIL_WORK_QUEUE_URL", value = aws_sqs_queue.email_work[0].url }
+        ] : [],
         local.nylas_enabled ? [
           { name = "NYLAS_CLIENT_ID", value = var.nylas_client_id },
           { name = "NYLAS_API_BASE_URL", value = var.nylas_api_base_url },
@@ -167,7 +208,10 @@ resource "aws_ecs_task_definition" "backend" {
     }
   ])
 
-  depends_on = [aws_iam_role_policy_attachment.ecs_task_realtime_valkey]
+  depends_on = [
+    aws_iam_role_policy_attachment.ecs_task_email_sqs,
+    aws_iam_role_policy_attachment.ecs_task_realtime_valkey,
+  ]
 }
 
 resource "aws_ecs_service" "backend" {
@@ -193,6 +237,7 @@ resource "aws_ecs_service" "backend" {
 
   depends_on = [
     aws_lb_listener_rule.cloudfront_to_backend,
+    aws_iam_role_policy_attachment.ecs_task_email_sqs,
     aws_iam_role_policy_attachment.ecs_task_realtime_valkey,
   ]
 }

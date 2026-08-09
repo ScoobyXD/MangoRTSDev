@@ -1,12 +1,13 @@
 package store
 
 import (
+	"context"
 	"sort"
 	"strings"
 	"time"
 )
 
-func (r *MemoryRepo) CreateCommunicationsArchiveJob(input CommunicationsArchiveJobInput) (CommunicationsArchiveJob, error) {
+func (r *MemoryRepo) CreateCommunicationsArchiveJobContext(_ context.Context, input CommunicationsArchiveJobInput) (CommunicationsArchiveJob, error) {
 	input, err := NormalizeCommunicationsArchiveJobInput(input)
 	if err != nil {
 		return CommunicationsArchiveJob{}, err
@@ -39,7 +40,8 @@ func (r *MemoryRepo) CreateCommunicationsArchiveJob(input CommunicationsArchiveJ
 	r.communicationsArchiveJobs[job.JobID] = job
 
 	for _, messageID := range input.MessageIDs {
-		if r.activeCommunicationsArchiveJobItemExistsLocked(job, messageID) {
+		if existing, ok := r.activeCommunicationsArchiveJobItemLocked(job, messageID); ok {
+			job.Items = append(job.Items, existing)
 			continue
 		}
 		item := CommunicationsArchiveJobItem{
@@ -55,7 +57,6 @@ func (r *MemoryRepo) CreateCommunicationsArchiveJob(input CommunicationsArchiveJ
 			CompanyEmailConnectionID: job.CompanyEmailConnectionID,
 			MessageID:                messageID,
 			Status:                   CommunicationsArchiveJobItemStatusPending,
-			AvailableAt:              now,
 			CreatedTimestamp:         now,
 			UpdatedTimestamp:         now,
 		}
@@ -72,10 +73,10 @@ func (r *MemoryRepo) CreateCommunicationsArchiveJob(input CommunicationsArchiveJ
 	return CloneCommunicationsArchiveJob(job), nil
 }
 
-func (r *MemoryRepo) activeCommunicationsArchiveJobItemExistsLocked(job CommunicationsArchiveJob, messageID string) bool {
+func (r *MemoryRepo) activeCommunicationsArchiveJobItemLocked(job CommunicationsArchiveJob, messageID string) (CommunicationsArchiveJobItem, bool) {
 	messageID = strings.TrimSpace(messageID)
 	if messageID == "" {
-		return false
+		return CommunicationsArchiveJobItem{}, false
 	}
 	for _, item := range r.communicationsArchiveJobItems {
 		if item.MessageID != messageID || !CommunicationsArchiveJobItemStatusIsActive(item.Status) {
@@ -86,116 +87,146 @@ func (r *MemoryRepo) activeCommunicationsArchiveJobItemExistsLocked(job Communic
 			item.SharedInboxID == job.SharedInboxID &&
 			item.ConnectionScope == job.ConnectionScope &&
 			item.AccountEmail == job.AccountEmail {
-			return true
+			return CloneCommunicationsArchiveJobItem(item), true
 		}
 	}
-	return false
+	return CommunicationsArchiveJobItem{}, false
 }
 
-func (r *MemoryRepo) ClaimCommunicationsArchiveJobItems(limit int, processingLeaseTimeout time.Duration) ([]CommunicationsArchiveJobItem, error) {
-	limit = NormalizeCommunicationsArchiveJobClaimLimit(limit)
-	processingLeaseTimeout = NormalizeCommunicationsArchiveJobProcessingLeaseTimeout(processingLeaseTimeout)
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	now := time.Now().UTC()
-	staleBefore := now.Add(-processingLeaseTimeout)
-	candidates := make([]CommunicationsArchiveJobItem, 0)
-	for _, item := range r.communicationsArchiveJobItems {
-		if item.Status != CommunicationsArchiveJobItemStatusPending && item.Status != CommunicationsArchiveJobItemStatusRetry && item.Status != CommunicationsArchiveJobItemStatusProcessing {
-			continue
-		}
-		if item.AvailableAt.After(now) {
-			continue
-		}
-		if item.Status == CommunicationsArchiveJobItemStatusProcessing && item.ProcessingStartedAt != nil && !item.ProcessingStartedAt.Before(staleBefore) {
-			continue
-		}
-		candidates = append(candidates, item)
-	}
-	sort.Slice(candidates, func(i, j int) bool {
-		if !candidates[i].AvailableAt.Equal(candidates[j].AvailableAt) {
-			return candidates[i].AvailableAt.Before(candidates[j].AvailableAt)
-		}
-		if !candidates[i].CreatedTimestamp.Equal(candidates[j].CreatedTimestamp) {
-			return candidates[i].CreatedTimestamp.Before(candidates[j].CreatedTimestamp)
-		}
-		return candidates[i].JobItemID < candidates[j].JobItemID
-	})
-	if len(candidates) > limit {
-		candidates = candidates[:limit]
-	}
-	claimed := make([]CommunicationsArchiveJobItem, 0, len(candidates))
-	for _, item := range candidates {
-		claimedAt := now
-		item.Status = CommunicationsArchiveJobItemStatusProcessing
-		item.ProcessingStartedAt = &claimedAt
-		item.AttemptCount++
-		item.UpdatedTimestamp = now
-		r.communicationsArchiveJobItems[item.JobItemID] = item
-		claimed = append(claimed, CloneCommunicationsArchiveJobItem(item))
-	}
-	return claimed, nil
-}
-
-func (r *MemoryRepo) MarkCommunicationsArchiveJobItemArchived(jobItemID string) error {
-	jobItemID = strings.TrimSpace(jobItemID)
+func (r *MemoryRepo) GetCommunicationsArchiveJobItemContext(_ context.Context, jobItemID string) (CommunicationsArchiveJobItem, error) {
+	jobItemID = cleanUUIDText(jobItemID)
 	if jobItemID == "" {
-		return ErrInvalid
+		return CommunicationsArchiveJobItem{}, ErrInvalid
 	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	item, ok := r.communicationsArchiveJobItems[jobItemID]
 	if !ok {
+		return CommunicationsArchiveJobItem{}, ErrNotFound
+	}
+	return CloneCommunicationsArchiveJobItem(item), nil
+}
+
+func (r *MemoryRepo) StartCommunicationsArchiveJobItemAttemptContext(_ context.Context, jobItemID string) (CommunicationsArchiveJobItem, bool, error) {
+	jobItemID = cleanUUIDText(jobItemID)
+	if jobItemID == "" {
+		return CommunicationsArchiveJobItem{}, false, ErrInvalid
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	item, ok := r.communicationsArchiveJobItems[jobItemID]
+	if !ok {
+		return CommunicationsArchiveJobItem{}, false, ErrNotFound
+	}
+	if (item.Status != CommunicationsArchiveJobItemStatusPending && item.Status != CommunicationsArchiveJobItemStatusProcessing) || item.AttemptCount >= 3 {
+		return CloneCommunicationsArchiveJobItem(item), false, nil
+	}
+	now := time.Now().UTC()
+	item.Status = CommunicationsArchiveJobItemStatusProcessing
+	item.AttemptCount++
+	item.AttemptToken = newUUIDv7String()
+	item.LastError = ""
+	item.UpdatedTimestamp = now
+	r.communicationsArchiveJobItems[jobItemID] = item
+	return CloneCommunicationsArchiveJobItem(item), true, nil
+}
+
+func (r *MemoryRepo) CompleteCommunicationsArchiveJobItemAttemptContext(_ context.Context, jobItemID, attemptToken string) error {
+	jobItemID, attemptToken = cleanUUIDText(jobItemID), cleanUUIDText(attemptToken)
+	if jobItemID == "" || attemptToken == "" {
+		return ErrInvalid
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	item, ok := r.communicationsArchiveJobItems[jobItemID]
+	if !ok || item.Status != CommunicationsArchiveJobItemStatusProcessing || item.AttemptToken != attemptToken {
 		return ErrNotFound
 	}
 	now := time.Now().UTC()
 	item.Status = CommunicationsArchiveJobItemStatusArchived
-	item.LastError = ""
-	item.ProcessingStartedAt = nil
 	item.ArchivedTimestamp = &now
+	item.LastError = ""
 	item.UpdatedTimestamp = now
 	r.communicationsArchiveJobItems[jobItemID] = item
 	r.updateCommunicationsArchiveJobStatusLocked(item.JobID, now)
 	return nil
 }
 
-func (r *MemoryRepo) MarkCommunicationsArchiveJobItemFailed(jobItemID, lastError string, availableAt time.Time, final bool) error {
-	jobItemID = strings.TrimSpace(jobItemID)
-	if jobItemID == "" {
+func (r *MemoryRepo) FailCommunicationsArchiveJobItemAttemptContext(_ context.Context, jobItemID, attemptToken, lastError string) error {
+	jobItemID, attemptToken = cleanUUIDText(jobItemID), cleanUUIDText(attemptToken)
+	lastError = trimCommunicationsArchiveJobLastError(lastError)
+	if jobItemID == "" || attemptToken == "" || lastError == "" {
 		return ErrInvalid
 	}
-
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
 	item, ok := r.communicationsArchiveJobItems[jobItemID]
-	if !ok {
+	if !ok || item.Status != CommunicationsArchiveJobItemStatusProcessing || item.AttemptToken != attemptToken {
 		return ErrNotFound
 	}
 	now := time.Now().UTC()
-	item.ProcessingStartedAt = nil
-	item.LastError = trimCommunicationsArchiveJobLastError(lastError)
+	item.Status = CommunicationsArchiveJobItemStatusPending
+	item.LastError = lastError
+	item.AttemptToken = ""
 	item.UpdatedTimestamp = now
-	if final {
+	if item.AttemptCount >= 3 {
 		item.Status = CommunicationsArchiveJobItemStatusFailed
 		item.FailedTimestamp = &now
-	} else {
-		if availableAt.IsZero() {
-			availableAt = now.Add(time.Second)
-		}
-		item.Status = CommunicationsArchiveJobItemStatusRetry
-		item.AvailableAt = availableAt.UTC()
 	}
 	r.communicationsArchiveJobItems[jobItemID] = item
 	r.updateCommunicationsArchiveJobStatusLocked(item.JobID, now)
 	return nil
 }
 
-func (r *MemoryRepo) ListCommunicationsArchiveJobItems(jobID string) ([]CommunicationsArchiveJobItem, error) {
+func (r *MemoryRepo) ParkCommunicationsArchiveJobItemAttemptContext(_ context.Context, jobItemID, attemptToken, companyID, emailConnectionID, connectionStatus, lastError string) error {
+	jobItemID, attemptToken = cleanUUIDText(jobItemID), cleanUUIDText(attemptToken)
+	companyID, emailConnectionID = cleanUUIDText(companyID), cleanUUIDText(emailConnectionID)
+	connectionStatus, lastError = normalizeEmailConnectionStatus(connectionStatus), trimCommunicationsArchiveJobLastError(lastError)
+	if jobItemID == "" || attemptToken == "" || companyID == "" || emailConnectionID == "" || lastError == "" ||
+		(connectionStatus != "reauth_required" && connectionStatus != "configuration_required") {
+		return ErrInvalid
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	item, ok := r.communicationsArchiveJobItems[jobItemID]
+	if !ok || item.CompanyID != companyID || item.Status != CommunicationsArchiveJobItemStatusProcessing || item.AttemptToken != attemptToken {
+		return ErrNotFound
+	}
+	updated := false
+	for key, connection := range r.emailConnections {
+		if connection.CompanyID == companyID && connection.EmailConnectionID == emailConnectionID {
+			connection.Status = connectionStatus
+			connection.UpdatedTimestamp = time.Now().UTC()
+			r.emailConnections[key] = connection
+			updated = true
+			break
+		}
+	}
+	if !updated {
+		key := companyEmailConnectionKey(companyID, emailConnectionID)
+		connection, exists := r.companyEmailConnections[key]
+		if !exists {
+			return ErrNotFound
+		}
+		connection.Status = connectionStatus
+		connection.UpdatedTimestamp = time.Now().UTC()
+		r.companyEmailConnections[key] = connection
+	}
+	now := time.Now().UTC()
+	item.Status = CommunicationsArchiveJobItemStatusFailed
+	item.LastError = lastError
+	item.AttemptToken = ""
+	item.FailedTimestamp = &now
+	item.UpdatedTimestamp = now
+	r.communicationsArchiveJobItems[jobItemID] = item
+	r.updateCommunicationsArchiveJobStatusLocked(item.JobID, now)
+	return nil
+}
+
+func (r *MemoryRepo) ListCommunicationsArchiveJobItemsContext(ctx context.Context, jobID string) ([]CommunicationsArchiveJobItem, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	jobID = strings.TrimSpace(jobID)
 	if jobID == "" {
 		return nil, ErrInvalid

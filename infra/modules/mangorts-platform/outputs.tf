@@ -48,6 +48,26 @@ output "ecs_service_name" {
   value       = try(aws_ecs_service.backend[0].name, "")
 }
 
+output "email_work_queue_url" {
+  description = "Development FIFO email work queue URL."
+  value       = try(aws_sqs_queue.email_work[0].url, "")
+}
+
+output "email_work_dlq_url" {
+  description = "Development FIFO email work DLQ URL for deliberate operator review."
+  value       = try(aws_sqs_queue.email_work_dlq[0].url, "")
+}
+
+output "email_scheduler_dlq_url" {
+  description = "Development Standard Scheduler delivery DLQ URL."
+  value       = try(aws_sqs_queue.email_scheduler_dlq[0].url, "")
+}
+
+output "email_worker_service_name" {
+  description = "Private development email worker ECS service name when enabled."
+  value       = try(aws_ecs_service.email_worker[0].name, "")
+}
+
 output "realtime_valkey_cache_name" {
   description = "Development ElastiCache Serverless Valkey cache name."
   value       = try(aws_elasticache_serverless_cache.realtime[0].name, "")

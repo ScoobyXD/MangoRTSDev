@@ -105,6 +105,7 @@ type IdentityRepository interface {
 	GetAuthUser(cognitoSubject string) (domain.User, error)
 	GetAuthUserByEmail(email string) (domain.User, error)
 	ListUserMemberships(userID string) ([]domain.CompanyMembership, error)
+	ListUserMembershipsContext(ctx context.Context, userID string) ([]domain.CompanyMembership, error)
 	UserHasCompanyAccess(cognitoSubject, companyID string) (bool, error)
 	AddCompanyMembership(cognitoSubject, companyID, role string) (domain.CompanyMembership, error)
 	CreateCompany(name string) (domain.Company, error)
@@ -129,42 +130,52 @@ type IdentityRepository interface {
 	ListUserEmailConnections(userID string) ([]domain.UserEmailConnection, error)
 	GetCompanyEmailConnectionByAccountEmail(companyID, accountEmail string) (domain.CompanyEmailConnection, error)
 	GetCompanyEmailConnectionByID(companyID, connectionID string) (domain.CompanyEmailConnection, error)
-	GetCompanyEmailConnectionByGrantID(grantID string) (domain.CompanyEmailConnection, error)
-	GetUserEmailConnectionByGrantID(grantID string) (domain.UserEmailConnection, error)
-	GetEmailConnectionByID(companyID, connectionID string) (domain.UserEmailConnection, error)
-	ListConnectedEmailConnections() ([]domain.UserEmailConnection, error)
+	GetCompanyEmailConnectionByGrantIDContext(ctx context.Context, grantID string) (domain.CompanyEmailConnection, error)
+	GetUserEmailConnectionByGrantIDContext(ctx context.Context, grantID string) (domain.UserEmailConnection, error)
+	GetEmailConnectionByIDContext(ctx context.Context, companyID, connectionID string) (domain.UserEmailConnection, error)
+	ListDueEmailConnectionsContext(ctx context.Context, cutoff time.Time, afterConnectionID string, limit int) ([]domain.UserEmailConnection, error)
 	UpsertUserEmailConnection(input UserEmailConnectionInput) (domain.UserEmailConnection, error)
 	UpsertCompanyEmailConnection(input CompanyEmailConnectionInput) (domain.CompanyEmailConnection, error)
 	UpdateCompanyEmailConnectionStatus(companyID, connectionID, status string) (domain.CompanyEmailConnection, error)
 	UpdateUserEmailConnectionStatus(userID, accountEmail, status string) (domain.UserEmailConnection, error)
-	UpdateEmailConnectionScanCheckpoint(companyID, connectionID string, checkpoint time.Time) error
+	UpdateCompanyEmailConnectionStatusContext(ctx context.Context, companyID, connectionID, status string) (domain.CompanyEmailConnection, error)
+	UpdateUserEmailConnectionStatusContext(ctx context.Context, userID, accountEmail, status string) (domain.UserEmailConnection, error)
+	UpdateEmailConnectionScanCheckpointContext(ctx context.Context, companyID, connectionID string, checkpoint time.Time) error
+	UpdateEmailConnectionStatusByIDContext(ctx context.Context, companyID, connectionID, status string) error
 	DeleteUserEmailConnection(userID string) error
 }
 
 type CommunicationsRepository interface {
 	UpsertCommunicationsTriageItem(userID string, message domain.EmailMessageSnapshot) (domain.CommunicationsTriageItem, error)
-	UpsertCommunicationsMessageReadStatus(input CommunicationsMessageReadStatusInput) (domain.CommunicationsMessageReadStatus, error)
+	UpsertCommunicationsMessageReadStatusContext(ctx context.Context, input CommunicationsMessageReadStatusInput) (domain.CommunicationsMessageReadStatus, error)
 	ListCommunicationsMessageReadStatuses(input CommunicationsMessageReadStatusListInput) ([]domain.CommunicationsMessageReadStatus, error)
-	CreateCommunicationsArchiveJob(input CommunicationsArchiveJobInput) (CommunicationsArchiveJob, error)
-	ClaimCommunicationsArchiveJobItems(limit int, processingLeaseTimeout time.Duration) ([]CommunicationsArchiveJobItem, error)
-	MarkCommunicationsArchiveJobItemArchived(jobItemID string) error
-	MarkCommunicationsArchiveJobItemFailed(jobItemID, lastError string, availableAt time.Time, final bool) error
-	ListCommunicationsArchiveJobItems(jobID string) ([]CommunicationsArchiveJobItem, error)
+	CreateCommunicationsArchiveJobContext(ctx context.Context, input CommunicationsArchiveJobInput) (CommunicationsArchiveJob, error)
+	GetCommunicationsArchiveJobItemContext(ctx context.Context, jobItemID string) (CommunicationsArchiveJobItem, error)
+	StartCommunicationsArchiveJobItemAttemptContext(ctx context.Context, jobItemID string) (CommunicationsArchiveJobItem, bool, error)
+	CompleteCommunicationsArchiveJobItemAttemptContext(ctx context.Context, jobItemID, attemptToken string) error
+	FailCommunicationsArchiveJobItemAttemptContext(ctx context.Context, jobItemID, attemptToken, lastError string) error
+	ParkCommunicationsArchiveJobItemAttemptContext(ctx context.Context, jobItemID, attemptToken, companyID, emailConnectionID, connectionStatus, lastError string) error
+	ListCommunicationsArchiveJobItemsContext(ctx context.Context, jobID string) ([]CommunicationsArchiveJobItem, error)
 	ConvertCommunicationsTriageItems(input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error)
 	RevertCommunicationsTriageNode(input CommunicationsTriageRevertInput) (CommunicationsTriageRevertResult, error)
 	TransferCommunicationsEmailNode(input CommunicationsEmailNodeTransferInput) (CommunicationsEmailNodeTransferResult, error)
 	ListCommunicationsEmailPlacements(userID, companyID string, messageIDs []string) ([]domain.CommunicationsEmailPlacement, error)
 	ListCommunicationsEmailPlacementsForConnection(userID, companyID, emailConnectionID string, messageIDs []string) ([]domain.CommunicationsEmailPlacement, error)
 	UpsertCommunicationsEmailThread(input CommunicationsEmailThreadUpsertInput) (domain.CommunicationsEmailThread, error)
+	UpsertCommunicationsEmailThreadContext(ctx context.Context, input CommunicationsEmailThreadUpsertInput) (domain.CommunicationsEmailThread, error)
 	GetCommunicationsEmailThread(companyID, emailThreadID string) (domain.CommunicationsEmailThread, error)
+	GetCommunicationsEmailThreadContext(ctx context.Context, companyID, emailThreadID string) (domain.CommunicationsEmailThread, error)
 	ListCommunicationsEmailThreadsForAccount(input CommunicationsEmailAccountReadInput) ([]domain.CommunicationsEmailThread, error)
 	ListCommunicationsEmailMessagesForAccount(input CommunicationsEmailAccountReadInput) ([]domain.CommunicationsEmailMessage, error)
-	EnsureCommunicationsEmailIngestionJob(input CommunicationsEmailIngestionJobInput) (CommunicationsEmailThreadDownloadJob, bool, error)
-	EnsureCommunicationsEmailThreadDownloadJob(companyID, emailThreadID, downloadScope, requestedProviderMessageID, requestedByUserID string) (CommunicationsEmailThreadDownloadJob, bool, error)
-	ClaimCommunicationsEmailThreadDownloadJobs(limit int, processingLeaseTimeout time.Duration) ([]CommunicationsEmailThreadDownloadJob, error)
-	MarkCommunicationsEmailThreadDownloadJobCompleted(downloadJobID string) error
-	MarkCommunicationsEmailThreadDownloadJobFailed(downloadJobID, lastError string, availableAt time.Time, final bool) error
-	ListCommunicationsEmailThreadDownloadJobs(companyID, emailThreadID string) ([]CommunicationsEmailThreadDownloadJob, error)
+	EnsureCommunicationsEmailIngestionJobContext(ctx context.Context, input CommunicationsEmailIngestionJobInput) (CommunicationsEmailThreadDownloadJob, bool, error)
+	EnsureCommunicationsEmailThreadDownloadJobContext(ctx context.Context, companyID, emailThreadID, downloadScope, requestedProviderMessageID, requestedByUserID string) (CommunicationsEmailThreadDownloadJob, bool, error)
+	GetCommunicationsEmailIngestionJobContext(ctx context.Context, jobID string) (CommunicationsEmailThreadDownloadJob, error)
+	StartCommunicationsEmailIngestionAttemptContext(ctx context.Context, jobID string) (CommunicationsEmailThreadDownloadJob, bool, error)
+	CompleteCommunicationsEmailIngestionAttemptContext(ctx context.Context, jobID, attemptToken string) error
+	FailCommunicationsEmailIngestionAttemptContext(ctx context.Context, jobID, attemptToken, lastError string) error
+	ParkCommunicationsEmailIngestionAttemptContext(ctx context.Context, jobID, attemptToken, connectionStatus, lastError string) error
+	ListCommunicationsEmailThreadDownloadJobsContext(ctx context.Context, companyID, emailThreadID string) ([]CommunicationsEmailThreadDownloadJob, error)
+	CheckEmailSQSWorkerSchemaReadinessContext(ctx context.Context) error
 	ListCommunicationsEmailThreadNodeIDs(companyID, emailThreadID string) ([]string, error)
 	GetCommunicationsNodeEmailThread(companyID, nodeID, emailThreadID string) (domain.CommunicationsNodeEmailThread, error)
 	ImportCommunicationsEmailIntoNode(input CommunicationsNodeEmailImportInput) (CommunicationsNodeEmailImportResult, error)
@@ -214,13 +225,16 @@ type AttachmentRepository interface {
 	attachmentcleanup.Repository
 	GetEmailAttachmentResourceAccess(input EmailAttachmentResourceAccessInput) (EmailAttachmentResourceAccess, error)
 	CreateAttachmentWithResourceLink(input AttachmentCreateInput) (domain.Attachment, domain.ResourceAttachment, error)
+	CreateAttachmentWithResourceLinkContext(ctx context.Context, input AttachmentCreateInput) (domain.Attachment, domain.ResourceAttachment, error)
 	GetAttachment(companyID, attachmentID string) (domain.Attachment, error)
+	AttachmentExistsContext(ctx context.Context, companyID, attachmentID string) (bool, error)
 	GetAttachmentVariant(ctx context.Context, companyID, attachmentID, variantType string) (domain.AttachmentVariant, error)
 	ReadAttachmentContent(ctx context.Context, companyID, attachmentID, variantType string) (AttachmentContentRead, error)
 	UpsertAttachmentVariants(ctx context.Context, companyID string, inputs []AttachmentVariantInput) ([]domain.AttachmentVariant, error)
 	ListAttachmentResourceLinks(companyID, attachmentID string) ([]domain.ResourceAttachment, error)
 	ListResourceAttachments(companyID, resourceType, resourceID string) ([]domain.ResourceAttachment, error)
 	LinkResourceAttachment(input ResourceAttachmentInput) (domain.ResourceAttachment, error)
+	LinkResourceAttachmentContext(ctx context.Context, input ResourceAttachmentInput) (domain.ResourceAttachment, error)
 	SoftDeleteResourceAttachment(input ResourceAttachmentDeleteInput) error
 	PreparePermanentAttachmentDeletion(ctx context.Context, companyID, attachmentID, resourceType, resourceID string) (AttachmentDeletionPlan, error)
 	GetAttachmentUploadIntentByClientRequest(companyID, actorUserID, clientRequestID string) (domain.AttachmentUploadIntent, error)
@@ -787,6 +801,7 @@ type CompanyExplorerRepository interface {
 	DeleteCompanyExplorerTargets(companyID string, targets []CompanyExplorerDeleteTargetInput, deletedByUserID string) (CompanyExplorerDeleteResult, error)
 	CreateCommunicationsSharedInboxFolder(companyID, parentFolderID, name, accountEmail string) (domain.CompanyExplorerFolder, error)
 	ListCommunicationsSharedInboxFolders(companyID string) ([]domain.CompanyExplorerFolder, error)
+	ListCommunicationsSharedInboxFoldersContext(ctx context.Context, companyID string) ([]domain.CompanyExplorerFolder, error)
 	ListVisibleCommunicationsSharedInboxFolders(companyID, userID string) ([]domain.CompanyExplorerFolder, error)
 	GetCommunicationsSharedInboxFolder(companyID, folderID string) (domain.CompanyExplorerFolder, error)
 	MoveCommunicationsSharedInboxFolder(companyID, folderID string, parentFolderID *string, position int) (domain.CompanyExplorerFolder, error)

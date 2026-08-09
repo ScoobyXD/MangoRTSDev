@@ -65,7 +65,6 @@ func TestEmailCollaborationSharedDraftSendUsesExactProviderReplyAllAndFinalizes(
 	server := NewServerWithOptions(repo, ServerOptions{
 		NylasConfig: testNylasConfig(), NylasClient: nylas,
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
-		DisableCommunicationsArchiveWorker: true,
 	})
 	defer server.Close()
 	server.nylasGate = newNylasRequestGate(0)
@@ -240,7 +239,6 @@ func TestEmailCollaborationSharedDraftSendRecoversDurableCompletionFailureWithSa
 	server := NewServerWithOptions(recoveryRepo, ServerOptions{
 		NylasConfig: testNylasConfig(), NylasClient: nylas,
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
-		DisableCommunicationsArchiveWorker: true,
 	})
 	defer server.Close()
 	server.nylasGate = newNylasRequestGate(0)
@@ -353,7 +351,6 @@ func TestEmailCollaborationSharedDraftSendErrorRecoveryChoosesKeyByProviderCerta
 			server := NewServerWithOptions(recoveryRepo, ServerOptions{
 				NylasConfig: testNylasConfig(), NylasClient: nylas,
 				DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
-				DisableCommunicationsArchiveWorker: true,
 			})
 			defer server.Close()
 			server.nylasGate = newNylasRequestGate(0)
@@ -457,7 +454,6 @@ func TestEmailCollaborationSharedDraftSendRecoversMissingProviderMessageIDWithSa
 	server := NewServerWithOptions(recoveryRepo, ServerOptions{
 		NylasConfig: testNylasConfig(), NylasClient: nylas,
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
-		DisableCommunicationsArchiveWorker: true,
 	})
 	defer server.Close()
 	server.nylasGate = newNylasRequestGate(0)
@@ -504,7 +500,6 @@ func TestEmailCollaborationSharedDraftFreshPreflightFailureReleasesClaim(t *test
 	server := NewServerWithOptions(repo, ServerOptions{
 		NylasConfig: testNylasConfig(), NylasClient: nylas,
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
-		DisableCommunicationsArchiveWorker: true,
 	})
 	defer server.Close()
 	server.nylasGate = newNylasRequestGate(0)
@@ -544,7 +539,6 @@ func TestEmailCollaborationSharedDraftRecoveredPreflightFailurePreservesUncertai
 	server := NewServerWithOptions(recoveryRepo, ServerOptions{
 		NylasConfig: testNylasConfig(), NylasClient: nylas,
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
-		DisableCommunicationsArchiveWorker: true,
 	})
 	defer server.Close()
 	server.nylasGate = newNylasRequestGate(0)
@@ -630,7 +624,6 @@ func TestEmailCollaborationSharedDraftRecoveredDispatchMarginBlocksProviderRepla
 	server := NewServerWithOptions(recoveryRepo, ServerOptions{
 		NylasConfig: testNylasConfig(), NylasClient: nylas,
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
-		DisableCommunicationsArchiveWorker: true,
 	})
 	defer server.Close()
 	server.nylasGate = newNylasRequestGate(0)
@@ -693,7 +686,6 @@ func TestEmailCollaborationSharedDraftExpiredRecoveryReturnsCanonicalDiscardGuid
 	server := NewServerWithOptions(recoveryRepo, ServerOptions{
 		NylasConfig: testNylasConfig(), NylasClient: nylas,
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
-		DisableCommunicationsArchiveWorker: true,
 	})
 	defer server.Close()
 	server.nylasGate = newNylasRequestGate(0)
@@ -759,7 +751,6 @@ func TestEmailCollaborationSharedDraftRecoveryRejectsChangedGrantWithoutProvider
 	server := NewServerWithOptions(recoveryRepo, ServerOptions{
 		NylasConfig: testNylasConfig(), NylasClient: nylas,
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
-		DisableCommunicationsArchiveWorker: true,
 	})
 	defer server.Close()
 	server.nylasGate = newNylasRequestGate(0)

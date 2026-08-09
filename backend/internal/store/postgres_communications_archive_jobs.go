@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"time"
 )
@@ -20,20 +21,18 @@ coalesce(job.company_email_connection_id::text, ''),
 item.message_id,
 item.status,
 item.attempt_count,
+coalesce(item.attempt_token::text, ''),
 item.last_error,
-item.available_at,
-item.processing_started_at,
 item.archived_timestamp,
 item.failed_timestamp,
 item.created_timestamp,
 item.updated_timestamp`
 
-func (r *PostgresRepo) CreateCommunicationsArchiveJob(input CommunicationsArchiveJobInput) (CommunicationsArchiveJob, error) {
+func (r *PostgresRepo) CreateCommunicationsArchiveJobContext(ctx context.Context, input CommunicationsArchiveJobInput) (CommunicationsArchiveJob, error) {
 	input, err := NormalizeCommunicationsArchiveJobInput(input)
 	if err != nil {
 		return CommunicationsArchiveJob{}, err
 	}
-	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return CommunicationsArchiveJob{}, err
@@ -116,10 +115,8 @@ insert into communications_email_archive_jobs (
 	}
 
 	for _, messageID := range input.MessageIDs {
-		var activeExists bool
-		if err := tx.QueryRowContext(ctx, `
-select exists (
-  select 1
+		existing, err := scanCommunicationsArchiveJobItem(tx.QueryRowContext(ctx, `
+select `+communicationsArchiveJobItemSelectColumns+`
   from communications_email_archive_job_items item
   join communications_email_archive_jobs job
     on job.archive_job_id = item.archive_job_id
@@ -129,19 +126,22 @@ select exists (
     and job.connection_scope = $4
     and job.account_email = $5
     and item.message_id = $6
-    and item.status in ('pending', 'processing', 'retry')
-)`,
+    and item.status in ('pending', 'processing')
+  order by item.created_timestamp,item.job_item_id
+  limit 1`,
 			job.ActorUserID,
 			job.CompanyID,
 			job.SharedInboxID,
 			job.ConnectionScope,
 			job.AccountEmail,
 			messageID,
-		).Scan(&activeExists); err != nil {
-			return CommunicationsArchiveJob{}, err
-		}
-		if activeExists {
+		))
+		if err == nil {
+			job.Items = append(job.Items, existing)
 			continue
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return CommunicationsArchiveJob{}, err
 		}
 		item, err := scanCommunicationsArchiveJobItem(tx.QueryRowContext(ctx, `
 with inserted as (
@@ -150,7 +150,6 @@ with inserted as (
     archive_job_id,
     message_id,
     status,
-    available_at,
     created_timestamp,
     updated_timestamp
   ) values (
@@ -158,7 +157,6 @@ with inserted as (
     $2::uuid,
     $3,
     'pending',
-    $4,
     $4,
     $4
   )
@@ -198,72 +196,64 @@ where archive_job_id=$1::uuid`, job.JobID, now); err != nil {
 	return CloneCommunicationsArchiveJob(job), nil
 }
 
-func (r *PostgresRepo) ClaimCommunicationsArchiveJobItems(limit int, processingLeaseTimeout time.Duration) ([]CommunicationsArchiveJobItem, error) {
-	limit = NormalizeCommunicationsArchiveJobClaimLimit(limit)
-	processingLeaseTimeout = NormalizeCommunicationsArchiveJobProcessingLeaseTimeout(processingLeaseTimeout)
-	staleBefore := time.Now().UTC().Add(-processingLeaseTimeout)
-	rows, err := r.db.QueryContext(context.Background(), `
-with claimed as (
-  select item.job_item_id
-  from communications_email_archive_job_items item
-  where item.status in ('pending', 'retry', 'processing')
-    and item.available_at <= now()
-    and (
-      item.status <> 'processing'
-      or item.processing_started_at is null
-      or item.processing_started_at < $2
-    )
-  order by item.available_at asc, item.created_timestamp asc, item.job_item_id asc
-  limit $1
-  for update skip locked
-),
-updated as (
-  update communications_email_archive_job_items item
-  set status='processing',
-      processing_started_at=now(),
-      attempt_count=item.attempt_count + 1,
-      updated_timestamp=now()
-  from claimed
-  where item.job_item_id=claimed.job_item_id
-  returning item.*
+func (r *PostgresRepo) GetCommunicationsArchiveJobItemContext(ctx context.Context, jobItemID string) (CommunicationsArchiveJobItem, error) {
+	jobItemID = cleanUUIDText(jobItemID)
+	if jobItemID == "" {
+		return CommunicationsArchiveJobItem{}, ErrInvalid
+	}
+	item, err := scanCommunicationsArchiveJobItem(r.db.QueryRowContext(ctx, `select `+communicationsArchiveJobItemSelectColumns+`
+from communications_email_archive_job_items item
+join communications_email_archive_jobs job on job.archive_job_id=item.archive_job_id
+where item.job_item_id=$1::uuid`, jobItemID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return CommunicationsArchiveJobItem{}, ErrNotFound
+	}
+	return item, err
+}
+
+func (r *PostgresRepo) StartCommunicationsArchiveJobItemAttemptContext(ctx context.Context, jobItemID string) (CommunicationsArchiveJobItem, bool, error) {
+	jobItemID = cleanUUIDText(jobItemID)
+	if jobItemID == "" {
+		return CommunicationsArchiveJobItem{}, false, ErrInvalid
+	}
+	attemptToken := newUUIDv7String()
+	item, err := scanCommunicationsArchiveJobItem(r.db.QueryRowContext(ctx, `with updated as (
+ update communications_email_archive_job_items
+ set status='processing',attempt_count=attempt_count+1,attempt_token=$2::uuid,last_error='',updated_timestamp=now()
+ where job_item_id=$1::uuid and status in ('pending','processing') and attempt_count<3
+ returning *
 )
 select `+communicationsArchiveJobItemSelectColumns+`
-from updated item
-join communications_email_archive_jobs job
-  on job.archive_job_id = item.archive_job_id
-order by item.available_at asc, item.created_timestamp asc, item.job_item_id asc`, limit, staleBefore)
-	if err != nil {
-		return nil, err
+from updated item join communications_email_archive_jobs job on job.archive_job_id=item.archive_job_id`, jobItemID, attemptToken))
+	if err == nil {
+		return item, true, nil
 	}
-	defer rows.Close()
-	return scanCommunicationsArchiveJobItems(rows)
+	if !errors.Is(err, sql.ErrNoRows) {
+		return CommunicationsArchiveJobItem{}, false, err
+	}
+	item, err = r.GetCommunicationsArchiveJobItemContext(ctx, jobItemID)
+	return item, false, err
 }
 
-func (r *PostgresRepo) MarkCommunicationsArchiveJobItemArchived(jobItemID string) error {
-	jobItemID = strings.TrimSpace(jobItemID)
-	if jobItemID == "" {
+func (r *PostgresRepo) CompleteCommunicationsArchiveJobItemAttemptContext(ctx context.Context, jobItemID, attemptToken string) error {
+	jobItemID, attemptToken = cleanUUIDText(jobItemID), cleanUUIDText(attemptToken)
+	if jobItemID == "" || attemptToken == "" {
 		return ErrInvalid
 	}
-	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-
 	var jobID string
-	if err := tx.QueryRowContext(ctx, `
-update communications_email_archive_job_items
-set status='archived',
-    processing_started_at=null,
-    archived_timestamp=coalesce(archived_timestamp, now()),
-    last_error='',
-    updated_timestamp=now()
-where job_item_id=$1::uuid
-returning archive_job_id::text`, jobItemID).Scan(&jobID); err != nil {
-		if err == sql.ErrNoRows {
-			return ErrNotFound
-		}
+	err = tx.QueryRowContext(ctx, `update communications_email_archive_job_items
+set status='archived',archived_timestamp=coalesce(archived_timestamp,now()),last_error='',updated_timestamp=now()
+where job_item_id=$1::uuid and status='processing' and attempt_token=$2::uuid
+returning archive_job_id::text`, jobItemID, attemptToken).Scan(&jobID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
 		return err
 	}
 	if err := updatePostgresCommunicationsArchiveJobStatusTx(ctx, tx, jobID); err != nil {
@@ -272,52 +262,29 @@ returning archive_job_id::text`, jobItemID).Scan(&jobID); err != nil {
 	return tx.Commit()
 }
 
-func (r *PostgresRepo) MarkCommunicationsArchiveJobItemFailed(jobItemID, lastError string, availableAt time.Time, final bool) error {
-	jobItemID = strings.TrimSpace(jobItemID)
-	if jobItemID == "" {
+func (r *PostgresRepo) FailCommunicationsArchiveJobItemAttemptContext(ctx context.Context, jobItemID, attemptToken, lastError string) error {
+	jobItemID, attemptToken = cleanUUIDText(jobItemID), cleanUUIDText(attemptToken)
+	lastError = trimCommunicationsArchiveJobLastError(lastError)
+	if jobItemID == "" || attemptToken == "" || lastError == "" {
 		return ErrInvalid
 	}
-	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-
-	status := CommunicationsArchiveJobItemStatusRetry
-	if availableAt.IsZero() {
-		availableAt = time.Now().UTC().Add(time.Second)
-	}
-	if final {
-		status = CommunicationsArchiveJobItemStatusFailed
-	}
-
 	var jobID string
-	if final {
-		err = tx.QueryRowContext(ctx, `
-update communications_email_archive_job_items
-set status=$2,
-    processing_started_at=null,
-    failed_timestamp=coalesce(failed_timestamp, now()),
+	err = tx.QueryRowContext(ctx, `update communications_email_archive_job_items
+set status=case when attempt_count>=3 then 'failed' else 'pending' end,
     last_error=$3,
-    updated_timestamp=now()
-where job_item_id=$1::uuid
-returning archive_job_id::text`, jobItemID, status, trimCommunicationsArchiveJobLastError(lastError)).Scan(&jobID)
-	} else {
-		err = tx.QueryRowContext(ctx, `
-update communications_email_archive_job_items
-set status=$2,
-    processing_started_at=null,
-    available_at=$3,
-    last_error=$4,
-    updated_timestamp=now()
-where job_item_id=$1::uuid
-returning archive_job_id::text`, jobItemID, status, availableAt.UTC(), trimCommunicationsArchiveJobLastError(lastError)).Scan(&jobID)
+    attempt_token=null,
+    failed_timestamp=case when attempt_count>=3 then now() else null end,updated_timestamp=now()
+where job_item_id=$1::uuid and status='processing' and attempt_token=$2::uuid
+returning archive_job_id::text`, jobItemID, attemptToken, lastError).Scan(&jobID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
 	}
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return ErrNotFound
-		}
 		return err
 	}
 	if err := updatePostgresCommunicationsArchiveJobStatusTx(ctx, tx, jobID); err != nil {
@@ -326,12 +293,55 @@ returning archive_job_id::text`, jobItemID, status, availableAt.UTC(), trimCommu
 	return tx.Commit()
 }
 
-func (r *PostgresRepo) ListCommunicationsArchiveJobItems(jobID string) ([]CommunicationsArchiveJobItem, error) {
+func (r *PostgresRepo) ParkCommunicationsArchiveJobItemAttemptContext(ctx context.Context, jobItemID, attemptToken, companyID, emailConnectionID, connectionStatus, lastError string) error {
+	jobItemID, attemptToken = cleanUUIDText(jobItemID), cleanUUIDText(attemptToken)
+	companyID, emailConnectionID = cleanUUIDText(companyID), cleanUUIDText(emailConnectionID)
+	connectionStatus, lastError = normalizeEmailConnectionStatus(connectionStatus), trimCommunicationsArchiveJobLastError(lastError)
+	if jobItemID == "" || attemptToken == "" || companyID == "" || emailConnectionID == "" || lastError == "" ||
+		(connectionStatus != "reauth_required" && connectionStatus != "configuration_required") {
+		return ErrInvalid
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var jobID string
+	err = tx.QueryRowContext(ctx, `update communications_email_archive_job_items item
+set status='failed',last_error=$3,attempt_token=null,failed_timestamp=now(),updated_timestamp=now()
+from communications_email_archive_jobs job
+where item.archive_job_id=job.archive_job_id and item.job_item_id=$1::uuid
+  and item.status='processing' and item.attempt_token=$2::uuid and job.company_id=$4::uuid
+returning item.archive_job_id::text`, jobItemID, attemptToken, lastError, companyID).Scan(&jobID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `update email_connections set status=$3,updated_timestamp=now()
+where company_id=$1::uuid and email_connection_id=$2::uuid`, companyID, emailConnectionID, connectionStatus)
+	if err != nil {
+		return err
+	}
+	if affected, err := result.RowsAffected(); err != nil || affected != 1 {
+		if err != nil {
+			return err
+		}
+		return ErrNotFound
+	}
+	if err := updatePostgresCommunicationsArchiveJobStatusTx(ctx, tx, jobID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *PostgresRepo) ListCommunicationsArchiveJobItemsContext(ctx context.Context, jobID string) ([]CommunicationsArchiveJobItem, error) {
 	jobID = strings.TrimSpace(jobID)
 	if jobID == "" {
 		return nil, ErrInvalid
 	}
-	rows, err := r.db.QueryContext(context.Background(), `
+	rows, err := r.db.QueryContext(ctx, `
 select `+communicationsArchiveJobItemSelectColumns+`
 from communications_email_archive_job_items item
 join communications_email_archive_jobs job
@@ -348,7 +358,7 @@ order by item.created_timestamp asc, item.job_item_id asc`, jobID)
 	}
 	if len(items) == 0 {
 		var exists bool
-		if err := r.db.QueryRowContext(context.Background(), `select exists(select 1 from communications_email_archive_jobs where archive_job_id=$1::uuid)`, jobID).Scan(&exists); err != nil {
+		if err := r.db.QueryRowContext(ctx, `select exists(select 1 from communications_email_archive_jobs where archive_job_id=$1::uuid)`, jobID).Scan(&exists); err != nil {
 			return nil, err
 		}
 		if !exists {
@@ -362,7 +372,7 @@ func updatePostgresCommunicationsArchiveJobStatusTx(ctx context.Context, tx *sql
 	var activeCount, failedCount int
 	if err := tx.QueryRowContext(ctx, `
 select
-  count(*) filter (where status in ('pending', 'processing', 'retry')),
+  count(*) filter (where status in ('pending', 'processing')),
   count(*) filter (where status='failed')
 from communications_email_archive_job_items
 where archive_job_id=$1::uuid`, jobID).Scan(&activeCount, &failedCount); err != nil {
@@ -385,7 +395,6 @@ where archive_job_id=$1::uuid`, jobID, status)
 
 func scanCommunicationsArchiveJobItem(row interface{ Scan(dest ...any) error }) (CommunicationsArchiveJobItem, error) {
 	var item CommunicationsArchiveJobItem
-	var processingStarted sql.NullTime
 	var archivedAt sql.NullTime
 	var failedAt sql.NullTime
 	err := row.Scan(
@@ -402,9 +411,8 @@ func scanCommunicationsArchiveJobItem(row interface{ Scan(dest ...any) error }) 
 		&item.MessageID,
 		&item.Status,
 		&item.AttemptCount,
+		&item.AttemptToken,
 		&item.LastError,
-		&item.AvailableAt,
-		&processingStarted,
 		&archivedAt,
 		&failedAt,
 		&item.CreatedTimestamp,
@@ -412,10 +420,6 @@ func scanCommunicationsArchiveJobItem(row interface{ Scan(dest ...any) error }) 
 	)
 	if err != nil {
 		return CommunicationsArchiveJobItem{}, err
-	}
-	if processingStarted.Valid {
-		value := processingStarted.Time
-		item.ProcessingStartedAt = &value
 	}
 	if archivedAt.Valid {
 		value := archivedAt.Time

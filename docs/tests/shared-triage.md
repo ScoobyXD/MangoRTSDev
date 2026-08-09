@@ -1,3 +1,29 @@
+# Process Story: Shared Triage conversion queues exact-account completion
+
+An authorized user converts or links one provider message from one exact shared inbox through the established typed command
+↓
+The transaction preserves literal company, shared-inbox, permanent email-connection, message, and destination identities and creates or finds the stable ingestion marker
+↓
+The API sends only that compact job to SQS in the permanent connection FIFO group; it never falls back to an actor's personal account or a database claimant loop
+↓
+The private worker later fills missing provider thread/files, and its committed hint is authorized again for the exact shared inbox
+↓
+Duplicate commands or deliveries reuse the same identity and never weaken Shared Triage permissions
+
+Last updated: 2026-08-09
+
+# Process Story: Shared Triage archive completion stays canonical
+
+An authorized user advances one frozen shared-inbox page and receives a durable archive job only after every exact item reaches SQS
+↓
+The private worker handles one exact shared provider message per delivery in the permanent connection FIFO group, without a database claim/reclaim timer
+↓
+PostgreSQL token-fences the item result while AWS owns redelivery and DLQ movement
+↓
+Every viewer observes completion or failure from canonical archive-job reads; no communications WebSocket completion event is sent
+
+Last updated: 2026-08-09
+
 # Process Story: Shared Triage policy status is automatic
 
 A manager edits a Shared Triage folder or shared inbox RACI or permission policy
@@ -69,7 +95,7 @@ ST36 - Shared inbox permissions use `resource_permission_settings` plus canonica
 ST37 - Shared inbox and folder RACI use `resource_gvic_settings` plus canonical `resource_gvic_assignments` under their exact resource IDs.
 ST38 - Email connection records do not receive Shared Triage permissions or RACI assignments; permissions and RACI are assigned to the shared inbox work surface.
 ST39 - Plain Shared Triage folders are organizational containers only; selecting one clears mail state and must not call email folder, message list, message detail, prefetch, or load-more endpoints.
-ST40 - Shared Triage consumes compact, permission-checked `mailbox:shared:<shared_inbox_id>` hints for only the exact selected mail-bearing shared inbox. First acceptance and reconnect acceptance invalidate reusable cache state but start zero provider reads. External message/folder hints use one-active/one-queued-final coordination only for metadata and directly identified detail; event payloads never insert or replace rows and no mail polling is used.
+ST40 - Shared Triage consumes compact, permission-checked `mailbox:shared:<shared_inbox_id>` hints for only the exact selected mail-bearing shared inbox. First acceptance and reconnect acceptance invalidate reusable cache state but start zero provider reads. A raw `message.created` webhook publishes nothing before ingestion; the worker's deterministic post-ingestion hint and true already-stored message/folder hints use one-active/one-queued-final coordination only for metadata and directly identified detail. Event payloads never insert or replace rows and no mail polling is used.
 ST41 - Shared subscription admission requires the exact existing mail-bearing resource plus current Edit access, and publication rechecks the current exact audience. My Work, Updates, RACI matrix, Shared Triage root/headings/group rows/plain folders, inaccessible inboxes, and inactive inboxes retain no fallback personal/mailbox subscription and issue no provider GET because of a hint.
 ST42 - Navigating to a concrete shared mailbox performs its normal canonical load and installs that exact subscription. Navigating away cancels/discards captured timers and pending work, unsubscribes the old inbox, and prevents a hint or stale response from Shared Inbox A from refreshing/invalidation Shared Inbox B.
 ST43 - Shared Triage mailbox inboxes must show a fixed, predictable message batch size of 12 messages per page.
@@ -100,9 +126,9 @@ ST67 - Shared mailbox WebSocket payloads carry only exact scope, trigger, and co
 ST68 - Local mail commands patch the affected visible or selected message from their committed response. Matching local provider echoes are consumed once without invalidation or GETs. External message hints leave the current list stable, may reconcile exact-inbox folder metadata, and reload selected detail only when its message/thread is directly identified.
 ST69 - Message and folder hints are exact-cache invalidation hints carrying no provider credentials or message bodies. Exact invalidation keys include company, `shared_inbox_id`, message, thread, page, and folders; another shared inbox and personal mail caches remain intact.
 ST70 - A background Shared Triage archive response may return Accepted only after the backend has written a durable archive job and job-item rows for the accepted message IDs.
-ST71 - Accepted Shared Triage archive job items must survive API process restart and be claimable by a backend worker until each item reaches archived or failed.
-ST72 - The backend archive worker must claim pending or retryable Shared Triage job items with a processing lease so concurrent workers do not mutate the same active item at the same time.
-ST73 - Retryable Shared Triage archive failures such as provider rate limits or transient provider errors must be recorded with attempt count, last error, and next available time instead of being dropped from memory.
+ST71 - Accepted Shared Triage archive job items survive API process restart because each permanent exact-message marker has one compact SQS delivery identity until it reaches archived, failed, or the work DLQ.
+ST72 - The private worker handles one exact Shared Triage archive item per SQS message, atomically starts its token-fenced provider attempt, and never claims/reclaims a PostgreSQL batch or uses a database delivery lease/timer. The permanent email connection ID is the FIFO group.
+ST73 - Retryable Shared Triage archive failures such as provider rate limits or transient provider errors record the safe attempt/error result and leave the SQS message undeleted. Fixed visibility, receive count, redelivery, and DLQ movement belong only to AWS; PostgreSQL has no `available_at` retry scheduler.
 ST74 - Final failures and successful completions are recorded durably on archive job items and exposed through canonical job reads; they do not publish communications WebSocket events.
 ST75 - Duplicate active Shared Triage archive submissions for the same actor, shared inbox, account, and message must not create duplicate active job items or duplicate provider archive attempts.
 ST76 - Shared Triage archive jobs must preserve company/shared-inbox scope and use the company-owned shared mailbox grant, not the actor's personal mailbox grant.
@@ -221,7 +247,7 @@ ST173 - A shared-inbox signature's display derivative may hydrate Settings/compo
 ST174 - Shared timer-expiry and Send now dispatches use the same company-owned grant and backend closure once and surface the same failure. A failed signature-image send preserves the current shared compose/draft or collaboration revision, reports no false success, and exposes only the classified public code plus sanitized server correlation.
 ST175 - With a prefetched page available, Shared Triage Archive page and go next swaps to that page before any new message-list read and submits exactly one background archive request for the frozen previous 12 IDs. The next bounded prefetch and durable archive-job/folder reads are separately expected work; none may replace or blink the displayed page.
 ST176 - For archive, unarchive, star, read, and delete, the initiating browser records exact shared-inbox scope, provider trigger, and message ID before dispatch. After a successful shared send returns its provider message ID, the browser records the expected `message.created` echo before local list/detail reconciliation. A matching provider echo is consumed once, expires within a bounded time, is removed when a command fails, and causes zero cache invalidations, browser GETs, list replacements, or UI refreshes. Suppression remains browser-local so other currently authorized viewers receive the external-change hint.
-ST177 - A genuinely external shared message create/update/delete invalidates cached future page data, may coalesce one exact-inbox folder metadata read, and may reload directly identified selected detail. It never reloads or replaces the currently displayed 12-row page; the change appears on the next explicit canonical list load.
+ST177 - A raw external shared message create only enqueues ingestion. After provider truth commits, the worker's deterministic exact-inbox hint—and true already-stored update/delete hints—invalidates cached future page data, may coalesce one exact-inbox folder metadata read, and may reload directly identified selected detail. It never reloads or replaces the currently displayed 12-row page; the change appears on the next explicit canonical list load.
 ST178 - Opening shared Sent, Starred, All, Archive, or another non-primary tab performs one initial newest-first message-page load. If the filtered/condensed result has a next page but no usable scroll range, Mango automatically appends pages until scrolling is possible or the provider is exhausted; otherwise additional pages require near-bottom scroll intent. Separate selected-detail/thread reads remain expected.
 ST179 - Shared mailbox subscription acceptance/reconnect and global notification-summary events start zero mail list, folder, collaboration, page, or detail GETs. They may only mark reusable cache state stale for the next explicit read.
 ST180 - The normal Archive button in an open Shared Triage message advances to and opens the row immediately below the archived row, falling back to the previous row only when the archived row was last. This is separate from Archive page and go next.
@@ -243,6 +269,8 @@ ST188 - After normal Archive or Archive page and go next removes a shared-inbox 
 ST189 - Attaching a shared-inbox email or thread to a Node changes collaboration metadata and chat access, not provider mailbox membership. If the provider still returns another unarchived message in the same thread, that canonical message may carry the Node indicator; the stored collaboration snapshot alone is never proof that any message remains in Inbox.
 ST190 - No collaboration-only My Triage fallback exists for a participant who cannot navigate the immutable source shared inbox. The participant retains collaboration Node/chat and stored-thread access without receiving an email-list row. Automated coverage must prove matching-row annotation, missing-row suppression after archive and refresh, thread matching, exact-shared-inbox isolation, and suppression outside the selected provider mailbox.
 ST191 - Shared Triage uses the same universal-picker dismissal and success presentation as My Triage without weakening shared-inbox authorization. A pointer press outside the picker closes it without selection or mutation. Floating-Node success first shows the compact elevated green notice immediately left of the Node-plus button, then publishes the authorized Node indicator after 450 milliseconds. Failure shows neither success nor a false indicator. Activating the indicator opens the Node normally and never sends an information-focus request or transient yellow flash; only Updates-row activation owns that flash.
+
+ST192 - A Shared Triage conversion or selected-message import commits its typed relationship and creates/finds the permanent ingestion identity before sending one compact SQS job under the exact shared email connection FIFO group. Queue/provider work never falls back to the actor's personal account, account-email guessing, or a database polling claimant. Duplicate commands and deliveries reuse the same stable identity and retain the current shared-inbox permission boundary.
 
 ## Scenarios
 

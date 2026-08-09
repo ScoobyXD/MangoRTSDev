@@ -49,7 +49,7 @@ test("ECS receives non-secret Valkey coordinates and no cache credential", () =>
   }
   assert.doesNotMatch(task, /MANGORTS_VALKEY_(PASSWORD|TOKEN|SECRET)/);
   assert.match(task, /MANGORTS_VALKEY_REQUIRED", value = "true"/);
-  assert.match(task, /resource "aws_ecs_task_definition" "backend"[\s\S]*depends_on\s*=\s*\[aws_iam_role_policy_attachment\.ecs_task_realtime_valkey\]/);
+  assert.match(task, /resource "aws_ecs_task_definition" "backend"[\s\S]*depends_on\s*=\s*\[[\s\S]*aws_iam_role_policy_attachment\.ecs_task_realtime_valkey/);
   assert.match(task, /resource "aws_ecs_service" "backend"[\s\S]*aws_iam_role_policy_attachment\.ecs_task_realtime_valkey/);
   assert.match(iam, /"elasticache:CreateServerlessCache"/);
   assert.match(iam, /"elasticache:ModifyUserGroup"/);

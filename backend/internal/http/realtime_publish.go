@@ -20,6 +20,10 @@ func (s *Server) publishRealtimeMessageContext(ctx context.Context, companyID, s
 	return s.publishRealtimeMessageWithAudienceContext(ctx, companyID, scope, nil, message)
 }
 
+func (s *Server) publishRealtimeMessageResultContext(ctx context.Context, companyID, scope string, message any) (int, error) {
+	return s.publishRealtimeMessageWithAudienceResultContext(ctx, companyID, scope, nil, message)
+}
+
 func realtimeAllowedUserIDs(userIDs []string) map[string]struct{} {
 	allowedUserIDs := map[string]struct{}{}
 	for _, userID := range userIDs {
@@ -97,24 +101,29 @@ func (s *Server) publishRealtimeMessageWithAudience(companyID, scope string, all
 }
 
 func (s *Server) publishRealtimeMessageWithAudienceContext(ctx context.Context, companyID, scope string, allowedUserIDs map[string]struct{}, message any) int {
+	delivered, _ := s.publishRealtimeMessageWithAudienceResultContext(ctx, companyID, scope, allowedUserIDs, message)
+	return delivered
+}
+
+func (s *Server) publishRealtimeMessageWithAudienceResultContext(ctx context.Context, companyID, scope string, allowedUserIDs map[string]struct{}, message any) (int, error) {
 	companyID = strings.TrimSpace(companyID)
 	scope = strings.TrimSpace(scope)
 	if s == nil || companyID == "" || scope == "" {
-		return 0
+		return 0, store.ErrInvalid
 	}
 	payload, eventType, err := realtimeMessagePayload(message)
 	if err != nil {
 		log.Printf("failed to marshal realtime message company_id=%s scope_type=%s: %v", companyID, realtimeScopeType(scope), err)
-		return 0
+		return 0, err
 	}
 	_, err = s.enqueueRealtimeOutboxAndWake(ctx, store.RealtimeOutboxInput{
 		CompanyID: companyID, Scope: scope, EventType: eventType, Payload: payload,
 		AllowedUserIDs: realtimeAllowedUserIDList(allowedUserIDs), AudienceRestricted: allowedUserIDs != nil,
 	})
 	if err != nil {
-		return 0
+		return 0, err
 	}
-	return 0
+	return 0, nil
 }
 
 func realtimeMessagePayload(message any) (json.RawMessage, string, error) {

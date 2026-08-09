@@ -46,6 +46,60 @@ resource "aws_iam_role" "ecs_task" {
   assume_role_policy = data.aws_iam_policy_document.ecs_task_assume_role.json
 }
 
+resource "aws_iam_role" "email_worker_execution" {
+  count = local.email_worker_service_enabled ? 1 : 0
+
+  name               = "${local.name_prefix}-email-worker-execution"
+  assume_role_policy = data.aws_iam_policy_document.ecs_task_assume_role.json
+}
+
+resource "aws_iam_role_policy_attachment" "email_worker_execution" {
+  count = local.email_worker_service_enabled ? 1 : 0
+
+  role       = aws_iam_role.email_worker_execution[0].name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+data "aws_iam_policy_document" "email_worker_execution_secrets" {
+  count = local.email_worker_service_enabled ? 1 : 0
+
+  statement {
+    actions = ["secretsmanager:GetSecretValue"]
+    resources = compact([
+      local.db_password_secret_arn,
+      var.nylas_api_key_secret_arn,
+    ])
+  }
+}
+
+resource "aws_iam_policy" "email_worker_execution_secrets" {
+  count = local.email_worker_service_enabled ? 1 : 0
+
+  name   = "${local.name_prefix}-email-worker-execution-secrets"
+  policy = data.aws_iam_policy_document.email_worker_execution_secrets[0].json
+}
+
+resource "aws_iam_role_policy_attachment" "email_worker_execution_secrets" {
+  count = local.email_worker_service_enabled ? 1 : 0
+
+  role       = aws_iam_role.email_worker_execution[0].name
+  policy_arn = aws_iam_policy.email_worker_execution_secrets[0].arn
+}
+
+resource "aws_iam_role" "email_worker" {
+  count = var.email_sqs_enabled ? 1 : 0
+
+  name               = "${local.name_prefix}-email-worker"
+  assume_role_policy = data.aws_iam_policy_document.ecs_task_assume_role.json
+
+  lifecycle {
+    precondition {
+      condition     = var.environment == "dev"
+      error_message = "The SQS email worker is development-only and cannot be enabled outside dev."
+    }
+  }
+}
+
 data "aws_iam_policy_document" "ecs_task_cognito" {
   statement {
     actions = [
@@ -100,6 +154,13 @@ resource "aws_iam_policy" "ecs_task_attachments" {
 resource "aws_iam_role_policy_attachment" "ecs_task_attachments" {
   count      = local.attachment_storage_enabled ? 1 : 0
   role       = aws_iam_role.ecs_task.name
+  policy_arn = aws_iam_policy.ecs_task_attachments[0].arn
+}
+
+resource "aws_iam_role_policy_attachment" "email_worker_attachments" {
+  count = var.email_sqs_enabled && local.attachment_storage_enabled ? 1 : 0
+
+  role       = aws_iam_role.email_worker[0].name
   policy_arn = aws_iam_policy.ecs_task_attachments[0].arn
 }
 

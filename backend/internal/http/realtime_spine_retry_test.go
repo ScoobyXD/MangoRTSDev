@@ -34,7 +34,7 @@ func TestRealtimeSpineRetryableAuthorizationFailureDoesNotAdvanceCursor(t *testi
 	base := store.NewMemoryRepo()
 	allowedUserID := "11111111-1111-4111-8111-111111111111"
 	repo := &controlledRealtimeAudienceRepo{Repository: base, exists: true, allowed: []string{allowedUserID}, resolveErr: errors.New("temporary authorization store failure")}
-	server := NewServerWithOptions(repo, ServerOptions{DisableRealtimeSpine: true, DisableNotificationCleanup: true, DisableAttachmentUploadCleanup: true, DisableCommunicationsArchiveWorker: true})
+	server := NewServerWithOptions(repo, ServerOptions{DisableRealtimeSpine: true, DisableNotificationCleanup: true, DisableAttachmentUploadCleanup: true})
 	defer server.Close()
 
 	companyID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -77,7 +77,7 @@ func TestRealtimeSpineRetryableAuthorizationFailureDoesNotAdvanceCursor(t *testi
 func TestRealtimeSpinePersistentAuthorizationFailureBlocksLaterSequence(t *testing.T) {
 	base := store.NewMemoryRepo()
 	repo := &controlledRealtimeAudienceRepo{Repository: base, exists: true, resolveErr: errors.New("persistent authorization store failure")}
-	server := NewServerWithOptions(repo, ServerOptions{DisableRealtimeSpine: true, DisableNotificationCleanup: true, DisableAttachmentUploadCleanup: true, DisableCommunicationsArchiveWorker: true})
+	server := NewServerWithOptions(repo, ServerOptions{DisableRealtimeSpine: true, DisableNotificationCleanup: true, DisableAttachmentUploadCleanup: true})
 	defer server.Close()
 
 	companyID := "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
@@ -113,7 +113,7 @@ func TestRealtimeAuthorizationRetryBackoffIgnoresLaterEventsAndRecoverySignals(t
 	base := store.NewMemoryRepo()
 	allowedUserID := "24242424-2424-4242-8242-242424242424"
 	repo := &controlledRealtimeAudienceRepo{Repository: base, exists: true, allowed: []string{allowedUserID}, resolveErr: errors.New("temporary authorization failure")}
-	server := NewServerWithOptions(repo, ServerOptions{DisableRealtimeSpine: true, DisableNotificationCleanup: true, DisableAttachmentUploadCleanup: true, DisableCommunicationsArchiveWorker: true})
+	server := NewServerWithOptions(repo, ServerOptions{DisableRealtimeSpine: true, DisableNotificationCleanup: true, DisableAttachmentUploadCleanup: true})
 	defer server.Close()
 
 	companyID := "25252525-2525-4252-8252-252525252525"

@@ -16,16 +16,16 @@ const (
 	CommunicationsEmailThreadDownloadScopeFullThread = "full_thread"
 	CommunicationsEmailThreadDownloadScopeMessage    = "message"
 
-	CommunicationsEmailThreadDownloadJobPending    = "pending"
+	CommunicationsEmailThreadDownloadJobAccepted   = "accepted"
 	CommunicationsEmailThreadDownloadJobProcessing = "processing"
-	CommunicationsEmailThreadDownloadJobRetry      = "retry"
 	CommunicationsEmailThreadDownloadJobCompleted  = "completed"
-	CommunicationsEmailThreadDownloadJobFailed     = "failed"
+	CommunicationsEmailThreadDownloadJobParked     = "parked"
+	CommunicationsEmailThreadDownloadJobExhausted  = "exhausted"
+	CommunicationsEmailProviderAttemptLimit        = 3
 
 	CommunicationsEmailIngestionPriorityLive    = 10
 	CommunicationsEmailIngestionPriorityVisible = 20
 	CommunicationsEmailIngestionPriorityScan    = 30
-	CommunicationsEmailIngestionPriorityBacklog = 40
 )
 
 type CommunicationsEmailAccountReadInput struct {
@@ -88,22 +88,22 @@ type CommunicationsNodeEmailImportResult struct {
 }
 
 type CommunicationsEmailThreadDownloadJob struct {
-	DownloadJobID       string     `json:"ingestion_job_id"`
-	CompanyID           string     `json:"company_id"`
-	EmailConnectionID   string     `json:"email_connection_id"`
-	EmailThreadID       string     `json:"email_thread_id,omitempty"`
-	ProviderMessageID   string     `json:"provider_message_id"`
-	ProviderThreadID    string     `json:"provider_thread_id,omitempty"`
-	Priority            int        `json:"priority"`
-	Status              string     `json:"status"`
-	AttemptCount        int        `json:"attempt_count"`
-	LastError           string     `json:"last_error,omitempty"`
-	AvailableAt         time.Time  `json:"available_at"`
-	ProcessingStartedAt *time.Time `json:"processing_started_at,omitempty"`
-	CompletedTimestamp  *time.Time `json:"completed_timestamp,omitempty"`
-	FailedTimestamp     *time.Time `json:"failed_timestamp,omitempty"`
-	CreatedTimestamp    time.Time  `json:"created_timestamp"`
-	UpdatedTimestamp    time.Time  `json:"updated_timestamp"`
+	DownloadJobID        string     `json:"ingestion_job_id"`
+	CompanyID            string     `json:"company_id"`
+	EmailConnectionID    string     `json:"email_connection_id"`
+	EmailThreadID        string     `json:"email_thread_id,omitempty"`
+	ProviderMessageID    string     `json:"provider_message_id"`
+	ProviderThreadID     string     `json:"provider_thread_id,omitempty"`
+	Priority             int        `json:"priority"`
+	Status               string     `json:"status"`
+	ProviderAttemptCount int        `json:"provider_attempt_count"`
+	AttemptToken         string     `json:"-"`
+	EnqueueSourceID      string     `json:"-"`
+	LastError            string     `json:"last_error,omitempty"`
+	CompletedTimestamp   *time.Time `json:"completed_timestamp,omitempty"`
+	FailedTimestamp      *time.Time `json:"failed_timestamp,omitempty"`
+	CreatedTimestamp     time.Time  `json:"created_timestamp"`
+	UpdatedTimestamp     time.Time  `json:"updated_timestamp"`
 }
 
 type CommunicationsEmailIngestionJobInput struct {
@@ -113,6 +113,7 @@ type CommunicationsEmailIngestionJobInput struct {
 	ProviderMessageID string
 	ProviderThreadID  string
 	Priority          int
+	EnqueueSourceID   string
 }
 
 func normalizeCommunicationsEmailThreadDownloadScope(value string) string {

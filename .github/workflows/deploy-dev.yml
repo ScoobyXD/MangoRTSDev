@@ -2,10 +2,34 @@ name: Deploy MangoRTS Dev
 
 on:
   workflow_dispatch:
+    inputs:
+      operation:
+        description: Create a reviewable plan or apply an exact plan from a prior run
+        type: choice
+        options: [plan, apply-reviewed-plan]
+        default: plan
+      deployment_stage:
+        description: The one reviewed DEV rollout stage
+        type: choice
+        options: [infrastructure-api, worker-only, schedule-only]
+        default: infrastructure-api
+      api_desired_count:
+        description: Explicit API desired count; use 0 for migration maintenance
+        type: string
+        default: "0"
+      email_schema_migrated:
+        description: Confirm the reviewed final DEV email schema is installed
+        type: boolean
+        default: false
+      reviewed_plan_run_id:
+        description: Required only for apply-reviewed-plan
+        type: string
+        default: ""
 
 permissions:
   contents: read
   id-token: write
+  actions: read
 
 concurrency:
   group: mangorts-dev-deploy
@@ -18,9 +42,59 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: development
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Resolve reviewed deployment stage
+        env:
+          DEPLOY_OPERATION: ${{ inputs.operation }}
+          DEPLOY_STAGE: ${{ inputs.deployment_stage }}
+          API_DESIRED_COUNT: ${{ inputs.api_desired_count }}
+          EMAIL_SCHEMA_MIGRATED: ${{ inputs.email_schema_migrated }}
+          REVIEWED_PLAN_RUN_ID: ${{ inputs.reviewed_plan_run_id }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$API_DESIRED_COUNT" =~ ^[0-9]+$ ]]; then
+            echo "api_desired_count must be a whole number of zero or more" >&2
+            exit 1
+          fi
+          case "$DEPLOY_STAGE" in
+            infrastructure-api)
+              EMAIL_WORKER_ENABLED=false
+              EMAIL_SCHEDULE_ENABLED=false
+              ;;
+            worker-only)
+              EMAIL_WORKER_ENABLED=true
+              EMAIL_SCHEDULE_ENABLED=false
+              ;;
+            schedule-only)
+              EMAIL_WORKER_ENABLED=true
+              EMAIL_SCHEDULE_ENABLED=true
+              ;;
+          esac
+          if [[ "$API_DESIRED_COUNT" != "0" && "$EMAIL_SCHEMA_MIGRATED" != "true" ]]; then
+            echo "The new API is not legacy-schema compatible. Migrate first or use api_desired_count=0 for maintenance." >&2
+            exit 1
+          fi
+          if [[ "$EMAIL_WORKER_ENABLED" == "true" && "$EMAIL_SCHEMA_MIGRATED" != "true" ]]; then
+            echo "Worker and schedule stages require the reviewed final email schema." >&2
+            exit 1
+          fi
+          if [[ "$DEPLOY_OPERATION" == "apply-reviewed-plan" && ! "$REVIEWED_PLAN_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "apply-reviewed-plan requires the numeric run ID of the reviewed plan." >&2
+            exit 1
+          fi
+          {
+            echo "DEPLOY_OPERATION=$DEPLOY_OPERATION"
+            echo "DEPLOY_STAGE=$DEPLOY_STAGE"
+            echo "API_DESIRED_COUNT=$API_DESIRED_COUNT"
+            echo "EMAIL_SCHEMA_MIGRATED=$EMAIL_SCHEMA_MIGRATED"
+            echo "EMAIL_WORKER_ENABLED=$EMAIL_WORKER_ENABLED"
+            echo "EMAIL_SCHEDULE_ENABLED=$EMAIL_SCHEDULE_ENABLED"
+            echo "REVIEWED_PLAN_RUN_ID=$REVIEWED_PLAN_RUN_ID"
+          } >> "$GITHUB_ENV"
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
@@ -35,6 +109,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Backend tests
+        if: inputs.operation == 'plan'
         working-directory: backend
         run: go test ./...
 
@@ -85,11 +160,13 @@ jobs:
           TF_NYLAS_WEBHOOK_SECRET_ARN: ${{ vars.TF_NYLAS_WEBHOOK_SECRET_ARN || '' }}
           TF_NYLAS_GOOGLE_SCOPES: ${{ vars.TF_NYLAS_GOOGLE_SCOPES || 'https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.labels' }}
           TF_NYLAS_MICROSOFT_SCOPES: ${{ vars.TF_NYLAS_MICROSOFT_SCOPES || 'offline_access User.Read Mail.ReadWrite Mail.Send' }}
+          TF_EMAIL_WORKER_ALARM_ACTION_ARNS: ${{ vars.TF_EMAIL_WORKER_ALARM_ACTION_ARNS || '[]' }}
           TF_ORIGIN_VERIFY_SECRET: ${{ secrets.ORIGIN_VERIFY_SECRET || secrets.DEV_BASIC_AUTH_PASSWORD }}
           TF_GITHUB_OWNER: ${{ vars.TF_GITHUB_OWNER || github.repository_owner }}
           TF_GITHUB_REPOSITORY: ${{ vars.TF_GITHUB_REPOSITORY || github.event.repository.name }}
           TF_GITHUB_BRANCH: ${{ vars.TF_GITHUB_BRANCH || 'main' }}
         run: |
+          umask 077
           : "${TF_ROOT_DOMAIN_NAME:?Set GitHub variable TF_ROOT_DOMAIN_NAME}"
           : "${TF_VPC_ID:?Set GitHub variable TF_VPC_ID}"
           : "${TF_PUBLIC_SUBNET_IDS:?Set GitHub variable TF_PUBLIC_SUBNET_IDS as a JSON array}"
@@ -130,9 +207,15 @@ jobs:
           TF_PUBLIC_SUBNET_IDS_NORMALIZED="$(normalize_json_string_array "$TF_PUBLIC_SUBNET_IDS")"
           TF_PRIVATE_SUBNET_IDS_NORMALIZED="$(normalize_json_string_array "$TF_PRIVATE_SUBNET_IDS")"
           TF_ECS_PRIVATE_SUBNET_CIDRS_NORMALIZED="$(normalize_json_string_array "$TF_ECS_PRIVATE_SUBNET_CIDRS")"
+          TF_EMAIL_WORKER_ALARM_ACTION_ARNS_NORMALIZED="$(normalize_json_string_array "$TF_EMAIL_WORKER_ALARM_ACTION_ARNS")"
           jq -e 'type == "array" and all(.[]; type == "string" and length > 0)' <<< "$TF_PUBLIC_SUBNET_IDS_NORMALIZED" >/dev/null
           jq -e 'type == "array" and all(.[]; type == "string" and length > 0)' <<< "$TF_PRIVATE_SUBNET_IDS_NORMALIZED" >/dev/null
           jq -e 'type == "array" and all(.[]; type == "string" and length > 0)' <<< "$TF_ECS_PRIVATE_SUBNET_CIDRS_NORMALIZED" >/dev/null
+          jq -e 'type == "array" and all(.[]; type == "string" and test("^arn:"))' <<< "$TF_EMAIL_WORKER_ALARM_ACTION_ARNS_NORMALIZED" >/dev/null
+          if [[ "$API_DESIRED_COUNT" != "0" || "$EMAIL_WORKER_ENABLED" == "true" ]] && [[ "$(jq 'length' <<< "$TF_EMAIL_WORKER_ALARM_ACTION_ARNS_NORMALIZED")" == "0" ]]; then
+            echo "Set TF_EMAIL_WORKER_ALARM_ACTION_ARNS before a nonzero SQS-enabled API, worker, or schedule stage." >&2
+            exit 1
+          fi
           if [[ "$TF_CREATE_PRIVATE_ECS_SUBNETS" == "true" ]]; then
             jq -e 'length >= 2' <<< "$TF_ECS_PRIVATE_SUBNET_CIDRS_NORMALIZED" >/dev/null
           else
@@ -163,6 +246,12 @@ jobs:
           existing_db_security_group_id = $(json_string "$TF_EXISTING_DB_SECURITY_GROUP_ID")
           backend_image_uri = ""
           deploy_revision = $(json_string "$GITHUB_SHA")
+          backend_desired_count = $API_DESIRED_COUNT
+          email_sqs_enabled = true
+          email_worker_enabled = $EMAIL_WORKER_ENABLED
+          email_reconciliation_schedule_enabled = $EMAIL_SCHEDULE_ENABLED
+          email_sqs_database_migration_complete = $EMAIL_SCHEMA_MIGRATED
+          email_worker_alarm_action_arns = $TF_EMAIL_WORKER_ALARM_ACTION_ARNS_NORMALIZED
           attachment_s3_bucket = $(json_string "$TF_ATTACHMENT_S3_BUCKET")
           dev_company_id = $(json_string "$TF_DEV_COMPANY_ID")
           cognito_domain_prefix = $(json_string "$TF_COGNITO_DOMAIN_PREFIX")
@@ -201,14 +290,17 @@ jobs:
         run: terraform validate
 
       - name: Read image repository output
+        if: inputs.operation == 'plan'
         working-directory: ${{ env.TF_DIR }}
         run: |
           echo "ECR_REPOSITORY_URL=$(terraform output -raw backend_ecr_repository_url)" >> "$GITHUB_ENV"
 
       - name: Login to ECR
+        if: inputs.operation == 'plan'
         run: aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${ECR_REPOSITORY_URL%/*}"
 
       - name: Build and push backend image
+        if: inputs.operation == 'plan'
         env:
           IMAGE_URI: ${{ env.ECR_REPOSITORY_URL }}:${{ github.sha }}
         run: |
@@ -230,14 +322,107 @@ jobs:
           echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
 
       - name: Terraform plan
+        if: inputs.operation == 'plan'
         working-directory: ${{ env.TF_DIR }}
-        run: terraform plan -out=tfplan -var "backend_image_uri=${IMAGE_URI}"
+        run: |
+          set -euo pipefail
+          umask 077
+          terraform plan -out=tfplan -var "backend_image_uri=${IMAGE_URI}"
+          terraform show -no-color tfplan > tfplan.txt
+          TFPLAN_SHA256="$(sha256sum tfplan | awk '{print $1}')"
+          printf '%s  %s\n' "$TFPLAN_SHA256" tfplan > tfplan.sha256
+          jq -n \
+            --arg source_sha "$GITHUB_SHA" \
+            --arg stage "$DEPLOY_STAGE" \
+            --arg api_desired_count "$API_DESIRED_COUNT" \
+            --arg schema_migrated "$EMAIL_SCHEMA_MIGRATED" \
+            --arg worker_enabled "$EMAIL_WORKER_ENABLED" \
+            --arg schedule_enabled "$EMAIL_SCHEDULE_ENABLED" \
+            --arg plan_sha256 "$TFPLAN_SHA256" \
+            '{source_sha:$source_sha,stage:$stage,api_desired_count:$api_desired_count,schema_migrated:$schema_migrated,worker_enabled:$worker_enabled,schedule_enabled:$schedule_enabled,plan_sha256:$plan_sha256}' \
+            > tfplan-metadata.json
 
-      - name: Terraform apply
+      - name: Encrypt exact Terraform plan bundle
+        if: inputs.operation == 'plan'
         working-directory: ${{ env.TF_DIR }}
-        run: terraform apply -auto-approve tfplan
+        env:
+          TF_PLAN_AGE_RECIPIENT: ${{ vars.TF_PLAN_AGE_RECIPIENT }}
+        run: |
+          set -euo pipefail
+          umask 077
+          : "${TF_PLAN_AGE_RECIPIENT:?Set protected development environment variable TF_PLAN_AGE_RECIPIENT}"
+          sudo apt-get update
+          sudo apt-get install --yes age
+          PLAN_ARCHIVE="$RUNNER_TEMP/mangorts-dev-tfplan.tar"
+          PLAN_CIPHERTEXT="$RUNNER_TEMP/mangorts-dev-tfplan.tar.age"
+          tar --create --file "$PLAN_ARCHIVE" tfplan tfplan.txt tfplan.sha256 tfplan-metadata.json
+          age --encrypt --recipient "$TF_PLAN_AGE_RECIPIENT" --output "$PLAN_CIPHERTEXT" "$PLAN_ARCHIVE"
+          rm -f "$PLAN_ARCHIVE" tfplan tfplan.txt tfplan.sha256 tfplan-metadata.json
+          test -s "$PLAN_CIPHERTEXT"
+
+      - name: Upload encrypted exact Terraform plan
+        if: inputs.operation == 'plan'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mangorts-dev-tfplan-ciphertext
+          path: ${{ runner.temp }}/mangorts-dev-tfplan.tar.age
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Download the separately reviewed encrypted Terraform plan
+        if: inputs.operation == 'apply-reviewed-plan'
+        uses: actions/download-artifact@v4
+        with:
+          name: mangorts-dev-tfplan-ciphertext
+          path: ${{ runner.temp }}/mangorts-dev-tfplan-ciphertext
+          run-id: ${{ inputs.reviewed_plan_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Decrypt and verify reviewed Terraform plan identity
+        if: inputs.operation == 'apply-reviewed-plan'
+        env:
+          TF_PLAN_AGE_IDENTITY: ${{ secrets.TF_PLAN_AGE_IDENTITY }}
+          TF_PLAN_AGE_RECIPIENT: ${{ vars.TF_PLAN_AGE_RECIPIENT }}
+        run: |
+          set -euo pipefail
+          umask 077
+          : "${TF_PLAN_AGE_IDENTITY:?Set dedicated protected development environment secret TF_PLAN_AGE_IDENTITY}"
+          : "${TF_PLAN_AGE_RECIPIENT:?Set protected development environment variable TF_PLAN_AGE_RECIPIENT}"
+          sudo apt-get update
+          sudo apt-get install --yes age
+          CIPHERTEXT="$RUNNER_TEMP/mangorts-dev-tfplan-ciphertext/mangorts-dev-tfplan.tar.age"
+          IDENTITY_FILE="$RUNNER_TEMP/mangorts-dev-tfplan-identity.txt"
+          PLAN_ARCHIVE="$RUNNER_TEMP/mangorts-dev-tfplan.tar"
+          PLAN_DIRECTORY="$RUNNER_TEMP/mangorts-dev-tfplan-plain"
+          test -s "$CIPHERTEXT"
+          printf '%s\n' "$TF_PLAN_AGE_IDENTITY" > "$IDENTITY_FILE"
+          chmod 600 "$IDENTITY_FILE"
+          test "$(age-keygen -y "$IDENTITY_FILE")" = "$TF_PLAN_AGE_RECIPIENT"
+          mkdir -p "$PLAN_DIRECTORY"
+          age --decrypt --identity "$IDENTITY_FILE" --output "$PLAN_ARCHIVE" "$CIPHERTEXT"
+          test "$(tar --list --file "$PLAN_ARCHIVE" | sort | tr '\n' ' ')" = "tfplan tfplan-metadata.json tfplan.sha256 tfplan.txt "
+          tar --extract --file "$PLAN_ARCHIVE" --directory "$PLAN_DIRECTORY" --no-same-owner --no-same-permissions
+          cd "$PLAN_DIRECTORY"
+          sha256sum --check tfplan.sha256
+          jq -e \
+            --arg source_sha "$GITHUB_SHA" \
+            --arg stage "$DEPLOY_STAGE" \
+            --arg api_desired_count "$API_DESIRED_COUNT" \
+            --arg schema_migrated "$EMAIL_SCHEMA_MIGRATED" \
+            --arg worker_enabled "$EMAIL_WORKER_ENABLED" \
+            --arg schedule_enabled "$EMAIL_SCHEDULE_ENABLED" \
+            --arg plan_sha256 "$(sha256sum tfplan | awk '{print $1}')" \
+            '.source_sha==$source_sha and .stage==$stage and .api_desired_count==$api_desired_count and .schema_migrated==$schema_migrated and .worker_enabled==$worker_enabled and .schedule_enabled==$schedule_enabled and .plan_sha256==$plan_sha256' \
+            tfplan-metadata.json >/dev/null
+          test -s tfplan
+
+      - name: Apply exact separately reviewed Terraform plan
+        if: inputs.operation == 'apply-reviewed-plan'
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform apply "$RUNNER_TEMP/mangorts-dev-tfplan-plain/tfplan"
 
       - name: Read Terraform outputs
+        if: inputs.operation == 'apply-reviewed-plan'
         working-directory: ${{ env.TF_DIR }}
         run: |
           {
@@ -255,6 +440,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Build frontend
+        if: inputs.operation == 'apply-reviewed-plan' && inputs.deployment_stage == 'infrastructure-api' && inputs.api_desired_count != '0'
         working-directory: frontend
         env:
           # Keep browser API calls on the app origin so public auth endpoints and
@@ -288,6 +474,7 @@ jobs:
           fi
 
       - name: Publish frontend
+        if: inputs.operation == 'apply-reviewed-plan' && inputs.deployment_stage == 'infrastructure-api' && inputs.api_desired_count != '0'
         run: |
           aws s3 sync frontend/dist "s3://${FRONTEND_BUCKET}" --delete
           INVALIDATION_ID="$(aws cloudfront create-invalidation --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" --paths "/*" --query 'Invalidation.Id' --output text)"
@@ -295,6 +482,7 @@ jobs:
           aws cloudfront wait invalidation-completed --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" --id "$INVALIDATION_ID"
 
       - name: Post-deploy smoke tests
+        if: inputs.operation == 'apply-reviewed-plan' && inputs.deployment_stage == 'infrastructure-api' && inputs.api_desired_count != '0'
         run: |
           set -euo pipefail
           tmp_body="$(mktemp)"
@@ -387,6 +575,7 @@ jobs:
           fi
 
       - name: Deployment summary
+        if: inputs.operation == 'apply-reviewed-plan'
         run: |
           {
             echo "## MangoRTS dev deploy"
@@ -399,3 +588,37 @@ jobs:
             echo ""
             echo "Register the Nylas callback URL and webhook URL in the Nylas dashboard for the same app/client ID used by TF_NYLAS_CLIENT_ID."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Plan review summary
+        if: inputs.operation == 'plan'
+        run: |
+          {
+            echo "## MangoRTS DEV Terraform plan ready for review"
+            echo ""
+            echo "- Plan run ID: ${GITHUB_RUN_ID}"
+            echo "- Source SHA: ${GITHUB_SHA}"
+            echo "- Stage: ${DEPLOY_STAGE}"
+            echo "- API desired count: ${API_DESIRED_COUNT}"
+            echo "- Final email schema confirmed: ${EMAIL_SCHEMA_MIGRATED}"
+            echo "- Worker enabled: ${EMAIL_WORKER_ENABLED}"
+            echo "- Schedule enabled: ${EMAIL_SCHEDULE_ENABLED}"
+            echo ""
+            echo "Review the exact Terraform plan output in this protected run, then dispatch apply-reviewed-plan with this run ID and the exact same inputs. Only the age-encrypted plan bundle is retained between runs."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove runner-local Terraform secret material
+        if: always()
+        run: |
+          rm -f \
+            "$TF_DIR/backend.hcl" \
+            "$TF_DIR/ci.auto.tfvars" \
+            "$TF_DIR/tfplan" \
+            "$TF_DIR/tfplan.txt" \
+            "$TF_DIR/tfplan.sha256" \
+            "$TF_DIR/tfplan-metadata.json" \
+            "$RUNNER_TEMP/mangorts-dev-tfplan.tar" \
+            "$RUNNER_TEMP/mangorts-dev-tfplan.tar.age" \
+            "$RUNNER_TEMP/mangorts-dev-tfplan-identity.txt"
+          rm -rf \
+            "$RUNNER_TEMP/mangorts-dev-tfplan-ciphertext" \
+            "$RUNNER_TEMP/mangorts-dev-tfplan-plain"

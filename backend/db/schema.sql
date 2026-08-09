@@ -234,7 +234,7 @@ create table if not exists email_connections (
   constraint email_connections_provider_chk check (provider in ('google', 'microsoft')),
   constraint email_connections_account_email_chk check (btrim(account_email) <> '' and account_email = lower(btrim(account_email))),
   constraint email_connections_grant_id_nonblank_chk check (btrim(grant_id) <> ''),
-  constraint email_connections_status_chk check (status in ('connected', 'disconnected', 'reauth_required')),
+  constraint email_connections_status_chk check (status in ('connected', 'disconnected', 'reauth_required', 'configuration_required')),
   constraint email_connections_checkpoint_chk check (last_successful_scan_at >= ingestion_started_at),
   primary key (email_connection_id),
   unique (company_id, email_connection_id),
@@ -1647,6 +1647,7 @@ create table if not exists communications_email_archive_job_items (
   message_id text not null,
   status text not null default 'pending',
   attempt_count integer not null default 0,
+  attempt_token uuid,
   last_error text not null default '',
   available_at timestamptz not null default now(),
   processing_started_at timestamptz,
@@ -1655,13 +1656,9 @@ create table if not exists communications_email_archive_job_items (
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
   constraint communications_email_archive_job_items_message_chk check (btrim(message_id) <> ''),
-  constraint communications_email_archive_job_items_status_chk check (status in ('pending', 'processing', 'retry', 'archived', 'failed')),
+  constraint communications_email_archive_job_items_status_chk check (status in ('pending', 'processing', 'archived', 'failed')),
   unique (archive_job_id, message_id)
 );
-
-create index if not exists idx_communications_email_archive_job_items_claim
-  on communications_email_archive_job_items(status, available_at, created_timestamp, job_item_id)
-  where status in ('pending', 'processing', 'retry');
 
 create index if not exists idx_communications_email_archive_job_items_job
   on communications_email_archive_job_items(archive_job_id, created_timestamp, job_item_id);
@@ -3900,8 +3897,11 @@ create table if not exists email_ingestion_jobs (
   provider_message_id text not null,
   provider_thread_id text not null default '',
   priority smallint not null default 30,
-  status text not null default 'pending',
+  status text not null default 'accepted',
   attempt_count integer not null default 0,
+  provider_attempt_count integer not null default 0,
+  attempt_token uuid,
+  enqueue_source_id text not null default '',
   last_error text not null default '',
   available_at timestamptz not null default now(),
   processing_started_at timestamptz,
@@ -3916,16 +3916,13 @@ create table if not exists email_ingestion_jobs (
   constraint email_ingestion_jobs_message_chk check (btrim(provider_message_id)<>''),
   constraint email_ingestion_jobs_priority_chk check (priority between 0 and 100),
   constraint email_ingestion_jobs_status_chk check (
-    status in ('pending','processing','retry','completed','failed')
+    status in ('accepted','processing','completed','parked','exhausted')
   ),
-  constraint email_ingestion_jobs_attempt_chk check (attempt_count >= 0)
+  constraint email_ingestion_jobs_attempt_chk check (attempt_count >= 0),
+  constraint email_ingestion_jobs_provider_attempt_chk check (provider_attempt_count between 0 and 3)
 );
-create unique index if not exists idx_email_ingestion_jobs_active_message
-  on email_ingestion_jobs(company_id,email_connection_id,provider_message_id)
-  where status in ('pending','processing','retry');
-create index if not exists idx_email_ingestion_jobs_claim
-  on email_ingestion_jobs(status,priority,available_at,created_timestamp)
-  where status in ('pending','processing','retry');
+create unique index if not exists idx_email_ingestion_jobs_stable_message
+  on email_ingestion_jobs(company_id,email_connection_id,provider_message_id);
 create table if not exists attachment_relationships (
   attachment_relationship_id uuid not null,
   company_id uuid not null,

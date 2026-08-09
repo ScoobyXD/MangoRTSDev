@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
@@ -212,12 +213,26 @@ func (r *MemoryRepo) upsertCommunicationsEmailThreadLocked(input CommunicationsE
 }
 
 func (r *MemoryRepo) UpsertCommunicationsEmailThread(input CommunicationsEmailThreadUpsertInput) (domain.CommunicationsEmailThread, error) {
+	return r.UpsertCommunicationsEmailThreadContext(context.Background(), input)
+}
+
+func (r *MemoryRepo) UpsertCommunicationsEmailThreadContext(ctx context.Context, input CommunicationsEmailThreadUpsertInput) (domain.CommunicationsEmailThread, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.CommunicationsEmailThread{}, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.upsertCommunicationsEmailThreadLocked(input)
 }
 
 func (r *MemoryRepo) GetCommunicationsEmailThread(companyID, emailThreadID string) (domain.CommunicationsEmailThread, error) {
+	return r.GetCommunicationsEmailThreadContext(context.Background(), companyID, emailThreadID)
+}
+
+func (r *MemoryRepo) GetCommunicationsEmailThreadContext(ctx context.Context, companyID, emailThreadID string) (domain.CommunicationsEmailThread, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.CommunicationsEmailThread{}, err
+	}
 	companyID, emailThreadID = cleanUUIDText(companyID), cleanUUIDText(emailThreadID)
 	if companyID == "" || emailThreadID == "" {
 		return domain.CommunicationsEmailThread{}, ErrInvalid
