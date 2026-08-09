@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   EXPLORER_ROOT_ROW_LABELS,
   EXPLORER_ROOT_ROW_ORDER,
@@ -123,7 +125,7 @@ run("tree rows ignore source nodes in the main Company Explorer", () => {
 });
 
 
-run("search tree rows render backend location path as nested explorer rows", () => {
+run("search tree rows merge shared paths and render each matching resource once", () => {
   const rows = buildCompanyExplorerSearchTreeRows([
     {
       company_id: "c",
@@ -149,6 +151,7 @@ run("search tree rows render backend location path as nested explorer rows", () 
       match_reason: "name_exact",
       location_path: [
         { entity_type: "folder", entity_id: "unfiled", name: "Unfiled" },
+        { entity_type: "folder", entity_id: "logic-gates", name: "Logic Gates" },
         { entity_type: "logic_gate", entity_id: "gate-a", resource_id: "gate-a", name: "Search Gate" },
       ],
       has_children: true,
@@ -157,16 +160,77 @@ run("search tree rows render backend location path as nested explorer rows", () 
     },
   ]);
 
-  assert.deepEqual(rows.map((row) => row.label), ["Unfiled", "Logic Gates", "Search Gate", "Unfiled", "Search Gate", "Search Node"]);
-  assert.deepEqual(rows.map((row) => row.depth), [0, 1, 2, 0, 1, 2]);
-  assert.deepEqual(rows.map((row) => row.kind), ["folder", "folder", "logic_gate", "folder", "logic_gate", "node"]);
+  assert.deepEqual(rows.map((row) => row.label), ["Unfiled", "Logic Gates", "Search Gate", "Search Node"]);
+  assert.deepEqual(rows.map((row) => row.depth), [0, 1, 2, 3]);
+  assert.deepEqual(rows.map((row) => row.kind), ["folder", "folder", "logic_gate", "node"]);
+  assert.equal(rows.filter((row) => row.entityID === "unfiled").length, 1);
+  assert.equal(rows.filter((row) => row.entityID === "gate-a").length, 1);
   assert.equal(rows[2]?.logicGateID, "gate-a");
   assert.equal(rows[2]?.folderLabel, "Unfiled / Logic Gates");
   assert.equal(rows[2]?.syntheticKind, "search_result");
-  assert.equal(rows[2]?.hasChildren, false);
-  assert.equal(rows[5]?.nodeID, "node-a");
-  assert.equal(rows[5]?.syntheticKind, "search_result");
-  assert.equal(rows[5]?.hasChildren, false);
+  assert.equal(rows[2]?.hasChildren, true);
+  assert.equal(rows[3]?.nodeID, "node-a");
+  assert.equal(rows[3]?.syntheticKind, "search_result");
+  assert.equal(rows[3]?.hasChildren, false);
+});
+
+run("search tree renders directly authorized results at the root when their locations are restricted", () => {
+  const rows = buildCompanyExplorerSearchTreeRows([
+    {
+      company_id: "c",
+      resource_type: "logic_gate",
+      resource_id: "gate-restricted-path",
+      entity_id: "gate-restricted-path",
+      display_name: "Visible Gate",
+      match_reason: "name_exact",
+      location_path: [],
+      has_children: false,
+      created_timestamp: "1",
+      updated_timestamp: "1",
+    },
+    {
+      company_id: "c",
+      resource_type: "project",
+      resource_id: "project-restricted-path",
+      entity_id: "project-restricted-path",
+      display_name: "Visible Project",
+      match_reason: "name_exact",
+      location_path: [],
+      has_children: false,
+      created_timestamp: "2",
+      updated_timestamp: "2",
+    },
+    {
+      company_id: "c",
+      resource_type: "node",
+      resource_id: "node-restricted-path",
+      entity_id: "node-restricted-path",
+      display_name: "Visible Node",
+      match_reason: "name_exact",
+      location_path: [],
+      has_children: false,
+      created_timestamp: "3",
+      updated_timestamp: "3",
+    },
+  ]);
+
+  assert.deepEqual(rows.map((row) => row.label), ["Visible Gate", "Visible Project", "Visible Node"]);
+  assert.deepEqual(rows.map((row) => row.depth), [0, 0, 0]);
+  assert.deepEqual(rows.map((row) => row.parentEntityID), ["", "", ""]);
+  assert.deepEqual(rows.map((row) => row.folderLabel), ["", "", ""]);
+  assert.equal(rows.every((row) => row.syntheticKind === "search_result"), true);
+});
+
+run("company explorer search debounces and aborts superseded requests", () => {
+  const content = readFileSync(resolve(process.cwd(), "frontend/src/modules/company-explorer/CompanyExplorerContent.tsx"), "utf8");
+  const api = readFileSync(resolve(process.cwd(), "frontend/src/modules/company-explorer/companyExplorerLazyApi.ts"), "utf8");
+  assert.match(content, /const controller = new AbortController\(\)/);
+  assert.match(content, /window\.setTimeout\(\(\) => \{/);
+  assert.match(content, /controller\.signal/);
+  assert.match(content, /window\.clearTimeout\(timer\)/);
+  assert.match(content, /controller\.abort\(\)/);
+  assert.match(api, /signal\?: AbortSignal/);
+  assert.match(api, /\{ signal \}/);
 });
 run("v2 tree rows preserve the existing tree shell ids and metadata", () => {
   const rows = buildCompanyExplorerV2TreeRows({

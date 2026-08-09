@@ -1913,21 +1913,26 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     const requestID = companyExplorerSearchRequestRef.current + 1;
     companyExplorerSearchRequestRef.current = requestID;
     let cancelled = false;
+    const controller = new AbortController();
     const titleVersionAtStart = readCommittedEntityTitleVersion();
-    void fetchCompanyExplorerSearchResults(apiBase, companyID, explorerSearchText)
-      .then((payload) => {
-        if (cancelled || companyExplorerSearchRequestRef.current !== requestID) return;
-        setCompanyExplorerSearchResults(foldCommittedEntityTitlesSince(
-          payload.results ?? [], companyID, titleVersionAtStart, reconcileCompanyExplorerSearchResultTitles,
-        ));
-      })
-      .catch((err) => {
-        if (cancelled || companyExplorerSearchRequestRef.current !== requestID) return;
-        setCompanyExplorerSearchResults([]);
-        setError(err instanceof Error ? err.message : "failed_to_search_company_explorer");
-      });
+    const timer = window.setTimeout(() => {
+      void fetchCompanyExplorerSearchResults(apiBase, companyID, explorerSearchText, undefined, undefined, controller.signal)
+        .then((payload) => {
+          if (cancelled || companyExplorerSearchRequestRef.current !== requestID) return;
+          setCompanyExplorerSearchResults(foldCommittedEntityTitlesSince(
+            payload.results ?? [], companyID, titleVersionAtStart, reconcileCompanyExplorerSearchResultTitles,
+          ));
+        })
+        .catch((err) => {
+          if (cancelled || controller.signal.aborted || companyExplorerSearchRequestRef.current !== requestID) return;
+          setCompanyExplorerSearchResults([]);
+          setError(err instanceof Error ? err.message : "failed_to_search_company_explorer");
+        });
+    }, 120);
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
+      controller.abort();
     };
   }, [apiBase, companyExplorerV2Active, companyID, explorerSearchActive, explorerSearchText]);
 

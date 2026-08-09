@@ -74,9 +74,9 @@ A user searches for a Node in Company Explorer or Editor
 ↓
 Mango reads the Node from `nodes` and follows the exact `node_logic_gate_assignments` and `project_relationships` rows without creating a placement copy
 ↓
-A visible Logic Gate's Company Explorer folder ancestry supplies the path first; otherwise a visible Project's ancestry supplies it; otherwise an accessible standalone Node has no path
+A fully visible Logic Gate and its Company Explorer folder ancestry supply the path first; otherwise a fully visible Project path supplies it; otherwise a directly accessible Node has no path
 ↓
-Hidden organizational ancestry is omitted, and deleting a Company Explorer folder cannot delete a Node through a historical placement row
+If any location resource or folder ancestor is hidden, Mango returns only the directly accessible Node and omits the whole location; deleting a Company Explorer folder still cannot delete a Node through a historical placement row
 ↓
 `company_explorer_items` remains a typed placement table only for Projects and Logic Gates
 
@@ -335,7 +335,7 @@ Deleting a pin, pin folder, or pin folder subtree deletes only personal organiza
 
 `company_explorer_items` may contain only Project and Logic Gate placement edges. No Node creation, email collaboration, chat, repair, deferred projection, or ordinary Explorer command may insert a Node placement or create a deterministic Unfiled/Nodes folder.
 
-Node search location derives only from exact source relationships: visible Logic Gate assignment and that Logic Gate's visible Company Explorer ancestry first, visible Project relationship and that Project's ancestry second, otherwise an empty path for an accessible standalone Node. A Node with only hidden organizational paths is excluded so hidden ancestry does not leak.
+Node search location derives only from exact source relationships: a fully visible Logic Gate assignment and that Logic Gate's fully visible Company Explorer ancestry first, a fully visible Project relationship and that Project's ancestry second, otherwise an empty path for a directly accessible Node. A Node with only hidden organizational paths remains searchable through its own permission, but the entire hidden path is omitted so no ancestor identity or name leaks.
 
 Removing historical Node placement rows or their now-empty deterministic folder MUST NOT delete a Node, Logic Gate assignment, Project relationship, email relationship, attachment relationship, chat ownership, RACI assignment, permission, or any other endpoint or typed edge.
 

@@ -309,16 +309,37 @@ export function isCompanyExplorerV2FolderItemPlacementRow(row: CompanyExplorerV2
 }
 
 export function buildCompanyExplorerSearchTreeRows(results: CompanyExplorerSearchResult[]): ExplorerTreeNode[] {
-  const rows: ExplorerTreeNode[] = [];
-  results.forEach((result, resultIndex) => {
+  type SearchBranch = {
+    row?: ExplorerTreeNode;
+    children: SearchBranch[];
+    childrenByIdentity: Map<string, SearchBranch>;
+  };
+
+  const root: SearchBranch = { children: [], childrenByIdentity: new Map() };
+  const identityFor = (entityType: CompanyExplorerV2EntityType, resourceID: string, entityID: string): string => (
+    `${entityType}:${resourceID || entityID}`
+  );
+  const ensureChild = (parent: SearchBranch, identity: string, row: ExplorerTreeNode): SearchBranch => {
+    const existing = parent.childrenByIdentity.get(identity);
+    if (existing) return existing;
+    const child: SearchBranch = { row, children: [], childrenByIdentity: new Map() };
+    parent.childrenByIdentity.set(identity, child);
+    parent.children.push(child);
+    return child;
+  };
+
+  results.forEach((result) => {
     const pathLabelParts: string[] = [];
-    const rowPrefix = `company-explorer-search-${result.resource_type}-${result.resource_id || result.entity_id}-${resultIndex}-`;
+    const pathIDParts: string[] = [];
+    let parent = root;
     result.location_path.forEach((segment, segmentIndex) => {
       const kind = explorerKindForSearchEntity(segment.entity_type);
       const resourceID = segment.resource_id || segment.entity_id;
       pathLabelParts.push(formatExplorerFolderLabel(segment.name || resourceID));
-      rows.push({
-        id: searchTreeIDForEntity(segment.entity_type, resourceID, segment.entity_id, `${rowPrefix}path-${segmentIndex}-`),
+      const identity = identityFor(segment.entity_type, resourceID, segment.entity_id);
+      pathIDParts.push(`${segment.entity_type}-${resourceID || segment.entity_id}`);
+      const row = {
+        id: searchTreeIDForEntity(segment.entity_type, resourceID, segment.entity_id, `company-explorer-search-path-${pathIDParts.join("--")}-`),
         label: segment.name || resourceID,
         depth: segmentIndex,
         kind,
@@ -335,18 +356,19 @@ export function buildCompanyExplorerSearchTreeRows(results: CompanyExplorerSearc
         protectedDefaultFolder: Boolean(segment.protected_default_folder),
         folderLabel: pathLabelParts.join(" / "),
         scopeLevel: segmentIndex,
-        position: ((resultIndex + 1) * TREE_ROW_POSITION_STEP) + segmentIndex,
+        position: 0,
         createdTimestamp: result.created_timestamp,
         hasChildren: true,
         syntheticKind: "search_path",
-      });
+      } satisfies ExplorerTreeNode;
+      parent = ensureChild(parent, identity, row);
     });
 
     const resourceID = result.resource_id || result.entity_id;
     const kind = explorerKindForSearchEntity(result.resource_type);
     const folderKind = explorerFolderKindForSearchEntity(result.resource_type);
     const parentSegment = result.location_path[result.location_path.length - 1];
-    rows.push({
+    const resultRow = {
       id: `company-explorer-search-result-${result.resource_type}-${resourceID || result.entity_id}`,
       label: result.display_name || resourceID || result.entity_id,
       depth: result.location_path.length,
@@ -364,12 +386,35 @@ export function buildCompanyExplorerSearchTreeRows(results: CompanyExplorerSearc
       protectedDefaultFolder: Boolean(result.protected_default_folder),
       folderLabel: pathLabelParts.join(" / "),
       scopeLevel: result.location_path.length,
-      position: ((resultIndex + 1) * TREE_ROW_POSITION_STEP) + result.location_path.length,
+      position: 0,
       createdTimestamp: result.created_timestamp,
       hasChildren: result.resource_type === "folder" ? Boolean(result.has_children) : false,
       syntheticKind: "search_result",
-    });
+    } satisfies ExplorerTreeNode;
+    const resultIdentity = identityFor(result.resource_type, resourceID, result.entity_id);
+    const existingResult = parent.childrenByIdentity.get(resultIdentity);
+    if (existingResult) {
+      existingResult.row = resultRow;
+    } else {
+      ensureChild(parent, resultIdentity, resultRow);
+    }
   });
+
+  const rows: ExplorerTreeNode[] = [];
+  const appendBranches = (branches: SearchBranch[], depth: number): void => {
+    branches.forEach((branch) => {
+      if (!branch.row) return;
+      rows.push({
+        ...branch.row,
+        depth,
+        scopeLevel: depth,
+        position: (rows.length + 1) * TREE_ROW_POSITION_STEP,
+        hasChildren: branch.children.length > 0 || branch.row.hasChildren,
+      });
+      appendBranches(branch.children, depth + 1);
+    });
+  };
+  appendBranches(root.children, 0);
   return rows;
 }
 

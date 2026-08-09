@@ -1,16 +1,16 @@
-# Process Story: Search touches Explorer ancestry only for narrowed location checks
+# Process Story: Search narrows once and shares every Explorer branch
 
-A user types a nonblank Universal Picker query
+A user types a nonblank Company Explorer or Universal Picker query
 ↓
-Mango ranks a bounded candidate batch directly from the selected source table, or from Nodes, Projects, and Logic Gates in that order for All
+Mango waits briefly for the active query, cancels the superseded request, and ranks a bounded candidate batch directly from the selected source tables
 ↓
-Only after narrowing does Mango resolve each candidate's Edit permission and, when the candidate has an organizational location, the visibility of that exact Logic Gate or Project placement and its folder ancestors
+Only after narrowing does Mango resolve each candidate's Edit permission and separately determine whether its exact Logic Gate, Project, and folder location is fully visible
 ↓
-Company Explorer supplies those candidate-specific typed paths but stores no permission rows and is never scanned as the source of Node, Project, or Logic Gate names
+Company Explorer returns every directly accessible candidate, includes a typed location only when every part is visible, omits the whole restricted location otherwise, and merges common visible path prefixes
 ↓
-The read performs no default-folder repair, and additional candidate batches are checked only when denied results leave the requested page unfilled
+The read performs no default-folder repair or company-wide permission scan, while Universal Picker keeps its existing flat result ranking
 
-Last updated: 2026-08-07
+Last updated: 2026-08-08
 
 # Process Story: Collaboration Nodes receive Responsible RACI without Explorer ownership
 
@@ -56,7 +56,7 @@ Last updated: 2026-08-05
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: backend coverage exists for V2 tree reads, placement/delete behavior, protected default folders, inherited/customized policy, move boundaries, and force resets. `tests/frontend/modules/company-explorer/companyExplorerStore.test.ts` covers E55 committed-title publication/registry helpers and Explorer, search, and RACI title reconcilers. Rule ID mapping remains partial.
+- Business Logic Covered By Automated Tests: backend coverage exists for V2 tree reads, placement/delete behavior, protected default folders, inherited/customized policy, move boundaries, force resets, and a disposable-PostgreSQL candidate-first search with regular-user inherited authorization and exact Explorer paths. `tests/frontend/modules/company-explorer/treePresentation.test.ts` covers merged search paths plus debounce/cancellation source contracts. `tests/frontend/modules/company-explorer/companyExplorerStore.test.ts` covers E55 committed-title publication/registry helpers and Explorer, search, and RACI title reconcilers. Rule ID mapping remains partial.
 
 ## Business Logic
 
@@ -90,12 +90,12 @@ E27 - Bare projects and Logic Gates created outside Company Explorer route to Un
 E28 - Every Node creation path, including email collaboration and chat, creates no Company Explorer item and no default Nodes folder. Nodes remain queryable from authoritative Node storage.
 E29 - The `company_explorer_items.target_type` constraint allows only `project` and `logic_gate`. The forward cleanup migration deletes only historical Node placement rows and the now-empty deterministic Unfiled/Nodes folders, without deleting Nodes or any business relationship.
 E30 - Creating, dragging, batch-placing, deferred-projecting, or communications-converting a Node into Company Explorer is rejected. Historical Node placement rows are neither rendered nor followed by folder deletion; only the cleanup migration removes them.
-E31 - Company Explorer search queries the whole company graph, not only branches that the lazy UI has already opened.
+E31 - Company Explorer search queries matching source rows across the whole company, not only branches that the lazy UI has already opened, and narrows a bounded candidate batch before resolving permissions or location ancestry.
 E32 - Company Explorer search still returns node matches from the source of truth rather than from `company_explorer_items`.
 E33 - Node search derives location from a visible Logic Gate assignment first, otherwise a visible Project relationship, otherwise an empty path for an accessible standalone Node. A Node with organization links is excluded when every linked organizational path is hidden, so folder ancestry cannot leak.
 E34 - Company Explorer search orders result types as Logic Gates, nodes, projects, then folders.
 E35 - Company Explorer search results include resource_type, resource_id, display name, match reason, and Explorer location path.
-E36 - Search result display renders the Explorer location path as nested Explorer rows with normal icons.
+E36 - Search result display merges exact shared location-path prefixes into one nested Explorer branch with normal icons. A resource that is both a match and another match's path parent renders once as the matching resource with the shared descendants beneath it.
 E37 - Node search result rows are open-only: they can be opened, but cannot be expanded, renamed, deleted, pinned, dragged, dropped, or used as creation targets.
 E38 - The default Unfiled folder and its Projects and Logic Gates child folders cannot be renamed, moved, or deleted. Projects and Logic Gates inside their folders retain normal authorized move/delete actions.
 E39 - While the Explorer search box contains text, the left sidebar hides non-Explorer sections and uses the remaining column for Explorer search results; clearing the search restores the normal sidebar. Explorer/Search Explorer remains beneath the shared body-level blocking modal layer and cannot paint or receive interaction above a node/editor popup, dialog, preview, or expanded/fullscreen panel; closing that surface preserves the existing search query.
@@ -122,10 +122,12 @@ E60 - Existing email-to-Logic-Gate conversion still creates Pending work under i
 E61 - Explorer policy reads explain inherited/customized mode, effective source, active reset, and inactive overwritten customization for folders, projects, and Logic Gates.
 E62 - Moving a subtree after an older force reset protects it through the new parent-link sequence; a later reset from its new ancestry may cross that link.
 E63 - Deleting an Explorer target removes both V2 settings rows and cascading policy edges; deleting only a placement follows root/detach materialization rules without deleting the target.
-E64 - Editor/Universal Picker entity ranking first reads a bounded candidate batch directly from the requested Node, Project, and/or Logic Gate source tables. Permission and location visibility checks run only for that batch, and later ranked batches are checked only when needed to fill the requested authorized result limit.
-E65 - Universal Picker location visibility uses only each narrowed candidate's exact typed organization links and folder ancestors. Company Explorer provides those paths but stores no permission or RACI assignment rows and is not a source table for entity names.
+E64 - Company Explorer and Editor/Universal Picker entity ranking first read a bounded candidate batch directly from their requested source tables. Permission and location visibility checks run only for that batch, and later ranked batches are checked only when needed to fill the requested authorized result limit. Universal Picker keeps Node, Project, then Logic Gate ranking; Company Explorer keeps Logic Gate, Node, Project, then folder ranking.
+E65 - Company Explorer and Universal Picker location visibility use only each narrowed candidate's exact typed organization links and folder ancestors. Company Explorer placement tables provide those paths but store no permission or RACI assignment rows and are not source tables for entity names. A directly accessible candidate remains searchable when its location is restricted.
 E66 - A Company Explorer or Universal Picker search GET performs no default-folder creation, repair, transaction, upsert, or version-triggering write. Default-folder setup belongs to explicit initialization and repair paths.
 E67 - Within one narrowed permission batch, the actor's nested group ancestry is resolved once and reused across candidate resource, location-resource, and folder checks. Effective permission policy still follows each candidate's canonical immediate-parent chain.
+E68 - Company Explorer waits 120 milliseconds before issuing search, aborts the superseded request when the query changes or the search view closes, and never reports an intentional abort as a search failure.
+E69 - Direct Edit permission on a matching Project, Logic Gate, Node, or folder is sufficient to return that item. Company Explorer includes its organizational path only when the location resource and every folder ancestor are also accessible; if any part is `no_access`, the entire path is omitted and only the matched item appears at the search root. Universal Picker likewise returns the directly accessible item without exposing organizational ancestry.
 
 
 ## Bug History
@@ -266,6 +268,11 @@ Business logic covered:
 - E36
 - E37
 - E39
+- E64
+- E65
+- E66
+- E67
+- E68
 
 Given:
 - Matching Logic Gates, nodes, projects, and folders exist across folders and lazy branches that have not necessarily been opened.
@@ -287,6 +294,7 @@ Expected:
 - Logic Gates are listed before nodes, nodes before projects, and projects before folders.
 - Each result includes resource_type, resource_id, display name, match reason, and Explorer location path.
 - The UI renders the location path as nested Explorer rows and selecting a resource result opens that resource directly.
+- Results that share folders or a resource parent reuse one rendered branch; repeated full copies of the same path never appear.
 - Node result rows are open-only and do not expose Explorer mutation affordances.
 - The blocking surface paints and receives interaction above Search Explorer regardless of feature-local stacking contexts; after it closes, the previous search query and results remain.
 

@@ -81,6 +81,7 @@ export function fetchCompanyExplorerSearchResults(
   query: string,
   limit?: number,
   resourceTypes?: CompanyExplorerSearchResourceType[],
+  signal?: AbortSignal,
 ): Promise<CompanyExplorerSearchResponse> {
   const params = new URLSearchParams();
   params.set("company_id", companyID);
@@ -91,5 +92,6 @@ export function fetchCompanyExplorerSearchResults(
   return requestJSON<CompanyExplorerSearchResponse>(
     apiBase,
     `/v1/company-explorer/search?${params.toString()}`,
+    { signal },
   );
 }

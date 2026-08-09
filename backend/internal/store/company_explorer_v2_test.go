@@ -1225,7 +1225,7 @@ func TestMemoryCompanyExplorerEditorSearchUsesExactUniversalPickerTypeOrder(t *t
 		}
 	}
 }
-func TestMemoryCompanyExplorerSearchHidesNodeWithOnlyHiddenLocation(t *testing.T) {
+func TestMemoryCompanyExplorerSearchReturnsDirectlyAuthorizedItemsWithoutHiddenLocations(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-220000000104"
 	repo.EnsureCompany(companyID, "Search Permissions Co")
@@ -1282,6 +1282,23 @@ func TestMemoryCompanyExplorerSearchHidesNodeWithOnlyHiddenLocation(t *testing.T
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus hidden: %v", err)
 	}
+	hiddenProject, err := repo.CreateProject(ProjectInput{
+		CompanyID: companyID, Name: "Permission Needle Project", Status: "Active",
+	})
+	if err != nil {
+		t.Fatalf("CreateProject hidden location: %v", err)
+	}
+	if hiddenProject.Project == nil {
+		t.Fatal("CreateProject hidden location returned no project")
+	}
+	if _, err := repo.UpsertCompanyExplorerV2Edge(CompanyExplorerV2EdgeInput{
+		CompanyID:       companyID,
+		ParentEntityID:  hiddenFolder.EntityID,
+		ChildEntityType: CompanyExplorerV2EntityProject,
+		ChildResourceID: hiddenProject.Project.ProjectID,
+	}); err != nil {
+		t.Fatalf("UpsertCompanyExplorerV2Edge hidden-location project: %v", err)
+	}
 	standaloneNode, err := repo.CreateNode(companyID, "Permission Needle Standalone Node")
 	if err != nil {
 		t.Fatalf("CreateNode standalone: %v", err)
@@ -1292,6 +1309,7 @@ func TestMemoryCompanyExplorerSearchHidesNodeWithOnlyHiddenLocation(t *testing.T
 	}{
 		{EntityTypeLogicGate, hiddenGate.LogicGateID},
 		{EntityTypeNode, hiddenNode.NodeID},
+		{EntityTypeProject, hiddenProject.Project.ProjectID},
 		{EntityTypeNode, standaloneNode.NodeID},
 	} {
 		if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
@@ -1317,8 +1335,10 @@ func TestMemoryCompanyExplorerSearchHidesNodeWithOnlyHiddenLocation(t *testing.T
 	if err != nil {
 		t.Fatalf("SearchCompanyExplorer: %v", err)
 	}
-	requireCompanyExplorerSearchMissing(t, results.Results, EntityTypeLogicGate, hiddenGate.LogicGateID)
-	requireCompanyExplorerSearchMissing(t, results.Results, EntityTypeNode, hiddenNode.NodeID)
+	requireCompanyExplorerSearchMissing(t, results.Results, CompanyExplorerV2EntityFolder, hiddenFolder.EntityID)
+	requireCompanyExplorerSearchPath(t, results.Results, EntityTypeLogicGate, hiddenGate.LogicGateID, []string{})
+	requireCompanyExplorerSearchPath(t, results.Results, EntityTypeNode, hiddenNode.NodeID, []string{})
+	requireCompanyExplorerSearchPath(t, results.Results, EntityTypeProject, hiddenProject.Project.ProjectID, []string{})
 	standaloneResult := requireCompanyExplorerSearchPath(t, results.Results, EntityTypeNode, standaloneNode.NodeID, []string{})
 	if standaloneResult.DisplayName != standaloneNode.Title {
 		t.Fatalf("standalone node result = %+v, want %q", standaloneResult, standaloneNode.Title)
@@ -1330,8 +1350,9 @@ func TestMemoryCompanyExplorerSearchHidesNodeWithOnlyHiddenLocation(t *testing.T
 	if err != nil {
 		t.Fatalf("editor recent SearchCompanyExplorer: %v", err)
 	}
-	requireCompanyExplorerSearchMissing(t, recent.Results, EntityTypeLogicGate, hiddenGate.LogicGateID)
-	requireCompanyExplorerSearchMissing(t, recent.Results, EntityTypeNode, hiddenNode.NodeID)
+	requireCompanyExplorerSearchPath(t, recent.Results, EntityTypeLogicGate, hiddenGate.LogicGateID, []string{})
+	requireCompanyExplorerSearchPath(t, recent.Results, EntityTypeNode, hiddenNode.NodeID, []string{})
+	requireCompanyExplorerSearchPath(t, recent.Results, EntityTypeProject, hiddenProject.Project.ProjectID, []string{})
 	requireCompanyExplorerSearchPath(t, recent.Results, EntityTypeNode, standaloneNode.NodeID, []string{})
 }
 

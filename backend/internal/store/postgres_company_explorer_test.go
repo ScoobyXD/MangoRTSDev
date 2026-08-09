@@ -142,53 +142,23 @@ func TestPostgresCompanyExplorerV2PermissionRuleMarkersCoverLeafResources(t *tes
 	}
 }
 
-func TestPostgresCompanyExplorerSearchUsesVisibleExplorerLocations(t *testing.T) {
+func TestPostgresCompanyExplorerSearchUsesSharedCandidateFirstPath(t *testing.T) {
 	raw, err := os.ReadFile("postgres_company_explorer_search.go")
 	if err != nil {
 		t.Fatalf("ReadFile postgres_company_explorer_search.go: %v", err)
 	}
 	source := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
-	for _, want := range []string{
-		"with recursive visible_folder_paths as",
-		"folder.created_timestamp",
-		"folder.updated_timestamp",
-		"child.created_timestamp",
-		"child.updated_timestamp",
-		"companyexploreraccesspredicate(\"'folder'\", \"folder.folder_id\", \"$3\", \"$4\")",
-		"companyexploreraccesspredicate(\"'folder'\", \"child.folder_id\", \"$3\", \"$4\")",
-		"visible_item_locations as",
-		"and (item.parent_folder_id is null or parent.folder_id is not null)",
-		"companyexploreraccesspredicate(\"item.target_type\", \"item.target_id\", \"$3\", \"$4\")",
-		"visible_logic_gate_locations as",
-		"visible_project_locations as",
-		"from node_logic_gate_assignments assignment",
-		"join visible_logic_gate_locations logic_gate_location",
-		"companyexploreraccesspredicate(\"'node'\", \"assignment.node_id\", \"$3\", \"$4\")",
-		"from project_relationships relationship",
-		"join visible_project_locations project_location",
-		"relationship.resource_id as target_id",
-		"relationship.resource_type='node'",
-		"node_organization_links as",
-		"left join ranked_locations location",
-		"left join node_organization_links node_link",
-		"coalesce(location.location_path, '[]'::jsonb) as location_path",
-		"and (location.target_id is not null or node_link.target_id is null)",
-	} {
-		if !strings.Contains(source, want) {
-			t.Fatalf("company explorer search SQL missing %q", want)
-		}
+	if !strings.Contains(source, "return r.searchcompanyexplorercandidates(query)") {
+		t.Fatal("Company Explorer search must use the shared candidate-first authorization path")
 	}
-	for _, forbidden := range []string{
-		"where item.target_type='node'",
-		"item.target_type in ('project', 'logic_gate', 'node')",
-	} {
+	for _, forbidden := range []string{"visible_folder_paths", "visible_item_locations", "mangorts_user_can_access_resource"} {
 		if strings.Contains(source, forbidden) {
-			t.Fatalf("company explorer search SQL kept hidden/project relationship search marker %q", forbidden)
+			t.Fatalf("Company Explorer search entrypoint retained broad pre-filter work %q", forbidden)
 		}
 	}
 }
 
-func TestPostgresCompanyExplorerEditorSearchNarrowsBeforePermissionChecks(t *testing.T) {
+func TestPostgresCompanyExplorerCandidateSearchNarrowsBeforePermissionChecks(t *testing.T) {
 	raw, err := os.ReadFile("postgres_company_explorer_editor_search.go")
 	if err != nil {
 		t.Fatalf("ReadFile postgres_company_explorer_editor_search.go: %v", err)
@@ -204,28 +174,36 @@ func TestPostgresCompanyExplorerEditorSearchNarrowsBeforePermissionChecks(t *tes
 		"access_targets as",
 		"resolved_targets as",
 		"target_access as",
+		"eligible_locations as",
 		"candidate_access as",
 		"lower(node.name) like '%' || lower($2) || '%'",
 		"lower(project.name) like '%' || lower($2) || '%'",
 		"lower(logic_gate.header) like '%' || lower($2) || '%'",
-		"case candidate.resource_type when 'node' then 0 when 'project' then 1 when 'logic_gate' then 2",
-		"order by candidate.editor_priority, candidate.match_priority",
-		"'[]'::text as location_path",
+		"lower(folder.name) like '%' || lower($2) || '%'",
+		"where not $7",
+		"when 'node' then 0 when 'project' then 1 when 'logic_gate' then 2",
+		"when 'logic_gate' then 0 when 'node' then 1 when 'project' then 2 when 'folder' then 3",
+		"jsonb_agg(jsonb_build_object",
+		"when $7 then '[]'::jsonb",
+		"when $3='' then true else coalesce(direct_access.allowed,false)",
+		"companyexplorerfinalhaschildrenexpr",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("editor entity search SQL missing %q", want)
 		}
 	}
 	for _, forbidden := range []string{
-		"jsonb_build_array",
-		"ranked_locations",
-		"companyexplorerfinalhaschildrenexpr",
-		"visible_folders as",
+		"visible_folder_paths",
+		"visible_item_locations",
+		"companyexploreraccesspredicate",
 		"mangorts_user_can_access_resource",
 	} {
 		if strings.Contains(source, forbidden) {
 			t.Fatalf("editor entity search SQL kept unused Explorer path work %q", forbidden)
 		}
+	}
+	if strings.Count(source, "mangorts_v2_resolve_permission_policy") != 1 {
+		t.Fatal("candidate search must resolve each deduplicated permission target through one shared policy CTE")
 	}
 	searchRaw, err := os.ReadFile("postgres_company_explorer_search.go")
 	if err != nil {
