@@ -15,23 +15,9 @@ func readEmailSQSContractFile(t *testing.T, path string) string {
 	return strings.ToLower(strings.ReplaceAll(string(raw), "\r\n", "\n"))
 }
 
-func assertEmailSQSStatusTransitionOrdering(t *testing.T, label, body string) {
-	t.Helper()
-	dropAt := strings.Index(body, "drop constraint if exists email_ingestion_jobs_status_chk")
-	updateAt := strings.Index(body, "update email_ingestion_jobs\n")
-	addAt := strings.Index(body, "add constraint email_ingestion_jobs_status_chk")
-	if dropAt < 0 || updateAt < 0 || addAt < 0 {
-		t.Fatalf("%s is missing the status transition statements", label)
-	}
-	if !(dropAt < updateAt && updateAt < addAt) {
-		t.Fatalf("%s must drop the legacy status check before failed -> exhausted and add the final check afterward", label)
-	}
-}
-
 func TestEmailSQSSchemaUsesPermanentIdentityAndProviderAttemptFence(t *testing.T) {
 	schema := readEmailSQSContractFile(t, "../../db/schema.sql")
-	migration := readEmailSQSContractFile(t, "../../db/migrations/20260809_zzz_email_sqs_delivery.sql")
-	assertEmailSQSStatusTransitionOrdering(t, "migration", migration)
+	migration := readEmailSQSContractFile(t, "../../db/migrations/20260809_zzzz_email_sqs_delivery_finalize.sql")
 	for label, body := range map[string]string{"schema": schema, "migration": migration} {
 		compact := strings.Join(strings.Fields(body), "")
 		for _, required := range []string{
@@ -50,30 +36,26 @@ func TestEmailSQSSchemaUsesPermanentIdentityAndProviderAttemptFence(t *testing.T
 		}
 	}
 	for _, required := range []string{
-		"communications_email_archive_job_items must be exact legacy 12 or exact final 11 columns",
-		"email_ingestion_jobs must be exact legacy 16 or exact final 17 columns",
+		"communications_email_archive_job_items must be exact previously-applied 13 or exact final 11 columns",
+		"email_ingestion_jobs must be exact previously-applied 19 or exact final 17 columns",
 		"email_connections must have exactly the approved 13 columns",
+		"add column sqs_accepted_timestamp timestamptz",
 		"add column provider_attempt_count integer not null default 0",
-		"add column attempt_token uuid",
-		"add column enqueue_source_id text not null default ''",
+		"drop column attempt_count",
+		"drop column available_at",
+		"drop column processing_started_at",
 		"drop index if exists idx_email_ingestion_jobs_claim",
 		"drop trigger if exists trg_email_relationships_one_node_per_thread on email_relationships",
 		"drop function if exists mangorts_enforce_one_node_per_email_thread()",
 		"drop index if exists idx_email_relationships_one_node_textbox_per_message",
 		"drop index if exists idx_communications_email_archive_job_items_claim",
 		"provider_attempt_count between 0 and 3",
-		"email sqs tables must be coherently all-legacy or all-final",
+		"email sqs tables must be coherently all previously-applied or all-final",
+		"email sqs row(s) have a status outside the final approved sets",
 		"current_setting('server_version_num')::integer < 170000",
 		"current_setting('server_version_num')::integer >= 180000",
 		"lock table public.email_connections",
-		"status is null or status not in ('completed','failed')",
-		"conflicting non-null email_thread_id values",
-		"conflicting nonblank provider_thread_id values",
-		"superseded_by_email_ingestion_cutover",
-		"created_timestamp asc nulls last",
-		"ingestion_job_id asc",
-		"get diagnostics collapsed_identity_row_count = row_count",
-		"duplicate stable ingestion identity group(s) remain after legacy metadata collapse",
+		"previously-applied migration must already have collapsed these rows",
 		"exact email message/node pair(s) are linked to more than one textbox",
 	} {
 		if !strings.Contains(migration, required) {
@@ -107,7 +89,6 @@ func TestEmailSQSSchemaUsesPermanentIdentityAndProviderAttemptFence(t *testing.T
 func TestEmailSQSOperatorSQLIsPlainReviewedPostgreSQL(t *testing.T) {
 	preflight := readEmailSQSContractFile(t, "../../../scripts/email_sqs_delivery_preflight.sql")
 	apply := readEmailSQSContractFile(t, "../../../scripts/email_sqs_delivery_apply.sql")
-	assertEmailSQSStatusTransitionOrdering(t, "operator apply", apply)
 	for label, body := range map[string]string{"preflight": preflight, "apply": apply} {
 		for _, forbidden := range []string{"\\set", "\\i", "\\copy", "\\echo"} {
 			if strings.Contains(body, forbidden) {
@@ -134,20 +115,17 @@ func TestEmailSQSOperatorSQLIsPlainReviewedPostgreSQL(t *testing.T) {
 	}
 	for _, required := range []string{
 		"exact approved 13-column shape",
-		"exact approved legacy 16-column shape",
+		"exact previously-applied 19-column shape",
 		"exact approved final 17-column shape",
-		"exact approved legacy 12-column shape",
+		"exact previously-applied 13-column shape",
 		"exact approved final 11-column shape",
-		"ready: all three email sqs tables are in the coherent legacy shape",
-		"ready: all three email sqs tables are in the coherent final shape",
-		"stop: email sqs tables must be coherently all-legacy or all-final",
-		"redundant_legacy_rows_to_collapse",
-		"unsafe_duplicate_rows",
-		"synthetic_completed_duplicate_rows",
-		"conflicting_email_thread_group_count",
-		"conflicting_provider_thread_group_count",
-		"ingestion_job_foreign_keys",
-		"ready: legacy migration will collapse exactly %s redundant inactive ingestion job metadata row(s)",
+		"ready: all email sqs tables are in the coherent previously-applied shape",
+		"ready: all email sqs tables are in the coherent final shape",
+		"stop: email sqs tables must be coherently all previously-applied or all-final",
+		"duplicate_stable_identity_groups",
+		"ready: stable ingestion identities are unique",
+		"ready: every email sqs row uses a final approved status",
+		"stop: one or more email sqs rows use a status outside the final approved sets",
 		"ready: each exact email message is linked to at most one textbox in each node",
 		"stop: one or more exact email messages are linked to multiple textboxes in the same node",
 	} {

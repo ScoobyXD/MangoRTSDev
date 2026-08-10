@@ -76,7 +76,7 @@ func TestCorrectedPriorityAndSQSMigrationsShareTheFinalEmailRelationshipGuard(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	sqsMigrationRaw, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "20260809_zzz_email_sqs_delivery.sql"))
+	sqsMigrationRaw, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "20260809_zzzz_email_sqs_delivery_finalize.sql"))
 	if err != nil {
 		t.Fatal(err)
 	}

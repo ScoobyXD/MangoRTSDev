@@ -102,6 +102,7 @@ Webhooks can occasionally be lost. Reconciliation is only the safety net:
 - Archive creation returns one durable job identity. The existing selected-mailbox subscription performs the canonical post-acceptance read, refreshes only affected active/visible identities, marks inactive cached status stale until navigation, and allows at most one active pass plus one queued final pass. No archive timer or full job payload enters Valkey.
 - Attached-email thread completion uses that same mailbox hint and one canonical HTTP read, with no one-second timer.
 - One ingestion-job API and one ingestion worker naming layer remain. Old download-job wrappers, claimant files, reconciliation enqueue residue, and delivery-era lease/scheduler columns are gone.
+- The human DEV finalizer accepts only the exact previously applied 19-column ingestion/13-column archive pair or the exact final 17/11 pair. It never guesses through partial drift, and it removes the retired delivery columns without rewriting the shipped migration that created the earlier shape.
 - `sqs_accepted_timestamp` is status/observability and, together with the immutable producer fingerprint, closes an exact original-send retry. It never authorizes an age-based or later-schedule resend.
 - The worker and reconciliation schedule remain disabled by default until the human migration and staged DEV rollout.
 
