@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
@@ -52,13 +53,14 @@ func nodeProjectionAsInformation(item domain.NodeProjection) domain.NodeInformat
 	}
 }
 
-const postgresNodeTextboxProjectionSelect = `
+const postgresNodeTextboxProjectionSelectFormat = `
 select textbox.company_id::text, textbox.node_id::text, textbox.textbox_id::text, 'Text box',
        $3 || jsonb_build_object(
-         'title', '',
-         'document', (textbox.body_json->'document')::text,
+         'title', textbox.title,
+         'document', %s,
          'email_message_id', coalesce(linked_email.email_message_id, ''),
          'email_message_ids', coalesce(linked_email.email_message_ids, '[]'::jsonb),
+         'email_accent', textbox.email_accent,
          'attachments', coalesce((
            select jsonb_agg(jsonb_build_object(
              'id', attachment.attachment_id::text, 'attachment_id', attachment.attachment_id::text,
@@ -89,6 +91,14 @@ left join lateral (
     and relationship.resource_id=textbox.node_id
     and relationship.resource_textbox_id=textbox.textbox_id::text
 ) linked_email on true`
+
+func postgresNodeTextboxProjectionSelect(includeDocument bool) string {
+	documentExpression := `''`
+	if includeDocument {
+		documentExpression = `(textbox.body_json->'document')::text`
+	}
+	return fmt.Sprintf(postgresNodeTextboxProjectionSelectFormat, documentExpression)
+}
 
 const postgresNodeEmailRelationshipProjectionSelect = `
 select relationship.company_id::text, relationship.resource_id::text,
@@ -126,7 +136,7 @@ func scanNodeProjection(row interface{ Scan(dest ...any) error }) (domain.NodePr
 }
 
 func postgresNodeFinalProjectionTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, informationID string) (domain.NodeProjection, bool, error) {
-	item, err := scanNodeProjection(tx.QueryRowContext(ctx, postgresNodeTextboxProjectionSelect+`
+	item, err := scanNodeProjection(tx.QueryRowContext(ctx, postgresNodeTextboxProjectionSelect(true)+`
 where textbox.company_id=$1::uuid and textbox.node_id=$2::uuid and textbox.textbox_id=$4::uuid
   and textbox.deleted_timestamp is null`, companyID, nodeID, editorTextBlockProjectionPrefix, informationID))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -140,8 +150,8 @@ where relationship.company_id=$1::uuid and relationship.resource_type='node'
 	return item, err == nil, err
 }
 
-func listPostgresNodeFinalProjections(ctx context.Context, db *sql.DB, companyID, nodeID string) ([]domain.NodeProjection, error) {
-	rows, err := db.QueryContext(ctx, postgresNodeTextboxProjectionSelect+`
+func listPostgresNodeFinalProjections(ctx context.Context, db *sql.DB, companyID, nodeID string, includeDocuments bool) ([]domain.NodeProjection, error) {
+	rows, err := db.QueryContext(ctx, postgresNodeTextboxProjectionSelect(includeDocuments)+`
 where textbox.company_id=$1::uuid and textbox.node_id=$2::uuid and textbox.deleted_timestamp is null
 order by textbox.display_order,textbox.textbox_id`, companyID, nodeID, editorTextBlockProjectionPrefix)
 	if err != nil {

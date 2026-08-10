@@ -344,6 +344,51 @@ func (r *PostgresRepo) ListVisibleLogicGates(companyID, userID string) ([]domain
 	return r.attachLogicGateEffectiveAccessLevels(ctx, companyID, userID, items)
 }
 
+func (r *PostgresRepo) ListLogicGateSummaries(companyID string) ([]domain.LogicGate, error) {
+	return r.listLogicGateSummaries(companyID, "")
+}
+
+func (r *PostgresRepo) ListVisibleLogicGateSummaries(companyID, userID string) ([]domain.LogicGate, error) {
+	companyID = cleanUUIDText(companyID)
+	userID = cleanUUIDText(userID)
+	if companyID == "" || userID == "" {
+		return nil, ErrInvalid
+	}
+	return r.listLogicGateSummaries(companyID, userID)
+}
+
+func (r *PostgresRepo) listLogicGateSummaries(companyID, userID string) ([]domain.LogicGate, error) {
+	ctx := context.Background()
+	query := `select company_id, logic_gate_id, header, created_timestamp
+		from logic_gates
+		where company_id=$1
+		order by created_timestamp asc, logic_gate_id::text asc`
+	args := []any{companyID}
+	if userID != "" {
+		query = `select company_id, logic_gate_id, header, created_timestamp
+			from logic_gates
+			where company_id=$1::uuid
+			  and mangorts_user_can_access_resource(company_id, 'logic_gate', logic_gate_id, $2::uuid, $3::text)
+			order by created_timestamp asc, logic_gate_id::text asc`
+		args = []any{companyID, userID, EntityPermissionEdit}
+	}
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.LogicGate, 0)
+	for rows.Next() {
+		var item domain.LogicGate
+		if err := rows.Scan(&item.CompanyID, &item.LogicGateID, &item.Header, &item.CreatedTimestamp); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (r *PostgresRepo) ListLogicGatesInFolderSubtree(companyID, folderID string) ([]domain.LogicGate, error) {
 	folderID = strings.TrimSpace(folderID)
 	if folderID == "" {

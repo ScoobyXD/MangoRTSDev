@@ -85,8 +85,11 @@ Last updated: 2026-08-08
 9. Sending the first temporary email chat atomically creates the Node text box, exact email-message relationship, and chat before the interface becomes a normal saved text box.
 10. One exact email message may link to at most one text box in each Node and may link to a different text box in another Node.
 11. Every email chat remains local to its exact Node, exact text box, and exact linked email message.
+12. Node text-box metadata saves persist title and email accent on the exact `node_textboxes` row and never invent an email identity outside the typed email relationship.
+13. The consolidated Node projection supplies text-box identity, order, metadata, links, and revision without copying the canonical editor document body.
+14. A visible editor completes its initial canonical read before subscribing for later realtime recovery, so socket acceptance cannot duplicate the initial document read.
 
-Last updated: 2026-08-09
+Last updated: 2026-08-10
 
 # Process Story: Editor policy status follows the draft automatically
 

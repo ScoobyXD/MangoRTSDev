@@ -1768,6 +1768,7 @@ test("visible refresh waits for an active recovery and then reads canonical stat
     const initialRecovery = sync.start();
     await initialReadStarted;
     sync.setRealtimeVisible(true);
+    assert.equal(subscriptions, 0, "initial canonical recovery finishes before realtime subscription");
     const visibleRefresh = sync.refreshCanonical();
     releaseInitialRead();
     await Promise.all([initialRecovery, visibleRefresh]);

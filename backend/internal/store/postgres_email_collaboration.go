@@ -7,6 +7,7 @@ import (
 	"errors"
 	"miraeopus/backend/internal/domain"
 	"sort"
+	"strings"
 
 	"time"
 )
@@ -76,29 +77,41 @@ func scanPostgresEmailCollaboration(row emailCollaborationRowScanner) (domain.Co
 }
 
 func listPostgresEmailCollaborationParticipants(ctx context.Context, q emailCollaborationQueryer, companyID, collaborationID string) ([]domain.CommunicationsEmailCollaborationParticipant, error) {
+	itemsByCollaborationID, err := listPostgresEmailCollaborationParticipantsBatch(ctx, q, companyID, []string{collaborationID})
+	if err != nil {
+		return nil, err
+	}
+	return itemsByCollaborationID[collaborationID], nil
+}
+
+func listPostgresEmailCollaborationParticipantsBatch(ctx context.Context, q emailCollaborationQueryer, companyID string, collaborationIDs []string) (map[string][]domain.CommunicationsEmailCollaborationParticipant, error) {
+	itemsByCollaborationID := make(map[string][]domain.CommunicationsEmailCollaborationParticipant, len(collaborationIDs))
+	if len(collaborationIDs) == 0 {
+		return itemsByCollaborationID, nil
+	}
 	rows, err := q.QueryContext(ctx, `
 select membership.company_id::text,relationship.email_relationship_id::text,
  membership.user_id::text,'','permission','',relationship.created_timestamp
 from email_relationships relationship
 join company_memberships membership on membership.company_id=relationship.company_id
-where relationship.company_id=$1::uuid and relationship.email_relationship_id=$2::uuid
+where relationship.company_id=$1::uuid
+ and relationship.email_relationship_id = any(string_to_array($2, ',')::uuid[])
  and relationship.resource_type='node'
  and mangorts_user_can_access_resource(relationship.company_id,relationship.resource_type,
      relationship.resource_id,membership.user_id,'edit')
-order by membership.user_id`, companyID, collaborationID)
+order by relationship.email_relationship_id,membership.user_id`, companyID, strings.Join(collaborationIDs, ","))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []domain.CommunicationsEmailCollaborationParticipant{}
 	for rows.Next() {
 		var item domain.CommunicationsEmailCollaborationParticipant
 		if err := rows.Scan(&item.CompanyID, &item.CollaborationID, &item.UserID, &item.AddedByUserID, &item.AddedViaType, &item.AddedViaID, &item.CreatedTimestamp); err != nil {
 			return nil, err
 		}
-		items = append(items, item)
+		itemsByCollaborationID[item.CollaborationID] = append(itemsByCollaborationID[item.CollaborationID], item)
 	}
-	return items, rows.Err()
+	return itemsByCollaborationID, rows.Err()
 }
 
 func postgresEmailCollaborationByID(ctx context.Context, q emailCollaborationQueryer, companyID, collaborationID, participantUserID string) (domain.CommunicationsEmailCollaboration, error) {
@@ -411,12 +424,19 @@ order by relationship.created_timestamp desc,relationship.email_relationship_id`
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
+	collaborationIDs := make([]string, len(items))
 	for index := range items {
-		participants, participantErr := listPostgresEmailCollaborationParticipants(ctx, r.db, input.CompanyID, items[index].CollaborationID)
-		if participantErr != nil {
-			return nil, participantErr
+		collaborationIDs[index] = items[index].CollaborationID
+	}
+	participantsByCollaborationID, err := listPostgresEmailCollaborationParticipantsBatch(ctx, r.db, input.CompanyID, collaborationIDs)
+	if err != nil {
+		return nil, err
+	}
+	for index := range items {
+		items[index].Participants = participantsByCollaborationID[items[index].CollaborationID]
+		if items[index].Participants == nil {
+			items[index].Participants = []domain.CommunicationsEmailCollaborationParticipant{}
 		}
-		items[index].Participants = participants
 	}
 	return items, nil
 }

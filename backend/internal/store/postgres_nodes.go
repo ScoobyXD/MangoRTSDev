@@ -632,7 +632,7 @@ func (r *PostgresRepo) getNodeDetails(companyID, nodeID string, includeInformati
 	information := make([]domain.NodeInformation, 0)
 	informationCount := 0
 	if includeInformation {
-		projections, err := listPostgresNodeFinalProjections(ctx, r.db, companyID, nodeID)
+		projections, err := listPostgresNodeFinalProjections(ctx, r.db, companyID, nodeID, true)
 		if err != nil {
 			return domain.NodeDetails{}, err
 		}
@@ -792,7 +792,22 @@ func (r *PostgresRepo) ListNodeProjections(companyID, nodeID string) ([]domain.N
 		return nil, ErrNotFound
 	}
 
-	return listPostgresNodeFinalProjections(ctx, r.db, companyID, nodeID)
+	return listPostgresNodeFinalProjections(ctx, r.db, companyID, nodeID, true)
+}
+
+func (r *PostgresRepo) ListNodeProjectionSummaries(companyID, nodeID string) ([]domain.NodeProjection, error) {
+	ctx := context.Background()
+	var exists bool
+	if err := r.db.QueryRowContext(ctx,
+		`select exists(select 1 from nodes where company_id=$1 and node_id=$2)`,
+		companyID, nodeID,
+	).Scan(&exists); err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, ErrNotFound
+	}
+	return listPostgresNodeFinalProjections(ctx, r.db, companyID, nodeID, false)
 }
 func (r *PostgresRepo) DeleteNodeProjection(companyID, nodeID, informationID string) error {
 	return r.deleteNodeProjection(NodeProjectionDeleteInput{

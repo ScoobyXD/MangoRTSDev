@@ -1,6 +1,6 @@
 import React from "react";
 import type { EmailAddress, EmailMessage } from "../communications/communicationsApi";
-import type { NodeProjectionItem } from "../nodes/nodeRecordStore";
+import type { NodeProjectionItem, NodeTimelineEventItem } from "../nodes/nodeRecordStore";
 import {
   uploadMangoAttachment,
   type AttachmentRequestJSON,
@@ -30,6 +30,7 @@ export type NodeWorkspaceSurfaceProps = {
   canEdit: boolean;
   assignedLogicGateIDs: string[];
   projections: NodeProjectionItem[];
+  initialTimelineEvents: NodeTimelineEventItem[];
   companyUsers: MentionableCompanyUser[];
   projectionsLoaded: boolean;
   editorSequence: number;

@@ -1154,7 +1154,9 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       }
       if (sync) {
         sync.setRealtimeVisible(true);
-        void sync.refreshCanonical().catch((cause) => callbacksRef.current.onError?.(cause instanceof Error ? cause.message : "Unable to refresh this text box"));
+        if (sync.hasCompletedInitialRecovery()) {
+          void sync.refreshCanonical().catch((cause) => callbacksRef.current.onError?.(cause instanceof Error ? cause.message : "Unable to refresh this text box"));
+        }
         return;
       }
       void prepare();

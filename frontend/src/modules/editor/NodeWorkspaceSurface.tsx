@@ -5,8 +5,8 @@ import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { isAbortError } from "../api/requestJSON";
 import { openEditorEntityLink, type EditorEntityLink } from "./editorEntityLinks.js";
 import { humanLabelOrFallback } from "../entityLabels.js";
-import { getLogicGateRecordSingleFlight } from "../logic-gates/logicGateRecordStore.js";
 import type { LogicGateRecord } from "../logic-gates/types";
+import { listKanbanBoards } from "../kanban/kanbanApi.js";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../dashboardEvents";
 import { ExplorerRowIcon } from "../../icons/index.js";
 import { foldCommittedEntityTitlesSince, readCommittedEntityTitleVersion, subscribeCommittedEntityTitleUpdates } from "../realtime/committedEntityTitleUpdates";
@@ -142,32 +142,8 @@ const NODE_EMAIL_COLUMN_LAYOUT_ID = "__node_email_column__";
 const NODE_EMAIL_COLUMN_BOTTOM_GUTTER_PX = 18;
 const NODE_HEADER_LINK_TARGET_TYPES = ["logic_gate", "project", "email_message"] as const;
 
-type NodeTimelineVerificationRecipient = {
-  company_id: string;
-  node_id: string;
-  event_id: string;
-  user_id: string;
-  user_display_name: string;
-  completed_timestamp?: string;
-  created_timestamp: string;
-};
-
-type NodeTimelineEvent = {
-  event_id: string;
-  company_id: string;
-  node_id: string;
-  type: "logic_gate_transfer" | "project_assignment" | "verification_request";
-  actor_user_id?: string;
-  actor_display_name: string;
-  from_logic_gate_id?: string;
-  from_logic_gate_name?: string;
-  to_logic_gate_id?: string;
-  to_logic_gate_name?: string;
-  project_id?: string;
-  project_name?: string;
-  verification_recipients: NodeTimelineVerificationRecipient[];
-  created_timestamp: string;
-};
+type NodeTimelineEvent = import("../nodes/nodeRecordStore").NodeTimelineEventItem;
+const EMPTY_NODE_TIMELINE_EVENTS: NodeTimelineEvent[] = [];
 const TEXT_SIDE_PANE_WIDTH_STORAGE_KEY_PREFIX = "node-editor-side-pane-width-v2";
 const TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIX = "node-editor-pane-layout-v4";
 const LEGACY_TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIXES = ["node-editor-pane-layout-v3", "node-editor-pane-layout-v2"] as const;
@@ -478,6 +454,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   assignedLogicGateIDs,
   apiBase,
   projections,
+  initialTimelineEvents = EMPTY_NODE_TIMELINE_EVENTS,
   companyUsers,
   projectionsLoaded,
   editorSequence,
@@ -1124,14 +1101,17 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     let cancelled = false;
     const titleVersionAtStart = readCommittedEntityTitleVersion();
-    void Promise.all(ids.map(async (logicGateID) => {
-      try {
-        const details = await getLogicGateRecordSingleFlight(apiBase, companyID, logicGateID);
-        return details.logic_gate;
-      } catch {
-        return null;
-      }
-    })).then((records) => {
+    void listKanbanBoards(apiBase, companyID, 200).then((boards) => {
+      const boardByLogicGateID = new Map(boards.map((board) => [board.logic_gate_id?.trim() ?? "", board]));
+      const records = ids.map((logicGateID): LogicGateRecord | null => {
+        const board = boardByLogicGateID.get(logicGateID);
+        return board ? {
+          company_id: board.company_id,
+          logic_gate_id: logicGateID,
+          header: board.title,
+          created_timestamp: board.created_timestamp,
+        } : null;
+      });
       if (!cancelled) setAssignedLogicGateRecords(foldCommittedEntityTitlesSince(
         records.filter((record): record is LogicGateRecord => Boolean(record)),
         companyID,
@@ -1171,7 +1151,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       `/v1/editor-json/node/${nodeID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`,
       {
         method: "PATCH",
-        body: JSON.stringify({ title: content.title, attachments: content.attachments ?? [] }),
+        body: JSON.stringify({ title: content.title, attachments: content.attachments ?? [], email_accent: content.emailAccent ?? "" }),
       },
     );
     const revision = response?.projection_revision ?? 0;
@@ -2315,8 +2295,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, [companyID, nodeID, requestJSON]);
 
   useEffect(() => {
-    void loadNodeTimelineEvents();
-  }, [loadNodeTimelineEvents]);
+    setTimelineEvents(initialTimelineEvents);
+    setTimelineEventsError("");
+    setTimelineEventsLoading(false);
+  }, [initialTimelineEvents, nodeID]);
 
   const createVerificationRequest = useCallback(async () => {
     if (!canEdit || !companyID || !nodeID || verificationRequestPending) return;

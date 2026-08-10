@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"miraeopus/backend/internal/domain"
 	"strings"
 	"sync"
@@ -8,7 +9,7 @@ import (
 
 type nodeViewLoader interface {
 	GetNodeDetailsSummary(companyID, nodeID string) (domain.NodeDetails, error)
-	ListNodeProjections(companyID, nodeID string) ([]domain.NodeProjection, error)
+	ListNodeProjectionSummaries(companyID, nodeID string) ([]domain.NodeProjection, error)
 	ListNodeLogicGateAssignments(companyID, nodeID string) ([]domain.NodeLogicGateAssignment, error)
 	ListResourceRACIAssignments(companyID, resourceType, resourceID string) ([]domain.ResourceRACIAssignment, error)
 	ListNodeTimelineEvents(companyID, nodeID string) ([]domain.NodeTimelineEvent, error)
@@ -55,7 +56,7 @@ func loadNodeView(loader nodeViewLoader, input NodeViewInput) (domain.NodeView, 
 	}()
 	go func() {
 		defer waitGroup.Done()
-		projections, projectionsErr = loader.ListNodeProjections(companyID, nodeID)
+		projections, projectionsErr = loader.ListNodeProjectionSummaries(companyID, nodeID)
 	}()
 	go func() {
 		defer waitGroup.Done()
@@ -107,6 +108,22 @@ func loadNodeView(loader nodeViewLoader, input NodeViewInput) (domain.NodeView, 
 		RelationshipsCount:   details.RelationshipsCount,
 		AssignmentCount:      len(assignments),
 	}, nil
+}
+
+func nodeProjectionSummaryInformation(information string) string {
+	if !strings.HasPrefix(information, editorTextBlockProjectionPrefix) {
+		return information
+	}
+	var payload map[string]any
+	if json.Unmarshal([]byte(strings.TrimPrefix(information, editorTextBlockProjectionPrefix)), &payload) != nil {
+		return information
+	}
+	payload["document"] = ""
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return information
+	}
+	return editorTextBlockProjectionPrefix + string(encoded)
 }
 
 func (r *MemoryRepo) GetLogicGateView(companyID, logicGateID string) (domain.LogicGateView, error) {

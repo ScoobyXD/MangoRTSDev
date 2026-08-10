@@ -865,6 +865,12 @@ N141 - Creating a Node's first exact Project relationship atomically creates one
 
 N142 - A stored email thread may have Node-wide `email_relationships` in more than one Node. A textbox-specific email relationship names one exact message, Node, and textbox; the same message is limited to one textbox in a Node but may use a different textbox in another Node. Repeating the exact Node/message/textbox command converges to its existing edge, while a different textbox in that Node is rejected. Removing one Node's email edge never removes another Node's edge, textbox, chat, stored email truth, or surviving attachment relationship.
 
+N143 - A Node text box stores its title and email accent on its exact `node_textboxes` row. The metadata save increments that textbox revision, while exact email identity remains derived only from the typed `email_relationships` row.
+
+N144 - A consolidated Node view returns text-box identity, order, metadata, typed links, attachments, chats, and revision without duplicating the canonical editor document body. The exact editor document endpoint remains the document-body authority.
+
+N145 - One consolidated Node read supplies its initial timeline events, and PostgreSQL loads all verification recipients for those events in one set-based query. The Node surface does not issue a second initial timeline request.
+
 ### Scenario N-S23: Email, Editor, And Chat Column Correction
 
 Business logic covered:

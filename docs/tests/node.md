@@ -31,8 +31,11 @@
 29. Reply and Reply All from any Node create or reopen the same universal thread draft instead of a Node-specific copy.
 30. A successfully sent reply becomes a new message in the same thread and inherits every Node-wide destination for that thread.
 31. Closing a local draft panel never deletes the universal draft; discarding the draft removes it for every surface.
+32. A Node text box stores its title and email accent on that exact text box; exact email identity remains owned only by `email_relationships`.
+33. A consolidated Node view carries text-box metadata but not a duplicate canonical editor document body; each mounted editor reads its exact canonical document once.
+34. Concurrent identical shared-draft and stored-thread reads share one request, while a committed realtime change forces a fresh canonical read.
 
-Last updated: 2026-08-09
+Last updated: 2026-08-10
 
 # General Process Story
 
