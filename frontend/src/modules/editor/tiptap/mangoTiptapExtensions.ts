@@ -274,8 +274,9 @@ function updateCurrentMangoTiptapIndent(editor: Editor, delta: -1 | 1): boolean 
 }
 
 /**
- * Starts the selected bullet or Checkbox outline. Numbered lists continue only
- * while active; ordinary paragraphs stay ordinary after a numbered-list exit.
+ * Starts the selected bullet or Checkbox outline. Numbered lists continue while
+ * active and accept a new first row from a nonempty label immediately above
+ * them; other ordinary paragraphs stay ordinary after a numbered-list exit.
  */
 export function handleMangoTiptapOutlineEnter(editor: Editor, outlineStyle: EditorOutlineStyleID): boolean {
   if (!editor.state.selection.empty) return false;
@@ -286,7 +287,28 @@ export function handleMangoTiptapOutlineEnter(editor: Editor, outlineStyle: Edit
   if (editor.isActive("listItem")) return empty ? false : editor.commands.splitListItem("listItem");
   if (!editor.isActive("paragraph") && !editor.isActive("heading")) return false;
 
-  if (outlineStyle === "indent-guides" || outlineStyle === "automatic-outline-numbering") return false;
+  if (outlineStyle === "automatic-outline-numbering") {
+    if (empty || $from.parentOffset !== currentBlock.content.size || $from.depth < 1) return false;
+    const containerDepth = $from.depth - 1;
+    const container = $from.node(containerDepth);
+    const currentBlockIndex = $from.index(containerDepth);
+    const followingBlock = currentBlockIndex + 1 < container.childCount
+      ? container.child(currentBlockIndex + 1)
+      : null;
+    if (followingBlock?.type.name !== "orderedList") return false;
+
+    const paragraphType = editor.schema.nodes.paragraph;
+    const listItemType = editor.schema.nodes.listItem;
+    if (!paragraphType || !listItemType) return false;
+    const paragraph = paragraphType.create({ blockId: newBlockID() });
+    const listItem = listItemType.create({ blockId: newBlockID() }, paragraph);
+    const insertionPosition = $from.after($from.depth) + 1;
+    const transaction = editor.state.tr.insert(insertionPosition, listItem);
+    transaction.setSelection(TextSelection.create(transaction.doc, insertionPosition + 2));
+    editor.view.dispatch(transaction.scrollIntoView());
+    return true;
+  }
+  if (outlineStyle === "indent-guides") return false;
 
   const startList = () => outlineStyle === "checklist"
     ? editor.commands.toggleTaskList()

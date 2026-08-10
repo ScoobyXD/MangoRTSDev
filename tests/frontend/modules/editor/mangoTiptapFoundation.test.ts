@@ -624,6 +624,58 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
     assert.equal(editor.state.doc.child(0).type.name, "paragraph");
     assert.equal(editor.state.doc.child(1).type.name, "paragraph");
     assert.equal(editor.state.selection.$from.parent, editor.state.doc.child(1));
+
+    const existingNumberedItems = Array.from({ length: 6 }, (_, index) => ({
+      type: "listItem",
+      attrs: { blockId: `existing-numbered-item-${index + 1}` },
+      content: [{
+        type: "paragraph",
+        attrs: { blockId: `existing-numbered-paragraph-${index + 1}` },
+        content: [{ type: "text", text: `existing row ${index + 1}` }],
+      }],
+    }));
+    editor.commands.setContent({ type: "doc", content: [
+      { type: "paragraph", attrs: { blockId: "numbered-section-label" }, content: [{ type: "text", text: "annoyances:" }] },
+      { type: "orderedList", attrs: { blockId: "existing-numbered-list", start: 1 }, content: existingNumberedItems },
+    ] });
+    let numberedSectionLabelEnd = 0;
+    editor.state.doc.descendants((node, position) => {
+      if (node.isText && node.text === "annoyances:") numberedSectionLabelEnd = position + node.nodeSize;
+    });
+    editor.commands.setTextSelection(numberedSectionLabelEnd);
+    assert.equal(
+      handleMangoTiptapOutlineEnter(editor, "automatic-outline-numbering"),
+      true,
+      "Enter after a label immediately before a numbered list inserts a new first numbered row",
+    );
+    assert.equal(editor.state.doc.childCount, 2, "the label and existing list remain the only top-level blocks");
+    assert.equal(editor.state.doc.child(0).textContent, "annoyances:", "the label row remains unchanged");
+    const insertedFirstNumberedList = editor.state.doc.child(1);
+    assert.equal(insertedFirstNumberedList.type.name, "orderedList");
+    assert.equal(insertedFirstNumberedList.attrs.blockId, "existing-numbered-list", "the existing numbered list keeps its identity");
+    assert.equal(insertedFirstNumberedList.attrs.start, 1, "the new row receives the existing first marker");
+    assert.equal(insertedFirstNumberedList.childCount, 7, "the six existing rows shift to markers 2 through 7");
+    assert.equal(insertedFirstNumberedList.child(0).textContent, "", "the inserted first numbered row starts empty");
+    assert.deepEqual(
+      Array.from({ length: 6 }, (_, index) => insertedFirstNumberedList.child(index + 1).attrs.blockId),
+      existingNumberedItems.map((item) => item.attrs.blockId),
+      "existing numbered rows retain their exact order and identities",
+    );
+    const insertedFirstNumberedIDs = mangoBlockIDs(editor.getJSON());
+    assert.equal(new Set(insertedFirstNumberedIDs).size, insertedFirstNumberedIDs.length, "the new numbered row receives unique block identities");
+    assert.equal(editor.state.selection.$from.parent, insertedFirstNumberedList.child(0).firstChild, "the caret moves into the new numbered row");
+
+    editor.commands.setContent({ type: "doc", content: [
+      { type: "paragraph", attrs: { blockId: "empty-before-numbered-list" } },
+      { type: "orderedList", attrs: { blockId: "numbered-list-after-empty-row", start: 1 }, content: existingNumberedItems },
+    ] });
+    editor.commands.setTextSelection(1);
+    assert.equal(
+      handleMangoTiptapOutlineEnter(editor, "automatic-outline-numbering"),
+      false,
+      "an ordinary empty row before a numbered list retains the normal non-restarting behavior",
+    );
+
     editor.commands.setContent({ type: "doc", content: [{ type: "paragraph" }] });
     editor.commands.setTextSelection(1);
     typeThroughEditorInput("1. ");
