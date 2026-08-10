@@ -299,8 +299,10 @@ export function handleMangoTiptapOutlineEnter(editor: Editor, outlineStyle: Edit
 
 /**
  * Removes an empty list marker without letting ProseMirror lift the blocks that
- * follow it through several list nesting levels. Older saved documents can
- * contain those blocks as additional children of the empty list item.
+ * follow it through several list nesting levels. A second Backspace on the
+ * ordinary blank row left inside a parent item removes only that row. Older
+ * saved documents can contain later blocks as additional children of the empty
+ * list item.
  */
 function handleMangoTiptapEmptyListItemDelete(editor: Editor): boolean {
   const { selection } = editor.state;
@@ -319,7 +321,6 @@ function handleMangoTiptapEmptyListItemDelete(editor: Editor): boolean {
   if (itemDepth < 1) return false;
 
   const item = $from.node(itemDepth);
-  if ($from.index(itemDepth) !== 0 || item.firstChild !== $from.parent) return false;
   const listDepth = itemDepth - 1;
   const list = $from.node(listDepth);
   const validList = item.type.name === "taskItem"
@@ -327,6 +328,25 @@ function handleMangoTiptapEmptyListItemDelete(editor: Editor): boolean {
     : list.type.name === "bulletList" || list.type.name === "orderedList";
   if (!validList) return false;
 
+  const itemChildIndex = $from.index(itemDepth);
+  const adjacentChildIsList = [itemChildIndex - 1, itemChildIndex + 1].some((index) => (
+    index >= 0
+    && index < item.childCount
+    && ["bulletList", "orderedList", "taskList"].includes(item.child(index).type.name)
+  ));
+  if (itemChildIndex > 0 && item.child(itemChildIndex) === $from.parent && adjacentChildIsList) {
+    const emptyBlockStart = $from.before($from.depth);
+    const transaction = editor.state.tr.delete(
+      emptyBlockStart,
+      emptyBlockStart + $from.parent.nodeSize,
+    );
+    const selectionPosition = Math.max(0, Math.min(transaction.doc.content.size, emptyBlockStart));
+    transaction.setSelection(TextSelection.near(transaction.doc.resolve(selectionPosition), -1));
+    editor.view.dispatch(transaction);
+    return true;
+  }
+
+  if (itemChildIndex !== 0 || item.firstChild !== $from.parent) return false;
   const itemIndex = $from.index(listDepth);
   const beforeItems: ProseMirrorNode[] = [];
   const afterItems: ProseMirrorNode[] = [];

@@ -821,6 +821,121 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
     assert.equal(editor.state.selection.$from.parent, editor.state.doc.child(1), "the caret remains on the row whose marker was deleted");
     assert.equal(editor.state.selection.$from.parentOffset, 0);
 
+    const nestedEmptyNumberedDocument = {
+      type: "doc",
+      content: [{
+        type: "orderedList",
+        attrs: { blockId: "reported-top-list", start: 6 },
+        content: [
+          {
+            type: "listItem",
+            attrs: { blockId: "reported-number-6" },
+            content: [
+              {
+                type: "paragraph",
+                attrs: { blockId: "reported-number-6-paragraph" },
+                content: [{ type: "text", text: "So many things with table." }],
+              },
+              {
+                type: "orderedList",
+                attrs: { blockId: "reported-number-6-children", start: 1 },
+                content: [
+                  {
+                    type: "listItem",
+                    attrs: { blockId: "reported-number-6-child-a" },
+                    content: [{
+                      type: "paragraph",
+                      attrs: { blockId: "reported-number-6-child-a-paragraph" },
+                      content: [{ type: "text", text: "The post spams." }],
+                    }],
+                  },
+                  {
+                    type: "listItem",
+                    attrs: { blockId: "reported-number-6-child-b" },
+                    content: [{
+                      type: "paragraph",
+                      attrs: { blockId: "reported-number-6-child-b-paragraph" },
+                    }],
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            type: "listItem",
+            attrs: { blockId: "reported-number-7" },
+            content: [{
+              type: "paragraph",
+              attrs: { blockId: "reported-number-7-paragraph" },
+              content: [{ type: "text", text: "Also going back on the browser." }],
+            }],
+          },
+          {
+            type: "listItem",
+            attrs: { blockId: "reported-number-8" },
+            content: [{
+              type: "paragraph",
+              attrs: { blockId: "reported-number-8-paragraph" },
+              content: [{ type: "text", text: "Small details like" }],
+            }],
+          },
+        ],
+      }],
+    };
+    editor.commands.setContent(nestedEmptyNumberedDocument);
+    let nestedEmptyNumberPosition = 0;
+    editor.state.doc.descendants((node, position) => {
+      if (node.attrs.blockId === "reported-number-6-child-b-paragraph") nestedEmptyNumberPosition = position + 1;
+    });
+    const reportedParentParagraphBeforeDelete = editor.state.doc.child(0).child(0).child(0).toJSON();
+    const reportedChildAListBeforeDelete = editor.state.doc.child(0).child(0).child(1).toJSON();
+    reportedChildAListBeforeDelete.content = reportedChildAListBeforeDelete.content?.slice(0, 1);
+    const reportedRow7BeforeDelete = editor.state.doc.child(0).child(1).toJSON();
+    const reportedRow8BeforeDelete = editor.state.doc.child(0).child(2).toJSON();
+    editor.commands.setTextSelection(nestedEmptyNumberPosition);
+    assert.equal(editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Backspace",
+      bubbles: true,
+      cancelable: true,
+    })), false, "the first Backspace removes the empty nested number marker");
+    assert.equal(editor.state.selection.$from.parent.attrs.blockId, "reported-number-6-child-b-paragraph");
+    assert.equal(editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Backspace",
+      bubbles: true,
+      cancelable: true,
+    })), false, "the next Backspace removes the remaining blank row without native list re-parenting");
+    assert.equal(editor.state.doc.childCount, 1, "the top-level numbered list remains one intact list");
+    assert.equal(editor.state.doc.child(0).childCount, 3, "rows 6 through 8 retain their numbering structure");
+    const reportedParentAfterDelete = editor.state.doc.child(0).child(0);
+    assert.equal(reportedParentAfterDelete.childCount, 2, "only the empty b row is removed from row 6");
+    assert.deepEqual(reportedParentAfterDelete.child(0).toJSON(), reportedParentParagraphBeforeDelete, "row 6 text remains unchanged");
+    assert.deepEqual(reportedParentAfterDelete.child(1).toJSON(), reportedChildAListBeforeDelete, "nested row a remains unchanged");
+    assert.deepEqual(editor.state.doc.child(0).child(1).toJSON(), reportedRow7BeforeDelete, "row 7 remains unchanged");
+    assert.deepEqual(editor.state.doc.child(0).child(2).toJSON(), reportedRow8BeforeDelete, "row 8 remains unchanged");
+    assert.equal(editor.state.selection.$from.parent.attrs.blockId, "reported-number-6-child-a-paragraph", "the caret lands after the preceding nested row");
+    assert.equal(editor.state.selection.$from.parentOffset, editor.state.selection.$from.parent.content.size);
+
+    editor.commands.setContent(nestedEmptyNumberedDocument);
+    nestedEmptyNumberPosition = 0;
+    editor.state.doc.descendants((node, position) => {
+      if (node.attrs.blockId === "reported-number-6-child-b-paragraph") nestedEmptyNumberPosition = position + 1;
+    });
+    editor.commands.setTextSelection(nestedEmptyNumberPosition);
+    for (let press = 0; press < 2; press += 1) {
+      assert.equal(editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "Delete",
+        bubbles: true,
+        cancelable: true,
+      })), false, `Delete press ${press + 1} remains editor-owned`);
+    }
+    assert.equal(editor.state.doc.childCount, 1, "repeated Delete also keeps the top-level numbered list intact");
+    assert.equal(editor.state.doc.child(0).childCount, 3);
+    assert.equal(editor.state.doc.child(0).child(0).childCount, 2);
+    assert.deepEqual(editor.state.doc.child(0).child(0).child(0).toJSON(), reportedParentParagraphBeforeDelete);
+    assert.deepEqual(editor.state.doc.child(0).child(0).child(1).toJSON(), reportedChildAListBeforeDelete);
+    assert.deepEqual(editor.state.doc.child(0).child(1).toJSON(), reportedRow7BeforeDelete);
+    assert.deepEqual(editor.state.doc.child(0).child(2).toJSON(), reportedRow8BeforeDelete);
+
     editor.commands.setContent({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "abc" }] }] });
     editor.commands.setTextSelection(4);
     assert.equal(
