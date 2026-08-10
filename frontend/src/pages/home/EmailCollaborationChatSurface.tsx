@@ -187,6 +187,8 @@ export function EmailCollaborationChatSurface({
   const messageCollaborationID = message.collaboration_id?.trim() ?? "";
   const messageCollaborationIDRef = React.useRef(messageCollaborationID);
   messageCollaborationIDRef.current = messageCollaborationID;
+  const projectionContextRef = React.useRef({ message, threadMessages, nodes });
+  projectionContextRef.current = { message, threadMessages, nodes };
   const enabled = active || Boolean(actionRequest);
   const targetEmailMessageID = selection?.messageID?.trim() || message.id.trim();
   const collaborationTargetMessage = targetMessage?.id.trim() === targetEmailMessageID ? targetMessage : message;
@@ -308,7 +310,8 @@ export function EmailCollaborationChatSurface({
       return { item, projections: await getNodeInformationProjectionSingleFlight(apiBase, companyID, item.node_id) };
     }));
     if (expectedLoadSequence !== undefined && loadSequenceRef.current !== expectedLoadSequence) return;
-    const conversationMessages = [message, ...threadMessages].filter((candidate, index, all) => (
+    const projectionContext = projectionContextRef.current;
+    const conversationMessages = [projectionContext.message, ...projectionContext.threadMessages].filter((candidate, index, all) => (
       all.findIndex((other) => other.id === candidate.id) === index
     ));
     const messageByInternalID = new Map(conversationMessages.flatMap((candidate) => {
@@ -336,7 +339,7 @@ export function EmailCollaborationChatSurface({
         const internalIDs = content.emailMessageIDs?.length ? content.emailMessageIDs : content.emailMessageID ? [content.emailMessageID] : [];
         return internalIDs.some((internalID) => messageByInternalID.has(internalID.trim()));
       });
-      const nodeTitle = nodes.find((candidate) => candidate.node_id === item.node_id)?.name?.trim()
+      const nodeTitle = projectionContext.nodes.find((candidate) => candidate.node_id === item.node_id)?.name?.trim()
         || "Node " + item.node_id.slice(0, 8);
       const linkedBlockIDs = new Set(linkedBlocks.map((projection) => projection.information_id));
       if (placement.blockID) linkedBlockIDs.add(placement.blockID);
@@ -358,7 +361,7 @@ export function EmailCollaborationChatSurface({
     setSectionLabelsByBlockID(blockLabels);
     setSectionLabelsByEmailMessageID({});
     setActiveTextBlockID(activeBlockID);
-  }, [apiBase, collaborationTargetMessage.email_message_id, companyID, message, nodes, targetEmailMessageID, threadMessages]);
+  }, [apiBase, collaborationTargetMessage.email_message_id, companyID, targetEmailMessageID]);
 
   const acceptCollaboration = React.useCallback((nextCollaboration: CommunicationsEmailCollaboration | null, publishToMailbox = true) => {
     collaborationRef.current = nextCollaboration;
