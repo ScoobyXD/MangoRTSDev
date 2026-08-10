@@ -43,6 +43,7 @@ import { assignNodeToLogicGateStatus } from "../../modules/kanban/kanbanApi";
 import { upsertProjectRelationship } from "../../modules/project-management/projectManagementApi";
 import { subscribeRealtimeScope } from "../../modules/realtime/realtimeWebSocket";
 import {
+  appendAcknowledgedEmailCollaborationChat,
   emailNodeImportRequired,
   formatEmailCollaborationChatError,
   resolveEmailCollaborationChatPlacement,
@@ -608,6 +609,7 @@ export function EmailCollaborationChatSurface({
         }),
       };
       let initialChatWrite: { type: string; informationID: string; information: string } | undefined;
+      let initialChat: EditorTextBlockChatMessage | undefined;
       if (includeChat && (cleanDraft || draftAttachments.length > 0)) {
         const informationID = generateStableInformationID();
         const mentions = mentionedPrincipalIDs(cleanDraft, principals);
@@ -639,6 +641,11 @@ export function EmailCollaborationChatSurface({
             mentionedGroupIDs: mentions.mentionedGroupIDs,
           }),
         };
+        initialChat = parseEditorTextBlockChats([{
+          information_id: informationID,
+          type: initialChatWrite.type,
+          information: initialChatWrite.information,
+        }])[0];
       }
       if (shouldAttachEmail || textBlockWrite || initialChatWrite) {
         const ensured = await ensureEmailCollaboration({
@@ -658,6 +665,18 @@ export function EmailCollaborationChatSurface({
       }
       if (!emailMessageID) throw new Error("email_message_id_missing");
       selectionInternalEmailMessageIDRef.current = emailMessageID;
+      if (initialChat) {
+        const acknowledgedChat = { ...initialChat, selectionMessageID: emailMessageID };
+        const sectionKey = `${cleanNodeID}:${textBlockID}`;
+        const nodeTitle = nodes.find((node) => node.node_id === cleanNodeID)?.name?.trim()
+          || "Node " + cleanNodeID.slice(0, 8);
+        setMessages((current) => appendAcknowledgedEmailCollaborationChat(current, acknowledgedChat));
+        setNodeIDByChatID((current) => ({ ...current, [acknowledgedChat.id]: cleanNodeID }));
+        setSectionKeysByChatID((current) => ({ ...current, [acknowledgedChat.id]: sectionKey }));
+        setSectionLabelsByBlockID((current) => ({ ...current, [sectionKey]: nodeTitle }));
+        setActiveTextBlockID(textBlockID);
+        setActiveMessageID(acknowledgedChat.id);
+      }
       onNodeAttachmentChange?.({
         nodeID: cleanNodeID,
         messageID: providerMessageID,
