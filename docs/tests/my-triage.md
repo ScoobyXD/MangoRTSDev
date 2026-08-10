@@ -10,8 +10,9 @@
 8. One universal shared draft is visible from My Triage and every related Node without being related to a Node text box.
 9. A My Triage-created shared draft invents no origin Node and does not auto-open a draft panel in any Node.
 10. An already-linked exact-message text box loads its existing messages and receives each later My Triage chat without creating another text box.
+11. Reconciling unchanged email metadata must not restart the chat-rail load, discard stored text-box chats, or repeat Node reads.
 
-Last updated: 2026-08-09
+Last updated: 2026-08-10
 
 # Process Story: My Triage conversion queues durable email completion
 

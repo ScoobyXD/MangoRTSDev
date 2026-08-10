@@ -241,6 +241,10 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(surface, /const refreshCollaborationByIDRef = React\.useRef\(refreshCollaborationByID\)/);
   assert.match(surface, /refreshCollaborationByIDRef\.current\(collaborationID, refreshSequence\)/);
   assert.match(surface, /\}, \[active, apiBase, collaborationID, companyID, nodeID\]\);/);
+  assert.match(surface, /const projectionContextRef = React\.useRef\(\{ message, threadMessages, nodes \}\)/);
+  assert.match(surface, /const projectionContext = projectionContextRef\.current;[\s\S]*\[projectionContext\.message, \.\.\.projectionContext\.threadMessages\][\s\S]*projectionContext\.nodes\.find/);
+  assert.match(surface, /\}, \[apiBase, collaborationTargetMessage\.email_message_id, companyID, targetEmailMessageID\]\);/);
+  assert.doesNotMatch(surface, /loadThreadProjections[\s\S]*\}, \[apiBase, collaborationTargetMessage\.email_message_id, companyID, message, nodes, targetEmailMessageID, threadMessages\]\);/);
   const emailBodyDocument = detail.slice(
     detail.indexOf("function useEmailBodyDocument"),
     detail.indexOf("function EmailConversationMessage"),
