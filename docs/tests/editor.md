@@ -102,7 +102,7 @@ Descendant actions appear only when descendants exist and use Apply to non-custo
 
 Last updated: 2026-08-07
 
-# Process Story: Numbered rows edit cleanly, caret clicks stay put, and pinned Nodes fill the screen
+# Process Story: Numbered rows edit cleanly, caret clicks stay put, and pinned Nodes fill the workspace
 
 A user presses Enter after a numbered row and receives the next numbered row
 ↓
@@ -116,11 +116,11 @@ Pressing Backspace or Delete on the shown empty numbered marker removes only tha
 ↓
 Clicking another insertion point in either a sleeping or active editor moves only the caret and keeps the text-box scroll position unchanged
 ↓
-Opening a Node from the Pinned sidebar launches that Node popup in full-screen mode immediately
+Opening a Node from the Pinned sidebar fills the viewport to the right of the sidebar while the sidebar stays visible and usable
 ↓
-These interactions keep the same editor document, popup instance, revisioned save path, and normal full-screen controls
+The full-screen control still expands across the full viewport and returns to the right-of-sidebar layout without replacing the editor
 
-Last updated: 2026-08-07
+Last updated: 2026-08-09
 
 # Process Story: A Node header resolves people and presents a readable linker
 
@@ -686,7 +686,7 @@ ED128 - Manual and action-triggered history use the same permanent resource hist
 ED129 - An action-triggered snapshot is quiet: it does not open history, block an in-app close, or display a success dialog. Save failure leaves the resource changed so a later close or manual save can retry. The history batch represents the committed canonical resource after the local flush; therefore already committed concurrent edits from another authorized user may also be present. Refresh, external navigation, and tab/window close are best effort because a browser may terminate asynchronous work, while Mango-controlled closes, resource switches, and route unmounts run while the application remains alive.
 ED130 - A first pointer press in a sleeping Node textbox records the clicked stable Mango block ID and text offset before the static-to-live swap. Mango resolves that semantic bookmark in the live Tiptap DOM, applies its ProseMirror position, focuses without scrolling, and removes the static cover only after the live caret is ready. Coordinate lookup is fallback only. Activation must not blink content, move the caret to an unrelated position, mutate the document, save, or create an empty row.
 ED131 - Enter on a nonempty numbered item creates the next numbered item. Enter on that new item while it is still empty delegates to Tiptap's normal list exit: the blank numbered item is removed, exactly one ordinary blank paragraph follows the list, and the caret moves to that paragraph. Automatic Numbering does not convert an ordinary empty paragraph on Enter, so every later Enter below the exited list creates another ordinary paragraph instead of restarting numbering. The exit must not leave an empty numbered item or create an additional numbered row.
-ED132 - A primary-pointer caret click in a sleeping or active Tiptap editor preserves the exact text-box horizontal and vertical scroll offsets while retaining native caret placement. Opening a Node from the Pinned sidebar creates a fresh popup instance whose initial view is full-screen; the existing full-screen control may still return it to its normal-size rectangle afterward.
+ED132 - A primary-pointer caret click in a sleeping or active Tiptap editor preserves the exact text-box horizontal and vertical scroll offsets while retaining native caret placement. Opening a Node from the Pinned sidebar creates a fresh popup that fills the viewport to the right of the primary sidebar and resize handle without blocking sidebar pointer or keyboard interaction. Entering full screen keeps that exact Node and editor mounted and visible while covering the full viewport; it must not collapse or move the popup offscreen and expose the underlying page. Leaving full screen restores the right-of-sidebar layout without remounting the editor.
 ED133 - Backspace or Delete with a collapsed caret on a simple empty numbered, bulleted, or Checkbox item removes the marker but retains the item's paragraph as one ordinary blank row at that exact document position, with the caret on that row. When an older saved item also owns later blocks and has a preceding list peer, those later blocks move intact to that peer and retain their exact content, order, formatting, block identity, and structural level. Without a preceding peer, the preserved blocks replace the empty item ahead of any remaining list items. Deletion must not jump the caret to the preceding row or repeatedly indent, outdent, merge, or otherwise re-parent preserved blocks; text deletion and noncollapsed range deletion retain the editor's native behavior.
 ED134 - Node, Project, and Logic Gate policy surfaces show Inherited and Customized only as automatic status. Authorized users edit the policy directly in either state; exact unordered equality with the immediate parent's raw pointers returns to Inherited, any difference is Customized, and the backend decides the stored mode again inside the save transaction. Descendant actions appear only when descendants exist and use the exact labels Apply to non-customized descendants and Apply to every descendant, with confirmation required for the latter.
 ED135 - A saved hard break at the end of a paragraph remains explicit JSON. When another block follows that paragraph, first-click activation must not expose ProseMirror's additional browser-only trailing-break helper as a new empty row. The live surface must match the sleeping surface without adding, removing, or saving document nodes and without changing annotation positions. A hard break at the end of the document retains the helper row required for normal caret editing.

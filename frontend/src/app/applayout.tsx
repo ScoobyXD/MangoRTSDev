@@ -131,7 +131,7 @@ type NodeEditorPopupState = {
   surfaceID?: "app-sidebar-node-popup" | "dock-restored-node-popup";
   focusInformationID?: string;
   focusRequestID?: number;
-  initialFullscreen?: boolean;
+  initialSidebarFill?: boolean;
   popupInstanceID?: number;
 };
 type LogicGateArenaTarget = {
@@ -2280,7 +2280,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
           surfaceID={explorerNodePopup.surfaceID}
           focusInformationID={explorerNodePopup.focusInformationID}
           focusRequestID={explorerNodePopup.focusRequestID}
-          initialFullscreen={explorerNodePopup.initialFullscreen}
+          initialSidebarFill={explorerNodePopup.initialSidebarFill}
           onClose={() => {
             const wasRouteManaged = routeManagedExplorerNodePopupRef.current || deepLink?.kind === "node";
             const returnedToSourceNode = wasRouteManaged && returnToEditorEntitySourceNode(explorerNodePopup.nodeID);

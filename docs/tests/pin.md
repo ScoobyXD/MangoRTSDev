@@ -98,17 +98,17 @@ The user may create personal folders, nest folders, and move folders and pins th
 ↓
 Dropping one existing pinned row onto another existing pinned row atomically creates a New Folder at the target's location and places target first and dragged pin second
 ↓
-Opening a pinned Node starts the Node popup fullscreen, while other Node launch sources keep their normal windowed behavior
+Opening a pinned Node fills the workspace to the right of the left sidebar, while the sidebar stays visible and interactive
 ↓
 Deleting a pin folder deletes only that folder subtree and its contained pin rows; underlying Nodes, Logic Gates, and Projects remain unchanged
 
-Last updated: 2026-08-05
+Last updated: 2026-08-09
 
 # Pin Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (backend nested-folder lifecycle, atomic grouping, owner and cycle rejection, permission-edge coverage, canonical schema audit, frontend flat and recursive tree planning, subtree removal, DB-backed API/no-cache behavior, internal-drag precedence and retained drop identity, one-second pin-group preview/cancel/drop-only commitment, fullscreen pinned-Node launch, Pinned DOM presentation/explicit context-menu rename/click-to-toggle folder headers/four corner-only marks/pin-row and folder hover lift/exact fixed-width status columns coverage, and exact Logic Gate status counts, exact orange and Node-icon Review colors, zero suppression, recursive folder totals, and live refresh coverage exist; `tests/frontend/app/timelineState.test.ts` covers PIN29 local pin-title reconciliation and stale persisted-response overlay; full browser pointer drag choreography still needs mapped automation)
+- Business Logic Covered By Automated Tests: Partial (backend nested-folder lifecycle, atomic grouping, owner and cycle rejection, permission-edge coverage, canonical schema audit, frontend flat and recursive tree planning, subtree removal, DB-backed API/no-cache behavior, internal-drag precedence and retained drop identity, one-second pin-group preview/cancel/drop-only commitment, right-of-sidebar pinned-Node launch, Pinned DOM presentation/explicit context-menu rename/click-to-toggle folder headers/four corner-only marks/pin-row and folder hover lift/exact fixed-width status columns coverage, and exact Logic Gate status counts, exact orange and Node-icon Review colors, zero suppression, recursive folder totals, and live refresh coverage exist; `tests/frontend/app/timelineState.test.ts` covers PIN29 local pin-title reconciliation and stale persisted-response overlay; full browser pointer drag choreography still needs mapped automation)
 
 ## Business Logic
 
@@ -151,7 +151,7 @@ PIN36 - Creating a pin folder, nested folder, renaming a folder, and deleting a 
 PIN37 - Expanded Pinned folder IDs and inline-rename state live only in current React session state and are never stored in browser storage.
 PIN38 - Internal pinned-row drag identity takes precedence over email and external Node drag payloads. Pin-on-pin grouping must not invoke email conversion or Node-to-Logic-Gate assignment.
 PIN39 - The middle of a folder is an inside drop; row edges are before/after drops. External supported resources may create or move a pin into a folder or sibling location, but an arbitrary unpinned resource dropped on a pin does not auto-create a folder.
-PIN40 - Opening a Node from the Pinned section starts a fresh fullscreen Node popup instance. Opening that Node from other routes, the dock, Explorer, Home, or another existing source remains windowed unless that source independently requests fullscreen.
+PIN40 - Opening a Node from the Pinned section starts a fresh popup that fills every viewport pixel to the right of the primary left sidebar and its resize handle. The sidebar remains visible, pointer-interactive, and keyboard-focusable. The full-screen control keeps that exact Node popup mounted and visible while expanding it across the full viewport with the standard full-screen geometry, and leaving full screen restores the right-of-sidebar layout. Opening that Node from other routes, the dock, Explorer, Home, or another existing source keeps that source's established layout.
 PIN41 - A blank Universal picker reads the same complete `/v1/user-pins` tree as the sidebar and renders every supported pin in stored mixed order with folder nesting in one scrollable list.
 PIN42 - Universal picker pin rows preserve PIN5-PIN9 snapshot and stale-pin behavior. Opening a reference follows the normal destination route; using a pin as a link target must still pass the business command's current permission and existence checks.
 PIN43 - Typed Universal picker search may place matching pins before workspace results and deduplicates the exact `resource_type + resource_id` pair. It never changes pin position, name, folder ownership, or persistence.
@@ -384,7 +384,7 @@ Expected:
 - Underlying Nodes, Logic Gates, and Projects are not deleted, recycled, renamed, or permission-changed.
 - Pins and folders outside the subtree remain.
 
-### Scenario PIN-S11: Pinned Node Opens Fullscreen
+### Scenario PIN-S11: Pinned Node Fills The Workspace Beside The Sidebar
 
 Business logic covered:
 - PIN9
@@ -395,9 +395,10 @@ Given:
 - The user opens a Node from Pinned and later opens the same Node from another source.
 
 Expected:
-- The Pinned launch uses a fresh popup instance and starts fullscreen.
-- Toggling fullscreen off returns to normal popup geometry.
-- The non-Pinned launch keeps its established windowed default.
+- The Pinned launch uses a fresh popup instance and fills the viewport from the sidebar resize handle to the right edge and from the top edge to the bottom edge.
+- The left sidebar remains visible and usable while this layout is open.
+- Full screen keeps the same Node visible across the full viewport instead of exposing the page underneath; toggling it off restores the right-of-sidebar layout.
+- The non-Pinned launch keeps its established layout.
 
 ### Scenario PIN-S12: Universal Picker Uses Pinned Instead Of Recents
 

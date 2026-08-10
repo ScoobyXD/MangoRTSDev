@@ -2066,24 +2066,44 @@ function fullscreenNodeEditorPopupRect(): NodeEditorPopupRect {
   return fullscreenNodeEditorViewportRect();
 }
 
-export function AppNodeEditorPopup({ nodeID, nodeTitle, surfaceID = "app-sidebar-node-popup", focusInformationID, focusRequestID, initialFullscreen = false, onClose, onCollapseToTab, onOpenInNewTab, onDeleteNode }: {
+function sidebarFillNodeEditorPopupRect(): NodeEditorPopupRect {
+  if (typeof window === "undefined") return defaultNodeEditorPopupRect();
+  const left = Math.max(0, Math.min(window.innerWidth, Math.ceil(nodeEditorPopupSidebarBoundary() ?? 0)));
+  return {
+    left,
+    top: 0,
+    width: Math.max(0, window.innerWidth - left),
+    height: Math.max(0, window.innerHeight),
+  };
+}
+
+type NodeEditorPopupViewMode = "windowed" | "sidebar-fill" | "fullscreen";
+
+type NodeEditorPopupRestoreState = {
+  rect: NodeEditorPopupRect;
+  viewMode: Exclude<NodeEditorPopupViewMode, "fullscreen">;
+};
+
+export function AppNodeEditorPopup({ nodeID, nodeTitle, surfaceID = "app-sidebar-node-popup", focusInformationID, focusRequestID, initialSidebarFill = false, onClose, onCollapseToTab, onOpenInNewTab, onDeleteNode }: {
   nodeID: string;
   nodeTitle: string;
   surfaceID?: "app-sidebar-node-popup" | "dock-restored-node-popup";
   focusInformationID?: string;
   focusRequestID?: number;
-  initialFullscreen?: boolean;
+  initialSidebarFill?: boolean;
   onClose: () => void;
   onCollapseToTab?: () => void;
   onOpenInNewTab?: () => void;
   onDeleteNode?: (nodeID: string, confirmationDisplayName: string) => boolean | void | Promise<boolean | void>;
 }): React.ReactElement {
-  const [popupRect, setPopupRect] = useState(() => initialFullscreen ? fullscreenNodeEditorPopupRect() : defaultNodeEditorPopupRect());
-  const [popupFullscreen, setPopupFullscreen] = useState(initialFullscreen);
+  const [popupRect, setPopupRect] = useState(() => initialSidebarFill ? sidebarFillNodeEditorPopupRect() : defaultNodeEditorPopupRect());
+  const [popupViewMode, setPopupViewMode] = useState<NodeEditorPopupViewMode>(initialSidebarFill ? "sidebar-fill" : "windowed");
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ position?: ConfirmActionMenuPosition | null } | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const popupRectRef = useRef(popupRect);
-  const restorePopupRectRef = useRef<NodeEditorPopupRect | null>(initialFullscreen ? defaultNodeEditorPopupRect() : null);
+  const restorePopupRef = useRef<NodeEditorPopupRestoreState | null>(null);
+  const popupFullscreen = popupViewMode === "fullscreen";
+  const popupSidebarFill = popupViewMode === "sidebar-fill";
 
   useEffect(() => {
     popupRectRef.current = popupRect;
@@ -2092,7 +2112,11 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, surfaceID = "app-sidebar
   useEffect(() => setNodeEditorFullscreenChromeActiveFlag(popupFullscreen), [popupFullscreen]);
 
   useEffect(() => {
-    const onResize = () => setPopupRect((current) => (popupFullscreen ? fullscreenNodeEditorPopupRect() : clampNodeEditorPopupRect(current)));
+    const onResize = () => setPopupRect((current) => {
+      if (popupFullscreen) return fullscreenNodeEditorPopupRect();
+      if (popupSidebarFill) return sidebarFillNodeEditorPopupRect();
+      return clampNodeEditorPopupRect(current);
+    });
     const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(onResize);
     for (const selector of ["[data-app-sidebar=\"primary\"]", "[data-app-sidebar-resize-handle=\"primary\"]"]) {
       const element = document.querySelector<HTMLElement>(selector);
@@ -2104,23 +2128,29 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, surfaceID = "app-sidebar
       window.removeEventListener("resize", onResize);
       resizeObserver?.disconnect();
     };
-  }, [popupFullscreen]);
+  }, [popupFullscreen, popupSidebarFill]);
 
   const togglePopupFullscreen = useCallback(() => {
-    setPopupRect((current) => {
-      if (popupFullscreen) {
-        const restored = restorePopupRectRef.current ? clampNodeEditorPopupRect(restorePopupRectRef.current) : defaultNodeEditorPopupRect();
-        restorePopupRectRef.current = null;
-        popupRectRef.current = restored;
-        return restored;
-      }
-      restorePopupRectRef.current = current;
-      const next = fullscreenNodeEditorPopupRect();
-      popupRectRef.current = next;
-      return next;
-    });
-    setPopupFullscreen((current) => !current);
-  }, [popupFullscreen]);
+    if (popupFullscreen) {
+      const restore = restorePopupRef.current;
+      const restoredViewMode = restore?.viewMode ?? "windowed";
+      const restoredRect = restoredViewMode === "sidebar-fill"
+        ? sidebarFillNodeEditorPopupRect()
+        : restore
+          ? clampNodeEditorPopupRect(restore.rect)
+          : defaultNodeEditorPopupRect();
+      restorePopupRef.current = null;
+      popupRectRef.current = restoredRect;
+      setPopupRect(restoredRect);
+      setPopupViewMode(restoredViewMode);
+      return;
+    }
+    restorePopupRef.current = { rect: popupRectRef.current, viewMode: popupSidebarFill ? "sidebar-fill" : "windowed" };
+    const next = fullscreenNodeEditorPopupRect();
+    popupRectRef.current = next;
+    setPopupRect(next);
+    setPopupViewMode("fullscreen");
+  }, [popupFullscreen, popupSidebarFill]);
 
   const startPopupResize = useCallback((event: React.PointerEvent<HTMLDivElement>, handle: NodeEditorPopupResizeHandle) => {
     event.preventDefault();
@@ -2153,7 +2183,7 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, surfaceID = "app-sidebar
       });
       popupRectRef.current = nextRect;
       setPopupRect(nextRect);
-      setPopupFullscreen(false);
+      setPopupViewMode("windowed");
     };
     const finish = () => {
       ownerDocument.body.style.cursor = previousCursor;
@@ -2187,9 +2217,13 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, surfaceID = "app-sidebar
   }, [deleteBusy, nodeID, onClose, onDeleteNode]);
 
   return (
-    <AppModalPortal onRequestClose={onClose}>
+    <AppModalPortal trapFocus={!popupSidebarFill} onRequestClose={onClose}>
       <div
-      style={nodeEditorPopupBackdropStyle}
+      style={{
+        ...nodeEditorPopupBackdropStyle,
+        left: popupSidebarFill ? popupRect.left : 0,
+        background: popupSidebarFill ? "transparent" : nodeEditorPopupBackdropStyle.background,
+      }}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -2197,11 +2231,11 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, surfaceID = "app-sidebar
       <UnifiedNodeShell
         surfaceID={surfaceID}
         title={nodeTitle}
-        role="dialog"
-        ariaModal
+        role={popupSidebarFill ? "group" : "dialog"}
+        ariaModal={!popupSidebarFill}
         actionButtonStyle={nodeEditorPopupCollapseButtonStyle}
         closeButtonStyle={nodeEditorPopupCloseButtonStyle}
-        style={{ ...nodeEditorPopupStyle, ...(popupFullscreen ? nodeEditorPopupFullscreenStyle : nodeEditorPopupDynamicBoundsStyle(popupRect.left)), left: popupRect.left, top: popupRect.top, width: popupRect.width, height: popupRect.height }}
+        style={{ ...nodeEditorPopupStyle, ...(popupFullscreen ? nodeEditorPopupFullscreenStyle : popupSidebarFill ? nodeEditorPopupSidebarFillStyle : nodeEditorPopupDynamicBoundsStyle(popupRect.left)), left: popupSidebarFill ? 0 : popupRect.left, top: popupRect.top, width: popupRect.width, height: popupRect.height }}
         onMouseDown={(event) => event.stopPropagation()}
         onTouchStart={(event) => event.stopPropagation()}
         actions={([
@@ -2984,7 +3018,10 @@ const sharedInboxEmailModalPrimaryButtonStyle: React.CSSProperties = {
 
 const nodeEditorPopupBackdropStyle: React.CSSProperties = {
   position: "fixed",
-  inset: 0,
+  top: 0,
+  right: 0,
+  bottom: 0,
+  left: 0,
   zIndex: 1,
   display: "block",
   background: "rgba(15, 23, 42, 0.18)",
@@ -3014,6 +3051,14 @@ const nodeEditorPopupFullscreenStyle: React.CSSProperties = {
   maxWidth: `calc(100vw - ${NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX * 2}px)`,
   maxHeight: `calc(100vh - ${NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX * 2}px)`,
   borderRadius: 14,
+};
+
+const nodeEditorPopupSidebarFillStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 0,
+  maxWidth: "none",
+  maxHeight: "none",
+  borderRadius: 0,
 };
 
 const nodeEditorPopupCloseButtonStyle: React.CSSProperties = {

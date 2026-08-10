@@ -855,7 +855,7 @@ N136 - Node RACI and permission modes are separate. Changing one never changes t
 
 N137 - Node reads and ETags include V2 source/reset/parent-link and live-group fingerprints, and authorization is checked before a conditional 304 response.
 
-N138 - Opening a pinned Node creates a fresh window instance at the normal stored/default Node size. The sidebar pin path must never force fullscreen, so initial open and refresh use the same sizing rule.
+N138 - Opening a pinned Node creates a fresh popup instance that fills the viewport to the right of the primary sidebar and resize handle while leaving that sidebar visible and interactive. It starts outside full-screen mode; entering full screen keeps the same Node mounted and visible across the full viewport instead of exposing the underlying page, and leaving full screen restores the right-of-sidebar layout. Other Node launch sources retain their established layout.
 
 N139 - The Node header timeline plus is centered over the left timeline rail. The old labelled Email, Attach email, assignment, and Go to buttons are removed. One mail icon/count toggles the Node email column, its divided adjacent plus opens email attachment, and current Logic Gate/Project icon-label chips open those exact resources.
 
