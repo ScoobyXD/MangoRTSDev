@@ -75,6 +75,32 @@ func TestMemoryConsolidatedNodeViewIncludesDetailsProjectionAndAssignments(t *te
 	}
 }
 
+func TestMemoryConsolidatedNodeViewOmitsCanonicalTextboxDocumentBody(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "55555555-5555-4555-8555-555555555591"
+	repo.EnsureCompany(companyID, "Node projection summary company")
+	node, err := repo.CreateNode(companyID, "Projection summary Node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	information := editorTextBlockProjectionPrefix + `{"title":"Notes","document":"private canonical body","attachments":[],"email_accent":"#123ABC"}`
+	if _, err := repo.AddNodeInformation(companyID, node.NodeID, "Text box", information, "55555555-5555-4555-8555-555555555592"); err != nil {
+		t.Fatal(err)
+	}
+
+	full, err := repo.ListNodeProjections(companyID, node.NodeID)
+	if err != nil || len(full) != 1 || !strings.Contains(full[0].Information, "private canonical body") {
+		t.Fatalf("full projections=%+v err=%v", full, err)
+	}
+	view, err := repo.GetNodeView(NodeViewInput{CompanyID: companyID, NodeID: node.NodeID})
+	if err != nil || len(view.Projections) != 1 {
+		t.Fatalf("view=%+v err=%v", view, err)
+	}
+	if strings.Contains(view.Projections[0].Information, "private canonical body") || !strings.Contains(view.Projections[0].Information, `"title":"Notes"`) {
+		t.Fatalf("summary projection carried the wrong payload: %s", view.Projections[0].Information)
+	}
+}
+
 func TestMemoryConsolidatedLogicGateViewIncludesDetailsProjectionRACIAndAssignmentBackedWork(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "55555555-5555-4555-8555-555555555511"
@@ -208,7 +234,7 @@ func (loader *blockingNodeViewLoader) GetNodeDetailsSummary(companyID, nodeID st
 	return domain.NodeDetails{Node: domain.Node{CompanyID: companyID, NodeID: nodeID}}, nil
 }
 
-func (loader *blockingNodeViewLoader) ListNodeProjections(_, _ string) ([]domain.NodeProjection, error) {
+func (loader *blockingNodeViewLoader) ListNodeProjectionSummaries(_, _ string) ([]domain.NodeProjection, error) {
 	loader.enter("projections")
 	return []domain.NodeProjection{}, nil
 }

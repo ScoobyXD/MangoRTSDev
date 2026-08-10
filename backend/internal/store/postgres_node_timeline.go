@@ -54,6 +54,34 @@ order by lower(user_display_name), user_id`, companyID, nodeID, eventID)
 	return items, rows.Err()
 }
 
+func listNodeTimelineRecipientsForEvents(ctx context.Context, queryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, companyID, nodeID string, eventIDs []string) (map[string][]domain.NodeTimelineVerificationRecipient, error) {
+	itemsByEventID := make(map[string][]domain.NodeTimelineVerificationRecipient, len(eventIDs))
+	if len(eventIDs) == 0 {
+		return itemsByEventID, nil
+	}
+	rows, err := queryer.QueryContext(ctx, `
+select company_id::text, node_id::text, event_id::text, user_id::text,
+       user_display_name, completed_timestamp, created_timestamp
+from node_timeline_verification_recipients
+where company_id=$1::uuid and node_id=$2::uuid
+  and event_id = any(string_to_array($3, ',')::uuid[])
+order by event_id, lower(user_display_name), user_id`, companyID, nodeID, strings.Join(eventIDs, ","))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var item domain.NodeTimelineVerificationRecipient
+		if err := rows.Scan(&item.CompanyID, &item.NodeID, &item.EventID, &item.UserID, &item.UserDisplayName, &item.CompletedTimestamp, &item.CreatedTimestamp); err != nil {
+			return nil, err
+		}
+		itemsByEventID[item.EventID] = append(itemsByEventID[item.EventID], item)
+	}
+	return itemsByEventID, rows.Err()
+}
+
 func nodeTimelineEventByIDTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, eventID string) (domain.NodeTimelineEvent, error) {
 	item, err := scanNodeTimelineEvent(tx.QueryRowContext(ctx, `select `+nodeTimelineEventColumns+`
 from node_timeline_events
@@ -97,10 +125,18 @@ order by created_timestamp desc, event_id desc`, companyID, nodeID)
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
+	eventIDs := make([]string, len(items))
 	for index := range items {
-		items[index].VerificationRecipients, err = listNodeTimelineRecipientsQuery(ctx, r.db, companyID, nodeID, items[index].EventID)
-		if err != nil {
-			return nil, err
+		eventIDs[index] = items[index].EventID
+	}
+	recipientsByEventID, err := listNodeTimelineRecipientsForEvents(ctx, r.db, companyID, nodeID, eventIDs)
+	if err != nil {
+		return nil, err
+	}
+	for index := range items {
+		items[index].VerificationRecipients = recipientsByEventID[items[index].EventID]
+		if items[index].VerificationRecipients == nil {
+			items[index].VerificationRecipients = []domain.NodeTimelineVerificationRecipient{}
 		}
 	}
 	return items, nil

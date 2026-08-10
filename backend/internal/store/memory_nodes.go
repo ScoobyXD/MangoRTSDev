@@ -485,6 +485,17 @@ func (r *MemoryRepo) ListNodeProjections(companyID, nodeID string) ([]domain.Nod
 	return items, nil
 }
 
+func (r *MemoryRepo) ListNodeProjectionSummaries(companyID, nodeID string) ([]domain.NodeProjection, error) {
+	items, err := r.ListNodeProjections(companyID, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	for index := range items {
+		items[index].Information = nodeProjectionSummaryInformation(items[index].Information)
+	}
+	return items, nil
+}
+
 func (r *MemoryRepo) DeleteNodeProjection(companyID, nodeID, informationID string) error {
 	return r.deleteNodeProjection(NodeProjectionDeleteInput{
 		CompanyID:     companyID,

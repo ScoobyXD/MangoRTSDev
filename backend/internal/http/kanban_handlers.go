@@ -236,9 +236,9 @@ func (s *Server) handleKanbanBoards(w http.ResponseWriter, r *http.Request) {
 		var gates []domain.LogicGate
 		var err error
 		if hasActor && !actorCanManageCompany(actor, companyID) {
-			gates, err = s.repo.ListVisibleLogicGates(companyID, actor.User.UserID)
+			gates, err = s.repo.ListVisibleLogicGateSummaries(companyID, actor.User.UserID)
 		} else {
-			gates, err = s.repo.ListLogicGates(companyID)
+			gates, err = s.repo.ListLogicGateSummaries(companyID)
 		}
 		if errors.Is(err, store.ErrInvalid) {
 			writeError(w, http.StatusBadRequest, "invalid_kanban_board_query")

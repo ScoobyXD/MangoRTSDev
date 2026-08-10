@@ -19,6 +19,7 @@ import {
   getCommunicationsArchiveJob,
   getEmailMessage,
   getEmailCollaborationThread,
+  getNodeEmailThread,
   getEmailSignature,
   getEmailThread,
   invalidateCommunicationsCache,
@@ -1315,6 +1316,38 @@ test("durable draft API preserves mailbox scopes and exposes the participant col
     ]);
     assert.equal(calls[3]?.body?.shared_inbox_id, "shared-1");
     assert.equal(calls[3]?.body?.company_id, "company-1");
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("duplicate draft and stored Node thread reads share one request while realtime refresh bypasses cache", async () => {
+  invalidateCommunicationsCache();
+  const originalFetch = globalThis.fetch;
+  const calls: string[] = [];
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    const path = input.toString();
+    calls.push(path);
+    if (path.startsWith("/v1/communications/drafts?")) return jsonResponse({ drafts: [] });
+    return jsonResponse({
+      email_thread_id: "email-thread-1",
+      thread_id: "provider-thread-1",
+      messages: [message("message-1")],
+      history_complete: true,
+    });
+  };
+  try {
+    await Promise.all(Array.from({ length: 12 }, () => listEmailDrafts("company-1", {})));
+    await listEmailDrafts("company-1", {});
+    assert.equal(calls.filter((path) => path.startsWith("/v1/communications/drafts?")).length, 1);
+
+    await Promise.all(Array.from({ length: 6 }, () => getNodeEmailThread("company-1", "node-1", "email-thread-1")));
+    await getNodeEmailThread("company-1", "node-1", "email-thread-1");
+    assert.equal(calls.filter((path) => path.includes("/email-threads/email-thread-1?")).length, 1);
+
+    await getNodeEmailThread("company-1", "node-1", "email-thread-1", { refresh: true });
+    assert.equal(calls.filter((path) => path.includes("/email-threads/email-thread-1?")).length, 2);
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();

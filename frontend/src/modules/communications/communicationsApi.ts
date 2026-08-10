@@ -578,6 +578,8 @@ const MESSAGE_DETAIL_CACHE_TTL_MS = WORKDAY_EMAIL_CACHE_TTL_MS;
 const MESSAGE_STALE_ON_RATE_LIMIT_TTL_MS = 24 * 60 * 60_000;
 const SHARED_INBOX_CACHE_TTL_MS = 5 * 60_000;
 const WORKSPACE_PANEL_CACHE_TTL_MS = 5 * 60_000;
+const EMAIL_DRAFT_LIST_CACHE_TTL_MS = 5_000;
+const NODE_EMAIL_THREAD_CACHE_TTL_MS = 30_000;
 const RECENT_ARCHIVED_MESSAGE_TTL_MS = WORKDAY_EMAIL_CACHE_TTL_MS;
 const RECENT_PRIMARY_MESSAGE_TTL_MS = WORKDAY_EMAIL_CACHE_TTL_MS;
 const PRIMARY_EXCLUDED_FOLDER_TOKENS = ["sent", "trash", "spam", "junk", "category:social", "category:promotions"] as const;
@@ -1084,13 +1086,21 @@ export async function respondToCalendarInvite(input: {
   });
 }
 
-export async function listEmailDrafts(companyID: string, scope: CommunicationsEmailDraftScope): Promise<CommunicationsEmailDraft[]> {
+export async function listEmailDrafts(
+  companyID: string,
+  scope: CommunicationsEmailDraftScope,
+  options: { refresh?: boolean } = {},
+): Promise<CommunicationsEmailDraft[]> {
   const cleanCompanyID = companyID.trim();
   if (!cleanCompanyID) return [];
   const query = createEmailDraftScopeQuery(cleanCompanyID, scope);
   if (Number.isFinite(scope.revision) && (scope.revision ?? 0) > 0) query.set("revision", String(Math.trunc(scope.revision!)));
-  const payload = await apiFetchJSON<{ drafts?: CommunicationsEmailDraft[] }>(`/v1/communications/drafts?${query.toString()}`);
-  return (payload.drafts ?? []).map(cloneCommunicationsEmailDraft);
+  const cacheKey = `email-drafts:${cleanCompanyID}:${query.toString()}`;
+  if (options.refresh) invalidateCacheKey(cacheKey);
+  return cachedRead(cacheKey, EMAIL_DRAFT_LIST_CACHE_TTL_MS, async () => {
+    const payload = await apiFetchJSON<{ drafts?: CommunicationsEmailDraft[] }>(`/v1/communications/drafts?${query.toString()}`);
+    return payload.drafts ?? [];
+  }, (drafts) => drafts.map(cloneCommunicationsEmailDraft));
 }
 
 function emailCollaborationQuery(input: ListCommunicationsEmailCollaborationsInput): URLSearchParams {
@@ -1150,24 +1160,24 @@ export async function getEmailCollaborationThread(companyID: string, collaborati
   };
 }
 
-export async function getNodeEmailThread(companyID: string, nodeID: string, emailThreadID: string): Promise<CommunicationsStoredEmailThread> {
+export async function getNodeEmailThread(
+  companyID: string,
+  nodeID: string,
+  emailThreadID: string,
+  options: { refresh?: boolean } = {},
+): Promise<CommunicationsStoredEmailThread> {
   const cleanCompanyID = companyID.trim();
   const cleanNodeID = nodeID.trim();
   const cleanEmailThreadID = emailThreadID.trim();
   if (!cleanCompanyID || !cleanNodeID || !cleanEmailThreadID) throw new Error("node_email_thread_id_required");
-  const query = new URLSearchParams({ company_id: cleanCompanyID });
-  const payload = await apiFetchJSON<CommunicationsStoredEmailThread>(
-    `/v1/nodes/${encodeURIComponent(cleanNodeID)}/email-threads/${encodeURIComponent(cleanEmailThreadID)}?${query.toString()}`,
-  );
-  return {
-    email_thread_id: payload.email_thread_id,
-    thread_id: payload.thread_id,
-    messages: (payload.messages ?? []).map(cloneMessage),
-    history_complete: payload.history_complete === true,
-    download_status: payload.download_status,
-    fetched_at: payload.fetched_at,
-    last_download_error: payload.last_download_error,
-  };
+  const cacheKey = `node-email-thread:${cleanCompanyID}:${cleanNodeID}:${cleanEmailThreadID}`;
+  if (options.refresh) invalidateCacheKey(cacheKey);
+  return cachedRead(cacheKey, NODE_EMAIL_THREAD_CACHE_TTL_MS, async () => {
+    const query = new URLSearchParams({ company_id: cleanCompanyID });
+    return apiFetchJSON<CommunicationsStoredEmailThread>(
+      `/v1/nodes/${encodeURIComponent(cleanNodeID)}/email-threads/${encodeURIComponent(cleanEmailThreadID)}?${query.toString()}`,
+    );
+  }, cloneCommunicationsStoredEmailThread);
 }
 
 export async function ensureEmailCollaboration(input: EnsureCommunicationsEmailCollaborationInput): Promise<CommunicationsEmailCollaboration> {
@@ -1200,6 +1210,7 @@ export async function ensureEmailCollaboration(input: EnsureCommunicationsEmailC
       }),
     },
   );
+  invalidateCommunicationsReadPrefix(`email-drafts:${cleanCompanyID}:`);
   return cloneCommunicationsEmailCollaboration(payload.collaboration);
 }
 
@@ -1232,13 +1243,15 @@ export async function sendEmailCollaborationDraft(input: {
         body: JSON.stringify({ expected_revision: expectedRevision }),
       },
     );
-    return {
+    const result = {
       ...payload,
       message: cloneMessage(payload.message),
       collaboration_id: payload.collaboration_id?.trim() || collaborationID,
       draft_id: payload.draft_id?.trim() || draftID,
       draft_deleted: payload.draft_deleted === true,
     };
+    invalidateCommunicationsReadPrefix(`email-drafts:${companyID}:`);
+    return result;
   }, { label: "Shared email" });
 }
 
@@ -1272,6 +1285,7 @@ export async function saveEmailDraft(input: SaveCommunicationsEmailDraftInput): 
       revision: Number.isFinite(input.revision) ? Math.max(0, Math.trunc(input.revision ?? 0)) : undefined,
     }),
   });
+  invalidateCommunicationsReadPrefix(`email-drafts:${cleanCompanyID}:`);
   return cloneCommunicationsEmailDraft(payload.draft);
 }
 
@@ -1284,6 +1298,7 @@ export async function deleteEmailDraft(companyID: string, draftID: string, scope
   await apiFetchJSON<{ status?: string }>(`/v1/communications/drafts/${encodeURIComponent(cleanDraftID)}?${query.toString()}`, {
     method: "DELETE",
   });
+  invalidateCommunicationsReadPrefix(`email-drafts:${cleanCompanyID}:`);
 }
 
 export async function getEmailSignature(companyID: string, sharedInboxID?: string, accountEmail?: string): Promise<CommunicationsEmailSignature | null> {
@@ -2588,6 +2603,15 @@ function invalidateCacheKey(key: string): void {
   communicationsReadInflight.delete(key);
 }
 
+function invalidateCommunicationsReadPrefix(prefix: string): void {
+  for (const key of communicationsReadCache.keys()) {
+    if (key.startsWith(prefix)) communicationsReadCache.delete(key);
+  }
+  for (const key of communicationsReadInflight.keys()) {
+    if (key.startsWith(prefix)) communicationsReadInflight.delete(key);
+  }
+}
+
 function clearEmailFolderCache(): void {
   foldersCache.clear();
   foldersInflight.clear();
@@ -2865,6 +2889,14 @@ function cloneCommunicationsEmailDraft(draft: CommunicationsEmailDraft): Communi
       ...item,
       attachment: item.attachment ? { ...item.attachment } : undefined,
     })) : undefined,
+  };
+}
+
+function cloneCommunicationsStoredEmailThread(thread: CommunicationsStoredEmailThread): CommunicationsStoredEmailThread {
+  return {
+    ...thread,
+    messages: (thread.messages ?? []).map(cloneMessage),
+    history_complete: thread.history_complete === true,
   };
 }
 

@@ -210,6 +210,7 @@ KB127 - Selecting a node from a Kanban card opens the normal modeless node windo
 KB128 - In a route-controlled Logic Gate Arena, opening or closing a Kanban node popup produces one continuous UI transition. Local popup state must not retrigger forced-route synchronization against the previous route and briefly close a newly opened node or reopen a newly closed node.
 KB130 - Confirmed Kanban Node deletion uses one atomic typed-target delete request, participates in the board's local mutation window, and updates both rendered and current card state. Older in-flight reads and realtime refresh hints cannot restore the deleted cards. A failed request restores the optimistic snapshot and schedules one canonical board refresh.
 KB131 - Deleting an assigned Node through the typed-target transaction recycles the Node and removes its assignment, RACI policy, and permission policy in one transaction. Assignment and parent-link delete triggers skip surviving-resource detach materialization only when the Node endpoint no longer exists; explicitly detaching an assignment from a surviving Node still materializes customized root policy.
+KB132 - The Kanban board index reads only permission-filtered Logic Gate identity, title, and timestamps. It never builds full RACI policies, work payloads, projections, or editor documents merely to list board choices.
 
 ## Scenarios
 

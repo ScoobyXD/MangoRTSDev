@@ -27,6 +27,11 @@ test("save-version history is requested only after Save Settings activation", ()
   assert.doesNotMatch(editor, /lastAutoSaveVersionSignatureRef\.current = "";\s+void loadEditorSaveVersions\(\);/);
 });
 
+test("initial Node realtime acceptance does not reload the consolidated Node view", () => {
+  const editor = source("frontend/src/modules/editor/EditorContent.tsx");
+  assert.match(editor, /let acceptedOnce = false;[\s\S]*onAccepted\(\) \{\s+if \(!acceptedOnce\) \{\s+acceptedOnce = true;\s+return;\s+\}\s+scheduleCanonicalRefresh\(\);/);
+});
+
 test("every node attachment refresh invalidates canonical metadata before incrementing the refresh key", () => {
   const nodeWorkspace = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
   assert.match(nodeWorkspace, /const refreshNodeAttachments = useCallback\(\(\) => \{\s+invalidateMangoResourceAttachmentsCache\(requestJSON, \{[\s\S]*?resourceType: "node",[\s\S]*?resourceID: nodeID,[\s\S]*?\}\);\s+setNodeAttachmentsRefreshKey/);

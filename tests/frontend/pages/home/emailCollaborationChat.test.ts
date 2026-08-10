@@ -248,7 +248,8 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.doesNotMatch(surface, /convertTriageMessagesToExplorerTarget/);
   assert.match(surface, /const submit = React\.useCallback\(async \(\) =>[\s\S]*collaborations\.length > 1 && !collaboration[\s\S]*ensureEmailCollaboration\(\{[\s\S]*linkedTextBlock:[\s\S]*initialChat:/);
   assert.doesNotMatch(surface, /Choose email node priority|setPriorityMenuOpen|data-email-action-popover|aria-label="Close email comments"/);
-  assert.match(surface, /const importedCollaborations = await listEmailCollaborations/);
+  assert.match(surface, /const ensured = await ensureEmailCollaboration\(\{[\s\S]*acceptCollaboration\(ensured\)/);
+  assert.doesNotMatch(surface, /const importedCollaborations = await listEmailCollaborations/);
   assert.match(surface, /setMessages\(\(current\) => appendAcknowledgedEmailCollaborationChat\(current, acknowledgedChat\)\)/);
   assert.match(surface, /setSectionKeysByChatID\(\(current\) => \(\{ \.\.\.current, \[acknowledgedChat\.id\]: sectionKey \}\)\)/);
   assert.match(surface, /setActiveMessageID\(acknowledgedChat\.id\)/);

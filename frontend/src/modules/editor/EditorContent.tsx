@@ -3,7 +3,7 @@ import { ConfirmActionMenu } from "../../app/ConfirmActionMenu";
 import { getNodeTitle, canEditResourceAccess, type NodeRecord, type NodeRelationship } from "../nodes/types";
 import { getLogicGateTitle, toLogicGateViewRecord, type LogicGateRACIAssignment, type LogicGateRACIRole, type LogicGateRACIPrincipalType, type LogicGateRecord } from "../logic-gates/types";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../dashboardEvents";
-import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, invalidateNodeRecordStoreCaches, primeNodeRecordStoreCaches, type NodeProjectionItem } from "../nodes/nodeRecordStore";
+import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, getNodeTimelineEventsSingleFlight, invalidateNodeRecordStoreCaches, primeNodeRecordStoreCaches, type NodeProjectionItem, type NodeTimelineEventItem } from "../nodes/nodeRecordStore";
 import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertNodeRelationshipGraphRelationship } from "../nodes/nodeRelationshipGraph";
 import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand } from "../workspace/workspaceEntityCommands";
 import { buildLinkedNodePayload } from "../nodes/relationshipRules";
@@ -571,6 +571,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [linkedNodeHistoryRows, setLinkedNodeHistoryRows] = useState<string[]>([]);
   const [nodeLogicGateIDs, setNodeLogicGateIDs] = useState<string[]>([]);
   const [nodeWorkspaceProjections, setNodeWorkspaceProjections] = useState<NodeProjectionItem[]>([]);
+  const [nodeTimelineEvents, setNodeTimelineEvents] = useState<NodeTimelineEventItem[]>([]);
   const [logicGateWorkspaceProjections, setLogicGateWorkspaceProjections] = useState<LogicGateProjectionItem[]>([]);
   const [nodeWorkspaceLoadedNodeID, setNodeWorkspaceLoadedNodeID] = useState("");
   const [editorSnapshotLoadedScope, setEditorSnapshotLoadedScope] = useState("");
@@ -983,6 +984,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setLinkedNodeMetadataRows([]);
     setLinkedNodeHistoryRows([]);
     setNodeWorkspaceProjections([]);
+    setNodeTimelineEvents([]);
     setLogicGateWorkspaceProjections([]);
     setEditorSnapshotLoadedScope("");
     setNodeStatus("");
@@ -1732,9 +1734,13 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setError("");
       if (resourceType === "node") {
         invalidateNodeRecordStoreCaches(apiBase, companyID, resourceID);
-        const projections = await getNodeInformationProjectionSingleFlight(apiBase, companyID, resourceID);
+        const [projections, timelineEvents] = await Promise.all([
+          getNodeInformationProjectionSingleFlight(apiBase, companyID, resourceID),
+          getNodeTimelineEventsSingleFlight(apiBase, companyID, resourceID),
+        ]);
         if (!isCurrentTarget()) return;
         setNodeWorkspaceProjections(projections);
+        setNodeTimelineEvents(timelineEvents);
         setNodeWorkspaceLoadedNodeID(resourceID);
         setEditorSnapshotLoadedScope(snapshotScope);
         return;
@@ -1780,6 +1786,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     const snapshotScope = nodeID ? editorSnapshotScope("node", nodeID) : "";
     if (!companyID || !nodeID || editorSnapshotLoadedScope !== snapshotScope) return undefined;
     let refreshTimer: number | null = null;
+    let acceptedOnce = false;
     const canonicalRefresh = createCoalescedCanonicalRefresh(refreshEditorSnapshot);
     const scheduleCanonicalRefresh = () => {
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
@@ -1790,6 +1797,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     };
     const unsubscribe = subscribeRealtimeScope(apiBase, companyID, `chat:node:${nodeID}`, {
       onAccepted() {
+        if (!acceptedOnce) {
+          acceptedOnce = true;
+          return;
+        }
         scheduleCanonicalRefresh();
       },
       onChatMessageCreated(message) {
@@ -2050,6 +2061,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setLinkedNodeHistoryRows([]);
       setNodeLogicGateIDs([]);
       setNodeWorkspaceProjections([]);
+      setNodeTimelineEvents([]);
       setLogicGateWorkspaceProjections([]);
       setEditorSnapshotLoadedScope("");
       setNodeWorkspaceLoadedNodeID("");
@@ -2128,6 +2140,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           setRACIPolicyOverwrittenByAncestor(gvicPolicy.overwritten_by_ancestor ?? null);
           setRACIPolicyRevision(gvicPolicy.revision);
           setNodeWorkspaceProjections([]);
+          setNodeTimelineEvents([]);
           setLogicGateWorkspaceProjections(projections);
           setNodeWorkspaceLoadedNodeID("");
           setEditorSnapshotLoadedScope(snapshotScope);
@@ -2160,9 +2173,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           return;
         }
         invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
-        const [details, projections, gvicPolicy] = await Promise.all([
+        const [details, projections, timelineEvents, gvicPolicy] = await Promise.all([
           getNodeRecordSingleFlight(apiBase, companyID, linkedNodeID),
           getNodeInformationProjectionSingleFlight(apiBase, companyID, linkedNodeID),
+          getNodeTimelineEventsSingleFlight(apiBase, companyID, linkedNodeID),
           requestJSON<ResourceRACIPayload>(`/v1/resources/node/${linkedNodeID}/gvic?company_id=${encodeURIComponent(companyID)}`),
         ]);
         if (!isCurrentLinkedLoad()) return;
@@ -2189,6 +2203,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         setRACIPolicyRevision(gvicPolicy.revision);
         applyLogicGateRACIAssignments([], "");
         setNodeWorkspaceProjections(projections);
+        setNodeTimelineEvents(timelineEvents);
         setNodeWorkspaceLoadedNodeID(linkedNodeID);
         setEditorSnapshotLoadedScope(snapshotScope);
         const currentInformation = details.information.length > 0
@@ -2576,6 +2591,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             canEdit={linkedEntityCanEdit}
             assignedLogicGateIDs={nodeLogicGateIDs}
             projections={nodeWorkspaceProjections}
+            initialTimelineEvents={nodeTimelineEvents}
             companyUsers={companyUsers}
             projectionsLoaded={nodeWorkspaceLoadedNodeID === linkedNodeID}
             editorSequence={0}

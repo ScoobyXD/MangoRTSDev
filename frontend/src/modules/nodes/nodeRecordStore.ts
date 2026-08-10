@@ -21,10 +21,38 @@ export type NodeProjectionItem = {
   updated_timestamp: string;
 };
 
+export type NodeTimelineVerificationRecipientItem = {
+  company_id: string;
+  node_id: string;
+  event_id: string;
+  user_id: string;
+  user_display_name: string;
+  completed_timestamp?: string;
+  created_timestamp: string;
+};
+
+export type NodeTimelineEventItem = {
+  event_id: string;
+  company_id: string;
+  node_id: string;
+  type: "logic_gate_transfer" | "project_assignment" | "verification_request";
+  actor_user_id?: string;
+  actor_display_name: string;
+  from_logic_gate_id?: string;
+  from_logic_gate_name?: string;
+  to_logic_gate_id?: string;
+  to_logic_gate_name?: string;
+  project_id?: string;
+  project_name?: string;
+  verification_recipients: NodeTimelineVerificationRecipientItem[];
+  created_timestamp: string;
+};
+
 type NodeViewResponse = NodeDetails & {
   company_id?: string;
   node_id?: string;
   projections?: NodeProjectionItem[];
+  timeline_events?: NodeTimelineEventItem[];
   gvic_assignments?: LogicGateRACIAssignment[];
 };
 
@@ -38,6 +66,8 @@ let nodeRecordStoreAuthGeneration = getAuthSessionCacheGeneration();
 const detailsCache = new Map<string, NodeDetails>();
 
 const projectionCache = new Map<string, NodeProjectionItem[]>();
+
+const timelineEventCache = new Map<string, NodeTimelineEventItem[]>();
 
 const gvicAssignmentCache = new Map<string, LogicGateRACIAssignment[]>();
 
@@ -57,6 +87,7 @@ function ensureNodeRecordStoreAuthScope(): void {
   viewFresh.clear();
   detailsCache.clear();
   projectionCache.clear();
+  timelineEventCache.clear();
   gvicAssignmentCache.clear();
 }
 
@@ -73,6 +104,7 @@ function cacheNodeViewPayload(cacheKey: string, payload: NodeViewResponse): Node
   const details = nodeDetailsFromViewPayload(payload);
   detailsCache.set(cacheKey, details);
   projectionCache.set(cacheKey, payload.projections ?? []);
+  timelineEventCache.set(cacheKey, payload.timeline_events ?? []);
   gvicAssignmentCache.set(cacheKey, payload.gvic_assignments ?? []);
   return details;
 }
@@ -136,12 +168,13 @@ export function invalidateNodeRecordStoreCaches(apiBase: string, companyID: stri
   viewFresh.delete(cacheKey);
   detailsCache.delete(cacheKey);
   projectionCache.delete(cacheKey);
+  timelineEventCache.delete(cacheKey);
   gvicAssignmentCache.delete(cacheKey);
 }
 
 export function invalidateNodeRecordStorePolicyCachesForCompany(apiBase: string, companyID: string): void {
   const prefix = key(apiBase, companyID, "");
-  const cacheKeys = new Set([...viewCache.keys(), ...viewInflight.keys(), ...viewGeneration.keys(), ...viewETag.keys(), ...detailsCache.keys(), ...projectionCache.keys(), ...gvicAssignmentCache.keys()]);
+  const cacheKeys = new Set([...viewCache.keys(), ...viewInflight.keys(), ...viewGeneration.keys(), ...viewETag.keys(), ...detailsCache.keys(), ...projectionCache.keys(), ...timelineEventCache.keys(), ...gvicAssignmentCache.keys()]);
   for (const cacheKey of cacheKeys) {
     if (!cacheKey.startsWith(prefix)) continue;
     bumpViewGeneration(cacheKey);
@@ -149,6 +182,7 @@ export function invalidateNodeRecordStorePolicyCachesForCompany(apiBase: string,
     viewFresh.delete(cacheKey);
     detailsCache.delete(cacheKey);
     projectionCache.delete(cacheKey);
+    timelineEventCache.delete(cacheKey);
     gvicAssignmentCache.delete(cacheKey);
   }
 }
@@ -176,6 +210,7 @@ export function primeNodeRecordStoreCaches(apiBase: string, companyID: string, e
       can_edit: entry.node.can_edit,
     });
     projectionCache.set(cacheKey, entry.projections ?? []);
+    timelineEventCache.set(cacheKey, []);
     gvicAssignmentCache.set(cacheKey, []);
   }
 }
@@ -194,6 +229,14 @@ export async function getNodeInformationProjectionSingleFlight(apiBase: string, 
   if (cached) return cached;
   const payload = await getNodeViewPayloadSingleFlight(apiBase, companyID, nodeID);
   return payload.projections ?? [];
+}
+
+export async function getNodeTimelineEventsSingleFlight(apiBase: string, companyID: string, nodeID: string): Promise<NodeTimelineEventItem[]> {
+  const cacheKey = key(apiBase, companyID, nodeID);
+  const cached = timelineEventCache.get(cacheKey);
+  if (cached) return cached;
+  const payload = await getNodeViewPayloadSingleFlight(apiBase, companyID, nodeID);
+  return payload.timeline_events ?? [];
 }
 
 export async function getNodeRACIAssignmentsSingleFlight(apiBase: string, companyID: string, nodeID: string): Promise<LogicGateRACIAssignment[]> {

@@ -3356,10 +3356,15 @@ type AttachedEmailThreadPreview = {
   downloadStatus: EmailThreadDownloadStatus;
 };
 
-async function loadAttachedEmailThreadPreview(email: EditorAttachedEmail, companyID: string, nodeID: string): Promise<AttachedEmailThreadPreview> {
+async function loadAttachedEmailThreadPreview(
+  email: EditorAttachedEmail,
+  companyID: string,
+  nodeID: string,
+  options: { refresh?: boolean } = {},
+): Promise<AttachedEmailThreadPreview> {
   const durableThreadID = email.emailThreadID?.trim() ?? "";
   if (durableThreadID && nodeID.trim()) {
-    const durableThread = await getNodeEmailThread(companyID, nodeID, durableThreadID);
+    const durableThread = await getNodeEmailThread(companyID, nodeID, durableThreadID, options);
     const primary = durableThread.messages.find((message) => message.id === email.messageID)
       ?? durableThread.messages[0] ?? null;
     return { messages: primary
@@ -3450,6 +3455,10 @@ const AttachedEmailThreadCard: React.FC<{
 	const refreshStoredThreadRef = useRef<() => void>(() => undefined);
 	const [activeSharedDraft, setActiveSharedDraft] = useState<CommunicationsEmailDraft | null>(null);
 	const autoOpenedSharedDraftRef = useRef("");
+	const onSelectRef = useRef(onSelect);
+	const onReplyRef = useRef(onReply);
+	onSelectRef.current = onSelect;
+	onReplyRef.current = onReply;
 
 	useEffect(() => {
 		let cancelled = false;
@@ -3457,9 +3466,9 @@ const AttachedEmailThreadCard: React.FC<{
     setLoading(true);
     setLoadError("");
     setThreadMessages([]);
-    const refreshStoredThread = async () => {
+    const refreshStoredThread = async (refresh = false) => {
       try {
-        const preview = await loadAttachedEmailThreadPreview(email, companyID, nodeID);
+        const preview = await loadAttachedEmailThreadPreview(email, companyID, nodeID, { refresh });
         if (cancelled) return;
         setThreadMessages(preview.messages);
         setThreadDownloadStatus(preview.downloadStatus);
@@ -3471,7 +3480,7 @@ const AttachedEmailThreadCard: React.FC<{
         initialLoad = false;
       }
 		};
-		refreshStoredThreadRef.current = () => { void refreshStoredThread(); };
+		refreshStoredThreadRef.current = () => { void refreshStoredThread(true); };
 		void refreshStoredThread();
 		return () => {
 			cancelled = true;
@@ -3508,12 +3517,12 @@ const AttachedEmailThreadCard: React.FC<{
       setActiveSharedDraft(draft);
       if (draft?.origin_node_id?.trim() === nodeID.trim() && autoOpenedSharedDraftRef.current !== draft.draft_id) {
         autoOpenedSharedDraftRef.current = draft.draft_id;
-        onSelect();
-        onReply(draft.reply_to_message?.id?.trim() || email.messageID, true);
+        onSelectRef.current();
+        onReplyRef.current(draft.reply_to_message?.id?.trim() || email.messageID, true);
       }
     }).catch(() => undefined);
     return () => { cancelled = true; };
-  }, [companyID, email.collaborationID, email.emailThreadID, email.messageID, nodeID, onReply, onSelect]);
+  }, [companyID, email.collaborationID, email.emailThreadID, email.messageID, nodeID]);
 
   const initialFocusProviderMessageID = initialFocusMessageID?.trim() === email.emailMessageID
     ? email.messageID
@@ -5751,7 +5760,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
 				if (change.message_id && change.message_id !== messageID && change.thread_id !== message?.thread_id) return;
 				void (async () => {
 				const storedThread = cleanEmailThreadID && nodeID.trim()
-					? await getNodeEmailThread(companyID, nodeID, cleanEmailThreadID)
+					? await getNodeEmailThread(companyID, nodeID, cleanEmailThreadID, { refresh: true })
           : null;
         const collaborationThread = !storedThread && cleanCollaborationID
           ? await getEmailCollaborationThread(companyID, cleanCollaborationID)

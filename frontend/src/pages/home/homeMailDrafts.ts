@@ -450,7 +450,7 @@ export async function loadHomeMailDrafts(
   const readCurrentScope = () => readHomeMailDraftsForScope(companyID, userID, sharedInboxID, accountEmail);
   try {
     const scope = { sharedInboxID: sharedInboxID.trim() || undefined, accountEmail: accountEmail.trim() || undefined };
-    const remoteDrafts = (await listEmailDrafts(companyID, scope))
+    const remoteDrafts = (await listEmailDrafts(companyID, scope, { refresh: true }))
       .map((draft) => homeMailDraftFromRemote(draft, companyID, userID))
       .filter((draft): draft is HomeMailDraft => Boolean(draft))
       .filter((draft) => homeMailDraftMatchesScope(draft, sharedInboxID, accountEmail));

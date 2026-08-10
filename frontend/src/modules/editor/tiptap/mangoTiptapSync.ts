@@ -373,7 +373,12 @@ export class MangoTiptapSync {
       this.stopped = false;
       await this.recover();
       this.initialRecoveryComplete = true;
+      this.subscribeRealtimeIfReady();
     });
+  }
+
+  hasCompletedInitialRecovery(): boolean {
+    return this.initialRecoveryComplete;
   }
 
   setRealtimeVisible(visible: boolean): void {
@@ -385,6 +390,11 @@ export class MangoTiptapSync {
       return;
     }
     if (this.stopped || this.unsubscribe) return;
+    this.subscribeRealtimeIfReady();
+  }
+
+  private subscribeRealtimeIfReady(): void {
+    if (!this.initialRecoveryComplete || !this.realtimeVisible || this.stopped || this.unsubscribe) return;
     this.unsubscribe = this.options.subscribeToCanonicalChange?.(() => {
       void this.recover().catch((cause) => this.options.onError?.(cause));
     }, this.clientID);

@@ -525,6 +525,7 @@ type WorkGraphRepository interface {
 	AddNodeInformation(companyID, nodeID, infoType, information, informationID string) (domain.NodeInformation, error)
 	AddNodeInformationWithActor(input NodeInformationInput) (domain.NodeInformation, error)
 	ListNodeProjections(companyID, nodeID string) ([]domain.NodeProjection, error)
+	ListNodeProjectionSummaries(companyID, nodeID string) ([]domain.NodeProjection, error)
 	UpsertNodeProjectionWithActor(input NodeInformationInput) (domain.NodeProjection, error)
 	DeleteNodeProjection(companyID, nodeID, informationID string) error
 	DeleteNodeProjectionWithActor(input NodeProjectionDeleteInput) error
@@ -543,6 +544,8 @@ type LogicGateRepository interface {
 	UpdateLogicGateHeaderWithWorkspaceEvent(companyID, logicGateID, header string) (domain.LogicGate, domain.DomainEvent, error)
 	ListLogicGates(companyID string) ([]domain.LogicGate, error)
 	ListVisibleLogicGates(companyID, userID string) ([]domain.LogicGate, error)
+	ListLogicGateSummaries(companyID string) ([]domain.LogicGate, error)
+	ListVisibleLogicGateSummaries(companyID, userID string) ([]domain.LogicGate, error)
 	ListLogicGatesInFolderSubtree(companyID, folderID string) ([]domain.LogicGate, error)
 	ListVisibleLogicGatesInFolderSubtree(companyID, folderID, userID string) ([]domain.LogicGate, error)
 	QueryLogicGates(companyID string, query LogicGateQuery) ([]domain.LogicGate, error)

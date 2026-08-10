@@ -497,6 +497,7 @@ export function EmailCollaborationChatSurface({
   React.useEffect(() => {
     if (!active || !companyID || !collaborationID || !nodeID) return undefined;
     let refreshTimer: number | null = null;
+    let acceptedOnce = false;
     const refresh = () => {
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
       const refreshSequence = loadSequenceRef.current;
@@ -509,7 +510,10 @@ export function EmailCollaborationChatSurface({
       }, 80);
     };
     const unsubscribe = subscribeRealtimeScope(apiBase, companyID, "chat:node:" + nodeID, {
-      onAccepted: refresh,
+      onAccepted: () => {
+        if (acceptedOnce) refresh();
+        acceptedOnce = true;
+      },
       onChatMessageCreated(event) {
         if (event.company_id === companyID && event.node_id === nodeID) refresh();
       },
@@ -684,16 +688,6 @@ export function EmailCollaborationChatSurface({
         informationID: attachedEmailInformationID,
         logicGateIDs: nodes.find((node) => node.node_id === cleanNodeID)?.logic_gate_ids,
       });
-      const importedCollaborations = await listEmailCollaborations({
-        companyID,
-        messageID: providerMessageID,
-        threadID: message.thread_id,
-        sharedInboxID,
-        accountEmail,
-      }).catch(() => []);
-      setCollaborations(importedCollaborations);
-      const importedCollaboration = importedCollaborations.find((item) => item.node_id === cleanNodeID) ?? null;
-      if (importedCollaboration) acceptCollaboration(importedCollaboration);
       invalidateNodeRecordStoreCaches(apiBase, companyID, cleanNodeID);
       setDraft("");
       setDraftAttachments([]);

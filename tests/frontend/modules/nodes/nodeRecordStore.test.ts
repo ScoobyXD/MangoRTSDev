@@ -6,6 +6,7 @@ import {
   getNodeRecordSingleFlight,
   getNodeRACIAssignmentsSingleFlight,
   getNodeInformationProjectionSingleFlight,
+  getNodeTimelineEventsSingleFlight,
   invalidateNodeRecordStoreCaches,
   type NodeProjectionItem,
 } from "../../../../frontend/src/modules/nodes/nodeRecordStore.js";
@@ -70,9 +71,41 @@ function nodeViewPayload(item: NodeProjectionItem, editorSequence: number) {
       user_id: "user-1",
       created_timestamp: "2026-06-18T01:00:00.000Z",
     }],
+    timeline_events: [{
+      event_id: "timeline-1",
+      company_id: "company-1",
+      node_id: "node-1",
+      type: "verification_request",
+      actor_display_name: "Node Actor",
+      verification_recipients: [],
+      created_timestamp: "2026-06-18T01:00:03.000Z",
+    }],
     editor_sequence: editorSequence,
   };
 }
+
+test("node projections and initial timeline share the consolidated view request", async () => {
+  const apiBase = "https://api.example.test/node-record-timeline";
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return jsonResponse(nodeViewPayload(projection("metadata-only", "2026-06-18T01:00:01.000Z"), 1));
+  }) as typeof fetch;
+  invalidateNodeRecordStoreCaches(apiBase, "company-1", "node-1");
+  try {
+    const [projections, timelineEvents] = await Promise.all([
+      getNodeInformationProjectionSingleFlight(apiBase, "company-1", "node-1"),
+      getNodeTimelineEventsSingleFlight(apiBase, "company-1", "node-1"),
+    ]);
+    assert.equal(calls, 1);
+    assert.equal(projections[0]?.information, "metadata-only");
+    assert.equal(timelineEvents[0]?.event_id, "timeline-1");
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateNodeRecordStoreCaches(apiBase, "company-1", "node-1");
+  }
+});
 
 test("node invalidation rejects a stale in-flight record response before any consumer can repopulate cache", async () => {
   const apiBase = "https://api.example.test/node-record-cache";

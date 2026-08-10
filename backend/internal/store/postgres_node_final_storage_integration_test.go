@@ -303,3 +303,52 @@ where company_id=$1::uuid and attachment_id=$2::uuid`, company.CompanyID, attach
 		t.Fatalf("isolated relationship delete left NodeA/NodeB/message=%d/%d/%d", nodeARelationships, nodeBRelationships, survivingMessages)
 	}
 }
+
+func TestPostgresNodeTextboxMetadataPersistsWithoutDuplicatingDocumentInNodeView(t *testing.T) {
+	db, repo := openRealtimePostgresIntegration(t)
+	company, err := repo.CreateCompany("Node textbox metadata integration")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = db.Exec("delete from companies where company_id=$1::uuid", company.CompanyID) })
+	node, err := repo.CreateNode(company.CompanyID, "Metadata Node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	textboxID := "00000000-0000-4000-8000-000000000591"
+	metadata, err := repo.UpdateEditorJSONMetadata(EditorJSONMetadataInput{
+		Document: EditorDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID, DocumentID: textboxID},
+		Title:    "Stored title", EmailAccent: "#12ABEF",
+	})
+	if err != nil || metadata.ProjectionRevision != 1 {
+		t.Fatalf("metadata=%+v err=%v", metadata, err)
+	}
+	document := editorMergeTestDocument(t,
+		`{"type":"paragraph","attrs":{"blockId":"metadata-body"},"content":[{"type":"text","text":"private canonical marker"}]}`)
+	commit, err := repo.CommitEditorJSONDocument(EditorJSONCommitInput{
+		Document:    EditorJSONDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID, DocumentID: textboxID},
+		OperationID: newUUIDv7String(), ClientID: "metadata-client", BaseRevision: 1,
+		SchemaVersion: MangoTiptapSchemaVersion, JSONDocument: document,
+	})
+	if err != nil || commit.Revision != 2 {
+		t.Fatalf("commit=%+v err=%v", commit, err)
+	}
+
+	projections, err := repo.ListNodeProjections(company.CompanyID, node.NodeID)
+	if err != nil || len(projections) != 1 {
+		t.Fatalf("projections=%+v err=%v", projections, err)
+	}
+	if !strings.Contains(projections[0].Information, `"title": "Stored title"`) ||
+		!strings.Contains(projections[0].Information, `"email_accent": "#12ABEF"`) ||
+		!strings.Contains(projections[0].Information, "private canonical marker") {
+		t.Fatalf("full projection lost metadata or document: %s", projections[0].Information)
+	}
+	view, err := repo.GetNodeView(NodeViewInput{CompanyID: company.CompanyID, NodeID: node.NodeID})
+	if err != nil || len(view.Projections) != 1 {
+		t.Fatalf("view=%+v err=%v", view, err)
+	}
+	if strings.Contains(view.Projections[0].Information, "private canonical marker") ||
+		!strings.Contains(view.Projections[0].Information, `"title": "Stored title"`) {
+		t.Fatalf("Node view projection carried the wrong payload: %s", view.Projections[0].Information)
+	}
+}
