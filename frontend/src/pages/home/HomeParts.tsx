@@ -6030,6 +6030,8 @@ function emailMessageBodyIsLoaded(message: EmailMessage): boolean {
 
 function useEmailBodyDocument(messageID: string, body: string, attachments: EmailAttachment[], companyID: string, sharedInboxID: string | undefined, accountEmail: string | undefined, collaborationID: string | undefined, enabled: boolean): { srcDoc: string } {
   const apiBase = readAuthConfig().apiBase;
+  const collaborationIDRef = React.useRef(collaborationID);
+  collaborationIDRef.current = collaborationID;
   const inlineAttachments = React.useMemo(
     () => attachments.filter((attachment) => emailAttachmentIsReferencedInline(body, attachment)),
     [attachments, body],
@@ -6054,7 +6056,7 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
     }
     return sources;
   }, [inlineAttachments]);
-  const hydrationKey = `${companyID}\x1f${sharedInboxID ?? ""}\x1f${sharedInboxID ? "" : accountEmail?.trim().toLowerCase() ?? ""}\x1f${collaborationID ?? ""}\x1f${messageID}\x1f${inlineAttachmentKey}`;
+  const hydrationKey = `${companyID}\x1f${sharedInboxID ?? ""}\x1f${sharedInboxID ? "" : accountEmail?.trim().toLowerCase() ?? ""}\x1f${messageID}\x1f${inlineAttachmentKey}`;
   const [downloadedCIDState, setDownloadedSourceByContentID] = React.useState<{
     hydrationKey: string;
     sources: Record<string, string>;
@@ -6077,7 +6079,7 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
         if (mangoAttachmentID) {
           sourceURL = await loadMangoAttachmentObjectURL(apiBase, companyID, mangoAttachmentID, "display", { signal: controller.signal });
         } else if (providerAttachmentID) {
-          const blob = await downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID, { signal: controller.signal, accountEmail, collaborationID });
+          const blob = await downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID, { signal: controller.signal, accountEmail, collaborationID: collaborationIDRef.current });
           if (cancelled) return { keys, sourceURL: "" };
           sourceURL = URL.createObjectURL(blob);
         }
@@ -6105,7 +6107,7 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
       controller.abort();
       objectURLs.forEach((objectURL) => URL.revokeObjectURL(objectURL));
     };
-  }, [accountEmail, apiBase, body, collaborationID, companyID, enabled, hydrationKey, inlineAttachmentKey, inlineAttachments, messageID, sharedInboxID]);
+  }, [accountEmail, apiBase, body, companyID, enabled, hydrationKey, inlineAttachmentKey, inlineAttachments, messageID, sharedInboxID]);
 
   const srcDoc = React.useMemo(() => {
     if (!enabled) return "";

@@ -30,6 +30,7 @@
 28. Reply and Reply All from a Node create or reopen the same universal thread draft.
 29. A sent reply becomes a new message in the same thread and inherits every Node-wide destination already used by that thread.
 30. Closing a local draft panel does not delete the universal draft; discarding the draft removes it for every surface.
+31. Opening, closing, or refreshing the triage chat rail does not restart or revoke an unchanged inline email image source.
 
 Last updated: 2026-08-09
 

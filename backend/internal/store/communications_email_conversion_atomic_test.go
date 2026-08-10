@@ -82,6 +82,77 @@ func TestMemoryEmailConversionAtomicallyPersistsEmailThreadTextBoxAndInitialChat
 	}
 }
 
+func TestMemoryEmailConversionAppendsChatToExistingEmailTextBox(t *testing.T) {
+	repo, companyID, user, node, message := setupAtomicEmailConversion(t, "11111111-1111-4111-8111-111111111194")
+	textBlockID := "44444444-4444-4444-8444-444444444494"
+	chatID := "55555555-5555-4555-8555-555555555594"
+
+	first, err := repo.ConvertCommunicationsTriageItems(context.Background(), CommunicationsTriageConversionInput{
+		UserID: user.UserID, CompanyID: companyID, AccountEmail: user.Email,
+		ActorUserID: user.UserID, PermissionUserID: user.UserID,
+		Target:     CommunicationsTriageConversionTarget{Mode: CommunicationsEmailConversionTargetExistingNode, NodeID: node.NodeID},
+		MessageIDs: []string{message.ID},
+		LinkedTextBlock: &NodeInformationInput{
+			InformationID: textBlockID, Type: "Text box",
+			Information: editorTextBlockProjectionPrefix + `{"title":"Imported email","document":"","attachments":[],"email_message_id":""}`,
+			ActorUserID: user.UserID,
+		},
+	})
+	if err != nil {
+		t.Fatalf("ConvertCommunicationsTriageItems initial link: %v", err)
+	}
+	if first.LinkedTextBlockID != textBlockID || len(first.EmailMessageIDs) != 1 {
+		t.Fatalf("initial link result = %+v", first)
+	}
+	if _, err := repo.UpsertCommunicationsTriageItem(user.UserID, message); err != nil {
+		t.Fatalf("UpsertCommunicationsTriageItem second send: %v", err)
+	}
+
+	result, err := repo.ConvertCommunicationsTriageItems(context.Background(), CommunicationsTriageConversionInput{
+		UserID: user.UserID, CompanyID: companyID, AccountEmail: user.Email,
+		ActorUserID: user.UserID, PermissionUserID: user.UserID,
+		Target:     CommunicationsTriageConversionTarget{Mode: CommunicationsEmailConversionTargetExistingNode, NodeID: node.NodeID},
+		MessageIDs: []string{message.ID},
+		InitialChat: &NodeInformationInput{
+			InformationID: chatID, Type: CommunicationsEmailCollaborationChatInformationType,
+			Information: `{"block_id":"44444444-4444-4444-8444-444444444494","selection_source":"email","selection_message_id":"","message":"Follow-up from triage"}`,
+			ActorUserID: user.UserID,
+		},
+	})
+	if err != nil {
+		t.Fatalf("ConvertCommunicationsTriageItems existing text-box chat: %v", err)
+	}
+	if result.LinkedTextBlockID != "" || result.InitialChatID != chatID || len(result.EmailMessageIDs) != 1 {
+		t.Fatalf("existing text-box chat result = %+v", result)
+	}
+
+	projections, err := repo.ListNodeProjections(companyID, node.NodeID)
+	if err != nil {
+		t.Fatalf("ListNodeProjections: %v", err)
+	}
+	textBoxCount := 0
+	chatCount := 0
+	for _, projection := range projections {
+		switch projection.Type {
+		case "Text box":
+			textBoxCount++
+		case CommunicationsEmailCollaborationChatInformationType:
+			chatCount++
+			information := strings.TrimPrefix(projection.Information, editorTextBlockProjectionPrefix)
+			var payload map[string]any
+			if err := json.Unmarshal([]byte(information), &payload); err != nil {
+				t.Fatalf("parse appended chat projection: %v", err)
+			}
+			if payload["block_id"] != textBlockID || payload["selection_message_id"] != result.EmailMessageIDs[0] {
+				t.Fatalf("appended chat payload = %+v", payload)
+			}
+		}
+	}
+	if textBoxCount != 1 || chatCount != 1 {
+		t.Fatalf("projection counts: text boxes=%d chats=%d projections=%+v", textBoxCount, chatCount, projections)
+	}
+}
+
 func TestMemoryEmailConversionRollsBackEveryAtomicImportWrite(t *testing.T) {
 	repo, companyID, user, node, message := setupAtomicEmailConversion(t, "11111111-1111-4111-8111-111111111193")
 	forced := errors.New("forced initial chat outbox failure")

@@ -215,6 +215,7 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(detail, /data-email-selection-chat-action="true"[\s\S]*onTextSelection\(\{ quote, startOffset, endOffset \}\)/);
 
   assert.match(surface, /listEmailCollaborations\(\{[\s\S]*setCollaborations\(items\)/);
+  assert.match(surface, /const placementChats = \[[\s\S]{0,160}\.\.\.placement\.messages/);
   assert.match(surface, /headerLeading=\{collaborations\.length > 1[\s\S]*data-email-chat-node-header="true"[\s\S]*<ExplorerRowIcon kind="node"/);
   assert.match(surface, /sectionLabelsByBlockID=\{sectionLabelsByBlockID\}/);
   assert.doesNotMatch(surface, /EmailCollaborationParticipantRoster|setChatTargetMenuOpen|onClose/);
@@ -237,6 +238,17 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(destinationSearch, /data-email-action-success="true"[\s\S]*right: "calc\(100% \+ 9px\)"/);
   assert.match(workspace, /EMAIL_NODE_INDICATOR_AFTER_NOTICE_MS[\s\S]*setEmailActionNotice[\s\S]*onEmailCollaborationChange\(delayedCollaboration\)/);
   assert.match(surface, /const delayFloatingNodeIndicator = createNew;[\s\S]*ensureCollaboration\(priority, createNew, !delayFloatingNodeIndicator\)[\s\S]*delayFloatingNodeIndicator \? created : undefined/);
+  assert.match(surface, /const refreshCollaborationByIDRef = React\.useRef\(refreshCollaborationByID\)/);
+  assert.match(surface, /refreshCollaborationByIDRef\.current\(collaborationID, refreshSequence\)/);
+  assert.match(surface, /\}, \[active, apiBase, collaborationID, companyID, nodeID\]\);/);
+  const emailBodyDocument = detail.slice(
+    detail.indexOf("function useEmailBodyDocument"),
+    detail.indexOf("function EmailConversationMessage"),
+  );
+  const hydrationKeyLine = emailBodyDocument.split("\n").find((line) => line.includes("const hydrationKey =")) ?? "";
+  assert.doesNotMatch(hydrationKeyLine, /collaborationID/);
+  assert.match(emailBodyDocument, /const collaborationIDRef = React\.useRef\(collaborationID\)/);
+  assert.match(emailBodyDocument, /collaborationID: collaborationIDRef\.current/);
   assert.match(sharedChat, /headerLeading\?: React\.ReactNode/);
   assert.match(sharedChat, /sectionLabelsByBlockID\?: Record<string, string>/);
   assert.match(surface, /<ChatPane[\s\S]*fillHeight/);

@@ -9,6 +9,7 @@
 7. If the thread has several Nodes, the user chooses which Node receives a new chat; Mango never guesses.
 8. One universal shared draft is visible from Shared Triage and every related Node without being related to a Node text box.
 9. A Shared Triage-created draft invents no origin Node and does not auto-open a draft panel in any Node.
+10. An already-linked exact-message text box loads its existing messages and receives each later Shared Triage chat without creating another text box.
 
 Last updated: 2026-08-09
 
@@ -46,9 +47,9 @@ One thread-level rail opens with exact Node, message, and text-box sections; ind
 ↓
 Each group header shows only its Node icon and title, and an unsent quote/text-box preview remains local
 ↓
-The first send atomically creates any missing text box, exact shared-email relationship, and chat in the chosen Node under the existing shared-inbox authorization; closing the preview writes and deletes nothing
+The first send appends to the existing exact-message text box or atomically creates any missing text box, exact shared-email relationship, and chat in the chosen Node under the existing shared-inbox authorization; closing the preview writes and deletes nothing
 
-Last updated: 2026-08-08
+Last updated: 2026-08-09
 
 # Process Story: Shared Triage policy status is automatic
 

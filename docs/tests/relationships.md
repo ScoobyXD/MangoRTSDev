@@ -15,6 +15,7 @@
 13. Showing a universal shared draft in a Node is presentation state and never creates a draft-to-textbox relationship.
 14. Removing one Node's email relationship removes only that Node's typed edge and leaves every other Node, stored thread/message, local text box, chat, and surviving attachment relationship unchanged.
 15. Email-to-Node, email-to-textbox, chat, and draft rules do not create a generic resource registry, surrogate identity, or untyped edge.
+16. An existing exact-message text-box relationship routes triage reads and later sends to that same Node text-box chat without creating another relationship.
 
 Last updated: 2026-08-09
 
@@ -28,7 +29,7 @@ Inside each Node, one exact message may link to one exact Node text box; the sam
 ↓
 Opening a highlighted-email chat preview creates no relationship or resource
 ↓
-The first send atomically creates the exact Node-local text box, message-to-textbox relationship, and chat, or creates none of them
+The first send appends to the existing exact Node-local text box or atomically creates the missing text box, message-to-textbox relationship, and chat, or creates none of them
 ↓
 Removing one Node's relationship leaves all other Node-local work and the stored email truth intact
 ↓
