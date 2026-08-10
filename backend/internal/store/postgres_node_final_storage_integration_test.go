@@ -3,10 +3,40 @@ package store
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestPostgresConsolidatedNodeTextboxMetadataMigrationIsIdempotent(t *testing.T) {
+	db, _ := openRealtimePostgresIntegration(t)
+	raw, err := os.ReadFile("../../db/migrations/20260810_node_textbox_metadata.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 1; attempt <= 2; attempt++ {
+		if _, err := db.Exec(string(raw)); err != nil {
+			t.Fatalf("apply consolidated Node textbox metadata migration attempt %d: %v", attempt, err)
+		}
+	}
+	var colorNullable bool
+	var colorDefaultMissing bool
+	if err := db.QueryRow(`
+select not attribute.attnotnull,
+       default_value.adbin is null
+from pg_catalog.pg_attribute attribute
+left join pg_catalog.pg_attrdef default_value
+  on default_value.adrelid=attribute.attrelid and default_value.adnum=attribute.attnum
+where attribute.attrelid='node_textboxes'::regclass
+  and attribute.attname='color'
+  and not attribute.attisdropped`).Scan(&colorNullable, &colorDefaultMissing); err != nil {
+		t.Fatal(err)
+	}
+	if !colorNullable || !colorDefaultMissing {
+		t.Fatalf("Node textbox color nullable=%v default missing=%v", colorNullable, colorDefaultMissing)
+	}
+}
 
 func TestPostgresNodeFinalTextboxChatEmailAndAttachmentStorage(t *testing.T) {
 	db, repo := openRealtimePostgresIntegration(t)
