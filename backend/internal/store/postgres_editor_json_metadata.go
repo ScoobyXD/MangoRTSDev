@@ -61,13 +61,13 @@ func (r *PostgresRepo) UpdateEditorJSONMetadata(input EditorJSONMetadataInput) (
 		}
 		err = tx.QueryRowContext(ctx, `
 			update node_textboxes
-			set title=$4,revision=revision+1,
+			set title=$4,color=$5,revision=revision+1,
 			    updated_timestamp=greatest(clock_timestamp(),created_timestamp)
 			where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid
 			  and deleted_timestamp is null
 			returning revision,updated_timestamp`,
 			input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID,
-			input.Title).Scan(&revision, &now)
+			input.Title, input.Color).Scan(&revision, &now)
 	case EntityTypeLogicGate:
 		textboxRef := EditorJSONDocumentRef{
 			CompanyID: input.Document.CompanyID, ResourceType: input.Document.ResourceType,

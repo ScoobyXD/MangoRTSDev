@@ -19,30 +19,38 @@ type nodeAttachedEmailPayload struct {
 	LinkScope         string `json:"link_scope"`
 }
 
-func nodeTextboxBodyFromProjectionInformation(information string) (json.RawMessage, error) {
+func nodeTextboxFromProjectionInformation(information string) (json.RawMessage, string, string, error) {
 	value := strings.TrimPrefix(strings.TrimSpace(information), editorTextBlockProjectionPrefix)
 	var payload struct {
 		Document json.RawMessage `json:"document"`
+		Title    string          `json:"title"`
+		Color    string          `json:"color"`
 	}
 	if json.Unmarshal([]byte(value), &payload) != nil || len(payload.Document) == 0 {
-		return nil, ErrInvalid
+		return nil, "", "", ErrInvalid
+	}
+	payload.Title = strings.TrimSpace(payload.Title)
+	payload.Color = strings.ToUpper(strings.TrimSpace(payload.Color))
+	if len(payload.Title) > 500 || !validNodeTextboxColor(payload.Color) {
+		return nil, "", "", ErrInvalid
 	}
 	document := payload.Document
 	if len(document) > 0 && document[0] == '"' {
 		var encoded string
 		if json.Unmarshal(document, &encoded) != nil {
-			return nil, ErrInvalid
+			return nil, "", "", ErrInvalid
 		}
 		if strings.TrimSpace(encoded) == "" {
-			return emptyEditorTextboxBody(), nil
+			return emptyEditorTextboxBody(), payload.Title, payload.Color, nil
 		}
 		document = json.RawMessage(encoded)
 	}
 	canonical, err := validateMangoTiptapJSONForCommit(document)
 	if err != nil {
-		return nil, err
+		return nil, "", "", err
 	}
-	return encodeEditorTextboxBody(canonical, nil)
+	body, err := encodeEditorTextboxBody(canonical, nil)
+	return body, payload.Title, payload.Color, err
 }
 
 func nodeProjectionAsInformation(item domain.NodeProjection) domain.NodeInformation {
@@ -55,9 +63,10 @@ func nodeProjectionAsInformation(item domain.NodeProjection) domain.NodeInformat
 
 const postgresNodeTextboxProjectionSelectFormat = `
 select textbox.company_id::text, textbox.node_id::text, textbox.textbox_id::text, 'Text box',
-       $3 || jsonb_build_object(
-         'title', textbox.title,
-         'document', %s,
+	       $3 || jsonb_build_object(
+	         'title', textbox.title,
+	         'color', textbox.color,
+	         'document', %s,
          'email_message_id', coalesce(linked_email.email_message_id, ''),
          'email_message_ids', coalesce(linked_email.email_message_ids, '[]'::jsonb),
          'attachments', coalesce((

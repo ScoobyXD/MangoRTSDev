@@ -1503,7 +1503,7 @@ test("node text-block metadata mutations use permanent JSON and remove deleted b
 
   assert.match(nodeSurface, /useMangoEditorDataFormat\(apiBase, companyID, requestJSON\)/);
   assert.match(nodeSurface, /`\/v1\/editor-json\/node\/\$\{nodeID\}\/documents\/\$\{blockID\}/);
-  assert.match(nodeSurface, /JSON\.stringify\(\{ title: content\.title, attachments: content\.attachments \?\? \[\] \}\)/);
+  assert.match(nodeSurface, /JSON\.stringify\(\{ title: content\.title, attachments: content\.attachments \?\? \[\], color: content\.color \}\)/);
   assert.doesNotMatch(nodeSurface, /email_accent: content\.emailAccent/);
   assert.doesNotMatch(nodeSurface, /editor-collaboration|legacy_html|buildEditorTextBlockMetadataPayload/);
   assert.match(nodeSurface, /await flushMangoTiptapDocument\(\{ companyID, resourceType: "node", resourceID: nodeID, documentID: blockID \}\)/);

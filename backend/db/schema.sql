@@ -3176,6 +3176,7 @@ create table if not exists node_textboxes (
   textbox_id uuid not null,
   body_json jsonb not null,
   title text not null default '',
+  color text not null default '#0EA5E9',
   revision bigint not null default 0,
   display_order bigint not null default 0,
   created_timestamp timestamptz not null default now(),
@@ -3191,6 +3192,10 @@ create table if not exists node_textboxes (
   ),
   constraint node_textboxes_revision_chk check (revision >= 0),
   constraint node_textboxes_title_chk check (length(title) <= 500),
+  constraint node_textboxes_color_chk check (color in (
+    '#0EA5E9', '#14B8A6', '#8B5CF6', '#F59E0B', '#22C55E', '#6366F1',
+    '#06B6D4', '#84CC16', '#A855F7', '#10B981', '#EAB308', '#3B82F6'
+  )),
   constraint node_textboxes_timestamps_chk check (
     updated_timestamp >= created_timestamp
     and (deleted_timestamp is null or deleted_timestamp >= created_timestamp)
@@ -3209,6 +3214,8 @@ comment on table node_textboxes is
   'Permanent current TipTap JSON document storage for Node text boxes.';
 comment on column node_textboxes.display_order is
   'User-controlled Node workspace order.';
+comment on column node_textboxes.color is
+  'Explicit non-red RGB color used by this exact Node text box.';
 
 -- Permanent comments owned by an exact Node textbox.
 create table if not exists node_textbox_chats (

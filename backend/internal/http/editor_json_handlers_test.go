@@ -77,7 +77,7 @@ func TestEditorJSONHTTPUsesPermanentFormatAndRetiresLegacyRoute(t *testing.T) {
 		t.Fatalf("save acknowledgement returned a complete document: %s", created.Body.String())
 	}
 	metadata := doJSON(http.MethodPatch, jsonPath, map[string]any{
-		"title": "JSON image", "attachments": []any{},
+		"title": "JSON image", "attachments": []any{}, "color": "#0EA5E9",
 	})
 	if metadata.Code != http.StatusOK || !strings.Contains(metadata.Body.String(), "\"projection_revision\":1") {
 		t.Fatalf("metadata status=%d body=%s", metadata.Code, metadata.Body.String())
@@ -87,6 +87,7 @@ func TestEditorJSONHTTPUsesPermanentFormatAndRetiresLegacyRoute(t *testing.T) {
 		t.Fatalf("JSON metadata projections=%+v err=%v", projections, err)
 	}
 	if !strings.Contains(projections[0].Information, "\"title\":\"JSON image\"") ||
+		!strings.Contains(projections[0].Information, "\"color\":\"#0EA5E9\"") ||
 		!strings.Contains(projections[0].Information, "\"document\":\"\"") ||
 		strings.Contains(projections[0].Information, "safe JSON") {
 		t.Fatalf("JSON metadata projection leaked document content: %s", projections[0].Information)

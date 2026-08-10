@@ -34,6 +34,10 @@ import {
 } from "../../modules/editor/NodeWorkspaceSurfaceShared";
 import { generateStableInformationID } from "../../modules/editor/editorTypes";
 import {
+  DEFAULT_NODE_TEXT_BLOCK_COLOR,
+  nextNodeTextBlockColor,
+} from "../../modules/editor/nodeTextBlockCreation";
+import {
   getNodeInformationProjectionSingleFlight,
   invalidateNodeRecordStoreCaches,
 } from "../../modules/nodes/nodeRecordStore";
@@ -708,6 +712,9 @@ export function EmailCollaborationChatSurface({
       const targetProjections = await getNodeInformationProjectionSingleFlight(apiBase, companyID, cleanNodeID).catch(() => []);
       let attachedEmailInformationID = collaboration?.attached_email_information_id?.trim() ?? "";
       const existingTextBlockProjections = listEditorTextBlockProjections(targetProjections);
+      const color = nextNodeTextBlockColor(existingTextBlockProjections.map((projection) => (
+        parseEditorTextBlockContent(projection.information).color ?? ""
+      )));
       const existingLinkedProjection = emailMessageID
         ? existingTextBlockProjections.find((projection) => {
           const content = parseEditorTextBlockContent(projection.information);
@@ -725,6 +732,7 @@ export function EmailCollaborationChatSurface({
           document: "",
           attachments: [],
           emailMessageID: payloadEmailMessageID,
+          color,
         }),
       };
       let initialChatWrite: { type: string; informationID: string; information: string } | undefined;
@@ -818,6 +826,9 @@ export function EmailCollaborationChatSurface({
 
     const textBlockID = generateStableInformationID();
     const payloadEmailMessageID = emailMessageID || generateStableInformationID();
+    const color = nextNodeTextBlockColor(listEditorTextBlockProjections(projections).map((projection) => (
+      parseEditorTextBlockContent(projection.information).color ?? ""
+    )));
     const linkedTextBlock = {
       type: EDITOR_TEXT_BLOCK_TYPE,
       informationID: textBlockID,
@@ -826,6 +837,7 @@ export function EmailCollaborationChatSurface({
         document: "",
         attachments: [],
         emailMessageID: payloadEmailMessageID,
+        color,
       }),
     };
     const ensured = await ensureEmailCollaboration({
@@ -965,6 +977,7 @@ export function EmailCollaborationChatSurface({
             document: "",
             attachments: [],
             emailMessageID: placeholderMessageID,
+            color: DEFAULT_NODE_TEXT_BLOCK_COLOR,
           }),
         },
         initialChat: pending.write,

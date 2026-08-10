@@ -161,7 +161,7 @@ test("email collaboration chat resolves to a real linked text box and only reads
       document: "",
       emailMessageID: "message-1",
       emailMessageIDs: ["message-1", "message-2"],
-      emailAccent: "#0ea5e9",
+      color: "#0EA5E9",
     }),
     created_timestamp: "2026-07-20T10:00:00.000Z",
   };

@@ -692,7 +692,7 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     emailLinkedProjection.information = TEXT_BLOCK_PREFIX + JSON.stringify({
       ...emailLinkedPayload,
       email_message_id: "internal-message-node-block-0",
-      email_accent: "#2563eb",
+      color: "#3B82F6",
     });
     currentNodeProjectionItems = [
       emailLinkedProjection,

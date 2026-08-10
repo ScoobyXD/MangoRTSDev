@@ -300,6 +300,7 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 		var request struct {
 			Title       string                                `json:"title"`
 			Attachments []store.EditorJSONAttachmentReference `json:"attachments"`
+			Color       string                                `json:"color"`
 			EmailAccent string                                `json:"email_accent"`
 		}
 		decoder := json.NewDecoder(r.Body)
@@ -313,7 +314,7 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 				CompanyID: ref.CompanyID, ResourceType: ref.ResourceType,
 				ResourceID: ref.ResourceID, DocumentID: ref.DocumentID,
 			},
-			Title: request.Title, Attachments: request.Attachments, EmailAccent: request.EmailAccent,
+			Title: request.Title, Attachments: request.Attachments, Color: request.Color, EmailAccent: request.EmailAccent,
 		})
 		if err != nil {
 			writeEditorJSONStoreError(w, err)

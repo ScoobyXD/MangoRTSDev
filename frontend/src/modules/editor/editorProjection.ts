@@ -122,6 +122,7 @@ export type EditorTextBlockContent = {
   attachments?: EditorChatAttachment[];
   emailMessageID?: string;
   emailMessageIDs?: string[];
+  color?: string;
   emailAccent?: string;
 };
 
@@ -269,6 +270,7 @@ export function parseEditorTextBlockContent(value: string): EditorTextBlockConte
     attachments: parseEditorChatAttachments(record.attachments),
     emailMessageID: emailMessageID || emailMessageIDs[0] || undefined,
     emailMessageIDs,
+    color: stringValue(record, "color") || undefined,
     emailAccent: stringValue(record, "email_accent") || undefined,
   };
 }
@@ -278,14 +280,18 @@ export function buildEditorTextBlockMetadataPayload(input: EditorTextBlockConten
   attachments: Record<string, unknown>[];
   email_message_id: string;
   email_message_ids: string[];
-  email_accent: string;
+  color?: string;
+  email_accent?: string;
 } {
+  const color = input.color?.trim().toUpperCase() ?? "";
+  const emailAccent = input.emailAccent?.trim() ?? "";
   return {
     title: input.title.trim(),
     attachments: normalizeChatAttachments(input.attachments ?? []).map(editorAttachmentReferencePayload),
     email_message_id: input.emailMessageID?.trim() ?? "",
     email_message_ids: uniqueStringList(input.emailMessageIDs ?? []),
-    email_accent: input.emailAccent?.trim() ?? "",
+    ...(color ? { color } : {}),
+    ...(emailAccent ? { email_accent: emailAccent } : {}),
   };
 }
 
