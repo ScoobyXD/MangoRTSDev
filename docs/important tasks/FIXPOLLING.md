@@ -433,6 +433,7 @@ The fresh work starts from the new current `main` after this decision record is 
 ### Current normal DEV deployment
 
 - The GitHub Actions **Run workflow** button has no rollout inputs.
+- The deployment job uses the existing trusted `main`-branch GitHub OIDC identity; it does not require a separate GitHub environment identity.
 - One run tests the backend, validates Terraform, builds the immutable backend image, creates one saved Terraform plan, applies that same plan, publishes the frontend, and runs smoke tests.
 - Normal DEV configuration is two API tasks, SQS enabled, the final schema confirmed, one private email worker enabled, and the reconciliation schedule disabled.
 - Queue age, backlog, worker count, and both DLQs always have CloudWatch alarms. Notification action ARNs are optional destinations for those alarms, not a deployment prerequisite.

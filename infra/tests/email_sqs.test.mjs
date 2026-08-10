@@ -105,7 +105,7 @@ test("DEV workflow is one normal input-free deployment", () => {
 	assert.match(devWorkflow, /EMAIL_SCHEMA_MIGRATED: "true"/);
 	assert.match(devWorkflow, /EMAIL_WORKER_ENABLED: "true"/);
 	assert.match(devWorkflow, /EMAIL_SCHEDULE_ENABLED: "false"/);
-	assert.match(devWorkflow, /environment: development/);
+	assert.doesNotMatch(devWorkflow, /environment:\s*development/);
 	assert.match(devWorkflow, /jobs:\s*\n\s*deploy:\s*\n\s*if: github\.ref == 'refs\/heads\/main'\s*\n\s*runs-on: ubuntu-latest/);
 	assert.match(devWorkflow, /terraform plan -out=tfplan/);
 	assert.match(devWorkflow, /terraform apply tfplan/);
