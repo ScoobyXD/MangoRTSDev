@@ -5,8 +5,8 @@
 3. An email thread belongs to a Node when that Node has a text box linked to any message in the thread.
 4. One stored email thread may belong to multiple Nodes, and one Node may contain multiple stored email threads.
 5. Attaching one message to a Node creates or reuses one exact text box for that message.
-6. A newly ingested message gets one exact linked text box in every Node that already contains its thread.
-7. New-message ingestion never copies a chat.
+6. A newly ingested message appears through the existing stored thread in every Node that already contains it without creating a new text box or email relationship.
+7. A new exact-message text box and relationship are created only when a user first sends a chat about that message in that Node.
 8. An email thread never links to a Node text box; only an exact email message may do so.
 9. One exact email message may link to at most one text box in each Node.
 10. The same exact email message may link to different text boxes in different Nodes.
@@ -29,7 +29,7 @@
 27. Shared draft body, recipients, attachments, revision, and editable **From** account are one universal state seen from triage and every related Node.
 28. A user may select only an authorized connected sending account in **From**, and send authorization is checked against that exact account.
 29. Reply and Reply All from any Node create or reopen the same universal thread draft instead of a Node-specific copy.
-30. A successfully sent reply becomes a new message in the same thread and gets one exact linked text box in every Node that already contains that thread.
+30. A successfully sent reply becomes a new message in the same stored thread in every related Node and creates no text box until a chat is sent about that exact reply.
 31. Closing a local draft panel never deletes the universal draft; discarding the draft removes it for every surface.
 32. An ordinary Node text box stores no color and uses the normal thin neutral frame; only a text box with an exact email relationship stores an approved non-red RGB `color`, and the interface uses that literal value without hashing an email ID. Red is reserved for a failed save.
 33. A consolidated Node view carries text-box metadata but not a duplicate canonical editor document body; each mounted editor reads its exact canonical document once.
@@ -45,7 +45,7 @@ A user attaches one exact email message to one or more Nodes
 ↓
 Each exact message is stored in one exact text box in each chosen Node, which makes the thread belong to those Nodes
 ↓
-Each later ingested message gets one exact text box in every Node that already contains the thread, without copying chat
+Each later ingested message appears through the same stored thread without creating a text box or relationship
 ↓
 One thread-global shared draft appears on demand in each related Node while its exact **From** account retains send authority
 
@@ -53,7 +53,7 @@ One thread-global shared draft appears on demand in each related Node while its 
 
 ## One thread in two Nodes
 
-The same stored thread appears in both Nodes because each has at least one exact message text box. A new message gets one new linked text box in both Nodes, but no chat is copied.
+The same stored thread appears in both Nodes because each has at least one exact message text box. A new message appears in both Node thread views without creating another text box. A text box is created only in a Node where a user sends a chat about that message.
 
 ## First chat on an unlinked message
 

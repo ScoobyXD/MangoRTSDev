@@ -4,7 +4,7 @@
 2. **Not Assigned** is stored as a null Node priority; numeric priorities remain limited to 1 through 5.
 3. A Node may be assigned to a Logic Gate while its priority is **Not Assigned**.
 4. An email thread belongs to a Node when that Node has a text box linked to any message in the thread; the same thread may belong to several Nodes.
-5. A newly ingested message gets one exact linked text box in every Node that already contains its thread.
+5. A newly ingested message appears through the existing stored thread in every Node that already contains it without creating a new text box or email relationship.
 6. Only an exact email message may link to a Node text box; a whole thread may not.
 7. One exact email message may link to at most one text box per Node and may link to a different text box in another Node.
 8. Every email chat in a Node belongs to one exact local text box, and that text box links to one exact email message.
@@ -22,7 +22,7 @@ One exact email message is attached to one or more Nodes whose priority may rema
 ↓
 Those exact message text boxes make the thread belong to those Nodes
 ↓
-Every newly ingested message gets one exact text box in each existing thread Node, and every chat remains owned by its exact Node and text box
+Every newly ingested message appears through the existing stored thread without creating a text box, and every chat remains owned by its exact Node and text box
 ↓
 When the local text box does not yet exist, the first send atomically creates the text box, exact email relationship, and chat
 ↓
@@ -57,13 +57,13 @@ Refreshing, relinking the same Project, opening the mail column, or clicking a c
 
 Last updated: 2026-08-07
 
-# Process Story: A stored email reply gets one exact text box in every existing thread Node
+# Process Story: A stored email reply updates every existing thread Node without a new text box
 
 A qualifying post-activation Inbox message identifies an exact stored email thread
 ↓
 Mango appends only missing/incomplete real provider messages and files
 ↓
-For each newly completed message, Mango inserts only one missing text box and exact `email_relationships` row in each Node already used by that thread
+Each newly completed message appears through the existing stored thread in every Node already using it, without a new text box or `email_relationships` row
 ↓
 Opening the Node reads the same updated durable thread; no completed sibling or chat is copied
 
@@ -263,7 +263,7 @@ N98 - My/Shared Triage and the email Node mount the same shared ChatPane over th
 N99 - An email-selection chat persists `selection_source=email`, exact provider message ID, trimmed quote, and valid offsets. A text-box selection in the node-wide email chat additionally persists `selection_block_id`, so chat navigation can focus the originating editor while email references still open the exact reply and quote.
 N100 - The email Node keeps the effective default and complete rules copied from its final source, while the creator and accepted mention participants receive permanent direct Edit access. The permissions surface cannot add/remove/replace those system-managed grants. Mention access is Node-chat access only: it grants authorized reads of the Mango-stored email snapshot attached to that Node, without requiring the viewer to own or access the source Nylas mailbox, and never changes provider recipients, delivery, CC/BCC, or subscription.
 N101 - A Triage-comment email Node receives no Company Explorer item and no initial Logic Gate assignment. Normal email conversions retain their established typed assignment behavior, and every primary-email-origin Node shares the email layout/icon contract even when created by drag.
-N102 - A qualifying post-activation Inbox message that arrives after a Node thread download is appended automatically by the durable webhook/checkpoint ingestion path. Mango imports only missing or incomplete real provider messages, then creates one exact linked message text box in each Node that already contains the thread without duplicating old messages or copying chats. Opening a Node remains provider-read-free, and a genuinely different mailbox/thread attached later becomes another left-pane browser tab.
+N102 - A qualifying post-activation Inbox message that arrives after a Node thread download is appended automatically by the durable webhook/checkpoint ingestion path. Mango imports only missing or incomplete real provider messages, and each Node already containing the thread shows the updated thread without a new text box, relationship, duplicated old message, or copied chat. Opening a Node remains provider-read-free, and a genuinely different mailbox/thread attached later becomes another left-pane browser tab.
 N103 - Clicking a persisted editor annotation highlight with no active text selection opens the owning text block's chat, expands the required thread, scrolls the exact stable comment ID into view, and moves accessible focus to that comment with a visible focus state. Multiple annotations resolve independently; normal selection, editing, keyboard behavior, and chat-to-text highlighting remain unchanged.
 N104 - Attached-email message cards list every attachment not actually referenced by the message body's normalized CID set. Both conversion-to-Node and attach-to-existing-Node retain immutable source mailbox/message/thread identity, while imported bodies, inline images, signatures, and ordinary attachment bytes are stored in Mango-owned email/attachment storage. Node collaborators read those stored copies through Node authorization; provider bytes are never embedded in the editable Node JSON projection.
 N105 - Reply and Reply All from an attached-email Node viewer load the signature for that retained exact mailbox scope and append it once to the live reply. Send fences on an outstanding scope-matched load and signs the flushed submitted body before provider submission. A late load preserves typed content, switching reply modes or rerendering does not duplicate it, and deliberate draft content is never replaced wholesale.
@@ -767,7 +767,7 @@ Expected:
 - The email and Node mounts show the same durable chat IDs and shared ChatPane behavior, including parent indentation, anchor navigation, mentions, attachments, deletion ownership, and Node chat reconciliation.
 - The creator and mentioned participant keep direct edit access while nonparticipants are denied.
 - The verified webhook or rare bounded checkpoint reconciliation enqueues the future provider message without downloading inside the request or requiring either participant to open Mango.
-- The background worker reuses the mailbox-scoped durable thread, appends each missing real provider message once, and creates one exact linked message text box in every existing thread Node without copying any chat.
+- The background worker reuses the mailbox-scoped durable thread and appends each missing real provider message once. Every existing thread Node shows the updated thread without creating a text box or chat.
 
 ### Scenario N-S20: Annotation Navigation, Attached Files, And Reply Signature
 
@@ -835,7 +835,7 @@ N123 - Updates deep links use the verification stamp event ID, and the Node edit
 
 N124 - Hashtag destination submission and first email-chat creation share the established import transaction. The selected Nylas message is fetched, identity-validated, stored completely, attached to the Node, and returned for immediate rendering before the request succeeds. The rest of the current provider thread is downloaded only by a durable retryable background job created atomically with the import.
 N125 - A Node email source is deduplicated by company plus immutable personal/shared mailbox scope plus Nylas thread ID, falling back to the exact Nylas message ID only when no thread ID exists. Messages are deduplicated inside that scope by Nylas message ID. Repeated and concurrent imports reuse the same durable thread/message/Node link/job; subject, sender, recipients, timestamps, and body similarity never establish identity.
-N126 - A qualifying later Inbox message from an already stored thread automatically appends only missing/incomplete real provider messages and files to the existing durable thread and preserves stable IDs/order for old messages. Every newly completed message gets one exact linked text box in each Node that already contains the thread. It does not redownload completed messages, copy chats, or create any Node relationship when the thread is unplaced.
+N126 - A qualifying later Inbox message from an already stored thread automatically appends only missing/incomplete real provider messages and files to the existing durable thread and preserves stable IDs/order for old messages. Every Node already containing the thread shows the newly completed message through that thread without creating a new text box or email relationship. It does not redownload completed messages, copy chats, or create any Node relationship when the thread is unplaced.
 N127 - `ingestion_job_id` is the one durable ingestion identity for the exact company/connection/provider message. PostgreSQL stores accepted, processing, completed, parked, or exhausted result state, provider-attempt count, exact attempt-token fence, optional thread ID, SQS acceptance observation, and a safe error. SQS alone owns delivery, ten-minute visibility, redelivery, receive count, and DLQ movement; the worker owns an eight-minute attempt deadline and refuses provider start 4. There is no database lease, next-attempt field, claimant, heartbeat, or automatic DLQ replay. Reconciliation creates and sends only genuinely missing stable jobs and sends nothing for any existing job. A failed attachment does not hide the trigger message or completed sibling messages/files.
 N128 - The durable email tables store immutable HTML/body and message envelope metadata; private Mango attachment storage stores ordinary files, inline CID images, and signature assets. The editable Node JSON stores only stable email/thread/message/Mango-attachment references. Node rendering sanitizes stored HTML, orders message cards by timestamp and Nylas message ID, and never needs the viewing collaborator's Nylas account.
 N129 - The Node email column renders the selected stored message immediately with an explicit thread-download status. While the durable job runs, successfully downloaded messages/files may appear without blanking the conversation. Partial/retry/failed states remain readable and expose a retryable status; successful completion means complete as of that user-initiated download, not permanently synchronized with the provider.

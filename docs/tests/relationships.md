@@ -6,8 +6,8 @@
 4. One exact email message may have at most one text-box relationship in each Node.
 5. The same exact email message may link to different text boxes in different Nodes.
 6. An email thread belongs to a Node when that Node has at least one text box linked to a message in the thread.
-7. A newly completed message gets one exact linked text box in every Node that already contains its thread.
-8. New-message ingestion never copies a chat or shared-draft display state.
+7. A newly completed message updates the stored thread shown in every Node that already contains it and creates no new text box or email relationship.
+8. A new exact-message text box and relationship are created only when a user first sends a chat about that message in that Node.
 9. An email-selection chat is valid only when the exact internal email message has an `email_relationships` row for that chat's exact Node and text box.
 10. Opening an email-selection chat preview creates no text box, email relationship, or chat relationship.
 11. Sending the first chat from an email-selection preview atomically creates the exact Node-local text box, email-to-textbox relationship, and text-box chat, or creates none of them.
@@ -27,7 +27,7 @@ A stored email thread may have exact message-to-text-box `email_relationships` i
 ↓
 The thread belongs to each Node containing at least one of those exact message text boxes
 ↓
-Each newly completed message gets one exact linked text box in every Node that already contains the thread
+Each newly completed message appears through that stored thread without creating another text box or relationship
 ↓
 Opening a highlighted-email chat preview creates no relationship or resource
 ↓
@@ -82,15 +82,15 @@ The picker and clickable header chips remain presentation only and never become 
 
 Last updated: 2026-08-07
 
-# Process Story: A completed email message gets exact text boxes in existing thread Nodes
+# Process Story: A completed email message updates existing thread Nodes without new text boxes
 
 A qualifying Inbox arrival reconciles a stored email thread
 ↓
 Mango identifies the exact newly completed `email_messages.email_message_id`
 ↓
-Inside that message transaction, Mango finds the distinct Nodes that already have an exact message text box for the same company/thread
+Every Node that already contains the thread reads the newly stored message through that same thread
 ↓
-One missing text box and typed email relationship are inserted idempotently for the new message in each Node
+No text box or email relationship is created for the new message until a user sends a chat about it in a chosen Node
 ↓
 No Node is guessed, no access is granted, no chat is copied, and an unplaced thread remains unplaced
 
@@ -381,11 +381,11 @@ Node search location derives only from exact source relationships: a fully visib
 
 Removing historical Node placement rows or their now-empty deterministic folder MUST NOT delete a Node, Logic Gate assignment, Project relationship, email relationship, attachment relationship, chat ownership, RACI assignment, permission, or any other endpoint or typed edge.
 
-### Law 29 — New email messages get one exact text box in every existing thread Node
+### Law 29 — New email messages update existing thread Nodes without creating text boxes
 
-When a provider message becomes completely stored under an existing `email_thread_id`, Mango MUST atomically create one missing Node text box and its `email_relationships` row in every distinct Node where the same company/thread already has an exact message-to-text-box relationship. The new relationship MUST use the exact stored `email_message_id`, exact Node ID, exact text-box ID, exact company, and canonical `node` type.
+When a provider message becomes completely stored under an existing `email_thread_id`, every Node that already contains that thread MUST see the message through the existing stored thread. Ingestion MUST NOT create a Node text box or `email_relationships` row for the new message.
 
-This propagation is idempotent and MUST NOT recopy an existing message, invent a Node for an unplaced thread, copy a chat or draft, grant permissions or RACI, or create a Project/Logic-Gate relationship. The message upsert and all missing text boxes and relationships commit or roll back together.
+The first chat about that exact message in a chosen Node MUST atomically create the missing exact-message text box, typed email relationship, and chat. Ingestion MUST NOT invent a Node, copy a chat or draft, grant permissions or RACI, or create a Project/Logic-Gate relationship.
 
 ### Law 30 — Policy parentage reuses canonical typed relationships
 

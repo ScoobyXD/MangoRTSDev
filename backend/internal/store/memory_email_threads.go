@@ -204,31 +204,6 @@ func (r *MemoryRepo) upsertCommunicationsEmailThreadLocked(input CommunicationsE
 			Message: snapshot, CreatedTimestamp: now, UpdatedTimestamp: now,
 		})
 	}
-	for _, snapshot := range input.Messages {
-		if !snapshot.DownloadComplete {
-			continue
-		}
-		for _, placement := range r.nodeEmailThreads {
-			if placement.CompanyID != input.CompanyID || placement.EmailThreadID != threadID {
-				continue
-			}
-			userID := thread.PersonalUserID
-			link := communicationsEmailNodeLink{
-				CompanyID: input.CompanyID, UserID: userID, SharedInboxID: thread.SharedInboxID,
-				AccountEmail: thread.AccountEmail, MessageID: snapshot.ID, NodeID: placement.NodeID,
-				Message: snapshot, CreatedTimestamp: now, UpdatedTimestamp: now,
-			}
-			r.emailNodeLinks[emailNodeAttachmentLinkKey(input.CompanyID, userID, snapshot.ID, placement.NodeID)] = link
-			for _, storedMessage := range thread.Messages {
-				if storedMessage.ProviderMessageID == snapshot.ID {
-					r.ensureMemoryEmailMessageTextboxLocked(
-						input.CompanyID, placement.NodeID, storedMessage.EmailMessageID, storedMessage.Message.Subject, "", now,
-					)
-					break
-				}
-			}
-		}
-	}
 	sort.Slice(thread.Messages, func(i, j int) bool {
 		left, right := thread.Messages[i], thread.Messages[j]
 		if left.Message.Date != right.Message.Date {

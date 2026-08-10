@@ -303,40 +303,6 @@ do update set
 			foldersJSON, folderIDsJSON, attachmentsJSON, message.DownloadComplete); err != nil {
 			return domain.CommunicationsEmailThread{}, err
 		}
-		if message.DownloadComplete {
-			rows, err := tx.QueryContext(ctx, `
-select distinct resource_id::text
-from email_relationships
-where company_id=$1::uuid and email_thread_id=$2::uuid
-  and resource_type='node' and resource_textbox_id is not null
-order by resource_id::text`, input.CompanyID, emailThreadID)
-			if err != nil {
-				return domain.CommunicationsEmailThread{}, err
-			}
-			destinationNodeIDs := make([]string, 0)
-			for rows.Next() {
-				var destinationNodeID string
-				if err := rows.Scan(&destinationNodeID); err != nil {
-					rows.Close()
-					return domain.CommunicationsEmailThread{}, err
-				}
-				destinationNodeIDs = append(destinationNodeIDs, destinationNodeID)
-			}
-			if err := rows.Err(); err != nil {
-				rows.Close()
-				return domain.CommunicationsEmailThread{}, err
-			}
-			if err := rows.Close(); err != nil {
-				return domain.CommunicationsEmailThread{}, err
-			}
-			for _, destinationNodeID := range destinationNodeIDs {
-				if _, _, err := ensurePostgresEmailMessageNodeTextboxTx(
-					ctx, tx, input.CompanyID, destinationNodeID, emailThreadID, message.ID, "", "",
-				); err != nil {
-					return domain.CommunicationsEmailThread{}, err
-				}
-			}
-		}
 	}
 	if _, err := tx.ExecContext(ctx, `
 with ordered as (
