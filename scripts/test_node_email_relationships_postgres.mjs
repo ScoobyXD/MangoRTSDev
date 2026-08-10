@@ -70,7 +70,7 @@ function scalar(statement) {
   return result.stdout.trim();
 }
 
-function installShape({ extraRelationshipColumn = false, duplicateEdge = false } = {}) {
+function installShape({ extraRelationshipColumn = false, duplicateEdge = false, legacyChats = false, conflictingLegacyChats = false, unsafeConflictingLegacyChats = false } = {}) {
   sql("drop schema public cascade; create schema public");
   sql(`
     create table email_threads(company_id uuid not null,email_thread_id uuid not null,primary key(company_id,email_thread_id));
@@ -79,6 +79,9 @@ function installShape({ extraRelationshipColumn = false, duplicateEdge = false }
       foreign key(company_id,email_thread_id) references email_threads(company_id,email_thread_id));
     create table nodes(node_id uuid not null,company_id uuid not null,priority smallint,primary key(company_id,node_id));
     create table node_textboxes(textbox_id uuid not null,company_id uuid not null,node_id uuid not null,
+      body_json jsonb not null default '{"format":"mango-tiptap-json","schema_version":"1","document":{"type":"doc","content":[{"type":"paragraph"}]},"annotations":[]}',
+      revision bigint not null default 1,display_order bigint not null default 0,created_timestamp timestamptz not null default now(),
+      updated_timestamp timestamptz not null default now(),deleted_timestamp timestamptz,
       primary key(company_id,node_id,textbox_id),foreign key(company_id,node_id) references nodes(company_id,node_id));
     create table node_logic_gate_assignments(company_id uuid);
     create table email_relationships(
@@ -106,7 +109,7 @@ function installShape({ extraRelationshipColumn = false, duplicateEdge = false }
     insert into nodes values
       ('40000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001',null),
       ('40000000-0000-0000-0000-000000000002','10000000-0000-0000-0000-000000000001',null);
-    insert into node_textboxes values
+    insert into node_textboxes(textbox_id,company_id,node_id) values
       ('50000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001'),
       ('50000000-0000-0000-0000-000000000002','10000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001'),
       ('50000000-0000-0000-0000-000000000003','10000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000002');
@@ -115,6 +118,24 @@ function installShape({ extraRelationshipColumn = false, duplicateEdge = false }
       ('node','30000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000001','60000000-0000-0000-0000-000000000002');
   `);
   if (duplicateEdge) sql("insert into email_relationships select resource_type,email_message_id,company_id,created_timestamp,resource_textbox_id,resource_id,email_thread_id,'60000000-0000-0000-0000-000000000099' from email_relationships where email_relationship_id='60000000-0000-0000-0000-000000000001'");
+  if (legacyChats || conflictingLegacyChats || unsafeConflictingLegacyChats) sql(`
+    insert into node_textbox_chats(company_id,chat_id,node_id,textbox_id,selection_source,selection_email_message_id,message) values
+      ('10000000-0000-0000-0000-000000000001','70000000-0000-0000-0000-000000000010','40000000-0000-0000-0000-000000000001','50000000-0000-0000-0000-000000000001','email','30000000-0000-0000-0000-000000000001','legacy A'),
+      ('10000000-0000-0000-0000-000000000001','70000000-0000-0000-0000-000000000011','40000000-0000-0000-0000-000000000001','50000000-0000-0000-0000-000000000001','email','30000000-0000-0000-0000-000000000001','legacy B')
+  `);
+  if (legacyChats) sql(`
+    insert into node_textbox_chats(company_id,chat_id,node_id,textbox_id,selection_source,selection_email_message_id,message) values
+      ('10000000-0000-0000-0000-000000000001','70000000-0000-0000-0000-000000000012','40000000-0000-0000-0000-000000000002','50000000-0000-0000-0000-000000000003','email','30000000-0000-0000-0000-000000000001','legacy other Node')
+  `);
+  if (conflictingLegacyChats || unsafeConflictingLegacyChats) sql(`
+    insert into node_textbox_chats(company_id,chat_id,node_id,textbox_id,selection_source,selection_email_message_id,message) values
+      ('10000000-0000-0000-0000-000000000001','70000000-0000-0000-0000-000000000013','40000000-0000-0000-0000-000000000001','50000000-0000-0000-0000-000000000002','email','30000000-0000-0000-0000-000000000001','conflicting legacy chat')
+  `);
+  if (unsafeConflictingLegacyChats) sql(`
+    update node_textboxes
+    set body_json='{"format":"mango-tiptap-json","schema_version":"1","document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"keep this work"}]}]},"annotations":[]}'
+    where textbox_id='50000000-0000-0000-0000-000000000002'
+  `);
 }
 
 try {
@@ -130,6 +151,32 @@ try {
   installShape();
   runMigration();
   if (scalar("select count(distinct resource_id) from email_relationships where email_thread_id='20000000-0000-0000-0000-000000000001'") !== "2") throw new Error("valid multi-Node thread was not preserved");
+  runMigration();
+
+  console.log("checking safe repair of older email chats");
+  installShape({ legacyChats: true });
+  runMigration();
+  if (scalar("select count(*) from email_relationships where resource_type='node' and resource_textbox_id is not null") !== "2") throw new Error("older email chats did not create exactly two missing textbox relationships");
+  if (scalar("select count(*) from node_textbox_chats where selection_source='email'") !== "3") throw new Error("older email chats were changed during relationship repair");
+  runMigration();
+  if (scalar("select count(*) from email_relationships where resource_type='node' and resource_textbox_id is not null") !== "2") throw new Error("repeated migration duplicated repaired textbox relationships");
+
+  console.log("checking safe consolidation of duplicate older chat textboxes");
+  installShape({ conflictingLegacyChats: true });
+  runMigration();
+  if (scalar("select count(distinct textbox_id) from node_textbox_chats where selection_source='email'") !== "1") throw new Error("duplicate older chat textboxes were not safely consolidated");
+  if (scalar("select count(*) from node_textbox_chats where selection_source='email'") !== "3") throw new Error("safe chat textbox consolidation removed a chat");
+  if (scalar("select count(*) from node_textboxes") !== "3") throw new Error("safe chat textbox consolidation removed a textbox");
+  if (scalar("select count(*) from email_relationships where resource_textbox_id is not null") !== "1") throw new Error("safe chat textbox consolidation did not create one exact relationship");
+
+  console.log("checking nonempty conflicting textbox rollback");
+  installShape({ unsafeConflictingLegacyChats: true });
+  const unsafeConflictingOutput = runMigration(true);
+  if (!unsafeConflictingOutput.includes("email_message_chat_textbox_repair_requires_review")) throw new Error("nonempty conflicting textbox did not stop with the expected reason");
+  if (scalar("select count(distinct textbox_id) from node_textbox_chats where selection_source='email'") !== "2") throw new Error("nonempty conflicting textbox STOP moved a chat");
+  if (scalar("select count(*) from email_relationships where resource_textbox_id is not null") !== "0") throw new Error("nonempty conflicting textbox STOP changed relationships");
+
+  installShape();
   runMigration();
 
   sql("insert into email_relationships values ('node','30000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001',now(),'50000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','60000000-0000-0000-0000-000000000003')");
