@@ -865,7 +865,7 @@ N141 - Creating a Node's first exact Project relationship atomically creates one
 
 N142 - A stored email thread may have Node-wide `email_relationships` in more than one Node. A textbox-specific email relationship names one exact message, Node, and textbox; the same message is limited to one textbox in a Node but may use a different textbox in another Node. Repeating the exact Node/message/textbox command converges to its existing edge, while a different textbox in that Node is rejected. Removing one Node's email edge never removes another Node's edge, textbox, chat, stored email truth, or surviving attachment relationship.
 
-N143 - A Node text box stores its title and one approved non-red RGB `color` on its exact `node_textboxes` row. Creation writes that literal color, every read returns it, and the interface never hashes an email ID or repairs a missing color. Red is reserved for a failed-save state.
+N143 - An ordinary Node text box has `color = null` and uses the normal thin neutral frame. Only a text box with an exact email relationship stores an approved non-red RGB `color`; the interface uses that literal value and never hashes an email ID. Red is reserved for a failed-save state.
 
 N144 - A consolidated Node view returns text-box identity, order, metadata, typed links, attachments, chats, and revision without duplicating the canonical editor document body. The exact editor document endpoint remains the document-body authority.
 

@@ -304,7 +304,7 @@ where company_id=$1::uuid and attachment_id=$2::uuid`, company.CompanyID, attach
 	}
 }
 
-func TestPostgresNodeTextboxTitleAndColorPersistWithoutDuplicatingDocumentInNodeView(t *testing.T) {
+func TestPostgresOrdinaryNodeTextboxTitlePersistsWithNoColor(t *testing.T) {
 	db, repo := openRealtimePostgresIntegration(t)
 	company, err := repo.CreateCompany("Node textbox metadata integration")
 	if err != nil {
@@ -319,7 +319,6 @@ func TestPostgresNodeTextboxTitleAndColorPersistWithoutDuplicatingDocumentInNode
 	metadata, err := repo.UpdateEditorJSONMetadata(EditorJSONMetadataInput{
 		Document: EditorDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID, DocumentID: textboxID},
 		Title:    "Stored title",
-		Color:    "#14B8A6",
 	})
 	if err != nil || metadata.ProjectionRevision != 1 {
 		t.Fatalf("metadata=%+v err=%v", metadata, err)
@@ -340,7 +339,7 @@ func TestPostgresNodeTextboxTitleAndColorPersistWithoutDuplicatingDocumentInNode
 		t.Fatalf("projections=%+v err=%v", projections, err)
 	}
 	if !strings.Contains(projections[0].Information, `"title": "Stored title"`) ||
-		!strings.Contains(projections[0].Information, `"color": "#14B8A6"`) ||
+		!strings.Contains(projections[0].Information, `"color": ""`) ||
 		strings.Contains(projections[0].Information, `"email_accent"`) ||
 		!strings.Contains(projections[0].Information, "private canonical marker") {
 		t.Fatalf("full projection lost metadata or document: %s", projections[0].Information)
@@ -351,7 +350,11 @@ func TestPostgresNodeTextboxTitleAndColorPersistWithoutDuplicatingDocumentInNode
 	}
 	if strings.Contains(view.Projections[0].Information, "private canonical marker") ||
 		!strings.Contains(view.Projections[0].Information, `"title": "Stored title"`) ||
-		!strings.Contains(view.Projections[0].Information, `"color": "#14B8A6"`) {
+		!strings.Contains(view.Projections[0].Information, `"color": ""`) {
 		t.Fatalf("Node view projection carried the wrong payload: %s", view.Projections[0].Information)
+	}
+	var colorMissing bool
+	if err := db.QueryRow(`select color is null from node_textboxes where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid`, company.CompanyID, node.NodeID, textboxID).Scan(&colorMissing); err != nil || !colorMissing {
+		t.Fatalf("ordinary Node textbox color is null=%v err=%v", colorMissing, err)
 	}
 }

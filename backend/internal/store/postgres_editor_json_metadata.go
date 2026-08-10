@@ -61,7 +61,7 @@ func (r *PostgresRepo) UpdateEditorJSONMetadata(input EditorJSONMetadataInput) (
 		}
 		err = tx.QueryRowContext(ctx, `
 			update node_textboxes
-			set title=$4,color=$5,revision=revision+1,
+			set title=$4,color=nullif($5,''),revision=revision+1,
 			    updated_timestamp=greatest(clock_timestamp(),created_timestamp)
 			where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid
 			  and deleted_timestamp is null

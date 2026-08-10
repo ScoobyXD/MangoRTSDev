@@ -31,7 +31,7 @@ func nodeTextboxFromProjectionInformation(information string) (json.RawMessage, 
 	}
 	payload.Title = strings.TrimSpace(payload.Title)
 	payload.Color = strings.ToUpper(strings.TrimSpace(payload.Color))
-	if len(payload.Title) > 500 || !validNodeTextboxColor(payload.Color) {
+	if len(payload.Title) > 500 || (payload.Color != "" && !validNodeTextboxColor(payload.Color)) {
 		return nil, "", "", ErrInvalid
 	}
 	document := payload.Document
@@ -65,7 +65,7 @@ const postgresNodeTextboxProjectionSelectFormat = `
 select textbox.company_id::text, textbox.node_id::text, textbox.textbox_id::text, 'Text box',
 	       $3 || jsonb_build_object(
 	         'title', textbox.title,
-	         'color', textbox.color,
+	         'color', coalesce(textbox.color, ''),
 	         'document', %s,
          'email_message_id', coalesce(linked_email.email_message_id, ''),
          'email_message_ids', coalesce(linked_email.email_message_ids, '[]'::jsonb),

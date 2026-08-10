@@ -85,7 +85,7 @@ Last updated: 2026-08-08
 9. Sending the first temporary email chat atomically creates the Node text box, exact email-message relationship, and chat before the interface becomes a normal saved text box.
 10. One exact email message may link to at most one text box in each Node and may link to a different text box in another Node.
 11. Every email chat remains local to its exact Node, exact text box, and exact linked email message.
-12. Node text-box metadata saves persist the title and one approved non-red RGB `color` on the exact `node_textboxes` row; every creation path writes the literal color, and Node rendering never hashes an email ID or repairs color. Red is reserved for failed-save feedback.
+12. An ordinary Node text box stores no color and uses the normal thin neutral frame. Only a Node text box with an exact email relationship may store an approved non-red RGB `color`; Node rendering uses that literal value and never hashes an email ID. Red is reserved for failed-save feedback.
 13. The consolidated Node projection supplies text-box identity, order, metadata, links, and revision without copying the canonical editor document body.
 14. A visible editor completes its initial canonical read before subscribing for later realtime recovery, so socket acceptance cannot duplicate the initial document read.
 15. Every attached-email thread starts collapsed and loads its body and shared-draft state only when that exact thread is opened.

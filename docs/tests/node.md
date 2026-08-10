@@ -31,7 +31,7 @@
 29. Reply and Reply All from any Node create or reopen the same universal thread draft instead of a Node-specific copy.
 30. A successfully sent reply becomes a new message in the same thread and inherits every Node-wide destination for that thread.
 31. Closing a local draft panel never deletes the universal draft; discarding the draft removes it for every surface.
-32. A Node text box stores its title and one approved non-red RGB `color` on that exact `node_textboxes` row; creation writes the literal color, reads return it, and the interface never hashes an email ID or repairs color. Red is reserved for a failed save.
+32. An ordinary Node text box stores no color and uses the normal thin neutral frame; only a text box with an exact email relationship stores an approved non-red RGB `color`, and the interface uses that literal value without hashing an email ID. Red is reserved for a failed save.
 33. A consolidated Node view carries text-box metadata but not a duplicate canonical editor document body; each mounted editor reads its exact canonical document once.
 34. Concurrent identical shared-draft and stored-thread reads share one request, while a committed realtime change forces a fresh canonical read.
 35. Every attached-email thread starts collapsed when a Node opens and performs no thread-body or shared-draft read until the user opens that exact thread.

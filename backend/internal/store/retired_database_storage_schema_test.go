@@ -94,6 +94,7 @@ func TestRetiredDatabaseStorageIsAbsentFromCanonicalSchemaAndStrictlyDropped(t *
 		"target_json_sha256",
 		"conversion_run_id",
 		"email_accent",
+		"color text not null",
 	} {
 		if strings.Contains(nodeBlock, forbidden) {
 			t.Errorf("canonical node_textboxes retains obsolete column %s", forbidden)
@@ -101,7 +102,7 @@ func TestRetiredDatabaseStorageIsAbsentFromCanonicalSchemaAndStrictlyDropped(t *
 	}
 	for _, required := range []string{
 		"body_json jsonb not null",
-		"color text not null default '#0ea5e9'",
+		"color text,",
 		"constraint node_textboxes_color_chk check",
 		"revision bigint not null default 0",
 		"display_order bigint not null default 0",
@@ -109,6 +110,21 @@ func TestRetiredDatabaseStorageIsAbsentFromCanonicalSchemaAndStrictlyDropped(t *
 	} {
 		if !strings.Contains(schema, required) {
 			t.Errorf("canonical schema missing retained structure %q", required)
+		}
+	}
+	colorRepairBytes, err := os.ReadFile("../../db/migrations/20260810_zzz_node_textbox_email_only_color.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	colorRepair := strings.ToLower(string(colorRepairBytes))
+	for _, required := range []string{
+		"alter column color drop default",
+		"alter column color drop not null",
+		"set color = null",
+		"relationship.resource_textbox_id = textbox.textbox_id::text",
+	} {
+		if !strings.Contains(colorRepair, required) {
+			t.Errorf("Node textbox email-only color repair missing %q", required)
 		}
 	}
 }

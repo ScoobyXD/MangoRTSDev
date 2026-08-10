@@ -33,10 +33,7 @@ import {
   type TextBlockSelectionAnchor,
 } from "../../modules/editor/NodeWorkspaceSurfaceShared";
 import { generateStableInformationID } from "../../modules/editor/editorTypes";
-import {
-  DEFAULT_NODE_TEXT_BLOCK_COLOR,
-  nextNodeTextBlockColor,
-} from "../../modules/editor/nodeTextBlockCreation";
+import { nextNodeTextBlockColor } from "../../modules/editor/nodeTextBlockCreation";
 import {
   getNodeInformationProjectionSingleFlight,
   invalidateNodeRecordStoreCaches,
@@ -977,7 +974,7 @@ export function EmailCollaborationChatSurface({
             document: "",
             attachments: [],
             emailMessageID: placeholderMessageID,
-            color: DEFAULT_NODE_TEXT_BLOCK_COLOR,
+            color: nextNodeTextBlockColor([]),
           }),
         },
         initialChat: pending.write,
