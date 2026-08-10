@@ -90,6 +90,7 @@ Last updated: 2026-08-08
 14. A visible editor completes its initial canonical read before subscribing for later realtime recovery, so socket acceptance cannot duplicate the initial document read.
 15. Every attached-email thread starts collapsed and loads its body and shared-draft state only when that exact thread is opened.
 16. The shared chat pane scrolls to the bottom only when a newly added message is authored by the current user.
+17. When React Strict Mode replaces an editor sync during preparation, only the current replacement sync may mark that editor ready.
 
 Last updated: 2026-08-10
 
