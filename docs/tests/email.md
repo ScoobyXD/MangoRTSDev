@@ -32,6 +32,7 @@
 30. Closing a local draft panel does not delete the universal draft; discarding the draft removes it for every surface.
 31. Opening, closing, or refreshing the triage chat rail does not restart or revoke an unchanged inline email image source.
 32. A triage chat send reuses the exact mailbox-scoped stored message when present, otherwise fetches and stores only that exact provider message, and never calls triage conversion or queues remaining-thread ingestion.
+33. After the backend acknowledges a My Triage or Shared Triage chat, the open rail shows it immediately in its exact Node and text-box group without waiting for realtime or another Node read.
 
 Last updated: 2026-08-10
 

@@ -10,6 +10,7 @@ import {
   EDITOR_TEXT_BLOCK_TYPE,
 } from "../../../../frontend/src/modules/editor/editorProjection.js";
 import {
+  appendAcknowledgedEmailCollaborationChat,
   buildEmailCollaborationParticipantRoster,
   emailNodeImportRequired,
   emailCollaborationChatSessionMounted,
@@ -20,6 +21,28 @@ import {
   resolveEmailCollaborationChatPlacement,
   type EmailCollaborationChatSession,
 } from "../../../../frontend/src/pages/home/emailCollaborationChat.js";
+
+test("an acknowledged triage chat appears immediately and is not duplicated by realtime", () => {
+  const existing = {
+    id: "chat-1",
+    blockID: "text-box-1",
+    authorID: "user-1",
+    authorName: "Test User",
+    message: "first",
+    createdTimestamp: "2026-08-10T08:00:00.000Z",
+    attachments: [],
+  };
+  const acknowledged = {
+    ...existing,
+    id: "chat-2",
+    message: "second",
+    createdTimestamp: "2026-08-10T08:01:00.000Z",
+  };
+
+  const appended = appendAcknowledgedEmailCollaborationChat([existing], acknowledged);
+  assert.deepEqual(appended.map((message) => message.id), ["chat-1", "chat-2"]);
+  assert.strictEqual(appendAcknowledgedEmailCollaborationChat(appended, acknowledged), appended);
+});
 
 test("provider-only email rows import before requiring an internal email message ID", () => {
   assert.equal(emailNodeImportRequired("node-1", "", ""), true, "first import into an existing Node");
@@ -226,6 +249,9 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(surface, /const submit = React\.useCallback\(async \(\) =>[\s\S]*collaborations\.length > 1 && !collaboration[\s\S]*ensureEmailCollaboration\(\{[\s\S]*linkedTextBlock:[\s\S]*initialChat:/);
   assert.doesNotMatch(surface, /Choose email node priority|setPriorityMenuOpen|data-email-action-popover|aria-label="Close email comments"/);
   assert.match(surface, /const importedCollaborations = await listEmailCollaborations/);
+  assert.match(surface, /setMessages\(\(current\) => appendAcknowledgedEmailCollaborationChat\(current, acknowledgedChat\)\)/);
+  assert.match(surface, /setSectionKeysByChatID\(\(current\) => \(\{ \.\.\.current, \[acknowledgedChat\.id\]: sectionKey \}\)\)/);
+  assert.match(surface, /setActiveMessageID\(acknowledgedChat\.id\)/);
   assert.doesNotMatch(surface, /parseEditorAttachedEmails|resolveEmailCollaboration\(/);
 
   assert.match(destinationSearch, /<UniversalEntityPicker[\s\S]*sourceLabel="Email"[\s\S]*initialMode="link"/);

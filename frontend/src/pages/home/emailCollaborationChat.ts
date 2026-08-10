@@ -82,6 +82,17 @@ export type EmailCollaborationChatPlacement = {
   messages: EditorTextBlockChatMessage[];
 };
 
+export function appendAcknowledgedEmailCollaborationChat(
+  current: EditorTextBlockChatMessage[],
+  acknowledged: EditorTextBlockChatMessage,
+): EditorTextBlockChatMessage[] {
+  if (current.some((message) => message.id === acknowledged.id)) return current;
+  return [...current, acknowledged].sort((left, right) => {
+    const created = left.createdTimestamp.localeCompare(right.createdTimestamp);
+    return created !== 0 ? created : left.id.localeCompare(right.id);
+  });
+}
+
 /**
  * Resolves one email message to its real text-box chat. The Attached email
  * projection is only a legacy read fallback; it is never returned as the
