@@ -1111,7 +1111,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       try {
         sync.setRealtimeVisible(visibleRef.current);
         await sync.start();
-        lifecycleRef.current.finishPreparation();
+        if (syncRef.current === sync) lifecycleRef.current.finishPreparation();
       } catch (cause) {
         syncStartedRef.current = false;
         syncPreparationRef.current = null;
