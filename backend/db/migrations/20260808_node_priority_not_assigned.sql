@@ -45,15 +45,37 @@ begin
   ]::text[] then
     raise exception 'STOP: node_textbox_chats exact column set drifted';
   end if;
+
+  select array_agg(attname) into actual_columns
+  from pg_attribute
+  where attrelid='public.node_textboxes'::regclass and attnum>0 and not attisdropped;
+  if cardinality(actual_columns)<>9 or not actual_columns @> array[
+    'body_json','company_id','created_timestamp','deleted_timestamp','display_order',
+    'node_id','revision','textbox_id','updated_timestamp'
+  ]::text[] then
+    raise exception 'STOP: node_textboxes exact column set drifted';
+  end if;
 end;
 $$;
 
 lock table email_relationships in share row exclusive mode;
+lock table node_textboxes in share row exclusive mode;
 lock table node_textbox_chats in share row exclusive mode;
 lock table email_drafts in share row exclusive mode;
 
 do $$
 begin
+  if exists (
+    select 1
+    from email_relationships relationship
+    group by relationship.company_id,relationship.email_message_id,
+             relationship.resource_type,relationship.resource_id,
+             coalesce(relationship.resource_textbox_id,'')
+    having count(*)>1
+  ) then
+    raise exception 'STOP: duplicate_email_semantic_edge';
+  end if;
+
   if exists (
     select 1
     from email_relationships relationship
@@ -65,6 +87,232 @@ begin
     raise exception 'STOP: email_message_linked_to_multiple_textboxes_in_one_node';
   end if;
 
+  if exists (
+    with conflict_keys as (
+      select chat.company_id,chat.node_id,chat.selection_email_message_id
+      from node_textbox_chats chat
+      where chat.selection_source='email'
+        and chat.deleted_timestamp is null
+      group by chat.company_id,chat.node_id,chat.selection_email_message_id
+      having count(distinct chat.textbox_id)>1
+    )
+    select 1
+    from conflict_keys conflict
+    join node_textbox_chats chat
+      on chat.company_id=conflict.company_id
+     and chat.node_id=conflict.node_id
+     and chat.selection_email_message_id=conflict.selection_email_message_id
+    join node_textboxes textbox
+      on textbox.company_id=chat.company_id
+     and textbox.node_id=chat.node_id
+     and textbox.textbox_id=chat.textbox_id
+    where chat.selection_source='email'
+      and chat.deleted_timestamp is null
+      and (
+        textbox.deleted_timestamp is not null
+        or textbox.body_json->'document' is distinct from '{"type":"doc","content":[{"type":"paragraph"}]}'::jsonb
+        or textbox.body_json->'annotations' is distinct from '[]'::jsonb
+        or chat.parent_chat_id is not null
+        or exists (
+          select 1
+          from node_textbox_chats child
+          where child.company_id=chat.company_id
+            and child.node_id=chat.node_id
+            and child.textbox_id=chat.textbox_id
+            and child.parent_chat_id=chat.chat_id
+        )
+        or exists (
+          select 1
+          from node_textbox_chats other_chat
+          where other_chat.company_id=chat.company_id
+            and other_chat.node_id=chat.node_id
+            and other_chat.textbox_id=chat.textbox_id
+            and other_chat.deleted_timestamp is null
+            and (
+              other_chat.selection_source<>'email'
+              or other_chat.selection_email_message_id<>chat.selection_email_message_id
+            )
+        )
+      )
+  ) then
+    raise exception 'STOP: email_message_chat_textbox_repair_requires_review';
+  end if;
+
+  if exists (
+    select 1
+    from node_textbox_chats chat
+    where chat.selection_source='email'
+      and chat.deleted_timestamp is null
+      and not exists (
+        select 1
+        from email_relationships exact_relationship
+        where exact_relationship.company_id=chat.company_id
+          and exact_relationship.resource_type='node'
+          and exact_relationship.resource_id=chat.node_id
+          and exact_relationship.resource_textbox_id=chat.textbox_id::text
+          and exact_relationship.email_message_id=chat.selection_email_message_id
+      )
+      and (
+        not exists (
+          select 1
+          from email_messages message
+          where message.company_id=chat.company_id
+            and message.email_message_id=chat.selection_email_message_id
+        )
+        or not exists (
+          select 1
+          from node_textboxes textbox
+          where textbox.company_id=chat.company_id
+            and textbox.node_id=chat.node_id
+            and textbox.textbox_id=chat.textbox_id
+        )
+        or not exists (
+          select 1
+          from email_relationships relationship
+          where relationship.company_id=chat.company_id
+            and relationship.resource_type='node'
+            and relationship.resource_id=chat.node_id
+            and relationship.resource_textbox_id is null
+            and relationship.email_message_id=chat.selection_email_message_id
+        )
+      )
+  ) then
+    raise exception 'STOP: email_chat_missing_message_textbox_or_node_relationship';
+  end if;
+
+end;
+$$;
+
+with conflict_keys as (
+  select chat.company_id,chat.node_id,chat.selection_email_message_id
+  from node_textbox_chats chat
+  where chat.selection_source='email'
+    and chat.deleted_timestamp is null
+  group by chat.company_id,chat.node_id,chat.selection_email_message_id
+  having count(distinct chat.textbox_id)>1
+), candidates as (
+  select chat.company_id,chat.node_id,chat.selection_email_message_id,chat.textbox_id,
+         min(textbox.created_timestamp) as textbox_created_timestamp,
+         case when exists (
+           select 1
+           from email_relationships relationship
+           where relationship.company_id=chat.company_id
+             and relationship.resource_type='node'
+             and relationship.resource_id=chat.node_id
+             and relationship.resource_textbox_id=chat.textbox_id::text
+             and relationship.email_message_id=chat.selection_email_message_id
+         ) then 0 else 1 end as relationship_rank
+  from conflict_keys conflict
+  join node_textbox_chats chat
+    on chat.company_id=conflict.company_id
+   and chat.node_id=conflict.node_id
+   and chat.selection_email_message_id=conflict.selection_email_message_id
+  join node_textboxes textbox
+    on textbox.company_id=chat.company_id
+   and textbox.node_id=chat.node_id
+   and textbox.textbox_id=chat.textbox_id
+  where chat.selection_source='email'
+    and chat.deleted_timestamp is null
+  group by chat.company_id,chat.node_id,chat.selection_email_message_id,chat.textbox_id
+), ranked as (
+  select candidates.*,
+         row_number() over (
+           partition by company_id,node_id,selection_email_message_id
+           order by relationship_rank,textbox_created_timestamp,textbox_id
+         ) as textbox_rank
+  from candidates
+), targets as (
+  select company_id,node_id,selection_email_message_id,textbox_id
+  from ranked
+  where textbox_rank=1
+)
+update node_textbox_chats chat
+set textbox_id=target.textbox_id,
+    revision=chat.revision+1,
+    updated_timestamp=now()
+from targets target
+where chat.company_id=target.company_id
+  and chat.node_id=target.node_id
+  and chat.selection_source='email'
+  and chat.selection_email_message_id=target.selection_email_message_id
+  and chat.deleted_timestamp is null
+  and chat.textbox_id<>target.textbox_id;
+
+do $$
+begin
+  if exists (
+    select 1
+    from node_textbox_chats chat
+    where chat.selection_source='email'
+      and chat.deleted_timestamp is null
+    group by chat.company_id,chat.node_id,chat.selection_email_message_id
+    having count(distinct chat.textbox_id)>1
+  ) then
+    raise exception 'STOP: email_message_chat_textbox_repair_failed';
+  end if;
+
+  if exists (
+    select 1
+    from node_textbox_chats chat
+    where chat.selection_source='email'
+      and chat.deleted_timestamp is null
+      and exists (
+        select 1
+        from email_relationships relationship
+        where relationship.company_id=chat.company_id
+          and relationship.resource_type='node'
+          and relationship.resource_id=chat.node_id
+          and relationship.email_message_id=chat.selection_email_message_id
+          and relationship.resource_textbox_id is not null
+          and relationship.resource_textbox_id<>chat.textbox_id::text
+      )
+  ) then
+    raise exception 'STOP: email_chat_conflicts_with_existing_textbox_relationship';
+  end if;
+end;
+$$;
+
+insert into email_relationships(
+  company_id,email_relationship_id,email_thread_id,email_message_id,
+  resource_type,resource_id,resource_textbox_id,created_timestamp
+)
+select chat.company_id,
+       gen_random_uuid(),
+       message.email_thread_id,
+       chat.selection_email_message_id,
+       'node',
+       chat.node_id,
+       chat.textbox_id::text,
+       min(chat.created_timestamp)
+from node_textbox_chats chat
+join email_messages message
+  on message.company_id=chat.company_id
+ and message.email_message_id=chat.selection_email_message_id
+where chat.selection_source='email'
+  and chat.deleted_timestamp is null
+  and exists (
+    select 1
+    from email_relationships node_wide
+    where node_wide.company_id=chat.company_id
+      and node_wide.resource_type='node'
+      and node_wide.resource_id=chat.node_id
+      and node_wide.resource_textbox_id is null
+      and node_wide.email_message_id=chat.selection_email_message_id
+  )
+  and not exists (
+    select 1
+    from email_relationships exact_relationship
+    where exact_relationship.company_id=chat.company_id
+      and exact_relationship.resource_type='node'
+      and exact_relationship.resource_id=chat.node_id
+      and exact_relationship.resource_textbox_id=chat.textbox_id::text
+      and exact_relationship.email_message_id=chat.selection_email_message_id
+  )
+group by chat.company_id,message.email_thread_id,chat.selection_email_message_id,
+         chat.node_id,chat.textbox_id;
+
+do $$
+begin
   if exists (
     select 1
     from node_textbox_chats chat
@@ -81,17 +329,6 @@ begin
       )
   ) then
     raise exception 'STOP: email_chat_missing_exact_textbox_relationship';
-  end if;
-
-  if exists (
-    select 1
-    from email_relationships relationship
-    group by relationship.company_id,relationship.email_message_id,
-             relationship.resource_type,relationship.resource_id,
-             coalesce(relationship.resource_textbox_id,'')
-    having count(*)>1
-  ) then
-    raise exception 'STOP: duplicate_email_semantic_edge';
   end if;
 end;
 $$;
