@@ -18,7 +18,6 @@ import {
   buildEditorTextBlockProjectionPayload,
   canDeleteEditorTextBlockChatMessage,
   canEditEditorTextBlockChatMessage,
-  editorEmailMessageAccent,
   EDITOR_TEXT_BLOCK_CHAT_TYPE,
   EDITOR_TEXT_BLOCK_TYPE,
   listEditorTextBlockProjections,
@@ -74,6 +73,7 @@ type EmailCollaborationChatSurfaceProps = {
   nodes: NodeRecord[];
   actionRequest: EmailCollaborationActionRequest;
   selection: EmailCollaborationSelection | null;
+  topOffset?: number;
   onClearSelection: () => void;
   onNavigateToEmailSelection: (selection: EmailCollaborationSelection) => void;
   onCollaborationChange?: (collaboration: CommunicationsEmailCollaboration) => void;
@@ -150,6 +150,7 @@ export function EmailCollaborationChatSurface({
   nodes,
   actionRequest,
   selection,
+  topOffset = 0,
   onClearSelection,
   onNavigateToEmailSelection,
   onCollaborationChange,
@@ -183,6 +184,7 @@ export function EmailCollaborationChatSurface({
   const requestedCollaborationIDRef = React.useRef("");
   const handledDestinationRequestRef = React.useRef<NonNullable<EmailCollaborationActionRequest> | null>(null);
   const pendingNewNodeIDRef = React.useRef("");
+  const locallySubmittedChatIDsRef = React.useRef<Set<string>>(new Set());
   const selectionChoiceKeyRef = React.useRef("");
   const messageCollaborationID = message.collaboration_id?.trim() ?? "";
   const messageCollaborationIDRef = React.useRef(messageCollaborationID);
@@ -515,7 +517,9 @@ export function EmailCollaborationChatSurface({
         acceptedOnce = true;
       },
       onChatMessageCreated(event) {
-        if (event.company_id === companyID && event.node_id === nodeID) refresh();
+        if (event.company_id !== companyID || event.node_id !== nodeID) return;
+        if (locallySubmittedChatIDsRef.current.delete(event.message_id)) return;
+        refresh();
       },
       onChatMessageUpdated(event) {
         if (event.company_id === companyID && event.node_id === nodeID) refresh();
@@ -564,10 +568,131 @@ export function EmailCollaborationChatSurface({
       : [...current, principal]);
   }, []);
 
+  const buildPendingChat = React.useCallback((textBlockID: string, emailMessageID: string, chatID = generateStableInformationID()) => {
+    const cleanDraft = draft.trim();
+    const mentions = mentionedPrincipalIDs(cleanDraft, principals);
+    for (const principal of selectedMentionPrincipals) {
+      const principalID = principal.user_id.trim();
+      if (principalID.startsWith(GROUP_MENTION_PREFIX)) {
+        const groupID = principalID.slice(GROUP_MENTION_PREFIX.length).trim();
+        if (groupID && !mentions.mentionedGroupIDs.includes(groupID)) mentions.mentionedGroupIDs.push(groupID);
+      } else if (principalID && !mentions.mentionedUserIDs.includes(principalID)) {
+        mentions.mentionedUserIDs.push(principalID);
+      }
+    }
+    const information = buildEditorTextBlockChatPayload({
+      blockID: textBlockID,
+      parentID: replyTargetID || undefined,
+      selectionSource: "email",
+      selectionMessageID: emailMessageID,
+      selectionQuote: selection?.quote,
+      selectionStart: selection?.startOffset,
+      selectionEnd: selection?.endOffset,
+      authorID: author.userID,
+      authorName: author.name,
+      message: cleanDraft,
+      createdTimestamp: new Date().toISOString(),
+      attachments: draftAttachments,
+      mentionedUserIDs: mentions.mentionedUserIDs,
+      mentionedGroupIDs: mentions.mentionedGroupIDs,
+    });
+    const chat = parseEditorTextBlockChats([{
+      information_id: chatID,
+      type: EDITOR_TEXT_BLOCK_CHAT_TYPE,
+      information,
+    }])[0];
+    if (!chat) throw new Error("failed_to_build_email_chat");
+    return {
+      chat,
+      write: { type: EDITOR_TEXT_BLOCK_CHAT_TYPE, informationID: chatID, information },
+    };
+  }, [author.name, author.userID, draft, draftAttachments, principals, replyTargetID, selectedMentionPrincipals, selection]);
+
+  const showPendingChat = React.useCallback((chat: EditorTextBlockChatMessage, targetNodeID: string, textBlockID: string, nodeTitle: string) => {
+    const sectionKey = `${targetNodeID}:${textBlockID}`;
+    locallySubmittedChatIDsRef.current.add(chat.id);
+    setMessages((current) => appendAcknowledgedEmailCollaborationChat(current, chat));
+    setNodeIDByChatID((current) => ({ ...current, [chat.id]: targetNodeID }));
+    setSectionKeysByChatID((current) => ({ ...current, [chat.id]: sectionKey }));
+    setSectionLabelsByBlockID((current) => ({ ...current, [sectionKey]: nodeTitle }));
+    setActiveTextBlockID(textBlockID);
+    setActiveMessageID(chat.id);
+    setDraft("");
+    setDraftAttachments([]);
+    setSelectedMentionPrincipals([]);
+    setReplyTargetID("");
+  }, []);
+
+  const rollBackPendingChat = React.useCallback((chatID: string) => {
+    locallySubmittedChatIDsRef.current.delete(chatID);
+    setMessages((current) => current.filter((item) => item.id !== chatID));
+    setNodeIDByChatID((current) => {
+      const next = { ...current };
+      delete next[chatID];
+      return next;
+    });
+    setSectionKeysByChatID((current) => {
+      const next = { ...current };
+      delete next[chatID];
+      return next;
+    });
+    setActiveMessageID((current) => current === chatID ? "" : current);
+  }, []);
+
+  const expireLocalChatEchoSuppression = React.useCallback((chatID: string) => {
+    window.setTimeout(() => locallySubmittedChatIDsRef.current.delete(chatID), 30_000);
+  }, []);
+
+  const submitExistingTextBoxChat = React.useCallback(async (activeCollaboration: CommunicationsEmailCollaboration, textBlockID: string) => {
+    const targetNodeID = activeCollaboration.node_id.trim();
+    const emailMessageID = selectionInternalEmailMessageIDRef.current
+      || collaborationTargetMessage.email_message_id?.trim()
+      || activeCollaboration.root_message_id?.trim()
+      || targetEmailMessageID;
+    if (!targetNodeID || !textBlockID || !emailMessageID || submitting) return;
+    const originalDraft = draft;
+    const originalAttachments = draftAttachments;
+    const originalPrincipals = selectedMentionPrincipals;
+    const originalReplyTargetID = replyTargetID;
+    const pending = buildPendingChat(textBlockID, emailMessageID);
+    const nodeTitle = nodes.find((node) => node.node_id === targetNodeID)?.name?.trim()
+      || "Node " + targetNodeID.slice(0, 8);
+    showPendingChat(pending.chat, targetNodeID, textBlockID, nodeTitle);
+    setSubmitting(true);
+    try {
+      await requestJSON<unknown>(`/v1/nodes/${encodeURIComponent(targetNodeID)}/information`, {
+        method: "POST",
+        body: JSON.stringify({
+          company_id: companyID,
+          type: pending.write.type,
+          information: pending.write.information,
+          information_id: pending.write.informationID,
+        }),
+      });
+      expireLocalChatEchoSuppression(pending.chat.id);
+      invalidateNodeRecordStoreCaches(apiBase, companyID, targetNodeID);
+      onClearSelection();
+      onSuccess();
+    } catch (cause) {
+      rollBackPendingChat(pending.chat.id);
+      setDraft(originalDraft);
+      setDraftAttachments(originalAttachments);
+      setSelectedMentionPrincipals(originalPrincipals);
+      setReplyTargetID(originalReplyTargetID);
+      onError(formatEmailCollaborationChatError(cause, "Failed to save email chat. Your message is ready to retry."));
+    } finally {
+      setSubmitting(false);
+    }
+  }, [apiBase, buildPendingChat, collaborationTargetMessage.email_message_id, companyID, draft, draftAttachments, expireLocalChatEchoSuppression, nodes, onClearSelection, onError, onSuccess, replyTargetID, requestJSON, rollBackPendingChat, selectedMentionPrincipals, showPendingChat, submitting, targetEmailMessageID]);
+
   const importIntoExistingNode = React.useCallback(async (targetNodeID: string, includeChat: boolean) => {
     const cleanNodeID = targetNodeID.trim();
     if (!cleanNodeID || submitting) return;
     const cleanDraft = draft.trim();
+    const originalAttachments = draftAttachments;
+    const originalPrincipals = selectedMentionPrincipals;
+    const originalReplyTargetID = replyTargetID;
+    let pendingChat: ReturnType<typeof buildPendingChat> | null = null;
     setSubmitting(true);
     try {
       const providerMessageID = selection?.messageID?.trim() || message.id.trim();
@@ -579,7 +704,6 @@ export function EmailCollaborationChatSurface({
         || "";
       const currentNodeCollaboration = collaborations.find((item) => item.node_id === cleanNodeID);
       const shouldAttachEmail = emailNodeImportRequired(cleanNodeID, currentNodeCollaboration?.node_id ?? "", emailMessageID);
-      const createdTimestamp = new Date().toISOString();
       const subject = message.subject?.trim() || "Email";
       const targetProjections = await getNodeInformationProjectionSingleFlight(apiBase, companyID, cleanNodeID).catch(() => []);
       let attachedEmailInformationID = collaboration?.attached_email_information_id?.trim() ?? "";
@@ -593,14 +717,6 @@ export function EmailCollaborationChatSurface({
         : undefined;
       const textBlockID = existingLinkedProjection?.information_id ?? generateStableInformationID();
       const payloadEmailMessageID = emailMessageID || generateStableInformationID();
-      const existingEmailContents = existingTextBlockProjections.map((projection) => parseEditorTextBlockContent(projection.information));
-      const existingMessageAccent = existingEmailContents
-        .find((content) => content.emailMessageID?.trim() === emailMessageID
-          || content.emailMessageIDs?.some((messageID) => messageID.trim() === emailMessageID))?.emailAccent?.trim() ?? "";
-      const existingEmailAccents = existingEmailContents
-        .filter((content) => content.emailMessageID?.trim() !== emailMessageID
-          && !content.emailMessageIDs?.some((messageID) => messageID.trim() === emailMessageID))
-        .map((content) => content.emailAccent?.trim() ?? "").filter(Boolean);
       const textBlockWrite = !includeChat || existingLinkedProjection ? undefined : {
         type: EDITOR_TEXT_BLOCK_TYPE,
         informationID: textBlockID,
@@ -609,47 +725,17 @@ export function EmailCollaborationChatSurface({
           document: "",
           attachments: [],
           emailMessageID: payloadEmailMessageID,
-          emailAccent: existingMessageAccent || editorEmailMessageAccent(payloadEmailMessageID, existingEmailAccents),
         }),
       };
       let initialChatWrite: { type: string; informationID: string; information: string } | undefined;
       let initialChat: EditorTextBlockChatMessage | undefined;
       if (includeChat && (cleanDraft || draftAttachments.length > 0)) {
-        const informationID = generateStableInformationID();
-        const mentions = mentionedPrincipalIDs(cleanDraft, principals);
-        for (const principal of selectedMentionPrincipals) {
-          const principalID = principal.user_id.trim();
-          if (principalID.startsWith(GROUP_MENTION_PREFIX)) {
-            const groupID = principalID.slice(GROUP_MENTION_PREFIX.length).trim();
-            if (groupID && !mentions.mentionedGroupIDs.includes(groupID)) mentions.mentionedGroupIDs.push(groupID);
-          } else if (principalID && !mentions.mentionedUserIDs.includes(principalID)) {
-            mentions.mentionedUserIDs.push(principalID);
-          }
-        }
-        initialChatWrite = {
-          type: EDITOR_TEXT_BLOCK_CHAT_TYPE,
-          informationID,
-          information: buildEditorTextBlockChatPayload({
-            blockID: textBlockID,
-            selectionSource: "email",
-            selectionMessageID: payloadEmailMessageID,
-            selectionQuote: selection?.quote,
-            selectionStart: selection?.startOffset,
-            selectionEnd: selection?.endOffset,
-            authorID: author.userID,
-            authorName: author.name,
-            message: cleanDraft,
-            createdTimestamp,
-            attachments: draftAttachments,
-            mentionedUserIDs: mentions.mentionedUserIDs,
-            mentionedGroupIDs: mentions.mentionedGroupIDs,
-          }),
-        };
-        initialChat = parseEditorTextBlockChats([{
-          information_id: informationID,
-          type: initialChatWrite.type,
-          information: initialChatWrite.information,
-        }])[0];
+        pendingChat = buildPendingChat(textBlockID, payloadEmailMessageID);
+        initialChatWrite = pendingChat.write;
+        initialChat = pendingChat.chat;
+        const nodeTitle = nodes.find((node) => node.node_id === cleanNodeID)?.name?.trim()
+          || "Node " + cleanNodeID.slice(0, 8);
+        showPendingChat(initialChat, cleanNodeID, textBlockID, nodeTitle);
       }
       if (shouldAttachEmail || textBlockWrite || initialChatWrite) {
         const ensured = await ensureEmailCollaboration({
@@ -671,15 +757,8 @@ export function EmailCollaborationChatSurface({
       selectionInternalEmailMessageIDRef.current = emailMessageID;
       if (initialChat) {
         const acknowledgedChat = { ...initialChat, selectionMessageID: emailMessageID };
-        const sectionKey = `${cleanNodeID}:${textBlockID}`;
-        const nodeTitle = nodes.find((node) => node.node_id === cleanNodeID)?.name?.trim()
-          || "Node " + cleanNodeID.slice(0, 8);
-        setMessages((current) => appendAcknowledgedEmailCollaborationChat(current, acknowledgedChat));
-        setNodeIDByChatID((current) => ({ ...current, [acknowledgedChat.id]: cleanNodeID }));
-        setSectionKeysByChatID((current) => ({ ...current, [acknowledgedChat.id]: sectionKey }));
-        setSectionLabelsByBlockID((current) => ({ ...current, [sectionKey]: nodeTitle }));
-        setActiveTextBlockID(textBlockID);
-        setActiveMessageID(acknowledgedChat.id);
+        setMessages((current) => current.map((item) => item.id === acknowledgedChat.id ? acknowledgedChat : item));
+        expireLocalChatEchoSuppression(acknowledgedChat.id);
       }
       onNodeAttachmentChange?.({
         nodeID: cleanNodeID,
@@ -689,21 +768,30 @@ export function EmailCollaborationChatSurface({
         logicGateIDs: nodes.find((node) => node.node_id === cleanNodeID)?.logic_gate_ids,
       });
       invalidateNodeRecordStoreCaches(apiBase, companyID, cleanNodeID);
-      setDraft("");
-      setDraftAttachments([]);
-      setSelectedMentionPrincipals([]);
-      setReplyTargetID("");
+      if (!initialChat) {
+        setDraft("");
+        setDraftAttachments([]);
+        setSelectedMentionPrincipals([]);
+        setReplyTargetID("");
+      }
       onClearSelection();
       onSuccess();
       if (!includeChat) onActionSuccess("Email was added to node.");
       onActionRequestHandled();
     } catch (cause) {
-      onError(formatEmailCollaborationChatError(cause, includeChat ? "Failed to import this email chat into the node." : "Failed to import this email into the node."));
+      if (pendingChat) {
+        rollBackPendingChat(pendingChat.chat.id);
+        setDraft(cleanDraft);
+        setDraftAttachments(originalAttachments);
+        setSelectedMentionPrincipals(originalPrincipals);
+        setReplyTargetID(originalReplyTargetID);
+      }
+      onError(formatEmailCollaborationChatError(cause, includeChat ? "Failed to save email chat. Your message is ready to retry." : "Failed to import this email into the node."));
       onActionRequestHandled();
     } finally {
       setSubmitting(false);
     }
-  }, [acceptCollaboration, accountEmail, apiBase, author.name, author.userID, collaboration?.attached_email_information_id, collaborationTargetMessage, collaborations, companyID, draft, draftAttachments, message.id, message.subject, message.thread_id, nodes, onActionRequestHandled, onActionSuccess, onClearSelection, onError, onNodeAttachmentChange, onSuccess, principals, selectedMentionPrincipals, selection, sharedInboxID, submitting]);
+  }, [acceptCollaboration, accountEmail, apiBase, buildPendingChat, collaboration?.attached_email_information_id, collaborationTargetMessage, collaborations, companyID, draft, draftAttachments, expireLocalChatEchoSuppression, message.id, message.subject, message.thread_id, nodes, onActionRequestHandled, onActionSuccess, onClearSelection, onError, onNodeAttachmentChange, onSuccess, replyTargetID, rollBackPendingChat, selectedMentionPrincipals, selection?.messageID, sharedInboxID, showPendingChat, submitting]);
 
   const ensureLinkedEmailTextBlock = React.useCallback(async (activeCollaboration: CommunicationsEmailCollaboration): Promise<string> => {
     const activeNodeID = activeCollaboration.node_id.trim();
@@ -729,11 +817,6 @@ export function EmailCollaborationChatSurface({
     }
 
     const textBlockID = generateStableInformationID();
-    const existingEmailContents = listEditorTextBlockProjections(projections)
-      .map((projection) => parseEditorTextBlockContent(projection.information));
-    const unavailableAccents = existingEmailContents
-      .map((content) => content.emailAccent?.trim() ?? "")
-      .filter(Boolean);
     const payloadEmailMessageID = emailMessageID || generateStableInformationID();
     const linkedTextBlock = {
       type: EDITOR_TEXT_BLOCK_TYPE,
@@ -743,7 +826,6 @@ export function EmailCollaborationChatSurface({
         document: "",
         attachments: [],
         emailMessageID: payloadEmailMessageID,
-        emailAccent: editorEmailMessageAccent(payloadEmailMessageID, unavailableAccents),
       }),
     };
     const ensured = await ensureEmailCollaboration({
@@ -843,25 +925,30 @@ export function EmailCollaborationChatSurface({
       return;
     }
     if (collaboration) {
+      if (activeTextBlockID) {
+        await submitExistingTextBoxChat(collaboration, activeTextBlockID);
+        return;
+      }
       await importIntoExistingNode(collaboration.node_id, true);
       return;
     }
+    const originalDraft = draft;
+    const originalAttachments = draftAttachments;
+    const originalPrincipals = selectedMentionPrincipals;
+    const originalReplyTargetID = replyTargetID;
+    const textBlockID = generateStableInformationID();
+    const placeholderMessageID = generateStableInformationID();
+    const requestedNodeID = pendingNewNodeIDRef.current || generateStableInformationID();
+    pendingNewNodeIDRef.current = requestedNodeID;
+    const pending = buildPendingChat(textBlockID, placeholderMessageID);
+    showPendingChat(
+      pending.chat,
+      requestedNodeID,
+      textBlockID,
+      message.subject?.trim() || "Email Node",
+    );
     setSubmitting(true);
     try {
-      const textBlockID = generateStableInformationID();
-      const chatID = generateStableInformationID();
-      const placeholderMessageID = generateStableInformationID();
-      const createdTimestamp = new Date().toISOString();
-      const mentions = mentionedPrincipalIDs(cleanDraft, principals);
-      for (const principal of selectedMentionPrincipals) {
-        const principalID = principal.user_id.trim();
-        if (principalID.startsWith(GROUP_MENTION_PREFIX)) {
-          const groupID = principalID.slice(GROUP_MENTION_PREFIX.length).trim();
-          if (groupID && !mentions.mentionedGroupIDs.includes(groupID)) mentions.mentionedGroupIDs.push(groupID);
-        } else if (principalID && !mentions.mentionedUserIDs.includes(principalID)) {
-          mentions.mentionedUserIDs.push(principalID);
-        }
-      }
       const created = await ensureEmailCollaboration({
         companyID,
         message: collaborationTargetMessage,
@@ -869,7 +956,7 @@ export function EmailCollaborationChatSurface({
         threadID: message.thread_id,
         sharedInboxID,
         accountEmail,
-        newNodeID: pendingNewNodeIDRef.current || generateStableInformationID(),
+        newNodeID: requestedNodeID,
         linkedTextBlock: {
           type: EDITOR_TEXT_BLOCK_TYPE,
           informationID: textBlockID,
@@ -878,44 +965,38 @@ export function EmailCollaborationChatSurface({
             document: "",
             attachments: [],
             emailMessageID: placeholderMessageID,
-            emailAccent: editorEmailMessageAccent(placeholderMessageID, []),
           }),
         },
-        initialChat: {
-          type: EDITOR_TEXT_BLOCK_CHAT_TYPE,
-          informationID: chatID,
-          information: buildEditorTextBlockChatPayload({
-            blockID: textBlockID,
-            selectionSource: "email",
-            selectionMessageID: placeholderMessageID,
-            selectionQuote: selection?.quote,
-            selectionStart: selection?.startOffset,
-            selectionEnd: selection?.endOffset,
-            authorID: author.userID,
-            authorName: author.name,
-            message: cleanDraft,
-            createdTimestamp,
-            attachments: draftAttachments,
-            mentionedUserIDs: mentions.mentionedUserIDs,
-            mentionedGroupIDs: mentions.mentionedGroupIDs,
-          }),
-        },
+        initialChat: pending.write,
       });
       pendingNewNodeIDRef.current = "";
       acceptCollaboration(created);
-      setDraft("");
-      setDraftAttachments([]);
-      setSelectedMentionPrincipals([]);
-      setReplyTargetID("");
+      const emailMessageID = created.root_message_id?.trim()
+        || created.message?.email_message_id?.trim()
+        || placeholderMessageID;
+      selectionInternalEmailMessageIDRef.current = emailMessageID;
+      setMessages((current) => current.map((item) => item.id === pending.chat.id
+        ? { ...item, selectionMessageID: emailMessageID }
+        : item));
+      setNodeIDByChatID((current) => ({ ...current, [pending.chat.id]: created.node_id }));
+      const sectionKey = `${created.node_id}:${textBlockID}`;
+      setSectionKeysByChatID((current) => ({ ...current, [pending.chat.id]: sectionKey }));
+      setSectionLabelsByBlockID((current) => ({ ...current, [sectionKey]: message.subject?.trim() || "Email Node" }));
+      expireLocalChatEchoSuppression(pending.chat.id);
+      invalidateNodeRecordStoreCaches(apiBase, companyID, created.node_id);
       onClearSelection();
-      await loadProjection(created, loadSequenceRef.current);
       onSuccess();
     } catch (cause) {
-      onError(formatEmailCollaborationChatError(cause, "Failed to save email chat. Your message is still here."));
+      rollBackPendingChat(pending.chat.id);
+      setDraft(originalDraft);
+      setDraftAttachments(originalAttachments);
+      setSelectedMentionPrincipals(originalPrincipals);
+      setReplyTargetID(originalReplyTargetID);
+      onError(formatEmailCollaborationChatError(cause, "Failed to save email chat. Your message is ready to retry."));
     } finally {
       setSubmitting(false);
     }
-  }, [acceptCollaboration, accountEmail, author.name, author.userID, collaboration, collaborationTargetMessage, collaborations.length, companyID, draft, draftAttachments, importIntoExistingNode, loadProjection, message.subject, message.thread_id, onClearSelection, onError, onSuccess, principals, selectedMentionPrincipals, selection, sharedInboxID, submitting, targetEmailMessageID]);
+  }, [acceptCollaboration, accountEmail, activeTextBlockID, apiBase, buildPendingChat, collaboration, collaborationTargetMessage, collaborations.length, companyID, draft, draftAttachments, expireLocalChatEchoSuppression, importIntoExistingNode, message.subject, message.thread_id, onClearSelection, onError, onSuccess, replyTargetID, rollBackPendingChat, selectedMentionPrincipals, sharedInboxID, showPendingChat, submitExistingTextBoxChat, submitting, targetEmailMessageID]);
   const attachFiles = React.useCallback(async (files: FileList | File[]) => {
     const candidates = Array.from(files);
     if (candidates.length === 0) return;
@@ -1086,7 +1167,8 @@ export function EmailCollaborationChatSurface({
       style={{
         minWidth: 0,
         minHeight: 0,
-        height: "100%",
+        height: topOffset > 0 ? `calc(100% - ${topOffset}px)` : "100%",
+        marginTop: topOffset,
         alignSelf: "stretch",
         display: active ? "grid" : "none",
         gridTemplateRows: "minmax(0, 1fr)",

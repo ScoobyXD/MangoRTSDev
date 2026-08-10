@@ -19,8 +19,7 @@ test("node-attached email viewer discloses per-message recipients while retainin
   const universalPickerEmailPane = source("frontend/src/modules/editor/UniversalPickerEmailPane.tsx");
   const calendarInviteCard = source("frontend/src/modules/communications/CalendarInviteCard.tsx");
 
-  assert.match(nodeParts, /Expand all threads/);
-  assert.match(nodeParts, /Collapse all threads/);
+  assert.doesNotMatch(nodeParts, /Expand all threads|Collapse all threads/);
   assert.match(nodeParts, /NodeEmailConversationTimeline/);
   assert.match(nodeParts, /gridTemplateColumns: "20px minmax\(0, 1fr\)"/);
   assert.match(nodeParts, /linear-gradient\(180deg, rgba\(14,165,233,0\.34\), rgba\(124,58,237,0\.3\)\)/);
@@ -74,7 +73,7 @@ test("node-attached email viewer discloses per-message recipients while retainin
   assert.match(nodeParts, /window\.setTimeout\(\(\) => replyEditorControllerRef\.current\?\.focus\(\), 0\)/);
 });
 
-test("node email and linked text boxes expose animated two-way navigation and collision-free colors", () => {
+test("node email and linked text boxes expose animated two-way navigation and computed colors", () => {
   const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
   const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
   const emailBodyHighlights = source("frontend/src/modules/editor/emailBodyHighlights.ts");
@@ -83,7 +82,7 @@ test("node email and linked text boxes expose animated two-way navigation and co
 
   assert.match(nodeSurface, /const revealEmailTextBlock = useCallback/);
   assert.match(nodeSurface, /const revealNodeEmailMessage = useCallback/);
-  assert.match(nodeSurface, /revealNodeEmailMessage\(linkedEmailMessageID\)/);
+  assert.match(nodeSurface, /revealNodeEmailMessage\(linkedEmailMessageID, block\.id\)/);
   assert.match(nodeSurface, /const linkedEmailMessageID = block.emailMessageID/);
   assert.match(nodeSurface, /const existingBlock = blocks\.find\(\(block\) => textBlockHasEmailMessage\(block, cleanMessageID\)\)/);
   assert.match(nodeSurface, /if \(existingBlock\) \{[\s\S]{0,520}return existingBlock\.id/);
@@ -93,7 +92,8 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeSurface, /data-node-text-box-row/);
   assert.match(nodeSurface, /scrollIntoView\(\{ behavior: "smooth", block: "center", inline: "nearest" \}\)/);
   assert.match(nodeSurface, /onEmailMessageActivate=\{revealEmailTextBlock\}/);
-  assert.match(nodeSurface, /editorEmailMessageAccent\(messageID, usedAccents\)/);
+  assert.match(nodeSurface, /editorEmailMessageAccent\(messageID\.trim\(\)\)/);
+  assert.doesNotMatch(nodeSurface, /repairs: Array<\{ blockID: string; accent: string \}>/);
   assert.match(nodeSurface, /aria-label=\{linkedEmailExpanded \? "Hide linked email" : "Show linked email"\}/);
   assert.match(nodeSurface, /data-node-email-column="true"/);
   assert.match(nodeSurface, /data-node-email-workspace-mode=\{nodeEmailWorkspaceMode\}/);
@@ -153,12 +153,17 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeParts, /data-node-linked-email-preview="true"/);
   assert.match(nodeParts, /resolveLinkedEmailPreview/);
   assert.match(nodeParts, /loadAttachedEmailThreadPreview/);
+  assert.match(nodeParts, /const \[expandedThreadIDs, setExpandedThreadIDs\] = useState<Set<string>>\(\(\) => new Set\(\)\)/);
+  assert.match(nodeParts, /if \(collapsed\) \{[\s\S]{0,220}setThreadMessages\(\[\]\)[\s\S]{0,220}return;[\s\S]{0,420}loadAttachedEmailThreadPreview/);
+  assert.match(nodeParts, /collapsed=\{!expandedThreadIDs\.has\(email\.messageID\)\}/);
+  assert.doesNotMatch(nodeParts, /Expand all threads|Collapse all threads/);
   assert.match(nodeParts, /setThreadDownloadStatus\(preview\.downloadStatus\)/);
   assert.match(nodeParts, /threadDownloadStatus !== "downloading"/);
   assert.match(nodeParts, /data-email-thread-download-status={threadDownloadStatus}/);
   assert.match(nodeParts, /Downloading the rest of this email thread/);
   assert.match(nodeParts, /storedThreadDownloadStatus !== "downloading"/);
   assert.match(nodeParts, /subscribeRealtimeScope\(apiBase, companyID, scope/);
+  assert.match(nodeParts, /hasNewCurrentUserMessage[\s\S]{0,360}messageList\.scrollTop = messageList\.scrollHeight/);
   assert.match(nodeParts, /refreshStoredThreadRef\.current\(\)/);
   assert.doesNotMatch(nodeParts, /setStoredThreadPollVersion|storedThreadPollTimer|setInterval/);
   assert.match(nodeParts, /initialFocusMessageID=\{resolvedPreview.focusMessageID\}/);
@@ -173,7 +178,7 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeParts, /data-node-email-thread-list="true"/);
   assert.doesNotMatch(nodeParts, />Attached emails</);
   assert.match(triageChat, /listEditorTextBlockProjections\(targetProjections\)/);
-  assert.match(triageChat, /existingMessageAccent \|\| editorEmailMessageAccent\(payloadEmailMessageID, existingEmailAccents\)/);
+  assert.doesNotMatch(triageChat, /existingMessageAccent|existingEmailAccents|emailAccent:/);
 });
 
 test("node drag and Universal-picker email attachment retain exact provider mailbox identity", () => {

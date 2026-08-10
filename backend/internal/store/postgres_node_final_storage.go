@@ -60,7 +60,6 @@ select textbox.company_id::text, textbox.node_id::text, textbox.textbox_id::text
          'document', %s,
          'email_message_id', coalesce(linked_email.email_message_id, ''),
          'email_message_ids', coalesce(linked_email.email_message_ids, '[]'::jsonb),
-         'email_accent', textbox.email_accent,
          'attachments', coalesce((
            select jsonb_agg(jsonb_build_object(
              'id', attachment.attachment_id::text, 'attachment_id', attachment.attachment_id::text,

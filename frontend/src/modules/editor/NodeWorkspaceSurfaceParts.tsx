@@ -749,6 +749,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const composerMentionOverlayRef = useRef<HTMLDivElement | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
+  const previousMessageIDsRef = useRef(new Set(messages.map((message) => message.id)));
+  const previousMessageBlockIDRef = useRef(blockID);
   const handledMessageFocusRequestRef = useRef("");
   const messageFocusRequestPendingRef = useRef(false);
   const mentionCloseTimerRef = useRef<number | null>(null);
@@ -911,6 +913,25 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       return next.size === previous.size ? previous : next;
     });
   }, [messages]);
+
+  useLayoutEffect(() => {
+    const nextMessageIDs = new Set(messages.map((message) => message.id));
+    if (previousMessageBlockIDRef.current !== blockID) {
+      previousMessageBlockIDRef.current = blockID;
+      previousMessageIDsRef.current = nextMessageIDs;
+      return;
+    }
+    const hasNewCurrentUserMessage = messages.some((message) => (
+      !previousMessageIDsRef.current.has(message.id) && message.authorID === currentUserID
+    ));
+    previousMessageIDsRef.current = nextMessageIDs;
+    if (!hasNewCurrentUserMessage || showingEmail) return;
+    const frame = window.requestAnimationFrame(() => {
+      const messageList = messageListRef.current;
+      if (messageList) messageList.scrollTop = messageList.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [blockID, currentUserID, messages, showingEmail]);
 
   useLayoutEffect(() => {
     const messageID = messageFocusRequest?.messageID.trim() ?? "";
@@ -3185,7 +3206,6 @@ type AttachedEmailPaneLayout = {
   folders: AttachedEmailFolderLayout[];
   emailOrder: string[];
   emailFolderByID: Record<string, string>;
-  collapsedThreadIDs: string[];
 };
 
 type AttachedEmailOrganizerPaneProps = {
@@ -3210,6 +3230,7 @@ type AttachedEmailOrganizerPaneProps = {
   ruleColor: string;
   selectedMessageID?: string;
   focusMessageID?: string;
+  focusBlockID?: string;
   focusMessageRequestID?: number;
   activeEmailSelection?: EmailActiveSelection | null;
   emailHighlightRemovalRequest?: EmailHighlightRemovalRequest | null;
@@ -3232,7 +3253,6 @@ const EMPTY_ATTACHED_EMAIL_LAYOUT: AttachedEmailPaneLayout = {
   folders: [],
   emailOrder: [],
   emailFolderByID: {},
-  collapsedThreadIDs: [],
 };
 
 const FolderPlusIcon: React.FC<{ color: string }> = ({ color }) => (
@@ -3283,7 +3303,6 @@ function readStoredAttachedEmailPaneLayout(storageKey: string): AttachedEmailPan
       emailFolderByID: parsed.emailFolderByID && typeof parsed.emailFolderByID === "object" && !Array.isArray(parsed.emailFolderByID)
         ? Object.fromEntries(Object.entries(parsed.emailFolderByID).filter(([emailID, folderID]) => emailID.trim() && typeof folderID === "string"))
         : {},
-      collapsedThreadIDs: Array.isArray(parsed.collapsedThreadIDs) ? parsed.collapsedThreadIDs.filter((id): id is string => typeof id === "string" && id.trim().length > 0) : [],
     };
   } catch {
     return EMPTY_ATTACHED_EMAIL_LAYOUT;
@@ -3342,7 +3361,6 @@ function normalizeAttachedEmailPaneLayout(layout: AttachedEmailPaneLayout, email
     folders: normalizedFolders,
     emailOrder,
     emailFolderByID,
-    collapsedThreadIDs: layout.collapsedThreadIDs.filter((id) => emailIDSet.has(id)),
   };
 }
 
@@ -3461,6 +3479,14 @@ const AttachedEmailThreadCard: React.FC<{
 	onReplyRef.current = onReply;
 
 	useEffect(() => {
+		if (collapsed) {
+			setLoading(false);
+			setLoadError("");
+			setThreadMessages([]);
+			setThreadDownloadStatus("complete");
+			refreshStoredThreadRef.current = () => undefined;
+			return;
+		}
 		let cancelled = false;
 		let initialLoad = true;
     setLoading(true);
@@ -3486,7 +3512,7 @@ const AttachedEmailThreadCard: React.FC<{
 			cancelled = true;
 			refreshStoredThreadRef.current = () => undefined;
 		};
-	}, [companyID, email, nodeID]);
+	}, [collapsed, companyID, email, nodeID]);
 
 	useEffect(() => {
 		if (threadDownloadStatus !== "downloading") return;
@@ -3505,6 +3531,10 @@ const AttachedEmailThreadCard: React.FC<{
 	}, [apiBase, companyID, currentUserID, email.accountEmail, email.messageID, email.sharedInboxID, email.threadID, threadDownloadStatus]);
 
   useEffect(() => {
+    if (collapsed) {
+      setActiveSharedDraft(null);
+      return;
+    }
     const durableThreadID = email.emailThreadID?.trim() ?? "";
     if (!durableThreadID || !email.collaborationID?.trim()) {
       setActiveSharedDraft(null);
@@ -3522,7 +3552,7 @@ const AttachedEmailThreadCard: React.FC<{
       }
     }).catch(() => undefined);
     return () => { cancelled = true; };
-  }, [companyID, email.collaborationID, email.emailThreadID, email.messageID, nodeID]);
+  }, [collapsed, companyID, email.collaborationID, email.emailThreadID, email.messageID, nodeID]);
 
   const initialFocusProviderMessageID = initialFocusMessageID?.trim() === email.emailMessageID
     ? email.messageID
@@ -4057,8 +4087,9 @@ export const LinkedEmailPreviewPane: React.FC<LinkedEmailPreviewPaneProps> = ({
     </div>
   );
 };
-export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, nodeID = "", apiBase = "", companyID, currentUserID = "", companyUsers = [], attachmentRequestJSON, attachmentResourceType, attachmentResourceID, attachmentInformationID, attachmentEditorSurface, storageKey, tabbed = false, expandContent = false, editable, accent, surfaceText, strokeColor, ruleColor, selectedMessageID, focusMessageID, focusMessageRequestID = 0, activeEmailSelection = null, emailHighlightRemovalRequest = null, onSelectMessage, onClearSelectedMessage, onRemoveEmail, onEmailSelectionChatRequest, onEmailSelectionTextBoxRequest, onEmailSelectionNodeRequest, onEmailMessageTextBoxRequest, onEmailMessageActivate, messageAccents = {}, onReplyEditorFocus, emailFocusExpanded = false, onRequestEmailFocusToggle, onError }) => {
+export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, nodeID = "", apiBase = "", companyID, currentUserID = "", companyUsers = [], attachmentRequestJSON, attachmentResourceType, attachmentResourceID, attachmentInformationID, attachmentEditorSurface, storageKey, tabbed = false, expandContent = false, editable, accent, surfaceText, strokeColor, ruleColor, selectedMessageID, focusMessageID, focusBlockID, focusMessageRequestID = 0, activeEmailSelection = null, emailHighlightRemovalRequest = null, onSelectMessage, onClearSelectedMessage, onRemoveEmail, onEmailSelectionChatRequest, onEmailSelectionTextBoxRequest, onEmailSelectionNodeRequest, onEmailMessageTextBoxRequest, onEmailMessageActivate, messageAccents = {}, onReplyEditorFocus, emailFocusExpanded = false, onRequestEmailFocusToggle, onError }) => {
   const [layout, setLayout] = useState<AttachedEmailPaneLayout>(() => readStoredAttachedEmailPaneLayout(storageKey));
+  const [expandedThreadIDs, setExpandedThreadIDs] = useState<Set<string>>(() => new Set());
   const [draggingMessageID, setDraggingMessageID] = useState("");
   const [localSelectedMessageID, setLocalSelectedMessageID] = useState("");
   const [activeTabbedMessageID, setActiveTabbedMessageID] = useState("");
@@ -4073,9 +4104,7 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
   const normalizedLayout = useMemo(() => normalizeAttachedEmailPaneLayout(layout, uniqueEmails), [layout, uniqueEmails]);
   const emailByID = useMemo(() => new Map(uniqueEmails.map((email) => [email.messageID, email])), [uniqueEmails]);
   const orderedEmails = useMemo(() => normalizedLayout.emailOrder.map((id) => emailByID.get(id)).filter((email): email is EditorAttachedEmail => Boolean(email)), [emailByID, normalizedLayout.emailOrder]);
-  const collapsedThreadIDs = useMemo(() => new Set(normalizedLayout.collapsedThreadIDs), [normalizedLayout.collapsedThreadIDs]);
   const activeSelectedMessageID = selectedMessageID?.trim() || localSelectedMessageID;
-  const allThreadsCollapsed = uniqueEmails.length > 0 && uniqueEmails.every((email) => collapsedThreadIDs.has(email.messageID));
   const childFoldersByParentID = useMemo(() => {
     const groups = new Map<string, AttachedEmailFolderLayout[]>();
     for (const folder of normalizedLayout.folders) {
@@ -4103,7 +4132,25 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
 
   useEffect(() => {
     setLayout(readStoredAttachedEmailPaneLayout(storageKey));
+    setExpandedThreadIDs(new Set());
   }, [storageKey]);
+
+  useEffect(() => {
+    setExpandedThreadIDs((current) => new Set(Array.from(current).filter((messageID) => emailByID.has(messageID))));
+  }, [emailByID]);
+
+  useEffect(() => {
+    const targetMessageID = focusMessageID?.trim() ?? "";
+    const targetBlockID = focusBlockID?.trim() ?? "";
+    if (!targetMessageID || !focusMessageRequestID) return;
+    const targetEmail = uniqueEmails.find((email) => (
+      email.emailMessageID === targetMessageID || (targetBlockID && email.blockID === targetBlockID)
+    ));
+    if (!targetEmail) return;
+    setExpandedThreadIDs((current) => current.has(targetEmail.messageID)
+      ? current
+      : new Set(current).add(targetEmail.messageID));
+  }, [focusBlockID, focusMessageID, focusMessageRequestID, uniqueEmails]);
 
   useEffect(() => {
     if (replyComposer && !emailByID.has(replyComposer.rootMessageID)) setReplyComposer(null);
@@ -4257,17 +4304,13 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
   }, [updateLayout]);
 
   const toggleThread = useCallback((messageID: string) => {
-    updateLayout((current) => {
-      const collapsed = new Set(current.collapsedThreadIDs);
-      if (collapsed.has(messageID)) collapsed.delete(messageID);
-      else collapsed.add(messageID);
-      return { ...current, collapsedThreadIDs: Array.from(collapsed) };
+    setExpandedThreadIDs((current) => {
+      const next = new Set(current);
+      if (next.has(messageID)) next.delete(messageID);
+      else next.add(messageID);
+      return next;
     });
-  }, [updateLayout]);
-
-  const expandAllThreads = useCallback(() => {
-    updateLayout((current) => ({ ...current, collapsedThreadIDs: [] }));
-  }, [updateLayout]);
+  }, []);
 
   const selectMessage = useCallback((messageID: string) => {
     const cleanMessageID = messageID.trim();
@@ -4281,11 +4324,6 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
     setReplyComposer(null);
     onClearSelectedMessage?.();
   }, [onClearSelectedMessage]);
-
-  const collapseAllThreads = useCallback(() => {
-    clearSelectedMessage();
-    updateLayout((current) => ({ ...current, collapsedThreadIDs: uniqueEmails.map((email) => email.messageID) }));
-  }, [clearSelectedMessage, uniqueEmails, updateLayout]);
 
   const removeEmailFromNode = useCallback((messageID: string) => {
     if (!editable || !onRemoveEmail) return;
@@ -4327,7 +4365,7 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
       strokeColor={strokeColor}
       ruleColor={ruleColor}
       selected={tabbed || activeSelectedMessageID === email.messageID}
-      collapsed={collapsedThreadIDs.has(email.messageID)}
+      collapsed={!expandedThreadIDs.has(email.messageID)}
       draggable={editable && !tabbed}
       replyTargetMessageID={replyComposer?.rootMessageID === email.messageID ? replyComposer.targetMessageID : ""}
       replyAll={replyComposer?.rootMessageID === email.messageID ? replyComposer.replyAll : false}
@@ -4336,7 +4374,7 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
       initialFocusMessageRequestID={focusMessageRequestID}
       highlightRemovalRequest={emailHighlightRemovalRequest?.messageID === email.messageID ? emailHighlightRemovalRequest : null}
       onToggleCollapsed={() => {
-        if (!collapsedThreadIDs.has(email.messageID) && activeSelectedMessageID === email.messageID) {
+        if (expandedThreadIDs.has(email.messageID) && activeSelectedMessageID === email.messageID) {
           clearSelectedMessage();
         }
         toggleThread(email.messageID);
@@ -4577,16 +4615,6 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
             style={{ width: 26, height: 24, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", padding: 0, fontSize: 16, fontWeight: 950, lineHeight: 1, boxShadow: EDITOR_NEU_SHADOW }}
           >
             <span aria-hidden="true">{emailFocusExpanded ? "←" : "→"}</span>
-          </button>
-        )}
-        {uniqueEmails.length > 0 && (
-          <button
-            type="button"
-            aria-expanded={!allThreadsCollapsed}
-            onClick={allThreadsCollapsed ? expandAllThreads : collapseAllThreads}
-            style={{ minHeight: 24, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: accent, cursor: "pointer", padding: "2px 8px", font: "inherit", fontSize: 10.5, fontWeight: 850, letterSpacing: 0, boxShadow: EDITOR_NEU_SHADOW }}
-          >
-            {allThreadsCollapsed ? "Expand all threads" : "Collapse all threads"}
           </button>
         )}
         {editable && (

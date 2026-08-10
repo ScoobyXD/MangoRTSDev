@@ -3176,7 +3176,6 @@ create table if not exists node_textboxes (
   textbox_id uuid not null,
   body_json jsonb not null,
   title text not null default '',
-  email_accent text not null default '',
   revision bigint not null default 0,
   display_order bigint not null default 0,
   created_timestamp timestamptz not null default now(),
@@ -3192,7 +3191,6 @@ create table if not exists node_textboxes (
   ),
   constraint node_textboxes_revision_chk check (revision >= 0),
   constraint node_textboxes_title_chk check (length(title) <= 500),
-  constraint node_textboxes_email_accent_chk check (email_accent = '' or email_accent ~ '^#[0-9A-Fa-f]{6}$'),
   constraint node_textboxes_timestamps_chk check (
     updated_timestamp >= created_timestamp
     and (deleted_timestamp is null or deleted_timestamp >= created_timestamp)
