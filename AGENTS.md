@@ -154,7 +154,7 @@ Do not use made-up words that you just invent on the fly to describe something. 
 13. Always prefer to do things the most simple, minimal, and basic way possible while still meeting our requirements, business logic, and not breaking our app.
 14. The concept of "Coruscant" is from Star Wars, you know how the planet is one big city with 1000s of layers betwween the ground to the top levels. New levels simply built ontop of old ones, an unknown number of roads and buildings and entire layers unused and leading to nowhere. That's our codebase now, which needs fixing. So when I say Coruscant, I am refering to our slop codebase.
 15. When I ask you to make some change or new feature, do not do it in a way that introduced another abstraction for something that we already had a solution for.
-
+16. Also, we have Greptile now so when I ask you to use Greptile just use it to check our code. 
 
 
 ## PostgreSQL and operator SQL rules
