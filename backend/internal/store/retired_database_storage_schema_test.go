@@ -94,6 +94,7 @@ func TestRetiredDatabaseStorageIsAbsentFromCanonicalSchemaAndStrictlyDropped(t *
 		"target_json_sha256",
 		"conversion_run_id",
 		"email_accent",
+		"color text not null",
 	} {
 		if strings.Contains(nodeBlock, forbidden) {
 			t.Errorf("canonical node_textboxes retains obsolete column %s", forbidden)
@@ -101,7 +102,7 @@ func TestRetiredDatabaseStorageIsAbsentFromCanonicalSchemaAndStrictlyDropped(t *
 	}
 	for _, required := range []string{
 		"body_json jsonb not null",
-		"color text not null default '#0ea5e9'",
+		"color text,",
 		"constraint node_textboxes_color_chk check",
 		"revision bigint not null default 0",
 		"display_order bigint not null default 0",
@@ -109,6 +110,59 @@ func TestRetiredDatabaseStorageIsAbsentFromCanonicalSchemaAndStrictlyDropped(t *
 	} {
 		if !strings.Contains(schema, required) {
 			t.Errorf("canonical schema missing retained structure %q", required)
+		}
+	}
+	metadataMigrationBytes, err := os.ReadFile("../../db/migrations/20260810_node_textbox_metadata.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadataMigration := strings.ToLower(string(metadataMigrationBytes))
+	for _, required := range []string{
+		"add column if not exists title text not null default ''",
+		"add column if not exists color text",
+		"alter column color drop default",
+		"alter column color drop not null",
+		"set color = null",
+		"relationship.resource_textbox_id = textbox.textbox_id::text",
+	} {
+		if !strings.Contains(metadataMigration, required) {
+			t.Errorf("consolidated Node textbox metadata migration missing %q", required)
+		}
+	}
+	migrationEntries, err := os.ReadDir("../../db/migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var nodeTextboxMetadataMigrations []string
+	for _, entry := range migrationEntries {
+		name := strings.ToLower(entry.Name())
+		if !entry.IsDir() && strings.HasPrefix(name, "20260810") && strings.Contains(name, "node_textbox") && strings.HasSuffix(name, ".sql") {
+			nodeTextboxMetadataMigrations = append(nodeTextboxMetadataMigrations, entry.Name())
+		}
+	}
+	if len(nodeTextboxMetadataMigrations) != 1 || nodeTextboxMetadataMigrations[0] != "20260810_node_textbox_metadata.sql" {
+		t.Fatalf("Node textbox metadata migrations=%v, want one consolidated migration", nodeTextboxMetadataMigrations)
+	}
+	operatorBytes, err := os.ReadFile("../../../scripts/repair_node_textbox_metadata_color.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	operator := strings.ToLower(string(operatorBytes))
+	for _, required := range []string{
+		"server_version_num",
+		"stop: this script supports postgresql 17.x only",
+		"alter column color drop default",
+		"set color = null",
+		"delete from public.schema_migrations",
+		"20260810_node_textbox_metadata.sql",
+	} {
+		if !strings.Contains(operator, required) {
+			t.Errorf("Node textbox metadata operator script missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"\\set", "\\i", "\\copy", "ordinal_position"} {
+		if strings.Contains(operator, forbidden) {
+			t.Errorf("Node textbox metadata operator script contains forbidden %q", forbidden)
 		}
 	}
 }

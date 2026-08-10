@@ -3,10 +3,40 @@ package store
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestPostgresConsolidatedNodeTextboxMetadataMigrationIsIdempotent(t *testing.T) {
+	db, _ := openRealtimePostgresIntegration(t)
+	raw, err := os.ReadFile("../../db/migrations/20260810_node_textbox_metadata.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 1; attempt <= 2; attempt++ {
+		if _, err := db.Exec(string(raw)); err != nil {
+			t.Fatalf("apply consolidated Node textbox metadata migration attempt %d: %v", attempt, err)
+		}
+	}
+	var colorNullable bool
+	var colorDefaultMissing bool
+	if err := db.QueryRow(`
+select not attribute.attnotnull,
+       default_value.adbin is null
+from pg_catalog.pg_attribute attribute
+left join pg_catalog.pg_attrdef default_value
+  on default_value.adrelid=attribute.attrelid and default_value.adnum=attribute.attnum
+where attribute.attrelid='node_textboxes'::regclass
+  and attribute.attname='color'
+  and not attribute.attisdropped`).Scan(&colorNullable, &colorDefaultMissing); err != nil {
+		t.Fatal(err)
+	}
+	if !colorNullable || !colorDefaultMissing {
+		t.Fatalf("Node textbox color nullable=%v default missing=%v", colorNullable, colorDefaultMissing)
+	}
+}
 
 func TestPostgresNodeFinalTextboxChatEmailAndAttachmentStorage(t *testing.T) {
 	db, repo := openRealtimePostgresIntegration(t)
@@ -304,7 +334,7 @@ where company_id=$1::uuid and attachment_id=$2::uuid`, company.CompanyID, attach
 	}
 }
 
-func TestPostgresNodeTextboxTitleAndColorPersistWithoutDuplicatingDocumentInNodeView(t *testing.T) {
+func TestPostgresOrdinaryNodeTextboxTitlePersistsWithNoColor(t *testing.T) {
 	db, repo := openRealtimePostgresIntegration(t)
 	company, err := repo.CreateCompany("Node textbox metadata integration")
 	if err != nil {
@@ -319,7 +349,6 @@ func TestPostgresNodeTextboxTitleAndColorPersistWithoutDuplicatingDocumentInNode
 	metadata, err := repo.UpdateEditorJSONMetadata(EditorJSONMetadataInput{
 		Document: EditorDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID, DocumentID: textboxID},
 		Title:    "Stored title",
-		Color:    "#14B8A6",
 	})
 	if err != nil || metadata.ProjectionRevision != 1 {
 		t.Fatalf("metadata=%+v err=%v", metadata, err)
@@ -340,7 +369,7 @@ func TestPostgresNodeTextboxTitleAndColorPersistWithoutDuplicatingDocumentInNode
 		t.Fatalf("projections=%+v err=%v", projections, err)
 	}
 	if !strings.Contains(projections[0].Information, `"title": "Stored title"`) ||
-		!strings.Contains(projections[0].Information, `"color": "#14B8A6"`) ||
+		!strings.Contains(projections[0].Information, `"color": ""`) ||
 		strings.Contains(projections[0].Information, `"email_accent"`) ||
 		!strings.Contains(projections[0].Information, "private canonical marker") {
 		t.Fatalf("full projection lost metadata or document: %s", projections[0].Information)
@@ -351,7 +380,11 @@ func TestPostgresNodeTextboxTitleAndColorPersistWithoutDuplicatingDocumentInNode
 	}
 	if strings.Contains(view.Projections[0].Information, "private canonical marker") ||
 		!strings.Contains(view.Projections[0].Information, `"title": "Stored title"`) ||
-		!strings.Contains(view.Projections[0].Information, `"color": "#14B8A6"`) {
+		!strings.Contains(view.Projections[0].Information, `"color": ""`) {
 		t.Fatalf("Node view projection carried the wrong payload: %s", view.Projections[0].Information)
+	}
+	var colorMissing bool
+	if err := db.QueryRow(`select color is null from node_textboxes where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid`, company.CompanyID, node.NodeID, textboxID).Scan(&colorMissing); err != nil || !colorMissing {
+		t.Fatalf("ordinary Node textbox color is null=%v err=%v", colorMissing, err)
 	}
 }

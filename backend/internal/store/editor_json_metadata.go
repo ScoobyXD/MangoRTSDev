@@ -57,7 +57,7 @@ func NormalizeEditorJSONMetadata(input EditorJSONMetadataInput) (EditorJSONMetad
 		return EditorJSONMetadataInput{}, ErrInvalid
 	}
 	if input.Document.ResourceType == EntityTypeNode {
-		if !validNodeTextboxColor(input.Color) || input.EmailAccent != "" {
+		if (input.Color != "" && !validNodeTextboxColor(input.Color)) || input.EmailAccent != "" {
 			return EditorJSONMetadataInput{}, ErrInvalid
 		}
 	} else if input.Color != "" || (input.EmailAccent != "" && !validEditorEmailAccent(input.EmailAccent)) {

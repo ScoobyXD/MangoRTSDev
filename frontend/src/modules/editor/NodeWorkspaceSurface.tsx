@@ -1207,8 +1207,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (!editorTextCanEdit) return;
     const now = new Date().toISOString();
     const blockID = generateStableInformationID();
-    const color = nextNodeTextBlockColor(blocks.map((block) => block.color));
-    const initialContent = createOrdinaryNodeTextBlockContent(color);
+    const initialContent = createOrdinaryNodeTextBlockContent();
     focusBlockIDRef.current = blockID;
     contentByBlockRef.current.set(blockID, initialContent);
     textBlockProjectionSaveController.markHasChanged(blockID, initialContent);
@@ -1218,7 +1217,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         title: initialContent.title,
         document: "",
         attachments: [],
-        color,
         createdTimestamp: now,
         updatedTimestamp: now,
         pending: true,
@@ -1244,7 +1242,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     });
     if (markHistory) markEditorHistoryChanged({ companyID, resourceType: "node", resourceID: nodeID });
     textBlockProjectionSaveController.startLatestContentSave(blockID);
-  }, [blocks, companyID, editorTextCanEdit, nodeID, textBlockProjectionSaveController]);
+  }, [companyID, editorTextCanEdit, nodeID, textBlockProjectionSaveController]);
 
   const createEmailTextBlock = useCallback((messageID: string, quote = "") => {
     const cleanMessageID = messageID.trim();
@@ -1266,7 +1264,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const now = new Date().toISOString();
     const blockID = generateStableInformationID();
     const sourceEmail = nodeAttachedEmails.find((email) => email.emailMessageID === cleanMessageID || email.id === cleanMessageID);
-    const color = nextNodeTextBlockColor(blocks.map((block) => block.color));
+    const color = nextNodeTextBlockColor(blocks.map((block) => block.color ?? ""));
     const cleanQuote = quote.trim();
     const initialContent = createEmailLinkedNodeTextBlockContent({
       title: sourceEmail?.subject.trim() ? `Email: ${sourceEmail.subject.trim()}` : "Email text box",
@@ -1322,7 +1320,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const now = new Date().toISOString();
     const blockID = generateStableInformationID();
     const sourceEmail = nodeAttachedEmails.find((email) => email.emailMessageID === cleanMessageID || email.id === cleanMessageID);
-    const color = nextNodeTextBlockColor(blocks.map((block) => block.color));
+    const color = nextNodeTextBlockColor(blocks.map((block) => block.color ?? ""));
     const initialContent = createEmailLinkedNodeTextBlockContent({
       title: sourceEmail?.subject.trim() ? `Email: ${sourceEmail.subject.trim()}` : "Email text box",
       messageID: cleanMessageID,
@@ -2220,11 +2218,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         information_id: generateStableInformationID(),
       }),
     });
+    const color = block.color?.trim() || nextNodeTextBlockColor(blocks.map((candidate) => candidate.color ?? ""));
+    updateTextBlockContent(blockID, { color });
     setBlocks((current) => current.map((candidate) => candidate.id === blockID
-      ? { ...candidate, emailMessageID: primaryEmailMessageID, emailMessageIDs: [primaryEmailMessageID] }
+      ? { ...candidate, emailMessageID: primaryEmailMessageID, emailMessageIDs: [primaryEmailMessageID], color }
       : candidate));
     onProjectionMutation();
-  }, [attachEmail, blocks, canEdit, companyID, nodeID, onProjectionMutation, requestJSON]);
+  }, [attachEmail, blocks, canEdit, companyID, nodeID, onProjectionMutation, requestJSON, updateTextBlockContent]);
 
   const removeAttachedEmail = useCallback(async (emailID: string) => {
     if (!canEdit || !nodeID || !companyID) return;
@@ -2418,12 +2418,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         target?.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
         target?.animate([
           { transform: "translateX(0)", boxShadow: "0 0 0 0 rgba(14,165,233,0)" },
-          { transform: "translateX(3px)", boxShadow: `0 0 0 4px ${block.color}33` },
+          { transform: "translateX(3px)", boxShadow: `0 0 0 4px ${block.color?.trim() || accent}33` },
           { transform: "translateX(0)", boxShadow: "0 0 0 0 rgba(14,165,233,0)" },
         ], { duration: 860, easing: "ease-out" });
       });
     });
-  }, [blocks]);
+  }, [accent, blocks]);
 
   const revealNodeEmailMessage = useCallback((messageID: string, blockID: string) => {
     const cleanMessageID = messageID.trim();
@@ -2678,8 +2678,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const messageIDs = block.emailMessageIDs?.length ? block.emailMessageIDs : block.emailMessageID ? [block.emailMessageID] : [];
     return messageIDs.map((messageID) => [
       messageID.trim(),
-      block.color.trim(),
-    ] as const).filter(([messageID]) => Boolean(messageID));
+      block.color?.trim() ?? "",
+    ] as const).filter(([messageID, color]) => Boolean(messageID && color));
   }));
   const activeNodeEmailChatMessage = activeChatBlockID
     ? chatMessages.find((message) => message.id === activeChatMessageIDs[activeChatBlockID])
@@ -3071,8 +3071,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           const chatIsActive = activeChatBlockID === chatBlockID;
           const chatPaneIsVisible = openChatBlockIDs.has(chatBlockID) || chatIsActive;
           const editorPaneIsVisible = openEditorBlockIDs.has(block.id) || tiptapPinnedBlockIDs.has(block.id);
-          const blockColor = block.color.trim();
           const linkedEmailMessageID = block.emailMessageID?.trim() ?? "";
+          const blockColor = linkedEmailMessageID ? (block.color?.trim() ?? "") : "";
           const linkedEmailExpanded = Boolean(linkedEmailMessageID && expandedLinkedEmailBlockIDs.has(block.id));
           const contentPaneIsVisible = editorPaneIsVisible || linkedEmailExpanded;
           const chatPaneMaxWidth = Math.max(
@@ -3286,7 +3286,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                       onError(cause instanceof Error ? cause.message : "failed_to_link_email_to_text_box");
                     });
                   }}
-                  style={{ height: linkedEmailExpanded ? "auto" : TEXT_BLOCK_ROW_HEIGHT, minHeight: TEXT_BLOCK_ROW_HEIGHT, minWidth: 0, display: "grid", gridTemplateRows: linkedEmailExpanded ? "38px auto" : "38px minmax(0, 1fr)", borderTop: `1px solid ${textBlockIsFocused ? "transparent" : blockColor}`, borderRight: `1px solid ${textBlockIsFocused ? "transparent" : blockColor}`, borderBottom: `1px solid ${textBlockIsFocused ? "transparent" : blockColor}`, borderLeft: `4px solid ${blockColor}`, borderRadius: 14, background: "#ffffff", overflow: linkedEmailExpanded ? "visible" : "hidden", boxShadow: textBlockIsFocused ? "8px 8px 20px rgba(174,174,192,0.26), -7px -7px 16px rgba(255,255,255,0.92), 0 0 18px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.88)" : EDITOR_NEU_SHADOW }}
+                  style={{ height: linkedEmailExpanded ? "auto" : TEXT_BLOCK_ROW_HEIGHT, minHeight: TEXT_BLOCK_ROW_HEIGHT, minWidth: 0, display: "grid", gridTemplateRows: linkedEmailExpanded ? "38px auto" : "38px minmax(0, 1fr)", borderTop: `1px solid ${textBlockIsFocused ? "transparent" : blockColor || EDITOR_NEU_SOFT_BORDER}`, borderRight: `1px solid ${textBlockIsFocused ? "transparent" : blockColor || EDITOR_NEU_SOFT_BORDER}`, borderBottom: `1px solid ${textBlockIsFocused ? "transparent" : blockColor || EDITOR_NEU_SOFT_BORDER}`, borderLeft: `${blockColor ? 4 : 1}px solid ${blockColor || (textBlockIsFocused ? "transparent" : EDITOR_NEU_SOFT_BORDER)}`, borderRadius: 14, background: blockColor ? "#ffffff" : `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${textBlockIsFocused ? EDITOR_NEU_EDGE_FRAME : "linear-gradient(135deg, rgba(255,255,255,0.76), rgba(255,255,255,0.76))"} border-box`, overflow: linkedEmailExpanded ? "visible" : "hidden", boxShadow: textBlockIsFocused ? "8px 8px 20px rgba(174,174,192,0.26), -7px -7px 16px rgba(255,255,255,0.92), 0 0 18px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.88)" : EDITOR_NEU_SHADOW }}
                 >
                   <div
                     data-node-text-box-header="true"
@@ -3298,13 +3298,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                       if (target instanceof Element && target.closest("button, input, label, select, textarea, a, details, summary")) return;
                       revealNodeEmailMessage(linkedEmailMessageID, block.id);
                     }}
-                    style={{ minWidth: 0, overflowX: "auto", overflowY: "hidden", borderBottom: `1px solid ${ruleColor}`, background: `linear-gradient(90deg, ${blockColor}30, ${blockColor}0c 54%, rgba(255,255,255,0.88))`, cursor: linkedEmailMessageID ? "pointer" : undefined }}
+                    style={{ minWidth: 0, overflowX: "auto", overflowY: "hidden", borderBottom: `1px solid ${ruleColor}`, background: blockColor ? `linear-gradient(90deg, ${blockColor}30, ${blockColor}0c 54%, rgba(255,255,255,0.88))` : "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))", cursor: linkedEmailMessageID ? "pointer" : undefined }}
                   >
                     <div style={{ minWidth: Math.max(448, minimumCommunicationWidth), height: 37, display: "grid", gridTemplateColumns: `${linkedEmailMessageID ? 128 : 44}px minmax(360px, 1fr) ${chatPaneIsVisible ? chatPaneWidth : 96}px`, alignItems: "center", gap: 4, padding: "4px 6px", boxSizing: "border-box" }}>
                       <div style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start" }}>
                         {linkedEmailMessageID ? (
-                          <button type="button" aria-label={linkedEmailExpanded ? "Hide linked email" : "Show linked email"} aria-expanded={linkedEmailExpanded} title={linkedEmailExpanded ? "Hide the linked email" : "Show the linked email"} onClick={toggleLinkedEmail} style={{ minWidth: 0, minHeight: 26, display: "inline-flex", alignItems: "center", gap: 5, border: `1px solid ${blockColor}`, borderRadius: 8, background: linkedEmailExpanded ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: blockColor, cursor: "pointer", padding: "2px 7px", fontSize: 10, fontWeight: 900, boxShadow: EDITOR_NEU_SHADOW }}>
-                            <MailIcon color={blockColor} />
+                          <button type="button" aria-label={linkedEmailExpanded ? "Hide linked email" : "Show linked email"} aria-expanded={linkedEmailExpanded} title={linkedEmailExpanded ? "Hide the linked email" : "Show the linked email"} onClick={toggleLinkedEmail} style={{ minWidth: 0, minHeight: 26, display: "inline-flex", alignItems: "center", gap: 5, border: `1px solid ${blockColor || EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: linkedEmailExpanded ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: blockColor || accent, cursor: "pointer", padding: "2px 7px", fontSize: 10, fontWeight: 900, boxShadow: EDITOR_NEU_SHADOW }}>
+                            <MailIcon color={blockColor || accent} />
                             <span>{linkedEmailExpanded ? "Hide email" : "Show email"}</span>
                           </button>
                         ) : null}
@@ -3361,7 +3361,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                                 attachmentInformationID={block.id}
                                 attachmentEditorSurface="node_text_block_linked_email"
                                 editable={canEdit}
-                                accent={blockColor}
+                                accent={blockColor || accent}
                                 surfaceText={surfaceText}
                                 strokeColor={strokeColor}
                                 activeSelection={activeNodeEmailSelection}

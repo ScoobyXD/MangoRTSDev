@@ -10,11 +10,11 @@ import {
 } from "../../../../frontend/src/modules/editor/nodeTextBlockCreation.js";
 
 test("ordinary Node plus creates an unlinked empty text box", () => {
-  const content = createOrdinaryNodeTextBlockContent("#0EA5E9");
+  const content = createOrdinaryNodeTextBlockContent();
   assert.equal(content.document, "");
   assert.deepEqual(content.attachments, []);
   assert.equal(content.emailMessageID, undefined);
-  assert.equal(content.color, "#0EA5E9");
+  assert.equal(content.color, undefined);
   assert.equal(content.title, "Hello I am a title");
 });
 
@@ -31,7 +31,7 @@ test("explicit email action creates an email-linked text box", () => {
   assert.equal(content.document, "<p>Selected quote</p>");
 });
 
-test("new Node text boxes receive an explicit non-red palette color without hashing", () => {
+test("new email-linked Node text boxes receive an explicit non-red palette color without hashing", () => {
   assert.equal(nextNodeTextBlockColor([]), "#0EA5E9");
   assert.equal(nextNodeTextBlockColor(["#0ea5e9"]), "#14B8A6");
   assert.equal(nextNodeTextBlockColor(["#0EA5E9", "#14B8A6"]), "#8B5CF6");

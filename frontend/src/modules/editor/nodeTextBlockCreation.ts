@@ -16,14 +16,12 @@ export const NODE_TEXT_BLOCK_COLORS = [
   "#3B82F6",
 ] as const;
 
-export const DEFAULT_NODE_TEXT_BLOCK_COLOR = NODE_TEXT_BLOCK_COLORS[0];
-
 export function nextNodeTextBlockColor(existingColors: Iterable<string>): string {
   const normalized = Array.from(existingColors, (color) => color.trim().toUpperCase()).filter(Boolean);
   const used = new Set(normalized);
   return NODE_TEXT_BLOCK_COLORS.find((color) => !used.has(color))
     ?? NODE_TEXT_BLOCK_COLORS[normalized.length % NODE_TEXT_BLOCK_COLORS.length]
-    ?? DEFAULT_NODE_TEXT_BLOCK_COLOR;
+    ?? NODE_TEXT_BLOCK_COLORS[0];
 }
 
 export type NodeEmailChatHostBlock = {
@@ -41,12 +39,11 @@ export type NodeEmailOriginReference = {
   blockID?: string;
 };
 
-export function createOrdinaryNodeTextBlockContent(color: string): EditorTextBlockContent {
+export function createOrdinaryNodeTextBlockContent(): EditorTextBlockContent {
   return {
     title: DEFAULT_NODE_TEXT_BLOCK_TITLE,
     document: "",
     attachments: [],
-    color: color.trim().toUpperCase(),
   };
 }
 

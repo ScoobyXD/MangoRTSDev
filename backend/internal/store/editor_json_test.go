@@ -246,7 +246,7 @@ func TestEditorFormatGateIsPermanentlyReadyAndRejectsPartialCounts(t *testing.T)
 	}
 }
 
-func TestNodeTextboxMetadataRequiresAnApprovedNonRedStoredColor(t *testing.T) {
+func TestNodeTextboxMetadataAllowsNoColorAndRejectsUnapprovedStoredColors(t *testing.T) {
 	document := EditorDocumentRef{
 		CompanyID: "11111111-1111-4111-8111-111111111111", ResourceType: EntityTypeNode,
 		ResourceID: "22222222-2222-4222-8222-222222222222", DocumentID: "33333333-3333-4333-8333-333333333333",
@@ -255,7 +255,11 @@ func TestNodeTextboxMetadataRequiresAnApprovedNonRedStoredColor(t *testing.T) {
 	if err != nil || normalized.Color != "#14B8A6" {
 		t.Fatalf("approved color metadata=%+v err=%v", normalized, err)
 	}
-	for _, color := range []string{"", "#EF4444", "#FF0000", "red", "#123456"} {
+	withoutColor, err := NormalizeEditorJSONMetadata(EditorJSONMetadataInput{Document: document, Title: "Ordinary notes"})
+	if err != nil || withoutColor.Color != "" {
+		t.Fatalf("ordinary metadata=%+v err=%v", withoutColor, err)
+	}
+	for _, color := range []string{"#EF4444", "#FF0000", "red", "#123456"} {
 		if _, err := NormalizeEditorJSONMetadata(EditorJSONMetadataInput{Document: document, Title: "Notes", Color: color}); !errors.Is(err, ErrInvalid) {
 			t.Fatalf("color %q error=%v, want ErrInvalid", color, err)
 		}

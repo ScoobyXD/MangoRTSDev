@@ -93,7 +93,11 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeSurface, /scrollIntoView\(\{ behavior: "smooth", block: "center", inline: "nearest" \}\)/);
   assert.match(nodeSurface, /onEmailMessageActivate=\{revealEmailTextBlock\}/);
   assert.doesNotMatch(nodeSurface, /editorEmailMessageAccent/);
-  assert.match(nodeSurface, /block\.color\.trim\(\)/);
+  assert.match(nodeSurface, /linkedEmailMessageID \? \(block\.color\?\.trim\(\) \?\? ""\) : ""/);
+  assert.match(nodeSurface, /borderLeft: `\$\{blockColor \? 4 : 1\}px solid \$\{blockColor \|\| \(textBlockIsFocused \? "transparent" : EDITOR_NEU_SOFT_BORDER\)\}`/);
+  assert.match(nodeSurface, /border: `1px solid \$\{blockColor \|\| EDITOR_NEU_SOFT_BORDER\}`/);
+  assert.match(nodeSurface, /<MailIcon color=\{blockColor \|\| accent\} \/>/);
+  assert.match(nodeSurface, /accent=\{blockColor \|\| accent\}/);
   assert.doesNotMatch(nodeSurface, /repairs: Array<\{ blockID: string; accent: string \}>/);
   assert.match(nodeSurface, /aria-label=\{linkedEmailExpanded \? "Hide linked email" : "Show linked email"\}/);
   assert.match(nodeSurface, /data-node-email-column="true"/);
@@ -180,7 +184,7 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.doesNotMatch(nodeParts, />Attached emails</);
   assert.match(triageChat, /listEditorTextBlockProjections\(targetProjections\)/);
   assert.doesNotMatch(triageChat, /existingMessageAccent|existingEmailAccents|emailAccent:/);
-  assert.match(triageChat, /color: DEFAULT_NODE_TEXT_BLOCK_COLOR/);
+  assert.match(triageChat, /color: nextNodeTextBlockColor\(\[\]\)/);
 });
 
 test("node drag and Universal-picker email attachment retain exact provider mailbox identity", () => {
