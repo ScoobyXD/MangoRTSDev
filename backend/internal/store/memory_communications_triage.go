@@ -410,7 +410,7 @@ func (r *MemoryRepo) attachCommunicationsTriageItemsToStandaloneNodeLocked(input
 		})
 		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
 	}
-	if err := r.addCommunicationsConversionAtomicWritesLocked(input, &result); err != nil {
+	if err := r.addCommunicationsEmailTextBoxChatWritesLocked(communicationsEmailTextBoxChatWriteInputFromConversion(input), &result); err != nil {
 		return CommunicationsTriageConversionResult{}, err
 	}
 	return result, nil
@@ -607,7 +607,7 @@ func (r *MemoryRepo) attachCommunicationsTriageItemsToExistingNodeLocked(input C
 		result.EmailProvenance = append(result.EmailProvenance, provenance)
 		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
 	}
-	if err := r.addCommunicationsConversionAtomicWritesLocked(input, &result); err != nil {
+	if err := r.addCommunicationsEmailTextBoxChatWritesLocked(communicationsEmailTextBoxChatWriteInputFromConversion(input), &result); err != nil {
 		return CommunicationsTriageConversionResult{}, err
 	}
 	return result, nil

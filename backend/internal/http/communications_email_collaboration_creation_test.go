@@ -99,6 +99,54 @@ func TestEmailCollaborationCreationUsesProviderTruth(t *testing.T) {
 	}
 }
 
+func TestEmailCollaborationCreationUsesStoredExactMessageWithoutProviderRead(t *testing.T) {
+	repo, owner, _, _ := newEmailCollaborationThreadTestRepo(t)
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID: owner.UserID, Provider: "google", AccountEmail: owner.Email,
+		Scope: "personal", GrantID: "stored-source-grant", Status: "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	storedMessage := domain.EmailMessageSnapshot{
+		ID: "stored-exact-message", ThreadID: "stored-exact-thread", Subject: "Stored subject",
+		Snippet: "Stored snippet", Body: "Stored body", Date: 84,
+	}
+	storedThread, err := repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+		CompanyID: emailCollaborationThreadTestCompanyID, PersonalUserID: owner.UserID,
+		PersonalAccountEmail: owner.Email, AccountEmail: owner.Email, Provider: "google",
+		ProviderThreadID: storedMessage.ThreadID, SelectedMessageID: storedMessage.ID,
+		Messages: []domain.EmailMessageSnapshot{storedMessage},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := newEmailCollaborationCreationTestClient(NylasMessage{}, errors.New("provider must not be called"))
+	rec := performEmailCollaborationCreationTestRequest(t, repo, client, owner, domain.RoleCompanyUser, communicationsEmailCollaborationRequest{
+		CompanyID: emailCollaborationThreadTestCompanyID, AccountEmail: owner.Email,
+		Message: domain.EmailMessageSnapshot{
+			ID: storedMessage.ID, ThreadID: storedMessage.ThreadID, Subject: "FORGED", Body: "FORGED",
+		},
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status=%d, want 201 body=%s", rec.Code, rec.Body.String())
+	}
+	var result store.CommunicationsEmailCollaborationEnsureResult
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Collaboration.Message.Subject != storedMessage.Subject || result.Collaboration.Message.Body != storedMessage.Body {
+		t.Fatalf("collaboration message = %+v, want stored exact message", result.Collaboration.Message)
+	}
+	grants, messageIDs := client.calls()
+	if len(grants) != 0 || len(messageIDs) != 0 {
+		t.Fatalf("stored exact message triggered provider calls: grants=%v messages=%v", grants, messageIDs)
+	}
+	jobs, err := repo.ListCommunicationsEmailIngestionJobsForThreadContext(context.Background(), emailCollaborationThreadTestCompanyID, storedThread.EmailThreadID)
+	if err != nil || len(jobs) != 0 {
+		t.Fatalf("chat creation queued ingestion jobs: %+v err=%v", jobs, err)
+	}
+}
+
 func TestEmailCollaborationCreationRejectsProviderIdentityMismatchBeforeEnsure(t *testing.T) {
 	for _, test := range []struct {
 		name             string

@@ -494,7 +494,7 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 		})
 		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
 	}
-	if err := r.addCommunicationsConversionAtomicWritesTx(ctx, tx, input, &result); err != nil {
+	if err := r.addCommunicationsEmailTextBoxChatWritesTx(ctx, tx, communicationsEmailTextBoxChatWriteInputFromConversion(input), &result); err != nil {
 		return CommunicationsTriageConversionResult{}, err
 	}
 	return result, nil
@@ -722,7 +722,7 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 		result.EmailProvenance = append(result.EmailProvenance, provenance)
 		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
 	}
-	if err := r.addCommunicationsConversionAtomicWritesTx(ctx, tx, input, &result); err != nil {
+	if err := r.addCommunicationsEmailTextBoxChatWritesTx(ctx, tx, communicationsEmailTextBoxChatWriteInputFromConversion(input), &result); err != nil {
 		return CommunicationsTriageConversionResult{}, err
 	}
 	return result, nil

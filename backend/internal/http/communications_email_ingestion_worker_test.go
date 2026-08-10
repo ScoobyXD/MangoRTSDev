@@ -70,6 +70,28 @@ func (r *emailOutboxBoundaryRepo) enqueueCount() int {
 	return r.enqueues
 }
 
+func mustEnsureEmailIngestionJobForTest(
+	t *testing.T,
+	repo *store.MemoryRepo,
+	connection domain.UserEmailConnection,
+	created store.CommunicationsEmailCollaborationEnsureResult,
+	providerMessageID string,
+) store.CommunicationsEmailIngestionJob {
+	t.Helper()
+	job, _, err := repo.EnsureCommunicationsEmailIngestionJobContext(context.Background(), store.CommunicationsEmailIngestionJobInput{
+		CompanyID:         created.Collaboration.CompanyID,
+		EmailConnectionID: connection.EmailConnectionID,
+		EmailThreadID:     created.Collaboration.EmailThreadID,
+		ProviderMessageID: providerMessageID,
+		ProviderThreadID:  created.Collaboration.ProviderThreadID,
+		Priority:          store.CommunicationsEmailIngestionPriorityVisible,
+	})
+	if err != nil {
+		t.Fatalf("EnsureCommunicationsEmailIngestionJobContext: %v", err)
+	}
+	return job
+}
+
 func newEmailOutboxBoundaryFixture(t *testing.T) (*store.MemoryRepo, store.CommunicationsEmailIngestionJob, *emailCollaborationThreadTestClient) {
 	t.Helper()
 	repo, owner, _, _ := newEmailCollaborationThreadTestRepo(t)
@@ -87,15 +109,12 @@ func newEmailOutboxBoundaryFixture(t *testing.T) (*store.MemoryRepo, store.Commu
 	if err != nil {
 		t.Fatal(err)
 	}
-	jobs, err := repo.ListCommunicationsEmailIngestionJobsForThreadContext(context.Background(), created.Collaboration.CompanyID, created.Collaboration.EmailThreadID)
-	if err != nil || len(jobs) != 1 || jobs[0].EmailConnectionID != connection.EmailConnectionID {
-		t.Fatalf("boundary jobs=%+v err=%v", jobs, err)
-	}
+	job := mustEnsureEmailIngestionJobForTest(t, repo, connection, created, "outbox-boundary-message")
 	client := newEmailCollaborationThreadTestClient()
 	client.messagesByID["outbox-boundary-message"] = NylasMessage{
 		ID: "outbox-boundary-message", Subject: "Durable hint boundary", Body: "<p>complete</p>", Date: time.Now().UTC().Unix(),
 	}
-	return repo, jobs[0], client
+	return repo, job, client
 }
 
 func TestEmailIngestionOutboxFailureRedeliversHintWithoutRepeatingProviderWork(t *testing.T) {
@@ -390,10 +409,7 @@ func TestEmailIngestionParksPermanentProviderFailuresFromAttachmentRecovery(t *t
 			if err != nil {
 				t.Fatal(err)
 			}
-			jobs, err := repo.ListCommunicationsEmailIngestionJobsForThreadContext(context.Background(), created.Collaboration.CompanyID, created.Collaboration.EmailThreadID)
-			if err != nil || len(jobs) != 1 {
-				t.Fatalf("jobs=%+v err=%v", jobs, err)
-			}
+			job := mustEnsureEmailIngestionJobForTest(t, repo, connection, created, test.message.ID)
 			client := newEmailCollaborationThreadTestClient()
 			client.messagesByID[test.message.ID] = test.message
 			test.configure(client)
@@ -405,12 +421,12 @@ func TestEmailIngestionParksPermanentProviderFailuresFromAttachmentRecovery(t *t
 			server.nylasGate = newNylasRequestGate(0)
 
 			acknowledged, err := server.processEmailIngestionDelivery(context.Background(), emailqueue.Message{
-				JobID: jobs[0].IngestionJobID, CompanyID: jobs[0].CompanyID, EmailConnectionID: jobs[0].EmailConnectionID,
+				JobID: job.IngestionJobID, CompanyID: job.CompanyID, EmailConnectionID: job.EmailConnectionID,
 			})
 			if err != nil || !acknowledged {
 				t.Fatalf("permanent provider failure acknowledged=%v err=%v", acknowledged, err)
 			}
-			parked, err := repo.GetCommunicationsEmailIngestionJobContext(context.Background(), jobs[0].IngestionJobID)
+			parked, err := repo.GetCommunicationsEmailIngestionJobContext(context.Background(), job.IngestionJobID)
 			if err != nil || parked.Status != store.CommunicationsEmailIngestionJobParked || parked.ProviderAttemptCount != 1 {
 				t.Fatalf("parked job=%+v err=%v", parked, err)
 			}
@@ -477,12 +493,9 @@ func TestCommunicationsEmailIngestionWorkerStoresThreadAttachmentsAndLaterManual
 	defer server.Close()
 	server.nylasGate = newNylasRequestGate(0)
 
-	jobs, err := repo.ListCommunicationsEmailIngestionJobsForThreadContext(context.Background(), emailCollaborationThreadTestCompanyID, created.Collaboration.EmailThreadID)
-	if err != nil || len(jobs) != 1 {
-		t.Fatalf("initial jobs=%+v err=%v", jobs, err)
-	}
+	job := mustEnsureEmailIngestionJobForTest(t, repo, connection, created, "worker-root")
 	acknowledged, err := server.processEmailIngestionDelivery(context.Background(), emailqueue.Message{
-		JobID: jobs[0].IngestionJobID, CompanyID: jobs[0].CompanyID, EmailConnectionID: jobs[0].EmailConnectionID,
+		JobID: job.IngestionJobID, CompanyID: job.CompanyID, EmailConnectionID: job.EmailConnectionID,
 	})
 	if err != nil || !acknowledged {
 		t.Fatalf("initial acknowledged=%v err=%v", acknowledged, err)
@@ -602,11 +615,8 @@ func TestCommunicationsEmailIngestionWorkerStoresThreadAttachmentsAndLaterManual
 		t.Fatal(err)
 	}
 	client.messagesByID["worker-orphan"] = NylasMessage{ID: "worker-orphan", Subject: "No provider thread", Body: "<p>orphan complete</p>", Date: 40}
-	orphanJobs, err := repo.ListCommunicationsEmailIngestionJobsForThreadContext(context.Background(), emailCollaborationThreadTestCompanyID, orphan.Collaboration.EmailThreadID)
-	if err != nil || len(orphanJobs) != 1 {
-		t.Fatalf("orphan jobs=%+v err=%v", orphanJobs, err)
-	}
-	acknowledged, err = server.processEmailIngestionDelivery(context.Background(), emailqueue.Message{JobID: orphanJobs[0].IngestionJobID, CompanyID: orphanJobs[0].CompanyID, EmailConnectionID: orphanJobs[0].EmailConnectionID})
+	orphanJob := mustEnsureEmailIngestionJobForTest(t, repo, connection, orphan, "worker-orphan")
+	acknowledged, err = server.processEmailIngestionDelivery(context.Background(), emailqueue.Message{JobID: orphanJob.IngestionJobID, CompanyID: orphanJob.CompanyID, EmailConnectionID: orphanJob.EmailConnectionID})
 	if err != nil || !acknowledged {
 		t.Fatalf("orphan acknowledged=%v err=%v", acknowledged, err)
 	}

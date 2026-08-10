@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -16,6 +15,7 @@ type communicationsEmailCollaborationRequest struct {
 	SharedInboxID   string                                            `json:"shared_inbox_id"`
 	AccountEmail    string                                            `json:"account_email"`
 	NewNodeID       string                                            `json:"new_node_id"`
+	TargetNodeID    string                                            `json:"target_node_id"`
 	Priority        *int                                              `json:"priority"`
 	Message         domain.EmailMessageSnapshot                       `json:"message"`
 	LinkedTextBlock *communicationsTriageAtomicNodeInformationRequest `json:"linked_text_block"`
@@ -83,34 +83,44 @@ func (s *Server) handleCommunicationsEmailCollaborations(w http.ResponseWriter, 
 		if !ok {
 			return
 		}
-		// Creation is a durable sharing boundary: the browser identifies the
-		// provider message, but it is never authoritative for the content that
-		// will be exposed to future collaboration participants.
-		if s.nylasClient == nil || !s.nylasConfig.IsConfigured() {
-			writeError(w, http.StatusServiceUnavailable, "nylas_not_configured")
-			return
-		}
-		connection, ok := s.resolveEmailCollaborationCreationSourceConnection(w, actor.User.UserID, req.CompanyID, scope)
-		if !ok {
-			return
-		}
 		requestedMessageID := strings.TrimSpace(req.Message.ID)
 		requestedThreadID := strings.TrimSpace(req.Message.ThreadID)
-		var providerMessage NylasMessage
-		if err := s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
-			var fetchErr error
-			providerMessage, fetchErr = s.nylasClient.GetMessage(ctx, connection.GrantID, requestedMessageID)
-			return fetchErr
-		}); err != nil {
-			s.writeNylasError(w, r, connection, err)
+		stored, storedErr := s.repo.GetCommunicationsEmailMessageForScope(store.CommunicationsEmailMessageLookupInput{
+			CompanyID: req.CompanyID, PersonalUserID: scope.personalUserID,
+			PersonalAccountEmail: scope.personalAccountEmail, SharedInboxID: scope.sharedInboxID,
+			AccountEmail: scope.accountEmail, ProviderMessageID: requestedMessageID,
+		})
+		providerSnapshot, provider := stored.Message, stored.Provider
+		if errors.Is(storedErr, store.ErrNotFound) {
+			// Provider-only triage rows are imported only when the user performs a
+			// durable action. The browser snapshot is display data, never storage truth.
+			if s.nylasClient == nil || !s.nylasConfig.IsConfigured() {
+				writeError(w, http.StatusServiceUnavailable, "nylas_not_configured")
+				return
+			}
+			connection, found := s.resolveEmailCollaborationCreationSourceConnection(w, actor.User.UserID, req.CompanyID, scope)
+			if !found {
+				return
+			}
+			providerMessage, fetchErr := s.communicationsMessage(r.Context(), connection, requestedMessageID)
+			if fetchErr != nil {
+				s.writeNylasError(w, r, connection, fetchErr)
+				return
+			}
+			if strings.TrimSpace(providerMessage.ID) != requestedMessageID ||
+				(requestedThreadID != "" && strings.TrimSpace(providerMessage.ThreadID) != requestedThreadID) {
+				writeError(w, http.StatusConflict, "email_provider_message_mismatch")
+				return
+			}
+			providerSnapshot = emailMessageSnapshotFromNylas(providerMessage)
+			provider = connection.Provider
+		} else if storedErr != nil {
+			s.writeEmailCollaborationStoreError(w, storedErr, "failed_to_resolve_stored_email_message")
 			return
-		}
-		if strings.TrimSpace(providerMessage.ID) != requestedMessageID ||
-			(requestedThreadID != "" && strings.TrimSpace(providerMessage.ThreadID) != requestedThreadID) {
+		} else if requestedThreadID != "" && strings.TrimSpace(providerSnapshot.ThreadID) != requestedThreadID {
 			writeError(w, http.StatusConflict, "email_provider_message_mismatch")
 			return
 		}
-		providerSnapshot := emailMessageSnapshotFromNylas(providerMessage)
 		nodeActorUserID, nodeActorLabel := nodeChangeActorPayload(r)
 		toNodeInformationInput := func(item *communicationsTriageAtomicNodeInformationRequest) *store.NodeInformationInput {
 			if item == nil {
@@ -124,8 +134,9 @@ func (s *Server) handleCommunicationsEmailCollaborations(w http.ResponseWriter, 
 		result, err := s.repo.EnsureCommunicationsEmailCollaboration(r.Context(), store.CommunicationsEmailCollaborationEnsureInput{
 			CompanyID: req.CompanyID, PersonalUserID: scope.personalUserID,
 			PersonalAccountEmail: scope.personalAccountEmail, SharedInboxID: scope.sharedInboxID,
-			AccountEmail: scope.accountEmail, Provider: connection.Provider, CreatedByUserID: actor.User.UserID,
+			AccountEmail: scope.accountEmail, Provider: provider, CreatedByUserID: actor.User.UserID,
 			RequestedNodeID: req.NewNodeID, Priority: req.Priority, Message: providerSnapshot,
+			TargetNodeID:    req.TargetNodeID,
 			LinkedTextBlock: toNodeInformationInput(req.LinkedTextBlock), InitialChat: toNodeInformationInput(req.InitialChat),
 		})
 		if err != nil {
@@ -149,15 +160,6 @@ func (s *Server) handleCommunicationsEmailCollaborations(w http.ResponseWriter, 
 			status = http.StatusCreated
 			s.wakeRealtimeSpine()
 		}
-		if strings.TrimSpace(result.Collaboration.EmailThreadID) != "" {
-			if err := s.enqueueCommunicationsEmailIngestionJobsForThreads(r.Context(), result.Collaboration.CompanyID, []string{result.Collaboration.EmailThreadID}, store.CommunicationsEmailUserProducerFingerprint(actor.User.UserID)); err != nil {
-				writeError(w, http.StatusServiceUnavailable, "failed_to_queue_email_ingestion")
-				return
-			}
-		}
-		if strings.TrimSpace(result.Collaboration.EmailThreadID) != "" {
-			_ = s.linkStoredEmailThreadAttachments(r.Context(), result.Collaboration.CompanyID, result.Collaboration.EmailThreadID, actor.User.UserID)
-		}
 		writeJSON(w, status, result)
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -170,7 +172,7 @@ func (s *Server) resolveEmailCollaborationCreationSourceConnection(w http.Respon
 		if !ok {
 			return domain.UserEmailConnection{}, false
 		}
-		return requireConnectedEmailStatus(w, connection)
+		return connection, true
 	}
 
 	connection, err := s.repo.GetCompanyEmailConnectionByAccountEmail(companyID, scope.accountEmail)
@@ -186,7 +188,11 @@ func (s *Server) resolveEmailCollaborationCreationSourceConnection(w http.Respon
 		writeError(w, http.StatusInternalServerError, "failed_to_load_shared_inbox_email_connection")
 		return domain.UserEmailConnection{}, false
 	}
-	return requireConnectedCompanyEmailStatus(w, connection, actorUserID)
+	return domain.UserEmailConnection{
+		EmailConnectionID: connection.EmailConnectionID, CompanyEmailConnectionID: connection.CompanyEmailConnectionID,
+		CompanyID: connection.CompanyID, UserID: actorUserID, Provider: connection.Provider,
+		AccountEmail: connection.AccountEmail, GrantID: connection.GrantID, Status: connection.Status,
+	}, true
 }
 
 func (s *Server) handleCommunicationsEmailCollaborationByID(w http.ResponseWriter, r *http.Request) {

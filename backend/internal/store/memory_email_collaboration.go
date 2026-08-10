@@ -54,6 +54,11 @@ func collaborationMessageIdentifierMatches(item domain.CommunicationsEmailCollab
 }
 
 func (r *MemoryRepo) findCollaborationLocked(companyID string, scope communicationsEmailCollaborationScope, messageID, threadID string) (domain.CommunicationsEmailCollaboration, bool) {
+	for _, item := range r.emailCollaborations {
+		if item.CompanyID == companyID && collaborationScopeMatches(item, scope) && collaborationMessageIdentifierMatches(item, messageID) {
+			return item, true
+		}
+	}
 	threadID = strings.TrimSpace(threadID)
 	if threadID != "" {
 		for _, item := range r.emailCollaborations {
@@ -62,21 +67,15 @@ func (r *MemoryRepo) findCollaborationLocked(companyID string, scope communicati
 			}
 		}
 	}
-	for _, item := range r.emailCollaborations {
-		if item.CompanyID == companyID && collaborationScopeMatches(item, scope) && collaborationMessageIdentifierMatches(item, messageID) {
-			return item, true
-		}
-	}
 	return domain.CommunicationsEmailCollaboration{}, false
 }
 func (r *MemoryRepo) findCollaborationForRequestedNodeLocked(companyID string, scope communicationsEmailCollaborationScope, messageID, threadID, nodeID string) (domain.CommunicationsEmailCollaboration, bool) {
 	nodeID = strings.TrimSpace(nodeID)
-	threadID = strings.TrimSpace(threadID)
 	for _, item := range r.emailCollaborations {
 		if item.CompanyID != companyID || item.NodeID != nodeID || !collaborationScopeMatches(item, scope) {
 			continue
 		}
-		if (threadID != "" && item.ProviderThreadID == threadID) || collaborationMessageIdentifierMatches(item, messageID) {
+		if collaborationMessageIdentifierMatches(item, messageID) {
 			return item, true
 		}
 	}
@@ -166,127 +165,140 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(ctx context.Context,
 		AccountEmail: scope.accountEmail, Provider: input.Provider, ProviderThreadID: input.Message.ThreadID,
 		SelectedMessageID: input.Message.ID, Messages: []domain.EmailMessageSnapshot{input.Message},
 		HistoryComplete: input.Message.ThreadID == "", FetchedAt: time.Now().UTC(),
-		RequestDownload: true, RequestedByUserID: input.CreatedByUserID,
 	}
 	thread, err := r.upsertCommunicationsEmailThreadLocked(threadInput)
 	if err != nil {
 		restore()
 		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}
-	existing, ok := r.findCollaborationLocked(input.CompanyID, scope, input.Message.ID, input.Message.ThreadID)
-	if input.RequestedNodeID != "" {
-		existing, ok = r.findCollaborationForRequestedNodeLocked(input.CompanyID, scope, input.Message.ID, input.Message.ThreadID, input.RequestedNodeID)
+	now := time.Now().UTC()
+	nodeID := input.TargetNodeID
+	createdNode := false
+	reuseExistingNode := false
+	if nodeID != "" {
+		if _, ok := r.nodes[key(input.CompanyID, nodeID)]; !ok || !r.userHasEffectiveAccessLocked(input.CompanyID, input.CreatedByUserID, EntityTypeNode, nodeID, EntityPermissionEdit) {
+			restore()
+			return CommunicationsEmailCollaborationEnsureResult{}, ErrNotFound
+		}
+		reuseExistingNode = true
+	} else {
+		nodeID = input.RequestedNodeID
+		if nodeID == "" {
+			if existing, ok := r.findCollaborationLocked(input.CompanyID, scope, input.Message.ID, input.Message.ThreadID); ok {
+				nodeID = existing.NodeID
+				reuseExistingNode = true
+			}
+		}
+		if existing, ok := r.findCollaborationForRequestedNodeLocked(input.CompanyID, scope, input.Message.ID, "", nodeID); ok {
+			nodeID = existing.NodeID
+			reuseExistingNode = true
+		} else {
+			if nodeID != "" {
+				if _, exists := r.nodes[key(input.CompanyID, nodeID)]; exists {
+					if !reuseExistingNode {
+						restore()
+						return CommunicationsEmailCollaborationEnsureResult{}, ErrAlreadyExists
+					}
+				} else {
+					reuseExistingNode = false
+				}
+			}
+			if !reuseExistingNode {
+				node, createErr := r.createNodeWithIDLocked(input.CompanyID, nodeID, communicationsEmailCollaborationTitle(input.Message))
+				if createErr != nil {
+					restore()
+					return CommunicationsEmailCollaborationEnsureResult{}, createErr
+				}
+				node.DefaultAccess = ResourceDefaultAccessNoAccess
+				if input.Priority != nil {
+					priority := *input.Priority
+					node.Priority = &priority
+				}
+				r.nodes[key(input.CompanyID, node.NodeID)] = node
+				nodeID = node.NodeID
+				if _, err := r.customizeNewMemoryResourcePermissionForCreatorLocked(input.CompanyID, EntityTypeNode, nodeID, input.CreatedByUserID); err != nil {
+					restore()
+					return CommunicationsEmailCollaborationEnsureResult{}, err
+				}
+				if _, err := r.customizeNewMemoryResourceRACIForCreatorLocked(input.CompanyID, EntityTypeNode, nodeID, domain.RACIRoleResponsible, input.CreatedByUserID); err != nil {
+					restore()
+					return CommunicationsEmailCollaborationEnsureResult{}, err
+				}
+				createdNode = true
+			}
+		}
 	}
+	existing, ok := r.findCollaborationForRequestedNodeLocked(input.CompanyID, scope, input.Message.ID, "", nodeID)
+	informationID, collaborationID := newUUIDv7String(), newUUIDv7String()
+	internalMessageID := internalEmailMessageIDForProvider(thread, input.Message.ID)
+	input.Message.EmailMessageID = internalMessageID
+	var item domain.CommunicationsEmailCollaboration
 	if ok {
 		existing = r.reconcileEnsuredEmailCollaborationLocked(existing, input)
 		existing.EmailThreadID = thread.EmailThreadID
 		existing.Provider = thread.Provider
 		r.emailCollaborations[key(existing.CompanyID, existing.CollaborationID)] = existing
-		if requestedMessageID, sourceID, ok := communicationsEmailIngestionRequest(thread, threadInput); ok {
-			if emailConnectionID := r.emailConnectionIDForThreadLocked(thread); emailConnectionID != "" {
-				if _, _, err := r.ensureCommunicationsEmailIngestionJobLocked(CommunicationsEmailIngestionJobInput{
-					CompanyID: input.CompanyID, EmailConnectionID: emailConnectionID, EmailThreadID: thread.EmailThreadID,
-					ProviderMessageID: requestedMessageID, ProviderThreadID: thread.ProviderThreadID, Priority: CommunicationsEmailIngestionPriorityVisible,
-					EnqueueSourceID: sourceID,
-				}); err != nil {
-					restore()
-					return CommunicationsEmailCollaborationEnsureResult{}, err
-				}
-			}
+		informationID, collaborationID = existing.AttachedEmailInformationID, existing.CollaborationID
+		item = existing
+	} else {
+		information := communicationsEmailAttachedProjectionPayloadWithThread(informationID, collaborationID, thread.EmailThreadID, input)
+		projectionKey := key(input.CompanyID, nodeID)
+		if r.nodeText[projectionKey] == nil {
+			r.nodeText[projectionKey] = map[string]domain.NodeProjection{}
 		}
-		information := communicationsEmailAttachedProjectionPayloadWithThread(existing.AttachedEmailInformationID, existing.CollaborationID, thread.EmailThreadID, input)
-		projectionKey := key(input.CompanyID, existing.NodeID)
-		if projection, ok := r.nodeText[projectionKey][existing.AttachedEmailInformationID]; ok {
-			projection.Information = information
-			projection.UpdatedTimestamp = time.Now().UTC()
-			r.nodeText[projectionKey][existing.AttachedEmailInformationID] = projection
+		r.nodeText[projectionKey][informationID] = domain.NodeProjection{CompanyID: input.CompanyID, NodeID: nodeID, InformationID: informationID, Type: "Attached email", Information: information, CreatedTimestamp: now, UpdatedTimestamp: now}
+		r.nodeInfo[projectionKey] = append(r.nodeInfo[projectionKey], domain.NodeInformation{CompanyID: input.CompanyID, NodeID: nodeID, InformationID: informationID, Type: "Attached email", Information: information, CreatedTimestamp: now, UpdatedTimestamp: now})
+		item = domain.CommunicationsEmailCollaboration{
+			CompanyID: input.CompanyID, CollaborationID: collaborationID, NodeID: nodeID,
+			AttachedEmailInformationID: informationID, ScopeType: scope.scopeType,
+			PersonalUserID: scope.personalUserID, PersonalAccountEmail: scope.personalAccountEmail,
+			SharedInboxID: scope.sharedInboxID, AccountEmail: scope.accountEmail, Provider: thread.Provider,
+			ProviderThreadID: input.Message.ThreadID, RootMessageID: internalMessageID,
+			LatestMessageID: internalMessageID, Message: input.Message, CreatedByUserID: input.CreatedByUserID,
+			EmailThreadID:    thread.EmailThreadID,
+			CreatedTimestamp: now, UpdatedTimestamp: now,
 		}
-		for index := range r.nodeInfo[projectionKey] {
-			if r.nodeInfo[projectionKey][index].InformationID == existing.AttachedEmailInformationID {
-				r.nodeInfo[projectionKey][index].Information = information
-				r.nodeInfo[projectionKey][index].UpdatedTimestamp = time.Now().UTC()
-			}
-		}
-		return CommunicationsEmailCollaborationEnsureResult{Collaboration: r.withCollaborationParticipantsLocked(existing)}, nil
+		r.emailCollaborations[key(input.CompanyID, item.CollaborationID)] = item
 	}
-
-	now := time.Now().UTC()
-	node, err := r.createNodeWithIDLocked(input.CompanyID, input.RequestedNodeID, communicationsEmailCollaborationTitle(input.Message))
-	if err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
-	}
-	node.DefaultAccess = ResourceDefaultAccessNoAccess
-	if input.Priority != nil {
-		priority := *input.Priority
-		node.Priority = &priority
-	}
-	r.nodes[key(input.CompanyID, node.NodeID)] = node
-	informationID, collaborationID := newUUIDv7String(), newUUIDv7String()
-	information := communicationsEmailAttachedProjectionPayloadWithThread(informationID, collaborationID, thread.EmailThreadID, input)
-	projection := domain.NodeProjection{CompanyID: input.CompanyID, NodeID: node.NodeID, InformationID: informationID, Type: "Attached email", Information: information, CreatedTimestamp: now, UpdatedTimestamp: now}
-	r.nodeText[key(input.CompanyID, node.NodeID)] = map[string]domain.NodeProjection{informationID: projection}
-	r.nodeInfo[key(input.CompanyID, node.NodeID)] = []domain.NodeInformation{{CompanyID: input.CompanyID, NodeID: node.NodeID, InformationID: informationID, Type: "Attached email", Information: information, CreatedTimestamp: now, UpdatedTimestamp: now}}
-	internalMessageID := internalEmailMessageIDForProvider(thread, input.Message.ID)
-	input.Message.EmailMessageID = internalMessageID
-	item := domain.CommunicationsEmailCollaboration{
-		CompanyID: input.CompanyID, CollaborationID: collaborationID, NodeID: node.NodeID,
-		AttachedEmailInformationID: informationID, ScopeType: scope.scopeType,
-		PersonalUserID: scope.personalUserID, PersonalAccountEmail: scope.personalAccountEmail,
-		SharedInboxID: scope.sharedInboxID, AccountEmail: scope.accountEmail, Provider: thread.Provider,
-		ProviderThreadID: input.Message.ThreadID, RootMessageID: internalMessageID,
-		LatestMessageID: internalMessageID, Message: input.Message, CreatedByUserID: input.CreatedByUserID,
-		EmailThreadID:    thread.EmailThreadID,
-		CreatedTimestamp: now, UpdatedTimestamp: now,
-	}
-	r.emailCollaborations[key(input.CompanyID, item.CollaborationID)] = item
-	if _, err := r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, node.NodeID, informationID, thread.EmailThreadID, input.Message.ID, input.CreatedByUserID, now); err != nil {
+	if _, err := r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, nodeID, informationID, thread.EmailThreadID, input.Message.ID, input.CreatedByUserID, now); err != nil {
 		restore()
 		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}
 	if input.LinkedTextBlock != nil {
-		input.LinkedTextBlock.CompanyID, input.LinkedTextBlock.NodeID = input.CompanyID, node.NodeID
-		if input.InitialChat != nil {
-			input.InitialChat.CompanyID, input.InitialChat.NodeID = input.CompanyID, node.NodeID
-		}
-		conversionInput := CommunicationsTriageConversionInput{
-			CompanyID: input.CompanyID, UserID: input.CreatedByUserID, ActorUserID: input.CreatedByUserID,
-			SharedInboxID: input.SharedInboxID, AccountEmail: input.AccountEmail, NodeID: node.NodeID,
-			MessageIDs: []string{input.Message.ID}, LinkedTextBlock: input.LinkedTextBlock, InitialChat: input.InitialChat,
-		}
-		if err := r.addCommunicationsConversionAtomicWritesLocked(conversionInput, &CommunicationsTriageConversionResult{}); err != nil {
+		input.LinkedTextBlock.CompanyID, input.LinkedTextBlock.NodeID = input.CompanyID, nodeID
+	}
+	if input.InitialChat != nil {
+		input.InitialChat.CompanyID, input.InitialChat.NodeID = input.CompanyID, nodeID
+		mentionedUserIDs, mentionedGroupIDs := CommunicationsEmailChatMentionPrincipalIDs(input.InitialChat.Information)
+		if _, err := r.addCollaborationParticipantsLocked(CommunicationsEmailCollaborationParticipantInput{
+			CompanyID: input.CompanyID, CollaborationID: collaborationID, ActorUserID: input.CreatedByUserID,
+			MentionedUserIDs: mentionedUserIDs, MentionedGroupIDs: mentionedGroupIDs,
+		}); err != nil {
 			restore()
 			return CommunicationsEmailCollaborationEnsureResult{}, err
 		}
 	}
-	if requestedMessageID, sourceID, ok := communicationsEmailIngestionRequest(thread, threadInput); ok {
-		if emailConnectionID := r.emailConnectionIDForThreadLocked(thread); emailConnectionID != "" {
-			if _, _, err := r.ensureCommunicationsEmailIngestionJobLocked(CommunicationsEmailIngestionJobInput{
-				CompanyID: input.CompanyID, EmailConnectionID: emailConnectionID, EmailThreadID: thread.EmailThreadID,
-				ProviderMessageID: requestedMessageID, ProviderThreadID: thread.ProviderThreadID, Priority: CommunicationsEmailIngestionPriorityVisible,
-				EnqueueSourceID: sourceID,
-			}); err != nil {
-				restore()
-				return CommunicationsEmailCollaborationEnsureResult{}, err
-			}
+	if input.LinkedTextBlock != nil || input.InitialChat != nil {
+		writeInput := communicationsEmailTextBoxChatWriteInput{
+			CompanyID: input.CompanyID, UserID: input.CreatedByUserID, SharedInboxID: input.SharedInboxID,
+			AccountEmail: input.AccountEmail, NodeID: nodeID, ProviderMessageID: input.Message.ID,
+			LinkedTextBlock: input.LinkedTextBlock, InitialChat: input.InitialChat,
+		}
+		if err := r.addCommunicationsEmailTextBoxChatWritesLocked(writeInput, &CommunicationsTriageConversionResult{}); err != nil {
+			restore()
+			return CommunicationsEmailCollaborationEnsureResult{}, err
 		}
 	}
-
-	if _, err := r.customizeNewMemoryResourcePermissionForCreatorLocked(input.CompanyID, EntityTypeNode, node.NodeID, input.CreatedByUserID); err != nil {
-		restore()
-		return CommunicationsEmailCollaborationEnsureResult{}, err
+	r.bumpNodeViewVersionLocked(input.CompanyID, nodeID)
+	if createdNode {
+		if _, err := r.appendDomainEventLocked(workspaceDomainEventInput(input.CompanyID, "node_created", map[string]any{
+			"node_id": nodeID, "email_collaboration_id": item.CollaborationID,
+		})); err != nil {
+			restore()
+			return CommunicationsEmailCollaborationEnsureResult{}, err
+		}
 	}
-	if _, err := r.customizeNewMemoryResourceRACIForCreatorLocked(input.CompanyID, EntityTypeNode, node.NodeID, domain.RACIRoleResponsible, input.CreatedByUserID); err != nil {
-		restore()
-		return CommunicationsEmailCollaborationEnsureResult{}, err
-	}
-	r.bumpNodeViewVersionLocked(input.CompanyID, node.NodeID)
-	if _, err := r.appendDomainEventLocked(workspaceDomainEventInput(input.CompanyID, "node_created", map[string]any{
-		"node_id": node.NodeID, "email_collaboration_id": item.CollaborationID,
-	})); err != nil {
-		restore()
-		return CommunicationsEmailCollaborationEnsureResult{}, err
-	}
-	return CommunicationsEmailCollaborationEnsureResult{Collaboration: r.withCollaborationParticipantsLocked(item), Created: true}, nil
+	return CommunicationsEmailCollaborationEnsureResult{Collaboration: r.withCollaborationParticipantsLocked(item), Created: createdNode}, nil
 }
 
 func (r *MemoryRepo) grantCollaborationNodeEditLocked(companyID, nodeID, userID string, now time.Time) error {
@@ -336,7 +348,7 @@ func (r *MemoryRepo) ListCommunicationsEmailCollaborations(input CommunicationsE
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	threadID := strings.TrimSpace(input.ThreadID)
-	items := []domain.CommunicationsEmailCollaboration{}
+	byNode := map[string]domain.CommunicationsEmailCollaboration{}
 	for _, item := range r.emailCollaborations {
 		if item.CompanyID != input.CompanyID || !collaborationScopeMatches(item, scope) {
 			continue
@@ -348,6 +360,15 @@ func (r *MemoryRepo) ListCommunicationsEmailCollaborations(input CommunicationsE
 		if !r.userHasEffectiveAccessLocked(input.CompanyID, input.ParticipantUserID, EntityTypeNode, item.NodeID, EntityPermissionEdit) {
 			continue
 		}
+		current, exists := byNode[item.NodeID]
+		itemIsExact := collaborationMessageIdentifierMatches(item, input.MessageID)
+		currentIsExact := collaborationMessageIdentifierMatches(current, input.MessageID)
+		if !exists || (itemIsExact && !currentIsExact) || (itemIsExact == currentIsExact && item.CreatedTimestamp.After(current.CreatedTimestamp)) {
+			byNode[item.NodeID] = item
+		}
+	}
+	items := make([]domain.CommunicationsEmailCollaboration, 0, len(byNode))
+	for _, item := range byNode {
 		items = append(items, r.withCollaborationParticipantsLocked(item))
 	}
 	sort.Slice(items, func(i, j int) bool {

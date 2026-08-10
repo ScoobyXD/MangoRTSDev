@@ -639,7 +639,7 @@ type ChatPaneProps = {
   headerLeading?: React.ReactNode;
   headerTrailing?: React.ReactNode;
   sectionLabelsByBlockID?: Record<string, string>;
-  sectionLabelsByEmailMessageID?: Record<string, string>;
+  sectionKeysByMessageID?: Record<string, string>;
   hideHeader?: boolean;
   activeTab?: "chat" | "email";
   selectionAnchor?: TextBlockSelectionAnchor;
@@ -706,7 +706,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   headerLeading,
   headerTrailing,
   sectionLabelsByBlockID = {},
-  sectionLabelsByEmailMessageID = {},
+  sectionKeysByMessageID = {},
   hideHeader = false,
   activeTab = "chat",
   selectionAnchor,
@@ -754,17 +754,16 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const mentionCloseTimerRef = useRef<number | null>(null);
   const threads = useMemo(() => buildChatThreads(messages), [messages]);
   const sectionedThreads = useMemo(() => {
-    const messageOrder = new Map(Object.keys(sectionLabelsByEmailMessageID).map((messageID, index) => [messageID, index]));
-    const blockOrder = new Map(Object.keys(sectionLabelsByBlockID).map((textBlockID, index) => [textBlockID, messageOrder.size + index]));
-    if (messageOrder.size === 0 && blockOrder.size === 0) return threads;
+    const blockOrder = new Map(Object.keys(sectionLabelsByBlockID).map((textBlockID, index) => [textBlockID, index]));
+    if (blockOrder.size === 0) return threads;
     return threads.map((thread, index) => ({ thread, index })).sort((left, right) => {
-      const leftMessageID = left.thread.message.selectionMessageID?.trim() ?? "";
-      const rightMessageID = right.thread.message.selectionMessageID?.trim() ?? "";
-      const leftOrder = messageOrder.get(leftMessageID) ?? blockOrder.get(left.thread.message.blockID) ?? Number.MAX_SAFE_INTEGER;
-      const rightOrder = messageOrder.get(rightMessageID) ?? blockOrder.get(right.thread.message.blockID) ?? Number.MAX_SAFE_INTEGER;
+      const leftKey = sectionKeysByMessageID[left.thread.message.id] ?? left.thread.message.blockID;
+      const rightKey = sectionKeysByMessageID[right.thread.message.id] ?? right.thread.message.blockID;
+      const leftOrder = blockOrder.get(leftKey) ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = blockOrder.get(rightKey) ?? Number.MAX_SAFE_INTEGER;
       return leftOrder - rightOrder || left.index - right.index;
     }).map(({ thread }) => thread);
-  }, [sectionLabelsByBlockID, sectionLabelsByEmailMessageID, threads]);
+  }, [sectionKeysByMessageID, sectionLabelsByBlockID, threads]);
   const replyTarget = replyTargetID ? messages.find((message) => message.id === replyTargetID) : undefined;
   const canSubmit = editable && editorChatAttachmentsReadyForSubmit(draftAttachments) && (draft.trim().length > 0 || draftAttachments.length > 0);
   const [storedHeight, setStoredHeight] = useState(() => readStoredChatPaneHeight(heightStorageKey));
@@ -1182,11 +1181,11 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           <>
             <div ref={messageListRef} className="editor-document-scroll mango-pane-enter" style={{ minHeight: 0, display: "grid", alignContent: "start", gap: 8, overflowY: "auto", overflowX: "hidden", padding: "9px 8px", ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
               {sectionedThreads.map((thread, index) => {
-                const sectionKey = thread.message.selectionMessageID?.trim() || thread.message.blockID;
+                const sectionKey = sectionKeysByMessageID[thread.message.id] ?? thread.message.blockID;
                 const previousSectionKey = index > 0
-                  ? sectionedThreads[index - 1].message.selectionMessageID?.trim() || sectionedThreads[index - 1].message.blockID
+                  ? sectionKeysByMessageID[sectionedThreads[index - 1].message.id] ?? sectionedThreads[index - 1].message.blockID
                   : "";
-                const sectionLabel = sectionLabelsByEmailMessageID[sectionKey] ?? sectionLabelsByBlockID[thread.message.blockID] ?? "";
+                const sectionLabel = sectionLabelsByBlockID[sectionKey] ?? "";
                 return (
                   <React.Fragment key={thread.message.id}>
                     {sectionLabel && previousSectionKey !== sectionKey && (

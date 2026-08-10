@@ -520,6 +520,7 @@ export type ListCommunicationsEmailCollaborationsInput = {
 export type EnsureCommunicationsEmailCollaborationInput = ListCommunicationsEmailCollaborationsInput & {
   message: EmailMessage;
   newNodeID?: string;
+  targetNodeID?: string;
   priority?: number;
   linkedTextBlock?: { type: string; information: string; informationID: string };
   initialChat?: { type: string; information: string; informationID: string };
@@ -1183,6 +1184,7 @@ export async function ensureEmailCollaboration(input: EnsureCommunicationsEmailC
         shared_inbox_id: input.sharedInboxID?.trim() || undefined,
         account_email: input.sharedInboxID?.trim() ? undefined : input.accountEmail?.trim().toLowerCase() || undefined,
         new_node_id: input.newNodeID?.trim() || undefined,
+        target_node_id: input.targetNodeID?.trim() || undefined,
         priority: input.priority,
         message: input.message,
         linked_text_block: input.linkedTextBlock ? {

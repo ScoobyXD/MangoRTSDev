@@ -295,6 +295,33 @@ func (r *MemoryRepo) ListCommunicationsEmailMessagesForAccount(input Communicati
 	})
 	return items, nil
 }
+
+func (r *MemoryRepo) GetCommunicationsEmailMessageForScope(input CommunicationsEmailMessageLookupInput) (CommunicationsEmailMessageLookupResult, error) {
+	input, scope, err := normalizeCommunicationsEmailMessageLookupInput(input)
+	if err != nil {
+		return CommunicationsEmailMessageLookupResult{}, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, thread := range r.emailThreads {
+		if thread.CompanyID != input.CompanyID || thread.ScopeType != scope.scopeType {
+			continue
+		}
+		if scope.scopeType == CommunicationsEmailCollaborationScopePersonal {
+			if thread.PersonalUserID != scope.personalUserID || thread.PersonalAccountEmail != scope.personalAccountEmail {
+				continue
+			}
+		} else if thread.SharedInboxID != scope.sharedInboxID {
+			continue
+		}
+		for _, message := range thread.Messages {
+			if message.ProviderMessageID == input.ProviderMessageID {
+				return CommunicationsEmailMessageLookupResult{Message: message.Message, Provider: thread.Provider}, nil
+			}
+		}
+	}
+	return CommunicationsEmailMessageLookupResult{}, ErrNotFound
+}
 func (r *MemoryRepo) GetCommunicationsNodeEmailThread(companyID, nodeID, emailThreadID string) (domain.CommunicationsNodeEmailThread, error) {
 	companyID, nodeID, emailThreadID = cleanUUIDText(companyID), cleanUUIDText(nodeID), cleanUUIDText(emailThreadID)
 	if companyID == "" || nodeID == "" || emailThreadID == "" {

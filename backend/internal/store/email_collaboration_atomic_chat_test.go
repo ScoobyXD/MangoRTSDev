@@ -46,8 +46,8 @@ func TestMemoryEmailCollaborationEnsureConvergesFallbackAndKnownThread(t *testin
 		CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "support@example.com", Provider: "google", CreatedByUserID: peer.UserID,
 		Message: domain.EmailMessageSnapshot{ID: "future-message", ThreadID: "provider-thread", Subject: "Fallback first", Snippet: "new", Date: 20},
 	})
-	if err != nil || future.Collaboration.CollaborationID != first.Collaboration.CollaborationID || future.Collaboration.LatestMessageID != first.Collaboration.LatestMessageID {
-		t.Fatalf("thread ensure = %+v err=%v, want the original exact-message relationship", future, err)
+	if err != nil || future.Created || future.Collaboration.NodeID != first.Collaboration.NodeID || future.Collaboration.CollaborationID == first.Collaboration.CollaborationID || future.Collaboration.Message.ID != "future-message" {
+		t.Fatalf("thread ensure = %+v err=%v, want the same Node and a distinct exact-message relationship", future, err)
 	}
 	otherScope, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, SharedInboxID: otherSharedInboxID, AccountEmail: "other@example.com", Provider: "google", CreatedByUserID: creator.UserID,
@@ -98,6 +98,71 @@ func TestMemoryEmailCollaborationConcurrentFallbackAndKnownThreadEnsureConverge(
 	stored, err := repo.GetCommunicationsEmailCollaboration(companyID, results[0].Collaboration.CollaborationID, participantUserID)
 	if err != nil || stored.ProviderThreadID != "concurrent-thread" || stored.Message.ThreadID != "concurrent-thread" {
 		t.Fatalf("concurrent collaboration = %+v err=%v", stored, err)
+	}
+}
+
+func TestMemoryEmailCollaborationAppendsChatInExistingNodeWithoutConversionJob(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-701300000131"
+	sharedInboxID := "11111111-1111-4111-8111-701300000132"
+	repo.EnsureCompany(companyID, "Exact email chat append")
+	creator := mustEmailCollaborationGuardUser(t, repo, companyID, "append-creator", "append-creator@example.com", domain.RoleCompanyUser)
+	textBlockID := NewUUIDv7String()
+	firstChatID := NewUUIDv7String()
+	secondChatID := NewUUIDv7String()
+	placeholderMessageID := NewUUIDv7String()
+
+	first, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), CommunicationsEmailCollaborationEnsureInput{
+		CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "support@example.com", Provider: "google", CreatedByUserID: creator.UserID,
+		Message: domain.EmailMessageSnapshot{ID: "append-message", ThreadID: "append-thread", Subject: "Append chat"},
+		LinkedTextBlock: &NodeInformationInput{
+			InformationID: textBlockID, Type: "Text box", ActorUserID: creator.UserID,
+			Information: editorTextBlockProjectionPrefix + `{"title":"Email","document":"","attachments":[],"email_message_id":"` + placeholderMessageID + `"}`,
+		},
+		InitialChat: &NodeInformationInput{
+			InformationID: firstChatID, Type: CommunicationsEmailCollaborationChatInformationType, ActorUserID: creator.UserID,
+			Information: `{"block_id":"` + textBlockID + `","selection_source":"email","selection_message_id":"` + placeholderMessageID + `","message":"first"}`,
+		},
+	})
+	if err != nil || !first.Created {
+		t.Fatalf("first ensure = %+v err=%v", first, err)
+	}
+
+	second, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), CommunicationsEmailCollaborationEnsureInput{
+		CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "support@example.com", Provider: "google", CreatedByUserID: creator.UserID,
+		TargetNodeID: first.Collaboration.NodeID,
+		Message:      domain.EmailMessageSnapshot{ID: "append-message", ThreadID: "append-thread", Subject: "Append chat"},
+		InitialChat: &NodeInformationInput{
+			InformationID: secondChatID, Type: CommunicationsEmailCollaborationChatInformationType, ActorUserID: creator.UserID,
+			Information: `{"block_id":"` + textBlockID + `","selection_source":"email","selection_message_id":"` + placeholderMessageID + `","message":"second"}`,
+		},
+	})
+	if err != nil || second.Created || second.Collaboration.NodeID != first.Collaboration.NodeID || second.Collaboration.CollaborationID != first.Collaboration.CollaborationID {
+		t.Fatalf("second ensure = %+v err=%v, want the existing exact Node/message relationship", second, err)
+	}
+	nodes, err := repo.ListNodes(companyID)
+	if err != nil || len(nodes) != 1 {
+		t.Fatalf("nodes = %+v err=%v, want exactly one", nodes, err)
+	}
+	projections, err := repo.ListNodeProjections(companyID, first.Collaboration.NodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	textBoxCount, chatCount := 0, 0
+	for _, projection := range projections {
+		switch projection.Type {
+		case "Text box":
+			textBoxCount++
+		case CommunicationsEmailCollaborationChatInformationType:
+			chatCount++
+		}
+	}
+	if textBoxCount != 1 || chatCount != 2 {
+		t.Fatalf("projection counts text_boxes=%d chats=%d, want 1 and 2", textBoxCount, chatCount)
+	}
+	jobs, err := repo.ListCommunicationsEmailIngestionJobsForThreadContext(context.Background(), companyID, first.Collaboration.EmailThreadID)
+	if err != nil || len(jobs) != 0 {
+		t.Fatalf("chat ensure queued conversion jobs: %+v err=%v", jobs, err)
 	}
 }
 

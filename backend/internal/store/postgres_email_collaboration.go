@@ -174,14 +174,39 @@ order by relationship.created_timestamp desc limit 1`, companyID, scope.scopeTyp
 	return item, err
 }
 
-func postgresEmailCollaborationLookupForEnsure(ctx context.Context, q emailCollaborationQueryer, input CommunicationsEmailCollaborationEnsureInput, scope communicationsEmailCollaborationScope) (domain.CommunicationsEmailCollaboration, error) {
-	if input.Message.ThreadID != "" {
-		item, err := postgresEmailCollaborationLookup(ctx, q, input.CompanyID, scope, "", input.Message.ThreadID, "", input.RequestedNodeID)
-		if err == nil || !errors.Is(err, ErrNotFound) {
-			return item, err
-		}
+func ensurePostgresExactEmailMessageNodeRelationshipTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	input CommunicationsEmailCollaborationEnsureInput,
+	thread domain.CommunicationsEmailThread,
+	nodeID string,
+) (string, error) {
+	requestedRelationshipID := newUUIDv7String()
+	if err := linkPostgresCommunicationsEmailThreadToNodeTx(
+		ctx, tx, input.CompanyID, nodeID, requestedRelationshipID,
+		thread.EmailThreadID, input.Message.ID, input.CreatedByUserID,
+	); err != nil {
+		return "", err
 	}
-	return postgresEmailCollaborationLookup(ctx, q, input.CompanyID, scope, input.Message.ID, "", "", input.RequestedNodeID)
+	var relationshipID string
+	err := tx.QueryRowContext(ctx, `
+select relationship.email_relationship_id::text
+from email_relationships relationship
+join email_messages message
+  on message.company_id=relationship.company_id
+ and message.email_thread_id=relationship.email_thread_id
+ and message.email_message_id=relationship.email_message_id
+where relationship.company_id=$1::uuid
+  and relationship.resource_type='node'
+  and relationship.resource_id=$2::uuid
+  and relationship.resource_textbox_id is null
+  and message.provider_message_id=$3
+order by relationship.created_timestamp,relationship.email_relationship_id
+limit 1`, input.CompanyID, nodeID, input.Message.ID).Scan(&relationshipID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return relationshipID, err
 }
 
 func (r *PostgresRepo) EnsureCommunicationsEmailCollaboration(ctx context.Context, input CommunicationsEmailCollaborationEnsureInput) (CommunicationsEmailCollaborationEnsureResult, error) {
@@ -207,80 +232,125 @@ func (r *PostgresRepo) EnsureCommunicationsEmailCollaboration(ctx context.Contex
 	threadInput := CommunicationsEmailThreadUpsertInput{CompanyID: input.CompanyID, PersonalUserID: scope.personalUserID,
 		PersonalAccountEmail: scope.personalAccountEmail, SharedInboxID: scope.sharedInboxID, AccountEmail: scope.accountEmail, Provider: input.Provider,
 		ProviderThreadID: input.Message.ThreadID, SelectedMessageID: input.Message.ID, Messages: []domain.EmailMessageSnapshot{input.Message},
-		HistoryComplete: input.Message.ThreadID == "", FetchedAt: time.Now().UTC(), RequestDownload: true, RequestedByUserID: input.CreatedByUserID}
+		HistoryComplete: input.Message.ThreadID == "", FetchedAt: time.Now().UTC()}
 	thread, err := upsertPostgresCommunicationsEmailThreadTx(ctx, tx, threadInput)
 	if err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, wrapEmailCollaborationEnsureStage("persist_email_thread", err)
 	}
-	if existing, lookupErr := postgresEmailCollaborationLookupForEnsure(ctx, tx, input, scope); lookupErr == nil {
-		if mid, sourceID, ok := communicationsEmailIngestionRequest(thread, threadInput); ok && thread.EmailConnectionID != "" {
-			if _, _, err := ensurePostgresCommunicationsEmailIngestionJobTx(ctx, tx, CommunicationsEmailIngestionJobInput{
-				CompanyID: input.CompanyID, EmailConnectionID: thread.EmailConnectionID, EmailThreadID: thread.EmailThreadID,
-				ProviderMessageID: mid, ProviderThreadID: thread.ProviderThreadID, Priority: CommunicationsEmailIngestionPriorityVisible,
-				EnqueueSourceID: sourceID,
-			}); err != nil {
-				return CommunicationsEmailCollaborationEnsureResult{}, err
-			}
+	nodeID := input.TargetNodeID
+	createdNode := false
+	reuseExistingNode := false
+	if nodeID != "" {
+		var canEdit bool
+		err := tx.QueryRowContext(ctx, `
+select mangorts_user_can_access_resource($1::uuid,'node',$2::uuid,$3::uuid,'edit')
+from nodes where company_id=$1::uuid and node_id=$2::uuid`, input.CompanyID, nodeID, input.CreatedByUserID).Scan(&canEdit)
+		if errors.Is(err, sql.ErrNoRows) {
+			return CommunicationsEmailCollaborationEnsureResult{}, ErrNotFound
 		}
-		if err := tx.Commit(); err != nil {
+		if err != nil {
 			return CommunicationsEmailCollaborationEnsureResult{}, err
 		}
-		return CommunicationsEmailCollaborationEnsureResult{Collaboration: existing}, nil
-	} else if !errors.Is(lookupErr, ErrNotFound) {
-		return CommunicationsEmailCollaborationEnsureResult{}, lookupErr
-	}
-	nodeID := input.RequestedNodeID
-	if nodeID == "" {
-		nodeID = newUUIDv7String()
-	}
-	relationshipID := newUUIDv7String()
-	if _, err := tx.ExecContext(ctx, `insert into nodes(company_id,node_id,name,priority,default_access,created_timestamp)
+		if !canEdit {
+			return CommunicationsEmailCollaborationEnsureResult{}, ErrNotFound
+		}
+		reuseExistingNode = true
+	} else {
+		nodeID = input.RequestedNodeID
+		if nodeID == "" {
+			if existing, lookupErr := postgresEmailCollaborationLookup(ctx, tx, input.CompanyID, scope, input.Message.ID, "", "", ""); lookupErr == nil {
+				nodeID = existing.NodeID
+				reuseExistingNode = true
+			} else if !errors.Is(lookupErr, ErrNotFound) {
+				return CommunicationsEmailCollaborationEnsureResult{}, lookupErr
+			} else if input.Message.ThreadID != "" {
+				if existing, threadLookupErr := postgresEmailCollaborationLookup(ctx, tx, input.CompanyID, scope, "", input.Message.ThreadID, "", ""); threadLookupErr == nil {
+					nodeID = existing.NodeID
+					reuseExistingNode = true
+				} else if !errors.Is(threadLookupErr, ErrNotFound) {
+					return CommunicationsEmailCollaborationEnsureResult{}, threadLookupErr
+				}
+			}
+		}
+		if nodeID == "" {
+			nodeID = newUUIDv7String()
+		}
+		if existing, lookupErr := postgresEmailCollaborationLookup(ctx, tx, input.CompanyID, scope, input.Message.ID, "", "", nodeID); lookupErr == nil {
+			nodeID = existing.NodeID
+			reuseExistingNode = true
+		} else if !errors.Is(lookupErr, ErrNotFound) {
+			return CommunicationsEmailCollaborationEnsureResult{}, lookupErr
+		} else {
+			var nodeExists bool
+			if err := tx.QueryRowContext(ctx, `select exists(select 1 from nodes where company_id=$1::uuid and node_id=$2::uuid)`, input.CompanyID, nodeID).Scan(&nodeExists); err != nil {
+				return CommunicationsEmailCollaborationEnsureResult{}, err
+			}
+			if nodeExists {
+				if !reuseExistingNode {
+					return CommunicationsEmailCollaborationEnsureResult{}, ErrAlreadyExists
+				}
+			} else if _, err := tx.ExecContext(ctx, `insert into nodes(company_id,node_id,name,priority,default_access,created_timestamp)
 values($1::uuid,$2::uuid,$3,$4,'no_access',now())`, input.CompanyID, nodeID, communicationsEmailCollaborationTitle(input.Message), input.Priority); err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
+				return CommunicationsEmailCollaborationEnsureResult{}, err
+			} else {
+				if _, err := customizeNewPostgresResourcePermissionForCreatorTx(ctx, tx, input.CompanyID, EntityTypeNode, nodeID, input.CreatedByUserID); err != nil {
+					return CommunicationsEmailCollaborationEnsureResult{}, err
+				}
+				if _, err := customizeNewPostgresResourceRACIForCreatorTx(ctx, tx, resourceRACIKey{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: nodeID}, domain.RACIRoleResponsible, input.CreatedByUserID); err != nil {
+					return CommunicationsEmailCollaborationEnsureResult{}, err
+				}
+				createdNode = true
+			}
+		}
 	}
-	if err := linkPostgresCommunicationsEmailThreadToNodeTx(ctx, tx, input.CompanyID, nodeID, relationshipID, thread.EmailThreadID, input.Message.ID, input.CreatedByUserID); err != nil {
+	relationshipID, err := ensurePostgresExactEmailMessageNodeRelationshipTx(ctx, tx, input, thread, nodeID)
+	if err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}
 	if input.LinkedTextBlock != nil {
 		input.LinkedTextBlock.CompanyID, input.LinkedTextBlock.NodeID = input.CompanyID, nodeID
-		if input.InitialChat != nil {
-			input.InitialChat.CompanyID, input.InitialChat.NodeID = input.CompanyID, nodeID
+	}
+	if input.InitialChat != nil {
+		input.InitialChat.CompanyID, input.InitialChat.NodeID = input.CompanyID, nodeID
+		mentionedUserIDs, mentionedGroupIDs := CommunicationsEmailChatMentionPrincipalIDs(input.InitialChat.Information)
+		if len(mentionedUserIDs) > 0 || len(mentionedGroupIDs) > 0 {
+			participantInput, normalizeErr := normalizeCommunicationsEmailCollaborationParticipantInput(CommunicationsEmailCollaborationParticipantInput{
+				CompanyID: input.CompanyID, CollaborationID: relationshipID, ActorUserID: input.CreatedByUserID,
+				MentionedUserIDs: mentionedUserIDs, MentionedGroupIDs: mentionedGroupIDs,
+			})
+			if normalizeErr != nil {
+				return CommunicationsEmailCollaborationEnsureResult{}, normalizeErr
+			}
+			if _, err := addPostgresEmailCollaborationParticipantsTx(ctx, tx, participantInput, postgresEmailCollaborationTarget{
+				CollaborationID: relationshipID, NodeID: nodeID, AttachedEmailInformationID: relationshipID,
+			}); err != nil {
+				return CommunicationsEmailCollaborationEnsureResult{}, err
+			}
 		}
-		conversionInput := CommunicationsTriageConversionInput{
-			CompanyID: input.CompanyID, UserID: input.CreatedByUserID, ActorUserID: input.CreatedByUserID,
-			SharedInboxID: input.SharedInboxID, AccountEmail: input.AccountEmail, NodeID: nodeID,
-			MessageIDs: []string{input.Message.ID}, LinkedTextBlock: input.LinkedTextBlock, InitialChat: input.InitialChat,
+	}
+	if input.LinkedTextBlock != nil || input.InitialChat != nil {
+		writeInput := communicationsEmailTextBoxChatWriteInput{
+			CompanyID: input.CompanyID, UserID: input.CreatedByUserID, SharedInboxID: input.SharedInboxID,
+			AccountEmail: input.AccountEmail, NodeID: nodeID, ProviderMessageID: input.Message.ID,
+			LinkedTextBlock: input.LinkedTextBlock, InitialChat: input.InitialChat,
 		}
-		if err := r.addCommunicationsConversionAtomicWritesTx(ctx, tx, conversionInput, &CommunicationsTriageConversionResult{}); err != nil {
+		if err := r.addCommunicationsEmailTextBoxChatWritesTx(ctx, tx, writeInput, &CommunicationsTriageConversionResult{}); err != nil {
 			return CommunicationsEmailCollaborationEnsureResult{}, err
 		}
-	}
-	if mid, sourceID, ok := communicationsEmailIngestionRequest(thread, threadInput); ok && thread.EmailConnectionID != "" {
-		if _, _, err := ensurePostgresCommunicationsEmailIngestionJobTx(ctx, tx, CommunicationsEmailIngestionJobInput{
-			CompanyID: input.CompanyID, EmailConnectionID: thread.EmailConnectionID, EmailThreadID: thread.EmailThreadID,
-			ProviderMessageID: mid, ProviderThreadID: thread.ProviderThreadID, Priority: CommunicationsEmailIngestionPriorityVisible,
-			EnqueueSourceID: sourceID,
-		}); err != nil {
-			return CommunicationsEmailCollaborationEnsureResult{}, err
-		}
-	}
-	if _, err := customizeNewPostgresResourcePermissionForCreatorTx(ctx, tx, input.CompanyID, EntityTypeNode, nodeID, input.CreatedByUserID); err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
-	}
-	if _, err := customizeNewPostgresResourceRACIForCreatorTx(ctx, tx, resourceRACIKey{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: nodeID}, domain.RACIRoleResponsible, input.CreatedByUserID); err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}
 	item, err := postgresEmailCollaborationByID(ctx, tx, input.CompanyID, relationshipID, input.CreatedByUserID)
 	if err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}
-	if _, err := r.appendDomainEventTx(ctx, tx, workspaceDomainEventInput(input.CompanyID, "node_created", map[string]any{"node_id": nodeID, "email_relationship_id": relationshipID})); err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
+	if createdNode {
+		if _, err := r.appendDomainEventTx(ctx, tx, workspaceDomainEventInput(input.CompanyID, "node_created", map[string]any{"node_id": nodeID, "email_relationship_id": relationshipID})); err != nil {
+			return CommunicationsEmailCollaborationEnsureResult{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}
-	return CommunicationsEmailCollaborationEnsureResult{Collaboration: item, Created: true}, nil
+	return CommunicationsEmailCollaborationEnsureResult{Collaboration: item, Created: createdNode}, nil
 }
 
 func (r *PostgresRepo) ListCommunicationsEmailCollaborations(input CommunicationsEmailCollaborationListInput) ([]domain.CommunicationsEmailCollaboration, error) {

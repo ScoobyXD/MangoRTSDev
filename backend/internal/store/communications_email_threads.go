@@ -34,6 +34,40 @@ type CommunicationsEmailAccountReadInput struct {
 	Provider             string
 }
 
+type CommunicationsEmailMessageLookupInput struct {
+	CompanyID            string
+	PersonalUserID       string
+	PersonalAccountEmail string
+	SharedInboxID        string
+	AccountEmail         string
+	ProviderMessageID    string
+}
+
+type CommunicationsEmailMessageLookupResult struct {
+	Message  domain.EmailMessageSnapshot
+	Provider string
+}
+
+func normalizeCommunicationsEmailMessageLookupInput(input CommunicationsEmailMessageLookupInput) (CommunicationsEmailMessageLookupInput, communicationsEmailCollaborationScope, error) {
+	companyID, scope, err := normalizeCommunicationsEmailCollaborationScope(
+		input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail,
+		input.SharedInboxID, input.AccountEmail,
+	)
+	if err != nil {
+		return CommunicationsEmailMessageLookupInput{}, communicationsEmailCollaborationScope{}, err
+	}
+	input.CompanyID = companyID
+	input.PersonalUserID = scope.personalUserID
+	input.PersonalAccountEmail = scope.personalAccountEmail
+	input.SharedInboxID = scope.sharedInboxID
+	input.AccountEmail = scope.accountEmail
+	input.ProviderMessageID = strings.TrimSpace(input.ProviderMessageID)
+	if input.ProviderMessageID == "" {
+		return CommunicationsEmailMessageLookupInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
+	}
+	return input, scope, nil
+}
+
 func normalizeCommunicationsEmailAccountReadInput(input CommunicationsEmailAccountReadInput) (CommunicationsEmailAccountReadInput, communicationsEmailCollaborationScope, error) {
 	companyID, scope, err := normalizeCommunicationsEmailCollaborationScope(
 		input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail,

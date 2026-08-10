@@ -167,6 +167,7 @@ type CommunicationsRepository interface {
 	GetCommunicationsEmailThreadContext(ctx context.Context, companyID, emailThreadID string) (domain.CommunicationsEmailThread, error)
 	ListCommunicationsEmailThreadsForAccount(input CommunicationsEmailAccountReadInput) ([]domain.CommunicationsEmailThread, error)
 	ListCommunicationsEmailMessagesForAccount(input CommunicationsEmailAccountReadInput) ([]domain.CommunicationsEmailMessage, error)
+	GetCommunicationsEmailMessageForScope(input CommunicationsEmailMessageLookupInput) (CommunicationsEmailMessageLookupResult, error)
 	EnsureCommunicationsEmailIngestionJobContext(ctx context.Context, input CommunicationsEmailIngestionJobInput) (CommunicationsEmailIngestionJob, bool, error)
 	GetCommunicationsEmailIngestionJobContext(ctx context.Context, jobID string) (CommunicationsEmailIngestionJob, error)
 	MarkCommunicationsEmailIngestionJobSQSAcceptedContext(ctx context.Context, jobID string) error

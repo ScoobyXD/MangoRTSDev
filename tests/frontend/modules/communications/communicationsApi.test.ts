@@ -115,7 +115,7 @@ test("stored search and selected-message ingestion preserve the exact mailbox sc
   }
 });
 
-test("email collaboration list is read-only while floating-node ensure sends a retry-safe node identity", async () => {
+test("email collaboration ensure sends distinct new-node and existing-node identities", async () => {
   const calls: Array<{ path: string; method: string; body?: Record<string, unknown> }> = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -149,14 +149,25 @@ test("email collaboration list is read-only while floating-node ensure sends a r
       newNodeID: "node-new",
       message: { id: "message-1", thread_id: "thread-1", subject: "Review", body: "Full body", unread: false, starred: false },
     });
+    await ensureEmailCollaboration({
+      companyID: "company-1",
+      messageID: "message-1",
+      threadID: "thread-1",
+      accountEmail: "ME@Example.test",
+      targetNodeID: "node-existing",
+      message: { id: "message-1", thread_id: "thread-1", subject: "Review", body: "Full body", unread: false, starred: false },
+    });
     assert.equal(listed.length, 1);
     assert.equal(calls[0]?.method, "GET");
     assert.equal(calls[0]?.path, "/v1/communications/email-collaborations?company_id=company-1&message_id=message-1&thread_id=thread-1&account_email=me%40example.test");
     assert.equal(calls[1]?.method, "POST");
     assert.equal(calls[1]?.path, "/v1/communications/email-collaborations");
     assert.equal(calls[1]?.body?.new_node_id, "node-new");
+    assert.equal("target_node_id" in (calls[1]?.body ?? {}), false);
     assert.equal("priority" in (calls[1]?.body ?? {}), false);
     assert.equal((calls[1]?.body?.message as { body?: string }).body, "Full body");
+    assert.equal(calls[2]?.body?.target_node_id, "node-existing");
+    assert.equal("new_node_id" in (calls[2]?.body ?? {}), false);
   } finally {
     globalThis.fetch = originalFetch;
   }

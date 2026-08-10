@@ -173,7 +173,7 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeParts, /data-node-email-thread-list="true"/);
   assert.doesNotMatch(nodeParts, />Attached emails</);
   assert.match(triageChat, /listEditorTextBlockProjections\(targetProjections\)/);
-  assert.match(triageChat, /existingMessageAccent \|\| editorEmailMessageAccent\(emailMessageID, existingEmailAccents\)/);
+  assert.match(triageChat, /existingMessageAccent \|\| editorEmailMessageAccent\(payloadEmailMessageID, existingEmailAccents\)/);
 });
 
 test("node drag and Universal-picker email attachment retain exact provider mailbox identity", () => {

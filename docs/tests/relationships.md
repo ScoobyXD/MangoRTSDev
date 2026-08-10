@@ -16,8 +16,9 @@
 14. Removing one Node's email relationship removes only that Node's typed edge and leaves every other Node, stored thread/message, local text box, chat, and surviving attachment relationship unchanged.
 15. Email-to-Node, email-to-textbox, chat, and draft rules do not create a generic resource registry, surrogate identity, or untyped edge.
 16. An existing exact-message text-box relationship routes triage reads and later sends to that same Node text-box chat without creating another relationship.
+17. A triage chat command reuses the exact mailbox-scoped stored message when present, fetches only that exact provider message when absent, and never queues thread ingestion or links a thread to a text box.
 
-Last updated: 2026-08-09
+Last updated: 2026-08-10
 
 # Process Story: One email thread can appear in several Nodes while message work stays Node-local
 
@@ -31,11 +32,13 @@ Opening a highlighted-email chat preview creates no relationship or resource
 ↓
 The first send appends to the existing exact Node-local text box or atomically creates the missing text box, message-to-textbox relationship, and chat, or creates none of them
 ↓
+That send reuses the exact stored message or imports only the missing exact provider message; thread completion remains separate background ingestion
+↓
 Removing one Node's relationship leaves all other Node-local work and the stored email truth intact
 ↓
 Every endpoint keeps its literal typed identity; no registry, surrogate identity, or generic untyped edge is introduced
 
-Last updated: 2026-08-09
+Last updated: 2026-08-10
 # Process Story: Policy inheritance follows typed parents without moving permissions into Explorer
 
 A permission or RACI resolver receives one exact resource type and ID

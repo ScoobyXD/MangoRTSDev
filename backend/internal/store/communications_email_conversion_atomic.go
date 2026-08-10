@@ -64,7 +64,30 @@ func communicationsEmailThreadInputForConversionMessage(input CommunicationsTria
 	return thread
 }
 
-func rewriteCommunicationsConversionInternalMessageID(input *CommunicationsTriageConversionInput, emailMessageID string) error {
+type communicationsEmailTextBoxChatWriteInput struct {
+	CompanyID         string
+	UserID            string
+	SharedInboxID     string
+	AccountEmail      string
+	NodeID            string
+	ProviderMessageID string
+	LinkedTextBlock   *NodeInformationInput
+	InitialChat       *NodeInformationInput
+}
+
+func communicationsEmailTextBoxChatWriteInputFromConversion(input CommunicationsTriageConversionInput) communicationsEmailTextBoxChatWriteInput {
+	providerMessageID := ""
+	if len(input.MessageIDs) > 0 {
+		providerMessageID = input.MessageIDs[0]
+	}
+	return communicationsEmailTextBoxChatWriteInput{
+		CompanyID: input.CompanyID, UserID: input.UserID, SharedInboxID: input.SharedInboxID,
+		AccountEmail: input.AccountEmail, NodeID: input.NodeID, ProviderMessageID: providerMessageID,
+		LinkedTextBlock: input.LinkedTextBlock, InitialChat: input.InitialChat,
+	}
+}
+
+func rewriteCommunicationsEmailTextBoxChatMessageID(input *communicationsEmailTextBoxChatWriteInput, emailMessageID string) error {
 	emailMessageID = cleanUUIDText(emailMessageID)
 	if emailMessageID == "" {
 		return ErrInvalid
@@ -97,8 +120,8 @@ func rewriteCommunicationsConversionInternalMessageID(input *CommunicationsTriag
 	return rewrite(input.InitialChat, "selection_message_id")
 }
 
-func (r *MemoryRepo) communicationsConversionInternalMessageIDLocked(input CommunicationsTriageConversionInput) string {
-	providerMessageID := strings.TrimSpace(input.MessageIDs[0])
+func (r *MemoryRepo) communicationsEmailTextBoxChatInternalMessageIDLocked(input communicationsEmailTextBoxChatWriteInput) string {
+	providerMessageID := strings.TrimSpace(input.ProviderMessageID)
 	for _, relationship := range r.nodeEmailThreads {
 		if relationship.CompanyID != input.CompanyID || relationship.NodeID != input.NodeID {
 			continue
@@ -156,11 +179,11 @@ func (r *PostgresRepo) addCommunicationsConversionInformationTx(ctx context.Cont
 	return item, nil
 }
 
-func (r *MemoryRepo) addCommunicationsConversionAtomicWritesLocked(input CommunicationsTriageConversionInput, result *CommunicationsTriageConversionResult) error {
+func (r *MemoryRepo) addCommunicationsEmailTextBoxChatWritesLocked(input communicationsEmailTextBoxChatWriteInput, result *CommunicationsTriageConversionResult) error {
 	if input.LinkedTextBlock == nil && input.InitialChat == nil {
 		return nil
 	}
-	if err := rewriteCommunicationsConversionInternalMessageID(&input, r.communicationsConversionInternalMessageIDLocked(input)); err != nil {
+	if err := rewriteCommunicationsEmailTextBoxChatMessageID(&input, r.communicationsEmailTextBoxChatInternalMessageIDLocked(input)); err != nil {
 		return err
 	}
 	if input.LinkedTextBlock != nil {
@@ -178,7 +201,7 @@ func (r *MemoryRepo) addCommunicationsConversionAtomicWritesLocked(input Communi
 	return nil
 }
 
-func (r *PostgresRepo) addCommunicationsConversionAtomicWritesTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput, result *CommunicationsTriageConversionResult) error {
+func (r *PostgresRepo) addCommunicationsEmailTextBoxChatWritesTx(ctx context.Context, tx *sql.Tx, input communicationsEmailTextBoxChatWriteInput, result *CommunicationsTriageConversionResult) error {
 	if input.LinkedTextBlock == nil && input.InitialChat == nil {
 		return nil
 	}
@@ -198,14 +221,14 @@ where relationship.company_id=$1::uuid and relationship.resource_type='node' and
     or ($4='' and connection.connection_type='personal'
       and connection.personal_user_id=$5::uuid and connection.account_email=$6))
 order by relationship.created_timestamp desc
-limit 1`, input.CompanyID, input.NodeID, input.MessageIDs[0], input.SharedInboxID, input.UserID, normalizeEmail(input.AccountEmail)).Scan(&emailMessageID)
+limit 1`, input.CompanyID, input.NodeID, input.ProviderMessageID, input.SharedInboxID, input.UserID, normalizeEmail(input.AccountEmail)).Scan(&emailMessageID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
 	if err != nil {
 		return err
 	}
-	if err := rewriteCommunicationsConversionInternalMessageID(&input, emailMessageID); err != nil {
+	if err := rewriteCommunicationsEmailTextBoxChatMessageID(&input, emailMessageID); err != nil {
 		return err
 	}
 	if input.LinkedTextBlock != nil {
