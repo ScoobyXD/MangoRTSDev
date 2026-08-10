@@ -14,7 +14,7 @@ func normalizeCommunicationsTriageAtomicWrites(input *CommunicationsTriageConver
 	if input.LinkedTextBlock == nil && input.InitialChat == nil {
 		return nil
 	}
-	if input.Target.Mode != CommunicationsEmailConversionTargetExistingNode || len(input.MessageIDs) != 1 || input.LinkedTextBlock == nil {
+	if input.Target.Mode != CommunicationsEmailConversionTargetExistingNode || len(input.MessageIDs) != 1 {
 		return ErrInvalid
 	}
 	normalize := func(value *NodeInformationInput, expectedType string) error {
@@ -30,8 +30,10 @@ func normalizeCommunicationsTriageAtomicWrites(input *CommunicationsTriageConver
 		}
 		return nil
 	}
-	if err := normalize(input.LinkedTextBlock, "Text box"); err != nil {
-		return err
+	if input.LinkedTextBlock != nil {
+		if err := normalize(input.LinkedTextBlock, "Text box"); err != nil {
+			return err
+		}
 	}
 	if input.InitialChat != nil {
 		if err := normalize(input.InitialChat, CommunicationsEmailCollaborationChatInformationType); err != nil {
@@ -155,31 +157,29 @@ func (r *PostgresRepo) addCommunicationsConversionInformationTx(ctx context.Cont
 }
 
 func (r *MemoryRepo) addCommunicationsConversionAtomicWritesLocked(input CommunicationsTriageConversionInput, result *CommunicationsTriageConversionResult) error {
-	if input.LinkedTextBlock == nil {
+	if input.LinkedTextBlock == nil && input.InitialChat == nil {
 		return nil
 	}
 	if err := rewriteCommunicationsConversionInternalMessageID(&input, r.communicationsConversionInternalMessageIDLocked(input)); err != nil {
 		return err
 	}
-	item, err := r.addCommunicationsConversionInformationLocked(*input.LinkedTextBlock)
-	if err != nil {
-		return err
-	}
-	result.LinkedTextBlockID = input.LinkedTextBlock.InformationID
-	if input.InitialChat != nil {
-		chat, err := r.addCommunicationsConversionInformationLocked(*input.InitialChat)
-		if err != nil {
+	if input.LinkedTextBlock != nil {
+		if _, err := r.addCommunicationsConversionInformationLocked(*input.LinkedTextBlock); err != nil {
 			return err
 		}
-		_ = chat
+		result.LinkedTextBlockID = input.LinkedTextBlock.InformationID
+	}
+	if input.InitialChat != nil {
+		if _, err := r.addCommunicationsConversionInformationLocked(*input.InitialChat); err != nil {
+			return err
+		}
 		result.InitialChatID = input.InitialChat.InformationID
 	}
-	_ = item
 	return nil
 }
 
 func (r *PostgresRepo) addCommunicationsConversionAtomicWritesTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput, result *CommunicationsTriageConversionResult) error {
-	if input.LinkedTextBlock == nil {
+	if input.LinkedTextBlock == nil && input.InitialChat == nil {
 		return nil
 	}
 	var emailMessageID string
@@ -208,10 +208,11 @@ limit 1`, input.CompanyID, input.NodeID, input.MessageIDs[0], input.SharedInboxI
 	if err := rewriteCommunicationsConversionInternalMessageID(&input, emailMessageID); err != nil {
 		return err
 	}
-	if _, err := r.addCommunicationsConversionInformationTx(ctx, tx, *input.LinkedTextBlock); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `
+	if input.LinkedTextBlock != nil {
+		if _, err := r.addCommunicationsConversionInformationTx(ctx, tx, *input.LinkedTextBlock); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
 insert into email_relationships(
   company_id,email_relationship_id,email_thread_id,email_message_id,
   resource_type,resource_id,resource_textbox_id,created_timestamp
@@ -224,9 +225,10 @@ where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid
 order by created_timestamp desc
 limit 1
 on conflict do nothing`, input.CompanyID, input.NodeID, input.LinkedTextBlock.InformationID, emailMessageID); err != nil {
-		return err
+			return err
+		}
+		result.LinkedTextBlockID = input.LinkedTextBlock.InformationID
 	}
-	result.LinkedTextBlockID = input.LinkedTextBlock.InformationID
 	if input.InitialChat != nil {
 		if _, err := r.addCommunicationsConversionInformationTx(ctx, tx, *input.InitialChat); err != nil {
 			return err

@@ -338,13 +338,18 @@ export function EmailCollaborationChatSurface({
       });
       const nodeTitle = nodes.find((candidate) => candidate.node_id === item.node_id)?.name?.trim()
         || "Node " + item.node_id.slice(0, 8);
-      for (const projection of linkedBlocks) {
-        blockLabels[projection.information_id] = nodeTitle;
-        for (const chat of chats.filter((candidate) => candidate.blockID === projection.information_id)) {
-          if (!chatNodes[chat.id]) {
-            chatNodes[chat.id] = item.node_id;
-            allChats.push(chat);
-          }
+      const linkedBlockIDs = new Set(linkedBlocks.map((projection) => projection.information_id));
+      if (placement.blockID) linkedBlockIDs.add(placement.blockID);
+      for (const linkedBlockID of linkedBlockIDs) blockLabels[linkedBlockID] = nodeTitle;
+      const placementChats = [
+        ...placement.messages,
+        ...chats.filter((candidate) => linkedBlockIDs.has(candidate.blockID)),
+      ];
+      for (const chat of placementChats) {
+        blockLabels[chat.blockID] = nodeTitle;
+        if (!chatNodes[chat.id]) {
+          chatNodes[chat.id] = item.node_id;
+          allChats.push(chat);
         }
       }
     }
@@ -389,6 +394,10 @@ export function EmailCollaborationChatSurface({
     onSuccess();
     return refreshed;
   }, [acceptCollaboration, companyID, loadThreadProjections, onSuccess]);
+  const refreshCollaborationByIDRef = React.useRef(refreshCollaborationByID);
+  refreshCollaborationByIDRef.current = refreshCollaborationByID;
+  const realtimeErrorRef = React.useRef(onError);
+  realtimeErrorRef.current = onError;
 
   React.useEffect(() => {
     const previousSourceKey = sourceLoadKeyRef.current;
@@ -494,9 +503,9 @@ export function EmailCollaborationChatSurface({
       const refreshSequence = loadSequenceRef.current;
       refreshTimer = window.setTimeout(() => {
         refreshTimer = null;
-        void refreshCollaborationByID(collaborationID, refreshSequence).catch((cause) => {
+        void refreshCollaborationByIDRef.current(collaborationID, refreshSequence).catch((cause) => {
           if (loadSequenceRef.current !== refreshSequence || isAbortError(cause)) return;
-          onError(formatEmailCollaborationChatError(cause, "Failed to refresh email chat."));
+          realtimeErrorRef.current(formatEmailCollaborationChatError(cause, "Failed to refresh email chat."));
         });
       }, 80);
     };
@@ -516,7 +525,7 @@ export function EmailCollaborationChatSurface({
       unsubscribe();
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
     };
-  }, [active, apiBase, collaborationID, companyID, nodeID, onError, refreshCollaborationByID]);
+  }, [active, apiBase, collaborationID, companyID, nodeID]);
 
   const ensureCollaboration = React.useCallback(async (priority?: number, createNew = false, publishToMailbox = true): Promise<CommunicationsEmailCollaboration> => {
     if (collaboration && !createNew) return collaboration;
