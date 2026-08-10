@@ -68,7 +68,7 @@ select draft.send_state, (
     where relationship.company_id=draft.company_id
       and relationship.email_thread_id=draft.email_thread_id
       and relationship.resource_type='node'
-      and relationship.resource_textbox_id is null
+      and relationship.resource_textbox_id is not null
       and mangorts_user_can_access_resource(relationship.company_id,relationship.resource_type,
         relationship.resource_id,$2::uuid,$4::text)
   )

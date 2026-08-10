@@ -121,7 +121,6 @@ export type EditorTextBlockContent = {
   document: string;
   attachments?: EditorChatAttachment[];
   emailMessageID?: string;
-  emailMessageIDs?: string[];
   emailAccent?: string;
 };
 
@@ -177,7 +176,6 @@ export function parseEditorAttachedEmails(items: EditorProjectionItem[]): Editor
 
 export function buildEditorTextBlockChatPayload(input: {
   blockID: string;
-  createEmailTextBoxOnSend?: boolean;
   parentID?: string;
   selectionSource?: "text" | "email";
   selectionBlockID?: string;
@@ -197,7 +195,6 @@ export function buildEditorTextBlockChatPayload(input: {
 }): string {
   return JSON.stringify({
     block_id: input.blockID,
-    create_email_textbox_on_send: input.createEmailTextBoxOnSend === true,
     parent_id: input.parentID ?? "",
     selection_source: input.selectionSource ?? "text",
     selection_block_id: input.selectionBlockID?.trim() ?? "",
@@ -232,7 +229,6 @@ export function buildEditorAttachedEmailPayload(input: {
   from?: string;
   date?: number;
   attachedTimestamp: string;
-  linkWholeThread?: boolean;
 }): string {
   return JSON.stringify({
     block_id: input.blockID?.trim() ?? "",
@@ -249,7 +245,7 @@ export function buildEditorAttachedEmailPayload(input: {
     from: input.from ?? "",
     date: input.date ?? null,
     attached_timestamp: input.attachedTimestamp,
-    link_scope: input.linkWholeThread ? "thread" : "message",
+    link_scope: "message",
   });
 }
 
@@ -258,17 +254,12 @@ export function parseEditorTextBlockContent(value: string): EditorTextBlockConte
   const payload = parsePayload(value.slice(EDITOR_TEXT_BLOCK_CONTENT_PREFIX.length));
   if (!payload || typeof payload !== "object") return { title: "", document: "", attachments: [] };
   const record = payload as Record<string, unknown>;
-  const emailMessageIDs = uniqueStringList(Array.isArray(record.email_message_ids)
-    ? record.email_message_ids.filter((item): item is string => typeof item === "string")
-    : []);
   const emailMessageID = stringValue(record, "email_message_id");
-  if (emailMessageID && !emailMessageIDs.includes(emailMessageID)) emailMessageIDs.unshift(emailMessageID);
   return {
     title: stringValue(record, "title"),
     document: rawStringValue(record, "document"),
     attachments: parseEditorChatAttachments(record.attachments),
-    emailMessageID: emailMessageID || emailMessageIDs[0] || undefined,
-    emailMessageIDs,
+    emailMessageID: emailMessageID || undefined,
     emailAccent: stringValue(record, "email_accent") || undefined,
   };
 }
@@ -277,14 +268,12 @@ export function buildEditorTextBlockMetadataPayload(input: EditorTextBlockConten
   title: string;
   attachments: Record<string, unknown>[];
   email_message_id: string;
-  email_message_ids: string[];
   email_accent: string;
 } {
   return {
     title: input.title.trim(),
     attachments: normalizeChatAttachments(input.attachments ?? []).map(editorAttachmentReferencePayload),
     email_message_id: input.emailMessageID?.trim() ?? "",
-    email_message_ids: uniqueStringList(input.emailMessageIDs ?? []),
     email_accent: input.emailAccent?.trim() ?? "",
   };
 }

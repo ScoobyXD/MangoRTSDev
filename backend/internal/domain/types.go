@@ -646,6 +646,21 @@ type CommunicationsEmailCollaboration struct {
 	Participants               []CommunicationsEmailCollaborationParticipant `json:"participants,omitempty"`
 }
 
+// CommunicationsEmailThreadChatGroup is one exact Node textbox in an email
+// thread and the chats owned by that textbox. Thread chat is a read view over
+// canonical email relationships and Node textbox chats; it owns no data.
+type CommunicationsEmailThreadChatGroup struct {
+	NodeID            string           `json:"node_id"`
+	NodeName          string           `json:"node_name"`
+	TextboxID         string           `json:"textbox_id"`
+	RelationshipID    string           `json:"relationship_id"`
+	EmailThreadID     string           `json:"email_thread_id"`
+	EmailMessageID    string           `json:"email_message_id"`
+	ProviderMessageID string           `json:"provider_message_id"`
+	MessageOrder      int              `json:"message_order"`
+	Chats             []NodeProjection `json:"chats"`
+}
+
 type CommunicationsEmailCollaborationParticipant struct {
 	CompanyID        string    `json:"company_id"`
 	CollaborationID  string    `json:"collaboration_id"`

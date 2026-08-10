@@ -9,6 +9,7 @@ import { markWorkspaceSnapshotScopeStale } from "../workspace/workspaceSnapshotC
 import { invalidateResourcePolicyDependentCaches } from "../permissions/resourcePolicyCaches.js";
 import { requestJSONWithMeta } from "../api/requestJSON.js";
 import { scheduleOutboundEmailDispatch } from "./outboundEmailUndo.js";
+import type { EditorProjectionItem } from "../editor/editorProjection.js";
 
 export type EmailProvider = "google" | "microsoft";
 
@@ -515,6 +516,18 @@ export type ListCommunicationsEmailCollaborationsInput = {
   threadID?: string;
   sharedInboxID?: string;
   accountEmail?: string;
+};
+
+export type CommunicationsEmailThreadChatGroup = {
+  node_id: string;
+  node_name: string;
+  textbox_id: string;
+  relationship_id: string;
+  email_thread_id: string;
+  email_message_id: string;
+  provider_message_id: string;
+  message_order: number;
+  chats: EditorProjectionItem[];
 };
 
 export type EnsureCommunicationsEmailCollaborationInput = ListCommunicationsEmailCollaborationsInput & {
@@ -1119,6 +1132,14 @@ export async function listEmailCollaborations(input: ListCommunicationsEmailColl
     "/v1/communications/email-collaborations?" + emailCollaborationQuery(input).toString(),
   );
   return (payload.collaborations ?? []).map(cloneCommunicationsEmailCollaboration);
+}
+
+export async function listEmailThreadChatGroups(input: ListCommunicationsEmailCollaborationsInput): Promise<CommunicationsEmailThreadChatGroup[]> {
+  if (!input.companyID.trim() || (!input.messageID?.trim() && !input.threadID?.trim())) return [];
+  const payload = await apiFetchJSON<{ groups?: CommunicationsEmailThreadChatGroup[] }>(
+    "/v1/communications/email-thread-chats?" + emailCollaborationQuery(input).toString(),
+  );
+  return payload.groups ?? [];
 }
 
 export async function getEmailCollaboration(companyID: string, collaborationID: string): Promise<CommunicationsEmailCollaboration | null> {

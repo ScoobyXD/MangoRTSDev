@@ -4,12 +4,6 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { CommunicationsEmailCollaboration } from "../../../../frontend/src/modules/communications/communicationsApi.js";
 import {
-  buildEditorTextBlockChatPayload,
-  buildEditorTextBlockProjectionPayload,
-  EDITOR_TEXT_BLOCK_CHAT_TYPE,
-  EDITOR_TEXT_BLOCK_TYPE,
-} from "../../../../frontend/src/modules/editor/editorProjection.js";
-import {
   appendAcknowledgedEmailCollaborationChat,
   buildEmailCollaborationParticipantRoster,
   emailNodeImportRequired,
@@ -18,7 +12,6 @@ import {
   formatEmailCollaborationChatError,
   nextEmailNodeDestinationRequest,
   reconcileEmailCollaborationChatSession,
-  resolveEmailCollaborationChatPlacement,
   type EmailCollaborationChatSession,
 } from "../../../../frontend/src/pages/home/emailCollaborationChat.js";
 
@@ -152,75 +145,6 @@ test("email destination requests preserve typed Node creation intent", () => {
     requestID: 1,
   });
 });
-test("email collaboration chat resolves to a real linked text box and only reads legacy attached-email chat as fallback", () => {
-  const linkedTextBox = {
-    information_id: "text-box-1",
-    type: EDITOR_TEXT_BLOCK_TYPE,
-    information: buildEditorTextBlockProjectionPayload({
-      title: "Email notes",
-      document: "",
-      emailMessageID: "message-1",
-      emailMessageIDs: ["message-1", "message-2"],
-      emailAccent: "#0ea5e9",
-    }),
-    created_timestamp: "2026-07-20T10:00:00.000Z",
-  };
-  const directChat = {
-    information_id: "direct-chat-1",
-    type: EDITOR_TEXT_BLOCK_CHAT_TYPE,
-    information: buildEditorTextBlockChatPayload({
-      blockID: linkedTextBox.information_id,
-      selectionSource: "email",
-      selectionMessageID: "message-1",
-      authorName: "Direct author",
-      message: "Direct text-box chat",
-      createdTimestamp: "2026-07-20T10:01:00.000Z",
-    }),
-  };
-  const legacyChat = {
-    information_id: "legacy-chat-1",
-    type: EDITOR_TEXT_BLOCK_CHAT_TYPE,
-    information: buildEditorTextBlockChatPayload({
-      blockID: "attached-email-1",
-      selectionSource: "email",
-      selectionMessageID: "message-1",
-      authorName: "Legacy author",
-      message: "Legacy attached-email chat",
-      createdTimestamp: "2026-07-20T09:59:00.000Z",
-    }),
-  };
-
-  const directPlacement = resolveEmailCollaborationChatPlacement(
-    [linkedTextBox, directChat, legacyChat],
-    "message-1",
-    "attached-email-1",
-  );
-  assert.equal(directPlacement.blockID, "text-box-1");
-  assert.deepEqual(directPlacement.messages.map((message) => message.id), ["direct-chat-1"]);
-
-  const threadPlacement = resolveEmailCollaborationChatPlacement(
-    [linkedTextBox],
-    "message-2",
-  );
-  assert.equal(threadPlacement.blockID, "text-box-1");
-
-  const legacyPlacement = resolveEmailCollaborationChatPlacement(
-    [linkedTextBox, legacyChat],
-    "message-1",
-    "attached-email-1",
-  );
-  assert.equal(legacyPlacement.blockID, "text-box-1");
-  assert.deepEqual(legacyPlacement.messages.map((message) => message.id), ["legacy-chat-1"]);
-
-  const emailOnlyPlacement = resolveEmailCollaborationChatPlacement(
-    [legacyChat],
-    "message-1",
-    "attached-email-1",
-  );
-  assert.equal(emailOnlyPlacement.blockID, "");
-  assert.deepEqual(emailOnlyPlacement.messages.map((message) => message.id), ["legacy-chat-1"]);
-});
-
 test("My and Shared Triage use one thread chat rail backed by Node text boxes", () => {
   const workspace = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeMailWorkspace.tsx"), "utf8");
   const detail = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
@@ -230,20 +154,29 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
 
   assert.match(workspace, /const commentOnEmailSelection = React\.useCallback[\s\S]*setEmailSelection\(selection\);[\s\S]*setEmailChatSession\(\{ key: emailChatKey, visible: true \}\)/);
   assert.match(workspace, /const toggleEmailChat = React\.useCallback[\s\S]*visible: !current\.visible/);
-  assert.doesNotMatch(workspace, /selectedMessage\?\.collaboration_node_id\?\.trim\(\)[\s\S]*setEmailChatSession\(\{ key: emailChatKey, visible: true \}\)/);
+  assert.match(workspace, /const handleExistingEmailChatsChange = React\.useCallback[\s\S]*if \(!hasChats \|\| !emailChatKey\) return;[\s\S]*\{ key: emailChatKey, visible: true \}/);
   assert.match(workspace, /onEmailSelection=\{commentOnEmailSelection\}/);
-  assert.match(workspace, /<EmailCollaborationChatSurface[\s\S]*active=\{emailChatVisible\}[\s\S]*threadMessages=\{selectedThreadMessages\}/);
+  assert.match(workspace, /\{emailChatAvailable && \([\s\S]*<EmailCollaborationChatSurface[\s\S]*active=\{emailChatVisible\}/);
+  assert.doesNotMatch(workspace, /threadMessages=\{selectedThreadMessages\}/);
+  assert.match(workspace, /onExistingChatsChange=\{handleExistingEmailChatsChange\}/);
+  assert.match(workspace, /onOpenNode=\{openEmailChatNode\}/);
   assert.match(detail, /data-email-thread-chat-toggle="true"[\s\S]*onClick=\{onToggleEmailChat\}/);
   assert.doesNotMatch(detail, /title="Chat about this email message"|data-email-message-actions="true"/);
   assert.match(detail, /data-email-selection-chat-action="true"[\s\S]*onTextSelection\(\{ quote, startOffset, endOffset \}\)/);
 
-  assert.match(surface, /listEmailCollaborations\(\{[\s\S]*setCollaborations\(items\)/);
-  assert.match(surface, /const placementChats = \[[\s\S]{0,160}\.\.\.placement\.messages/);
+  assert.match(surface, /listEmailThreadChatGroups\(\{[\s\S]*messageID: message\.id,[\s\S]*threadID: message\.thread_id/);
+  assert.doesNotMatch(surface, /listEmailCollaborations|getEmailCollaboration|ListNodeProjections|threadMessages/);
+  assert.match(surface, /for \(const group of groups\)[\s\S]*parseEditorTextBlockChats\(group\.chats\)/);
   assert.match(surface, /headerLeading=\{collaborations\.length > 1[\s\S]*data-email-chat-node-header="true"[\s\S]*<ExplorerRowIcon kind="node"/);
   assert.match(surface, /sectionLabelsByBlockID=\{sectionLabelsByBlockID\}/);
+  assert.match(surface, /sectionNodeIDsByBlockID=\{sectionNodeIDsByBlockID\}/);
   assert.match(surface, /sectionKeysByMessageID=\{sectionKeysByChatID\}/);
+  assert.match(surface, /onOpenSectionNode=\{onOpenNode\}/);
   assert.doesNotMatch(surface, /EmailCollaborationParticipantRoster|setChatTargetMenuOpen|onClose/);
   assert.match(surface, /const startNewFloatingNodeChat[\s\S]*pendingNewNodeIDRef\.current = generateStableInformationID\(\)[\s\S]*acceptCollaboration\(null\)/);
+  const newChatStart = surface.indexOf("const startNewFloatingNodeChat");
+  const newChatEnd = surface.indexOf("React.useEffect", newChatStart);
+  assert.doesNotMatch(surface.slice(newChatStart, newChatEnd), /setMessages\(\[\]\)/);
   assert.match(surface, /const ensureLinkedEmailTextBlock[\s\S]*ensureEmailCollaboration\(\{[\s\S]*targetNodeID: activeNodeID,[\s\S]*linkedTextBlock/);
   assert.doesNotMatch(surface, /convertTriageMessagesToExplorerTarget/);
   assert.match(surface, /const submitExistingTextBoxChat = React\.useCallback[\s\S]*showPendingChat\(pending\.chat[\s\S]*await requestJSON<unknown>\(`\/v1\/nodes\/\$\{encodeURIComponent\(targetNodeID\)\}\/information`/);
@@ -255,11 +188,12 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.doesNotMatch(surface, /const importedCollaborations = await listEmailCollaborations/);
   assert.match(surface, /rollBackPendingChat\(pending\.chat\.id\);[\s\S]{0,260}setDraft\(originalDraft\)/);
   assert.match(surface, /locallySubmittedChatIDsRef\.current\.delete\(event\.message_id\)/);
+  assert.match(surface, /const unsubscribes = threadChatNodeIDs\.map[\s\S]*"chat:node:" \+ visibleNodeID/);
   assert.match(workspace, /onContentTopChange=\{setEmailChatTopOffset\}/);
   assert.match(workspace, /topOffset=\{showDetailResizeHandle \? emailChatTopOffset : 0\}/);
   assert.match(detail, /content\.getBoundingClientRect\(\)\.top - root\.getBoundingClientRect\(\)\.top \+ paddingTop/);
   assert.match(surface, /height: topOffset > 0 \? `calc\(100% - \$\{topOffset\}px\)` : "100%"[\s\S]*marginTop: topOffset/);
-  assert.doesNotMatch(surface, /parseEditorAttachedEmails|resolveEmailCollaboration\(/);
+  assert.doesNotMatch(surface, /parseEditorAttachedEmails|resolveEmailCollaborationChatPlacement/);
 
   assert.match(destinationSearch, /<UniversalEntityPicker[\s\S]*sourceLabel="Email"[\s\S]*initialMode="link"/);
   assert.match(destinationSearch, /data-email-floating-node-button="true"[\s\S]*aria-label="Create floating node from email"/);
@@ -273,13 +207,6 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(destinationSearch, /data-email-action-success="true"[\s\S]*right: "calc\(100% \+ 9px\)"/);
   assert.match(workspace, /EMAIL_NODE_INDICATOR_AFTER_NOTICE_MS[\s\S]*setEmailActionNotice[\s\S]*onEmailCollaborationChange\(delayedCollaboration\)/);
   assert.match(surface, /const delayFloatingNodeIndicator = createNew;[\s\S]*ensureCollaboration\(priority, createNew, !delayFloatingNodeIndicator\)[\s\S]*delayFloatingNodeIndicator \? created : undefined/);
-  assert.match(surface, /const refreshCollaborationByIDRef = React\.useRef\(refreshCollaborationByID\)/);
-  assert.match(surface, /refreshCollaborationByIDRef\.current\(collaborationID, refreshSequence\)/);
-  assert.match(surface, /\}, \[active, apiBase, collaborationID, companyID, nodeID\]\);/);
-  assert.match(surface, /const projectionContextRef = React\.useRef\(\{ message, threadMessages, nodes \}\)/);
-  assert.match(surface, /const projectionContext = projectionContextRef\.current;[\s\S]*\[projectionContext\.message, \.\.\.projectionContext\.threadMessages\][\s\S]*projectionContext\.nodes\.find/);
-  assert.match(surface, /\}, \[apiBase, collaborationTargetMessage\.email_message_id, companyID, targetEmailMessageID\]\);/);
-  assert.doesNotMatch(surface, /loadThreadProjections[\s\S]*\}, \[apiBase, collaborationTargetMessage\.email_message_id, companyID, message, nodes, targetEmailMessageID, threadMessages\]\);/);
   const emailBodyDocument = detail.slice(
     detail.indexOf("function useEmailBodyDocument"),
     detail.indexOf("function EmailConversationMessage"),
@@ -290,8 +217,10 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(emailBodyDocument, /collaborationID: collaborationIDRef\.current/);
   assert.match(sharedChat, /headerLeading\?: React\.ReactNode/);
   assert.match(sharedChat, /sectionLabelsByBlockID\?: Record<string, string>/);
+  assert.match(sharedChat, /sectionNodeIDsByBlockID\?: Record<string, string>/);
   assert.match(sharedChat, /sectionKeysByMessageID\?: Record<string, string>/);
-  assert.doesNotMatch(sharedChat, /const sectionKey = thread\.message\.selectionMessageID/);
+  assert.match(sharedChat, /aria-label=\{`Open Node \$\{sectionLabel\}`\}[\s\S]*onClick=\{\(\) => onOpenSectionNode\(sectionNodeID\)\}/);
+  assert.match(sharedChat, /borderTop: index > 0 \? `1px solid \$\{ruleColor\}`/);
   assert.match(surface, /<ChatPane[\s\S]*fillHeight/);
 });
 test("email-created nodes reuse canonical chat data with one node email column", () => {
@@ -312,7 +241,7 @@ test("email-created nodes reuse canonical chat data with one node email column",
   const mailNodeOpen = homePage.slice(mailNodeOpenStart, homePage.indexOf("useEffect", mailNodeOpenStart));
   assert.match(mailNodeOpen, /openNodeEditorOverlay\(node\);/);
   assert.doesNotMatch(mailNodeOpen, /collaboration_information_id|focusRequestID|message\.id/);
-  assert.match(nodeSurface, /emailOriginChatBlockID = emailOriginAttachedEmail\?\.id\.trim\(\)/);
+  assert.doesNotMatch(nodeSurface, /emailOriginChatBlockID|resolveLegacyEmailChatHostBlockID/);
   assert.match(nodeSurface, /data-node-email-column="true"/);
   assert.match(nodeSurface, /data-node-text-box-columns="editor-chat"/);
   assert.match(nodeSurface, /const chatBlockID = block\.id/);
@@ -320,7 +249,6 @@ test("email-created nodes reuse canonical chat data with one node email column",
   assert.doesNotMatch(nodeSurface, /aria-label="Toggle email column"/);
   assert.doesNotMatch(nodeSurface, /data-node-text-box-columns="email-editor-chat"/);
   assert.match(nodeSurface, /blockID=\{block\.id\}[\s\S]*blockID=\{chatBlockID\}/);
-  assert.match(nodeSurface, /emailOriginPrimaryRow && emailChatParticipantRoster/);
   assert.match(nodeSurface, /tabbed=\{false\}/);
   assert.match(nodeParts, /role="tablist" aria-label="Attached email threads"/);
   assert.match(nodeParts, /height: replyComposerOpen \? "clamp\(420px, calc\(100vh - 300px\), 760px\)" : "auto"/);

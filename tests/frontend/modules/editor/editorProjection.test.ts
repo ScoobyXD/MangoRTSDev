@@ -108,10 +108,9 @@ test("parses node text block chat projection payloads", () => {
   assert.deepEqual(messages[0].attachments, [{ id: "attachment-1", attachmentID: "attachment-1", name: "notes.csv", type: "text/csv", size: 42, dataURL: undefined }]);
 });
 
-test("first email-selection chat payload commits its pending text box only on send", () => {
+test("email-selection chat payload points to an already stored text box", () => {
   const payload = JSON.parse(buildEditorTextBlockChatPayload({
     blockID: "00000000-0000-4000-8000-000000000511",
-    createEmailTextBoxOnSend: true,
     selectionSource: "email",
     selectionBlockID: "00000000-0000-4000-8000-000000000511",
     selectionMessageID: "00000000-0000-4000-8000-000000000509",
@@ -124,7 +123,7 @@ test("first email-selection chat payload commits its pending text box only on se
     createdTimestamp: "2026-08-08T12:00:00.000Z",
   })) as Record<string, unknown>;
 
-  assert.equal(payload.create_email_textbox_on_send, true);
+  assert.equal("create_email_textbox_on_send" in payload, false);
   assert.equal(payload.block_id, payload.selection_block_id);
   assert.equal(payload.selection_source, "email");
 });
@@ -216,7 +215,6 @@ test("parses titled node text block content payloads with legacy fallback", () =
     document: "<!-- mango-editor-html-v1 --><b>Ship it</b>",
     attachments: [{ id: "attachment-2", attachmentID: "attachment-2", name: "diagram.png", type: "image/png", size: 128, dataURL: undefined }],
     emailMessageID: "message-9",
-    emailMessageIDs: ["message-9"],
     emailAccent: "#0ea5e9",
   });
   assert.deepEqual(parseEditorTextBlockContent("legacy text"), {

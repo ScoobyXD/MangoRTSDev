@@ -216,7 +216,7 @@ join email_connections connection on connection.company_id=thread.company_id
 left join shared_inboxes inbox on inbox.company_id=thread.company_id
  and inbox.company_email_connection_id=thread.email_connection_id
 where relationship.company_id=$1::uuid and relationship.resource_type='node' and relationship.resource_id=$2::uuid
-  and relationship.resource_textbox_id is null and message.provider_message_id=$3
+	  and relationship.resource_textbox_id is not null and message.provider_message_id=$3
   and (($4<>'' and inbox.shared_inbox_id=nullif($4,'')::uuid)
     or ($4='' and connection.connection_type='personal'
       and connection.personal_user_id=$5::uuid and connection.account_email=$6))
@@ -232,23 +232,26 @@ limit 1`, input.CompanyID, input.NodeID, input.ProviderMessageID, input.SharedIn
 		return err
 	}
 	if input.LinkedTextBlock != nil {
-		if _, err := r.addCommunicationsConversionInformationTx(ctx, tx, *input.LinkedTextBlock); err != nil {
+		var exists bool
+		if err := tx.QueryRowContext(ctx, `select exists(select 1 from node_textboxes
+where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid and deleted_timestamp is null)`,
+			input.CompanyID, input.NodeID, input.LinkedTextBlock.InformationID).Scan(&exists); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `
-insert into email_relationships(
-  company_id,email_relationship_id,email_thread_id,email_message_id,
-  resource_type,resource_id,resource_textbox_id,created_timestamp
-)
-select company_id,gen_random_uuid(),email_thread_id,email_message_id,
-       'node',resource_id,$3::text,clock_timestamp()
-from email_relationships
+		if !exists {
+			if _, err := r.addCommunicationsConversionInformationTx(ctx, tx, *input.LinkedTextBlock); err != nil {
+				return err
+			}
+		}
+		var linked bool
+		if err := tx.QueryRowContext(ctx, `select exists(select 1 from email_relationships
 where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid
-  and email_message_id=$4::uuid and resource_textbox_id is null
-order by created_timestamp desc
-limit 1
-on conflict do nothing`, input.CompanyID, input.NodeID, input.LinkedTextBlock.InformationID, emailMessageID); err != nil {
+  and email_message_id=$3::uuid and resource_textbox_id=$4)`,
+			input.CompanyID, input.NodeID, emailMessageID, input.LinkedTextBlock.InformationID).Scan(&linked); err != nil {
 			return err
+		}
+		if !linked {
+			return ErrInvalid
 		}
 		result.LinkedTextBlockID = input.LinkedTextBlock.InformationID
 	}
@@ -268,7 +271,11 @@ func (r *MemoryRepo) persistCommunicationsConversionEmailLocked(input Communicat
 		return "", "", "", err
 	}
 	informationID := r.addEmailProjectionWithThreadLocked(input.CompanyID, input.NodeID, input.SharedInboxID, input.AccountEmail, message, thread.EmailThreadID, now, input.Target.Mode != CommunicationsEmailConversionTargetExistingNode)
-	if _, err := r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, input.NodeID, informationID, thread.EmailThreadID, message.ID, input.ActorUserID, now); err != nil {
+	preferredTextboxID := ""
+	if input.LinkedTextBlock != nil {
+		preferredTextboxID = input.LinkedTextBlock.InformationID
+	}
+	if _, err := r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, input.NodeID, informationID, thread.EmailThreadID, message.ID, input.ActorUserID, now, preferredTextboxID); err != nil {
 		return "", "", "", err
 	}
 	if requestedMessageID, sourceID, ok := communicationsEmailIngestionRequest(thread, threadInput); ok && thread.EmailConnectionID != "" {
@@ -290,9 +297,21 @@ func (r *PostgresRepo) persistCommunicationsConversionEmailTx(ctx context.Contex
 	if err != nil {
 		return "", "", "", err
 	}
+	internalMessageID := internalEmailMessageIDForProvider(thread, message.ID)
+	writeInput := communicationsEmailTextBoxChatWriteInputFromConversion(input)
+	if err := rewriteCommunicationsEmailTextBoxChatMessageID(&writeInput, internalMessageID); err != nil {
+		return "", "", "", err
+	}
+	textboxID := ""
+	if writeInput.LinkedTextBlock != nil {
+		if _, err := r.addCommunicationsConversionInformationTx(ctx, tx, *writeInput.LinkedTextBlock); err != nil {
+			return "", "", "", err
+		}
+		textboxID = writeInput.LinkedTextBlock.InformationID
+	}
 	relationshipID, err := addEmailProjectionSQLWithThread(ctx, tx, input.CompanyID, input.NodeID,
 		input.SharedInboxID, input.AccountEmail, message, thread.EmailThreadID, now,
-		input.Target.Mode != CommunicationsEmailConversionTargetExistingNode)
+		input.Target.Mode != CommunicationsEmailConversionTargetExistingNode, textboxID)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -305,5 +324,5 @@ func (r *PostgresRepo) persistCommunicationsConversionEmailTx(ctx context.Contex
 			return "", "", "", err
 		}
 	}
-	return relationshipID, thread.EmailThreadID, internalEmailMessageIDForProvider(thread, message.ID), nil
+	return relationshipID, thread.EmailThreadID, internalMessageID, nil
 }

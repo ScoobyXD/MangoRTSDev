@@ -51,9 +51,8 @@ test("Tiptap annotation work stays outside the ordinary save and whole-document 
   assert.match(editor, /if \(\(transaction\.docChanged && !transaction\.selectionSet\) \|\| transaction\.storedMarksSet\)[\s\S]*updateSelectionState\(transactionEditor\);[\s\S]*if \(!transaction\.docChanged\) return;/);
   assert.match(annotations, /mangoTiptapAnnotationsEqual\(readMappedMangoTiptapAnnotations\(editor\), annotations\)[\s\S]*return false;[\s\S]*editor\.view\.dispatch/);
   assert.match(editorContent, /setSelectionInlineFormat\(\(current\) => \([\s\S]*current\.bold === nextFormat\.bold[\s\S]*\? current[\s\S]*: nextFormat/);
-  assert.match(nodeWorkspace, /const displayedChatMessagesByBlock = useMemo\(\(\) => \{[\s\S]*if \(!emailOriginNode\) return chatMessagesByBlock;[\s\S]*return displayed;[\s\S]*\}, \[chatMessagesByBlock, emailOriginChatBlockID, emailOriginChatHostBlockID, emailOriginNode\]\)/);
-  assert.match(nodeWorkspace, /const messages = displayedChatMessagesByBlock\.get\(block\.id\) \?\? \[\];/);
-  assert.doesNotMatch(nodeWorkspace, /const messages = \[\.\.\.legacyMessages, \.\.\.directMessages\]/);
+  assert.match(nodeWorkspace, /const messages = chatMessagesByBlock\.get\(block\.id\) \?\? \[\];/);
+  assert.doesNotMatch(nodeWorkspace, /displayedChatMessagesByBlock|legacyMessages|emailOriginChatHostBlockID/);
   assert.match(editor, /onSnapshot: \(snapshot, snapshotAnnotations\) => \{\s+currentDocumentRef\.current = snapshot;\s+persistedAnnotationsRef\.current = \[\.\.\.snapshotAnnotations\];\s+\}/);
   assert.doesNotMatch(editor, /onSnapshot: \(snapshot, snapshotAnnotations\) => \{\s+setDocument\(snapshot\)/);
 });
