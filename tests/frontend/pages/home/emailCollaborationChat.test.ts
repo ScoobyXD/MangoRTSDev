@@ -218,9 +218,11 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(surface, /const placementChats = \[[\s\S]{0,160}\.\.\.placement\.messages/);
   assert.match(surface, /headerLeading=\{collaborations\.length > 1[\s\S]*data-email-chat-node-header="true"[\s\S]*<ExplorerRowIcon kind="node"/);
   assert.match(surface, /sectionLabelsByBlockID=\{sectionLabelsByBlockID\}/);
+  assert.match(surface, /sectionKeysByMessageID=\{sectionKeysByChatID\}/);
   assert.doesNotMatch(surface, /EmailCollaborationParticipantRoster|setChatTargetMenuOpen|onClose/);
   assert.match(surface, /const startNewFloatingNodeChat[\s\S]*pendingNewNodeIDRef\.current = generateStableInformationID\(\)[\s\S]*acceptCollaboration\(null\)/);
-  assert.match(surface, /const ensureLinkedEmailTextBlock[\s\S]*convertTriageMessagesToExplorerTarget\([\s\S]*linkedTextBlock/);
+  assert.match(surface, /const ensureLinkedEmailTextBlock[\s\S]*ensureEmailCollaboration\(\{[\s\S]*targetNodeID: activeNodeID,[\s\S]*linkedTextBlock/);
+  assert.doesNotMatch(surface, /convertTriageMessagesToExplorerTarget/);
   assert.match(surface, /const submit = React\.useCallback\(async \(\) =>[\s\S]*collaborations\.length > 1 && !collaboration[\s\S]*ensureEmailCollaboration\(\{[\s\S]*linkedTextBlock:[\s\S]*initialChat:/);
   assert.doesNotMatch(surface, /Choose email node priority|setPriorityMenuOpen|data-email-action-popover|aria-label="Close email comments"/);
   assert.match(surface, /const importedCollaborations = await listEmailCollaborations/);
@@ -255,6 +257,8 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(emailBodyDocument, /collaborationID: collaborationIDRef\.current/);
   assert.match(sharedChat, /headerLeading\?: React\.ReactNode/);
   assert.match(sharedChat, /sectionLabelsByBlockID\?: Record<string, string>/);
+  assert.match(sharedChat, /sectionKeysByMessageID\?: Record<string, string>/);
+  assert.doesNotMatch(sharedChat, /const sectionKey = thread\.message\.selectionMessageID/);
   assert.match(surface, /<ChatPane[\s\S]*fillHeight/);
 });
 test("email-created nodes reuse canonical chat data with one node email column", () => {

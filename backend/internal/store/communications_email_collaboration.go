@@ -33,6 +33,7 @@ type CommunicationsEmailCollaborationEnsureInput struct {
 	Provider             string
 	CreatedByUserID      string
 	RequestedNodeID      string
+	TargetNodeID         string
 	Priority             *int
 	Message              domain.EmailMessageSnapshot
 	LinkedTextBlock      *NodeInformationInput
@@ -147,16 +148,20 @@ func normalizeCommunicationsEmailCollaborationEnsureInput(input CommunicationsEm
 	message := normalizeEmailMessageSnapshot(input.Message)
 	creatorID := cleanUUIDText(input.CreatedByUserID)
 	requestedNodeID := cleanUUIDText(input.RequestedNodeID)
+	targetNodeID := cleanUUIDText(input.TargetNodeID)
 	if creatorID == "" || message.ID == "" {
 		return CommunicationsEmailCollaborationEnsureInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
 	}
 	if strings.TrimSpace(input.RequestedNodeID) != "" && requestedNodeID == "" {
 		return CommunicationsEmailCollaborationEnsureInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
 	}
-	if input.Priority != nil && (*input.Priority < 1 || *input.Priority > 5) {
+	if strings.TrimSpace(input.TargetNodeID) != "" && targetNodeID == "" {
 		return CommunicationsEmailCollaborationEnsureInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
 	}
-	if input.LinkedTextBlock == nil && input.InitialChat != nil {
+	if requestedNodeID != "" && targetNodeID != "" {
+		return CommunicationsEmailCollaborationEnsureInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
+	}
+	if input.Priority != nil && (*input.Priority < 1 || *input.Priority > 5) {
 		return CommunicationsEmailCollaborationEnsureInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
 	}
 	for _, value := range []struct {
@@ -185,6 +190,7 @@ func normalizeCommunicationsEmailCollaborationEnsureInput(input CommunicationsEm
 	}
 	input.CreatedByUserID = creatorID
 	input.RequestedNodeID = requestedNodeID
+	input.TargetNodeID = targetNodeID
 	input.Message = message
 	return input, scope, nil
 }

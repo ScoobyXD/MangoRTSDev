@@ -522,6 +522,50 @@ order by message.message_timestamp desc nulls last, message.provider_message_id`
 	return items, rows.Err()
 }
 
+func (r *PostgresRepo) GetCommunicationsEmailMessageForScope(input CommunicationsEmailMessageLookupInput) (CommunicationsEmailMessageLookupResult, error) {
+	input, scope, err := normalizeCommunicationsEmailMessageLookupInput(input)
+	if err != nil {
+		return CommunicationsEmailMessageLookupResult{}, err
+	}
+	ctx := context.Background()
+	var emailThreadID string
+	err = r.db.QueryRowContext(ctx, `
+select thread.email_thread_id::text
+from email_messages message
+join email_threads thread
+  on thread.company_id=message.company_id
+ and thread.email_thread_id=message.email_thread_id
+join email_connections connection
+  on connection.company_id=thread.company_id
+ and connection.email_connection_id=thread.email_connection_id
+left join shared_inboxes inbox
+  on inbox.company_id=connection.company_id
+ and inbox.company_email_connection_id=connection.email_connection_id
+where message.company_id=$1::uuid
+  and message.provider_message_id=$6
+  and connection.connection_type=$2
+  and (($2='personal' and connection.personal_user_id=nullif($3,'')::uuid and connection.account_email=$4)
+    or ($2='shared' and inbox.shared_inbox_id=nullif($5,'')::uuid))
+order by thread.email_thread_id
+limit 1`, input.CompanyID, scope.scopeType, scope.personalUserID, scope.personalAccountEmail, scope.sharedInboxID, input.ProviderMessageID).Scan(&emailThreadID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CommunicationsEmailMessageLookupResult{}, ErrNotFound
+	}
+	if err != nil {
+		return CommunicationsEmailMessageLookupResult{}, err
+	}
+	thread, err := postgresCommunicationsEmailThreadByID(ctx, r.db, input.CompanyID, emailThreadID)
+	if err != nil {
+		return CommunicationsEmailMessageLookupResult{}, err
+	}
+	for _, message := range thread.Messages {
+		if message.ProviderMessageID == input.ProviderMessageID {
+			return CommunicationsEmailMessageLookupResult{Message: message.Message, Provider: thread.Provider}, nil
+		}
+	}
+	return CommunicationsEmailMessageLookupResult{}, ErrNotFound
+}
+
 func (r *PostgresRepo) GetCommunicationsNodeEmailThread(companyID, nodeID, emailThreadID string) (domain.CommunicationsNodeEmailThread, error) {
 	companyID, nodeID, emailThreadID = cleanUUIDText(companyID), cleanUUIDText(nodeID), cleanUUIDText(emailThreadID)
 	if companyID == "" || nodeID == "" || emailThreadID == "" {
