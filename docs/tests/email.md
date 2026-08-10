@@ -18,7 +18,7 @@
 16. My Triage and Shared Triage show one scrollable chat rail for the thread, grouped only by exact Node and text box; different messages in that same Node/text box do not create separators.
 17. Each triage chat group header shows only its Node icon and Node title.
 18. The email thread header owns the one neutral chat toggle. Individual messages show no chat button or three-dot overflow button.
-19. The chat rail starts at the email surface's top edge and ends at its bottom edge; it does not extend above or below the email box.
+19. The chat rail's top and bottom borders align with the displayed email-message card, not the subject and action toolbar above that card.
 20. Dragging an exact email message onto a Node text box links that message. Dragging an email thread onto a text box is rejected.
 21. One active shared draft is universal to its exact email thread and retains its exact reply-source message when one exists.
 22. A universal shared draft is not related to a Node or text box in storage; its text-box-shaped Node panel is UI only.
@@ -32,7 +32,10 @@
 30. Closing a local draft panel does not delete the universal draft; discarding the draft removes it for every surface.
 31. Opening, closing, or refreshing the triage chat rail does not restart or revoke an unchanged inline email image source.
 32. A triage chat send reuses the exact mailbox-scoped stored message when present, otherwise fetches and stores only that exact provider message, and never calls triage conversion or queues remaining-thread ingestion.
-33. After the backend acknowledges a My Triage or Shared Triage chat, the open rail shows it immediately in its exact Node and text-box group without waiting for realtime or another Node read.
+33. A My Triage or Shared Triage send adds the chat to the open rail before the request starts; success keeps the optimistic row, and failure removes it and restores the composer.
+34. Once an exact email message already has a Node text box, each later triage chat uses only the normal Node text-box-chat create command.
+35. A Node opens with every attached-email thread collapsed and reads a thread body or shared draft only after the user opens that exact thread.
+36. A chat authored by the current user moves the shared message view to the new message at the bottom.
 
 Last updated: 2026-08-10
 
@@ -1173,7 +1176,7 @@ Given:
 Expected:
 - The Node-plus button creates a floating Node immediately and opens no rail. The Universal picker opens in `##` link mode and uses shared pinned/workspace search. Empty-query Backspace switches to `#` reference and `#` switches back to link. Reference opens an exact Node, Logic Gate, Project, or email without mutation. Link selection reuses an existing Node or creates a new email Node in the chosen Logic Gate/Project after the existing priority and placement steps. Enter/Tab and arrow-key navigation remain available, the successful relationship annotates the mailbox row and reply header with the Node indicator, and a temporary green notice overlays the detail without changing its grid rows.
 - The separate Node-wide email column shows the selected message immediately from Mango storage and fills in the rest of the current thread as the durable job completes. A linked text box may show only its exact associated message inside its left content column; it never duplicates the complete thread and never intrudes into or shortens the right chat column.
-- Choosing an existing Node creates or reuses the exact-message text box with persisted `email_message_id` and deterministic `email_accent`, imports only that exact message when missing, never opens chat, and shows **Email was added to node.** on success.
+- Choosing an existing Node creates or reuses the exact-message text box relationship, computes its deterministic accent in the interface, imports only that exact message when missing, never opens chat, and shows **Email was added to node.** on success.
 - The email thread header has one chat toggle; individual message cards have no chat button or three-dot menu. Selecting text shows an anchored chat action first. If the thread has its one Node association, Enter writes to that exact-message text-box chat. With no association, Enter creates a floating Node with priority **Not Assigned** and no Logic Gate, attaches the selected message, creates the exact-message text box, and commits the comment there.
 - Each text-box row contains a left content column and an independently sized right chat column. Show email places the exact linked-message preview above the editor within the left column; when the editor is closed, that preview owns the left column. The chat always retains the row's full body height.
 - The Node-wide email column and chat pane use the full available vertical space. The email column is sticky below the Node toolbar while the text-box timeline scrolls and retains its own vertical scroller. The Node-level Email toggle retains a stable three-track shell and animates width plus opacity/transform for open and close; the closed email pane is inert and pointer-disabled. Email, Editor, Chat, and linked-email visibility changes honor reduced-motion settings; the email-focus button retains its separate responsibility.

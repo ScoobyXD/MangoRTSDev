@@ -304,7 +304,7 @@ where company_id=$1::uuid and attachment_id=$2::uuid`, company.CompanyID, attach
 	}
 }
 
-func TestPostgresNodeTextboxMetadataPersistsWithoutDuplicatingDocumentInNodeView(t *testing.T) {
+func TestPostgresNodeTextboxTitlePersistsWithoutDuplicatingDocumentInNodeView(t *testing.T) {
 	db, repo := openRealtimePostgresIntegration(t)
 	company, err := repo.CreateCompany("Node textbox metadata integration")
 	if err != nil {
@@ -318,7 +318,7 @@ func TestPostgresNodeTextboxMetadataPersistsWithoutDuplicatingDocumentInNodeView
 	textboxID := "00000000-0000-4000-8000-000000000591"
 	metadata, err := repo.UpdateEditorJSONMetadata(EditorJSONMetadataInput{
 		Document: EditorDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeNode, ResourceID: node.NodeID, DocumentID: textboxID},
-		Title:    "Stored title", EmailAccent: "#12ABEF",
+		Title:    "Stored title",
 	})
 	if err != nil || metadata.ProjectionRevision != 1 {
 		t.Fatalf("metadata=%+v err=%v", metadata, err)
@@ -339,7 +339,7 @@ func TestPostgresNodeTextboxMetadataPersistsWithoutDuplicatingDocumentInNodeView
 		t.Fatalf("projections=%+v err=%v", projections, err)
 	}
 	if !strings.Contains(projections[0].Information, `"title": "Stored title"`) ||
-		!strings.Contains(projections[0].Information, `"email_accent": "#12ABEF"`) ||
+		strings.Contains(projections[0].Information, `"email_accent"`) ||
 		!strings.Contains(projections[0].Information, "private canonical marker") {
 		t.Fatalf("full projection lost metadata or document: %s", projections[0].Information)
 	}

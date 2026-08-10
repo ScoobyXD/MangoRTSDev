@@ -403,6 +403,7 @@ export function HomeMailWorkspace({
   const [emailActionRequest, setEmailActionRequest] = React.useState<EmailCollaborationActionRequest>(null);
   const [emailCollaborationError, setEmailCollaborationError] = React.useState("");
   const [emailActionNotice, setEmailActionNotice] = React.useState<{ message: string; requestID: number } | null>(null);
+  const [emailChatTopOffset, setEmailChatTopOffset] = React.useState(0);
   const nodeByID = React.useMemo(() => new Map(nodes.map((node) => [node.node_id, node])), [nodes]);
   const logicGateByID = React.useMemo(() => new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate])), [logicGates]);
   const openEmailLogicGate = React.useCallback((logicGateID: string) => {
@@ -1009,6 +1010,7 @@ export function HomeMailWorkspace({
                 selectionNavigation={emailNavigation}
                 onOpenCollaborationNode={onOpenCollaborationNode}
                 onOpenLogicGate={openEmailLogicGate}
+                onContentTopChange={setEmailChatTopOffset}
               />
             )}
             {(emailChatMounted || emailActionRequest) && (
@@ -1028,6 +1030,7 @@ export function HomeMailWorkspace({
                 nodes={nodes}
                 actionRequest={emailActionRequest}
                 selection={emailSelection}
+                topOffset={showDetailResizeHandle ? emailChatTopOffset : 0}
                 onClearSelection={clearEmailSelection}
                 onNavigateToEmailSelection={navigateToEmailSelection}
                 onCollaborationChange={onEmailCollaborationChange}

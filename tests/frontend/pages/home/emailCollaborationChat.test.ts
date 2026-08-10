@@ -246,13 +246,19 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(surface, /const startNewFloatingNodeChat[\s\S]*pendingNewNodeIDRef\.current = generateStableInformationID\(\)[\s\S]*acceptCollaboration\(null\)/);
   assert.match(surface, /const ensureLinkedEmailTextBlock[\s\S]*ensureEmailCollaboration\(\{[\s\S]*targetNodeID: activeNodeID,[\s\S]*linkedTextBlock/);
   assert.doesNotMatch(surface, /convertTriageMessagesToExplorerTarget/);
-  assert.match(surface, /const submit = React\.useCallback\(async \(\) =>[\s\S]*collaborations\.length > 1 && !collaboration[\s\S]*ensureEmailCollaboration\(\{[\s\S]*linkedTextBlock:[\s\S]*initialChat:/);
+  assert.match(surface, /const submitExistingTextBoxChat = React\.useCallback[\s\S]*showPendingChat\(pending\.chat[\s\S]*await requestJSON<unknown>\(`\/v1\/nodes\/\$\{encodeURIComponent\(targetNodeID\)\}\/information`/);
+  assert.match(surface, /if \(collaboration\) \{\s*if \(activeTextBlockID\) \{\s*await submitExistingTextBoxChat\(collaboration, activeTextBlockID\)/);
+  assert.match(surface, /showPendingChat\([\s\S]{0,260}setSubmitting\(true\);\s*try \{\s*const created = await ensureEmailCollaboration/);
+  assert.match(surface, /linkedTextBlock:[\s\S]*initialChat: pending\.write/);
   assert.doesNotMatch(surface, /Choose email node priority|setPriorityMenuOpen|data-email-action-popover|aria-label="Close email comments"/);
   assert.match(surface, /const ensured = await ensureEmailCollaboration\(\{[\s\S]*acceptCollaboration\(ensured\)/);
   assert.doesNotMatch(surface, /const importedCollaborations = await listEmailCollaborations/);
-  assert.match(surface, /setMessages\(\(current\) => appendAcknowledgedEmailCollaborationChat\(current, acknowledgedChat\)\)/);
-  assert.match(surface, /setSectionKeysByChatID\(\(current\) => \(\{ \.\.\.current, \[acknowledgedChat\.id\]: sectionKey \}\)\)/);
-  assert.match(surface, /setActiveMessageID\(acknowledgedChat\.id\)/);
+  assert.match(surface, /rollBackPendingChat\(pending\.chat\.id\);[\s\S]{0,260}setDraft\(originalDraft\)/);
+  assert.match(surface, /locallySubmittedChatIDsRef\.current\.delete\(event\.message_id\)/);
+  assert.match(workspace, /onContentTopChange=\{setEmailChatTopOffset\}/);
+  assert.match(workspace, /topOffset=\{showDetailResizeHandle \? emailChatTopOffset : 0\}/);
+  assert.match(detail, /content\.getBoundingClientRect\(\)\.top - root\.getBoundingClientRect\(\)\.top \+ paddingTop/);
+  assert.match(surface, /height: topOffset > 0 \? `calc\(100% - \$\{topOffset\}px\)` : "100%"[\s\S]*marginTop: topOffset/);
   assert.doesNotMatch(surface, /parseEditorAttachedEmails|resolveEmailCollaboration\(/);
 
   assert.match(destinationSearch, /<UniversalEntityPicker[\s\S]*sourceLabel="Email"[\s\S]*initialMode="link"/);

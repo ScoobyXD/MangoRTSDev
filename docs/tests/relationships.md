@@ -15,7 +15,7 @@
 13. Showing a universal shared draft in a Node is presentation state and never creates a draft-to-textbox relationship.
 14. Removing one Node's email relationship removes only that Node's typed edge and leaves every other Node, stored thread/message, local text box, chat, and surviving attachment relationship unchanged.
 15. Email-to-Node, email-to-textbox, chat, and draft rules do not create a generic resource registry, surrogate identity, or untyped edge.
-16. An existing exact-message text-box relationship routes triage reads and later sends to that same Node text-box chat without creating another relationship.
+16. An existing exact-message text-box relationship routes a later triage send through the normal Node text-box-chat insert only; it creates no email, relationship, permission, participant, or collaboration row.
 17. A triage chat command reuses the exact mailbox-scoped stored message when present, fetches only that exact provider message when absent, and never queues thread ingestion or links a thread to a text box.
 
 Last updated: 2026-08-10

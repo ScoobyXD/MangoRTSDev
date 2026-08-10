@@ -12,7 +12,8 @@
 10. An already-linked exact-message text box loads its existing messages and receives each later My Triage chat without creating another text box.
 11. Reconciling unchanged email metadata must not restart the chat-rail load, discard stored text-box chats, or repeat Node reads.
 12. A chat send reuses the exact mailbox-scoped stored message when present, otherwise fetches only that exact provider message, and never calls triage conversion or queues remaining-thread ingestion.
-13. After the backend acknowledges a chat, the open rail shows it immediately in its exact Node and text-box group without waiting for realtime or another Node read.
+13. Sending a chat adds it to the open rail before the network request starts; success keeps that exact optimistic row, while failure removes it and restores the complete composer for retry.
+14. A later chat for an already-linked exact email message uses the normal Node text-box-chat create command only; it does not repeat email, relationship, permission, participant, or collaboration setup.
 
 Last updated: 2026-08-10
 
@@ -773,7 +774,7 @@ Expected:
 - Only a participant whose active personal provider page returns the conversation sees it in My Triage, where matching collaboration metadata annotates the one provider row. A mentioned nonrecipient retains Node/chat access but receives no My Triage email row.
 - The thread-header chat toggle opens and closes the one Node chat rail. Text selection alone leaves it closed; clicking the resulting chat action opens it with the quote. Closing it or changing exact message, mailbox, or view makes no durable mutation.
 - With one association, the rail targets that Node. With several, it asks which Node owns the comment or offers a new floating Node, then renders that Node's shared ChatPane data, replies, navigation, mentions, attachments, refresh behavior, and participant roster.
-- A failed ensure leaves no partial durable artifacts; a creation/write failure preserves the chat composer context, never inserts a false saved row before backend acknowledgement, re-enables retry, and translates `failed_to_create_email_collaboration` or `email_collaboration_storage_not_ready` into actionable text.
+- A failed ensure leaves no partial durable artifacts. The optimistic row appears before acknowledgement, then a creation/write failure removes that row, restores the complete composer context, re-enables retry, and translates `failed_to_create_email_collaboration` or `email_collaboration_storage_not_ready` into actionable text.
 - The exact selected message supplies an anchored chat and Create Shared Draft Reply All context.
 - My Drafts keeps exact-account private drafts isolated while also showing the one active participant-authorized collaboration draft with explicit source/shared context.
 - The shared draft cannot be scheduled; its current revision is sent immediately through the collaboration source while ordinary private drafts retain the existing browser-driven scheduling path.

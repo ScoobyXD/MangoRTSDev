@@ -531,7 +531,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [chatMessageFocusRequest, setChatMessageFocusRequest] = useState<{ blockID: string; messageID: string; requestID: number } | null>(null);
   const [chatComposerFocusRequestIDs, setChatComposerFocusRequestIDs] = useState<Record<string, number>>({});
   const [emailHighlightRemovalRequest, setEmailHighlightRemovalRequest] = useState<EmailHighlightRemovalRequest | null>(null);
-  const [nodeEmailNavigationRequest, setNodeEmailNavigationRequest] = useState<{ messageID: string; requestID: number } | null>(null);
+  const [nodeEmailNavigationRequest, setNodeEmailNavigationRequest] = useState<{ messageID: string; blockID: string; requestID: number } | null>(null);
   const [closedEditorBlockIDs, setClosedEditorBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.closedEditorBlockIDs));
   const [closedEmailBlockIDs, setClosedEmailBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.closedEmailBlockIDs));
   const [closedChatBlockIDs, setClosedChatBlockIDs] = useState<Set<string>>(() => new Set(initialPaneLayoutRef.current.closedChatBlockIDs));
@@ -1151,7 +1151,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       `/v1/editor-json/node/${nodeID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`,
       {
         method: "PATCH",
-        body: JSON.stringify({ title: content.title, attachments: content.attachments ?? [], email_accent: content.emailAccent ?? "" }),
+        body: JSON.stringify({ title: content.title, attachments: content.attachments ?? [] }),
       },
     );
     const revision = response?.projection_revision ?? 0;
@@ -1264,9 +1264,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const now = new Date().toISOString();
     const blockID = generateStableInformationID();
     const sourceEmail = nodeAttachedEmails.find((email) => email.emailMessageID === cleanMessageID || email.id === cleanMessageID);
-    const existingMessageAccent = blocks.find((block) => textBlockHasEmailMessage(block, cleanMessageID))?.emailAccent?.trim() ?? "";
-    const unavailableAccents = blocks.filter((block) => !textBlockHasEmailMessage(block, cleanMessageID)).map((block) => block.emailAccent ?? "");
-    const emailAccent = existingMessageAccent || editorEmailMessageAccent(cleanMessageID, unavailableAccents);
+    const emailAccent = editorEmailMessageAccent(cleanMessageID);
     const cleanQuote = quote.trim();
     const initialContent = createEmailLinkedNodeTextBlockContent({
       title: sourceEmail?.subject.trim() ? `Email: ${sourceEmail.subject.trim()}` : "Email text box",
@@ -1322,8 +1320,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const now = new Date().toISOString();
     const blockID = generateStableInformationID();
     const sourceEmail = nodeAttachedEmails.find((email) => email.emailMessageID === cleanMessageID || email.id === cleanMessageID);
-    const unavailableAccents = blocks.map((block) => block.emailAccent ?? "");
-    const emailAccent = editorEmailMessageAccent(cleanMessageID, unavailableAccents);
+    const emailAccent = editorEmailMessageAccent(cleanMessageID);
     const initialContent = createEmailLinkedNodeTextBlockContent({
       title: sourceEmail?.subject.trim() ? `Email: ${sourceEmail.subject.trim()}` : "Email text box",
       messageID: cleanMessageID,
@@ -1451,33 +1448,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       scheduleTextBlockSave(blockID, nextContent, markHistory);
     }
   }, [canEdit, scheduleTextBlockSave]);
-
-
-  useEffect(() => {
-    if (!editorTextCanEdit) return;
-    const accentByMessageID = new Map<string, string>();
-    const usedAccents = new Set<string>();
-    const repairs: Array<{ blockID: string; accent: string }> = [];
-    for (const block of blocks.slice().reverse()) {
-      const messageID = block.emailMessageID?.trim() ?? "";
-      if (!messageID) continue;
-      const storedAccent = block.emailAccent?.trim() ?? "";
-      let assignedAccent = accentByMessageID.get(messageID) ?? "";
-      if (!assignedAccent) {
-        assignedAccent = storedAccent && !usedAccents.has(storedAccent.toLowerCase())
-          ? storedAccent
-          : editorEmailMessageAccent(messageID, usedAccents);
-        accentByMessageID.set(messageID, assignedAccent);
-        usedAccents.add(assignedAccent.toLowerCase());
-      }
-      if (storedAccent.toLowerCase() !== assignedAccent.toLowerCase()) {
-        repairs.push({ blockID: block.id, accent: assignedAccent });
-      }
-    }
-    for (const repair of repairs) {
-      updateTextBlockContent(repair.blockID, { emailAccent: repair.accent }, false);
-    }
-  }, [blocks, editorTextCanEdit, updateTextBlockContent]);
 
   const appendTextBlockAttachments = useCallback((blockID: string, attachments: EditorChatAttachment[]) => {
     if (!canEdit || attachments.length === 0) return;
@@ -2453,11 +2423,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     });
   }, [accent, blocks]);
 
-  const revealNodeEmailMessage = useCallback((messageID: string) => {
+  const revealNodeEmailMessage = useCallback((messageID: string, blockID: string) => {
     const cleanMessageID = messageID.trim();
     if (!cleanMessageID) return;
     setNodeEmailNavigationRequest((current) => ({
       messageID: cleanMessageID,
+      blockID,
       requestID: (current?.requestID ?? 0) + 1,
     }));
     setOpenEmailBlockIDs((current) => new Set(current).add(NODE_EMAIL_COLUMN_LAYOUT_ID));
@@ -3037,6 +3008,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               ruleColor={ruleColor}
               selectedMessageID={selectedEmailIDsByBlock[NODE_EMAIL_COLUMN_LAYOUT_ID] ?? ""}
               focusMessageID={nodeEmailNavigationRequest?.messageID || (activeNodeEmailChatMessage?.selectionSource === "email" ? activeNodeEmailChatMessage.selectionMessageID : undefined) || focusEmailMessageID}
+              focusBlockID={nodeEmailNavigationRequest?.blockID || activeNodeEmailChatMessage?.blockID}
               focusMessageRequestID={nodeEmailNavigationRequest?.requestID ?? focusRequestID ?? 0}
               activeEmailSelection={activeNodeEmailSelection}
               emailHighlightRemovalRequest={emailHighlightRemovalRequest}
@@ -3322,7 +3294,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                       if (!linkedEmailMessageID) return;
                       const target = event.target;
                       if (target instanceof Element && target.closest("button, input, label, select, textarea, a, details, summary")) return;
-                      revealNodeEmailMessage(linkedEmailMessageID);
+                      revealNodeEmailMessage(linkedEmailMessageID, block.id);
                     }}
                     style={{ minWidth: 0, overflowX: "auto", overflowY: "hidden", borderBottom: `1px solid ${ruleColor}`, background: blockEmailAccent ? `linear-gradient(90deg, ${blockEmailAccent}30, ${blockEmailAccent}0c 54%, rgba(255,255,255,0.88))` : "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))", cursor: linkedEmailMessageID ? "pointer" : undefined }}
                   >

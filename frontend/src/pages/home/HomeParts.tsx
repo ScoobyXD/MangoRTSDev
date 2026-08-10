@@ -6289,7 +6289,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
     </article>
   );
 }
-export function MessageDetail({ message, threadMessages = [], nodes, companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, chatOpen, emailNodeDestinationSearch, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onToggleEmailChat, onOpenCollaborationNode, onOpenLogicGate }: {
+export function MessageDetail({ message, threadMessages = [], nodes, companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, chatOpen, emailNodeDestinationSearch, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onToggleEmailChat, onOpenCollaborationNode, onOpenLogicGate, onContentTopChange }: {
   message: EmailMessage;
   threadMessages?: EmailMessage[];
   nodes: NodeRecord[];
@@ -6318,6 +6318,7 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
   onToggleEmailChat: () => void;
   onOpenCollaborationNode?: (message: EmailMessage) => void;
   onOpenLogicGate?: (logicGateID: string) => void;
+  onContentTopChange?: (offset: number) => void;
 }) {
   const canonicalConversationMessages = conversationMessagesForDetail(message, threadMessages);
   const nodeByID = new Map(nodes.map((node) => [node.node_id, node]));
@@ -6334,6 +6335,7 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
   const [expandedMessageIDs, setExpandedMessageIDs] = React.useState<Set<string>>(() => new Set([newestMessageID]));
   const [loadingMessageBodyIDs, setLoadingMessageBodyIDs] = React.useState<Set<string>>(() => new Set());
   const messageBodyInflightRef = React.useRef<Map<string, Promise<EmailMessage | null>>>(new Map());
+  const detailRootRef = React.useRef<HTMLDivElement | null>(null);
   const conversationScrollRef = React.useRef<HTMLDivElement | null>(null);
   const conversationScrollIdentityRef = React.useRef("");
   React.useEffect(() => {
@@ -6431,8 +6433,27 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
     alignContent: singleMessage ? "stretch" : "start",
     padding: singleMessage ? 4 : "8px 10px 18px 2px",
   };
+  React.useLayoutEffect(() => {
+    if (!onContentTopChange) return;
+    const root = detailRootRef.current;
+    const content = conversationScrollRef.current;
+    if (!root || !content) return;
+    const measure = () => {
+      const paddingTop = Number.parseFloat(window.getComputedStyle(content).paddingTop) || 0;
+      onContentTopChange(Math.max(0, content.getBoundingClientRect().top - root.getBoundingClientRect().top + paddingTop));
+    };
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(root);
+    observer?.observe(content);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [onContentTopChange]);
   return (
-    <div style={{ ...detailStyle, position: "relative" }}>
+    <div ref={detailRootRef} style={{ ...detailStyle, position: "relative" }}>
       <div style={panelHeaderStyle}>
         <div style={{ minWidth: 0 }}>
           <h2 style={detailSubjectStyle}>{message.subject || "(no subject)"}</h2>
