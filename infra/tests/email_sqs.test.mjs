@@ -61,9 +61,10 @@ test("scheduler uses stable control group, bounded retries, and its own encrypte
   assert.doesNotMatch(sqs.match(/resource "aws_sqs_queue" "email_scheduler_dlq"[\s\S]*?\n\}/)?.[0] ?? "", /fifo_queue/);
 });
 
-test("normal DEV deploy creates queues while worker and schedule remain separately disabled", () => {
+test("normal DEV deploy runs the queues and one worker while reconciliation stays off", () => {
   assert.match(devVariables, /variable "email_sqs_enabled"[\s\S]*?default\s*=\s*true/);
-  assert.match(devVariables, /variable "email_worker_enabled"[\s\S]*?default\s*=\s*false/);
+  assert.match(devVariables, /variable "email_worker_enabled"[\s\S]*?default\s*=\s*true/);
+  assert.match(devVariables, /variable "email_sqs_database_migration_complete"[\s\S]*?default\s*=\s*true/);
   assert.match(devVariables, /variable "email_reconciliation_schedule_enabled"[\s\S]*?default\s*=\s*false/);
   assert.match(moduleVariables, /variable "email_sqs_enabled"[\s\S]*?default\s*=\s*false/);
   assert.match(devMain, /email_worker_enabled\s*=\s*var\.email_worker_enabled/);
@@ -82,51 +83,38 @@ test("normal DEV deploy creates queues while worker and schedule remain separate
   assert.match(sqs, /resource "aws_sqs_queue" "email_work_dlq"[\s\S]*?depends_on = \[aws_iam_role_policy_attachment\.github_deploy_email_sqs\]/);
 });
 
-test("worker and schedule cannot enable before final schema, external dependencies, and alarm actions", () => {
+test("worker and schedule cannot enable before final schema and external dependencies", () => {
 	assert.match(moduleVariables, /variable "email_sqs_database_migration_complete"[\s\S]*?default\s*=\s*false/);
 	assert.match(sqs, /local\.email_worker_dependencies_configured/);
-	assert.match(sqs, /at least one alarm action ARN/);
+	assert.doesNotMatch(moduleLocals, /length\(var\.email_worker_alarm_action_arns\) > 0/);
 	assert.match(sqs, /var\.email_worker_enabled && local\.email_worker_dependencies_configured/);
 	assert.match(task, /!var\.email_worker_enabled[\s\S]*?var\.email_sqs_enabled[\s\S]*?local\.backend_service_enabled[\s\S]*?local\.email_worker_dependencies_configured/);
 	assert.match(task, /!var\.email_reconciliation_schedule_enabled[\s\S]*?var\.email_worker_enabled[\s\S]*?local\.backend_service_enabled/);
 });
 
-test("Terraform blocks every nonzero SQS-enabled API until migration and actionable alarms exist", () => {
+test("Terraform blocks every nonzero SQS-enabled API until migration is complete", () => {
 	assert.match(task, /var\.email_sqs_enabled[\s\S]*?var\.backend_desired_count > 0[\s\S]*?var\.email_sqs_database_migration_complete/);
 	assert.match(task, /A nonzero SQS-enabled API desired count requires email_sqs_database_migration_complete=true/);
-	assert.match(task, /var\.email_sqs_enabled[\s\S]*?var\.backend_desired_count > 0[\s\S]*?length\(var\.email_worker_alarm_action_arns\) > 0/);
-	assert.match(task, /A nonzero SQS-enabled API desired count requires at least one email alarm action ARN/);
+	assert.doesNotMatch(task, /requires at least one email alarm action ARN/);
 });
 
-test("DEV workflow separates reviewable infrastructure, worker, and schedule plans from exact apply", () => {
-	assert.match(devWorkflow, /options: \[infrastructure-api, worker-only, schedule-only\]/);
-	assert.match(devWorkflow, /api_desired_count/);
-	assert.match(devWorkflow, /The new API is not legacy-schema compatible/);
-	assert.match(devWorkflow, /EMAIL_WORKER_ENABLED=false[\s\S]*?EMAIL_SCHEDULE_ENABLED=false/);
-	assert.match(devWorkflow, /worker-only\)[\s\S]*?EMAIL_WORKER_ENABLED=true[\s\S]*?EMAIL_SCHEDULE_ENABLED=false/);
-	assert.match(devWorkflow, /schedule-only\)[\s\S]*?EMAIL_WORKER_ENABLED=true[\s\S]*?EMAIL_SCHEDULE_ENABLED=true/);
+test("DEV workflow is one normal input-free deployment", () => {
+	assert.match(devWorkflow, /workflow_dispatch:\s*\n\s*\npermissions:/);
+	assert.doesNotMatch(devWorkflow, /inputs\.|reviewed_plan_run_id|infrastructure-api|worker-only|schedule-only/);
+	assert.match(devWorkflow, /API_DESIRED_COUNT: "2"/);
+	assert.match(devWorkflow, /EMAIL_SCHEMA_MIGRATED: "true"/);
+	assert.match(devWorkflow, /EMAIL_WORKER_ENABLED: "true"/);
+	assert.match(devWorkflow, /EMAIL_SCHEDULE_ENABLED: "false"/);
 	assert.match(devWorkflow, /environment: development/);
 	assert.match(devWorkflow, /jobs:\s*\n\s*deploy:\s*\n\s*if: github\.ref == 'refs\/heads\/main'\s*\n\s*runs-on: ubuntu-latest/);
-	assert.match(devWorkflow, /TF_PLAN_AGE_RECIPIENT/);
-	assert.match(devWorkflow, /secrets\.TF_PLAN_AGE_IDENTITY/);
-	assert.match(devWorkflow, /age --encrypt[\s\S]*?mangorts-dev-tfplan\.tar\.age/);
-	assert.match(devWorkflow, /age --decrypt[\s\S]*?sha256sum --check tfplan\.sha256/);
-	assert.ok([...devWorkflow.matchAll(/umask 077/g)].length >= 4, "secret-bearing Terraform inputs and plan plaintext must be runner-private");
-	assert.match(devWorkflow, /actions\/download-artifact@v4[\s\S]*?name: mangorts-dev-tfplan-ciphertext[\s\S]*?run-id: \$\{\{ inputs\.reviewed_plan_run_id \}\}/);
-	assert.match(devWorkflow, /terraform apply "\$RUNNER_TEMP\/mangorts-dev-tfplan-plain\/tfplan"/);
+	assert.match(devWorkflow, /terraform plan -out=tfplan/);
+	assert.match(devWorkflow, /terraform apply tfplan/);
 	assert.doesNotMatch(devWorkflow, /terraform apply -auto-approve/);
 	assert.match(devWorkflow, /TF_EMAIL_WORKER_ALARM_ACTION_ARNS/);
-	assert.match(devWorkflow, /API_DESIRED_COUNT" != "0" \|\| "\$EMAIL_WORKER_ENABLED" == "true"[\s\S]*?TF_EMAIL_WORKER_ALARM_ACTION_ARNS_NORMALIZED/);
-	assert.match(devWorkflow, /environment-scoped manual run/);
-	assert.match(devWorkflow, /manual exact-plan self-review, not independent approval/);
-	assert.match(devWorkflow, /repository writer could modify this workflow/);
-	assert.doesNotMatch(devWorkflow, /protected (?:development|run|job)/i);
-
-	const upload = devWorkflow.match(/- name: Upload encrypted exact Terraform plan[\s\S]*?if-no-files-found: error/)?.[0] ?? "";
-	assert.match(upload, /actions\/upload-artifact@v4/);
-	assert.match(upload, /path: \$\{\{ runner\.temp \}\}\/mangorts-dev-tfplan\.tar\.age/);
-	assert.doesNotMatch(upload, /TF_DIR|tfplan\.txt|tfplan-metadata\.json|tfplan\.sha256|path:\s*[^\n]*\/tfplan\s*$/m);
-	assert.doesNotMatch(devWorkflow, /path:\s*\|[\s\S]{0,300}(?:tfplan\.txt|tfplan-metadata\.json|\/tfplan\s*$)/m);
+	assert.doesNotMatch(devWorkflow, /TF_PLAN_AGE|mangorts-dev-tfplan-ciphertext|actions\/download-artifact/);
+	assert.match(devWorkflow, /- name: Build frontend\s*\n\s*working-directory: frontend/);
+	assert.match(devWorkflow, /- name: Publish frontend\s*\n\s*run:/);
+	assert.match(devWorkflow, /- name: Post-deploy smoke tests\s*\n\s*run:/);
 	assert.match(moduleLocals, /var\.environment == "dev" \? \["repo:\$\{var\.github_owner\}\/\$\{var\.github_repository\}:environment:development"\] : \[\]/);
 });
 

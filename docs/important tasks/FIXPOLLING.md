@@ -399,7 +399,7 @@ Rules:
 - every operator migration requires a read-only preflight and one human-run transaction;
 - agents do not write to a live database.
 
-## DEV-only implementation and rollout
+## DEV-only implementation and deployment
 
 The fresh work starts from the new current `main` after this decision record is merged.
 
@@ -407,21 +407,18 @@ The fresh work starts from the new current `main` after this decision record is 
 
 - implement the smallest end-to-end webhook -> SQS -> worker -> PostgreSQL path;
 - add the DEV queue, FIFO dead-letter queue, encryption, least-privilege IAM, alarms, and private worker service;
-- keep worker and reconciliation disabled by default;
+- keep worker and reconciliation disabled during offline implementation;
 - preserve the deployed Valkey resources and exact channel ACL;
 - remove hot email polling instead of retaining it as fallback;
 - run unit, disposable PostgreSQL, Terraform, and complete repository tests;
 - obtain two independent reviews of backend correctness and DEV infrastructure.
 
-### Stage 2: first reviewed DEV deployment with features off
+### Retired one-time rollout controls
 
-- review the complete Terraform plan before apply;
-- `email_sqs_enabled` may remain DEV-default `true` to bootstrap queues/IAM, but the worker and reconciliation flags default off;
-- the new API image is **not** compatible with the legacy email schema and must not be launched before the migration;
-- the normal DEV workflow accepts an explicit API desired count, including `0` for migration maintenance. Queue/IAM bootstrap may leave the old API active only when its current image and desired count are preserved; otherwise the reviewed maintenance plan scales the old API to zero and does not launch the new image;
-- plan and apply are separate environment-scoped manual operations restricted to `main`. Review Terraform's redacted plan output in the plan-run log. The runner bundles the exact binary plan, redacted rendering, checksum, and rollout identity, encrypts that bundle with `age`, deletes the plaintext bundle, and uploads only ciphertext. Apply downloads that exact ciphertext, decrypts it only inside the `development` job with its dedicated environment secret, verifies recipient, checksum, source SHA, stage, schema confirmation, worker/schedule flags, and API count, then applies that exact binary plan. This is exact-plan self-review, not independent approval: the current private-repository plan cannot enforce environment reviewers or branch protection, and a repository writer could modify the workflow. Keep the required age values unconfigured until a human chooses a GitHub plan/permissions change, an external gate, or explicitly accepts that limitation;
-- do not modify production;
-- verify queue attributes, redrive policy with `maxReceiveCount=3`, encryption, IAM, and alarms.
+- The migration cutover once needed separate API, worker, and schedule stages while the database still had the legacy schema.
+- That one-time rollout form is not the normal deployment interface and has been removed.
+- DEV deployment no longer asks for a plan/apply choice, stage, API count, schema checkbox, or earlier run ID.
+- Production remains unchanged.
 
 ### Stage 3: atomic human schema cutover
 
@@ -433,15 +430,14 @@ The fresh work starts from the new current `main` after this decision record is 
 - a human applies the one small plain-SQL transaction in DBeaver. It locks and rechecks before writing, collapses only the reported safe redundant ingestion metadata with the canonical ranking, asserts the exact deleted count and zero remaining duplicates, and does not delete email/thread/attachment truth;
 - verify the final schema and keep worker/schedule off before deploying code that requires it.
 
-### Stage 4: new API, then one worker, then reconciliation
+### Current normal DEV deployment
 
-- provide at least one reviewed alarm action ARN, then review and apply the infrastructure/API stage with the migrated-schema confirmation, explicit nonzero API desired count, and worker/schedule still disabled. Terraform itself rejects every nonzero SQS-enabled API plan without both migration confirmation and an alarm action, including plans created outside the workflow;
-- verify the new API: health, OAuth, Nylas signature handling, SQS send failure, and Valkey realtime;
-- review the worker-only plan that changes only the worker flag to one task and apply that exact encrypted saved plan;
-- verify one real personal and one real shared connection job;
-- review the schedule-only plan that changes only the schedule flag, then apply that exact saved plan only after direct jobs work;
-- verify known 404/400 accounts park once and stop;
-- verify no message receives more than three automatic SQS deliveries, dead-letter work stays parked, and reconciliation never recreates its stable identity.
+- The GitHub Actions **Run workflow** button has no rollout inputs.
+- One run tests the backend, validates Terraform, builds the immutable backend image, creates one saved Terraform plan, applies that same plan, publishes the frontend, and runs smoke tests.
+- Normal DEV configuration is two API tasks, SQS enabled, the final schema confirmed, one private email worker enabled, and the reconciliation schedule disabled.
+- Queue age, backlog, worker count, and both DLQs always have CloudWatch alarms. Notification action ARNs are optional destinations for those alarms, not a deployment prerequisite.
+- Enabling the rare reconciliation schedule is a separate deliberate repository configuration change, not a normal deployment question.
+- Verify known 404/400 accounts park once and stop, no message receives more than three automatic SQS deliveries, dead-letter work stays parked, and reconciliation never recreates its stable identity.
 
 ### Rollback
 
@@ -511,11 +507,11 @@ The fresh work starts from the new current `main` after this decision record is 
 - worker receives use 20-second long polling;
 - persistent Receive failure exits the worker for ECS restart backoff, while ordinary message failure stays with SQS redelivery;
 - worker IAM contains only required queue, attachment, Valkey-wake, and secret access;
-- worker startup requires final-schema confirmation, PostgreSQL readiness, complete Nylas/SQS/external-Valkey configuration, and actionable alarm ARNs before the first receive;
+- worker startup requires final-schema confirmation, PostgreSQL readiness, and complete Nylas/SQS/external-Valkey configuration before the first receive;
 - Scheduler trust uses the exact schedule-group ARN and source account;
 - Scheduler uses the stable `reconciliation-control` group ID, 2 retries, and a 5-minute maximum event age;
 - Scheduler's delivery DLQ is a separate encrypted Standard queue;
-- queue age, worker running count, and both DLQs have actionable alarms; a nonzero SQS-enabled API is forbidden until an alarm action ARN is configured, so queue alarms are actionable before the API can enqueue;
+- queue age, worker running count, and both DLQs have CloudWatch alarms; optional action ARNs add notifications without blocking a normal DEV deployment;
 - Valkey `+@pubsub`, exact channel restriction, and authorization alarm remain unchanged;
 - no production file or resource changes.
 

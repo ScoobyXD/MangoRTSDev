@@ -204,19 +204,19 @@ variable "email_sqs_enabled" {
 }
 
 variable "email_worker_enabled" {
-  description = "Run the single private DEV email worker after a separate reviewed enable plan."
+  description = "Run the single private DEV email worker during normal deployments."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "email_sqs_database_migration_complete" {
-  description = "Explicit reviewed confirmation that the DEV database has the final email SQS schema."
+  description = "Whether the DEV database has the final email SQS schema."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "email_reconciliation_schedule_enabled" {
-  description = "Enable rare DEV email reconciliation after a separate reviewed enable plan."
+  description = "Enable rare DEV email reconciliation separately from normal deployments."
   type        = bool
   default     = false
 }
@@ -245,7 +245,7 @@ variable "email_worker_memory" {
 }
 
 variable "email_worker_alarm_action_arns" {
-  description = "Alarm action ARNs for DEV email queue, worker, and Scheduler alerts; required before a nonzero SQS-enabled API, worker, or schedule stage."
+  description = "Optional alarm action ARNs for DEV email queue, worker, and Scheduler alerts."
   type        = list(string)
   default     = []
 

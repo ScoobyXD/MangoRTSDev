@@ -80,20 +80,12 @@ resource "aws_ecs_cluster" "main" {
     }
 
     precondition {
-      condition = !(
-        var.email_sqs_enabled &&
-        var.backend_desired_count > 0
-      ) || length(var.email_worker_alarm_action_arns) > 0
-      error_message = "A nonzero SQS-enabled API desired count requires at least one email alarm action ARN."
-    }
-
-    precondition {
       condition = !var.email_worker_enabled || (
         var.email_sqs_enabled &&
         local.backend_service_enabled &&
         local.email_worker_dependencies_configured
       )
-      error_message = "DEV email worker enablement requires SQS, an immutable backend image, the final migrated schema, complete DB/Nylas/Valkey configuration, and at least one alarm action ARN."
+      error_message = "DEV email worker enablement requires SQS, an immutable backend image, the final migrated schema, and complete DB/Nylas/Valkey configuration."
     }
 
     precondition {

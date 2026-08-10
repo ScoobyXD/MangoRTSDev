@@ -22,8 +22,7 @@ locals {
     trimspace(local.db_password_secret_arn) != "" &&
     trimspace(var.nylas_client_id) != "" &&
     trimspace(var.nylas_api_key_secret_arn) != "" &&
-    contains(["https://api.us.nylas.com", "https://api.eu.nylas.com"], trimspace(var.nylas_api_base_url)) &&
-    length(var.email_worker_alarm_action_arns) > 0
+    contains(["https://api.us.nylas.com", "https://api.eu.nylas.com"], trimspace(var.nylas_api_base_url))
   )
   attachment_storage_enabled = trimspace(var.attachment_s3_bucket) != ""
   attachment_browser_origins = sort(distinct(concat(

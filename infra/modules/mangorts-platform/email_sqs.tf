@@ -294,7 +294,7 @@ resource "aws_ecs_task_definition" "email_worker" {
   lifecycle {
     precondition {
       condition     = local.email_worker_dependencies_configured
-      error_message = "DEV email worker requires the final migrated schema, complete DB and Nylas configuration, external Valkey, and at least one alarm action ARN."
+      error_message = "DEV email worker requires the final migrated schema, complete DB and Nylas configuration, and external Valkey."
     }
   }
 }
@@ -432,7 +432,7 @@ resource "aws_scheduler_schedule" "email_reconciliation" {
 
     precondition {
       condition     = var.email_worker_enabled && local.email_worker_dependencies_configured
-      error_message = "DEV email reconciliation requires the reviewed worker stage, final migrated schema, complete DB/Nylas/Valkey configuration, and at least one alarm action ARN."
+      error_message = "DEV email reconciliation requires the enabled worker, final migrated schema, and complete DB/Nylas/Valkey configuration."
     }
   }
 

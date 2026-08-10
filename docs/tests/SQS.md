@@ -104,7 +104,7 @@ Webhooks can occasionally be lost. Reconciliation is only the safety net:
 - One ingestion-job API and one ingestion worker naming layer remain. Old download-job wrappers, claimant files, reconciliation enqueue residue, and delivery-era lease/scheduler columns are gone.
 - The human DEV finalizer accepts only the exact previously applied 19-column ingestion/13-column archive pair or the exact final 17/11 pair. It never guesses through partial drift, and it removes the retired delivery columns without rewriting the shipped migration that created the earlier shape.
 - `sqs_accepted_timestamp` is status/observability and, together with the immutable producer fingerprint, closes an exact original-send retry. It never authorizes an age-based or later-schedule resend.
-- The worker and reconciliation schedule remain disabled by default until the human migration and staged DEV rollout.
+- The normal input-free DEV deployment runs the API, queues, and one private worker together now that the human migration is complete. The rare reconciliation schedule remains off until intentionally enabled. CloudWatch alarms exist even when no optional notification action ARN is configured.
 
 ## Required regression checks
 
