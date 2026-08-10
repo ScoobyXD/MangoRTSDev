@@ -40,6 +40,7 @@ func TestNodeProductionSQLUsesOnlyFinalStorage(t *testing.T) {
 	final := readNodeFinalContractFile(t, "postgres_node_final_storage.go")
 	for _, required := range []string{
 		"from node_textboxes textbox", "from email_relationships relationship",
+		"'color', textbox.color",
 		"listpostgresnodetextboxchatprojections", "relationship.resource_textbox_id",
 		"mangorts_user_can_access_resource", "from attachment_relationships link",
 	} {
@@ -48,7 +49,7 @@ func TestNodeProductionSQLUsesOnlyFinalStorage(t *testing.T) {
 		}
 	}
 	readiness := readNodeFinalContractFile(t, "postgres.go")
-	for _, required := range []string{"node_textboxes", "node_textbox_chats", "node_textboxes_history", "textbox_id"} {
+	for _, required := range []string{"node_textboxes", "node_textbox_chats", "node_textboxes_history", "textbox_id", "color"} {
 		if !strings.Contains(readiness, required) {
 			t.Errorf("application readiness missing final Node contract %q", required)
 		}

@@ -1,8 +1,7 @@
 begin;
 
 alter table node_textboxes
-  add column if not exists title text not null default '',
-  add column if not exists email_accent text not null default '';
+  add column if not exists title text not null default '';
 
 do $$
 begin
@@ -13,15 +12,6 @@ begin
   ) then
     alter table node_textboxes
       add constraint node_textboxes_title_chk check (length(title) <= 500);
-  end if;
-  if not exists (
-    select 1 from pg_constraint
-    where conrelid = 'node_textboxes'::regclass
-      and conname = 'node_textboxes_email_accent_chk'
-  ) then
-    alter table node_textboxes
-      add constraint node_textboxes_email_accent_chk
-      check (email_accent = '' or email_accent ~ '^#[0-9A-Fa-f]{6}$');
   end if;
 end;
 $$;

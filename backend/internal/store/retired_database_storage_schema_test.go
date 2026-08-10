@@ -93,6 +93,7 @@ func TestRetiredDatabaseStorageIsAbsentFromCanonicalSchemaAndStrictlyDropped(t *
 		"source_html_sha256",
 		"target_json_sha256",
 		"conversion_run_id",
+		"email_accent",
 	} {
 		if strings.Contains(nodeBlock, forbidden) {
 			t.Errorf("canonical node_textboxes retains obsolete column %s", forbidden)
@@ -100,6 +101,8 @@ func TestRetiredDatabaseStorageIsAbsentFromCanonicalSchemaAndStrictlyDropped(t *
 	}
 	for _, required := range []string{
 		"body_json jsonb not null",
+		"color text not null default '#0ea5e9'",
+		"constraint node_textboxes_color_chk check",
 		"revision bigint not null default 0",
 		"display_order bigint not null default 0",
 		"create table if not exists node_textboxes_history",

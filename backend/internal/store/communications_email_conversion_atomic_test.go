@@ -22,7 +22,7 @@ func TestMemoryEmailConversionAtomicallyPersistsEmailThreadTextBoxAndInitialChat
 		MessageIDs: []string{message.ID},
 		LinkedTextBlock: &NodeInformationInput{
 			InformationID: textBlockID, Type: "Text box",
-			Information: editorTextBlockProjectionPrefix + `{"title":"Imported email","document":"","attachments":[],"email_message_id":"","email_accent":"#4f46e5"}`,
+			Information: editorTextBlockProjectionPrefix + `{"title":"Imported email","document":"","attachments":[],"email_message_id":"","color":"#0EA5E9"}`,
 			ActorUserID: user.UserID,
 		},
 		InitialChat: &NodeInformationInput{

@@ -58,6 +58,7 @@ func (r *PostgresRepo) CheckApplicationSchemaReadiness() error {
 		{"attachment_relationships", "resource_type"},
 		{"attachment_relationships", "resource_id"},
 		{"node_textboxes", "body_json"},
+		{"node_textboxes", "color"},
 		{"node_textbox_chats", "chat_id"},
 		{"project_textboxes", "title"},
 		{"project_textboxes", "email_message_id"},

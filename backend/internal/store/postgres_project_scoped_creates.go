@@ -196,13 +196,13 @@ func (r *PostgresRepo) addInitialNodeInformationTx(ctx context.Context, tx *sql.
 	if keyValue == "" {
 		keyValue = newUUIDv7String()
 	}
-	body, err := nodeTextboxBodyFromProjectionInformation(input.Information)
+	body, title, color, err := nodeTextboxFromProjectionInformation(input.Information)
 	if err != nil {
 		return domain.NodeInformation{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `insert into node_textboxes(
-  company_id,node_id,textbox_id,body_json,revision,display_order,created_timestamp,updated_timestamp
-) values($1::uuid,$2::uuid,$3::uuid,$4::jsonb,1,0,now(),now())`, companyID, nodeID, keyValue, body); err != nil {
+  company_id,node_id,textbox_id,body_json,title,color,revision,display_order,created_timestamp,updated_timestamp
+) values($1::uuid,$2::uuid,$3::uuid,$4::jsonb,$5,$6,1,0,now(),now())`, companyID, nodeID, keyValue, body, title, color); err != nil {
 		return domain.NodeInformation{}, err
 	}
 	projection, found, err := postgresNodeFinalProjectionTx(ctx, tx, companyID, nodeID, keyValue)

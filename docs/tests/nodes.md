@@ -865,7 +865,7 @@ N141 - Creating a Node's first exact Project relationship atomically creates one
 
 N142 - A stored email thread may have Node-wide `email_relationships` in more than one Node. A textbox-specific email relationship names one exact message, Node, and textbox; the same message is limited to one textbox in a Node but may use a different textbox in another Node. Repeating the exact Node/message/textbox command converges to its existing edge, while a different textbox in that Node is rejected. Removing one Node's email edge never removes another Node's edge, textbox, chat, stored email truth, or surviving attachment relationship.
 
-N143 - A Node text box stores its title on its exact `node_textboxes` row. The interface computes the email accent from the exact typed `email_relationships` message ID and never stores or repairs that color.
+N143 - A Node text box stores its title and one approved non-red RGB `color` on its exact `node_textboxes` row. Creation writes that literal color, every read returns it, and the interface never hashes an email ID or repairs a missing color. Red is reserved for a failed-save state.
 
 N144 - A consolidated Node view returns text-box identity, order, metadata, typed links, attachments, chats, and revision without duplicating the canonical editor document body. The exact editor document endpoint remains the document-body authority.
 
@@ -893,7 +893,7 @@ Expected:
 - The left column reaches at least the full text-box-row height immediately and then the remaining Node viewport; it has one Email header and no redundant `Attached emails` group when no folders exist.
 - The new box opens with Editor only and contains no old chat. The older legacy chat remains on the stable associated/original box before and after the new box is prepended.
 - Editor and Chat labels appear in the one shared row header. Opening Chat does not add a second Chat header inside the pane, and editor-only/chat-only/editor-plus-chat modes keep their existing independent toggles and horizontal resizing.
-- The linked box header and exact email card share the computed accent. **Email** opens only that exact message inside the row's left content column; when Editor is also open they divide that column vertically, while the separate Chat column retains full body height. **Hide email** removes the preview without changing durable text, email, or chat projections. The Node-level Email toggle animates the left Node-wide thread column open and closed without unmounting its transition shell.
+- The text box header, border, and exact linked email card share the color stored on that text box. **Email** opens only that exact message inside the row's left content column; when Editor is also open they divide that column vertically, while the separate Chat column retains full body height. **Hide email** removes the preview without changing durable text, email, or chat projections. The Node-level Email toggle animates the left Node-wide thread column open and closed without unmounting its transition shell.
 - Clicking the three dots displays a viewport-fixed menu with **Delete**. Choosing it opens confirmation; confirming deletes the box and only chat projections directly owned by that box, while canceling changes nothing.
 - A raw `Failed to fetch` from the optional node attachment listing does not appear in the global bottom-left error surface. The attachment menu shows an actionable retry message, while editing, email, and chat remain usable.
 

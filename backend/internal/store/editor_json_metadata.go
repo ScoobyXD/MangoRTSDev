@@ -34,6 +34,7 @@ type EditorJSONMetadataInput struct {
 	Title          string                          `json:"title"`
 	Attachments    []EditorJSONAttachmentReference `json:"attachments"`
 	EmailMessageID string                          `json:"email_message_id"`
+	Color          string                          `json:"color"`
 	EmailAccent    string                          `json:"email_accent"`
 }
 
@@ -50,8 +51,16 @@ func NormalizeEditorJSONMetadata(input EditorJSONMetadataInput) (EditorJSONMetad
 	input.Document = ref
 	input.Title = strings.TrimSpace(input.Title)
 	input.EmailMessageID = strings.TrimSpace(input.EmailMessageID)
+	input.Color = strings.ToUpper(strings.TrimSpace(input.Color))
 	input.EmailAccent = strings.TrimSpace(input.EmailAccent)
-	if len(input.Title) > 500 || len(input.Attachments) > 100 || len(input.EmailMessageID) > 500 || (input.EmailAccent != "" && !validEditorEmailAccent(input.EmailAccent)) {
+	if len(input.Title) > 500 || len(input.Attachments) > 100 || len(input.EmailMessageID) > 500 {
+		return EditorJSONMetadataInput{}, ErrInvalid
+	}
+	if input.Document.ResourceType == EntityTypeNode {
+		if !validNodeTextboxColor(input.Color) || input.EmailAccent != "" {
+			return EditorJSONMetadataInput{}, ErrInvalid
+		}
+	} else if input.Color != "" || (input.EmailAccent != "" && !validEditorEmailAccent(input.EmailAccent)) {
 		return EditorJSONMetadataInput{}, ErrInvalid
 	}
 	for index := range input.Attachments {
@@ -109,8 +118,24 @@ func validEditorEmailAccent(value string) bool {
 	return true
 }
 
+func validNodeTextboxColor(value string) bool {
+	switch value {
+	case "#0EA5E9", "#14B8A6", "#8B5CF6", "#F59E0B", "#22C55E", "#6366F1",
+		"#06B6D4", "#84CC16", "#A855F7", "#10B981", "#EAB308", "#3B82F6":
+		return true
+	default:
+		return false
+	}
+}
+
 func editorProjectionInformationWithJSONMetadata(input EditorJSONMetadataInput, document string) (string, error) {
-	encoded, err := json.Marshal(map[string]any{"title": input.Title, "document": document, "attachments": input.Attachments, "email_message_id": input.EmailMessageID, "email_accent": input.EmailAccent})
+	payload := map[string]any{"title": input.Title, "document": document, "attachments": input.Attachments, "email_message_id": input.EmailMessageID}
+	if input.Document.ResourceType == EntityTypeNode {
+		payload["color"] = input.Color
+	} else {
+		payload["email_accent"] = input.EmailAccent
+	}
+	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
 	}

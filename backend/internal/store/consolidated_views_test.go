@@ -83,7 +83,7 @@ func TestMemoryConsolidatedNodeViewOmitsCanonicalTextboxDocumentBody(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	information := editorTextBlockProjectionPrefix + `{"title":"Notes","document":"private canonical body","attachments":[],"email_accent":"#123ABC"}`
+	information := editorTextBlockProjectionPrefix + `{"title":"Notes","document":"private canonical body","attachments":[],"color":"#0EA5E9"}`
 	if _, err := repo.AddNodeInformation(companyID, node.NodeID, "Text box", information, "55555555-5555-4555-8555-555555555592"); err != nil {
 		t.Fatal(err)
 	}
