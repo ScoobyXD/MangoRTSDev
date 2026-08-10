@@ -166,6 +166,88 @@ func TestMemoryEmailCollaborationAppendsChatInExistingNodeWithoutConversionJob(t
 	}
 }
 
+func TestMemoryEmailThreadChatGroupsIncludeEveryNodeTextboxAndPropagateNewMessages(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-701300000141"
+	sharedInboxID := "11111111-1111-4111-8111-701300000142"
+	repo.EnsureCompany(companyID, "Thread chat groups")
+	creator := mustEmailCollaborationGuardUser(t, repo, companyID, "thread-chat-creator", "thread-chat@example.com", domain.RoleCompanyUser)
+
+	firstBlockID, firstChatID := NewUUIDv7String(), NewUUIDv7String()
+	first, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), CommunicationsEmailCollaborationEnsureInput{
+		CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "support@example.com", Provider: "google", CreatedByUserID: creator.UserID,
+		Message: domain.EmailMessageSnapshot{ID: "thread-message-1", ThreadID: "thread-chat-groups", Subject: "First", DownloadComplete: true},
+		LinkedTextBlock: &NodeInformationInput{InformationID: firstBlockID, Type: "Text box", ActorUserID: creator.UserID,
+			Information: editorTextBlockProjectionPrefix + `{"title":"First","document":"","email_message_id":"` + NewUUIDv7String() + `"}`},
+		InitialChat: &NodeInformationInput{InformationID: firstChatID, Type: CommunicationsEmailCollaborationChatInformationType, ActorUserID: creator.UserID,
+			Information: `{"block_id":"` + firstBlockID + `","selection_source":"email","selection_message_id":"` + NewUUIDv7String() + `","message":"first node chat"}`},
+	})
+	if err != nil {
+		t.Fatalf("first collaboration: %v", err)
+	}
+	secondNode, err := repo.CreateNode(companyID, "Second Node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	secondBlockID, secondChatID := NewUUIDv7String(), NewUUIDv7String()
+	second, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), CommunicationsEmailCollaborationEnsureInput{
+		CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "support@example.com", Provider: "google", CreatedByUserID: creator.UserID,
+		TargetNodeID: secondNode.NodeID,
+		Message:      domain.EmailMessageSnapshot{ID: "thread-message-2", ThreadID: "thread-chat-groups", Subject: "Second", DownloadComplete: true},
+		LinkedTextBlock: &NodeInformationInput{InformationID: secondBlockID, Type: "Text box", ActorUserID: creator.UserID,
+			Information: editorTextBlockProjectionPrefix + `{"title":"Second","document":"","email_message_id":"` + NewUUIDv7String() + `"}`},
+		InitialChat: &NodeInformationInput{InformationID: secondChatID, Type: CommunicationsEmailCollaborationChatInformationType, ActorUserID: creator.UserID,
+			Information: `{"block_id":"` + secondBlockID + `","selection_source":"email","selection_message_id":"` + NewUUIDv7String() + `","message":"second node chat"}`},
+	})
+	if err != nil {
+		t.Fatalf("second collaboration: %v", err)
+	}
+
+	groups, err := repo.ListCommunicationsEmailThreadChatGroups(CommunicationsEmailCollaborationListInput{
+		CompanyID: companyID, ParticipantUserID: creator.UserID, SharedInboxID: sharedInboxID,
+		MessageID: "thread-message-2", ThreadID: "thread-chat-groups",
+	})
+	if err != nil {
+		t.Fatalf("ListCommunicationsEmailThreadChatGroups: %v", err)
+	}
+	if len(groups) != 3 {
+		t.Fatalf("groups = %+v, want Node 1 message 1 and 2 plus Node 2 message 2", groups)
+	}
+	chatCount := 0
+	seenNodes := map[string]bool{}
+	for _, group := range groups {
+		seenNodes[group.NodeID] = true
+		chatCount += len(group.Chats)
+	}
+	if chatCount != 2 || !seenNodes[first.Collaboration.NodeID] || !seenNodes[second.Collaboration.NodeID] {
+		t.Fatalf("groups = %+v, want both Node sections and both chats", groups)
+	}
+
+	if _, err := repo.UpsertCommunicationsEmailThread(CommunicationsEmailThreadUpsertInput{
+		CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "support@example.com", Provider: "google",
+		ProviderThreadID: "thread-chat-groups", SelectedMessageID: "thread-message-3",
+		Messages: []domain.EmailMessageSnapshot{{ID: "thread-message-3", ThreadID: "thread-chat-groups", Subject: "Third", DownloadComplete: true}},
+	}); err != nil {
+		t.Fatalf("new message ingestion: %v", err)
+	}
+	groups, err = repo.ListCommunicationsEmailThreadChatGroups(CommunicationsEmailCollaborationListInput{
+		CompanyID: companyID, ParticipantUserID: creator.UserID, SharedInboxID: sharedInboxID,
+		MessageID: "thread-message-3", ThreadID: "thread-chat-groups",
+	})
+	if err != nil {
+		t.Fatalf("groups after new message: %v", err)
+	}
+	newMessageNodes := map[string]bool{}
+	for _, group := range groups {
+		if group.ProviderMessageID == "thread-message-3" {
+			newMessageNodes[group.NodeID] = true
+		}
+	}
+	if len(groups) != 5 || !newMessageNodes[first.Collaboration.NodeID] || !newMessageNodes[second.Collaboration.NodeID] {
+		t.Fatalf("groups after ingestion = %+v, want the new message in both existing Nodes", groups)
+	}
+}
+
 func TestMemoryEmailCollaborationAtomicInformationWriteSnapshotsGroup(t *testing.T) {
 	repo, companyID, creator, participant, collaboration := setupAtomicEmailCollaboration(t)
 	parent, err := repo.CreateCompanyUserGroup(companyID, "", "Support")

@@ -713,7 +713,32 @@ func (r *MemoryRepo) TransferCommunicationsEmailNode(input CommunicationsEmailNo
 		attachmentLink.CreatedTimestamp = existing.CreatedTimestamp
 	}
 	r.emailNodeLinks[attachmentKey] = attachmentLink
-	r.addEmailProjectionLocked(input.CompanyID, targetCard.NodeID, sourceLink.SharedInboxID, sourceLink.AccountEmail, sourceLink.Message, now, false)
+	emailThreadID := ""
+	for _, threadLink := range r.nodeEmailThreads {
+		if threadLink.CompanyID != input.CompanyID || threadLink.NodeID != sourceLink.NodeID {
+			continue
+		}
+		thread, ok := r.emailThreads[key(input.CompanyID, threadLink.EmailThreadID)]
+		if !ok {
+			continue
+		}
+		for _, message := range thread.Messages {
+			if message.ProviderMessageID == sourceLink.MessageID {
+				emailThreadID = thread.EmailThreadID
+				break
+			}
+		}
+		if emailThreadID != "" {
+			break
+		}
+	}
+	if emailThreadID == "" {
+		return CommunicationsEmailNodeTransferResult{}, ErrNotFound
+	}
+	informationID := r.addEmailProjectionWithThreadLocked(input.CompanyID, targetCard.NodeID, sourceLink.SharedInboxID, sourceLink.AccountEmail, sourceLink.Message, emailThreadID, now, false)
+	if _, err := r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, targetCard.NodeID, informationID, emailThreadID, sourceLink.MessageID, sourceLink.UserID, now, ""); err != nil {
+		return CommunicationsEmailNodeTransferResult{}, err
+	}
 	r.deleteCommunicationsEmailSourceNodeLocked(input.CompanyID, sourceKey, sourceLink)
 	events, err := r.appendDomainEventsLocked([]DomainEventInput{
 		workspaceDomainEventInput(input.CompanyID, "kanban_card_deleted", map[string]any{"board_id": sourceLink.BoardID, "card_id": sourceLink.CardID}),
@@ -765,6 +790,11 @@ func (r *MemoryRepo) deleteCommunicationsEmailSourceNodeLocked(companyID, direct
 	delete(r.nodes, key(companyID, link.NodeID))
 	delete(r.nodeInfo, key(companyID, link.NodeID))
 	delete(r.nodeText, key(companyID, link.NodeID))
+	for threadKey, threadLink := range r.nodeEmailThreads {
+		if threadLink.CompanyID == companyID && threadLink.NodeID == link.NodeID {
+			delete(r.nodeEmailThreads, threadKey)
+		}
+	}
 	delete(r.folderItems, folderItemKey(companyID, "node", link.NodeID))
 }
 
@@ -972,10 +1002,6 @@ func (r *MemoryRepo) pendingKanbanColumnIDLocked(companyID, boardID string) stri
 		}
 	}
 	return ""
-}
-
-func (r *MemoryRepo) addEmailProjectionLocked(companyID, nodeID, sharedInboxID, accountEmail string, message domain.EmailMessageSnapshot, now time.Time, createdFromEmail bool) {
-	r.addEmailProjectionWithThreadLocked(companyID, nodeID, sharedInboxID, accountEmail, message, "", now, createdFromEmail)
 }
 
 func (r *MemoryRepo) addEmailProjectionWithThreadLocked(companyID, nodeID, sharedInboxID, accountEmail string, message domain.EmailMessageSnapshot, emailThreadID string, now time.Time, createdFromEmail bool) string {

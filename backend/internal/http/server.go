@@ -313,6 +313,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/communications/drafts/", s.handleCommunicationsEmailDraftByID)
 	mux.HandleFunc("/v1/communications/email-collaborations", s.handleCommunicationsEmailCollaborations)
 	mux.HandleFunc("/v1/communications/email-collaborations/", s.handleCommunicationsEmailCollaborationByID)
+	mux.HandleFunc("/v1/communications/email-thread-chats", s.handleCommunicationsEmailThreadChats)
 	mux.HandleFunc("/v1/communications/signature", s.handleCommunicationsEmailSignature)
 	mux.HandleFunc("/v1/communications/stored-messages", s.handleCommunicationsStoredMessages)
 	mux.HandleFunc("/v1/communications/messages", s.handleCommunicationsMessages)

@@ -194,7 +194,7 @@ func TestCommunicationsTriageConvertUsesSharedInboxConnection(t *testing.T) {
 		t.Fatalf("shared conversion placements = %+v, want shared email attached to gate %s", placements, logicGate.LogicGateID)
 	}
 	projections, err := repo.ListNodeProjections(companyID, placements[0].NodeID)
-	if err != nil || len(projections) != 1 {
+	if err != nil || len(projections) != 2 || projections[0].Type != "Attached email" || projections[1].Type != "Text box" {
 		t.Fatalf("shared conversion projections = %+v err=%v", projections, err)
 	}
 	var projectionPayload map[string]any
@@ -262,7 +262,7 @@ func TestCommunicationsTriageConvertSelectsExactOwnedPersonalAccount(t *testing.
 		t.Fatalf("ListCommunicationsEmailPlacements = %+v err=%v", placements, err)
 	}
 	projections, err := repo.ListNodeProjections(companyID, placements[0].NodeID)
-	if err != nil || len(projections) != 1 {
+	if err != nil || len(projections) != 2 || projections[0].Type != "Attached email" || projections[1].Type != "Text box" {
 		t.Fatalf("ListNodeProjections = %+v err=%v", projections, err)
 	}
 	var projectionPayload map[string]any

@@ -46,6 +46,7 @@ import {
   removeLogicGateRACIAssignments,
   respondToCalendarInvite,
   listEmailCollaborations,
+  listEmailThreadChatGroups,
   saveEmailSignature,
   saveEmailDraft,
   sendEmail,
@@ -169,6 +170,37 @@ test("email collaboration ensure sends distinct new-node and existing-node ident
     assert.equal((calls[1]?.body?.message as { body?: string }).body, "Full body");
     assert.equal(calls[2]?.body?.target_node_id, "node-existing");
     assert.equal("new_node_id" in (calls[2]?.body ?? {}), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("email thread chat groups use one direct mailbox-scoped read", async () => {
+  const originalFetch = globalThis.fetch;
+  let requested = "";
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    requested = input.toString();
+    return jsonResponse({ groups: [{
+      node_id: "node-1",
+      node_name: "Inbox work",
+      textbox_id: "textbox-1",
+      relationship_id: "relationship-1",
+      email_thread_id: "thread-internal-1",
+      email_message_id: "message-internal-1",
+      provider_message_id: "message-1",
+      message_order: 0,
+      chats: [],
+    }] });
+  };
+  try {
+    const groups = await listEmailThreadChatGroups({
+      companyID: " company-1 ",
+      messageID: " message-1 ",
+      threadID: " thread-1 ",
+      accountEmail: "ME@Example.test",
+    });
+    assert.equal(requested, "/v1/communications/email-thread-chats?company_id=company-1&message_id=message-1&thread_id=thread-1&account_email=me%40example.test");
+    assert.equal(groups[0]?.textbox_id, "textbox-1");
   } finally {
     globalThis.fetch = originalFetch;
   }

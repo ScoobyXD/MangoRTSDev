@@ -10,7 +10,7 @@ import { EmailEntityIconButton, HomeColumnResizeHandle, ComposePanel, DeleteMess
 import { EmailCollaborationChatSurface, type EmailCollaborationSelection } from "./EmailCollaborationChatSurface";
 import { EmailNodeDestinationSearch } from "./EmailNodeDestinationSearch";
 import { emailMessageRowKey } from "./homeUtils";
-import { emailCollaborationChatSessionMounted, emailCollaborationChatSessionVisible, nextEmailNodeDestinationRequest, reconcileEmailCollaborationChatSession, type EmailCollaborationActionRequest, type EmailCollaborationChatSession, type EmailNodeDestination } from "./emailCollaborationChat";
+import { emailCollaborationChatSessionVisible, nextEmailNodeDestinationRequest, reconcileEmailCollaborationChatSession, type EmailCollaborationActionRequest, type EmailCollaborationChatSession, type EmailNodeDestination } from "./emailCollaborationChat";
 import type { EmailNodeAttachmentChange } from "./emailCollaborationRows";
 import { OutboundEmailUndoBanner } from "../../modules/communications/OutboundEmailUndoBanner";
 import { MessageReadReceiptChip } from "./MessageReadReceiptChip";
@@ -420,7 +420,6 @@ export function HomeMailWorkspace({
   const emailChatKey = emailChatAvailable && selectedMessageRowKey
     ? JSON.stringify([activeViewID, mailbox, selectedMessageRowKey])
     : "";
-  const emailChatMounted = emailCollaborationChatSessionMounted(emailChatSession, emailChatKey);
   const emailChatVisible = emailCollaborationChatSessionVisible(emailChatSession, emailChatKey);
   const visibleError = emailCollaborationError || error;
   const clearEmailCollaborationError = React.useCallback(() => setEmailCollaborationError(""), []);
@@ -436,6 +435,16 @@ export function HomeMailWorkspace({
     setEmailChatSession((current) => current?.key === emailChatKey
       ? { key: emailChatKey, visible: !current.visible }
       : { key: emailChatKey, visible: true });
+  }, [emailChatKey]);
+  const openEmailChatNode = React.useCallback((nodeID: string) => {
+    const cleanNodeID = nodeID.trim();
+    if (!cleanNodeID) return;
+    const node = nodeByID.get(cleanNodeID);
+    onOpenPickerEntity({ entityType: "node", entityID: cleanNodeID, label: node?.name?.trim() || cleanNodeID });
+  }, [nodeByID, onOpenPickerEntity]);
+  const handleExistingEmailChatsChange = React.useCallback((hasChats: boolean) => {
+    if (!hasChats || !emailChatKey) return;
+    setEmailChatSession((current) => current?.key === emailChatKey ? current : { key: emailChatKey, visible: true });
   }, [emailChatKey]);
   const sendEmailToNodeDestination = React.useCallback((destination: EmailNodeDestination) => {
     if (!selectedMessage) return;
@@ -972,7 +981,6 @@ export function HomeMailWorkspace({
             ) : (
               <MessageDetail
                 message={selectedMessage}
-                threadMessages={selectedThreadMessages}
                 nodes={nodes}
                 companyID={companyID}
                 sharedInboxID={selectedMessage.collaboration_shared_inbox_id || (activeViewID.startsWith("shared:") ? activeViewID.slice("shared:".length).trim() : undefined)}
@@ -1013,14 +1021,13 @@ export function HomeMailWorkspace({
                 onContentTopChange={setEmailChatTopOffset}
               />
             )}
-            {(emailChatMounted || emailActionRequest) && (
+            {emailChatAvailable && (
               <EmailCollaborationChatSurface
                 active={emailChatVisible}
                 id="email-collaboration-chat"
                 companyID={companyID}
                 currentUserID={currentUserID}
                 message={selectedMessage}
-                threadMessages={selectedThreadMessages}
                 targetMessage={selectedThreadMessages.find((threadMessage) => threadMessage.id === emailSelection?.messageID)}
                 sharedInboxID={selectedMessage.collaboration_shared_inbox_id || (activeViewID.startsWith("shared:") ? activeViewID.slice("shared:".length).trim() : undefined)}
                 accountEmail={selectedMessage.collaboration_account_email || accountEmail}
@@ -1039,6 +1046,8 @@ export function HomeMailWorkspace({
                 onSuccess={clearEmailCollaborationError}
                 onActionSuccess={showEmailActionNotice}
                 onActionRequestHandled={clearEmailActionRequest}
+                onExistingChatsChange={handleExistingEmailChatsChange}
+                onOpenNode={openEmailChatNode}
               />
             )}
           </div>

@@ -99,7 +99,7 @@ join email_messages message on message.company_id=relationship.company_id
 join node_logic_gate_assignments assignment on assignment.company_id=relationship.company_id
  and assignment.node_id=relationship.resource_id
 where relationship.company_id=$1::uuid and relationship.resource_type='node'
- and relationship.resource_id=$2::uuid and relationship.resource_textbox_id is null
+ and relationship.resource_id=$2::uuid and relationship.resource_textbox_id is not null
  and assignment.compatibility_board_id=$3 and assignment.compatibility_card_id=$4::uuid
 order by relationship.created_timestamp limit 1`, companyID, nodeID, boardID, cardID).Scan(
 		&reference.CompanyID, &reference.UserID, &reference.MessageID, &reference.NodeID,
@@ -758,7 +758,7 @@ join email_messages message on message.company_id=relationship.company_id
 left join node_logic_gate_assignments assignment on assignment.company_id=relationship.company_id
  and assignment.node_id=relationship.resource_id
 where relationship.company_id=$2::uuid and relationship.resource_type='node'
- and relationship.resource_textbox_id is null
+ and relationship.resource_textbox_id is not null
  and message.provider_message_id in (`+strings.Join(placeholders, ",")+`)
  and mangorts_user_can_access_resource(relationship.company_id,'node',
      relationship.resource_id,$1::uuid,'edit')
@@ -812,7 +812,7 @@ left join node_logic_gate_assignments assignment on assignment.company_id=relati
 where relationship.company_id=$2::uuid
  and thread.email_connection_id=$3::uuid
  and relationship.resource_type='node'
- and relationship.resource_textbox_id is null
+ and relationship.resource_textbox_id is not null
  and message.provider_message_id in (`+strings.Join(placeholders, ",")+`)
  and mangorts_user_can_access_resource(relationship.company_id,'node',
      relationship.resource_id,$1::uuid,'edit')
@@ -866,32 +866,21 @@ order by updated_timestamp desc limit 1`, companyID, message.ID).Scan(&emailThre
 		}
 		return err
 	}
-	_, err := addEmailProjectionSQLWithThread(ctx, tx, companyID, nodeID, sharedInboxID, accountEmail, message, emailThreadID, attachedAt, createdFromEmail)
+	_, err := addEmailProjectionSQLWithThread(ctx, tx, companyID, nodeID, sharedInboxID, accountEmail, message, emailThreadID, attachedAt, createdFromEmail, "")
 	return err
 }
 
-func addEmailProjectionSQLWithThread(ctx context.Context, tx *sql.Tx, companyID, nodeID, sharedInboxID, accountEmail string, message domain.EmailMessageSnapshot, emailThreadID string, attachedAt time.Time, createdFromEmail bool) (string, error) {
+func addEmailProjectionSQLWithThread(ctx context.Context, tx *sql.Tx, companyID, nodeID, sharedInboxID, accountEmail string, message domain.EmailMessageSnapshot, emailThreadID string, attachedAt time.Time, createdFromEmail bool, textboxID string) (string, error) {
 	companyID, nodeID, emailThreadID = cleanUUIDText(companyID), cleanUUIDText(nodeID), cleanUUIDText(emailThreadID)
 	if companyID == "" || nodeID == "" || emailThreadID == "" || strings.TrimSpace(message.ID) == "" {
 		return "", ErrInvalid
 	}
 	relationshipID := newUUIDv7String()
-	if err := linkPostgresCommunicationsEmailThreadToNodeTx(ctx, tx, companyID, nodeID, relationshipID, emailThreadID, message.ID, ""); err != nil {
+	ensuredRelationshipID, _, err := ensurePostgresEmailMessageNodeTextboxTx(ctx, tx, companyID, nodeID, emailThreadID, message.ID, relationshipID, textboxID)
+	if err != nil {
 		return "", err
 	}
-	if err := tx.QueryRowContext(ctx, `
-select relationship.email_relationship_id::text
-from email_relationships relationship
-join email_messages email_message on email_message.company_id=relationship.company_id
- and email_message.email_thread_id=relationship.email_thread_id
- and email_message.email_message_id=relationship.email_message_id
-where relationship.company_id=$1::uuid and relationship.resource_type='node'
- and relationship.resource_id=$2::uuid and relationship.email_thread_id=$3::uuid
- and relationship.resource_textbox_id is null and email_message.provider_message_id=$4`,
-		companyID, nodeID, emailThreadID, message.ID).Scan(&relationshipID); err != nil {
-		return "", err
-	}
-	return relationshipID, nil
+	return ensuredRelationshipID, nil
 }
 
 func deletePostgresCommunicationsEmailSourceNodeTx(ctx context.Context, tx *sql.Tx, companyID string, link communicationsEmailNodeLink) error {
@@ -939,7 +928,7 @@ join email_messages message on message.company_id=relationship.company_id
 join node_logic_gate_assignments assignment on assignment.company_id=relationship.company_id
  and assignment.node_id=relationship.resource_id
 where relationship.company_id=$1::uuid and relationship.resource_type='node'
- and relationship.resource_textbox_id is null
+ and relationship.resource_textbox_id is not null
  and assignment.compatibility_board_id=$3 and assignment.compatibility_card_id=$4::uuid
  and ($2='' or mangorts_user_can_access_resource(relationship.company_id,'node',
      relationship.resource_id,$2::uuid,'edit'))

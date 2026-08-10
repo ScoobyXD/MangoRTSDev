@@ -639,6 +639,7 @@ type ChatPaneProps = {
   headerLeading?: React.ReactNode;
   headerTrailing?: React.ReactNode;
   sectionLabelsByBlockID?: Record<string, string>;
+  sectionNodeIDsByBlockID?: Record<string, string>;
   sectionKeysByMessageID?: Record<string, string>;
   hideHeader?: boolean;
   activeTab?: "chat" | "email";
@@ -669,6 +670,7 @@ type ChatPaneProps = {
   onMentionPrincipal?: (principal: MentionableCompanyUser) => void;
   onActivateMessage: (messageID: string) => void;
   onNavigateToMessage: (messageID: string) => void;
+  onOpenSectionNode?: (nodeID: string) => void;
   onReply: (messageID: string) => void;
   onEditMessage: (messageID: string, message: string) => Promise<void>;
   onDeleteMessage: (messageID: string) => void;
@@ -706,6 +708,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   headerLeading,
   headerTrailing,
   sectionLabelsByBlockID = {},
+  sectionNodeIDsByBlockID = {},
   sectionKeysByMessageID = {},
   hideHeader = false,
   activeTab = "chat",
@@ -736,6 +739,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   onMentionPrincipal,
   onActivateMessage,
   onNavigateToMessage,
+  onOpenSectionNode,
   onReply,
   onEditMessage,
   onDeleteMessage,
@@ -1207,12 +1211,27 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   ? sectionKeysByMessageID[sectionedThreads[index - 1].message.id] ?? sectionedThreads[index - 1].message.blockID
                   : "";
                 const sectionLabel = sectionLabelsByBlockID[sectionKey] ?? "";
+                const sectionNodeID = sectionNodeIDsByBlockID[sectionKey] ?? "";
                 return (
                   <React.Fragment key={thread.message.id}>
                     {sectionLabel && previousSectionKey !== sectionKey && (
-                      <div data-email-chat-message-section="true" style={{ borderTop: index > 0 ? `1px solid ${ruleColor}` : undefined, padding: index > 0 ? "11px 2px 2px" : "2px 2px", color: "#475569", fontSize: 10.5, fontWeight: 850, display: "inline-flex", alignItems: "center", gap: 6 }}>
-                        <ExplorerEntityIcon kind="node" />
-                        <span>{sectionLabel}</span>
+                      <div data-email-chat-message-section="true" style={{ borderTop: index > 0 ? `1px solid ${ruleColor}` : undefined, padding: index > 0 ? "11px 2px 2px" : "2px 2px", color: "#475569", fontSize: 10.5, fontWeight: 850 }}>
+                        {sectionNodeID && onOpenSectionNode ? (
+                          <button
+                            type="button"
+                            aria-label={`Open Node ${sectionLabel}`}
+                            onClick={() => onOpenSectionNode(sectionNodeID)}
+                            style={{ border: 0, padding: 0, background: "transparent", color: "inherit", font: "inherit", display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+                          >
+                            <ExplorerEntityIcon kind="node" />
+                            <span>{sectionLabel}</span>
+                          </button>
+                        ) : (
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                            <ExplorerEntityIcon kind="node" />
+                            <span>{sectionLabel}</span>
+                          </span>
+                        )}
                       </div>
                     )}
                     <ChatThreadItem

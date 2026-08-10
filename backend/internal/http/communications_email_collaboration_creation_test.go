@@ -294,7 +294,7 @@ func TestEmailCollaborationCreationAllowsFloatingNodeWithoutPriority(t *testing.
 		t.Fatal(err)
 	}
 	if len(nodes) != 2 {
-		t.Fatalf("second target nodes=%+v, want two Node-wide destinations", nodes)
+		t.Fatalf("second target nodes=%+v, want two textbox-backed destinations", nodes)
 	}
 
 	server := newEmailCollaborationThreadTestServer(repo, client)
@@ -320,12 +320,32 @@ func TestEmailCollaborationCreationAllowsFloatingNodeWithoutPriority(t *testing.
 		listedNodeIDs[collaboration.NodeID] = struct{}{}
 	}
 	if len(listResult.Collaborations) != 2 {
-		t.Fatalf("listed collaborations=%+v, want both Node-wide destinations", listResult.Collaborations)
+		t.Fatalf("listed collaborations=%+v, want both textbox-backed destinations", listResult.Collaborations)
 	}
 	for _, nodeID := range []string{requestedNodeID, request.NewNodeID} {
 		if _, ok := listedNodeIDs[nodeID]; !ok {
 			t.Fatalf("listed collaborations=%+v, missing Node %s", listResult.Collaborations, nodeID)
 		}
+	}
+
+	chatPath := "/v1/communications/email-thread-chats?company_id=" + emailCollaborationThreadTestCompanyID +
+		"&message_id=floating-message&thread_id=floating-thread&account_email=" + owner.Email
+	chatRequest := emailCollaborationThreadTestRequestWithActor(
+		httptest.NewRequest(http.MethodGet, chatPath, nil), owner, domain.RoleCompanyUser,
+	)
+	chatResponse := httptest.NewRecorder()
+	server.Routes().ServeHTTP(chatResponse, chatRequest)
+	if chatResponse.Code != http.StatusOK {
+		t.Fatalf("thread chat status=%d, want 200 body=%s", chatResponse.Code, chatResponse.Body.String())
+	}
+	var chatResult struct {
+		Groups []domain.CommunicationsEmailThreadChatGroup `json:"groups"`
+	}
+	if err := json.NewDecoder(chatResponse.Body).Decode(&chatResult); err != nil {
+		t.Fatal(err)
+	}
+	if len(chatResult.Groups) != 2 || chatResult.Groups[0].TextboxID == "" || chatResult.Groups[1].TextboxID == "" {
+		t.Fatalf("thread chat groups=%+v, want one exact textbox group for each Node", chatResult.Groups)
 	}
 }
 
