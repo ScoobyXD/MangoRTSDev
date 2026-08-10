@@ -5,8 +5,8 @@
 3. Selecting a Logic Gate immediately creates a new email Node in that Logic Gate with priority **Not Assigned**.
 4. Selecting a Project requires one Project Logic Gate choice, then creates a new email Node there with priority **Not Assigned**.
 5. A stored email thread belongs to a Node when that Node has a text box linked to any message in the thread; the same thread may belong to several Nodes.
-6. Every newly ingested message gets one exact linked text box in every Node that already contains its thread.
-7. New-message ingestion never copies a chat or shared-draft panel state.
+6. Every newly ingested message appears in every Node that already contains its thread without creating a new text box or email relationship.
+7. A new exact-message text box and relationship are created only when a user first sends a chat about that message in that Node.
 8. An email thread never links to a text box; only an exact email message may do so.
 9. One exact email message may link to at most one text box per Node and may link to a different text box in another Node.
 10. Every email chat belongs to one exact Node text box, and that text box links to one exact email message.
@@ -15,7 +15,7 @@
 13. If the chosen Node already links that message to a text box, the chat appends there. Otherwise the first send atomically creates the Node-local text box, exact email link, and chat.
 14. If a triage thread has no Node, the first sent chat creates a floating Node with priority **Not Assigned** and no popup. If the thread has several Nodes, the user chooses the destination Node before send.
 15. Clearing the quote or closing its unsent rail cancels the preview without creating or deleting database rows.
-16. My Triage and Shared Triage show one scrollable chat rail for the thread, grouped only by exact Node and text box; different messages in that same Node/text box do not create separators.
+16. My Triage and Shared Triage show one scrollable chat rail for the thread, grouped only by exact Node and text box; different text boxes always remain separate groups.
 17. A horizontal line separates chat groups, and each group header shows a clickable Node icon and Node title.
 18. The email thread header owns the one neutral chat toggle, and the rail opens automatically when the selected thread already has any chat. Individual messages show no chat button or three-dot overflow button.
 19. The chat rail's top and bottom borders align with the displayed email-message card, not the subject and action toolbar above that card.
@@ -28,7 +28,7 @@
 26. Shared draft body, recipients, attachments, revision, and editable **From** account are one universal state on every surface.
 27. The **From** field may select only an authorized connected sending account, and send authorization is checked against that exact account.
 28. Reply and Reply All from a Node create or reopen the same universal thread draft.
-29. A sent reply becomes a new message in the same thread and gets one exact linked text box in every Node that already contains that thread.
+29. A sent reply becomes a new message in the same stored thread in every related Node and creates no text box until a chat is sent about that exact reply.
 30. Closing a local draft panel does not delete the universal draft; discarding the draft removes it for every surface.
 31. Opening, closing, or refreshing the triage chat rail does not restart or revoke an unchanged inline email image source.
 32. A triage chat send reuses the exact mailbox-scoped stored message when present, otherwise fetches and stores only that exact provider message, and never calls triage conversion or queues remaining-thread ingestion.
@@ -143,7 +143,7 @@ Signed Nylas `message.created` webhooks normally enqueue the exact provider mess
 ↓
 The worker rejects pre-boundary or non-Inbox discovery messages, then reconciles the complete real provider thread available in that mailbox without copying an already-complete Mango message
 ↓
-An unknown thread is stored with no Node relationship; a known thread's newly completed messages get one exact linked text box in each existing thread Node
+An unknown thread is stored with no Node relationship; a known thread's newly completed messages appear through the existing stored thread without creating new text boxes or relationships
 ↓
 My Triage and Shared Triage remain provider-owned lists, while their stored-message placement enrichment shows the Node icon and opens the already-updated Mango thread
 ↓
@@ -479,7 +479,7 @@ EMAIL58 - Chat replies store the existing parent-message ID and render beneath t
 EMAIL59 - A committed `@` or urgent `!` mention of a company user adds that user exactly once as a permanent Node-chat participant. A committed user-group mention resolves the group current same-company membership and snapshots each distinct resolved user in the same transaction as the chat write; invalid, deleted, or cross-company principals are rejected rather than partially shared. Mention participation never changes provider To/Cc/Bcc, never sends or subscribes the user to provider email delivery, and never makes that user an email participant.
 EMAIL60 - Collaboration participation is append-only for the collaboration lifetime. Later group membership or hierarchy changes neither add nor remove participants, deleting a mention message does not revoke access, and repeatedly mentioning the same user directly or through overlapping groups is idempotent.
 EMAIL61 - Every authorized Node collaborator may open the downloaded collaboration thread and its Mango-stored file/CID attachments even when that person was not To/Cc/Bcc and has no connection to the source mailbox. The backend authorizes the Node/thread link first and serves only the immutable Mango-stored snapshot and authenticated Mango attachment objects; a collaborator read never calls Nylas and never exposes a grant or credentials.
-EMAIL62 - A qualifying post-activation Inbox message extends its exact stored connection/thread automatically. Immutable Nylas IDs decide whether to reuse the message and thread; subject or body resemblance never does. The worker appends only missing/incomplete messages and files, then creates one exact linked message text box in every Node that already contains the thread. It copies no chat. Unknown or currently unplaced threads remain stored without any Node relationship.
+EMAIL62 - A qualifying post-activation Inbox message extends its exact stored connection/thread automatically. Immutable Nylas IDs decide whether to reuse the message and thread; subject or body resemblance never does. The worker appends only missing/incomplete messages and files. Every Node already containing the thread shows the new message through that thread, but ingestion creates no new text box, email relationship, or chat. Unknown or currently unplaced threads remain stored without any Node relationship.
 EMAIL63 - Email-list membership always comes from the active personal or selected shared mailbox's canonical provider response. A matching collaboration may annotate that provider-owned row with collaboration/Node identity by immutable source mailbox plus provider thread/message identity, but a stored collaboration snapshot, Node attachment, or mention never manufactures a My Triage or Shared Triage row.
 EMAIL64 - A nonparticipant cannot discover/list a collaboration row, perform source-mailbox provider reads, chat, draft, or obtain collaboration attachments by guessing a collaboration, Node, message, or draft ID. Participant authorization is checked before source-mailbox reads and participant operations. The existing company-admin/dev-admin bypass may still open the Node shell under the general resource contract, but it does not create participation, a triage row, source-mailbox access, mention delivery, or My Drafts visibility.
 EMAIL65 - `Create Shared Draft`, Reply, or Reply All on an exact source message creates or reopens at most one active universal shared draft for the exact stored thread. The draft retains the exact reply-source message, initializes recipients through the normal Reply All rules, and is never associated with a Node text box.
@@ -545,7 +545,7 @@ EMAIL121 - Every connection stores a permanent Mango ID, `ingestion_started_at`,
 
 EMAIL121A - Provider 401/403 and exact 404 `grant.not_found` park only that permanent connection as `reauth_required`; the known Google/Gmail 400 precondition failure parks it as `configuration_required`. The exact job and connection status update must succeed before SQS acknowledgement. Reauthorizing the same mailbox updates the same permanent connection without changing `ingestion_started_at` or `last_successful_scan_at`; a bounded reconciliation control message may resume from the checkpoint. Another valid connection is never changed.
 
-EMAIL121B - When a message becomes complete, its upsert and one missing exact message text box plus relationship in every current thread Node commit atomically. It does not copy a chat, create a relationship for an unknown or unplaced thread, grant access, or choose a new Node.
+EMAIL121B - When a message becomes complete, its upsert extends the stored thread used by every current thread Node. It creates no text box, email relationship, or chat. The first chat about that message in a chosen Node atomically creates its missing exact-message text box, relationship, and chat.
 
 EMAIL121C - The DEV cutover preflight refuses to proceed while any legacy database-delivered ingestion or archive item is pending, processing, or retrying. It reports aggregate stable-identity duplicate groups, exact redundant rows, inactive-status violations, synthetic cutover completions, conflicting non-null Mango thread IDs, conflicting nonblank provider thread IDs, and foreign-key references without exposing mailbox/provider identifiers. A coherent legacy duplicate group may collapse only when every row is completed or failed, every populated thread identity agrees, and no foreign key references ingestion jobs. The locked transaction rechecks those gates, retains genuine completion before failure before `superseded_by_email_ingestion_cutover` synthetic completion, then within that class prefers agreed thread metadata, earliest `created_timestamp`, and ascending `ingestion_job_id`. It deletes only redundant `email_ingestion_jobs` metadata, asserts the exact count and zero remaining duplicates, preserves all email/thread/attachment data byte-for-byte, then creates the unique stable identity index. Final-schema duplicates remain STOP; an already-final unique state reruns safely without changing its data or final contract.
 
@@ -922,7 +922,7 @@ Expected:
 - Every participant can read the Mango-stored thread snapshot and Mango-stored attachments without receiving provider credentials, an auto-forwarded provider copy, or access to the source mailbox.
 - The source email appears only in a participant's active My Triage or Shared Triage when that exact provider mailbox response returns it. Mentioned nonrecipients retain stored-thread and Node/chat access but receive no email-list row.
 - A participant who is also a provider recipient sees the one provider-owned row annotated with collaboration identity by exact source scope plus provider thread/message identity.
-- A verified webhook or rare bounded checkpoint reconciliation enqueues the later provider message without waiting for a user session. Background ingestion appends each missing real message once and creates one exact message text box in every existing thread Node without copying any chat.
+- A verified webhook or rare bounded checkpoint reconciliation enqueues the later provider message without waiting for a user session. Background ingestion appends each missing real message once, and every existing thread Node shows it without creating a text box or chat.
 - Similar subject text, participants, or body content in another thread or mailbox never joins the collaboration.
 
 ### Scenario EMAIL-S15: Shared Reply-All Draft Concurrency, Send, And Discard

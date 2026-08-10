@@ -454,10 +454,10 @@ func TestCommunicationsEmailThreadDurableDownloadSchemaContract(t *testing.T) {
 	}
 }
 
-func TestMemoryEmailThreadPropagatesCompletedMessagesToEveryNodeDestination(t *testing.T) {
+func TestMemoryEmailThreadKeepsCompletedMessagesInExistingNodeThreadsWithoutNewTextboxes(t *testing.T) {
 	repo := NewMemoryRepo()
 	const companyID = "11111111-1111-4111-8111-111111111199"
-	repo.EnsureCompany(companyID, "Multi-Node email propagation")
+	repo.EnsureCompany(companyID, "Multi-Node email thread")
 	owner := mustEmailCollaborationGuardUser(t, repo, companyID, "multi-node-owner", "multi-node@example.com", domain.RoleCompanyUser)
 	base := CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: owner.UserID, PersonalAccountEmail: owner.Email,
@@ -492,6 +492,17 @@ func TestMemoryEmailThreadPropagatesCompletedMessagesToEveryNodeDestination(t *t
 		}
 	}
 	if len(nodes) != 2 || !nodes[first.Collaboration.NodeID] || !nodes[second.Collaboration.NodeID] {
-		t.Fatalf("thread destinations=%v, want both Nodes after new completed message", nodes)
+		t.Fatalf("thread destinations=%v, want both existing Nodes", nodes)
+	}
+	textBoxCount := 0
+	for _, projections := range repo.nodeText {
+		for _, projection := range projections {
+			if isEditorTextBoxType(projection.Type) {
+				textBoxCount++
+			}
+		}
+	}
+	if textBoxCount != 2 {
+		t.Fatalf("text boxes=%d, want only the two original Node placements", textBoxCount)
 	}
 }

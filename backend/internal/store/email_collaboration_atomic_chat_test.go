@@ -166,7 +166,7 @@ func TestMemoryEmailCollaborationAppendsChatInExistingNodeWithoutConversionJob(t
 	}
 }
 
-func TestMemoryEmailThreadChatGroupsIncludeEveryNodeTextboxAndPropagateNewMessages(t *testing.T) {
+func TestMemoryEmailThreadChatGroupsIncludeEveryNodeTextboxWithoutCreatingTextboxesForNewMessages(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-701300000141"
 	sharedInboxID := "11111111-1111-4111-8111-701300000142"
@@ -210,8 +210,8 @@ func TestMemoryEmailThreadChatGroupsIncludeEveryNodeTextboxAndPropagateNewMessag
 	if err != nil {
 		t.Fatalf("ListCommunicationsEmailThreadChatGroups: %v", err)
 	}
-	if len(groups) != 3 {
-		t.Fatalf("groups = %+v, want Node 1 message 1 and 2 plus Node 2 message 2", groups)
+	if len(groups) != 2 {
+		t.Fatalf("groups = %+v, want only the two explicitly created chat textboxes", groups)
 	}
 	chatCount := 0
 	seenNodes := map[string]bool{}
@@ -243,8 +243,37 @@ func TestMemoryEmailThreadChatGroupsIncludeEveryNodeTextboxAndPropagateNewMessag
 			newMessageNodes[group.NodeID] = true
 		}
 	}
-	if len(groups) != 5 || !newMessageNodes[first.Collaboration.NodeID] || !newMessageNodes[second.Collaboration.NodeID] {
-		t.Fatalf("groups after ingestion = %+v, want the new message in both existing Nodes", groups)
+	if len(groups) != 2 || len(newMessageNodes) != 0 {
+		t.Fatalf("groups after ingestion = %+v, want no automatic textbox for the new thread message", groups)
+	}
+
+	thirdBlockID, thirdChatID := NewUUIDv7String(), NewUUIDv7String()
+	if _, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), CommunicationsEmailCollaborationEnsureInput{
+		CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "support@example.com", Provider: "google", CreatedByUserID: creator.UserID,
+		TargetNodeID: first.Collaboration.NodeID,
+		Message:      domain.EmailMessageSnapshot{ID: "thread-message-3", ThreadID: "thread-chat-groups", Subject: "Third", DownloadComplete: true},
+		LinkedTextBlock: &NodeInformationInput{InformationID: thirdBlockID, Type: "Text box", ActorUserID: creator.UserID,
+			Information: editorTextBlockProjectionPrefix + `{"title":"Third","document":"","email_message_id":"` + NewUUIDv7String() + `"}`},
+		InitialChat: &NodeInformationInput{InformationID: thirdChatID, Type: CommunicationsEmailCollaborationChatInformationType, ActorUserID: creator.UserID,
+			Information: `{"block_id":"` + thirdBlockID + `","selection_source":"email","selection_message_id":"` + NewUUIDv7String() + `","message":"third message chat"}`},
+	}); err != nil {
+		t.Fatalf("first chat for new message: %v", err)
+	}
+	groups, err = repo.ListCommunicationsEmailThreadChatGroups(CommunicationsEmailCollaborationListInput{
+		CompanyID: companyID, ParticipantUserID: creator.UserID, SharedInboxID: sharedInboxID,
+		MessageID: "thread-message-3", ThreadID: "thread-chat-groups",
+	})
+	if err != nil {
+		t.Fatalf("groups after first chat: %v", err)
+	}
+	newMessageNodes = map[string]bool{}
+	for _, group := range groups {
+		if group.ProviderMessageID == "thread-message-3" {
+			newMessageNodes[group.NodeID] = true
+		}
+	}
+	if len(groups) != 3 || len(newMessageNodes) != 1 || !newMessageNodes[first.Collaboration.NodeID] {
+		t.Fatalf("groups after first chat = %+v, want one new textbox only in the chosen Node", groups)
 	}
 }
 
