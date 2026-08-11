@@ -121,8 +121,7 @@ export type EditorTextBlockContent = {
   document: string;
   attachments?: EditorChatAttachment[];
   emailMessageID?: string;
-  emailMessageIDs?: string[];
-  emailAccent?: string;
+  color?: string;
 };
 
 function compareProjectionFreshness(a: EditorProjectionItem, b: EditorProjectionItem): number {
@@ -258,18 +257,13 @@ export function parseEditorTextBlockContent(value: string): EditorTextBlockConte
   const payload = parsePayload(value.slice(EDITOR_TEXT_BLOCK_CONTENT_PREFIX.length));
   if (!payload || typeof payload !== "object") return { title: "", document: "", attachments: [] };
   const record = payload as Record<string, unknown>;
-  const emailMessageIDs = uniqueStringList(Array.isArray(record.email_message_ids)
-    ? record.email_message_ids.filter((item): item is string => typeof item === "string")
-    : []);
   const emailMessageID = stringValue(record, "email_message_id");
-  if (emailMessageID && !emailMessageIDs.includes(emailMessageID)) emailMessageIDs.unshift(emailMessageID);
   return {
     title: stringValue(record, "title"),
     document: rawStringValue(record, "document"),
     attachments: parseEditorChatAttachments(record.attachments),
-    emailMessageID: emailMessageID || emailMessageIDs[0] || undefined,
-    emailMessageIDs,
-    emailAccent: stringValue(record, "email_accent") || undefined,
+    emailMessageID: emailMessageID || undefined,
+    color: stringValue(record, "color") || undefined,
   };
 }
 
@@ -277,15 +271,14 @@ export function buildEditorTextBlockMetadataPayload(input: EditorTextBlockConten
   title: string;
   attachments: Record<string, unknown>[];
   email_message_id: string;
-  email_message_ids: string[];
-  email_accent: string;
+  color?: string;
 } {
+  const color = input.color?.trim().toUpperCase() ?? "";
   return {
     title: input.title.trim(),
     attachments: normalizeChatAttachments(input.attachments ?? []).map(editorAttachmentReferencePayload),
     email_message_id: input.emailMessageID?.trim() ?? "",
-    email_message_ids: uniqueStringList(input.emailMessageIDs ?? []),
-    email_accent: input.emailAccent?.trim() ?? "",
+    ...(color ? { color } : {}),
   };
 }
 

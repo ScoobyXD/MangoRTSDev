@@ -92,7 +92,12 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeSurface, /data-node-text-box-row/);
   assert.match(nodeSurface, /scrollIntoView\(\{ behavior: "smooth", block: "center", inline: "nearest" \}\)/);
   assert.match(nodeSurface, /onEmailMessageActivate=\{revealEmailTextBlock\}/);
-  assert.match(nodeSurface, /editorEmailMessageAccent\(messageID\.trim\(\)\)/);
+  assert.doesNotMatch(nodeSurface, /editorEmailMessageAccent/);
+  assert.match(nodeSurface, /linkedEmailMessageID \? \(block\.color\?\.trim\(\) \?\? ""\) : ""/);
+  assert.match(nodeSurface, /borderLeft: `\$\{blockColor \? 4 : 1\}px solid \$\{blockColor \|\| \(textBlockIsFocused \? "transparent" : EDITOR_NEU_SOFT_BORDER\)\}`/);
+  assert.match(nodeSurface, /border: `1px solid \$\{blockColor \|\| EDITOR_NEU_SOFT_BORDER\}`/);
+  assert.match(nodeSurface, /<MailIcon color=\{blockColor \|\| accent\} \/>/);
+  assert.match(nodeSurface, /accent=\{blockColor \|\| accent\}/);
   assert.doesNotMatch(nodeSurface, /repairs: Array<\{ blockID: string; accent: string \}>/);
   assert.match(nodeSurface, /aria-label=\{linkedEmailExpanded \? "Hide linked email" : "Show linked email"\}/);
   assert.match(nodeSurface, /data-node-email-column="true"/);
