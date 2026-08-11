@@ -523,7 +523,6 @@ export function AppSidebarRACITabsSection({ apiBase, companyID, onOpenLogicGate 
 
   return (
     <div data-sidebar-raci-tabs="true" style={towerStyle}>
-      <div style={towerHeaderStyle}>Tower</div>
       {RACI_TAB_ROLES.map((role) => {
         const expanded = expandedRoles.has(role);
         const root = branches[raciTabBranchKey(role, "")];
@@ -603,7 +602,6 @@ function renderCounts(counts: RACITabStatusCounts): React.ReactElement {
 }
 
 const towerStyle: React.CSSProperties = { display: "grid", gap: 4, minWidth: 0, marginBottom: 8 };
-const towerHeaderStyle: React.CSSProperties = { padding: "0 4px 2px", color: "#111", fontSize: 12, fontWeight: 700 };
 const roleWrapStyle: React.CSSProperties = { minWidth: 0, display: "grid", gap: 3 };
 function roleHeaderStyle(expanded: boolean): React.CSSProperties {
   return { width: "100%", minHeight: 31, display: "grid", gridTemplateColumns: "15px minmax(0,1fr) auto", alignItems: "center", gap: 5, border: "1px solid rgba(148,163,184,.24)", borderRadius: 8, background: expanded ? "rgba(255,255,255,.88)" : "linear-gradient(145deg,#fff,#f6f7fb)", color: "#111827", cursor: "pointer", padding: "0 7px", textAlign: "left", fontSize: 11.5, fontWeight: 750 };

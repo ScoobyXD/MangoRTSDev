@@ -6066,7 +6066,6 @@ $$;
 commit;
 -- END RACI ROLE CONTRACT
 
-<<<<<<< HEAD
 -- Bare-bones Huddles and KPIs. PostgreSQL 17.x compatible.
 
 create table if not exists huddle_logic_gates (
@@ -6253,7 +6252,6 @@ returns boolean language sql stable set search_path=public,pg_temp as $$
     when 'huddle_node' then exists(select 1 from huddle_nodes where company_id=p_company_id and huddle_node_id=p_resource_id)
     else false end;
 $$;
-=======
 -- BEGIN RACI TABS
 begin;
 
@@ -6648,4 +6646,3 @@ for each row execute function mangorts_raci_tabs_company_changed();
 
 commit;
 -- END RACI TABS
->>>>>>> codex/implement-tower-raci-tabs0000753
