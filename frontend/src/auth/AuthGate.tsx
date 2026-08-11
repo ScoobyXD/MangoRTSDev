@@ -24,7 +24,7 @@ import {
   type LoginResult,
 } from "./cognitoAuth";
 import { isAuthPath, nextPathAfterAuthentication, nextPathForAuthState } from "./authRoutes";
-import { listCompanyUsers, markCommunicationsWorkspacePanelStale } from "../modules/communications/communicationsApi";
+import { listCompanyUsers, markCommunicationsWorkspaceResourcesStale } from "../modules/communications/communicationsApi";
 import { normalizeAppPath, parseDeepLinkRoute } from "../app/deepLinkRoutes";
 import { RecycleBinPage } from "../pages/recycle-bin/RecycleBinPage";
 import { RealtimeHealthChrome } from "../modules/realtime/RealtimeHealthChrome";
@@ -1488,7 +1488,7 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
             setError("");
             try {
               await apiFetchJSON(`/v1/companies/${encodeURIComponent(companyID)}/users/${encodeURIComponent(targetUser.user_id)}`, { method: "DELETE" });
-              markCommunicationsWorkspacePanelStale(companyID, { companyUsers: true });
+              markCommunicationsWorkspaceResourcesStale(companyID, { companyUsers: true });
               setUsers((previous) => previous.filter((user) => user.user_id !== targetUser.user_id));
               setDeleteConfirmation(null);
               setDeleteAcknowledged(false);

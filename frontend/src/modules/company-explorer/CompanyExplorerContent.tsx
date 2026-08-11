@@ -7,8 +7,7 @@ import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import { type NodeRecord } from "../nodes/types";
 import { getLogicGateTitle as getLogicGateRecordTitle, toLogicGateViewRecord, type LogicGateRACIRole, type LogicGateRecord as LogicGateApiRecord, type LogicGateViewRecord } from "../logic-gates/types";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../dashboardEvents";
-import { removeCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph } from "../nodes/nodeRelationshipGraph";
-import { removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gates/logicGateRelationshipGraph";
+import { removeLogicGateRelationshipGraphNode, upsertLogicGateRelationshipGraphNode } from "../logic-gates/logicGateRelationshipGraph";
 import { emptyExplorerSelectionState, type ExplorerSelectionState } from "./selectionSync";
 import { hasCompanyExplorerFolderPermissionRules, type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind, type CompanyExplorerFolderScopeType, type CompanyExplorerItemType, type CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders";
 import { invalidateKanbanBoardListCache, listKanbanBoards, type RACIMatrixProjectionRow } from "../kanban/kanbanApi";
@@ -2215,8 +2214,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         name: RACIVisualRootFolderName(missing.role),
       }),
     }).then((created) => {
-      upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, created);
-      upsertCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, created);
       if (!cancelled) dispatchExplorerStore({ type: "upsertFolder", folder: created });
     }).catch((err) => {
       if (!cancelled) setError(err instanceof Error ? err.message : "failed_to_create_RACI_visual_folder");
@@ -2244,8 +2241,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         name: scopedRootName,
       }),
     }).then((folder) => {
-      upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, folder);
-      upsertCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folder);
       if (cancelled) return;
       dispatchExplorerStore({ type: "upsertFolder", folder });
       setExpanded((previous) => new Set(previous).add(`workspace-folder-${folder.folder_id}`));
@@ -2348,8 +2343,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         next.add(`workspace-folder-${folder.folder_id}`);
         return next;
       });
-      upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, folder);
-      upsertCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folder);
       lastLocalExplorerSelectionRef.current = { domain: folderKind, changedAt: Date.now() };
       pendingExplorerSelectionIntentRef.current = "activate";
       setSelectedTreeID(`workspace-folder-${folder.folder_id}`);
@@ -2451,10 +2444,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       })).filter((item) => item.folder_id && item.item_id);
       dispatchExplorerStore({ type: "upsertV2Rows", rows });
       dispatchExplorerStore({ type: "upsertFolderItems", folderItems: items });
-      for (const item of items) {
-        upsertCompanyExplorerFolderItemInNodeRelationshipGraph(apiBase, companyID, item);
-        upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph(apiBase, companyID, item);
-      }
       if (options.expandTarget) {
         setExpanded((previous) => {
           const next = new Set(previous);
@@ -2471,8 +2460,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
 
   const upsertOptimisticFolderItem = useCallback((item: CompanyExplorerFolderItem) => {
     dispatchExplorerStore({ type: "upsertFolderItems", folderItems: [item] });
-    upsertCompanyExplorerFolderItemInNodeRelationshipGraph(apiBase, companyID, item);
-    upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph(apiBase, companyID, item);
   }, [apiBase, companyID]);
 
   const expandCreatedItemTarget = useCallback((parentFolderID: string) => {
@@ -2689,12 +2676,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         body: JSON.stringify({ company_id: companyID, targets: deleteTargets, confirmation_display_name: confirmationDisplayName }),
       });
 
-      if (deletedFolderIDs.size > 0) {
-        for (const folderID of deletedFolderIDs) {
-          removeCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, folderID);
-          removeCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folderID);
-        }
-      }
       if (deletedLogicGateIDs.size > 0) {
         for (const logicGateID of deletedLogicGateIDs) removeLogicGateRelationshipGraphNode(apiBase, companyID, logicGateID);
       }
@@ -2808,8 +2789,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           body: JSON.stringify({ company_id: companyID, name: value }),
         });
         dispatchExplorerStore({ type: "replaceFolder", folder });
-        upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, folder);
-        upsertCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folder);
       } else if (activeRename.target.kind === "logic_gate") {
         const updated = await commitEntityTitleMutation(
           () => requestJSON<LogicGateApiRecord>(`/v1/logic-gates/${activeRename.target.id}`, {
@@ -2887,8 +2866,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           return next;
         });
       }
-      upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, folder);
-      upsertCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folder);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_move_folder");
     }

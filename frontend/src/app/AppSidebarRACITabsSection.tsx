@@ -65,6 +65,9 @@ export function AppSidebarRACITabsSection({ apiBase, companyID, onOpenLogicGate 
   const expandedRolesRef = useRef(expandedRoles);
   const expandedFolderIDsRef = useRef(expandedFolderIDs);
   const loadingKeysRef = useRef(loadingKeys);
+  const boardSubscriptionByLogicGateIDRef = useRef(new Map<string, () => void>());
+  const trackedLogicGateIDsRef = useRef(new Set<string>());
+  const refreshLogicGateCountsRef = useRef<(logicGateID: string) => void>(() => undefined);
   branchesRef.current = branches;
   expandedRolesRef.current = expandedRoles;
   expandedFolderIDsRef.current = expandedFolderIDs;
@@ -276,37 +279,51 @@ export function AppSidebarRACITabsSection({ apiBase, companyID, onOpenLogicGate 
     });
   };
 
+  refreshLogicGateCountsRef.current = (logicGateID: string) => {
+    if (!trackedLogicGateIDsRef.current.has(logicGateID)) return;
+    void fetchRACITabLogicGateCounts(apiBase, companyID, logicGateID).then(
+      (counts) => patchLogicGateCounts(logicGateID, counts),
+      () => undefined,
+    );
+  };
+
   useEffect(() => {
-    if (!companyID || loadedLogicGateIDs.length === 0) return;
-    const tracked = new Set(loadedLogicGateIDs);
-    const refresh = (logicGateID: string) => {
-      if (!tracked.has(logicGateID)) return;
-      void fetchRACITabLogicGateCounts(apiBase, companyID, logicGateID).then(
-        (counts) => patchLogicGateCounts(logicGateID, counts),
-        () => undefined,
-      );
-    };
     const onLocalChange = (event: Event) => {
       const detail = (event as CustomEvent<KanbanBoardContentsUpdatedDetail>).detail;
       if (detail?.companyID && detail.companyID !== companyID) return;
       const boardID = detail?.boardID?.trim() ?? "";
       const logicGateID = detail?.logicGateID?.trim() || logicGateIDFromKanbanBoardID(boardID);
-      if (logicGateID) refresh(logicGateID);
+      if (logicGateID) refreshLogicGateCountsRef.current(logicGateID);
     };
     window.addEventListener(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, onLocalChange);
-    const unsubscribers = loadedLogicGateIDs.map((logicGateID) => {
-      const boardID = logicGateKanbanBoardID(logicGateID);
-      return subscribeRealtimeScope(apiBase, companyID, `board:${boardID}`, {
-        onRecover: () => refresh(logicGateID),
-        onKanbanChanged: (message) => {
-          if (message.company_id === companyID && message.board_id === boardID) refresh(logicGateID);
-        },
-      });
-    });
     return () => {
       window.removeEventListener(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, onLocalChange);
-      unsubscribers.forEach((unsubscribe) => unsubscribe());
+      for (const unsubscribe of boardSubscriptionByLogicGateIDRef.current.values()) unsubscribe();
+      boardSubscriptionByLogicGateIDRef.current.clear();
+      trackedLogicGateIDsRef.current.clear();
     };
+  }, [apiBase, companyID]);
+
+  useEffect(() => {
+    const nextLogicGateIDs = new Set(loadedLogicGateIDs);
+    trackedLogicGateIDsRef.current = nextLogicGateIDs;
+    for (const [logicGateID, unsubscribe] of boardSubscriptionByLogicGateIDRef.current) {
+      if (nextLogicGateIDs.has(logicGateID)) continue;
+      unsubscribe();
+      boardSubscriptionByLogicGateIDRef.current.delete(logicGateID);
+    }
+    if (!companyID) return;
+    for (const logicGateID of loadedLogicGateIDs) {
+      if (boardSubscriptionByLogicGateIDRef.current.has(logicGateID)) continue;
+      const boardID = logicGateKanbanBoardID(logicGateID);
+      const unsubscribe = subscribeRealtimeScope(apiBase, companyID, `board:${boardID}`, {
+        onRecover: () => refreshLogicGateCountsRef.current(logicGateID),
+        onKanbanChanged: (message) => {
+          if (message.company_id === companyID && message.board_id === boardID) refreshLogicGateCountsRef.current(logicGateID);
+        },
+      });
+      boardSubscriptionByLogicGateIDRef.current.set(logicGateID, unsubscribe);
+    }
   }, [apiBase, companyID, loadedLogicGateIDKey]);
 
   useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {

@@ -4,7 +4,7 @@ import { apiFetchJSON, formatAuthError, type CurrentUserResponse } from "../../a
 import {
   listCompanyUserGroups,
   listCompanyUsers,
-  markCommunicationsWorkspacePanelStale,
+  markCommunicationsWorkspaceResourcesStale,
   type CompanyUser,
   type CompanyUserGroup,
   type CompanyUserGroupMember,
@@ -108,7 +108,7 @@ export const TeamsContent: React.FC<TeamsContentProps> = ({ accent = "#6366f1", 
     setBusy(true);
     setError("");
     try {
-      markCommunicationsWorkspacePanelStale(companyID, { userGroups: true });
+      markCommunicationsWorkspaceResourcesStale(companyID, { userGroups: true });
       const group = await apiFetchJSON<CompanyUserGroup>(`/v1/companies/${encodeURIComponent(companyID)}/user-groups`, {
         method: "POST",
         body: JSON.stringify({ name, parent_group_id: parentGroupID }),
@@ -117,7 +117,7 @@ export const TeamsContent: React.FC<TeamsContentProps> = ({ accent = "#6366f1", 
       setSelectedGroupID(group.group_id);
       if (parentGroupID) setNewChildGroupName("");
       else setNewGroupName("");
-      markCommunicationsWorkspacePanelStale(companyID, { userGroups: true });
+      markCommunicationsWorkspaceResourcesStale(companyID, { userGroups: true });
       await loadTeams();
     } catch (createError) {
       console.error("Create team failed", createError);
@@ -140,7 +140,7 @@ export const TeamsContent: React.FC<TeamsContentProps> = ({ accent = "#6366f1", 
         ...current.filter((member) => member.group_id !== selectedGroupID),
         ...(payload.members ?? []),
       ]);
-      markCommunicationsWorkspacePanelStale(companyID, { userGroups: true });
+      markCommunicationsWorkspaceResourcesStale(companyID, { userGroups: true });
       await loadTeams();
     } catch (saveError) {
       console.error("Save team users failed", saveError);
@@ -157,7 +157,7 @@ export const TeamsContent: React.FC<TeamsContentProps> = ({ accent = "#6366f1", 
     try {
       await apiFetchJSON(`/v1/companies/${encodeURIComponent(companyID)}/user-groups/${encodeURIComponent(selectedGroupID)}`, { method: "DELETE" });
       setSelectedGroupID("");
-      markCommunicationsWorkspacePanelStale(companyID, { userGroups: true });
+      markCommunicationsWorkspaceResourcesStale(companyID, { userGroups: true });
       await loadTeams();
     } catch (deleteError) {
       console.error("Delete team failed", deleteError);

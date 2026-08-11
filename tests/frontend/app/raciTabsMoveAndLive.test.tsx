@@ -61,6 +61,10 @@ test("RACI Tabs moves stay lazy and live changes refresh only visible branches",
   const moved = new Set<string>();
   const branchRequests: string[] = [];
   let layoutRequests = 0;
+  const sentScopeCount = (type: string, scope: string) => sockets.reduce((count, socket) => count + socket.sent.filter((message) => {
+    const parsed = JSON.parse(message) as { type?: string; scope?: string };
+    return parsed.type === type && parsed.scope === scope;
+  }).length, 0);
 
   const itemRow = (logicGateID: string, name: string, folder: string | null, position: number) => ({ row_kind: "item", item: {
     company_id: companyID, user_id: "77777777-7777-4777-8777-777777777777", role: "responsible",
@@ -120,6 +124,10 @@ test("RACI Tabs moves stay lazy and live changes refresh only visible branches",
     assert.ok(responsible);
     await act(async () => { responsible.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })); await new Promise((resolve) => setTimeout(resolve, 0)); });
     assert.equal(branchRequests.length, 1);
+    const firstBoardScope = `board:logic-gate:${firstGateID}`;
+    const secondBoardScope = `board:logic-gate:${secondGateID}`;
+    assert.equal(sentScopeCount("subscribe", firstBoardScope), 1);
+    assert.equal(sentScopeCount("subscribe", secondBoardScope), 1);
 
     const parentButton = container.querySelector<HTMLButtonElement>('button[aria-label="Expand Parent"]');
     assert.ok(parentButton);
@@ -156,12 +164,17 @@ test("RACI Tabs moves stay lazy and live changes refresh only visible branches",
     assert.equal(branchRequests.filter((value) => value.includes(`parent_folder_id=${parentFolderID}`)).length, 2, "the visible parent branch refreshes its nested folder totals");
     assert.equal(container.querySelector(`[data-raci-tab-row="item:${firstGateID}"]`), null, "moved row leaves the visible source immediately");
     assert.ok(container.querySelector(`[data-raci-tab-row="folder:${folderID}"] [title="Request: 1"]`), "the closed destination row shows its refreshed recursive total");
+    assert.equal(sentScopeCount("unsubscribe", firstBoardScope), 1, "only the board removed from loaded rows is unsubscribed");
+    assert.equal(sentScopeCount("unsubscribe", secondBoardScope), 0, "the unchanged board stays subscribed");
+    assert.equal(sentScopeCount("subscribe", secondBoardScope), 1, "the unchanged board is not subscribed again");
 
     let folderButton = container.querySelector<HTMLButtonElement>('button[aria-label="Expand Destination"]');
     assert.ok(folderButton);
     await act(async () => { folderButton.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })); await new Promise((resolve) => setTimeout(resolve, 0)); });
     assert.equal(branchRequests.filter((value) => value.includes(`parent_folder_id=${folderID}`)).length, 1, "opening destination performs a fresh read");
     assert.ok(container.querySelector(`[data-raci-tab-row="item:${firstGateID}"]`));
+    assert.equal(sentScopeCount("subscribe", firstBoardScope), 2, "a board is subscribed again only after it becomes loaded again");
+    assert.equal(sentScopeCount("subscribe", secondBoardScope), 1);
 
     await dragIntoDestination(secondGateID);
     assert.equal(layoutRequests, 2);

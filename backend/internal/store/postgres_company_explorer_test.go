@@ -270,10 +270,16 @@ func TestPostgresCompanyExplorerV2RootRowsUseContiguousRootArgs(t *testing.T) {
 	if !strings.Contains(rootRows, "r.querycompanyexplorerfinalrootchildren(ctx, query)") {
 		t.Fatalf("ListCompanyExplorerV2RootRows must read top-level rows through the root-specific query")
 	}
+	if strings.Contains(rootRows, "ensurecompanyexplorer") || strings.Contains(rootRows, "backfill") || strings.Contains(rootRows, "begin") {
+		t.Fatalf("ListCompanyExplorerV2RootRows must be a read-only bounded query")
+	}
 
 	childRows := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) ListCompanyExplorerV2ChildRows")), " "))
 	if !strings.Contains(childRows, "case companyexplorerv2entitycompany: rows, err = r.querycompanyexplorerfinalrootchildren(ctx, query)") {
 		t.Fatalf("ListCompanyExplorerV2ChildRows must route company-parent reads through root-specific args")
+	}
+	if strings.Contains(childRows, "ensurecompanyexplorer") || strings.Contains(childRows, "backfill") || strings.Contains(childRows, "begin") {
+		t.Fatalf("ListCompanyExplorerV2ChildRows must be a read-only bounded query")
 	}
 
 	rootChildren := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) queryCompanyExplorerFinalRootChildren")), " "))

@@ -19,9 +19,9 @@ RT14 - Items and folders share one mixed sibling order within a role and parent.
 RT15 - A newly projected item copies the current Logic Gate name, receives a null folder ID, and receives a position after the existing root siblings in that user's role tab.
 RT16 - `raci_tabs_items` is a derived Tower navigation copy only. Canonical RACI remains in `resource_gvic_settings` and `resource_gvic_assignments`, canonical permission remains separate, and no RACI Tabs row grants RACI or access.
 RT17 - The forward migration backfills one root item for every existing effective company, user, Logic Gate, and winning role, including effective group and inherited assignments. Backfill ordering and positions are deterministic and rerunning the guarded migration cannot create duplicates.
-RT18 - Giving one user one new effective role on one Logic Gate inserts or updates exactly that user's item in the same committed business transaction.
+RT18 - Giving one user one new effective role on one Logic Gate recalculates only that Logic Gate and inserts or updates exactly that user's item in the same committed business transaction.
 RT19 - Giving a group an effective Logic Gate role expands the group's current nested membership and inserts or updates one item per affected effective user. Five effective members produce five user items; twenty produce twenty.
-RT20 - A parent-policy change, descendant reset, Logic Gate parent move, group-membership change, parent-group change, group deletion, or company-membership change reconciles every affected user's Logic Gate item even when that accepted write fan-out is large.
+RT20 - A folder-policy or folder-parent change recalculates only Logic Gates in that folder subtree. A group-membership or parent-group change recalculates only resources assigned to that group or its affected ancestors. Company-membership removal relies on the exact cascading assignments and group memberships; none of these writes recalculates every Logic Gate in the company.
 RT21 - Reconciliation compares the complete effective user-and-winning-role set. New users are inserted, removed users are deleted, unchanged users remain, and a winning-role change updates the role, clears the old folder placement, and appends the item to the new role root.
 RT22 - RACI Tabs synchronization is part of the command that changed its effective input and commits or rolls back with that command. Retries are idempotent and cannot create duplicate items.
 RT23 - A successful Logic Gate rename copies the committed name to every matching RACI Tabs item. Logic Gate deletion removes every matching item without deleting unrelated folders.
@@ -41,6 +41,9 @@ RT36 - Request uses the Pin yellow gradient, Pending uses the Pin light-gray gra
 RT37 - A committed Node assignment, removal, or tracked-status move refreshes only the affected loaded Logic Gate count and recalculates its loaded ancestor and role totals. Count refresh writes no RACI Tabs item, folder, RACI, permission, or browser-storage row.
 RT38 - RACI Tabs APIs derive the acting user from the authenticated company membership. A request-supplied user ID cannot read or mutate another user's items or folders.
 RT39 - A committed direct-user, group, group-membership, group-parent, group-deletion, inherited-policy, or inheritance-parentage change that can change effective Logic Gate RACI emits one compact company-scoped `raci_tabs.changed` doorbell through Mango's existing durable realtime connection. The doorbell carries no tree data, grants no access, immediately refetches only expanded visible branches, discards loaded collapsed branches, and leaves never-opened branches request-free.
+RT40 - Loading Mango performs zero RACI Tabs recalculations. Startup may read prepared rows only after the user opens a role.
+RT41 - Opening a role or folder performs only its bounded read of prepared `raci_tabs_items` and `raci_tabs_folders` rows. No RACI Tabs GET creates defaults, repairs projection rows, starts a transaction, or recalculates RACI.
+RT42 - Every ordinary RACI input mutation identifies the exact Logic Gate, Explorer folder subtree, or group-assigned resources whose effective RACI could change. The canonical schema has no ordinary company-wide RACI Tabs synchronization function or trigger.
 
 ## Process Story: Effective Logic Gate RACI appears in a lazy personal tree
 

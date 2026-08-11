@@ -81,7 +81,6 @@ import { durableEditorAttachmentInformationID } from "./editorAttachmentPreparat
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
-import { invalidateWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
 import { invalidateResourcePolicyDependentCaches } from "../permissions/resourcePolicyCaches";
 import { subscribeRealtimeScope } from "../realtime/realtimeWebSocket";
 import { assignNodeToLogicGateStatus, moveLogicGateAssignment } from "../kanban/kanbanApi";
@@ -1174,7 +1173,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       upsertNodeRelationshipGraphNode(apiBase, companyID, node);
       if (relationship) upsertNodeRelationshipGraphRelationship(apiBase, companyID, relationship);
       primeNodeRecordStoreCaches(apiBase, companyID, [{ node, relationships: relationship ? [relationship] : [] }]);
-      invalidateWorkspaceSnapshot(apiBase, companyID);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_related_node");
     }
@@ -1228,7 +1226,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     upsertNodeRelationshipGraphNode(apiBase, companyID, node);
     primeNodeRecordStoreCaches(apiBase, companyID, [{ node, relationships: [] }]);
     invalidateNodeRecordStoreCaches(apiBase, companyID, node.node_id);
-    invalidateWorkspaceSnapshot(apiBase, companyID);
   }, [apiBase, companyID, currentUserID, linkedEntityCanEdit, linkedEntityKind, requestJSON]);
 
   const assignLinkedNodeToLogicGate = useCallback(async (logicGateID: string) => {
@@ -1268,7 +1265,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setNodeAccounts(resultNode.accounts ?? nodeAccounts);
     setLinkedNodeTitle((current) => preserveNodeTitle(getNodeTitle(resultNode), current || linkedNodeTitle, linkedNodeID));
     upsertNodeRelationshipGraphNode(apiBase, companyID, resultNode);
-    invalidateWorkspaceSnapshot(apiBase, companyID);
   }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, linkedNodeTitle, nodeAccounts, nodeLogicGateIDs, nodePriorityDraft, preserveNodeTitle]);
 
   const linkLogicGateEntityFromEditor = useCallback(async (entity: EditorEntityLink) => {
@@ -1294,7 +1290,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       resourceType: "logic_gate",
       resourceID: linkedNodeID,
     });
-    invalidateWorkspaceSnapshot(apiBase, companyID);
   }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, requestJSON]);
 
   const updateNodePresetPatch = useCallback(async (patch: Record<string, unknown>) => {
@@ -1312,7 +1307,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setNodeAccounts(updated.accounts ?? nodeAccounts);
       invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
       upsertNodeRelationshipGraphNode(apiBase, companyID, updated);
-      invalidateWorkspaceSnapshot(apiBase, companyID);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_update_node_fields");
     }
@@ -1367,7 +1361,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       if (currentNode) {
         upsertNodeRelationshipGraphNode(apiBase, companyID, { ...currentNode, accounts: savedAccounts });
       }
-      invalidateWorkspaceSnapshot(apiBase, companyID);
     }).catch((err) => {
       setNodeAccounts(previousAccounts);
       setError(err instanceof Error ? err.message : "failed_to_update_node_accounts");
@@ -1404,7 +1397,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setNodeAccounts(result.node.accounts ?? nodeAccounts);
       invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
       upsertNodeRelationshipGraphNode(apiBase, companyID, result.node);
-      invalidateWorkspaceSnapshot(apiBase, companyID);
     }).catch((err) => {
       setError(err instanceof Error ? err.message : "failed_to_update_node_status");
     });
@@ -1466,7 +1458,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       if (!policy) return;
       setNodeRACIAssignments(displayRACIAssignments(policy));
       invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
-      invalidateWorkspaceSnapshot(apiBase, companyID);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_update_node_gvic");
     }
@@ -1491,7 +1482,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       applyLogicGateRACIAssignments(assignments, logicGateID);
       patchLogicGateRecordStoreRACIAssignments(apiBase, companyID, logicGateID, assignments);
       patchLogicGateRACIAssignmentsInCommunicationsWorkspaceCache(companyID, logicGateID, assignments);
-      invalidateWorkspaceSnapshot(apiBase, companyID);
     }).catch((err) => {
       const currentTarget = linkedEditorTargetRef.current;
       if (logicGateRACIMutationSequenceRef.current === mutationSequence && currentTarget.kind === "logic_gate" && currentTarget.id === logicGateID) {
@@ -1517,7 +1507,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       applyLogicGateRACIAssignments(assignments, logicGateID);
       patchLogicGateRecordStoreRACIAssignments(apiBase, companyID, logicGateID, assignments);
       patchLogicGateRACIAssignmentsInCommunicationsWorkspaceCache(companyID, logicGateID, assignments);
-      invalidateWorkspaceSnapshot(apiBase, companyID);
     }).catch((err) => {
       setError(err instanceof Error ? err.message : "failed_to_apply_logic_gate_gvic_to_nodes");
     }).finally(() => {
@@ -1542,7 +1531,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     ).then((policy) => {
       if (!policy) return;
       applyLogicGateRACIAssignments(displayRACIAssignments(policy), logicGateID);
-      invalidateWorkspaceSnapshot(apiBase, companyID);
     }).catch((err) => {
       setError(err instanceof Error ? err.message : "failed_to_apply_inherited_gvic");
     }).finally(() => {
@@ -2571,7 +2559,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               title={linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "Logic Gate" : "Node")}
               variant="embedded"
               readOnly={!linkedEntityCanEdit}
-              onSaved={() => invalidateWorkspaceSnapshot(apiBase, companyID)}
             />
           </div>
         )}

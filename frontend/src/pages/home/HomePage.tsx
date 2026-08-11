@@ -21,7 +21,7 @@ import {
   ensureEmailMessageIngested,
   EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED,
   fetchCommunicationsAuthURL,
-  fetchCommunicationsWorkspacePanel,
+  fetchCommunicationsWorkspaceResources,
   fetchCommunicationsStatus,
 	getEmailCollaborationThread,
 	getCommunicationsArchiveJob,
@@ -67,7 +67,6 @@ import { mangoEmailDraftResourceID, uploadMangoAttachment } from "../../modules/
 import { isOutboundEmailUndoneError } from "../../modules/communications/outboundEmailUndo";
 import { realtimePersonalMailboxScope, realtimeSharedMailboxScope, subscribeRealtimeScope } from "../../modules/realtime/realtimeWebSocket";
 import { buildReplyAllRecipients } from "../../modules/communications/emailRecipients";
-import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
 import { EVENT_EDITOR_EMAIL_REFERENCE_OPEN, type EditorEntityLink } from "../../modules/editor/editorEntityLinks.js";
 import type { NodeRecord, NodeRelationship } from "../../modules/nodes/types";
 import { buildCompanyExplorerTreeRows } from "../../modules/company-explorer/companyExplorerTreeRows";
@@ -76,13 +75,13 @@ import {
   reconcileCommittedNodeTitleInSnapshot,
 } from "../../modules/realtime/committedTitleSnapshotReconciliation";
 import { resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation";
-import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
+import type { ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import type { LogicGateRACIRole, LogicGateRecord } from "../../modules/logic-gates/types";
 import { toLogicGateViewRecord } from "../../modules/logic-gates/types";
 import { invalidateNodeRecordStoreCaches } from "../../modules/nodes/nodeRecordStore";
 import { getLogicGateRecordSingleFlight } from "../../modules/logic-gates/logicGateRecordStore";
-import { removeNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../../modules/nodes/nodeRelationshipGraph";
-import { removeLogicGateRelationshipGraphNode, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../../modules/logic-gates/logicGateRelationshipGraph";
+import { removeNodeRelationshipGraphNode, upsertNodeRelationshipGraphNode } from "../../modules/nodes/nodeRelationshipGraph";
+import { removeLogicGateRelationshipGraphNode, upsertLogicGateRelationshipGraphNode } from "../../modules/logic-gates/logicGateRelationshipGraph";
 import { invalidateKanbanBoardContentsCache } from "../../modules/kanban/KanbanBoardContentStore";
 import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache, type RACIMatrixProjectionRow } from "../../modules/kanban/kanbanApi";
 
@@ -489,8 +488,6 @@ export function HomePage({
   const [loadingSharedInboxes, setLoadingSharedInboxes] = useState(false);
   const [loadingLogicGates, setLoadingLogicGates] = useState(false);
   const [loadingNodes, setLoadingNodes] = useState(false);
-  const [nodeFolders, setNodeFolders] = useState<CompanyExplorerFolder[]>([]);
-  const [nodeFolderItems, setNodeFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
   const [nodes, setNodes] = useState<NodeRecord[]>([]);
   const [nodeRelationships, setNodeRelationships] = useState<NodeRelationship[]>([]);
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
@@ -499,8 +496,6 @@ export function HomePage({
   const [RACIMatrixViewerListEntries, setRACIMatrixViewerListEntries] = useState<RACIMatrixViewerListEntry[]>([]);
   const [RACIMatrixTargetUserID, setRACIMatrixTargetUserID] = useState("");
   const [matrixAccountFilterIDs, setMatrixAccountFilterIDs] = useState<string[]>([]);
-  const [logicGateFolders, setLogicGateFolders] = useState<CompanyExplorerFolder[]>([]);
-  const [logicGateFolderItems, setLogicGateFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
   const [logicGates, setLogicGates] = useState<LogicGateRecord[]>([]);
   const [myLogicGateShortcuts, setMyLogicGateShortcuts] = useState<UserLogicGateShortcut[]>([]);
   const [nodeSearch, setNodeSearch] = useState("");
@@ -1451,30 +1446,16 @@ export function HomePage({
     setLoadingNodes(true);
     try {
       const titleVersionAtStart = readCommittedEntityTitleVersion();
-      const panel = await fetchCommunicationsWorkspacePanel(companyID);
-      setLogicGateFolders(panel.logicGateFolders);
-      setLogicGateFolderItems(panel.logicGateFolderItems);
+      const panel = await fetchCommunicationsWorkspaceResources(companyID);
       setLogicGates(foldCommittedEntityTitlesSince(
         panel.logicGates, companyID, titleVersionAtStart,
         reconcileCommittedLogicGateRecordTitles,
       ));
       setMyLogicGateShortcuts(sortLogicGateShortcuts(panel.myLogicGateShortcuts));
-      setNodeFolders(panel.nodeFolders);
-      setNodeFolderItems(panel.nodeFolderItems);
       setNodes(foldCommittedEntityTitlesSince(
         panel.nodes, companyID, titleVersionAtStart,
         reconcileCommittedNodeTitleInSnapshot,
       ));
-      setLogicGateExpandedIDs((previous) => {
-        const next = new Set(previous);
-        for (const folder of panel.logicGateFolders) next.add(`workspace-folder-${folder.folder_id}`);
-        return next;
-      });
-      setNodeExpandedIDs((previous) => {
-        const next = new Set(previous);
-        for (const folder of panel.nodeFolders) next.add(`workspace-folder-${folder.folder_id}`);
-        return next;
-      });
       return true;
     } catch (logicGateError) {
       setError(formatError(logicGateError, "Failed to load Home nodes"));
@@ -3997,10 +3978,10 @@ export function HomePage({
     logicGates: [],
     projects: [],
     kanbanBoards: [],
-    folders: nodeFolders,
-    folderItems: nodeFolderItems,
+    folders: [],
+    folderItems: [],
     rootRowOrder: {},
-  }).filter((row) => row.kind === "folder" || row.kind === "node"), [nodeExpandedIDs, nodeFolderItems, nodeFolders, nodes]);
+  }).filter((row) => row.kind === "node"), [nodeExpandedIDs, nodes]);
   const visibleNodeRows = useMemo(() => filterExplorerRowsForSearch(allNodeRows, nodeSearch), [allNodeRows, nodeSearch]);
   const logicGateByID = useMemo(() => new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate])), [logicGates]);
   const logicGateByIDRef = useRef(logicGateByID);
@@ -4098,9 +4079,7 @@ export function HomePage({
   ), [myNodes]);
   const myNodeGroups = useMemo(() => buildMyNodeGroups({
     nodes: myLogicGateNodes,
-    logicGateFolders,
-    logicGateFolderItems,
-  }), [logicGateFolderItems, logicGateFolders, myLogicGateNodes]);
+  }), [myLogicGateNodes]);
   const logicGateCanvasRecords = useMemo(() => logicGates.map((logicGate) => ({
     ...logicGate,
     node_id: logicGate.logic_gate_id,
@@ -4112,19 +4091,17 @@ export function HomePage({
     logicGates: logicGateCanvasRecords,
     projects: [],
     kanbanBoards: [],
-    folders: logicGateFolders,
-    folderItems: logicGateFolderItems,
+    folders: [],
+    folderItems: [],
     rootRowOrder: {},
-  }).filter((row) => row.kind === "folder" || row.kind === "logic_gate"), [logicGateCanvasRecords, logicGateExpandedIDs, logicGateFolderItems, logicGateFolders]);
+  }).filter((row) => row.kind === "logic_gate"), [logicGateCanvasRecords, logicGateExpandedIDs]);
   const visibleLogicGateRows = useMemo(() => filterExplorerRowsForSearch(allLogicGateRows, logicGateSearch), [allLogicGateRows, logicGateSearch]);
   const shortcutLogicGateIDs = useMemo(() => new Set(myLogicGateShortcuts.map((shortcut) => shortcut.logic_gate_id)), [myLogicGateShortcuts]);
   const myLogicGateGroups = useMemo(() => buildMyLogicGateGroups({
     shortcuts: myLogicGateShortcuts,
     assignedLogicGates: assignedMyLogicGates,
     logicGateByID,
-    folders: logicGateFolders,
-    folderItems: logicGateFolderItems,
-  }), [assignedMyLogicGates, logicGateByID, logicGateFolderItems, logicGateFolders, myLogicGateShortcuts]);
+  }), [assignedMyLogicGates, logicGateByID, myLogicGateShortcuts]);
   const myLogicGateOrderedRowIDs = useMemo(() => myLogicGateGroups
     .flatMap((group) => group.logicGates.map((logicGate) => logicGateTreeID(logicGate.logic_gate_id))), [myLogicGateGroups]);
   const activeRACIRoleLogicGates = useMemo(() => {
@@ -4136,9 +4113,7 @@ export function HomePage({
     shortcuts: [],
     assignedLogicGates: activeRACIRoleLogicGates,
     logicGateByID,
-    folders: logicGateFolders,
-    folderItems: logicGateFolderItems,
-  }), [activeRACIRoleLogicGates, logicGateByID, logicGateFolderItems, logicGateFolders]);
+  }), [activeRACIRoleLogicGates, logicGateByID]);
   const RACIMatrixDirectoryUsers = useMemo(() => {
     const users = [...companyUsers];
     if (currentUserID && !users.some((user) => user.user_id.trim() === currentUserID)) {
@@ -4529,15 +4504,13 @@ export function HomePage({
       if (mailboxRequestOwnerIsCurrent(owner)) setBusy("");
     }
   }, [adjustPrimaryMailboxCount, canMutateCurrentMailView, companyID, currentMailboxRequestOwner, forgetLocalMailboxMutationEchoes, mailboxRequestOwnerIsCurrent, providerMutationAvailableForMessageIDs, rememberLocalMailboxMutationEchoes, removeMessagesFromVisibleMailList, selectedMessageID]);
-  const addShortcutsFromExplorerPayload = useCallback(async (payload: ExplorerDragPayload | null) => {
+  const addShortcutsFromExplorer = useCallback(async (logicGateIDs: string[]) => {
     setBusy("my-logic-gates");
     setError("");
     try {
       const result = await addMyLogicGateShortcutsCommand({
         companyID,
-        payload,
-        folders: logicGateFolders,
-        folderItems: logicGateFolderItems,
+        logicGateIDs,
       });
       if (!result) return;
       setMyLogicGateShortcuts((previous) => mergeLogicGateShortcuts(previous, result.shortcuts));
@@ -4547,7 +4520,7 @@ export function HomePage({
     } finally {
       setBusy("");
     }
-  }, [companyID, logicGateFolderItems, logicGateFolders]);
+  }, [companyID]);
   const removeShortcut = useCallback(async (logicGateID: string) => {
     if (!logicGateID.trim()) return;
     setBusy("my-logic-gates");
@@ -4582,21 +4555,12 @@ export function HomePage({
         invalidateLogicGateArenaView: invalidateLogicGateArenaViewCache,
         invalidateNodeRecord: invalidateNodeRecordStoreCaches,
         upsertNodeRelationshipGraphNode,
-        upsertNodeFolderItemInRelationshipGraph: upsertCompanyExplorerFolderItemInNodeRelationshipGraph,
-        upsertLogicGateFolderItemInRelationshipGraph: upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph,
       });
       if (!conversion) return;
       for (const node of conversion.result.nodes ?? []) {
         setNodes((previous) => {
           const next = previous.filter((item) => item.node_id !== node.node_id);
           return [...next, node];
-        });
-      }
-      for (const item of conversion.result.folder_items ?? []) {
-        if (item.item_type !== "node") continue;
-        setNodeFolderItems((previous) => {
-          const next = previous.filter((candidate) => candidate.item_type !== item.item_type || candidate.item_id !== item.item_id);
-          return [...next, item];
         });
       }
       const converted = conversion.convertedMessageIDs;
@@ -4995,24 +4959,7 @@ export function HomePage({
     void refreshRACIMatrixProjection();
     return undefined;
   }, [activeRACIMatrixUserID, companyID, isInboxMatrixView, refreshRACIMatrixProjection]);
-  const mergeCreatedFolderItems = useCallback((items: CompanyExplorerFolderItem[]) => {
-    if (items.length === 0) return;
-    setNodeFolderItems((previous) => {
-      const byKey = new Map(previous.map((item) => [`${item.item_type}:${item.item_id}`, item]));
-      for (const item of items.filter((item) => item.item_type === "node")) byKey.set(`${item.item_type}:${item.item_id}`, item);
-      return Array.from(byKey.values());
-    });
-    setLogicGateFolderItems((previous) => {
-      const byKey = new Map(previous.map((item) => [`${item.item_type}:${item.item_id}`, item]));
-      for (const item of items.filter((item) => item.item_type === "logic_gate")) byKey.set(`${item.item_type}:${item.item_id}`, item);
-      return Array.from(byKey.values());
-    });
-    for (const item of items) {
-      upsertCompanyExplorerFolderItemInNodeRelationshipGraph(apiBase, companyID, item);
-      upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph(apiBase, companyID, item);
-    }
-  }, [apiBase, companyID]);
-  const mergeCreatedLogicGate = useCallback((logicGate: LogicGateRecord, folderItems: CompanyExplorerFolderItem[], titleVersionAtStart: number) => {
+  const mergeCreatedLogicGate = useCallback((logicGate: LogicGateRecord, titleVersionAtStart: number) => {
     const reconciledLogicGate = foldCommittedEntityTitlesSince(
       [logicGate], companyID, titleVersionAtStart,
       reconcileCommittedLogicGateRecordTitles,
@@ -5021,17 +4968,15 @@ export function HomePage({
       const next = previous.filter((item) => item.logic_gate_id !== reconciledLogicGate.logic_gate_id);
       return [...next, reconciledLogicGate];
     });
-    mergeCreatedFolderItems(folderItems);
     upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateViewRecord(reconciledLogicGate));
     return reconciledLogicGate;
-  }, [apiBase, companyID, mergeCreatedFolderItems]);
+  }, [apiBase, companyID]);
   const createHomeNode = useCallback(async (assignment?: { logicGateID: string; priority: InboxPriority; status?: RACIInboxStatus }) => {
     setBusy("create-node");
     setError("");
     try {
       const titleVersionAtStart = readCommittedEntityTitleVersion();
       const result = await createHomeNodeCommand({ apiBase, companyID });
-      mergeCreatedFolderItems(result.folderItems);
       mergeUpdatedNode(result.node, titleVersionAtStart);
       if (assignment?.logicGateID.trim()) {
         const nextNodeByID = new Map(nodeByID);
@@ -5057,7 +5002,7 @@ export function HomePage({
     } finally {
       setBusy("");
     }
-  }, [apiBase, applyRACIMatrixProjectionRows, companyID, mergeCreatedFolderItems, mergeUpdatedNode, nodeByID]);
+  }, [apiBase, applyRACIMatrixProjectionRows, companyID, mergeUpdatedNode, nodeByID]);
   const createHomeLogicGate = useCallback(async (options: { assignCurrentUser?: boolean; creatorRACIRole?: LogicGateRACIRole; openArena?: boolean } = {}) => {
     setBusy("create-logic-gate");
     setError("");
@@ -5065,7 +5010,7 @@ export function HomePage({
       const creatorRACIRole = options.creatorRACIRole ?? (options.assignCurrentUser ? "responsible" : undefined);
       const titleVersionAtStart = readCommittedEntityTitleVersion();
       const result = await createHomeLogicGateCommand({ apiBase, companyID, creatorRACIRole });
-      const logicGate = mergeCreatedLogicGate(result.logicGate, result.folderItems, titleVersionAtStart);
+      const logicGate = mergeCreatedLogicGate(result.logicGate, titleVersionAtStart);
       setNotice(creatorRACIRole ? "Logic Gate created and assigned to you." : "Logic Gate created.");
       if (options.openArena ?? true) {
         openLogicGateArena(logicGate.logic_gate_id, logicGate.header || "Logic Gate");
@@ -5094,8 +5039,7 @@ export function HomePage({
         creatorRACIRole: input.creatorRACIRole,
         createLogicGateTitle: "new logic gate",
       });
-      if (result.logicGate) mergeCreatedLogicGate(result.logicGate, result.folderItems.filter((item) => item.item_type === "logic_gate"), titleVersionAtStart);
-      mergeCreatedFolderItems(result.folderItems.filter((item) => item.item_type !== "logic_gate"));
+      if (result.logicGate) mergeCreatedLogicGate(result.logicGate, titleVersionAtStart);
       applyRACIMatrixProjectionRows(result.gvic_projection_rows, { titleVersionAtStart });
       mergeUpdatedNode(result.node, titleVersionAtStart);
       setNotice("Note created in a new Logic Gate.");
@@ -5104,7 +5048,7 @@ export function HomePage({
     } finally {
       setBusy("");
     }
-  }, [apiBase, applyRACIMatrixProjectionRows, companyID, mergeCreatedFolderItems, mergeCreatedLogicGate, mergeUpdatedNode]);
+  }, [apiBase, applyRACIMatrixProjectionRows, companyID, mergeCreatedLogicGate, mergeUpdatedNode]);
   const openNodeBulkEditMenu = useCallback((nodeID: string, event: React.MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
@@ -5185,7 +5129,7 @@ export function HomePage({
       const titleVersionAtStart = readCommittedEntityTitleVersion();
       const logicGateResult = await createHomeLogicGateCommand({ apiBase, companyID, creatorRACIRole: input.creatorRACIRole });
       const logicGate = logicGateResult.logicGate;
-      mergeCreatedLogicGate(logicGate, logicGateResult.folderItems, titleVersionAtStart);
+      mergeCreatedLogicGate(logicGate, titleVersionAtStart);
       const dropResult = await dropNodesIntoInboxLogicGateCommand({
         apiBase,
         companyID,
@@ -5364,9 +5308,7 @@ export function HomePage({
           return nextLogicGateIDs.length === (node.logic_gate_ids ?? []).length ? node : { ...node, logic_gate_ids: nextLogicGateIDs };
         }));
       setNodeRelationships((previous) => previous.filter((relationship) => !nodeIDSet.has(relationship.node_id_a) && !nodeIDSet.has(relationship.node_id_b)));
-      setNodeFolderItems((previous) => previous.filter((item) => item.item_type !== "node" || !nodeIDSet.has(item.item_id)));
       setLogicGates((previous) => previous.filter((logicGate) => !logicGateIDSet.has(logicGate.logic_gate_id)));
-      setLogicGateFolderItems((previous) => previous.filter((item) => item.item_type !== "logic_gate" || !logicGateIDSet.has(item.item_id)));
       setMyLogicGateShortcuts((previous) => previous.filter((shortcut) => !logicGateIDSet.has(shortcut.logic_gate_id)));
       setSelectedNodeRowIDs((previous) => new Set(Array.from(previous).filter((treeID) => !nodeIDSet.has(nodeIDFromTreeID(treeID)))));
       setSelectedLogicGateRowIDs((previous) => new Set(Array.from(previous).filter((treeID) => !logicGateIDSet.has(logicGateIDFromTreeID(treeID)))));
@@ -5844,14 +5786,14 @@ export function HomePage({
             <>
               {activeRACIInboxSection && (
                 <RACIRoleInboxMatrix
+                  apiBase={apiBase}
+                  companyID={companyID}
                   section={activeRACIInboxSection}
                   loading={loadingNodes}
                   nodes={matrixFilteredNodes}
                   nodeByID={nodeByID}
                   nodeRelationships={nodeRelationships}
                   logicGateByID={logicGateByID}
-                  nodeFolders={nodeFolders}
-                  nodeFolderItems={nodeFolderItems}
                   currentUserID={activeRACIMatrixUserID}
                   viewerSelector={gvicMatrixViewerSelectorElement}
                   accountFilter={matrixAccountFilterControl}
@@ -6042,8 +5984,8 @@ export function HomePage({
             <LogicGateRail
               loading={loadingLogicGates}
               logicGateByID={logicGateByID}
-              folders={logicGateFolders}
-              folderItems={logicGateFolderItems}
+              apiBase={apiBase}
+              companyID={companyID}
               allRows={visibleLogicGateRows}
               selectedRowIDs={selectedLogicGateRowIDs}
               expandedRowIDs={logicGateExpandedIDs}
@@ -6064,7 +6006,7 @@ export function HomePage({
               onSelectRow={selectLogicGateRow}
               onSelectShortcut={selectLogicGateShortcut}
               onOpenLogicGate={openLogicGateArena}
-              onAddShortcuts={addShortcutsFromExplorerPayload}
+              onAddShortcuts={addShortcutsFromExplorer}
               onRemoveShortcut={removeShortcut}
               onConvertMessages={convertMessagesToLogicGate}
               onCreateLogicGate={(options) => { void createHomeLogicGate({ ...options, openArena: false }); }}

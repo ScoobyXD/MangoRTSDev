@@ -29,15 +29,13 @@ import {
   listCompanyUsers,
   listCompanyUserGroups,
   listLogicGates,
-  listLogicGateFolderItems,
   listCommunicationsSharedInboxes,
   listEmailDrafts,
   listEmailFolders,
   listEmailMessages,
   listStoredEmailMessages,
-  listNodeFolderItems,
   listNodes,
-  markCommunicationsWorkspacePanelStale,
+  markCommunicationsWorkspaceResourcesStale,
   markCommunicationsArchiveJobsStaleForMailboxChange,
   mergeEmailMessageIntoMessageList,
   parseEmailAddressList,
@@ -543,7 +541,7 @@ test("local list merge helpers prepend one new inbox message without replacing t
   );
 });
 
-test("workspace panel scoped stale refetches only matching resource caches", async () => {
+test("workspace resource scoped stale refetches only matching resource caches", async () => {
   invalidateCommunicationsCache();
   const calls: string[] = [];
   const originalFetch = globalThis.fetch;
@@ -552,80 +550,20 @@ test("workspace panel scoped stale refetches only matching resource caches", asy
     calls.push(path);
     if (path.startsWith("/v1/logic-gates?")) return jsonResponse({ logic_gates: [{ company_id: "company-1", logic_gate_id: "gate-1", header: "Gate 1", created_timestamp: "2026-01-01T00:00:00Z" }] });
     if (path.startsWith("/v1/nodes?")) return jsonResponse({ nodes: [{ company_id: "company-1", node_id: `node-${calls.filter((call) => call.startsWith("/v1/nodes?")).length}`, name: "Node", created_timestamp: "2026-01-01T00:00:00Z" }] });
-    if (path.startsWith("/v1/company-explorer/roots?")) return jsonResponse({ rows: [] });
     return jsonResponse({ folders: [], shortcuts: [], users: [] });
   };
   try {
     await listLogicGates("company-1");
     await listNodes("company-1");
-    await listNodeFolderItems("company-1");
-    markCommunicationsWorkspacePanelStale("company-1", { nodes: true });
+    markCommunicationsWorkspaceResourcesStale("company-1", { nodes: true });
     await listLogicGates("company-1");
     await listNodes("company-1");
-    await listNodeFolderItems("company-1");
 
     assert.deepEqual(calls, [
       "/v1/logic-gates?company_id=company-1",
       "/v1/nodes?company_id=company-1",
-      "/v1/company-explorer/roots?company_id=company-1",
       "/v1/nodes?company_id=company-1",
     ]);
-  } finally {
-    globalThis.fetch = originalFetch;
-    invalidateCommunicationsCache();
-  }
-});
-
-test("company explorer folder item helpers do not walk collapsed child branches", async () => {
-  invalidateCommunicationsCache();
-  const calls: string[] = [];
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (input: RequestInfo | URL) => {
-    const path = input.toString();
-    calls.push(path);
-    if (path.startsWith("/v1/company-explorer/children?")) {
-      assert.fail(`unexpected company explorer children request: ${path}`);
-    }
-    if (path.startsWith("/v1/company-explorer/roots?")) {
-      return jsonResponse({
-        rows: [
-          {
-            company_id: "company-1",
-            entity_id: "folder-1",
-            entity_type: "folder",
-            name: "Folder",
-            position: 1000,
-            has_children: true,
-            created_timestamp: "2026-01-01T00:00:00Z",
-            updated_timestamp: "2026-01-01T00:00:00Z",
-          },
-          {
-            company_id: "company-1",
-            entity_id: "gate-entity-1",
-            entity_type: "logic_gate",
-            resource_id: "gate-1",
-            name: "Gate 1",
-            parent_entity_id: "folder-1",
-            edge_id: "edge-gate-1",
-            position: 1000,
-            has_children: false,
-            created_timestamp: "2026-01-01T00:00:00Z",
-            updated_timestamp: "2026-01-01T00:00:00Z",
-          },
-        ],
-      });
-    }
-    return jsonResponse({});
-  };
-  try {
-    const [nodeItems, logicGateItems] = await Promise.all([
-      listNodeFolderItems("company-1"),
-      listLogicGateFolderItems("company-1"),
-    ]);
-
-    assert.deepEqual(nodeItems, []);
-    assert.deepEqual(logicGateItems.map((item) => [item.folder_id, item.item_id]), [["folder-1", "gate-1"]]);
-    assert.deepEqual(calls, ["/v1/company-explorer/roots?company_id=company-1"]);
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();
@@ -685,7 +623,7 @@ test("listCompanyUserGroups shares node-open reference reads and honors scoped i
     assert.equal((await listCompanyUserGroups("company-1")).groups[0]?.group_id, "group-1");
     assert.equal(calls, 1);
 
-    markCommunicationsWorkspacePanelStale("company-1", { userGroups: true });
+    markCommunicationsWorkspaceResourcesStale("company-1", { userGroups: true });
     assert.equal((await listCompanyUserGroups("company-1")).groups[0]?.group_id, "group-2");
     assert.equal(calls, 2);
   } finally {

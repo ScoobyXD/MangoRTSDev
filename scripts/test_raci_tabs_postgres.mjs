@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const schema = join(repoRoot, "backend", "db", "schema.sql");
 const migration = join(repoRoot, "backend", "db", "migrations", "20260810_zzzz_raci_tabs.sql");
+const targetedMigration = join(repoRoot, "backend", "db", "migrations", "20260811_zz_targeted_raci_tabs.sql");
 const postgresStoreSource = readFileSync(join(repoRoot, "backend", "internal", "store", "postgres_raci_tabs.go"), "utf8");
 
 function goSQLConstant(name) {
@@ -86,7 +87,8 @@ try {
 
   runFile(schema);
   runFile(migration);
-  runFile(migration);
+  runFile(targetedMigration);
+  runFile(targetedMigration);
   expectScalar("select count(*) from information_schema.columns where table_schema='public' and table_name='raci_tabs_items'", "9", "raci_tabs_items exact column count");
   expectScalar("select count(*) from information_schema.columns where table_schema='public' and table_name='raci_tabs_folders'", "9", "raci_tabs_folders exact column count");
 
@@ -121,13 +123,18 @@ try {
 
   sql("truncate raci_tabs_items");
   runFile(migration);
+  runFile(targetedMigration);
   expectScalar("select count(*) from raci_tabs_items", "40", "deterministic migration backfill");
   expectScalar("select string_agg(position::text,',' order by position) from raci_tabs_items where user_id='20000000-0000-4000-8000-000000000001'", "1000,2000", "deterministic per-role root positions");
   runFile(migration);
+  runFile(targetedMigration);
   expectScalar("select count(*) from raci_tabs_items", "40", "idempotent repeated migration");
 
+  sql("update raci_tabs_items set name='UNRELATED SENTINEL' where user_id='20000000-0000-4000-8000-000000000001' and logic_gate_id='40000000-0000-4000-8000-000000000002'");
   sql("insert into resource_gvic_assignments(company_id,resource_type,resource_id,role,principal_type,principal_id) values ('10000000-0000-4000-8000-000000000001','logic_gate','40000000-0000-4000-8000-000000000001','responsible','user','20000000-0000-4000-8000-000000000001')");
   expectScalar("select role from raci_tabs_items where user_id='20000000-0000-4000-8000-000000000001' and logic_gate_id='40000000-0000-4000-8000-000000000001'", "responsible", "winning role priority");
+  expectScalar("select name from raci_tabs_items where user_id='20000000-0000-4000-8000-000000000001' and logic_gate_id='40000000-0000-4000-8000-000000000002'", "UNRELATED SENTINEL", "a direct Gate One RACI change does not recalculate Gate Two");
+  sql("select mangorts_sync_raci_tabs_logic_gate('10000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000002')");
   sql("insert into raci_tabs_folders(company_id,folder_id,user_id,role,name,position) values ('10000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','responsible','Personal',1000); update raci_tabs_items set folder_id='50000000-0000-4000-8000-000000000001' where user_id='20000000-0000-4000-8000-000000000001' and logic_gate_id='40000000-0000-4000-8000-000000000001'");
   sql("update resource_gvic_assignments set role='accountable' where company_id='10000000-0000-4000-8000-000000000001' and resource_type='logic_gate' and resource_id='40000000-0000-4000-8000-000000000001' and principal_type='user' and principal_id='20000000-0000-4000-8000-000000000001'");
   expectScalar("select role || ':' || coalesce(folder_id::text,'root') from raci_tabs_items where user_id='20000000-0000-4000-8000-000000000001' and logic_gate_id='40000000-0000-4000-8000-000000000001'", "accountable:root", "winning-role change clears personal placement");
@@ -155,6 +162,12 @@ try {
   sql("delete from logic_gates where company_id='10000000-0000-4000-8000-000000000001' and logic_gate_id='40000000-0000-4000-8000-000000000002'");
   expectScalar("select count(*) from raci_tabs_items", "20", "Logic Gate deletion removes only matching copied items");
   expectScalar("select count(*) from raci_tabs_folders", "1", "Logic Gate deletion preserves personal folders");
+
+  sql("delete from company_memberships where company_id='10000000-0000-4000-8000-000000000001' and user_id='20000000-0000-4000-8000-000000000001'");
+  expectScalar("select count(*) from raci_tabs_items where user_id='20000000-0000-4000-8000-000000000001'", "0", "membership removal deletes only that user's prepared rows");
+  sql("insert into company_memberships(company_id,user_id,role) values ('10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','company_user')");
+  expectScalar("select role from raci_tabs_items where user_id='20000000-0000-4000-8000-000000000001' and logic_gate_id='40000000-0000-4000-8000-000000000001'", "accountable", "membership addition restores the user's direct assignment");
+  expectScalar("select count(*) from raci_tabs_items where user_id='20000000-0000-4000-8000-000000000001'", "1", "membership addition recalculates only resources directly assigned to that user");
 
   sql("alter table raci_tabs_items add column unexpected_column text");
   const driftOutput = runFile(migration, true);

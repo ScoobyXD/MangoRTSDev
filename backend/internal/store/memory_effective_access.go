@@ -82,7 +82,11 @@ func (r *MemoryRepo) ListEffectiveUsersForResource(companyID, resourceType, reso
 func (r *MemoryRepo) ResolveEffectiveUsersForResource(ctx context.Context, companyID, resourceType, resourceID, accessLevel string, candidateUserIDs []string) (bool, []string, error) {
 	companyID = strings.TrimSpace(companyID)
 	resourceID = strings.TrimSpace(resourceID)
-	resourceType, typeOK := NormalizeEntityType(resourceType)
+	resourceType = strings.ToLower(strings.TrimSpace(resourceType))
+	_, typeOK := NormalizeEntityType(resourceType)
+	if resourceType == EntityTypeKPI {
+		typeOK = true
+	}
 	accessLevel, accessOK := NormalizeEntityPermission(accessLevel)
 	if ctx == nil || companyID == "" || resourceID == "" || !typeOK || !accessOK || EntityPermissionRank(accessLevel) == 0 {
 		return false, nil, ErrInvalid
@@ -97,6 +101,16 @@ func (r *MemoryRepo) ResolveEffectiveUsersForResource(ctx context.Context, compa
 	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return false, nil, err
+	}
+	if resourceType == EntityTypeKPI {
+		kpi, ok := r.kpis[key(companyID, resourceID)]
+		if !ok {
+			return false, []string{}, nil
+		}
+		resourceType = EntityTypeLogicGate
+		resourceID = kpi.LogicGateID
+	} else {
+		resourceType, _ = NormalizeEntityType(resourceType)
 	}
 	if !r.entityExistsLocked(companyID, resourceType, resourceID) {
 		return false, []string{}, nil

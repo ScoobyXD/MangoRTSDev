@@ -26,5 +26,6 @@
 24. Deleting a Huddle Logic Gate is blocked while it owns any Huddle Nodes.
 25. Deleting an empty Huddle Logic Gate moves it and its restorable direct policies and Huddle Explorer placement to the Recycle Bin; restoring it reuses the same UUID.
 26. The first version has no Huddle settings, frequency, regular Logic Gate membership, KPI aggregation, snapshots, timeline, chat, or automatic Huddle Node creation.
+27. Realtime current-audience resolution recognizes `huddle_logic_gate` and resolves its users from that Huddle Logic Gate's direct typed permission policy.
 
 Last updated: 2026-08-11

@@ -33,6 +33,9 @@ func (r *PostgresRepo) CreateLogicGateWithWorkspaceEvent(companyID, header strin
 	}); err != nil {
 		return domain.LogicGate{}, domain.DomainEvent{}, err
 	}
+	if _, _, err := placeCompanyExplorerItemInDefaultFolderTx(ctx, tx, item.CompanyID, EntityTypeLogicGate, item.LogicGateID, "", false); err != nil {
+		return domain.LogicGate{}, domain.DomainEvent{}, err
+	}
 	event, err := r.appendDomainEventTx(ctx, tx, logicGateCreatedWorkspaceEventInput(item, workItemAssignmentEventMetadata{}))
 	if err != nil {
 		return domain.LogicGate{}, domain.DomainEvent{}, err

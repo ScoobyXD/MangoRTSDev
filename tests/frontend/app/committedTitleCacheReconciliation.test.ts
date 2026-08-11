@@ -28,7 +28,6 @@ import {
   hasNodeRelationshipGraphSnapshot,
   refreshNodeRelationshipGraphSnapshot,
 } from "../../../frontend/src/modules/nodes/nodeRelationshipGraph.js";
-import { invalidateWorkspaceSnapshot } from "../../../frontend/src/modules/workspace/workspaceSnapshotCache.js";
 
 test("Node title publication invalidates Home and PM reads and patches cached Kanban cards", async () => {
   const appLayoutSource = readFileSync("frontend/src/app/applayout.tsx", "utf8");
@@ -174,7 +173,6 @@ test("Node graph cache is patched synchronously and an older snapshot cannot ove
   const apiBase = "https://title-cache-graph.example.test";
   const companyID = "title-cache-graph-company";
   const nodeID = "node-graph";
-  invalidateWorkspaceSnapshot(apiBase, companyID);
   resetCommittedEntityTitleRegistryForTests();
   let snapshotFetches = 0;
   let releaseStaleFetch!: () => void;
@@ -189,7 +187,8 @@ test("Node graph cache is patched synchronously and an older snapshot cannot ove
   );
   globalThis.fetch = async (input: RequestInfo | URL) => {
     const path = input.toString();
-    if (!path.startsWith(`${apiBase}/v1/workspace/snapshot?`)) throw new Error(`unexpected request: ${path}`);
+    if (path.startsWith(`${apiBase}/v1/node-relationships?`)) return jsonResponse({ relationships: [] });
+    if (!path.startsWith(`${apiBase}/v1/nodes?`)) throw new Error(`unexpected request: ${path}`);
     snapshotFetches += 1;
     if (snapshotFetches === 2) {
       markStaleFetchStarted();
@@ -202,7 +201,6 @@ test("Node graph cache is patched synchronously and an older snapshot cannot ove
         name: "Old graph node",
         created_timestamp: "2026-07-13T00:00:00Z",
       }],
-      relationships: [],
     });
   };
 
@@ -211,7 +209,6 @@ test("Node graph cache is patched synchronously and an older snapshot cannot ove
     assert.equal(getNodeRelationshipGraphSnapshot(apiBase, companyID).nodes[0]?.name, "Old graph node");
     assert.equal(hasNodeRelationshipGraphSnapshot(apiBase, companyID), true);
 
-    invalidateWorkspaceSnapshot(apiBase, companyID);
     const staleRefresh = refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
     await staleFetchStarted;
     publishCommittedEntityTitleUpdate({
@@ -229,11 +226,10 @@ test("Node graph cache is patched synchronously and an older snapshot cannot ove
     releaseStaleFetch();
     await staleRefresh;
     assert.equal(getNodeRelationshipGraphSnapshot(apiBase, companyID).nodes[0]?.name, "Committed graph node");
-    assert.equal(snapshotFetches, 2, "the stale in-flight response must be folded without a retry request");
+    assert.equal(snapshotFetches, 2, "the stale in-flight node response must be folded without a retry request");
   } finally {
     unsubscribe();
     globalThis.fetch = originalFetch;
-    invalidateWorkspaceSnapshot(apiBase, companyID);
     resetCommittedEntityTitleRegistryForTests();
   }
 });

@@ -6,7 +6,7 @@ import {
   peekKanbanBoardContentsCache,
   primeKanbanBoardContentsCache,
 } from "../../../../frontend/src/modules/kanban/KanbanBoardContentStore.js";
-import { moveLogicGateAssignment } from "../../../../frontend/src/modules/kanban/kanbanApi.js";
+import { invalidateKanbanBoardListCache, listKanbanBoards, moveLogicGateAssignment } from "../../../../frontend/src/modules/kanban/kanbanApi.js";
 import {
   EVENT_KANBAN_BOARD_CONTENTS_UPDATED,
   logicGateKanbanBoardID,
@@ -85,6 +85,35 @@ function assignmentResponse(destinationBoardID: string) {
     gvic_projection_rows: [],
   };
 }
+
+test("simultaneous board-list reads share one request", async () => {
+  const apiBase = "https://board-list-dedup.test";
+  const companyID = "company-dedup";
+  const originalFetch = globalThis.fetch;
+  let fetchCount = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  globalThis.fetch = (async () => {
+    fetchCount += 1;
+    await gate;
+    return jsonResponse({ boards: [{ company_id: companyID, board_id: "board-1", title: "Board", position: 1000 }] });
+  }) as typeof fetch;
+
+  try {
+    invalidateKanbanBoardListCache(apiBase, companyID);
+    const first = listKanbanBoards(apiBase, companyID);
+    const second = listKanbanBoards(apiBase, companyID);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(fetchCount, 1);
+    release();
+    const [firstBoards, secondBoards] = await Promise.all([first, second]);
+    assert.deepEqual(firstBoards, secondBoards);
+  } finally {
+    release();
+    globalThis.fetch = originalFetch;
+    invalidateKanbanBoardListCache(apiBase, companyID);
+  }
+});
 
 test("cross-Logic-Gate assignment success invalidates and announces both canonical boards", async () => {
   const apiBase = "https://api.test";

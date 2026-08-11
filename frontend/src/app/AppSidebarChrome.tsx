@@ -86,7 +86,7 @@ import {
 import type { SidebarPinDropPlacement } from "./sidebarPinTree";
 import {
   countSidebarLogicGateStatuses,
-  startSidebarLogicGateStatusCountSync,
+  emptySidebarLogicGateStatusCounts,
   type SidebarLogicGateStatusCounts,
 } from "./sidebarLogicGateStatusCounts";
 import { HuddleExplorerSection } from "../modules/huddles/HuddleExplorerSection";
@@ -342,55 +342,85 @@ export function AppSidebar({
   const sharedCreateNameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedEmailInputRef = useRef<HTMLInputElement | null>(null);
   const skipRenameBlurRef = useRef(false);
+  const pinnedBoardSubscriptionByLogicGateIDRef = useRef(new Map<string, () => void>());
+  const trackedPinnedLogicGateIDsRef = useRef(new Set<string>());
+  const pinnedCountRequestVersionByLogicGateIDRef = useRef(new Map<string, number>());
+  const refreshPinnedLogicGateCountsRef = useRef<(logicGateID: string, boardID?: string) => void>(() => undefined);
+
+  refreshPinnedLogicGateCountsRef.current = (logicGateID: string, boardID = logicGateKanbanBoardID(logicGateID)) => {
+    if (!trackedPinnedLogicGateIDsRef.current.has(logicGateID)) return;
+    const version = (pinnedCountRequestVersionByLogicGateIDRef.current.get(logicGateID) ?? 0) + 1;
+    pinnedCountRequestVersionByLogicGateIDRef.current.set(logicGateID, version);
+    invalidateKanbanBoardContentsCache(apiBase, companyID, boardID);
+    void getKanbanBoardContentsSingleFlight(apiBase, companyID, boardID, Number.MAX_SAFE_INTEGER).then(
+      (contents) => {
+        if (!trackedPinnedLogicGateIDsRef.current.has(logicGateID)
+          || pinnedCountRequestVersionByLogicGateIDRef.current.get(logicGateID) !== version) return;
+        setLogicGateStatusCountsByID((current) => ({
+          ...current,
+          [logicGateID]: countSidebarLogicGateStatuses(contents),
+        }));
+      },
+      () => {
+        if (!trackedPinnedLogicGateIDsRef.current.has(logicGateID)
+          || pinnedCountRequestVersionByLogicGateIDRef.current.get(logicGateID) !== version) return;
+        setLogicGateStatusCountsByID((current) => ({
+          ...current,
+          [logicGateID]: emptySidebarLogicGateStatusCounts(),
+        }));
+      },
+    );
+  };
+
   useEffect(() => {
-    setLogicGateStatusCountsByID({});
-    if (!companyID.trim() || pinnedLogicGateIDs.length === 0) return undefined;
-    const trackedLogicGateIDs = new Set(pinnedLogicGateIDs);
-    return startSidebarLogicGateStatusCountSync({
-      logicGateIDs: pinnedLogicGateIDs,
-      load: async (logicGateID) => {
-        const contents = await getKanbanBoardContentsSingleFlight(
-          apiBase,
-          companyID,
-          logicGateKanbanBoardID(logicGateID),
-          Number.MAX_SAFE_INTEGER,
-        );
-        return countSidebarLogicGateStatuses(contents);
-      },
-      subscribe: (onLogicGateChanged) => {
-        const refresh = (logicGateID: string, boardID = logicGateKanbanBoardID(logicGateID)) => {
-          if (!trackedLogicGateIDs.has(logicGateID)) return;
-          invalidateKanbanBoardContentsCache(apiBase, companyID, boardID);
-          onLogicGateChanged(logicGateID);
-        };
-        const onLocalBoardChange = (event: Event) => {
-          const detail = (event as CustomEvent<KanbanBoardContentsUpdatedDetail>).detail;
-          if (detail?.companyID && detail.companyID !== companyID) return;
-          const boardID = detail?.boardID?.trim() ?? "";
-          const logicGateID = detail?.logicGateID?.trim() || logicGateIDFromKanbanBoardID(boardID);
-          if (logicGateID) refresh(logicGateID, boardID || logicGateKanbanBoardID(logicGateID));
-        };
-        window.addEventListener(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, onLocalBoardChange);
-        const realtimeUnsubscribers = pinnedLogicGateIDs.map((logicGateID) => {
-          const boardID = logicGateKanbanBoardID(logicGateID);
-          return subscribeRealtimeScope(apiBase, companyID, `board:${boardID}`, {
-            onAccepted() {
-              refresh(logicGateID, boardID);
-            },
-            onKanbanChanged(message) {
-              if (message.company_id !== companyID || message.board_id !== boardID) return;
-              refresh(logicGateID, boardID);
-            },
-          });
-        });
-        return () => {
-          window.removeEventListener(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, onLocalBoardChange);
-          for (const unsubscribe of realtimeUnsubscribers) unsubscribe();
-        };
-      },
-      onChange: setLogicGateStatusCountsByID,
-    });
-  }, [apiBase, companyID, pinnedLogicGateIDKey, pinnedLogicGateIDs]);
+    const onLocalBoardChange = (event: Event) => {
+      const detail = (event as CustomEvent<KanbanBoardContentsUpdatedDetail>).detail;
+      if (detail?.companyID && detail.companyID !== companyID) return;
+      const boardID = detail?.boardID?.trim() ?? "";
+      const logicGateID = detail?.logicGateID?.trim() || logicGateIDFromKanbanBoardID(boardID);
+      if (logicGateID) refreshPinnedLogicGateCountsRef.current(logicGateID, boardID || logicGateKanbanBoardID(logicGateID));
+    };
+    window.addEventListener(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, onLocalBoardChange);
+    return () => {
+      window.removeEventListener(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, onLocalBoardChange);
+      for (const unsubscribe of pinnedBoardSubscriptionByLogicGateIDRef.current.values()) unsubscribe();
+      pinnedBoardSubscriptionByLogicGateIDRef.current.clear();
+      trackedPinnedLogicGateIDsRef.current.clear();
+      pinnedCountRequestVersionByLogicGateIDRef.current.clear();
+    };
+  }, [apiBase, companyID]);
+
+  useEffect(() => {
+    const nextLogicGateIDs = new Set(pinnedLogicGateIDs);
+    trackedPinnedLogicGateIDsRef.current = nextLogicGateIDs;
+    for (const [logicGateID, unsubscribe] of pinnedBoardSubscriptionByLogicGateIDRef.current) {
+      if (nextLogicGateIDs.has(logicGateID)) continue;
+      unsubscribe();
+      pinnedBoardSubscriptionByLogicGateIDRef.current.delete(logicGateID);
+      pinnedCountRequestVersionByLogicGateIDRef.current.delete(logicGateID);
+    }
+    setLogicGateStatusCountsByID((current) => Object.fromEntries(
+      Object.entries(current).filter(([logicGateID]) => nextLogicGateIDs.has(logicGateID)),
+    ));
+    if (!companyID.trim()) return;
+    for (const logicGateID of pinnedLogicGateIDs) {
+      if (pinnedBoardSubscriptionByLogicGateIDRef.current.has(logicGateID)) continue;
+      const boardID = logicGateKanbanBoardID(logicGateID);
+      let acceptedOnce = false;
+      const unsubscribe = subscribeRealtimeScope(apiBase, companyID, `board:${boardID}`, {
+        onAccepted() {
+          if (acceptedOnce) refreshPinnedLogicGateCountsRef.current(logicGateID, boardID);
+          acceptedOnce = true;
+        },
+        onKanbanChanged(message) {
+          if (message.company_id !== companyID || message.board_id !== boardID) return;
+          refreshPinnedLogicGateCountsRef.current(logicGateID, boardID);
+        },
+      });
+      pinnedBoardSubscriptionByLogicGateIDRef.current.set(logicGateID, unsubscribe);
+      refreshPinnedLogicGateCountsRef.current(logicGateID, boardID);
+    }
+  }, [apiBase, companyID, pinnedLogicGateIDKey]);
   useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
     if (update.companyID !== companyID.trim() || update.entityType !== "logic_gate") return;
     const title = update.title.trim();

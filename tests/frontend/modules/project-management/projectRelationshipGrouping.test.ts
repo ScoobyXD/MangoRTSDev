@@ -271,6 +271,8 @@ test("Project Logic Gates and Nodes wires universal rows without the old card gr
   assert.match(source, /<ProjectRelationshipSearchPicker/);
   assert.match(source, /Search Explorer Nodes in Logic Gates/);
   assert.match(source, /fetchCompanyExplorerSearchResults\([\s\S]*relationshipPickerSearchText[\s\S]*\["node"\]/);
+  assert.match(source, /fetchCompanyExplorerBranchResourceIDs\(apiBase, companyID, payload\.folderID, "node"\)/);
+  assert.doesNotMatch(source, /getScopedItemIDs/);
   assert.doesNotMatch(source, /expandLogicGateRelationshipTargets/);
   assert.match(source, /existingRelationshipKeys\.has\(key\)/);
   assert.match(source, /addRelationshipTargets\(\[\{ resourceType: "node", resourceID \}\]\)/);
