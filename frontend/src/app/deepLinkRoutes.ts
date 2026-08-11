@@ -17,6 +17,11 @@ export type ProjectDeepLinkRoute = {
   projectID: string;
 };
 
+export type HuddleLogicGateDeepLinkRoute = {
+  kind: "huddle_logic_gate";
+  huddleLogicGateID: string;
+};
+
 export type GvicDeepLinkRoute = {
   kind: "gvic";
   role: RACIInboxRole;
@@ -24,7 +29,7 @@ export type GvicDeepLinkRoute = {
   nodeID?: string;
 };
 
-export type DeepLinkRoute = LogicGateDeepLinkRoute | NodeDeepLinkRoute | ProjectDeepLinkRoute | GvicDeepLinkRoute;
+export type DeepLinkRoute = LogicGateDeepLinkRoute | NodeDeepLinkRoute | ProjectDeepLinkRoute | HuddleLogicGateDeepLinkRoute | GvicDeepLinkRoute;
 
 function cleanSegment(value: string): string {
   try {
@@ -77,6 +82,10 @@ export function parseDeepLinkRoute(pathname: string): DeepLinkRoute | null {
     const projectID = cleanSegment(segments[1]);
     return projectID ? { kind: "project", projectID } : null;
   }
+  if (segments.length === 2 && segments[0] === "huddle-logic-gates") {
+    const huddleLogicGateID = cleanSegment(segments[1]);
+    return huddleLogicGateID ? { kind: "huddle_logic_gate", huddleLogicGateID } : null;
+  }
   if ((segments.length === 2 || segments.length === 4) && segments[0] === "gvic") {
     if (segments.length === 4 && segments[2] !== "nodes") return null;
     const section = gvicSectionForRoleOrView(cleanSegment(segments[1]));
@@ -105,6 +114,10 @@ export function buildNodeRoute(nodeID: string): string {
 
 export function buildProjectRoute(projectID: string): string {
   return `/projects/${encodeSegment(projectID)}`;
+}
+
+export function buildHuddleLogicGateRoute(huddleLogicGateID: string): string {
+  return `/huddle-logic-gates/${encodeSegment(huddleLogicGateID)}`;
 }
 
 export type ProjectLogicGateNavigationPlan = {

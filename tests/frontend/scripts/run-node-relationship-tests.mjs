@@ -12,6 +12,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/auth/authRoutes.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/api/requestJSON.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/huddles/logicGateConversion.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/huddles/huddleUI.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/attachments/attachmentApi.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/attachments/emailDraftResourceIdentity.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/attachments/attachmentDirectUpload.test.js"),

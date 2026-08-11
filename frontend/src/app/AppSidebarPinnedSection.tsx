@@ -26,6 +26,7 @@ import {
   type SidebarLogicGateStatusCountDefinition,
   type SidebarLogicGateStatusCounts,
 } from "./sidebarLogicGateStatusCounts.js";
+import { HuddleResourceIcon } from "../modules/huddles/HuddleResourceIcon.js";
 
 type AppSidebarPinnedSectionProps = {
   tree: SidebarPinTree;
@@ -257,8 +258,8 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
 
   const renderPinGroupPreviewRow = (pin: SidebarPin): React.ReactNode => (
     <div key={pin.pinID} data-pin-group-preview-entry={pin.pinID} style={pinGroupPreviewRowStyle}>
-      <span style={pinGroupPreviewPinStyle}>
-        <span style={rowIconStyle}><ExplorerRowIcon kind={pin.kind === "huddle_node" ? "node" : pin.kind === "huddle_logic_gate" ? "logic_gate" : pin.kind} /></span>
+        <span style={pinGroupPreviewPinStyle}>
+          <span style={rowIconStyle}>{pin.kind === "huddle_logic_gate" || pin.kind === "huddle_node" ? <HuddleResourceIcon type={pin.kind} /> : <ExplorerRowIcon kind={pin.kind} />}</span>
         <span style={rowTextStyle}>{pin.name}</span>
       </span>
       {renderStatusCounts(pin.kind === "logic_gate" ? logicGateStatusCountsByID[pin.id] : undefined, true)}
@@ -473,7 +474,7 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
               onBlur={() => setRaisedPinID((current) => current === row.pin.pinID ? "" : current)}
               onClick={() => openPin(row.pin)}
             >
-              <span style={rowIconStyle}><ExplorerRowIcon kind={row.pin.kind === "huddle_node" ? "node" : row.pin.kind === "huddle_logic_gate" ? "logic_gate" : row.pin.kind} /></span>
+              <span style={rowIconStyle}>{row.pin.kind === "huddle_logic_gate" || row.pin.kind === "huddle_node" ? <HuddleResourceIcon type={row.pin.kind} /> : <ExplorerRowIcon kind={row.pin.kind} />}</span>
               <span style={rowTextStyle}>{row.pin.name}</span>
             </button>
             {renderStatusCounts(row.pin.kind === "logic_gate" ? logicGateStatusCountsByID[row.pin.id] : undefined, true)}
@@ -709,11 +710,11 @@ const folderNameTextStyle: React.CSSProperties = { minWidth: 0, overflow: "hidde
 const folderRenameStyle: React.CSSProperties = { minWidth: 0, display: "grid", gridTemplateColumns: "15px minmax(0, 1fr)", alignItems: "center", gap: 4 };
 const pinGroupPreviewTitleStyle: React.CSSProperties = { minWidth: 0, height: 22, display: "grid", gridTemplateColumns: "15px minmax(0, 1fr)", alignItems: "center", gap: 4, color: "#111827", fontSize: 11.5, fontWeight: 700 };
 const pinGroupPreviewRowStyle: React.CSSProperties = { minWidth: 0, minHeight: 29, display: "grid", gridTemplateColumns: "minmax(0,1fr) auto 22px", alignItems: "center", gap: 2 };
-const pinGroupPreviewPinStyle: React.CSSProperties = { minWidth: 0, minHeight: 29, display: "grid", gridTemplateColumns: "20px minmax(0,1fr)", alignItems: "center", gap: 4, color: "#111", fontSize: 11.5, fontWeight: 600, padding: "0 5px" };
+const pinGroupPreviewPinStyle: React.CSSProperties = { minWidth: 0, minHeight: 29, display: "grid", gridTemplateColumns: "28px minmax(0,1fr)", alignItems: "center", gap: 4, color: "#111", fontSize: 11.5, fontWeight: 600, padding: "0 5px" };
 const pinGroupPreviewRemoveSlotStyle: React.CSSProperties = { width: 22, height: 22 };
 const pinRowStyle: React.CSSProperties = { minWidth: 0, minHeight: 29, display: "grid", gridTemplateColumns: "minmax(0,1fr) auto 22px", alignItems: "center", gap: 2 };
-const rowIconStyle: React.CSSProperties = { width: 20, height: 20, display: "grid", placeItems: "center", color: "#111" };
-const pinButtonStyle: React.CSSProperties = { minWidth: 0, minHeight: 29, display: "grid", gridTemplateColumns: "20px minmax(0,1fr)", alignItems: "center", gap: 4, border: 0, borderRadius: 7, background: "transparent", color: "#111", cursor: "pointer", font: "inherit", fontSize: 11.5, fontWeight: 600, padding: "0 5px", textAlign: "left" };
+const rowIconStyle: React.CSSProperties = { width: 28, height: 20, display: "grid", placeItems: "center", color: "#111" };
+const pinButtonStyle: React.CSSProperties = { minWidth: 0, minHeight: 29, display: "grid", gridTemplateColumns: "28px minmax(0,1fr)", alignItems: "center", gap: 4, border: 0, borderRadius: 7, background: "transparent", color: "#111", cursor: "pointer", font: "inherit", fontSize: 11.5, fontWeight: 600, padding: "0 5px", textAlign: "left" };
 const rowTextStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 const statusCountsStyle: React.CSSProperties = { width: 74, display: "grid", gridTemplateColumns: "repeat(4, 17px)", alignItems: "center", justifyContent: "end", gap: 2, minWidth: 74, whiteSpace: "nowrap" };
 const statusCountSlotStyle: React.CSSProperties = { width: 17, height: 17, display: "grid", placeItems: "center" };

@@ -10,12 +10,13 @@
 8. The owning Huddle Logic Gate's right column shows Huddle Nodes as a simple vertical list of cards.
 9. Double-clicking a Huddle Node card opens that exact Huddle Node in a Huddle Node popup.
 10. The popup opens almost full screen by default while leaving the application's left sidebar visible.
-11. The Huddle Node surface keeps its header, direct RACI cards, Editor tab, Permissions tab, shared editor toolbar, pin-to-tab action, fullscreen action, delete action, and close action.
-12. The shared editor toolbar includes the existing font size, bold, underline, italic, strikethrough, highlight, alignment, alphabetical list, numerical list, dense bullet list, and checklist controls.
-13. The popup has two columns: the TipTap editor on the left and an empty area reserved for a later chat feature on the right.
-14. Huddle Nodes use the existing RACI and permission tables with direct typed ownership, but do not expose **Apply to descendants** or **Apply to descendants including customized** actions.
-15. Deleting a Huddle Node moves the Node, its restorable direct policies, and its Huddle Explorer placement to the Recycle Bin; restoring it reuses the same UUID and owning Huddle Logic Gate.
-16. A Huddle Node cannot exist without its owning Huddle Logic Gate.
-17. The first version has no KPI copies, KPI snapshots, frequency, period, timeline events, or chat behavior.
+11. The popup title starts with **Huddle Node:** and reuses the normal Node and Logic Gate RACI role cards, people-and-group picker, Editor tab, Permissions tab, and shared Mango editor toolbar in its top header area.
+12. The shared editor toolbar includes the existing font size, bold, underline, italic, strikethrough, highlight, alignment, alphabetical list, numerical list, dense bullet list, checklist, and table controls.
+13. Pin, fullscreen, delete, and close are compact icon actions in the top-right header instead of text buttons.
+14. The popup has two horizontally resizable columns: the TipTap editor on the left and an empty area reserved for a later chat feature on the right.
+15. Huddle Nodes use the existing RACI and permission tables with direct typed ownership, but do not expose **Apply to descendants** or **Apply to descendants including customized** actions.
+16. Deleting a Huddle Node moves the Node, its restorable direct policies, and its Huddle Explorer placement to the Recycle Bin; restoring it reuses the same UUID and owning Huddle Logic Gate.
+17. A Huddle Node cannot exist without its owning Huddle Logic Gate.
+18. The first version has no KPI copies, KPI snapshots, frequency, period, timeline events, or chat behavior.
 
-Last updated: 2026-08-10
+Last updated: 2026-08-11
