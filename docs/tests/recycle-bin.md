@@ -49,6 +49,9 @@ RB28 - Restore remains scoped to the deleting user; an admin aggregate view must
 RB29 - Recycle payloads preserve current and manual-history rows from `node_textboxes`, `project_textboxes`, `logic_gate_textboxes`, and their three `_history` tables. Old payloads must be converted before editor cleanup; disabled automatic snapshots are not manual history and are excluded.
 RB30 - A new Project recycle payload stores `project_textbox_chats` after its Project textbox owners and stores exact `email_relationships` in relationship order. It does not store `project_information` or `project_projection_table`.
 RB31 - A new Logic Gate recycle payload stores `logic_gate_textboxes` and `logic_gate_textboxes_history` after the Logic Gate owner plus exact final relationships. It stores no Logic Gate chat rows and does not store `logic_gate_information` or `logic_gate_projection_table`.
+RB32 - Recycle Bin object kinds include `kpi`, `huddle_logic_gate`, `huddle_node`, `huddle_explorer_folder`, and `huddle_explorer_item` in addition to the existing kinds.
+RB33 - A KPI restore payload preserves its exact Logic Gate owner, name, and `body_json`. A Huddle resource restore payload preserves its exact source row, direct policies, and typed Huddle Explorer placement. A Huddle Explorer item or empty folder restore payload preserves only that exact organization row. Every restore reuses the original literal IDs.
+RB34 - Converting a normal Logic Gate into a Huddle Logic Gate is not a deletion and creates no Recycle Bin row.
 
 ## Scenarios
 

@@ -141,7 +141,7 @@ Last updated: 2026-08-06
 
 # Process Story: Mango relates resources by their exact identities
 
-A user relates or personally pins an existing Node, Logic Gate, Project, email, attachment, Account, or other supported Mango resource
+A user relates or personally pins an existing Node, Logic Gate, Huddle Logic Gate, Huddle Node, Project, email, attachment, Account, or other supported Mango resource
 ↓
 The command carries the resource's existing canonical ID unchanged from its source record
 ↓
@@ -151,7 +151,7 @@ Moving a Node between Logic Gates changes only that canonical assignment and its
 ↓
 The relationship subsystem stores that literal ID in a direct typed column when the endpoint type is fixed, or together with its canonical `resource_type` when the endpoint type can vary
 ↓
-The relationship remains in the table for its business meaning, such as Node structure, Logic Gate flow, Project membership, personal pin organization, email attachment, file ownership, Account assignment, permission, or RACI assignment; only the documented Company Explorer, Logic Gate-to-Node, and Shared Triage parent links also define immediate V2 policy ancestry
+The relationship remains in the table for its business meaning, such as Node structure, Logic Gate flow, Huddle ownership and placement, Project membership, personal pin organization, email attachment, file ownership, Account assignment, permission, or RACI assignment; only the documented Company Explorer, Logic Gate-to-Node, and Shared Triage parent links also define immediate V2 policy ancestry
 ↓
 Reads, events, projections, recycle/restore, and permanent deletion use the same company, endpoint type, and literal resource ID; no resource registry, translated ID, or replacement identity is consulted
 ↓
@@ -159,7 +159,7 @@ Removing one relationship removes only that edge unless the owning subsystem has
 ↓
 Deleting a personal pin folder removes only its descendant folder and pin records, never the pinned resources
 
-Last updated: 2026-08-06
+Last updated: 2026-08-10
 
 # Relationship Business Logic Laws
 
@@ -167,7 +167,7 @@ These laws define how MangoRTS represents relationships. They apply to schema de
 
 ## What `resource` means
 
-A **resource** is an identifiable Mango business object that may own data or be one endpoint of a relationship. Resources include Nodes, Logic Gates, Projects, email messages and threads, textboxes and chats where they have their own identity, attachments, Accounts, Company Explorer folders, shared inboxes and folders, and any future business object explicitly added to a relationship contract.
+A **resource** is an identifiable Mango business object that may own data or be one endpoint of a relationship. Resources include Nodes, Logic Gates, Huddle Logic Gates, Huddle Nodes, KPIs, Projects, email messages and threads, textboxes and chats where they have their own identity, attachments, Accounts, Company Explorer folders, Huddle Explorer folders, shared inboxes and folders, and any future business object explicitly added to a relationship contract.
 
 A user or group is normally a **principal** when it receives a permission or RACI role. A relationship row and a derived projection row are records about resources; they are not automatically resources themselves.
 
@@ -202,6 +202,9 @@ Examples include:
 - `project_relationships` for a Project's Node and Logic Gate membership.
 - `email_relationships` for normalized email messages attached to supported Mango owners.
 - `attachment_relationships` for stored files owned or used by supported Mango resources.
+- `huddle_nodes.huddle_logic_gate_id` for one Huddle Node's fixed owning Huddle Logic Gate.
+- `kpis.logic_gate_id` for one KPI's fixed owning normal Logic Gate.
+- `huddle_explorer_items` for typed Huddle Logic Gate and Huddle Node placement.
 - Account assignment, permission, and RACI relationship tables for their own distinct meanings.
 
 ### Law 5 — Do not split one meaning merely because endpoint types differ
@@ -214,7 +217,7 @@ Separate tables are correct when the business meaning or required fields differ,
 
 When a relationship table has a fixed endpoint by definition, that endpoint SHOULD use its direct typed column. `project_relationships.project_id`, for example, is the exact owning Project, while `resource_type + resource_id` identifies the supported related resource.
 
-Same-type structural tables MAY use two explicit typed columns when both sides have one fixed type. `node_relationships.node_id_a/node_id_b` and `logic_gate_relationships.logic_gate_id_a/logic_gate_id_b` are valid because their relationship meanings and endpoint types are fixed.
+Same-type structural tables MAY use two explicit typed columns when both sides have one fixed type. `node_relationships.node_id_a/node_id_b` and `logic_gate_relationships.logic_gate_id_a/logic_gate_id_b` are valid because their relationship meanings and endpoint types are fixed. `huddle_nodes.huddle_logic_gate_id` and `kpis.logic_gate_id` are also valid direct owner columns because each relationship has one fixed owner type.
 
 ### Law 7 — Fully generic edges type both endpoints
 
@@ -262,6 +265,9 @@ Current examples include:
 - A Logic Gate may be related to multiple Projects.
 - One Project/Logic-Gate pair has one stable semantic edge whether it is created directly from the Logic Gate editor or implicitly while adding an assigned Node.
 - An attachment may have multiple active owner relationships.
+- A Huddle Logic Gate may own multiple Huddle Nodes, while each Huddle Node has exactly one Huddle Logic Gate.
+- A normal Logic Gate may own multiple KPIs, while each KPI has exactly one normal Logic Gate.
+- One Huddle Logic Gate or Huddle Node has at most one live `huddle_explorer_items` placement.
 - One RACI resource/principal pair has exactly one direct role; Responsible, Accountable, Consulted, and Informed each permit multiple typed user or group principals, and group edges expand through live nested membership without copied per-user relationship rows.
 
 ### Law 13 — Duplicate commands do not create duplicate semantic edges
@@ -277,7 +283,7 @@ A relationship row MUST NOT automatically bypass the normal authorization rules 
 For email and attachment links, knowing an email ID, attachment ID, object key, or relationship ID is never sufficient by itself. Access is checked through the exact owning resource and relationship scope.
 
 
-The only relationships that define V2 RACI and permission parentage are the exact hierarchy contracts in `docs/importanttasks/v2gvic&permissions.md`: Company Explorer folders parent contained folders, Projects, and Logic Gates; a Logic Gate parents its assigned Nodes; Shared Triage folders parent contained folders and shared inboxes. Project membership, Node-to-Node structure, email, attachment, Account, and other relationships do not become policy parents.
+The only relationships that define V2 RACI and permission parentage are the exact hierarchy contracts in `docs/importanttasks/v2gvic&permissions.md`: Company Explorer folders parent contained folders, Projects, and Logic Gates; a Logic Gate parents its assigned Nodes; Shared Triage folders parent contained folders and shared inboxes. Project membership, Node-to-Node structure, email, attachment, Account, KPI ownership, Huddle Node ownership, and Huddle Explorer placement do not become policy parents. Huddle Logic Gates and Huddle Nodes use direct typed policies in the first version.
 
 Creating or moving one of those parent links advances separate RACI and permission parent-link sequences. The relationship does not copy policy rows or grant access by itself; an inherited child resolves its current parent policy, while a customized child remains independent. Removing the only Node-to-Logic-Gate parent materializes an inherited Node's current effective policies before detach so a root never remains inherited.
 
@@ -312,7 +318,7 @@ Recycle behavior MUST NOT translate resource IDs, invent replacement endpoints, 
 
 ### Law 19 — Removing an edge does not delete its endpoints
 
-Deleting a relationship normally deletes only that relationship. Removing a Node from a Project does not delete the Node or Project. Removing an email relationship does not delete the normalized email message or thread. Removing one attachment relationship does not delete the file while another valid active owner relationship survives.
+Deleting a relationship normally deletes only that relationship. Removing a Node from a Project does not delete the Node or Project. Removing a Huddle Explorer item does not delete its Huddle Logic Gate or Huddle Node. Removing an email relationship does not delete the normalized email message or thread. Removing one attachment relationship does not delete the file while another valid active owner relationship survives.
 
 Any endpoint-deletion behavior must be an explicit separately documented business rule. Attachment last-owner cleanup is one such explicit rule.
 
@@ -368,7 +374,7 @@ Any change to relationship meaning, supported resource types, cardinality, ident
 
 ### Law 27 — Personal pin folders contain pin edges, not resources
 
-`pins.resource_type + pins.resource_id` stores the exact typed identity of the pinned Node, Logic Gate, or Project. `pin_folders` is a separate user-and-company-scoped organization tree, and `pins.parent_folder_id` points directly to a folder owned by that same user and company. Folder parent links must reject cycles and cross-owner IDs.
+`pins.resource_type + pins.resource_id` stores the exact typed identity of the pinned Node, Logic Gate, Huddle Logic Gate, Huddle Node, or Project. `pin_folders` is a separate user-and-company-scoped organization tree, and `pins.parent_folder_id` points directly to a folder owned by that same user and company. Folder parent links must reject cycles and cross-owner IDs.
 
 Deleting a pin, pin folder, or pin folder subtree deletes only personal organization rows. It MUST NOT delete, recycle, rename, move, permission-change, or otherwise mutate the underlying pinned resources. Grouping two pins into a new folder and changing mixed folder/pin layout are atomic personal-organization commands; they do not create another resource identity or access relationship.
 
@@ -388,7 +394,7 @@ This propagation is idempotent and MUST NOT recopy an existing message, invent o
 
 ### Law 30 — Policy parentage reuses canonical typed relationships
 
-Policy settings and assignments MUST remain in `resource_gvic_settings`, `resource_gvic_assignments`, `resource_permission_settings`, and `resource_permissions`. Company Explorer stores no permission or RACI rows. It contributes only the exact folder-parent and Project/Logic-Gate placement edges already owned by Explorer; Node policy parentage uses the exact Logic Gate assignment, and Shared Inbox policy parentage uses its own typed hierarchy.
+Policy settings and assignments MUST remain in `resource_gvic_settings`, `resource_gvic_assignments`, `resource_permission_settings`, and `resource_permissions`. Company Explorer and Huddle Explorer store no permission or RACI rows. Company Explorer contributes only the exact folder-parent and Project/Logic-Gate placement edges already owned by Explorer; Node policy parentage uses the exact Logic Gate assignment, and Shared Inbox policy parentage uses its own typed hierarchy. Huddle Explorer placement and Huddle Node ownership are not policy-parent edges in the first version.
 
 Inherited resolution may follow those live typed parent edges, but it MUST NOT copy them into policy tables, invent a generic resource edge, or make Company Explorer a second policy authority. Comparing a saved raw policy with its immediate parent's raw policy may change the policy mode to inherited or customized; it MUST NOT change resource placement, assignment, ownership, or endpoint identity.
 
@@ -399,6 +405,12 @@ One `email_thread_id` and its exact stored messages MAY have Node-wide `email_re
 A textbox-specific relationship MUST name one exact `email_message_id`, one exact Node, and one exact textbox in that Node. The same message may be linked to at most one textbox inside one Node. Repeating the same Node/message/textbox command converges to the existing typed edge, a different textbox in that same Node is rejected, and a textbox in a different Node is allowed.
 
 Removing one Node-wide or textbox-specific email relationship deletes only that exact relationship. It MUST NOT delete or rewrite another Node's relationship, the stored thread or message, another Node's textbox or chat, an email chat quote, or any surviving attachment relationship.
+
+### Law 32 — Huddle ownership and placement use exact Huddle identities
+
+`huddle_nodes.huddle_logic_gate_id` MUST equal the exact owning `huddle_logic_gates.huddle_logic_gate_id`. `huddle_explorer_items.resource_huddle_resource_id` MUST equal the exact source Huddle ID, and `huddle_type` MUST state whether that source is `huddle_logic_gate` or `huddle_node`.
+
+Creating a Huddle resource and its required Explorer item MUST be atomic. Deleting only an Explorer item removes only that placement. Recycling a Huddle resource MUST preserve the exact typed placement promised for restore. These relationships MUST NOT create a central registry, translated ID, untyped edge, access grant, or policy-parent link.
 
 ## Required design examples
 
