@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"strings"
 	"testing"
 
@@ -155,6 +156,7 @@ func TestMemoryEmailConversionAppendsChatToExistingEmailTextBox(t *testing.T) {
 
 func TestMemoryEmailConversionRollsBackEveryAtomicImportWrite(t *testing.T) {
 	repo, companyID, user, node, message := setupAtomicEmailConversion(t, "11111111-1111-4111-8111-111111111193")
+	beforeOutbox := maps.Clone(repo.realtimeOutbox)
 	forced := errors.New("forced initial chat outbox failure")
 	repo.realtimeOutboxErr = forced
 
@@ -184,7 +186,7 @@ func TestMemoryEmailConversionRollsBackEveryAtomicImportWrite(t *testing.T) {
 	if items := communicationsTriageItemsForTest(repo, user.UserID); len(items) != 1 || items[0].MessageID != message.ID {
 		t.Fatalf("source triage item after rollback = %+v", items)
 	}
-	if len(repo.emailThreads) != 0 || len(repo.emailThreadScopeIDs) != 0 || len(repo.nodeEmailThreads) != 0 || len(repo.realtimeOutbox) != 0 {
+	if len(repo.emailThreads) != 0 || len(repo.emailThreadScopeIDs) != 0 || len(repo.nodeEmailThreads) != 0 || !maps.EqualFunc(repo.realtimeOutbox, beforeOutbox, func(a, b RealtimeOutboxEvent) bool { return a.EventID == b.EventID }) {
 		t.Fatalf("partial durable state after rollback: threads=%d scopes=%d links=%d outbox=%d",
 			len(repo.emailThreads), len(repo.emailThreadScopeIDs), len(repo.nodeEmailThreads), len(repo.realtimeOutbox))
 	}

@@ -120,6 +120,7 @@ func (r *MemoryRepo) UpdateCompanyUserGroup(companyID, groupID string, parentGro
 			oldAffectedGroupIDs[affectedGroupID] = true
 		}
 		r.syncRACIGroupDependentResourcesForGroupSetLocked(companyID, oldAffectedGroupIDs)
+		r.reconcileMemoryRACITabsCompanyLocked(companyID)
 	}
 	return cloneCompanyUserGroup(group), nil
 }
@@ -213,6 +214,7 @@ func (r *MemoryRepo) DeleteCompanyUserGroup(companyID, groupID string) error {
 		}
 	}
 	r.syncRACIResourceKeysLocked(companyID, affectedRACIKeys)
+	r.reconcileMemoryRACITabsCompanyLocked(companyID)
 	return nil
 }
 
@@ -282,6 +284,7 @@ func (r *MemoryRepo) SetCompanyUserGroupMembers(companyID, groupID string, userI
 		items = append(items, r.withCompanyUserGroupMemberUserLocked(member))
 	}
 	sortCompanyUserGroupMembers(items)
+	r.reconcileMemoryRACITabsCompanyLocked(companyID)
 	return items, nil
 }
 

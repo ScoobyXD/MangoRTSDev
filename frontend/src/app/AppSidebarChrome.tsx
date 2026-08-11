@@ -6,11 +6,14 @@ import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMe
 import { AppModalPortal } from "./AppModalPortal";
 import FrameRightClickMenu from "./framerightclickmenu";
 import { AppSidebarPinnedSection } from "./AppSidebarPinnedSection";
+<<<<<<< HEAD
+=======
+import { AppSidebarRACITabsSection } from "./AppSidebarRACITabsSection";
+>>>>>>> codex/implement-tower-raci-tabs0000753
 import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderFieldsIcon, HeaderSharedTriageIcon, HeaderTeamsIcon, HeaderTriageIcon, HeaderUpdatesIcon } from "../icons/index.js";
 import { MangoWordmark } from "../icons/index.js";
 import { UI_THEME } from "./frameLayoutTypes";
-import { preloadAccountManagerSurface, preloadFieldsSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "./preloadDashboardModules";
-import { requestProjectViewSettings } from "../modules/project-management/projectViewEvents";
+import { preloadAccountManagerSurface, preloadFieldsSurface, preloadTeamsSurface } from "./preloadDashboardModules";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../icons/index.js";
 import { CompanyExplorerSearchBox } from "../modules/company-explorer/CompanyExplorerSearchBox";
 import type { CompanyExplorerTriageMessageDropHandler } from "../modules/company-explorer/CompanyExplorerContentModel";
@@ -1342,6 +1345,7 @@ export function AppSidebar({
       />
 
       <section style={appSidebarNavSectionStyle} aria-label="Tower">
+<<<<<<< HEAD
         <AppSidebarSectionHeader label="Tower" />
         <HomeBuiltInViewSidebarRow
           label="Projects"
@@ -1352,6 +1356,20 @@ export function AppSidebar({
             ariaLabel: "Edit Projects view",
             onOpen: requestProjectViewSettings,
           }}
+=======
+        <AppSidebarRACITabsSection
+          apiBase={apiBase}
+          companyID={companyID}
+          onOpenLogicGate={(logicGateID, name) => onPinOpen({
+            pinID: "",
+            id: logicGateID,
+            kind: "logic_gate",
+            parentFolderID: "",
+            name,
+            position: 0,
+            createdTimestamp: "",
+          })}
+>>>>>>> codex/implement-tower-raci-tabs0000753
         />
       </section>
 

@@ -65,6 +65,7 @@ type Repository interface {
 	ConsolidatedViewRepository
 	SavedViewRepository
 	UserPinRepository
+	RACITabsRepository
 	LogicGateWorkRepository
 	WorkItemReadRepository
 	CompanyExplorerRepository
@@ -668,6 +669,71 @@ type UserPinRepository interface {
 	DeleteUserPinFolder(input UserPinFolderDeleteInput) error
 	ApplyUserPinLayout(input UserPinLayoutInput) error
 	GroupUserPins(input UserPinGroupInput) (UserPinGroupResult, error)
+}
+
+type RACITabsRepository interface {
+	ListRACITabBranch(input RACITabBranchInput) (domain.RACITabPage, error)
+	GetRACITabLogicGateCounts(input RACITabLogicGateCountsInput) (domain.RACITabStatusCounts, error)
+	CreateRACITabFolder(input RACITabFolderCreateInput) (domain.RACITabFolder, error)
+	RenameRACITabFolder(input RACITabFolderRenameInput) (domain.RACITabFolder, error)
+	DeleteRACITabFolder(input RACITabFolderDeleteInput) error
+	ApplyRACITabLayout(input RACITabLayoutInput) error
+}
+
+type RACITabBranchInput struct {
+	CompanyID      string
+	UserID         string
+	Role           string
+	ParentFolderID string
+	Offset         int
+	Limit          int
+}
+
+type RACITabLogicGateCountsInput struct {
+	CompanyID   string
+	UserID      string
+	LogicGateID string
+}
+
+type RACITabFolderCreateInput struct {
+	CompanyID      string
+	UserID         string
+	Role           string
+	FolderID       string
+	ParentFolderID string
+	Name           string
+}
+
+type RACITabFolderRenameInput struct {
+	CompanyID string
+	UserID    string
+	FolderID  string
+	Name      string
+}
+
+type RACITabFolderDeleteInput struct {
+	CompanyID string
+	UserID    string
+	FolderID  string
+}
+
+const (
+	RACITabLayoutEntryFolder = "folder"
+	RACITabLayoutEntryItem   = "item"
+)
+
+type RACITabLayoutEntry struct {
+	EntryType      string
+	EntryID        string
+	ParentFolderID string
+	Position       int
+}
+
+type RACITabLayoutInput struct {
+	CompanyID string
+	UserID    string
+	Role      string
+	Entries   []RACITabLayoutEntry
 }
 
 type UserPinListInput struct {

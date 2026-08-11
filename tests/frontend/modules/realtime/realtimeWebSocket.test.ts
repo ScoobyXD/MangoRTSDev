@@ -23,6 +23,7 @@ import {
   type RealtimeMailboxFolderChangedMessage,
   type RealtimeMailboxMessageChangedMessage,
   type RealtimeNotificationCreatedMessage,
+  type RealtimeRACITabsChangedMessage,
 } from "../../../../frontend/src/modules/realtime/realtimeWebSocket.js";
 
 test("parses retained product and scoped mailbox message families", () => {
@@ -85,6 +86,14 @@ test("parses retained product and scoped mailbox message families", () => {
   assert.equal(board.board_id, "logic-gate:gate-1");
   assert.equal(board.change_type, "card.moved");
 
+  const raciTabs = parseRealtimeMessage(JSON.stringify({
+    type: "raci_tabs.changed",
+    company_id: "company-1",
+    scope: "raci-tabs:company",
+  })) as RealtimeRACITabsChangedMessage;
+  assert.equal(raciTabs.company_id, "company-1");
+  assert.equal(raciTabs.scope, "raci-tabs:company");
+
   const mailboxMessage = parseRealtimeMessage(JSON.stringify({
     type: "mailbox.message.changed",
     company_id: "company-1",
@@ -136,6 +145,8 @@ test("allows only exact notification, mailbox, node-chat, board, and editor scop
   assert.equal(isSupportedRealtimeScope("notifications:user:user-1"), true);
   assert.equal(isSupportedRealtimeScope("chat:node:node-1"), true);
   assert.equal(isSupportedRealtimeScope("board:logic-gate:gate-1"), true);
+  assert.equal(isSupportedRealtimeScope("raci-tabs:company"), true);
+  assert.equal(isSupportedRealtimeScope("raci-tabs:user:user-1"), false);
   assert.equal(isSupportedRealtimeScope("mailbox:personal:account:user-1:owner@example.com"), true);
   assert.equal(isSupportedRealtimeScope("mailbox:shared:shared-1"), true);
   assert.equal(realtimePersonalMailboxScope(" user-1 ", " OWNER@example.com "), "mailbox:personal:account:user-1:owner@example.com");
@@ -635,9 +646,10 @@ test("frontend source inventory contains only retained narrow scope families", (
     .filter((file) => !file.endsWith("realtimeWebSocket.ts"))
     .map((file) => ({ file, source: readFileSync(file, "utf8") }))
     .filter(({ source }) => source.includes("subscribeRealtimeScope("));
-	assert.equal(subscriptionSources.length, 8);
+	assert.equal(subscriptionSources.length, 9);
   assert.deepEqual(subscriptionSources.map(({ file }) => file.split("\\").join("/").split("/frontend/src/")[1]).sort(), [
     "app/AppSidebarChrome.tsx",
+    "app/AppSidebarRACITabsSection.tsx",
     "app/NotificationRealtimeBridge.tsx",
 		"modules/editor/EditorContent.tsx",
 		"modules/editor/NodeWorkspaceSurfaceParts.tsx",

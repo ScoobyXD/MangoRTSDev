@@ -248,6 +248,7 @@ func (r *MemoryRepo) AddCompanyMembership(cognitoSubject, companyID, role string
 		membership.CreatedTimestamp = existingMembership.CreatedTimestamp
 	}
 	r.memberships[membershipKeyValue] = membership
+	r.reconcileMemoryRACITabsCompanyLocked(companyID)
 	return membership, nil
 }
 
@@ -541,6 +542,8 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 	folderSharesSnapshot := cloneMemoryMap(r.folderShares)
 	emailConnectionsSnapshot := cloneMemoryMap(r.emailConnections)
 	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
+	raciTabFoldersSnapshot := cloneMemoryMap(r.raciTabFolders)
+	raciTabItemsSnapshot := cloneMemoryMap(r.raciTabItems)
 	restore := func() {
 		r.memberships = membershipsSnapshot
 		r.userGroupMembers = userGroupMembersSnapshot
@@ -554,6 +557,8 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 		r.folderShares = folderSharesSnapshot
 		r.emailConnections = emailConnectionsSnapshot
 		r.effectiveAccess = effectiveAccessSnapshot
+		r.raciTabFolders = raciTabFoldersSnapshot
+		r.raciTabItems = raciTabItemsSnapshot
 	}
 	deleted := domain.CompanyUser{
 		CompanyID:        membership.CompanyID,
@@ -568,6 +573,16 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 
 	r.clearLogicGateAssignmentMemberReferencesLocked(companyID, userID)
 	delete(r.memberships, membershipKey(companyID, userID))
+	for folderKey, folder := range r.raciTabFolders {
+		if folder.CompanyID == companyID && folder.UserID == userID {
+			delete(r.raciTabFolders, folderKey)
+		}
+	}
+	for itemKey, item := range r.raciTabItems {
+		if item.CompanyID == companyID && item.UserID == userID {
+			delete(r.raciTabItems, itemKey)
+		}
+	}
 	for memberKey, member := range r.userGroupMembers {
 		if member.CompanyID == companyID && member.UserID == userID {
 			delete(r.userGroupMembers, memberKey)
@@ -712,6 +727,16 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 	for rowKey, row := range r.RACIMatrixProjectionRows {
 		if row.UserID == userID {
 			delete(r.RACIMatrixProjectionRows, rowKey)
+		}
+	}
+	for folderKey, folder := range r.raciTabFolders {
+		if folder.UserID == userID {
+			delete(r.raciTabFolders, folderKey)
+		}
+	}
+	for itemKey, item := range r.raciTabItems {
+		if item.UserID == userID {
+			delete(r.raciTabItems, itemKey)
 		}
 	}
 	delete(r.users, user.CognitoSubject)
@@ -908,6 +933,7 @@ func (r *MemoryRepo) AcceptInvitation(token, cognitoSubject, email, displayName 
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
 	}
+	r.reconcileMemoryRACITabsCompanyLocked(invitation.CompanyID)
 	invitation.Status = domain.InvitationStatusAccepted
 	invitation.AcceptedByUserID = &user.UserID
 	invitation.AcceptedTimestamp = &now

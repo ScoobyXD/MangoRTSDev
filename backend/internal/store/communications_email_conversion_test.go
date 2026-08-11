@@ -647,6 +647,7 @@ func TestMemoryEmailConversionCommandRollsBackPartialWork(t *testing.T) {
 			t.Fatalf("UpsertCommunicationsTriageItem: %v", err)
 		}
 		beforeEvents := maps.Clone(repo.domainEvents)
+		beforeOutbox := maps.Clone(repo.realtimeOutbox)
 		forced := errors.New("forced outbox failure")
 		repo.realtimeOutboxErr = forced
 		_, err := repo.ConvertCommunicationsTriageItems(context.Background(), CommunicationsTriageConversionInput{
@@ -657,8 +658,8 @@ func TestMemoryEmailConversionCommandRollsBackPartialWork(t *testing.T) {
 			t.Fatalf("err = %v, want outbox failure", err)
 		}
 		assertEmailConversionRolledBack(t, repo, companyID, user.UserID, message.ID, beforeEvents)
-		if len(repo.realtimeOutbox) != 0 {
-			t.Fatalf("split conversion outbox entries=%d, want none", len(repo.realtimeOutbox))
+		if !maps.EqualFunc(repo.realtimeOutbox, beforeOutbox, func(a, b RealtimeOutboxEvent) bool { return a.EventID == b.EventID }) {
+			t.Fatalf("split conversion outbox entries=%d, want baseline %d", len(repo.realtimeOutbox), len(beforeOutbox))
 		}
 	})
 }

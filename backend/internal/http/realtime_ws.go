@@ -43,6 +43,8 @@ const (
 	realtimeBoardScopePrefix           = "board:"
 	realtimeEditorScopePrefix          = "editor:"
 	realtimeEditorJSONScopePrefix      = "editor-json:"
+	realtimeRACITabsScope              = "raci-tabs:company"
+	realtimeRACITabsScopePrefix        = "raci-tabs:"
 )
 
 const (
@@ -394,6 +396,9 @@ func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, sc
 		}
 		return true, "", nil
 	}
+	if strings.TrimSpace(scope) == realtimeRACITabsScope {
+		return true, "", nil
+	}
 	if userID, accountEmail := realtimePersonalMailboxIdentityFromScope(scope); userID != "" {
 		if userID != strings.TrimSpace(actor.User.UserID) {
 			return false, "access_denied", nil
@@ -654,6 +659,7 @@ func realtimeKnownScopePrefix(scope string) bool {
 		realtimeBoardScopePrefix,
 		realtimeEditorScopePrefix,
 		realtimeEditorJSONScopePrefix,
+		realtimeRACITabsScopePrefix,
 	} {
 		if strings.HasPrefix(strings.TrimSpace(scope), prefix) {
 			return true
@@ -665,6 +671,9 @@ func realtimeKnownScopePrefix(scope string) bool {
 func realtimeScopeType(scope string) string {
 	if realtimeNotificationUserIDFromScope(scope) != "" {
 		return "notifications"
+	}
+	if strings.TrimSpace(scope) == realtimeRACITabsScope {
+		return "raci-tabs"
 	}
 	personalUserID, _ := realtimePersonalMailboxIdentityFromScope(scope)
 	if personalUserID != "" || realtimeSharedMailboxIDFromScope(scope) != "" {
@@ -697,7 +706,7 @@ func (s *Server) recordRealtimeActiveSubscriptions() {
 		return
 	}
 	counts := s.realtimeRegistry.scopeTypeCounts()
-	for _, scopeType := range []string{"notifications", "mailbox", "chat", "board", "editor"} {
+	for _, scopeType := range []string{"notifications", "mailbox", "chat", "board", "editor", "raci-tabs"} {
 		s.recordOperationalMetric("realtime.active_subscriptions", scopeType, int64(counts[scopeType]), 0)
 	}
 }

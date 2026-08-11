@@ -131,6 +131,7 @@ func (s *Server) handleResourceSubresource(w http.ResponseWriter, r *http.Reques
 		if writeV2PolicyError(w, err, "failed_to_update_gvic_policy") {
 			return
 		}
+		s.publishCommittedWorkspaceEvents(events)
 		s.projectCommittedNotificationEvents(events)
 		writeJSONWithPrecomputedETag(w, r, http.StatusOK, policy, policyETag(policy.Revision))
 	default:
