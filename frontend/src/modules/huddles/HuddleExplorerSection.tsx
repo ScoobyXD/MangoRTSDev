@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../icons/index.js";
 import { createRequestJSON } from "../api/requestJSON";
-import { HuddleNodePopup, type HuddleOpenResource, type HuddleResourceType } from "./HuddleResourceSurface";
+import { HuddleNodePopup, type HuddleOpenResource } from "./HuddleResourceSurface";
 import { HuddlePeopleIcon, HuddleResourceIcon } from "./HuddleResourceIcon";
 
 type Folder = { company_id: string; folder_id: string; parent_folder_id?: string | null; name: string };
-type Item = { company_id: string; item_id: string; parent_folder_id?: string | null; resource_type: HuddleResourceType; resource_id: string; name: string };
+type Item = { company_id: string; item_id: string; parent_folder_id?: string | null; resource_type: "huddle_logic_gate"; resource_id: string; name: string };
 type Tree = { folders?: Folder[]; items?: Item[] };
 
 export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: string; currentUserID: string }> = ({ apiBase, companyID, currentUserID }) => {
@@ -71,8 +71,7 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
   });
   const openItem = (item: Item) => {
     const detail: HuddleOpenResource = { resourceType: item.resource_type, resourceID: item.resource_id, name: item.name };
-    if (item.resource_type === "huddle_node") setOpenNode(detail);
-    else window.dispatchEvent(new CustomEvent("mangorts:huddle-open", { detail }));
+    window.dispatchEvent(new CustomEvent("mangorts:huddle-open", { detail }));
   };
 
   const renderLevel = (parentID: string, depth: number): React.ReactNode => (
@@ -109,10 +108,9 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
             data-huddle-row-raised={raisedRowID === rowID ? "true" : undefined}
             onMouseEnter={() => setRaisedRowID(rowID)}
             onMouseLeave={() => setRaisedRowID((current) => current === rowID ? "" : current)}
-            onDoubleClick={() => openItem(item)}
             style={{ ...itemRowStyle(raisedRowID === rowID), paddingLeft: 18 + depth * 12 }}
           >
-            <button type="button" title="Double-click to open" onDoubleClick={(event) => { event.stopPropagation(); openItem(item); }} style={itemNameButtonStyle}>
+            <button type="button" title="Click to open" onClick={() => openItem(item)} style={itemNameButtonStyle}>
               <HuddleResourceIcon type={item.resource_type} />
               <span style={rowTextStyle}>{item.name}</span>
             </button>

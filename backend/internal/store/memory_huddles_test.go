@@ -70,6 +70,10 @@ func TestMemoryHuddleLifecycleKeepsTypedIdentityAndRecycleRestore(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	tree, err = repo.ListHuddleExplorer(companyID)
+	if err != nil || len(tree.Items) != 1 || tree.Items[0].ResourceType != EntityTypeHuddleLogicGate {
+		t.Fatalf("Huddle Node creation changed Explorer placements: %+v, err=%v", tree, err)
+	}
 	repo.replaceMemoryRACIEdgesLocked(companyID, EntityTypeHuddleNode, node.HuddleNodeID, []domain.ResourceRACIAssignment{{Role: domain.RACIRoleAccountable, PrincipalType: "user", PrincipalID: userID}})
 	if err := repo.DeleteHuddleLogicGate(companyID, gateID, userID); !errors.Is(err, ErrConflict) {
 		t.Fatalf("delete gate with node error = %v, want conflict", err)
@@ -86,6 +90,10 @@ func TestMemoryHuddleLifecycleKeepsTypedIdentityAndRecycleRestore(t *testing.T) 
 	}
 	if restored, err := repo.GetHuddleNode(companyID, node.HuddleNodeID); err != nil || restored.HuddleLogicGateID != gateID {
 		t.Fatalf("restored node = %+v, err=%v", restored, err)
+	}
+	tree, err = repo.ListHuddleExplorer(companyID)
+	if err != nil || len(tree.Items) != 1 || tree.Items[0].ResourceType != EntityTypeHuddleLogicGate {
+		t.Fatalf("Huddle Node restore changed Explorer placements: %+v, err=%v", tree, err)
 	}
 	restoredPolicy, err := repo.GetResourceRACIPolicy(companyID, EntityTypeHuddleNode, node.HuddleNodeID)
 	if err != nil || len(restoredPolicy.RACIAssignments) != 1 || restoredPolicy.RACIAssignments[0].Role != domain.RACIRoleAccountable {
@@ -118,5 +126,39 @@ func TestCanonicalHuddleSchemaHasNoPatchMarker(t *testing.T) {
 	}
 	if strings.Contains(string(body), "\n+-- Bare-bones Huddles and KPIs") {
 		t.Fatal("canonical Huddle schema contains a leading patch marker and is not executable SQL")
+	}
+}
+
+func TestHuddleExplorerStoresOnlyHuddleLogicGates(t *testing.T) {
+	migration, err := os.ReadFile("../../db/migrations/20260811_z_huddle_explorer_logic_gates_only.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, err := os.ReadFile("../../db/schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	storeSource, err := os.ReadFile("postgres_huddles.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{"migration": strings.ToLower(string(migration)), "canonical schema": strings.ToLower(string(schema))} {
+		if !strings.Contains(body, "check (huddle_type = 'huddle_logic_gate')") {
+			t.Fatalf("%s does not restrict Huddle Explorer items to Huddle Logic Gates", name)
+		}
+	}
+	migrationSQL := strings.ToLower(string(migration))
+	for _, required := range []string{
+		"delete from huddle_explorer_items",
+		"where huddle_type = 'huddle_node'",
+		"item.object_kind = 'huddle_node'",
+		"item.restore_payload - 'huddle_explorer_items'",
+	} {
+		if !strings.Contains(migrationSQL, required) {
+			t.Fatalf("Huddle Explorer migration missing %q", required)
+		}
+	}
+	if strings.Contains(strings.ToLower(string(storeSource)), "values($1::uuid,$2::uuid,'huddle_node',$3::uuid)") {
+		t.Fatal("PostgreSQL Huddle Node creation still inserts a Huddle Explorer item")
 	}
 }
