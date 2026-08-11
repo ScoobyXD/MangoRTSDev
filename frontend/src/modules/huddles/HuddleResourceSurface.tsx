@@ -180,12 +180,10 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
   };
 
   const createNode = async () => {
-    const nodeName = window.prompt("Huddle Node name", "New Huddle Node")?.trim();
-    if (!nodeName) return;
     try {
       const node = await requestJSON<HuddleNode>("/v1/huddle-nodes", {
         method: "POST",
-        json: { company_id: companyID, huddle_logic_gate_id: resource.resourceID, name: nodeName },
+        json: { company_id: companyID, huddle_logic_gate_id: resource.resourceID, name: "New Huddle Node" },
       });
       setNodes((current) => [...current, node]);
     } catch (cause) {
@@ -347,8 +345,8 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
                     key={node.huddle_node_id}
                     type="button"
                     data-huddle-node-card={node.huddle_node_id}
-                    title="Double-click to open Huddle Node"
-                    onDoubleClick={() => onOpenNode({ resourceType: "huddle_node", resourceID: node.huddle_node_id, name: node.name })}
+                    title="Click to open Huddle Node"
+                    onClick={() => onOpenNode({ resourceType: "huddle_node", resourceID: node.huddle_node_id, name: node.name })}
                     style={nodeCardStyle}
                   >
                     <HuddleResourceIcon type="huddle_node" />

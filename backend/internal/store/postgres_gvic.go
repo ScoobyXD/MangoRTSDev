@@ -151,6 +151,10 @@ func postgresRACIResourceExists(ctx context.Context, queryer postgresRACIQueryer
 		sqlText = `select exists(select 1 from nodes where company_id=$1::uuid and node_id=$2::uuid)`
 	case EntityTypeLogicGate:
 		sqlText = `select exists(select 1 from logic_gates where company_id=$1::uuid and logic_gate_id=$2::uuid)`
+	case EntityTypeHuddleLogicGate:
+		sqlText = `select exists(select 1 from huddle_logic_gates where company_id=$1::uuid and huddle_logic_gate_id=$2::uuid)`
+	case EntityTypeHuddleNode:
+		sqlText = `select exists(select 1 from huddle_nodes where company_id=$1::uuid and huddle_node_id=$2::uuid)`
 	case EntityTypeProject:
 		sqlText = `select exists(select 1 from projects where company_id=$1::uuid and project_id=$2::uuid)`
 	case EntityTypeCompanyExplorerFolder:

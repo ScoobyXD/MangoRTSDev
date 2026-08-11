@@ -5,10 +5,10 @@
 3. Every Huddle Node belongs to exactly one Huddle Logic Gate in the same company through the literal `huddle_logic_gate_id`.
 4. A Huddle Node uses the exact resource type `huddle_node` and the exact `huddle_nodes.huddle_node_id` everywhere it is referenced.
 5. A Huddle Node can be created only from the **Create Huddle Node** action in a Huddle Logic Gate's right column.
-6. Creation requires only a nonblank name; all other Huddle Node content starts empty.
+6. Clicking **Create Huddle Node** immediately creates one Huddle Node named **New Huddle Node** without asking for a name; all other Huddle Node content starts empty.
 7. Creating a Huddle Node and its root `huddle_explorer_items` placement commits or rolls back as one transaction.
 8. The owning Huddle Logic Gate's right column shows Huddle Nodes as a simple vertical list of cards.
-9. Double-clicking a Huddle Node card opens that exact Huddle Node in a Huddle Node popup.
+9. Clicking a Huddle Node card once opens that exact Huddle Node in a Huddle Node popup.
 10. The popup opens almost full screen by default while leaving the application's left sidebar visible.
 11. The popup title starts with **Huddle Node:** and reuses the normal Node and Logic Gate RACI role cards, people-and-group picker, Editor tab, Permissions tab, and shared Mango editor toolbar in its top header area.
 12. The shared editor toolbar includes the existing font size, bold, underline, italic, strikethrough, highlight, alignment, alphabetical list, numerical list, dense bullet list, checklist, and table controls.
