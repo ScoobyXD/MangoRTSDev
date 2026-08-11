@@ -245,9 +245,71 @@ export function readMangoTiptapSelectionState(editor: Editor) {
   };
 }
 
+function resetContainingOrderedListStarts(transaction: Transaction): void {
+  const { $from } = transaction.selection;
+  for (let depth = 1; depth <= $from.depth; depth += 1) {
+    const list = $from.node(depth);
+    if (list.type.name !== "orderedList" || Number(list.attrs.start) === 1) continue;
+    transaction.setNodeMarkup($from.before(depth), undefined, { ...list.attrs, start: 1 }, list.marks);
+  }
+}
+
 export function indentMangoTiptapSelection(editor: Editor): boolean {
   if (editor.isActive("taskItem")) return editor.chain().focus().sinkListItem("taskItem").run();
-  if (editor.isActive("listItem")) return editor.chain().focus().sinkListItem("listItem").run();
+  if (editor.isActive("listItem")) {
+    editor.commands.focus();
+    const { $from } = editor.state.selection;
+    let itemDepth = -1;
+    for (let depth = $from.depth - 1; depth > 0; depth -= 1) {
+      if ($from.node(depth).type.name === "listItem") {
+        itemDepth = depth;
+        break;
+      }
+    }
+    const listDepth = itemDepth - 1;
+    const list = listDepth > 0 ? $from.node(listDepth) : null;
+    const item = itemDepth > 0 ? $from.node(itemDepth) : null;
+    const itemIndex = listDepth > 0 ? $from.index(listDepth) : -1;
+    const nestedList = item?.lastChild;
+    if (
+      list
+      && item
+      && itemIndex > 0
+      && $from.index(itemDepth) === 0
+      && nestedList?.type === list.type
+    ) {
+      const previousItem = list.child(itemIndex - 1);
+      const activeItemContent = [];
+      for (let index = 0; index < item.childCount - 1; index += 1) activeItemContent.push(item.child(index));
+      const activeItem = item.copy(Fragment.fromArray(activeItemContent));
+      const nestedItems = [activeItem];
+      nestedList.content.forEach((child) => nestedItems.push(child));
+      const movedList = nestedList.type.create(
+        nestedList.type.name === "orderedList" ? { ...nestedList.attrs, start: 1 } : nestedList.attrs,
+        Fragment.fromArray(nestedItems),
+        nestedList.marks,
+      );
+      const previousItemPosition = $from.before(itemDepth) - previousItem.nodeSize;
+      const movedListPosition = previousItemPosition + 1 + previousItem.content.size;
+      const updatedPreviousItem = previousItem.copy(previousItem.content.append(Fragment.from(movedList)));
+      const transaction = editor.state.tr.replaceWith(previousItemPosition, $from.after(itemDepth), updatedPreviousItem);
+      transaction.setSelection(TextSelection.create(
+        transaction.doc,
+        movedListPosition + 3 + $from.parentOffset,
+      ));
+      resetContainingOrderedListStarts(transaction);
+      editor.view.dispatch(transaction.scrollIntoView());
+      return true;
+    }
+    return editor.chain()
+      .focus()
+      .sinkListItem("listItem")
+      .command(({ tr }) => {
+        resetContainingOrderedListStarts(tr);
+        return true;
+      })
+      .run();
+  }
   return updateCurrentMangoTiptapIndent(editor, 1);
 }
 
@@ -284,7 +346,17 @@ export function handleMangoTiptapOutlineEnter(editor: Editor, outlineStyle: Edit
   const currentBlock = $from.parent;
   const empty = currentBlock.isTextblock && currentBlock.content.size === 0;
   if (editor.isActive("taskItem")) return empty ? false : editor.commands.splitListItem("taskItem");
-  if (editor.isActive("listItem")) return empty ? false : editor.commands.splitListItem("listItem");
+  if (editor.isActive("listItem")) {
+    if (empty) return false;
+    return editor.chain()
+      .focus()
+      .splitListItem("listItem")
+      .command(({ tr }) => {
+        resetContainingOrderedListStarts(tr);
+        return true;
+      })
+      .run();
+  }
   if (!editor.isActive("paragraph") && !editor.isActive("heading")) return false;
 
   if (outlineStyle === "automatic-outline-numbering") {
@@ -305,6 +377,7 @@ export function handleMangoTiptapOutlineEnter(editor: Editor, outlineStyle: Edit
     const insertionPosition = $from.after($from.depth) + 1;
     const transaction = editor.state.tr.insert(insertionPosition, listItem);
     transaction.setSelection(TextSelection.create(transaction.doc, insertionPosition + 2));
+    resetContainingOrderedListStarts(transaction);
     editor.view.dispatch(transaction.scrollIntoView());
     return true;
   }
