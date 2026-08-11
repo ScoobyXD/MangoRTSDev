@@ -15,6 +15,7 @@ import (
 const (
 	NotificationRealtimeDeleteEach = "deleted"
 	NotificationRealtimeClear      = "cleared"
+	raciTabsRealtimeScope          = "raci-tabs:company"
 )
 
 func stableRealtimeEventID(parts ...string) string {
@@ -318,6 +319,115 @@ func nodeDomainEventKanbanChangeType(eventType string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func isRACITabsChangedDomainEvent(event domain.DomainEvent) bool {
+	if !isWorkspaceStreamDomainEvent(event) {
+		return false
+	}
+	switch strings.TrimSpace(event.Type) {
+	case LogicGateRACIUpdatedEventType,
+		"company_explorer_folder_updated", "company_explorer_folder_deleted",
+		"company_explorer_item_removed",
+		"company_user_group_updated", "company_user_group_deleted", "company_user_group_members_updated":
+		return true
+	case "company_explorer_item_placed":
+		return workspaceEventPayloadString(event.Payload, "target_type") == EntityTypeLogicGate
+	case "resource_gvic_policy_updated":
+		resourceType := workspaceEventPayloadString(event.Payload, "resource_type")
+		return resourceType == EntityTypeCompanyExplorerFolder || resourceType == EntityTypeLogicGate
+	default:
+		return false
+	}
+}
+
+func raciTabsChangedOutboxInput(companyID string, eventIDs, allowedUserIDs []string) (RealtimeOutboxInput, error) {
+	companyID = strings.TrimSpace(companyID)
+	if companyID == "" || len(eventIDs) == 0 {
+		return RealtimeOutboxInput{}, ErrInvalid
+	}
+	payload, err := json.Marshal(map[string]any{
+		"type": "raci_tabs.changed", "company_id": companyID, "scope": raciTabsRealtimeScope,
+	})
+	if err != nil {
+		return RealtimeOutboxInput{}, err
+	}
+	return normalizeRealtimeOutboxInput(RealtimeOutboxInput{
+		EventID:   stableRealtimeEventID("raci_tabs.changed", companyID, strings.Join(eventIDs, ",")),
+		CompanyID: companyID, Scope: raciTabsRealtimeScope, EventType: "raci_tabs.changed", Payload: payload,
+		AllowedUserIDs: allowedUserIDs, AudienceRestricted: true,
+	})
+}
+
+func raciTabsChangedEventIDsByCompany(events []domain.DomainEvent) map[string][]string {
+	byCompany := map[string][]string{}
+	for _, event := range events {
+		if !isRACITabsChangedDomainEvent(event) {
+			continue
+		}
+		companyID := strings.TrimSpace(event.CompanyID)
+		eventID := strings.TrimSpace(event.EventID)
+		if companyID == "" || eventID == "" || slices.Contains(byCompany[companyID], eventID) {
+			continue
+		}
+		byCompany[companyID] = append(byCompany[companyID], eventID)
+	}
+	return byCompany
+}
+
+func (r *MemoryRepo) enqueueRACITabsRealtimeForDomainEventsLocked(events []domain.DomainEvent) error {
+	for companyID, eventIDs := range raciTabsChangedEventIDsByCompany(events) {
+		allowed := []string{}
+		for _, membership := range r.memberships {
+			if membership.CompanyID == companyID || membership.Role == domain.RoleDevAdmin {
+				allowed = append(allowed, membership.UserID)
+			}
+		}
+		slices.Sort(allowed)
+		input, err := raciTabsChangedOutboxInput(companyID, eventIDs, allowed)
+		if err != nil {
+			return err
+		}
+		if _, err := r.enqueueRealtimeOutboxLocked(input); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *PostgresRepo) enqueueRACITabsRealtimeForDomainEventsTx(ctx context.Context, tx *sql.Tx, events []domain.DomainEvent) error {
+	for companyID, eventIDs := range raciTabsChangedEventIDsByCompany(events) {
+		rows, err := tx.QueryContext(ctx, `
+select distinct user_id::text
+from company_memberships
+where company_id=$1::uuid or role='dev_admin'
+order by user_id::text`, companyID)
+		if err != nil {
+			return err
+		}
+		allowed := []string{}
+		for rows.Next() {
+			var userID string
+			if err := rows.Scan(&userID); err != nil {
+				rows.Close()
+				return err
+			}
+			allowed = append(allowed, userID)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		input, err := raciTabsChangedOutboxInput(companyID, eventIDs, allowed)
+		if err != nil {
+			return err
+		}
+		if _, err := r.enqueueRealtimeOutboxTx(ctx, tx, input); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *MemoryRepo) enqueueKanbanRealtimeForDomainEventLocked(event domain.DomainEvent) error {

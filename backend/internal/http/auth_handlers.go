@@ -348,6 +348,7 @@ func (s *Server) handleCompanyUserGroupsSubresource(w http.ResponseWriter, r *ht
 			writeError(w, http.StatusInternalServerError, "failed_to_update_user_group_members")
 			return
 		}
+		s.publishWorkspaceEvent(companyID, "company_user_group_members_updated", map[string]any{"group_id": strings.TrimSpace(parts[0])})
 		writeJSON(w, http.StatusOK, map[string]any{"members": members})
 		return
 	}
@@ -403,6 +404,7 @@ func (s *Server) handleCompanyUserGroupsSubresource(w http.ResponseWriter, r *ht
 			writeError(w, http.StatusInternalServerError, "failed_to_update_user_group")
 			return
 		}
+		s.publishWorkspaceEvent(companyID, "company_user_group_updated", map[string]any{"group_id": groupID})
 		writeJSON(w, http.StatusOK, group)
 		return
 	case http.MethodDelete:
@@ -419,6 +421,7 @@ func (s *Server) handleCompanyUserGroupsSubresource(w http.ResponseWriter, r *ht
 			writeError(w, http.StatusInternalServerError, "failed_to_delete_user_group")
 			return
 		}
+		s.publishWorkspaceEvent(companyID, "company_user_group_deleted", map[string]any{"group_id": groupID})
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 		return
 	default:

@@ -30,11 +30,31 @@ test("Tower RACI Tabs start collapsed and fetch only an opened role and opened f
   }
   installGlobal("IS_REACT_ACT_ENVIRONMENT", true, restores);
 
+  class SilentWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSED = 3;
+    readyState = SilentWebSocket.CONNECTING;
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: string }) => void) | null = null;
+    onclose: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    constructor(_url: string) {
+      queueMicrotask(() => { this.readyState = SilentWebSocket.OPEN; this.onopen?.(); });
+    }
+    send(_message: string): void {}
+    close(): void { this.readyState = SilentWebSocket.CLOSED; this.onclose?.(); }
+  }
+  installGlobal("WebSocket", SilentWebSocket, restores);
+
   const requests: string[] = [];
   installGlobal("fetch", async (input: string | URL | Request) => {
     const value = typeof input === "string" ? input : input.toString();
     requests.push(value);
     const url = new URL(value, "http://localhost");
+    if (url.pathname === "/v1/realtime/ticket") {
+      return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
+    }
     const parentFolderID = url.searchParams.get("parent_folder_id") ?? "";
     const rows = parentFolderID
       ? []
@@ -70,15 +90,16 @@ test("Tower RACI Tabs start collapsed and fetch only an opened role and opened f
     const roleButtons = Array.from(container.querySelectorAll("button")).filter((button) => ["Responsible", "Accountable", "Consulted", "Informed"].includes(button.textContent?.trim() ?? ""));
     assert.deepEqual(roleButtons.map((button) => button.textContent?.trim()), ["Responsible", "Accountable", "Consulted", "Informed"]);
     assert.deepEqual(roleButtons.map((button) => button.getAttribute("aria-expanded")), ["false", "false", "false", "false"]);
-    assert.equal(requests.length, 0);
+    assert.equal(requests.filter((value) => value.includes("/v1/raci-tabs?")).length, 0);
 
     await act(async () => {
       roleButtons[0].dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    assert.equal(requests.length, 1);
-    assert.match(requests[0], /role=responsible/);
-    assert.doesNotMatch(requests[0], /parent_folder_id=/);
+    const firstBranchRequests = requests.filter((value) => value.includes("/v1/raci-tabs?"));
+    assert.equal(firstBranchRequests.length, 1);
+    assert.match(firstBranchRequests[0], /role=responsible/);
+    assert.doesNotMatch(firstBranchRequests[0], /parent_folder_id=/);
 
     const folderButton = container.querySelector<HTMLButtonElement>('button[aria-label="Expand Personal"]');
     assert.ok(folderButton);
@@ -86,8 +107,9 @@ test("Tower RACI Tabs start collapsed and fetch only an opened role and opened f
       folderButton.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    assert.equal(requests.length, 2);
-    assert.match(requests[1], /parent_folder_id=22222222-2222-4222-8222-222222222222/);
+    const branchRequests = requests.filter((value) => value.includes("/v1/raci-tabs?"));
+    assert.equal(branchRequests.length, 2);
+    assert.match(branchRequests[1], /parent_folder_id=22222222-2222-4222-8222-222222222222/);
     assert.equal(requests.filter((value) => /role=(accountable|consulted|informed)/.test(value)).length, 0);
   } finally {
     if (mountedRoot) await act(async () => mountedRoot?.unmount());

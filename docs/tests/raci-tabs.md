@@ -5,9 +5,9 @@
 RT1 - Tower shows exactly four personal Logic Gate tabs in this order: Responsible, Accountable, Consulted, and Informed.
 RT2 - All four tabs start collapsed whenever Mango starts a new frontend session. Expansion state is current-session React state and is never stored in browser storage.
 RT3 - A collapsed tab that has not yet been opened sends no RACI Tabs item, folder, or status-count request.
-RT4 - First expansion of one role tab loads only that role's bounded root page. It does not load another role or any unopened folder, and a truncated page returns a continuation cursor instead of silently dropping rows.
-RT5 - First expansion of one folder loads only that folder's bounded direct-child page. Folder rows include `has_children` and recursive status totals without returning unopened descendant rows.
-RT6 - A loaded tab or folder reuses its current-session rows when collapsed and reopened until a committed relevant change invalidates or patches that exact branch.
+RT4 - Every collapsed-to-expanded role-tab transition performs one fresh bounded GET for only that role's root page. It does not load another role or any unopened folder, and a truncated page returns a continuation cursor instead of silently dropping rows.
+RT5 - Every collapsed-to-expanded folder transition performs one fresh bounded GET for only that folder's direct-child page. Folder rows include `has_children` and recursive status totals without returning unopened descendant rows.
+RT6 - Collapsing a role tab or folder discards that branch's loaded rows. A closed or never-opened branch stays unloaded and sends no branch GET until its next expansion.
 RT7 - The canonical RACI Tabs tables are `raci_tabs_items` and `raci_tabs_folders`; Company Explorer, Pins, retired My Work storage, and browser storage are not RACI Tabs storage.
 RT8 - `raci_tabs_items` has exactly `company_id`, `user_id`, `role`, `logic_gate_id`, nullable `folder_id`, `name`, `position`, `created_timestamp`, and `updated_timestamp`. It has no item ID, generic resource type, translated resource ID, permission field, or RACI policy field.
 RT9 - The `raci_tabs_items` primary key is `(company_id, user_id, logic_gate_id)`. Its stored role is that user's one winning effective role under Responsible, Accountable, Consulted, then Informed priority.
@@ -40,6 +40,7 @@ RT35 - Request, Pending, In Progress, Review, and the row action slot keep the s
 RT36 - Request uses the Pin yellow gradient, Pending uses the Pin light-gray gradient, In Progress uses exact opaque `rgba(254, 155, 70)`, and Review uses the Node icon's `#33ddd5` to `#19a8ff` vertical gradient.
 RT37 - A committed Node assignment, removal, or tracked-status move refreshes only the affected loaded Logic Gate count and recalculates its loaded ancestor and role totals. Count refresh writes no RACI Tabs item, folder, RACI, permission, or browser-storage row.
 RT38 - RACI Tabs APIs derive the acting user from the authenticated company membership. A request-supplied user ID cannot read or mutate another user's items or folders.
+RT39 - A committed direct-user, group, group-membership, group-parent, group-deletion, inherited-policy, or inheritance-parentage change that can change effective Logic Gate RACI emits one compact company-scoped `raci_tabs.changed` doorbell through Mango's existing durable realtime connection. The doorbell carries no tree data, grants no access, immediately refetches only expanded visible branches, discards loaded collapsed branches, and leaves never-opened branches request-free.
 
 ## Process Story: Effective Logic Gate RACI appears in a lazy personal tree
 
@@ -49,11 +50,11 @@ The canonical pointer policy remains authoritative while the same committed comm
 ↓
 Mango starts with all four Tower tabs collapsed and sends no RACI Tabs content request until the user opens one role
 ↓
-Opening that role loads only its root page, and opening a folder loads only that folder's direct children while recursive status totals remain visible
+Opening that role freshly loads only its root page, and opening a folder freshly loads only that folder's direct children while recursive status totals remain visible
 ↓
 The user selects and drags Logic Gate items through nested personal folders without changing the Logic Gate, its RACI, its permission, Company Explorer, or Pins
 
-Last updated: 2026-08-10
+Last updated: 2026-08-11
 
 ## Scenarios
 
@@ -77,6 +78,7 @@ Expected:
 - Removed effective users lose their items; a winning-role change moves the item to the new role root.
 - Rename updates copied names, deletion removes copied items, and no copied row grants RACI or permission.
 - Every synchronization commits or rolls back with the business command and is safe to retry.
+- Each relevant commit sends only a compact `raci_tabs.changed` doorbell to current company members; expanded branches refresh and closed branches wait for their next expansion.
 
 ### Scenario RT-S2: Tabs and personal folders load and move only what the user opens
 
@@ -84,7 +86,7 @@ Business logic covered:
 - RT1 through RT6
 - RT10 through RT15
 - RT25 through RT32
-- RT38
+- RT38 through RT39
 
 Given:
 - A user starts Mango with root items, three root folders, and several nested folders in multiple role tabs.
@@ -95,10 +97,12 @@ Expected:
 - All four tabs initially remain collapsed and send no content or count request.
 - Opening Responsible loads only its bounded root page; opening one folder loads only that folder's direct page.
 - Unopened roles and folders remain unloaded, while returned folder rows still show `has_children` and recursive totals.
+- Moving into an unopened folder updates the existing item or folder row without preloading the destination; opening that destination later performs a fresh GET. An already-expanded destination refreshes immediately after the move.
 - Selection and item-batch drag follow the visible loaded order; folders move one subtree at a time.
 - Invalid cross-owner, cross-role, or cyclic moves commit nothing.
 - Folder deletion preserves every Logic Gate item by returning contained items to the role root.
-- Reopening a still-current branch reuses its session data, and no organization action changes RACI, permission, Pins, or Company Explorer.
+- Collapsing discards that branch's rows, every reopening performs a fresh exact-branch GET, and no organization action changes RACI, permission, Pins, or Company Explorer.
+- A RACI Tabs doorbell refetches only expanded visible branches; collapsed and never-opened branches make no immediate request.
 
 ### Scenario RT-S3: Logic Gate, folder, and role totals keep Pin alignment
 

@@ -45,6 +45,7 @@ type Props = {
 
 type ActiveDrag = { role: RACITabRole; entries: RACITabEntryRef[] };
 type DropTarget = { key: string; placement: "inside" | "before" | "after" };
+type BranchRef = { role: RACITabRole; parentFolderID: string };
 
 export function AppSidebarRACITabsSection({ apiBase, companyID, onOpenLogicGate }: Props): React.ReactElement {
   const [expandedRoles, setExpandedRoles] = useState<Set<RACITabRole>>(new Set());
@@ -59,8 +60,20 @@ export function AppSidebarRACITabsSection({ apiBase, companyID, onOpenLogicGate 
   const [busy, setBusy] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; folder: RACITabFolder } | null>(null);
   const activeDragRef = useRef<ActiveDrag | null>(null);
+  const branchesRef = useRef(branches);
+  const expandedRolesRef = useRef(expandedRoles);
+  const expandedFolderIDsRef = useRef(expandedFolderIDs);
+  const loadingKeysRef = useRef(loadingKeys);
+  branchesRef.current = branches;
+  expandedRolesRef.current = expandedRoles;
+  expandedFolderIDsRef.current = expandedFolderIDs;
+  loadingKeysRef.current = loadingKeys;
 
   useEffect(() => {
+    expandedRolesRef.current = new Set();
+    expandedFolderIDsRef.current = new Set();
+    branchesRef.current = {};
+    loadingKeysRef.current = new Set();
     setExpandedRoles(new Set());
     setExpandedFolderIDs(new Set());
     setBranches({});
@@ -80,16 +93,72 @@ export function AppSidebarRACITabsSection({ apiBase, companyID, onOpenLogicGate 
   }, [branches]);
   const loadedLogicGateIDKey = loadedLogicGateIDs.join("\u0000");
 
+  const updateBranches = (updater: (current: Record<string, RACITabBranch | undefined>) => Record<string, RACITabBranch | undefined>) => {
+    setBranches((current) => {
+      const next = updater(current);
+      branchesRef.current = next;
+      return next;
+    });
+  };
+
+  const branchIsVisible = (role: RACITabRole, parentFolderID: string, current = branchesRef.current): boolean => {
+    if (!expandedRolesRef.current.has(role)) return false;
+    if (!parentFolderID) return true;
+    if (!expandedFolderIDsRef.current.has(parentFolderID)) return false;
+    return buildVisibleRACITabRows(role, current, expandedFolderIDsRef.current)
+      .some(({ row }) => row.rowKind === "folder" && row.folder.folderID === parentFolderID);
+  };
+
+  const visibleBranchRefs = (role?: RACITabRole): BranchRef[] => {
+    const refs: BranchRef[] = [];
+    for (const currentRole of RACI_TAB_ROLES) {
+      if (role && currentRole !== role) continue;
+      if (!expandedRolesRef.current.has(currentRole)) continue;
+      refs.push({ role: currentRole, parentFolderID: "" });
+      for (const { row } of buildVisibleRACITabRows(currentRole, branchesRef.current, expandedFolderIDsRef.current)) {
+        if (row.rowKind === "folder" && expandedFolderIDsRef.current.has(row.folder.folderID)) {
+          refs.push({ role: currentRole, parentFolderID: row.folder.folderID });
+        }
+      }
+    }
+    return refs;
+  };
+
+  const refreshBranches = async (refs: BranchRef[]): Promise<void> => {
+    const unique = [...new Map(refs.map((ref) => [raciTabBranchKey(ref.role, ref.parentFolderID), ref])).values()]
+      .filter((ref) => branchIsVisible(ref.role, ref.parentFolderID));
+    const pages = await Promise.all(unique.map(async (ref) => ({
+      ref,
+      page: await fetchRACITabBranch(apiBase, companyID, ref.role, ref.parentFolderID).catch(() => null),
+    })));
+    updateBranches((current) => {
+      const next = { ...current };
+      for (const { ref, page } of pages) {
+        if (page && branchIsVisible(ref.role, ref.parentFolderID, current)) next[raciTabBranchKey(ref.role, ref.parentFolderID)] = page;
+      }
+      return next;
+    });
+  };
+
+  const refreshVisibleBranches = async (): Promise<void> => {
+    const refs = visibleBranchRefs();
+    const visibleKeys = new Set(refs.map((ref) => raciTabBranchKey(ref.role, ref.parentFolderID)));
+    updateBranches((current) => Object.fromEntries(Object.entries(current).filter(([key]) => visibleKeys.has(key))));
+    await refreshBranches(refs);
+  };
+
   const loadBranch = async (role: RACITabRole, parentFolderID: string, append = false): Promise<void> => {
     const key = raciTabBranchKey(role, parentFolderID);
-    if (loadingKeys.has(key)) return;
-    const cursor = append ? branches[key]?.nextCursor ?? "" : "";
+    if (loadingKeysRef.current.has(key)) return;
+    const cursor = append ? branchesRef.current[key]?.nextCursor ?? "" : "";
     if (append && !cursor) return;
+    loadingKeysRef.current = new Set(loadingKeysRef.current).add(key);
     setLoadingKeys((current) => new Set(current).add(key));
     setErrors((current) => ({ ...current, [key]: "" }));
     try {
       const page = await fetchRACITabBranch(apiBase, companyID, role, parentFolderID, cursor);
-      setBranches((current) => {
+      updateBranches((current) => {
+        if (!branchIsVisible(role, parentFolderID, current)) return current;
         const previous = current[key];
         return {
           ...current,
@@ -99,6 +168,9 @@ export function AppSidebarRACITabsSection({ apiBase, companyID, onOpenLogicGate 
     } catch (cause) {
       setErrors((current) => ({ ...current, [key]: cause instanceof Error ? cause.message : "Unable to load" }));
     } finally {
+      const nextLoading = new Set(loadingKeysRef.current);
+      nextLoading.delete(key);
+      loadingKeysRef.current = nextLoading;
       setLoadingKeys((current) => {
         const next = new Set(current);
         next.delete(key);
@@ -108,27 +180,58 @@ export function AppSidebarRACITabsSection({ apiBase, companyID, onOpenLogicGate 
   };
 
   const toggleRole = (role: RACITabRole) => {
-    const opening = !expandedRoles.has(role);
-    setExpandedRoles((current) => {
-      const next = new Set(current);
-      if (opening) next.add(role);
-      else next.delete(role);
+    const opening = !expandedRolesRef.current.has(role);
+    const nextRoles = new Set(expandedRolesRef.current);
+    if (opening) nextRoles.add(role);
+    else nextRoles.delete(role);
+    expandedRolesRef.current = nextRoles;
+    setExpandedRoles(nextRoles);
+    if (opening) {
+      void loadBranch(role, "");
+      return;
+    }
+    const roleFolderIDs = new Set<string>();
+    for (const branch of Object.values(branchesRef.current)) {
+      if (branch?.role !== role) continue;
+      for (const row of branch.rows) if (row.rowKind === "folder") roleFolderIDs.add(row.folder.folderID);
+    }
+    setExpandedFolderIDs((current) => {
+      const next = new Set([...current].filter((folderID) => !roleFolderIDs.has(folderID)));
+      expandedFolderIDsRef.current = next;
       return next;
     });
-    if (opening && !branches[raciTabBranchKey(role, "")]) void loadBranch(role, "");
+    updateBranches((current) => Object.fromEntries(Object.entries(current).filter(([, branch]) => branch?.role !== role)));
   };
 
   const toggleFolder = (folder: RACITabFolder) => {
-    const opening = !expandedFolderIDs.has(folder.folderID);
+    const opening = !expandedFolderIDsRef.current.has(folder.folderID);
+    const nextFolders = new Set(expandedFolderIDsRef.current);
+    if (opening) nextFolders.add(folder.folderID);
+    else nextFolders.delete(folder.folderID);
+    expandedFolderIDsRef.current = nextFolders;
+    setExpandedFolderIDs(nextFolders);
+    if (opening) {
+      void loadBranch(folder.role, folder.folderID);
+      return;
+    }
+    const closing = new Set([folder.folderID]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const branch of Object.values(branchesRef.current)) {
+        if (!branch || !closing.has(branch.parentFolderID)) continue;
+        for (const row of branch.rows) if (row.rowKind === "folder" && !closing.has(row.folder.folderID)) {
+          closing.add(row.folder.folderID);
+          changed = true;
+        }
+      }
+    }
     setExpandedFolderIDs((current) => {
-      const next = new Set(current);
-      if (opening) next.add(folder.folderID);
-      else next.delete(folder.folderID);
+      const next = new Set([...current].filter((folderID) => !closing.has(folderID)));
+      expandedFolderIDsRef.current = next;
       return next;
     });
-    if (opening && folder.hasChildren && !branches[raciTabBranchKey(folder.role, folder.folderID)]) {
-      void loadBranch(folder.role, folder.folderID);
-    }
+    updateBranches((current) => Object.fromEntries(Object.entries(current).filter(([, branch]) => !branch || !closing.has(branch.parentFolderID))));
   };
 
   const patchLogicGateCounts = (logicGateID: string, nextCounts: RACITabStatusCounts) => {
@@ -215,42 +318,29 @@ export function AppSidebarRACITabsSection({ apiBase, companyID, onOpenLogicGate 
     } : branch])));
   }), [companyID]);
 
-  const reloadLoadedRole = async (role: RACITabRole) => {
-    const parents = Object.values(branches).filter((branch): branch is RACITabBranch => !!branch && branch.role === role).map((branch) => branch.parentFolderID);
-    const pages = await Promise.all(parents.map((parentFolderID) => fetchRACITabBranch(apiBase, companyID, role, parentFolderID).then(
-      (page) => page,
-      () => null,
-    )));
-    setBranches((current) => {
-      const next = { ...current };
-      for (const page of pages) if (page) next[raciTabBranchKey(role, page.parentFolderID)] = page;
-      return next;
+  useEffect(() => {
+    if (!companyID) return;
+    return subscribeRealtimeScope(apiBase, companyID, "raci-tabs:company", {
+      onRecover: refreshVisibleBranches,
+      onRACITabsChanged: (message) => {
+        if (message.company_id === companyID) void refreshVisibleBranches();
+      },
     });
-  };
+  }, [apiBase, companyID]);
 
   const reportMutationError = (role: RACITabRole, cause: unknown) => {
     const key = raciTabBranchKey(role, "");
     setErrors((current) => ({ ...current, [key]: cause instanceof Error ? cause.message : "Unable to update RACI Tabs" }));
   };
 
-  const fetchCompleteBranch = async (role: RACITabRole, parentFolderID: string, initial?: RACITabBranch): Promise<RACITabBranch> => {
-    let page = initial ?? await fetchRACITabBranch(apiBase, companyID, role, parentFolderID);
-    const rows = [...page.rows];
-    const cursors = new Set<string>();
-    while (page.nextCursor && !cursors.has(page.nextCursor)) {
-      cursors.add(page.nextCursor);
-      page = await fetchRACITabBranch(apiBase, companyID, role, parentFolderID, page.nextCursor);
-      rows.push(...page.rows);
-    }
-    return { ...page, parentFolderID, rows: dedupeRows(rows), nextCursor: "" };
-  };
-
   const executeDrop = async (role: RACITabRole, target: RACITabEntryRef | null, placement: "inside" | "before" | "after") => {
     const active = activeDragRef.current;
     if (!active || active.role !== role || busy) return;
     setBusy(true);
+    const sourceParents = new Set<string>();
+    let destinationParent = "";
     try {
-      const workingBranches = { ...branches };
+      const workingBranches = { ...branchesRef.current };
       const parentForEntry = (entry: RACITabEntryRef): string => {
         const key = `${entry.entryType}:${entry.entryID}`;
         for (const branch of Object.values(workingBranches)) {
@@ -258,22 +348,21 @@ export function AppSidebarRACITabsSection({ apiBase, companyID, onOpenLogicGate 
         }
         return "";
       };
-      const affectedParents = new Set(active.entries.map(parentForEntry));
-      affectedParents.add(target && placement === "inside" ? target.entryID : target ? parentForEntry(target) : "");
-      const completedBranches: Record<string, RACITabBranch> = {};
-      for (const parentFolderID of affectedParents) {
-        const key = raciTabBranchKey(role, parentFolderID);
-        workingBranches[key] = await fetchCompleteBranch(role, parentFolderID, workingBranches[key]);
-        completedBranches[key] = workingBranches[key]!;
-      }
-      setBranches((current) => ({ ...current, ...completedBranches }));
+      active.entries.forEach((entry) => sourceParents.add(parentForEntry(entry)));
+      destinationParent = target && placement === "inside" ? target.entryID : target ? parentForEntry(target) : "";
       const updates = planRACITabDrop(role, workingBranches, active.entries, target, placement);
       if (updates.length === 0) return;
+      const movingKeys = new Set(active.entries.map((entry) => `${entry.entryType}:${entry.entryID}`));
+      updateBranches((current) => Object.fromEntries(Object.entries(current).map(([key, branch]) => [key, branch ? {
+        ...branch,
+        rows: branch.rows.filter((row) => !movingKeys.has(raciTabRowKey(row))),
+      } : branch])));
       await applyRACITabLayout(apiBase, companyID, role, updates);
-      await reloadLoadedRole(role);
+      await refreshBranches([...sourceParents, destinationParent].map((parentFolderID) => ({ role, parentFolderID })));
       setSelectedKeys(new Set(active.entries.map((entry) => `${entry.entryType}:${entry.entryID}`)));
     } catch (cause) {
       reportMutationError(role, cause);
+      await refreshBranches([...sourceParents].map((parentFolderID) => ({ role, parentFolderID })));
     } finally {
       activeDragRef.current = null;
       setDropTarget(null);
@@ -321,9 +410,11 @@ export function AppSidebarRACITabsSection({ apiBase, companyID, onOpenLogicGate 
       setExpandedFolderIDs((current) => {
         const next = new Set(current);
         next.delete(folder.folderID);
+        expandedFolderIDsRef.current = next;
         return next;
       });
-      await reloadLoadedRole(folder.role);
+      updateBranches((current) => Object.fromEntries(Object.entries(current).filter(([, branch]) => branch?.parentFolderID !== folder.folderID)));
+      await refreshBranches(visibleBranchRefs(folder.role));
     } catch (cause) {
       reportMutationError(folder.role, cause);
     } finally {

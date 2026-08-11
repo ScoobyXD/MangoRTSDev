@@ -80,12 +80,17 @@ func TestMemoryRACITabsSynchronizeEffectiveUsersAndPersonalLayout(t *testing.T) 
 		t.Fatalf("nested lazy page = %+v err=%v", childPage.Rows, err)
 	}
 
-	if _, err := repo.UpdateLogicGateHeader(companyID, gate.LogicGateID, "Renamed Launch Gate"); err != nil {
+	beforeRename := childPage.Rows[0].Item
+	if _, _, err := repo.UpdateLogicGateHeaderWithWorkspaceEvent(companyID, gate.LogicGateID, "Renamed Launch Gate"); err != nil {
 		t.Fatal(err)
 	}
 	childPage, err = repo.ListRACITabBranch(RACITabBranchInput{CompanyID: companyID, UserID: bob.UserID, Role: domain.RACIRoleConsulted, ParentFolderID: nested.FolderID})
 	if err != nil || childPage.Rows[0].Item.Name != "Renamed Launch Gate" {
 		t.Fatalf("renamed copied item = %+v err=%v", childPage.Rows, err)
+	}
+	afterRename := childPage.Rows[0].Item
+	if afterRename.FolderID == nil || *afterRename.FolderID != nested.FolderID || afterRename.Position != beforeRename.Position || afterRename.Role != beforeRename.Role || !afterRename.CreatedTimestamp.Equal(beforeRename.CreatedTimestamp) {
+		t.Fatalf("rename changed personal layout before=%+v after=%+v", beforeRename, afterRename)
 	}
 
 	if _, err := repo.SetLogicGateRACIAssignments(LogicGateRACIAssignmentUpdateInput{
@@ -105,6 +110,57 @@ func TestMemoryRACITabsSynchronizeEffectiveUsersAndPersonalLayout(t *testing.T) 
 	}
 	if _, err := repo.ListRACITabBranch(RACITabBranchInput{CompanyID: companyID, UserID: alice.UserID, Role: domain.RACIRoleResponsible}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestMemoryRACITabsAPIRenameSynchronizesAndRollsBack(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "77777777-7777-4777-8777-777777777709"
+	repo.EnsureCompany(companyID, "RACI Tabs Rename")
+	user := mustCreateRACIMembershipUser(t, repo, "raci-tabs-rename-user", companyID)
+	gate, err := repo.CreateLogicGate(companyID, "Original Gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddLogicGateRACIAssignments(LogicGateRACIAssignmentCommandInput{
+		CompanyID: companyID, LogicGateID: gate.LogicGateID,
+		Assignments: []LogicGateRACIAssignmentInput{{Role: domain.RACIRoleResponsible, UserID: user.UserID}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	folder, err := repo.CreateRACITabFolder(RACITabFolderCreateInput{CompanyID: companyID, UserID: user.UserID, Role: domain.RACIRoleResponsible, Name: "Personal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.ApplyRACITabLayout(RACITabLayoutInput{CompanyID: companyID, UserID: user.UserID, Role: domain.RACIRoleResponsible, Entries: []RACITabLayoutEntry{{EntryType: RACITabLayoutEntryItem, EntryID: gate.LogicGateID, ParentFolderID: folder.FolderID, Position: 2300}}}); err != nil {
+		t.Fatal(err)
+	}
+	itemKey := memoryRACITabItemKey(companyID, user.UserID, gate.LogicGateID)
+	before := repo.raciTabItems[itemKey]
+	forced := errors.New("forced rename event failure")
+	repo.domainEventAppendErr = forced
+	if _, _, err := repo.UpdateLogicGateHeaderWithWorkspaceEvent(companyID, gate.LogicGateID, "Rolled Back"); !errors.Is(err, forced) {
+		t.Fatalf("failed rename error = %v", err)
+	}
+	rolledBack := repo.raciTabItems[itemKey]
+	if rolledBack != before {
+		t.Fatalf("failed rename changed RACI tab before=%+v after=%+v", before, rolledBack)
+	}
+	storedGate, err := repo.GetLogicGate(companyID, gate.LogicGateID)
+	if err != nil || storedGate.Header != "Original Gate" {
+		t.Fatalf("failed rename changed Logic Gate = %+v err=%v", storedGate, err)
+	}
+
+	repo.domainEventAppendErr = nil
+	if _, _, err := repo.UpdateLogicGateHeaderWithWorkspaceEvent(companyID, gate.LogicGateID, "Committed Gate"); err != nil {
+		t.Fatal(err)
+	}
+	after := repo.raciTabItems[itemKey]
+	if after.Name != "Committed Gate" || after.FolderID == nil || *after.FolderID != folder.FolderID || after.Position != before.Position || after.Role != before.Role || !after.CreatedTimestamp.Equal(before.CreatedTimestamp) {
+		t.Fatalf("committed rename changed layout before=%+v after=%+v", before, after)
+	}
+	if after.UpdatedTimestamp.Equal(before.UpdatedTimestamp) {
+		t.Fatalf("committed rename did not update copied timestamp: %+v", after)
 	}
 }
 

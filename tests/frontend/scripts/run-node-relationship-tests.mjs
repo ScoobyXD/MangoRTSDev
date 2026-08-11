@@ -142,6 +142,10 @@ const componentTests = [
     source: resolve(repoRoot, "tests/frontend/app/raciTabsLazySection.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/app/raciTabsLazySection.test.js"),
   },
+  {
+    source: resolve(repoRoot, "tests/frontend/app/raciTabsMoveAndLive.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/app/raciTabsMoveAndLive.test.js"),
+  },
 ];
 const packageFile = resolve(frontendRoot, ".test-dist/package.json");
 const tscEntrypoint = resolve(frontendRoot, "node_modules/typescript/bin/tsc");

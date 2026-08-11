@@ -106,8 +106,8 @@ RW6 - Editor state distinguishes local pending, Saving, Saved, Reconnecting with
 RW7 - Unacknowledged HTML patches are retained durably under authenticated user, company, exact document, browser client, and operation ID and survive unmount, refresh, disconnect, and reconnect.
 RW8 - Timeout investigations must identify the exact HTTP method, route, request duration, and backend log line for the affected request.
 RW9 - Backend request logs must make it possible to distinguish slow durable writes from slow background reads or refetches.
-RW10 - Notifications/Updates, mounted Node chat, mounted Logic Gate Kanban, the exact active mailbox, and exact collaborative editor documents all publish through the one durable outbox/shared-backplane/local-registry realtime spine. Payload/recovery rules differ, but no feature owns a second livestream system.
-RW11 - Approved scope patterns are `notifications:user:{user_id}`, `chat:node:{node_id}`, `board:{board_id}`, exact personal/shared mailbox scopes, and `editor:{node|logic_gate|project}:{resource_id}:{document_id}`. Broad workspace, company, directory, communications, Explorer, graph, RACI/My Work, Project Management, permission, wildcard editor, and user-wide editor scopes are forbidden.
+RW10 - Notifications/Updates, mounted Node chat, mounted Logic Gate Kanban, the exact active mailbox, exact collaborative editor documents, and RACI Tabs change doorbells all publish through the one durable outbox/shared-backplane/local-registry realtime spine. Payload/recovery rules differ, but no feature owns a second livestream system.
+RW11 - Approved scope patterns are `notifications:user:{user_id}`, `chat:node:{node_id}`, `board:{board_id}`, exact personal/shared mailbox scopes, `editor:{node|logic_gate|project}:{resource_id}:{document_id}`, and the exact company-membership-checked `raci-tabs:company` doorbell scope. Broad workspace, generic company, directory, communications, Explorer, graph, other RACI/My Work, Project Management, permission, wildcard editor, and user-wide editor scopes are forbidden.
 RW12 - Socket open never means Connected or Saved. Green requires server ready, a confirmed application heartbeat, an admission result for every initial exact subscription, and successful recovery for accepted mounted scopes. A rejected scope is resolved but unavailable and reports through that feature's `onRejected` path; it is not evidence that the authenticated socket or unrelated features are disconnected. Saved still requires the affected write's own acknowledgement.
 RW13 - Browser-side API request timing should make status=error timeout cases visible with the route that timed out.
 RW14 - Dev or production timeout triage must consider backend, database, and cache-refetch load before changing the client timeout threshold.
@@ -322,13 +322,13 @@ Business logic covered:
 - RW12
 
 Given:
-- A durable notification, Node chat change, mounted-board-visible mutation, or exact active-mailbox provider change commits.
+- A durable notification, Node chat change, mounted-board-visible mutation, exact active-mailbox provider change, or effective RACI Tabs input change commits.
 - A matching retained scope has a local subscriber.
 
 Expected:
-- The backend publishes only to the matching notification, Node chat, board, exact personal-account mailbox, or exact shared-inbox mailbox scope.
+- The backend publishes only to the matching notification, Node chat, board, exact personal-account mailbox, exact shared-inbox mailbox, or exact `raci-tabs:company` scope.
 - First acceptance and reconnect use only that active surface's coalesced canonical HTTP read; Updates fetches its feed only while open and mail reconciles only while the exact mailbox is active.
-- Ordinary workspace, Explorer, graph, My Work, Project Management, broad communications, permission, and document mutations emit no product socket message.
+- Ordinary workspace, unrelated Explorer, graph, My Work, Project Management, broad communications, permission, and document mutations emit no product socket message.
 
 ### Scenario RW-S4B: Retired Map Contracts Stay Absent
 
