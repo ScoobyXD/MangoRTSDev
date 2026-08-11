@@ -1027,7 +1027,7 @@ export function HomeMailWorkspace({
               height: "100%",
               display: "grid",
               gridTemplateColumns: showDetailResizeHandle && emailChatVisible
-                ? `minmax(0, 1fr) 8px ${emailChatWidth}px`
+                ? `minmax(${EMAIL_DETAIL_MIN_WIDTH}px, 1fr) 8px minmax(${EMAIL_CHAT_MIN_WIDTH}px, min(${emailChatWidth}px, calc(100% - ${EMAIL_DETAIL_MIN_WIDTH + 8}px)))`
                 : "minmax(0, 1fr)",
               gridTemplateRows: !showDetailResizeHandle && emailChatVisible
                 ? "auto auto"

@@ -196,6 +196,7 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(workspace, /topOffset=\{showDetailResizeHandle \? emailChatTopOffset : 0\}/);
   assert.match(workspace, /aria-label="Resize email chat column"/);
   assert.match(workspace, /emailChatWidthStorageKey\(companyID\)/);
+  assert.match(workspace, /minmax\(\$\{EMAIL_DETAIL_MIN_WIDTH\}px, 1fr\)[\s\S]*calc\(100% - \$\{EMAIL_DETAIL_MIN_WIDTH \+ 8\}px\)/);
   assert.match(detail, /content\.getBoundingClientRect\(\)\.top - root\.getBoundingClientRect\(\)\.top \+ paddingTop/);
   assert.match(surface, /height: topOffset > 0 \? `calc\(100% - \$\{topOffset\}px\)` : "100%"[\s\S]*marginTop: topOffset/);
   assert.doesNotMatch(surface, /parseEditorAttachedEmails|resolveEmailCollaborationChatPlacement/);
