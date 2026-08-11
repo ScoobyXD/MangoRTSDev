@@ -417,7 +417,7 @@ where company_id=$1::uuid and draft_id=$2
    and relationship.email_thread_id=email_drafts.email_thread_id
    and relationship.email_relationship_id=$3::uuid
    and relationship.resource_type='node'
-   and relationship.resource_textbox_id is not null
+   and relationship.resource_textbox_id is null
    and mangorts_user_can_access_resource(relationship.company_id,relationship.resource_type,
        relationship.resource_id,$4::uuid,'edit'))
 for update`, companyID, draftID, relationshipID, participantUserID))
@@ -514,7 +514,7 @@ where company_id=$1::uuid and draft_id=$2
    and relationship.email_thread_id=email_drafts.email_thread_id
    and relationship.email_relationship_id=$3::uuid
    and relationship.resource_type='node'
-	   and relationship.resource_textbox_id is not null)`
+	   and relationship.resource_textbox_id is null)`
 	}
 	query += ` for update`
 	if err := tx.QueryRowContext(ctx, query, companyID, draftID, relationshipID, claimToken).Scan(&revision, &claimedRevision, &emailThreadID); err != nil {

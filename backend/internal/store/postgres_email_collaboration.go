@@ -130,7 +130,7 @@ join email_threads thread on thread.company_id=relationship.company_id and threa
 join email_messages message on message.company_id=relationship.company_id
  and message.email_thread_id=relationship.email_thread_id and message.email_message_id=relationship.email_message_id
 where relationship.company_id=$1::uuid and relationship.email_relationship_id=$2::uuid
- and relationship.resource_type='node' and relationship.resource_textbox_id is not null`+clause, args...))
+ and relationship.resource_type='node' and relationship.resource_textbox_id is null`+clause, args...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.CommunicationsEmailCollaboration{}, ErrNotFound
 	}
@@ -150,7 +150,7 @@ join email_threads thread on thread.company_id=relationship.company_id and threa
 join email_messages message on message.company_id=relationship.company_id
  and message.email_thread_id=relationship.email_thread_id and message.email_message_id=relationship.email_message_id
 where relationship.company_id=$1::uuid and relationship.resource_type='node'
- and relationship.resource_textbox_id is not null and connection.connection_type=$2
+ and relationship.resource_textbox_id is null and connection.connection_type=$2
  and (($2='personal' and connection.personal_user_id=nullif($3,'')::uuid and connection.account_email=$4)
    or ($2='shared' and inbox.shared_inbox_id=nullif($5,'')::uuid))
  and ((nullif($7,'') is not null and thread.provider_thread_id=$7)
@@ -165,7 +165,7 @@ where relationship.company_id=$1::uuid and relationship.resource_type='node'
      and destination.email_thread_id=relationship.email_thread_id
      and destination.resource_type='node'
      and destination.resource_id=relationship.resource_id
-     and destination.resource_textbox_id is not null
+     and destination.resource_textbox_id is null
    order by case when exists (
      select 1 from email_messages requested_message
      where requested_message.company_id=destination.company_id
@@ -193,17 +193,33 @@ func ensurePostgresExactEmailMessageNodeRelationshipTx(
 	input CommunicationsEmailCollaborationEnsureInput,
 	thread domain.CommunicationsEmailThread,
 	nodeID string,
-	textboxID string,
 ) (string, error) {
 	requestedRelationshipID := newUUIDv7String()
-	ensuredRelationshipID, _, err := ensurePostgresEmailMessageNodeTextboxTx(
-		ctx, tx, input.CompanyID, nodeID, thread.EmailThreadID, input.Message.ID,
-		requestedRelationshipID, textboxID,
-	)
-	if err != nil {
+	if err := linkPostgresCommunicationsEmailThreadToNodeTx(
+		ctx, tx, input.CompanyID, nodeID, requestedRelationshipID,
+		thread.EmailThreadID, input.Message.ID, input.CreatedByUserID,
+	); err != nil {
 		return "", err
 	}
-	return ensuredRelationshipID, nil
+	var relationshipID string
+	err := tx.QueryRowContext(ctx, `
+select relationship.email_relationship_id::text
+from email_relationships relationship
+join email_messages message
+  on message.company_id=relationship.company_id
+ and message.email_thread_id=relationship.email_thread_id
+ and message.email_message_id=relationship.email_message_id
+where relationship.company_id=$1::uuid
+  and relationship.resource_type='node'
+  and relationship.resource_id=$2::uuid
+  and relationship.resource_textbox_id is null
+  and message.provider_message_id=$3
+order by relationship.created_timestamp,relationship.email_relationship_id
+limit 1`, input.CompanyID, nodeID, input.Message.ID).Scan(&relationshipID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return relationshipID, err
 }
 
 func (r *PostgresRepo) EnsureCommunicationsEmailCollaboration(ctx context.Context, input CommunicationsEmailCollaborationEnsureInput) (CommunicationsEmailCollaborationEnsureResult, error) {
@@ -300,35 +316,16 @@ values($1::uuid,$2::uuid,$3,$4,'no_access',now())`, input.CompanyID, nodeID, com
 			}
 		}
 	}
+	relationshipID, err := ensurePostgresExactEmailMessageNodeRelationshipTx(ctx, tx, input, thread, nodeID)
+	if err != nil {
+		return CommunicationsEmailCollaborationEnsureResult{}, err
+	}
 	if input.LinkedTextBlock != nil {
 		input.LinkedTextBlock.CompanyID, input.LinkedTextBlock.NodeID = input.CompanyID, nodeID
 	}
 	if input.InitialChat != nil {
 		input.InitialChat.CompanyID, input.InitialChat.NodeID = input.CompanyID, nodeID
-	}
-	writeInput := communicationsEmailTextBoxChatWriteInput{
-		CompanyID: input.CompanyID, UserID: input.CreatedByUserID, SharedInboxID: input.SharedInboxID,
-		AccountEmail: input.AccountEmail, NodeID: nodeID, ProviderMessageID: input.Message.ID,
-		LinkedTextBlock: input.LinkedTextBlock, InitialChat: input.InitialChat,
-	}
-	if err := rewriteCommunicationsEmailTextBoxChatMessageID(&writeInput, internalEmailMessageIDForProvider(thread, input.Message.ID)); err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
-	}
-	if writeInput.LinkedTextBlock != nil {
-		if _, err := r.addCommunicationsConversionInformationTx(ctx, tx, *writeInput.LinkedTextBlock); err != nil {
-			return CommunicationsEmailCollaborationEnsureResult{}, err
-		}
-	}
-	textboxID := ""
-	if writeInput.LinkedTextBlock != nil {
-		textboxID = writeInput.LinkedTextBlock.InformationID
-	}
-	relationshipID, err := ensurePostgresExactEmailMessageNodeRelationshipTx(ctx, tx, input, thread, nodeID, textboxID)
-	if err != nil {
-		return CommunicationsEmailCollaborationEnsureResult{}, err
-	}
-	if writeInput.InitialChat != nil {
-		mentionedUserIDs, mentionedGroupIDs := CommunicationsEmailChatMentionPrincipalIDs(writeInput.InitialChat.Information)
+		mentionedUserIDs, mentionedGroupIDs := CommunicationsEmailChatMentionPrincipalIDs(input.InitialChat.Information)
 		if len(mentionedUserIDs) > 0 || len(mentionedGroupIDs) > 0 {
 			participantInput, normalizeErr := normalizeCommunicationsEmailCollaborationParticipantInput(CommunicationsEmailCollaborationParticipantInput{
 				CompanyID: input.CompanyID, CollaborationID: relationshipID, ActorUserID: input.CreatedByUserID,
@@ -343,7 +340,14 @@ values($1::uuid,$2::uuid,$3,$4,'no_access',now())`, input.CompanyID, nodeID, com
 				return CommunicationsEmailCollaborationEnsureResult{}, err
 			}
 		}
-		if _, err := r.addCommunicationsConversionInformationTx(ctx, tx, *writeInput.InitialChat); err != nil {
+	}
+	if input.LinkedTextBlock != nil || input.InitialChat != nil {
+		writeInput := communicationsEmailTextBoxChatWriteInput{
+			CompanyID: input.CompanyID, UserID: input.CreatedByUserID, SharedInboxID: input.SharedInboxID,
+			AccountEmail: input.AccountEmail, NodeID: nodeID, ProviderMessageID: input.Message.ID,
+			LinkedTextBlock: input.LinkedTextBlock, InitialChat: input.InitialChat,
+		}
+		if err := r.addCommunicationsEmailTextBoxChatWritesTx(ctx, tx, writeInput, &CommunicationsTriageConversionResult{}); err != nil {
 			return CommunicationsEmailCollaborationEnsureResult{}, err
 		}
 	}
@@ -376,7 +380,7 @@ join email_threads thread on thread.company_id=relationship.company_id and threa
 join email_messages message on message.company_id=relationship.company_id
  and message.email_thread_id=relationship.email_thread_id and message.email_message_id=relationship.email_message_id
 where relationship.company_id=$1::uuid and relationship.resource_type='node'
- and relationship.resource_textbox_id is not null and connection.connection_type=$2
+ and relationship.resource_textbox_id is null and connection.connection_type=$2
  and (($2='personal' and connection.personal_user_id=nullif($3,'')::uuid and connection.account_email=$4)
    or ($2='shared' and inbox.shared_inbox_id=nullif($5,'')::uuid))
  and ((nullif($7,'') is not null and thread.provider_thread_id=$7)
@@ -389,7 +393,7 @@ where relationship.company_id=$1::uuid and relationship.resource_type='node'
      and destination.email_thread_id=relationship.email_thread_id
      and destination.resource_type='node'
      and destination.resource_id=relationship.resource_id
-     and destination.resource_textbox_id is not null
+     and destination.resource_textbox_id is null
    order by case when exists (
      select 1 from email_messages requested_message
      where requested_message.company_id=destination.company_id
@@ -466,11 +470,11 @@ func lockPostgresEmailCollaborationTarget(ctx context.Context, tx *sql.Tx, compa
 	var err error
 	if nodeID != "" {
 		err = tx.QueryRowContext(ctx, `select email_relationship_id::text,resource_id::text,email_relationship_id::text
-from email_relationships where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid and resource_textbox_id is not null
+from email_relationships where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid and resource_textbox_id is null
 order by created_timestamp,email_relationship_id limit 1 for update`, companyID, nodeID).Scan(&t.CollaborationID, &t.NodeID, &t.AttachedEmailInformationID)
 	} else {
 		err = tx.QueryRowContext(ctx, `select email_relationship_id::text,resource_id::text,email_relationship_id::text
-from email_relationships where company_id=$1::uuid and email_relationship_id=$2::uuid and resource_type='node' and resource_textbox_id is not null for update`, companyID, collaborationID).Scan(&t.CollaborationID, &t.NodeID, &t.AttachedEmailInformationID)
+from email_relationships where company_id=$1::uuid and email_relationship_id=$2::uuid and resource_type='node' and resource_textbox_id is null for update`, companyID, collaborationID).Scan(&t.CollaborationID, &t.NodeID, &t.AttachedEmailInformationID)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return postgresEmailCollaborationTarget{}, ErrNotFound

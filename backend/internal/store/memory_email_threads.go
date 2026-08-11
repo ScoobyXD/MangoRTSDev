@@ -2,46 +2,11 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
 	"time"
 )
-
-func (r *MemoryRepo) ensureMemoryEmailMessageTextboxLocked(companyID, nodeID, emailMessageID, subject, preferredTextboxID string, now time.Time) string {
-	nodeKey := key(companyID, nodeID)
-	if r.nodeText[nodeKey] == nil {
-		r.nodeText[nodeKey] = map[string]domain.NodeProjection{}
-	}
-	for _, projection := range r.nodeText[nodeKey] {
-		if !isEditorTextBoxType(projection.Type) {
-			continue
-		}
-		var payload struct {
-			EmailMessageID string `json:"email_message_id"`
-		}
-		raw := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(projection.Information), editorTextBlockProjectionPrefix))
-		if json.Unmarshal([]byte(raw), &payload) == nil && payload.EmailMessageID == emailMessageID {
-			return projection.InformationID
-		}
-	}
-	textboxID := cleanUUIDText(preferredTextboxID)
-	if textboxID == "" {
-		textboxID = newUUIDv7String()
-	}
-	payload, _ := json.Marshal(map[string]any{
-		"title": subject, "document": "", "email_message_id": emailMessageID,
-	})
-	projection := domain.NodeProjection{
-		CompanyID: companyID, NodeID: nodeID, InformationID: textboxID, Type: "Text box",
-		Information: editorTextBlockProjectionPrefix + string(payload), Revision: 1,
-		CreatedTimestamp: now, UpdatedTimestamp: now,
-	}
-	r.nodeText[nodeKey][textboxID] = projection
-	r.nodeInfo[nodeKey] = append(r.nodeInfo[nodeKey], nodeProjectionAsInformation(projection))
-	return textboxID
-}
 
 func cloneCommunicationsEmailThread(item domain.CommunicationsEmailThread) domain.CommunicationsEmailThread {
 	item.Messages = append([]domain.CommunicationsEmailMessage(nil), item.Messages...)
@@ -204,6 +169,23 @@ func (r *MemoryRepo) upsertCommunicationsEmailThreadLocked(input CommunicationsE
 			Message: snapshot, CreatedTimestamp: now, UpdatedTimestamp: now,
 		})
 	}
+	for _, snapshot := range input.Messages {
+		if !snapshot.DownloadComplete {
+			continue
+		}
+		for _, placement := range r.nodeEmailThreads {
+			if placement.CompanyID != input.CompanyID || placement.EmailThreadID != threadID {
+				continue
+			}
+			userID := thread.PersonalUserID
+			link := communicationsEmailNodeLink{
+				CompanyID: input.CompanyID, UserID: userID, SharedInboxID: thread.SharedInboxID,
+				AccountEmail: thread.AccountEmail, MessageID: snapshot.ID, NodeID: placement.NodeID,
+				Message: snapshot, CreatedTimestamp: now, UpdatedTimestamp: now,
+			}
+			r.emailNodeLinks[emailNodeAttachmentLinkKey(input.CompanyID, userID, snapshot.ID, placement.NodeID)] = link
+		}
+	}
 	sort.Slice(thread.Messages, func(i, j int) bool {
 		left, right := thread.Messages[i], thread.Messages[j]
 		if left.Message.Date != right.Message.Date {
@@ -359,19 +341,16 @@ func (r *MemoryRepo) GetCommunicationsNodeEmailThread(companyID, nodeID, emailTh
 	return item, nil
 }
 
-func (r *MemoryRepo) linkCommunicationsEmailThreadToNodeLocked(companyID, nodeID, informationID, emailThreadID, selectedMessageID, actorUserID string, now time.Time, preferredTextboxID string) (domain.CommunicationsNodeEmailThread, error) {
+func (r *MemoryRepo) linkCommunicationsEmailThreadToNodeLocked(companyID, nodeID, informationID, emailThreadID, selectedMessageID, actorUserID string, now time.Time) (domain.CommunicationsNodeEmailThread, error) {
 	selectedInternalMessageID := cleanUUIDText(selectedMessageID)
-	selectedSubject := ""
 	if thread, ok := r.emailThreads[key(companyID, emailThreadID)]; ok {
 		for _, message := range thread.Messages {
 			if message.ProviderMessageID == selectedMessageID || message.EmailMessageID == selectedMessageID {
 				selectedInternalMessageID = message.EmailMessageID
-				selectedSubject = message.Message.Subject
 				break
 			}
 		}
 	}
-	r.ensureMemoryEmailMessageTextboxLocked(companyID, nodeID, selectedInternalMessageID, selectedSubject, preferredTextboxID, now)
 	link := domain.CommunicationsNodeEmailThread{
 		CompanyID: companyID, NodeID: nodeID, InformationID: informationID,
 		EmailThreadID: emailThreadID, SelectedMessageID: selectedInternalMessageID,
@@ -423,7 +402,7 @@ func (r *MemoryRepo) ImportCommunicationsEmailIntoNode(input CommunicationsNodeE
 		CompanyID: input.CompanyID, NodeID: input.NodeID, InformationID: input.InformationID,
 		Type: info.Type, Information: information, CreatedTimestamp: now, UpdatedTimestamp: now,
 	}
-	if _, err := r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, input.NodeID, input.InformationID, thread.EmailThreadID, selected.ID, input.CreatedByUserID, now, ""); err != nil {
+	if _, err := r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, input.NodeID, input.InformationID, thread.EmailThreadID, selected.ID, input.CreatedByUserID, now); err != nil {
 		return CommunicationsNodeEmailImportResult{}, err
 	}
 	if requestedMessageID, sourceID, ok := communicationsEmailIngestionRequest(thread, input.Thread); ok {

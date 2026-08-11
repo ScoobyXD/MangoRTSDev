@@ -60,6 +60,13 @@ join nodes node
  and node.node_id=relationship.resource_id
 where mangorts_user_can_access_resource(
   relationship.company_id,'node',relationship.resource_id,$8::uuid,'edit')
+  and exists (
+    select 1 from node_textbox_chats chat
+    where chat.company_id=relationship.company_id
+      and chat.node_id=relationship.resource_id
+      and chat.textbox_id::text=relationship.resource_textbox_id
+      and chat.deleted_timestamp is null
+  )
 order by case when message.provider_message_id=$6 then 0 else 1 end,
          message.message_order,lower(node.name),relationship.resource_id,relationship.resource_textbox_id`, args...)
 	if err != nil {
@@ -77,7 +84,11 @@ order by case when message.provider_message_id=$6 then 0 else 1 end,
 			return nil, err
 		}
 		group.Chats = []domain.NodeProjection{}
-		groupIndex[group.NodeID+"\x1f"+group.TextboxID] = len(groups)
+		groupKey := group.NodeID + "\x1f" + group.TextboxID
+		if _, exists := groupIndex[groupKey]; exists {
+			continue
+		}
+		groupIndex[groupKey] = len(groups)
 		groups = append(groups, group)
 	}
 	if err := rows.Err(); err != nil {

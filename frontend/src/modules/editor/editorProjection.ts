@@ -176,6 +176,7 @@ export function parseEditorAttachedEmails(items: EditorProjectionItem[]): Editor
 
 export function buildEditorTextBlockChatPayload(input: {
   blockID: string;
+  createEmailTextBoxOnSend?: boolean;
   parentID?: string;
   selectionSource?: "text" | "email";
   selectionBlockID?: string;
@@ -195,6 +196,7 @@ export function buildEditorTextBlockChatPayload(input: {
 }): string {
   return JSON.stringify({
     block_id: input.blockID,
+    create_email_textbox_on_send: input.createEmailTextBoxOnSend === true,
     parent_id: input.parentID ?? "",
     selection_source: input.selectionSource ?? "text",
     selection_block_id: input.selectionBlockID?.trim() ?? "",
@@ -229,6 +231,7 @@ export function buildEditorAttachedEmailPayload(input: {
   from?: string;
   date?: number;
   attachedTimestamp: string;
+  linkWholeThread?: boolean;
 }): string {
   return JSON.stringify({
     block_id: input.blockID?.trim() ?? "",
@@ -245,7 +248,7 @@ export function buildEditorAttachedEmailPayload(input: {
     from: input.from ?? "",
     date: input.date ?? null,
     attached_timestamp: input.attachedTimestamp,
-    link_scope: "message",
+    link_scope: input.linkWholeThread ? "thread" : "message",
   });
 }
 

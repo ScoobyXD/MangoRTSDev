@@ -736,7 +736,7 @@ func (r *MemoryRepo) TransferCommunicationsEmailNode(input CommunicationsEmailNo
 		return CommunicationsEmailNodeTransferResult{}, ErrNotFound
 	}
 	informationID := r.addEmailProjectionWithThreadLocked(input.CompanyID, targetCard.NodeID, sourceLink.SharedInboxID, sourceLink.AccountEmail, sourceLink.Message, emailThreadID, now, false)
-	if _, err := r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, targetCard.NodeID, informationID, emailThreadID, sourceLink.MessageID, sourceLink.UserID, now, ""); err != nil {
+	if _, err := r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, targetCard.NodeID, informationID, emailThreadID, sourceLink.MessageID, sourceLink.UserID, now); err != nil {
 		return CommunicationsEmailNodeTransferResult{}, err
 	}
 	r.deleteCommunicationsEmailSourceNodeLocked(input.CompanyID, sourceKey, sourceLink)

@@ -303,6 +303,27 @@ do update set
 			foldersJSON, folderIDsJSON, attachmentsJSON, message.DownloadComplete); err != nil {
 			return domain.CommunicationsEmailThread{}, err
 		}
+		if message.DownloadComplete {
+			if _, err := tx.ExecContext(ctx, `
+insert into email_relationships (
+  company_id,email_relationship_id,email_thread_id,email_message_id,
+  resource_type,resource_id,resource_textbox_id,created_timestamp
+)
+select target.company_id,gen_random_uuid(),target.email_thread_id,target.email_message_id,
+       'node',destination.resource_id,null,now()
+from email_messages target
+cross join (
+  select distinct resource_id
+  from email_relationships
+  where company_id=$1::uuid and email_thread_id=$2::uuid
+    and resource_type='node' and resource_textbox_id is null
+) destination
+where target.company_id=$1::uuid and target.email_thread_id=$2::uuid
+  and target.provider_message_id=$3 and target.download_complete
+on conflict do nothing`, input.CompanyID, emailThreadID, message.ID); err != nil {
+				return domain.CommunicationsEmailThread{}, err
+			}
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `
 with ordered as (
@@ -585,82 +606,58 @@ limit 1`, companyID, nodeID, emailThreadID).Scan(
 	return item, err
 }
 
-func ensurePostgresEmailMessageNodeTextboxTx(
-	ctx context.Context,
-	tx *sql.Tx,
-	companyID, nodeID, emailThreadID, providerMessageID, relationshipID, textboxID string,
-) (string, string, error) {
+func linkPostgresCommunicationsEmailThreadToNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, relationshipID, emailThreadID, selectedMessageID, _ string) error {
 	if _, err := tx.ExecContext(ctx, `
 select pg_advisory_xact_lock(
-  hashtextextended('email-message-node-textbox:' || $1::text || ':' || $2::text || ':' || $3::text, 0)
-)`, companyID, nodeID, providerMessageID); err != nil {
-		return "", "", err
-	}
-	var existingRelationshipID, existingTextboxID string
-	err := tx.QueryRowContext(ctx, `
-select relationship.email_relationship_id::text,relationship.resource_textbox_id
-from email_relationships relationship
-join email_messages message
-  on message.company_id=relationship.company_id
- and message.email_thread_id=relationship.email_thread_id
- and message.email_message_id=relationship.email_message_id
-where relationship.company_id=$1::uuid
-  and relationship.email_thread_id=$3::uuid
-  and relationship.resource_type='node'
-  and relationship.resource_id=$2::uuid
-  and relationship.resource_textbox_id is not null
-  and message.provider_message_id=$4
-limit 1`, companyID, nodeID, emailThreadID, providerMessageID).Scan(&existingRelationshipID, &existingTextboxID)
-	if err == nil {
-		return existingRelationshipID, existingTextboxID, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return "", "", err
-	}
-	if relationshipID == "" {
-		relationshipID = newUUIDv7String()
-	}
-	if textboxID == "" {
-		textboxID = newUUIDv7String()
-	}
-	ref := EditorJSONDocumentRef{CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: nodeID, DocumentID: textboxID}
-	storage, ok := postgresEditorTextboxStorageFor(ref)
-	if !ok {
-		return "", "", ErrInvalid
-	}
-	if err := insertEmptyPostgresEditorTextboxTx(ctx, tx, storage, ref); err != nil {
-		return "", "", err
+  hashtextextended($1::text || ':' || $2::text, 0)
+)`, companyID, emailThreadID); err != nil {
+		return err
 	}
 	result, err := tx.ExecContext(ctx, `
-insert into email_relationships(
-  company_id,email_relationship_id,email_thread_id,email_message_id,
-  resource_type,resource_id,resource_textbox_id,created_timestamp
+insert into email_relationships (
+  company_id, email_relationship_id, email_thread_id, email_message_id,
+  resource_type, resource_id, resource_textbox_id, created_timestamp
 )
-select $1::uuid,$5::uuid,message.email_thread_id,message.email_message_id,
-       'node',$2::uuid,$6,clock_timestamp()
+select $1::uuid,
+       case when message.provider_message_id=$5 then $3::uuid else gen_random_uuid() end,
+       $4::uuid, message.email_message_id,
+       'node', $2::uuid, null, now()
 from email_messages message
 where message.company_id=$1::uuid
-  and message.email_thread_id=$3::uuid
-  and message.provider_message_id=$4
-on conflict do nothing`, companyID, nodeID, emailThreadID, providerMessageID, relationshipID, textboxID)
+  and message.email_thread_id=$4::uuid
+on conflict do nothing`, companyID, nodeID, relationshipID, emailThreadID, selectedMessageID)
 	if err != nil {
-		return "", "", err
+		return err
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return "", "", err
+		return err
 	}
-	if affected == 0 {
-		return "", "", ErrNotFound
+	if affected > 0 {
+		return nil
 	}
-	return relationshipID, textboxID, nil
-}
-
-func linkPostgresCommunicationsEmailThreadToNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, relationshipID, emailThreadID, selectedMessageID, _ string) error {
-	_, _, err := ensurePostgresEmailMessageNodeTextboxTx(
-		ctx, tx, companyID, nodeID, emailThreadID, selectedMessageID, relationshipID, "",
-	)
-	return err
+	var exists bool
+	if err := tx.QueryRowContext(ctx, `
+select exists (
+  select 1
+  from email_relationships relationship
+  join email_messages message
+    on message.company_id=relationship.company_id
+   and message.email_thread_id=relationship.email_thread_id
+   and message.email_message_id=relationship.email_message_id
+  where relationship.company_id=$1::uuid
+    and relationship.email_thread_id=$3::uuid
+    and relationship.resource_type='node'
+    and relationship.resource_id=$2::uuid
+    and relationship.resource_textbox_id is null
+    and message.provider_message_id=$4
+)`, companyID, nodeID, emailThreadID, selectedMessageID).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (r *PostgresRepo) ImportCommunicationsEmailIntoNode(input CommunicationsNodeEmailImportInput) (CommunicationsNodeEmailImportResult, error) {
@@ -709,7 +706,7 @@ where relationship.company_id=$1::uuid
   and relationship.email_thread_id=$3::uuid
   and relationship.resource_type='node'
   and relationship.resource_id=$2::uuid
-  and relationship.resource_textbox_id is not null
+  and relationship.resource_textbox_id is null
   and message.provider_message_id=$4`,
 		input.CompanyID, input.NodeID, thread.EmailThreadID, selectedProviderMessageID).Scan(&input.InformationID); err != nil {
 		return CommunicationsNodeEmailImportResult{}, err
