@@ -71,7 +71,12 @@ func (r *PostgresRepo) ConvertLogicGateToHuddle(companyID, logicGateID, actorID 
 	if _, err = tx.ExecContext(ctx, `insert into resource_gvic_assignments(company_id,resource_type,resource_id,role,principal_type,principal_id,created_timestamp,updated_timestamp) select company_id,'huddle_logic_gate',$3::uuid,role,principal_type,principal_id,created_timestamp,statement_timestamp() from resource_gvic_assignments where company_id=$1::uuid and resource_type=$2 and resource_id=$4::uuid`, companyID, gvicSourceType, logicGateID, gvicSourceID); err != nil {
 		return domain.HuddleLogicGate{}, err
 	}
-	if _, err = tx.ExecContext(ctx, `insert into resource_permissions(company_id,resource_type,resource_id,subject_type,subject_id,user_id,access_level,created_timestamp,updated_timestamp) select company_id,'huddle_logic_gate',$3::uuid,subject_type,subject_id,user_id,access_level,created_timestamp,statement_timestamp() from resource_permissions where company_id=$1::uuid and resource_type=$2 and resource_id=$4::uuid`, companyID, permissionSourceType, logicGateID, permissionSourceID); err != nil {
+	if _, err = tx.ExecContext(ctx, `insert into resource_permissions(company_id,resource_type,resource_id,subject_type,subject_id,access_level,created_timestamp,updated_timestamp) select company_id,'huddle_logic_gate',$3::uuid,subject_type,subject_id,access_level,created_timestamp,statement_timestamp() from resource_permissions where company_id=$1::uuid and resource_type=$2 and resource_id=$4::uuid`, companyID, permissionSourceType, logicGateID, permissionSourceID); err != nil {
+		return domain.HuddleLogicGate{}, err
+	}
+	// The Explorer detach trigger resolves the old Logic Gate policy, so remove
+	// the placement before deleting those policy settings.
+	if _, err = tx.ExecContext(ctx, `delete from company_explorer_items where company_id=$1::uuid and target_type='logic_gate' and target_id=$2::uuid`, companyID, logicGateID); err != nil {
 		return domain.HuddleLogicGate{}, err
 	}
 	for _, table := range []string{"resource_gvic_assignments", "resource_permissions", "resource_gvic_settings", "resource_permission_settings"} {
@@ -80,7 +85,6 @@ func (r *PostgresRepo) ConvertLogicGateToHuddle(companyID, logicGateID, actorID 
 		}
 	}
 	for _, query := range []string{
-		`delete from company_explorer_items where company_id=$1::uuid and target_type='logic_gate' and target_id=$2::uuid`,
 		`delete from project_relationship_projection where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`,
 		`delete from project_relationships where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`,
 		`delete from logic_gate_relationships where company_id=$1::uuid and (logic_gate_id_a=$2::uuid or logic_gate_id_b=$2::uuid)`,
