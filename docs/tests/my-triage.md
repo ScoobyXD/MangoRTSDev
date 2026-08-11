@@ -7,15 +7,15 @@
 5. The thread chat rail is one scrollable view grouped only by exact Node and text box; messages sharing both remain in one group.
 6. Each chat group header shows a clickable Node icon and Node title.
 7. If the thread has several Nodes, the user chooses which Node receives a new chat; Mango never guesses.
-8. One universal shared draft is visible from My Triage and every related Node without being related to a Node text box.
-9. A My Triage-created shared draft invents no origin Node and does not auto-open a draft panel in any Node.
+8. Reply and Reply All create or reopen only the current user's owner-only personal draft for the exact source and sending account.
+9. Create Shared Draft requires one accessible Node that already contains the thread, then opens that Node's dedicated shared-draft text box; My Triage never keeps a thread-wide shared draft.
 10. An already-linked exact-message text box loads its existing messages and receives each later My Triage chat without creating another text box.
 11. Reconciling unchanged email metadata must not restart the chat-rail load, discard stored text-box chats, or repeat Node reads.
 12. A chat send reuses the exact mailbox-scoped stored message when present, otherwise fetches only that exact provider message, and never calls triage conversion or queues remaining-thread ingestion.
 13. Sending a chat adds it to the open rail before the network request starts; success keeps that exact optimistic row, while failure removes it and restores the complete composer for retry.
 14. A later chat for an already-linked exact email message uses the normal Node text-box-chat create command only; it does not repeat email, relationship, permission, participant, or collaboration setup.
 
-Last updated: 2026-08-10
+Last updated: 2026-08-11
 
 # Process Story: My Triage conversion queues durable email completion
 
@@ -208,7 +208,7 @@ MT118 - A personal mailbox hint received while another Home view/account is sele
 MT119 - Selecting an unread personal email by pointer, Enter, or Space immediately removes its unread dot/frame, updates the selected card and unread counter, and persists read state through the scoped provider command. Stale list/detail refreshes cannot resurrect unread while that command is authoritative; failure rolls the row/counter back, invalidates detail cache, and surfaces the established error.
 MT120 - Selecting away from a successfully read personal message never marks it unread. A later provider or realtime refresh preserves the committed read state.
 MT121 - Personal conversation detail resolves provider thread membership through `thread.message_ids`, hydrates any sent or older members absent from the bounded preview page, deduplicates by message ID, and orders deterministically. It supports external-initiated, user-initiated, alternating, and forwarded mail only when the provider thread or exact supported reply metadata establishes membership; subject similarity never joins conversations and missing thread identity remains a one-off.
-MT122 - Ordinary personal durable draft list/get/create/update/delete operations require the authenticated user's exact personal account scope. Draft scope is immutable, known IDs in another user/account cannot be read, changed, reassigned, or deleted, and browser fallback data is keyed by company/user then filtered to the active account; only explicit pending-sync rows may migrate to the database. The My Triage Drafts tab renders those database drafts plus active collaboration shared drafts for which the current user is a permanent participant under EMAIL65 through EMAIL69; it never displays provider Drafts, another user's private draft, or a collaboration draft for a nonparticipant.
+MT122 - Personal durable draft list/get/create/update/delete operations require the authenticated user's exact owner and sending-account scope. Draft scope is immutable, known IDs in another user/account cannot be read, changed, reassigned, or deleted, and browser fallback data is keyed by company/user then filtered to the active account; only explicit pending-sync rows may migrate to the database. The My Triage Drafts tab renders only those owner drafts and never displays provider Drafts, another user's private draft, or a Node-shared draft.
 MT123 - A My Triage row shows the established accessible thread indicator on its left only when the canonical/loaded conversation count is greater than one; a one-off message or a message with an unproven thread count shows no thread icon.
 MT124 - Personal read-on-open timers, optimistic overlays, and mutation responses use the authenticated company/user/account plus provider message ID. A completion may update only the exact captured mailbox/filter and selection generation; switching search, unread filter, view, account, user, or selected thread cannot let a stale success, rollback, error, or reconnect recovery mutate the new context.
 MT125 - My Triage email cards use the shared compact triage-row layout. Horizontal card padding is no more than 6 CSS pixels per side, and the left indicator rail is no more than 20 CSS pixels wide while retaining the approximately 9-pixel unread dot, thread indicator, keyboard focus, and drag hit behavior.
@@ -218,8 +218,8 @@ MT128 - My Triage email rows come only from the active connected personal mailbo
 MT129 - When a canonical My Triage provider row matches a collaboration by immutable personal mailbox plus provider thread/message identity, Mango annotates that provider row with collaboration/Node identity for chat and shared-draft actions. Provider unread/starred/attachment/thread state remains authoritative, and no collaboration snapshot may become a separate or fallback row.
 MT130 - One chat toggle in the My Triage thread header opens and closes one rail grouped only by exact Node and text box. Selecting a row auto-opens it only when the stored thread already has accessible chats. Reading, selecting text, closing, and abandoning an empty composer create nothing. If no Node is associated, the first nonempty comment creates a floating Node with priority **Not Assigned**, no Logic Gate, and one exact linked text box. If several Nodes are associated, the user chooses the destination Node before send. Sending reuses the exact stored mailbox message or fetches only that missing exact provider message; it never calls triage conversion or queues remaining-thread ingestion. After backend acknowledgement, the saved chat appears immediately in that exact group without waiting for realtime or another Node read.
 MT131 - Selecting email body text shows a chat action and captures the exact message ID, trimmed quote, and text offsets without opening the rail or filling the composer. Clicking that action opens the rail, places the quote in the composer, and focuses it. Individual reply cards have no chat button or three-dot menu. Sending uses the chosen Node's exact-message text box, and each group header shows a clickable Node icon and title.
-MT132 - Reply, Reply All, and Create Shared Draft create or reopen the one universal active draft for the exact thread. A My Triage-created draft has no invented origin Node and does not auto-open in any Node; every related Node shows its active-draft count and may open the same draft on demand.
-MT133 - A collaboration shared draft sends immediately through EMAIL68. Its compose footer does not expose scheduled send, and the My Triage browser scheduler ignores shared drafts even if legacy/local state contains a timestamp.
+MT132 - Reply and Reply All create or reopen the current user's owner-only personal draft for the exact source and account. Create Shared Draft requires one accessible Node already containing the thread and opens that Node's one dedicated shared-draft text box; it does not add the Node-shared draft to My Triage Drafts.
+MT133 - A Node-shared draft sends immediately through EMAIL68 from its exact Node. Its compose footer does not expose scheduled send, and the My Triage browser scheduler never submits it.
 MT134 - Unsynchronized personal fallback drafts survive Mango `401`, unclassified `403`, provider reauthorization/disconnection `409`, `5xx`, and network failures. Only explicit access/company revocation or definitive scope deletion purges the exact personal account; another personal account/shared inbox remains untouched.
 MT135 - Personal draft loads use exact-scope generations plus local revisions. An older load cannot overwrite a newer load, save, delete, remote save completion, or a different personal account; stale callers return the current exact-scope draft set and browser storage preserves every unrelated scope.
 MT136 - Personal compose creates the live exact-account draft before attachment upload/link. Draft-only attachment reads and mutations require that still-live owner/account draft; deleting it revokes draft-only list/content/send access, legacy accountless links remain owner-only read compatibility for a live draft, and independent sent-message attachment links remain valid.
@@ -727,7 +727,7 @@ Expected:
 - Conversation detail contains the external original, the Mango sent reply, and the newest inbound reply in deterministic order. Forwarded or subject-similar unrelated mail is not merged, and an unresolved one-off remains valid.
 - The unread dot/frame and visible unread count clear immediately on pointer or keyboard open; success remains read across selection/realtime refresh, while failure rolls state and count back and surfaces the error.
 - The multi-message row shows the thread icon; a one-message row does not.
-- Each ordinary personal draft API operation and private Drafts-tab row requires the exact authenticated user/account database scope. User B cannot list, fetch, overwrite, move, delete, or access attachments for User A's private draft even when the draft ID is known; only permanent collaboration participation adds the explicit shared-draft exception. The tab never lists provider Drafts, and a successful remote load cannot resurrect an unmarked stale browser draft.
+- Each personal draft API operation and Drafts-tab row requires the exact authenticated owner and sending-account database scope. User B cannot list, fetch, overwrite, move, delete, or access attachments for User A's draft even when the draft ID is known. The tab never lists provider Drafts or Node-shared drafts, and a successful remote load cannot resurrect an unmarked stale browser draft.
 - Recoverable errors retain pending local drafts; only explicit revocation/deletion purges the exact scope. Out-of-order loads cannot overwrite newer loads, saves, deletes, or another personal account.
 - Compose persists the live exact-account draft before attachment upload. Deleting it denies draft-scoped attachment access to every actor, while the independent sent-message link stays valid.
 
@@ -766,7 +766,7 @@ Business logic covered:
 Given:
 - A personal email owner selects text, clicks the resulting chat action, chooses the destination when the thread has several Nodes, and mentions another user or group in that Node-local chat.
 - One participant is not a provider recipient, and another participant can also see the provider-owned row.
-- A participant creates a shared draft from Reply All.
+- A user chooses Create Shared Draft and nominates one accessible Node that already contains the thread.
 - The email thread may have zero or one Node association; a floating-Node ensure or first-comment request may fail before retry succeeds.
 
 Expected:
@@ -775,10 +775,10 @@ Expected:
 - The thread-header chat toggle opens and closes the one Node chat rail. Text selection alone leaves it closed; clicking the resulting chat action opens it with the quote. Closing it or changing exact message, mailbox, or view makes no durable mutation.
 - With one association, the rail targets that Node. With several, it asks which Node owns the comment or offers a new floating Node, then renders that Node's shared ChatPane data, replies, navigation, mentions, attachments, refresh behavior, and participant roster.
 - A failed ensure leaves no partial durable artifacts. The optimistic row appears before acknowledgement, then a creation/write failure removes that row, restores the complete composer context, re-enables retry, and translates `failed_to_create_email_collaboration` or `email_collaboration_storage_not_ready` into actionable text.
-- The exact selected message supplies an anchored chat and Create Shared Draft Reply All context.
-- My Drafts keeps exact-account private drafts isolated while also showing the one active participant-authorized collaboration draft with explicit source/shared context.
-- The shared draft cannot be scheduled; its current revision is sent immediately through the collaboration source while ordinary private drafts retain the existing browser-driven scheduling path.
-- Mention participation alone cannot list an email row; participant-authorized collaboration drafts remain explicit My Drafts records, and a nonparticipant cannot list a row or draft by guessing IDs.
+- The exact selected message supplies the anchored chat and draft reply context. Reply and Reply All remain owner-only personal actions.
+- Create Shared Draft opens only the nominated Node's dedicated text box. My Drafts keeps exact-account owner drafts isolated and does not list Node-shared drafts.
+- The Node-shared draft cannot be scheduled; its current revision is sent immediately through the exact authorized sending account while owner-only drafts retain the existing browser-driven scheduling path.
+- Mention participation alone cannot list an email row or Node-shared draft; Node access authorizes only the exact Node surface, and guessed row or draft IDs remain denied.
 
 ### Scenario MT-S15: Personal Signature Image And Start-Action Reliability
 

@@ -11,14 +11,14 @@
 9. Opening an email-selection chat preview creates no text box, email relationship, or chat relationship.
 10. Sending the first chat from an email-selection preview atomically creates the exact Node-local text box, email-to-textbox relationship, and text-box chat, or creates none of them.
 11. Cancelling an unsent email-selection chat preview requires no relationship deletion because no relationship has been written.
-12. A universal shared draft belongs to its exact email thread, not to a Node or text box.
-13. Showing a universal shared draft in a Node is presentation state and never creates a draft-to-textbox relationship.
-14. Removing one Node's email relationship removes only that Node's typed edge and leaves every other Node, stored thread/message, local text box, chat, and surviving attachment relationship unchanged.
+12. A Node-shared email draft belongs directly to one exact Node, one exact email thread, and one dedicated text box in that Node; the same thread may have a separate shared draft in another Node.
+13. The shared draft stores the exact Node and text-box identities directly and never creates a generic draft edge, resource registry, surrogate identity, participant table, or copied permission grant.
+14. Removing one Node's email relationship removes only that Node's typed email edge and leaves every other Node, stored thread/message, local shared draft, local text box, chat, and surviving attachment relationship unchanged.
 15. Email-to-Node, email-to-textbox, chat, and draft rules do not create a generic resource registry, surrogate identity, or untyped edge.
 16. An existing exact-message text-box relationship routes a later triage send through the normal Node text-box-chat insert only; it creates no email, relationship, permission, participant, or collaboration row.
 17. A triage chat command reuses the exact mailbox-scoped stored message when present, fetches only that exact provider message when absent, and never queues thread ingestion or links a thread to a text box.
 
-Last updated: 2026-08-10
+Last updated: 2026-08-11
 
 # Process Story: One email thread can appear in several Nodes while message work stays Node-local
 

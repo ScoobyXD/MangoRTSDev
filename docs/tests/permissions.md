@@ -127,7 +127,7 @@ P62 - Permission mutations still publish no generic permission/workspace event. 
 P63 - A newly created email Node first resolves and copies the effective policy from its final parent/source, then becomes customized with one system-managed direct Edit binding for its creator and direct Responsible RACI. Generic permission replacement cannot widen or remove collaboration participant grants.
 P64 - A committed direct user mention or resolved user-group mention snapshots each distinct same-company user as a collaboration participant and adds one system-managed direct edit binding for that user in the same durable transaction. These are user bindings, not live group pointers, so later group changes neither grant nor revoke collaboration access.
 P65 - Collaboration participant membership and its mandatory Node edit binding are append-only for the collaboration lifetime. The collaboration Node policy is system-managed: generic Node permission mutation cannot add a grant, remove/downgrade/replace a participant binding, or change its default away from `no_access`; only the accepted mention-participant path may add a binding. Deleting the mention message has no permission effect.
-P66 - A generic Node permission grant alone does not create email collaboration participation, a triage row, source-mailbox access, or shared-draft access. The existing dev-admin/company-admin bypass remains an administrative access rule but does not silently add the administrator to participant lists, mention notifications, or My Drafts.
+P66 - Existing effective access to one exact Node authorizes that Node's shared-draft read, edit, and discard paths without a draft participant table or copied grant. It does not create email collaboration participation, a triage row, source-mailbox access, mailbox credentials, send authority, mention notifications, or a My Drafts row. The existing dev-admin/company-admin Node-access rule follows the same boundary.
 P67 - Chat mutation authorization is the intersection of normal entity Edit permission and exact stored comment authorship. An administrator, manager, collaborator, or other editor may read and reply according to existing access but may not edit or delete another user's comment. Missing or mismatched stored `author_id` fails closed, and legacy POST upsert paths cannot bypass the author-only PATCH boundary.
 P68 - After any successful permission save, the company workspace snapshot and cached Node and Logic Gate records are invalidated so inherited and overwritten descendants refetch their live effective permission policy instead of continuing to show a stale cached result. This invalidation changes no descendant policy rows.
 
@@ -364,8 +364,8 @@ Expected:
 - Each distinct resolved mentioned user receives one system-managed direct edit binding and participant row in the chat transaction.
 - The mention group is snapshotted to users rather than retained as a dynamic group permission pointer.
 - Group changes and mention deletion do not change existing participants.
-- Generic permission mutation cannot remove/downgrade participant bindings, change the default, or add a nonparticipant to email/thread/draft visibility.
-- Existing company-admin/dev-admin bypass remains intact but does not itself create a participant, triage card, notification, or shared draft listing.
+- Generic permission mutation cannot remove/downgrade participant bindings, change the default, or add a nonparticipant to collaboration email/thread visibility. Normal effective Node access independently controls only that exact Node's shared draft.
+- Existing company-admin/dev-admin Node access remains intact and may open that Node's shared draft, but it does not create a participant, triage card, notification, mailbox authority, send authority, or My Drafts row.
 
 ### Scenario P-S9: Comment Authorship Is A Mutation Boundary
 
