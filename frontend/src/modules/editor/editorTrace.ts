@@ -1,4 +1,4 @@
-export type EditorTraceResourceType = "node" | "project" | "logic_gate";
+export type EditorTraceResourceType = "node" | "project" | "logic_gate" | "huddle_logic_gate" | "huddle_node" | "kpi";
 
 export type EditorTraceDataValue = string | number | boolean | null;
 export type EditorTraceData = Readonly<Record<string, EditorTraceDataValue | undefined>>;

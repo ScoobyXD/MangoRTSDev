@@ -4,7 +4,7 @@ import type { BoundRequestJSON } from "../api/requestJSON";
 import { listCompanyUsers } from "../communications/communicationsApi";
 import { invalidateResourcePolicyDependentCaches } from "./resourcePolicyCaches";
 
-type PermissionEntityType = "node" | "logic_gate" | "project" | "company_explorer_folder" | "shared_inbox_folder" | "shared_inbox";
+type PermissionEntityType = "node" | "logic_gate" | "project" | "company_explorer_folder" | "shared_inbox_folder" | "shared_inbox" | "huddle_logic_gate" | "huddle_node";
 type PermissionSubjectType = "user" | "group";
 type ResourceAccessLevel = "no_access" | "edit";
 

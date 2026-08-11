@@ -97,6 +97,32 @@ with recursive candidates as (
     and ($6 = '' or 'logic_gate' = any(string_to_array($6, ',')::text[]))
     and ($2='' or lower(logic_gate.header) like '%' || lower($2) || '%' or logic_gate.logic_gate_id::text like '%' || $2 || '%')
   union all
+  select huddle.company_id,
+         'huddle_logic_gate'::text,
+         'huddle_logic_gate'::text,
+         huddle.huddle_logic_gate_id,
+         huddle.huddle_logic_gate_id,
+         huddle.header,
+         huddle.created_timestamp,
+         huddle.updated_timestamp
+  from huddle_logic_gates huddle
+  where huddle.company_id=$1::uuid
+    and ($6 = '' or 'huddle_logic_gate' = any(string_to_array($6, ',')::text[]))
+    and ($2='' or lower(huddle.header) like '%' || lower($2) || '%' or huddle.huddle_logic_gate_id::text like '%' || $2 || '%')
+  union all
+  select huddle_node.company_id,
+         'huddle_node'::text,
+         'huddle_node'::text,
+         huddle_node.huddle_node_id,
+         huddle_node.huddle_node_id,
+         huddle_node.name,
+         huddle_node.created_timestamp,
+         huddle_node.updated_timestamp
+  from huddle_nodes huddle_node
+  where huddle_node.company_id=$1::uuid
+    and ($6 = '' or 'huddle_node' = any(string_to_array($6, ',')::text[]))
+    and ($2='' or lower(huddle_node.name) like '%' || lower($2) || '%' or huddle_node.huddle_node_id::text like '%' || $2 || '%')
+  union all
   select folder.company_id,
          'folder'::text,
          'company_explorer_folder'::text,
@@ -123,14 +149,18 @@ with recursive candidates as (
            when 'node' then 0
            when 'project' then 1
            when 'logic_gate' then 2
-           else 3
+           when 'huddle_logic_gate' then 3
+           when 'huddle_node' then 4
+           else 5
          end as editor_priority,
          case candidate.resource_type
            when 'logic_gate' then 0
            when 'node' then 1
            when 'project' then 2
            when 'folder' then 3
-           else 4
+           when 'huddle_logic_gate' then 4
+           when 'huddle_node' then 5
+           else 6
          end as explorer_priority,
          case
            when $2='' then 0

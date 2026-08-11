@@ -471,6 +471,12 @@ func (s *Server) realtimeEntityExists(companyID, resourceType, resourceID string
 		_, err = s.repo.GetLogicGate(companyID, resourceID)
 	case store.EntityTypeProject:
 		_, err = s.repo.GetProject(companyID, resourceID)
+	case store.EntityTypeHuddleLogicGate:
+		_, err = s.repo.GetHuddleLogicGate(companyID, resourceID)
+	case store.EntityTypeHuddleNode:
+		_, err = s.repo.GetHuddleNode(companyID, resourceID)
+	case store.EntityTypeKPI:
+		_, err = s.repo.GetKPI(companyID, resourceID)
 	case store.EntityTypeSharedInbox:
 		item, loadErr := s.repo.GetCommunicationsSharedInboxFolder(companyID, resourceID)
 		if loadErr == nil {

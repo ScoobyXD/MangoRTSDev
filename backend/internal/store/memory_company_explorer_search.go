@@ -210,6 +210,29 @@ func (r *MemoryRepo) SearchCompanyExplorer(query CompanyExplorerSearchQuery) (Co
 			add(entity)
 		}
 	}
+	addHuddle := func(resourceType, resourceID, name string, created, updated time.Time) {
+		if !companyExplorerSearchResourceTypeAllowed(query.ResourceTypes, resourceType) {
+			return
+		}
+		if query.PermissionUserID != "" && !r.userCanAccessEntityLocked(query.CompanyID, resourceType, resourceID, query.PermissionUserID, EntityPermissionEdit) {
+			return
+		}
+		_, reason, ok := companyExplorerSearchMatch(name, resourceID, query.Query)
+		if !ok {
+			return
+		}
+		matches = append(matches, CompanyExplorerSearchResult{CompanyID: query.CompanyID, ResourceType: resourceType, ResourceID: resourceID, EntityID: resourceID, DisplayName: name, MatchReason: reason, LocationPath: []CompanyExplorerLocationSegment{}, CreatedTimestamp: created, UpdatedTimestamp: updated})
+	}
+	for _, item := range r.huddleLogicGates {
+		if item.CompanyID == query.CompanyID {
+			addHuddle(EntityTypeHuddleLogicGate, item.HuddleLogicGateID, item.Header, item.CreatedTimestamp, item.UpdatedTimestamp)
+		}
+	}
+	for _, item := range r.huddleNodes {
+		if item.CompanyID == query.CompanyID {
+			addHuddle(EntityTypeHuddleNode, item.HuddleNodeID, item.Name, item.CreatedTimestamp, item.UpdatedTimestamp)
+		}
+	}
 	sort.Slice(matches, func(i, j int) bool {
 		leftType, _ := companyExplorerSearchTypePriority(matches[i].ResourceType)
 		rightType, _ := companyExplorerSearchTypePriority(matches[j].ResourceType)
@@ -310,6 +333,10 @@ func companyExplorerEditorEntityPriority(entityType string) int {
 		return 1
 	case EntityTypeLogicGate:
 		return 2
+	case EntityTypeHuddleLogicGate:
+		return 3
+	case EntityTypeHuddleNode:
+		return 4
 	default:
 		return 5
 	}
@@ -325,6 +352,10 @@ func companyExplorerSearchTypePriority(entityType string) (int, bool) {
 		return 2, true
 	case CompanyExplorerV2EntityFolder:
 		return 3, true
+	case EntityTypeHuddleLogicGate:
+		return 4, true
+	case EntityTypeHuddleNode:
+		return 5, true
 	default:
 		return 0, false
 	}

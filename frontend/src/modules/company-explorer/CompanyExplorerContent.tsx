@@ -2934,6 +2934,10 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   }, [focusTreeRow]);
 
   const emitExplorerEntityActivation = useCallback((row: ExplorerTreeNode, options: { suppressNodeNavigation?: boolean } = {}) => {
+    if ((row.entityType === "huddle_logic_gate" || row.entityType === "huddle_node") && row.resourceID) {
+      window.dispatchEvent(new CustomEvent("mangorts:huddle-open", { detail: { resourceType: row.entityType, resourceID: row.resourceID, name: row.label } }));
+      return;
+    }
     const kind = row.kind === "node" || row.kind === "logic_gate" || row.kind === "project" ? row.kind : "";
     const id = kind === "node" ? (row.nodeID ?? "") : kind === "logic_gate" ? (row.logicGateID ?? "") : kind === "project" ? (row.projectID ?? "") : "";
     const cleanID = id.trim();

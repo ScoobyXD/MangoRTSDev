@@ -20,6 +20,11 @@ type memoryRecycleBinSnapshot struct {
 	nodeRels                      map[string][]domain.NodeRelationship
 	nodeAccountAssignments        map[string]domain.NodeAccountAssignment
 	logicGates                    map[string]domain.LogicGate
+	huddleLogicGates              map[string]domain.HuddleLogicGate
+	huddleNodes                   map[string]domain.HuddleNode
+	kpis                          map[string]domain.KPI
+	huddleExplorerFolders         map[string]domain.HuddleExplorerFolder
+	huddleExplorerItems           map[string]domain.HuddleExplorerItem
 	logicGateInfo                 map[string][]domain.LogicGateInformation
 	logicGateText                 map[string]map[string]domain.LogicGateProjection
 	logicGateRels                 map[string][]domain.LogicGateRelationship
@@ -41,6 +46,9 @@ type memoryRecycleBinSnapshot struct {
 	projectTimelineItems          map[string]memoryProjectManagementTimelineItem
 	projectTimelineProjection     map[string]ProjectManagementTimelineProjectionRow
 	entityPermissions             map[string]domain.EntityPermission
+	gvicAssignments               map[string]domain.ResourceRACIAssignment
+	gvicV2Settings                map[string]memoryV2PolicySetting
+	permissionV2Settings          map[string]memoryV2PolicySetting
 	effectiveAccess               map[string]domain.EffectiveResourceAccess
 	emailNodeLinks                map[string]communicationsEmailNodeLink
 	logicGateShortcuts            map[string]domain.UserLogicGateShortcut
@@ -211,6 +219,11 @@ func (r *MemoryRepo) snapshotRecycleStateLocked() memoryRecycleBinSnapshot {
 		nodeRels:                      cloneSliceMap(r.nodeRels),
 		nodeAccountAssignments:        cloneMap(r.nodeAccountAssignments),
 		logicGates:                    cloneMap(r.logicGates),
+		huddleLogicGates:              cloneMap(r.huddleLogicGates),
+		huddleNodes:                   cloneMap(r.huddleNodes),
+		kpis:                          cloneMap(r.kpis),
+		huddleExplorerFolders:         cloneMap(r.huddleExplorerFolders),
+		huddleExplorerItems:           cloneMap(r.huddleExplorerItems),
 		logicGateInfo:                 cloneSliceMap(r.logicGateInfo),
 		logicGateText:                 cloneNestedMap(r.logicGateText),
 		logicGateRels:                 cloneSliceMap(r.logicGateRels),
@@ -232,6 +245,9 @@ func (r *MemoryRepo) snapshotRecycleStateLocked() memoryRecycleBinSnapshot {
 		projectTimelineItems:          cloneMap(r.projectTimelineItems),
 		projectTimelineProjection:     cloneMap(r.projectTimelineProjection),
 		entityPermissions:             cloneMap(r.entityPermissions),
+		gvicAssignments:               cloneMap(r.gvicAssignments),
+		gvicV2Settings:                cloneMap(r.gvicV2Settings),
+		permissionV2Settings:          cloneMap(r.permissionV2Settings),
 		effectiveAccess:               cloneMap(r.effectiveAccess),
 		emailNodeLinks:                cloneMap(r.emailNodeLinks),
 		logicGateShortcuts:            cloneMap(r.logicGateShortcuts),
@@ -245,6 +261,11 @@ func (r *MemoryRepo) restoreRecycleSnapshotLocked(snapshot memoryRecycleBinSnaps
 	r.nodeRels = cloneSliceMap(snapshot.nodeRels)
 	r.nodeAccountAssignments = cloneMap(snapshot.nodeAccountAssignments)
 	r.logicGates = cloneMap(snapshot.logicGates)
+	r.huddleLogicGates = cloneMap(snapshot.huddleLogicGates)
+	r.huddleNodes = cloneMap(snapshot.huddleNodes)
+	r.kpis = cloneMap(snapshot.kpis)
+	r.huddleExplorerFolders = cloneMap(snapshot.huddleExplorerFolders)
+	r.huddleExplorerItems = cloneMap(snapshot.huddleExplorerItems)
 	r.logicGateInfo = cloneSliceMap(snapshot.logicGateInfo)
 	r.logicGateText = cloneNestedMap(snapshot.logicGateText)
 	r.logicGateRels = cloneSliceMap(snapshot.logicGateRels)
@@ -266,6 +287,9 @@ func (r *MemoryRepo) restoreRecycleSnapshotLocked(snapshot memoryRecycleBinSnaps
 	r.projectTimelineItems = cloneMap(snapshot.projectTimelineItems)
 	r.projectTimelineProjection = cloneMap(snapshot.projectTimelineProjection)
 	r.entityPermissions = cloneMap(snapshot.entityPermissions)
+	r.gvicAssignments = cloneMap(snapshot.gvicAssignments)
+	r.gvicV2Settings = cloneMap(snapshot.gvicV2Settings)
+	r.permissionV2Settings = cloneMap(snapshot.permissionV2Settings)
 	r.effectiveAccess = cloneMap(snapshot.effectiveAccess)
 	r.emailNodeLinks = cloneMap(snapshot.emailNodeLinks)
 	r.logicGateShortcuts = cloneMap(snapshot.logicGateShortcuts)

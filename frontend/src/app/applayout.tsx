@@ -1577,11 +1577,16 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   const routeForSidebarPin = useCallback((pin: SidebarPin): string => {
     if (pin.kind === "logic_gate") return buildLogicGateRoute(pin.id);
     if (pin.kind === "project") return buildProjectRoute(pin.id);
+    if (pin.kind === "huddle_logic_gate" || pin.kind === "huddle_node") return window.location.pathname;
     return buildNodeRoute(pin.id);
   }, []);
 
   const openSidebarPin = useCallback((pin: SidebarPin) => {
     const companyID = getActiveCompanyID();
+    if (pin.kind === "huddle_logic_gate" || pin.kind === "huddle_node") {
+      window.dispatchEvent(new CustomEvent("mangorts:huddle-open", { detail: { resourceType: pin.kind, resourceID: pin.id, name: pin.name } }));
+      return;
+    }
     if (pin.kind === "logic_gate") {
       setExplorerNodePopup(null);
       setLogicGateArenaTarget({

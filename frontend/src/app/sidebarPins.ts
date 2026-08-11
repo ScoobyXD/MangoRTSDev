@@ -1,5 +1,5 @@
 import { humanLabelOrFallback } from "../modules/entityLabels.js";
-export type SidebarPinKind = "node" | "logic_gate" | "project";
+export type SidebarPinKind = "node" | "logic_gate" | "project" | "huddle_logic_gate" | "huddle_node";
 
 export type SidebarPin = {
   pinID: string;
@@ -54,7 +54,9 @@ export const EVENT_APP_SIDEBAR_PIN_REQUESTED = "mangorts:app-sidebar-pin-request
 
 export function sidebarPinFallbackName(kind: SidebarPinKind, id: string): string {
   if (kind === "logic_gate") return "Logic Gate";
-  if (kind === "project") return "Project";
+	if (kind === "project") return "Project";
+	if (kind === "huddle_logic_gate") return "Huddle";
+	if (kind === "huddle_node") return "Huddle Node";
   return `Node ${id.trim().slice(0, 8) || "pin"}`;
 }
 

@@ -15,7 +15,7 @@ export type SidebarPinnedResourceDropAction =
 export type SidebarPinDropPlacement = "before" | "after" | "inside";
 
 export function isSidebarPinKind(value: unknown): value is SidebarPinKind {
-  return value === "node" || value === "logic_gate" || value === "project";
+  return value === "node" || value === "logic_gate" || value === "project" || value === "huddle_logic_gate" || value === "huddle_node";
 }
 
 export function sidebarPinsFromDrop(dataTransfer: DataTransfer, parentFolderID?: string): SidebarPinDraft[] {

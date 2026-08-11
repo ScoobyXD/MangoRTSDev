@@ -294,6 +294,8 @@ function searchTreeIDForEntity(entityType: CompanyExplorerV2EntityType, resource
   if (entityType === "node") return `${prefix}node-${id}`;
   if (entityType === "logic_gate") return `${prefix}logic-gate-${id}`;
   if (entityType === "project") return `${prefix}project-${id}`;
+  if (entityType === "huddle_logic_gate") return `${prefix}huddle-logic-gate-${id}`;
+  if (entityType === "huddle_node") return `${prefix}huddle-node-${id}`;
   return `${prefix}workspace-folder-${entityID}`;
 }
 

@@ -26,6 +26,12 @@ func postgresEditorTextboxStorageFor(ref EditorJSONDocumentRef) (postgresEditorT
 		return postgresEditorTextboxStorage{"project_textboxes", "project_id", "textbox_id", false, true}, true
 	case EntityTypeLogicGate:
 		return postgresEditorTextboxStorage{"logic_gate_textboxes", "logic_gate_id", "textbox_id", false, false}, true
+	case EntityTypeHuddleLogicGate:
+		return postgresEditorTextboxStorage{"huddle_logic_gates", "huddle_logic_gate_id", "huddle_logic_gate_id", true, false}, true
+	case EntityTypeHuddleNode:
+		return postgresEditorTextboxStorage{"huddle_nodes", "huddle_node_id", "huddle_node_id", true, false}, true
+	case EntityTypeKPI:
+		return postgresEditorTextboxStorage{"kpis", "kpi_id", "kpi_id", true, false}, true
 	default:
 		return postgresEditorTextboxStorage{}, false
 	}
@@ -219,6 +225,12 @@ func getPostgresEditorTextboxSnapshot(r *PostgresRepo, ref EditorJSONDocumentRef
 
 func insertEmptyPostgresEditorTextboxTx(ctx context.Context, tx *sql.Tx, storage postgresEditorTextboxStorage, ref EditorJSONDocumentRef) error {
 	body := emptyEditorTextboxBody()
+	if ref.ResourceType == EntityTypeHuddleLogicGate || ref.ResourceType == EntityTypeHuddleNode || ref.ResourceType == EntityTypeKPI {
+		if ref.DocumentID != ref.ResourceID {
+			return ErrInvalid
+		}
+		return nil
+	}
 	if ref.ResourceType == EntityTypeNode {
 		_, err := tx.ExecContext(ctx, `insert into node_textboxes(company_id,node_id,textbox_id,body_json,revision,display_order,created_timestamp,updated_timestamp)
 		values($1::uuid,$2::uuid,$3::uuid,$4::jsonb,0,

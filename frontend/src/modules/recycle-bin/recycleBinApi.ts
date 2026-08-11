@@ -1,6 +1,6 @@
 import { apiFetchJSON } from "../../auth/cognitoAuth.js";
 
-export type RecycleBinObjectKind = "folder" | "node" | "logic_gate" | "project" | "kanban";
+export type RecycleBinObjectKind = "folder" | "node" | "logic_gate" | "project" | "kanban" | "kpi" | "huddle_logic_gate" | "huddle_node" | "huddle_explorer_folder" | "huddle_explorer_item";
 
 export type RecycleBinContainedItem = {
   kind: RecycleBinObjectKind;

@@ -95,6 +95,7 @@ import { useCompanyAccounts } from "../accounts/AccountFilterControl";
 import { setNodeAccountAssignments, type Account } from "../accounts/accountsApi";
 import { useMangoEditorDataFormat } from "./editorDataFormat";
 import { LogicGateTiptapEditorSurface } from "./LogicGateTiptapEditorSurface.js";
+import { LogicGateKPISection } from "../huddles/LogicGateKPISection";
 import { scheduleTransientInformationFocus } from "./transientInformationFocus.js";
 import { parseMangoTiptapDocument } from "./tiptap/mangoTiptapDocument.js";
 import type { EditorEntityLink } from "./editorEntityLinks.js";
@@ -2371,6 +2372,23 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     return scheduleTransientInformationFocus({ root: () => editorRootRef.current, informationID, mentionUserID: focusMentionUserID });
   }, [documentInformationID, focusInformationID, focusMentionUserID, focusRequestID, linkedEntityKind, linkedNodeID]);
 
+  const logicGateConversionAction = {
+    id: "convert-to-huddle",
+    label: "Turn into Huddle Logic Gate",
+    disabled: !linkedEntityCanEdit,
+    onSelect: () => {
+      if (!window.confirm("Convert this Logic Gate to a Huddle? This cannot be undone.")) return;
+      void requestJSON<{ huddle_logic_gate_id: string; header: string }>(`/v1/logic-gates/${encodeURIComponent(linkedNodeID)}/convert-to-huddle`, {
+        method: "POST",
+        json: { company_id: companyID },
+      }).then((item) => {
+        window.dispatchEvent(new CustomEvent("mangorts:huddle-open", { detail: { resourceType: "huddle_logic_gate", resourceID: item.huddle_logic_gate_id, name: item.header } }));
+      }).catch((cause) => setError(cause instanceof Error && cause.message.includes("logic_gate_conversion_blocked")
+        ? "Conversion is blocked. Empty the editor and remove all Kanban work and KPIs, then try again."
+        : cause instanceof Error ? cause.message : "Could not convert this Logic Gate."));
+    },
+  };
+
   return (
     <div
       ref={editorRootRef}
@@ -2431,7 +2449,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               label: "Apply to every descendant",
               disabled: !linkedEntityCanEdit || logicGateRACIApplyToAssignedNodesBusy,
               onSelect: () => setLogicGateRACIApplyConfirmationOpen(true),
-            }] : []}
+            }, logicGateConversionAction] : linkedEntityKind === "logic_gate" ? [logicGateConversionAction] : []}
             onRelationshipTabAnchorChange={updateRelationshipTabAnchor}
             reserveHeaderOffset={!forcedEntityKind}
             singleLine
@@ -2484,6 +2502,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onAddRACIPrincipal={linkedEntityKind === "node" ? addNodeRACIPrincipal : addLogicGateRACIPrincipal}
             onRemoveRACIPrincipal={linkedEntityKind === "node" ? removeNodeRACIPrincipal : removeLogicGateRACIPrincipal}
           />
+
+          {linkedEntityKind === "logic_gate" && activeTab === "editor" && (
+            <LogicGateKPISection companyID={companyID} logicGateID={linkedNodeID} canEdit={linkedEntityCanEdit} currentUserID={currentUserID} requestJSON={requestJSON} />
+          )}
 
           </div>
         )}

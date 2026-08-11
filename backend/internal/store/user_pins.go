@@ -21,6 +21,10 @@ func NormalizeUserPinResourceType(resourceType string) (string, bool) {
 		return EntityTypeLogicGate, true
 	case EntityTypeProject:
 		return EntityTypeProject, true
+	case EntityTypeHuddleLogicGate:
+		return EntityTypeHuddleLogicGate, true
+	case EntityTypeHuddleNode:
+		return EntityTypeHuddleNode, true
 	default:
 		return "", false
 	}

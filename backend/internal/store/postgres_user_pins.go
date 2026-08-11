@@ -524,6 +524,10 @@ func (r *PostgresRepo) userPinResourceExists(companyID, resourceType, resourceID
 		query = "select exists(select 1 from logic_gates where company_id=$1::uuid and logic_gate_id=$2::uuid)"
 	case EntityTypeProject:
 		query = "select exists(select 1 from projects where company_id=$1::uuid and project_id=$2::uuid)"
+	case EntityTypeHuddleLogicGate:
+		query = "select exists(select 1 from huddle_logic_gates where company_id=$1::uuid and huddle_logic_gate_id=$2::uuid)"
+	case EntityTypeHuddleNode:
+		query = "select exists(select 1 from huddle_nodes where company_id=$1::uuid and huddle_node_id=$2::uuid)"
 	default:
 		return false, ErrInvalid
 	}

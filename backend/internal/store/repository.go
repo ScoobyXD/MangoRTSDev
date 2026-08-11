@@ -13,6 +13,7 @@ var (
 	ErrNotFound                      = errors.New("not found")
 	ErrInvalid                       = errors.New("invalid")
 	ErrAlreadyExists                 = errors.New("already exists")
+	ErrConflict                      = errors.New("conflict")
 	ErrVersionConflict               = errors.New("version conflict")
 	ErrEditorDocumentTooLarge        = errors.New("editor document too large")
 	ErrEditorOwnerTextLimit          = errors.New("editor owner text limit exceeded")
@@ -67,6 +68,7 @@ type Repository interface {
 	LogicGateWorkRepository
 	WorkItemReadRepository
 	CompanyExplorerRepository
+	HuddleRepository
 	RecycleBinRepository
 	WorkspaceEntityCommandRepository
 	KanbanRepository
@@ -1485,6 +1487,9 @@ const UserLogicGateShortcutBatchMaxItems = 200
 const (
 	EntityTypeNode                  = "node"
 	EntityTypeLogicGate             = "logic_gate"
+	EntityTypeHuddleLogicGate       = "huddle_logic_gate"
+	EntityTypeHuddleNode            = "huddle_node"
+	EntityTypeKPI                   = "kpi"
 	EntityTypeProject               = "project"
 	EntityTypeCompanyExplorerFolder = "company_explorer_folder"
 	EntityTypeSharedTriageFolder    = "shared_triage_folder"
@@ -1502,6 +1507,63 @@ const (
 
 	EntityPermissionMaxAssignments = 1000
 )
+
+type LogicGateConversionBlockers struct {
+	Editor     bool `json:"editor"`
+	KanbanWork bool `json:"kanban_work"`
+	KPIs       bool `json:"kpis"`
+}
+
+func (b LogicGateConversionBlockers) Any() bool { return b.Editor || b.KanbanWork || b.KPIs }
+
+type LogicGateConversionBlockedError struct{ Blockers LogicGateConversionBlockers }
+
+func (e *LogicGateConversionBlockedError) Error() string { return "logic gate conversion blocked" }
+
+type HuddleCreateInput struct {
+	CompanyID string
+	Name      string
+	OwnerID   string
+	ActorID   string
+}
+
+type HuddleUpdateInput struct {
+	CompanyID  string
+	ResourceID string
+	Name       string
+}
+
+type HuddleMoveInput struct {
+	CompanyID      string
+	ResourceID     string
+	ParentFolderID string
+	ActorID        string
+}
+
+type HuddleRepository interface {
+	ConvertLogicGateToHuddle(companyID, logicGateID, actorID string) (domain.HuddleLogicGate, error)
+	ListHuddleLogicGates(companyID string) ([]domain.HuddleLogicGate, error)
+	GetHuddleLogicGate(companyID, huddleLogicGateID string) (domain.HuddleLogicGate, error)
+	UpdateHuddleLogicGate(input HuddleUpdateInput) (domain.HuddleLogicGate, error)
+	DeleteHuddleLogicGate(companyID, huddleLogicGateID, deletedByUserID string) error
+	ListHuddleNodes(companyID, huddleLogicGateID string) ([]domain.HuddleNode, error)
+	CreateHuddleNode(input HuddleCreateInput) (domain.HuddleNode, error)
+	GetHuddleNode(companyID, huddleNodeID string) (domain.HuddleNode, error)
+	UpdateHuddleNode(input HuddleUpdateInput) (domain.HuddleNode, error)
+	DeleteHuddleNode(companyID, huddleNodeID, deletedByUserID string) error
+	ListKPIs(companyID, logicGateID string) ([]domain.KPI, error)
+	CreateKPI(input HuddleCreateInput) (domain.KPI, error)
+	GetKPI(companyID, kpiID string) (domain.KPI, error)
+	UpdateKPI(input HuddleUpdateInput) (domain.KPI, error)
+	DeleteKPI(companyID, kpiID, deletedByUserID string) error
+	ListHuddleExplorer(companyID string) (domain.HuddleExplorer, error)
+	CreateHuddleExplorerFolder(input HuddleCreateInput) (domain.HuddleExplorerFolder, error)
+	UpdateHuddleExplorerFolder(input HuddleUpdateInput) (domain.HuddleExplorerFolder, error)
+	MoveHuddleExplorerFolder(input HuddleMoveInput) error
+	DeleteHuddleExplorerFolder(companyID, folderID, deletedByUserID string) error
+	MoveHuddleExplorerItem(input HuddleMoveInput) error
+	DeleteHuddleExplorerItem(companyID, itemID, deletedByUserID string) error
+}
 
 func NormalizeWorkItemInboxQuery(query WorkItemInboxQuery) WorkItemInboxQuery {
 	query.CompanyID = strings.TrimSpace(query.CompanyID)
@@ -2495,6 +2557,10 @@ func NormalizeRACIResourceType(resourceType string) (string, bool) {
 		return EntityTypeNode, true
 	case EntityTypeLogicGate:
 		return EntityTypeLogicGate, true
+	case EntityTypeHuddleLogicGate:
+		return EntityTypeHuddleLogicGate, true
+	case EntityTypeHuddleNode:
+		return EntityTypeHuddleNode, true
 	case EntityTypeProject:
 		return EntityTypeProject, true
 	case EntityTypeCompanyExplorerFolder:
@@ -2525,6 +2591,10 @@ func NormalizeEntityType(entityType string) (string, bool) {
 		return EntityTypeNode, true
 	case EntityTypeLogicGate:
 		return EntityTypeLogicGate, true
+	case EntityTypeHuddleLogicGate:
+		return EntityTypeHuddleLogicGate, true
+	case EntityTypeHuddleNode:
+		return EntityTypeHuddleNode, true
 	case EntityTypeProject:
 		return EntityTypeProject, true
 	case EntityTypeCompanyExplorerFolder, "folder", "company_folder":
