@@ -246,6 +246,10 @@ func TestRACITabsSchemaAndMigrationContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	targetedMigration, err := os.ReadFile(filepath.Join(root, "db", "migrations", "20260811_zz_targeted_raci_tabs.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	for name, expected := range map[string][]string{
 		"raci_tabs_items":   {"company_id", "user_id", "role", "logic_gate_id", "folder_id", "name", "position", "created_timestamp", "updated_timestamp"},
 		"raci_tabs_folders": {"company_id", "folder_id", "user_id", "role", "parent_folder_id", "name", "position", "created_timestamp", "updated_timestamp"},
@@ -267,6 +271,27 @@ func TestRACITabsSchemaAndMigrationContract(t *testing.T) {
 	}
 	if strings.Contains(normalized, "gvic_matrix_projection_table") {
 		t.Fatal("RACI Tabs migration depends on retired matrix projection storage")
+	}
+	targetedNormalized := strings.ToLower(string(targetedMigration))
+	for _, required := range []string{
+		"mangorts_sync_raci_tabs_explorer_subtree",
+		"mangorts_sync_raci_tabs_policy_resource",
+		"mangorts_sync_raci_tabs_group_ancestors",
+		"mangorts_raci_tabs_membership_added",
+		"drop function if exists mangorts_sync_raci_tabs_company(uuid)",
+	} {
+		if !strings.Contains(targetedNormalized, required) {
+			t.Fatalf("targeted RACI Tabs migration missing %q", required)
+		}
+	}
+	schemaNormalized := strings.ToLower(string(schema))
+	for _, forbiddenDefinition := range []string{
+		"create or replace function mangorts_sync_raci_tabs_company",
+		"create or replace function mangorts_raci_tabs_company_changed",
+	} {
+		if strings.Contains(schemaNormalized, forbiddenDefinition) {
+			t.Fatalf("canonical schema still defines company-wide RACI synchronization %q", forbiddenDefinition)
+		}
 	}
 }
 

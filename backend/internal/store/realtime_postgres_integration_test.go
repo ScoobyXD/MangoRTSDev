@@ -115,6 +115,61 @@ func TestPostgresRealtimeProjectAudienceResolution(t *testing.T) {
 	}
 }
 
+func TestPostgresRealtimeHuddleAndKPIAudienceResolution(t *testing.T) {
+	db, repo := openRealtimePostgresIntegration(t)
+	company, err := repo.CreateCompany("Realtime Huddle and KPI audience")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = db.Exec("delete from companies where company_id=$1::uuid", company.CompanyID) })
+	user, err := repo.UpsertAuthUser("realtime-pg-huddle-user", "realtime-pg-huddle-user@example.test", "Realtime Huddle User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("realtime-pg-huddle-user", company.CompanyID, "company_admin"); err != nil {
+		t.Fatal(err)
+	}
+	logicGate, _, err := repo.CreateLogicGateWithWorkspaceEvent(company.CompanyID, "KPI owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	huddleLogicGateID := newUUIDv7String()
+	huddleNodeID := newUUIDv7String()
+	kpiID := newUUIDv7String()
+	if _, err := db.Exec(`
+insert into huddle_logic_gates(company_id,huddle_logic_gate_id,header) values($1::uuid,$2::uuid,'Live Huddle');
+insert into huddle_nodes(company_id,huddle_node_id,huddle_logic_gate_id,name) values($1::uuid,$3::uuid,$2::uuid,'Live Huddle Node');
+insert into kpis(company_id,kpi_id,logic_gate_id,name) values($1::uuid,$4::uuid,$5::uuid,'Live KPI')`,
+		company.CompanyID, huddleLogicGateID, huddleNodeID, kpiID, logicGate.LogicGateID); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, resource := range []struct {
+		resourceType string
+		resourceID   string
+	}{
+		{EntityTypeHuddleLogicGate, huddleLogicGateID},
+		{EntityTypeHuddleNode, huddleNodeID},
+		{EntityTypeKPI, kpiID},
+	} {
+		exists, userIDs, err := repo.ResolveEffectiveUsersForResource(
+			context.Background(), company.CompanyID, resource.resourceType, resource.resourceID,
+			EntityPermissionEdit, []string{user.UserID},
+		)
+		if err != nil || !exists || len(userIDs) != 1 || userIDs[0] != user.UserID {
+			t.Fatalf("%s audience exists=%v userIDs=%v err=%v", resource.resourceType, exists, userIDs, err)
+		}
+	}
+
+	exists, userIDs, err := repo.ResolveEffectiveUsersForResource(
+		context.Background(), company.CompanyID, EntityTypeKPI, newUUIDv7String(),
+		EntityPermissionEdit, []string{user.UserID},
+	)
+	if err != nil || exists || len(userIDs) != 0 {
+		t.Fatalf("missing KPI audience exists=%v userIDs=%v err=%v", exists, userIDs, err)
+	}
+}
+
 func TestPostgresRealtimeProducersAreTransactionallyAtomic(t *testing.T) {
 	db, repo := openRealtimePostgresIntegration(t)
 	installRealtimeOutboxFailureTrigger(t, db)

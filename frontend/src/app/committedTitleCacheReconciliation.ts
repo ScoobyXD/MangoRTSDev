@@ -1,4 +1,4 @@
-import { markCommunicationsWorkspacePanelStale } from "../modules/communications/communicationsApi.js";
+import { markCommunicationsWorkspaceResourcesStale } from "../modules/communications/communicationsApi.js";
 import type { CommittedEntityTitleUpdate } from "../modules/realtime/committedEntityTitleUpdates.js";
 import { invalidateLogicGateRecordStoreCaches } from "../modules/logic-gates/logicGateRecordStore.js";
 import { reconcileLogicGateRelationshipGraphTitle } from "../modules/logic-gates/logicGateRelationshipGraph.js";
@@ -7,7 +7,6 @@ import { invalidateKanbanBoardListCache } from "../modules/kanban/kanbanApi.js";
 import { invalidateNodeRecordStoreCaches } from "../modules/nodes/nodeRecordStore.js";
 import { reconcileNodeRelationshipGraphTitle } from "../modules/nodes/nodeRelationshipGraph.js";
 import { invalidateProjectRelationshipsForResource } from "../modules/project-management/projectManagementApi.js";
-import { invalidateWorkspaceSnapshot } from "../modules/workspace/workspaceSnapshotCache.js";
 
 export function reconcileCachesForCommittedEntityTitle(
   apiBase: string,
@@ -17,9 +16,6 @@ export function reconcileCachesForCommittedEntityTitle(
   const resourceID = update.resourceID.trim();
   if (!companyID || !resourceID) return;
 
-  // Clear shared snapshots before synchronously patching the title-bearing
-  // caches that can be served immediately by a mounted or remounted surface.
-  invalidateWorkspaceSnapshot(apiBase, companyID);
   invalidateProjectRelationshipsForResource({
     companyID,
     resourceType: update.entityType,
@@ -28,13 +24,13 @@ export function reconcileCachesForCommittedEntityTitle(
   reconcileKanbanBoardContentTitles(apiBase, companyID, update);
   if (update.entityType === "node") {
     invalidateNodeRecordStoreCaches(apiBase, companyID, resourceID);
-    markCommunicationsWorkspacePanelStale(companyID, { nodes: true });
+    markCommunicationsWorkspaceResourcesStale(companyID, { nodes: true });
     reconcileNodeRelationshipGraphTitle(apiBase, companyID, update);
     return;
   }
 
   invalidateLogicGateRecordStoreCaches(apiBase, companyID, resourceID);
-  markCommunicationsWorkspacePanelStale(companyID, { logicGates: true });
+  markCommunicationsWorkspaceResourcesStale(companyID, { logicGates: true });
   invalidateKanbanBoardListCache(apiBase, companyID);
   reconcileLogicGateRelationshipGraphTitle(apiBase, companyID, update);
 }

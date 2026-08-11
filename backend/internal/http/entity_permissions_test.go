@@ -390,7 +390,11 @@ func TestCompanyManagerCanEditManagerAndUserPermissions(t *testing.T) {
 	if err := json.Unmarshal(getRes.Body.Bytes(), &getPayload); err != nil {
 		t.Fatalf("decode manager permissions: %v", err)
 	}
-	if getPayload.ResourceID != logicGate.LogicGateID || getPayload.PermissionMode != store.PolicyModeCustomized || getPayload.EffectiveDefaultAccess != store.ResourceDefaultAccessEdit || !getPayload.CanEditManagerPermissions {
+	if getPayload.ResourceID != logicGate.LogicGateID ||
+		getPayload.PermissionMode != store.PolicyModeInherited ||
+		getPayload.EffectiveSource.ResourceType != store.EntityTypeCompanyExplorerFolder ||
+		getPayload.EffectiveDefaultAccess != store.ResourceDefaultAccessEdit ||
+		!getPayload.CanEditManagerPermissions {
 		t.Fatalf("manager canonical permission policy = %+v, want manager-row edit authority", getPayload)
 	}
 

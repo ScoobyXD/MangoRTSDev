@@ -27,8 +27,6 @@ import type {
   SendEmailInput,
   UserLogicGateShortcut,
 } from "../../modules/communications/communicationsApi.js";
-import type { ExplorerDragPayload } from "../../modules/company-explorer/companyExplorerTypes.js";
-import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders.js";
 import {
   assignNodeToLogicGateStatus as defaultAssignNodeToLogicGateStatus,
   createRACIMatrixNode as defaultCreateRACIMatrixNode,
@@ -47,10 +45,10 @@ import {
 import { editorBodyHasEmailContent, serializeEditorBodyForEmailHTML } from "../../modules/editor/richTextEditing.js";
 import { buildForwardedComposeBody } from "./emailForwarding.js";
 import type { NodeRecord } from "../../modules/nodes/types.js";
+import type { CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders.js";
 import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand } from "../../modules/workspace/workspaceEntityCommands.js";
 import {
   cleanIDList,
-  logicGateIDsFromExplorerPayload,
   nodeTitle,
   normalizeRACIInboxStatus,
 } from "./homeUtils.js";
@@ -86,7 +84,6 @@ export type HomeMailMessageUpdate = { unread?: boolean; starred?: boolean; folde
 export type HomeKanbanBoardContentsInvalidator = (apiBase: string, companyID: string, boardID: string) => void;
 export type HomeNodeRecordInvalidator = (apiBase: string, companyID: string, nodeID: string) => void;
 export type HomeNodeGraphNodeUpsert = (apiBase: string, companyID: string, node: NodeRecord) => void;
-export type HomeFolderItemGraphUpsert = (apiBase: string, companyID: string, item: CompanyExplorerFolderItem) => void;
 
 export type HomeLogicGateShortcutCommandResult = {
   logicGateIDs: string[];
@@ -177,7 +174,6 @@ type HomeDeleteEntitiesResponse = {
 function noopKanbanBoardContentsInvalidator(): void {}
 function noopNodeRecordInvalidator(): void {}
 function noopNodeGraphNodeUpsert(): void {}
-function noopFolderItemGraphUpsert(): void {}
 
 type HomeEntityCreateRequestJSON = <T>(apiBase: string, path: string, init?: RequestJSONInit) => Promise<T>;
 
@@ -691,12 +687,10 @@ export async function removeSharedInboxRACIPrincipalCommand(args: {
 }
 export async function addMyLogicGateShortcutsCommand(args: {
   companyID: string;
-  payload: ExplorerDragPayload | null;
-  folders: CompanyExplorerFolder[];
-  folderItems: CompanyExplorerFolderItem[];
+  logicGateIDs: string[];
   addMyLogicGateShortcuts?: HomeAddMyLogicGateShortcuts;
 }): Promise<HomeLogicGateShortcutCommandResult | null> {
-  const logicGateIDs = logicGateIDsFromExplorerPayload(args.payload, args.folders, args.folderItems);
+  const logicGateIDs = cleanIDList(args.logicGateIDs);
   if (logicGateIDs.length === 0) return null;
   const addMyLogicGateShortcuts = args.addMyLogicGateShortcuts ?? defaultAddMyLogicGateShortcuts;
   const shortcuts = await addMyLogicGateShortcuts(args.companyID, logicGateIDs);
@@ -757,8 +751,6 @@ export async function convertMessagesToExplorerTargetCommand(args: {
   dispatchKanbanBoardContentsUpdated?: (detail: KanbanBoardContentsUpdatedDetail) => void;
   invalidateNodeRecord?: HomeNodeRecordInvalidator;
   upsertNodeRelationshipGraphNode?: HomeNodeGraphNodeUpsert;
-  upsertNodeFolderItemInRelationshipGraph?: HomeFolderItemGraphUpsert;
-  upsertLogicGateFolderItemInRelationshipGraph?: HomeFolderItemGraphUpsert;
 }): Promise<HomeExplorerTriageConversionCommandResult | null> {
   const companyID = args.companyID.trim();
   const messageIDs = cleanIDList(args.messageIDs);
@@ -790,8 +782,6 @@ export async function convertMessagesToExplorerTargetCommand(args: {
   const emitKanbanBoardContentsUpdated = args.dispatchKanbanBoardContentsUpdated ?? dispatchKanbanBoardContentsUpdated;
   const invalidateNodeRecord = args.invalidateNodeRecord ?? noopNodeRecordInvalidator;
   const upsertNodeRelationshipGraphNode = args.upsertNodeRelationshipGraphNode ?? noopNodeGraphNodeUpsert;
-  const upsertNodeFolderItemInRelationshipGraph = args.upsertNodeFolderItemInRelationshipGraph ?? noopFolderItemGraphUpsert;
-  const upsertLogicGateFolderItemInRelationshipGraph = args.upsertLogicGateFolderItemInRelationshipGraph ?? noopFolderItemGraphUpsert;
 
   if (boardID && boardLogicGateID) {
     invalidateKanbanBoardList(args.apiBase, companyID);
@@ -804,11 +794,6 @@ export async function convertMessagesToExplorerTargetCommand(args: {
     invalidateNodeRecord(args.apiBase, companyID, node.node_id);
     upsertNodeRelationshipGraphNode(args.apiBase, companyID, node);
   }
-  for (const item of result.folder_items ?? []) {
-    upsertNodeFolderItemInRelationshipGraph(args.apiBase, companyID, item);
-    upsertLogicGateFolderItemInRelationshipGraph(args.apiBase, companyID, item);
-  }
-
   const convertedMessageIDs = result.deleted_message_ids?.length ? result.deleted_message_ids : messageIDs;
   const unstarredMessageIDs = cleanIDList(result.unstarred_message_ids ?? []);
   return { result, boardID, logicGateID: boardLogicGateID, convertedMessageIDs, unstarredMessageIDs };
@@ -830,8 +815,6 @@ export async function convertMessagesToLogicGateCommand(args: {
   dispatchKanbanBoardContentsUpdated?: (detail: KanbanBoardContentsUpdatedDetail) => void;
   invalidateNodeRecord?: HomeNodeRecordInvalidator;
   upsertNodeRelationshipGraphNode?: HomeNodeGraphNodeUpsert;
-  upsertNodeFolderItemInRelationshipGraph?: HomeFolderItemGraphUpsert;
-  upsertLogicGateFolderItemInRelationshipGraph?: HomeFolderItemGraphUpsert;
 }): Promise<HomeTriageConversionCommandResult | null> {
   const logicGateID = args.logicGateID.trim();
   const nodeID = args.nodeID?.trim() ?? "";
@@ -864,8 +847,6 @@ export async function convertMessagesToLogicGateCommand(args: {
   const emitKanbanBoardContentsUpdated = args.dispatchKanbanBoardContentsUpdated ?? dispatchKanbanBoardContentsUpdated;
   const invalidateNodeRecord = args.invalidateNodeRecord ?? noopNodeRecordInvalidator;
   const upsertNodeRelationshipGraphNode = args.upsertNodeRelationshipGraphNode ?? noopNodeGraphNodeUpsert;
-  const upsertNodeFolderItemInRelationshipGraph = args.upsertNodeFolderItemInRelationshipGraph ?? noopFolderItemGraphUpsert;
-  const upsertLogicGateFolderItemInRelationshipGraph = args.upsertLogicGateFolderItemInRelationshipGraph ?? noopFolderItemGraphUpsert;
 
   invalidateKanbanBoardList(args.apiBase, args.companyID);
   invalidateKanbanBoardContents(args.apiBase, args.companyID, boardID);
@@ -876,11 +857,6 @@ export async function convertMessagesToLogicGateCommand(args: {
     invalidateNodeRecord(args.apiBase, args.companyID, node.node_id);
     upsertNodeRelationshipGraphNode(args.apiBase, args.companyID, node);
   }
-  for (const item of result.folder_items ?? []) {
-    upsertNodeFolderItemInRelationshipGraph(args.apiBase, args.companyID, item);
-    upsertLogicGateFolderItemInRelationshipGraph(args.apiBase, args.companyID, item);
-  }
-
   const convertedMessageIDs = result.deleted_message_ids?.length ? result.deleted_message_ids : messageIDs;
   const unstarredMessageIDs = cleanIDList(result.unstarred_message_ids ?? []);
   return {

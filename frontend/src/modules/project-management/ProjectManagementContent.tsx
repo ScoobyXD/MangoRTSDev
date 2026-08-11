@@ -19,17 +19,16 @@ import {
 } from "../realtime/committedEntityTitleUpdates.js";
 import type { ExplorerTreeNode } from "../company-explorer/companyExplorerTypes.js";
 import { listEntityFields, setEntityFieldAssignments, type EntityField } from "../fields/entityFieldsApi.js";
-import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 import { UniversalGroupingControls } from "../grouping/UniversalGroupingControls.js";
 import type { LogicGateRecord } from "../logic-gates/types.js";
 import { toLogicGateViewRecord } from "../logic-gates/types.js";
 import { getNodeTitle, type NodeRecord } from "../nodes/types.js";
 import {
-  fetchCommunicationsWorkspacePanel,
-  invalidateCommunicationsWorkspacePanelCache,
+  fetchCommunicationsWorkspaceResources,
+  invalidateCommunicationsWorkspaceResourceCache,
   listCompanyUserGroups,
   listCompanyUsers,
-  type CommunicationsWorkspacePanel,
+  type CommunicationsWorkspaceResources,
   type CompanyUser,
   type CompanyUserGroup,
   type CompanyUserGroupMember,
@@ -92,12 +91,8 @@ type ProjectTimelinePayload = {
   color?: string;
 };
 
-type WorkspacePanelState = {
-  nodeFolders: CompanyExplorerFolder[];
-  nodeFolderItems: CompanyExplorerFolderItem[];
+type WorkspaceResourceState = {
   nodes: NodeRecord[];
-  logicGateFolders: CompanyExplorerFolder[];
-  logicGateFolderItems: CompanyExplorerFolderItem[];
   logicGates: LogicGateRecord[];
 };
 
@@ -196,12 +191,8 @@ function readProjectListFieldColumns(companyID: string): string[] {
 }
 
 const PROJECT_HEALTH_OPTIONS: ProjectHealth[] = ["On Track", "AT RISK", "Off Track"];
-const EMPTY_WORKSPACE_PANEL: WorkspacePanelState = {
-  nodeFolders: [],
-  nodeFolderItems: [],
+const EMPTY_WORKSPACE_RESOURCES: WorkspaceResourceState = {
   nodes: [],
-  logicGateFolders: [],
-  logicGateFolderItems: [],
   logicGates: [],
 };
 const WEEK_DAY_COUNT = 7;
@@ -210,14 +201,10 @@ const TIMELINE_MIN_DAY_W = 96;
 const TIMELINE_HEADER_H = 38;
 const TIMELINE_ROW_H = 45;
 
-function workspacePanelStateFromResponse(panel: CommunicationsWorkspacePanel): WorkspacePanelState {
+function workspaceStateFromResources(resources: CommunicationsWorkspaceResources): WorkspaceResourceState {
   return {
-    nodeFolders: panel.nodeFolders,
-    nodeFolderItems: panel.nodeFolderItems,
-    nodes: panel.nodes,
-    logicGateFolders: panel.logicGateFolders,
-    logicGateFolderItems: panel.logicGateFolderItems,
-    logicGates: panel.logicGates,
+    nodes: resources.nodes,
+    logicGates: resources.logicGates,
   };
 }
 
@@ -386,10 +373,6 @@ function buildProjectExplorerRows(input: {
   expanded: Set<string>;
   nodes: NodeRecord[];
   logicGates: LogicGateRecord[];
-  nodeFolders: CompanyExplorerFolder[];
-  nodeFolderItems: CompanyExplorerFolderItem[];
-  logicGateFolders: CompanyExplorerFolder[];
-  logicGateFolderItems: CompanyExplorerFolderItem[];
 }): ExplorerTreeNode[] {
   return buildCompanyExplorerTreeRows({
     expanded: input.expanded,
@@ -397,8 +380,8 @@ function buildProjectExplorerRows(input: {
     logicGates: input.logicGates.map(toLogicGateViewRecord),
     projects: [],
     kanbanBoards: [],
-    folders: [...input.nodeFolders, ...input.logicGateFolders],
-    folderItems: [...input.nodeFolderItems, ...input.logicGateFolderItems],
+    folders: [],
+    folderItems: [],
     rootRowOrder: {},
   });
 }
@@ -655,14 +638,14 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
 }) => {
   const companyID = getActiveCompanyID();
   const pageRef = useRef<HTMLDivElement | null>(null);
-  const workspacePanelReloadTimerRef = useRef<number | null>(null);
+  const workspaceResourceReloadTimerRef = useRef<number | null>(null);
   const projectListReloadTimerRef = useRef<number | null>(null);
   const timelineRowsRef = useRef<ProjectManagementTimelineRow[]>([]);
   const [currentUserID, setCurrentUserID] = useState("");
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
   const [groups, setGroups] = useState<CompanyUserGroup[]>([]);
   const [groupMembers, setGroupMembers] = useState<CompanyUserGroupMember[]>([]);
-  const [workspace, setWorkspace] = useState<WorkspacePanelState>(EMPTY_WORKSPACE_PANEL);
+  const [workspace, setWorkspace] = useState<WorkspaceResourceState>(EMPTY_WORKSPACE_RESOURCES);
   const [loading, setLoading] = useState(true);
   const [timelineLoading, setTimelineLoading] = useState(true);
   const [projectsLoading, setProjectsLoading] = useState(true);
@@ -706,14 +689,14 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     setTimelineRows((current) => reconcileProjectResourceDisplayTitles(current, update, companyID));
   }), [companyID]);
 
-  const loadWorkspacePanel = useCallback(async () => {
+  const loadWorkspaceResources = useCallback(async () => {
     const cleanCompanyID = companyID.trim();
     if (!cleanCompanyID) return;
     try {
       const titleVersionAtStart = readCommittedEntityTitleVersion();
-      const panel = await fetchCommunicationsWorkspacePanel(cleanCompanyID);
+      const resources = await fetchCommunicationsWorkspaceResources(cleanCompanyID);
       setWorkspace(foldCommittedEntityTitlesSince(
-        workspacePanelStateFromResponse(panel), cleanCompanyID, titleVersionAtStart,
+        workspaceStateFromResources(resources), cleanCompanyID, titleVersionAtStart,
         (current, update) => reconcileProjectManagementWorkspaceTitles(current, update, cleanCompanyID),
       ));
     } catch (loadError) {
@@ -748,18 +731,18 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     }
   }, [companyID]);
 
-  const scheduleWorkspacePanelReload = useCallback(() => {
+  const scheduleWorkspaceResourceReload = useCallback(() => {
     const cleanCompanyID = companyID.trim();
     if (!cleanCompanyID) return;
-    invalidateCommunicationsWorkspacePanelCache(cleanCompanyID);
-    if (workspacePanelReloadTimerRef.current !== null) {
-      window.clearTimeout(workspacePanelReloadTimerRef.current);
+    invalidateCommunicationsWorkspaceResourceCache(cleanCompanyID);
+    if (workspaceResourceReloadTimerRef.current !== null) {
+      window.clearTimeout(workspaceResourceReloadTimerRef.current);
     }
-    workspacePanelReloadTimerRef.current = window.setTimeout(() => {
-      workspacePanelReloadTimerRef.current = null;
-      void loadWorkspacePanel();
+    workspaceResourceReloadTimerRef.current = window.setTimeout(() => {
+      workspaceResourceReloadTimerRef.current = null;
+      void loadWorkspaceResources();
     }, 250);
-  }, [companyID, loadWorkspacePanel]);
+  }, [companyID, loadWorkspaceResources]);
 
   const scheduleProjectListReload = useCallback(() => {
     const cleanCompanyID = companyID.trim();
@@ -780,11 +763,11 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     const titleVersionAtStart = readCommittedEntityTitleVersion();
     Promise.all([
       fetchCurrentUser().catch(() => null),
-      fetchCommunicationsWorkspacePanel(companyID),
+      fetchCommunicationsWorkspaceResources(companyID),
       listCompanyUsers(companyID),
       listCompanyUserGroups(companyID),
     ])
-      .then(([current, panel, users, userGroups]) => {
+      .then(([current, resources, users, userGroups]) => {
         if (cancelled) return;
         const userID = current?.user.user_id.trim() ?? "";
         setCurrentUserID(userID);
@@ -792,7 +775,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         setGroups(userGroups.groups);
         setGroupMembers(userGroups.members);
         setWorkspace(foldCommittedEntityTitlesSince(
-          workspacePanelStateFromResponse(panel), companyID, titleVersionAtStart,
+          workspaceStateFromResources(resources), companyID, titleVersionAtStart,
           (currentValue, update) => reconcileProjectManagementWorkspaceTitles(currentValue, update, companyID),
         ));
         const defaultPerspective = defaultUserPerspective(userID);
@@ -812,24 +795,15 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
 
 
   useEffect(() => () => {
-    if (workspacePanelReloadTimerRef.current !== null) {
-      window.clearTimeout(workspacePanelReloadTimerRef.current);
-      workspacePanelReloadTimerRef.current = null;
+    if (workspaceResourceReloadTimerRef.current !== null) {
+      window.clearTimeout(workspaceResourceReloadTimerRef.current);
+      workspaceResourceReloadTimerRef.current = null;
     }
     if (projectListReloadTimerRef.current !== null) {
       window.clearTimeout(projectListReloadTimerRef.current);
       projectListReloadTimerRef.current = null;
     }
   }, []);
-
-  useEffect(() => {
-    setExplorerExpanded((current) => {
-      const next = new Set(current);
-      for (const folder of workspace.nodeFolders) next.add(`workspace-folder-${folder.folder_id}`);
-      for (const folder of workspace.logicGateFolders) next.add(`workspace-folder-${folder.folder_id}`);
-      return next;
-    });
-  }, [workspace.logicGateFolders, workspace.nodeFolders]);
 
   useEffect(() => {
     timelineRowsRef.current = timelineRows;
@@ -1055,11 +1029,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     expanded: explorerExpanded,
     nodes: filteredNodes,
     logicGates: filteredLogicGates,
-    nodeFolders: workspace.nodeFolders,
-    nodeFolderItems: workspace.nodeFolderItems,
-    logicGateFolders: workspace.logicGateFolders,
-    logicGateFolderItems: workspace.logicGateFolderItems,
-  }), [explorerExpanded, filteredLogicGates, filteredNodes, workspace.logicGateFolderItems, workspace.logicGateFolders, workspace.nodeFolderItems, workspace.nodeFolders]);
+  }), [explorerExpanded, filteredLogicGates, filteredNodes]);
   const defaultTimelineStartOffset = useMemo(() => clampInteger(daysBetween(new Date(), weekDays[0]), 0, WEEK_DAY_COUNT - 1), [weekDays]);
 
   const addTimelineItem = useCallback(async (payload: ProjectTimelinePayload, startOffset: number) => {
@@ -1151,18 +1121,17 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     setWorkspace((current) => ({
       ...current,
       nodes: current.nodes.filter((node) => node.node_id !== nodeID),
-      nodeFolderItems: current.nodeFolderItems.filter((folderItem) => folderItem.item_type !== "node" || folderItem.item_id !== nodeID),
     }));
     try {
       await deleteProjectManagementNode(companyID, nodeID, confirmationDisplayName);
-      scheduleWorkspacePanelReload();
+      scheduleWorkspaceResourceReload();
       void loadTimelineRows();
     } catch (deleteError) {
       setWorkspace(previousWorkspace);
       setError(deleteError instanceof Error ? deleteError.message : "Node delete failed");
       void loadTimelineRows();
     }
-  }, [companyID, loadTimelineRows, scheduleWorkspacePanelReload, workspace]);
+  }, [companyID, loadTimelineRows, scheduleWorkspaceResourceReload, workspace]);
 
   const clearTimelinePerspective = useCallback(() => {
     const items = visibleTimelineRows.slice();
@@ -1189,13 +1158,13 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     try {
       await deleteProject(companyID, projectID, confirmationDisplayName);
       scheduleProjectListReload();
-      scheduleWorkspacePanelReload();
+      scheduleWorkspaceResourceReload();
     } catch (deleteError) {
       setProjects(previousProjects);
       setError(deleteError instanceof Error ? deleteError.message : "Failed to delete project");
       void loadProjectList();
     }
-  }, [companyID, loadProjectList, projects, scheduleProjectListReload, scheduleWorkspacePanelReload]);
+  }, [companyID, loadProjectList, projects, scheduleProjectListReload, scheduleWorkspaceResourceReload]);
 
   const saveProjectRename = useCallback(async () => {
     const project = projectRenameTarget;

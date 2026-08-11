@@ -42,7 +42,7 @@ Moves, resets, group changes, and ETags resolve current state without descendant
 ↓
 An editable dialog saves pending changes before closing; denied, read-only, unchanged, and already-saved dialogs close without writing
 ↓
-A successful permission save invalidates the workspace snapshot and cached Node and Logic Gate records so descendant views refetch the new live policy result
+A successful permission save invalidates cached Node and Logic Gate records so descendant views refetch the new live policy result
 
 Last updated: 2026-08-06
 
@@ -129,7 +129,7 @@ P64 - A committed direct user mention or resolved user-group mention snapshots e
 P65 - Collaboration participant membership and its mandatory Node edit binding are append-only for the collaboration lifetime. The collaboration Node policy is system-managed: generic Node permission mutation cannot add a grant, remove/downgrade/replace a participant binding, or change its default away from `no_access`; only the accepted mention-participant path may add a binding. Deleting the mention message has no permission effect.
 P66 - Existing effective access to one exact Node authorizes that Node's shared-draft read, edit, and discard paths without a draft participant table or copied grant. It does not create email collaboration participation, a triage row, source-mailbox access, mailbox credentials, send authority, mention notifications, or a My Drafts row. The existing dev-admin/company-admin Node-access rule follows the same boundary.
 P67 - Chat mutation authorization is the intersection of normal entity Edit permission and exact stored comment authorship. An administrator, manager, collaborator, or other editor may read and reply according to existing access but may not edit or delete another user's comment. Missing or mismatched stored `author_id` fails closed, and legacy POST upsert paths cannot bypass the author-only PATCH boundary.
-P68 - After any successful permission save, the company workspace snapshot and cached Node and Logic Gate records are invalidated so inherited and overwritten descendants refetch their live effective permission policy instead of continuing to show a stale cached result. This invalidation changes no descendant policy rows.
+P68 - After any successful permission save, cached Node and Logic Gate records are invalidated so inherited and overwritten descendants refetch their live effective permission policy instead of continuing to show a stale cached result. This invalidation changes no descendant policy rows.
 
 ## Scenarios
 
@@ -285,7 +285,7 @@ Expected:
 - A later descendant customization becomes active again; an ordinary later parent save cannot cross it.
 - A subtree moved after a reset is protected by its newer parent-link sequence until a later reset from its new ancestry.
 - Point authorization reads only the canonical settings/rules, hierarchy, and current nested groups.
-- After an embedded editor descendant action succeeds, the workspace snapshot is invalidated and the next descendant read shows the new live inheritance or reset result.
+- After an embedded editor descendant action succeeds, exact record caches are invalidated and the next descendant read shows the new live inheritance or reset result.
 - Write count is constant with descendant count, including an intentionally empty customized rule set.
 - Permission explanations identify source, direct/default/group result, reset, parent-link boundary, and inactive stored customization.
 - Group permission rules remain group pointers and are not expanded into one source row per user.

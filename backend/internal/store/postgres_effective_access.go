@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"sort"
 	"strings"
 )
@@ -188,10 +189,31 @@ order by membership.user_id::text`, companyID, resourceType, resourceID, accessL
 func (r *PostgresRepo) ResolveEffectiveUsersForResource(ctx context.Context, companyID, resourceType, resourceID, accessLevel string, candidateUserIDs []string) (bool, []string, error) {
 	companyID = cleanUUIDText(companyID)
 	resourceID = cleanUUIDText(resourceID)
-	resourceType, typeOK := NormalizeEntityType(resourceType)
+	resourceType = strings.ToLower(strings.TrimSpace(resourceType))
 	accessLevel, accessOK := NormalizeEntityPermission(accessLevel)
-	if ctx == nil || companyID == "" || resourceID == "" || !typeOK || !accessOK || EntityPermissionRank(accessLevel) == 0 {
+	if ctx == nil || companyID == "" || resourceID == "" || !accessOK || EntityPermissionRank(accessLevel) == 0 {
 		return false, nil, ErrInvalid
+	}
+	if resourceType == EntityTypeKPI {
+		var logicGateID string
+		err := r.db.QueryRowContext(ctx, `
+select logic_gate_id::text
+from kpis
+where company_id=$1::uuid and kpi_id=$2::uuid`, companyID, resourceID).Scan(&logicGateID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, []string{}, nil
+		}
+		if err != nil {
+			return false, nil, err
+		}
+		resourceType = EntityTypeLogicGate
+		resourceID = logicGateID
+	} else {
+		var typeOK bool
+		resourceType, typeOK = NormalizeEntityType(resourceType)
+		if !typeOK {
+			return false, nil, ErrInvalid
+		}
 	}
 
 	existsQuery := ""
@@ -204,6 +226,10 @@ func (r *PostgresRepo) ResolveEffectiveUsersForResource(ctx context.Context, com
 		existsQuery = `select exists(select 1 from projects where company_id=$1::uuid and project_id=$2::uuid)`
 	case EntityTypeSharedInbox:
 		existsQuery = `select exists(select 1 from shared_inboxes where company_id=$1::uuid and shared_inbox_id=$2::uuid)`
+	case EntityTypeHuddleLogicGate:
+		existsQuery = `select exists(select 1 from huddle_logic_gates where company_id=$1::uuid and huddle_logic_gate_id=$2::uuid)`
+	case EntityTypeHuddleNode:
+		existsQuery = `select exists(select 1 from huddle_nodes where company_id=$1::uuid and huddle_node_id=$2::uuid)`
 	default:
 		return false, nil, ErrInvalid
 	}

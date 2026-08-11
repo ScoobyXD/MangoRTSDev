@@ -1,11 +1,10 @@
 import { apiFetchJSON, getApiAccessToken, getAuthSessionCacheGeneration, readAuthConfig } from "../../auth/cognitoAuth.js";
-import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
+import type { CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 import type { CompanyExplorerV2Row } from "../company-explorer/companyExplorerLazyApi.js";
-import { logicGateKanbanBoardID, type KanbanBoard, type KanbanCard } from "../kanban/shared.js";
+import type { KanbanBoard, KanbanCard } from "../kanban/shared.js";
 import type { NodeRecord } from "../nodes/types.js";
 import type { LogicGateRACIAssignment, LogicGateRACIRole, LogicGateRACIPrincipalType, LogicGateRecord } from "../logic-gates/types.js";
 import type { ProjectRelationshipProjection } from "../project-management/projectManagementApi.js";
-import { markWorkspaceSnapshotScopeStale } from "../workspace/workspaceSnapshotCache.js";
 import { invalidateResourcePolicyDependentCaches } from "../permissions/resourcePolicyCaches.js";
 import { requestJSONWithMeta } from "../api/requestJSON.js";
 import { scheduleOutboundEmailDispatch } from "./outboundEmailUndo.js";
@@ -257,22 +256,14 @@ export type CompanyUserGroupsResponse = {
   members: CompanyUserGroupMember[];
 };
 
-export type CommunicationsWorkspacePanel = {
-  logicGateFolders: CompanyExplorerFolder[];
-  logicGateFolderItems: CompanyExplorerFolderItem[];
+export type CommunicationsWorkspaceResources = {
   logicGates: LogicGateRecord[];
   myLogicGateShortcuts: UserLogicGateShortcut[];
-  nodeFolders: CompanyExplorerFolder[];
-  nodeFolderItems: CompanyExplorerFolderItem[];
   nodes: NodeRecord[];
 };
 
-export type CommunicationsWorkspacePanelCacheScope = {
-  logicGateFolders?: boolean;
-  logicGateFolderItems?: boolean;
+export type CommunicationsWorkspaceResourceCacheScope = {
   logicGates?: boolean;
-  nodeFolders?: boolean;
-  nodeFolderItems?: boolean;
   nodes?: boolean;
   companyUsers?: boolean;
   userGroups?: boolean;
@@ -606,7 +597,7 @@ const MESSAGE_PAGE_CACHE_TTL_MS = 30_000;
 const MESSAGE_DETAIL_CACHE_TTL_MS = WORKDAY_EMAIL_CACHE_TTL_MS;
 const MESSAGE_STALE_ON_RATE_LIMIT_TTL_MS = 24 * 60 * 60_000;
 const SHARED_INBOX_CACHE_TTL_MS = 5 * 60_000;
-const WORKSPACE_PANEL_CACHE_TTL_MS = 5 * 60_000;
+const WORKSPACE_RESOURCE_CACHE_TTL_MS = 5 * 60_000;
 const EMAIL_DRAFT_LIST_CACHE_TTL_MS = 5_000;
 const NODE_EMAIL_THREAD_CACHE_TTL_MS = 30_000;
 const RECENT_ARCHIVED_MESSAGE_TTL_MS = WORKDAY_EMAIL_CACHE_TTL_MS;
@@ -1491,7 +1482,7 @@ export async function updateCommunicationsSharedInboxRACIAssignments(
 
 export async function listLogicGates(companyID: string): Promise<LogicGateRecord[]> {
   const cleanCompanyID = companyID.trim();
-  return cachedRead(`logic-gates:${cleanCompanyID}`, WORKSPACE_PANEL_CACHE_TTL_MS, async () => {
+  return cachedRead(`logic-gates:${cleanCompanyID}`, WORKSPACE_RESOURCE_CACHE_TTL_MS, async () => {
     const params = new URLSearchParams({ company_id: cleanCompanyID });
     const payload = await apiFetchJSON<{ logic_gates?: LogicGateRecord[] }>(`/v1/logic-gates?${params.toString()}`);
     return cloneLogicGates(payload.logic_gates ?? []);
@@ -1500,7 +1491,7 @@ export async function listLogicGates(companyID: string): Promise<LogicGateRecord
 
 export async function listCompanyUsers(companyID: string): Promise<CompanyUser[]> {
   const cleanCompanyID = companyID.trim();
-  return cachedRead(`company-users:${cleanCompanyID}`, WORKSPACE_PANEL_CACHE_TTL_MS, async () => {
+  return cachedRead(`company-users:${cleanCompanyID}`, WORKSPACE_RESOURCE_CACHE_TTL_MS, async () => {
     const payload = await apiFetchJSON<{ users?: CompanyUser[] }>(`/v1/companies/${encodeURIComponent(cleanCompanyID)}/users`);
     return cloneCompanyUsers(payload.users ?? []);
   }, cloneCompanyUsers);
@@ -1508,7 +1499,7 @@ export async function listCompanyUsers(companyID: string): Promise<CompanyUser[]
 
 export async function listCompanyUserGroups(companyID: string): Promise<CompanyUserGroupsResponse> {
   const cleanCompanyID = companyID.trim();
-  return cachedRead(`company-user-groups:${cleanCompanyID}`, WORKSPACE_PANEL_CACHE_TTL_MS, async () => {
+  return cachedRead(`company-user-groups:${cleanCompanyID}`, WORKSPACE_RESOURCE_CACHE_TTL_MS, async () => {
     const payload = await apiFetchJSON<{ groups?: CompanyUserGroup[]; members?: CompanyUserGroupMember[] }>(`/v1/companies/${encodeURIComponent(cleanCompanyID)}/user-groups`);
     return cloneCompanyUserGroupsResponse({ groups: payload.groups ?? [], members: payload.members ?? [] });
   }, cloneCompanyUserGroupsResponse);
@@ -1535,8 +1526,7 @@ export async function updateLogicGateRACIAssignments(
     headers: { "If-Match": current.revision },
     body: JSON.stringify(body),
   });
-  invalidateWorkspacePanelCache(companyID);
-  markLogicGateWorkspaceSnapshotScopesStale(companyID, logicGateID);
+  invalidateWorkspaceResourceCache(companyID);
   invalidateResourcePolicyDependentCaches(readAuthConfig().apiBase, companyID);
   return cloneResourceRACIAssignmentsAsLogicGate(payload.gvic_assignments ?? [], logicGateID);
 }
@@ -1586,8 +1576,7 @@ async function commandLogicGateRACIAssignments(
       descendant_action: applyToDescendants ? "including_customized" : "inherited_only",
     }),
   });
-  invalidateWorkspacePanelCache(companyID);
-  markLogicGateWorkspaceSnapshotScopesStale(companyID, logicGateID);
+  invalidateWorkspaceResourceCache(companyID);
   invalidateResourcePolicyDependentCaches(readAuthConfig().apiBase, companyID);
   return cloneResourceRACIAssignmentsAsLogicGate(payload.gvic_assignments ?? [], logicGateID);
 }
@@ -1612,7 +1601,7 @@ export function removeLogicGateRACIAssignments(
 
 export async function listNodes(companyID: string): Promise<NodeRecord[]> {
   const cleanCompanyID = companyID.trim();
-  return cachedRead(`nodes:${cleanCompanyID}`, WORKSPACE_PANEL_CACHE_TTL_MS, async () => {
+  return cachedRead(`nodes:${cleanCompanyID}`, WORKSPACE_RESOURCE_CACHE_TTL_MS, async () => {
     const params = new URLSearchParams({ company_id: cleanCompanyID });
     const payload = await apiFetchJSON<{ nodes?: NodeRecord[] }>(`/v1/nodes?${params.toString()}`);
     return cloneNodes(payload.nodes ?? []);
@@ -1627,74 +1616,13 @@ export async function updateNode(companyID: string, nodeID: string, update: Part
       ...update,
     }),
   });
-  invalidateWorkspacePanelCache(companyID);
-  markNodeWorkspaceSnapshotScopesStale(companyID);
+  invalidateWorkspaceResourceCache(companyID);
   return { ...node };
-}
-
-export async function listNodeFolders(companyID: string): Promise<CompanyExplorerFolder[]> {
-  const cleanCompanyID = companyID.trim();
-  return cachedRead(`node-folders:${cleanCompanyID}`, WORKSPACE_PANEL_CACHE_TTL_MS, async () => {
-    const params = new URLSearchParams({ company_id: cleanCompanyID, folder_kind: "node" });
-    const payload = await apiFetchJSON<{ folders?: CompanyExplorerFolder[] }>(`/v1/company-explorer/folders?${params.toString()}`);
-    return cloneCompanyExplorerFolders(payload.folders ?? []);
-  }, cloneCompanyExplorerFolders);
-}
-
-export async function listNodeFolderItems(companyID: string): Promise<CompanyExplorerFolderItem[]> {
-  const cleanCompanyID = companyID.trim();
-  return cachedRead(`node-folder-items:${cleanCompanyID}`, WORKSPACE_PANEL_CACHE_TTL_MS, async () => {
-    return listCompanyExplorerReferenceItems(cleanCompanyID, "node");
-  }, cloneCompanyExplorerFolderItems);
-}
-
-export async function listLogicGateFolders(companyID: string): Promise<CompanyExplorerFolder[]> {
-  const cleanCompanyID = companyID.trim();
-  return cachedRead(`logic-gate-folders:${cleanCompanyID}`, WORKSPACE_PANEL_CACHE_TTL_MS, async () => {
-    const params = new URLSearchParams({ company_id: cleanCompanyID, folder_kind: "logic_gate" });
-    const payload = await apiFetchJSON<{ folders?: CompanyExplorerFolder[] }>(`/v1/company-explorer/folders?${params.toString()}`);
-    return cloneCompanyExplorerFolders(payload.folders ?? []);
-  }, cloneCompanyExplorerFolders);
-}
-
-export async function listLogicGateFolderItems(companyID: string): Promise<CompanyExplorerFolderItem[]> {
-  const cleanCompanyID = companyID.trim();
-  return cachedRead(`logic-gate-folder-items:${cleanCompanyID}`, WORKSPACE_PANEL_CACHE_TTL_MS, async () => {
-    return listCompanyExplorerReferenceItems(cleanCompanyID, "logic_gate");
-  }, cloneCompanyExplorerFolderItems);
-}
-
-async function listCompanyExplorerReferenceItems(companyID: string, itemType: "node" | "logic_gate" | "project"): Promise<CompanyExplorerFolderItem[]> {
-  const rows = await listCompanyExplorerRootReferenceRows(companyID);
-  return rows
-    .filter((row) => row.entity_type === itemType && row.edge_id && row.parent_entity_id)
-    .map((row) => ({
-      company_id: row.company_id,
-      folder_id: row.parent_entity_id ?? "",
-      item_type: itemType,
-      item_id: row.resource_id || row.entity_id,
-      position: row.position,
-      created_timestamp: row.created_timestamp,
-      updated_timestamp: row.updated_timestamp,
-    }));
-}
-
-async function listCompanyExplorerRootReferenceRows(companyID: string): Promise<CompanyExplorerV2Row[]> {
-  const cleanCompanyID = companyID.trim();
-  return cachedRead(`company-explorer-root-reference-rows:${cleanCompanyID}`, WORKSPACE_PANEL_CACHE_TTL_MS, async () => {
-    const params = new URLSearchParams({ company_id: cleanCompanyID });
-    const payload = await apiFetchJSON<CompanyExplorerV2Row[] | { rows?: CompanyExplorerV2Row[] }>(`/v1/company-explorer/roots?${params.toString()}`);
-    return normalizeCompanyExplorerRows(payload);
-  }, cloneCompanyExplorerRows);
-}
-
-function normalizeCompanyExplorerRows(payload: CompanyExplorerV2Row[] | { rows?: CompanyExplorerV2Row[] }): CompanyExplorerV2Row[] {
-  return Array.isArray(payload) ? payload : (payload.rows ?? []);
 }
 
 export async function listMyLogicGateShortcuts(companyID: string): Promise<UserLogicGateShortcut[]> {
   const cleanCompanyID = companyID.trim();
-  return cachedRead(`my-logic-gates:${cleanCompanyID}`, WORKSPACE_PANEL_CACHE_TTL_MS, async () => {
+  return cachedRead(`my-logic-gates:${cleanCompanyID}`, WORKSPACE_RESOURCE_CACHE_TTL_MS, async () => {
     const params = new URLSearchParams({ company_id: cleanCompanyID });
     const payload = await apiFetchJSON<{ shortcuts?: UserLogicGateShortcut[] }>(`/v1/communications/my-logic-gates?${params.toString()}`);
     return cloneLogicGateShortcuts(payload.shortcuts ?? []);
@@ -1716,24 +1644,16 @@ export async function removeMyLogicGateShortcut(companyID: string, logicGateID: 
   invalidateCacheKey(`my-logic-gates:${companyID.trim()}`);
 }
 
-export async function fetchCommunicationsWorkspacePanel(companyID: string): Promise<CommunicationsWorkspacePanel> {
+export async function fetchCommunicationsWorkspaceResources(companyID: string): Promise<CommunicationsWorkspaceResources> {
   const cleanCompanyID = companyID.trim();
-  const [logicGateFolders, logicGateFolderItems, logicGates, shortcuts, nodeFolders, nodeFolderItems, nodes] = await Promise.all([
-    listLogicGateFolders(cleanCompanyID),
-    listLogicGateFolderItems(cleanCompanyID),
+  const [logicGates, shortcuts, nodes] = await Promise.all([
     listLogicGates(cleanCompanyID),
     listMyLogicGateShortcuts(cleanCompanyID),
-    listNodeFolders(cleanCompanyID),
-    listNodeFolderItems(cleanCompanyID),
     listNodes(cleanCompanyID),
   ]);
   return {
-    logicGateFolders,
-    logicGateFolderItems,
     logicGates,
     myLogicGateShortcuts: cloneLogicGateShortcuts(shortcuts),
-    nodeFolders,
-    nodeFolderItems,
     nodes,
   };
 }
@@ -1822,12 +1742,7 @@ export async function convertTriageMessagesToExplorerTarget(input: {
       } : undefined,
     }),
   });
-  invalidateWorkspacePanelCache(input.companyID);
-  markNodeWorkspaceSnapshotScopesStale(input.companyID);
-  const logicGateID = input.target.mode === "existing_logic_gate" || input.target.mode === "existing_node"
-    ? input.target.logicGateID?.trim() ?? ""
-    : "";
-  if (logicGateID) markKanbanWorkspaceSnapshotScopeStale(input.companyID, logicGateKanbanBoardID(logicGateID));
+  invalidateWorkspaceResourceCache(input.companyID);
   return result;
 }
 
@@ -1880,9 +1795,7 @@ export async function revertKanbanCardToMyTriage(input: {
       card_id: input.cardID,
     }),
   });
-  invalidateWorkspacePanelCache(input.companyID);
-  markNodeWorkspaceSnapshotScopesStale(input.companyID);
-  markKanbanWorkspaceSnapshotScopeStale(input.companyID, result.board_id?.trim() || input.boardID);
+  invalidateWorkspaceResourceCache(input.companyID);
   return result;
 }
 
@@ -1935,10 +1848,7 @@ export async function transferEmailNodeCardToNode(input: {
       target_card_id: input.targetCardID,
     }),
   });
-  invalidateWorkspacePanelCache(input.companyID);
-  markNodeWorkspaceSnapshotScopesStale(input.companyID);
-  markKanbanWorkspaceSnapshotScopeStale(input.companyID, result.source_board_id?.trim() || input.sourceBoardID);
-  markKanbanWorkspaceSnapshotScopeStale(input.companyID, result.target_board_id?.trim() || input.targetBoardID);
+  invalidateWorkspaceResourceCache(input.companyID);
   return result;
 }
 
@@ -2023,31 +1933,21 @@ export function invalidateEmailThreadCache(threadID: string, companyID?: string,
   emailThreadInflight.delete(key);
 }
 
-export function invalidateCommunicationsWorkspacePanelCache(companyID: string): void {
-  invalidateWorkspacePanelCache(companyID);
+export function invalidateCommunicationsWorkspaceResourceCache(companyID: string): void {
+  invalidateWorkspaceResourceCache(companyID);
 }
 
-export function markCommunicationsWorkspacePanelStale(companyID: string, scope?: CommunicationsWorkspacePanelCacheScope): void {
+export function markCommunicationsWorkspaceResourcesStale(companyID: string, scope?: CommunicationsWorkspaceResourceCacheScope): void {
   const cleanCompanyID = companyID.trim();
   if (!cleanCompanyID) return;
   if (scope) {
     if (scope.logicGates) invalidateCacheKey(`logic-gates:${cleanCompanyID}`);
     if (scope.nodes) invalidateCacheKey(`nodes:${cleanCompanyID}`);
-    if (scope.nodeFolders) invalidateCacheKey(`node-folders:${cleanCompanyID}`);
-    if (scope.nodeFolderItems) {
-      invalidateCacheKey(`node-folder-items:${cleanCompanyID}`);
-      invalidateCacheKey(`company-explorer-root-reference-rows:${cleanCompanyID}`);
-    }
-    if (scope.logicGateFolders) invalidateCacheKey(`logic-gate-folders:${cleanCompanyID}`);
-    if (scope.logicGateFolderItems) {
-      invalidateCacheKey(`logic-gate-folder-items:${cleanCompanyID}`);
-      invalidateCacheKey(`company-explorer-root-reference-rows:${cleanCompanyID}`);
-    }
     if (scope.companyUsers) invalidateCacheKey(`company-users:${cleanCompanyID}`);
     if (scope.userGroups) invalidateCacheKey(`company-user-groups:${cleanCompanyID}`);
     return;
   }
-  clearWorkspacePanelReadCache(cleanCompanyID);
+  clearWorkspaceResourceReadCache(cleanCompanyID);
 }
 
 export function patchLogicGateRACIAssignmentsInCommunicationsWorkspaceCache(
@@ -2671,45 +2571,16 @@ function clearMessagePageCache(): void {
   messagePageCacheWriters.clear();
 }
 
-function markWorkspacePanelSnapshotScopeStale(companyID: string, options: Parameters<typeof markWorkspaceSnapshotScopeStale>[2]): void {
+function invalidateWorkspaceResourceCache(companyID: string): void {
   const cleanCompanyID = companyID.trim();
   if (!cleanCompanyID) return;
-  markWorkspaceSnapshotScopeStale(readAuthConfig().apiBase, cleanCompanyID, options);
+  clearWorkspaceResourceReadCache(cleanCompanyID);
 }
 
-function markNodeWorkspaceSnapshotScopesStale(companyID: string): void {
-  markWorkspacePanelSnapshotScopeStale(companyID, { scope: "full" });
-  markWorkspacePanelSnapshotScopeStale(companyID, { scope: "company_explorer" });
-}
-
-function markLogicGateWorkspaceSnapshotScopesStale(companyID: string, logicGateID: string): void {
-  const cleanLogicGateID = logicGateID.trim();
-  markWorkspacePanelSnapshotScopeStale(companyID, { scope: "full" });
-  markWorkspacePanelSnapshotScopeStale(companyID, { scope: "company_explorer" });
-  if (cleanLogicGateID) markWorkspacePanelSnapshotScopeStale(companyID, { scope: "kanban", boardID: logicGateKanbanBoardID(cleanLogicGateID) });
-}
-
-function markKanbanWorkspaceSnapshotScopeStale(companyID: string, boardID: string): void {
-  const cleanBoardID = boardID.trim();
-  if (!cleanBoardID) return;
-  markWorkspacePanelSnapshotScopeStale(companyID, { scope: "kanban", boardID: cleanBoardID });
-}
-
-function invalidateWorkspacePanelCache(companyID: string): void {
-  const cleanCompanyID = companyID.trim();
-  if (!cleanCompanyID) return;
-  clearWorkspacePanelReadCache(cleanCompanyID);
-}
-
-function clearWorkspacePanelReadCache(cleanCompanyID: string): void {
+function clearWorkspaceResourceReadCache(cleanCompanyID: string): void {
   for (const key of [
     `logic-gates:${cleanCompanyID}`,
     `nodes:${cleanCompanyID}`,
-    `node-folders:${cleanCompanyID}`,
-    `node-folder-items:${cleanCompanyID}`,
-    `logic-gate-folders:${cleanCompanyID}`,
-    `logic-gate-folder-items:${cleanCompanyID}`,
-    `company-explorer-root-reference-rows:${cleanCompanyID}`,
     `company-users:${cleanCompanyID}`,
     `company-user-groups:${cleanCompanyID}`,
   ]) {
@@ -3018,21 +2889,6 @@ function cloneResourceRACIAssignmentsAsSharedInbox(
 function dispatchCommunicationsSharedInboxesUpdated(companyID: string): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED, { detail: { companyID: companyID.trim() } }));
-}
-
-function cloneCompanyExplorerFolders(folders: CompanyExplorerFolder[]): CompanyExplorerFolder[] {
-  return folders.map((folder) => ({ ...folder }));
-}
-
-function cloneCompanyExplorerFolderItems(items: CompanyExplorerFolderItem[]): CompanyExplorerFolderItem[] {
-  return items.map((item) => ({ ...item }));
-}
-
-function cloneCompanyExplorerRows(rows: CompanyExplorerV2Row[]): CompanyExplorerV2Row[] {
-  return rows.map((row) => ({
-    ...row,
-    native_context: row.native_context ? { ...row.native_context } : undefined,
-  }));
 }
 
 function cloneLogicGates(logicGates: LogicGateRecord[]): LogicGateRecord[] {

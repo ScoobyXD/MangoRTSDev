@@ -81,48 +81,6 @@ export function aggregateSidebarPinFolderStatusCounts(
   return countsByFolderID;
 }
 
-export type SidebarLogicGateStatusCountSyncOptions = {
-  logicGateIDs: string[];
-  load: (logicGateID: string) => Promise<SidebarLogicGateStatusCounts>;
-  subscribe: (onLogicGateChanged: (logicGateID: string) => void) => () => void;
-  onChange: (countsByLogicGateID: Record<string, SidebarLogicGateStatusCounts>) => void;
-};
-
-export function startSidebarLogicGateStatusCountSync(options: SidebarLogicGateStatusCountSyncOptions): () => void {
-  const logicGateIDs = Array.from(new Set(options.logicGateIDs.map((logicGateID) => logicGateID.trim()).filter(Boolean)));
-  const tracked = new Set(logicGateIDs);
-  const requestVersionByLogicGateID = new Map<string, number>();
-  const countsByLogicGateID: Record<string, SidebarLogicGateStatusCounts> = {};
-  let disposed = false;
-
-  const refresh = (logicGateID: string) => {
-    const cleanLogicGateID = logicGateID.trim();
-    if (disposed || !tracked.has(cleanLogicGateID)) return;
-    const version = (requestVersionByLogicGateID.get(cleanLogicGateID) ?? 0) + 1;
-    requestVersionByLogicGateID.set(cleanLogicGateID, version);
-    void options.load(cleanLogicGateID).then(
-      (counts) => {
-        if (disposed || requestVersionByLogicGateID.get(cleanLogicGateID) !== version) return;
-        countsByLogicGateID[cleanLogicGateID] = normalizedCounts(counts);
-        options.onChange(cloneCountsByLogicGateID(countsByLogicGateID));
-      },
-      () => {
-        if (disposed || requestVersionByLogicGateID.get(cleanLogicGateID) !== version) return;
-        countsByLogicGateID[cleanLogicGateID] = emptySidebarLogicGateStatusCounts();
-        options.onChange(cloneCountsByLogicGateID(countsByLogicGateID));
-      },
-    );
-  };
-
-  const unsubscribe = options.subscribe(refresh);
-  for (const logicGateID of logicGateIDs) refresh(logicGateID);
-
-  return () => {
-    disposed = true;
-    unsubscribe();
-  };
-}
-
 function sidebarLogicGateStatusKey(value: string): SidebarLogicGateStatusKey | null {
   const normalized = value.trim().toLowerCase().replace(/[\s_-]+/g, " ");
   if (normalized === "request" || normalized === "requested" || normalized === "requests") return "request";
@@ -138,21 +96,6 @@ function addCounts(target: SidebarLogicGateStatusCounts, source: SidebarLogicGat
   }
 }
 
-function normalizedCounts(counts: SidebarLogicGateStatusCounts): SidebarLogicGateStatusCounts {
-  return {
-    request: normalizeCount(counts.request),
-    pending: normalizeCount(counts.pending),
-    inProgress: normalizeCount(counts.inProgress),
-    review: normalizeCount(counts.review),
-  };
-}
-
 function normalizeCount(value: number): number {
   return Number.isSafeInteger(value) && value > 0 ? value : 0;
-}
-
-function cloneCountsByLogicGateID(
-  countsByLogicGateID: Record<string, SidebarLogicGateStatusCounts>,
-): Record<string, SidebarLogicGateStatusCounts> {
-  return Object.fromEntries(Object.entries(countsByLogicGateID).map(([logicGateID, counts]) => [logicGateID, { ...counts }]));
 }

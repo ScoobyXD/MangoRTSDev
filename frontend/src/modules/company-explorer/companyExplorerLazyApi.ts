@@ -1,3 +1,4 @@
+import { getAuthSessionCacheGeneration } from "../../auth/cognitoAuth.js";
 import { requestJSON } from "../api/requestJSON.js";
 import type { CompanyExplorerSnapshotPayload } from "./companyExplorerStore.js";
 
@@ -51,16 +52,26 @@ function lazyScopeQuery(companyID: string): string {
   return `company_id=${encodeURIComponent(companyID)}`;
 }
 
+const lazyReadInflight = new Map<string, Promise<CompanyExplorerSnapshotPayload>>();
+
+function fetchLazyRows(apiBase: string, path: string): Promise<CompanyExplorerSnapshotPayload> {
+  const key = `${getAuthSessionCacheGeneration()}\u0000${apiBase}\u0000${path}`;
+  const existing = lazyReadInflight.get(key);
+  if (existing) return existing;
+  const request = requestJSON<CompanyExplorerSnapshotPayload>(apiBase, path).finally(() => {
+    if (lazyReadInflight.get(key) === request) lazyReadInflight.delete(key);
+  });
+  lazyReadInflight.set(key, request);
+  return request;
+}
+
 export function fetchCompanyExplorerRoots(
   apiBase: string,
   companyID: string,
   scope: CompanyExplorerLazyScope,
 ): Promise<CompanyExplorerSnapshotPayload> {
   void scope;
-  return requestJSON<CompanyExplorerSnapshotPayload>(
-    apiBase,
-    `/v1/company-explorer/roots?${lazyScopeQuery(companyID)}`,
-  );
+  return fetchLazyRows(apiBase, `/v1/company-explorer/roots?${lazyScopeQuery(companyID)}`);
 }
 
 export function fetchCompanyExplorerChildren(
@@ -70,11 +81,34 @@ export function fetchCompanyExplorerChildren(
   parentEntityID: string,
 ): Promise<CompanyExplorerSnapshotPayload> {
   void scope;
-  return requestJSON<CompanyExplorerSnapshotPayload>(
-    apiBase,
-    `/v1/company-explorer/children?${lazyScopeQuery(companyID)}&parent_id=${encodeURIComponent(parentEntityID)}`,
-  );
+  return fetchLazyRows(apiBase, `/v1/company-explorer/children?${lazyScopeQuery(companyID)}&parent_id=${encodeURIComponent(parentEntityID)}`);
 }
+
+export async function fetchCompanyExplorerBranchResourceIDs(
+  apiBase: string,
+  companyID: string,
+  parentEntityID: string,
+  resourceType: Extract<CompanyExplorerV2EntityType, "node" | "logic_gate" | "project">,
+): Promise<string[]> {
+  const pendingEntityIDs = [parentEntityID.trim()];
+  const visitedEntityIDs = new Set<string>();
+  const resourceIDs = new Set<string>();
+  while (pendingEntityIDs.length > 0) {
+    const currentParentEntityID = pendingEntityIDs.shift() ?? "";
+    if (!currentParentEntityID || visitedEntityIDs.has(currentParentEntityID)) continue;
+    visitedEntityIDs.add(currentParentEntityID);
+    const snapshot = await fetchCompanyExplorerChildren(apiBase, companyID, "all", currentParentEntityID);
+    for (const row of snapshot.rows ?? []) {
+      if (row.entity_type === resourceType) {
+        const resourceID = (row.resource_id || row.entity_id).trim();
+        if (resourceID) resourceIDs.add(resourceID);
+      }
+      if (row.has_children && row.entity_type !== "node") pendingEntityIDs.push(row.entity_id);
+    }
+  }
+  return Array.from(resourceIDs);
+}
+
 export function fetchCompanyExplorerSearchResults(
   apiBase: string,
   companyID: string,

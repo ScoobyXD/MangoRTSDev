@@ -7,26 +7,6 @@ import (
 	"miraeopus/backend/internal/domain"
 )
 
-func (r *PostgresRepo) ensureCompanyExplorerDefaultState(companyID string) error {
-	companyID = cleanUUIDText(companyID)
-	if companyID == "" {
-		return ErrInvalid
-	}
-	ctx := context.Background()
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := ensureCompanyExplorerDefaultFoldersTx(ctx, tx, companyID, ""); err != nil {
-		return err
-	}
-	if err := backfillBareCompanyExplorerItemsTx(ctx, tx, companyID); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 func ensureCompanyExplorerDefaultFoldersTx(ctx context.Context, tx *sql.Tx, companyID, actorUserID string) (companyExplorerDefaultFolders, error) {
 	companyID = cleanUUIDText(companyID)
 	actorUserID = cleanUUIDText(actorUserID)
@@ -54,7 +34,10 @@ on conflict (company_id, folder_id) do update set
   parent_folder_id=excluded.parent_folder_id,
   name=excluded.name,
   position=excluded.position,
-  updated_timestamp=now()`, companyID, folderID, parentFolderID, name, position, actorUserID)
+  updated_timestamp=now()
+where (company_explorer_folders.parent_folder_id, company_explorer_folders.name, company_explorer_folders.position)
+      is distinct from
+      (excluded.parent_folder_id, excluded.name, excluded.position)`, companyID, folderID, parentFolderID, name, position, actorUserID)
 		return err
 	}
 	if err := upsert(folders.UnfiledFolderID, nil, CompanyExplorerDefaultRootFolderName, 1000); err != nil {
@@ -115,79 +98,4 @@ returning company_id::text, coalesce(parent_folder_id::text, '') as folder_id, t
 	}
 	_ = snapshotPolicy // V2 child policy mode is initialized by the database trigger.
 	return item, true, nil
-}
-
-func backfillBareCompanyExplorerItemsTx(ctx context.Context, tx *sql.Tx, companyID string) error {
-	companyID = cleanUUIDText(companyID)
-	if companyID == "" {
-		return ErrInvalid
-	}
-	if _, err := ensureCompanyExplorerDefaultFoldersTx(ctx, tx, companyID, ""); err != nil {
-		return err
-	}
-	if err := backfillBareCompanyExplorerItemsForTypeTx(ctx, tx, companyID, EntityTypeProject, `
-select project.project_id::text
-from projects project
-where project.company_id=$1::uuid
-  and not exists (
-    select 1
-    from company_explorer_items item
-    where item.company_id=project.company_id
-      and item.target_type='project'
-      and item.target_id=project.project_id
-  )
-order by project.created_timestamp, project.project_id`); err != nil {
-		return err
-	}
-	if err := backfillBareCompanyExplorerItemsForTypeTx(ctx, tx, companyID, EntityTypeLogicGate, `
-select logic_gate.logic_gate_id::text
-from logic_gates logic_gate
-where logic_gate.company_id=$1::uuid
-  and not exists (
-    select 1
-    from company_explorer_items item
-    where item.company_id=logic_gate.company_id
-      and item.target_type='logic_gate'
-      and item.target_id=logic_gate.logic_gate_id
-  )
-  and not exists (
-    select 1
-    from project_relationships relationship
-    where relationship.company_id=logic_gate.company_id
-      and relationship.resource_type='logic_gate'
-      and relationship.resource_id=logic_gate.logic_gate_id
-  )
-order by logic_gate.created_timestamp, logic_gate.logic_gate_id`); err != nil {
-		return err
-	}
-	return nil
-}
-
-func backfillBareCompanyExplorerItemsForTypeTx(ctx context.Context, tx *sql.Tx, companyID, targetType, query string) error {
-	rows, err := tx.QueryContext(ctx, query, companyID)
-	if err != nil {
-		return err
-	}
-	targetIDs := make([]string, 0)
-	for rows.Next() {
-		var targetID string
-		if err := rows.Scan(&targetID); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		targetIDs = append(targetIDs, targetID)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return err
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	for _, targetID := range targetIDs {
-		if _, _, err := placeCompanyExplorerItemInDefaultFolderTx(ctx, tx, companyID, targetType, targetID, "", false); err != nil && !errors.Is(err, ErrInvalid) {
-			return err
-		}
-	}
-	return nil
 }

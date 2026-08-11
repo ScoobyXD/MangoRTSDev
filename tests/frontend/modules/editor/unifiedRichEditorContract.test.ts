@@ -808,7 +808,7 @@ test("editor header keeps primary controls visible and preserves all secondary o
   assert.match(linkedDocumentPanels, /data-raci-add-principal=\{role\}[\s\S]*aria-label=\{`Add \$\{label\} user or team`\}/);
   assert.doesNotMatch(linkedDocumentPanels, /Apply RACI to assigned nodes|Current RACI|Apply RACI to all descendants/);
   assert.doesNotMatch(linkedDocumentPanels, />Policy mode<|Effective source:/);
-  assert.match(editorContent, /<EntityPermissionsPanel[\s\S]*readOnly=\{!linkedEntityCanEdit\}[\s\S]*onSaved=\{\(\) => invalidateWorkspaceSnapshot\(apiBase, companyID\)\}/);
+  assert.match(editorContent, /<EntityPermissionsPanel[\s\S]*readOnly=\{!linkedEntityCanEdit\}/);
   assert.match(editorContent, /descendant_action: descendantAction/);
   assert.equal(editorContent.includes("invalidateResourcePolicyDependentCaches(apiBase, companyID);"), true);
   assert.match(projectSummary, /visibleTabIDs=\{EDITOR_PRIMARY_HEADER_TAB_IDS\}/);

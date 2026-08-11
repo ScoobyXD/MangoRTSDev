@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { CompanyUser, CommunicationsArchiveJob, CommunicationsSharedInbox, CommunicationsSharedInboxRACIAssignment, CommunicationsSharedInboxRACIRole, EmailMessage, SendEmailInput, UserLogicGateShortcut } from "../../../../frontend/src/modules/communications/communicationsApi.js";
-import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../../../frontend/src/modules/folders/companyExplorerFolders.js";
+import type { CompanyExplorerFolderItem } from "../../../../frontend/src/modules/folders/companyExplorerFolders.js";
 import type { LogicGateAssignmentCommandResult, RACIMatrixProjectionRow } from "../../../../frontend/src/modules/kanban/kanbanApi.js";
 import type { KanbanBoard, KanbanCard } from "../../../../frontend/src/modules/kanban/shared.js";
 import type { NodeRecord } from "../../../../frontend/src/modules/nodes/types.js";
@@ -328,19 +328,6 @@ function shortcut(logicGateID: string, position = 1000): UserLogicGateShortcut {
     company_id: "company-1",
     logic_gate_id: logicGateID,
     position,
-    created_timestamp: timestamp,
-    updated_timestamp: timestamp,
-  };
-}
-
-function explorerFolder(id: string, parentFolderID?: string): CompanyExplorerFolder {
-  return {
-    company_id: "company-1",
-    folder_id: id,
-    parent_folder_id: parentFolderID,
-    folder_kind: "logic_gate",
-    name: id,
-    position: 1000,
     created_timestamp: timestamp,
     updated_timestamp: timestamp,
   };
@@ -767,7 +754,7 @@ test("Home bulk node patch keeps non-placement fields on the node update endpoin
   assert.equal(moveCalls[0]?.priority, null);
   assert.deepEqual(updateCalls, [{ companyID: "company-1", nodeID: "node-1", patch: { due_date: "2026-05-20" } }]);
 });
-test("Home My Logic Gate shortcut add resolves explorer payloads before saving", async () => {
+test("Home My Logic Gate shortcut add saves the resolved Logic Gate IDs", async () => {
   const calls: Array<{ companyID: string; logicGateIDs: string[] }> = [];
   const addMyLogicGateShortcuts: HomeAddMyLogicGateShortcuts = async (companyID, logicGateIDs) => {
     calls.push({ companyID, logicGateIDs });
@@ -776,13 +763,7 @@ test("Home My Logic Gate shortcut add resolves explorer payloads before saving",
 
   const result = await addMyLogicGateShortcutsCommand({
     companyID: "company-1",
-    payload: { kind: "folder", folderKind: "logic_gate", folderID: "folder-root" },
-    folders: [explorerFolder("folder-root"), explorerFolder("folder-child", "folder-root")],
-    folderItems: [
-      explorerFolderItem("folder-root", "gate-a"),
-      explorerFolderItem("folder-child", "gate-b"),
-      explorerFolderItem("folder-child", "node-ignored", "node"),
-    ],
+    logicGateIDs: ["gate-a", "gate-b", "gate-a"],
     addMyLogicGateShortcuts,
   });
 
@@ -824,8 +805,6 @@ test("Home triage conversion command owns cache, event, and graph side effects",
   const boardContentEvents: unknown[] = [];
   const invalidatedNodes: string[] = [];
   const upsertedNodes: string[] = [];
-  const nodeFolderItems: string[] = [];
-  const logicGateFolderItems: string[] = [];
 
   const result = await convertMessagesToLogicGateCommand({
     apiBase: "https://api.example.test",
@@ -842,8 +821,6 @@ test("Home triage conversion command owns cache, event, and graph side effects",
     dispatchKanbanBoardContentsUpdated: (detail) => boardContentEvents.push(detail),
     invalidateNodeRecord: (_apiBase, _companyID, nodeID) => invalidatedNodes.push(nodeID),
     upsertNodeRelationshipGraphNode: (_apiBase, _companyID, node) => upsertedNodes.push(node.node_id),
-    upsertNodeFolderItemInRelationshipGraph: (_apiBase, _companyID, item) => nodeFolderItems.push(item.item_id),
-    upsertLogicGateFolderItemInRelationshipGraph: (_apiBase, _companyID, item) => logicGateFolderItems.push(item.item_id),
   });
 
   assert.deepEqual(convertCalls, [{ companyID: "company-1", accountEmail: "owner@example.test", logicGateID: "gate-1", messageIDs: ["message-1", "message-2"], priority: 2 }]);
@@ -858,8 +835,6 @@ test("Home triage conversion command owns cache, event, and graph side effects",
   assert.deepEqual(boardContentEvents, [{ companyID: "company-1", boardID: "logic-gate:gate-1", logicGateID: "gate-1" }]);
   assert.deepEqual(invalidatedNodes, ["node-1"]);
   assert.deepEqual(upsertedNodes, ["node-1"]);
-  assert.deepEqual(nodeFolderItems, ["node-1"]);
-  assert.deepEqual(logicGateFolderItems, ["node-1"]);
 
   await convertMessagesToLogicGateCommand({
     apiBase: "https://api.example.test",
@@ -877,8 +852,6 @@ test("Home triage conversion command owns cache, event, and graph side effects",
     dispatchKanbanBoardContentsUpdated: (detail) => boardContentEvents.push(detail),
     invalidateNodeRecord: (_apiBase, _companyID, nodeID) => invalidatedNodes.push(nodeID),
     upsertNodeRelationshipGraphNode: (_apiBase, _companyID, node) => upsertedNodes.push(node.node_id),
-    upsertNodeFolderItemInRelationshipGraph: (_apiBase, _companyID, item) => nodeFolderItems.push(item.item_id),
-    upsertLogicGateFolderItemInRelationshipGraph: (_apiBase, _companyID, item) => logicGateFolderItems.push(item.item_id),
   });
   assert.deepEqual(convertCalls[1], {
     companyID: "company-1",

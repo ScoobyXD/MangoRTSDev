@@ -18,5 +18,6 @@
 16. Deleting a Huddle Node moves the Node and its restorable direct policies to the Recycle Bin; restoring it reuses the same UUID and owning Huddle Logic Gate and creates no Huddle Explorer placement.
 17. A Huddle Node cannot exist without its owning Huddle Logic Gate.
 18. The first version has no KPI copies, KPI snapshots, frequency, period, timeline events, or chat behavior.
+19. Realtime current-audience resolution recognizes `huddle_node` and resolves its users from that Huddle Node's direct typed permission policy.
 
 Last updated: 2026-08-11

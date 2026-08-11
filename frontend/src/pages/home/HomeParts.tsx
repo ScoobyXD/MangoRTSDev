@@ -40,7 +40,6 @@ import type { EditorOutlineStyleID } from "../../modules/editor/plainTextEditing
 import type { EditorHighlightColor } from "../../modules/editor/richTextEditing";
 import type { EditorInlineStyleCommand, EditorSelectionInlineFormatState, EditorTextAlignment } from "../../modules/editor/useEditorDocumentSurfaceHandlers";
 import { EDITOR_DOCUMENT_FONT_SIZE_PX } from "../../modules/editor/useEditorPreferences";
-import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../icons/index.js";
 import type { NodeRecord, NodeRelationship } from "../../modules/nodes/types";
 import { buildNodeRelationshipHierarchyRows } from "../../modules/nodes/nodeRelationshipStructure";
@@ -54,6 +53,7 @@ import {
 } from "../../modules/notifications/notificationsApi";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDragPayload } from "../../modules/company-explorer/companyExplorerDragDrop";
+import { fetchCompanyExplorerBranchResourceIDs } from "../../modules/company-explorer/companyExplorerLazyApi";
 import { HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RACI_INBOX_SECTIONS, RACI_STATUS_COLUMNS } from "./homeConstants";
 import type { ComposeAttachment, ComposeState, HomeEntityDeleteTarget, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, RACIInboxRole, RACIInboxStatus } from "./homeTypes";
 import type { EmailCollaborationSelection } from "./EmailCollaborationChatSurface";
@@ -82,6 +82,22 @@ const HOME_LOGIC_GATE_PRIORITY_OPTIONS: ReadonlyArray<{ value: number; label: st
   { value: 4, label: "4  Sprint (1 week)" },
   { value: 5, label: "5  Later (low priority)" },
 ];
+
+function explorerPayloadMayContainLogicGates(payload: ExplorerDragPayload | null): boolean {
+  return logicGateIDsFromExplorerPayload(payload).length > 0
+    || Boolean(payload?.kind === "folder" && payload.folderID);
+}
+
+async function resolveHomeExplorerLogicGateIDs(
+  apiBase: string,
+  companyID: string,
+  payload: ExplorerDragPayload | null,
+): Promise<string[]> {
+  const directLogicGateIDs = logicGateIDsFromExplorerPayload(payload);
+  if (directLogicGateIDs.length > 0) return directLogicGateIDs;
+  if (payload?.kind !== "folder" || !payload.folderID) return [];
+  return fetchCompanyExplorerBranchResourceIDs(apiBase, companyID, payload.folderID, "logic_gate");
+}
 
 function MessageReadStatusText({ message }: { message: EmailMessage }) {
   const label = messageReadStatusLabel(message.read_status);
@@ -1492,10 +1508,10 @@ export function RailRowResizeHandle({ onPointerDown }: { onPointerDown: (event: 
 }
 
 export function LogicGateRail({
+  apiBase,
+  companyID,
   loading,
   logicGateByID,
-  folders,
-  folderItems,
   allRows,
   selectedRowIDs,
   expandedRowIDs,
@@ -1515,10 +1531,10 @@ export function LogicGateRail({
   onCreateLogicGate,
   onRequestDeleteLogicGate,
 }: {
+  apiBase: string;
+  companyID: string;
   loading: boolean;
   logicGateByID: Map<string, LogicGateRecord>;
-  folders: CompanyExplorerFolder[];
-  folderItems: CompanyExplorerFolderItem[];
   allRows: ExplorerTreeNode[];
   selectedRowIDs: Set<string>;
   expandedRowIDs: Set<string>;
@@ -1532,7 +1548,7 @@ export function LogicGateRail({
   onSelectRow: (row: ExplorerTreeNode, event: React.MouseEvent) => void;
   onSelectShortcut: (logicGateID: string, event: React.MouseEvent) => void;
   onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
-  onAddShortcuts: (payload: ExplorerDragPayload | null) => void;
+  onAddShortcuts: (logicGateIDs: string[]) => void;
   onRemoveShortcut: (logicGateID: string) => void;
   onConvertMessages: (logicGateID: string, messageIDs: string[], priority: number) => void;
   onCreateLogicGate: (options?: { creatorRACIRole?: LogicGateRACIRole }) => void;
@@ -1576,9 +1592,11 @@ export function LogicGateRail({
         }}
         onDrop={(event) => {
           const payload = readExplorerDragPayload(event.dataTransfer);
-          if (logicGateIDsFromExplorerPayload(payload, folders, folderItems).length === 0) return;
+          if (!explorerPayloadMayContainLogicGates(payload)) return;
           event.preventDefault();
-          onAddShortcuts(payload);
+          void resolveHomeExplorerLogicGateIDs(apiBase, companyID, payload).then((logicGateIDs) => {
+            if (logicGateIDs.length > 0) onAddShortcuts(logicGateIDs);
+          }, (cause) => console.error("Failed to load Company Explorer folder", cause));
         }}
       >
         <div style={logicGateRailHeaderStyle}>
@@ -3310,14 +3328,14 @@ function InboxNotificationMenu({
 }
 
 export function RACIRoleInboxMatrix({
+  apiBase,
+  companyID,
   section,
   loading,
   nodes,
   nodeByID,
   nodeRelationships,
   logicGateByID,
-  nodeFolders,
-  nodeFolderItems,
   currentUserID,
   viewerSelector,
   accountFilter,
@@ -3341,14 +3359,14 @@ export function RACIRoleInboxMatrix({
   onDropNodesInCell,
   onDropLogicGates,
 }: {
+  apiBase: string;
+  companyID: string;
   section: (typeof RACI_INBOX_SECTIONS)[number];
   loading: boolean;
   nodes: NodeRecord[];
   nodeByID: Map<string, NodeRecord>;
   nodeRelationships: NodeRelationship[];
   logicGateByID: Map<string, LogicGateRecord>;
-  nodeFolders: CompanyExplorerFolder[];
-  nodeFolderItems: CompanyExplorerFolderItem[];
   currentUserID: string;
   viewerSelector?: React.ReactNode;
   accountFilter?: React.ReactNode;
@@ -3515,16 +3533,17 @@ export function RACIRoleInboxMatrix({
     setPinContextMenu(null);
     setCellContextMenu({ ...input, x: event.clientX, y: event.clientY });
   }, []);
-  const readCellDropPayload = useCallback((dataTransfer: DataTransfer) => {
+  const readCellDropPayload = useCallback(async (dataTransfer: DataTransfer) => {
     const explorerPayload = readExplorerDragPayload(dataTransfer);
     const matrixNodePayload = readInboxNodeDragPayload(dataTransfer);
     const matrixLogicGatePayload = readInboxLogicGateDragPayload(dataTransfer);
     const nodeIDs = cleanIDList([
-      ...nodeIDsFromExplorerPayload(explorerPayload, nodeFolders, nodeFolderItems),
+      ...nodeIDsFromExplorerPayload(explorerPayload),
       ...(matrixNodePayload?.nodeIDs ?? []),
     ]).filter((nodeID) => nodeByID.has(nodeID));
+    const explorerLogicGateIDs = await resolveHomeExplorerLogicGateIDs(apiBase, companyID, explorerPayload);
     const logicGateIDs = cleanIDList([
-      ...logicGateIDsFromExplorerPayload(explorerPayload, [], []),
+      ...explorerLogicGateIDs,
       ...(matrixLogicGatePayload?.logicGateIDs ?? []),
     ]).filter((logicGateID) => logicGateByID.has(logicGateID));
     return {
@@ -3533,7 +3552,17 @@ export function RACIRoleInboxMatrix({
       fromLogicGateID: matrixNodePayload?.fromLogicGateID,
       nodeIDsByLogicGateID: matrixLogicGatePayload?.nodeIDsByLogicGateID,
     };
-  }, [logicGateByID, nodeByID, nodeFolderItems, nodeFolders]);
+  }, [apiBase, companyID, logicGateByID, nodeByID]);
+
+  const canReadCellDropPayload = useCallback((dataTransfer: DataTransfer) => {
+    const explorerPayload = readExplorerDragPayload(dataTransfer);
+    const matrixNodePayload = readInboxNodeDragPayload(dataTransfer);
+    const matrixLogicGatePayload = readInboxLogicGateDragPayload(dataTransfer);
+    return nodeIDsFromExplorerPayload(explorerPayload).length > 0
+      || explorerPayloadMayContainLogicGates(explorerPayload)
+      || (matrixNodePayload?.nodeIDs.length ?? 0) > 0
+      || (matrixLogicGatePayload?.logicGateIDs.length ?? 0) > 0;
+  }, []);
 
   return (
     <>
@@ -3597,10 +3626,9 @@ export function RACIRoleInboxMatrix({
                         creatorRACIRole,
                       })}
                       onDragOver={(event) => {
-                        const drop = readCellDropPayload(event.dataTransfer);
-                        if (drop.nodeIDs.length === 0 && drop.logicGateIDs.length === 0) return;
+                        if (!canReadCellDropPayload(event.dataTransfer)) return;
                         event.preventDefault();
-                        event.dataTransfer.dropEffect = drop.logicGateIDs.length > 0 || drop.fromLogicGateID ? "move" : "copy";
+                        event.dataTransfer.dropEffect = "move";
                         setActiveDropKey(cellDropKey);
                       }}
                       onDragLeave={(event) => {
@@ -3609,29 +3637,30 @@ export function RACIRoleInboxMatrix({
                         }
                       }}
                       onDrop={(event) => {
-                        const drop = readCellDropPayload(event.dataTransfer);
                         setActiveDropKey((current) => current === cellDropKey ? "" : current);
-                        if (drop.nodeIDs.length === 0 && drop.logicGateIDs.length === 0) return;
+                        if (!canReadCellDropPayload(event.dataTransfer)) return;
                         event.preventDefault();
                         event.stopPropagation();
-                        if (drop.logicGateIDs.length > 0) {
-                          onDropLogicGates({
-                            logicGateIDs: drop.logicGateIDs,
-                            priority: priority.value,
-                            status: column.status,
-                            creatorRACIRole,
-                            nodeIDsByLogicGateID: drop.nodeIDsByLogicGateID,
-                          });
-                        }
-                        if (drop.nodeIDs.length > 0) {
-                          onDropNodesInCell({
-                            nodeIDs: drop.nodeIDs,
-                            priority: priority.value,
-                            status: column.status,
-                            creatorRACIRole,
-                            fromLogicGateID: drop.fromLogicGateID,
-                          });
-                        }
+                        void readCellDropPayload(event.dataTransfer).then((drop) => {
+                          if (drop.logicGateIDs.length > 0) {
+                            onDropLogicGates({
+                              logicGateIDs: drop.logicGateIDs,
+                              priority: priority.value,
+                              status: column.status,
+                              creatorRACIRole,
+                              nodeIDsByLogicGateID: drop.nodeIDsByLogicGateID,
+                            });
+                          }
+                          if (drop.nodeIDs.length > 0) {
+                            onDropNodesInCell({
+                              nodeIDs: drop.nodeIDs,
+                              priority: priority.value,
+                              status: column.status,
+                              creatorRACIRole,
+                              fromLogicGateID: drop.fromLogicGateID,
+                            });
+                          }
+                        }, (cause) => console.error("Failed to load Company Explorer folder", cause));
                       }}
                     >
                       {logicGateGroups.map((group) => {
@@ -3647,8 +3676,6 @@ export function RACIRoleInboxMatrix({
                             orderedRowIDs={orderedRowIDs}
                             nodeByID={nodeByID}
                             nodeRelationships={nodeRelationships}
-                            nodeFolders={nodeFolders}
-                            nodeFolderItems={nodeFolderItems}
                             getNodeDragIDs={getNodeDragIDs}
                             getLogicGateDragIDs={getLogicGateDragIDs}
                             logicGateByID={logicGateByID}
@@ -3730,8 +3757,6 @@ export function LogicGateInboxNodeGroupCard({
   orderedRowIDs,
   nodeByID,
   nodeRelationships = [],
-  nodeFolders = [],
-  nodeFolderItems = [],
   getNodeDragIDs,
   getLogicGateDragIDs,
   logicGateByID,
@@ -3771,8 +3796,6 @@ export function LogicGateInboxNodeGroupCard({
   orderedRowIDs: string[];
   nodeByID: Map<string, NodeRecord>;
   nodeRelationships?: NodeRelationship[];
-  nodeFolders?: CompanyExplorerFolder[];
-  nodeFolderItems?: CompanyExplorerFolderItem[];
   getNodeDragIDs: (nodeID: string) => string[];
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
   onSelectLogicGate?: (logicGateID: string, orderedIDs: string[], event: React.MouseEvent) => void;
@@ -3834,7 +3857,7 @@ export function LogicGateInboxNodeGroupCard({
   const readDroppedNodes = (dataTransfer: DataTransfer): InboxNodeDragPayload => {
     const matrixPayload = readInboxNodeDragPayload(dataTransfer);
     const explorerNodeIDs = hasExplorerDrag(dataTransfer)
-      ? nodeIDsFromExplorerPayload(readExplorerDragPayload(dataTransfer), nodeFolders, nodeFolderItems)
+      ? nodeIDsFromExplorerPayload(readExplorerDragPayload(dataTransfer))
       : [];
     const nodeIDs = cleanIDList([...(matrixPayload?.nodeIDs ?? []), ...explorerNodeIDs])
       .filter((nodeID) => nodeByID.has(nodeID));

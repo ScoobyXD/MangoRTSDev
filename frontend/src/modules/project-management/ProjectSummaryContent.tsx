@@ -24,7 +24,7 @@ import {
 } from "../realtime/committedEntityTitleUpdates.js";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../icons/index.js";
 import { CompanyExplorerSearchBox } from "../company-explorer/CompanyExplorerSearchBox.js";
-import { fetchCompanyExplorerSearchResults, type CompanyExplorerSearchResult } from "../company-explorer/companyExplorerLazyApi.js";
+import { fetchCompanyExplorerBranchResourceIDs, fetchCompanyExplorerSearchResults, type CompanyExplorerSearchResult } from "../company-explorer/companyExplorerLazyApi.js";
 import { reconcileCompanyExplorerSearchResultTitles } from "../company-explorer/companyExplorerStore.js";
 import { buildCompanyExplorerSearchTreeRows } from "../company-explorer/companyExplorerTreeRows.js";
 import type { ExplorerTreeNode } from "../company-explorer/companyExplorerTypes.js";
@@ -112,10 +112,8 @@ import {
 } from "../editor/editorExitHistory.js";
 import { flushMangoTiptapDocument, flushMangoTiptapResource } from "../editor/tiptap/mangoTiptapFlushRegistry.js";
 import { setEntityFieldAssignments, type EntityField } from "../fields/entityFieldsApi.js";
-import { getScopedItemIDs, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 import { UniversalGroupingControls } from "../grouping/UniversalGroupingControls.js";
 import { moveLogicGateAssignment } from "../kanban/kanbanApi.js";
-import type { LogicGateRecord } from "../logic-gates/types.js";
 import type { NodeRecord } from "../nodes/types.js";
 import { EVENT_HOME_TRIAGE_CONVERSION_APPLIED, type HomeTriageConversionAppliedDetail } from "../../pages/home/homeConstants.js";
 import { cleanIDList, hasTriageMessageDrag, readTriageMessageDrag } from "../../pages/home/homeUtils.js";
@@ -307,12 +305,7 @@ const ProjectSavedVersionsDialog: React.FC<{
 };
 
 type ProjectSummaryWorkspaceSnapshot = {
-  nodeFolders: CompanyExplorerFolder[];
-  nodeFolderItems: CompanyExplorerFolderItem[];
   nodes: NodeRecord[];
-  logicGateFolders: CompanyExplorerFolder[];
-  logicGateFolderItems: CompanyExplorerFolderItem[];
-  logicGates: LogicGateRecord[];
 };
 
 type ProjectRelationshipDropTarget = {
@@ -2016,10 +2009,10 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     }
   }, [companyID, loadProject]);
 
-  const relationshipTargetsFromTransfer = useCallback((dataTransfer: DataTransfer): ProjectRelationshipDropTarget[] => {
+  const relationshipTargetsFromTransfer = useCallback((dataTransfer: DataTransfer): Promise<ProjectRelationshipDropTarget[]> => {
     const payload = readExplorerDragPayload(dataTransfer);
-    return resolveProjectRelationshipDropTargets(payload, workspace);
-  }, [workspace]);
+    return resolveProjectRelationshipDropTargets(readAuthConfig().apiBase, companyID, payload, workspace);
+  }, [companyID, workspace]);
 
   const saveCriticalPathStep = useCallback(async (
     step: ProjectCriticalPathStep,
@@ -2926,11 +2919,14 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               setRelationshipDropActive(false);
             }}
             onDrop={(event) => {
-              const targets = relationshipTargetsFromTransfer(event.dataTransfer);
-              if (targets.length === 0) return;
+              if (!Array.from(event.dataTransfer.types).includes(EXPLORER_DRAG_MIME)) return;
               event.preventDefault();
               setRelationshipDropActive(false);
-              void addRelationshipTargets(targets);
+              void relationshipTargetsFromTransfer(event.dataTransfer).then((targets) => {
+                if (targets.length > 0) void addRelationshipTargets(targets);
+              }, (cause) => {
+                setError(cause instanceof Error ? cause.message : "Failed to load Company Explorer folder");
+              });
             }}
           >
             {relationshipGroupingModel.groups.length > 0
@@ -4035,7 +4031,12 @@ function formatTextBlockMetadataTimestamp(value: string | number | undefined): s
   return `${time} ${day}`;
 }
 
-function resolveProjectRelationshipDropTargets(payload: ExplorerDropPayload | null, workspace?: ProjectSummaryWorkspaceSnapshot): ProjectRelationshipDropTarget[] {
+async function resolveProjectRelationshipDropTargets(
+  apiBase: string,
+  companyID: string,
+  payload: ExplorerDropPayload | null,
+  workspace?: ProjectSummaryWorkspaceSnapshot,
+): Promise<ProjectRelationshipDropTarget[]> {
   if (!payload || !workspace) return [];
   const itemType = getExplorerDropPayloadItemType(payload);
   if (payload.kind === "batch") {
@@ -4048,13 +4049,11 @@ function resolveProjectRelationshipDropTargets(payload: ExplorerDropPayload | nu
   if (payload.itemType === "node" && payload.itemID) {
     return eligibleProjectNodeRelationshipTargets([payload.itemID], workspace);
   }
-  if (payload.kind !== "folder" || payload.folderKind !== "node") return [];
-  return eligibleProjectNodeRelationshipTargets(Array.from(getScopedItemIDs({
-    folders: workspace.nodeFolders,
-    folderItems: workspace.nodeFolderItems,
-    folderID: payload.folderID ?? "",
-    itemType: "node",
-  })), workspace);
+  if (payload.kind === "folder" && payload.folderID) {
+    const nodeIDs = await fetchCompanyExplorerBranchResourceIDs(apiBase, companyID, payload.folderID, "node");
+    return eligibleProjectNodeRelationshipTargets(nodeIDs, workspace);
+  }
+  return [];
 }
 
 function eligibleProjectNodeRelationshipTargets(

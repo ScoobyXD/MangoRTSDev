@@ -1,9 +1,8 @@
 import { readAuthConfig } from "../../auth/cognitoAuth.js";
 import { createRequestJSON } from "../api/requestJSON.js";
 import type { CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
-import { markWorkspaceSnapshotScopeStale } from "../workspace/workspaceSnapshotCache.js";
 import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand, type WorkspaceEntityCommandRequest } from "../workspace/workspaceEntityCommands.js";
-import { upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertNodeRelationshipGraphRelationship } from "./nodeRelationshipGraph.js";
+import { upsertNodeRelationshipGraphNode, upsertNodeRelationshipGraphRelationship } from "./nodeRelationshipGraph.js";
 import { primeNodeRecordStoreCaches } from "./nodeRecordStore.js";
 import { buildLinkedNodePayload } from "./relationshipRules.js";
 import type { NodeRecord, NodeRelationship } from "./types.js";
@@ -63,9 +62,6 @@ export async function createNodeFromSelectionTitle(args: {
   const relationships = response.relationships ?? [];
   upsertNodeRelationshipGraphNode(apiBase, companyID, node);
   for (const relationship of relationships) upsertNodeRelationshipGraphRelationship(apiBase, companyID, relationship);
-  for (const folderItem of response.folder_items ?? []) upsertCompanyExplorerFolderItemInNodeRelationshipGraph(apiBase, companyID, folderItem);
   primeNodeRecordStoreCaches(apiBase, companyID, [{ node, relationships }]);
-  markWorkspaceSnapshotScopeStale(apiBase, companyID, { scope: "full" });
-  markWorkspaceSnapshotScopeStale(apiBase, companyID, { scope: "company_explorer" });
   return node;
 }

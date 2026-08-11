@@ -242,6 +242,9 @@ func (r *MemoryRepo) CreateLogicGate(companyID, header string) (domain.LogicGate
 	}
 	r.logicGates[key(companyID, item.LogicGateID)] = item
 	r.ensureLogicGateKanbanBoardLocked(companyID, item.LogicGateID, item.Header)
+	r.ensureCompanyExplorerV2CompanyGraphLocked(companyID)
+	r.ensureCompanyExplorerDefaultFoldersLocked(companyID)
+	r.placeCompanyExplorerItemInDefaultFolderLocked(companyID, EntityTypeLogicGate, item.LogicGateID, false)
 	return r.withLogicGateRACILocked(item), nil
 }
 
@@ -880,6 +883,9 @@ func (r *MemoryRepo) CreateLogicGateWithWorkspaceEvent(companyID, header string)
 		r.kanbanColumns = beforeColumns
 		return domain.LogicGate{}, domain.DomainEvent{}, err
 	}
+	r.ensureCompanyExplorerV2CompanyGraphLocked(companyID)
+	r.ensureCompanyExplorerDefaultFoldersLocked(companyID)
+	r.placeCompanyExplorerItemInDefaultFolderLocked(companyID, EntityTypeLogicGate, item.LogicGateID, false)
 	return item, event, nil
 }
 

@@ -7,11 +7,6 @@ import (
 	"time"
 )
 
-func (r *MemoryRepo) ensureCompanyExplorerDefaultStateLocked(companyID string) {
-	r.ensureCompanyExplorerDefaultFoldersLocked(companyID)
-	r.backfillBareCompanyExplorerItemsLocked(companyID)
-}
-
 func (r *MemoryRepo) ensureCompanyExplorerDefaultFoldersLocked(companyID string) companyExplorerDefaultFolders {
 	companyID = strings.TrimSpace(companyID)
 	folders := companyExplorerDefaultFolderIDs(companyID)
@@ -24,6 +19,9 @@ func (r *MemoryRepo) ensureCompanyExplorerDefaultFoldersLocked(companyID string)
 		r.ensureCompanyExplorerV2NativeEntityLocked(companyID, CompanyExplorerV2EntityCompany, companyID, companyID, now, now)
 	}
 	upsertFolder := func(folderID, parentEntityID, name, folderKind string, position int) {
+		if _, ok := r.folders[key(companyID, folderID)]; ok {
+			return
+		}
 		created := now
 		defaultAccess := ResourceDefaultAccessEdit
 		if previous, ok := r.companyExplorerV2Entities[key(companyID, folderID)]; ok && !previous.CreatedTimestamp.IsZero() {
@@ -77,21 +75,6 @@ func (r *MemoryRepo) ensureCompanyExplorerDefaultFoldersLocked(companyID string)
 	return folders
 }
 
-func (r *MemoryRepo) backfillBareCompanyExplorerItemsLocked(companyID string) {
-	for _, project := range r.projects {
-		if project.CompanyID != companyID || r.companyExplorerV2HasManualEdgeLocked(companyID, CompanyExplorerV2EntityProject, project.ProjectID) {
-			continue
-		}
-		r.placeCompanyExplorerItemInDefaultFolderLocked(companyID, EntityTypeProject, project.ProjectID, false)
-	}
-	for _, logicGate := range r.logicGates {
-		if logicGate.CompanyID != companyID || r.companyExplorerV2HasManualEdgeLocked(companyID, CompanyExplorerV2EntityLogicGate, logicGate.LogicGateID) || r.companyExplorerLogicGateHasProjectParentLocked(companyID, logicGate.LogicGateID) {
-			continue
-		}
-		r.placeCompanyExplorerItemInDefaultFolderLocked(companyID, EntityTypeLogicGate, logicGate.LogicGateID, false)
-	}
-}
-
 func (r *MemoryRepo) placeCompanyExplorerItemInDefaultFolderLocked(companyID, targetType, targetID string, snapshotPolicy bool) bool {
 	folderID, ok := companyExplorerDefaultFolderIDForTargetType(companyID, targetType)
 	if !ok || r.companyExplorerV2HasManualEdgeLocked(companyID, targetType, targetID) {
@@ -133,15 +116,6 @@ func (r *MemoryRepo) companyExplorerV2HasManualEdgeLocked(companyID, targetType,
 	}
 	for _, edge := range r.companyExplorerV2Edges {
 		if edge.CompanyID == companyID && edge.ChildEntityID == child.EntityID {
-			return true
-		}
-	}
-	return false
-}
-
-func (r *MemoryRepo) companyExplorerLogicGateHasProjectParentLocked(companyID, logicGateID string) bool {
-	for _, projection := range r.projectRelationshipProjection {
-		if projection.CompanyID == companyID && projection.ResourceType == EntityTypeLogicGate && projection.ResourceID == logicGateID {
 			return true
 		}
 	}

@@ -716,37 +716,16 @@ func assertMemoryNoLogicGateAssignmentSource(t *testing.T, repo *MemoryRepo, com
 	}
 }
 
-func TestMemoryRepo_CompanyProvisioningDoesNotCreateCompanyExplorerDefaults(t *testing.T) {
+func TestMemoryRepo_CompanyProvisioningCreatesUnifiedCompanyExplorerDefaults(t *testing.T) {
 	assertProvisioned := func(t *testing.T, repo *MemoryRepo, companyID string) {
 		t.Helper()
-		nodeFolders, err := repo.ListCompanyExplorerFolders(companyID, "node")
-		if err != nil {
-			t.Fatalf("ListCompanyExplorerFolders node failed: %v", err)
-		}
-		logicFolders, err := repo.ListCompanyExplorerFolders(companyID, "logic_gate")
-		if err != nil {
-			t.Fatalf("ListCompanyExplorerFolders logic_gate failed: %v", err)
-		}
-		communicationsFolders, err := repo.ListCompanyExplorerFolders(companyID, "communications")
-		if err != nil {
-			t.Fatalf("ListCompanyExplorerFolders communications failed: %v", err)
-		}
-		sharedTriageFolders, err := repo.ListCommunicationsSharedInboxFolders(companyID)
-		if err != nil {
-			t.Fatalf("ListCommunicationsSharedInboxFolders failed: %v", err)
-		}
-
-		if len(nodeFolders) != 0 {
-			t.Fatalf("node default folders = %d, want 0", len(nodeFolders))
-		}
-		if len(logicFolders) != 0 {
-			t.Fatalf("logic gate default folders = %d, want 0", len(logicFolders))
-		}
-		if len(communicationsFolders) != 0 {
-			t.Fatalf("company explorer communications folders = %d, want 0", len(communicationsFolders))
-		}
-		if len(sharedTriageFolders) != 0 {
-			t.Fatalf("shared triage default folders = %d, want 0", len(sharedTriageFolders))
+		defaults := companyExplorerDefaultFolderIDs(companyID)
+		repo.mu.RLock()
+		defer repo.mu.RUnlock()
+		for _, folderID := range []string{defaults.UnfiledFolderID, defaults.ProjectsFolderID, defaults.LogicGatesFolderID} {
+			if _, ok := repo.folders[key(companyID, folderID)]; !ok {
+				t.Fatalf("missing unified Company Explorer default folder %s", folderID)
+			}
 		}
 	}
 

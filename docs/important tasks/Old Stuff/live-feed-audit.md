@@ -862,7 +862,7 @@ Examples:
 - Kanban board contents has no TTL: frontend/src/modules/kanban/KanbanBoardContentStore.ts:44-98.
 - Kanban list and arena cache TTLs are two and five minutes respectively: frontend/src/modules/kanban/kanbanApi.ts:17-20, 472 onward.
 - Company Explorer loaded branches are marked stale/refreshed by realtime; collapse and re-expand alone does not guarantee a fresh branch: frontend/src/modules/company-explorer/CompanyExplorerContent.tsx:1416-1467, 1530-1594, 1660-1686.
-- Workspace snapshots already support ETag/If-None-Match: frontend/src/modules/workspace/workspaceSnapshotCache.ts:136-174.
+- The browser workspace snapshot cache cited by this historical audit has since been deleted.
 - There is no general visibilitychange, pageshow, or window-focus freshness hook under frontend/src at this audit base.
 
 These cache facts do not block deletion. This is a single-user development app, and temporary cross-user staleness is accepted. Apply the following only where it is simple or where focused tests expose an unacceptable same-user regression:

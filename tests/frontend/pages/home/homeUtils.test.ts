@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { CommunicationsSharedInbox, EmailMessage } from "../../../../frontend/src/modules/communications/communicationsApi.js";
-import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../../../frontend/src/modules/folders/companyExplorerFolders.js";
 import type { LogicGateRecord } from "../../../../frontend/src/modules/logic-gates/types.js";
 import type { NodeRecord } from "../../../../frontend/src/modules/nodes/types.js";
 import {
@@ -155,31 +154,6 @@ function logicGate(id: string, roles: LogicGateRecord["gvic_assignments"]): Logi
     header: id,
     gvic_assignments: roles,
     created_timestamp: "2026-01-01T00:00:00Z",
-  };
-}
-
-function explorerFolder(id: string, name: string, parentFolderID?: string): CompanyExplorerFolder {
-  return {
-    company_id: "company-1",
-    folder_id: id,
-    parent_folder_id: parentFolderID,
-    folder_kind: "logic_gate",
-    name,
-    position: 1000,
-    created_timestamp: "2026-01-01T00:00:00Z",
-    updated_timestamp: "2026-01-01T00:00:00Z",
-  };
-}
-
-function explorerFolderItem(folderID: string, itemID: string, itemType: "node" | "logic_gate"): CompanyExplorerFolderItem {
-  return {
-    company_id: "company-1",
-    folder_id: folderID,
-    item_type: itemType,
-    item_id: itemID,
-    position: 1000,
-    created_timestamp: "2026-01-01T00:00:00Z",
-    updated_timestamp: "2026-01-01T00:00:00Z",
   };
 }
 
@@ -767,36 +741,22 @@ test("RACI inbox group builder classifies work by role, status, and priority", (
   ], gates), [opaqueID, "gate-new"]);
 });
 
-test("my node groups follow logic gate folders and node drag payloads resolve folder drops", () => {
-  const folders = [
-    explorerFolder("folder-product", "Product"),
-    explorerFolder("folder-growth", "Growth", "folder-product"),
-  ];
-  const logicGateFolderItems = [
-    explorerFolderItem("folder-growth", "gate-growth", "logic_gate"),
-  ];
+test("my node groups stay independent of Company Explorer folder preloads", () => {
   const nodes = [
     node("node-unfiled", "Unfiled", { priority: 1 }),
     node("node-growth", "Growth Node", { logic_gate_ids: ["gate-growth"], priority: 2 }),
   ];
 
-  const groups = buildMyNodeGroups({ nodes, logicGateFolders: folders, logicGateFolderItems });
+  const groups = buildMyNodeGroups({ nodes });
 
   assert.deepEqual(groups.map((group) => [group.label, group.nodes.map((item) => item.node_id)]), [
-    ["Product / Growth", ["node-growth"]],
-    ["Unfiled Nodes", ["node-unfiled"]],
+    ["My Nodes", ["node-unfiled", "node-growth"]],
   ]);
   assert.deepEqual(nodeIDsFromExplorerPayload(
-    { kind: "folder", folderID: "folder-product", folderKind: "node" },
-    [
-      { ...folders[0], folder_kind: "node" },
-      { ...folders[1], folder_kind: "node" },
-    ],
-    [
-      explorerFolderItem("folder-product", "node-root", "node"),
-      explorerFolderItem("folder-growth", "node-child", "node"),
-      explorerFolderItem("folder-growth", "gate-growth", "logic_gate"),
-    ],
+    { kind: "batch", itemType: "node", items: [
+      { itemID: "node-root", itemType: "node" },
+      { itemID: "node-child", itemType: "node" },
+    ] },
   ), ["node-root", "node-child"]);
 });
 
@@ -842,15 +802,7 @@ test("home explorer rows expose selected nodes as Logic Gate Arena drag items", 
   ]);
 });
 
-test("my logic gate groups merge shortcuts with RACI-assigned gates", () => {
-  const folders = [
-    explorerFolder("folder-product", "Product"),
-    explorerFolder("folder-growth", "Growth", "folder-product"),
-  ];
-  const folderItems = [
-    explorerFolderItem("folder-growth", "gate-shortcut", "logic_gate"),
-    explorerFolderItem("folder-growth", "gate-assigned", "logic_gate"),
-  ];
+test("my logic gate groups merge shortcuts with RACI-assigned gates without Explorer folders", () => {
   const shortcut = {
     user_id: "user-1",
     company_id: "company-1",
@@ -871,12 +823,10 @@ test("my logic gate groups merge shortcuts with RACI-assigned gates", () => {
     shortcuts: [shortcut],
     assignedLogicGates: [assignedGate, duplicateAssignedGate],
     logicGateByID,
-    folders,
-    folderItems,
   });
 
   assert.deepEqual(groups.map((group) => [group.label, group.logicGates.map((item) => item.logic_gate_id)]), [
-    ["Product / Growth", ["gate-shortcut", "gate-assigned"]],
+    ["My Logic Gates", ["gate-shortcut", "gate-assigned"]],
   ]);
 });
 

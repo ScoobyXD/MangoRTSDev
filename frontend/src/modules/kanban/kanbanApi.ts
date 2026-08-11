@@ -1,9 +1,9 @@
+import { getAuthSessionCacheGeneration } from "../../auth/cognitoAuth.js";
 import { requestJSON } from "../api/requestJSON.js";
 import type { Account } from "../accounts/accountsApi.js";
 import type { CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 import type { LogicGateRACIRole, LogicGateRecord } from "../logic-gates/types.js";
 import type { NodeRecord } from "../nodes/types.js";
-import { markWorkspaceSnapshotScopeStale } from "../workspace/workspaceSnapshotCache.js";
 import {
   invalidateKanbanBoardContentsCache,
   invalidateKanbanBoardContentsForCompany,
@@ -23,6 +23,7 @@ type CacheEntry<T> = {
 const KANBAN_BOARD_LIST_TTL_MS = 2 * 60_000;
 
 const boardListCache = new Map<string, CacheEntry<KanbanBoard[]>>();
+const boardListInflight = new Map<string, Promise<KanbanBoard[]>>();
 const boardListGenerationByScope = new Map<string, number>();
 
 function boardListScopeKey(apiBase: string, companyID: string): string {
@@ -38,24 +39,6 @@ function bumpBoardListGeneration(apiBase: string, companyID: string): void {
   boardListGenerationByScope.set(scopeKey, (boardListGenerationByScope.get(scopeKey) ?? 0) + 1);
 }
 
-
-function markKanbanWorkspaceSnapshotStale(apiBase: string, companyID: string, boardID: string): void {
-  const cleanBoardID = boardID.trim();
-  if (!cleanBoardID) return;
-  markWorkspaceSnapshotScopeStale(apiBase, companyID, { scope: "kanban", boardID: cleanBoardID });
-}
-
-function markNodeWorkspaceSnapshotStale(apiBase: string, companyID: string): void {
-  markWorkspaceSnapshotScopeStale(apiBase, companyID, { scope: "full" });
-}
-
-function markLogicGateAssignmentWorkspaceSnapshotsStale(args: { apiBase: string; companyID: string; logicGateID?: string; fromLogicGateID?: string; nodeID?: string }): void {
-  const logicGateID = args.logicGateID?.trim() ?? "";
-  const fromLogicGateID = args.fromLogicGateID?.trim() ?? "";
-  if (logicGateID) markKanbanWorkspaceSnapshotStale(args.apiBase, args.companyID, logicGateKanbanBoardID(logicGateID));
-  if (fromLogicGateID && fromLogicGateID !== logicGateID) markKanbanWorkspaceSnapshotStale(args.apiBase, args.companyID, logicGateKanbanBoardID(fromLogicGateID));
-  if (args.nodeID?.trim()) markNodeWorkspaceSnapshotStale(args.apiBase, args.companyID);
-}
 
 function dispatchLogicGateWorkUpdated(companyID: string, logicGateID: string): void {
   const cleanLogicGateID = logicGateID.trim();
@@ -80,7 +63,6 @@ function reconcileCommittedCrossLogicGateAssignment(args: {
   for (const logicGateID of logicGateIDs) {
     invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, logicGateID);
   }
-  markLogicGateAssignmentWorkspaceSnapshotsStale(args);
   if (typeof window === "undefined") return;
   for (const logicGateID of logicGateIDs) {
     const boardID = logicGateKanbanBoardID(logicGateID);
@@ -105,10 +87,24 @@ export async function listKanbanBoards(apiBase: string, companyID: string, limit
   const cached = readCache(boardListCache.get(cacheKey) ?? null, KANBAN_BOARD_LIST_TTL_MS, cloneBoards);
   if (cached) return cached;
   const generation = readBoardListGeneration(apiBase, companyID);
-  const payload = await requestJSON<{ boards?: KanbanBoard[] }>(apiBase, `/v1/kanban/boards?${params}`);
-  const boards = payload.boards ?? [];
-  if (readBoardListGeneration(apiBase, companyID) === generation) boardListCache.set(cacheKey, { value: cloneBoards(boards), fetchedAt: Date.now() });
-  return boards;
+  const authGeneration = getAuthSessionCacheGeneration();
+  const inflightKey = `${authGeneration}:${generation}:${cacheKey}`;
+  const existing = boardListInflight.get(inflightKey);
+  if (existing) return cloneBoards(await existing);
+  const request = requestJSON<{ boards?: KanbanBoard[] }>(apiBase, `/v1/kanban/boards?${params}`)
+    .then((payload) => {
+      const boards = payload.boards ?? [];
+      if (getAuthSessionCacheGeneration() === authGeneration
+        && readBoardListGeneration(apiBase, companyID) === generation) {
+        boardListCache.set(cacheKey, { value: cloneBoards(boards), fetchedAt: Date.now() });
+      }
+      return boards;
+    })
+    .finally(() => {
+      if (boardListInflight.get(inflightKey) === request) boardListInflight.delete(inflightKey);
+    });
+  boardListInflight.set(inflightKey, request);
+  return cloneBoards(await request);
 }
 
 export async function createKanbanBoard(apiBase: string, companyID: string, title: string, boardID = "", position?: number): Promise<KanbanBoard> {
@@ -117,7 +113,6 @@ export async function createKanbanBoard(apiBase: string, companyID: string, titl
     json: { company_id: companyID, board_id: boardID, title, position },
   });
   invalidateKanbanBoardListCache(apiBase, companyID);
-  markKanbanWorkspaceSnapshotStale(apiBase, companyID, board.board_id);
   return board;
 }
 
@@ -128,7 +123,6 @@ export async function updateKanbanBoard(apiBase: string, companyID: string, boar
   });
   invalidateKanbanBoardListCache(apiBase, companyID);
   invalidateLogicGateArenaViewCache(apiBase, companyID, board.logic_gate_id ?? logicGateIDFromKanbanBoardID(board.board_id));
-  markKanbanWorkspaceSnapshotStale(apiBase, companyID, board.board_id || boardID);
   return board;
 }
 
@@ -137,7 +131,6 @@ export async function deleteKanbanBoard(apiBase: string, companyID: string, boar
   await requestJSON<{ status?: string }>(apiBase, `/v1/kanban/boards/${encodeURIComponent(boardID)}?${params}`, { method: "DELETE" });
   invalidateKanbanBoardListCache(apiBase, companyID);
   invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateIDFromKanbanBoardID(boardID));
-  markKanbanWorkspaceSnapshotStale(apiBase, companyID, boardID);
 }
 
 export async function createKanbanColumn(apiBase: string, companyID: string, boardID: string, title: string, position?: number, widthPx?: number, heightPx?: number, itemColor?: string): Promise<KanbanColumn> {
@@ -146,7 +139,6 @@ export async function createKanbanColumn(apiBase: string, companyID: string, boa
     json: { company_id: companyID, board_id: boardID, title, position, width_px: widthPx, height_px: heightPx, item_color: itemColor },
   });
   invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateIDFromKanbanBoardID(boardID));
-  markKanbanWorkspaceSnapshotStale(apiBase, companyID, boardID);
   return column;
 }
 
@@ -174,7 +166,6 @@ export async function updateKanbanColumn(args: {
     },
   });
   invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, logicGateIDFromKanbanBoardID(args.boardID));
-  markKanbanWorkspaceSnapshotStale(args.apiBase, args.companyID, args.boardID);
   return column;
 }
 
@@ -182,7 +173,6 @@ export async function deleteKanbanColumn(apiBase: string, companyID: string, boa
   const params = query({ company_id: companyID, board_id: boardID });
   await requestJSON<{ status?: string }>(apiBase, `/v1/kanban/columns/${encodeURIComponent(columnID)}?${params}`, { method: "DELETE" });
   invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateIDFromKanbanBoardID(boardID));
-  markKanbanWorkspaceSnapshotStale(apiBase, companyID, boardID);
 }
 
 export async function upsertKanbanCard(args: {
@@ -208,8 +198,6 @@ export async function upsertKanbanCard(args: {
     },
   });
   invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, logicGateIDFromKanbanBoardID(args.boardID));
-  markKanbanWorkspaceSnapshotStale(args.apiBase, args.companyID, args.boardID);
-  markNodeWorkspaceSnapshotStale(args.apiBase, args.companyID);
   dispatchLogicGateWorkUpdated(args.companyID, logicGateIDFromKanbanBoardID(args.boardID));
   return card;
 }
@@ -298,10 +286,6 @@ export async function createRACIMatrixNode(args: {
   if (payload.logic_gate?.logic_gate_id) {
     invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, payload.logic_gate.logic_gate_id);
   }
-  if (payload.card?.board_id) {
-    markKanbanWorkspaceSnapshotStale(args.apiBase, args.companyID, payload.card.board_id);
-  }
-  markNodeWorkspaceSnapshotStale(args.apiBase, args.companyID);
   dispatchLogicGateWorkUpdated(args.companyID, payload.logic_gate?.logic_gate_id ?? payload.card?.logic_gate_id ?? args.logicGateID ?? "");
   return {
     ...payload,
@@ -338,7 +322,6 @@ export async function assignNodeToLogicGateStatus(args: {
     },
   });
   invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, args.logicGateID);
-  markLogicGateAssignmentWorkspaceSnapshotsStale({ apiBase: args.apiBase, companyID: args.companyID, logicGateID: args.logicGateID, nodeID: args.nodeID });
   dispatchLogicGateWorkUpdated(args.companyID, args.logicGateID);
   return normalizeLogicGateAssignmentCommandResult(payload);
 }
@@ -369,7 +352,6 @@ export async function moveLogicGateAssignment(args: {
       },
     });
     invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, args.logicGateID);
-    markLogicGateAssignmentWorkspaceSnapshotsStale({ apiBase: args.apiBase, companyID: args.companyID, logicGateID: args.logicGateID, fromLogicGateID: args.fromLogicGateID, nodeID: args.nodeID });
     dispatchLogicGateWorkUpdated(args.companyID, args.logicGateID);
     return normalizeLogicGateAssignmentCommandResult(payload);
   }
@@ -413,7 +395,6 @@ export async function removeLogicGateAssignment(args: {
       method: "DELETE",
     });
     invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, logicGateID);
-    markLogicGateAssignmentWorkspaceSnapshotsStale({ apiBase: args.apiBase, companyID: args.companyID, logicGateID, nodeID: args.nodeID });
     dispatchLogicGateWorkUpdated(args.companyID, logicGateID);
     return normalizeLogicGateAssignmentCommandResult(payload);
   }
@@ -427,7 +408,6 @@ export async function removeLogicGateAssignment(args: {
     },
   });
   invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, args.logicGateID);
-  markLogicGateAssignmentWorkspaceSnapshotsStale({ apiBase: args.apiBase, companyID: args.companyID, logicGateID: args.logicGateID, nodeID: args.nodeID });
   dispatchLogicGateWorkUpdated(args.companyID, args.logicGateID ?? "");
   return normalizeLogicGateAssignmentCommandResult(payload);
 }
@@ -449,7 +429,6 @@ export async function setLogicGateAssignmentIssue(args: {
       },
     });
     invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, logicGateID);
-    markLogicGateAssignmentWorkspaceSnapshotsStale({ apiBase: args.apiBase, companyID: args.companyID, logicGateID, nodeID: args.nodeID });
     return normalizeLogicGateAssignmentCommandResult(payload);
   }
   const payload = await requestJSON<LogicGateAssignmentCommandPayload>(args.apiBase, "/v1/work-items/logic-gate-assignments/issue", {
@@ -462,7 +441,6 @@ export async function setLogicGateAssignmentIssue(args: {
     },
   });
   invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, args.logicGateID);
-  markLogicGateAssignmentWorkspaceSnapshotsStale({ apiBase: args.apiBase, companyID: args.companyID, logicGateID: args.logicGateID, nodeID: args.nodeID });
   return normalizeLogicGateAssignmentCommandResult(payload);
 }
 
@@ -486,7 +464,6 @@ export async function moveKanbanCard(args: {
     },
   });
   invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, logicGateIDFromKanbanBoardID(args.boardID));
-  markKanbanWorkspaceSnapshotStale(args.apiBase, args.companyID, args.boardID);
   dispatchLogicGateWorkUpdated(args.companyID, logicGateIDFromKanbanBoardID(args.boardID));
   return card;
 }
@@ -495,7 +472,6 @@ export async function deleteKanbanCard(apiBase: string, companyID: string, board
   const params = query({ company_id: companyID, board_id: boardID });
   await requestJSON<{ status?: string }>(apiBase, `/v1/kanban/cards/${encodeURIComponent(cardID)}?${params}`, { method: "DELETE" });
   invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateIDFromKanbanBoardID(boardID));
-  markKanbanWorkspaceSnapshotStale(apiBase, companyID, boardID);
   dispatchLogicGateWorkUpdated(companyID, logicGateIDFromKanbanBoardID(boardID));
 }
 
@@ -504,6 +480,9 @@ export function invalidateKanbanBoardListCache(apiBase: string, companyID: strin
   const prefix = `${apiBase}:company_id=${encodeURIComponent(companyID)}`;
   for (const key of Array.from(boardListCache.keys())) {
     if (key.startsWith(prefix)) boardListCache.delete(key);
+  }
+  for (const key of Array.from(boardListInflight.keys())) {
+    if (key.includes(`:${prefix}`)) boardListInflight.delete(key);
   }
 }
 

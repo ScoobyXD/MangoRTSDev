@@ -9,7 +9,7 @@ Last updated: 2026-08-05
 ## Request behavior
 
 - Snapshot handlers validate company, scope, folder, board, pagination, and access before reading response rows.
-- The full snapshot supports Node and Logic Gate relationship caches used by Editor, Home, Project, Kanban, and title reconciliation.
+- The browser does not use the full workspace snapshot for Node or Logic Gate relationship caches; those caches load their exact resource and relationship endpoints.
 - Company Explorer reads stay folder/item scoped and permission filtered.
 - Kanban reads stay board/resource scoped and bounded.
 - A conditional request may return `304` only after the viewer's current authorization and exact read version are established.
@@ -28,5 +28,5 @@ Request timing logs should distinguish request validation, access checks, source
 
 - Workspace scope/ETag tests under `backend/internal/http`
 - Read-version routing tests under `backend/internal/store`
-- Frontend cache tests in `tests/frontend/modules/workspace/workspaceSnapshotCache.test.ts`
+- Frontend Node and Logic Gate relationship-cache tests
 - Repository-wide realtime scope inventory tests

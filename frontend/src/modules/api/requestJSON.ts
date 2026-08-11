@@ -296,11 +296,9 @@ function shouldLogBenchmarkRequestTiming(method: string, path: string): boolean 
   if (method === "PUT" && /^\/v2\/logic-gates\/[^/]+\/nodes\/[^/]+\/state$/.test(cleanPath)) return true;
   if (method !== "GET") return false;
   return (
-    cleanPath === "/v1/workspace/snapshot" ||
     cleanPath === "/v1/kanban/boards" ||
     cleanPath === "/v1/kanban/columns" ||
     cleanPath === "/v1/kanban/cards" ||
-    cleanPath === "/v1/company-explorer/folders" ||
     cleanPath === "/v1/company-explorer/roots" ||
     cleanPath === "/v1/company-explorer/children" ||
     cleanPath === "/v1/nodes" ||

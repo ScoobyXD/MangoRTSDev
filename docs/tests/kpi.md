@@ -17,5 +17,6 @@
 15. Deleting a KPI moves it to the Recycle Bin, and restoring it reuses the same KPI ID and owning Logic Gate.
 16. A normal Logic Gate with one or more KPIs cannot be converted into a Huddle Logic Gate.
 17. The first version has no KPI type, target, measurement, unit, formula, reusable definition, chart model, graph model, date model, history, or Huddle aggregation.
+18. Realtime current-audience resolution maps `kpi` to the exact owning Logic Gate and uses that Logic Gate's current audience. A missing KPI resolves to no audience instead of retrying delivery as a storage failure.
 
 Last updated: 2026-08-11
