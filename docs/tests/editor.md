@@ -2478,3 +2478,65 @@ No document body or credential was printed or stored during the audit.
 Rollback before step 6 is an application rollback. The old storage is still
 present. Step 6 is deliberately separate because dropping tables is not a safe
 automatic rollback point.
+
+# Current Implemented Editor Editing Semantics Inventory
+
+Inventory date: 08/10/2026
+
+These laws record current production behavior; they do not approve behavior that the code merely happens to have. “Document editor” means the Tiptap JSON editor used by Node, Project, and Logic Gate text boxes. “Mail editor” means the shared HTML editor used by mail compose, shared drafts, attached-email replies, and signatures. Chat composers are separate conversation inputs and are outside this inventory.
+
+## Current behavior laws
+
+1. [08/10/2026] Changing Outline Style must not convert the current document selection or change the kind of an existing structural list.
+2. [08/10/2026] In the document editor, Enter in a nonempty numbered, bulleted, or Checkbox item must split only the active item at the caret and insert the new peer before any existing nested child list.
+3. [08/10/2026] In the document editor, Enter in an empty list item must run the structural list-exit or list-lift command at that exact position; exiting a root item must leave an ordinary blank row.
+4. [08/10/2026] In Automatic Numbering, Enter at the end of a nonempty ordinary document row immediately before an ordered list must prepend one empty item to that list without changing the ordinary row or any existing item’s content, identity, order, or depth.
+5. [08/10/2026] In Automatic Numbering, Enter after a numbered item with nested items must create the new peer before those nested items.
+6. [08/10/2026] In Automatic Numbering, Tab on the new peer before existing nested items must nest only that peer and must keep the existing nested items at their prior depth and in their prior order.
+7. [08/10/2026] In a document structural list, Tab and Shift+Tab must nest or lift only the active item; Tab requires a previous peer that can own the item.
+8. [08/10/2026] Outside a document structural list, Tab and Shift+Tab must change only the active paragraph or heading by one indentation level, bounded from 0 through 12.
+9. [08/10/2026] Backspace or Delete on a simple empty document list item must remove only its marker and retain one ordinary blank row at the same document position.
+10. [08/10/2026] Backspace or Delete on a retained blank row inside a parent list item must remove only that blank row and preserve the parent item, nested lists, following items, formatting, identities, depths, and order.
+11. [08/10/2026] Shift+Enter in the document editor must insert a hard line break without starting or continuing the selected outline style.
+12. [08/10/2026] Document ordered-list markers must repeat the visible depth sequence `1.`, `a.`, `1)`, `a)`.
+13. [08/10/2026] Document bullet markers must repeat the visible depth sequence solid circle, hollow circle, solid square, hollow square.
+14. [08/10/2026] Clicking a Checkbox marker must toggle only that exact item’s checked state.
+15. [08/10/2026] In ordinary mail-editor text outside a structural list, Tab at a collapsed caret must insert exactly five literal spaces unless Automatic Numbering recognizes the active marked row and changes only that row’s depth and marker family.
+16. [08/10/2026] In the mail editor, Tab with a multi-line selection must add one five-space indent to every selected line while preserving the selected text.
+17. [08/10/2026] In ordinary mail-editor text outside a structural list, Shift+Tab at a collapsed caret must remove one leading tab or up to five leading spaces from only the active line; Automatic Numbering must instead outdent only the active marked row or remove its root marker.
+18. [08/10/2026] In the mail editor, Shift+Tab with a multi-line selection must remove one available indent from every selected line while preserving the selected text.
+19. [08/10/2026] In Indent Guides, mail-editor Enter must copy the active line’s exact leading spaces, tabs, and nonbreaking spaces onto the new line.
+20. [08/10/2026] After higher-priority image, entity, mention, list, and empty-marker rules decline a mail-editor Backspace, exactly five consecutive literal spaces immediately before the caret on one line must be removed as one unit; other plain-text deletion remains native browser behavior.
+21. [08/10/2026] In mail-editor Automatic Numbering, Enter after a valid marker must continue the same depth as decimal, alphabetic, or Roman text according to that depth.
+22. [08/10/2026] In mail-editor Automatic Numbering, Enter or Backspace on an empty marked row must remove the marker atomically and retain the row’s indentation.
+23. [08/10/2026] In mail-editor Automatic Numbering, Shift+Enter must insert a plain newline without a new marker.
+24. [08/10/2026] In a mail-editor bullet or Checklist, Enter must split a nonempty active item at the caret and must exit an empty active item.
+25. [08/10/2026] In a mail-editor bullet or Checklist, Tab must nest only the active item under its previous same-kind peer and Shift+Tab must outdent only the active item.
+26. [08/10/2026] Typing `- ` on an otherwise blank mail-editor line must replace the shortcut with one structural bullet item, including inside a table cell.
+27. [08/10/2026] Backspace or Delete on a noncollapsed mail-editor list selection must use native selected-range deletion instead of the empty-item exit command.
+28. [08/10/2026] Inserting a document-editor table must create a 3-by-3 table with a header row, resizable 112-pixel base columns, and 36-pixel base cell height.
+29. [08/10/2026] A document-editor table’s cell context menu must add or delete rows and columns and must delete the table on explicit request.
+30. [08/10/2026] Dragging a document table’s bottom-right growth handle must add whole rows or columns and reset the table to equal column widths in one document transaction.
+31. [08/10/2026] Tab and Shift+Tab inside a document table cell must run the same active-block or active-list indentation commands as outside a table and must not navigate to another cell.
+32. [08/10/2026] Inserting a mail-editor table must create a 3-by-3 table whose first row and first column are headers, with a maximum normalized size of 20 rows by 8 columns.
+33. [08/10/2026] Enter in an ordinary mail-editor table cell must insert a line break and must not navigate to another cell.
+34. [08/10/2026] Enter in a nonempty ordinary mail-editor table cell while Bullet Points or Checkbox is selected must wrap all editable cell content in the chosen list and append one empty item.
+35. [08/10/2026] Tab and Shift+Tab inside a mail-editor table cell must run the shared text or structural-list indentation command and must not navigate to another cell.
+36. [08/10/2026] Font-size commands must clamp explicit sizes to 10 through 28 pixels and must apply immediately to selected text or remain pending for text typed at a collapsed caret.
+37. [08/10/2026] Bold, Underline, Italic, Strikethrough, and highlight commands must toggle the exact selected text runs or remain pending for later typing at a collapsed caret.
+38. [08/10/2026] Left, center, and right alignment must apply to the active document paragraph or heading, the selected document image, or the complete active mail-editor table according to the current selection context.
+39. [08/10/2026] While an `@` or `!` people menu is open, Arrow keys must move its highlight, Enter or plain Tab must insert the highlighted atomic mention, and Escape must close the menu before ordinary editor key behavior runs.
+40. [08/10/2026] Typing `#` at a collapsed document caret must open the Universal picker and insert the chosen resource as an atomic typed entity reference rather than plain text.
+41. [08/10/2026] Backspace on a selected entity reference or at a collapsed caret immediately after it must replace only the reference with its stored label as ordinary text and must not change the linked product entity.
+42. [08/10/2026] Rich paste and drop must preserve supported text, lists, tables, formatting, links, mentions, entity references, and durable raster images in source order while removing unsupported or unsafe markup and URLs.
+43. [08/10/2026] Pasted or dropped images must become durable attachment-backed editor nodes before save; a failed image import must leave the successfully imported text and images intact and expose the failure.
+44. [08/10/2026] An editor image must behave as one selectable unit that Delete or Backspace removes; selection must expose download and eight resize handles, dragging must move it, and double-click must open its preview.
+45. [08/10/2026] Undo and redo must restore document markup, atomic objects, images, and the saved selection instead of rebuilding the edit as plain text.
+46. [08/10/2026] Activating a sleeping document editor from a primary-pointer click must preserve the clicked block and text offset, the document value, and both scroll offsets during the static-to-live swap.
+
+## Unsettled requirements and code gaps
+
+- [08/10/2026] The requested rule that Enter or Tab must never affect another row is not fully implemented: document-editor Tab targets only the active block or item, but a mail-editor multi-line selection deliberately indents or outdents every selected line, and Bullet Points or Checkbox Enter in a nonempty mail table cell rewrites all editable content in that cell.
+- [08/10/2026] The two live editor engines do not yet share one exact editing model: product documents use Tiptap JSON, while mail surfaces use sanitized HTML and several key commands have different semantics.
+- [08/10/2026] No production command folds or unfolds document headings, paragraphs, or list branches; current collapse behavior belongs to surrounding email cards and chat threads rather than editable document content.
+- [08/10/2026] Document text renders at a 14-pixel base size with a 20-pixel line height, while the shared toolbar reports a 15-pixel fallback when no explicit text-size mark exists.
