@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../icons/index.js";
 import { getExplorerDropIntent } from "../modules/company-explorer/companyExplorerDragDrop.js";
-import { logicGateRACIRolePresentation } from "../modules/logic-gates/raciPresentation.js";
+import { logicGateRACIRaisedSurfaceStyle } from "../modules/logic-gates/raciPresentation.js";
 import { subscribeCommittedEntityTitleUpdates } from "../modules/realtime/committedEntityTitleUpdates.js";
 import { subscribeRealtimeScope } from "../modules/realtime/realtimeWebSocket.js";
 import {
@@ -610,7 +610,7 @@ function roleHeaderStyle(expanded: boolean): React.CSSProperties {
 }
 const roleToggleStyle: React.CSSProperties = { minWidth: 0, minHeight: 29, display: "grid", gridTemplateColumns: "15px minmax(0,1fr)", alignItems: "center", gap: 5, border: 0, background: "transparent", color: "inherit", cursor: "pointer", padding: 0, textAlign: "left", fontSize: "inherit", fontWeight: "inherit" };
 function roleLabelStyle(role: RACITabRole): React.CSSProperties {
-  return { justifySelf: "start", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", borderRadius: 4, backgroundColor: logicGateRACIRolePresentation(role).accent, color: "#111827", padding: "2px 6px" };
+  return { ...logicGateRACIRaisedSurfaceStyle(role), justifySelf: "start", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", borderRadius: 4, color: "#111827", padding: "2px 6px" };
 }
 const roleSurfaceStyle: React.CSSProperties = { minWidth: 0, display: "grid", gap: 3, padding: "6px 5px 7px", border: "1px solid rgba(148,163,184,.24)", borderRadius: 10, background: "linear-gradient(145deg,rgba(255,255,255,.94),rgba(248,250,252,.82))", boxShadow: "4px 5px 14px rgba(148,163,184,.2),-3px -3px 10px rgba(255,255,255,.82),inset 1px 1px 0 rgba(255,255,255,.76)" };
 const addFolderStyle: React.CSSProperties = { width: 22, height: 22, border: "1px solid rgba(100,116,139,.25)", borderRadius: 5, background: "rgba(255,255,255,.74)", color: "#334155", cursor: "pointer" };
