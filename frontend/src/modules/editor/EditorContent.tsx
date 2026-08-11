@@ -12,6 +12,7 @@ import { getLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGr
 import { patchLogicGateRACIAssignmentsInCommunicationsWorkspaceCache } from "../communications/communicationsApi";
 import { linkMangoResourceAttachment } from "../attachments/attachmentApi";
 import { createRequestJSON, isAbortError } from "../api/requestJSON";
+import { logicGateConversionErrorMessage } from "../huddles/logicGateConversion";
 import { clearResourceMissing, isTerminalResourceNotFoundError } from "../api/missingResources";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 import { getEditorDocumentIsolationState, type EditorRelatedNodeCreationKind, type EditorTabID } from "./editorTabs";
@@ -2383,9 +2384,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         json: { company_id: companyID },
       }).then((item) => {
         window.dispatchEvent(new CustomEvent("mangorts:huddle-open", { detail: { resourceType: "huddle_logic_gate", resourceID: item.huddle_logic_gate_id, name: item.header } }));
-      }).catch((cause) => setError(cause instanceof Error && cause.message.includes("logic_gate_conversion_blocked")
-        ? "Conversion is blocked. Empty the editor and remove all Kanban work and KPIs, then try again."
-        : cause instanceof Error ? cause.message : "Could not convert this Logic Gate."));
+      }).catch((cause) => setError(logicGateConversionErrorMessage(cause)));
     },
   };
 

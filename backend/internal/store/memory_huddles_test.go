@@ -110,3 +110,13 @@ func TestHuddleMigrationUsesExactExplorerColumns(t *testing.T) {
 		}
 	}
 }
+
+func TestCanonicalHuddleSchemaHasNoPatchMarker(t *testing.T) {
+	body, err := os.ReadFile("../../db/schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "\n+-- Bare-bones Huddles and KPIs") {
+		t.Fatal("canonical Huddle schema contains a leading patch marker and is not executable SQL")
+	}
+}

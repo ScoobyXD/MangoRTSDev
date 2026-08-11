@@ -6433,7 +6433,7 @@ $$;
 commit;
 -- END RACI ROLE CONTRACT
 
-+-- Bare-bones Huddles and KPIs. PostgreSQL 17.x compatible.
+-- Bare-bones Huddles and KPIs. PostgreSQL 17.x compatible.
 
 create table if not exists huddle_logic_gates (
   company_id uuid not null,

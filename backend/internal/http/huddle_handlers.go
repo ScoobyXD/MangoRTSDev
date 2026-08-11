@@ -471,6 +471,9 @@ func (s *Server) handleHuddleExplorerItemByID(w http.ResponseWriter, r *http.Req
 		if _, ok := huddleActor(w, r, req.CompanyID); !ok {
 			return
 		}
+		if !s.requireHuddleExplorerItemEdit(w, r, req.CompanyID, id) {
+			return
+		}
 		if err := s.repo.MoveHuddleExplorerItem(store.HuddleMoveInput{CompanyID: req.CompanyID, ResourceID: id, ParentFolderID: req.ParentFolderID}); err != nil {
 			writeHuddleError(w, err)
 			return
@@ -484,6 +487,9 @@ func (s *Server) handleHuddleExplorerItemByID(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if r.Method == http.MethodDelete {
+		if !s.requireHuddleExplorerItemEdit(w, r, companyID, id) {
+			return
+		}
 		if err := s.repo.DeleteHuddleExplorerItem(companyID, id, actor.User.UserID); err != nil {
 			writeHuddleError(w, err)
 			return
@@ -492,4 +498,19 @@ func (s *Server) handleHuddleExplorerItemByID(w http.ResponseWriter, r *http.Req
 		return
 	}
 	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+}
+
+func (s *Server) requireHuddleExplorerItemEdit(w http.ResponseWriter, r *http.Request, companyID, itemID string) bool {
+	explorer, err := s.repo.ListHuddleExplorer(companyID)
+	if err != nil {
+		writeHuddleError(w, err)
+		return false
+	}
+	for _, item := range explorer.Items {
+		if item.ItemID == itemID {
+			return s.requireEntityEdit(w, r, companyID, item.ResourceType, item.ResourceID, "huddle_resource_not_found")
+		}
+	}
+	writeHuddleError(w, store.ErrNotFound)
+	return false
 }

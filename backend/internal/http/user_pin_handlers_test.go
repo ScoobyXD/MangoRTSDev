@@ -149,6 +149,64 @@ func TestUserPinsListAfterPermissionRevokedButCreateRequiresView(t *testing.T) {
 	}
 }
 
+func TestHuddlePinsResolveTypedNamesAndRequireEditAccess(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	handler := NewServer(repo).Routes()
+	companyID := "57575757-5757-4757-8757-575757575757"
+	editor := mustCreateUserPinUser(t, repo, "huddle-pin-editor", companyID, "huddle-pin-editor@example.com", domain.RoleCompanyUser)
+	denied := mustCreateUserPinUser(t, repo, "huddle-pin-denied", companyID, "huddle-pin-denied@example.com", domain.RoleCompanyUser)
+	logicGate, err := repo.CreateLogicGate(companyID, "Executive Huddle")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	huddleLogicGate, err := repo.ConvertLogicGateToHuddle(companyID, logicGate.LogicGateID, editor.UserID)
+	if err != nil {
+		t.Fatalf("ConvertLogicGateToHuddle: %v", err)
+	}
+	huddleNode, err := repo.CreateHuddleNode(store.HuddleCreateInput{CompanyID: companyID, OwnerID: huddleLogicGate.HuddleLogicGateID, Name: "Monday Review", ActorID: editor.UserID})
+	if err != nil {
+		t.Fatalf("CreateHuddleNode: %v", err)
+	}
+
+	resources := []struct {
+		resourceType string
+		resourceID   string
+		name         string
+	}{
+		{resourceType: store.EntityTypeHuddleLogicGate, resourceID: huddleLogicGate.HuddleLogicGateID, name: huddleLogicGate.Header},
+		{resourceType: store.EntityTypeHuddleNode, resourceID: huddleNode.HuddleNodeID, name: huddleNode.Name},
+	}
+	for _, resource := range resources {
+		if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+			CompanyID:        companyID,
+			EntityType:       resource.resourceType,
+			EntityID:         resource.resourceID,
+			DefaultAccess:    store.EntityPermissionNoAccess,
+			DefaultAccessSet: true,
+			Permissions: []store.EntityPermissionInput{{
+				SubjectType: store.EntityPermissionSubjectUser,
+				SubjectID:   editor.UserID,
+				AccessLevel: store.EntityPermissionEdit,
+			}},
+			ActorUserID: editor.UserID,
+		}); err != nil {
+			t.Fatalf("SetEntityPermissions %s: %v", resource.resourceType, err)
+		}
+		pin := createUserPinForTest(t, handler, editor, companyID, domain.RoleCompanyUser, resource.resourceType, resource.resourceID)
+		if pin.ResourceType != resource.resourceType || pin.ResourceID != resource.resourceID || pin.Name != resource.name {
+			t.Fatalf("%s pin = %+v", resource.resourceType, pin)
+		}
+
+		body := `{"company_id":"` + companyID + `","resource_type":"` + resource.resourceType + `","resource_id":"` + resource.resourceID + `"}`
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/user-pins", bytes.NewBufferString(body))
+		handler.ServeHTTP(rec, userPinRequestWithActor(req, denied, companyID, domain.RoleCompanyUser))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("pin %s without Edit status = %d body=%s", resource.resourceType, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 func TestUserPinFoldersRejectCyclesAndWrongOwnerIDs(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	handler := NewServer(repo).Routes()
