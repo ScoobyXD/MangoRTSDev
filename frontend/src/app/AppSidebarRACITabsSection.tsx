@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../icons/index.js";
 import { getExplorerDropIntent } from "../modules/company-explorer/companyExplorerDragDrop.js";
+import { logicGateRACIRolePresentation } from "../modules/logic-gates/raciPresentation.js";
 import { subscribeCommittedEntityTitleUpdates } from "../modules/realtime/committedEntityTitleUpdates.js";
 import { subscribeRealtimeScope } from "../modules/realtime/realtimeWebSocket.js";
 import {
@@ -532,7 +533,7 @@ export function AppSidebarRACITabsSection({ apiBase, companyID, onOpenLogicGate 
             <div style={roleHeaderStyle(expanded)}>
               <button type="button" aria-expanded={expanded} style={roleToggleStyle} onClick={() => toggleRole(role)}>
                 <ExplorerDisclosureIcon open={expanded} color="#334155" />
-                <span>{RACI_TAB_LABELS[role]}</span>
+                <span data-raci-tab-role-label={role} style={roleLabelStyle(role)}>{RACI_TAB_LABELS[role]}</span>
               </button>
               {root ? renderCounts(root.statusCounts) : <span />}
               <button type="button" aria-label={`Create ${RACI_TAB_LABELS[role]} folder`} disabled={busy} style={addFolderStyle} onClick={() => void createFolder(role, "")}>+</button>
@@ -608,6 +609,9 @@ function roleHeaderStyle(expanded: boolean): React.CSSProperties {
   return { width: "100%", minHeight: 31, display: "grid", gridTemplateColumns: "minmax(0,1fr) 74px 22px", alignItems: "center", gap: 2, boxSizing: "border-box", border: "1px solid rgba(148,163,184,.24)", borderRadius: 8, background: expanded ? "rgba(255,255,255,.88)" : "linear-gradient(145deg,#fff,#f6f7fb)", color: "#111827", padding: "0 5px", fontSize: 11.5, fontWeight: 750 };
 }
 const roleToggleStyle: React.CSSProperties = { minWidth: 0, minHeight: 29, display: "grid", gridTemplateColumns: "15px minmax(0,1fr)", alignItems: "center", gap: 5, border: 0, background: "transparent", color: "inherit", cursor: "pointer", padding: 0, textAlign: "left", fontSize: "inherit", fontWeight: "inherit" };
+function roleLabelStyle(role: RACITabRole): React.CSSProperties {
+  return { justifySelf: "start", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", borderRadius: 4, backgroundColor: logicGateRACIRolePresentation(role).accent, color: "#111827", padding: "2px 6px" };
+}
 const roleSurfaceStyle: React.CSSProperties = { minWidth: 0, display: "grid", gap: 3, padding: "6px 5px 7px", border: "1px solid rgba(148,163,184,.24)", borderRadius: 10, background: "linear-gradient(145deg,rgba(255,255,255,.94),rgba(248,250,252,.82))", boxShadow: "4px 5px 14px rgba(148,163,184,.2),-3px -3px 10px rgba(255,255,255,.82),inset 1px 1px 0 rgba(255,255,255,.76)" };
 const addFolderStyle: React.CSSProperties = { width: 22, height: 22, border: "1px solid rgba(100,116,139,.25)", borderRadius: 5, background: "rgba(255,255,255,.74)", color: "#334155", cursor: "pointer" };
 function rowContainerStyle(depth: number, selected: boolean, raised: boolean, placement: DropTarget["placement"] | null): React.CSSProperties {

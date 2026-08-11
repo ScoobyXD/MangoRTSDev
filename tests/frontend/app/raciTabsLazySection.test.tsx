@@ -92,6 +92,11 @@ test("Tower RACI Tabs start collapsed and fetch only an opened role and opened f
     assert.deepEqual(roleButtons.map((button) => button.getAttribute("aria-expanded")), ["false", "false", "false", "false"]);
     assert.equal(roleButtons[0].parentElement?.style.gridTemplateColumns, "minmax(0,1fr) 74px 22px", "role totals and the add action use the same columns as Logic Gate rows");
     assert.equal(container.querySelectorAll('button[aria-label^="Create "][aria-label$=" folder"]').length, 4, "every collapsed role exposes its root-folder action in the header");
+    assert.deepEqual(
+      Array.from(container.querySelectorAll<HTMLElement>("[data-raci-tab-role-label]")).map((label) => label.style.backgroundColor),
+      ["rgb(240, 138, 36)", "rgb(25, 200, 121)", "rgb(25, 168, 255)", "rgb(139, 92, 246)"],
+      "role labels use the exact filled colors from the established RACI boxes",
+    );
     assert.equal(requests.filter((value) => value.includes("/v1/raci-tabs?")).length, 0);
 
     await act(async () => {
