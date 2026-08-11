@@ -1,14 +1,11 @@
 package httpapi
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"miraeopus/backend/internal/domain"
@@ -165,156 +162,6 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 		t.Fatalf("my logic gates missing accountable role: %+v", myGatesPayload.LogicGates)
 	}
 
-	myWorkRec := getWorkItemInboxRead(t, handler, "/v1/work-items/my-work-matrix?"+baseQuery, user.UserID, companyID, domain.RoleCompanyUser)
-	var myWorkPayload struct {
-		CompanyID string                          `json:"company_id"`
-		UserID    string                          `json:"user_id"`
-		Rows      []store.RACIMatrixProjectionRow `json:"rows"`
-	}
-	decodeWorkItemInboxReadPayload(t, myWorkRec, &myWorkPayload)
-	if myWorkPayload.CompanyID != companyID || myWorkPayload.UserID != user.UserID {
-		t.Fatalf("my work metadata = %+v", myWorkPayload)
-	}
-	if !inboxReadHTTPMyWorkHasNode(myWorkPayload.Rows, responsibleNode.NodeID, domain.RACIRoleResponsible) {
-		t.Fatalf("my work rows missing Responsible node %s: %+v", responsibleNode.NodeID, myWorkPayload.Rows)
-	}
-}
-
-func TestMyWorkMatrixNodeMoveUpdatesRolePriorityAndPreservesLogicGate(t *testing.T) {
-	repo := store.NewMemoryRepo()
-	companyID := "11111111-1111-4111-8111-565656565656"
-	repo.EnsureCompany(companyID, "My Work Move Company")
-	user, err := repo.UpsertAuthUser("my-work-move-user", "my-work-move@example.com", "My Work Move User")
-	if err != nil {
-		t.Fatalf("UpsertAuthUser: %v", err)
-	}
-	if _, err := repo.AddCompanyMembership("my-work-move-user", companyID, domain.RoleCompanyAdmin); err != nil {
-		t.Fatalf("AddCompanyMembership: %v", err)
-	}
-	logicGate, err := repo.CreateLogicGate(companyID, "My Work Move Gate")
-	if err != nil {
-		t.Fatalf("CreateLogicGate: %v", err)
-	}
-	if _, err := repo.SetLogicGateRACIAssignments(store.LogicGateRACIAssignmentUpdateInput{
-		CompanyID:   companyID,
-		LogicGateID: logicGate.LogicGateID,
-		Assignments: []store.LogicGateRACIAssignmentInput{{Role: domain.RACIRoleResponsible, UserID: user.UserID}},
-	}); err != nil {
-		t.Fatalf("SetLogicGateRACIAssignments: %v", err)
-	}
-	node, err := repo.CreateNode(companyID, "Move me from Responsible to Consulted")
-	if err != nil {
-		t.Fatalf("CreateNode: %v", err)
-	}
-	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
-		CompanyID:   companyID,
-		LogicGateID: logicGate.LogicGateID,
-		NodeID:      node.NodeID,
-		Status:      "pending",
-		Priority:    testPriority(1),
-		PrioritySet: true,
-	}); err != nil {
-		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
-	}
-
-	handler := NewServer(repo).Routes()
-	rec := postMyWorkMatrixMoveJSON(t, handler, node.NodeID, user.UserID, companyID, domain.RoleCompanyAdmin, map[string]any{
-		"company_id":         companyID,
-		"target_user_id":     user.UserID,
-		"target_gvic_role":   domain.RACIRoleConsulted,
-		"logic_gate_id":      logicGate.LogicGateID,
-		"from_logic_gate_id": logicGate.LogicGateID,
-		"priority":           3,
-	})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("move status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-	var payload struct {
-		Node                    domain.Node                     `json:"node"`
-		Rows                    []store.RACIMatrixProjectionRow `json:"gvic_projection_rows"`
-		RemovedProjectionRowIDs []string                        `json:"removed_projection_row_ids"`
-	}
-	decodeWorkItemInboxReadPayload(t, rec, &payload)
-	if payload.Node.Priority == nil || *payload.Node.Priority != 3 {
-		t.Fatalf("node priority = %+v, want 3", payload.Node.Priority)
-	}
-	if len(payload.Node.LogicGateIDs) != 1 || payload.Node.LogicGateIDs[0] != logicGate.LogicGateID {
-		t.Fatalf("node logic_gate_ids = %+v, want preserved gate %s", payload.Node.LogicGateIDs, logicGate.LogicGateID)
-	}
-	if !inboxReadHTTPMyWorkHasNode(payload.Rows, node.NodeID, domain.RACIRoleConsulted) {
-		t.Fatalf("response rows missing consulted node: %+v", payload.Rows)
-	}
-	if inboxReadHTTPMyWorkHasNode(payload.Rows, node.NodeID, domain.RACIRoleResponsible) {
-		t.Fatalf("response rows still include Responsible node: %+v", payload.Rows)
-	}
-	if len(payload.RemovedProjectionRowIDs) == 0 {
-		t.Fatalf("removed projection row IDs empty, want old Responsible row removed")
-	}
-
-	myWorkRec := getWorkItemInboxRead(t, handler, "/v1/work-items/my-work-matrix?company_id="+companyID, user.UserID, companyID, domain.RoleCompanyAdmin)
-	var myWorkPayload struct {
-		Rows []store.RACIMatrixProjectionRow `json:"rows"`
-	}
-	decodeWorkItemInboxReadPayload(t, myWorkRec, &myWorkPayload)
-	if !inboxReadHTTPMyWorkHasNode(myWorkPayload.Rows, node.NodeID, domain.RACIRoleConsulted) {
-		t.Fatalf("my work rows missing consulted node after move: %+v", myWorkPayload.Rows)
-	}
-	if inboxReadHTTPMyWorkHasNode(myWorkPayload.Rows, node.NodeID, domain.RACIRoleResponsible) {
-		t.Fatalf("my work rows still include Responsible node after move: %+v", myWorkPayload.Rows)
-	}
-	assignments, err := repo.ListNodeLogicGateAssignments(companyID, node.NodeID)
-	if err != nil {
-		t.Fatalf("ListNodeLogicGateAssignments: %v", err)
-	}
-	if len(assignments) != 1 || assignments[0].LogicGateID != logicGate.LogicGateID {
-		t.Fatalf("logic gate assignments = %+v, want preserved gate", assignments)
-	}
-}
-
-func TestWorkItemMyWorkMatrixLogsRepoError(t *testing.T) {
-	companyID := "11111111-1111-4111-8111-999999999999"
-	userID := "22222222-2222-4222-8222-999999999999"
-	repoErr := errors.New("ERROR: for SELECT DISTINCT, ORDER BY expressions must appear in select list (SQLSTATE 42P10)")
-	repo := myWorkMatrixErrorRepo{Repository: store.NewMemoryRepo(), err: repoErr}
-	handler := NewServer(repo).Routes()
-
-	var logs bytes.Buffer
-	previousWriter := log.Writer()
-	previousFlags := log.Flags()
-	log.SetOutput(&logs)
-	log.SetFlags(0)
-	t.Cleanup(func() {
-		log.SetOutput(previousWriter)
-		log.SetFlags(previousFlags)
-	})
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/v1/work-items/my-work-matrix?company_id="+companyID, nil)
-	req = workItemInboxReadRequestWithActor(req, userID, companyID, domain.RoleCompanyUser, false)
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusInternalServerError, rec.Body.String())
-	}
-	body := rec.Body.String()
-	if !strings.Contains(body, "failed_to_list_my_work_matrix") {
-		t.Fatalf("response body = %s, want public error code", body)
-	}
-	if strings.Contains(body, "SQLSTATE") {
-		t.Fatalf("response body leaked backend error: %s", body)
-	}
-	logged := logs.String()
-	for _, needle := range []string{
-		"failed_to_list_my_work_matrix",
-		"user_id=" + userID,
-		"viewer_user_id=" + userID,
-		"company_id=" + companyID,
-		"SQLSTATE 42P10",
-	} {
-		if !strings.Contains(logged, needle) {
-			t.Fatalf("log output missing %q: %s", needle, logged)
-		}
-	}
 }
 
 func TestWorkItemInboxReadUsesAuthenticatedActorUserID(t *testing.T) {
@@ -585,15 +432,6 @@ var (
 	errMissingWorkItemReadRequestContext = errors.New("missing work item read request context")
 )
 
-type myWorkMatrixErrorRepo struct {
-	store.Repository
-	err error
-}
-
-func (r myWorkMatrixErrorRepo) ListMyWorkMatrix(store.WorkItemInboxQuery) (store.MyWorkMatrixResponse, error) {
-	return store.MyWorkMatrixResponse{}, r.err
-}
-
 func getWorkItemInboxRead(t *testing.T, handler http.Handler, path, userID, companyID, role string) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := httptest.NewRecorder()
@@ -634,20 +472,6 @@ func decodeWorkItemInboxReadPayload(t *testing.T, rec *httptest.ResponseRecorder
 	}
 }
 
-func postMyWorkMatrixMoveJSON(t *testing.T, handler http.Handler, nodeID, userID, companyID, role string, body map[string]any) *httptest.ResponseRecorder {
-	t.Helper()
-	encoded, err := json.Marshal(body)
-	if err != nil {
-		t.Fatalf("marshal request: %v", err)
-	}
-	req := httptest.NewRequest(http.MethodPost, "/v1/work-items/my-work-matrix/nodes/"+nodeID+"/move", bytes.NewReader(encoded))
-	req.Header.Set("Content-Type", "application/json")
-	req = workItemInboxReadRequestWithActor(req, userID, companyID, role, false)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	return rec
-}
-
 func mustSetWorkItemReadNodeRACI(t *testing.T, repo *store.MemoryRepo, companyID, nodeID, userID string) {
 	t.Helper()
 	if _, err := repo.SetResourceRACIAssignments(store.ResourceRACIAssignmentUpdateInput{
@@ -684,13 +508,4 @@ func inboxReadHTTPRolesContain(roles []string, role string) bool {
 
 func inboxReadHTTPNodesExactly(nodes []domain.Node, nodeID string) bool {
 	return len(nodes) == 1 && nodes[0].NodeID == nodeID
-}
-
-func inboxReadHTTPMyWorkHasNode(rows []store.RACIMatrixProjectionRow, nodeID string, role string) bool {
-	for _, row := range rows {
-		if row.NodeID == nodeID && row.RACIAssignment == role && !row.IsContainerRow {
-			return true
-		}
-	}
-	return false
 }

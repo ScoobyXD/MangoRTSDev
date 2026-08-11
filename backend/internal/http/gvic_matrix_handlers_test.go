@@ -90,7 +90,7 @@ func TestRACIMatrixNodeCreateAndMoveV2IgnoresStaleSourceHint(t *testing.T) {
 	}
 	moveProjectionRows := getRACIMatrixProjectionRowsForTest(t, handler, companyID, editor)
 	if projectionRowsContainNodeGate(moveProjectionRows, createPayload.Node.NodeID, targetGate.LogicGate.LogicGateID) {
-		t.Fatalf("move projection refetch rows = %+v, want done node removed from active My Work projection", moveProjectionRows)
+		t.Fatalf("move projection refetch rows = %+v, want done node removed from active RACI matrix projection", moveProjectionRows)
 	}
 }
 

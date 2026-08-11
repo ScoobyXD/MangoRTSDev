@@ -7,15 +7,6 @@ import (
 )
 
 var savedViewGroupingFieldsBySurface = map[string]map[string]bool{
-	SavedViewSurfaceMyWork: {
-		"account":    true,
-		"due_date":   true,
-		"logic_gate": true,
-		"person":     true,
-		"project":    true,
-		"status":     true,
-		"team":       true,
-	},
 	SavedViewSurfaceUpdates: {
 		"type":       true,
 		"date":       true,
@@ -35,8 +26,6 @@ var savedViewGroupingFieldsBySurface = map[string]map[string]bool{
 
 func NormalizeSavedViewSurface(surface string) (string, bool) {
 	switch strings.TrimSpace(surface) {
-	case SavedViewSurfaceMyWork:
-		return SavedViewSurfaceMyWork, true
 	case SavedViewSurfaceUpdates:
 		return SavedViewSurfaceUpdates, true
 	case SavedViewSurfaceLogicGateKanban:

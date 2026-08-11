@@ -1,6 +1,6 @@
 import { requestJSON } from "../../modules/api/requestJSON.js";
 
-export type SavedViewSurface = "my_work" | "updates" | "logic_gate_kanban";
+export type SavedViewSurface = "updates" | "logic_gate_kanban";
 export type SavedViewPrincipal = "user" | "group";
 export type SavedViewGroupingDirection = "asc" | "desc";
 
@@ -128,7 +128,6 @@ function normalizeSavedView(value: SavedView): SavedView | null {
 
 function normalizeSavedViewSurface(value: unknown): SavedViewSurface | "" {
   if (value === "updates") return "updates";
-  if (value === "my_work") return "my_work";
   if (value === "logic_gate_kanban") return "logic_gate_kanban";
   return "";
 }

@@ -11,33 +11,19 @@ type postgresPolicyRowsQueryer interface {
 }
 
 func (r *PostgresRepo) ListRACIMatrixProjectionRowsForResources(companyID string, nodeIDs, logicGateIDs []string) ([]RACIMatrixProjectionRow, error) {
-	return queryPostgresV2RACIRows(context.Background(), r.db, companyID, "", "", nodeIDs, logicGateIDs, 0)
+	return queryPostgresRACIMatrixRows(context.Background(), r.db, companyID, "", "", nodeIDs, logicGateIDs, 0)
 }
 
 func (r *PostgresRepo) ListRACIMatrixProjectionRowsForLogicGate(companyID, logicGateID string) ([]RACIMatrixProjectionRow, error) {
-	return queryPostgresV2RACIRows(context.Background(), r.db, companyID, "", "", nil, []string{logicGateID}, 0)
+	return queryPostgresRACIMatrixRows(context.Background(), r.db, companyID, "", "", nil, []string{logicGateID}, 0)
 }
 
 func (r *PostgresRepo) ListRACIMatrixProjectionRowsForUser(query WorkItemInboxQuery) ([]RACIMatrixProjectionRow, error) {
 	query = NormalizeWorkItemInboxQuery(query)
-	return queryPostgresV2RACIRows(context.Background(), r.db, query.CompanyID, query.UserID, query.ViewerUserID, nil, nil, query.Limit)
+	return queryPostgresRACIMatrixRows(context.Background(), r.db, query.CompanyID, query.UserID, query.ViewerUserID, nil, nil, query.Limit)
 }
 
-func (r *PostgresRepo) ListMyWorkMatrixRows(query WorkItemInboxQuery) ([]RACIMatrixProjectionRow, error) {
-	query = NormalizeWorkItemInboxQuery(query)
-	return queryPostgresV2RACIRows(context.Background(), r.db, query.CompanyID, query.UserID, query.ViewerUserID, nil, nil, query.Limit)
-}
-
-func (r *PostgresRepo) ListMyWorkMatrix(query WorkItemInboxQuery) (MyWorkMatrixResponse, error) {
-	query = NormalizeWorkItemInboxQuery(query)
-	rows, err := r.ListMyWorkMatrixRows(query)
-	if err != nil {
-		return MyWorkMatrixResponse{}, err
-	}
-	return MyWorkMatrixResponse{CompanyID: query.CompanyID, UserID: query.UserID, Rows: rows}, nil
-}
-
-func queryPostgresV2RACIRows(ctx context.Context, queryer postgresPolicyRowsQueryer, companyID, userID, viewerUserID string, nodeIDs, logicGateIDs []string, limit int) ([]RACIMatrixProjectionRow, error) {
+func queryPostgresRACIMatrixRows(ctx context.Context, queryer postgresPolicyRowsQueryer, companyID, userID, viewerUserID string, nodeIDs, logicGateIDs []string, limit int) ([]RACIMatrixProjectionRow, error) {
 	companyID = cleanUUIDText(companyID)
 	userID = cleanUUIDText(userID)
 	viewerUserID = cleanUUIDText(viewerUserID)

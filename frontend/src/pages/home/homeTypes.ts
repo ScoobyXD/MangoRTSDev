@@ -92,7 +92,6 @@ export type HomeViewID =
   | "c-inbox"
   | "i-inbox"
   | "o-inbox"
-  | "my-work"
   | "updates"
   | "my-nodes"
   | "my-logic-gates"

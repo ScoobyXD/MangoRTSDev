@@ -20,7 +20,7 @@ A manager or editor assigns Responsible, Accountable, Consulted, or Informed to 
 ↓
 The policy stores each direct user or group once, and the editor shows each direct assignee's full display name
 ↓
-Nested group membership expands live for effective RACI, My Work, and notifications without creating permanent per-user copies
+Nested group membership expands live for effective RACI and notifications without creating permanent per-user copies
 ↓
 A changed effective role notifies that non-actor user even when the user was already assigned before the policy replacement
 ↓
@@ -560,8 +560,8 @@ Customization is copy-on-customize for one resource only. It is never descendant
 6. The editor colors are Responsible orange (`#f97316`), Accountable green (`#16a34a`), Consulted blue (`#2563eb`), and Informed purple (`#7c3aed`).
 7. The editor shows direct person and group names in each role card; names wrap instead of collapsing to `People (n)`.
 8. A group membership or group-parent change changes effective RACI immediately without rewriting policy rows.
-9. RACI controls assignment, My Work, update routing, and notification targeting only. It never grants resource access.
-10. My Work must still require effective Edit permission to the returned resource.
+9. RACI controls assignment, RACI-derived inbox routing, update routing, and notification targeting only. It never grants resource access.
+10. RACI-derived inbox reads must still require effective Edit permission to the returned resource.
 
 ## Permission-specific rules
 
@@ -586,7 +586,7 @@ After selecting one effective permission policy through inheritance:
 3. Deleting a group removes direct graph edges referencing that group from both graph tables.
 4. Group deletion must not leave blank-label or stale UUID policy assignments.
 5. Group changes do not allocate resource policy customization sequences because the resource policy itself was not edited.
-6. Cache fingerprints must include the company group-membership version so stale authorization or My Work data cannot survive a group change.
+6. Cache fingerprints must include the company group-membership version so stale authorization or RACI-derived inbox data cannot survive a group change.
 
 ## API and JSON contract
 
@@ -738,16 +738,16 @@ Permission checks perform work proportional to:
 
 They must not perform work proportional to the total number of descendants.
 
-### My Work and reverse RACI lookup
+### RACI-derived inboxes and reverse RACI lookup
 
-My Work reads from canonical RACI settings/assignments, canonical hierarchy, current group membership, and current permissions.
+RACI-derived inboxes read from canonical RACI settings/assignments, canonical hierarchy, current group membership, and current permissions.
 
 Requirements:
 
 1. Results are paginated and deterministically ordered.
 2. Queries start from user/group assignment roots and indexed hierarchy relationships rather than scanning every company resource.
 3. Active customized boundaries and eligible force resets are applied during scope resolution.
-4. My Work never requires synchronous descendant materialization after a policy write.
+4. RACI-derived inboxes never require synchronous descendant materialization after a policy write.
 5. If a disposable search cache is later proven necessary, it must be rebuildable from the four tables and hierarchy, clearly named as a cache, and never used as policy authority.
 
 ### Cache and ETag behavior
@@ -893,7 +893,7 @@ Step 1 never guesses that equal parent and child policies were inherited. Every 
 - a customization sequence equal to the migration baseline;
 - separate RACI and permission sequences whose next values are strictly above the baseline.
 
-The copy normalizes old RACI `shared_triage_folder` identities to `shared_inbox_folder`. Missing resources or principals, invalid RACI role shapes, hierarchy cycles, unresolved permission defaults, old effective-table disagreements, and My Work projection disagreements stop the copy instead of being guessed or silently repaired.
+The copy normalizes old RACI `shared_triage_folder` identities to `shared_inbox_folder`. Missing resources or principals, invalid RACI role shapes, hierarchy cycles, unresolved permission defaults, old effective-table disagreements, and obsolete projection disagreements stop the copy instead of being guessed or silently repaired.
 
 #### Verification record
 
@@ -903,7 +903,7 @@ The schema contract and disposable-PostgreSQL integration tests cover first appl
 
 ### Goal
 
-Change backend and frontend behavior so every policy read, write, authorization decision, My Work query, notification decision, cache fingerprint, create/move/delete workflow, and group-change workflow uses only the V2 contract.
+Change backend and frontend behavior so every policy read, write, authorization decision, RACI-derived inbox query, notification decision, cache fingerprint, create/move/delete workflow, and group-change workflow uses only the V2 contract.
 
 ### Required cutover order
 
@@ -926,7 +926,7 @@ Step 2 must replace:
 - Node Logic Gate placement, cross-gate move, and detach behavior;
 - Company Explorer and Shared Triage create/move/delete behavior;
 - group membership and group hierarchy effects;
-- My Work RACI queries;
+- RACI-derived inbox queries;
 - notification target resolution;
 - Logic Gate and Node read fingerprints/ETags;
 - workspace version/event behavior;
@@ -952,9 +952,9 @@ Step 2 is complete only when:
 
 - every application read and write uses the V2 tables;
 - the old table names have zero deployed readers and writers;
-- point authorization and My Work return correct results;
+- point authorization and RACI-derived inboxes return correct results;
 - force overwrite performs constant-size policy writes;
-- smoke tests cover create, customize, inherit, both overwrite options, move, detach, group change, delete, My Work, notifications, and ETags;
+- smoke tests cover create, customize, inherit, both overwrite options, move, detach, group change, delete, RACI-derived inboxes, notifications, and ETags;
 - old storage remains frozen only as rollback/audit evidence.
 
 ### Step 2 implementation and operator record
@@ -991,13 +991,13 @@ Use a designated database operator and ordinary DBeaver PostgreSQL SQL execution
 5. Run `backend/db/migrations/20260805_zzzc_v2_gvic_permissions_step2_cutover.sql` once. Any error rolls back the entire rename and V2 runtime installation.
 6. Deploy the matching Step 2 backend and frontend while writers remain paused.
 7. Run `scripts/v2_gvic_permissions_step2_readiness.sql`. It must return READY for server version, the four final exact table shapes, both temporary legacy graph tables, absence of the old staging names, and complete settings coverage.
-8. Run smoke checks for create, customize, inherit, both descendant actions, move, Node detach, group membership/hierarchy/delete, point authorization, My Work, notifications, and actor-safe ETags.
+8. Run smoke checks for create, customize, inherit, both descendant actions, move, Node detach, group membership/hierarchy/delete, point authorization, RACI-derived inboxes, notifications, and actor-safe ETags.
 9. Resume writers only after readiness and smoke checks pass.
 10. Keep the temporary legacy tables and remaining legacy functions/triggers/columns untouched until the separately approved Step 3 soak, snapshot, retirement preflight, and retirement SQL.
 
 #### Implemented runtime behavior
 
-The deployed Step 2 build reads and writes only the four canonical policy tables. It resolves inherited/customized policies, inactive overwritten customizations, parent-link reset boundaries, live nested groups, exact RACI/permission separation, Node detach materialization, final-parent creator rules, current My Work, current notification targets, and actor-safe policy fingerprints. Legacy readers are excluded from the deployed build and no fallback, compatibility reader, dual writer, or request-time schema repair was added.
+The deployed Step 2 build reads and writes only the four canonical policy tables. It resolves inherited/customized policies, inactive overwritten customizations, parent-link reset boundaries, live nested groups, exact RACI/permission separation, Node detach materialization, final-parent creator rules, current RACI-derived inboxes, current notification targets, and actor-safe policy fingerprints. Legacy readers are excluded from the deployed build and no fallback, compatibility reader, dual writer, or request-time schema repair was added.
 
 On August 5, 2026, the first post-cutover smoke check exposed a backend-only default-access reader defect: `postgresResourceDefaultAccess` selected a nonexistent `default_access` column from `mangorts_v2_resolve_permission_policy`. The resolver contract returns the effective source identity, so the reader now joins that identity to `resource_permission_settings` and reads the selected source row's `default_access`. A guarded disposable-PostgreSQL assertion exercises this exact runtime reader after cutover. This correction changes no business rule or database object, requires no SQL, and requires only deployment/restart of the corrected backend. The Step 2 readiness result remains valid and all temporary legacy evidence remains untouched.
 
@@ -1113,7 +1113,7 @@ The implementation must map these scenarios into `docs/tests/gvic.md`, `docs/tes
 4. Role cards show direct assignee names and wrap long name lists.
 5. Group membership changes affect effective users without resource-policy writes.
 6. RACI does not grant resource access.
-7. My Work includes only resources where the user has both effective RACI and effective Edit permission.
+7. RACI-derived inboxes include only resources where the user has both effective RACI and effective Edit permission.
 
 ### Permission scenarios
 
@@ -1135,7 +1135,7 @@ The implementation must map these scenarios into `docs/tests/gvic.md`, `docs/tes
 4. Concurrent complete-policy writes reject stale expected revisions.
 5. Command idempotency prevents repeated force sequences for one retried request.
 6. A committed event is never published for a rolled-back policy transaction.
-7. My Work pagination is stable under concurrent policy changes.
+7. RACI-derived inbox pagination is stable under concurrent policy changes.
 
 ## Documentation requirements
 
@@ -1143,7 +1143,6 @@ Step 2 changes business behavior and must update the business-rule files with a 
 
 - `docs/tests/gvic.md`
 - `docs/tests/permissions.md`
-- `docs/tests/my-work.md`
 - `docs/tests/nodes.md`
 - `docs/tests/users-and-user-groups.md`
 - any Company Explorer or Shared Triage process document whose inheritance behavior changes

@@ -206,19 +206,19 @@ func TestMemoryLogicGateResourceRACIResolvesInheritedAndCustomizedNodesLive(t *t
 	}
 	assertMemoryNodeRACIResolution(t, repo, companyID, node.NodeID, PolicyModeCustomized, directUser.UserID, directUser.UserID, EntityTypeNode, node.NodeID, false)
 
-	rows, err := repo.ListMyWorkMatrixRows(WorkItemInboxQuery{CompanyID: companyID, UserID: directUser.UserID, ViewerUserID: directUser.UserID, Limit: 10})
+	rows, err := repo.ListRACIMatrixProjectionRowsForUser(WorkItemInboxQuery{CompanyID: companyID, UserID: directUser.UserID, ViewerUserID: directUser.UserID, Limit: 10})
 	if err != nil {
-		t.Fatalf("ListMyWorkMatrixRows direct user: %v", err)
+		t.Fatalf("ListRACIMatrixProjectionRowsForUser direct user: %v", err)
 	}
-	if findMyWorkTestRow(rows, EntityTypeNode, node.NodeID) == nil {
-		t.Fatalf("direct user My Work rows = %+v, want linked node after node edit", rows)
+	if findRACIMatrixTestRow(rows, EntityTypeNode, node.NodeID) == nil {
+		t.Fatalf("direct user RACI matrix rows = %+v, want linked node after node edit", rows)
 	}
-	gateRows, err := repo.ListMyWorkMatrixRows(WorkItemInboxQuery{CompanyID: companyID, UserID: gateUser.UserID, ViewerUserID: gateUser.UserID, Limit: 10})
+	gateRows, err := repo.ListRACIMatrixProjectionRowsForUser(WorkItemInboxQuery{CompanyID: companyID, UserID: gateUser.UserID, ViewerUserID: gateUser.UserID, Limit: 10})
 	if err != nil {
-		t.Fatalf("ListMyWorkMatrixRows old gate user: %v", err)
+		t.Fatalf("ListRACIMatrixProjectionRowsForUser old gate user: %v", err)
 	}
-	if findMyWorkTestRow(gateRows, EntityTypeNode, node.NodeID) != nil {
-		t.Fatalf("old gate user My Work rows = %+v, want node edit to remove old user", gateRows)
+	if findRACIMatrixTestRow(gateRows, EntityTypeNode, node.NodeID) != nil {
+		t.Fatalf("old gate user RACI matrix rows = %+v, want node edit to remove old user", gateRows)
 	}
 
 	if _, err := repo.RemoveLogicGateNodeAssignment(LogicGateNodeAssignmentRemoveInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, NodeID: node.NodeID}); err != nil {

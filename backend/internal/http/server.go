@@ -391,8 +391,6 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/work-items/aci-inbox", s.handleWorkItemACIInbox)
 	mux.HandleFunc("/v1/work-items/my-nodes", s.handleWorkItemMyNodes)
 	mux.HandleFunc("/v1/work-items/my-logic-gates", s.handleWorkItemMyLogicGates)
-	mux.HandleFunc("/v1/work-items/my-work-matrix", s.handleWorkItemMyWorkMatrix)
-	mux.HandleFunc("/v1/work-items/my-work-matrix/", s.handleWorkItemMyWorkMatrixSubresource)
 	mux.HandleFunc("/v1/work-items/gvic-matrix-projection", s.handleWorkItemRACIMatrixProjection)
 	mux.HandleFunc("/v1/work-items/logic-gate-assignments/move", s.handleWorkItemLogicGateAssignmentMove)
 	mux.HandleFunc("/v1/work-items/logic-gate-assignments/remove", s.handleWorkItemLogicGateAssignmentRemove)

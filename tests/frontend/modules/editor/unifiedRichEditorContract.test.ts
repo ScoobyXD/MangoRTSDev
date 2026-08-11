@@ -1283,7 +1283,7 @@ test("unified node shell contract lists every Phase 2 full node-window surface",
     "app-sidebar-node-popup",
     "dock-restored-node-popup",
     "updates-node-panel",
-    "kanban-my-work-node-overlay",
+    "kanban-node-overlay",
     "project-critical-path-inline-node",
     "project-relationships-inline-node",
   ]);
@@ -1291,7 +1291,7 @@ test("unified node shell contract lists every Phase 2 full node-window surface",
   assert.ok(UNIFIED_NODE_SHELL_SURFACE_CONTRACTS.every((surface) => surface.persistenceBoundary === "node-information-projection"));
   assert.ok(UNIFIED_NODE_SHELL_SURFACE_CONTRACTS.every((surface) => surface.openerState === "opener-owned"));
   assert.ok(UNIFIED_NODE_SHELL_SURFACE_CONTRACTS.every((surface) => surface.chatPane === "separate"));
-  assert.deepEqual(UNIFIED_NODE_SHELL_SURFACE_CONTRACTS.find((surface) => surface.id === "kanban-my-work-node-overlay")?.actions, [
+  assert.deepEqual(UNIFIED_NODE_SHELL_SURFACE_CONTRACTS.find((surface) => surface.id === "kanban-node-overlay")?.actions, [
     "close",
     "fullscreen",
     "minimize",
@@ -1357,7 +1357,7 @@ test("node window adapters mount the shared unified node shell", () => {
   assert.match(appLayout, /surfaceID: "dock-restored-node-popup"/);
 
   assert.match(kanbanOverlays, /UnifiedNodeShell/);
-  assert.match(kanbanOverlays, /surfaceID="kanban-my-work-node-overlay"/);
+  assert.match(kanbanOverlays, /surfaceID="kanban-node-overlay"/);
   assert.match(kanbanOverlays, /id: "fullscreen"/);
   assert.match(kanbanOverlays, /pressed: fullscreen/);
   assert.match(kanbanOverlays, /<AppModalPortal ownerDocument=\{boardRootRef\.current\?\.ownerDocument\} trapFocus=\{fullscreen\} onRequestClose=\{onClose\}>/);

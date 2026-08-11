@@ -627,7 +627,6 @@ type SavedViewRepository interface {
 }
 
 const (
-	SavedViewSurfaceMyWork          = "my_work"
 	SavedViewSurfaceUpdates         = "updates"
 	SavedViewSurfaceLogicGateKanban = "logic_gate_kanban"
 
@@ -756,8 +755,6 @@ type WorkItemReadRepository interface {
 	ListMyNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error)
 	ListMyLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
 	ListMyLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
-	ListMyWorkMatrixRows(query WorkItemInboxQuery) ([]RACIMatrixProjectionRow, error)
-	ListMyWorkMatrix(query WorkItemInboxQuery) (MyWorkMatrixResponse, error)
 	ListRACIMatrixProjectionRowsForUser(query WorkItemInboxQuery) ([]RACIMatrixProjectionRow, error)
 	ListRACIMatrixProjectionRowsForResources(companyID string, nodeIDs, logicGateIDs []string) ([]RACIMatrixProjectionRow, error)
 	ListRACIMatrixProjectionRowsForLogicGate(companyID, logicGateID string) ([]RACIMatrixProjectionRow, error)
@@ -1127,11 +1124,6 @@ type WorkItemLogicGateInboxItem struct {
 	CreatedTimestamp time.Time                        `json:"created_timestamp"`
 }
 
-type MyWorkMatrixResponse struct {
-	CompanyID string                    `json:"company_id"`
-	UserID    string                    `json:"user_id"`
-	Rows      []RACIMatrixProjectionRow `json:"rows"`
-}
 type ProjectionRow struct {
 	CompanyID                    string           `json:"company_id"`
 	ProjectionRowID              string           `json:"projection_row_id,omitempty"`

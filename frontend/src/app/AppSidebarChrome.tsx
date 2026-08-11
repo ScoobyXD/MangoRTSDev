@@ -6,7 +6,7 @@ import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMe
 import { AppModalPortal } from "./AppModalPortal";
 import FrameRightClickMenu from "./framerightclickmenu";
 import { AppSidebarPinnedSection } from "./AppSidebarPinnedSection";
-import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderFieldsIcon, HeaderMyWorkIcon, HeaderSharedTriageIcon, HeaderTeamsIcon, HeaderTriageIcon, HeaderUpdatesIcon } from "../icons/index.js";
+import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderFieldsIcon, HeaderSharedTriageIcon, HeaderTeamsIcon, HeaderTriageIcon, HeaderUpdatesIcon } from "../icons/index.js";
 import { MangoWordmark } from "../icons/index.js";
 import { UI_THEME } from "./frameLayoutTypes";
 import { preloadAccountManagerSurface, preloadFieldsSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "./preloadDashboardModules";
@@ -66,7 +66,7 @@ import { subscribeRealtimeScope } from "../modules/realtime/realtimeWebSocket";
 import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../modules/editor/UnifiedNodeShell";
 import { EVENT_HOME_TRIAGE_CONVERSION_APPLIED, INBOX_PRIORITIES, type HomeTriageConversionAppliedDetail } from "../pages/home/homeConstants";
 import { convertMessagesToExplorerTargetCommand } from "../pages/home/homeCommands";
-import { HomeSavedViewsSidebarSection, restoreSelectedHomeSavedView } from "../pages/home/HomeSavedViewsSidebar";
+import { HomeBuiltInViewSidebarRow, HomeSavedViewsSidebarSection, restoreSelectedHomeSavedView } from "../pages/home/HomeSavedViewsSidebar";
 import {
   buildSharedInboxRows,
   cleanIDList,
@@ -146,7 +146,7 @@ const SIDEBAR_ACTIVE_TEXT = "#111111";
 
 type SidebarSectionID = "shared-triage";
 
-export type HomeKeyViewID = "my-triage" | "shared-root" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox" | "my-work" | "updates" | `shared:${string}`;
+export type HomeKeyViewID = "my-triage" | "shared-root" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox" | "updates" | `shared:${string}`;
 export type { SidebarPin, SidebarPinKind } from "./sidebarPins";
 
 type AppSidebarPrimaryPage = "home" | "logic-gate-arena" | "project-management" | "account-manager" | "teams" | "fields";
@@ -299,7 +299,6 @@ export function AppSidebar({
   onPinDragLeave,
 }: AppSidebarProps): React.ReactElement {
   const homeActive = activePage === "home";
-  const myWorkActive = (homeActive && activeHomeView === "my-work") || activePage === "project-management";
   const companyID = getActiveCompanyID();
   const apiBase = readAuthConfig().apiBase;
   const pins = pinTree.pins;
@@ -1343,29 +1342,14 @@ export function AppSidebar({
 
       <section style={appSidebarNavSectionStyle} aria-label="Tower">
         <AppSidebarSectionHeader label="Tower" />
-        <AppSidebarButton
-          label="My Work"
-          active={myWorkActive}
-          icon={<HeaderMyWorkIcon color="#10b981" />}
-          elevated
-          onClick={() => onHomeViewSelect("my-work")}
-        />
-        <HomeSavedViewsSidebarSection
-          apiBase={apiBase}
-          companyID={companyID}
-          currentUserID={currentUserID}
-          surface="my_work"
-          active={homeActive && activeHomeView === "my-work"}
-          onSelectSurface={() => onHomeViewSelect("my-work")}
-          builtInView={{
-            label: "Projects",
-            active: activePage === "project-management",
-            onSelect: () => onPageSelect("project-management"),
-            onPreload: preloadProjectManagementSurface,
-            settings: {
-              ariaLabel: "Edit Projects view",
-              onOpen: requestProjectViewSettings,
-            },
+        <HomeBuiltInViewSidebarRow
+          label="Projects"
+          active={activePage === "project-management"}
+          onSelect={() => onPageSelect("project-management")}
+          onPreload={preloadProjectManagementSurface}
+          settings={{
+            ariaLabel: "Edit Projects view",
+            onOpen: requestProjectViewSettings,
           }}
         />
       </section>

@@ -235,7 +235,7 @@ Business logic covered:
 - PIN13
 
 Given:
-- A user right-clicks a pinnable node, logic gate, or project from Company Explorer, a node surface, board cards, Updates, or My Work.
+- A user right-clicks a pinnable node, logic gate, or project from Company Explorer, a node surface, board cards, or Updates.
 - A user right-clicks an item in the pin section.
 
 Expected:

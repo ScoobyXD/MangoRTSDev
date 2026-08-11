@@ -8,7 +8,7 @@ import (
 	"miraeopus/backend/internal/domain"
 )
 
-func TestMemoryRepoMyWorkRowsAreDerivedFromV2PolicyAtReadTime(t *testing.T) {
+func TestMemoryRepoRACIMatrixRowsAreDerivedFromV2PolicyAtReadTime(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "22222222-2222-4222-8222-222222222451"
 	repo.EnsureCompany(companyID, "RACIMatrix Projection Co")
@@ -108,25 +108,21 @@ func TestMemoryRepoMyWorkRowsAreDerivedFromV2PolicyAtReadTime(t *testing.T) {
 	assertMemoryRACIMatrixProjectionCounts(t, repo, companyID, 2, 2)
 }
 
-func TestRACIMatrixProjectionSchemaAndPostgresReadsUseTargetedProjection(t *testing.T) {
-	migrationRaw, err := os.ReadFile("../../db/migrations/20260618_z_gvic_node_phase2_cleanup.sql")
+func TestRACIMatrixReadsUseV2PolicySourcesWithoutRetiredTable(t *testing.T) {
+	cleanupRaw, err := os.ReadFile("../../db/migrations/20260810_zz_remove_retired_personal_work_surface.sql")
 	if err != nil {
-		t.Fatalf("ReadFile migration: %v", err)
+		t.Fatalf("ReadFile cleanup migration: %v", err)
 	}
-	migration := normalizeProjectionSource(string(migrationRaw))
+	cleanup := normalizeProjectionSource(string(cleanupRaw))
 	for _, needle := range []string{
-		"create table if not exists gvic_matrix_projection_table",
-		"drop column if exists assignee_user_id",
-		"drop column if exists status_color",
-		"insert into gvic_matrix_projection_table",
-		"insert into company_projection_sequences",
-		"where projection_name = 'racio_matrix'",
-		"'gvic_matrix'",
-		"greatest(company_projection_sequences.sequence, excluded.sequence)",
-		"delete from company_projection_sequences where projection_name = 'racio_matrix'",
+		"drop table if exists gvic_matrix_projection_table",
+		"drop table if exists racio_matrix_projection_table",
+		"gvic_matrix_projection_table_legacy_20260621%",
+		"delete from saved_views",
+		"add constraint saved_views_surface_chk",
 	} {
-		if !strings.Contains(migration, needle) {
-			t.Fatalf("RACIMatrix migration missing %q", needle)
+		if !strings.Contains(cleanup, needle) {
+			t.Fatalf("retired surface cleanup migration missing %q", needle)
 		}
 	}
 
@@ -135,78 +131,29 @@ func TestRACIMatrixProjectionSchemaAndPostgresReadsUseTargetedProjection(t *test
 		t.Fatalf("ReadFile schema: %v", err)
 	}
 	schema := normalizeProjectionSource(string(schemaRaw))
-	for _, needle := range []string{
-		"create table if not exists gvic_matrix_projection_table",
-		"create table if not exists resource_permissions",
-		"from resource_permissions access",
-	} {
-		if !strings.Contains(schema, needle) {
-			t.Fatalf("canonical schema missing %q", needle)
-		}
+	if strings.Contains(schema, "create table if not exists gvic_matrix_projection_table") {
+		t.Fatal("canonical schema still creates the retired RACI matrix projection table")
 	}
 
-	postgresReadRaw, err := os.ReadFile("postgres_work_item_reads.go")
+	postgresReadRaw, err := os.ReadFile("postgres_raci_matrix_v2.go")
 	if err != nil {
-		t.Fatalf("ReadFile postgres reads: %v", err)
+		t.Fatalf("ReadFile Postgres RACI matrix reads: %v", err)
 	}
 	postgresReads := normalizeProjectionSource(string(postgresReadRaw))
 	for _, needle := range []string{
 		"mangorts_v2_effective_gvic_assignments(node.company_id,'node',node.node_id)",
 		"mangorts_v2_effective_gvic_assignments(gate.company_id,'logic_gate',gate.logic_gate_id)",
-		"mangorts_user_can_access_resource(node.company_id,'node',node.node_id,$4::uuid,'edit')",
-		"mangorts_user_can_access_resource(gate.company_id,'logic_gate',gate.logic_gate_id,$4::uuid,'edit')",
+		"mangorts_user_can_access_resource(candidate.company_id,candidate.resource_type,candidate.resource_id,$3::uuid,'edit')",
 	} {
 		if !strings.Contains(postgresReads, needle) {
-			t.Fatalf("Postgres RACIMatrix reads missing %q", needle)
+			t.Fatalf("Postgres RACI matrix reads missing %q", needle)
 		}
 	}
-
-	postgresProjectionRaw, err := os.ReadFile("postgres_gvic_matrix_projection.go")
-	if err != nil {
-		t.Fatalf("ReadFile postgres projection writes: %v", err)
-	}
-	postgresProjection := normalizeProjectionSource(string(postgresProjectionRaw))
-	for _, forbidden := range []string{
-		"rebuild_" + "work_item_" + "inbox",
-		"work_item_" + "inbox_entries",
-		"effective_" + "resource_" + "access",
-		"resource_" + "access ",
-	} {
-		if strings.Contains(postgresReads, forbidden) || strings.Contains(postgresProjection, forbidden) || strings.Contains(schema, forbidden) {
-			t.Fatalf("new projection/runtime source should not contain legacy reference %q", forbidden)
-		}
+	if strings.Contains(postgresReads, "gvic_matrix_projection_table") {
+		t.Fatal("Postgres RACI matrix reads still depend on the retired projection table")
 	}
 }
 
-func TestPostgresMyWorkMatrixReadsFlatNodeLeafProjectionRows(t *testing.T) {
-	postgresProjectionRaw, err := os.ReadFile("postgres_gvic_matrix_projection.go")
-	if err != nil {
-		t.Fatalf("ReadFile postgres projection writes: %v", err)
-	}
-	sql := normalizeProjectionSource(string(postgresProjectionRaw))
-	for _, needle := range []string{
-		"projection_row_id",
-		"node_name",
-		"logic_gate_name",
-		"mangorts_user_can_access_resource(entry.company_id, 'node', entry.node_id",
-	} {
-		if !strings.Contains(sql, needle) {
-			t.Fatalf("Postgres My Work flat projection path missing %q", needle)
-		}
-	}
-	for _, forbidden := range []string{
-		"node_leaf_id",
-		"is_container_row",
-		"'project'::text as resource_type",
-		"postgresMyWorkProjectRowsSQL",
-		"project_rows",
-		"effective.resource_type='project'",
-	} {
-		if strings.Contains(sql, forbidden) {
-			t.Fatalf("Postgres My Work projection still contains project-only query fragment %q", forbidden)
-		}
-	}
-}
 func assertMemoryRACIMatrixProjectionCounts(t *testing.T, repo *MemoryRepo, companyID string, wantNodeRows, wantLogicGateRows int) {
 	t.Helper()
 	repo.mu.RLock()

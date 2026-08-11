@@ -1052,7 +1052,6 @@ export function getHomeViewLabel(viewID: HomeViewID, sharedInboxes: Communicatio
   if (viewID === "shared-root") return "Shared Triage";
   const RACISection = gvicInboxSectionForView(viewID);
   if (RACISection) return RACISection.title;
-  if (viewID === "my-work") return "My Work";
   if (viewID === "updates") return "Updates";
   if (viewID === "my-nodes") return "My Nodes";
   if (viewID === "my-logic-gates") return "My Logic Gates";
@@ -1102,7 +1101,7 @@ export function isInboxMatrixViewID(viewID: HomeViewID): boolean {
 
 
 export function isWorkspacePanelHomeViewID(viewID: HomeViewID): boolean {
-  return isArchivableHomeViewID(viewID) || isInboxMatrixViewID(viewID) || viewID === "my-work" || viewID === "updates" || viewID === "my-nodes" || viewID === "my-logic-gates";
+  return isArchivableHomeViewID(viewID) || isInboxMatrixViewID(viewID) || viewID === "updates" || viewID === "my-nodes" || viewID === "my-logic-gates";
 }
 
 export function mailboxForHomeView(viewID: HomeViewID): EmailMailbox {

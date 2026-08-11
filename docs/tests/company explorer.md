@@ -223,7 +223,7 @@ Business logic covered:
 
 Given:
 - A user has several Explorer branches loaded.
-- The user commits a folder or project mutation, or successfully renames a Node or Logic Gate from each supported Editor, Kanban, Home/My Work, or Company Explorer entry point.
+- The user commits a folder or project mutation, or successfully renames a Node or Logic Gate from each supported Editor, Kanban, Home, or Company Explorer entry point.
 - Another browser may change an Explorer resource while this browser remains open.
 
 Expected:

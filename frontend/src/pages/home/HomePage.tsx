@@ -89,7 +89,6 @@ import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache, type
 import { listMyLogicGates, listRACIMatrixProjectionRows } from "../../modules/work-items/workItemReadApi";
 import { useNotificationSummary } from "../../modules/notifications/useNotificationSummary";
 import {
-  commitEntityTitleMutation,
   foldCommittedEntityTitlesSince,
   readCommittedEntityTitleVersion,
   subscribeCommittedEntityTitleUpdates,
@@ -98,16 +97,13 @@ import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
 import { buildLogicGateRoute, buildProjectRoute } from "../../app/deepLinkRoutes";
 import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, LogicGateRail, NodeEditorPopup, NodeInboxRail, RACIMatrixViewerSelector, RACIRoleInboxMatrix, SharedInboxRACISettingsModal, type RACIMatrixViewerListEntry } from "./HomeParts";
-import { MyWorkView } from "./MyWorkView";
-import { markMyWorkMatrixCachesStaleForCompany, markMyWorkMatrixCachesStaleForTargetUsers } from "./myWorkMatrixLoader";
-import { myWorkDebugLog, recordMyWorkDebugCause } from "./myWorkPerformanceDebug";
 import { UpdatesView } from "./UpdatesView";
 import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "./HomeMailWorkspace";
 import { OutboundEmailUndoBanner } from "../../modules/communications/OutboundEmailUndoBanner";
 import { applyHomeMailSignature, composeHasDraftContent, createHomeMailDraftID, createHomeMailForwardDraftID, createHomeMailReplyDraftID, createHomeMailSharedReplyDraftID, deleteHomeMailDraft, deleteHomeMailDraftRemote, deleteHomeMailDraftsRemote, ensureHomeMailDraftAttachmentTarget, homeMailDraftMatchesScope, homeMailDraftToCompose, homeMailDraftToMessage, homeMailSignatureScopeKey, loadHomeMailDrafts, loadHomeMailSignature, mergeHomeMailDrafts, readHomeMailDrafts, readHomeMailDraftsForScope, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignatureRemote, syncHomeMailDraftFromCompose, type HomeMailDraft } from "./homeMailDrafts";
 import { applyHomeMailboxCountDelta, cancelHomeMailboxListRequestTimers, consumeHomeMailboxLocalMutationEcho, createHomeArchiveStatusCoordinator, createHomeMailboxFolderLoadCoordinator, createHomeMailboxRealtimeCoordinator, forgetHomeMailboxLocalMutationEchoes, homeMailboxComposeSubmissionIsCurrent, homeMailboxCountKey, homeMailboxFolderOwnerIsCurrent, homeMailboxPendingMessageIDs, homeMailboxPendingMessageKey, homeMailboxRealtimeTargetKey, homeMailboxRequestOwnerIsCurrent, rememberHomeMailboxLocalMutationEchoes, selectHomeMailboxRealtimeTarget, type HomeMailboxCountOverrideKey, type HomeMailboxCountOverrides, type HomeMailboxFolderOwner, type HomeMailboxLocalMutationEchoRegistry, type HomeMailboxRequestOwner } from "./homeMailboxRealtime";
 import { ARCHIVE_QUEUE_MAX_EMAILS, EVENT_HOME_TRIAGE_CONVERSION_APPLIED, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME, type HomeTriageConversionAppliedDetail } from "./homeConstants";
-import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeRACIMatrixNodeCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, removeMyLogicGateShortcutCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
+import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeRACIMatrixNodeCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, dropNodesIntoInboxLogicGateCommand, removeMyLogicGateShortcutCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
 import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, condenseEmailThreadMessages, emailMailboxMessageKey, emailMailboxScopeKey, emailMessagesForOrderedPage, emailThreadKey, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, inboxCountPresentation, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRACIRole, logicGateHasRACIRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingEmailThreadMessageIDs, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, mergeEmailMessageIntoScopedMessageList, mergeLogicGateShortcuts, messageListFilterKey, nextEmailMessageAfterRemoval, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, orderEmailConversationMessages, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortEmailConversationMessagesNewestFirst, sortLogicGateShortcuts, sortSharedInboxes, shouldAutoMarkEmailSelectionRead, unreadEmailThreadMessagesForSelection, userCanManageSharedInboxStructure, userHasFullSharedInboxAccess, type EmailConversationOrder } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeAttachment, type ComposeState, type HomeColumnResizeDrag, type HomeColumnWidths, type HomeEntityDeleteKind, type HomeEntityDeleteTarget, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type RACIInboxStatus } from "./homeTypes";
@@ -439,7 +435,7 @@ export function HomePage({
   me,
   onNavigate,
   embedded = false,
-  initialViewID = "my-work",
+  initialViewID = "my-triage",
   onActiveViewChange,
   deepLinkNodeID,
   onNodeOverlayOpen,
@@ -542,8 +538,6 @@ export function HomePage({
   });
   const [pendingSharedInboxMessageRefreshID, setPendingSharedInboxMessageRefreshID] = useState("");
   const [selectedMailDetailRealtimeRevision, setSelectedMailDetailRealtimeRevision] = useState(0);
-  const [myWorkLiveRefreshToken, setMyWorkLiveRefreshToken] = useState(0);
-  const [optimisticMyWorkDeletedNodeIDs, setOptimisticMyWorkDeletedNodeIDs] = useState<Set<string>>(new Set());
   const [noticeResourceAction, setNoticeResourceAction] = useState<HomeNoticeResourceAction | null>(null);
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [workspaceTrackWidth, setWorkspaceTrackWidth] = useState(() => Math.max(1, window.innerWidth - 20));
@@ -594,7 +588,6 @@ export function HomePage({
   const folderReloadTimerRef = useRef<number | null>(null);
   const messageListRefreshTimerRef = useRef<number | null>(null);
   const pendingMessageListRefreshOptionsRef = useRef({ requestKey: "", refresh: false });
-  const myWorkLiveRefreshTimerRef = useRef<number | null>(null);
   const RACIMatrixProjectionRefetchInFlightRef = useRef(false);
   const RACIMatrixProjectionInitializedRef = useRef(false);
   const RACIMatrixProjectionRowsRef = useRef<RACIMatrixProjectionRow[]>([]);
@@ -625,12 +618,11 @@ export function HomePage({
   const columnResizeDragRef = useRef<HomeColumnResizeDrag | null>(null);
   const appSidebarOwnsNavigationRef = useRef(appSidebarOwnsNavigation);
   const isInboxMatrixView = isInboxMatrixViewID(activeViewID);
-  const isMyWorkView = activeViewID === "my-work";
   const isUpdatesView = activeViewID === "updates";
   const { accounts: matrixAccounts } = useCompanyAccounts(companyID, isInboxMatrixView);
   const isNarrow = isInboxMatrixView
     ? viewportWidth < 980
-    : isMyWorkView || isUpdatesView
+    : isUpdatesView
       ? viewportWidth < 760
       : workspaceTrackWidth < getHomeColumnMinimumTrackWidth(!appSidebarOwnsNavigation);
   const currentUserID = me?.user.user_id?.trim() ?? "";
@@ -657,35 +649,8 @@ export function HomePage({
     setLogicGates((current) => reconcileCommittedLogicGateRecordTitles(current, update));
   }), [companyID]);
   useEffect(() => {
-    setOptimisticMyWorkDeletedNodeIDs(new Set());
     setSharedInboxesLoaded(false);
   }, [companyID]);
-  const scheduleMyWorkLiveRefresh = useCallback((targetUserIDs: string[] = []) => {
-    const cleanTargetUserIDs = cleanIDList(targetUserIDs);
-    if (cleanTargetUserIDs.length > 0) markMyWorkMatrixCachesStaleForTargetUsers(cleanTargetUserIDs);
-    else markMyWorkMatrixCachesStaleForCompany(companyID);
-    myWorkDebugLog("home.scheduleMyWorkRefresh", { companyID, targetUserIDs: cleanTargetUserIDs });
-    recordMyWorkDebugCause("local mutation", {
-      companyID,
-      targetUserCount: cleanTargetUserIDs.length,
-      broadCompanyRefresh: cleanTargetUserIDs.length === 0,
-    });
-    if (myWorkLiveRefreshTimerRef.current !== null) window.clearTimeout(myWorkLiveRefreshTimerRef.current);
-    myWorkLiveRefreshTimerRef.current = window.setTimeout(() => {
-      myWorkLiveRefreshTimerRef.current = null;
-      myWorkDebugLog("home.fireMyWorkRefreshToken", { companyID, targetUserIDs: cleanTargetUserIDs });
-      setMyWorkLiveRefreshToken((value) => value + 1);
-    }, 80);
-  }, [companyID]);
-  const scheduleCurrentUserMyWorkRefresh = useCallback(() => {
-    scheduleMyWorkLiveRefresh(currentUserID ? [currentUserID] : []);
-  }, [currentUserID, scheduleMyWorkLiveRefresh]);
-  useEffect(() => () => {
-    if (myWorkLiveRefreshTimerRef.current !== null) {
-      window.clearTimeout(myWorkLiveRefreshTimerRef.current);
-      myWorkLiveRefreshTimerRef.current = null;
-    }
-  }, []);
   useEffect(() => {
     setRACIMatrixTargetUserID(currentUserID);
   }, [companyID, currentUserID]);
@@ -2509,7 +2474,7 @@ export function HomePage({
   useEffect(() => { void loadStatus({ clearError: !preserveInitialOAuthError }); }, [loadStatus, preserveInitialOAuthError]);
   useEffect(() => { if (activeMailViewHasEmailConnection && isArchivableHomeViewID(activeViewID)) void loadFolders(); }, [activeEmailMailboxScopeKey, activeMailViewHasEmailConnection, activeViewID, loadFolders]);
   useEffect(() => { if (status?.configured) void loadSharedInboxes(); }, [loadSharedInboxes, status?.configured]);
-  useEffect(() => { if (status?.connected || activeSharedTreeViewSelected || isInboxMatrixView || isMyWorkView || isUpdatesView) void loadCompanyUsers(); }, [activeSharedTreeViewSelected, isInboxMatrixView, isMyWorkView, isUpdatesView, loadCompanyUsers, status?.connected]);
+  useEffect(() => { if (status?.connected || activeSharedTreeViewSelected || isInboxMatrixView || isUpdatesView) void loadCompanyUsers(); }, [activeSharedTreeViewSelected, isInboxMatrixView, isUpdatesView, loadCompanyUsers, status?.connected]);
   useEffect(() => {
     const onSharedInboxesUpdated = (event: Event) => {
       const detail = (event as CustomEvent<{ companyID?: string }>).detail;
@@ -5131,9 +5096,8 @@ export function HomePage({
     }
   }, [apiBase, companyID, mergeCreatedLogicGate, openLogicGateArena]);
   const createLogicGateInInboxCell = useCallback(async (input: { creatorRACIRole?: LogicGateRACIRole }) => {
-    const logicGate = await createHomeLogicGate({ creatorRACIRole: input.creatorRACIRole, openArena: false });
-    if (logicGate) scheduleCurrentUserMyWorkRefresh();
-  }, [createHomeLogicGate, scheduleCurrentUserMyWorkRefresh]);
+    await createHomeLogicGate({ creatorRACIRole: input.creatorRACIRole, openArena: false });
+  }, [createHomeLogicGate]);
   const createNodeInInboxCell = useCallback(async (input: { priority: InboxPriority; status?: RACIInboxStatus; creatorRACIRole?: LogicGateRACIRole }) => {
     setBusy("create-node");
     setError("");
@@ -5151,14 +5115,13 @@ export function HomePage({
       mergeCreatedFolderItems(result.folderItems.filter((item) => item.item_type !== "logic_gate"));
       applyRACIMatrixProjectionRows(result.gvic_projection_rows, { titleVersionAtStart });
       mergeUpdatedNode(result.node, titleVersionAtStart);
-      scheduleCurrentUserMyWorkRefresh();
       setNotice("Note created in a new Logic Gate.");
     } catch (createError) {
       setError(formatError(createError, "Failed to create note in matrix cell"));
     } finally {
       setBusy("");
     }
-  }, [apiBase, applyRACIMatrixProjectionRows, companyID, mergeCreatedFolderItems, mergeCreatedLogicGate, mergeUpdatedNode, scheduleCurrentUserMyWorkRefresh]);
+  }, [apiBase, applyRACIMatrixProjectionRows, companyID, mergeCreatedFolderItems, mergeCreatedLogicGate, mergeUpdatedNode]);
   const openNodeBulkEditMenu = useCallback((nodeID: string, event: React.MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
@@ -5194,36 +5157,6 @@ export function HomePage({
     event.stopPropagation();
     openLogicGateBulkEditMenuAt(logicGateID, event.clientX, event.clientY);
   }, [openLogicGateBulkEditMenuAt]);
-  const moveMyWorkNodesIntoCell = useCallback(async (input: { logicGateID?: string; nodeIDs: string[]; priority: InboxPriority; fromLogicGateID?: string; creatorRACIRole?: LogicGateRACIRole; targetUserID?: string }) => {
-    const targetRACIRole = input.creatorRACIRole;
-    const nodeIDs = cleanIDList(input.nodeIDs).filter((nodeID) => nodeByID.has(nodeID));
-    if (!targetRACIRole || nodeIDs.length === 0) return null;
-    setBusy("my-work-node-drop");
-    setError("");
-    try {
-      const titleVersionAtStart = readCommittedEntityTitleVersion();
-      const result = await moveMyWorkNodesToCellCommand({
-        apiBase,
-        companyID,
-        nodeIDs,
-        priority: input.priority,
-        targetRACIRole,
-        targetUserID: input.targetUserID,
-        logicGateID: input.logicGateID,
-        fromLogicGateID: input.fromLogicGateID,
-        nodeByID,
-      });
-      applyRACIMatrixProjectionRows(result.gvic_projection_rows, { titleVersionAtStart });
-      for (const node of result.nodes) mergeUpdatedNode(node, titleVersionAtStart);
-      setNotice(nodeIDs.length === 1 ? "My Work node moved." : `${nodeIDs.length} My Work nodes moved.`);
-      return result;
-    } catch (dropError) {
-      setError(formatError(dropError, "Failed to move My Work node"));
-      return null;
-    } finally {
-      setBusy("");
-    }
-  }, [apiBase, applyRACIMatrixProjectionRows, companyID, mergeUpdatedNode, nodeByID]);
   const dropNodesIntoInboxLogicGate = useCallback(async (input: { logicGateID: string; nodeIDs: string[]; priority: InboxPriority; status?: RACIInboxStatus; fromLogicGateID?: string }) => {
     const logicGateID = input.logicGateID.trim();
     const fromLogicGateID = input.fromLogicGateID?.trim() ?? "";
@@ -5248,7 +5181,6 @@ export function HomePage({
       for (const node of dropResult.nodes) {
         if (node) mergeUpdatedNode(node, titleVersionAtStart);
       }
-      scheduleCurrentUserMyWorkRefresh();
       if (fromLogicGateID === logicGateID) {
         setNotice(nodeIDs.length === 1 ? "Node updated in Logic Gate." : `${nodeIDs.length} nodes updated in Logic Gate.`);
       } else {
@@ -5260,7 +5192,7 @@ export function HomePage({
     } finally {
       setBusy("");
     }
-  }, [apiBase, applyRACIMatrixProjectionRows, companyID, mergeUpdatedNode, nodeByID, scheduleCurrentUserMyWorkRefresh]);
+  }, [apiBase, applyRACIMatrixProjectionRows, companyID, mergeUpdatedNode, nodeByID]);
   const dropNodesIntoNewInboxLogicGate = useCallback(async (input: { nodeIDs: string[]; priority: InboxPriority; status?: RACIInboxStatus; creatorRACIRole?: LogicGateRACIRole; fromLogicGateID?: string }) => {
     const nodeIDs = cleanIDList(input.nodeIDs).filter((nodeID) => nodeByID.has(nodeID));
     if (nodeIDs.length === 0) return;
@@ -5284,14 +5216,13 @@ export function HomePage({
       });
       applyRACIMatrixProjectionRows(dropResult.gvic_projection_rows, { titleVersionAtStart });
       for (const node of dropResult.nodes) mergeUpdatedNode(node, titleVersionAtStart);
-      scheduleCurrentUserMyWorkRefresh();
       setNotice(nodeIDs.length === 1 ? "Node moved into a new Logic Gate." : `${nodeIDs.length} nodes moved into a new Logic Gate.`);
     } catch (dropError) {
       setError(formatError(dropError, "Failed to move nodes into a new Logic Gate"));
     } finally {
       setBusy("");
     }
-  }, [apiBase, applyRACIMatrixProjectionRows, companyID, mergeCreatedLogicGate, mergeUpdatedNode, nodeByID, scheduleCurrentUserMyWorkRefresh]);
+  }, [apiBase, applyRACIMatrixProjectionRows, companyID, mergeCreatedLogicGate, mergeUpdatedNode, nodeByID]);
   const moveLogicGatesIntoInboxCell = useCallback(async (input: { logicGateIDs: string[]; priority: InboxPriority; status?: RACIInboxStatus; creatorRACIRole?: LogicGateRACIRole; nodeIDsByLogicGateID?: Record<string, string[]> }) => {
     const logicGateIDs = cleanIDList(input.logicGateIDs).filter((logicGateID) => logicGateByID.has(logicGateID));
     if (logicGateIDs.length === 0) return;
@@ -5348,7 +5279,6 @@ export function HomePage({
         movedNodeCount += dropResult.nodes.length;
         for (const node of dropResult.nodes) mergeUpdatedNode(node, titleVersionAtStart);
       }
-      scheduleCurrentUserMyWorkRefresh();
       setNotice(logicGateIDs.length === 1
         ? (movedNodeCount > 0 ? "Logic Gate moved." : "Logic Gate assignment updated.")
         : `${logicGateIDs.length} Logic Gates moved.`);
@@ -5357,43 +5287,7 @@ export function HomePage({
     } finally {
       setBusy("");
     }
-  }, [apiBase, applyRACIMatrixProjectionRows, companyID, currentUserID, logicGateByID, mergeUpdatedNode, nodeByID, nodes, scheduleCurrentUserMyWorkRefresh]);
-
-  const moveProjectsIntoInboxCell = useCallback(async (input: { projectIDs: string[]; priority: InboxPriority; status?: RACIInboxStatus; creatorRACIRole?: LogicGateRACIRole; logicGateIDsByProjectID?: Record<string, string[]>; nodeIDsByProjectID?: Record<string, string[]>; nodeIDsByLogicGateID?: Record<string, string[]> }) => {
-    const projectIDs = cleanIDList(input.projectIDs);
-    if (projectIDs.length === 0) return;
-    const logicGateIDs = cleanIDList(projectIDs.flatMap((projectID) => input.logicGateIDsByProjectID?.[projectID] ?? [])).filter((logicGateID) => logicGateByID.has(logicGateID));
-    const nodeIDsByLogicGateID = input.nodeIDsByLogicGateID ?? {};
-    const nodeIDsMovedWithLogicGates = new Set<string>();
-    for (const logicGateID of logicGateIDs) {
-      for (const nodeID of cleanIDList(nodeIDsByLogicGateID[logicGateID] ?? [])) nodeIDsMovedWithLogicGates.add(nodeID);
-    }
-    const directNodeIDs = cleanIDList(projectIDs.flatMap((projectID) => input.nodeIDsByProjectID?.[projectID] ?? []))
-      .filter((nodeID) => !nodeIDsMovedWithLogicGates.has(nodeID) && nodeByID.has(nodeID));
-    if (logicGateIDs.length > 0) {
-      await moveLogicGatesIntoInboxCell({
-        logicGateIDs,
-        priority: input.priority,
-        status: input.status,
-        creatorRACIRole: input.creatorRACIRole,
-        nodeIDsByLogicGateID,
-      });
-    }
-    if (directNodeIDs.length > 0) {
-      await dropNodesIntoNewInboxLogicGate({
-        nodeIDs: directNodeIDs,
-        priority: input.priority,
-        status: input.status,
-        creatorRACIRole: input.creatorRACIRole,
-      });
-    }
-    if (logicGateIDs.length === 0 && directNodeIDs.length === 0) {
-      setNotice(projectIDs.length === 1 ? "Project has no movable work items." : "Projects have no movable work items.");
-      return;
-    }
-    scheduleCurrentUserMyWorkRefresh();
-    setNotice(projectIDs.length === 1 ? "Project moved." : `${projectIDs.length} projects moved.`);
-  }, [dropNodesIntoNewInboxLogicGate, logicGateByID, moveLogicGatesIntoInboxCell, nodeByID, scheduleCurrentUserMyWorkRefresh]);
+  }, [apiBase, applyRACIMatrixProjectionRows, companyID, currentUserID, logicGateByID, mergeUpdatedNode, nodeByID, nodes]);
 
   const addNodesToLogicGate = useCallback(async (nodeIDs: string[], logicGateID: string) => {
     const cleanLogicGateID = logicGateID.trim();
@@ -5470,41 +5364,11 @@ export function HomePage({
     activeDeleteSelectionKindRef.current = kind;
     requestDeleteHomeEntities(kind === "node" ? buildNodeDeleteTargets(ids) : buildLogicGateDeleteTargets(ids), position);
   }, [buildLogicGateDeleteTargets, buildNodeDeleteTargets, requestDeleteHomeEntities]);
-  const renameMyWorkNode = useCallback(async (nodeID: string) => {
-    const cleanNodeID = nodeID.trim();
-    const node = nodeByID.get(cleanNodeID);
-    if (!cleanNodeID || !node) return;
-    const currentTitle = nodeTitle(node);
-    const nextTitle = window.prompt("Rename node", currentTitle)?.trim();
-    if (!nextTitle || nextTitle === currentTitle) return;
-    setBusy("rename-node");
-    setError("");
-    try {
-      const titleVersionAtStart = readCommittedEntityTitleVersion();
-      const updated = await commitEntityTitleMutation(
-        () => requestJSON<NodeRecord>(apiBase, `/v1/nodes/${encodeURIComponent(cleanNodeID)}`, {
-          method: "PUT",
-          body: JSON.stringify({ company_id: companyID, name: nextTitle }),
-        }),
-        (result) => ({ companyID, entityType: "node", resourceID: result.node_id, title: nodeTitle(result) }),
-      );
-      mergeUpdatedNode(updated, titleVersionAtStart, false);
-      setNotice("Node renamed.");
-    } catch (renameError) {
-      setError(formatError(renameError, "Failed to rename node"));
-    } finally {
-      setBusy("");
-    }
-  }, [apiBase, companyID, mergeUpdatedNode, nodeByID]);
   const deleteHomeEntities = useCallback(async (targets: HomeEntityDeleteTarget[], confirmationDisplayName: string): Promise<boolean> => {
     const normalizedTargets = targets.map((target) => ({ kind: target.kind, id: target.id.trim() })).filter((target) => target.id);
     const nodeIDSet = new Set(normalizedTargets.filter((target) => target.kind === "node").map((target) => target.id));
     const logicGateIDSet = new Set(normalizedTargets.filter((target) => target.kind === "logic_gate").map((target) => target.id));
     if (nodeIDSet.size === 0 && logicGateIDSet.size === 0) return false;
-    const optimisticNodeIDs = Array.from(nodeIDSet);
-    if (optimisticNodeIDs.length > 0) {
-      setOptimisticMyWorkDeletedNodeIDs((current) => new Set([...current, ...optimisticNodeIDs]));
-    }
     setBusy("entity-delete");
     setError("");
     try {
@@ -5541,24 +5405,16 @@ export function HomePage({
       }
       setBulkEditMenu(null);
       setEntityDeleteConfirmation(null);
-      scheduleMyWorkLiveRefresh();
       const deletedCount = nodeIDSet.size + logicGateIDSet.size;
       setNotice(deletedCount === 1 ? "Item deleted." : `${deletedCount} items deleted.`);
       return true;
     } catch (deleteError) {
-      if (optimisticNodeIDs.length > 0) {
-        setOptimisticMyWorkDeletedNodeIDs((current) => {
-          const next = new Set(current);
-          for (const nodeID of optimisticNodeIDs) next.delete(nodeID);
-          return next;
-        });
-      }
       setError(formatError(deleteError, "Failed to delete selected items"));
       return false;
     } finally {
       setBusy("");
     }
-  }, [apiBase, companyID, logicGateIDFromTreeID, logicGateSelectionAnchorID, nodeIDFromTreeID, nodeSelectionAnchorID, nodes, scheduleMyWorkLiveRefresh]);
+  }, [apiBase, companyID, logicGateIDFromTreeID, logicGateSelectionAnchorID, nodeIDFromTreeID, nodeSelectionAnchorID, nodes]);
   const deleteNodeEditorOverlayNode = useCallback(async (nodeID: string, confirmationDisplayName: string): Promise<boolean> => {
     const targets = buildNodeDeleteTargets([nodeID]);
     if (targets.length === 0) return false;
@@ -5885,11 +5741,11 @@ export function HomePage({
     unreadOnly,
   ]);
   useEffect(() => {
-    if (!activeMailViewHasEmailConnection || isInboxMatrixView || isMyWorkView || isUpdatesView) return;
+    if (!activeMailViewHasEmailConnection || isInboxMatrixView || isUpdatesView) return;
     window.dispatchEvent(new CustomEvent("mangorts:home-unread-counts-updated", {
       detail: { companyID, viewID: activeViewID, unreadCount: unreadMessageCount },
     }));
-  }, [activeMailViewHasEmailConnection, activeViewID, companyID, isInboxMatrixView, isMyWorkView, isUpdatesView, unreadMessageCount]);
+  }, [activeMailViewHasEmailConnection, activeViewID, companyID, isInboxMatrixView, isUpdatesView, unreadMessageCount]);
   const visibleArchiveCandidateCount = isPrimaryTriageMailbox(activeViewID, mailbox)
     ? primaryTriageVisibleRawMessageIDs(messages.filter((message) => emailMessageUsesActiveProviderScope(
       message,
@@ -5903,12 +5759,12 @@ export function HomePage({
     ? `${selectedMessageIDs.size} selected`
     : (visibleLoadingMessages || loadingMoreMessages) ? "Loading" : "";
   const showLocalEntityRail = !embedded;
-  const layoutColumnWidths = isNarrow || isInboxMatrixView || isMyWorkView || isUpdatesView
+  const layoutColumnWidths = isNarrow || isInboxMatrixView || isUpdatesView
     ? columnWidths
     : fitHomeColumnWidthsToAvailableWidth(columnWidths, workspaceTrackWidth, !appSidebarOwnsNavigation);
   const workspaceGridTemplateColumns = isNarrow
     ? "1fr"
-    : isMyWorkView || isUpdatesView
+    : isUpdatesView
       ? appSidebarOwnsNavigation
         ? "minmax(0, 1fr)"
         : `${layoutColumnWidths[0]}px minmax(0, 1fr)`
@@ -5923,7 +5779,7 @@ export function HomePage({
       : isInboxMatrixView
         ? getInboxMatrixGridTemplateColumns(layoutColumnWidths)
         : getHomeGridTemplateColumns(layoutColumnWidths);
-  const matrixWorkspaceActive = (isInboxMatrixView || isMyWorkView || isUpdatesView) && !isNarrow;
+  const matrixWorkspaceActive = (isInboxMatrixView || isUpdatesView) && !isNarrow;
   const workspaceLayoutStyle: React.CSSProperties = {
     ...workspaceStyle,
     gridTemplateColumns: workspaceGridTemplateColumns,
@@ -5951,7 +5807,7 @@ export function HomePage({
       )}
       {error && !status?.connected && <div style={errorStyle}>{error}</div>}
       {notice && !status?.connected && <div style={noticeStyle}>{notice}</div>}
-      {(isMyWorkView || isUpdatesView || isInboxMatrixView) && <OutboundEmailUndoBanner />}
+      {(isUpdatesView || isInboxMatrixView) && <OutboundEmailUndoBanner />}
       {loadingStatus ? (
         <main style={centerStyle}>Loading email connection</main>
       ) : !status?.configured ? (
@@ -5978,31 +5834,7 @@ export function HomePage({
         </main>
       ) : (
         <main ref={workspaceRef} style={workspaceLayoutStyle}>
-          {isMyWorkView ? (
-            <MyWorkView
-              apiBase={apiBase}
-              loading={loadingNodes || loadingLogicGates}
-              companyID={companyID}
-              currentUserID={currentUserID}
-              liveRefreshToken={myWorkLiveRefreshToken}
-              nodes={nodes}
-              logicGates={logicGates}
-              companyUsers={companyUsers}
-              companyUserGroups={companyUserGroups}
-              companyUserGroupMembers={companyUserGroupMembers}
-              onOpenNode={openNodeEditorOverlay}
-              onOpenLogicGate={(logicGateID, label, nodeID) => openLogicGateArena(logicGateID, label || logicGateTitle(logicGateByID.get(logicGateID)), nodeID)}
-              onOpenProject={openProjectManagement}
-              onRenameNode={renameMyWorkNode}
-              onRequestDeleteNode={(nodeID, position) => requestDeleteBulkEditTargets("node", [nodeID], position)}
-              onCreateNodeInCell={(input) => { void createNodeInInboxCell(input); }}
-              onDropNodes={(input) => moveMyWorkNodesIntoCell(input)}
-              onDropNodesInCell={(input) => { void dropNodesIntoNewInboxLogicGate(input); }}
-              onDropLogicGates={(input) => { void moveLogicGatesIntoInboxCell(input); }}
-              onDropProjects={(input) => { void moveProjectsIntoInboxCell(input); }}
-              hiddenNodeIDs={optimisticMyWorkDeletedNodeIDs}
-            />
-          ) : isUpdatesView ? (
+          {isUpdatesView ? (
             <UpdatesView
               apiBase={apiBase}
               companyID={companyID}

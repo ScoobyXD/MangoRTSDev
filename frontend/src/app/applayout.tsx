@@ -291,7 +291,6 @@ const STATIC_HOME_KEY_VIEW_IDS = new Set<HomeKeyViewID>([
   "c-inbox",
   "i-inbox",
   "o-inbox",
-  "my-work",
   "updates",
 ]);
 const DEFAULT_HOME_KEY_VIEW_ID: HomeKeyViewID = "my-triage";
@@ -319,10 +318,6 @@ function readStoredHomeKeyViewID(scope: string): HomeKeyViewID {
   try {
     const storageKey = homeViewStorageKey(scope);
     const storedView = coerceHomeKeyViewID(localStorage.getItem(storageKey));
-    if (storedView === "my-work") {
-      localStorage.removeItem(storageKey);
-      return DEFAULT_HOME_KEY_VIEW_ID;
-    }
     return storedView ?? DEFAULT_HOME_KEY_VIEW_ID;
   } catch {
     return DEFAULT_HOME_KEY_VIEW_ID;

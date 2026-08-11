@@ -1,10 +1,8 @@
 package store
 
 import (
-	"errors"
 	"miraeopus/backend/internal/domain"
 	"reflect"
-	"sort"
 	"testing"
 	"time"
 )
@@ -218,206 +216,6 @@ func TestMemoryRepoLogicGateRACIGroupAssignmentsIncludeSubgroups(t *testing.T) {
 	}
 }
 
-func TestMemoryRepoMyWorkMatrixRowsKeepResourceInProjectAfterRejectedAddition(t *testing.T) {
-	repo := NewMemoryRepo()
-	companyID := "44444444-4444-4444-8444-444444444444"
-	repo.EnsureCompany(companyID, "My Work Projects Company")
-	user := mustCreateInboxReadCompanyUser(t, repo, "my-work-project-user", companyID, "my-work-project@example.com", "My Work Project User")
-
-	logicGate := mustCreateInboxReadLogicGate(t, repo, companyID, "Single Project Gate")
-	mustSetInboxReadLogicGateRACI(t, repo, companyID, logicGate.LogicGateID, []LogicGateRACIAssignmentInput{{Role: domain.RACIRoleResponsible, UserID: user.UserID}})
-	node, err := repo.CreateNode(companyID, "Done node under active project gate")
-	if err != nil {
-		t.Fatalf("CreateNode: %v", err)
-	}
-	priority := 3
-	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
-		CompanyID:   companyID,
-		LogicGateID: logicGate.LogicGateID,
-		NodeID:      node.NodeID,
-		Status:      "In Progress",
-		Priority:    &priority,
-		PrioritySet: true,
-	}); err != nil {
-		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
-	}
-	mustSetInboxReadNodeInherited(t, repo, companyID, node.NodeID)
-
-	alpha := mustCreateInboxReadProject(t, repo, companyID, "Alpha Project", "Active", user.UserID)
-	bravo := mustCreateInboxReadProject(t, repo, companyID, "Bravo Project", "In Progress", user.UserID)
-	mustLinkInboxReadProjectResource(t, repo, companyID, alpha.ProjectID, EntityTypeNode, node.NodeID, 1, user.UserID)
-	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
-		CompanyID: companyID, ProjectID: bravo.ProjectID, ResourceType: EntityTypeNode,
-		ResourceID: node.NodeID, Position: 2, ActorUserID: user.UserID,
-	}); !errors.Is(err, ErrProjectNodeInAnotherProject) {
-		t.Fatalf("add node to Bravo err = %v, want ErrProjectNodeInAnotherProject", err)
-	}
-
-	rows, err := repo.ListMyWorkMatrixRows(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Limit: 10})
-	if err != nil {
-		t.Fatalf("ListMyWorkMatrixRows: %v", err)
-	}
-	assertMyWorkProjectNames(t, rows, EntityTypeNode, node.NodeID, []string{"Alpha Project"})
-
-	matrix, err := repo.ListMyWorkMatrix(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID})
-	if err != nil {
-		t.Fatalf("ListMyWorkMatrix: %v", err)
-	}
-	if alphaRow := findMyWorkTestRow(matrix.Rows, EntityTypeProject, alpha.ProjectID); alphaRow == nil {
-		t.Fatalf("Alpha project missing after rejected addition; rows=%+v", matrix.Rows)
-	}
-	if bravoRow := findMyWorkTestRow(matrix.Rows, EntityTypeProject, bravo.ProjectID); bravoRow != nil {
-		t.Fatalf("Bravo project contains rejected Node: %+v", bravoRow)
-	}
-	nodeRow := findMyWorkTestRow(matrix.Rows, EntityTypeNode, node.NodeID)
-	if nodeRow == nil ||
-		nodeRow.ProjectionRowID == "" ||
-		nodeRow.ProjectID != alpha.ProjectID ||
-		nodeRow.ProjectName != "Alpha Project" ||
-		nodeRow.LogicGateID == nil ||
-		*nodeRow.LogicGateID != logicGate.LogicGateID ||
-		nodeRow.LogicGateName != "Single Project Gate" ||
-		nodeRow.NodeID != node.NodeID ||
-		nodeRow.NodeName != "Done node under active project gate" ||
-		nodeRow.RACIAssignment != domain.RACIRoleResponsible ||
-		nodeRow.IsContainerRow {
-		t.Fatalf("node leaf path row = %+v; rows=%+v", nodeRow, matrix.Rows)
-	}
-}
-
-func TestMemoryRepoMyWorkMatrixRowsApplyProjectActiveRules(t *testing.T) {
-	repo := NewMemoryRepo()
-	companyID := "55555555-5555-4555-8555-555555555555"
-	repo.EnsureCompany(companyID, "My Work Active Rules Company")
-	user := mustCreateInboxReadCompanyUser(t, repo, "my-work-active-user", companyID, "my-work-active@example.com", "My Work Active User")
-
-	standaloneDone, err := repo.CreateNode(companyID, "Standalone done node")
-	if err != nil {
-		t.Fatalf("CreateNode standalone done: %v", err)
-	}
-	mustUpdateInboxReadNodeStatus(t, repo, companyID, standaloneDone.NodeID, "Done", user.UserID)
-	mustSetInboxReadNodeRACI(t, repo, companyID, standaloneDone.NodeID, user.UserID)
-
-	activeProjectDone, err := repo.CreateNode(companyID, "Project done node")
-	if err != nil {
-		t.Fatalf("CreateNode project done: %v", err)
-	}
-	mustUpdateInboxReadNodeStatus(t, repo, companyID, activeProjectDone.NodeID, "Done", user.UserID)
-	mustSetInboxReadNodeRACI(t, repo, companyID, activeProjectDone.NodeID, user.UserID)
-	activeNodeGate := mustCreateInboxReadLogicGate(t, repo, companyID, "Active Project Node Gate")
-	mustSetInboxReadLogicGateRACI(t, repo, companyID, activeNodeGate.LogicGateID, []LogicGateRACIAssignmentInput{{Role: domain.RACIRoleResponsible, UserID: user.UserID}})
-	activeNodePriority := 1
-	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
-		CompanyID: companyID, LogicGateID: activeNodeGate.LogicGateID, NodeID: activeProjectDone.NodeID,
-		Status: "Done", Priority: &activeNodePriority, PrioritySet: true,
-	}); err != nil {
-		t.Fatalf("AssignNodeToLogicGateStatus active project node: %v", err)
-	}
-	activeProject := mustCreateInboxReadProject(t, repo, companyID, "Active Project", "Active", user.UserID)
-	mustLinkInboxReadProjectResource(t, repo, companyID, activeProject.ProjectID, EntityTypeNode, activeProjectDone.NodeID, 1, user.UserID)
-
-	doneViaGate, err := repo.CreateNode(companyID, "Project logic gate done node")
-	if err != nil {
-		t.Fatalf("CreateNode project logic gate done: %v", err)
-	}
-	logicGate := mustCreateInboxReadLogicGate(t, repo, companyID, "Active Project Gate")
-	mustSetInboxReadLogicGateRACI(t, repo, companyID, logicGate.LogicGateID, []LogicGateRACIAssignmentInput{{Role: domain.RACIRoleResponsible, UserID: user.UserID}})
-	gatePriority := 2
-	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
-		CompanyID:   companyID,
-		LogicGateID: logicGate.LogicGateID,
-		NodeID:      doneViaGate.NodeID,
-		Status:      "Done",
-		Priority:    &gatePriority,
-		PrioritySet: true,
-	}); err != nil {
-		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
-	}
-	mustSetInboxReadNodeInherited(t, repo, companyID, doneViaGate.NodeID)
-	mustLinkInboxReadProjectResource(t, repo, companyID, activeProject.ProjectID, EntityTypeNode, doneViaGate.NodeID, 2, user.UserID)
-
-	doneProjectNode, err := repo.CreateNode(companyID, "Done project active node")
-	if err != nil {
-		t.Fatalf("CreateNode done project node: %v", err)
-	}
-	mustUpdateInboxReadNodeStatus(t, repo, companyID, doneProjectNode.NodeID, "In Progress", user.UserID)
-	mustSetInboxReadNodeRACI(t, repo, companyID, doneProjectNode.NodeID, user.UserID)
-	closedNodeGate := mustCreateInboxReadLogicGate(t, repo, companyID, "Closed Project Node Gate")
-	closedNodePriority := 1
-	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
-		CompanyID: companyID, LogicGateID: closedNodeGate.LogicGateID, NodeID: doneProjectNode.NodeID,
-		Status: "In Progress", Priority: &closedNodePriority, PrioritySet: true,
-	}); err != nil {
-		t.Fatalf("AssignNodeToLogicGateStatus closed project node: %v", err)
-	}
-	doneProject := mustCreateInboxReadProject(t, repo, companyID, "Closed Project", "Done", user.UserID)
-	mustLinkInboxReadProjectResource(t, repo, companyID, doneProject.ProjectID, EntityTypeNode, doneProjectNode.NodeID, 1, user.UserID)
-
-	rows, err := repo.ListMyWorkMatrixRows(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID})
-	if err != nil {
-		t.Fatalf("ListMyWorkMatrixRows: %v", err)
-	}
-	assertMyWorkProjectNames(t, rows, EntityTypeNode, standaloneDone.NodeID, nil)
-	assertMyWorkProjectNames(t, rows, EntityTypeNode, activeProjectDone.NodeID, []string{"Active Project"})
-	assertMyWorkProjectNames(t, rows, EntityTypeNode, doneViaGate.NodeID, []string{"Active Project"})
-	assertMyWorkProjectNames(t, rows, EntityTypeNode, doneProjectNode.NodeID, nil)
-}
-
-func TestMemoryRepoMyWorkMatrixRowsIncludeResponsibleAssigneeForPersonGrouping(t *testing.T) {
-	repo := NewMemoryRepo()
-	companyID := "55555555-5555-4555-8555-555555555556"
-	repo.EnsureCompany(companyID, "My Work Responsible Person Company")
-	responsible := mustCreateInboxReadCompanyUser(t, repo, "my-work-responsible-person", companyID, "responsible@example.com", "Responsible Person")
-	accountable := mustCreateInboxReadCompanyUser(t, repo, "my-work-accountable-person", companyID, "accountable@example.com", "Accountable Person")
-	logicGate := mustCreateInboxReadLogicGate(t, repo, companyID, "Responsible Person Gate")
-	mustSetInboxReadLogicGateRACI(t, repo, companyID, logicGate.LogicGateID, []LogicGateRACIAssignmentInput{
-		{Role: domain.RACIRoleResponsible, UserID: responsible.UserID},
-		{Role: domain.RACIRoleAccountable, UserID: accountable.UserID},
-	})
-	node, err := repo.CreateNode(companyID, "Responsible Person Node")
-	if err != nil {
-		t.Fatalf("CreateNode: %v", err)
-	}
-	priority := 2
-	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
-		CompanyID: companyID, LogicGateID: logicGate.LogicGateID, NodeID: node.NodeID,
-		Priority: &priority, PrioritySet: true,
-	}); err != nil {
-		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
-	}
-	mustSetInboxReadNodeInherited(t, repo, companyID, node.NodeID)
-
-	rows, err := repo.ListMyWorkMatrixRows(WorkItemInboxQuery{
-		CompanyID: companyID, UserID: accountable.UserID, ViewerUserID: accountable.UserID,
-	})
-	if err != nil {
-		t.Fatalf("ListMyWorkMatrixRows: %v", err)
-	}
-	row := findMyWorkTestRow(rows, EntityTypeNode, node.NodeID)
-	if row == nil || row.RACIAssignment != domain.RACIRoleAccountable {
-		t.Fatalf("accountable My Work row = %+v; rows=%+v", row, rows)
-	}
-	if !reflect.DeepEqual(row.ResponsibleUserIDs, []string{responsible.UserID}) {
-		t.Fatalf("Responsible user IDs = %+v, want Responsible assignee %s", row.ResponsibleUserIDs, responsible.UserID)
-	}
-}
-func TestMemoryRepoMyWorkMatrixExcludesProjectWithoutNodeLeaf(t *testing.T) {
-	repo := NewMemoryRepo()
-	companyID := "66666666-6666-4666-8666-666666666666"
-	repo.EnsureCompany(companyID, "My Work Project Root Company")
-	user := mustCreateInboxReadCompanyUser(t, repo, "my-work-root-user", companyID, "my-work-root@example.com", "My Work Root User")
-	project := mustCreateInboxReadProject(t, repo, companyID, "First Class Project", "Active", user.UserID)
-	mustSetInboxReadResourceRACI(t, repo, companyID, EntityTypeProject, project.ProjectID, domain.RACIRoleAccountable, user.UserID)
-
-	matrix, err := repo.ListMyWorkMatrix(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID})
-	if err != nil {
-		t.Fatalf("ListMyWorkMatrix: %v", err)
-	}
-	if len(matrix.Rows) != 0 {
-		t.Fatalf("project-only RACI assignment produced My Work rows: %+v", matrix.Rows)
-	}
-}
-
 func mustCreateInboxReadCompanyUser(t *testing.T, repo *MemoryRepo, subject, companyID, email, displayName string) domain.User {
 	t.Helper()
 	user, err := repo.UpsertAuthUser(subject, email, displayName)
@@ -443,45 +241,6 @@ func mustSetInboxReadLogicGateRACI(t *testing.T, repo *MemoryRepo, companyID, lo
 	t.Helper()
 	if _, err := repo.SetLogicGateRACIAssignments(LogicGateRACIAssignmentUpdateInput{CompanyID: companyID, LogicGateID: logicGateID, Assignments: assignments}); err != nil {
 		t.Fatalf("SetLogicGateRACIAssignments %s: %v", logicGateID, err)
-	}
-}
-
-func mustCreateInboxReadProject(t *testing.T, repo *MemoryRepo, companyID, name, status, actorUserID string) domain.Project {
-	t.Helper()
-	result, err := repo.CreateProject(ProjectInput{CompanyID: companyID, Name: name, Status: status, ActorUserID: actorUserID})
-	if err != nil {
-		t.Fatalf("CreateProject %q: %v", name, err)
-	}
-	if result.Project == nil {
-		t.Fatalf("CreateProject %q returned nil project", name)
-	}
-	return *result.Project
-}
-
-func mustLinkInboxReadProjectResource(t *testing.T, repo *MemoryRepo, companyID, projectID, resourceType, resourceID string, position int, actorUserID string) {
-	t.Helper()
-	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
-		CompanyID:    companyID,
-		ProjectID:    projectID,
-		ResourceType: resourceType,
-		ResourceID:   resourceID,
-		Position:     position,
-		ActorUserID:  actorUserID,
-	}); err != nil {
-		t.Fatalf("UpsertProjectRelationship %s %s: %v", resourceType, resourceID, err)
-	}
-}
-
-func mustUpdateInboxReadNodeStatus(t *testing.T, repo *MemoryRepo, companyID, nodeID, status, actorUserID string) {
-	t.Helper()
-	if _, err := repo.UpdateNode(UpdateNodeInput{
-		CompanyID:   companyID,
-		NodeID:      nodeID,
-		Status:      &status,
-		StatusSet:   true,
-		ActorUserID: actorUserID,
-	}); err != nil {
-		t.Fatalf("UpdateNode %s status: %v", nodeID, err)
 	}
 }
 
@@ -521,38 +280,17 @@ func mustSetInboxReadResourceRACI(t *testing.T, repo *MemoryRepo, companyID, res
 	}
 }
 
-func assertMyWorkProjectNames(t *testing.T, rows []RACIMatrixProjectionRow, resourceType, resourceID string, want []string) {
-	t.Helper()
-	got := make([]string, 0)
-	for _, row := range rows {
-		if myWorkTestRowMatches(row, resourceType, resourceID) {
-			got = append(got, row.ProjectName)
-		}
-	}
-	sort.Strings(got)
-	if got == nil {
-		got = []string{}
-	}
-	if want == nil {
-		want = []string{}
-	}
-	sort.Strings(want)
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("project names for %s %s = %+v, want %+v; rows=%+v", resourceType, resourceID, got, want, rows)
-	}
-}
-
-func findMyWorkTestRow(rows []RACIMatrixProjectionRow, resourceType, resourceID string) *RACIMatrixProjectionRow {
+func findRACIMatrixTestRow(rows []RACIMatrixProjectionRow, resourceType, resourceID string) *RACIMatrixProjectionRow {
 	for index := range rows {
 		row := &rows[index]
-		if myWorkTestRowMatches(*row, resourceType, resourceID) {
+		if raciMatrixTestRowMatches(*row, resourceType, resourceID) {
 			return row
 		}
 	}
 	return nil
 }
 
-func myWorkTestRowMatches(row RACIMatrixProjectionRow, resourceType, resourceID string) bool {
+func raciMatrixTestRowMatches(row RACIMatrixProjectionRow, resourceType, resourceID string) bool {
 	switch resourceType {
 	case EntityTypeNode:
 		return row.NodeID == resourceID

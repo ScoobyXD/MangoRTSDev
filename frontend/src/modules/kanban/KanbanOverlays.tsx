@@ -228,7 +228,7 @@ export function KanbanNodeEditorOverlay({
     <AppModalPortal ownerDocument={boardRootRef.current?.ownerDocument} trapFocus={fullscreen} onRequestClose={onClose}>
       <div data-mango-editor-overlay-backdrop={fullscreen ? "modal" : "modeless"} style={{ position: "fixed", inset: 0, zIndex: 1, background: fullscreen ? "rgba(15, 23, 42, 0.18)" : "transparent", pointerEvents: fullscreen ? "auto" : "none" }}>
       <UnifiedNodeShell
-      surfaceID="kanban-my-work-node-overlay"
+      surfaceID="kanban-node-overlay"
       title={overlay.nodeTitle}
       actionButtonClassName="mango-elevated-action"
       role="dialog"

@@ -114,11 +114,10 @@ test("Updates prefers a real event status and ignores synthetic legacy fallback 
   }, "Review"), "Review");
 });
 
-test("Updates, My Work, and Projects consume the same status grouping helper", () => {
+test("Updates and Projects consume the same status grouping helper", () => {
   const updates = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/UpdatesView.tsx"), "utf8");
   const updatesGrouping = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/updatesGrouping.ts"), "utf8");
   const sidebar = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeSavedViewsSidebar.tsx"), "utf8");
-  const myWork = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/myWorkGrouping.ts"), "utf8");
   const projects = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/projectRelationshipGrouping.ts"), "utf8");
   const backend = readFileSync(resolve(process.cwd(), "backend/internal/store/saved_views.go"), "utf8");
 
@@ -128,7 +127,6 @@ test("Updates, My Work, and Projects consume the same status grouping helper", (
   assert.match(updates, /resolveNodeDetails/);
   assert.match(sidebar, /UPDATE_GROUPING_FIELDS/);
   assert.match(updatesGrouping, /value: "status", label: "Status"/);
-  assert.match(myWork, /getUniversalStatusGroupValue\(status\)/);
   assert.match(projects, /getUniversalStatusGroupValue\(status\)/);
   assert.match(backend, /SavedViewSurfaceUpdates:[\s\S]*"status":\s+true/);
 });

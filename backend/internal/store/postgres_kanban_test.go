@@ -213,7 +213,7 @@ func TestPostgresKanbanRuntimeDoesNotQueryLegacyTables(t *testing.T) {
 		"postgres_logic_gates.go",
 		"postgres_company_explorer.go",
 		"postgres_nodes.go",
-		"postgres_gvic_matrix_projection.go",
+		"postgres_raci_matrix_v2.go",
 		"postgres_gvic_matrix_commands.go",
 		"postgres_workspace_entity_batch.go",
 	}

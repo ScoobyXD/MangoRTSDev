@@ -325,7 +325,7 @@ Any endpoint-deletion behavior must be an explicit separately documented busines
 
 ### Law 20 — Source tables own truth; projections only derive it
 
-The canonical relationship or assignment table is the write authority for its business meaning. A projection, cache, search document, Kanban view, Company Explorer view, My Work row, or API compatibility shape MUST derive from source relationships and MUST NOT become a second relationship authority.
+The canonical relationship or assignment table is the write authority for its business meaning. A projection, cache, search document, Kanban view, Company Explorer view, or API shape MUST derive from source relationships and MUST NOT become a second relationship authority.
 
 Deleting or rebuilding a projection MUST NOT delete or rewrite the source relationship.
 

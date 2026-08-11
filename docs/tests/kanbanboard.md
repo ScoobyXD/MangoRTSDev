@@ -108,7 +108,7 @@ KB39 - A card with no account appears under `No account`.
 KB40 - Priority grouping uses Node priority values 1 through 5 and places a null priority under **Not Assigned**.
 KB41 - Saved Logic Gate Kanban groupings must use `principal = user`.
 KB42 - Saved Logic Gate Kanban groupings must reject group/team principals.
-KB43 - Saved Logic Gate Kanban groupings must reject fields that belong to My Work, Updates, or Kanban status-only behavior, such as project, logic gate, team, type, or status.
+KB43 - Saved Logic Gate Kanban groupings must reject fields that belong to Updates or Kanban status-only behavior, such as project, logic gate, team, type, or status.
 KB44 - Saved Logic Gate Kanban extra groupings use `saved_views.surface = logic_gate_kanban`.
 KB45 - Each user has at most one active Logic Gate Kanban saved view row per company, keyed by `surface = logic_gate_kanban`, `principal = user`, and that user's `principal_id`.
 KB46 - Logic Gate Kanban must not use or require a `saved_view_preferences` table; loading a Logic Gate Kanban board applies the user's `logic_gate_kanban` row directly.
