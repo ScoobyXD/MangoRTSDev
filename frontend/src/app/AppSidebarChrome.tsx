@@ -88,6 +88,7 @@ import {
   startSidebarLogicGateStatusCountSync,
   type SidebarLogicGateStatusCounts,
 } from "./sidebarLogicGateStatusCounts";
+import { HuddleExplorerSection } from "../modules/huddles/HuddleExplorerSection";
 
 const SidebarCompanyExplorerContent = React.lazy(() => import("../modules/company-explorer/CompanyExplorerContent").then((module) => ({ default: module.CompanyExplorerContent })));
 const AppNodeEditorContent = React.lazy(() => import("../modules/editor/EditorContent").then((module) => ({
@@ -1353,6 +1354,8 @@ export function AppSidebar({
           }}
         />
       </section>
+
+      <HuddleExplorerSection apiBase={apiBase} companyID={companyID} currentUserID={currentUserID} />
 
       <section style={appSidebarNavSectionStyle} aria-label="Entities">
         <AppSidebarSectionHeader label="Entities" />

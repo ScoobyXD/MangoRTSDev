@@ -72,6 +72,15 @@ func (r *MemoryRepo) editorJSONResourceExistsLocked(ref EditorJSONDocumentRef) b
 			CompanyID: ref.CompanyID, ResourceType: ref.ResourceType,
 			ResourceID: ref.ResourceID, DocumentID: ref.DocumentID,
 		})
+	case EntityTypeHuddleLogicGate:
+		_, ok := r.huddleLogicGates[key(ref.CompanyID, ref.ResourceID)]
+		return ok && ref.DocumentID == ref.ResourceID
+	case EntityTypeHuddleNode:
+		_, ok := r.huddleNodes[key(ref.CompanyID, ref.ResourceID)]
+		return ok && ref.DocumentID == ref.ResourceID
+	case EntityTypeKPI:
+		_, ok := r.kpis[key(ref.CompanyID, ref.ResourceID)]
+		return ok && ref.DocumentID == ref.ResourceID
 	default:
 		return false
 	}

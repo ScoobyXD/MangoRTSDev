@@ -333,6 +333,20 @@ func (s *Server) resolveUserPinResourceName(w http.ResponseWriter, companyID, re
 			return "", false
 		}
 		return strings.TrimSpace(logicGate.Header), true
+	case store.EntityTypeHuddleLogicGate:
+		huddleLogicGate, err := s.repo.GetHuddleLogicGate(companyID, resourceID)
+		if err != nil {
+			writeUserPinResourceReadError(w, err)
+			return "", false
+		}
+		return strings.TrimSpace(huddleLogicGate.Header), true
+	case store.EntityTypeHuddleNode:
+		huddleNode, err := s.repo.GetHuddleNode(companyID, resourceID)
+		if err != nil {
+			writeUserPinResourceReadError(w, err)
+			return "", false
+		}
+		return strings.TrimSpace(huddleNode.Name), true
 	case store.EntityTypeProject:
 		project, err := s.repo.GetProject(companyID, resourceID)
 		if err != nil {

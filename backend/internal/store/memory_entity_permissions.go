@@ -372,6 +372,12 @@ func (r *MemoryRepo) entityExistsLocked(companyID, entityType, entityID string) 
 	case EntityTypeLogicGate:
 		_, ok := r.logicGates[key(companyID, entityID)]
 		return ok
+	case EntityTypeHuddleLogicGate:
+		_, ok := r.huddleLogicGates[key(companyID, entityID)]
+		return ok
+	case EntityTypeHuddleNode:
+		_, ok := r.huddleNodes[key(companyID, entityID)]
+		return ok
 	case EntityTypeProject:
 		_, ok := r.projects[key(companyID, entityID)]
 		return ok

@@ -1591,7 +1591,9 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         "tiptap.callback",
         () => {
           lifecycleRef.current.markDirty();
-          markEditorHistoryChanged({ companyID, resourceType, resourceID });
+          if (resourceType === "node" || resourceType === "project" || resourceType === "logic_gate") {
+            markEditorHistoryChanged({ companyID, resourceType, resourceID });
+          }
           syncRef.current?.schedule(() => compactMangoTiptapDocument({
             format: "mango-tiptap-json",
             schema_version: 1,
@@ -1958,7 +1960,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         <UniversalEntityPicker
           companyID={companyID}
           requestJSON={requestJSON}
-          sourceType={resourceType}
+          sourceType={resourceType === "huddle_node" ? "node" : resourceType === "huddle_logic_gate" || resourceType === "kpi" ? "logic_gate" : resourceType}
           linkTargetTypes={linkTargetTypes}
           anchor={universalPickerDraft.anchor}
           onChoose={chooseUniversalPickerEntity}

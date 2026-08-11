@@ -44,7 +44,7 @@ type UserPinGroupResponse = UserPinTreeResponse & {
 };
 
 function normalizeSidebarPinKind(value: string): SidebarPinKind | null {
-  if (value === "node" || value === "logic_gate" || value === "project") return value;
+  if (value === "node" || value === "logic_gate" || value === "project" || value === "huddle_logic_gate" || value === "huddle_node") return value;
   return null;
 }
 

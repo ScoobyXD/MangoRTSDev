@@ -78,7 +78,7 @@ export function universalPickerAllowedTypes(
 
 function pinRowToPickerRow(row: SidebarPinTreeRow, allowedTypes: readonly EditorEntityType[]): PickerRow | null {
   if (row.entryType === "folder") return { kind: "folder", key: `folder:${row.folder.folderID}`, depth: row.depth, label: row.folder.name };
-  if (!allowedTypes.includes(row.pin.kind)) return null;
+  if (row.pin.kind === "huddle_logic_gate" || row.pin.kind === "huddle_node" || !allowedTypes.includes(row.pin.kind)) return null;
   return {
     kind: "entity",
     key: `${row.pin.kind}:${row.pin.id}`,

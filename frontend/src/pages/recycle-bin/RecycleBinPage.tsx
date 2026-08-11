@@ -404,6 +404,11 @@ function recycleBinUserLabel(user: CompanyUser | undefined, fallbackUserID: stri
 
 function formatObjectKind(kind: RecycleBinObjectKind, folderKind?: string): string {
   if (kind === "logic_gate") return "Logic Gate";
+  if (kind === "huddle_logic_gate") return "Huddle Logic Gate";
+  if (kind === "huddle_node") return "Huddle Node";
+  if (kind === "huddle_explorer_folder") return "Huddles folder";
+  if (kind === "huddle_explorer_item") return "Huddles placement";
+  if (kind === "kpi") return "KPI";
   if (kind === "folder") return folderKind ? `${formatObjectKind(folderKind as RecycleBinObjectKind)} folder` : "Folder";
   if (kind === "kanban") return "Kanban";
   return kind.slice(0, 1).toUpperCase() + kind.slice(1);
@@ -442,7 +447,7 @@ function RecycleIcon(): React.ReactElement {
 function ObjectKindIcon({ kind }: { kind: RecycleBinObjectKind }): React.ReactElement {
   return (
     <span aria-hidden="true" style={recycleObjectIconStyle}>
-      <ExplorerRowIcon kind={kind} />
+      <ExplorerRowIcon kind={kind === "huddle_node" ? "node" : kind === "huddle_logic_gate" || kind === "kpi" ? "logic_gate" : kind === "huddle_explorer_folder" || kind === "huddle_explorer_item" ? "folder" : kind} />
     </span>
   );
 }

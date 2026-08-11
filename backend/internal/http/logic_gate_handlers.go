@@ -134,6 +134,30 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	logicGateID := parts[0]
+	if len(parts) == 2 && parts[1] == "convert-to-huddle" {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		var req struct {
+			CompanyID string `json:"company_id"`
+		}
+		if json.NewDecoder(r.Body).Decode(&req) != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json")
+			return
+		}
+		if !s.requireEntityAdmin(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
+			return
+		}
+		actor, _ := authenticatedActor(r)
+		item, err := s.repo.ConvertLogicGateToHuddle(req.CompanyID, logicGateID, actor.User.UserID)
+		if err != nil {
+			writeHuddleError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, item)
+		return
+	}
 
 	if len(parts) == 1 {
 		if r.Method == http.MethodPut {

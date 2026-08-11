@@ -413,7 +413,7 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
 }
 
 export function isSupportedRealtimeScope(scope: string): boolean {
-  return /^(?:notifications:user:[^:]+|chat:node:[^:]+|board:.+|mailbox:personal:account:[^:]+:[^:@\s]+@[^:@\s]+|mailbox:shared:[^:]+|editor:(?:node|logic_gate|project):[^:]+:[^:]+|editor-json:(?:node|logic_gate|project|email_draft|email_signature):[^:]+:[^:]+)$/.test(scope.trim());
+  return /^(?:notifications:user:[^:]+|chat:node:[^:]+|board:.+|mailbox:personal:account:[^:]+:[^:@\s]+@[^:@\s]+|mailbox:shared:[^:]+|editor:(?:node|logic_gate|project):[^:]+:[^:]+|editor-json:(?:node|logic_gate|project|huddle_logic_gate|huddle_node|kpi|email_draft|email_signature):[^:]+:[^:]+)$/.test(scope.trim());
 }
 
 export function realtimePersonalMailboxScope(userID: string, accountEmail: string): string {
@@ -436,7 +436,7 @@ export function realtimeEditorScope(resourceType: "node" | "logic_gate" | "proje
 }
 
 export function realtimeEditorJSONScope(
-  resourceType: "node" | "logic_gate" | "project" | "email_draft" | "email_signature",
+  resourceType: "node" | "logic_gate" | "project" | "huddle_logic_gate" | "huddle_node" | "kpi" | "email_draft" | "email_signature",
   resourceID: string,
   documentID: string,
 ): string {

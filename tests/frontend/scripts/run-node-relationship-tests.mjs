@@ -11,6 +11,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/auth/cognitoAuth.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/auth/authRoutes.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/api/requestJSON.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/huddles/logicGateConversion.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/attachments/attachmentApi.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/attachments/emailDraftResourceIdentity.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/attachments/attachmentDirectUpload.test.js"),
@@ -102,6 +103,10 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorDates.test.js"),
 ];
 const componentTests = [
+  {
+    source: resolve(repoRoot, "tests/frontend/modules/huddles/logicGateKPISection.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/huddles/logicGateKPISection.test.js"),
+  },
   {
     source: resolve(repoRoot, "tests/frontend/modules/editor/mangoTiptapEditorIntegration.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/mangoTiptapEditorIntegration.test.js"),

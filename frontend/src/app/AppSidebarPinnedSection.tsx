@@ -258,7 +258,7 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
   const renderPinGroupPreviewRow = (pin: SidebarPin): React.ReactNode => (
     <div key={pin.pinID} data-pin-group-preview-entry={pin.pinID} style={pinGroupPreviewRowStyle}>
       <span style={pinGroupPreviewPinStyle}>
-        <span style={rowIconStyle}><ExplorerRowIcon kind={pin.kind} /></span>
+        <span style={rowIconStyle}><ExplorerRowIcon kind={pin.kind === "huddle_node" ? "node" : pin.kind === "huddle_logic_gate" ? "logic_gate" : pin.kind} /></span>
         <span style={rowTextStyle}>{pin.name}</span>
       </span>
       {renderStatusCounts(pin.kind === "logic_gate" ? logicGateStatusCountsByID[pin.id] : undefined, true)}
@@ -473,7 +473,7 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
               onBlur={() => setRaisedPinID((current) => current === row.pin.pinID ? "" : current)}
               onClick={() => openPin(row.pin)}
             >
-              <span style={rowIconStyle}><ExplorerRowIcon kind={row.pin.kind} /></span>
+              <span style={rowIconStyle}><ExplorerRowIcon kind={row.pin.kind === "huddle_node" ? "node" : row.pin.kind === "huddle_logic_gate" ? "logic_gate" : row.pin.kind} /></span>
               <span style={rowTextStyle}>{row.pin.name}</span>
             </button>
             {renderStatusCounts(row.pin.kind === "logic_gate" ? logicGateStatusCountsByID[row.pin.id] : undefined, true)}

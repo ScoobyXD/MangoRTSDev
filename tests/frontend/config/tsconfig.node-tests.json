@@ -24,6 +24,8 @@
     "../auth/authRoutes.test.ts",
     "../../../frontend/src/modules/api/requestJSON.ts",
     "../modules/api/requestJSON.test.ts",
+    "../../../frontend/src/modules/huddles/logicGateConversion.ts",
+    "../modules/huddles/logicGateConversion.test.ts",
     "../../../frontend/src/modules/attachments/attachmentApi.ts",
     "../modules/attachments/attachmentApi.test.ts",
     "../modules/attachments/emailDraftResourceIdentity.test.ts",

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const migration = join(repoRoot, "backend", "db", "migrations", "20260808_node_priority_not_assigned.sql");
+const canonicalSchema = join(repoRoot, "backend", "db", "schema.sql");
 
 function postgresBinary(name) {
   const suffix = process.platform === "win32" ? ".exe" : "";
@@ -61,6 +62,12 @@ function runMigration(expectFailure = false) {
   if (!expectFailure && result.status !== 0) throw new Error(result.stderr || result.stdout);
   if (expectFailure && result.status === 0) throw new Error("expected Node email migration to fail");
   return `${result.stdout}\n${result.stderr}`;
+}
+
+function runCanonicalSchema() {
+  const result = spawnSync(psql, ["-X", "-h", host, "-p", String(port), "-U", user, "-d", database, "-v", "ON_ERROR_STOP=1", "-f", canonicalSchema], { encoding: "utf8", timeout: 60_000, env });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(result.stderr || result.stdout);
 }
 
 function scalar(statement) {
@@ -146,6 +153,10 @@ try {
   }
   const version = Number(sql("show server_version_num").match(/\b(\d{6})\b/)?.[1]);
   if (version < 170000 || version >= 190000) throw new Error(`unsupported disposable PostgreSQL version ${version}`);
+
+  console.log("checking canonical schema executes cleanly");
+  sql("drop schema public cascade; create schema public");
+  runCanonicalSchema();
 
   console.log("checking reordered columns and valid existing multi-Node thread");
   installShape();

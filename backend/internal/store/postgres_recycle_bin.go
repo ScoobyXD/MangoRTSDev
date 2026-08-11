@@ -246,6 +246,11 @@ var recycleSnapshotTables = map[string]bool{
 	"nodes":                        true,
 	"logic_gates":                  true,
 	"projects":                     true,
+	"huddle_logic_gates":           true,
+	"huddle_nodes":                 true,
+	"kpis":                         true,
+	"huddle_explorer_folders":      true,
+	"huddle_explorer_items":        true,
 	"node_textboxes":               true,
 	"node_textboxes_history":       true,
 	"node_textbox_chats":           true,
@@ -279,6 +284,9 @@ var recycleRestoreTableOrder = []string{
 	"nodes",
 	"logic_gates",
 	"projects",
+	"huddle_logic_gates",
+	"huddle_nodes",
+	"kpis",
 	"node_textboxes",
 	"node_textboxes_history",
 	"node_textbox_chats",
@@ -288,6 +296,7 @@ var recycleRestoreTableOrder = []string{
 	"project_textboxes_history",
 	"project_textbox_chats",
 	"company_explorer_folders",
+	"huddle_explorer_folders",
 	"node_account_assignments",
 	"resource_gvic_settings",
 	"resource_permission_settings",
@@ -306,6 +315,7 @@ var recycleRestoreTableOrder = []string{
 	"project_management_timeline_projection",
 	"kanban_board_projection",
 	"company_explorer_items",
+	"huddle_explorer_items",
 }
 
 func postgresRestoreRecycleTableTx(ctx context.Context, tx *sql.Tx, tableName string, rows json.RawMessage) error {

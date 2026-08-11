@@ -3,7 +3,7 @@ import type { CompanyExplorerSnapshotPayload } from "./companyExplorerStore.js";
 
 export type CompanyExplorerLazyScope = "all";
 
-export type CompanyExplorerV2EntityType = "company" | "folder" | "project" | "logic_gate" | "node";
+export type CompanyExplorerV2EntityType = "company" | "folder" | "project" | "logic_gate" | "node" | "huddle_logic_gate" | "huddle_node";
 export type CompanyExplorerSearchResourceType = Exclude<CompanyExplorerV2EntityType, "company">;
 
 export type CompanyExplorerV2Row = {

@@ -805,6 +805,57 @@ type LogicGate struct {
 	CreatedTimestamp time.Time                 `json:"created_timestamp"`
 }
 
+type HuddleLogicGate struct {
+	CompanyID         string    `json:"company_id"`
+	HuddleLogicGateID string    `json:"huddle_logic_gate_id"`
+	Header            string    `json:"header"`
+	CreatedTimestamp  time.Time `json:"created_timestamp"`
+	UpdatedTimestamp  time.Time `json:"updated_timestamp"`
+}
+
+type HuddleNode struct {
+	CompanyID         string    `json:"company_id"`
+	HuddleNodeID      string    `json:"huddle_node_id"`
+	HuddleLogicGateID string    `json:"huddle_logic_gate_id"`
+	Name              string    `json:"name"`
+	CreatedTimestamp  time.Time `json:"created_timestamp"`
+	UpdatedTimestamp  time.Time `json:"updated_timestamp"`
+}
+
+type KPI struct {
+	CompanyID        string    `json:"company_id"`
+	KPIID            string    `json:"kpi_id"`
+	LogicGateID      string    `json:"logic_gate_id"`
+	Name             string    `json:"name"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type HuddleExplorerFolder struct {
+	CompanyID        string    `json:"company_id"`
+	FolderID         string    `json:"folder_id"`
+	ParentFolderID   *string   `json:"parent_folder_id"`
+	Name             string    `json:"name"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type HuddleExplorerItem struct {
+	CompanyID        string    `json:"company_id"`
+	ItemID           string    `json:"item_id"`
+	ParentFolderID   *string   `json:"parent_folder_id"`
+	ResourceType     string    `json:"resource_type"`
+	ResourceID       string    `json:"resource_id"`
+	Name             string    `json:"name"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type HuddleExplorer struct {
+	Folders []HuddleExplorerFolder `json:"folders"`
+	Items   []HuddleExplorerItem   `json:"items"`
+}
+
 const (
 	RACIRoleResponsible = "responsible"
 	RACIRoleAccountable = "accountable"

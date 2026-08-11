@@ -114,7 +114,7 @@ func normalizeCompanyExplorerSearchResourceTypes(values []string) ([]string, err
 			continue
 		}
 		switch clean {
-		case EntityTypeLogicGate, EntityTypeNode, EntityTypeProject, CompanyExplorerV2EntityFolder:
+		case EntityTypeLogicGate, EntityTypeNode, EntityTypeProject, EntityTypeHuddleLogicGate, EntityTypeHuddleNode, CompanyExplorerV2EntityFolder:
 		default:
 			return nil, ErrInvalid
 		}
