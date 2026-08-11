@@ -1,5 +1,7 @@
 import type {
   CommunicationsEmailCollaboration,
+  CommunicationsEmailThreadChatGroup,
+  CommunicationsEmailThreadTextboxLink,
   CompanyUser,
   CompanyUserGroup,
 } from "../../modules/communications/communicationsApi.js";
@@ -76,10 +78,56 @@ export function appendAcknowledgedEmailCollaborationChat(
   acknowledged: EditorTextBlockChatMessage,
 ): EditorTextBlockChatMessage[] {
   if (current.some((message) => message.id === acknowledged.id)) return current;
-  return [...current, acknowledged].sort((left, right) => {
+  return orderEmailCollaborationChatMessages([...current, acknowledged]);
+}
+
+export function orderEmailCollaborationChatMessages(
+  messages: EditorTextBlockChatMessage[],
+): EditorTextBlockChatMessage[] {
+  return [...messages].sort((left, right) => {
     const created = left.createdTimestamp.localeCompare(right.createdTimestamp);
     return created !== 0 ? created : left.id.localeCompare(right.id);
   });
+}
+
+export function emailThreadChatGroupKey(group: Pick<CommunicationsEmailThreadChatGroup, "node_id" | "textbox_id">): string {
+  return `${group.node_id}:${group.textbox_id}`;
+}
+
+export function orderEmailThreadChatGroups(
+  groups: CommunicationsEmailThreadChatGroup[],
+): CommunicationsEmailThreadChatGroup[] {
+  return [...groups].sort((left, right) => {
+    const activity = Date.parse(left.latest_activity_timestamp) - Date.parse(right.latest_activity_timestamp);
+    if (activity !== 0) return activity;
+    const node = left.node_id.localeCompare(right.node_id);
+    return node !== 0 ? node : left.textbox_id.localeCompare(right.textbox_id);
+  });
+}
+
+export function emailTextboxLinkForMessage(
+  links: CommunicationsEmailThreadTextboxLink[],
+  providerMessageID: string,
+  nodeID?: string,
+): CommunicationsEmailThreadTextboxLink | undefined {
+  const cleanProviderMessageID = providerMessageID.trim();
+  const cleanNodeID = nodeID?.trim() ?? "";
+  return links.find((link) => (
+    link.provider_message_id.trim() === cleanProviderMessageID
+    && (!cleanNodeID || link.node_id === cleanNodeID)
+  ));
+}
+
+export function conflictingEmailTextboxLink(
+  links: CommunicationsEmailThreadTextboxLink[],
+  selectedGroup: CommunicationsEmailThreadChatGroup,
+  providerMessageID: string,
+): CommunicationsEmailThreadTextboxLink | undefined {
+  return links.find((link) => (
+    link.node_id === selectedGroup.node_id
+    && link.textbox_id !== selectedGroup.textbox_id
+    && link.provider_message_id.trim() === providerMessageID.trim()
+  ));
 }
 
 function cleanID(value: string | undefined): string {

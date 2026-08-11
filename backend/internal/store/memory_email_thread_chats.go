@@ -5,19 +5,32 @@ import (
 	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
+	"time"
 )
 
-func (r *MemoryRepo) ListCommunicationsEmailThreadChatGroups(input CommunicationsEmailCollaborationListInput) ([]domain.CommunicationsEmailThreadChatGroup, error) {
+func memoryEmailThreadChatMessageTimestamp(message domain.CommunicationsEmailMessage) time.Time {
+	if message.Message.Date > 0 {
+		if message.Message.Date > 1_000_000_000_000 {
+			return time.UnixMilli(message.Message.Date).UTC()
+		}
+		return time.Unix(message.Message.Date, 0).UTC()
+	}
+	return message.CreatedTimestamp
+}
+
+func (r *MemoryRepo) ListCommunicationsEmailThreadChatGroups(input CommunicationsEmailCollaborationListInput) (domain.CommunicationsEmailThreadChatView, error) {
 	items, err := r.ListCommunicationsEmailCollaborations(input)
 	if err != nil {
-		return nil, err
+		return domain.CommunicationsEmailThreadChatView{}, err
 	}
 	groups := make([]domain.CommunicationsEmailThreadChatGroup, 0)
+	textboxLinks := make([]domain.CommunicationsEmailThreadTextboxLink, 0)
 	seen := map[string]bool{}
+	seenLinks := map[string]bool{}
 	for _, item := range items {
 		thread, err := r.GetCommunicationsEmailThread(item.CompanyID, item.EmailThreadID)
 		if err != nil {
-			return nil, err
+			return domain.CommunicationsEmailThreadChatView{}, err
 		}
 		messageByID := map[string]domain.CommunicationsEmailMessage{}
 		for _, message := range thread.Messages {
@@ -25,11 +38,11 @@ func (r *MemoryRepo) ListCommunicationsEmailThreadChatGroups(input Communication
 		}
 		node, err := r.GetNode(item.CompanyID, item.NodeID)
 		if err != nil {
-			return nil, err
+			return domain.CommunicationsEmailThreadChatView{}, err
 		}
 		projections, err := r.ListNodeProjections(item.CompanyID, item.NodeID)
 		if err != nil {
-			return nil, err
+			return domain.CommunicationsEmailThreadChatView{}, err
 		}
 		chatsByTextboxID := map[string][]domain.NodeProjection{}
 		for _, projection := range projections {
@@ -46,6 +59,7 @@ func (r *MemoryRepo) ListCommunicationsEmailThreadChatGroups(input Communication
 				continue
 			}
 			var payload struct {
+				Title           string   `json:"title"`
 				EmailMessageID  string   `json:"email_message_id"`
 				EmailMessageIDs []string `json:"email_message_ids"`
 			}
@@ -57,47 +71,68 @@ func (r *MemoryRepo) ListCommunicationsEmailThreadChatGroups(input Communication
 			if payload.EmailMessageID != "" {
 				messageIDs = append(messageIDs, payload.EmailMessageID)
 			}
-			var message domain.CommunicationsEmailMessage
-			foundMessage := false
+			linkedMessages := make([]domain.CommunicationsEmailThreadChatLinkedMessage, 0, len(messageIDs))
+			linkedMessageIDs := map[string]bool{}
+			latestActivity := time.Time{}
 			for _, emailMessageID := range messageIDs {
-				candidate, ok := messageByID[cleanUUIDText(emailMessageID)]
-				if !ok {
+				cleanMessageID := cleanUUIDText(emailMessageID)
+				candidate, ok := messageByID[cleanMessageID]
+				if !ok || linkedMessageIDs[cleanMessageID] {
 					continue
 				}
-				if !foundMessage || candidate.ProviderMessageID == strings.TrimSpace(input.MessageID) {
-					message, foundMessage = candidate, true
-				}
-				if candidate.ProviderMessageID == strings.TrimSpace(input.MessageID) {
-					break
+				linkedMessageIDs[cleanMessageID] = true
+				messageTimestamp := memoryEmailThreadChatMessageTimestamp(candidate)
+				linkedMessages = append(linkedMessages, domain.CommunicationsEmailThreadChatLinkedMessage{
+					EmailMessageID: candidate.EmailMessageID, ProviderMessageID: candidate.ProviderMessageID,
+					MessageTimestamp: messageTimestamp,
+				})
+				if latestActivity.Before(messageTimestamp) {
+					latestActivity = messageTimestamp
 				}
 			}
 			groupKey := item.NodeID + "\x1f" + projection.InformationID
-			chats := chatsByTextboxID[projection.InformationID]
-			if !foundMessage || len(chats) == 0 || seen[groupKey] {
+			for _, linkedMessage := range linkedMessages {
+				linkKey := groupKey + "\x1f" + linkedMessage.EmailMessageID
+				if seenLinks[linkKey] {
+					continue
+				}
+				seenLinks[linkKey] = true
+				textboxLinks = append(textboxLinks, domain.CommunicationsEmailThreadTextboxLink{
+					NodeID: item.NodeID, TextboxID: projection.InformationID,
+					EmailMessageID: linkedMessage.EmailMessageID, ProviderMessageID: linkedMessage.ProviderMessageID,
+				})
+			}
+			chats := append([]domain.NodeProjection(nil), chatsByTextboxID[projection.InformationID]...)
+			if len(linkedMessages) == 0 || len(chats) == 0 || seen[groupKey] {
 				continue
+			}
+			sort.SliceStable(chats, func(i, j int) bool {
+				if !chats[i].CreatedTimestamp.Equal(chats[j].CreatedTimestamp) {
+					return chats[i].CreatedTimestamp.Before(chats[j].CreatedTimestamp)
+				}
+				return chats[i].InformationID < chats[j].InformationID
+			})
+			for _, chat := range chats {
+				if latestActivity.Before(chat.CreatedTimestamp) {
+					latestActivity = chat.CreatedTimestamp
+				}
 			}
 			seen[groupKey] = true
 			groups = append(groups, domain.CommunicationsEmailThreadChatGroup{
-				NodeID: item.NodeID, NodeName: node.Title, TextboxID: projection.InformationID, RelationshipID: item.CollaborationID,
-				EmailThreadID: thread.EmailThreadID, EmailMessageID: message.EmailMessageID,
-				ProviderMessageID: message.ProviderMessageID, MessageOrder: message.MessageOrder,
-				Chats: append([]domain.NodeProjection(nil), chats...),
+				NodeID: item.NodeID, NodeName: node.Title, TextboxID: projection.InformationID,
+				TextboxTitle: strings.TrimSpace(payload.Title), EmailThreadID: thread.EmailThreadID,
+				LinkedMessages: linkedMessages, LatestActivityTimestamp: latestActivity, Chats: chats,
 			})
 		}
 	}
 	sort.SliceStable(groups, func(i, j int) bool {
-		leftCurrent := groups[i].ProviderMessageID == strings.TrimSpace(input.MessageID)
-		rightCurrent := groups[j].ProviderMessageID == strings.TrimSpace(input.MessageID)
-		if leftCurrent != rightCurrent {
-			return leftCurrent
+		if !groups[i].LatestActivityTimestamp.Equal(groups[j].LatestActivityTimestamp) {
+			return groups[i].LatestActivityTimestamp.Before(groups[j].LatestActivityTimestamp)
 		}
-		if groups[i].MessageOrder != groups[j].MessageOrder {
-			return groups[i].MessageOrder < groups[j].MessageOrder
-		}
-		if groups[i].NodeName != groups[j].NodeName {
-			return groups[i].NodeName < groups[j].NodeName
+		if groups[i].NodeID != groups[j].NodeID {
+			return groups[i].NodeID < groups[j].NodeID
 		}
 		return groups[i].TextboxID < groups[j].TextboxID
 	})
-	return groups, nil
+	return domain.CommunicationsEmailThreadChatView{Groups: groups, TextboxLinks: textboxLinks}, nil
 }

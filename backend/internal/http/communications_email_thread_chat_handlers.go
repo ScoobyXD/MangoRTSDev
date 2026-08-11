@@ -48,13 +48,14 @@ func (s *Server) handleCommunicationsEmailThreadChats(w http.ResponseWriter, r *
 		s.writeEmailCollaborationStoreError(w, err, "failed_to_load_email_thread_chats")
 		return
 	}
-	groups, err := s.repo.ListCommunicationsEmailThreadChatGroups(input)
+	chatView, err := s.repo.ListCommunicationsEmailThreadChatGroups(input)
 	if err != nil {
 		s.writeEmailCollaborationStoreError(w, err, "failed_to_load_email_thread_chats")
 		return
 	}
 	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
 		"collaborations": collaborations,
-		"groups":         groups,
+		"groups":         chatView.Groups,
+		"textbox_links":  chatView.TextboxLinks,
 	})
 }

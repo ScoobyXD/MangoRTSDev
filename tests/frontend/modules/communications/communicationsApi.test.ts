@@ -189,12 +189,20 @@ test("email thread chat groups use one direct mailbox-scoped read", async () => 
       node_id: "node-1",
       node_name: "Inbox work",
       textbox_id: "textbox-1",
-      relationship_id: "relationship-1",
+      textbox_title: "First review",
       email_thread_id: "thread-internal-1",
+      linked_messages: [{
+        email_message_id: "message-internal-1",
+        provider_message_id: "message-1",
+        message_timestamp: "2026-08-11T10:00:00Z",
+      }],
+      latest_activity_timestamp: "2026-08-11T10:00:00Z",
+      chats: [],
+    }], textbox_links: [{
+      node_id: "node-1",
+      textbox_id: "textbox-1",
       email_message_id: "message-internal-1",
       provider_message_id: "message-1",
-      message_order: 0,
-      chats: [],
     }] });
   };
   try {
@@ -207,6 +215,7 @@ test("email thread chat groups use one direct mailbox-scoped read", async () => 
     assert.equal(requested, "/v1/communications/email-thread-chats?company_id=company-1&message_id=message-1&thread_id=thread-1&account_email=me%40example.test");
     assert.equal(result.collaborations[0]?.node_id, "node-1");
     assert.equal(result.groups[0]?.textbox_id, "textbox-1");
+    assert.equal(result.textbox_links[0]?.email_message_id, "message-internal-1");
   } finally {
     globalThis.fetch = originalFetch;
   }
