@@ -636,7 +636,7 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
     }));
     editor.commands.setContent({ type: "doc", content: [
       { type: "paragraph", attrs: { blockId: "numbered-section-label" }, content: [{ type: "text", text: "annoyances:" }] },
-      { type: "orderedList", attrs: { blockId: "existing-numbered-list", start: 1 }, content: existingNumberedItems },
+      { type: "orderedList", attrs: { blockId: "existing-numbered-list", start: 3 }, content: existingNumberedItems },
     ] });
     let numberedSectionLabelEnd = 0;
     editor.state.doc.descendants((node, position) => {
@@ -653,7 +653,7 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
     const insertedFirstNumberedList = editor.state.doc.child(1);
     assert.equal(insertedFirstNumberedList.type.name, "orderedList");
     assert.equal(insertedFirstNumberedList.attrs.blockId, "existing-numbered-list", "the existing numbered list keeps its identity");
-    assert.equal(insertedFirstNumberedList.attrs.start, 1, "the new row receives the existing first marker");
+    assert.equal(insertedFirstNumberedList.attrs.start, 1, "inserting at the top rebases stale markers to the canonical first marker");
     assert.equal(insertedFirstNumberedList.childCount, 7, "the six existing rows shift to markers 2 through 7");
     assert.equal(insertedFirstNumberedList.child(0).textContent, "", "the inserted first numbered row starts empty");
     assert.deepEqual(
@@ -769,6 +769,66 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
     assert.equal(editor.state.doc.child(2).type.name, "paragraph");
     assert.equal(editor.state.selection.$from.parent, editor.state.doc.child(2));
     assert.equal(editor.state.doc.child(0).childCount, 1, "ordinary Enter cannot restart or extend the numbered list");
+
+    const preservedNestedNumberedItems = ["sadss", "asdasd", "asd"].map((text, index) => ({
+      type: "listItem",
+      attrs: { blockId: `preserved-child-${index + 1}` },
+      content: [{
+        type: "paragraph",
+        attrs: { blockId: `preserved-child-paragraph-${index + 1}` },
+        content: [{ type: "text", text }],
+      }],
+    }));
+    editor.commands.setContent({ type: "doc", content: [{
+      type: "orderedList",
+      attrs: { blockId: "stale-root-list", start: 3 },
+      content: [
+        {
+          type: "listItem",
+          attrs: { blockId: "parent-numbered-item" },
+          content: [
+            { type: "paragraph", attrs: { blockId: "parent-numbered-paragraph" }, content: [{ type: "text", text: "asdad" }] },
+            { type: "orderedList", attrs: { blockId: "preserved-child-list", start: 1 }, content: preservedNestedNumberedItems },
+          ],
+        },
+        { type: "listItem", attrs: { blockId: "following-numbered-item" }, content: [{ type: "paragraph", attrs: { blockId: "following-numbered-paragraph" }, content: [{ type: "text", text: "Fix the permissions page" }] }] },
+      ],
+    }] });
+    let parentNumberedTextEnd = 0;
+    editor.state.doc.descendants((node, position) => {
+      if (node.isText && node.text === "asdad") parentNumberedTextEnd = position + node.nodeSize;
+    });
+    editor.commands.setTextSelection(parentNumberedTextEnd);
+    const preservedNestedListBeforeEnter = editor.state.doc.child(0).child(0).child(1).toJSON();
+    assert.equal(handleMangoTiptapOutlineEnter(editor, "automatic-outline-numbering"), true, "Enter creates one new peer after a parent row");
+    const numberedListAfterNestedEnter = editor.state.doc.child(0);
+    assert.equal(numberedListAfterNestedEnter.attrs.start, 1, "Enter rebases the edited ordered list to 1");
+    assert.equal(numberedListAfterNestedEnter.childCount, 3, "Enter inserts only one new root item");
+    assert.equal(numberedListAfterNestedEnter.child(0).childCount, 1, "the new peer appears before the parent's existing nested rows");
+    assert.equal(numberedListAfterNestedEnter.child(1).childCount, 2, "the new peer temporarily carries the existing nested rows at their visible depth");
+    assert.deepEqual(numberedListAfterNestedEnter.child(1).child(1).toJSON(), preservedNestedListBeforeEnter, "Enter preserves the exact nested rows");
+    assert.equal(numberedListAfterNestedEnter.child(1).firstChild?.textContent, "");
+    assert.equal(numberedListAfterNestedEnter.child(2).attrs.blockId, "following-numbered-item", "the following root row remains unchanged");
+    const insertedPeerID = numberedListAfterNestedEnter.child(1).attrs.blockId;
+    assert.equal(editor.state.selection.$from.parent, numberedListAfterNestedEnter.child(1).firstChild, "the caret moves into only the new peer");
+
+    assert.equal(indentMangoTiptapSelection(editor), true, "Tab indents only the new peer");
+    const numberedListAfterNestedTab = editor.state.doc.child(0);
+    assert.equal(numberedListAfterNestedTab.attrs.start, 1);
+    assert.equal(numberedListAfterNestedTab.childCount, 2, "Tab leaves the following root row at the root level");
+    assert.equal(numberedListAfterNestedTab.child(1).attrs.blockId, "following-numbered-item");
+    const nestedListAfterTab = numberedListAfterNestedTab.child(0).child(1);
+    assert.equal(nestedListAfterTab.attrs.blockId, "preserved-child-list", "the existing nested list keeps its identity");
+    assert.equal(nestedListAfterTab.attrs.start, 1, "the nested alphanumeric sequence rebases to its first marker");
+    assert.equal(nestedListAfterTab.childCount, 4, "Tab makes the active row the first child without creating another list");
+    assert.equal(nestedListAfterTab.child(0).attrs.blockId, insertedPeerID, "only the active row changes depth");
+    assert.equal(nestedListAfterTab.child(0).childCount, 1, "the indented row does not own the rows that follow it");
+    assert.deepEqual(
+      Array.from({ length: 3 }, (_, index) => nestedListAfterTab.child(index + 1).toJSON()),
+      preservedNestedListBeforeEnter.content,
+      "the existing nested rows keep their content, identities, order, and depth",
+    );
+    assert.equal(editor.state.selection.$from.parent, nestedListAfterTab.child(0).firstChild, "the caret remains in the indented row");
 
     const nestedRows = [
       { type: "paragraph", attrs: { blockId: "person-label" }, content: [{ type: "text", text: "Christina:" }] },
