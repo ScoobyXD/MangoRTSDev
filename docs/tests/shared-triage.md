@@ -5,14 +5,16 @@
 3. Highlighting email text shows a chat action first and does not automatically fill the composer.
 4. Clicking the highlight action opens the rail, places the quote in the composer, and focuses it without writing to the database.
 5. The thread chat rail is one scrollable view grouped only by exact Node and text box; messages sharing both remain in one group.
-6. Each chat group header shows a clickable Node icon and Node title.
-7. If the thread has several Nodes, the user chooses which Node receives a new chat; Mango never guesses.
+6. Chat groups are oldest-first, elevate on hover, remain elevated while selected, and show a clickable Node title plus one **New chat** action.
+7. **New chat** selects the exact Node and text box for normal or highlighted-text chat sends; Shared Triage has no destination dropdown and never guesses.
 8. One universal shared draft is visible from Shared Triage and every related Node without being related to a Node text box.
 9. A Shared Triage-created draft invents no origin Node and does not auto-open a draft panel in any Node.
 10. An already-linked exact-message text box loads its existing messages and receives each later Shared Triage chat without creating another text box.
 11. Reconciling unchanged email metadata must not restart the chat-rail load, discard stored text-box chats, or repeat Node reads.
 12. A chat send reuses the exact shared-mailbox stored message when present, otherwise fetches only that exact provider message, and never calls triage conversion or queues remaining-thread ingestion.
 13. After the backend acknowledges a chat, the open rail shows it immediately in its exact Node and text-box group without waiting for realtime or another Node read.
+14. Opening a conversation reconciles the stored snapshot with a fresh provider thread and shows every available message in oldest-to-newest order with the actual count.
+15. The desktop thread chat column is horizontally resizable and preserves its company-scoped width.
 
 Last updated: 2026-08-10
 
@@ -48,9 +50,9 @@ An authorized Shared Triage user opens one exact shared-inbox conversation and u
 ↓
 One thread-level rail opens with exact Node-and-text-box sections; individual messages show no separate chat button or overflow menu
 ↓
-Each group header shows a clickable Node icon and title, and an unsent quote/text-box preview remains local
+Each oldest-first group elevates on hover and its **New chat** action selects that exact Node and text box; an unsent quote preview remains local
 ↓
-The first send appends to the existing exact-message text box or atomically creates any missing text box, exact shared-email relationship, and chat in the chosen Node under the existing shared-inbox authorization; closing the preview writes and deletes nothing
+The first send atomically creates any missing exact shared-email relationship and chat in the chosen text box, creating the text box only when no existing group was chosen; closing the preview writes and deletes nothing
 
 Last updated: 2026-08-09
 
@@ -256,8 +258,8 @@ ST152 - The top sender/subject line reserves only the actual width of its top-ri
 ST153 - Compact spacing preserves the shared-inbox card contract: unread dot/frame, selected pressed surface, conditional thread icon, ellipsis, scope-correct commands, and pointer/keyboard/drag affordances remain distinct and usable.
 ST154 - Shared Triage email rows come only from the selected shared inbox's canonical provider list. Mention participation alone grants Node/chat access; it does not grant mailbox navigation or create a Shared Triage or My Triage email row for a participant whose accessible provider mailbox did not return the message.
 ST155 - When a canonical Shared Triage provider row matches a collaboration by exact shared inbox plus provider thread/message identity, Mango annotates that provider row with collaboration/Node identity. Provider unread/starred/attachment/thread state remains authoritative, and no collaboration snapshot may become a separate, fallback, or cross-inbox row.
-ST156 - One chat toggle in the Shared Triage thread header opens and closes one rail grouped only by exact Node and text box. Selecting a row auto-opens it only when the stored thread already has accessible chats. Reading, selecting text, closing, and abandoning an empty composer create nothing. If no Node is associated, the first nonempty comment creates a floating Node with priority **Not Assigned**, no Logic Gate, and one exact linked text box. If several Nodes are associated, the user chooses the destination Node before send. Sending reuses the exact stored shared-mailbox message or fetches only that missing exact provider message; it never calls triage conversion or queues remaining-thread ingestion. Exact shared-inbox authorization and acknowledged save precede clearing the draft, and the saved chat appears immediately in its exact group without waiting for realtime or another Node read.
-ST157 - Selecting email text shows a chat action and captures the exact message ID, quote, and offsets without opening the rail or filling the composer. Clicking that action opens the rail, places the quote in the composer, and focuses it. Individual reply cards have no chat button or three-dot menu. Sending resolves or creates the chosen Node's exact-message text box, and each group header shows a clickable Node icon and title.
+ST156 - One chat toggle in the Shared Triage thread header opens and closes one horizontally resizable rail grouped oldest-first by exact Node and text box. Selecting a row auto-opens it only when the stored thread already has accessible chats. Reading, selecting text, closing, and abandoning an empty composer create nothing. If no Node is associated, the first nonempty comment creates a floating Node with priority **Not Assigned**, no Logic Gate, and one exact linked text box. Existing work is selected only through a group's **New chat** action; no destination dropdown or Node guess is allowed. Sending reuses the exact stored shared-mailbox message or fetches only that missing exact provider message; it never calls triage conversion or queues remaining-thread ingestion. Exact shared-inbox authorization and acknowledged save precede clearing the draft, and the saved chat appears immediately in its exact group without waiting for realtime or another Node read.
+ST157 - Selecting email text shows a chat action and captures the exact message ID, quote, and offsets without opening the rail or filling the composer. Clicking that action opens the rail, places the quote in the composer, and focuses it. Individual reply cards have no chat button or three-dot menu. Each group elevates on hover, remains elevated when selected, and has a clickable Node title plus one **New chat** action. Sending atomically creates any missing exact-message link to that chosen text box and the chat without creating a duplicate text box.
 ST158 - Reply, Reply All, and Create Shared Draft create or reopen the one universal active draft for the exact thread. A Shared Triage-created draft has no invented origin Node and does not auto-open in any Node; every related Node shows its active-draft count and may open the same draft on demand. Collaboration participation never grants unrelated shared-inbox access.
 ST159 - Collaboration shared drafts are immediate-send only under EMAIL68. Their compose footer omits scheduled send and the ordinary Shared Triage browser scheduler excludes them; this does not change scheduled-send behavior for ordinary shared-inbox drafts.
 ST160 - Unsynchronized shared fallback drafts survive Mango `401`, unclassified `403`, provider reauthorization/disconnection `409`, `5xx`, and network failures. Only explicit access/company revocation, shared-inbox deletion, or conversion to a non-mail-bearing row purges that exact inbox; personal and other shared scopes remain intact.

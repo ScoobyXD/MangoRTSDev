@@ -67,8 +67,7 @@ where mangorts_user_can_access_resource(
       and chat.textbox_id::text=relationship.resource_textbox_id
       and chat.deleted_timestamp is null
   )
-order by case when message.provider_message_id=$6 then 0 else 1 end,
-         message.message_order,lower(node.name),relationship.resource_id,relationship.resource_textbox_id`, args...)
+order by message.message_order,lower(node.name),relationship.resource_id,relationship.resource_textbox_id`, args...)
 	if err != nil {
 		return nil, err
 	}
