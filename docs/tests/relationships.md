@@ -1,33 +1,32 @@
 # Current Email Relationship Business Logic Laws
 
-1. `email_relationships` connects one exact internal email message to one exact Node text box.
-2. Every Node email relationship must name a real text box in that same Node; Node-wide email relationships do not exist.
-3. One Node text box may link to at most one exact email message.
-4. One exact email message may have at most one text-box relationship in each Node.
-5. The same exact email message may link to different text boxes in different Nodes.
-6. An email thread belongs to a Node when that Node has at least one text box linked to a message in the thread.
-7. A newly completed message updates the stored thread shown in every Node that already contains it and creates no new text box or email relationship.
-8. A new exact-message text box and relationship are created only when a user first sends a chat about that message in that Node.
-9. An email-selection chat is valid only when the exact internal email message has an `email_relationships` row for that chat's exact Node and text box.
-10. Opening an email-selection chat preview creates no text box, email relationship, or chat relationship.
-11. Sending the first chat from an email-selection preview atomically creates the exact Node-local text box, email-to-textbox relationship, and text-box chat, or creates none of them.
-12. Cancelling an unsent email-selection chat preview requires no relationship deletion because no relationship has been written.
-13. A universal shared draft belongs to its exact email thread, not to a Node or text box.
-14. Showing a universal shared draft in a Node is presentation state and never creates a draft-to-textbox relationship.
-15. Removing one Node's email relationship removes only that Node's typed edge and leaves every other Node, stored thread/message, local text box, chat, and surviving attachment relationship unchanged.
-16. Email-to-Node, email-to-textbox, chat, and draft rules do not create a generic resource registry, surrogate identity, or untyped edge.
-17. An existing exact-message text-box relationship routes a later triage send through the normal Node text-box-chat insert only; it creates no email, relationship, permission, participant, or collaboration row.
-18. A triage chat command reuses the exact mailbox-scoped stored message when present, fetches only that exact provider message when absent, and never queues thread ingestion.
+1. `email_relationships` remains the typed authority that connects an exact internal email message to a Node and optionally to one exact Node text box.
+2. One stored email thread may have Node-wide relationships in multiple Nodes, and one Node may have multiple stored email threads.
+3. One exact email message may have at most one textbox-specific relationship in each Node.
+4. The same exact email message may link to different text boxes in different Nodes.
+5. The database enforces semantic-edge uniqueness and the one-textbox-per-message-per-Node law under concurrent writes.
+6. A newly completed message inherits every distinct Node-wide destination already present for its thread.
+7. New-message ingestion never creates or copies a textbox-specific relationship, chat, or shared-draft display state.
+8. An email-selection chat is valid only when the exact internal email message has an `email_relationships` row for that chat's exact Node and Node text box.
+9. Opening an email-selection chat preview creates no text box, email relationship, or chat relationship.
+10. Sending the first chat from an email-selection preview atomically creates the exact Node-local text box, email-to-textbox relationship, and text-box chat, or creates none of them.
+11. Cancelling an unsent email-selection chat preview requires no relationship deletion because no relationship has been written.
+12. A universal shared draft belongs to its exact email thread, not to a Node or text box.
+13. Showing a universal shared draft in a Node is presentation state and never creates a draft-to-textbox relationship.
+14. Removing one Node's email relationship removes only that Node's typed edge and leaves every other Node, stored thread/message, local text box, chat, and surviving attachment relationship unchanged.
+15. Email-to-Node, email-to-textbox, chat, and draft rules do not create a generic resource registry, surrogate identity, or untyped edge.
+16. An existing exact-message text-box relationship routes a later triage send through the normal Node text-box-chat insert only; it creates no email, relationship, permission, participant, or collaboration row.
+17. A triage chat command reuses the exact mailbox-scoped stored message when present, fetches only that exact provider message when absent, and never queues thread ingestion or links a thread to a text box.
 
 Last updated: 2026-08-10
 
 # Process Story: One email thread can appear in several Nodes while message work stays Node-local
 
-A stored email thread may have exact message-to-text-box `email_relationships` in several Nodes
+A stored email thread may have exact Node-wide `email_relationships` in several Nodes
 ↓
-The thread belongs to each Node containing at least one of those exact message text boxes
+Each newly completed message inherits every distinct Node-wide destination already used by that thread, but never inherits a text-box destination
 ↓
-Each newly completed message appears through that stored thread without creating another text box or relationship
+Inside each Node, one exact message may link to one exact Node text box; the same message may link to a different text box in another Node
 ↓
 Opening a highlighted-email chat preview creates no relationship or resource
 ↓
@@ -82,17 +81,17 @@ The picker and clickable header chips remain presentation only and never become 
 
 Last updated: 2026-08-07
 
-# Process Story: A completed email message updates existing thread Nodes without new text boxes
+# Process Story: A completed email message inherits exact Node-wide destinations
 
 A qualifying Inbox arrival reconciles a stored email thread
 ↓
 Mango identifies the exact newly completed `email_messages.email_message_id`
 ↓
-Every Node that already contains the thread reads the newly stored message through that same thread
+Inside that message transaction, Mango reads the distinct current Node-wide `email_relationships` destinations for the same company/thread
 ↓
-No text box or email relationship is created for the new message until a user sends a chat about it in a chosen Node
+Only missing typed Node relationships are inserted idempotently for the new message
 ↓
-No Node is guessed, no access is granted, no chat is copied, and an unplaced thread remains unplaced
+No endpoint is guessed, no access is granted, no textbox placement is copied, and an unplaced thread remains unplaced
 
 Last updated: 2026-08-07
 
@@ -381,11 +380,11 @@ Node search location derives only from exact source relationships: a fully visib
 
 Removing historical Node placement rows or their now-empty deterministic folder MUST NOT delete a Node, Logic Gate assignment, Project relationship, email relationship, attachment relationship, chat ownership, RACI assignment, permission, or any other endpoint or typed edge.
 
-### Law 29 — New email messages update existing thread Nodes without creating text boxes
+### Law 29 — New email messages inherit only exact Node-wide thread destinations
 
-When a provider message becomes completely stored under an existing `email_thread_id`, every Node that already contains that thread MUST see the message through the existing stored thread. Ingestion MUST NOT create a Node text box or `email_relationships` row for the new message.
+When a provider message becomes completely stored under an existing `email_thread_id`, Mango MUST atomically create only the missing `email_relationships` rows for the distinct current destinations where the same company/thread already has `resource_type='node'` and `resource_textbox_id is null`. The new relationship MUST use the exact stored `email_message_id`, exact Node ID, exact company, and canonical `node` type.
 
-The first chat about that exact message in a chosen Node MUST atomically create the missing exact-message text box, typed email relationship, and chat. Ingestion MUST NOT invent a Node, copy a chat or draft, grant permissions or RACI, or create a Project/Logic-Gate relationship.
+This propagation is idempotent and MUST NOT recopy an existing message, invent or choose a Node for an unplaced thread, copy Project/Logic-Gate/textbox destinations, grant permissions or RACI, create a chat/draft, or treat a relationship as provider-thread membership authority. The message upsert and its missing Node-wide relationships commit or roll back together.
 
 ### Law 30 — Policy parentage reuses canonical typed relationships
 
@@ -395,11 +394,11 @@ Inherited resolution may follow those live typed parent edges, but it MUST NOT c
 
 ### Law 31 — Email threads may span Nodes, while textbox links remain exact and Node-local
 
-One `email_thread_id` and its exact stored messages MAY have message-to-text-box `email_relationships` in more than one Node. The thread belongs to a Node exactly when that Node has at least one such relationship. A Node email relationship MUST have a non-null `resource_textbox_id`.
+One `email_thread_id` and its exact stored messages MAY have Node-wide `email_relationships` in more than one Node. A Node-wide relationship has `resource_type='node'` and a null `resource_textbox_id`; it exposes the thread in that exact Node but does not make that Node the thread owner.
 
-A relationship MUST name one exact `email_message_id`, one exact Node, and one exact textbox in that Node. One textbox may name at most one email message, and the same message may be linked to at most one textbox inside one Node. Repeating the same Node/message/textbox command converges to the existing typed edge, a different textbox in that same Node is rejected, and a textbox in a different Node is allowed.
+A textbox-specific relationship MUST name one exact `email_message_id`, one exact Node, and one exact textbox in that Node. The same message may be linked to at most one textbox inside one Node. Repeating the same Node/message/textbox command converges to the existing typed edge, a different textbox in that same Node is rejected, and a textbox in a different Node is allowed.
 
-Removing one Node email relationship deletes only that exact relationship. It MUST NOT delete or rewrite another Node's relationship, the stored thread or message, another Node's textbox or chat, an email chat quote, or any surviving attachment relationship.
+Removing one Node-wide or textbox-specific email relationship deletes only that exact relationship. It MUST NOT delete or rewrite another Node's relationship, the stored thread or message, another Node's textbox or chat, an email chat quote, or any surviving attachment relationship.
 
 ## Required design examples
 

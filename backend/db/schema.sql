@@ -3504,9 +3504,7 @@ create table if not exists email_relationships (
   constraint email_relationships_resource_type_chk
     check (resource_type in ('node', 'project', 'logic_gate')),
   constraint email_relationships_textbox_id_chk
-    check (resource_textbox_id is null or btrim(resource_textbox_id) <> ''),
-  constraint email_relationships_node_textbox_required_chk
-    check (resource_type <> 'node' or resource_textbox_id is not null)
+    check (resource_textbox_id is null or btrim(resource_textbox_id) <> '')
 );
 
 create index if not exists idx_email_relationships_resource
@@ -3525,10 +3523,6 @@ create unique index if not exists idx_email_relationships_active_identity
 
 create unique index if not exists idx_email_relationships_one_node_textbox_per_message
   on email_relationships(company_id, email_message_id, resource_id)
-  where resource_type='node' and resource_textbox_id is not null;
-
-create unique index if not exists idx_email_relationships_one_message_per_node_textbox
-  on email_relationships(company_id, resource_id, resource_textbox_id)
   where resource_type='node' and resource_textbox_id is not null;
 
 create table if not exists node_textboxes_history (

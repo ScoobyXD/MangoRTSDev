@@ -83,7 +83,7 @@ func TestMemoryEmailConversionCommandCreatesAssignedWorkItemWithProvenanceAndEve
 		t.Fatalf("provenance = %+v, want original email/message/thread and created work item IDs", provenance)
 	}
 	projections, err := repo.ListNodeProjections(companyID, node.NodeID)
-	if err != nil || len(projections) != 2 || projections[0].Type != "Attached email" || projections[1].Type != "Text box" {
+	if err != nil || len(projections) != 1 || projections[0].Type != "Attached email" {
 		t.Fatalf("email projections = %+v err=%v", projections, err)
 	}
 	var projectionPayload map[string]any
@@ -224,7 +224,7 @@ func TestMemoryEmailConversionCommandAttachesEmailToExistingNode(t *testing.T) {
 		t.Fatalf("email placements = %+v err=%v", placements, err)
 	}
 	projections, err := repo.ListNodeProjections(companyID, node.NodeID)
-	if err != nil || len(projections) != 2 || projections[0].Type != "Attached email" || projections[1].Type != "Text box" {
+	if err != nil || len(projections) != 1 || projections[0].Type != "Attached email" {
 		t.Fatalf("email projections = %+v err=%v", projections, err)
 	}
 	var projectionPayload map[string]any
@@ -333,8 +333,8 @@ func TestMemoryEmailNodeTransferAttachesEmailAndDeletesSourceNode(t *testing.T) 
 		t.Fatalf("email placements after transfer = %+v err=%v, want target placement", placements, err)
 	}
 	projections, err := repo.ListNodeProjections(companyID, targetNode.NodeID)
-	if err != nil || len(projections) != 2 || projections[0].Type != "Attached email" || projections[1].Type != "Text box" {
-		t.Fatalf("target email projections = %+v err=%v, want attached email and its textbox", projections, err)
+	if err != nil || len(projections) != 1 || projections[0].Type != "Attached email" {
+		t.Fatalf("target email projections = %+v err=%v, want attached email", projections, err)
 	}
 	nodes, err := repo.ListNodes(companyID)
 	if err != nil || len(nodes) != 1 || nodes[0].NodeID != targetNode.NodeID {
@@ -585,7 +585,7 @@ func TestMemoryEmailConversionCommandAttachesEmailToStandaloneExistingNode(t *te
 		t.Fatalf("node priority = %+v, want %d", result.Nodes[0].Priority, priority)
 	}
 	projections, err := repo.ListNodeProjections(companyID, node.NodeID)
-	if err != nil || len(projections) != 2 || projections[0].Type != "Attached email" || projections[1].Type != "Text box" {
+	if err != nil || len(projections) != 1 || projections[0].Type != "Attached email" {
 		t.Fatalf("email projections = %+v err=%v", projections, err)
 	}
 	placements, err := repo.ListCommunicationsEmailPlacements(user.UserID, companyID, []string{message.ID})

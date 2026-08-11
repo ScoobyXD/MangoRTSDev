@@ -260,11 +260,7 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(ctx context.Context,
 		}
 		r.emailCollaborations[key(input.CompanyID, item.CollaborationID)] = item
 	}
-	preferredTextboxID := ""
-	if input.LinkedTextBlock != nil {
-		preferredTextboxID = input.LinkedTextBlock.InformationID
-	}
-	if _, err := r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, nodeID, informationID, thread.EmailThreadID, input.Message.ID, input.CreatedByUserID, now, preferredTextboxID); err != nil {
+	if _, err := r.linkCommunicationsEmailThreadToNodeLocked(input.CompanyID, nodeID, informationID, thread.EmailThreadID, input.Message.ID, input.CreatedByUserID, now); err != nil {
 		restore()
 		return CommunicationsEmailCollaborationEnsureResult{}, err
 	}

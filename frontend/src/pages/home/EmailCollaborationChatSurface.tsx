@@ -215,17 +215,9 @@ export function EmailCollaborationChatSurface({
 
   const applyThreadChatGroups = React.useCallback((
     groups: CommunicationsEmailThreadChatGroup[],
+    destinations: CommunicationsEmailCollaboration[],
     activeDestination: CommunicationsEmailCollaboration | null,
   ) => {
-    const destinations = [...new Map(groups.map((group) => [group.node_id, group])).values()].map((group) => ({
-      company_id: companyID,
-      collaboration_id: group.relationship_id,
-      node_id: group.node_id,
-      attached_email_information_id: group.relationship_id,
-      provider_thread_id: message.thread_id,
-      root_message_id: group.email_message_id,
-      latest_message_id: group.email_message_id,
-    } satisfies CommunicationsEmailCollaboration));
     collaborationsRef.current = destinations;
     setCollaborations(destinations);
     const blockLabels: Record<string, string> = {};
@@ -261,13 +253,13 @@ export function EmailCollaborationChatSurface({
     setActiveTextBlockID(activeBlockID);
     onExistingChatsChange?.(allChats.length > 0);
     return destinations;
-  }, [companyID, message.thread_id, onExistingChatsChange, targetEmailMessageID]);
+  }, [onExistingChatsChange, targetEmailMessageID]);
 
   const loadThreadChats = React.useCallback(async (
     activeDestination: CommunicationsEmailCollaboration | null,
     expectedLoadSequence?: number,
   ) => {
-    const groups = await listEmailThreadChatGroups({
+    const result = await listEmailThreadChatGroups({
       companyID,
       messageID: message.id,
       threadID: message.thread_id,
@@ -275,7 +267,7 @@ export function EmailCollaborationChatSurface({
       accountEmail,
     });
     if (expectedLoadSequence !== undefined && loadSequenceRef.current !== expectedLoadSequence) return;
-    applyThreadChatGroups(groups, activeDestination);
+    applyThreadChatGroups(result.groups, result.collaborations, activeDestination);
   }, [accountEmail, applyThreadChatGroups, companyID, message.id, message.thread_id, sharedInboxID]);
 
   const acceptCollaboration = React.useCallback((nextCollaboration: CommunicationsEmailCollaboration | null, publishToMailbox = true) => {
@@ -338,12 +330,12 @@ export function EmailCollaborationChatSurface({
       sharedInboxID,
       accountEmail,
     })
-      .then((groups) => {
-        if (loadSequenceRef.current !== requestSequence) return;
-        const items = applyThreadChatGroups(groups, null);
-        const nextCollaboration = items.length === 1 ? items[0] : null;
-        acceptCollaboration(nextCollaboration, false);
-        if (nextCollaboration) applyThreadChatGroups(groups, nextCollaboration);
+      .then((result) => {
+		if (loadSequenceRef.current !== requestSequence) return;
+		const items = applyThreadChatGroups(result.groups, result.collaborations, null);
+		const nextCollaboration = items.length === 1 ? items[0] : null;
+		acceptCollaboration(nextCollaboration, false);
+		if (nextCollaboration) applyThreadChatGroups(result.groups, result.collaborations, nextCollaboration);
         if (loadSequenceRef.current === requestSequence) onSuccess();
       })
       .catch((cause) => {

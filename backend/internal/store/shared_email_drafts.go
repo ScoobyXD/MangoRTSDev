@@ -161,7 +161,7 @@ where company_id=$1::uuid and deleted_timestamp is null
   where relationship.company_id=email_drafts.company_id
    and relationship.email_thread_id=email_drafts.email_thread_id
    and relationship.resource_type='node'
-   and relationship.resource_textbox_id is not null
+   and relationship.resource_textbox_id is null
    and mangorts_user_can_access_resource(relationship.company_id,relationship.resource_type,
        relationship.resource_id,$2::uuid,'edit'))
 order by updated_timestamp desc,draft_id`, strings.TrimSpace(input.CompanyID), participantUserID)
@@ -208,7 +208,7 @@ where company_id=$1::uuid and draft_id=$2 and deleted_timestamp is null
   where relationship.company_id=email_drafts.company_id
    and relationship.email_thread_id=email_drafts.email_thread_id
    and relationship.resource_type='node'
-   and relationship.resource_textbox_id is not null
+   and relationship.resource_textbox_id is null
    and mangorts_user_can_access_resource(relationship.company_id,relationship.resource_type,
        relationship.resource_id,$3::uuid,'edit'))`, companyID, draftID, participantUserID))
 	if err == nil {
@@ -223,7 +223,7 @@ func postgresAccessibleEmailCollaborationIDForThread(ctx context.Context, q emai
 select relationship.email_relationship_id::text
 from email_relationships relationship
 where relationship.company_id=$1::uuid and relationship.email_thread_id=$2::uuid
- and relationship.resource_type='node' and relationship.resource_textbox_id is not null
+ and relationship.resource_type='node' and relationship.resource_textbox_id is null
  and mangorts_user_can_access_resource(relationship.company_id,relationship.resource_type,
      relationship.resource_id,$3::uuid,'edit')
 order by relationship.created_timestamp,relationship.email_relationship_id
@@ -403,7 +403,7 @@ exists (
  where relationship.company_id=email_drafts.company_id
   and relationship.email_thread_id=email_drafts.email_thread_id
   and relationship.resource_type='node'
-  and relationship.resource_textbox_id is not null
+  and relationship.resource_textbox_id is null
   and mangorts_user_can_access_resource(relationship.company_id,relationship.resource_type,
       relationship.resource_id,$3::uuid,'edit'))`
 	ctx := context.Background()
