@@ -187,9 +187,6 @@ func (r *PostgresRepo) CreateHuddleNode(input HuddleCreateInput) (domain.HuddleN
 	if err != nil {
 		return domain.HuddleNode{}, err
 	}
-	if _, err = tx.ExecContext(ctx, `insert into huddle_explorer_items(company_id,huddle_explorer_item_id,huddle_type,resource_huddle_resource_id) values($1::uuid,$2::uuid,'huddle_node',$3::uuid)`, input.CompanyID, newUUIDv7String(), id); err != nil {
-		return domain.HuddleNode{}, err
-	}
 	if err = postgresCreateDirectPolicyTx(ctx, tx, input.CompanyID, EntityTypeHuddleNode, id); err != nil {
 		return domain.HuddleNode{}, err
 	}
@@ -275,7 +272,7 @@ func (r *PostgresRepo) ListHuddleExplorer(companyID string) (domain.HuddleExplor
 	if err = rows.Close(); err != nil {
 		return result, err
 	}
-	rows, err = r.db.Query(`select item.company_id::text,item.huddle_explorer_item_id::text,item.parent_folder_id::text,item.huddle_type,item.resource_huddle_resource_id::text,case when item.huddle_type='huddle_logic_gate' then gate.header else node.name end,item.created_date,item.updated_date from huddle_explorer_items item left join huddle_logic_gates gate on item.huddle_type='huddle_logic_gate' and gate.company_id=item.company_id and gate.huddle_logic_gate_id=item.resource_huddle_resource_id left join huddle_nodes node on item.huddle_type='huddle_node' and node.company_id=item.company_id and node.huddle_node_id=item.resource_huddle_resource_id where item.company_id=$1::uuid order by item.created_date,item.huddle_explorer_item_id`, companyID)
+	rows, err = r.db.Query(`select item.company_id::text,item.huddle_explorer_item_id::text,item.parent_folder_id::text,item.huddle_type,item.resource_huddle_resource_id::text,gate.header,item.created_date,item.updated_date from huddle_explorer_items item join huddle_logic_gates gate on gate.company_id=item.company_id and gate.huddle_logic_gate_id=item.resource_huddle_resource_id where item.company_id=$1::uuid order by item.created_date,item.huddle_explorer_item_id`, companyID)
 	if err != nil {
 		return result, err
 	}
@@ -401,7 +398,7 @@ func (r *PostgresRepo) deleteHuddleObject(companyID, kind, id, userID string) er
 		}
 	case "huddle_explorer_item":
 		table = "huddle_explorer_items"
-		labelExpression = `case when huddle_type='huddle_logic_gate' then (select header from huddle_logic_gates where company_id=$1::uuid and huddle_logic_gate_id=resource_huddle_resource_id) else (select name from huddle_nodes where company_id=$1::uuid and huddle_node_id=resource_huddle_resource_id) end`
+		labelExpression = `(select header from huddle_logic_gates where company_id=$1::uuid and huddle_logic_gate_id=resource_huddle_resource_id)`
 		where = `company_id=$1::uuid and huddle_explorer_item_id=$2::uuid`
 	default:
 		return ErrInvalid
@@ -423,13 +420,14 @@ func (r *PostgresRepo) deleteHuddleObject(companyID, kind, id, userID string) er
 	if err = add(table, where, companyID, id); err != nil {
 		return err
 	}
-	if kind == "huddle_logic_gate" || kind == "huddle_node" {
-		resourceType := kind
-		if err = add("huddle_explorer_items", `company_id=$1::uuid and huddle_type=$2 and resource_huddle_resource_id=$3::uuid`, companyID, resourceType, id); err != nil {
+	if kind == "huddle_logic_gate" {
+		if err = add("huddle_explorer_items", `company_id=$1::uuid and huddle_type='huddle_logic_gate' and resource_huddle_resource_id=$2::uuid`, companyID, id); err != nil {
 			return err
 		}
+	}
+	if kind == "huddle_logic_gate" || kind == "huddle_node" {
 		for _, policyTable := range []string{"resource_gvic_settings", "resource_permission_settings", "resource_gvic_assignments", "resource_permissions"} {
-			if err = add(policyTable, `company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, resourceType, id); err != nil {
+			if err = add(policyTable, `company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, kind, id); err != nil {
 				return err
 			}
 		}
@@ -447,7 +445,9 @@ func (r *PostgresRepo) deleteHuddleObject(companyID, kind, id, userID string) er
 				return err
 			}
 		}
-		if _, err = tx.ExecContext(ctx, `delete from huddle_explorer_items where company_id=$1::uuid and huddle_type=$2 and resource_huddle_resource_id=$3::uuid`, companyID, kind, id); err != nil {
+	}
+	if kind == "huddle_logic_gate" {
+		if _, err = tx.ExecContext(ctx, `delete from huddle_explorer_items where company_id=$1::uuid and huddle_type='huddle_logic_gate' and resource_huddle_resource_id=$2::uuid`, companyID, id); err != nil {
 			return err
 		}
 	}

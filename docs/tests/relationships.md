@@ -204,7 +204,7 @@ Examples include:
 - `attachment_relationships` for stored files owned or used by supported Mango resources.
 - `huddle_nodes.huddle_logic_gate_id` for one Huddle Node's fixed owning Huddle Logic Gate.
 - `kpis.logic_gate_id` for one KPI's fixed owning normal Logic Gate.
-- `huddle_explorer_items` for typed Huddle Logic Gate and Huddle Node placement.
+- `huddle_explorer_items` for typed Huddle Logic Gate placement; Huddle Nodes use only their direct owning Huddle Logic Gate relationship.
 - Account assignment, permission, and RACI relationship tables for their own distinct meanings.
 
 ### Law 5 — Do not split one meaning merely because endpoint types differ
@@ -267,7 +267,7 @@ Current examples include:
 - An attachment may have multiple active owner relationships.
 - A Huddle Logic Gate may own multiple Huddle Nodes, while each Huddle Node has exactly one Huddle Logic Gate.
 - A normal Logic Gate may own multiple KPIs, while each KPI has exactly one normal Logic Gate.
-- One Huddle Logic Gate or Huddle Node has at most one live `huddle_explorer_items` placement.
+- One Huddle Logic Gate has at most one live `huddle_explorer_items` placement, and a Huddle Node has none.
 - One RACI resource/principal pair has exactly one direct role; Responsible, Accountable, Consulted, and Informed each permit multiple typed user or group principals, and group edges expand through live nested membership without copied per-user relationship rows.
 
 ### Law 13 — Duplicate commands do not create duplicate semantic edges
@@ -318,7 +318,7 @@ Recycle behavior MUST NOT translate resource IDs, invent replacement endpoints, 
 
 ### Law 19 — Removing an edge does not delete its endpoints
 
-Deleting a relationship normally deletes only that relationship. Removing a Node from a Project does not delete the Node or Project. Removing a Huddle Explorer item does not delete its Huddle Logic Gate or Huddle Node. Removing an email relationship does not delete the normalized email message or thread. Removing one attachment relationship does not delete the file while another valid active owner relationship survives.
+Deleting a relationship normally deletes only that relationship. Removing a Node from a Project does not delete the Node or Project. Removing a Huddle Explorer item does not delete its Huddle Logic Gate. Removing an email relationship does not delete the normalized email message or thread. Removing one attachment relationship does not delete the file while another valid active owner relationship survives.
 
 Any endpoint-deletion behavior must be an explicit separately documented business rule. Attachment last-owner cleanup is one such explicit rule.
 
@@ -408,9 +408,9 @@ Removing one Node-wide or textbox-specific email relationship deletes only that 
 
 ### Law 32 — Huddle ownership and placement use exact Huddle identities
 
-`huddle_nodes.huddle_logic_gate_id` MUST equal the exact owning `huddle_logic_gates.huddle_logic_gate_id`. `huddle_explorer_items.resource_huddle_resource_id` MUST equal the exact source Huddle ID, and `huddle_type` MUST state whether that source is `huddle_logic_gate` or `huddle_node`.
+`huddle_nodes.huddle_logic_gate_id` MUST equal the exact owning `huddle_logic_gates.huddle_logic_gate_id`. `huddle_explorer_items.resource_huddle_resource_id` MUST equal the exact source `huddle_logic_gates.huddle_logic_gate_id`, and the retained `huddle_type` column MUST equal `huddle_logic_gate`. Huddle Nodes MUST NOT receive Huddle Explorer items.
 
-Creating a Huddle resource and its required Explorer item MUST be atomic. Deleting only an Explorer item removes only that placement. Recycling a Huddle resource MUST preserve the exact typed placement promised for restore. These relationships MUST NOT create a central registry, translated ID, untyped edge, access grant, or policy-parent link.
+Converting a normal Logic Gate and creating its required Huddle Logic Gate Explorer item MUST be atomic. Creating, updating, deleting, or restoring a Huddle Node MUST NOT create or restore an Explorer item. Deleting only an Explorer item removes only that Huddle Logic Gate placement. Recycling a Huddle Logic Gate MUST preserve its exact typed placement for restore. These relationships MUST NOT create a central registry, translated ID, untyped edge, access grant, or policy-parent link.
 
 ## Required design examples
 

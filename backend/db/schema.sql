@@ -6168,7 +6168,7 @@ create table if not exists huddle_explorer_items (
   foreign key (company_id) references companies(company_id) on delete cascade,
   foreign key (company_id,parent_folder_id)
     references huddle_explorer_folders(company_id,folder_id) on delete restrict,
-  constraint huddle_explorer_items_huddle_type_chk check (huddle_type in ('huddle_logic_gate','huddle_node'))
+  constraint huddle_explorer_items_huddle_type_chk check (huddle_type = 'huddle_logic_gate')
 );
 
 create index if not exists idx_huddle_explorer_folders_parent
@@ -6204,9 +6204,6 @@ begin
   if new.huddle_type='huddle_logic_gate' and not exists(
     select 1 from huddle_logic_gates where company_id=new.company_id and huddle_logic_gate_id=new.resource_huddle_resource_id
   ) then raise exception 'huddle_logic_gate_missing' using errcode='23503'; end if;
-  if new.huddle_type='huddle_node' and not exists(
-    select 1 from huddle_nodes where company_id=new.company_id and huddle_node_id=new.resource_huddle_resource_id
-  ) then raise exception 'huddle_node_missing' using errcode='23503'; end if;
   return new;
 end; $$;
 

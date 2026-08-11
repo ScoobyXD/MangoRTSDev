@@ -6,7 +6,7 @@
 4. A Huddle Node uses the exact resource type `huddle_node` and the exact `huddle_nodes.huddle_node_id` everywhere it is referenced.
 5. A Huddle Node can be created only from the **Create Huddle Node** action in a Huddle Logic Gate's right column.
 6. Clicking **Create Huddle Node** immediately creates one Huddle Node named **New Huddle Node** without asking for a name; all other Huddle Node content starts empty.
-7. Creating a Huddle Node and its root `huddle_explorer_items` placement commits or rolls back as one transaction.
+7. Creating a Huddle Node, its exact owning Huddle Logic Gate relationship, and its direct policy settings commits or rolls back as one transaction, and creates no `huddle_explorer_items` row.
 8. The owning Huddle Logic Gate's right column shows Huddle Nodes as a simple vertical list of cards.
 9. Clicking a Huddle Node card once opens that exact Huddle Node in a Huddle Node popup.
 10. The popup opens almost full screen by default while leaving the application's left sidebar visible.
@@ -15,7 +15,7 @@
 13. Pin, fullscreen, delete, and close are compact icon actions in the top-right header instead of text buttons.
 14. The popup has two horizontally resizable columns: the TipTap editor on the left and an empty area reserved for a later chat feature on the right.
 15. Huddle Nodes use the existing RACI and permission tables with direct typed ownership, but do not expose **Apply to descendants** or **Apply to descendants including customized** actions.
-16. Deleting a Huddle Node moves the Node, its restorable direct policies, and its Huddle Explorer placement to the Recycle Bin; restoring it reuses the same UUID and owning Huddle Logic Gate.
+16. Deleting a Huddle Node moves the Node and its restorable direct policies to the Recycle Bin; restoring it reuses the same UUID and owning Huddle Logic Gate and creates no Huddle Explorer placement.
 17. A Huddle Node cannot exist without its owning Huddle Logic Gate.
 18. The first version has no KPI copies, KPI snapshots, frequency, period, timeline events, or chat behavior.
 

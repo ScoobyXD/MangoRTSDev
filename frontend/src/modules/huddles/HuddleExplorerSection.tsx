@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../icons/index.js";
 import { createRequestJSON } from "../api/requestJSON";
-import { HuddleNodePopup, type HuddleOpenResource, type HuddleResourceType } from "./HuddleResourceSurface";
+import { HuddleNodePopup, type HuddleOpenResource } from "./HuddleResourceSurface";
 import { HuddlePeopleIcon, HuddleResourceIcon } from "./HuddleResourceIcon";
 
 type Folder = { company_id: string; folder_id: string; parent_folder_id?: string | null; name: string };
-type Item = { company_id: string; item_id: string; parent_folder_id?: string | null; resource_type: HuddleResourceType; resource_id: string; name: string };
+type Item = { company_id: string; item_id: string; parent_folder_id?: string | null; resource_type: "huddle_logic_gate"; resource_id: string; name: string };
 type Tree = { folders?: Folder[]; items?: Item[] };
 
 export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: string; currentUserID: string }> = ({ apiBase, companyID, currentUserID }) => {
@@ -33,7 +33,6 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
 
   const folders = tree.folders ?? [];
   const items = tree.items ?? [];
-  const visibleItems = items.filter((item) => item.resource_type === "huddle_logic_gate");
   const createFolder = async (parentFolderID = "") => {
     const name = window.prompt("Folder name", "New Folder")?.trim();
     if (!name) return;
@@ -72,8 +71,7 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
   });
   const openItem = (item: Item) => {
     const detail: HuddleOpenResource = { resourceType: item.resource_type, resourceID: item.resource_id, name: item.name };
-    if (item.resource_type === "huddle_node") setOpenNode(detail);
-    else window.dispatchEvent(new CustomEvent("mangorts:huddle-open", { detail }));
+    window.dispatchEvent(new CustomEvent("mangorts:huddle-open", { detail }));
   };
 
   const renderLevel = (parentID: string, depth: number): React.ReactNode => (
@@ -101,7 +99,7 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
           </div>
         );
       })}
-      {visibleItems.filter((item) => (item.parent_folder_id ?? "") === parentID).map((item) => {
+      {items.filter((item) => (item.parent_folder_id ?? "") === parentID).map((item) => {
         const rowID = `item:${item.item_id}`;
         return (
           <div
@@ -133,7 +131,7 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
       </div>
       <div style={{ minWidth: 0, display: "grid", alignContent: "start", gap: 3 }}>
         {renderLevel("", 0)}
-        {folders.length + visibleItems.length === 0 && <span style={emptyStyle}>No Huddles yet</span>}
+        {folders.length + items.length === 0 && <span style={emptyStyle}>No Huddles yet</span>}
       </div>
       {openNode && <HuddleNodePopup apiBase={apiBase} companyID={companyID} currentUserID={currentUserID} resource={openNode} requestJSON={requestJSON} onClose={() => { setOpenNode(null); void load(); }} />}
     </section>

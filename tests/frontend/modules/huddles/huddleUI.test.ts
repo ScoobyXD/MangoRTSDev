@@ -40,7 +40,8 @@ test("Huddle UI uses the routed page, shared editor and RACI controls, icon acti
   assert.match(explorer, /data-huddle-row-raised/);
   assert.match(explorer, /<HuddlePeopleIcon/);
   assert.match(explorer, /<HuddleResourceIcon type=\{item\.resource_type\}/);
-  assert.match(explorer, /const visibleItems = items\.filter\(\(item\) => item\.resource_type === "huddle_logic_gate"\)/);
+  assert.match(explorer, /resource_type: "huddle_logic_gate"/);
+  assert.doesNotMatch(explorer, /visibleItems/);
   assert.match(explorer, /onClick=\{\(\) => openItem\(item\)\}/);
   assert.doesNotMatch(explorer, /onDoubleClick=\{\(\) => openItem\(item\)\}/);
   assert.match(surface, /name: "New Huddle Node"/);

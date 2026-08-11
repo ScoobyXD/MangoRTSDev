@@ -129,6 +129,7 @@ company_id,item_id,parent_folder_id,target_type,target_id,position
 	if err != nil {
 		t.Fatalf("CreateHuddleNode: %v", err)
 	}
+	assertHuddleConversionCount(t, db, `select count(*) from huddle_explorer_items where company_id=$1::uuid and huddle_type='huddle_node' and resource_huddle_resource_id=$2::uuid`, company.CompanyID, node.HuddleNodeID, 0)
 	if policy, err := repo.GetResourceRACIPolicy(company.CompanyID, EntityTypeHuddleNode, node.HuddleNodeID); err != nil {
 		t.Fatalf("GetResourceRACIPolicy(huddle_node): %v", err)
 	} else if policy.ResourceType != EntityTypeHuddleNode || policy.ResourceID != node.HuddleNodeID {

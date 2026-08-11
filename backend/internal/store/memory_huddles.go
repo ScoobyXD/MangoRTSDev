@@ -168,8 +168,6 @@ func (r *MemoryRepo) CreateHuddleNode(input HuddleCreateInput) (domain.HuddleNod
 	item := domain.HuddleNode{CompanyID: input.CompanyID, HuddleNodeID: newUUIDv7String(), HuddleLogicGateID: input.OwnerID, Name: input.Name, CreatedTimestamp: now, UpdatedTimestamp: now}
 	r.huddleNodes[key(input.CompanyID, item.HuddleNodeID)] = item
 	r.ensureV2PolicySettingsLocked(input.CompanyID, EntityTypeHuddleNode, item.HuddleNodeID)
-	placement := domain.HuddleExplorerItem{CompanyID: input.CompanyID, ItemID: newUUIDv7String(), ResourceType: EntityTypeHuddleNode, ResourceID: item.HuddleNodeID, Name: item.Name, CreatedTimestamp: now, UpdatedTimestamp: now}
-	r.huddleExplorerItems[key(input.CompanyID, placement.ItemID)] = placement
 	return item, nil
 }
 
@@ -197,13 +195,6 @@ func (r *MemoryRepo) UpdateHuddleNode(input HuddleUpdateInput) (domain.HuddleNod
 	item.Name = input.Name
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.huddleNodes[k] = item
-	for ik, p := range r.huddleExplorerItems {
-		if p.CompanyID == input.CompanyID && p.ResourceType == EntityTypeHuddleNode && p.ResourceID == input.ResourceID {
-			p.Name = input.Name
-			p.UpdatedTimestamp = item.UpdatedTimestamp
-			r.huddleExplorerItems[ik] = p
-		}
-	}
 	return item, nil
 }
 func (r *MemoryRepo) DeleteHuddleNode(companyID, id, userID string) error {
@@ -217,11 +208,6 @@ func (r *MemoryRepo) DeleteHuddleNode(companyID, id, userID string) error {
 	r.addSimpleHuddleRecycleLocked(companyID, userID, "huddle_node", id, item.Name)
 	r.deleteMemoryHuddlePoliciesLocked(companyID, EntityTypeHuddleNode, id)
 	delete(r.huddleNodes, k)
-	for ik, p := range r.huddleExplorerItems {
-		if p.CompanyID == companyID && p.ResourceType == EntityTypeHuddleNode && p.ResourceID == id {
-			delete(r.huddleExplorerItems, ik)
-		}
-	}
 	return nil
 }
 
