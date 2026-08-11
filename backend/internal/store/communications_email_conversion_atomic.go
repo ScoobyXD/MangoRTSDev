@@ -120,6 +120,155 @@ func rewriteCommunicationsEmailTextBoxChatMessageID(input *communicationsEmailTe
 	return rewrite(input.InitialChat, "selection_message_id")
 }
 
+func communicationsEmailInitialChatTextboxID(initialChat *NodeInformationInput) (string, error) {
+	if initialChat == nil {
+		return "", ErrInvalid
+	}
+	var payload nodeTextboxChatPayload
+	if err := json.Unmarshal([]byte(strings.TrimSpace(initialChat.Information)), &payload); err != nil {
+		return "", ErrInvalid
+	}
+	textboxID := cleanUUIDText(payload.BlockID)
+	if textboxID == "" {
+		return "", ErrInvalid
+	}
+	return textboxID, nil
+}
+
+func memoryEmailTextboxMessageIDs(projection domain.NodeProjection) (map[string]any, string, []string, error) {
+	information := strings.TrimSpace(projection.Information)
+	prefix := ""
+	if strings.HasPrefix(information, editorTextBlockProjectionPrefix) {
+		prefix = editorTextBlockProjectionPrefix
+		information = strings.TrimSpace(strings.TrimPrefix(information, prefix))
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(information), &payload); err != nil {
+		return nil, "", nil, ErrInvalid
+	}
+	messageIDs := make([]string, 0)
+	seen := map[string]bool{}
+	appendID := func(value any) {
+		messageID, _ := value.(string)
+		messageID = cleanUUIDText(messageID)
+		if messageID != "" && !seen[messageID] {
+			seen[messageID] = true
+			messageIDs = append(messageIDs, messageID)
+		}
+	}
+	appendID(payload["email_message_id"])
+	if values, ok := payload["email_message_ids"].([]any); ok {
+		for _, value := range values {
+			appendID(value)
+		}
+	}
+	return payload, prefix, messageIDs, nil
+}
+
+func (r *MemoryRepo) linkCommunicationsEmailMessageToExistingTextboxLocked(input communicationsEmailTextBoxChatWriteInput, emailMessageID string) error {
+	textboxID, err := communicationsEmailInitialChatTextboxID(input.InitialChat)
+	if err != nil {
+		return err
+	}
+	projectionKey := key(input.CompanyID, input.NodeID)
+	projections := r.nodeText[projectionKey]
+	target, targetExists := projections[textboxID]
+	if !targetExists || !isEditorTextBoxType(target.Type) {
+		return ErrNotFound
+	}
+	for candidateTextboxID, projection := range projections {
+		if !isEditorTextBoxType(projection.Type) {
+			continue
+		}
+		_, _, messageIDs, err := memoryEmailTextboxMessageIDs(projection)
+		if err != nil {
+			return err
+		}
+		for _, candidateMessageID := range messageIDs {
+			if candidateMessageID == emailMessageID && candidateTextboxID != textboxID {
+				return ErrInvalid
+			}
+		}
+	}
+	payload, prefix, messageIDs, err := memoryEmailTextboxMessageIDs(target)
+	if err != nil {
+		return err
+	}
+	for _, candidateMessageID := range messageIDs {
+		if candidateMessageID == emailMessageID {
+			return nil
+		}
+	}
+	messageIDs = append(messageIDs, emailMessageID)
+	payload["email_message_ids"] = messageIDs
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	target.Information = prefix + string(raw)
+	target.UpdatedTimestamp = time.Now().UTC()
+	projections[textboxID] = target
+	return nil
+}
+
+func linkPostgresCommunicationsEmailMessageToExistingTextboxTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	input communicationsEmailTextBoxChatWriteInput,
+	emailMessageID string,
+) error {
+	textboxID, err := communicationsEmailInitialChatTextboxID(input.InitialChat)
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `
+insert into email_relationships(
+  company_id,email_relationship_id,email_thread_id,email_message_id,
+  resource_type,resource_id,resource_textbox_id,created_timestamp
+)
+select relationship.company_id,gen_random_uuid(),relationship.email_thread_id,relationship.email_message_id,
+       'node',relationship.resource_id,textbox.textbox_id::text,clock_timestamp()
+from email_relationships relationship
+join node_textboxes textbox
+  on textbox.company_id=relationship.company_id
+ and textbox.node_id=relationship.resource_id
+ and textbox.textbox_id=$3::uuid
+ and textbox.deleted_timestamp is null
+where relationship.company_id=$1::uuid and relationship.resource_type='node'
+  and relationship.resource_id=$2::uuid and relationship.email_message_id=$4::uuid
+  and relationship.resource_textbox_id is null
+order by relationship.created_timestamp desc
+limit 1
+on conflict do nothing`, input.CompanyID, input.NodeID, textboxID, emailMessageID)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 1 {
+		return nil
+	}
+	var existingTextboxID string
+	err = tx.QueryRowContext(ctx, `
+select resource_textbox_id
+from email_relationships
+where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid
+  and email_message_id=$3::uuid and resource_textbox_id is not null
+limit 1`, input.CompanyID, input.NodeID, emailMessageID).Scan(&existingTextboxID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if existingTextboxID != textboxID {
+		return ErrInvalid
+	}
+	return nil
+}
+
 func (r *MemoryRepo) communicationsEmailTextBoxChatInternalMessageIDLocked(input communicationsEmailTextBoxChatWriteInput) string {
 	providerMessageID := strings.TrimSpace(input.ProviderMessageID)
 	for _, relationship := range r.nodeEmailThreads {
@@ -193,6 +342,11 @@ func (r *MemoryRepo) addCommunicationsEmailTextBoxChatWritesLocked(input communi
 		result.LinkedTextBlockID = input.LinkedTextBlock.InformationID
 	}
 	if input.InitialChat != nil {
+		if input.LinkedTextBlock == nil {
+			if err := r.linkCommunicationsEmailMessageToExistingTextboxLocked(input, r.communicationsEmailTextBoxChatInternalMessageIDLocked(input)); err != nil {
+				return err
+			}
+		}
 		if _, err := r.addCommunicationsConversionInformationLocked(*input.InitialChat); err != nil {
 			return err
 		}
@@ -253,6 +407,11 @@ on conflict do nothing`, input.CompanyID, input.NodeID, input.LinkedTextBlock.In
 		result.LinkedTextBlockID = input.LinkedTextBlock.InformationID
 	}
 	if input.InitialChat != nil {
+		if input.LinkedTextBlock == nil {
+			if err := linkPostgresCommunicationsEmailMessageToExistingTextboxTx(ctx, tx, input, emailMessageID); err != nil {
+				return err
+			}
+		}
 		if _, err := r.addCommunicationsConversionInformationTx(ctx, tx, *input.InitialChat); err != nil {
 			return err
 		}

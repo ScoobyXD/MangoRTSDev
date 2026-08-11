@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"miraeopus/backend/internal/domain"
+	"sort"
 )
 
 const postgresEmailThreadChatTargetCTE = `
@@ -34,17 +35,18 @@ func emailThreadChatQueryArgs(input CommunicationsEmailCollaborationListInput, s
 	}
 }
 
-func (r *PostgresRepo) ListCommunicationsEmailThreadChatGroups(input CommunicationsEmailCollaborationListInput) ([]domain.CommunicationsEmailThreadChatGroup, error) {
+func (r *PostgresRepo) ListCommunicationsEmailThreadChatGroups(input CommunicationsEmailCollaborationListInput) (domain.CommunicationsEmailThreadChatView, error) {
 	input, scope, err := normalizeCommunicationsEmailCollaborationListInput(input)
 	if err != nil {
-		return nil, err
+		return domain.CommunicationsEmailThreadChatView{}, err
 	}
 	ctx := context.Background()
 	args := emailThreadChatQueryArgs(input, scope)
 	rows, err := r.db.QueryContext(ctx, postgresEmailThreadChatTargetCTE+`
-select relationship.resource_id::text,node.name,relationship.resource_textbox_id,relationship.email_relationship_id::text,
-       relationship.email_thread_id::text,relationship.email_message_id::text,
-       message.provider_message_id,message.message_order
+select relationship.resource_id::text,node.name,relationship.resource_textbox_id,
+       coalesce(textbox.title,''),relationship.email_thread_id::text,
+       relationship.email_message_id::text,message.provider_message_id,
+       coalesce(message.message_timestamp,message.created_timestamp)
 from target_thread target
 join email_relationships relationship
   on relationship.company_id=$1::uuid
@@ -58,48 +60,60 @@ join email_messages message
 join nodes node
   on node.company_id=relationship.company_id
  and node.node_id=relationship.resource_id
+join node_textboxes textbox
+  on textbox.company_id=relationship.company_id
+ and textbox.node_id=relationship.resource_id
+ and textbox.textbox_id::text=relationship.resource_textbox_id
+ and textbox.deleted_timestamp is null
 where mangorts_user_can_access_resource(
   relationship.company_id,'node',relationship.resource_id,$8::uuid,'edit')
-  and exists (
-    select 1 from node_textbox_chats chat
-    where chat.company_id=relationship.company_id
-      and chat.node_id=relationship.resource_id
-      and chat.textbox_id::text=relationship.resource_textbox_id
-      and chat.deleted_timestamp is null
-  )
-order by case when message.provider_message_id=$6 then 0 else 1 end,
-         message.message_order,lower(node.name),relationship.resource_id,relationship.resource_textbox_id`, args...)
+order by relationship.resource_id,relationship.resource_textbox_id,
+         coalesce(message.message_timestamp,message.created_timestamp),relationship.email_message_id`, args...)
 	if err != nil {
-		return nil, err
+		return domain.CommunicationsEmailThreadChatView{}, err
 	}
 	groups := make([]domain.CommunicationsEmailThreadChatGroup, 0)
+	textboxLinks := make([]domain.CommunicationsEmailThreadTextboxLink, 0)
 	groupIndex := map[string]int{}
 	for rows.Next() {
-		var group domain.CommunicationsEmailThreadChatGroup
+		var nodeID, nodeName, textboxID, textboxTitle, emailThreadID string
+		var linked domain.CommunicationsEmailThreadChatLinkedMessage
 		if err := rows.Scan(
-			&group.NodeID, &group.NodeName, &group.TextboxID, &group.RelationshipID, &group.EmailThreadID,
-			&group.EmailMessageID, &group.ProviderMessageID, &group.MessageOrder,
+			&nodeID, &nodeName, &textboxID, &textboxTitle, &emailThreadID,
+			&linked.EmailMessageID, &linked.ProviderMessageID, &linked.MessageTimestamp,
 		); err != nil {
 			rows.Close()
-			return nil, err
+			return domain.CommunicationsEmailThreadChatView{}, err
 		}
-		group.Chats = []domain.NodeProjection{}
-		groupKey := group.NodeID + "\x1f" + group.TextboxID
-		if _, exists := groupIndex[groupKey]; exists {
-			continue
+		groupKey := nodeID + "\x1f" + textboxID
+		index, exists := groupIndex[groupKey]
+		if !exists {
+			index = len(groups)
+			groupIndex[groupKey] = index
+			groups = append(groups, domain.CommunicationsEmailThreadChatGroup{
+				NodeID: nodeID, NodeName: nodeName, TextboxID: textboxID, TextboxTitle: textboxTitle,
+				EmailThreadID: emailThreadID, LinkedMessages: []domain.CommunicationsEmailThreadChatLinkedMessage{},
+				Chats: []domain.NodeProjection{},
+			})
 		}
-		groupIndex[groupKey] = len(groups)
-		groups = append(groups, group)
+		groups[index].LinkedMessages = append(groups[index].LinkedMessages, linked)
+		textboxLinks = append(textboxLinks, domain.CommunicationsEmailThreadTextboxLink{
+			NodeID: nodeID, TextboxID: textboxID, EmailMessageID: linked.EmailMessageID,
+			ProviderMessageID: linked.ProviderMessageID,
+		})
+		if groups[index].LatestActivityTimestamp.Before(linked.MessageTimestamp) {
+			groups[index].LatestActivityTimestamp = linked.MessageTimestamp
+		}
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		return nil, err
+		return domain.CommunicationsEmailThreadChatView{}, err
 	}
 	if err := rows.Close(); err != nil {
-		return nil, err
+		return domain.CommunicationsEmailThreadChatView{}, err
 	}
 	if len(groups) == 0 {
-		return groups, nil
+		return domain.CommunicationsEmailThreadChatView{Groups: groups, TextboxLinks: textboxLinks}, nil
 	}
 
 	chatRows, err := r.db.QueryContext(ctx, postgresEmailThreadChatTargetCTE+postgresNodeTextboxChatProjectionSelect+`
@@ -118,21 +132,43 @@ where chat.company_id=$1::uuid
   )
 order by chat.created_timestamp,chat.chat_id`, args...)
 	if err != nil {
-		return nil, err
+		return domain.CommunicationsEmailThreadChatView{}, err
 	}
 	defer chatRows.Close()
 	for chatRows.Next() {
 		chat, err := scanNodeTextboxChatProjection(chatRows)
 		if err != nil {
-			return nil, err
+			return domain.CommunicationsEmailThreadChatView{}, err
 		}
 		var payload nodeTextboxChatPayload
 		if err := json.Unmarshal([]byte(chat.Information), &payload); err != nil {
-			return nil, err
+			return domain.CommunicationsEmailThreadChatView{}, err
 		}
 		if index, ok := groupIndex[chat.NodeID+"\x1f"+payload.BlockID]; ok {
 			groups[index].Chats = append(groups[index].Chats, chat)
+			if groups[index].LatestActivityTimestamp.Before(chat.CreatedTimestamp) {
+				groups[index].LatestActivityTimestamp = chat.CreatedTimestamp
+			}
 		}
 	}
-	return groups, chatRows.Err()
+	if err := chatRows.Err(); err != nil {
+		return domain.CommunicationsEmailThreadChatView{}, err
+	}
+	visibleGroups := make([]domain.CommunicationsEmailThreadChatGroup, 0, len(groups))
+	for _, group := range groups {
+		if len(group.Chats) > 0 {
+			visibleGroups = append(visibleGroups, group)
+		}
+	}
+	groups = visibleGroups
+	sort.SliceStable(groups, func(i, j int) bool {
+		if !groups[i].LatestActivityTimestamp.Equal(groups[j].LatestActivityTimestamp) {
+			return groups[i].LatestActivityTimestamp.Before(groups[j].LatestActivityTimestamp)
+		}
+		if groups[i].NodeID != groups[j].NodeID {
+			return groups[i].NodeID < groups[j].NodeID
+		}
+		return groups[i].TextboxID < groups[j].TextboxID
+	})
+	return domain.CommunicationsEmailThreadChatView{Groups: groups, TextboxLinks: textboxLinks}, nil
 }

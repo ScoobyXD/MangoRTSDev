@@ -641,6 +641,10 @@ type ChatPaneProps = {
   sectionLabelsByBlockID?: Record<string, string>;
   sectionNodeIDsByBlockID?: Record<string, string>;
   sectionKeysByMessageID?: Record<string, string>;
+  sectionActionLabel?: string;
+  selectedSectionKey?: string;
+  composerDestinationLabel?: string;
+  chronologicalMessages?: boolean;
   hideHeader?: boolean;
   activeTab?: "chat" | "email";
   selectionAnchor?: TextBlockSelectionAnchor;
@@ -671,6 +675,8 @@ type ChatPaneProps = {
   onActivateMessage: (messageID: string) => void;
   onNavigateToMessage: (messageID: string) => void;
   onOpenSectionNode?: (nodeID: string) => void;
+  onSectionAction?: (sectionKey: string) => void;
+  onClearComposerDestination?: () => void;
   onReply: (messageID: string) => void;
   onEditMessage: (messageID: string, message: string) => Promise<void>;
   onDeleteMessage: (messageID: string) => void;
@@ -710,6 +716,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   sectionLabelsByBlockID = {},
   sectionNodeIDsByBlockID = {},
   sectionKeysByMessageID = {},
+  sectionActionLabel,
+  selectedSectionKey = "",
+  composerDestinationLabel,
+  chronologicalMessages = false,
   hideHeader = false,
   activeTab = "chat",
   selectionAnchor,
@@ -740,6 +750,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   onActivateMessage,
   onNavigateToMessage,
   onOpenSectionNode,
+  onSectionAction,
+  onClearComposerDestination,
   onReply,
   onEditMessage,
   onDeleteMessage,
@@ -758,7 +770,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const handledMessageFocusRequestRef = useRef("");
   const messageFocusRequestPendingRef = useRef(false);
   const mentionCloseTimerRef = useRef<number | null>(null);
-  const threads = useMemo(() => buildChatThreads(messages), [messages]);
+  const threads = useMemo(() => chronologicalMessages
+    ? messages.map((message) => ({ message, children: [] }))
+    : buildChatThreads(messages), [chronologicalMessages, messages]);
+  const messageByID = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
   const sectionedThreads = useMemo(() => {
     const blockOrder = new Map(Object.keys(sectionLabelsByBlockID).map((textBlockID, index) => [textBlockID, index]));
     if (blockOrder.size === 0) return threads;
@@ -1212,55 +1227,99 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   : "";
                 const sectionLabel = sectionLabelsByBlockID[sectionKey] ?? "";
                 const sectionNodeID = sectionNodeIDsByBlockID[sectionKey] ?? "";
+                const sectionSelected = selectedSectionKey === sectionKey;
                 return (
                   <React.Fragment key={thread.message.id}>
                     {sectionLabel && previousSectionKey !== sectionKey && (
-                      <div data-email-chat-message-section="true" style={{ borderTop: index > 0 ? `1px solid ${ruleColor}` : undefined, padding: index > 0 ? "11px 2px 2px" : "2px 2px", color: "#475569", fontSize: 10.5, fontWeight: 850 }}>
-                        {sectionNodeID && onOpenSectionNode ? (
+                      <div
+                        data-email-chat-message-section="true"
+                        data-chat-section-selected={sectionSelected ? "true" : undefined}
+                        aria-current={sectionSelected ? "true" : undefined}
+                        style={{ minHeight: 28, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, borderTop: index > 0 ? `1px solid ${ruleColor}` : undefined, borderLeft: sectionSelected ? `3px solid ${accent}` : "3px solid transparent", borderRadius: 8, padding: index > 0 ? "11px 5px 3px" : "3px 5px", background: sectionSelected ? "linear-gradient(135deg, rgba(230,252,255,0.58), rgba(247,239,255,0.58))" : "transparent", color: "#475569", fontSize: 10.5, fontWeight: 850, boxShadow: sectionSelected ? "inset 1px 1px 0 rgba(255,255,255,0.84), 0 4px 12px rgba(15,23,42,0.06)" : undefined }}
+                      >
+                        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {sectionNodeID && onOpenSectionNode ? (
+                            <button
+                              type="button"
+                              aria-label={`Open Node ${sectionLabel}`}
+                              onClick={() => onOpenSectionNode(sectionNodeID)}
+                              style={{ minWidth: 0, maxWidth: "100%", border: 0, padding: 0, background: "transparent", color: "inherit", font: "inherit", display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+                            >
+                              <ExplorerEntityIcon kind="node" />
+                              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sectionLabel}</span>
+                            </button>
+                          ) : (
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                              <ExplorerEntityIcon kind="node" />
+                              <span>{sectionLabel}</span>
+                            </span>
+                          )}
+                        </span>
+                        {sectionActionLabel && onSectionAction && (
                           <button
                             type="button"
-                            aria-label={`Open Node ${sectionLabel}`}
-                            onClick={() => onOpenSectionNode(sectionNodeID)}
-                            style={{ border: 0, padding: 0, background: "transparent", color: "inherit", font: "inherit", display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+                            data-chat-section-action="true"
+                            aria-label={`${sectionActionLabel} in ${sectionLabel}`}
+                            aria-pressed={sectionSelected}
+                            onClick={() => onSectionAction(sectionKey)}
+                            style={{ flex: "0 0 auto", minHeight: 24, border: sectionSelected ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: sectionSelected ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: sectionSelected ? accent : surfaceText, cursor: "pointer", font: "inherit", fontSize: 10, fontWeight: 900, padding: "3px 8px", boxShadow: sectionSelected ? "0 6px 14px rgba(15,23,42,0.09), 0 0 10px rgba(183,124,255,0.14)" : EDITOR_NEU_SHADOW }}
                           >
-                            <ExplorerEntityIcon kind="node" />
-                            <span>{sectionLabel}</span>
+                            {sectionActionLabel}
                           </button>
-                        ) : (
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                            <ExplorerEntityIcon kind="node" />
-                            <span>{sectionLabel}</span>
-                          </span>
                         )}
                       </div>
                     )}
-                    <ChatThreadItem
-                      node={thread}
-                      depth={0}
-                      isLastSibling={false}
-                      apiBase={apiBase}
-                      companyID={companyID}
-                      currentUserID={currentUserID}
-                      editable={editable}
-                      activeMessageID={activeMessageID}
-                      companyUsers={companyUsers}
-                      accent={accent}
-                      surfaceText={surfaceText}
-                      ruleColor={ruleColor}
-                      collapsedThreadIDs={collapsedThreadIDs}
-                      onToggleCollapse={toggleThreadCollapse}
-                      onActivate={onActivateMessage}
-                      onNavigate={onNavigateToMessage}
-                      onReply={handleReply}
-                      onEdit={onEditMessage}
-                      onDelete={onDeleteMessage}
-                      onPreviewImage={setPreviewAttachment}
-                    />
+                    <div
+                      data-chat-section-key={sectionKey}
+                      style={chronologicalMessages
+                        ? { borderLeft: sectionSelected ? `3px solid ${accent}` : "3px solid transparent", paddingLeft: 3, background: sectionSelected ? "rgba(247,250,252,0.62)" : "transparent" }
+                        : { display: "contents" }}
+                    >
+                      <ChatThreadItem
+                        node={thread}
+                        replyToMessage={chronologicalMessages && thread.message.parentID ? messageByID.get(thread.message.parentID) : undefined}
+                        depth={0}
+                        isLastSibling={false}
+                        apiBase={apiBase}
+                        companyID={companyID}
+                        currentUserID={currentUserID}
+                        editable={editable}
+                        activeMessageID={activeMessageID}
+                        companyUsers={companyUsers}
+                        accent={accent}
+                        surfaceText={surfaceText}
+                        ruleColor={ruleColor}
+                        collapsedThreadIDs={collapsedThreadIDs}
+                        onToggleCollapse={toggleThreadCollapse}
+                        onActivate={onActivateMessage}
+                        onNavigate={onNavigateToMessage}
+                        onReply={handleReply}
+                        onEdit={onEditMessage}
+                        onDelete={onDeleteMessage}
+                        onPreviewImage={setPreviewAttachment}
+                      />
+                    </div>
                   </React.Fragment>
                 );
               })}
             </div>
             <div style={{ display: "grid", gap: 6, padding: 8, borderTop: `1px solid ${ruleColor}` }}>
+          {composerDestinationLabel && (
+            <div data-chat-composer-destination="true" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 22px", alignItems: "center", gap: 6, border: `1px solid ${accent}`, borderLeft: `3px solid ${accent}`, borderRadius: 9, background: "linear-gradient(135deg, rgba(230,252,255,0.62), rgba(247,239,255,0.62))", color: surfaceText, padding: "6px 6px 6px 7px", fontSize: 10, lineHeight: 1.35, fontWeight: 850, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.84)" }}>
+              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>New chat to {composerDestinationLabel}</span>
+              {onClearComposerDestination && (
+                <button
+                  type="button"
+                  aria-label="Cancel chat destination"
+                  title="Cancel chat destination"
+                  onClick={onClearComposerDestination}
+                  style={{ width: 22, height: 22, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 6, background: "#ffffff", color: surfaceText, cursor: "pointer", fontSize: 14, fontWeight: 900, lineHeight: 1, padding: 0 }}
+                >
+                  x
+                </button>
+              )}
+            </div>
+          )}
           {selectionAnchor && active && (
             <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 22px", alignItems: "start", gap: 6, border: "1px solid rgba(92,238,255,0.34)", borderLeft: `3px solid ${accent}`, borderRadius: 9, background: "linear-gradient(135deg, rgba(230,252,255,0.58), rgba(247,239,255,0.58))", color: surfaceText, padding: "6px 6px 6px 7px", fontSize: 10, lineHeight: 1.35, fontWeight: 800, overflowWrap: "anywhere", maxHeight: 72, overflowY: "auto", boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.82)" }}>
               <span style={{ minWidth: 0 }}>{selectionAnchor.quote}</span>
@@ -1671,6 +1730,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
 type ChatThreadItemProps = {
   node: ChatThreadNode;
+  replyToMessage?: EditorTextBlockChatMessage;
   depth: number;
   isLastSibling: boolean;
   apiBase?: string;
@@ -1754,7 +1814,7 @@ const MentionHighlightedText: React.FC<{ text: string; users: MentionableCompany
   );
 };
 
-const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibling, apiBase, companyID, currentUserID, editable, activeMessageID, companyUsers, accent, surfaceText, ruleColor, collapsedThreadIDs, onToggleCollapse, onActivate, onNavigate, onReply, onEdit, onDelete, onPreviewImage }) => {
+const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, replyToMessage, depth, isLastSibling, apiBase, companyID, currentUserID, editable, activeMessageID, companyUsers, accent, surfaceText, ruleColor, collapsedThreadIDs, onToggleCollapse, onActivate, onNavigate, onReply, onEdit, onDelete, onPreviewImage }) => {
   const { message, children } = node;
   const hasChildren = children.length > 0;
   const collapsed = collapsedThreadIDs.has(message.id);
@@ -1861,6 +1921,11 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
         </div>
       </div>
       <div style={{ minWidth: 0, display: "grid", gap: 4 }}>
+        {replyToMessage && (
+          <div data-chat-reply-context="true" style={{ color: "rgba(71,85,105,0.72)", fontSize: 9.5, fontWeight: 750 }}>
+            Reply to {replyToMessage.authorName || "Unknown author"}
+          </div>
+        )}
         <div style={{ display: "flex", justifyContent: "space-between", gap: 6, minWidth: 0, color: surfaceText, fontSize: 10, fontWeight: 800 }}>
           <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: authorAccent, fontWeight: 900 }}>{message.authorName}</span>
           <span title={message.editedTimestamp ? `Edited ${formatTimestamp(message.editedTimestamp)}` : undefined} style={{ opacity: 0.58, flex: "0 0 auto" }}>

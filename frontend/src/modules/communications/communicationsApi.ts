@@ -522,17 +522,28 @@ export type CommunicationsEmailThreadChatGroup = {
   node_id: string;
   node_name: string;
   textbox_id: string;
-  relationship_id: string;
+  textbox_title: string;
   email_thread_id: string;
+  linked_messages: Array<{
+    email_message_id: string;
+    provider_message_id: string;
+    message_timestamp: string;
+  }>;
+  latest_activity_timestamp: string;
+  chats: EditorProjectionItem[];
+};
+
+export type CommunicationsEmailThreadTextboxLink = {
+  node_id: string;
+  textbox_id: string;
   email_message_id: string;
   provider_message_id: string;
-  message_order: number;
-  chats: EditorProjectionItem[];
 };
 
 export type CommunicationsEmailThreadChats = {
   collaborations: CommunicationsEmailCollaboration[];
   groups: CommunicationsEmailThreadChatGroup[];
+  textbox_links: CommunicationsEmailThreadTextboxLink[];
 };
 
 export type EnsureCommunicationsEmailCollaborationInput = ListCommunicationsEmailCollaborationsInput & {
@@ -1141,17 +1152,19 @@ export async function listEmailCollaborations(input: ListCommunicationsEmailColl
 
 export async function listEmailThreadChatGroups(input: ListCommunicationsEmailCollaborationsInput): Promise<CommunicationsEmailThreadChats> {
   if (!input.companyID.trim() || (!input.messageID?.trim() && !input.threadID?.trim())) {
-    return { collaborations: [], groups: [] };
+    return { collaborations: [], groups: [], textbox_links: [] };
   }
   const payload = await apiFetchJSON<{
     collaborations?: CommunicationsEmailCollaboration[];
     groups?: CommunicationsEmailThreadChatGroup[];
+    textbox_links?: CommunicationsEmailThreadTextboxLink[];
   }>(
 		"/v1/communications/email-thread-chats?" + emailCollaborationQuery(input).toString(),
 	);
 	return {
 		collaborations: (payload.collaborations ?? []).map(cloneCommunicationsEmailCollaboration),
 		groups: payload.groups ?? [],
+		textbox_links: payload.textbox_links ?? [],
 	};
 }
 
