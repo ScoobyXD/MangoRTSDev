@@ -5,7 +5,7 @@ export type UnifiedNodeShellSurfaceID =
   | "app-sidebar-node-popup"
   | "dock-restored-node-popup"
   | "updates-node-panel"
-  | "kanban-my-work-node-overlay"
+  | "kanban-node-overlay"
   | "project-critical-path-inline-node"
   | "project-relationships-inline-node";
 
@@ -72,7 +72,7 @@ export const UNIFIED_NODE_SHELL_SURFACE_CONTRACTS: readonly UnifiedNodeShellSurf
     actions: ["close", "fullscreen", "open-in-new-tab", "pin"],
   },
   {
-    id: "kanban-my-work-node-overlay",
+    id: "kanban-node-overlay",
     body: "node-workspace",
     persistenceBoundary: "node-information-projection",
     openerState: "opener-owned",

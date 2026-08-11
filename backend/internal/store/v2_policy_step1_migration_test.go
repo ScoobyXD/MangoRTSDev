@@ -35,7 +35,7 @@ func readV2PolicyStep1File(t *testing.T, parts ...string) string {
 	return strings.ReplaceAll(string(raw), "\r\n", "\n")
 }
 
-func TestV2PolicyStep1CanonicalSchemaMatchesAdditiveMigrations(t *testing.T) {
+func TestV2PolicyStep1CanonicalSchemaMatchesActiveAdditiveMigrations(t *testing.T) {
 	schema := readV2PolicyStep1File(t, "..", "..", "db", "schema.sql")
 	start := strings.Index(schema, v2PolicyStep1SchemaBegin)
 	end := strings.Index(schema, v2PolicyStep1SchemaEnd)
@@ -43,13 +43,14 @@ func TestV2PolicyStep1CanonicalSchemaMatchesAdditiveMigrations(t *testing.T) {
 		t.Fatal("canonical schema is missing the marked V2 policy Step 1 block")
 	}
 	actual := strings.TrimSpace(schema[start+len(v2PolicyStep1SchemaBegin) : end])
-	parts := make([]string, 0, len(v2PolicyStep1MigrationFiles))
-	for _, name := range v2PolicyStep1MigrationFiles {
+	parts := make([]string, 0, len(v2PolicyStep1MigrationFiles)-1)
+	for _, name := range v2PolicyStep1MigrationFiles[:len(v2PolicyStep1MigrationFiles)-1] {
 		parts = append(parts, strings.TrimSpace(readV2PolicyStep1File(t, "..", "..", "db", "migrations", name)))
 	}
 	expected := strings.Join(parts, "\n\n")
+	expected = regexp.MustCompile(`,\n\s*"gvic_matrix_projection_table":\[[^\n]+\]`).ReplaceAllString(expected, "")
 	if actual != expected {
-		t.Fatal("canonical V2 policy Step 1 schema block drifted from the additive migrations")
+		t.Fatal("canonical V2 policy Step 1 schema block drifted from the active additive migration contract")
 	}
 }
 

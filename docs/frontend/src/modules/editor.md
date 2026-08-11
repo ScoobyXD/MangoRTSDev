@@ -60,7 +60,7 @@ Search and creation retain the current company/workspace scope and existing effe
 
 ## Unified Node Shell Implementation Update (2026-07-09)
 - `frontend/src/modules/editor/UnifiedNodeShell.tsx` is the shared user-facing shell source for full node-window chrome/action ordering and the node-workspace body boundary.
-- `frontend/src/modules/editor/unifiedNodeShellContract.ts` records the Phase 2 surface contract for Home, app/sidebar, dock-restored, Updates, Kanban/My Work, and Project critical-path inline node windows.
+- `frontend/src/modules/editor/unifiedNodeShellContract.ts` records the Phase 2 surface contract for Home, app/sidebar, dock-restored, Updates, Kanban, and Project critical-path inline node windows.
 - The shared shell owns top-right action rendering, accessible labels, action ordering, and data attributes identifying the shell and `node-workspace` body.
 - The shared shell does not own opener state or persistence. Popup size/fullscreen state, sidebar-aware bounds, dock restore state, Kanban overlay ratios, Updates notification context, and Project critical-path row selection remain with their current openers.
 - Node content still mounts through `EditorContent` and `NodeWorkspaceSurface`, so node text boxes, attached emails, and chats keep node information/projection persistence and the Phase 1 editor/chat boundaries.

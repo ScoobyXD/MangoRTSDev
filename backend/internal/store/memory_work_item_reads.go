@@ -26,10 +26,10 @@ type memoryRACIMatrixProjectionRow struct {
 	UpdatedTimestamp          time.Time
 }
 
-// rebuildV2MyWorkRowsLocked derives the transient memory read model from the
+// rebuildV2RACIMatrixRowsLocked derives the transient memory read model from the
 // four V2 policy maps. The rows are never policy authority and are rebuilt at
-// each public My Work read so group membership and inheritance stay live.
-func (r *MemoryRepo) rebuildV2MyWorkRowsLocked(companyID string) {
+// each public RACI matrix read so group membership and inheritance stay live.
+func (r *MemoryRepo) rebuildV2RACIMatrixRowsLocked(companyID string) {
 	for rowKey, row := range r.RACIMatrixProjectionRows {
 		if row.CompanyID == companyID {
 			delete(r.RACIMatrixProjectionRows, rowKey)
@@ -83,7 +83,7 @@ func (r *MemoryRepo) listRACIMatrixProjectedNodes(ctx context.Context, query Wor
 	query = NormalizeWorkItemInboxQuery(query)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.rebuildV2MyWorkRowsLocked(query.CompanyID)
+	r.rebuildV2RACIMatrixRowsLocked(query.CompanyID)
 
 	items := make([]domain.Node, 0)
 	for _, row := range r.RACIMatrixProjectionRows {
@@ -144,7 +144,7 @@ func (r *MemoryRepo) listRACIMatrixProjectedLogicGates(ctx context.Context, quer
 	query = NormalizeWorkItemInboxQuery(query)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.rebuildV2MyWorkRowsLocked(query.CompanyID)
+	r.rebuildV2RACIMatrixRowsLocked(query.CompanyID)
 
 	assignmentsByGate := r.logicGateRACIAssignmentsByGateLocked(query.CompanyID)
 	items := make([]WorkItemLogicGateInboxItem, 0)
@@ -303,7 +303,7 @@ func (r *MemoryRepo) deleteRACIMatrixProjectionForLogicGateLocked(companyID, log
 	}
 }
 
-func (r *MemoryRepo) v2MyWorkSourceTimestampLocked(companyID, resourceType, resourceID, userID string, fallback time.Time) time.Time {
+func (r *MemoryRepo) v2RACIMatrixSourceTimestampLocked(companyID, resourceType, resourceID, userID string, fallback time.Time) time.Time {
 	for _, assignment := range r.gvicEffectiveAssignmentsForResourceLocked(companyID, resourceType, resourceID) {
 		if assignment.UserID == userID && assignment.UpdatedTimestamp.After(fallback) {
 			fallback = assignment.UpdatedTimestamp
@@ -327,7 +327,7 @@ func (r *MemoryRepo) upsertRACIMatrixProjectionNodeRowLocked(companyID string, n
 		ResourceID:       node.NodeID,
 		LogicGateID:      strings.TrimSpace(logicGateID),
 		Node:             node,
-		UpdatedTimestamp: r.v2MyWorkSourceTimestampLocked(companyID, EntityTypeNode, node.NodeID, userID, node.CreatedTimestamp),
+		UpdatedTimestamp: r.v2RACIMatrixSourceTimestampLocked(companyID, EntityTypeNode, node.NodeID, userID, node.CreatedTimestamp),
 	}
 	r.RACIMatrixProjectionRows[RACIMatrixProjectionKey(companyID, userID, RACIMatrixProjectionResourceNode, node.NodeID)] = row
 }
@@ -345,7 +345,7 @@ func (r *MemoryRepo) upsertRACIMatrixProjectionLogicGateRowLocked(companyID, log
 		LogicGateID:               logicGateID,
 		LogicGateHeader:           gate.Header,
 		LogicGateCreatedTimestamp: gate.CreatedTimestamp,
-		UpdatedTimestamp:          r.v2MyWorkSourceTimestampLocked(companyID, EntityTypeLogicGate, logicGateID, userID, gate.CreatedTimestamp),
+		UpdatedTimestamp:          r.v2RACIMatrixSourceTimestampLocked(companyID, EntityTypeLogicGate, logicGateID, userID, gate.CreatedTimestamp),
 	}
 	r.RACIMatrixProjectionRows[RACIMatrixProjectionKey(companyID, userID, RACIMatrixProjectionResourceLogicGate, logicGateID)] = row
 }
@@ -376,7 +376,7 @@ func (r *MemoryRepo) RACIMatrixProjectionRowsForResourcesLocked(companyID string
 		if !nodeMatches && !logicGateMatches {
 			continue
 		}
-		for _, item := range r.myWorkFlatPathRowsForNodeProjectionLocked(row) {
+		for _, item := range r.raciMatrixFlatPathRowsForNodeProjectionLocked(row) {
 			key := gvicMatrixProjectionRowIdentity(item)
 			if key == ":" || seen[key] {
 				continue
@@ -422,7 +422,7 @@ func (r *MemoryRepo) RACIMatrixProjectionRowsForLogicGateLocked(companyID, logic
 		if row.CompanyID != companyID || row.ResourceType != RACIMatrixProjectionResourceNode || row.LogicGateID != logicGateID {
 			continue
 		}
-		for _, item := range r.myWorkFlatPathRowsForNodeProjectionLocked(row) {
+		for _, item := range r.raciMatrixFlatPathRowsForNodeProjectionLocked(row) {
 			key := gvicMatrixProjectionRowIdentity(item)
 			if key == ":" || seen[key] {
 				continue
@@ -462,7 +462,7 @@ func (r *MemoryRepo) ListRACIMatrixProjectionRowsForResources(companyID string, 
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.rebuildV2MyWorkRowsLocked(companyID)
+	r.rebuildV2RACIMatrixRowsLocked(companyID)
 	return r.RACIMatrixProjectionRowsForResourcesLocked(companyID, nodeIDs, logicGateIDs), nil
 }
 
@@ -473,7 +473,7 @@ func (r *MemoryRepo) ListRACIMatrixProjectionRowsForUser(query WorkItemInboxQuer
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.rebuildV2MyWorkRowsLocked(query.CompanyID)
+	r.rebuildV2RACIMatrixRowsLocked(query.CompanyID)
 	items := make([]RACIMatrixProjectionRow, 0)
 	for _, row := range r.RACIMatrixProjectionRows {
 		if row.CompanyID != query.CompanyID || row.UserID != query.UserID || row.ResourceType != RACIMatrixProjectionResourceNode {
@@ -482,8 +482,8 @@ func (r *MemoryRepo) ListRACIMatrixProjectionRowsForUser(query WorkItemInboxQuer
 		if !r.userHasEffectiveAccessLocked(query.CompanyID, query.ViewerUserID, EntityTypeNode, row.ResourceID, EntityPermissionEdit) {
 			continue
 		}
-		for _, item := range r.myWorkFlatPathRowsForNodeProjectionLocked(row) {
-			if !r.userCanReadMyWorkProjectionContextLocked(query.CompanyID, query.ViewerUserID, item) {
+		for _, item := range r.raciMatrixFlatPathRowsForNodeProjectionLocked(row) {
+			if !r.userCanReadRACIMatrixProjectionContextLocked(query.CompanyID, query.ViewerUserID, item) {
 				continue
 			}
 			items = append(items, item)
@@ -493,8 +493,8 @@ func (r *MemoryRepo) ListRACIMatrixProjectionRowsForUser(query WorkItemInboxQuer
 		if RACIRoleSortValue(items[i].RACIAssignment) != RACIRoleSortValue(items[j].RACIAssignment) {
 			return RACIRoleSortValue(items[i].RACIAssignment) < RACIRoleSortValue(items[j].RACIAssignment)
 		}
-		leftPriority := myWorkProjectionPrioritySort(items[i].Priority)
-		rightPriority := myWorkProjectionPrioritySort(items[j].Priority)
+		leftPriority := raciMatrixProjectionPrioritySort(items[i].Priority)
+		rightPriority := raciMatrixProjectionPrioritySort(items[j].Priority)
 		if leftPriority != rightPriority {
 			return leftPriority < rightPriority
 		}
@@ -506,80 +506,10 @@ func (r *MemoryRepo) ListRACIMatrixProjectionRowsForUser(query WorkItemInboxQuer
 	if query.Limit > 0 && len(items) > query.Limit {
 		items = items[:query.Limit]
 	}
-	r.attachMyWorkResponsibleUserIDsLocked(items)
 	return items, nil
 }
 
-func (r *MemoryRepo) ListMyWorkMatrixRows(query WorkItemInboxQuery) ([]RACIMatrixProjectionRow, error) {
-	query.CompanyID = strings.TrimSpace(query.CompanyID)
-	query.UserID = strings.TrimSpace(query.UserID)
-	query.ViewerUserID = strings.TrimSpace(query.ViewerUserID)
-	if query.CompanyID == "" || query.UserID == "" || query.ViewerUserID == "" || query.Limit < 0 {
-		return nil, ErrInvalid
-	}
-	if query.Limit > WorkItemInboxMaxLimit {
-		query.Limit = WorkItemInboxMaxLimit
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.rebuildV2MyWorkRowsLocked(query.CompanyID)
-	items := make([]RACIMatrixProjectionRow, 0)
-	for _, row := range r.RACIMatrixProjectionRows {
-		if row.CompanyID != query.CompanyID || row.UserID != query.UserID || row.ResourceType != RACIMatrixProjectionResourceNode {
-			continue
-		}
-		if strings.TrimSpace(row.ResourceID) == "" || strings.TrimSpace(row.Node.NodeID) == "" {
-			continue
-		}
-		if !r.userHasEffectiveAccessLocked(query.CompanyID, query.ViewerUserID, EntityTypeNode, row.ResourceID, EntityPermissionEdit) {
-			continue
-		}
-		for _, item := range r.myWorkFlatPathRowsForNodeProjectionLocked(row) {
-			if !r.userCanReadMyWorkProjectionContextLocked(query.CompanyID, query.ViewerUserID, item) {
-				continue
-			}
-			items = append(items, item)
-		}
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if RACIRoleSortValue(items[i].RACIAssignment) != RACIRoleSortValue(items[j].RACIAssignment) {
-			return RACIRoleSortValue(items[i].RACIAssignment) < RACIRoleSortValue(items[j].RACIAssignment)
-		}
-		leftPriority := myWorkProjectionPrioritySort(items[i].Priority)
-		rightPriority := myWorkProjectionPrioritySort(items[j].Priority)
-		if leftPriority != rightPriority {
-			return leftPriority < rightPriority
-		}
-		if strings.ToLower(items[i].ProjectName) != strings.ToLower(items[j].ProjectName) {
-			return strings.ToLower(items[i].ProjectName) < strings.ToLower(items[j].ProjectName)
-		}
-		leftGate := ""
-		if items[i].LogicGateID != nil {
-			leftGate = *items[i].LogicGateID
-		}
-		rightGate := ""
-		if items[j].LogicGateID != nil {
-			rightGate = *items[j].LogicGateID
-		}
-		if leftGate != rightGate {
-			return leftGate < rightGate
-		}
-		if strings.ToLower(items[i].NodeName) != strings.ToLower(items[j].NodeName) {
-			return strings.ToLower(items[i].NodeName) < strings.ToLower(items[j].NodeName)
-		}
-		return items[i].ProjectionRowID < items[j].ProjectionRowID
-	})
-	for index := range items {
-		items[index].SortOrder = index + 1
-	}
-	if query.Limit > 0 && len(items) > query.Limit {
-		items = items[:query.Limit]
-	}
-	r.attachMyWorkResponsibleUserIDsLocked(items)
-	return items, nil
-}
-
-func (r *MemoryRepo) userCanReadMyWorkProjectionContextLocked(companyID, viewerUserID string, row RACIMatrixProjectionRow) bool {
+func (r *MemoryRepo) userCanReadRACIMatrixProjectionContextLocked(companyID, viewerUserID string, row RACIMatrixProjectionRow) bool {
 	if row.LogicGateID != nil && strings.TrimSpace(*row.LogicGateID) != "" {
 		if !r.userHasEffectiveAccessLocked(companyID, viewerUserID, EntityTypeLogicGate, strings.TrimSpace(*row.LogicGateID), EntityPermissionEdit) {
 			return false
@@ -593,15 +523,15 @@ func (r *MemoryRepo) userCanReadMyWorkProjectionContextLocked(companyID, viewerU
 	return true
 }
 
-func (r *MemoryRepo) myWorkFlatPathRowsForNodeProjectionLocked(row memoryRACIMatrixProjectionRow) []RACIMatrixProjectionRow {
+func (r *MemoryRepo) raciMatrixFlatPathRowsForNodeProjectionLocked(row memoryRACIMatrixProjectionRow) []RACIMatrixProjectionRow {
 	if row.ResourceType != RACIMatrixProjectionResourceNode || strings.TrimSpace(row.ResourceID) == "" || strings.TrimSpace(row.Node.NodeID) == "" {
 		return nil
 	}
-	roles := r.myWorkRolesForProjectionRowLocked(row)
+	roles := r.raciMatrixRolesForProjectionRowLocked(row)
 	if len(roles) == 0 {
 		return nil
 	}
-	projectContexts, hasProject := r.myWorkProjectContextsLocked(row)
+	projectContexts, hasProject := r.raciMatrixProjectContextsLocked(row)
 	if hasProject && len(projectContexts) == 0 {
 		return nil
 	}
@@ -609,18 +539,18 @@ func (r *MemoryRepo) myWorkFlatPathRowsForNodeProjectionLocked(row memoryRACIMat
 		return nil
 	}
 	if len(projectContexts) == 0 {
-		projectContexts = []myWorkProjectContext{{}}
+		projectContexts = []raciMatrixProjectContext{{}}
 	}
 	out := make([]RACIMatrixProjectionRow, 0, len(roles)*len(projectContexts))
 	for _, role := range roles {
 		for _, project := range projectContexts {
-			out = append(out, r.myWorkFlatPathRowForNodeRoleLocked(row, role, project))
+			out = append(out, r.raciMatrixFlatPathRowForNodeRoleLocked(row, role, project))
 		}
 	}
 	return out
 }
 
-func (r *MemoryRepo) myWorkFlatPathRowForNodeRoleLocked(row memoryRACIMatrixProjectionRow, role string, project myWorkProjectContext) RACIMatrixProjectionRow {
+func (r *MemoryRepo) raciMatrixFlatPathRowForNodeRoleLocked(row memoryRACIMatrixProjectionRow, role string, project raciMatrixProjectContext) RACIMatrixProjectionRow {
 	nodeID := strings.TrimSpace(row.ResourceID)
 	logicGateID := strings.TrimSpace(row.LogicGateID)
 	projectID := strings.TrimSpace(project.projectID)
@@ -633,7 +563,7 @@ func (r *MemoryRepo) myWorkFlatPathRowForNodeRoleLocked(row memoryRACIMatrixProj
 	}
 	item := RACIMatrixProjectionRow{
 		CompanyID:        row.CompanyID,
-		ProjectionRowID:  memoryMyWorkProjectionRowID(row, role, projectID),
+		ProjectionRowID:  memoryRACIMatrixProjectionRowID(row, role, projectID),
 		UserID:           row.UserID,
 		NodeName:         row.Node.Title,
 		RACIAssignment:   role,
@@ -657,7 +587,7 @@ func (r *MemoryRepo) myWorkFlatPathRowForNodeRoleLocked(row memoryRACIMatrixProj
 	return item
 }
 
-func memoryMyWorkProjectionRowID(row memoryRACIMatrixProjectionRow, role, projectID string) string {
+func memoryRACIMatrixProjectionRowID(row memoryRACIMatrixProjectionRow, role, projectID string) string {
 	priority := "none"
 	if row.Node.Priority != nil {
 		priority = strconv.Itoa(*row.Node.Priority)
@@ -671,7 +601,7 @@ func memoryMyWorkProjectionRowID(row memoryRACIMatrixProjectionRow, role, projec
 		logicGateID = "none"
 	}
 	parts := []string{
-		"my_work_node_leaf",
+		"raci_matrix_node_leaf",
 		strings.TrimSpace(row.CompanyID),
 		strings.TrimSpace(row.UserID),
 		strings.TrimSpace(role),
@@ -686,7 +616,7 @@ func memoryMyWorkProjectionRowID(row memoryRACIMatrixProjectionRow, role, projec
 	return strings.Join(parts, ":")
 }
 
-func myWorkProjectionPrioritySort(priority *int) int {
+func raciMatrixProjectionPrioritySort(priority *int) int {
 	if priority == nil || *priority <= 0 {
 		return 6
 	}
@@ -694,19 +624,6 @@ func myWorkProjectionPrioritySort(priority *int) int {
 		return 5
 	}
 	return *priority
-}
-func (r *MemoryRepo) ListMyWorkMatrix(query WorkItemInboxQuery) (MyWorkMatrixResponse, error) {
-	query.CompanyID = strings.TrimSpace(query.CompanyID)
-	query.UserID = strings.TrimSpace(query.UserID)
-	query.ViewerUserID = strings.TrimSpace(query.ViewerUserID)
-	if query.CompanyID == "" || query.UserID == "" || query.ViewerUserID == "" || query.Limit < 0 {
-		return MyWorkMatrixResponse{}, ErrInvalid
-	}
-	rows, err := r.ListMyWorkMatrixRows(query)
-	if err != nil {
-		return MyWorkMatrixResponse{}, err
-	}
-	return MyWorkMatrixResponse{CompanyID: query.CompanyID, UserID: query.UserID, Rows: rows}, nil
 }
 func (r *MemoryRepo) ListRACIMatrixProjectionRowsForLogicGate(companyID, logicGateID string) ([]RACIMatrixProjectionRow, error) {
 	companyID = strings.TrimSpace(companyID)
@@ -716,7 +633,7 @@ func (r *MemoryRepo) ListRACIMatrixProjectionRowsForLogicGate(companyID, logicGa
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.rebuildV2MyWorkRowsLocked(companyID)
+	r.rebuildV2RACIMatrixRowsLocked(companyID)
 	return r.RACIMatrixProjectionRowsForLogicGateLocked(companyID, logicGateID), nil
 }
 
@@ -745,7 +662,7 @@ func memoryRACIMatrixProjectionRowToDTO(row memoryRACIMatrixProjectionRow) RACIM
 	return item
 }
 
-func (r *MemoryRepo) myWorkRolesForProjectionRowLocked(row memoryRACIMatrixProjectionRow) []string {
+func (r *MemoryRepo) raciMatrixRolesForProjectionRowLocked(row memoryRACIMatrixProjectionRow) []string {
 	return r.gvicEffectiveRolesForUserLocked(row.CompanyID, row.ResourceType, row.ResourceID, row.UserID, map[string]bool{
 		domain.RACIRoleResponsible: true,
 		domain.RACIRoleAccountable: true,
@@ -754,7 +671,7 @@ func (r *MemoryRepo) myWorkRolesForProjectionRowLocked(row memoryRACIMatrixProje
 	})
 }
 
-type myWorkProjectContext struct {
+type raciMatrixProjectContext struct {
 	projectID   string
 	projectName string
 	position    int
@@ -762,8 +679,8 @@ type myWorkProjectContext struct {
 	id          string
 }
 
-func (r *MemoryRepo) myWorkProjectContextsLocked(row memoryRACIMatrixProjectionRow) ([]myWorkProjectContext, bool) {
-	candidates := make([]myWorkProjectContext, 0)
+func (r *MemoryRepo) raciMatrixProjectContextsLocked(row memoryRACIMatrixProjectionRow) ([]raciMatrixProjectContext, bool) {
+	candidates := make([]raciMatrixProjectContext, 0)
 	hasProject := false
 	seen := map[string]bool{}
 	for _, projection := range r.projectRelationshipProjection {
@@ -798,7 +715,7 @@ func (r *MemoryRepo) myWorkProjectContextsLocked(row memoryRACIMatrixProjectionR
 			continue
 		}
 		seen[keyValue] = true
-		candidates = append(candidates, myWorkProjectContext{
+		candidates = append(candidates, raciMatrixProjectContext{
 			projectID:   projection.ProjectID,
 			projectName: name,
 			position:    projection.Position,

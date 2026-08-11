@@ -8,7 +8,6 @@ import { invalidateNodeRecordStoreCaches } from "../modules/nodes/nodeRecordStor
 import { reconcileNodeRelationshipGraphTitle } from "../modules/nodes/nodeRelationshipGraph.js";
 import { invalidateProjectRelationshipsForResource } from "../modules/project-management/projectManagementApi.js";
 import { invalidateWorkspaceSnapshot } from "../modules/workspace/workspaceSnapshotCache.js";
-import { patchMyWorkMatrixCachesForCommittedTitle } from "../pages/home/myWorkMatrixLoader.js";
 
 export function reconcileCachesForCommittedEntityTitle(
   apiBase: string,
@@ -27,8 +26,6 @@ export function reconcileCachesForCommittedEntityTitle(
     resourceID,
   });
   reconcileKanbanBoardContentTitles(apiBase, companyID, update);
-  patchMyWorkMatrixCachesForCommittedTitle(update);
-
   if (update.entityType === "node") {
     invalidateNodeRecordStoreCaches(apiBase, companyID, resourceID);
     markCommunicationsWorkspacePanelStale(companyID, { nodes: true });

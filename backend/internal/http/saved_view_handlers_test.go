@@ -20,7 +20,7 @@ func TestSavedViewsPersonalLifecycle(t *testing.T) {
 
 	createBody := `{
 		"company_id":"` + companyID + `",
-		"surface":"my_work",
+		"surface":"updates",
 		"principal":"user",
 		"principal_id":"` + user.UserID + `",
 		"name":"Project by Logic Gate",
@@ -36,7 +36,7 @@ func TestSavedViewsPersonalLifecycle(t *testing.T) {
 	if err := json.NewDecoder(createRec.Body).Decode(&created); err != nil {
 		t.Fatalf("decode created: %v", err)
 	}
-	if created.SavedViewID == "" || created.Surface != store.SavedViewSurfaceMyWork || created.Principal != store.SavedViewPrincipalUser {
+	if created.SavedViewID == "" || created.Surface != store.SavedViewSurfaceUpdates || created.Principal != store.SavedViewPrincipalUser {
 		t.Fatalf("created saved view = %+v", created)
 	}
 	if len(created.Groupings) != 2 || created.Groupings[1].Field != "logic_gate" {
@@ -44,7 +44,7 @@ func TestSavedViewsPersonalLifecycle(t *testing.T) {
 	}
 
 	listRec := httptest.NewRecorder()
-	listReq := httptest.NewRequest(http.MethodGet, "/v1/saved-views?company_id="+companyID+"&surface=my_work", nil)
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/saved-views?company_id="+companyID+"&surface=updates", nil)
 	handler.ServeHTTP(listRec, savedViewRequestWithActor(listReq, user, companyID, domain.RoleCompanyUser))
 	if listRec.Code != http.StatusOK {
 		t.Fatalf("list status = %d body=%s", listRec.Code, listRec.Body.String())
@@ -61,7 +61,7 @@ func TestSavedViewsPersonalLifecycle(t *testing.T) {
 
 	updateBody := `{
 		"company_id":"` + companyID + `",
-		"surface":"my_work",
+		"surface":"updates",
 		"principal":"user",
 		"principal_id":"` + user.UserID + `",
 		"name":"Status",
@@ -367,7 +367,7 @@ func TestSavedViewsRejectInvalidPrincipalAndGrouping(t *testing.T) {
 
 	companyPrincipalBody := `{
 		"company_id":"` + companyID + `",
-		"surface":"my_work",
+		"surface":"updates",
 		"principal":"company",
 		"principal_id":"` + companyID + `",
 		"name":"Company",

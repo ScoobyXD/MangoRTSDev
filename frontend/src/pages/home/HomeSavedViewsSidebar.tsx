@@ -2,11 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import {
-  DEFAULT_MY_WORK_GROUPINGS,
-  MY_WORK_GROUPING_FIELDS,
-  normalizeMyWorkGroupingStack,
-} from "./myWorkGrouping";
-import {
   createSavedViewID,
   deleteSavedView as deleteSavedViewRequest,
   fetchSavedViews,
@@ -25,7 +20,7 @@ export function restoreSelectedHomeSavedView(surface: HomeSavedViewsSurface, com
   emitHomeSavedViewsChanged(surface, readSelectedSavedViewID(surface, companyID, storageUserID));
 }
 
-type HomeSavedViewsSurface = Extract<SavedViewSurface, "my_work" | "updates">;
+type HomeSavedViewsSurface = Extract<SavedViewSurface, "updates">;
 
 type HomeSavedGroupingSetting = {
   setting_id: string;
@@ -48,19 +43,8 @@ type HomeSavedViewsSidebarSectionProps = {
   surface: HomeSavedViewsSurface;
   active: boolean;
   onSelectSurface: () => void;
-  builtInView?: {
-    label: string;
-    active: boolean;
-    onSelect: () => void;
-    onPreload?: () => void;
-    settings?: {
-      ariaLabel: string;
-      onOpen: (anchor: DOMRect) => void;
-    };
-  };
 };
 
-const MY_WORK_SELECTED_VIEW_STORAGE_KEY = "mangorts.myWork.selectedView.v1";
 const UPDATES_SELECTED_VIEW_STORAGE_KEY = "mangorts.updates.selectedView.v1";
 const HOME_SAVED_VIEW_DRAG_MIME = "application/x-mangorts-home-saved-view";
 const HOME_SAVED_VIEW_GROUPING_DRAG_MIME = "application/x-mangorts-home-saved-view-grouping";
@@ -75,7 +59,6 @@ export function HomeSavedViewsSidebarSection({
   surface,
   active,
   onSelectSurface,
-  builtInView,
 }: HomeSavedViewsSidebarSectionProps) {
   const storageUserID = currentUserID.trim() || "local";
   const fallbackSetting = useMemo(
@@ -549,38 +532,8 @@ export function HomeSavedViewsSidebarSection({
   ) : null;
 
   return (
-    <div ref={panelRef} style={savedViewPanelStyle(active || !!builtInView?.active)}>
+    <div ref={panelRef} style={savedViewPanelStyle(active)}>
       <div style={savedViewListStyle}>
-        {builtInView && (
-          <div style={builtInSavedViewRowShellStyle(builtInView.active)}>
-            <button
-              type="button"
-              aria-current={builtInView.active ? "page" : undefined}
-              style={savedViewRowButtonStyle}
-              onPointerEnter={builtInView.onPreload}
-              onFocus={builtInView.onPreload}
-              onPointerDown={builtInView.onPreload}
-              onClick={builtInView.onSelect}
-            >
-              <span style={savedViewNameStyle}>{builtInView.label}</span>
-            </button>
-            {builtInView.settings ? (
-              <button
-                type="button"
-                title={builtInView.settings.ariaLabel}
-                aria-label={builtInView.settings.ariaLabel}
-                style={savedViewSettingsButtonStyle}
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  builtInView.settings?.onOpen(event.currentTarget.getBoundingClientRect());
-                }}
-              >
-                ...
-              </button>
-            ) : null}
-          </div>
-        )}
         {settings.map((item) => {
           const dropPlacement = savedViewDropTarget?.settingID === item.setting_id ? savedViewDropTarget.placement : null;
           return (
@@ -681,6 +634,58 @@ export function HomeSavedViewsSidebarSection({
   );
 }
 
+export function HomeBuiltInViewSidebarRow({
+  label,
+  active,
+  onSelect,
+  onPreload,
+  settings,
+}: {
+  label: string;
+  active: boolean;
+  onSelect: () => void;
+  onPreload?: () => void;
+  settings?: {
+    ariaLabel: string;
+    onOpen: (anchor: DOMRect) => void;
+  };
+}) {
+  return (
+    <div style={savedViewPanelStyle(active)}>
+      <div style={savedViewListStyle}>
+        <div style={builtInSavedViewRowShellStyle(active)}>
+          <button
+            type="button"
+            aria-current={active ? "page" : undefined}
+            style={savedViewRowButtonStyle}
+            onPointerEnter={onPreload}
+            onFocus={onPreload}
+            onPointerDown={onPreload}
+            onClick={onSelect}
+          >
+            <span style={savedViewNameStyle}>{label}</span>
+          </button>
+          {settings ? (
+            <button
+              type="button"
+              title={settings.ariaLabel}
+              aria-label={settings.ariaLabel}
+              style={savedViewSettingsButtonStyle}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                settings.onOpen(event.currentTarget.getBoundingClientRect());
+              }}
+            >
+              ...
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function emitHomeSavedViewsChanged(surface: HomeSavedViewsSurface, settingID: string): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(EVENT_HOME_SAVED_VIEWS_CHANGED, {
@@ -688,11 +693,12 @@ function emitHomeSavedViewsChanged(surface: HomeSavedViewsSurface, settingID: st
   }));
 }
 
-function savedViewStorageKey(surface: HomeSavedViewsSurface, companyID: string, userID: string): string {
-  const prefix = surface === "my_work" ? MY_WORK_SELECTED_VIEW_STORAGE_KEY : UPDATES_SELECTED_VIEW_STORAGE_KEY;
+function savedViewStorageKey(_surface: HomeSavedViewsSurface, companyID: string, userID: string): string {
   const cleanCompanyID = companyID.trim();
   const cleanUserID = userID.trim();
-  return cleanCompanyID && cleanUserID ? `${prefix}:${cleanCompanyID}:${cleanUserID}` : prefix;
+  return cleanCompanyID && cleanUserID
+    ? `${UPDATES_SELECTED_VIEW_STORAGE_KEY}:${cleanCompanyID}:${cleanUserID}`
+    : UPDATES_SELECTED_VIEW_STORAGE_KEY;
 }
 
 function readSelectedSavedViewID(surface: HomeSavedViewsSurface, companyID: string, userID: string): string {
@@ -717,20 +723,15 @@ function clearSelectedSavedViewID(surface: HomeSavedViewsSurface, companyID: str
   } catch {}
 }
 
-function homeSavedViewGroupingFields(surface: HomeSavedViewsSurface): ReadonlyArray<{ value: string; label: string }> {
-  return surface === "my_work" ? MY_WORK_GROUPING_FIELDS : UPDATE_GROUPING_FIELDS;
+function homeSavedViewGroupingFields(_surface: HomeSavedViewsSurface): ReadonlyArray<{ value: string; label: string }> {
+  return UPDATE_GROUPING_FIELDS;
 }
 
-function defaultGroupings(surface: HomeSavedViewsSurface): SavedViewGrouping[] {
-  return surface === "my_work"
-    ? DEFAULT_MY_WORK_GROUPINGS.map((item) => ({ field: item.field, direction: item.direction }))
-    : DEFAULT_UPDATE_GROUPINGS.map((item) => ({ field: item.field, direction: item.direction }));
+function defaultGroupings(_surface: HomeSavedViewsSurface): SavedViewGrouping[] {
+  return DEFAULT_UPDATE_GROUPINGS.map((item) => ({ field: item.field, direction: item.direction }));
 }
 
-function normalizeHomeSavedGroupingStack(surface: HomeSavedViewsSurface, value: unknown): SavedViewGrouping[] {
-  if (surface === "my_work") {
-    return normalizeMyWorkGroupingStack(value).map((item) => ({ field: item.field, direction: item.direction }));
-  }
+function normalizeHomeSavedGroupingStack(_surface: HomeSavedViewsSurface, value: unknown): SavedViewGrouping[] {
   return normalizeUpdateGroupingStack(value).map((item) => ({ field: item.field, direction: item.direction }));
 }
 
@@ -743,7 +744,7 @@ function createDefaultSavedView(surface: HomeSavedViewsSurface, companyID: strin
     surface,
     principal: "user",
     principal_id: currentUserID.trim(),
-    name: surface === "my_work" ? "Project" : "Updates",
+    name: "Updates",
     groupings: defaultGroupings(surface),
     position: 1000,
     created_timestamp: now,
@@ -1120,7 +1121,7 @@ const savedViewContextMenuButtonStyle: React.CSSProperties = {
   padding: "0 9px",
 };
 
-function savedViewSurfaceAccent(surface: HomeSavedViewsSurface): {
+function savedViewSurfaceAccent(_surface: HomeSavedViewsSurface): {
   strong: string;
   faint: string;
   soft: string;
@@ -1128,23 +1129,13 @@ function savedViewSurfaceAccent(surface: HomeSavedViewsSurface): {
   text: string;
   glow: string;
 } {
-  if (surface === "updates") {
-    return {
-      strong: "#f59e0b",
-      faint: "#fff7ed",
-      soft: "rgba(255, 237, 213, 0.82)",
-      frame: "linear-gradient(135deg, rgba(251, 146, 60, 0.96), rgba(251, 191, 36, 0.82), rgba(255, 255, 255, 0.90))",
-      text: "#b45309",
-      glow: "0 0 0 1px rgba(245, 158, 11, 0.18), 0 8px 20px rgba(245, 158, 11, 0.16)",
-    };
-  }
   return {
-    strong: "#10b981",
-    faint: "#ecfdf5",
-    soft: "rgba(209, 250, 229, 0.82)",
-    frame: "linear-gradient(135deg, rgba(16, 185, 129, 0.94), rgba(45, 212, 191, 0.78), rgba(255, 255, 255, 0.90))",
-    text: "#047857",
-    glow: "0 0 0 1px rgba(16, 185, 129, 0.18), 0 8px 20px rgba(16, 185, 129, 0.15)",
+    strong: "#f59e0b",
+    faint: "#fff7ed",
+    soft: "rgba(255, 237, 213, 0.82)",
+    frame: "linear-gradient(135deg, rgba(251, 146, 60, 0.96), rgba(251, 191, 36, 0.82), rgba(255, 255, 255, 0.90))",
+    text: "#b45309",
+    glow: "0 0 0 1px rgba(245, 158, 11, 0.18), 0 8px 20px rgba(245, 158, 11, 0.16)",
   };
 }
 

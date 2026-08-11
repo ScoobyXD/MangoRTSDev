@@ -49,27 +49,6 @@ export type RACIMatrixProjectionResponse = {
   rows: RACIMatrixProjectionRow[];
 };
 
-export type MyWorkMatrixRow = RACIMatrixProjectionRow & {
-  gvic_assignment?: LogicGateRACIRole | string;
-  project_id?: string;
-  project_name?: string;
-  logic_gate_id?: string;
-  logic_gate_name?: string;
-};
-
-export type MyWorkMatrixResponse = {
-  company_id: string;
-  user_id: string;
-  rows: MyWorkMatrixRow[];
-};
-
-export type MyWorkNodeMoveResult = {
-  company_id: string;
-  node: NodeRecord;
-  gvic_projection_rows: RACIMatrixProjectionRow[];
-  removed_projection_row_ids: string[];
-};
-
 export async function listResponsibleInboxNodes(params: WorkItemInboxReadParams): Promise<ResponsibleInboxNodesResponse> {
   return fetchWorkItemInboxRead<ResponsibleInboxNodesResponse>(params, "/v1/work-items/responsible-inbox");
 }
@@ -88,39 +67,6 @@ export async function listMyLogicGates(params: WorkItemInboxReadParams): Promise
 
 export async function listRACIMatrixProjectionRows(params: WorkItemInboxReadParams): Promise<RACIMatrixProjectionResponse> {
   return fetchWorkItemInboxRead<RACIMatrixProjectionResponse>(params, "/v1/work-items/gvic-matrix-projection");
-}
-
-export async function listMyWorkMatrixRows(params: WorkItemInboxReadParams): Promise<MyWorkMatrixResponse> {
-  return fetchWorkItemInboxRead<MyWorkMatrixResponse>(params, "/v1/work-items/my-work-matrix");
-}
-
-export async function moveMyWorkNodeToCell(params: {
-  apiBase: string;
-  companyID: string;
-  nodeID: string;
-  targetUserID?: string;
-  targetRACIRole: LogicGateRACIRole;
-  priority?: number | null;
-  logicGateID?: string;
-  fromLogicGateID?: string;
-}): Promise<MyWorkNodeMoveResult> {
-  const payload = await requestJSON<Partial<MyWorkNodeMoveResult> & { node: NodeRecord }>(params.apiBase, `/v1/work-items/my-work-matrix/nodes/${encodeURIComponent(params.nodeID)}/move`, {
-    method: "POST",
-    json: {
-      company_id: params.companyID,
-      target_user_id: params.targetUserID,
-      target_gvic_role: params.targetRACIRole,
-      priority: params.priority,
-      logic_gate_id: params.logicGateID,
-      from_logic_gate_id: params.fromLogicGateID,
-    },
-  });
-  return {
-    company_id: payload.company_id ?? params.companyID,
-    node: payload.node,
-    gvic_projection_rows: Array.isArray(payload.gvic_projection_rows) ? payload.gvic_projection_rows : [],
-    removed_projection_row_ids: Array.isArray(payload.removed_projection_row_ids) ? payload.removed_projection_row_ids : [],
-  };
 }
 
 async function fetchWorkItemInboxRead<T>(params: WorkItemInboxReadParams, path: string): Promise<T> {

@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"errors"
-	"log"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"strings"
@@ -194,29 +193,6 @@ func (s *Server) handleWorkItemMyLogicGates(w http.ResponseWriter, r *http.Reque
 		"user_id":     query.UserID,
 		"limit":       query.Limit,
 		"logic_gates": items,
-	})
-}
-
-func (s *Server) handleWorkItemMyWorkMatrix(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
-		return
-	}
-	query, ok := s.parseWorkItemInboxReadQuery(w, r)
-	if !ok {
-		return
-	}
-	query.Limit = 0
-	matrix, err := s.repo.ListMyWorkMatrix(query)
-	if err != nil {
-		log.Printf("failed_to_list_my_work_matrix user_id=%s viewer_user_id=%s company_id=%s err=%v", query.UserID, query.ViewerUserID, query.CompanyID, err)
-		writeError(w, http.StatusInternalServerError, "failed_to_list_my_work_matrix")
-		return
-	}
-	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
-		"company_id": query.CompanyID,
-		"user_id":    query.UserID,
-		"rows":       matrix.Rows,
 	})
 }
 

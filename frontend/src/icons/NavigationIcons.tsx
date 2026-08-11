@@ -80,14 +80,6 @@ export const HeaderUpdatesIcon: React.FC<{ color?: string }> = ({ color = "curre
   </svg>
 );
 
-export const HeaderMyWorkIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
-  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
-    <rect x="2.2" y="3" width="11.6" height="10.3" rx="1.4" fill="none" stroke={color} strokeWidth="1.2" />
-    <path d="M5.1 2.1v2.2M10.9 2.1v2.2M4.4 7.2h3.3M4.4 10h5.9" fill="none" stroke={color} strokeWidth="1.15" strokeLinecap="round" />
-    <path d="m10.1 7.4 1 .95 1.7-2" fill="none" stroke={color} strokeWidth="1.15" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
 export const HeaderExplorerIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
   <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
     <path d="M2.2 4.6h4.35l1.1 1.3h6.15v6.35a1.2 1.2 0 0 1-1.2 1.2H3.4a1.2 1.2 0 0 1-1.2-1.2Z" fill="none" stroke={color} strokeWidth="1.2" strokeLinejoin="round" />

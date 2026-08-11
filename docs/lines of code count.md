@@ -130,7 +130,6 @@ There are 25 non-test files over 1,500 logic lines. Nineteen of them are over
 | 2,553 | `backend/internal/http/communications_handlers.go` | No |
 | 2,470 | `backend/internal/store/repository.go` | No |
 | 2,441 | `frontend/src/pages/home/UpdatesView.tsx` | No |
-| 2,381 | `frontend/src/pages/home/MyWorkView.tsx` | No |
 | 2,181 | `frontend/src/pages/home/homeStyles.ts` | No |
 | 2,164 | `frontend/src/app/applayout.tsx` | No |
 | 1,917 | `backend/internal/http/server_company_explorer_test.go` | Yes |

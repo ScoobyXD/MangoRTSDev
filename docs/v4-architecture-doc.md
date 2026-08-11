@@ -42,7 +42,7 @@ Updates uses notification read state as an archive boundary: unread rows are the
 
 Normal and urgent mentions committed by either supported editor persistence path create targeted notification domain events only for newly added stable occurrences. Operation IDs scope idempotency, so retries and edits that retain an existing mention stay silent; Node, Logic Gate, and Project documents use the same rule.
 
-Broad company/workspace/user-directory/editor wildcard streams remain forbidden. Company Explorer, graphs/maps, RACI/My Work, Project Management, permissions, generic projections, broad communications, and title caches do not receive generalized backend replication. Same-browser committed-title convergence remains the targeted local command-result/cache mechanism documented in the owner contracts.
+Broad company/workspace/user-directory/editor wildcard streams remain forbidden. Company Explorer, graphs/maps, RACI, Project Management, permissions, generic projections, broad communications, and title caches do not receive generalized backend replication. Same-browser committed-title convergence remains the targeted local command-result/cache mechanism documented in the owner contracts.
 
 ## Collaborative Documents
 

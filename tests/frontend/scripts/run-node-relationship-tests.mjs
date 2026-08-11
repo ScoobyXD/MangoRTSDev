@@ -34,9 +34,6 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/emailCollaborationChat.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/updatesSelection.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/updatesGrouping.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/myWorkGrouping.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/myWorkDisplayRows.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/myWorkMatrixLoader.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/homeCommands.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/homeMailDrafts.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/homeMailboxRealtime.test.js"),
@@ -162,8 +159,6 @@ for (const testFile of testFiles) {
   contents = contents.replaceAll('"../../../../frontend/src/modules/company-explorer/selectionSync"', '"../../../../frontend/src/modules/company-explorer/selectionSync.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/company-explorer/treePresentation"', '"../../../../frontend/src/modules/company-explorer/treePresentation.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/kanban/shared"', '"../../../../frontend/src/modules/kanban/shared.js"');
-  contents = contents.replaceAll('"../../../../frontend/src/pages/home/myWorkGrouping"', '"../../../../frontend/src/pages/home/myWorkGrouping.js"');
-  contents = contents.replaceAll('"../../../../frontend/src/pages/home/myWorkMatrixLoader"', '"../../../../frontend/src/pages/home/myWorkMatrixLoader.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/kanban/KanbanBoardContentStore"', '"../../../../frontend/src/modules/kanban/KanbanBoardContentStore.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/plainTextEditing"', '"../../../../frontend/src/modules/editor/plainTextEditing.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/unifiedRichEditorContract"', '"../../../../frontend/src/modules/editor/unifiedRichEditorContract.js"');

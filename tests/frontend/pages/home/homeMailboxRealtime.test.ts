@@ -107,7 +107,6 @@ test("selects only the exact active mail-bearing personal account or shared inbo
     { viewID: "shared-root", mailbox: "primary" as const },
     { viewID: "shared:heading-1", mailbox: "primary" as const, sharedInbox: { id: "heading-1", mailBearing: false } },
     { viewID: "my-triage", mailbox: "drafts" as const },
-    { viewID: "my-work", mailbox: "primary" as const },
   ]) {
     assert.equal(selectHomeMailboxRealtimeTarget({
       companyID: "company-1",

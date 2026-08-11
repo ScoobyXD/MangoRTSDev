@@ -7,7 +7,7 @@ import type { KanbanBoard, KanbanCard } from "../../../../frontend/src/modules/k
 import type { NodeRecord } from "../../../../frontend/src/modules/nodes/types.js";
 import { EDITOR_RICH_TEXT_PREFIX } from "../../../../frontend/src/modules/editor/richTextEditing.js";
 import { INBOX_NO_LOGIC_GATE_ID } from "../../../../frontend/src/pages/home/homeConstants.js";
-import { addMyLogicGateShortcutsCommand, addSharedInboxRACIPrincipalCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeRACIMatrixNodeCommand, deleteHomeMailMessagesCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, removeMyLogicGateShortcutCommand, removeSharedInboxRACIPrincipalCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessagesBatch, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateRACIMatrixNode, type HomeDeleteEmailMessage, type HomeDropAssignNodeToLogicGateStatus, type HomeMoveMyWorkNodeToCell, type HomeRemoveMyLogicGateShortcut, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInboxRACIAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
+import { addMyLogicGateShortcutsCommand, addSharedInboxRACIPrincipalCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeRACIMatrixNodeCommand, deleteHomeMailMessagesCommand, dropNodesIntoInboxLogicGateCommand, removeMyLogicGateShortcutCommand, removeSharedInboxRACIPrincipalCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessagesBatch, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateRACIMatrixNode, type HomeDeleteEmailMessage, type HomeDropAssignNodeToLogicGateStatus, type HomeRemoveMyLogicGateShortcut, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInboxRACIAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
 import { appendHomeMailPlainText, applyHomeMailSignature, composeHasDraftContent, homeMailBodyHasSignature, homeMailDraftToMessage, homeMailSignatureScopeKey, loadHomeMailSignature, readHomeMailSignature, saveHomeMailSignatureRemote } from "../../../../frontend/src/pages/home/homeMailDrafts.js";
 import { emptyCompose } from "../../../../frontend/src/pages/home/homeTypes.js";
 
@@ -299,7 +299,7 @@ function projectionRow(resourceID: string, overrides: Partial<RACIMatrixProjecti
   const logicGateID = overrides.logic_gate_id ?? "none";
   return {
     company_id: "company-1",
-    projection_row_id: `my_work_node_leaf:company-1:user-1:responsible:none:node:${resourceID}:project:none:logic_gate:${logicGateID}`,
+    projection_row_id: `raci_matrix_node_leaf:company-1:user-1:responsible:none:node:${resourceID}:project:none:logic_gate:${logicGateID}`,
     user_id: "user-1",
     node_name: `Node ${resourceID}`,
     gvic_assignment: "responsible",
@@ -632,64 +632,6 @@ test("Home node drop dedupes selected nodes and falls back to each node status",
   assert.deepEqual(updated.gvic_projection_rows.map((row) => row.node_id), ["node-1", "node-2"]);
   assert.deepEqual(statuses, ["done", "pending"]);
   assert.deepEqual(priorities, [null, null]);
-});
-
-test("My Work node drop uses the dedicated move command for role and priority placement", async () => {
-  const nodes = new Map([
-    ["node-1", node("node-1", { priority: 1, logic_gate_ids: ["gate-1"] })],
-    ["node-2", node("node-2", { priority: 2, logic_gate_ids: ["gate-1"] })],
-  ]);
-  const calls: Array<Parameters<HomeMoveMyWorkNodeToCell>[0]> = [];
-  const moveMyWorkNodeToCell: HomeMoveMyWorkNodeToCell = async (input) => {
-    calls.push(input);
-    const sourceNode = nodes.get(input.nodeID) ?? node(input.nodeID);
-    return {
-      company_id: input.companyID,
-      node: { ...sourceNode, priority: input.priority, logic_gate_ids: input.logicGateID ? [input.logicGateID] : sourceNode.logic_gate_ids } as NodeRecord,
-      gvic_projection_rows: [projectionRow(input.nodeID, {
-        projection_row_id: `consulted-${input.nodeID}`,
-        user_id: input.targetUserID ?? "user-1",
-        gvic_assignment: input.targetRACIRole,
-        logic_gate_id: input.logicGateID ?? "",
-      })],
-      removed_projection_row_ids: ["old-responsible-row", `old-${input.nodeID}`, "old-responsible-row"],
-    };
-  };
-
-  const updated = await moveMyWorkNodesToCellCommand({
-    apiBase: "https://api.example.test",
-    companyID: "company-1",
-    nodeIDs: ["node-1", "missing", "node-1", "node-2"],
-    priority: 3,
-    targetRACIRole: "consulted",
-    targetUserID: "user-2",
-    logicGateID: "gate-1",
-    fromLogicGateID: "gate-1",
-    nodeByID: nodes,
-    moveMyWorkNodeToCell,
-  });
-
-  assert.deepEqual(calls.map((call) => ({
-    companyID: call.companyID,
-    nodeID: call.nodeID,
-    targetUserID: call.targetUserID,
-    targetRACIRole: call.targetRACIRole,
-    priority: call.priority,
-    logicGateID: call.logicGateID,
-    fromLogicGateID: call.fromLogicGateID,
-  })), [
-    { companyID: "company-1", nodeID: "node-1", targetUserID: "user-2", targetRACIRole: "consulted", priority: 3, logicGateID: "gate-1", fromLogicGateID: "gate-1" },
-    { companyID: "company-1", nodeID: "node-2", targetUserID: "user-2", targetRACIRole: "consulted", priority: 3, logicGateID: "gate-1", fromLogicGateID: "gate-1" },
-  ]);
-  assert.deepEqual(updated.nodes.map((item) => [item.node_id, item.priority, item.logic_gate_ids]), [
-    ["node-1", 3, ["gate-1"]],
-    ["node-2", 3, ["gate-1"]],
-  ]);
-  assert.deepEqual(updated.gvic_projection_rows.map((row) => [row.node_id, row.gvic_assignment, row.user_id]), [
-    ["node-1", "consulted", "user-2"],
-    ["node-2", "consulted", "user-2"],
-  ]);
-  assert.deepEqual(updated.removed_projection_row_ids, ["old-responsible-row", "old-node-1", "old-node-2"]);
 });
 
 test("Home logic gate creation sends creator RACI role through batch create", async () => {

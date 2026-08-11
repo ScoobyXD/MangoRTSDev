@@ -52,7 +52,7 @@ Any role can receive multiple people or groups, while one direct principal can h
 ↓
 A group assignment stays one typed group edge and expands through current members and nested subgroups whenever effective RACI is read
 ↓
-If membership changes or a person's effective role changes, My Work and notification routing use the new live result without copying per-user assignment rows
+If membership changes or a person's effective role changes, RACI inbox reads and notification routing use the new live result without copying per-user assignment rows
 ↓
 RACI remains separate from permissions and never grants Edit access
 
@@ -62,7 +62,7 @@ Last updated: 2026-08-06
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: backend, HTTP, frontend contract, disposable PostgreSQL, scale, and regression coverage for V2 role validation, inherited/customized resolution, force resets, moves, detach, group changes, My Work, notifications, and fingerprints. Rule ID mapping remains partial.
+- Business Logic Covered By Automated Tests: backend, HTTP, frontend contract, disposable PostgreSQL, scale, and regression coverage for V2 role validation, inherited/customized resolution, force resets, moves, detach, group changes, RACI inboxes, notifications, and fingerprints. Rule ID mapping remains partial.
 
 ## Business Logic
 
@@ -87,14 +87,14 @@ RACI18 - Group assignments remain group pointers. Current nested membership expa
 RACI19 - Group membership, parent-group, and deletion changes affect effective RACI immediately without rewriting resource policies. Deleting a group removes its direct policy edges.
 RACI20 - If one user reaches several roles, the deterministic order is Responsible, Accountable, Consulted, then Informed; direct and shallower sources break equal-role ties.
 RACI21 - RACI never grants Edit access. Authorization reads only the separate permission policy.
-RACI22 - My Work includes a resource only when the actor has both effective RACI and effective Edit permission, resolved from the four canonical tables, live hierarchy, and live groups.
+RACI22 - A RACI inbox includes a resource only when the actor has both effective RACI and effective Edit permission, resolved from the four canonical tables, live hierarchy, and live groups.
 RACI23 - Notification routing resolves the current effective RACI of the exact target resource. Parent or neighboring resource RACI never substitutes.
 RACI24 - Assignment notifications are sent only for newly effective users or effective role changes; unchanged users, removals, unrelated users, and the actor receive none.
 RACI25 - RACI event payloads identify policy type, action, descendant action, allocated sequence, mode, and changed recipients.
 RACI26 - Reads explain the stored mode, effective mode, source resource, active reset, and an inactive stored customization superseded by force overwrite.
 RACI27 - The frontend shows Inherited or Customized as a non-clickable status, keeps authorized assignment inputs editable in either state, provides both exact descendant actions only when descendants exist, protects stale writes, invalidates affected workspace reads, and performs no optimistic descendant materialization.
 RACI28 - Fingerprints include effective source identity and sequence, eligible reset identity and sequence, the parent-link boundary, live group-membership version, and actor-specific edit result where exposed.
-RACI29 - Point reads, My Work, notification decisions, and cache validation derive current state at read time; policy writes stay constant-size with descendant count.
+RACI29 - Point reads, RACI inbox reads, notification decisions, and cache validation derive current state at read time; policy writes stay constant-size with descendant count.
 RACI30 - Resource deletion deletes its settings row and cascades its RACI edges. No missing resource, user, or group identity can remain.
 RACI31 - Shared inbox folder and shared inbox RACI use their exact canonical resource identities and remain separate from permissions and mailbox credentials.
 RACI32 - Logic Gate work may expose its effective Responsible user as request-owner metadata, but that field never implies permission.
@@ -189,17 +189,17 @@ Given:
 - A Logic Gate has inherited and customized Node descendants.
 - A regular Logic Gate RACI edit uses Apply to non-customized descendants.
 - The user separately runs Apply to every descendant for that Logic Gate.
-- A user later opens or refreshes My Work after RACI assignments change.
-- Another browser may retain stale My Work state until navigation or refresh.
+- A user later opens or refreshes a RACI inbox after assignments change.
+- Another browser may retain stale RACI inbox state until navigation or refresh.
 
 Expected:
 - A regular edit updates one complete Logic Gate policy; inherited Nodes see it and active customized Nodes do not.
 - Apply to non-customized descendants adds no descendant state or graph writes.
 - Apply to every descendant updates one descendant-reset sequence and makes eligible older Node customizations inactive without walking assigned Nodes.
 - Project, Node, and shared-resource policy writes remain scoped to one settings row and one complete edge set.
-- My Work derives current rows from V2 policy, hierarchy, live groups, permissions, and work metadata.
-- No RACI/My Work realtime policy scope or permanent effective/projection authority is created.
-- My Work sees current effective state on its next canonical load.
+- The RACI inbox derives current rows from V2 policy, hierarchy, live groups, permissions, and work metadata.
+- No RACI inbox realtime policy scope or permanent effective/projection authority is created.
+- The RACI inbox sees current effective state on its next canonical load.
 - Independently required notification/domain-event consumers remain, but no generic browser refresh event is published.
 
 ### Scenario RACI-S4: Shared Inbox RACI And Permission Separation
@@ -236,16 +236,16 @@ Given:
 Expected:
 - The write replaces one complete customized edge set and its sequence in one transaction.
 - Apply to non-customized descendants writes no descendant state; Apply to every descendant changes one reset sequence.
-- No permanent effective or My Work authority rows are maintained.
+- No permanent effective or RACI inbox authority rows are maintained.
 - Editable RACI chips and mode/source explanations reconcile from the canonical response.
-- My Work and other non-live views resolve current state on open or refresh.
+- RACI inboxes and other non-live views resolve current state on open or refresh.
 - Stale broad Logic Gate payloads, stale workspace list cache entries, cached Node/Logic Gate records, and stale in-flight reads cannot overwrite newer Logic Gate RACI assignments or descendant effective policy.
 - Logic Gate and Node RACI follow the same freshness contract.
 - The inherited Node resolves the Logic Gate live; the customized Node remains independent until an eligible Apply to every descendant reset.
 - Parent-link, reset, group-version, actor, and effective-source fingerprints prevent unsafe 304 responses.
 - The canonical response remains authoritative without pretending descendants were individually rewritten.
 
-### Scenario RACI-S6: Node Logic Gate Inheritance, Detach, My Work, And Updates
+### Scenario RACI-S6: Node Logic Gate Inheritance, Detach, RACI Inboxes, And Updates
 
 Business logic covered:
 - RACI21
@@ -276,7 +276,7 @@ Expected:
 - Apply to every descendant changes one Logic Gate reset sequence and can supersede older customized descendants without row fanout.
 - A parent link created after an older reset protects the moved subtree until a later reset.
 - Detaching the inherited Node materializes its current effective policy as a customized Node policy in the same transaction.
-- My Work shows the node only when the user's effective node RACI includes that node; parent project or logic gate RACI only provides grouping and context.
+- A RACI inbox shows the Node only when the user's effective Node RACI includes it and the viewer has Edit access; parent Project or Logic Gate RACI only provides grouping and context.
 - Project RACI does not flow down into logic gates or nodes.
 - Updates visibility uses the RACI/access rules of the updated target: project updates use project RACI, logic gate updates use logic gate RACI, and node updates use node effective RACI.
 
