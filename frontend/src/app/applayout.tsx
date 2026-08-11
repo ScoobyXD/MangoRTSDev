@@ -77,12 +77,13 @@ import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMe
 import { AppTaskbar } from "./AppTaskbar";
 import { EVENT_APP_DOCK_TAB_REQUESTED, appDockTabID, appTaskbarStorageScope, readAppDockTabs, saveAppDockTabs, upsertAppDockTab, type AppDockTab, type AppDockTabInput } from "./appDockTabs";
 import { readAppTimelineState, rollTimelineStateToDate, saveAppTimelineState, type AppTimelineState } from "./timelineState";
-import { buildGvicRoute, buildLogicGateRoute, buildNodeRoute, buildProjectLogicGateNavigationPlan, buildProjectRoute, gvicRoleForViewID, type DeepLinkRoute, type GvicDeepLinkRoute } from "./deepLinkRoutes";
+import { buildGvicRoute, buildHuddleLogicGateRoute, buildLogicGateRoute, buildNodeRoute, buildProjectLogicGateNavigationPlan, buildProjectRoute, gvicRoleForViewID, type DeepLinkRoute, type GvicDeepLinkRoute } from "./deepLinkRoutes";
 import { replaceProjectWorkPanelHistoryState, type ProjectLogicGateReturnContext } from "./projectRouteHistory";
 import { buildContextualNodeRoute, openAppPathInNewTab } from "./resourceLinks";
 import { createRequestJSON } from "../modules/api/requestJSON";
 import { invalidateNodeRecordStoreCaches } from "../modules/nodes/nodeRecordStore";
 import { removeNodeRelationshipGraphNode } from "../modules/nodes/nodeRelationshipGraph";
+import { HuddleLogicGatePage } from "../modules/huddles/HuddleLogicGatePage";
 import { foldLatestCommittedEntityTitles, subscribeCommittedEntityTitleUpdates } from "../modules/realtime/committedEntityTitleUpdates";
 import { reconcileCachesForCommittedEntityTitle } from "./committedTitleCacheReconciliation";
 import {
@@ -469,7 +470,9 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   const isAccountManagerView = activePrimaryPage === "account-manager";
   const isTeamsView = activePrimaryPage === "teams";
   const isFieldsView = activePrimaryPage === "fields";
-  const isFullPageView = isLogicGateArenaView || isHomeView || isProjectManagementView || isAccountManagerView || isTeamsView || isFieldsView;
+  const huddleLogicGateID = deepLink?.kind === "huddle_logic_gate" ? deepLink.huddleLogicGateID : "";
+  const isHuddleLogicGateView = Boolean(huddleLogicGateID);
+  const isFullPageView = isHuddleLogicGateView || isLogicGateArenaView || isHomeView || isProjectManagementView || isAccountManagerView || isTeamsView || isFieldsView;
   const rootFrames = useMemo(() => frames.filter((frame) => !frame.parentId), [frames]);
 
   useEffect(() => {
@@ -1169,6 +1172,20 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   }, [activatePrimaryPage, gvicDeepLinkViewID, taskbarScope]);
 
   useEffect(() => {
+    const openHuddleLogicGate = (event: Event) => {
+      const detail = (event as CustomEvent<{ resourceType?: string; resourceID?: string }>).detail;
+      const resourceID = detail?.resourceID?.trim() ?? "";
+      if (detail?.resourceType !== "huddle_logic_gate" || !resourceID || !onNavigate) return;
+      closeMenus();
+      setExplorerNodePopup(null);
+      setActiveDockTabID(null);
+      onNavigate(buildHuddleLogicGateRoute(resourceID));
+    };
+    window.addEventListener("mangorts:huddle-open", openHuddleLogicGate);
+    return () => window.removeEventListener("mangorts:huddle-open", openHuddleLogicGate);
+  }, [closeMenus, onNavigate]);
+
+  useEffect(() => {
     if (overrideContent || deepLink || !initialPage) return;
     activatePrimaryPage(initialPage);
   }, [activatePrimaryPage, deepLink, initialPage, overrideContent]);
@@ -1572,13 +1589,18 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   const routeForSidebarPin = useCallback((pin: SidebarPin): string => {
     if (pin.kind === "logic_gate") return buildLogicGateRoute(pin.id);
     if (pin.kind === "project") return buildProjectRoute(pin.id);
-    if (pin.kind === "huddle_logic_gate" || pin.kind === "huddle_node") return window.location.pathname;
+    if (pin.kind === "huddle_logic_gate") return buildHuddleLogicGateRoute(pin.id);
+    if (pin.kind === "huddle_node") return window.location.pathname;
     return buildNodeRoute(pin.id);
   }, []);
 
   const openSidebarPin = useCallback((pin: SidebarPin) => {
     const companyID = getActiveCompanyID();
-    if (pin.kind === "huddle_logic_gate" || pin.kind === "huddle_node") {
+    if (pin.kind === "huddle_logic_gate") {
+      if (onNavigate) onNavigate(buildHuddleLogicGateRoute(pin.id));
+      return;
+    }
+    if (pin.kind === "huddle_node") {
       window.dispatchEvent(new CustomEvent("mangorts:huddle-open", { detail: { resourceType: pin.kind, resourceID: pin.id, name: pin.name } }));
       return;
     }
@@ -1978,7 +2000,15 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
           event.preventDefault();
         }}
       >
-        {isLogicGateArenaView ? (
+        {isHuddleLogicGateView ? (
+          <HuddleLogicGatePage
+            apiBase={apiBase}
+            companyID={activeCompanyID}
+            currentUserID={me?.user.user_id?.trim() ?? ""}
+            huddleLogicGateID={huddleLogicGateID}
+            onClose={() => { if (onNavigate) onNavigate(routeForPage(activePrimaryPage ?? "home")); }}
+          />
+        ) : isLogicGateArenaView ? (
           <React.Suspense fallback={fullPageFallback}>
             <LazyLogicGateArenaPage
               frames={frames}

@@ -853,7 +853,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   );
 };
 
-function RACIAssignmentBoard({
+export function RACIAssignmentBoard({
   assignments,
   overwrittenByAncestor,
   companyUsers,

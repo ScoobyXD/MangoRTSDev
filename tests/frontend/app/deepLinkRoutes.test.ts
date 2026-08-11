@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it } from "node:test";
 import {
+  buildHuddleLogicGateRoute,
   buildLogicGateRoute,
   buildProjectLogicGateNavigationPlan,
   buildNodeRoute,
@@ -43,6 +44,15 @@ describe("deepLinkRoutes", () => {
     assert.deepEqual(parseDeepLinkRoute(path), {
       kind: "node",
       nodeID: "node/42",
+    });
+  });
+
+  it("round-trips the dedicated Huddle Logic Gate page route", () => {
+    const path = buildHuddleLogicGateRoute("huddle gate/42");
+    assert.equal(path, "/huddle-logic-gates/huddle%20gate%2F42");
+    assert.deepEqual(parseDeepLinkRoute(path), {
+      kind: "huddle_logic_gate",
+      huddleLogicGateID: "huddle gate/42",
     });
   });
 

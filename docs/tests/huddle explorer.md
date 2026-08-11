@@ -1,6 +1,6 @@
 # Current Huddle Explorer Business Logic Laws
 
-1. The left sidebar contains one expandable and collapsible **Huddles** section between Tower and Entities.
+1. The left sidebar contains one **Huddles** section between Tower and Entities with a Huddle people icon in its heading.
 2. Huddle Explorer is separate from Company Explorer and uses `huddle_explorer_folders` and `huddle_explorer_items` as its only placement authorities.
 3. `huddle_explorer_folders` contains `company_id`, `folder_id`, `parent_folder_id`, `name`, `created_date`, and `updated_date`.
 4. A Huddle Explorer folder may have a null parent for a root folder or the exact `folder_id` of another folder in the same company.
@@ -13,7 +13,7 @@
 11. Converting a normal Logic Gate creates one root Huddle Explorer item for the new Huddle Logic Gate in the same transaction.
 12. Creating a Huddle Node creates one root Huddle Explorer item for the new Huddle Node in the same transaction.
 13. Huddle Explorer supports creating, renaming, nesting, moving, and deleting folders, and moving Huddle items between its folders and root.
-14. Double-clicking a Huddle Logic Gate item opens that exact Huddle Logic Gate; double-clicking a Huddle Node item opens that exact Huddle Node popup.
+14. Double-clicking a Huddle Logic Gate item opens that exact Huddle Logic Gate route; double-clicking a Huddle Node item opens that exact Huddle Node popup.
 15. Search Explorer can return Huddle Logic Gates and Huddle Nodes using their exact Huddle types and IDs.
 16. Huddle Logic Gates and Huddle Nodes never receive Company Explorer item rows.
 17. Deleting only a Huddle Explorer item recycles only that placement and does not delete or recycle the underlying Huddle Logic Gate or Huddle Node.
@@ -21,5 +21,7 @@
 19. A Huddle Explorer folder must be empty before it can be deleted; an empty deleted folder goes to the Recycle Bin and restores with the same folder ID and parent.
 20. Huddle Explorer placement and folder nesting do not grant access and do not create RACI or permission parentage in the first version.
 21. Huddle Explorer ordering uses existing row dates and names; the first version has no custom position or ordering model.
+22. Huddle rows match the Pinned section's text scale, color, spacing, raised hover treatment, and elevated section surface.
+23. A Huddle resource row combines the normal Logic Gate or Node icon with a Huddle people icon instead of using a separate replacement resource icon.
 
-Last updated: 2026-08-10
+Last updated: 2026-08-11
