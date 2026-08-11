@@ -12,13 +12,13 @@
 10. Every email chat belongs to one exact Node, one exact text box in that Node, and one exact linked email message. Mango does not create unlinked email chats.
 11. Chats about the same message in different Nodes remain separate.
 12. Highlighting email text only shows the **Turn highlighted email text into a chat** action. Clicking it opens the rail, places the quote in the composer, and focuses the composer without writing to the database.
-13. A user starts a new triage chat by clicking **New chat** in one exact Node-and-text-box group header; no destination dropdown is used.
-14. A send to a chosen existing group atomically links the selected exact message to that text box when needed and adds the chat without creating another text box.
+13. If the chosen Node already links that message to a text box, the chat appends there. Otherwise the first send atomically creates the Node-local text box, exact email link, and chat.
+14. If a triage thread has no Node, the first sent chat creates a floating Node with priority **Not Assigned** and no popup. If the thread has several Nodes, the user chooses the destination Node before send.
 15. Clearing the quote or closing its unsent rail cancels the preview without creating or deleting database rows.
-16. My Triage and Shared Triage show one scrollable chat rail grouped by exact Node and text box, with the oldest groups and chats at the top and the newest at the bottom.
-17. Each triage chat group elevates on hover, stays elevated while selected, and has a clickable Node title plus one **New chat** action.
+16. My Triage and Shared Triage show one scrollable chat rail for the thread, grouped only by exact Node and text box; different messages in that same Node/text box do not create separators.
+17. Each triage chat group header shows a clickable Node icon and Node title.
 18. The chat rail opens automatically when the selected thread already has accessible chats. The email thread header owns the one neutral manual toggle. Individual messages show no chat button or three-dot overflow button.
-19. The desktop triage chat column is horizontally resizable and preserves its last company-scoped width.
+19. The chat rail's top and bottom borders align with the displayed email-message card, not the subject and action toolbar above that card.
 20. Dragging an exact email message onto a Node text box links that message. Dragging an email thread onto a text box is rejected.
 21. One active shared draft is universal to its exact email thread and retains its exact reply-source message when one exists.
 22. A universal shared draft is not related to a Node or text box in storage; its text-box-shaped Node panel is UI only.
@@ -34,11 +34,8 @@
 32. A triage chat send reuses the exact mailbox-scoped stored message when present, otherwise fetches and stores only that exact provider message, and never calls triage conversion or queues remaining-thread ingestion.
 33. A My Triage or Shared Triage send adds the chat to the open rail before the request starts; success keeps the optimistic row, and failure removes it and restores the composer.
 34. Once an exact email message already has a Node text box, each later triage chat uses only the normal Node text-box-chat create command.
-35. Opening a triage conversation reconciles stored history with a fresh provider thread and shows every available message in oldest-to-newest order with the actual message count.
-36. A Node opens with every attached-email thread collapsed and reads a thread body or shared draft only after the user opens that exact thread.
-37. An opened one-message Node email shows its body directly; an opened multi-message thread keeps its per-message headers and expands every message.
-38. Selecting text in a Node email never starts a whole-message drag; whole-message dragging starts only from its header or blank card surface.
-39. A chat authored by the current user moves the shared message view to the new message at the bottom.
+35. A Node opens with every attached-email thread collapsed and reads a thread body or shared draft only after the user opens that exact thread.
+36. A chat authored by the current user moves the shared message view to the new message at the bottom.
 
 Last updated: 2026-08-10
 
@@ -497,7 +494,7 @@ EMAIL73 - Each remote draft load owns one exact scope generation and local revis
 EMAIL74 - An `email_draft` attachment can be created, linked, listed, sent, or read only while the exact owning draft still exists and is not deleted. Personal access is exact owner/account; legacy accountless personal IDs are live-draft owner-only read compatibility and never mutation authority; shared access uses the exact live inbox and current permissions. Compose creates the durable draft before attachment upload/link. Deleting a draft makes all draft-only attachment paths unreadable even to manager/admin bypass attempts, while an independently linked `email_message`/sent attachment remains readable through its own live authorization.
 EMAIL75 - Every email conversion and local mail mutation retains one exact source mailbox request key. Personal My Triage drag payloads and `POST /v1/communications/triage/convert` carry normalized `account_email`; Shared Triage carries `shared_inbox_id` and suppresses any personal account parameter. Explorer, Kanban, project, and pin handoffs preserve that identity through the committed-result event, so one personal account cannot convert, unstar, archive, update, move, or delete through another account's grant.
 EMAIL76 - My Triage and Shared Triage have one chat toggle in the email thread header. The one rail covers the whole thread and opens automatically when that thread already has accessible chats; the toggle still opens and closes it manually. Individual message cards have no chat button or overflow menu. Selecting text shows a chat action first, and clicking that action opens the rail with the exact quote. The universal destination picker never opens or reserves the chat rail. Opening or closing the rail performs no durable mutation.
-EMAIL77 - An email chat rail orders Node-and-text-box groups oldest-first. Each group elevates on hover, remains elevated when selected, and shows a clickable Node title plus one **New chat** action that selects that exact Node and text box. The rail has no destination dropdown, and collaboration participants remain the authorization authority.
+EMAIL77 - An open email-node chat header shows a clickable owning Node icon and Node name. It does not show participant avatars, extra labels, or close text. Collaboration participants remain the authorization authority even though the header does not display a participant roster.
 EMAIL78 - Floating-Node ensure/create and the first comment write have explicit retry-safe failure behavior. A failed ensure leaves no partial Node, attached-email projection, RACI, permission, participant, or relationship. A failed subsequent comment write leaves any already committed empty association reusable under EMAIL52, but the frontend never inserts a false optimistic saved row before backend acknowledgement. The open composer preserves typed text, selected mentions, reply target, selected Node-chat target, stable requested Node ID, attachments, and exact email-message anchor, re-enables submission, and permits deliberate retry against the same source.
 EMAIL79 - An email viewed inside a Node uses the canonical provider/Mango message-detail attachment metadata from its retained message, thread, and mailbox identity. Only attachments whose normalized Content-ID is actually referenced by the rendered body are omitted from the separate attachment list; a normal file carrying an unreferenced Content-ID remains discoverable with filename, MIME type, size, authenticated download, and safe image preview. Conversion and direct attach persist references and provenance, never a second attachment model or provider bytes.
 EMAIL80 - The exact saved personal-account or shared-inbox signature is applied once whenever a user starts New compose, Reply, or Reply All in My Triage, Shared Triage, or an attached-email Node viewer. Send waits for an outstanding exact-scope signature read and applies it to the flushed submitted body before provider submission. Late signature hydration appends to the live draft without replacing user edits; rerender, reply-mode changes, autosave, and draft restoration do not duplicate it. Signature images remain Mango attachment references and the settings editor hydrates their authenticated preview without public storage URLs.
@@ -573,14 +570,6 @@ EMAIL130 - Choosing a provider email with no `email_message_id` calls the authen
 EMAIL131 - A stored attached-email thread in `downloading` state is event-driven. Node and Project surfaces perform one initial canonical read, subscribe to the exact personal-account or shared-inbox mailbox scope, and perform one canonical thread read for a matching worker post-commit hint. They never run the retired one-second timer, never replace it with another polling interval, and never treat the compact hint as email truth.
 
 EMAIL132 - Time spent waiting in the SQS backlog does not consume the ten-minute visibility period or eight-minute worker deadline; both begin only when a worker receives the item. The current DEV queue retains items for fourteen days. DEV deliberately runs one private ECS worker task with bounded concurrency and no production autoscaling in this cleanup. Three total SQS deliveries are the maximum, and a DLQed item requires deliberate human review.
-
-EMAIL133 - Opening a My Triage or Shared Triage conversation always reconciles its stored snapshot with a fresh exact-mailbox provider thread, hydrates every authoritative message ID, and shows the actual oldest-to-newest history and count.
-
-EMAIL134 - An opened one-message Node email renders its body directly under the existing email header. An opened multi-message Node thread keeps its timeline and message headers and expands every message by default.
-
-EMAIL135 - Selecting Node email body text never starts a whole-message drag. Whole-message dragging begins only from the message header or blank card surface, and the existing selection actions remain available.
-
-EMAIL136 - The desktop My Triage and Shared Triage chat column is horizontally resizable, keeps the email detail usable, and preserves its last company-scoped width.
 
 ## Scenarios
 

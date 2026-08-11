@@ -110,7 +110,6 @@ func TestMemoryEmailCollaborationAppendsChatInExistingNodeWithoutConversionJob(t
 	textBlockID := NewUUIDv7String()
 	firstChatID := NewUUIDv7String()
 	secondChatID := NewUUIDv7String()
-	thirdChatID := NewUUIDv7String()
 	placeholderMessageID := NewUUIDv7String()
 
 	first, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), CommunicationsEmailCollaborationEnsureInput{
@@ -160,38 +159,6 @@ func TestMemoryEmailCollaborationAppendsChatInExistingNodeWithoutConversionJob(t
 	}
 	if textBoxCount != 1 || chatCount != 2 {
 		t.Fatalf("projection counts text_boxes=%d chats=%d, want 1 and 2", textBoxCount, chatCount)
-	}
-	third, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), CommunicationsEmailCollaborationEnsureInput{
-		CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "support@example.com", Provider: "google", CreatedByUserID: creator.UserID,
-		TargetNodeID: first.Collaboration.NodeID, TargetTextboxID: textBlockID,
-		Message: domain.EmailMessageSnapshot{ID: "append-message-2", ThreadID: "append-thread", Subject: "Append chat reply", Date: 20},
-		InitialChat: &NodeInformationInput{
-			InformationID: thirdChatID, Type: CommunicationsEmailCollaborationChatInformationType, ActorUserID: creator.UserID,
-			Information: `{"block_id":"` + textBlockID + `","selection_source":"email","selection_message_id":"` + placeholderMessageID + `","message":"third"}`,
-		},
-	})
-	if err != nil || third.Created || third.Collaboration.NodeID != first.Collaboration.NodeID {
-		t.Fatalf("third ensure = %+v err=%v, want the second exact message linked to the existing textbox", third, err)
-	}
-	projections, err = repo.ListNodeProjections(companyID, first.Collaboration.NodeID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	textBoxCount, chatCount = 0, 0
-	for _, projection := range projections {
-		switch projection.Type {
-		case "Text box":
-			textBoxCount++
-			messageIDs, parseErr := editorTextBoxEmailMessageIDs(projection.Information)
-			if parseErr != nil || len(messageIDs) != 2 {
-				t.Fatalf("textbox email message ids = %+v err=%v, want both exact messages", messageIDs, parseErr)
-			}
-		case CommunicationsEmailCollaborationChatInformationType:
-			chatCount++
-		}
-	}
-	if textBoxCount != 1 || chatCount != 3 {
-		t.Fatalf("projection counts after existing textbox target text_boxes=%d chats=%d, want 1 and 3", textBoxCount, chatCount)
 	}
 	jobs, err := repo.ListCommunicationsEmailIngestionJobsForThreadContext(context.Background(), companyID, first.Collaboration.EmailThreadID)
 	if err != nil || len(jobs) != 0 {
@@ -245,9 +212,6 @@ func TestMemoryEmailThreadChatGroupsIncludeEveryNodeTextboxWithoutCreatingTextbo
 	}
 	if len(groups) != 2 {
 		t.Fatalf("groups = %+v, want only the two explicitly created chat textboxes", groups)
-	}
-	if groups[0].ProviderMessageID != "thread-message-1" || groups[1].ProviderMessageID != "thread-message-2" {
-		t.Fatalf("group order = %q, %q, want oldest message first", groups[0].ProviderMessageID, groups[1].ProviderMessageID)
 	}
 	chatCount := 0
 	seenNodes := map[string]bool{}

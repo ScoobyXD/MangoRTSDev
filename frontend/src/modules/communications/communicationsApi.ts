@@ -539,7 +539,6 @@ export type EnsureCommunicationsEmailCollaborationInput = ListCommunicationsEmai
   message: EmailMessage;
   newNodeID?: string;
   targetNodeID?: string;
-  targetTextBoxID?: string;
   priority?: number;
   linkedTextBlock?: { type: string; information: string; informationID: string };
   initialChat?: { type: string; information: string; informationID: string };
@@ -825,42 +824,33 @@ export async function getEmailMessage(
   }
 }
 
-export async function getEmailThread(
-  threadID: string,
-  companyID?: string,
-  sharedInboxID?: string,
-  accountEmail?: string,
-  options: { refresh?: boolean } = {},
-): Promise<EmailThread> {
+export async function getEmailThread(threadID: string, companyID?: string, sharedInboxID?: string, accountEmail?: string): Promise<EmailThread> {
   ensureCommunicationsCacheAuthScope();
   const cleanThreadID = threadID.trim();
   if (!cleanThreadID) throw new Error("email_thread_id_required");
   const cacheKey = emailThreadCacheKey(cleanThreadID, companyID, sharedInboxID, accountEmail);
   const cacheEntry = emailThreadCache.get(cacheKey) ?? null;
-  if (options.refresh) emailThreadCache.delete(cacheKey);
-  const cached = options.refresh ? null : readCache(cacheEntry, MESSAGE_DETAIL_CACHE_TTL_MS, cloneEmailThread);
+  const cached = readCache(cacheEntry, MESSAGE_DETAIL_CACHE_TTL_MS, cloneEmailThread);
   if (cached) return cached;
-  const inflightKey = options.refresh ? `${cacheKey}:refresh` : cacheKey;
-  const existingInflight = emailThreadInflight.get(inflightKey);
+  const existingInflight = emailThreadInflight.get(cacheKey);
   if (existingInflight) return cloneEmailThread(await existingInflight);
   const queryParams = new URLSearchParams();
   if (companyID?.trim()) queryParams.set("company_id", companyID.trim());
   if (sharedInboxID?.trim()) queryParams.set("shared_inbox_id", sharedInboxID.trim());
   if (!sharedInboxID?.trim() && accountEmail?.trim()) queryParams.set("account_email", accountEmail.trim().toLowerCase());
-  if (options.refresh) queryParams.set("refresh", "true");
   const query = queryParams.toString();
   const request = apiFetchJSON<{ thread: EmailThread }>(`/v1/communications/threads/${encodeURIComponent(cleanThreadID)}${query ? `?${query}` : ""}`)
     .then((payload) => {
       const thread = cloneEmailThread(payload.thread);
-      if (emailThreadInflight.get(inflightKey) === request) {
+      if (emailThreadInflight.get(cacheKey) === request) {
         emailThreadCache.set(cacheKey, { value: thread, fetchedAt: Date.now() });
       }
       return thread;
     })
     .finally(() => {
-      if (emailThreadInflight.get(inflightKey) === request) emailThreadInflight.delete(inflightKey);
+      if (emailThreadInflight.get(cacheKey) === request) emailThreadInflight.delete(cacheKey);
     });
-  emailThreadInflight.set(inflightKey, request);
+  emailThreadInflight.set(cacheKey, request);
   try {
     return cloneEmailThread(await request);
   } catch (error) {
@@ -1239,7 +1229,6 @@ export async function ensureEmailCollaboration(input: EnsureCommunicationsEmailC
         account_email: input.sharedInboxID?.trim() ? undefined : input.accountEmail?.trim().toLowerCase() || undefined,
         new_node_id: input.newNodeID?.trim() || undefined,
         target_node_id: input.targetNodeID?.trim() || undefined,
-        target_textbox_id: input.targetTextBoxID?.trim() || undefined,
         priority: input.priority,
         message: input.message,
         linked_text_block: input.linkedTextBlock ? {

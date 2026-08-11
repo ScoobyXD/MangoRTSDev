@@ -39,10 +39,7 @@ test("node-attached email viewer discloses per-message recipients while retainin
   assert.match(nodeParts, /<EmailBodyFrame/);
   assert.match(nodeParts, /splitEmailQuotedHistory\(fullThreadBody\)/);
   assert.match(nodeParts, /body=\{displayThreadBody\}/);
-  assert.match(nodeParts, /data-email-timeline-item=\{singleMessageLayout \? undefined : "true"\}/);
-  assert.match(nodeParts, /setExpandedThreadMessageIDs\(new Set\(displayThreadMessages/);
-  assert.match(nodeParts, /data-email-drag-handle="true"/);
-  assert.match(nodeParts, /data-email-selection-content="true"/);
+  assert.match(nodeParts, /data-email-timeline-item=\{singleMessageOnly \? undefined : "true"\}/);
   assert.match(nodeParts, /normalizeEmailThreadMessages\(candidates, "oldest"\)/);
   assert.match(nodeParts, /data-email-message-id=\{threadMessage\.id\}/);
   assert.match(nodeParts, /data-email-message-sources=\{emailThreadMessageSourceLabel\(threadMessage\)\}/);
@@ -177,7 +174,7 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.doesNotMatch(nodeParts, /setStoredThreadPollVersion|storedThreadPollTimer|setInterval/);
   assert.match(nodeParts, /initialFocusMessageID=\{resolvedPreview.focusMessageID\}/);
   assert.match(nodeParts, /singleMessageOnly/);
-  assert.match(nodeParts, /data-email-single-message=\{singleMessageLayout \? "true" : undefined\}/);
+  assert.match(nodeParts, /data-email-single-message=\{singleMessageOnly \? "true" : undefined\}/);
   assert.match(nodeParts, /data-linked-email-message-metadata="true"/);
   assert.match(nodeParts, /setThreadMessages\(singleMessageOnly \? \[payload\]/);
   assert.match(nodeParts, /applyEmailBodyHighlights\(frameDocument, highlights, activeSelection\)/);

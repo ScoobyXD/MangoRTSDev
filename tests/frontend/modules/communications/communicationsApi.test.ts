@@ -157,7 +157,6 @@ test("email collaboration ensure sends distinct new-node and existing-node ident
       threadID: "thread-1",
       accountEmail: "ME@Example.test",
       targetNodeID: "node-existing",
-      targetTextBoxID: "textbox-existing",
       message: { id: "message-1", thread_id: "thread-1", subject: "Review", body: "Full body", unread: false, starred: false },
     });
     assert.equal(listed.length, 1);
@@ -170,7 +169,6 @@ test("email collaboration ensure sends distinct new-node and existing-node ident
     assert.equal("priority" in (calls[1]?.body ?? {}), false);
     assert.equal((calls[1]?.body?.message as { body?: string }).body, "Full body");
     assert.equal(calls[2]?.body?.target_node_id, "node-existing");
-    assert.equal(calls[2]?.body?.target_textbox_id, "textbox-existing");
     assert.equal("new_node_id" in (calls[2]?.body ?? {}), false);
   } finally {
     globalThis.fetch = originalFetch;
