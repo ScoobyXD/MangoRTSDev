@@ -16,6 +16,7 @@ type communicationsEmailCollaborationRequest struct {
 	AccountEmail    string                                            `json:"account_email"`
 	NewNodeID       string                                            `json:"new_node_id"`
 	TargetNodeID    string                                            `json:"target_node_id"`
+	TargetTextboxID string                                            `json:"target_textbox_id"`
 	Priority        *int                                              `json:"priority"`
 	Message         domain.EmailMessageSnapshot                       `json:"message"`
 	LinkedTextBlock *communicationsTriageAtomicNodeInformationRequest `json:"linked_text_block"`
@@ -136,7 +137,7 @@ func (s *Server) handleCommunicationsEmailCollaborations(w http.ResponseWriter, 
 			PersonalAccountEmail: scope.personalAccountEmail, SharedInboxID: scope.sharedInboxID,
 			AccountEmail: scope.accountEmail, Provider: provider, CreatedByUserID: actor.User.UserID,
 			RequestedNodeID: req.NewNodeID, Priority: req.Priority, Message: providerSnapshot,
-			TargetNodeID:    req.TargetNodeID,
+			TargetNodeID: req.TargetNodeID, TargetTextboxID: req.TargetTextboxID,
 			LinkedTextBlock: toNodeInformationInput(req.LinkedTextBlock), InitialChat: toNodeInformationInput(req.InitialChat),
 		})
 		if err != nil {

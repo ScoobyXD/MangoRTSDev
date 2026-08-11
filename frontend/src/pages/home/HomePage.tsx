@@ -2635,7 +2635,7 @@ export function HomePage({
               setSelectedMessage(selectedSnapshot);
               setSelectedThreadMessages(mergeEmailThreadDetailMessages(collaborationThreadMessages, [selectedSnapshot]));
             }
-            if (!providerMailAvailable || collaborationThread.history_complete) return;
+            if (!providerMailAvailable) return;
           } catch (collaborationThreadError) {
             if (!providerMailAvailable) throw collaborationThreadError;
           }
@@ -2660,7 +2660,7 @@ export function HomePage({
         let threadPreviews: EmailMessage[] = [];
         let authoritativeMessageIDs: string[] = [];
         try {
-          const thread = await getEmailThread(threadID, companyID, sharedInboxID, activeMailAccountEmail);
+          const thread = await getEmailThread(threadID, companyID, sharedInboxID, activeMailAccountEmail, { refresh: true });
           if (cancelled) return;
           authoritativeMessageIDs = cleanIDList(thread.message_ids ?? []);
           if (authoritativeMessageIDs.length > 1) {
@@ -2690,6 +2690,7 @@ export function HomePage({
               companyID,
               sharedInboxID,
               accountEmail: activeMailAccountEmail,
+              refresh: true,
             });
             if (cancelled) return;
             threadPreviews = mergeEmailMessagePages(threadPreviews, page.messages ?? []);
@@ -2734,10 +2735,26 @@ export function HomePage({
           hydratedMissingMessages.push(...loaded.filter((message): message is EmailMessage => Boolean(message)));
         }
         const loadedThreadMessages = [...threadPreviews, ...hydratedMissingMessages];
-        setSelectedThreadMessages(mergeEmailThreadDetailMessages(
+        const reconciledThreadMessages = mergeEmailThreadDetailMessages(
           [...collaborationThreadMessages, ...loadedThreadMessages.map(withLocalReadOverlay)],
           [selectedWithLocalReplies],
-        ));
+        );
+        setSelectedThreadMessages(reconciledThreadMessages);
+        const reconciledMessageCount = reconciledThreadMessages.length;
+        if (reconciledMessageCount > 0) {
+          const selectedWithCompleteCount = {
+            ...selectedWithLocalReplies,
+            thread_message_count: reconciledMessageCount,
+          };
+          selectedMessageRef.current = selectedWithCompleteCount;
+          setSelectedMessage(selectedWithCompleteCount);
+          const selectedThreadKey = emailThreadKey(selectedWithCompleteCount);
+          setMessages((previous) => previous.map((candidate) => (
+            emailThreadKey(candidate) === selectedThreadKey
+              ? { ...candidate, thread_message_count: reconciledMessageCount }
+              : candidate
+          )));
+        }
         const stillMissingAuthoritativeIDs = missingEmailThreadMessageIDs(
           authoritativeMessageIDs,
           selectedWithLocalReplies.id,
@@ -2754,7 +2771,7 @@ export function HomePage({
         const collaborationFallback = selectedMessageRef.current;
         if (collaborationFallback?.id === selectedMessageID && collaborationFallback.collaboration_id?.trim()) {
           setSelectedMessage(collaborationFallback);
-          setSelectedThreadMessages([collaborationFallback]);
+          setSelectedThreadMessages(mergeEmailThreadDetailMessages(collaborationThreadMessages, [collaborationFallback]));
           return;
         }
         if (isEmailAccessExpiredError(detailError)) {

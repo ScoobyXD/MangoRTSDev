@@ -166,12 +166,15 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
 
   assert.match(surface, /listEmailThreadChatGroups\(\{[\s\S]*messageID: message\.id,[\s\S]*threadID: message\.thread_id/);
   assert.doesNotMatch(surface, /listEmailCollaborations|getEmailCollaboration|ListNodeProjections|threadMessages/);
-  assert.match(surface, /for \(const group of groups\)[\s\S]*parseEditorTextBlockChats\(group\.chats\)/);
-  assert.match(surface, /headerLeading=\{collaborations\.length > 1[\s\S]*data-email-chat-node-header="true"[\s\S]*<ExplorerRowIcon kind="node"/);
+  assert.match(surface, /const orderedGroups = \[\.\.\.groups\]\.sort[\s\S]*for \(const group of orderedGroups\)[\s\S]*parseEditorTextBlockChats\(group\.chats\)/);
+  assert.match(surface, /headerLeading=\{\([\s\S]*data-email-chat-node-header="true"[\s\S]*<ExplorerRowIcon kind="node"/);
+  assert.doesNotMatch(surface, /Choose destination Node|aria-label="Chat destination Node"/);
   assert.match(surface, /sectionLabelsByBlockID=\{sectionLabelsByBlockID\}/);
   assert.match(surface, /sectionNodeIDsByBlockID=\{sectionNodeIDsByBlockID\}/);
   assert.match(surface, /sectionKeysByMessageID=\{sectionKeysByChatID\}/);
   assert.match(surface, /onOpenSectionNode=\{onOpenNode\}/);
+  assert.match(surface, /onActivateSection=\{activateChatSection\}/);
+  assert.match(surface, /targetTextBoxID: textBlockID/);
   assert.doesNotMatch(surface, /EmailCollaborationParticipantRoster|setChatTargetMenuOpen|onClose/);
   assert.match(surface, /const startNewFloatingNodeChat[\s\S]*pendingNewNodeIDRef\.current = generateStableInformationID\(\)[\s\S]*acceptCollaboration\(null\)/);
   const newChatStart = surface.indexOf("const startNewFloatingNodeChat");
@@ -191,6 +194,8 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(surface, /const unsubscribes = threadChatNodeIDs\.map[\s\S]*"chat:node:" \+ visibleNodeID/);
   assert.match(workspace, /onContentTopChange=\{setEmailChatTopOffset\}/);
   assert.match(workspace, /topOffset=\{showDetailResizeHandle \? emailChatTopOffset : 0\}/);
+  assert.match(workspace, /aria-label="Resize email chat column"/);
+  assert.match(workspace, /emailChatWidthStorageKey\(companyID\)/);
   assert.match(detail, /content\.getBoundingClientRect\(\)\.top - root\.getBoundingClientRect\(\)\.top \+ paddingTop/);
   assert.match(surface, /height: topOffset > 0 \? `calc\(100% - \$\{topOffset\}px\)` : "100%"[\s\S]*marginTop: topOffset/);
   assert.doesNotMatch(surface, /parseEditorAttachedEmails|resolveEmailCollaborationChatPlacement/);
@@ -219,6 +224,8 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(sharedChat, /sectionLabelsByBlockID\?: Record<string, string>/);
   assert.match(sharedChat, /sectionNodeIDsByBlockID\?: Record<string, string>/);
   assert.match(sharedChat, /sectionKeysByMessageID\?: Record<string, string>/);
+  assert.match(sharedChat, /onActivateSection\?: \(sectionKey: string\) => void/);
+  assert.match(sharedChat, /Start a new chat in \$\{sectionLabel\}/);
   assert.match(sharedChat, /aria-label=\{`Open Node \$\{sectionLabel\}`\}[\s\S]*onClick=\{\(\) => onOpenSectionNode\(sectionNodeID\)\}/);
   assert.match(sharedChat, /borderTop: index > 0 \? `1px solid \$\{ruleColor\}`/);
   assert.match(surface, /<ChatPane[\s\S]*fillHeight/);
