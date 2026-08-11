@@ -11,11 +11,10 @@
 9. My Triage and Shared Triage read all accessible chats for the selected stored thread in one request.
 10. Only text boxes that contain chats appear as chat sections.
 11. The rail groups chats by Node and text box. Messages sharing one text box remain in one section.
-12. Sections are oldest-first; each one elevates on hover, stays elevated while selected, and shows a clickable Node name plus one **New chat** action.
+12. Each section has a horizontal separator and a clickable Node icon and Node name.
 13. The chat rail opens automatically when the selected thread already has at least one accessible chat.
 14. A new chat is written only to the Node and text box chosen by the user; Mango never guesses between Nodes.
 15. Removing one Node's relationship, text box, or chat does not remove another Node's copy of that work.
-16. Sending from a chosen section may atomically link the selected exact message to that existing text box, but it never creates a duplicate text box.
 
 Last updated: 2026-08-10
 

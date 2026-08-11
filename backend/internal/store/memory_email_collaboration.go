@@ -282,8 +282,7 @@ func (r *MemoryRepo) EnsureCommunicationsEmailCollaboration(ctx context.Context,
 		writeInput := communicationsEmailTextBoxChatWriteInput{
 			CompanyID: input.CompanyID, UserID: input.CreatedByUserID, SharedInboxID: input.SharedInboxID,
 			AccountEmail: input.AccountEmail, NodeID: nodeID, ProviderMessageID: input.Message.ID,
-			ExistingTextBoxID: input.TargetTextboxID,
-			LinkedTextBlock:   input.LinkedTextBlock, InitialChat: input.InitialChat,
+			LinkedTextBlock: input.LinkedTextBlock, InitialChat: input.InitialChat,
 		}
 		if err := r.addCommunicationsEmailTextBoxChatWritesLocked(writeInput, &CommunicationsTriageConversionResult{}); err != nil {
 			restore()

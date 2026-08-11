@@ -345,8 +345,7 @@ values($1::uuid,$2::uuid,$3,$4,'no_access',now())`, input.CompanyID, nodeID, com
 		writeInput := communicationsEmailTextBoxChatWriteInput{
 			CompanyID: input.CompanyID, UserID: input.CreatedByUserID, SharedInboxID: input.SharedInboxID,
 			AccountEmail: input.AccountEmail, NodeID: nodeID, ProviderMessageID: input.Message.ID,
-			ExistingTextBoxID: input.TargetTextboxID,
-			LinkedTextBlock:   input.LinkedTextBlock, InitialChat: input.InitialChat,
+			LinkedTextBlock: input.LinkedTextBlock, InitialChat: input.InitialChat,
 		}
 		if err := r.addCommunicationsEmailTextBoxChatWritesTx(ctx, tx, writeInput, &CommunicationsTriageConversionResult{}); err != nil {
 			return CommunicationsEmailCollaborationEnsureResult{}, err

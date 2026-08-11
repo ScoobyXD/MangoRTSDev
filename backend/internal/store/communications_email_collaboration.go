@@ -34,7 +34,6 @@ type CommunicationsEmailCollaborationEnsureInput struct {
 	CreatedByUserID      string
 	RequestedNodeID      string
 	TargetNodeID         string
-	TargetTextboxID      string
 	Priority             *int
 	Message              domain.EmailMessageSnapshot
 	LinkedTextBlock      *NodeInformationInput
@@ -150,7 +149,6 @@ func normalizeCommunicationsEmailCollaborationEnsureInput(input CommunicationsEm
 	creatorID := cleanUUIDText(input.CreatedByUserID)
 	requestedNodeID := cleanUUIDText(input.RequestedNodeID)
 	targetNodeID := cleanUUIDText(input.TargetNodeID)
-	targetTextboxID := cleanUUIDText(input.TargetTextboxID)
 	if creatorID == "" || message.ID == "" {
 		return CommunicationsEmailCollaborationEnsureInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
 	}
@@ -160,13 +158,7 @@ func normalizeCommunicationsEmailCollaborationEnsureInput(input CommunicationsEm
 	if strings.TrimSpace(input.TargetNodeID) != "" && targetNodeID == "" {
 		return CommunicationsEmailCollaborationEnsureInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
 	}
-	if strings.TrimSpace(input.TargetTextboxID) != "" && targetTextboxID == "" {
-		return CommunicationsEmailCollaborationEnsureInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
-	}
 	if requestedNodeID != "" && targetNodeID != "" {
-		return CommunicationsEmailCollaborationEnsureInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
-	}
-	if targetTextboxID != "" && (targetNodeID == "" || input.InitialChat == nil || input.LinkedTextBlock != nil) {
 		return CommunicationsEmailCollaborationEnsureInput{}, communicationsEmailCollaborationScope{}, ErrInvalid
 	}
 	if input.Priority != nil && (*input.Priority < 1 || *input.Priority > 5) {
@@ -199,7 +191,6 @@ func normalizeCommunicationsEmailCollaborationEnsureInput(input CommunicationsEm
 	input.CreatedByUserID = creatorID
 	input.RequestedNodeID = requestedNodeID
 	input.TargetNodeID = targetNodeID
-	input.TargetTextboxID = targetTextboxID
 	input.Message = message
 	return input, scope, nil
 }

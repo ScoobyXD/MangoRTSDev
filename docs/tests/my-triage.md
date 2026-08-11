@@ -5,8 +5,8 @@
 3. Highlighting email text shows a chat action first and does not automatically fill the composer.
 4. Clicking the highlight action opens the rail, places the quote in the composer, and focuses it without writing to the database.
 5. The thread chat rail is one scrollable view grouped only by exact Node and text box; messages sharing both remain in one group.
-6. Chat groups are oldest-first, elevate on hover, remain elevated while selected, and show a clickable Node title plus one **New chat** action.
-7. **New chat** selects the exact Node and text box for normal or highlighted-text chat sends; My Triage has no destination dropdown and never guesses.
+6. Each chat group header shows a clickable Node icon and Node title.
+7. If the thread has several Nodes, the user chooses which Node receives a new chat; Mango never guesses.
 8. One universal shared draft is visible from My Triage and every related Node without being related to a Node text box.
 9. A My Triage-created shared draft invents no origin Node and does not auto-open a draft panel in any Node.
 10. An already-linked exact-message text box loads its existing messages and receives each later My Triage chat without creating another text box.
@@ -14,8 +14,6 @@
 12. A chat send reuses the exact mailbox-scoped stored message when present, otherwise fetches only that exact provider message, and never calls triage conversion or queues remaining-thread ingestion.
 13. Sending a chat adds it to the open rail before the network request starts; success keeps that exact optimistic row, while failure removes it and restores the complete composer for retry.
 14. A later chat for an already-linked exact email message uses the normal Node text-box-chat create command only; it does not repeat email, relationship, permission, participant, or collaboration setup.
-15. Opening a conversation reconciles the stored snapshot with a fresh provider thread and shows every available message in oldest-to-newest order with the actual count.
-16. The desktop thread chat column is horizontally resizable and preserves its company-scoped width.
 
 Last updated: 2026-08-10
 
@@ -51,9 +49,9 @@ A user opens one personal email conversation and uses the thread chat toggle or 
 ↓
 One thread-level rail opens, grouped only by exact Node and text box; individual messages show no separate chat button or overflow menu
 ↓
-Each oldest-first group elevates on hover and its **New chat** action selects that exact Node and text box; a temporary quote preview remains local until the user sends a real chat
+Each group header shows a clickable Node icon and title, and a temporary quote/text-box preview remains local until the user sends a real chat
 ↓
-The first send atomically creates any missing exact-message relationship and chat in the chosen text box, creating the text box only when no existing group was chosen; closing an unsent preview writes and deletes nothing
+The first send appends to the existing exact-message text box or atomically creates any missing text box, exact email relationship, and chat in the chosen Node; closing an unsent preview writes and deletes nothing
 
 Last updated: 2026-08-09
 
@@ -218,8 +216,8 @@ MT126 - The top sender/subject line reserves only the width actually occupied by
 MT127 - Compact spacing must not change card meaning or accessibility: unread keeps its top-left dot and text emphasis without a blue/thick outer frame, selected keeps its independent full-card pressed surface, thread count retains its conditional icon, truncation uses ellipsis, and pointer/keyboard/drag targets remain usable.
 MT128 - My Triage email rows come only from the active connected personal mailbox's canonical provider list. A Node attachment, stored collaboration snapshot, chat mention, or permanent collaboration participation never creates a My Triage email row for someone whose mailbox did not return that message.
 MT129 - When a canonical My Triage provider row matches a collaboration by immutable personal mailbox plus provider thread/message identity, Mango annotates that provider row with collaboration/Node identity for chat and shared-draft actions. Provider unread/starred/attachment/thread state remains authoritative, and no collaboration snapshot may become a separate or fallback row.
-MT130 - One chat toggle in the My Triage thread header opens and closes one horizontally resizable rail grouped oldest-first by exact Node and text box. Selecting a row auto-opens it only when the stored thread already has accessible chats. Reading, selecting text, closing, and abandoning an empty composer create nothing. If no Node is associated, the first nonempty comment creates a floating Node with priority **Not Assigned**, no Logic Gate, and one exact linked text box. Existing work is selected only through a group's **New chat** action; no destination dropdown or Node guess is allowed. Sending reuses the exact stored mailbox message or fetches only that missing exact provider message; it never calls triage conversion or queues remaining-thread ingestion. After backend acknowledgement, the saved chat appears immediately in that exact group without waiting for realtime or another Node read.
-MT131 - Selecting email body text shows a chat action and captures the exact message ID, trimmed quote, and text offsets without opening the rail or filling the composer. Clicking that action opens the rail, places the quote in the composer, and focuses it. Individual reply cards have no chat button or three-dot menu. Each group elevates on hover, remains elevated when selected, and has a clickable Node title plus one **New chat** action. Sending atomically creates any missing exact-message link to that chosen text box and the chat without creating a duplicate text box.
+MT130 - One chat toggle in the My Triage thread header opens and closes one rail grouped only by exact Node and text box. Selecting a row auto-opens it only when the stored thread already has accessible chats. Reading, selecting text, closing, and abandoning an empty composer create nothing. If no Node is associated, the first nonempty comment creates a floating Node with priority **Not Assigned**, no Logic Gate, and one exact linked text box. If several Nodes are associated, the user chooses the destination Node before send. Sending reuses the exact stored mailbox message or fetches only that missing exact provider message; it never calls triage conversion or queues remaining-thread ingestion. After backend acknowledgement, the saved chat appears immediately in that exact group without waiting for realtime or another Node read.
+MT131 - Selecting email body text shows a chat action and captures the exact message ID, trimmed quote, and text offsets without opening the rail or filling the composer. Clicking that action opens the rail, places the quote in the composer, and focuses it. Individual reply cards have no chat button or three-dot menu. Sending uses the chosen Node's exact-message text box, and each group header shows a clickable Node icon and title.
 MT132 - Reply, Reply All, and Create Shared Draft create or reopen the one universal active draft for the exact thread. A My Triage-created draft has no invented origin Node and does not auto-open in any Node; every related Node shows its active-draft count and may open the same draft on demand.
 MT133 - A collaboration shared draft sends immediately through EMAIL68. Its compose footer does not expose scheduled send, and the My Triage browser scheduler ignores shared drafts even if legacy/local state contains a timestamp.
 MT134 - Unsynchronized personal fallback drafts survive Mango `401`, unclassified `403`, provider reauthorization/disconnection `409`, `5xx`, and network failures. Only explicit access/company revocation or definitive scope deletion purges the exact personal account; another personal account/shared inbox remains untouched.

@@ -641,7 +641,6 @@ type ChatPaneProps = {
   sectionLabelsByBlockID?: Record<string, string>;
   sectionNodeIDsByBlockID?: Record<string, string>;
   sectionKeysByMessageID?: Record<string, string>;
-  activeSectionKey?: string;
   hideHeader?: boolean;
   activeTab?: "chat" | "email";
   selectionAnchor?: TextBlockSelectionAnchor;
@@ -672,7 +671,6 @@ type ChatPaneProps = {
   onActivateMessage: (messageID: string) => void;
   onNavigateToMessage: (messageID: string) => void;
   onOpenSectionNode?: (nodeID: string) => void;
-  onActivateSection?: (sectionKey: string) => void;
   onReply: (messageID: string) => void;
   onEditMessage: (messageID: string, message: string) => Promise<void>;
   onDeleteMessage: (messageID: string) => void;
@@ -712,7 +710,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   sectionLabelsByBlockID = {},
   sectionNodeIDsByBlockID = {},
   sectionKeysByMessageID = {},
-  activeSectionKey = "",
   hideHeader = false,
   activeTab = "chat",
   selectionAnchor,
@@ -743,7 +740,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   onActivateMessage,
   onNavigateToMessage,
   onOpenSectionNode,
-  onActivateSection,
   onReply,
   onEditMessage,
   onDeleteMessage,
@@ -783,7 +779,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const [composerSizing, setComposerSizing] = useState({ height: CHAT_COMPOSER_MIN_HEIGHT, scrolls: false });
   const [previewAttachment, setPreviewAttachment] = useState<EditorChatAttachment | null>(null);
   const [collapsedThreadIDs, setCollapsedThreadIDs] = useState<Set<string>>(() => new Set());
-  const [hoveredSectionKey, setHoveredSectionKey] = useState("");
   const [activeMentionDraft, setActiveMentionDraft] = useState<ActiveMentionDraft | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const [activeEntityDraft, setActiveEntityDraft] = useState<ActiveEntityLinkDraft | null>(null);
@@ -1217,66 +1212,25 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   : "";
                 const sectionLabel = sectionLabelsByBlockID[sectionKey] ?? "";
                 const sectionNodeID = sectionNodeIDsByBlockID[sectionKey] ?? "";
-                const sectionElevated = Boolean(sectionLabel && (sectionKey === activeSectionKey || sectionKey === hoveredSectionKey));
                 return (
-                  <div
-                    key={thread.message.id}
-                    data-email-chat-group={sectionLabel ? sectionKey : undefined}
-                    data-email-chat-group-active={sectionKey === activeSectionKey ? "true" : undefined}
-                    onMouseEnter={sectionLabel ? () => setHoveredSectionKey(sectionKey) : undefined}
-                    onMouseLeave={sectionLabel ? () => setHoveredSectionKey((current) => current === sectionKey ? "" : current) : undefined}
-                    style={sectionLabel ? {
-                      minWidth: 0,
-                      display: "grid",
-                      gap: 5,
-                      border: "1px solid transparent",
-                      borderRadius: 11,
-                      background: sectionElevated
-                        ? "linear-gradient(135deg, rgba(255,255,255,0.92), rgba(230,252,255,0.50) 48%, rgba(247,239,255,0.58))"
-                        : "transparent",
-                      boxShadow: sectionElevated
-                        ? "0 8px 20px rgba(15,23,42,0.10), 0 0 14px rgba(183,124,255,0.14), inset 1px 1px 0 rgba(255,255,255,0.88)"
-                        : "none",
-                      padding: "3px 4px 4px",
-                      transition: "background 140ms ease, box-shadow 160ms ease",
-                    } : { minWidth: 0 }}
-                  >
+                  <React.Fragment key={thread.message.id}>
                     {sectionLabel && previousSectionKey !== sectionKey && (
-                      <div data-email-chat-message-section="true" style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, borderTop: index > 0 ? `1px solid ${ruleColor}` : undefined, padding: index > 0 ? "11px 2px 2px" : "2px 2px", color: "#475569", fontSize: 10.5, fontWeight: 850 }}>
-                        <span style={{ minWidth: 0, display: "inline-flex", alignItems: "center", gap: 6 }}>
-                          {sectionNodeID && onOpenSectionNode ? (
-                            <button
-                              type="button"
-                              aria-label={`Open Node ${sectionLabel}`}
-                              onClick={() => onOpenSectionNode(sectionNodeID)}
-                              style={{ minWidth: 0, border: 0, padding: 0, background: "transparent", color: "inherit", font: "inherit", display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}
-                            >
-                              <TextEditorIcon color="#0284c7" />
-                              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sectionLabel}</span>
-                            </button>
-                          ) : (
-                            <span style={{ minWidth: 0, display: "inline-flex", alignItems: "center", gap: 6 }}>
-                              <TextEditorIcon color="#0284c7" />
-                              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sectionLabel}</span>
-                            </span>
-                          )}
-                        </span>
-                        {onActivateSection && (
+                      <div data-email-chat-message-section="true" style={{ borderTop: index > 0 ? `1px solid ${ruleColor}` : undefined, padding: index > 0 ? "11px 2px 2px" : "2px 2px", color: "#475569", fontSize: 10.5, fontWeight: 850 }}>
+                        {sectionNodeID && onOpenSectionNode ? (
                           <button
                             type="button"
-                            aria-label={`Start a new chat in ${sectionLabel}`}
-                            title={`Start a new chat in ${sectionLabel}`}
-                            aria-pressed={sectionKey === activeSectionKey}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onActivateSection(sectionKey);
-                              window.requestAnimationFrame(() => textareaRef.current?.focus());
-                            }}
-                            style={{ flex: "0 0 auto", minHeight: 24, display: "inline-flex", alignItems: "center", gap: 4, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: sectionKey === activeSectionKey ? EDITOR_NEU_ACTIVE_SURFACE : EDITOR_NEU_SURFACE, color: accent, cursor: "pointer", padding: "2px 7px", font: "inherit", fontSize: 10, fontWeight: 850, boxShadow: "2px 2px 6px rgba(174,174,192,0.14), -2px -2px 6px rgba(255,255,255,0.78)" }}
+                            aria-label={`Open Node ${sectionLabel}`}
+                            onClick={() => onOpenSectionNode(sectionNodeID)}
+                            style={{ border: 0, padding: 0, background: "transparent", color: "inherit", font: "inherit", display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}
                           >
-                            <ChatIcon color={accent} />
-                            <span>New chat</span>
+                            <ExplorerEntityIcon kind="node" />
+                            <span>{sectionLabel}</span>
                           </button>
+                        ) : (
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                            <ExplorerEntityIcon kind="node" />
+                            <span>{sectionLabel}</span>
+                          </span>
                         )}
                       </div>
                     )}
@@ -1302,7 +1256,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                       onDelete={onDeleteMessage}
                       onPreviewImage={setPreviewAttachment}
                     />
-                  </div>
+                  </React.Fragment>
                 );
               })}
             </div>
@@ -5611,7 +5565,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const [message, setMessage] = useState<EmailMessage | null>(null);
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
   const [sentReplies, setSentReplies] = useState<EmailMessage[]>([]);
-  const [expandedThreadMessageIDs, setExpandedThreadMessageIDs] = useState<Set<string>>(() => new Set());
+  const [expandedThreadMessageID, setExpandedThreadMessageID] = useState("");
   const [quotedHistoryMessageIDs, setQuotedHistoryMessageIDs] = useState<Set<string>>(() => new Set());
   const [toDraft, setToDraft] = useState("");
   const [ccDraft, setCcDraft] = useState("");
@@ -5933,14 +5887,20 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       ?? null;
     return exactMessage ? [exactMessage] : [];
   }, [message, messageID, sentReplies, singleMessageOnly, threadMessages]);
-  const singleMessageLayout = displayThreadMessages.length <= 1;
   useEffect(() => {
-    setExpandedThreadMessageIDs(new Set(displayThreadMessages.map((threadMessage) => threadMessage.id?.trim()).filter(Boolean)));
+    setExpandedThreadMessageID((current) => {
+      if (current && displayThreadMessages.some((threadMessage) => threadMessage.id === current)) return current;
+      for (let index = displayThreadMessages.length - 1; index >= 0; index -= 1) {
+        const candidateID = displayThreadMessages[index]?.id?.trim();
+        if (candidateID) return candidateID;
+      }
+      return "";
+    });
   }, [displayThreadMessages]);
   useEffect(() => {
     const targetMessageID = initialFocusMessageID?.trim() ?? "";
     if (!targetMessageID || !displayThreadMessages.some((threadMessage) => threadMessage.id === targetMessageID)) return undefined;
-    setExpandedThreadMessageIDs((current) => new Set(current).add(targetMessageID));
+    setExpandedThreadMessageID(targetMessageID);
     const frame = window.requestAnimationFrame(() => {
       const target = Array.from(conversationRootRef.current?.querySelectorAll<HTMLElement>("[data-email-message-id]") ?? [])
         .find((element) => element.dataset.emailMessageId === targetMessageID);
@@ -6510,10 +6470,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
               const threadMessageID = threadMessage.id || messageID;
               const threadMessageAccent = messageAccents[threadMessageID]?.trim() || "";
               const isSelectedMessage = threadMessage.id === message.id;
-              const hideInlineMessageChrome = singleMessageOnly || singleMessageLayout;
-              const showInlineMessageMetadata = singleMessageOnly;
-              const directSingleMessageLayout = singleMessageLayout && !singleMessageOnly;
-              const isExpanded = hideInlineMessageChrome || expandedThreadMessageIDs.has(threadMessageID);
+              const hideInlineMessageChrome = singleMessageOnly;
+              const isExpanded = singleMessageOnly || expandedThreadMessageID === threadMessageID;
               const fullThreadBody = threadMessage.body || threadMessage.snippet || "";
               const quotedContent = splitEmailQuotedHistory(fullThreadBody);
               const quotedHistoryVisible = quotedHistoryMessageIDs.has(threadMessageID);
@@ -6531,26 +6489,13 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
               return (
                 <div
                   key={emailThreadMessageRenderKey(threadMessage) || `${index}`}
-                  data-email-timeline-item={singleMessageLayout ? undefined : "true"}
+                  data-email-timeline-item={singleMessageOnly ? undefined : "true"}
                   data-email-message-id={threadMessage.id}
-                  data-email-single-message={singleMessageLayout ? "true" : undefined}
+                  data-email-single-message={singleMessageOnly ? "true" : undefined}
                   data-email-message-sources={emailThreadMessageSourceLabel(threadMessage)}
-                  onPointerDownCapture={(event) => {
-                    const root = event.currentTarget;
-                    const target = event.target instanceof HTMLElement ? event.target : null;
-                    const interactive = target?.closest("button, a, input, textarea, select, [contenteditable='true']");
-                    const selectionContent = target?.closest("[data-email-selection-content='true']");
-                    const dragHandle = target?.closest("[data-email-drag-handle='true']");
-                    if (editable && threadMessage.email_message_id?.trim() && !interactive && (dragHandle || !selectionContent)) {
-                      root.setAttribute("draggable", "true");
-                    } else {
-                      root.removeAttribute("draggable");
-                    }
-                  }}
-                  onPointerUp={(event) => event.currentTarget.removeAttribute("draggable")}
-                  onPointerCancel={(event) => event.currentTarget.removeAttribute("draggable")}
+                  draggable={editable && Boolean(threadMessage.email_message_id?.trim())}
                   onDragStart={(event) => {
-                    if (!editable || !threadMessage.email_message_id?.trim() || event.currentTarget.getAttribute("draggable") !== "true") {
+                    if (!editable || !threadMessage.email_message_id?.trim()) {
                       event.preventDefault();
                       return;
                     }
@@ -6562,43 +6507,40 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                     )));
                     event.dataTransfer.setData("text/plain", threadMessage.subject || threadMessage.id);
                   }}
-                  onDragEnd={(event) => event.currentTarget.removeAttribute("draggable")}
                   style={{
                     minWidth: 0,
                     display: "grid",
-                    gridTemplateColumns: singleMessageLayout ? "minmax(0, 1fr)" : "20px minmax(0, 1fr)",
+                    gridTemplateColumns: singleMessageOnly ? "minmax(0, 1fr)" : "20px minmax(0, 1fr)",
                     gap: 8,
                     alignItems: "stretch",
-                    margin: directSingleMessageLayout ? "0" : inlineExpansion ? "8px 0" : "12px 0",
+                    margin: inlineExpansion ? "8px 0" : "12px 0",
                   }}
                 >
-                  {!singleMessageLayout && <NodeEmailConversationTimeline expanded={isExpanded} sent={threadMessageIsSent} timelineStart={index === 0} timelineEnd={index === displayThreadMessages.length - 1} />}
+                  {!singleMessageOnly && <NodeEmailConversationTimeline expanded={isExpanded} sent={threadMessageIsSent} timelineStart={index === 0} timelineEnd={index === displayThreadMessages.length - 1} />}
                   <div
                     style={{
                       position: "relative",
                       display: "grid",
                       gap: inlineExpansion ? 5 : 7,
-                      padding: directSingleMessageLayout ? "5px 0 4px" : hideInlineMessageChrome ? "0 8px 5px" : inlineExpansion ? "9px 10px 10px" : "13px 12px 15px",
+                      padding: hideInlineMessageChrome ? "0 8px 5px" : inlineExpansion ? "9px 10px 10px" : "13px 12px 15px",
                       borderStyle: "solid",
-                      borderTopWidth: directSingleMessageLayout ? 0 : 1,
-                      borderRightWidth: directSingleMessageLayout ? 0 : 1,
-                      borderBottomWidth: directSingleMessageLayout ? 0 : 1,
-                      borderLeftWidth: directSingleMessageLayout ? 0 : 3,
+                      borderTopWidth: 1,
+                      borderRightWidth: 1,
+                      borderBottomWidth: 1,
+                      borderLeftWidth: 3,
                       borderTopColor: isExpanded ? "transparent" : EDITOR_NEU_SOFT_BORDER,
                       borderRightColor: isExpanded ? "transparent" : EDITOR_NEU_SOFT_BORDER,
                       borderBottomColor: isExpanded ? "transparent" : EDITOR_NEU_SOFT_BORDER,
                       borderLeftColor: threadMessageAccent || (threadMessageIsSent ? "rgba(124,58,237,0.42)" : "rgba(14,165,233,0.42)"),
-                      borderRadius: directSingleMessageLayout ? 0 : 12,
+                      borderRadius: 12,
                       background: "#ffffff",
-                      boxShadow: directSingleMessageLayout
-                        ? "none"
-                        : isReplyTarget && !hideInlineMessageChrome
+                      boxShadow: isReplyTarget && !hideInlineMessageChrome
                         ? "0 0 0 2px rgba(124,58,237,0.22), 0 0 0 3px rgba(6,182,212,0.24)"
                         : isExpanded ? EDITOR_NEU_SHADOW : "4px 4px 11px rgba(174,174,192,0.2), -4px -4px 11px rgba(255,255,255,0.82)",
                       transition: "background 140ms ease, box-shadow 160ms ease, border-color 140ms ease",
                     }}
                   >
-                  {showInlineMessageMetadata && (
+                  {hideInlineMessageChrome && (
                     <div data-linked-email-message-metadata="true" role="group" aria-label="Linked email message details" style={{ display: "grid", gap: 3, color: "rgba(71,85,105,0.9)", fontSize: 10.5, fontWeight: 700, padding: "7px 8px", borderRadius: 8, background: `linear-gradient(90deg, ${threadMessageAccent || accent}28, ${threadMessageAccent || accent}0b 58%, rgba(255,255,255,0.96))` }}>
                       <div style={{ minWidth: 0, display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
                         <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: surfaceText, fontSize: 12 }}>{threadMessage.subject || "(no subject)"}</strong>
@@ -6611,7 +6553,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                     </div>
                   )}
                   {!hideInlineMessageChrome && (
-                    <div data-email-message-header="true" data-email-drag-handle="true" style={{ display: "grid", gap: 5, padding: "7px 8px", borderRadius: 8, background: `linear-gradient(90deg, ${threadMessageAccent || accent}28, ${threadMessageAccent || accent}0b 58%, rgba(255,255,255,0.96))` }}>
+                    <div data-email-message-header="true" style={{ display: "grid", gap: 5, padding: "7px 8px", borderRadius: 8, background: `linear-gradient(90deg, ${threadMessageAccent || accent}28, ${threadMessageAccent || accent}0b 58%, rgba(255,255,255,0.96))` }}>
                       <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr)${onMessageTextBoxRequest ? " auto" : ""} auto auto`, alignItems: "start", gap: 8 }}>
                         <button
                           type="button"
@@ -6619,12 +6561,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                           aria-label={`${isExpanded ? "Collapse" : "Expand"} email from ${fromLine}`}
                           onClick={() => {
                             onMessageActivate?.(threadMessageID);
-                            setExpandedThreadMessageIDs((current) => {
-                              const next = new Set(current);
-                              if (next.has(threadMessageID)) next.delete(threadMessageID);
-                              else next.add(threadMessageID);
-                              return next;
-                            });
+                            setExpandedThreadMessageID((current) => current === threadMessageID ? "" : threadMessageID);
                           }}
                           style={{
                             minWidth: 0,
@@ -6721,27 +6658,24 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                     </div>
                   )}
                   {isExpanded && (useRichThreadBody ? (
-                    <div data-email-selection-content="true" style={{ minWidth: 0 }}>
-                      <EmailBodyFrame
-                        message={threadMessage}
-                        body={displayThreadBody}
-                        apiBase={apiBase}
-                        companyID={companyID}
-                        sharedInboxID={sharedInboxID}
-                        accountEmail={accountEmail}
-                        collaborationID={collaborationID}
-                        compact={inlineExpansion}
-                        strokeColor={strokeColor}
-                        accent={accent}
-                        highlights={emailHighlightsByMessageID[threadMessageID] ?? []}
-                        activeSelection={activeSelection?.messageID === threadMessageID ? activeSelection : null}
-                        onSelectionChange={canUseEmailSelection ? (selection) => updateFrameSelection(threadMessageID, selection) : undefined}
-                      />
-                    </div>
+                    <EmailBodyFrame
+                      message={threadMessage}
+                      body={displayThreadBody}
+                      apiBase={apiBase}
+                      companyID={companyID}
+                      sharedInboxID={sharedInboxID}
+                      accountEmail={accountEmail}
+                      collaborationID={collaborationID}
+                      compact={inlineExpansion}
+                      strokeColor={strokeColor}
+                      accent={accent}
+                      highlights={emailHighlightsByMessageID[threadMessageID] ?? []}
+                      activeSelection={activeSelection?.messageID === threadMessageID ? activeSelection : null}
+                      onSelectionChange={canUseEmailSelection ? (selection) => updateFrameSelection(threadMessageID, selection) : undefined}
+                    />
                   ) : (
                     <div
                       ref={isSelectedMessage ? selectedEmailBodyRef : undefined}
-                      data-email-selection-content="true"
                       {...{ [EMAIL_BODY_MESSAGE_ID_ATTRIBUTE]: threadMessageID }}
                       style={{
                         marginTop: 7,

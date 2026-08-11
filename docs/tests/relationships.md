@@ -9,7 +9,7 @@
 7. New-message ingestion never creates or copies a textbox-specific relationship, chat, or shared-draft display state.
 8. An email-selection chat is valid only when the exact internal email message has an `email_relationships` row for that chat's exact Node and Node text box.
 9. Opening an email-selection chat preview creates no text box, email relationship, or chat relationship.
-10. Sending the first chat from an email-selection preview atomically creates the missing exact relationship and chat in the chosen text box, creating that text box only when the user did not choose an existing one.
+10. Sending the first chat from an email-selection preview atomically creates the exact Node-local text box, email-to-textbox relationship, and text-box chat, or creates none of them.
 11. Cancelling an unsent email-selection chat preview requires no relationship deletion because no relationship has been written.
 12. A universal shared draft belongs to its exact email thread, not to a Node or text box.
 13. Showing a universal shared draft in a Node is presentation state and never creates a draft-to-textbox relationship.
@@ -17,7 +17,6 @@
 15. Email-to-Node, email-to-textbox, chat, and draft rules do not create a generic resource registry, surrogate identity, or untyped edge.
 16. An existing exact-message text-box relationship routes a later triage send through the normal Node text-box-chat insert only; it creates no email, relationship, permission, participant, or collaboration row.
 17. A triage chat command reuses the exact mailbox-scoped stored message when present, fetches only that exact provider message when absent, and never queues thread ingestion or links a thread to a text box.
-18. Linking another exact message to a chosen existing Node text box and adding its first chat succeeds or fails as one transaction and never creates a second text box.
 
 Last updated: 2026-08-10
 
@@ -31,7 +30,7 @@ Inside each Node, one exact message may link to one exact Node text box; the sam
 ↓
 Opening a highlighted-email chat preview creates no relationship or resource
 ↓
-The first send appends to the chosen exact Node-local text box and atomically creates its missing message relationship and chat, creating a text box only when none was chosen
+The first send appends to the existing exact Node-local text box or atomically creates the missing text box, message-to-textbox relationship, and chat, or creates none of them
 ↓
 That send reuses the exact stored message or imports only the missing exact provider message; thread completion remains separate background ingestion
 ↓

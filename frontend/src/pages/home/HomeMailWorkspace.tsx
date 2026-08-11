@@ -168,31 +168,6 @@ const mailboxDropdownMenuStyle: React.CSSProperties = {
   boxShadow: "0 14px 34px rgba(15, 23, 42, 0.16)",
 };
 
-const EMAIL_CHAT_DEFAULT_WIDTH = 440;
-const EMAIL_CHAT_MIN_WIDTH = 320;
-const EMAIL_DETAIL_MIN_WIDTH = 360;
-
-function emailChatWidthStorageKey(companyID: string): string {
-  return `mangorts.email-collaboration-chat-width:${companyID}`;
-}
-
-function readEmailChatWidth(companyID: string): number {
-  try {
-    const stored = Number.parseFloat(localStorage.getItem(emailChatWidthStorageKey(companyID)) ?? "");
-    return Number.isFinite(stored) ? Math.max(EMAIL_CHAT_MIN_WIDTH, stored) : EMAIL_CHAT_DEFAULT_WIDTH;
-  } catch {
-    return EMAIL_CHAT_DEFAULT_WIDTH;
-  }
-}
-
-function persistEmailChatWidth(companyID: string, width: number): void {
-  try {
-    localStorage.setItem(emailChatWidthStorageKey(companyID), String(Math.round(width)));
-  } catch {
-    // The resize still works when browser storage is unavailable.
-  }
-}
-
 function mailboxDropdownItemStyle(active: boolean): React.CSSProperties {
   return {
     border: active ? "1px solid rgba(14, 165, 233, 0.72)" : "1px solid transparent",
@@ -429,9 +404,6 @@ export function HomeMailWorkspace({
   const [emailCollaborationError, setEmailCollaborationError] = React.useState("");
   const [emailActionNotice, setEmailActionNotice] = React.useState<{ message: string; requestID: number } | null>(null);
   const [emailChatTopOffset, setEmailChatTopOffset] = React.useState(0);
-  const [emailChatWidth, setEmailChatWidth] = React.useState(() => readEmailChatWidth(companyID));
-  const [emailChatResizing, setEmailChatResizing] = React.useState(false);
-  const emailDetailLayoutRef = React.useRef<HTMLDivElement | null>(null);
   const nodeByID = React.useMemo(() => new Map(nodes.map((node) => [node.node_id, node])), [nodes]);
   const logicGateByID = React.useMemo(() => new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate])), [logicGates]);
   const openEmailLogicGate = React.useCallback((logicGateID: string) => {
@@ -449,7 +421,6 @@ export function HomeMailWorkspace({
     ? JSON.stringify([activeViewID, mailbox, selectedMessageRowKey])
     : "";
   const emailChatVisible = emailCollaborationChatSessionVisible(emailChatSession, emailChatKey);
-  React.useEffect(() => setEmailChatWidth(readEmailChatWidth(companyID)), [companyID]);
   const visibleError = emailCollaborationError || error;
   const clearEmailCollaborationError = React.useCallback(() => setEmailCollaborationError(""), []);
   const clearEmailActionRequest = React.useCallback(() => setEmailActionRequest(null), []);
@@ -465,39 +436,6 @@ export function HomeMailWorkspace({
       ? { key: emailChatKey, visible: !current.visible }
       : { key: emailChatKey, visible: true });
   }, [emailChatKey]);
-  const resizeEmailChatTo = React.useCallback((width: number) => {
-    const layoutWidth = emailDetailLayoutRef.current?.getBoundingClientRect().width ?? 0;
-    const maximum = layoutWidth > 0
-      ? Math.max(EMAIL_CHAT_MIN_WIDTH, layoutWidth - EMAIL_DETAIL_MIN_WIDTH - 8)
-      : width;
-    const nextWidth = Math.min(maximum, Math.max(EMAIL_CHAT_MIN_WIDTH, width));
-    setEmailChatWidth(nextWidth);
-    persistEmailChatWidth(companyID, nextWidth);
-  }, [companyID]);
-  const startEmailChatResize = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    const startX = event.clientX;
-    const startWidth = emailChatWidth;
-    const ownerDocument = event.currentTarget.ownerDocument;
-    const previousCursor = ownerDocument.body.style.cursor;
-    const previousUserSelect = ownerDocument.body.style.userSelect;
-    setEmailChatResizing(true);
-    ownerDocument.body.style.cursor = "col-resize";
-    ownerDocument.body.style.userSelect = "none";
-    const onPointerMove = (pointerEvent: PointerEvent) => resizeEmailChatTo(startWidth + startX - pointerEvent.clientX);
-    const finish = () => {
-      setEmailChatResizing(false);
-      ownerDocument.body.style.cursor = previousCursor;
-      ownerDocument.body.style.userSelect = previousUserSelect;
-      ownerDocument.removeEventListener("pointermove", onPointerMove);
-      ownerDocument.removeEventListener("pointerup", finish);
-      ownerDocument.removeEventListener("pointercancel", finish);
-    };
-    ownerDocument.addEventListener("pointermove", onPointerMove);
-    ownerDocument.addEventListener("pointerup", finish);
-    ownerDocument.addEventListener("pointercancel", finish);
-  }, [emailChatWidth, resizeEmailChatTo]);
   const openEmailChatNode = React.useCallback((nodeID: string) => {
     const cleanNodeID = nodeID.trim();
     if (!cleanNodeID) return;
@@ -1019,7 +957,6 @@ export function HomeMailWorkspace({
           />
         ) : selectedMessage ? (
           <div
-            ref={emailDetailLayoutRef}
             className="mango-pane-layout-transition"
             style={{
               minWidth: 0,
@@ -1027,14 +964,16 @@ export function HomeMailWorkspace({
               height: "100%",
               display: "grid",
               gridTemplateColumns: showDetailResizeHandle && emailChatVisible
-                ? `minmax(${EMAIL_DETAIL_MIN_WIDTH}px, 1fr) 8px minmax(${EMAIL_CHAT_MIN_WIDTH}px, min(${emailChatWidth}px, calc(100% - ${EMAIL_DETAIL_MIN_WIDTH + 8}px)))`
-                : "minmax(0, 1fr)",
+                ? "minmax(0, 1fr) minmax(320px, 38%)"
+                : showDetailResizeHandle
+                  ? "minmax(0, 1fr) minmax(0, 0fr)"
+                  : "minmax(0, 1fr)",
               gridTemplateRows: !showDetailResizeHandle && emailChatVisible
                 ? "auto auto"
                 : "minmax(0, 1fr)",
               overflow: "hidden",
               position: "relative",
-              transition: emailChatResizing ? "none" : "grid-template-columns 200ms cubic-bezier(0.2, 0.8, 0.2, 1)",
+              transition: "grid-template-columns 200ms cubic-bezier(0.2, 0.8, 0.2, 1)",
             }}
           >
             {selectedConversationLoading ? (
@@ -1080,31 +1019,6 @@ export function HomeMailWorkspace({
                 onOpenCollaborationNode={onOpenCollaborationNode}
                 onOpenLogicGate={openEmailLogicGate}
                 onContentTopChange={setEmailChatTopOffset}
-              />
-            )}
-            {showDetailResizeHandle && emailChatVisible && (
-              <div
-                role="separator"
-                aria-label="Resize email chat column"
-                aria-orientation="vertical"
-                aria-valuemin={EMAIL_CHAT_MIN_WIDTH}
-                aria-valuenow={Math.round(emailChatWidth)}
-                tabIndex={0}
-                onPointerDown={startEmailChatResize}
-                onKeyDown={(event) => {
-                  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-                  event.preventDefault();
-                  resizeEmailChatTo(emailChatWidth + (event.key === "ArrowLeft" ? 24 : -24));
-                }}
-                style={{
-                  width: 8,
-                  minHeight: 0,
-                  cursor: "col-resize",
-                  background: "linear-gradient(90deg, transparent 2px, rgba(56,189,248,0.42) 3px, rgba(167,139,250,0.32) 5px, transparent 6px)",
-                  touchAction: "none",
-                  outlineOffset: -2,
-                  zIndex: 2,
-                }}
               />
             )}
             {emailChatAvailable && (

@@ -64,8 +64,11 @@ func (r *MemoryRepo) ListCommunicationsEmailThreadChatGroups(input Communication
 				if !ok {
 					continue
 				}
-				if !foundMessage || candidate.MessageOrder < message.MessageOrder {
+				if !foundMessage || candidate.ProviderMessageID == strings.TrimSpace(input.MessageID) {
 					message, foundMessage = candidate, true
+				}
+				if candidate.ProviderMessageID == strings.TrimSpace(input.MessageID) {
+					break
 				}
 			}
 			groupKey := item.NodeID + "\x1f" + projection.InformationID
@@ -83,6 +86,11 @@ func (r *MemoryRepo) ListCommunicationsEmailThreadChatGroups(input Communication
 		}
 	}
 	sort.SliceStable(groups, func(i, j int) bool {
+		leftCurrent := groups[i].ProviderMessageID == strings.TrimSpace(input.MessageID)
+		rightCurrent := groups[j].ProviderMessageID == strings.TrimSpace(input.MessageID)
+		if leftCurrent != rightCurrent {
+			return leftCurrent
+		}
 		if groups[i].MessageOrder != groups[j].MessageOrder {
 			return groups[i].MessageOrder < groups[j].MessageOrder
 		}
