@@ -104,6 +104,7 @@ test("grouping New chat controls select, identify, send, and cancel the exact co
           selectedSectionKey={selectedSectionKey}
           composerDestinationLabel={destinationLabel}
           chronologicalMessages
+          reserveScrollbarGutter
           draft="Ready to send"
           companyUsers={[]}
           draftAttachments={[]}
@@ -141,6 +142,11 @@ test("grouping New chat controls select, identify, send, and cancel the exact co
     const root = createRoot(container);
     mountedRoot = root;
     await act(async () => root.render(<Harness />));
+
+    const messageScroller = container.querySelector<HTMLElement>(".editor-document-scroll");
+    assert.ok(messageScroller);
+    assert.equal(messageScroller.style.scrollbarGutter, "stable");
+    assert.equal(messageScroller.style.paddingRight, "16px");
 
     const articles = Array.from(container.querySelectorAll<HTMLElement>('[role="article"]'));
     assert.deepEqual(articles.map((article) => article.dataset.nodeChatMessageId), ["chat-1", "chat-2", "chat-3", "chat-4"]);

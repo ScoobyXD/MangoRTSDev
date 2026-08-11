@@ -220,6 +220,9 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.doesNotMatch(workspace, /threadMessages=\{selectedThreadMessages\}/);
   assert.match(workspace, /onExistingChatsChange=\{handleExistingEmailChatsChange\}/);
   assert.match(workspace, /onOpenNode=\{openEmailChatNode\}/);
+  assert.match(workspace, /data-email-chat-column-resizer="true"[\s\S]*onPointerDown=\{startEmailChatColumnResize\}[\s\S]*background: "transparent"/);
+  assert.match(workspace, /resizeEmailChatColumnAtPointer\(bounds\.left, bounds\.width, clientX\)/);
+  assert.match(workspace, /minmax\(0, 1fr\) 0px clamp\(\$\{EMAIL_CHAT_COLUMN_MIN_WIDTH\}px/);
   assert.match(detail, /data-email-thread-chat-toggle="true"[\s\S]*onClick=\{onToggleEmailChat\}/);
   assert.doesNotMatch(detail, /title="Chat about this email message"|data-email-message-actions="true"/);
   assert.match(detail, /data-email-selection-chat-action="true"[\s\S]*onTextSelection\(\{ quote, startOffset, endOffset \}\)/);
@@ -236,6 +239,7 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(surface, /sectionActionLabel="New chat"/);
   assert.match(surface, /selectedSectionKey=\{selectedChatGroupKey\}/);
   assert.match(surface, /composerDestinationLabel=\{composerDestinationLabel\}/);
+  assert.match(surface, /reserveScrollbarGutter/);
   assert.match(surface, /onSectionAction=\{selectExistingChatGroup\}/);
   assert.match(surface, /onClearComposerDestination=\{cancelChatGroupDestination\}/);
   assert.match(surface, /chronologicalMessages/);
@@ -295,6 +299,8 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(sharedChat, /data-chat-section-action="true"/);
   assert.match(sharedChat, /data-chat-section-selected=\{sectionSelected \? "true" : undefined\}/);
   assert.match(sharedChat, /data-chat-composer-destination="true"[\s\S]*New chat to \{composerDestinationLabel\}/);
+  assert.match(sharedChat, /reserveScrollbarGutter\?: boolean/);
+  assert.match(sharedChat, /scrollbarGutter: reserveScrollbarGutter \? "stable" : undefined[\s\S]*padding: reserveScrollbarGutter \? "9px 16px 9px 8px" : "9px 8px"/);
   assert.match(sharedChat, /aria-label=\{`Open Node \$\{sectionLabel\}`\}[\s\S]*onClick=\{\(\) => onOpenSectionNode\(sectionNodeID\)\}/);
   assert.match(sharedChat, /borderTop: index > 0 \? `1px solid \$\{ruleColor\}`/);
   assert.match(surface, /<ChatPane[\s\S]*fillHeight/);

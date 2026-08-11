@@ -49,6 +49,7 @@ import {
   orderEmailConversationMessages,
   rewriteEmailDocumentCIDSources,
   RACIRoleCellKey,
+  resizeEmailChatColumnAtPointer,
   resizeHomeColumns,
   resizeHomeInboxMatrixColumnsWithoutSidebar,
   readTriageMessageDrag,
@@ -887,6 +888,12 @@ test("home column sizing keeps generated grid tracks stable", () => {
   assert.equal(getInboxMatrixGridTemplateColumns(widths), "200px minmax(320px, 1fr) 380px");
   assert.equal(getInboxMatrixGridTemplateColumnsWithoutSidebar(widths), "minmax(320px, 1fr) 10px 380px");
   assert.deepEqual(resizeHomeInboxMatrixColumnsWithoutSidebar(widths, 2, -160, 780), [200, 400, 320, 450]);
+});
+
+test("email chat left-edge resizing anchors the right edge and protects both columns", () => {
+  assert.equal(resizeEmailChatColumnAtPointer(100, 1000, 650), 450);
+  assert.equal(resizeEmailChatColumnAtPointer(100, 1000, 900), 320, "chat width keeps its minimum");
+  assert.equal(resizeEmailChatColumnAtPointer(100, 1000, 200), 680, "email detail keeps its minimum");
 });
 
 test("home column sizing fits first-load widths into the available My Triage workspace", () => {

@@ -5,7 +5,7 @@ import type { EditorEntityLink, EditorEntityLinkRequest } from "../../modules/ed
 import type { NodeRecord } from "../../modules/nodes/types";
 import type { LogicGateRecord } from "../../modules/logic-gates/types";
 import type { ComposeState, HomeViewID, MessageSelectionModifiers } from "./homeTypes";
-import { canDragTriageMessageFromMailbox, emailConversationShouldShowLoadingShell, emailMessageHasMultipleThreadMessages, emailMessageLogicGateIDs, emailMessageRowAriaLabel, emailThreadMessageCount, formatAddressList, formatMessageDate, isMailRowActivationKey, mailboxLabel, messageReadStatusLabel, messageReadStatusTitle, type EmailConversationOrder } from "./homeUtils";
+import { canDragTriageMessageFromMailbox, EMAIL_CHAT_COLUMN_MIN_WIDTH, EMAIL_DETAIL_COLUMN_MIN_WIDTH, emailConversationShouldShowLoadingShell, emailMessageHasMultipleThreadMessages, emailMessageLogicGateIDs, emailMessageRowAriaLabel, emailThreadMessageCount, formatAddressList, formatMessageDate, isMailRowActivationKey, mailboxLabel, messageReadStatusLabel, messageReadStatusTitle, resizeEmailChatColumnAtPointer, type EmailConversationOrder } from "./homeUtils";
 import { EmailEntityIconButton, HomeColumnResizeHandle, ComposePanel, DeleteMessagesConfirmationModal, MessageDetail, MessageLeadingIndicators, type EmailCollaborationNavigation } from "./HomeParts";
 import { EmailCollaborationChatSurface, type EmailCollaborationSelection } from "./EmailCollaborationChatSurface";
 import { EmailNodeDestinationSearch } from "./EmailNodeDestinationSearch";
@@ -404,6 +404,10 @@ export function HomeMailWorkspace({
   const [emailCollaborationError, setEmailCollaborationError] = React.useState("");
   const [emailActionNotice, setEmailActionNotice] = React.useState<{ message: string; requestID: number } | null>(null);
   const [emailChatTopOffset, setEmailChatTopOffset] = React.useState(0);
+  const [emailChatColumnWidth, setEmailChatColumnWidth] = React.useState<number | null>(null);
+  const [emailChatColumnResizing, setEmailChatColumnResizing] = React.useState(false);
+  const emailDetailLayoutRef = React.useRef<HTMLDivElement | null>(null);
+  const emailChatResizePointerIDRef = React.useRef<number | null>(null);
   const nodeByID = React.useMemo(() => new Map(nodes.map((node) => [node.node_id, node])), [nodes]);
   const logicGateByID = React.useMemo(() => new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate])), [logicGates]);
   const openEmailLogicGate = React.useCallback((logicGateID: string) => {
@@ -446,6 +450,30 @@ export function HomeMailWorkspace({
     if (!hasChats || !emailChatKey) return;
     setEmailChatSession((current) => current?.key === emailChatKey ? current : { key: emailChatKey, visible: true });
   }, [emailChatKey]);
+  const resizeEmailChatColumn = React.useCallback((clientX: number) => {
+    const layout = emailDetailLayoutRef.current;
+    if (!layout) return;
+    const bounds = layout.getBoundingClientRect();
+    setEmailChatColumnWidth(resizeEmailChatColumnAtPointer(bounds.left, bounds.width, clientX));
+  }, []);
+  const startEmailChatColumnResize = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    emailChatResizePointerIDRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setEmailChatColumnResizing(true);
+    resizeEmailChatColumn(event.clientX);
+  }, [resizeEmailChatColumn]);
+  const moveEmailChatColumnResize = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (emailChatResizePointerIDRef.current !== event.pointerId) return;
+    event.preventDefault();
+    resizeEmailChatColumn(event.clientX);
+  }, [resizeEmailChatColumn]);
+  const finishEmailChatColumnResize = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (emailChatResizePointerIDRef.current !== event.pointerId) return;
+    emailChatResizePointerIDRef.current = null;
+    setEmailChatColumnResizing(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  }, []);
   const sendEmailToNodeDestination = React.useCallback((destination: EmailNodeDestination) => {
     if (!selectedMessage) return;
     setEmailSelection({ messageID: selectedMessage.id, quote: "", startOffset: 0, endOffset: 0 });
@@ -957,6 +985,7 @@ export function HomeMailWorkspace({
           />
         ) : selectedMessage ? (
           <div
+            ref={emailDetailLayoutRef}
             className="mango-pane-layout-transition"
             style={{
               minWidth: 0,
@@ -964,7 +993,7 @@ export function HomeMailWorkspace({
               height: "100%",
               display: "grid",
               gridTemplateColumns: showDetailResizeHandle && emailChatVisible
-                ? "minmax(0, 1fr) minmax(320px, 38%)"
+                ? `minmax(0, 1fr) 0px clamp(${EMAIL_CHAT_COLUMN_MIN_WIDTH}px, ${emailChatColumnWidth === null ? "38%" : `${emailChatColumnWidth}px`}, calc(100% - ${EMAIL_DETAIL_COLUMN_MIN_WIDTH}px))`
                 : showDetailResizeHandle
                   ? "minmax(0, 1fr) minmax(0, 0fr)"
                   : "minmax(0, 1fr)",
@@ -973,7 +1002,7 @@ export function HomeMailWorkspace({
                 : "minmax(0, 1fr)",
               overflow: "hidden",
               position: "relative",
-              transition: "grid-template-columns 200ms cubic-bezier(0.2, 0.8, 0.2, 1)",
+              transition: emailChatColumnResizing ? "none" : "grid-template-columns 200ms cubic-bezier(0.2, 0.8, 0.2, 1)",
             }}
           >
             {selectedConversationLoading ? (
@@ -1019,6 +1048,27 @@ export function HomeMailWorkspace({
                 onOpenCollaborationNode={onOpenCollaborationNode}
                 onOpenLogicGate={openEmailLogicGate}
                 onContentTopChange={setEmailChatTopOffset}
+              />
+            )}
+            {showDetailResizeHandle && emailChatVisible && (
+              <div
+                aria-hidden="true"
+                data-email-chat-column-resizer="true"
+                onPointerDown={startEmailChatColumnResize}
+                onPointerMove={moveEmailChatColumnResize}
+                onPointerUp={finishEmailChatColumnResize}
+                onPointerCancel={finishEmailChatColumnResize}
+                style={{
+                  zIndex: 4,
+                  width: 10,
+                  height: "100%",
+                  justifySelf: "center",
+                  alignSelf: "stretch",
+                  cursor: "col-resize",
+                  touchAction: "none",
+                  background: "transparent",
+                  userSelect: "none",
+                }}
               />
             )}
             {emailChatAvailable && (

@@ -345,6 +345,18 @@ export function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(value)));
 }
 
+export const EMAIL_CHAT_COLUMN_MIN_WIDTH = 320;
+export const EMAIL_DETAIL_COLUMN_MIN_WIDTH = 320;
+
+export function resizeEmailChatColumnAtPointer(containerLeft: number, containerWidth: number, pointerClientX: number): number {
+  const maximumChatWidth = Math.max(EMAIL_CHAT_COLUMN_MIN_WIDTH, Math.round(containerWidth) - EMAIL_DETAIL_COLUMN_MIN_WIDTH);
+  return clampNumber(
+    containerLeft + containerWidth - pointerClientX,
+    EMAIL_CHAT_COLUMN_MIN_WIDTH,
+    maximumChatWidth,
+  );
+}
+
 export type TriageMessageDragPayload = {
   messageIDs: string[];
   sharedInboxID?: string;
