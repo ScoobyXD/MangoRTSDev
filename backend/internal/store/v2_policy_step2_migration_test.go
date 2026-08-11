@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -28,8 +29,17 @@ func TestV2PolicyStep2SchemaAndOperatorContract(t *testing.T) {
 	if start < 0 || end <= start {
 		t.Fatal("canonical schema is missing the marked V2 policy Step 2 block")
 	}
-	if strings.TrimSpace(schema[start+len(v2PolicyStep2SchemaBegin):end]) != strings.TrimSpace(migration) {
-		t.Fatal("canonical V2 policy Step 2 block drifted from the cutover migration")
+	canonicalStep2 := strings.TrimSpace(schema[start+len(v2PolicyStep2SchemaBegin) : end])
+	retiredPreflightGuard := regexp.MustCompile(`(?ms)\n\s*if exists\s*\(\s*select 1 from mangorts_v2_step1_preflight_report\(\)\s*where section='FINAL' and status<>'READY'\s*\)\s*then\s*raise exception 'v2_policy_step2_step1_preflight_stop';\s*end if;`)
+	if !retiredPreflightGuard.MatchString(migration) {
+		t.Fatal("historical Step 2 migration is missing its original preflight guard")
+	}
+	activeStep2 := strings.TrimSpace(retiredPreflightGuard.ReplaceAllString(migration, "\n"))
+	if strings.Join(strings.Fields(canonicalStep2), " ") != strings.Join(strings.Fields(activeStep2), " ") {
+		t.Fatal("canonical V2 policy Step 2 block drifted from the active cutover contract")
+	}
+	if strings.Contains(canonicalStep2, "mangorts_v2_step1_preflight_report") {
+		t.Fatal("canonical schema still calls the retired Step 1 preflight report")
 	}
 	lower := strings.ToLower(migration)
 	for _, required := range []string{

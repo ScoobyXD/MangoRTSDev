@@ -4937,12 +4937,6 @@ begin
     end if;
   end loop;
 
-  if exists (
-    select 1 from mangorts_v2_step1_preflight_report()
-    where section='FINAL' and status<>'READY'
-  ) then
-    raise exception 'v2_policy_step2_step1_preflight_stop';
-  end if;
 end;
 $$;
 
