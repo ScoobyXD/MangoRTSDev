@@ -338,7 +338,6 @@ export function AppSidebarRACITabsSection({ apiBase, companyID, onOpenLogicGate 
     if (!active || active.role !== role || busy) return;
     setBusy(true);
     const sourceParents = new Set<string>();
-    let destinationParent = "";
     try {
       const workingBranches = { ...branchesRef.current };
       const parentForEntry = (entry: RACITabEntryRef): string => {
@@ -349,7 +348,6 @@ export function AppSidebarRACITabsSection({ apiBase, companyID, onOpenLogicGate 
         return "";
       };
       active.entries.forEach((entry) => sourceParents.add(parentForEntry(entry)));
-      destinationParent = target && placement === "inside" ? target.entryID : target ? parentForEntry(target) : "";
       const updates = planRACITabDrop(role, workingBranches, active.entries, target, placement);
       if (updates.length === 0) return;
       const movingKeys = new Set(active.entries.map((entry) => `${entry.entryType}:${entry.entryID}`));
@@ -358,7 +356,7 @@ export function AppSidebarRACITabsSection({ apiBase, companyID, onOpenLogicGate 
         rows: branch.rows.filter((row) => !movingKeys.has(raciTabRowKey(row))),
       } : branch])));
       await applyRACITabLayout(apiBase, companyID, role, updates);
-      await refreshBranches([...sourceParents, destinationParent].map((parentFolderID) => ({ role, parentFolderID })));
+      await refreshBranches(visibleBranchRefs(role));
       setSelectedKeys(new Set(active.entries.map((entry) => `${entry.entryType}:${entry.entryID}`)));
     } catch (cause) {
       reportMutationError(role, cause);

@@ -54,6 +54,7 @@ test("RACI Tabs moves stay lazy and live changes refresh only visible branches",
   installGlobal("WebSocket", FakeWebSocket, restores);
 
   const companyID = "44444444-4444-4444-8444-444444444444";
+  const parentFolderID = "55555555-5555-4555-8555-555555555554";
   const folderID = "55555555-5555-4555-8555-555555555555";
   const firstGateID = "66666666-6666-4666-8666-666666666661";
   const secondGateID = "66666666-6666-4666-8666-666666666662";
@@ -64,13 +65,18 @@ test("RACI Tabs moves stay lazy and live changes refresh only visible branches",
   const itemRow = (logicGateID: string, name: string, folder: string | null, position: number) => ({ row_kind: "item", item: {
     company_id: companyID, user_id: "77777777-7777-4777-8777-777777777777", role: "responsible",
     logic_gate_id: logicGateID, folder_id: folder, name, position,
-    created_timestamp: "2026-08-10T00:00:00Z", updated_timestamp: "2026-08-10T00:00:00Z", status_counts: {},
+    created_timestamp: "2026-08-10T00:00:00Z", updated_timestamp: "2026-08-10T00:00:00Z", status_counts: { request: 1 },
   } });
-  const folderRow = { row_kind: "folder", folder: {
+  const folderRow = () => ({ row_kind: "folder", folder: {
     company_id: companyID, folder_id: folderID, user_id: "77777777-7777-4777-8777-777777777777",
-    role: "responsible", parent_folder_id: null, name: "Destination", position: 3000,
-    created_timestamp: "2026-08-10T00:00:00Z", updated_timestamp: "2026-08-10T00:00:00Z", has_children: true, status_counts: {},
-  } };
+    role: "responsible", parent_folder_id: parentFolderID, name: "Destination", position: 1000,
+    created_timestamp: "2026-08-10T00:00:00Z", updated_timestamp: "2026-08-10T00:00:00Z", has_children: true, status_counts: { request: moved.size },
+  } });
+  const parentFolderRow = () => ({ row_kind: "folder", folder: {
+    company_id: companyID, folder_id: parentFolderID, user_id: "77777777-7777-4777-8777-777777777777",
+    role: "responsible", parent_folder_id: null, name: "Parent", position: 3000,
+    created_timestamp: "2026-08-10T00:00:00Z", updated_timestamp: "2026-08-10T00:00:00Z", has_children: true, status_counts: { request: moved.size },
+  } });
 
   installGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
     const value = typeof input === "string" ? input : input.toString();
@@ -84,15 +90,17 @@ test("RACI Tabs moves stay lazy and live changes refresh only visible branches",
     }
     if (url.pathname !== "/v1/raci-tabs") return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
     branchRequests.push(value);
-    const parentFolderID = url.searchParams.get("parent_folder_id") ?? "";
-    const rows = parentFolderID === folderID
+    const requestedParentFolderID = url.searchParams.get("parent_folder_id") ?? "";
+    const rows = requestedParentFolderID === folderID
       ? [firstGateID, secondGateID].filter((id) => moved.has(id)).map((id, index) => itemRow(id, id === firstGateID ? "First Gate" : "Second Gate", folderID, (index + 1) * 1000))
+      : requestedParentFolderID === parentFolderID
+        ? [folderRow()]
       : [
         ...(!moved.has(firstGateID) ? [itemRow(firstGateID, "First Gate", null, 1000)] : []),
         ...(!moved.has(secondGateID) ? [itemRow(secondGateID, "Second Gate", null, 2000)] : []),
-        folderRow,
+        parentFolderRow(),
       ];
-    return new Response(JSON.stringify({ role: "responsible", parent_folder_id: parentFolderID || null, rows, status_counts: {}, next_cursor: "" }), { status: 200, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify({ role: "responsible", parent_folder_id: requestedParentFolderID || null, rows, status_counts: { request: requestedParentFolderID ? moved.size : 2 }, next_cursor: "" }), { status: 200, headers: { "content-type": "application/json" } });
   }, restores);
 
   let mountedRoot: { unmount(): void } | null = null;
@@ -112,6 +120,11 @@ test("RACI Tabs moves stay lazy and live changes refresh only visible branches",
     assert.ok(responsible);
     await act(async () => { responsible.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })); await new Promise((resolve) => setTimeout(resolve, 0)); });
     assert.equal(branchRequests.length, 1);
+
+    const parentButton = container.querySelector<HTMLButtonElement>('button[aria-label="Expand Parent"]');
+    assert.ok(parentButton);
+    await act(async () => { parentButton.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    assert.equal(branchRequests.filter((value) => value.includes(`parent_folder_id=${parentFolderID}`)).length, 1);
 
     const dragIntoDestination = async (logicGateID: string) => {
       const source = container.querySelector<HTMLElement>(`[data-raci-tab-row="item:${logicGateID}"]`);
@@ -139,8 +152,10 @@ test("RACI Tabs moves stay lazy and live changes refresh only visible branches",
 
     await dragIntoDestination(firstGateID);
     assert.equal(layoutRequests, 1, container.querySelector('[role="alert"]')?.textContent ?? "layout request was not sent");
-    assert.equal(branchRequests.filter((value) => value.includes("parent_folder_id=")).length, 0, "closed destination must not be preloaded or cached");
+    assert.equal(branchRequests.filter((value) => value.includes(`parent_folder_id=${folderID}`)).length, 0, "closed destination must not be preloaded or cached");
+    assert.equal(branchRequests.filter((value) => value.includes(`parent_folder_id=${parentFolderID}`)).length, 2, "the visible parent branch refreshes its nested folder totals");
     assert.equal(container.querySelector(`[data-raci-tab-row="item:${firstGateID}"]`), null, "moved row leaves the visible source immediately");
+    assert.ok(container.querySelector(`[data-raci-tab-row="folder:${folderID}"] [title="Request: 1"]`), "the closed destination row shows its refreshed recursive total");
 
     let folderButton = container.querySelector<HTMLButtonElement>('button[aria-label="Expand Destination"]');
     assert.ok(folderButton);
@@ -151,7 +166,9 @@ test("RACI Tabs moves stay lazy and live changes refresh only visible branches",
     await dragIntoDestination(secondGateID);
     assert.equal(layoutRequests, 2);
     assert.equal(branchRequests.filter((value) => value.includes(`parent_folder_id=${folderID}`)).length, 2, "open destination refreshes after a move");
+    assert.equal(branchRequests.filter((value) => value.includes(`parent_folder_id=${parentFolderID}`)).length, 3, "the visible ancestor refreshes after a move into its open child");
     assert.ok(container.querySelector(`[data-raci-tab-row="item:${secondGateID}"]`));
+    assert.ok(container.querySelector(`[data-raci-tab-row="folder:${folderID}"] [title="Request: 2"]`), "the destination row total includes both moved Logic Gates");
 
     folderButton = container.querySelector<HTMLButtonElement>('button[aria-label="Collapse Destination"]');
     assert.ok(folderButton);
@@ -162,8 +179,8 @@ test("RACI Tabs moves stay lazy and live changes refresh only visible branches",
       sockets[0].onmessage?.({ data: JSON.stringify({ type: "raci_tabs.changed", company_id: companyID, scope: "raci-tabs:company" }) });
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    assert.equal(branchRequests.length, beforeCollapsedSignal + 1, "only the still-expanded role root refreshes");
-    assert.equal(branchRequests[branchRequests.length - 1].includes("parent_folder_id="), false);
+    assert.equal(branchRequests.length, beforeCollapsedSignal + 2, "only the still-expanded role root and parent refresh");
+    assert.equal(branchRequests.slice(beforeCollapsedSignal).some((value) => value.includes(`parent_folder_id=${folderID}`)), false);
 
     folderButton = container.querySelector<HTMLButtonElement>('button[aria-label="Expand Destination"]');
     assert.ok(folderButton);
