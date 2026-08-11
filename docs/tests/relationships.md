@@ -17,8 +17,9 @@
 15. Email-to-Node, email-to-textbox, chat, and draft rules do not create a generic resource registry, surrogate identity, or untyped edge.
 16. An existing exact-message text-box relationship routes a later triage send through the normal Node text-box-chat insert only; it creates no email, relationship, permission, participant, or collaboration row.
 17. A triage chat command reuses the exact mailbox-scoped stored message when present, fetches only that exact provider message when absent, and never queues thread ingestion or links a thread to a text box.
+18. When an exact message has no text-box relationship in the chosen Node, selecting an existing chat grouping atomically links that message to the grouping's exact existing text box and creates its first chat without creating another text box.
 
-Last updated: 2026-08-10
+Last updated: 2026-08-11
 
 # Process Story: One email thread can appear in several Nodes while message work stays Node-local
 
@@ -30,7 +31,7 @@ Inside each Node, one exact message may link to one exact Node text box; the sam
 ↓
 Opening a highlighted-email chat preview creates no relationship or resource
 ↓
-The first send appends to the existing exact Node-local text box or atomically creates the missing text box, message-to-textbox relationship, and chat, or creates none of them
+The first send appends to the message's existing exact Node-local text box, atomically links the message and chat to an explicitly chosen existing grouping, or atomically creates the missing text box, message-to-textbox relationship, and chat; a failed command creates none of them
 ↓
 That send reuses the exact stored message or imports only the missing exact provider message; thread completion remains separate background ingestion
 ↓
@@ -38,7 +39,7 @@ Removing one Node's relationship leaves all other Node-local work and the stored
 ↓
 Every endpoint keeps its literal typed identity; no registry, surrogate identity, or generic untyped edge is introduced
 
-Last updated: 2026-08-10
+Last updated: 2026-08-11
 # Process Story: Policy inheritance follows typed parents without moving permissions into Explorer
 
 A permission or RACI resolver receives one exact resource type and ID
