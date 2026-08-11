@@ -800,7 +800,7 @@ test("editor header keeps primary controls visible and preserves all secondary o
   assert.match(editorContent, /logicGateRACIApplyConfirmationOpen && linkedEntityKind === "logic_gate"[\s\S]*<ConfirmActionMenu[\s\S]*title="Apply to every descendant\?"[\s\S]*confirmLabel="Apply"[\s\S]*cancelLabel="No"[\s\S]*onConfirm=\{\(\) => \{[\s\S]*setLogicGateRACIApplyConfirmationOpen\(false\);[\s\S]*applyLogicGateRACIToAssignedNodes\(\)[\s\S]*onCancel=\{\(\) => setLogicGateRACIApplyConfirmationOpen\(false\)\}/);
   assert.match(raciPresentation, /role: "responsible"[\s\S]*accent: KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR[\s\S]*role: "accountable"[\s\S]*accent: KANBAN_LOGIC_GATE_DONE_COLOR[\s\S]*role: "consulted"[\s\S]*accent: KANBAN_LOGIC_GATE_REVIEW_COLOR[\s\S]*role: "informed"[\s\S]*accent: KANBAN_LOGIC_GATE_BACKLOG_COLOR/);
   assert.match(linkedDocumentPanels, /const RACI_ROLES = LOGIC_GATE_RACI_ROLE_PRESENTATIONS[\s\S]*gridTemplateColumns: "repeat\(4, minmax\(170px, 1fr\)\)"[\s\S]*\{RACI_ROLES\.map/);
-  assert.match(linkedDocumentPanels, /aria-label="GVIC policy mode"[\s\S]*mode === "inherited" \? "Inherited" : "Customized"/);
+  assert.doesNotMatch(linkedDocumentPanels, /aria-label="GVIC policy mode"|mode === "inherited" \? "Inherited" : "Customized"/);
   assert.match(linkedDocumentPanels, /canEdit=\{canEdit\}/);
   assert.match(raciPresentation, /radial-gradient\(circle at 12% 10%[\s\S]*colorWithAlpha\(accent, 0\.14\)[\s\S]*colorWithAlpha\(accent, 0\.08\)[\s\S]*linear-gradient\(160deg,[\s\S]*colorWithAlpha\(accent, 0\.12\)[\s\S]*linear-gradient\(135deg,[\s\S]*colorWithAlpha\(accent, 0\.34\)/);
   assert.doesNotMatch(raciPresentation, /colorWithAlpha\(accent, 0\.(?:42|54|86)\)/);
