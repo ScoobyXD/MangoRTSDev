@@ -78,6 +78,7 @@ export type TextBlockState = {
   attachments: EditorChatAttachment[];
   emailMessageID?: string;
   color?: string;
+  temporaryEmailChat?: boolean;
   createdTimestamp: string;
   updatedTimestamp: string;
   pending: boolean;

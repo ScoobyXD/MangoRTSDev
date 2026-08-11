@@ -438,7 +438,7 @@ func (r *PostgresRepo) ListCommunicationsEmailThreadNodeIDs(companyID, emailThre
 	rows, err := r.db.Query(`select distinct resource_id::text
 from email_relationships
 where company_id=$1::uuid and email_thread_id=$2::uuid
-  and resource_type='node' and resource_textbox_id is not null
+  and resource_type='node' and resource_textbox_id is null
 order by resource_id::text`, companyID, emailThreadID)
 	if err != nil {
 		return nil, err

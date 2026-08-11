@@ -46,16 +46,34 @@ func (r *MemoryRepo) ListCommunicationsEmailThreadChatGroups(input Communication
 				continue
 			}
 			var payload struct {
-				EmailMessageID string `json:"email_message_id"`
+				EmailMessageID  string   `json:"email_message_id"`
+				EmailMessageIDs []string `json:"email_message_ids"`
 			}
 			raw := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(projection.Information), editorTextBlockProjectionPrefix))
 			if json.Unmarshal([]byte(raw), &payload) != nil {
 				continue
 			}
-			emailMessageID := cleanUUIDText(payload.EmailMessageID)
-			message, ok := messageByID[emailMessageID]
+			messageIDs := append([]string(nil), payload.EmailMessageIDs...)
+			if payload.EmailMessageID != "" {
+				messageIDs = append(messageIDs, payload.EmailMessageID)
+			}
+			var message domain.CommunicationsEmailMessage
+			foundMessage := false
+			for _, emailMessageID := range messageIDs {
+				candidate, ok := messageByID[cleanUUIDText(emailMessageID)]
+				if !ok {
+					continue
+				}
+				if !foundMessage || candidate.ProviderMessageID == strings.TrimSpace(input.MessageID) {
+					message, foundMessage = candidate, true
+				}
+				if candidate.ProviderMessageID == strings.TrimSpace(input.MessageID) {
+					break
+				}
+			}
 			groupKey := item.NodeID + "\x1f" + projection.InformationID
-			if !ok || seen[groupKey] {
+			chats := chatsByTextboxID[projection.InformationID]
+			if !foundMessage || len(chats) == 0 || seen[groupKey] {
 				continue
 			}
 			seen[groupKey] = true
@@ -63,7 +81,7 @@ func (r *MemoryRepo) ListCommunicationsEmailThreadChatGroups(input Communication
 				NodeID: item.NodeID, NodeName: node.Title, TextboxID: projection.InformationID, RelationshipID: item.CollaborationID,
 				EmailThreadID: thread.EmailThreadID, EmailMessageID: message.EmailMessageID,
 				ProviderMessageID: message.ProviderMessageID, MessageOrder: message.MessageOrder,
-				Chats: append([]domain.NodeProjection(nil), chatsByTextboxID[projection.InformationID]...),
+				Chats: append([]domain.NodeProjection(nil), chats...),
 			})
 		}
 	}

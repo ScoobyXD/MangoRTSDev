@@ -38,14 +38,23 @@ func (s *Server) handleCommunicationsEmailThreadChats(w http.ResponseWriter, r *
 	if !ok {
 		return
 	}
-	groups, err := s.repo.ListCommunicationsEmailThreadChatGroups(store.CommunicationsEmailCollaborationListInput{
+	input := store.CommunicationsEmailCollaborationListInput{
 		CompanyID: companyID, ParticipantUserID: actor.User.UserID,
 		PersonalUserID: scope.personalUserID, PersonalAccountEmail: scope.personalAccountEmail,
 		SharedInboxID: scope.sharedInboxID, MessageID: messageID, ThreadID: threadID,
-	})
+	}
+	collaborations, err := s.repo.ListCommunicationsEmailCollaborations(input)
 	if err != nil {
 		s.writeEmailCollaborationStoreError(w, err, "failed_to_load_email_thread_chats")
 		return
 	}
-	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"groups": groups})
+	groups, err := s.repo.ListCommunicationsEmailThreadChatGroups(input)
+	if err != nil {
+		s.writeEmailCollaborationStoreError(w, err, "failed_to_load_email_thread_chats")
+		return
+	}
+	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
+		"collaborations": collaborations,
+		"groups":         groups,
+	})
 }

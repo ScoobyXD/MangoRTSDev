@@ -1411,8 +1411,8 @@ func TestMemoryRepoConvertCommunicationsTriageItemsAddsAttachedEmailProjection(t
 	if err != nil {
 		t.Fatalf("ListNodeProjections failed: %v", err)
 	}
-	if len(projections) != 2 || projections[0].Type != "Attached email" || projections[1].Type != "Text box" {
-		t.Fatalf("projection rows = %+v, want the Attached email and its textbox", projections)
+	if len(projections) != 1 || projections[0].Type != "Attached email" {
+		t.Fatalf("projection rows = %+v, want one Attached email", projections)
 	}
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(projections[0].Information), &payload); err != nil {

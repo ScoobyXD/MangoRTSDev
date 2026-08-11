@@ -180,7 +180,12 @@ test("email thread chat groups use one direct mailbox-scoped read", async () => 
   let requested = "";
   globalThis.fetch = async (input: RequestInfo | URL) => {
     requested = input.toString();
-    return jsonResponse({ groups: [{
+    return jsonResponse({ collaborations: [{
+      company_id: "company-1",
+      collaboration_id: "collaboration-1",
+      node_id: "node-1",
+      attached_email_information_id: "relationship-wide-1",
+    }], groups: [{
       node_id: "node-1",
       node_name: "Inbox work",
       textbox_id: "textbox-1",
@@ -193,14 +198,15 @@ test("email thread chat groups use one direct mailbox-scoped read", async () => 
     }] });
   };
   try {
-    const groups = await listEmailThreadChatGroups({
+    const result = await listEmailThreadChatGroups({
       companyID: " company-1 ",
       messageID: " message-1 ",
       threadID: " thread-1 ",
       accountEmail: "ME@Example.test",
     });
     assert.equal(requested, "/v1/communications/email-thread-chats?company_id=company-1&message_id=message-1&thread_id=thread-1&account_email=me%40example.test");
-    assert.equal(groups[0]?.textbox_id, "textbox-1");
+    assert.equal(result.collaborations[0]?.node_id, "node-1");
+    assert.equal(result.groups[0]?.textbox_id, "textbox-1");
   } finally {
     globalThis.fetch = originalFetch;
   }

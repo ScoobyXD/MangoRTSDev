@@ -145,9 +145,14 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeSurface, /const messages = chatMessagesByBlock\.get\(block\.id\) \?\? \[\];/);
   assert.doesNotMatch(nodeSurface, /legacyMessages|emailOriginChatHostBlockID|resolveLegacyEmailChatHostBlockID/);
   assert.match(nodeSurface, /<LinkedEmailPreviewPane/);
-  assert.match(nodeSurface, /const existingBlockID = blocks\.find\(\(block\) => textBlockHasEmailMessage\(block, messageID\)\)\?\.id \?\? "";[\s\S]*const blockID = existingBlockID;[\s\S]*if \(!blockID\) return/);
-  assert.doesNotMatch(nodeSurface, /stageEmailSelectionChatTextBlock|temporaryEmailChat|createEmailTextBoxOnSend/);
-  assert.match(nodeSurface, /removeStoredEmailLocalHighlight\(emailSelectionAnchor\.messageID, emailSelectionAnchor\)/);
+  assert.match(nodeSurface, /const stageEmailSelectionChatTextBlock = useCallback/);
+  assert.match(nodeSurface, /temporaryEmailChatBlocksRef\.current\.set\(blockID, temporaryBlock\)/);
+  assert.match(nodeSurface, /const blockID = existingBlockID \|\| stageEmailSelectionChatTextBlock\(messageID\)/);
+  assert.match(nodeSurface, /const createEmailTextBoxOnSend = temporaryEmailChatBlocksRef\.current\.has\(blockID\)/);
+  assert.match(nodeSurface, /createEmailTextBoxOnSend,/);
+  assert.match(nodeSurface, /cancelTemporaryEmailChatDraft\(chatBlockID, selectionAnchor\)/);
+  assert.match(nodeSurface, /removeStoredEmailLocalHighlight\(emailAnchor\.messageID, emailAnchor\)/);
+  assert.match(nodeSurface, /temporaryEmailChat: false/);
   assert.match(nodeSurface, /data-node-pane-header="editor"/);
   assert.match(nodeSurface, /data-node-pane-header="chat"/);
   assert.match(nodeSurface, /<ChatPane[\s\S]{0,420}hideHeader/);
@@ -204,7 +209,7 @@ test("only one exact email message can be dropped onto a Node text box", () => {
   const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
 
   assert.match(nodeSurface, /const linkDroppedEmailToTextBlock[\s\S]*const dragged = parseDraggedEmail\(dataTransfer\);[\s\S]*if \(!dragged\) return/);
-  assert.match(nodeSurface, /buildEditorAttachedEmailPayload\(\{ \.\.\.dragged, blockID \}\)/);
+  assert.match(nodeSurface, /buildEditorAttachedEmailPayload\(\{ \.\.\.dragged, blockID, linkWholeThread: false \}\)/);
   assert.match(nodeSurface, /onDragOver=\{\(event\) => \{[\s\S]{0,240}event\.dataTransfer\.types\.includes\(EMAIL_DRAG_MIME\)/);
   assert.match(nodeSurface, /onDrop=\{\(event\) => \{[\s\S]{0,240}if \(!event\.dataTransfer\.types\.includes\(EMAIL_DRAG_MIME\)\) return/);
   const textBoxDropStart = nodeSurface.indexOf("const linkDroppedEmailToTextBlock");

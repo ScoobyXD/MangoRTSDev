@@ -1,6 +1,6 @@
 # Current Universal Picker Email Laws
 
-1. Linking a selected email to an existing Node creates or reuses that exact message's text box in the Node, even when the thread already belongs to another Node.
+1. Linking a selected email to an existing Node adds or reuses that exact Node-wide thread destination even when the thread is already in another Node.
 2. Linking a selected email to a Logic Gate immediately creates its Node there with priority **Not Assigned**.
 3. Linking a selected email to a Project requires only the Project Logic Gate choice and creates the Node with priority **Not Assigned**.
 4. Reference mode opens the exact selected resource without changing the email.
@@ -13,7 +13,7 @@ A user opens the Universal Picker from one selected email
 ↓
 Reference mode opens the exact chosen resource without changing the email
 ↓
-Linking to an existing Node creates or reuses the selected message's exact text box there; linking to a Logic Gate creates the email Node there immediately; linking to a Project asks only for its Logic Gate
+Linking to an existing Node uses that Node; linking to a Logic Gate creates the email Node there immediately; linking to a Project asks only for its Logic Gate
 ↓
 Every newly created email Node starts with priority **Not Assigned** and uses the established typed placement command
 
@@ -123,7 +123,7 @@ UP32 - Node-to-Logic-Gate uses the existing priority-valid assign-or-move comman
 
 UP33 - Linking an email to a Node or using a Node Attach email action uses the existing exact-message Node import/attachment command. Linking an email to a Project or using Project Attach email uses the existing Project exact-message attachment command. Before either typed command, the picker ensures the exact provider message is durably ingested when necessary and supplies its real Mango `email_message_id` plus account/mailbox scope rather than a surrogate picker identity.
 
-UP34 - From a selected email, choosing an existing Node creates or reuses one exact text box linked to that selected message, even when the thread already belongs to another Node. Choosing a Logic Gate immediately creates the email Node there with priority **Not Assigned**. Choosing a Project requires only a Logic Gate choice and then uses the established typed Project/Logic Gate commands.
+UP34 - From a selected email, choosing an existing Node adds or reuses that exact Node-wide thread destination even when the thread already has another Node destination. Choosing a Logic Gate immediately creates the email Node there with priority **Not Assigned**. Choosing a Project requires only a Logic Gate choice and then uses the established typed Project/Logic Gate commands.
 
 UP35 - Reference-mode selection never creates a relationship. In an editor it inserts the typed entity atom; in a selected-email host it opens the exact target. A reference chip remains independent from any existing relationship represented by the same two resources.
 

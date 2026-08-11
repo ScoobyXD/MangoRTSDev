@@ -530,6 +530,11 @@ export type CommunicationsEmailThreadChatGroup = {
   chats: EditorProjectionItem[];
 };
 
+export type CommunicationsEmailThreadChats = {
+  collaborations: CommunicationsEmailCollaboration[];
+  groups: CommunicationsEmailThreadChatGroup[];
+};
+
 export type EnsureCommunicationsEmailCollaborationInput = ListCommunicationsEmailCollaborationsInput & {
   message: EmailMessage;
   newNodeID?: string;
@@ -1134,12 +1139,20 @@ export async function listEmailCollaborations(input: ListCommunicationsEmailColl
   return (payload.collaborations ?? []).map(cloneCommunicationsEmailCollaboration);
 }
 
-export async function listEmailThreadChatGroups(input: ListCommunicationsEmailCollaborationsInput): Promise<CommunicationsEmailThreadChatGroup[]> {
-  if (!input.companyID.trim() || (!input.messageID?.trim() && !input.threadID?.trim())) return [];
-  const payload = await apiFetchJSON<{ groups?: CommunicationsEmailThreadChatGroup[] }>(
-    "/v1/communications/email-thread-chats?" + emailCollaborationQuery(input).toString(),
-  );
-  return payload.groups ?? [];
+export async function listEmailThreadChatGroups(input: ListCommunicationsEmailCollaborationsInput): Promise<CommunicationsEmailThreadChats> {
+  if (!input.companyID.trim() || (!input.messageID?.trim() && !input.threadID?.trim())) {
+    return { collaborations: [], groups: [] };
+  }
+  const payload = await apiFetchJSON<{
+    collaborations?: CommunicationsEmailCollaboration[];
+    groups?: CommunicationsEmailThreadChatGroup[];
+  }>(
+		"/v1/communications/email-thread-chats?" + emailCollaborationQuery(input).toString(),
+	);
+	return {
+		collaborations: (payload.collaborations ?? []).map(cloneCommunicationsEmailCollaboration),
+		groups: payload.groups ?? [],
+	};
 }
 
 export async function getEmailCollaboration(companyID: string, collaborationID: string): Promise<CommunicationsEmailCollaboration | null> {
