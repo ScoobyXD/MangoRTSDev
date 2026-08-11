@@ -6,11 +6,11 @@ import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMe
 import { AppModalPortal } from "./AppModalPortal";
 import FrameRightClickMenu from "./framerightclickmenu";
 import { AppSidebarPinnedSection } from "./AppSidebarPinnedSection";
-import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderFieldsIcon, HeaderMyWorkIcon, HeaderSharedTriageIcon, HeaderTeamsIcon, HeaderTriageIcon, HeaderUpdatesIcon } from "../icons/index.js";
+import { AppSidebarRACITabsSection } from "./AppSidebarRACITabsSection";
+import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderFieldsIcon, HeaderSharedTriageIcon, HeaderTeamsIcon, HeaderTriageIcon, HeaderUpdatesIcon } from "../icons/index.js";
 import { MangoWordmark } from "../icons/index.js";
 import { UI_THEME } from "./frameLayoutTypes";
-import { preloadAccountManagerSurface, preloadFieldsSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "./preloadDashboardModules";
-import { requestProjectViewSettings } from "../modules/project-management/projectViewEvents";
+import { preloadAccountManagerSurface, preloadFieldsSurface, preloadTeamsSurface } from "./preloadDashboardModules";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../icons/index.js";
 import { CompanyExplorerSearchBox } from "../modules/company-explorer/CompanyExplorerSearchBox";
 import type { CompanyExplorerTriageMessageDropHandler } from "../modules/company-explorer/CompanyExplorerContentModel";
@@ -299,7 +299,6 @@ export function AppSidebar({
   onPinDragLeave,
 }: AppSidebarProps): React.ReactElement {
   const homeActive = activePage === "home";
-  const myWorkActive = (homeActive && activeHomeView === "my-work") || activePage === "project-management";
   const companyID = getActiveCompanyID();
   const apiBase = readAuthConfig().apiBase;
   const pins = pinTree.pins;
@@ -1342,31 +1341,18 @@ export function AppSidebar({
       />
 
       <section style={appSidebarNavSectionStyle} aria-label="Tower">
-        <AppSidebarSectionHeader label="Tower" />
-        <AppSidebarButton
-          label="My Work"
-          active={myWorkActive}
-          icon={<HeaderMyWorkIcon color="#10b981" />}
-          elevated
-          onClick={() => onHomeViewSelect("my-work")}
-        />
-        <HomeSavedViewsSidebarSection
+        <AppSidebarRACITabsSection
           apiBase={apiBase}
           companyID={companyID}
-          currentUserID={currentUserID}
-          surface="my_work"
-          active={homeActive && activeHomeView === "my-work"}
-          onSelectSurface={() => onHomeViewSelect("my-work")}
-          builtInView={{
-            label: "Projects",
-            active: activePage === "project-management",
-            onSelect: () => onPageSelect("project-management"),
-            onPreload: preloadProjectManagementSurface,
-            settings: {
-              ariaLabel: "Edit Projects view",
-              onOpen: requestProjectViewSettings,
-            },
-          }}
+          onOpenLogicGate={(logicGateID, name) => onPinOpen({
+            pinID: "",
+            id: logicGateID,
+            kind: "logic_gate",
+            parentFolderID: "",
+            name,
+            position: 0,
+            createdTimestamp: "",
+          })}
         />
       </section>
 

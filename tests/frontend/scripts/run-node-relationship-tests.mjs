@@ -49,6 +49,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/app/sidebarPinsApi.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/sidebarPinDrops.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/sidebarPinTree.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/app/raciTabs.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/sidebarLogicGateStatusCounts.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/sidebarPinPopup.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/preloadDashboardPlan.test.js"),
@@ -136,6 +137,10 @@ const componentTests = [
   {
     source: resolve(repoRoot, "tests/frontend/app/sidebarPinnedSection.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/app/sidebarPinnedSection.test.js"),
+  },
+  {
+    source: resolve(repoRoot, "tests/frontend/app/raciTabsLazySection.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/app/raciTabsLazySection.test.js"),
   },
 ];
 const packageFile = resolve(frontendRoot, ".test-dist/package.json");

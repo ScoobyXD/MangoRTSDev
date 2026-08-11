@@ -150,7 +150,7 @@ test("My Work project and logic gate groupings are normal removable grouping fie
   assert.equal(savedGroupings[2].field, "logic_gate");
 });
 
-test("Projects is the fixed first My Work subview instead of an Entities navigation button", () => {
+test("Tower mounts the lazy RACI Tabs surface without restoring the retired My Work navigation", () => {
   const appSidebar = readFileSync(resolve(process.cwd(), "frontend/src/app/AppSidebarChrome.tsx"), "utf8");
   const savedViewsSidebar = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeSavedViewsSidebar.tsx"), "utf8");
   const myWorkSectionStart = appSidebar.indexOf('aria-label="Tower"');
@@ -167,7 +167,8 @@ test("Projects is the fixed first My Work subview instead of an Entities navigat
   );
 
   assert.ok(myWorkSectionStart >= 0 && entitiesSectionStart > myWorkSectionStart);
-  assert.match(myWorkSection, /label: "Projects"[\s\S]*active: activePage === "project-management"[\s\S]*onSelect: \(\) => onPageSelect\("project-management"\)/);
+  assert.match(myWorkSection, /<AppSidebarRACITabsSection[\s\S]*apiBase={apiBase}[\s\S]*companyID={companyID}/);
+  assert.doesNotMatch(myWorkSection, /label: "Projects"|label: "My Work"|my-work/);
   assert.doesNotMatch(entitiesSection, /label="Projects"/);
   assert.ok(builtInViewStart >= 0 && customViewsStart > builtInViewStart);
   assert.match(builtInViewMarkup, /aria-current={builtInView\.active \? "page" : undefined}/);

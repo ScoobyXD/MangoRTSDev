@@ -635,9 +635,10 @@ test("frontend source inventory contains only retained narrow scope families", (
     .filter((file) => !file.endsWith("realtimeWebSocket.ts"))
     .map((file) => ({ file, source: readFileSync(file, "utf8") }))
     .filter(({ source }) => source.includes("subscribeRealtimeScope("));
-	assert.equal(subscriptionSources.length, 8);
+	assert.equal(subscriptionSources.length, 9);
   assert.deepEqual(subscriptionSources.map(({ file }) => file.split("\\").join("/").split("/frontend/src/")[1]).sort(), [
     "app/AppSidebarChrome.tsx",
+    "app/AppSidebarRACITabsSection.tsx",
     "app/NotificationRealtimeBridge.tsx",
 		"modules/editor/EditorContent.tsx",
 		"modules/editor/NodeWorkspaceSurfaceParts.tsx",

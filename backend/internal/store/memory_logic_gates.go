@@ -263,6 +263,7 @@ func (r *MemoryRepo) UpdateLogicGateHeader(companyID, logicGateID, header string
 	}
 	r.syncRACIMatrixProjectionForLogicGateLocked(companyID, logicGateID)
 	r.syncProjectManagementTimelineProjectionForLogicGateLocked(companyID, logicGateID)
+	r.reconcileMemoryRACITabsLogicGateLocked(item)
 	return r.withLogicGateRACILocked(item), nil
 }
 
@@ -595,6 +596,11 @@ func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string) error 
 	for linkKey, link := range r.emailNodeLinks {
 		if link.CompanyID == companyID && link.LogicGateID == logicGateID {
 			delete(r.emailNodeLinks, linkKey)
+		}
+	}
+	for itemKey, item := range r.raciTabItems {
+		if item.CompanyID == companyID && item.LogicGateID == logicGateID {
+			delete(r.raciTabItems, itemKey)
 		}
 	}
 

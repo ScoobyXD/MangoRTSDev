@@ -399,6 +399,7 @@ func (r *MemoryRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeInpu
 			childResourceID = child.EntityID
 		}
 	}
+	r.reconcileMemoryRACITabsCompanyLocked(input.CompanyID)
 	return r.companyExplorerV2RowLocked(CompanyExplorerV2RowsQuery{CompanyID: input.CompanyID, PermissionUserID: input.PermissionUserID}, child, &edge), nil
 }
 
@@ -446,6 +447,7 @@ func (r *MemoryRepo) MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdgeIn
 			childResourceID = child.EntityID
 		}
 	}
+	r.reconcileMemoryRACITabsCompanyLocked(input.CompanyID)
 	return r.companyExplorerV2RowLocked(CompanyExplorerV2RowsQuery{CompanyID: input.CompanyID, PermissionUserID: input.PermissionUserID}, child, &edge), nil
 }
 
@@ -483,6 +485,7 @@ func (r *MemoryRepo) DeleteCompanyExplorerV2Edges(companyID string, edgeIDs []st
 		}
 		delete(r.companyExplorerV2Edges, key(companyID, edgeID))
 	}
+	r.reconcileMemoryRACITabsCompanyLocked(companyID)
 	return nil
 }
 
@@ -654,6 +657,7 @@ func (r *MemoryRepo) DeleteCompanyExplorerV2Folder(companyID, entityID string) e
 			delete(r.entityPermissions, permissionKey)
 		}
 	}
+	r.reconcileMemoryRACITabsCompanyLocked(companyID)
 	return nil
 }
 
