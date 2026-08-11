@@ -94,13 +94,13 @@ RACI25 - RACI event payloads identify policy type, action, descendant action, al
 RACI26 - Reads explain the stored mode, effective mode, source resource, active reset, and an inactive stored customization superseded by force overwrite.
 RACI27 - The frontend shows Inherited or Customized as a non-clickable status, keeps authorized assignment inputs editable in either state, provides both exact descendant actions only when descendants exist, protects stale writes, invalidates affected workspace reads, and performs no optimistic descendant materialization.
 RACI28 - Fingerprints include effective source identity and sequence, eligible reset identity and sequence, the parent-link boundary, live group-membership version, and actor-specific edit result where exposed.
-RACI29 - Point reads, My Work, notification decisions, and cache validation derive current state at read time; policy writes stay constant-size with descendant count.
+RACI29 - Point reads, My Work, notification decisions, and cache validation derive current policy state at read time; canonical policy rows stay constant-size with descendant count, while the non-authoritative RACI Tabs UI copy may perform the accepted per-user and per-Logic-Gate reconciliation defined in `docs/tests/raci-tabs.md`.
 RACI30 - Resource deletion deletes its settings row and cascades its RACI edges. No missing resource, user, or group identity can remain.
 RACI31 - Shared inbox folder and shared inbox RACI use their exact canonical resource identities and remain separate from permissions and mailbox credentials.
 RACI32 - Logic Gate work may expose its effective Responsible user as request-owner metadata, but that field never implies permission.
 RACI33 - Email-derived and workspace-created resources apply creator rules only after their final parent placement so copied policy comes from the correct source.
 RACI34 - Stale in-flight reads cannot overwrite a newer committed policy response; ETags and policy fingerprints track the resolved V2 state.
-RACI35 - Step 2 runtime readers and writers use only the two canonical RACI tables. Temporarily retained legacy tables are frozen rollback evidence and have no deployed reader or writer.
+RACI35 - Canonical RACI policy readers and writers use only `resource_gvic_settings` and `resource_gvic_assignments`. Temporarily retained legacy tables are frozen rollback evidence, and the separate RACI Tabs UI copy is never read as policy authority.
 RACI36 - All RACI changes and their settings, graph edges, events, and read-version effects commit atomically.
 RACI37 - The editor keeps the four role columns compact, shows one neutral Inherited/Customized status, does not show raw policy-source UUIDs or customization warnings, and does not require a separate mode action before an inherited assignment can be edited.
 RACI38 - A cross-Logic-Gate Node move reads and authorizes the actual canonical one-per-Node assignment. A caller-supplied source Logic Gate is only a hint and cannot select relationship authority or cause a valid move to fail when stale. The move changes the canonical Logic Gate assignment and its projections; it neither requires nor rewrites optional email or attachment relationships owned by the same Node.
@@ -115,6 +115,7 @@ RACI41 - Each role card keeps Add in its top-right heading row and gives the ass
 RACI42 - Replacing a V2 policy notifies a non-actor user when that user's highest effective RACI role changes, even when the user was already effective before the write.
 RACI43 - Accountable is the green second role and uses the A inbox. The obsolete Verifier role, V inbox, and CVI notification surface are rejected after cutover; migration converts stored Verified or Verifier values to Accountable and CVI notifications to ACI.
 RACI44 - The RACI forward migration uses only live V2 policy, notification, and Recycle Bin storage. Notification event-name conversion uses `notifications.notification_type`; the migration must not reference a nonexistent `notifications.event_type` column or read, lock, update, or recreate the retired `gvic_matrix_projection_table`.
+RACI47 - Tower may copy effective Logic Gate users and their winning roles into `raci_tabs_items` solely for personal RACI-tab navigation. This accepted copy may fan out after policy, hierarchy, or group changes, but canonical group assignments remain pointers and neither RACI Tabs table grants RACI or permission.
 
 ## Scenarios
 
@@ -170,7 +171,7 @@ Expected:
 - Effective records preserve whether access came from direct or group source.
 - Removing the user from the group removes only the group-derived effective access.
 - Removing the RACI edge removes that source principal from future effective resolution.
-- No permanent effective or projection row is updated or retimestamped.
+- No permanent effective policy row is updated or retimestamped; the non-authoritative RACI Tabs UI rows reconcile only as required by `docs/tests/raci-tabs.md`.
 - Current nested membership is expanded on each canonical read.
 - Group membership or parent changes update the company group fingerprint without changing resource customization sequences.
 
@@ -199,7 +200,7 @@ Expected:
 - Apply to every descendant updates one descendant-reset sequence and makes eligible older Node customizations inactive without walking assigned Nodes.
 - Project, Node, and shared-resource policy writes remain scoped to one settings row and one complete edge set.
 - My Work derives current rows from V2 policy, hierarchy, live groups, permissions, and work metadata.
-- No RACI/My Work realtime policy scope or permanent effective/projection authority is created.
+- No RACI/My Work realtime policy scope or permanent effective/projection authority is created; RACI Tabs remains a derived navigation copy and never becomes policy authority.
 - My Work sees current effective state on its next canonical load.
 - Independently required notification/domain-event consumers remain, but no generic browser refresh event is published.
 
@@ -237,7 +238,7 @@ Given:
 Expected:
 - The write replaces one complete customized edge set and its sequence in one transaction.
 - Apply to non-customized descendants writes no descendant state; Apply to every descendant changes one reset sequence.
-- No permanent effective or My Work authority rows are maintained.
+- No permanent effective or My Work authority rows are maintained; any RACI Tabs rows remain the non-authoritative UI copy defined in `docs/tests/raci-tabs.md`.
 - Editable RACI chips and mode/source explanations reconcile from the canonical response.
 - My Work and other non-live views resolve current state on open or refresh.
 - Stale broad Logic Gate payloads, stale workspace list cache entries, cached Node/Logic Gate records, and stale in-flight reads cannot overwrite newer Logic Gate RACI assignments or descendant effective policy.
@@ -313,7 +314,7 @@ Expected:
 - A subtree moved after the reset is protected by its newer parent-link sequence.
 - Point reads explain the effective source, eligible reset, and any inactive stored customization.
 - Write count stays constant as modeled descendant count grows.
-- Group RACI assignments remain group pointers and are not expanded into one source row per user.
+- Group RACI assignments remain group pointers and are not expanded into one canonical source row per user; RACI Tabs may separately copy one derived navigation row per effective user.
 - RACI explanations identify source policy, direct/group principal, live membership, reset, and parent-link boundary.
 
 ### Scenario RACI-S8: Minimal Logic Gate Work Request Owner
