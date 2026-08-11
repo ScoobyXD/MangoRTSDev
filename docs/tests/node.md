@@ -20,24 +20,24 @@
 18. Dragging one exact email message onto a Node text box links that message; dragging a whole thread onto a text box is rejected.
 19. My Triage and Shared Triage show one thread chat rail divided into groups by exact Node, message, and text box.
 20. Every triage chat group header shows a clickable Node icon and Node title.
-21. One active shared draft is universal to its exact email thread and keeps its exact reply-source message when one exists.
-22. A shared draft is never owned by or related to a Node text box; its Node text-box appearance is UI only.
-23. Creating a shared draft from a Node records that Node as the origin, shows a clickable origin-Node link, and opens the draft panel there by default.
-24. Creating a shared draft from My Triage or Shared Triage does not invent an origin Node or auto-open the draft in any Node.
-25. Every Node containing the thread shows the active shared-draft count, but only the origin Node opens the draft panel automatically.
-26. In any other Node, clicking the shared-draft count opens the universal draft in a text-box-shaped panel; clicking again closes only that local panel.
-27. Shared draft body, recipients, attachments, revision, and editable **From** account are one universal state seen from triage and every related Node.
+21. Reply and Reply All create or reopen only the current user's owner-only personal draft for the exact source message and sending account.
+22. Create Shared Draft creates or reopens one shared draft for this exact Node and thread, with one dedicated text box in this Node.
+23. One Node may have at most one active shared draft for the same thread.
+24. A thread in another Node may have a separate shared draft with separate content, revision, attachments, chat, and send lifecycle.
+25. No Node shows, counts, opens, edits, or discards another Node's shared draft merely because both Nodes contain the same thread.
+26. A triage Create Shared Draft action must nominate an accessible Node that already contains the thread, then open that Node's dedicated draft text box.
+27. Shared draft body, recipients, attachments, revision, and editable **From** account are shared only with current users of this exact Node.
 28. A user may select only an authorized connected sending account in **From**, and send authorization is checked against that exact account.
-29. Reply and Reply All from any Node create or reopen the same universal thread draft instead of a Node-specific copy.
+29. Reply and Reply All from a Node remain personal; only Create Shared Draft starts Node-shared editing.
 30. A successfully sent reply becomes a new message in the same thread and inherits every Node-wide destination for that thread.
-31. Closing a local draft panel never deletes the universal draft; discarding the draft removes it for every surface.
+31. Closing the shared-draft text box never deletes the draft; discarding removes only this exact Node's draft.
 32. An ordinary Node text box stores no color and uses the normal thin neutral frame; only a text box with an exact email relationship stores an approved non-red RGB `color`, and the interface uses that literal value without hashing an email ID. Red is reserved for a failed save.
 33. A consolidated Node view carries text-box metadata but not a duplicate canonical editor document body; each mounted editor reads its exact canonical document once.
 34. Concurrent identical shared-draft and stored-thread reads share one request, while a committed realtime change forces a fresh canonical read.
-35. Every attached-email thread starts collapsed when a Node opens and performs no thread-body or shared-draft read until the user opens that exact thread.
+35. Every attached-email thread starts collapsed when a Node opens and performs no thread-body or this Node's shared-draft read until the user opens that exact thread.
 36. Sending a chat authored by the current user moves the shared chat view to the new message at the bottom.
 
-Last updated: 2026-08-10
+Last updated: 2026-08-11
 
 # General Process Story
 
@@ -47,7 +47,7 @@ Mango relates every stored message and each later ingested message to every Node
 ↓
 Each Node may link one exact message to its own local text box and keep its own local chat
 ↓
-One thread-global shared draft appears on demand in each related Node while its exact **From** account retains send authority
+Each Node may create its own one shared draft and dedicated text box while the exact **From** account separately retains send authority
 
 # Main Scenarios
 
@@ -61,4 +61,4 @@ The user previews the quote without writes. The first sent chat creates the exac
 
 ## Shared draft and reply from a Node
 
-Node collaborators and triage users edit one universal draft for the thread. Its origin Node opens it automatically; other related Nodes expose only the count until clicked. An authorized **From** account sends it, and the sent message returns to the same thread in every related Node.
+Reply and Reply All remain personal to their user. Create Shared Draft creates or opens only this Node's draft and dedicated text box; another Node containing the thread has no access to it and may create its own separate draft. An authorized **From** account sends it, freezes the sent draft, and adds the sent message to the same thread under normal Node-wide propagation.

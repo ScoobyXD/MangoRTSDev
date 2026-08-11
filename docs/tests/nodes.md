@@ -9,12 +9,12 @@
 7. One exact email message may link to at most one text box per Node and may link to a different text box in another Node.
 8. Every email chat in a Node belongs to one exact email message and that message's exact local text box.
 9. Chats about the same email message in different Nodes remain separate.
-10. One active shared draft is universal to the thread and is never related to a text box.
-11. Only the draft's origin Node auto-opens its text-box-shaped draft panel; every other related Node exposes a count and opens or closes that panel only when clicked.
-12. The draft's origin Node link, shared content, editable **From** account, and revision remain the same from every Node and triage surface.
+10. One Node may have at most one active shared draft for the same thread, owned by one dedicated text box in that Node.
+11. The same thread may have a separate shared draft in another Node, and neither Node shows, counts, or edits the other Node's draft.
+12. The draft content, editable **From** account, revision, attachments, and chat are shared only with current users of its exact Node.
 13. Removing one Node's email relationship leaves every other Node relationship, local text box, chat, stored thread/message, and surviving attachment relationship unchanged.
 
-Last updated: 2026-08-09
+Last updated: 2026-08-11
 
 # Process Story: An email thread can appear in several Nodes while each Node keeps its own text box and chat
 
