@@ -55,7 +55,6 @@ type EditorLinkedDocumentPanelsProps = {
     assignments: LogicGateRACIAssignment[];
     inherited?: boolean;
     readOnlyReason?: string;
-    mode: "inherited" | "customized";
     overwrittenByAncestor?: { resource_type: string; resource_id: string; sequence: number } | null;
   } | null;
   companyUsers: Array<{ user_id: string; email?: string; display_name?: string }>;
@@ -403,7 +402,6 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   const gvicBoard = gvicFields ? (
     <RACIAssignmentBoard
       assignments={gvicFields.assignments}
-      mode={gvicFields.mode}
       overwrittenByAncestor={gvicFields.overwrittenByAncestor}
       companyUsers={companyUsers}
       companyUserGroups={companyUserGroups}
@@ -857,7 +855,6 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
 
 function RACIAssignmentBoard({
   assignments,
-  mode,
   overwrittenByAncestor,
   companyUsers,
   companyUserGroups,
@@ -871,7 +868,6 @@ function RACIAssignmentBoard({
   onRemovePrincipal,
 }: {
   assignments: LogicGateRACIAssignment[];
-  mode: "inherited" | "customized";
   overwrittenByAncestor?: { resource_type: string; resource_id: string; sequence: number } | null;
   companyUsers: Array<{ user_id: string; email?: string; display_name?: string }>;
   companyUserGroups: Array<{ group_id: string; parent_group_id?: string; name: string; position: number }>;
@@ -886,12 +882,6 @@ function RACIAssignmentBoard({
 }) {
   return (
     <div style={{ minWidth: 0, width: "100%", display: "grid", gap: 6, overflowX: "auto", overflowY: "hidden" }}>
-      <div
-        aria-label="GVIC policy mode"
-        style={{ justifySelf: "start", padding: "3px 8px", borderRadius: 999, fontSize: 10, fontWeight: 800, color: mode === "inherited" ? "#475569" : "#1d4ed8", background: mode === "inherited" ? "rgba(226, 232, 240, 0.72)" : "rgba(219, 234, 254, 0.82)" }}
-      >
-        {mode === "inherited" ? "Inherited" : "Customized"}
-      </div>
       {overwrittenByAncestor && (
         <div style={{ fontSize: 10, color: "#64748b" }}>This item currently follows the policy applied by an ancestor.</div>
       )}

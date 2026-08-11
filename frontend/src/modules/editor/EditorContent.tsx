@@ -2458,11 +2458,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             gvicFields={linkedEntityKind === "node" ? {
               assignments: nodeRACIAssignments,
               inherited: nodeRACIIsInherited,
-              mode: gvicPolicyMode,
               overwrittenByAncestor: gvicPolicyOverwrittenByAncestor,
             } : linkedEntityKind === "logic_gate" ? {
               assignments: logicGateRACIAssignments,
-              mode: gvicPolicyMode,
               overwrittenByAncestor: gvicPolicyOverwrittenByAncestor,
             } : null}
             companyUsers={companyUsers}
