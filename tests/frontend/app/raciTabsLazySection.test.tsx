@@ -90,6 +90,8 @@ test("Tower RACI Tabs start collapsed and fetch only an opened role and opened f
     const roleButtons = Array.from(container.querySelectorAll("button")).filter((button) => ["Responsible", "Accountable", "Consulted", "Informed"].includes(button.textContent?.trim() ?? ""));
     assert.deepEqual(roleButtons.map((button) => button.textContent?.trim()), ["Responsible", "Accountable", "Consulted", "Informed"]);
     assert.deepEqual(roleButtons.map((button) => button.getAttribute("aria-expanded")), ["false", "false", "false", "false"]);
+    assert.equal(roleButtons[0].parentElement?.style.gridTemplateColumns, "minmax(0,1fr) 74px 22px", "role totals and the add action use the same columns as Logic Gate rows");
+    assert.equal(container.querySelectorAll('button[aria-label^="Create "][aria-label$=" folder"]').length, 4, "every collapsed role exposes its root-folder action in the header");
     assert.equal(requests.filter((value) => value.includes("/v1/raci-tabs?")).length, 0);
 
     await act(async () => {
@@ -100,6 +102,7 @@ test("Tower RACI Tabs start collapsed and fetch only an opened role and opened f
     assert.equal(firstBranchRequests.length, 1);
     assert.match(firstBranchRequests[0], /role=responsible/);
     assert.doesNotMatch(firstBranchRequests[0], /parent_folder_id=/);
+    assert.equal(container.querySelector('[data-raci-tab-surface="responsible"] button[aria-label="Create Responsible folder"]'), null, "the expanded surface has no separate empty add-folder row");
 
     const folderButton = container.querySelector<HTMLButtonElement>('button[aria-label="Expand Personal"]');
     assert.ok(folderButton);
