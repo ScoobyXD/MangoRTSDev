@@ -644,7 +644,6 @@ type ChatPaneProps = {
   sectionActionLabel?: string;
   selectedSectionKey?: string;
   composerDestinationLabel?: string;
-  chronologicalMessages?: boolean;
   reserveScrollbarGutter?: boolean;
   hideHeader?: boolean;
   activeTab?: "chat" | "email";
@@ -720,7 +719,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   sectionActionLabel,
   selectedSectionKey = "",
   composerDestinationLabel,
-  chronologicalMessages = false,
   reserveScrollbarGutter = false,
   hideHeader = false,
   activeTab = "chat",
@@ -772,10 +770,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const handledMessageFocusRequestRef = useRef("");
   const messageFocusRequestPendingRef = useRef(false);
   const mentionCloseTimerRef = useRef<number | null>(null);
-  const threads = useMemo(() => chronologicalMessages
-    ? messages.map((message) => ({ message, children: [] }))
-    : buildChatThreads(messages), [chronologicalMessages, messages]);
-  const messageByID = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
+  const threads = useMemo(() => buildChatThreads(messages), [messages]);
   const sectionedThreads = useMemo(() => {
     const blockOrder = new Map(Object.keys(sectionLabelsByBlockID).map((textBlockID, index) => [textBlockID, index]));
     if (blockOrder.size === 0) return threads;
@@ -1273,13 +1268,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                     )}
                     <div
                       data-chat-section-key={sectionKey}
-                      style={chronologicalMessages
-                        ? { borderLeft: sectionSelected ? `3px solid ${accent}` : "3px solid transparent", paddingLeft: 3, background: sectionSelected ? "rgba(247,250,252,0.62)" : "transparent" }
-                        : { display: "contents" }}
+                      style={{ display: "contents" }}
                     >
                       <ChatThreadItem
                         node={thread}
-                        replyToMessage={chronologicalMessages && thread.message.parentID ? messageByID.get(thread.message.parentID) : undefined}
                         depth={0}
                         isLastSibling={false}
                         apiBase={apiBase}
@@ -1732,7 +1724,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
 type ChatThreadItemProps = {
   node: ChatThreadNode;
-  replyToMessage?: EditorTextBlockChatMessage;
   depth: number;
   isLastSibling: boolean;
   apiBase?: string;
@@ -1816,7 +1807,7 @@ const MentionHighlightedText: React.FC<{ text: string; users: MentionableCompany
   );
 };
 
-const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, replyToMessage, depth, isLastSibling, apiBase, companyID, currentUserID, editable, activeMessageID, companyUsers, accent, surfaceText, ruleColor, collapsedThreadIDs, onToggleCollapse, onActivate, onNavigate, onReply, onEdit, onDelete, onPreviewImage }) => {
+const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibling, apiBase, companyID, currentUserID, editable, activeMessageID, companyUsers, accent, surfaceText, ruleColor, collapsedThreadIDs, onToggleCollapse, onActivate, onNavigate, onReply, onEdit, onDelete, onPreviewImage }) => {
   const { message, children } = node;
   const hasChildren = children.length > 0;
   const collapsed = collapsedThreadIDs.has(message.id);
@@ -1923,11 +1914,6 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, replyToMessage, d
         </div>
       </div>
       <div style={{ minWidth: 0, display: "grid", gap: 4 }}>
-        {replyToMessage && (
-          <div data-chat-reply-context="true" style={{ color: "rgba(71,85,105,0.72)", fontSize: 9.5, fontWeight: 750 }}>
-            Reply to {replyToMessage.authorName || "Unknown author"}
-          </div>
-        )}
         <div style={{ display: "flex", justifyContent: "space-between", gap: 6, minWidth: 0, color: surfaceText, fontSize: 10, fontWeight: 800 }}>
           <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: authorAccent, fontWeight: 900 }}>{message.authorName}</span>
           <span title={message.editedTimestamp ? `Edited ${formatTimestamp(message.editedTimestamp)}` : undefined} style={{ opacity: 0.58, flex: "0 0 auto" }}>

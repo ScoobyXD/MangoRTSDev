@@ -242,9 +242,13 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(surface, /reserveScrollbarGutter/);
   assert.match(surface, /onSectionAction=\{selectExistingChatGroup\}/);
   assert.match(surface, /onClearComposerDestination=\{cancelChatGroupDestination\}/);
-  assert.match(surface, /chronologicalMessages/);
+  assert.doesNotMatch(surface, /chronologicalMessages/);
+  assert.match(sharedChat, /const threads = useMemo\(\(\) => buildChatThreads\(messages\), \[messages\]\)/);
+  assert.match(surface, /if \(!selection\) \{\s*await submitExistingTextBoxChat\(selectedCollaboration, selectedGroup\.textbox_id\);\s*return;\s*\}/);
+  assert.match(surface, /const hasEmailSelection = Boolean\(emailMessageID\.trim\(\)\)[\s\S]*selectionSource: hasEmailSelection \? "email" : undefined/);
+  assert.match(surface, /if \(selection\) \{[\s\S]*conflictingEmailTextboxLink\(threadTextboxLinks, group, targetEmailMessageID\)/);
   assert.match(surface, /emailTextboxLinkForMessage\(threadTextboxLinks, targetEmailMessageID, selectedGroup\.node_id\)[\s\S]*submitExistingTextBoxChat\(selectedCollaboration, selectedGroup\.textbox_id, exactTextboxLink\.email_message_id\)[\s\S]*importIntoExistingNode\(selectedGroup\.node_id, true, selectedGroup\)/);
-  assert.match(surface, /conflictingEmailTextboxLink\(threadTextboxLinks, group, targetEmailMessageID\)/);
+  assert.match(surface, /if \(!replyCollaboration\) \{[\s\S]*submitExistingTextBoxChat\(replyCollaboration, replyGroup\.textbox_id, replyEmailMessageID\)/);
   assert.match(surface, /result\.textbox_links/);
   assert.doesNotMatch(surface, /group\.provider_message_id|group\.email_message_id/);
   assert.doesNotMatch(surface, /EmailCollaborationParticipantRoster|setChatTargetMenuOpen|onClose/);
@@ -255,7 +259,7 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(surface, /const ensureLinkedEmailTextBlock[\s\S]*ensureEmailCollaboration\(\{[\s\S]*targetNodeID: activeNodeID,[\s\S]*linkedTextBlock/);
   assert.doesNotMatch(surface, /convertTriageMessagesToExplorerTarget/);
   assert.match(surface, /const submitExistingTextBoxChat = React\.useCallback[\s\S]*showPendingChat\(pending\.chat[\s\S]*await requestJSON<unknown>\(`\/v1\/nodes\/\$\{encodeURIComponent\(targetNodeID\)\}\/information`/);
-  assert.match(surface, /if \(collaboration\) \{\s*if \(activeTextBlockID\) \{\s*await submitExistingTextBoxChat\(collaboration, activeTextBlockID\)/);
+  assert.match(surface, /if \(collaboration\) \{\s*if \(activeTextBlockID\) \{[\s\S]*const activeSelectionMessageID = selection[\s\S]*await submitExistingTextBoxChat\(collaboration, activeTextBlockID, activeSelectionMessageID\)/);
   assert.match(surface, /showPendingChat\([\s\S]{0,260}setSubmitting\(true\);\s*try \{\s*const created = await ensureEmailCollaboration/);
   assert.match(surface, /linkedTextBlock:[\s\S]*initialChat: pending\.write/);
   assert.doesNotMatch(surface, /Choose email node priority|setPriorityMenuOpen|data-email-action-popover|aria-label="Close email comments"/);

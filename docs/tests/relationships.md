@@ -15,9 +15,9 @@
 13. Showing a universal shared draft in a Node is presentation state and never creates a draft-to-textbox relationship.
 14. Removing one Node's email relationship removes only that Node's typed edge and leaves every other Node, stored thread/message, local text box, chat, and surviving attachment relationship unchanged.
 15. Email-to-Node, email-to-textbox, chat, and draft rules do not create a generic resource registry, surrogate identity, or untyped edge.
-16. An existing exact-message text-box relationship routes a later triage send through the normal Node text-box-chat insert only; it creates no email, relationship, permission, participant, or collaboration row.
-17. A triage chat command reuses the exact mailbox-scoped stored message when present, fetches only that exact provider message when absent, and never queues thread ingestion or links a thread to a text box.
-18. When an exact message has no text-box relationship in the chosen Node, selecting an existing chat grouping atomically links that message to the grouping's exact existing text box and creates its first chat without creating another text box.
+16. An ordinary root chat or reply in an existing triage grouping uses only the normal Node text-box-chat insert and creates no email, relationship, permission, participant, or collaboration row.
+17. A triage command that creates a new email grouping or stores a highlighted-email selection reuses the exact mailbox-scoped stored message when present, fetches only that exact provider message when absent, and never queues thread ingestion or links a thread to a text box.
+18. When a highlighted-email chat's exact message has no text-box relationship in the chosen Node, selecting an existing chat grouping atomically links that message to the grouping's exact existing text box and creates the chat without creating another text box.
 
 Last updated: 2026-08-11
 
@@ -31,9 +31,9 @@ Inside each Node, one exact message may link to one exact Node text box; the sam
 ↓
 Opening a highlighted-email chat preview creates no relationship or resource
 ↓
-The first send appends to the message's existing exact Node-local text box, atomically links the message and chat to an explicitly chosen existing grouping, or atomically creates the missing text box, message-to-textbox relationship, and chat; a failed command creates none of them
+An ordinary root chat or reply appends directly to an existing grouping without creating an email relationship; a highlighted-email chat links its exact message to the chosen grouping when required, and a failed atomic command creates none of its relationship or chat writes
 ↓
-That send reuses the exact stored message or imports only the missing exact provider message; thread completion remains separate background ingestion
+A highlighted-email or new-grouping send reuses the exact stored message or imports only the missing exact provider message; thread completion remains separate background ingestion
 ↓
 Removing one Node's relationship leaves all other Node-local work and the stored email truth intact
 ↓

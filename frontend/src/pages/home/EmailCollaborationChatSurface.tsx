@@ -471,6 +471,7 @@ export function EmailCollaborationChatSurface({
 
   const buildPendingChat = React.useCallback((textBlockID: string, emailMessageID: string, chatID = generateStableInformationID()) => {
     const cleanDraft = draft.trim();
+    const hasEmailSelection = Boolean(emailMessageID.trim());
     const mentions = mentionedPrincipalIDs(cleanDraft, principals);
     for (const principal of selectedMentionPrincipals) {
       const principalID = principal.user_id.trim();
@@ -484,11 +485,11 @@ export function EmailCollaborationChatSurface({
     const information = buildEditorTextBlockChatPayload({
       blockID: textBlockID,
       parentID: replyTargetID || undefined,
-      selectionSource: "email",
-      selectionMessageID: emailMessageID,
-      selectionQuote: selection?.quote,
-      selectionStart: selection?.startOffset,
-      selectionEnd: selection?.endOffset,
+      selectionSource: hasEmailSelection ? "email" : undefined,
+      selectionMessageID: hasEmailSelection ? emailMessageID : undefined,
+      selectionQuote: hasEmailSelection ? selection?.quote : undefined,
+      selectionStart: hasEmailSelection ? selection?.startOffset : undefined,
+      selectionEnd: hasEmailSelection ? selection?.endOffset : undefined,
       authorID: author.userID,
       authorName: author.name,
       message: cleanDraft,
@@ -555,12 +556,8 @@ export function EmailCollaborationChatSurface({
     exactEmailMessageID = "",
   ) => {
     const targetNodeID = activeCollaboration.node_id.trim();
-    const emailMessageID = exactEmailMessageID.trim()
-      || selectionInternalEmailMessageIDRef.current
-      || collaborationTargetMessage.email_message_id?.trim()
-      || activeCollaboration.root_message_id?.trim()
-      || targetEmailMessageID;
-    if (!targetNodeID || !textBlockID || !emailMessageID || submitting) return;
+    const emailMessageID = exactEmailMessageID.trim();
+    if (!targetNodeID || !textBlockID || submitting) return;
     const originalDraft = draft;
     const originalAttachments = draftAttachments;
     const originalPrincipals = selectedMentionPrincipals;
@@ -594,7 +591,7 @@ export function EmailCollaborationChatSurface({
     } finally {
       setSubmitting(false);
     }
-  }, [apiBase, buildPendingChat, collaborationTargetMessage.email_message_id, companyID, draft, draftAttachments, expireLocalChatEchoSuppression, nodes, onClearSelection, onError, onSuccess, replyTargetID, requestJSON, rollBackPendingChat, selectedMentionPrincipals, showPendingChat, submitting, targetEmailMessageID]);
+  }, [apiBase, buildPendingChat, companyID, draft, draftAttachments, expireLocalChatEchoSuppression, nodes, onClearSelection, onError, onSuccess, replyTargetID, requestJSON, rollBackPendingChat, selectedMentionPrincipals, showPendingChat, submitting]);
 
   const importIntoExistingNode = React.useCallback(async (
     targetNodeID: string,
@@ -851,7 +848,7 @@ export function EmailCollaborationChatSurface({
     if (replyMessage && replyGroup) {
       const replyCollaboration = collaborations.find((item) => item.node_id === replyGroup.node_id);
       const replyEmailMessageID = replyMessage.selectionMessageID?.trim() ?? "";
-      if (!replyCollaboration || !replyEmailMessageID) {
+      if (!replyCollaboration) {
         onError("This reply destination is no longer available.");
         return;
       }
@@ -862,6 +859,15 @@ export function EmailCollaborationChatSurface({
       ? threadChatGroups.find((group) => emailThreadChatGroupKey(group) === selectedChatGroupKey)
       : undefined;
     if (selectedGroup) {
+      const selectedCollaboration = collaborations.find((item) => item.node_id === selectedGroup.node_id);
+      if (!selectedCollaboration) {
+        onError("This chat grouping's Node is no longer available.");
+        return;
+      }
+      if (!selection) {
+        await submitExistingTextBoxChat(selectedCollaboration, selectedGroup.textbox_id);
+        return;
+      }
       const conflict = conflictingEmailTextboxLink(threadTextboxLinks, selectedGroup, targetEmailMessageID);
       if (conflict) {
         const visibleConflict = threadChatGroups.find((group) => (
@@ -870,11 +876,6 @@ export function EmailCollaborationChatSurface({
         onError(visibleConflict
           ? `This exact email message already belongs to ${chatGroupLabel(visibleConflict)}. Choose that grouping instead.`
           : "This exact email message already belongs to another text box in this Node.");
-        return;
-      }
-      const selectedCollaboration = collaborations.find((item) => item.node_id === selectedGroup.node_id);
-      if (!selectedCollaboration) {
-        onError("This chat grouping's Node is no longer available.");
         return;
       }
       const exactTextboxLink = emailTextboxLinkForMessage(threadTextboxLinks, targetEmailMessageID, selectedGroup.node_id);
@@ -891,7 +892,13 @@ export function EmailCollaborationChatSurface({
     }
     if (collaboration) {
       if (activeTextBlockID) {
-        await submitExistingTextBoxChat(collaboration, activeTextBlockID);
+        const activeSelectionMessageID = selection
+          ? selectionInternalEmailMessageIDRef.current
+            || collaborationTargetMessage.email_message_id?.trim()
+            || collaboration.root_message_id?.trim()
+            || targetEmailMessageID
+          : "";
+        await submitExistingTextBoxChat(collaboration, activeTextBlockID, activeSelectionMessageID);
         return;
       }
       await importIntoExistingNode(collaboration.node_id, true);
@@ -962,7 +969,7 @@ export function EmailCollaborationChatSurface({
     } finally {
       setSubmitting(false);
     }
-  }, [acceptCollaboration, accountEmail, activeTextBlockID, apiBase, buildPendingChat, chatGroupLabel, collaboration, collaborationTargetMessage, collaborations, companyID, draft, draftAttachments, expireLocalChatEchoSuppression, importIntoExistingNode, message.subject, message.thread_id, messages, onClearSelection, onError, onSuccess, replyTargetID, rollBackPendingChat, sectionKeysByChatID, selectedChatGroupKey, selectedMentionPrincipals, sharedInboxID, showPendingChat, submitExistingTextBoxChat, submitting, targetEmailMessageID, threadChatGroups, threadTextboxLinks]);
+  }, [acceptCollaboration, accountEmail, activeTextBlockID, apiBase, buildPendingChat, chatGroupLabel, collaboration, collaborationTargetMessage, collaborations, companyID, draft, draftAttachments, expireLocalChatEchoSuppression, importIntoExistingNode, message.subject, message.thread_id, messages, onClearSelection, onError, onSuccess, replyTargetID, rollBackPendingChat, sectionKeysByChatID, selectedChatGroupKey, selectedMentionPrincipals, selection, sharedInboxID, showPendingChat, submitExistingTextBoxChat, submitting, targetEmailMessageID, threadChatGroups, threadTextboxLinks]);
   const attachFiles = React.useCallback(async (files: FileList | File[]) => {
     const candidates = Array.from(files);
     if (candidates.length === 0) return;
@@ -1090,15 +1097,17 @@ export function EmailCollaborationChatSurface({
   const selectExistingChatGroup = React.useCallback((sectionKey: string) => {
     const group = threadChatGroups.find((candidate) => emailThreadChatGroupKey(candidate) === sectionKey);
     if (!group) return;
-    const conflict = conflictingEmailTextboxLink(threadTextboxLinks, group, targetEmailMessageID);
-    if (conflict) {
-      const visibleConflict = threadChatGroups.find((candidate) => (
-        candidate.node_id === conflict.node_id && candidate.textbox_id === conflict.textbox_id
-      ));
-      onError(visibleConflict
-        ? `This exact email message already belongs to ${chatGroupLabel(visibleConflict)}. Choose that grouping instead.`
-        : "This exact email message already belongs to another text box in this Node.");
-      return;
+    if (selection) {
+      const conflict = conflictingEmailTextboxLink(threadTextboxLinks, group, targetEmailMessageID);
+      if (conflict) {
+        const visibleConflict = threadChatGroups.find((candidate) => (
+          candidate.node_id === conflict.node_id && candidate.textbox_id === conflict.textbox_id
+        ));
+        onError(visibleConflict
+          ? `This exact email message already belongs to ${chatGroupLabel(visibleConflict)}. Choose that grouping instead.`
+          : "This exact email message already belongs to another text box in this Node.");
+        return;
+      }
     }
     const nextCollaboration = collaborations.find((item) => item.node_id === group.node_id);
     if (!nextCollaboration) {
@@ -1109,13 +1118,13 @@ export function EmailCollaborationChatSurface({
     acceptCollaboration(nextCollaboration, false);
     rememberSelectedChatGroup(sectionKey);
     const exactTextboxLink = emailTextboxLinkForMessage(threadTextboxLinks, targetEmailMessageID, group.node_id);
-    selectionInternalEmailMessageIDRef.current = exactTextboxLink?.textbox_id === group.textbox_id
+    selectionInternalEmailMessageIDRef.current = selection && exactTextboxLink?.textbox_id === group.textbox_id
       ? exactTextboxLink.email_message_id
       : "";
     setActiveTextBlockID(group.textbox_id);
     setReplyTargetID("");
     setActiveMessageID("");
-  }, [acceptCollaboration, chatGroupLabel, collaborations, onError, rememberSelectedChatGroup, targetEmailMessageID, threadChatGroups, threadTextboxLinks]);
+  }, [acceptCollaboration, chatGroupLabel, collaborations, onError, rememberSelectedChatGroup, selection, targetEmailMessageID, threadChatGroups, threadTextboxLinks]);
 
   const cancelChatGroupDestination = React.useCallback(() => {
     rememberSelectedChatGroup("");
@@ -1210,7 +1219,6 @@ export function EmailCollaborationChatSurface({
         sectionActionLabel="New chat"
         selectedSectionKey={selectedChatGroupKey}
         composerDestinationLabel={composerDestinationLabel}
-        chronologicalMessages
         reserveScrollbarGutter
         selectionAnchor={selectionAnchor}
         draft={draft}

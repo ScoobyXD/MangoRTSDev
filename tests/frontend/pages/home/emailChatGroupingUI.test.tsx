@@ -103,7 +103,6 @@ test("grouping New chat controls select, identify, send, and cancel the exact co
           sectionActionLabel="New chat"
           selectedSectionKey={selectedSectionKey}
           composerDestinationLabel={destinationLabel}
-          chronologicalMessages
           reserveScrollbarGutter
           draft="Ready to send"
           companyUsers={[]}
@@ -149,8 +148,8 @@ test("grouping New chat controls select, identify, send, and cancel the exact co
     assert.equal(messageScroller.style.paddingRight, "16px");
 
     const articles = Array.from(container.querySelectorAll<HTMLElement>('[role="article"]'));
-    assert.deepEqual(articles.map((article) => article.dataset.nodeChatMessageId), ["chat-1", "chat-2", "chat-3", "chat-4"]);
-    assert.match(articles[2]?.textContent ?? "", /Reply to Author chat-1/);
+    assert.deepEqual(articles.map((article) => article.dataset.nodeChatMessageId), ["chat-1", "chat-3", "chat-2", "chat-4"]);
+    assert.ok(articles[0]?.querySelector('[data-node-chat-message-id="chat-3"]'), "the reply remains nested under its parent");
 
     const firstNewChat = container.querySelector<HTMLButtonElement>('[aria-label="New chat in Alpha Node · First grouping"]');
     assert.ok(firstNewChat);
