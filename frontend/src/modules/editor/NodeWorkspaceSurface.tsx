@@ -1123,7 +1123,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       `/v1/editor-json/node/${nodeID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`,
       {
         method: "PATCH",
-        body: JSON.stringify({ title: content.title, attachments: content.attachments ?? [] }),
+        body: JSON.stringify({ title: content.title, attachments: content.attachments ?? [], color: content.color }),
       },
     );
     const revision = response?.projection_revision ?? 0;
