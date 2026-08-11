@@ -1,3 +1,10 @@
+Last updated: 2026-08-11
+
+# General Process Story
+
+A user opens an email. Mango identifies the exact active message, reads every accessible Node-and-text-box chat grouping for its stored thread, keeps each grouping intact, and orders groupings and their chats from oldest at the top to newest at the bottom. The user selects one grouping through its **New chat** button, selects a new grouping, or selects a new Node. Sending then reuses every existing layer and atomically creates only the missing exact-message relationship, text box, Node, and first chat required by that selected destination.
+
+
 # Current Email Chat Business Logic Laws
 
 1. Every email-chat action targets one exact stored email message, even when the message belongs to a larger thread.
@@ -30,8 +37,3 @@
 28. A failed atomic first-chat command creates none of its Node, relationship, text-box, or chat writes and preserves the complete composer for retry.
 29. Removing one Node's relationship, text box, or chat does not remove another Node's copy of that work.
 
-Last updated: 2026-08-11
-
-# General Process Story
-
-A user opens an email. Mango identifies the exact active message, reads every accessible Node-and-text-box chat grouping for its stored thread, keeps each grouping intact, and orders groupings and their chats from oldest at the top to newest at the bottom. The user selects one grouping through its **New chat** button, selects a new grouping, or selects a new Node. Sending then reuses every existing layer and atomically creates only the missing exact-message relationship, text box, Node, and first chat required by that selected destination.
