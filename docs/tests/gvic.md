@@ -69,7 +69,7 @@ Coverage Status:
 RACI1 - RACI supports Responsible, Accountable, Consulted, and Informed roles and normalizes input before validation.
 RACI2 - Responsible, Accountable, Consulted, and Informed each accept multiple users or groups.
 RACI3 - One direct source principal can have only one RACI role in one customized resource policy.
-RACI4 - Canonical RACI resource types are node, logic_gate, project, company_explorer_folder, shared_inbox_folder, and shared_inbox. `shared_triage_folder` is rejected after cutover.
+RACI4 - Canonical RACI resource types are node, logic_gate, huddle_logic_gate, huddle_node, project, company_explorer_folder, shared_inbox_folder, and shared_inbox. `shared_triage_folder` is rejected after cutover.
 RACI5 - `resource_gvic_settings` stores mode and sequences; `resource_gvic_assignments` stores only the complete customized graph. No effective, revision, snapshot, or projection table is policy authority.
 RACI6 - Every root is customized, including an empty policy. A non-root resource starts inherited unless its creation workflow explicitly customizes it.
 RACI7 - An inherited resource stores no RACI edges. Its effective policy is the nearest active customized resource in its live parent chain.
@@ -81,7 +81,7 @@ RACI12 - Apply to every descendant records one ancestor reset sequence that also
 RACI13 - A customization made after a reset becomes active again because its customized sequence is newer.
 RACI14 - A parent relationship created or changed receives a new parent-link sequence for both policy domains. A link newer than a reset blocks that older reset from crossing the moved edge.
 RACI15 - Moving an inherited resource changes its effective policy immediately; moving a customized resource preserves that customization. Descendants are not rewritten.
-RACI16 - A Node assigned to a Logic Gate uses that Logic Gate as its immediate parent. Detaching an inherited Node materializes its current effective RACI as a customized Node policy in the same transaction.
+RACI16 - A Node assigned to a Logic Gate uses that Logic Gate as its immediate parent. Detaching an inherited Node materializes its current effective RACI as a customized Node policy in the same transaction. Huddle Node ownership and Huddle Explorer placement do not create RACI parentage.
 RACI17 - A creator rule, including an email-derived Responsible assignment, first copies the final effective parent policy and then changes the new resource to customized.
 RACI18 - Group assignments remain group pointers. Current nested membership expands at read time, and cycles are rejected.
 RACI19 - Group membership, parent-group, and deletion changes affect effective RACI immediately without rewriting resource policies. Deleting a group removes its direct policy edges.
@@ -109,6 +109,7 @@ RACI39 - After any successful RACI policy write, the company workspace snapshot 
 RACI45 - GVIC policy equality compares the unordered raw assignment set keyed by role, principal type, and principal ID. A group stays one pointer. Expanded effective users, labels, timestamps, and array order do not affect equality.
 
 RACI46 - The frontend uses its loaded parent policy for immediate status, while the backend re-resolves the live parent and stores the authoritative mode inside the same write transaction. Roots remain customized because they have no parent.
+RACI47 - Huddle Logic Gates and Huddle Nodes use direct RACI policies under the exact resource types `huddle_logic_gate` and `huddle_node`. Their RACI surfaces do not expose either descendant action.
 RACI40 - The editor presents RACI as Responsible (Kanban In Progress orange #f08a24), Accountable (Kanban Done green #19c879), Consulted (Kanban Review teal-blue #19a8ff), and Informed (Kanban Backlog purple #8b5cf6), in that order. Each card keeps a pale layered treatment: a 14%/8% radial highlight, a 12%/7%/6% fill, a 34%/22%/12% edge gradient, and a 6% role-colored glow. The stronger Kanban column surface opacity is not used on RACI cards.
 RACI41 - Each role card keeps Add in its top-right heading row and gives the assignment surface the full card width. Zero assignments renders one unwrapped `No assignments` row; otherwise every direct person or group renders as its own unwrapped name row, all rows remain visible as the card grows, and a group name continues to represent its live nested membership.
 RACI42 - Replacing a V2 policy notifies a non-actor user when that user's highest effective RACI role changes, even when the user was already effective before the write.

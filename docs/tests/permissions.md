@@ -71,7 +71,7 @@ P13 - Invalid requested access levels return a bad request error.
 P14 - Reading entity permission settings requires manager/admin authority and edit access to the entity.
 P15 - Updating entity permission settings requires dev admin, company admin, or company manager authority with edit access to the entity.
 P16 - Permission responses include stored/effective mode, stored/effective default and user/group rules, source resource, reset/overwrite explanation, effective access, and permission-management capabilities.
-P17 - Visible node, logic gate, project, and Explorer reads are filtered by effective edit access.
+P17 - Visible node, logic gate, Huddle Logic Gate, Huddle Node, project, and Explorer reads are filtered by effective edit access.
 P18 - Relationship rows are filtered by the viewer's access to the related resources.
 P19 - Kanban board and card access derives from the access level of the owning logic gate.
 P20 - Regular users cannot load or update permission settings even when they have resource edit access; company manager/admin authority is a separate settings-management gate.
@@ -91,14 +91,14 @@ P33 - Returning to inherited deletes direct rule rows and the customized sequenc
 P34 - Editing a parent changes only that parent. Existing inherited descendants see it live; customized descendants keep their active complete policies.
 P35 - A same-parent reorder leaves the parent-link sequence and current policy unchanged. A real move allocates a new parent-link sequence for permissions and RACI.
 P36 - Moving an inherited resource changes its effective parent immediately; moving a customized resource preserves its policy. Detaching an inherited Node materializes its current effective permission policy as customized.
-P37 - Company Explorer folders parent contained folders, projects, and Logic Gates; Logic Gates parent assigned Nodes; Shared Triage folders parent folders and shared inboxes. Project relationships do not create policy parentage.
+P37 - Company Explorer folders parent contained folders, projects, and Logic Gates; Logic Gates parent assigned Nodes; Shared Triage folders parent folders and shared inboxes. Project relationships, KPI ownership, Huddle Node ownership, and Huddle Explorer placement do not create policy parentage.
 P38 - Kanban board/card visibility follows the owning Logic Gate access, but opening a Kanban node detail/editor must perform a fresh node-level access check.
 P39 - Permission settings denial copy explains that only managers and admins with resource edit access can manage permissions.
 P40 - Group permission rows are pointers to the group or subgroup; adding a user to that group later makes the user's effective permission follow the group row without writing per-user rows.
 P41 - A direct user rule overrides groups. The nearest matching group wins; at equal depth No Access beats Edit, then stable group identity breaks ties. Default applies only when no direct or group rule matches.
 P42 - Apply to non-customized descendants saves the selected policy if needed and writes no descendant policy state. Inherited branches already resolve it live, and active customized boundaries remain protected.
 P43 - Apply to every descendant uses one reset sequence that also supersedes older customized descendants. A later descendant customization becomes active again, and the UI requires confirmation before this action.
-P44 - Every permissions dialog and embedded permissions view, including Company Explorer folders, nodes, Logic Gates, projects, shared inboxes, and Shared Triage entry points, exposes an explicit `Save` button in a stable action area. Save commits the current default, user/group, and descendant selections without closing. Closing an editable dialog with pending changes saves successfully before dismissing it. Denied, read-only, unchanged, and already-saved dialogs close without writing, and closing after a successful explicit Save never issues a duplicate write.
+P44 - Every permissions dialog and embedded permissions view, including Company Explorer folders, nodes, Logic Gates, Huddle Logic Gates, Huddle Nodes, projects, shared inboxes, and Shared Triage entry points, exposes an explicit `Save` button in a stable action area. Save commits the current default, user/group, and supported descendant selections without closing. Closing an editable dialog with pending changes saves successfully before dismissing it. Denied, read-only, unchanged, and already-saved dialogs close without writing, and closing after a successful explicit Save never issues a duplicate write.
 P45 - Runtime authorization resolves group permission rows from group source tables and group membership source rows; permission checks must not require a derived group closure/projection table to be populated.
 P46 - Ordinary policy writes do not walk descendants. Force-overwrite work stays constant-size as the subtree grows.
 P47 - Settings contain inherited/customized mode, customized sequence, parent-link sequence, and descendant-reset sequence; direct rows exist only for a customized complete policy.
@@ -112,6 +112,7 @@ P69 - Permission policy equality compares the canonical default plus the unorder
 P70 - The frontend may compare against the loaded parent snapshot for immediate feedback, but the backend must re-resolve and compare the live parent inside the write transaction. Roots cannot inherit. A request flag cannot force a mode that disagrees with the saved policy.
 
 P71 - Descendant controls appear only when the resource currently has descendants. The exact labels are `Apply to non-customized descendants` and `Apply to every descendant`; only the latter is separately confirmed.
+P72 - Huddle Logic Gates and Huddle Nodes use direct policies under the exact resource types `huddle_logic_gate` and `huddle_node`. Their permission surfaces do not expose either descendant action.
 P52 - Permission audit/explainability identifies direct/default/group resolution, the effective customized source, eligible reset, parent-link boundary, and overwritten customization; it never reports RACI as an authorization grant.
 P53 - Permission fingerprints include effective source and sequence, eligible reset, parent-link boundary, group-membership version, actor identity, and actor-specific Edit result where exposed.
 P54 - Soft delete for nodes and Company Explorer delete targets requires edit access to the deleted resource or container; no access and RACI assignments never authorize the delete.

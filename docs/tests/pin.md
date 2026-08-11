@@ -90,7 +90,7 @@ Last updated: 2026-08-05
 
 # Process Story: A user organizes personal pins into a nested tree
 
-A user with edit access pins an existing Node, Logic Gate, or Project
+A user with edit access pins an existing Node, Logic Gate, Huddle Logic Gate, Huddle Node, or Project
 ↓
 Mango stores one user-and-company-scoped pin containing the resource's exact canonical type and ID
 ↓
@@ -100,9 +100,9 @@ Dropping one existing pinned row onto another existing pinned row atomically cre
 ↓
 Opening a pinned Node fills the workspace to the right of the left sidebar, while the sidebar stays visible and interactive
 ↓
-Deleting a pin folder deletes only that folder subtree and its contained pin rows; underlying Nodes, Logic Gates, and Projects remain unchanged
+Deleting a pin folder deletes only that folder subtree and its contained pin rows; underlying Nodes, Logic Gates, Huddle Logic Gates, Huddle Nodes, and Projects remain unchanged
 
-Last updated: 2026-08-09
+Last updated: 2026-08-10
 
 # Pin Tests
 
@@ -114,7 +114,7 @@ Coverage Status:
 
 PIN1 - Pins are stored in the database, scoped by company and user, not browser cache.
 PIN2 - The canonical resource-pin table is pins; a pin row has a single primary key pin ID plus company ID, user ID, optional parent folder ID, resource type, resource ID, name, position, and created timestamp.
-PIN3 - Supported pinned resource types are node, logic gate, and project.
+PIN3 - Supported pinned resource types are node, logic gate, huddle logic gate, huddle node, and project.
 PIN4 - Creating a pin requires company access and current edit access to the target resource.
 PIN5 - The pin name is a snapshot resolved from the server resource name or title at pin time.
 PIN6 - A user can only have one pin for the same company, resource type, and resource ID.
@@ -128,7 +128,7 @@ PIN13 - Pinned-resource right-click menus put Open in new browser tab first and 
 PIN14 - The sidebar pin section must not read, write, hydrate, or recover pins from browser storage.
 PIN15 - The canonical frontend pin API surface is /v1/user-pins, /v1/user-pins/{pin_id}, /v1/user-pins/layout, /v1/user-pin-folders, /v1/user-pin-folders/{folder_id}, and /v1/user-pin-folders/group. Legacy /v1/pins, /v1/user-pins/order, pinsApi, SIDEBAR_PINS_KEY, label, and addedAt compatibility are not allowed.
 PIN16 - The user_pins table is not canonical and must be dropped; backend storage reads and writes the pins table.
-PIN17 - Only pinned nodes and pinned logic gates are valid email drop targets; pinned projects and empty pin-section space are not email drop targets.
+PIN17 - Only pinned nodes and pinned normal logic gates are valid email drop targets; pinned Huddle Logic Gates, pinned Huddle Nodes, pinned projects, and empty pin-section space are not email drop targets.
 PIN18 - Dropping triage or shared-triage email on a pinned logic gate uses the existing communications conversion path to create node(s) in that logic gate, including the normal priority, permission, RACI, local cache patching, and event behavior.
 PIN19 - Dropping triage or shared-triage email on a pinned node attaches the email to that existing node through the existing node conversion path and must not create a duplicate node.
 PIN20 - Dropping a node on a pinned logic gate assigns the existing node to that logic gate through the normal logic-gate node assignment path and must not duplicate the node.
@@ -170,6 +170,7 @@ PIN55 - The sidebar loads each distinct pinned Logic Gate's canonical work view 
 PIN56 - The Pinned surface renders above Tower in the left sidebar. Moving that surface changes no persisted pin or Tower data.
 PIN57 - A Pinned folder's drag hitbox is its visible header, not the expanded descendant frame. The header middle is an inside drop; its top and bottom edges are before and after drops in the folder's parent; and the Pinned root end zone reparents an entry to root. A nested row's drag start must not bubble into and replace its typed identity with a draggable ancestor folder. Pinned retains that exact internal entry through drop, as Company Explorer retains its active drag payload, so a browser withholding custom `DataTransfer` content at release cannot turn a displayed valid target into a no-op. These zones allow pins and folders to reorder, move into a folder, move between folders, or come out of any parent while the cycle and owner rules remain enforced.
 PIN58 - After the one-second middle hover in PIN32, Pinned shows a current-session-only expanded New Folder preview at the target row, with the target first and dragged pin second. The dragged row temporarily appears only in that preview. No API, database, pin, or folder change occurs until drop. Leaving that target, entering a non-middle zone, or ending the drag cancels the timer and preview immediately and sends no grouping command; only dropping the exact dragged pin on the exact armed target may invoke the atomic group command.
+PIN59 - Opening a `huddle_logic_gate` or `huddle_node` pin opens the exact matching Huddle surface. Huddle pins use the normal personal pin lifecycle but do not become email or Node drop targets and do not contribute normal Logic Gate Kanban status counts.
 
 ## Scenarios
 
