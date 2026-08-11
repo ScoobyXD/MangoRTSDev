@@ -1211,6 +1211,7 @@ export function EmailCollaborationChatSurface({
         selectedSectionKey={selectedChatGroupKey}
         composerDestinationLabel={composerDestinationLabel}
         chronologicalMessages
+        reserveScrollbarGutter
         selectionAnchor={selectionAnchor}
         draft={draft}
         companyUsers={principals}

@@ -645,6 +645,7 @@ type ChatPaneProps = {
   selectedSectionKey?: string;
   composerDestinationLabel?: string;
   chronologicalMessages?: boolean;
+  reserveScrollbarGutter?: boolean;
   hideHeader?: boolean;
   activeTab?: "chat" | "email";
   selectionAnchor?: TextBlockSelectionAnchor;
@@ -720,6 +721,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   selectedSectionKey = "",
   composerDestinationLabel,
   chronologicalMessages = false,
+  reserveScrollbarGutter = false,
   hideHeader = false,
   activeTab = "chat",
   selectionAnchor,
@@ -1219,7 +1221,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           </div>
         ) : (
           <>
-            <div ref={messageListRef} className="editor-document-scroll mango-pane-enter" style={{ minHeight: 0, display: "grid", alignContent: "start", gap: 8, overflowY: "auto", overflowX: "hidden", padding: "9px 8px", ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
+            <div ref={messageListRef} className="editor-document-scroll mango-pane-enter" style={{ minHeight: 0, display: "grid", alignContent: "start", gap: 8, overflowY: "auto", overflowX: "hidden", scrollbarGutter: reserveScrollbarGutter ? "stable" : undefined, padding: reserveScrollbarGutter ? "9px 16px 9px 8px" : "9px 8px", ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
               {sectionedThreads.map((thread, index) => {
                 const sectionKey = sectionKeysByMessageID[thread.message.id] ?? thread.message.blockID;
                 const previousSectionKey = index > 0
