@@ -46,6 +46,7 @@ type CommunicationsEmailMessageLookupInput struct {
 type CommunicationsEmailMessageLookupResult struct {
 	Message  domain.EmailMessageSnapshot
 	Provider string
+	Thread   domain.CommunicationsEmailThread
 }
 
 func normalizeCommunicationsEmailMessageLookupInput(input CommunicationsEmailMessageLookupInput) (CommunicationsEmailMessageLookupInput, communicationsEmailCollaborationScope, error) {

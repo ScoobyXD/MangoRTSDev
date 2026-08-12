@@ -67,7 +67,7 @@ export const UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE: React.CSSProperties
   lineHeight: "20px",
 };
 
-function UnifiedNodeShellFullscreenIcon({ active = false }: { active?: boolean }) {
+export function UnifiedNodeShellFullscreenIcon({ active = false }: { active?: boolean }) {
   return (
     <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
       {active ? (

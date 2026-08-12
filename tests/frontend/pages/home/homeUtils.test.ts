@@ -41,7 +41,6 @@ import {
   mailboxCountsFromFolders,
   mailboxForHomeView,
   mergeEmailMessageIntoScopedMessageList,
-  missingEmailThreadMessageIDs,
   nextEmailMessageAfterRemoval,
   nodeDragItemsFromExplorerRows,
   nodeIDsFromExplorerPayload,
@@ -547,34 +546,6 @@ test("external inbound, user sent reply, and next inbound stay one thread withou
   assert.equal(condensed[0]?.thread_unread_count, 1);
   assert.equal(condensed[1]?.thread_message_count, 1);
   assert.equal(condensed[2]?.thread_message_count, 1);
-});
-
-test("authoritative thread hydration plans exact missing sent and received messages without subject-based merging", () => {
-  const loadedExternalConversation = [
-    emailMessage("external-latest", "provider-thread-1", 300),
-    emailMessage("external-original", "provider-thread-1", 100),
-    emailMessage("forwarded-unrelated", "", 250, { subject: "Fwd: Subject" }),
-  ];
-  assert.deepEqual(
-    missingEmailThreadMessageIDs(
-      ["external-original", "user-sent", "external-latest"],
-      "external-latest",
-      loadedExternalConversation,
-    ),
-    ["user-sent"],
-  );
-  assert.deepEqual(
-    missingEmailThreadMessageIDs(
-      ["user-original", "external-reply", "user-second", "external-latest", "external-reply"],
-      "external-latest",
-      [emailMessage("external-latest", "provider-thread-2", 400), emailMessage("user-original", "provider-thread-2", 100)],
-    ),
-    ["external-reply", "user-second"],
-  );
-  assert.deepEqual(
-    missingEmailThreadMessageIDs([], "one-off", [emailMessage("forwarded-unrelated", "", 250)]),
-    [],
-  );
 });
 
 test("conversation messages are newest first with a deterministic id tie-breaker", () => {

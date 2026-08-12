@@ -537,6 +537,9 @@ test("mail thread detail supports exact-message replies, saved editor sizing, an
   assert.match(homeParts, /EmailReferencePreviewModal/);
   assert.match(homeParts, /UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE/);
   assert.match(homeParts, /data-email-reference-preview-close="true"/);
+  assert.match(homeParts, /data-email-reference-preview-fullscreen="true"/);
+  assert.match(homeParts, /min\(1180px, calc\(100vw - 32px\)\)/);
+  assert.match(homeParts, /data-email-reference-preview-resources="true"/);
   assert.match(homeParts, /previewOnly/);
   assert.match(homeParts, /saveMailReplyEditorHeight/);
   assert.match(homeParts, /MAIL_REPLY_EDITOR_MIN_HEIGHT_PX/);
