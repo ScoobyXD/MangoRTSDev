@@ -28,7 +28,7 @@
 26. Every outbound reply uses Mango's existing 10-second safe-send controller. The UI shows the decreasing progress bar, **Send now**, and **Undo**; all three actions control the same pending send.
 27. A successful send creates or updates the exact normalized sent `email_messages` record, promotes the draft's attachment relationships to that message, and retires the active draft. It never deletes the source message or thread.
 28. Permanently deleting a Node cascades its Node-scoped shared drafts. Deleting or losing one email relationship does not invent a new Node or copy the draft elsewhere.
-29. The cutover is forward-only. Existing personal-account drafts may use their exact stored creator as owner. An old row with no unambiguous owner, Node, or source message stops migration for human resolution; Mango never guesses or copies it to several scopes.
+29. The cutover is forward-only. Existing personal-account drafts may use their exact stored creator as owner. The migration retires attachment links and deletes only obsolete draft rows that lack an exact owner or an exact Node and source message; Mango never guesses, copies, or exposes those rows in a new scope.
 
 Last updated: 2026-08-12
 

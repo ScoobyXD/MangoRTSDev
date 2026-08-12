@@ -44,6 +44,7 @@ run("Frontend relationship semantics tests", "npm run test:node-relationships", 
 run("Frontend production build", "npm run build", resolve(repoRoot, "frontend"));
 run("Email SQS disposable PostgreSQL contract", "node scripts/test_email_sqs_delivery_postgres.mjs", repoRoot);
 run("Node email relationship disposable PostgreSQL contract", "node scripts/test_node_email_relationships_postgres.mjs", repoRoot);
+run("Email draft scope disposable PostgreSQL contract", "node scripts/test_email_draft_scope_postgres.mjs", repoRoot);
 run("RACI Tabs disposable PostgreSQL contract", "node scripts/test_raci_tabs_postgres.mjs", repoRoot);
 run("Huddle Explorer disposable PostgreSQL contract", "node scripts/test_huddle_explorer_postgres.mjs", repoRoot);
 runBackendGoTests();
