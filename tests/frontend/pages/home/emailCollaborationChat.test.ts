@@ -245,13 +245,20 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(surface, /sectionKeysByMessageID=\{sectionKeysByChatID\}/);
   assert.match(surface, /onOpenSectionNode=\{onOpenNode\}/);
   assert.match(surface, /sectionActionLabel="New chat"/);
-  assert.match(surface, /selectSectionOnClick=\{Boolean\(selection\)\}/);
+  assert.match(surface, /selectSectionOnClick=\{Boolean\(selection && !replyTargetID\)\}/);
   assert.match(surface, /selectedSectionKey=\{selectedChatGroupKey\}/);
-  assert.match(surface, /composerDestinationLabel=\{composerDestinationLabel\}/);
+  assert.match(surface, /composerDestination=\{replyTargetID \? undefined : composerDestination\}/);
+  assert.match(surface, /composerDestinationError=\{replyTargetID \? undefined : selectionDestinationError\}/);
+  assert.match(surface, /selectionAnchor=\{replyTargetID \? undefined : selectionAnchor\}/);
   assert.match(surface, /reserveScrollbarGutter/);
   assert.match(surface, /onSectionAction=\{selectExistingChatGroup\}/);
   assert.match(surface, /onNodeSectionAction=\{selectNodeChatDestination\}/);
   assert.match(surface, /onClearComposerDestination=\{cancelChatGroupDestination\}/);
+  assert.match(surface, /data-chat-new-node-destination="true"[\s\S]*startNewFloatingNodeChat/);
+  assert.match(surface, /if \(selection && !newNodeDestinationSelected && !selectedChatGroupKey && !selectedChatNodeID\)[\s\S]*Please select a destination\./);
+  assert.match(surface, /const exactTextboxLinks = threadTextboxLinks\.filter[\s\S]*exactTextboxLinks\.length === 1[\s\S]*selectNodeChatDestination\(exactTextboxLinks\[0\]\.node_id\)/);
+  assert.match(surface, /collaborations\.length === 1[\s\S]*selectNodeChatDestination\(collaborations\[0\]\.node_id\)/);
+  assert.match(surface, /const clearDestinationOutsideSelection[\s\S]*cancelChatGroupDestination\(\)[\s\S]*document\.addEventListener\("pointerdown", clearDestinationOutsideSelection\)/);
   assert.doesNotMatch(surface, /chronologicalMessages/);
   assert.match(sharedChat, /const threads = useMemo\(\(\) => buildChatThreads\(messages\), \[messages\]\)/);
   assert.match(surface, /if \(!selection\) \{\s*await submitExistingTextBoxChat\(selectedCollaboration, selectedGroup\.textbox_id\);\s*return;\s*\}/);
@@ -313,10 +320,15 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(sharedChat, /sectionActionLabel\?: string/);
   assert.match(sharedChat, /selectSectionOnClick\?: boolean/);
   assert.match(sharedChat, /data-chat-section-selectable=\{selectSectionOnClick \? "true" : undefined\}/);
-  assert.match(sharedChat, /composerDestinationLabel\?: string/);
+  assert.match(sharedChat, /composerDestination\?: ChatComposerDestination/);
+  assert.match(sharedChat, /composerDestinationError\?: string/);
   assert.match(sharedChat, /data-chat-section-action="true"/);
   assert.match(sharedChat, /data-chat-section-selected=\{sectionSelected \? "true" : undefined\}/);
-  assert.match(sharedChat, /data-chat-composer-destination="true"[\s\S]*New chat to \{composerDestinationLabel\}/);
+  assert.match(sharedChat, /data-chat-composer-highlight="true"[\s\S]*Highlighted text[\s\S]*data-chat-composer-destination="true"[\s\S]*Destination/);
+  assert.match(sharedChat, /New Node · New Text Box[\s\S]*Existing Node · New Text Box[\s\S]*Existing Node · Existing Text Box/);
+  assert.match(sharedChat, /data-chat-destination-node-entity="true"[\s\S]*<ExplorerEntityIcon kind="node" \/>[\s\S]*composerDestination\.nodeName/);
+  assert.match(sharedChat, /composerDestinationError \|\| "Select a Node or text-box grouping"/);
+  assert.match(sharedChat, /aria-label="Cancel chat destination"/);
   assert.match(sharedChat, /reserveScrollbarGutter\?: boolean/);
   assert.match(sharedChat, /scrollbarGutter: reserveScrollbarGutter \? "stable" : undefined[\s\S]*padding: reserveScrollbarGutter \? "9px 16px 9px 8px" : "9px 8px"/);
   assert.match(sharedChat, /data-email-chat-node-section=\{showNodeSurface \? "true" : undefined\}[\s\S]*data-email-chat-message-section=\{section\.sectionLabel \? "true" : undefined\}/);
@@ -330,6 +342,12 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
     assert.match(hoverStyle, /transform: translateY\(-2px\)/);
     assert.match(hoverStyle, /box-shadow:/);
     assert.doesNotMatch(hoverStyle, /background|92,238,255|128,216,255|183,124,255/);
+  }
+  const nodeSelectedStyle = styles.match(/\.email-chat-node-section\[data-chat-node-selected="true"\] \{([\s\S]*?)\}/)?.[1] ?? "";
+  const textboxSelectedStyle = styles.match(/\.email-chat-textbox-group\[data-chat-section-selected="true"\] \{([\s\S]*?)\}/)?.[1] ?? "";
+  for (const selectedStyle of [nodeSelectedStyle, textboxSelectedStyle]) {
+    assert.match(selectedStyle, /border-color: rgba\(100,116,139/);
+    assert.doesNotMatch(selectedStyle, /linear-gradient|92,238,255|128,216,255|183,124,255/);
   }
   assert.match(surface, /<ChatPane[\s\S]*fillHeight/);
 });

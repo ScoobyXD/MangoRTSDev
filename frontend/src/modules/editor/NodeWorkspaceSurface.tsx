@@ -449,6 +449,7 @@ function scrollNodeWorkspaceInformationIntoView(root: HTMLElement | null, inform
 export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   companyID,
   nodeID,
+  nodeName = "This Node",
   canEdit,
   assignedLogicGateIDs,
   apiBase,
@@ -3556,6 +3557,11 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     messages={messages}
                     hideHeader
                     selectionAnchor={selectionAnchor}
+                    composerDestination={selectionAnchor?.source === "email" ? {
+                      kind: block.temporaryEmailChat ? "existing_node_new_textbox" : "existing_node_existing_textbox",
+                      nodeID,
+                      nodeName: nodeName.trim() || "This Node",
+                    } : undefined}
                     draft={chatDrafts[chatBlockID] ?? ""}
                     draftEntityLinks={chatDraftEntityLinks[chatBlockID] ?? []}
                     companyUsers={companyUsers}
@@ -3586,6 +3592,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     onDeleteMessage={(messageID) => { void deleteChatMessage(messageID); }}
                     onClearReply={clearReplyTarget}
                     onClearSelectionAnchor={clearSelectionAnchor}
+                    onClearComposerDestination={clearSelectionAnchor}
                     onAttachFiles={(files) => { void addChatDraftAttachments(chatBlockID, files); }}
                     onRemoveDraftAttachment={(attachmentID) => removeChatDraftAttachment(chatBlockID, attachmentID)}
                     onSubmit={() => { void submitChat(chatBlockID); }}

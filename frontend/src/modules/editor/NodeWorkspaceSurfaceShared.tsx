@@ -27,6 +27,7 @@ export type NodeWorkspaceSurfaceProps = {
   companyID: string;
   scope: string;
   nodeID: string;
+  nodeName?: string;
   canEdit: boolean;
   assignedLogicGateIDs: string[];
   projections: NodeProjectionItem[];

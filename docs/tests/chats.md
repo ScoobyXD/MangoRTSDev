@@ -19,7 +19,7 @@
 17. Choosing a new Node atomically creates the Node, normal Node relationship, text box, exact message link, and first chat without changing another Node's copy of the thread.
 18. Replying to an existing chat inherits that chat's exact Node and text-box grouping, writes only the reply chat with its parent chat ID, and does not require an email-selection anchor.
 19. The chat rail groups text-box chat groupings beneath one parent surface per Node, and every existing text-box grouping has one top-right **New chat** button that selects that exact Node and text box as the composer destination.
-20. Hovering a Node parent or text-box grouping elevates its whole surface; choosing either level flashes its blue-purple perimeter for one second, leaves the resolved Node parent or text-box grouping visibly selected, and identifies that destination in the composer until the user selects another destination or cancels.
+20. Hovering a Node parent or text-box grouping elevates its whole surface without recoloring it; choosing either level briefly flashes its perimeter and then leaves only a soft neutral selected frame that can be dismissed.
 21. Pressing Enter for an ordinary **New chat** sends one relationship-neutral root chat to the selected grouping through the normal Node text-box-chat insert without a separate destination dropdown.
 22. Chats inside one grouping display their real reply tree, with root chats ordered oldest-to-newest and each parent's direct replies ordered oldest-to-newest.
 23. Node parent groupings use a stable case-insensitive Node-name order with Node ID as the tie-breaker; email or chat activity never moves a Node grouping.
@@ -30,11 +30,21 @@
 28. A failed atomic first-chat command creates none of its Node, relationship, text-box, or chat writes and preserves the complete composer for retry.
 29. Removing one Node's relationship, text box, or chat does not remove another Node's copy of that work.
 30. A saved highlighted-email chat keeps its exact quoted range visibly highlighted in My Triage, Shared Triage, and the Node email view until the last chat using that range is removed.
-31. My Triage and Shared Triage wait for the user to choose a Node parent or text-box grouping; within that Node, an existing exact-message text-box link is enforced automatically, while an unlinked exact message may use the chosen existing text box or the Node parent as an explicit new-grouping destination.
+31. My Triage and Shared Triage enforce one exact pending destination for a highlighted-email chat: an exact existing text-box link is selected automatically when unambiguous, one existing Node with no exact link defaults to a new text box in that Node, no existing Node defaults to a new Node and new text box, and every ambiguous multi-Node case waits for an explicit choice.
 32. The Node email view applies the same exact-message rules: an existing exact-message text-box link opens and flashes that text-box chat automatically, while an unlinked exact message may use any elevated text-box surface or the elevated Node parent for an explicit new grouping, and the first send creates the allowed link and chat atomically or creates neither.
+33. Only a highlighted-text-to-chat composer shows the routing template, with the exact highlighted quote in the top field and the pending destination in the field directly below it.
+34. A highlighted-email destination has exactly one of three labels: **New Node · New Text Box**, **Existing Node · New Text Box**, or **Existing Node · Existing Text Box**.
+35. An existing-Node destination shows the Node icon followed by the real Node name in Mango's rectangular entity chip; a text box has no displayed or invented name in the destination field.
+36. Clicking an existing text-box grouping selects **Existing Node · Existing Text Box**, clicking a Node parent selects **Existing Node · New Text Box** unless that exact message already has a text-box link there, and clicking the Node-plus action selects **New Node · New Text Box**.
+37. If the exact message already has a text-box link in the chosen Node, Mango resolves every Node-local choice to **Existing Node · Existing Text Box** and never moves, replaces, or duplicates that link.
+38. A highlighted-email chat cannot send without both its highlighted quote and one pending destination; an attempted send with no destination gives the destination field a red outline and the exact message **Please select a destination.**
+39. The destination X and a click outside every destination grouping and the composer clear only My Triage or Shared Triage's temporary destination selection, keep the highlighted quote and draft, remove the soft selected frame, and perform no database write.
+40. Clicking inside the composer, its highlighted-text field, its destination field, or a destination grouping does not accidentally clear the pending destination.
+41. Reply and grouping-header **New chat** commands inherit their exact existing text-box destination and do not show or require the highlighted-text routing template.
+42. The Node-plus action, grouping clicks, default destination, destination X, outside-click dismissal, soft frame, and validation error are presentation state only; the first successful Send remains the only command that may create the allowed Node, text box, email relationship, and chat together.
 
-Last updated: 2026-08-11
+Last updated: 2026-08-12
 
 # General Process Story
 
-A user opens an email and Mango reads every accessible Node-and-text-box chat grouping for its stored thread, keeps Nodes stable, and shows each Node's chat groupings in the same order as its text boxes. Choosing **New chat** on an existing grouping creates a relationship-neutral root chat in that exact text box, while replies remain nested beneath their parent chats. A highlighted-email chat uses an existing exact-message text-box link when one exists in the chosen Node; otherwise the user's chosen text-box or Node-parent destination atomically creates only the missing exact-message link, text box, Node, and first chat required by that destination.
+A user opens an email and Mango reads every accessible Node-and-text-box chat grouping for its stored thread, keeps Nodes stable, and shows each Node's chat groupings in text-box order. A highlighted-text chat shows its quote above one explicit destination, defaults only when the message state is unambiguous, and lets the user choose or dismiss a softly framed Node or text-box grouping without writing anything. **New chat** and replies already know their text box. Only Send atomically creates the exact missing Node, text box, email relationship, and chat allowed by the selected route.

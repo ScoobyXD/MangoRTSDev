@@ -2594,6 +2594,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             companyID={companyID}
             scope={scope}
             nodeID={linkedNodeID}
+            nodeName={linkedNodeTitle}
             canEdit={linkedEntityCanEdit}
             assignedLogicGateIDs={nodeLogicGateIDs}
             projections={nodeWorkspaceProjections}

@@ -628,6 +628,12 @@ export type ChatMessageFocusRequest = {
   requestID: number;
 };
 
+export type ChatComposerDestination = {
+  kind: "new_node_new_textbox" | "existing_node_new_textbox" | "existing_node_existing_textbox";
+  nodeID?: string;
+  nodeName?: string;
+};
+
 type ChatPaneProps = {
   blockID: string;
   editable: boolean;
@@ -649,7 +655,8 @@ type ChatPaneProps = {
   selectedNodeSectionID?: string;
   flashedSectionKey?: string;
   flashedNodeSectionID?: string;
-  composerDestinationLabel?: string;
+  composerDestination?: ChatComposerDestination;
+  composerDestinationError?: string;
   reserveScrollbarGutter?: boolean;
   hideHeader?: boolean;
   activeTab?: "chat" | "email";
@@ -731,7 +738,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   selectedNodeSectionID = "",
   flashedSectionKey = "",
   flashedNodeSectionID = "",
-  composerDestinationLabel,
+  composerDestination,
+  composerDestinationError,
   reserveScrollbarGutter = false,
   hideHeader = false,
   activeTab = "chat",
@@ -1390,26 +1398,13 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                 );
               })}
             </div>
-            <div style={{ display: "grid", gap: 6, padding: 8, borderTop: `1px solid ${ruleColor}` }}>
-          {composerDestinationLabel && (
-            <div data-chat-composer-destination="true" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 22px", alignItems: "center", gap: 6, border: `1px solid ${accent}`, borderLeft: `3px solid ${accent}`, borderRadius: 9, background: "linear-gradient(135deg, rgba(230,252,255,0.62), rgba(247,239,255,0.62))", color: surfaceText, padding: "6px 6px 6px 7px", fontSize: 10, lineHeight: 1.35, fontWeight: 850, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.84)" }}>
-              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>New chat to {composerDestinationLabel}</span>
-              {onClearComposerDestination && (
-                <button
-                  type="button"
-                  aria-label="Cancel chat destination"
-                  title="Cancel chat destination"
-                  onClick={onClearComposerDestination}
-                  style={{ width: 22, height: 22, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 6, background: "#ffffff", color: surfaceText, cursor: "pointer", fontSize: 14, fontWeight: 900, lineHeight: 1, padding: 0 }}
-                >
-                  x
-                </button>
-              )}
-            </div>
-          )}
+            <div data-chat-composer-shell="true" style={{ display: "grid", gap: 6, padding: 8, borderTop: `1px solid ${ruleColor}` }}>
           {selectionAnchor && active && (
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 22px", alignItems: "start", gap: 6, border: "1px solid rgba(92,238,255,0.34)", borderLeft: `3px solid ${accent}`, borderRadius: 9, background: "linear-gradient(135deg, rgba(230,252,255,0.58), rgba(247,239,255,0.58))", color: surfaceText, padding: "6px 6px 6px 7px", fontSize: 10, lineHeight: 1.35, fontWeight: 800, overflowWrap: "anywhere", maxHeight: 72, overflowY: "auto", boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.82)" }}>
-              <span style={{ minWidth: 0 }}>{selectionAnchor.quote}</span>
+            <div data-chat-composer-highlight="true" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 22px", alignItems: "start", gap: 6, border: "1px solid rgba(148,163,184,0.34)", borderLeft: `3px solid ${accent}`, borderRadius: 9, background: "rgba(255,255,255,0.72)", color: surfaceText, padding: "6px 6px 6px 7px", fontSize: 10, lineHeight: 1.35, fontWeight: 800, overflowWrap: "anywhere", maxHeight: 72, overflowY: "auto", boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.82)" }}>
+              <span style={{ minWidth: 0, display: "grid", gap: 2 }}>
+                <small style={{ color: "#64748b", fontSize: 8.5, fontWeight: 900, letterSpacing: ".04em", textTransform: "uppercase" }}>Highlighted text</small>
+                <span>{selectionAnchor.quote}</span>
+              </span>
               <button
                 type="button"
                 aria-label="Clear selected text"
@@ -1419,6 +1414,71 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               >
                 x
               </button>
+            </div>
+          )}
+          {selectionAnchor?.source === "email" && active && (
+            <div
+              data-chat-composer-destination="true"
+              data-chat-composer-destination-kind={composerDestination?.kind ?? ""}
+              data-chat-composer-destination-invalid={composerDestinationError ? "true" : undefined}
+              role={composerDestinationError ? "alert" : undefined}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "minmax(0, 1fr) 22px",
+                alignItems: "center",
+                gap: 6,
+                minHeight: 42,
+                border: `1px solid ${composerDestinationError ? "#dc2626" : "rgba(148,163,184,0.42)"}`,
+                borderLeft: `3px solid ${composerDestinationError ? "#dc2626" : accent}`,
+                borderRadius: 9,
+                background: "rgba(255,255,255,0.76)",
+                color: surfaceText,
+                padding: "6px 6px 6px 7px",
+                fontSize: 10,
+                lineHeight: 1.35,
+                boxShadow: composerDestinationError ? "0 0 0 2px rgba(220,38,38,0.10)" : "inset 1px 1px 0 rgba(255,255,255,0.84)",
+              }}
+            >
+              <span style={{ minWidth: 0, display: "grid", gap: 4 }}>
+                <small style={{ color: composerDestinationError ? "#b91c1c" : "#64748b", fontSize: 8.5, fontWeight: 900, letterSpacing: ".04em", textTransform: "uppercase" }}>Destination</small>
+                {composerDestination ? (
+                  <span style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 6, overflow: "hidden" }}>
+                    {composerDestination.kind === "new_node_new_textbox" ? (
+                      <span aria-hidden="true" style={{ position: "relative", flex: "0 0 auto", width: 18, height: 18, display: "grid", placeItems: "center" }}>
+                        <ExplorerEntityIcon kind="node" />
+                        <strong style={{ position: "absolute", right: -2, bottom: -3, width: 10, height: 10, display: "grid", placeItems: "center", borderRadius: 999, background: "#ffffff", color: accent, fontSize: 10, lineHeight: 1 }}>+</strong>
+                      </span>
+                    ) : (
+                      <span data-chat-destination-node-entity="true" style={{ minWidth: 0, maxWidth: "52%", flex: "0 1 auto", display: "inline-flex", alignItems: "center", gap: 5, border: "1px solid rgba(148,163,184,0.34)", borderRadius: 7, background: "rgba(248,250,252,0.92)", padding: "3px 6px", boxShadow: "1px 1px 3px rgba(15,23,42,0.06)" }}>
+                        <ExplorerEntityIcon kind="node" />
+                        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 900 }}>{composerDestination.nodeName || "Selected Node"}</span>
+                      </span>
+                    )}
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#334155", fontWeight: 850 }}>
+                      {composerDestination.kind === "new_node_new_textbox"
+                        ? "New Node · New Text Box"
+                        : composerDestination.kind === "existing_node_new_textbox"
+                          ? "Existing Node · New Text Box"
+                          : "Existing Node · Existing Text Box"}
+                    </span>
+                  </span>
+                ) : (
+                  <span style={{ color: composerDestinationError ? "#b91c1c" : "#64748b", fontWeight: 800 }}>
+                    {composerDestinationError || "Select a Node or text-box grouping"}
+                  </span>
+                )}
+              </span>
+              {composerDestination && onClearComposerDestination ? (
+                <button
+                  type="button"
+                  aria-label="Cancel chat destination"
+                  title="Cancel chat destination"
+                  onClick={onClearComposerDestination}
+                  style={{ width: 22, height: 22, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 6, background: "#ffffff", color: surfaceText, cursor: "pointer", fontSize: 14, fontWeight: 900, lineHeight: 1, padding: 0 }}
+                >
+                  x
+                </button>
+              ) : <span aria-hidden="true" />}
             </div>
           )}
           {draftAttachments.length > 0 && (
