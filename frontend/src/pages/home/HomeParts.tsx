@@ -36,6 +36,7 @@ import { beginEditorAttachmentMutation, finishEditorAttachmentMutation, type Edi
 import { UnifiedRichEditorSurface, type UnifiedRichEditorFormattingController } from "../../modules/editor/UnifiedRichEditorSurface";
 import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../../modules/editor/UnifiedNodeShell";
 import { ChatIcon } from "../../modules/editor/NodeWorkspaceSurfaceShared";
+import { applyEmailBodyHighlights, type EmailBodyHighlightRange } from "../../modules/editor/emailBodyHighlights";
 import type { EditorOutlineStyleID } from "../../modules/editor/plainTextEditing";
 import type { EditorHighlightColor } from "../../modules/editor/richTextEditing";
 import type { EditorInlineStyleCommand, EditorSelectionInlineFormatState, EditorTextAlignment } from "../../modules/editor/useEditorDocumentSurfaceHandlers";
@@ -5853,12 +5854,14 @@ function emailBodySelectionRange(
   return range;
 }
 
-function AutoHeightEmailBodyFrame({ srcDoc, minHeight, fillAvailableHeight = false, style, onTextSelection, selectionNavigation }: {
+function AutoHeightEmailBodyFrame({ srcDoc, minHeight, fillAvailableHeight = false, style, onTextSelection, highlights = [], activeSelection, selectionNavigation }: {
   srcDoc: string;
   minHeight: number;
   fillAvailableHeight?: boolean;
   style?: React.CSSProperties;
   onTextSelection?: (selection: Omit<EmailCollaborationSelection, "messageID">) => void;
+  highlights?: readonly EmailBodyHighlightRange[];
+  activeSelection?: EmailCollaborationSelection | null;
   selectionNavigation?: EmailCollaborationNavigation | null;
 }) {
   const frameRef = React.useRef<HTMLIFrameElement | null>(null);
@@ -5874,17 +5877,18 @@ function AutoHeightEmailBodyFrame({ srcDoc, minHeight, fillAvailableHeight = fal
     setPendingTextSelection(null);
   }, [srcDoc]);
 
+  const paintEmailHighlights = React.useCallback(() => {
+    applyEmailBodyHighlights(frameRef.current?.contentDocument, highlights, selectionNavigation ?? activeSelection);
+  }, [activeSelection, highlights, selectionNavigation]);
+
   const applySelectionNavigation = React.useCallback(() => {
     if (!selectionNavigation) return;
     const frame = frameRef.current;
     const frameDocument = frame?.contentDocument;
-    const frameWindow = frame?.contentWindow;
-    if (!frame || !frameDocument?.body || !frameWindow) return;
+    if (!frame || !frameDocument?.body) return;
+    paintEmailHighlights();
     const range = emailBodySelectionRange(frameDocument, selectionNavigation);
     if (!range) return;
-    const browserSelection = frameWindow.getSelection();
-    browserSelection?.removeAllRanges();
-    browserSelection?.addRange(range);
     const scrollContainer = frame.closest<HTMLElement>("[data-email-conversation-scroll]");
     const targetRect = range.getBoundingClientRect();
     if (scrollContainer && targetRect.height >= 0) {
@@ -5894,7 +5898,12 @@ function AutoHeightEmailBodyFrame({ srcDoc, minHeight, fillAvailableHeight = fal
     } else {
       frame.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
-  }, [selectionNavigation]);
+  }, [paintEmailHighlights, selectionNavigation]);
+
+  React.useEffect(() => {
+    const frameID = window.requestAnimationFrame(paintEmailHighlights);
+    return () => window.cancelAnimationFrame(frameID);
+  }, [paintEmailHighlights]);
 
   React.useEffect(() => {
     if (!selectionNavigation) return undefined;
@@ -5910,6 +5919,7 @@ function AutoHeightEmailBodyFrame({ srcDoc, minHeight, fillAvailableHeight = fal
     if (!frame || !frameDocument?.documentElement || !frameDocument.body) return;
     frameDocument.documentElement.style.overflow = "hidden";
     frameDocument.body.style.overflow = "hidden";
+    paintEmailHighlights();
     const resize = () => {
       const frameMinHeight = frame.style.minHeight;
       frame.style.minHeight = "0px";
@@ -6142,7 +6152,7 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
   return { srcDoc };
 }
 
-function EmailConversationMessage({ message, companyID, sharedInboxID, accountEmail, fill, expanded, latest, timelineStart, timelineEnd, busy, calendarResponseAvailable, loadingBody = false, selectionNavigation, onToggleExpanded, onLoadBody, onReply, onReplyAll, onEmailSelection }: {
+function EmailConversationMessage({ message, companyID, sharedInboxID, accountEmail, fill, expanded, latest, timelineStart, timelineEnd, busy, calendarResponseAvailable, loadingBody = false, chatHighlights = [], activeSelection, selectionNavigation, onToggleExpanded, onLoadBody, onReply, onReplyAll, onEmailSelection }: {
   message: EmailMessage;
   companyID: string;
   sharedInboxID?: string;
@@ -6155,6 +6165,8 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
   busy: boolean;
   calendarResponseAvailable: boolean;
   loadingBody?: boolean;
+  chatHighlights?: readonly EmailBodyHighlightRange[];
+  activeSelection?: EmailCollaborationSelection | null;
   selectionNavigation?: EmailCollaborationNavigation | null;
   onToggleExpanded: () => void;
   onLoadBody: () => void;
@@ -6257,6 +6269,8 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
             fillAvailableHeight={fill}
             style={frameStyle}
             onTextSelection={onEmailSelection ? (selection) => onEmailSelection({ ...selection, messageID: message.id }) : undefined}
+            highlights={chatHighlights}
+            activeSelection={activeSelection}
             selectionNavigation={selectionNavigation}
           />
         ))}
@@ -6312,7 +6326,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
     </article>
   );
 }
-export function MessageDetail({ message, threadMessages = [], nodes, companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, chatOpen, emailNodeDestinationSearch, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onToggleEmailChat, onOpenCollaborationNode, onOpenLogicGate, onContentTopChange }: {
+export function MessageDetail({ message, threadMessages = [], nodes, companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, chatOpen, emailNodeDestinationSearch, emailChatHighlights = [], activeEmailSelection, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onToggleEmailChat, onOpenCollaborationNode, onOpenLogicGate, onContentTopChange }: {
   message: EmailMessage;
   threadMessages?: EmailMessage[];
   nodes: NodeRecord[];
@@ -6327,6 +6341,8 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
   chatAvailable: boolean;
   chatOpen: boolean;
   emailNodeDestinationSearch: React.ReactNode;
+  emailChatHighlights?: readonly EmailCollaborationSelection[];
+  activeEmailSelection?: EmailCollaborationSelection | null;
   selectionNavigation?: EmailCollaborationNavigation | null;
   onLoadMessageBody: (messageID: string) => Promise<EmailMessage | null>;
   onReply: (message: EmailMessage) => void;
@@ -6384,7 +6400,7 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
     return request;
   }, [onLoadMessageBody]);
   const navigationTargetMessage = selectionNavigation
-    ? conversationMessages.find((candidate) => candidate.id === selectionNavigation.messageID) ?? null
+    ? conversationMessages.find((candidate) => candidate.id === selectionNavigation.messageID || candidate.email_message_id === selectionNavigation.messageID) ?? null
     : null;
   React.useLayoutEffect(() => {
     if (!selectionNavigation || !navigationTargetMessage) return;
@@ -6563,7 +6579,11 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
             busy={busy}
             calendarResponseAvailable={!sharedInboxID || archiveAvailable}
             loadingBody={loadingMessageBodyIDs.has(conversationMessage.id) || (loading && conversationMessage.id === message.id && !emailMessageBodyIsLoaded(conversationMessage))}
-            selectionNavigation={selectionNavigation?.messageID === conversationMessage.id ? selectionNavigation : null}
+            chatHighlights={emailChatHighlights
+              .filter((highlight) => highlight.messageID === conversationMessage.id || highlight.messageID === conversationMessage.email_message_id)
+              .map((highlight, highlightIndex) => ({ ...highlight, id: `${highlight.messageID}:${highlightIndex}:${highlight.startOffset}:${highlight.endOffset}` }))}
+            activeSelection={activeEmailSelection?.messageID === conversationMessage.id || activeEmailSelection?.messageID === conversationMessage.email_message_id ? activeEmailSelection : null}
+            selectionNavigation={selectionNavigation?.messageID === conversationMessage.id || selectionNavigation?.messageID === conversationMessage.email_message_id ? selectionNavigation : null}
             onToggleExpanded={() => toggleConversationMessage(conversationMessage)}
             onLoadBody={() => { void loadConversationMessageBody(conversationMessage); }}
             onReply={(replyMessage) => runMessageAction(replyMessage, onReply)}

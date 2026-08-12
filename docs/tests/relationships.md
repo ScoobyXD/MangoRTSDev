@@ -9,7 +9,7 @@
 7. New-message ingestion never creates or copies a textbox-specific relationship, chat, or shared-draft display state.
 8. An email-selection chat is valid only when the exact internal email message has an `email_relationships` row for that chat's exact Node and Node text box.
 9. Opening an email-selection chat preview creates no text box, email relationship, or chat relationship.
-10. Sending the first chat from an email-selection preview atomically creates the exact Node-local text box, email-to-textbox relationship, and text-box chat, or creates none of them.
+10. Sending the first chat from an email-selection preview atomically links the chosen existing text box or creates the first Node-local text box, then creates the email-to-textbox relationship and chat, or creates none of them.
 11. Cancelling an unsent email-selection chat preview requires no relationship deletion because no relationship has been written.
 12. A Node-shared email draft belongs directly to one exact Node, one exact email thread, and one dedicated text box in that Node; the same thread may have a separate shared draft in another Node.
 13. The shared draft stores the exact Node and text-box identities directly and never creates a generic draft edge, resource registry, surrogate identity, participant table, or copied permission grant.
@@ -18,6 +18,7 @@
 16. An ordinary root chat or reply in an existing triage grouping uses only the normal Node text-box-chat insert and creates no email, relationship, permission, participant, or collaboration row.
 17. A triage command that creates a new email grouping or stores a highlighted-email selection reuses the exact mailbox-scoped stored message when present, fetches only that exact provider message when absent, and never queues thread ingestion or links a thread to a text box.
 18. When a highlighted-email chat's exact message has no text-box relationship in the chosen Node, selecting an existing chat grouping atomically links that message to the grouping's exact existing text box and creates the chat without creating another text box.
+19. The Node email view uses the same atomic rule when the user chooses an existing text-box chat column; a failed relationship or chat write leaves both absent.
 
 Last updated: 2026-08-11
 

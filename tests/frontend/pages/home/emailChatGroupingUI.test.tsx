@@ -33,7 +33,7 @@ function chat(
   };
 }
 
-test("grouping New chat controls select, identify, send, and cancel the exact composer destination", { timeout: 8_000 }, async () => {
+test("highlighted-email grouping clicks and New chat controls select, identify, send, and cancel the exact destination", { timeout: 8_000 }, async () => {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
     pretendToBeVisual: true,
     url: "http://localhost/",
@@ -101,6 +101,7 @@ test("grouping New chat controls select, identify, send, and cancel the exact co
             "chat-4": "node-b:textbox-b",
           }}
           sectionActionLabel="New chat"
+          selectSectionOnClick
           selectedSectionKey={selectedSectionKey}
           composerDestinationLabel={destinationLabel}
           reserveScrollbarGutter
@@ -150,6 +151,9 @@ test("grouping New chat controls select, identify, send, and cancel the exact co
     const articles = Array.from(container.querySelectorAll<HTMLElement>('[role="article"]'));
     assert.deepEqual(articles.map((article) => article.dataset.nodeChatMessageId), ["chat-1", "chat-3", "chat-2", "chat-4"]);
     assert.ok(articles[0]?.querySelector('[data-node-chat-message-id="chat-3"]'), "the reply remains nested under its parent");
+
+    await act(async () => articles[3]?.click());
+    assert.equal(container.querySelector('[data-chat-composer-destination="true"]')?.textContent?.includes("New chat to Beta Node · Second grouping"), true);
 
     const firstNewChat = container.querySelector<HTMLButtonElement>('[aria-label="New chat in Alpha Node · First grouping"]');
     assert.ok(firstNewChat);

@@ -399,6 +399,7 @@ export function HomeMailWorkspace({
   const [allMailboxMenuOpen, setAllMailboxMenuOpen] = React.useState(false);
   const [emailSelection, setEmailSelection] = React.useState<EmailCollaborationSelection | null>(null);
   const [emailNavigation, setEmailNavigation] = React.useState<EmailCollaborationNavigation | null>(null);
+  const [emailChatHighlights, setEmailChatHighlights] = React.useState<EmailCollaborationSelection[]>([]);
   const [emailChatSession, setEmailChatSession] = React.useState<EmailCollaborationChatSession>(null);
   const [emailActionRequest, setEmailActionRequest] = React.useState<EmailCollaborationActionRequest>(null);
   const [emailCollaborationError, setEmailCollaborationError] = React.useState("");
@@ -506,6 +507,7 @@ export function HomeMailWorkspace({
   React.useEffect(() => {
     setEmailSelection(null);
     setEmailNavigation(null);
+    setEmailChatHighlights([]);
     setEmailChatSession((current) => reconcileEmailCollaborationChatSession(current, emailChatKey));
     setEmailActionRequest(null);
     setEmailCollaborationError("");
@@ -1043,6 +1045,8 @@ export function HomeMailWorkspace({
                 onToggleRead={onToggleRead}
                 onToggleStar={onToggleStar}
                 onEmailSelection={commentOnEmailSelection}
+                emailChatHighlights={emailChatHighlights}
+                activeEmailSelection={emailSelection}
                 onToggleEmailChat={toggleEmailChat}
                 selectionNavigation={emailNavigation}
                 onOpenCollaborationNode={onOpenCollaborationNode}
@@ -1097,6 +1101,7 @@ export function HomeMailWorkspace({
                 onActionSuccess={showEmailActionNotice}
                 onActionRequestHandled={clearEmailActionRequest}
                 onExistingChatsChange={handleExistingEmailChatsChange}
+                onEmailChatHighlightsChange={setEmailChatHighlights}
                 onOpenNode={openEmailChatNode}
               />
             )}

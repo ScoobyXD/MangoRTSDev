@@ -11,8 +11,8 @@
 9. One exact email message may link to at most one text box per Node and may link to a different text box in another Node.
 10. Every email chat belongs to one exact Node, one exact text box in that Node, and one exact linked email message. Mango does not create unlinked email chats.
 11. Chats about the same message in different Nodes remain separate.
-12. Highlighting email text only shows the **Turn highlighted email text into a chat** action. Clicking it opens the rail, places the quote in the composer, and focuses the composer without writing to the database.
-13. If the chosen Node already links that message to a text box, the chat appends there. Otherwise the first send atomically creates the Node-local text box, exact email link, and chat.
+12. Highlighting email text only shows the **Turn highlighted email text into a chat** action. Clicking it keeps the exact quote visibly highlighted and waits for the user to click the exact triage grouping or Node text-box chat column without writing to the database.
+13. If the chosen Node already links that message to the chosen text box, the chat appends there. Otherwise the first send atomically links the chosen existing text box or creates the first text box, then creates the exact chat.
 14. If a triage thread has no Node, the first sent chat creates a floating Node with priority **Not Assigned** and no popup. If the thread has several Nodes, the user chooses the destination Node before send.
 15. Clearing the quote or closing its unsent rail cancels the preview without creating or deleting database rows.
 16. My Triage and Shared Triage show one scrollable chat rail for the thread, grouped only by exact Node and text box; different messages in that same Node/text box do not create separators.
@@ -36,6 +36,7 @@
 34. Once an exact email message already has a Node text box, each later triage chat uses only the normal Node text-box-chat create command.
 35. A Node opens with every attached-email thread collapsed and reads a thread body or that exact Node's shared draft only after the user opens that exact thread.
 36. A chat authored by the current user moves the shared message view to the new message at the bottom.
+37. Every saved email-selection chat renders its exact stored quote and offsets as a lasting highlight in My Triage, Shared Triage, and Node email views.
 
 Last updated: 2026-08-11
 
@@ -107,15 +108,15 @@ Last updated: 2026-08-09
 
 A user opens one exact personal or shared email thread and highlights text in one exact message
 ↓
-The highlight first offers a chat action; clicking it opens the one thread-level chat rail with the exact quote and offsets
+The highlight first offers a chat action; clicking it keeps the exact quote visible and opens the one thread-level chat rail or Node email destination mode
 ↓
-Mango shows a temporary preview and writes nothing while the user reads, edits, closes, or clears the quote
+Mango writes nothing while the user chooses the exact triage grouping or Node text-box chat column, reads, edits, closes, or clears the quote
 ↓
-The first nonempty send atomically creates the chosen Node's text box, exact message-to-textbox relationship, and chat, or rolls all three back
+The first nonempty send atomically links the chosen existing text box or creates the first text box, adds the exact message relationship, and creates the chat, or rolls every new write back
 ↓
 The same thread may appear in several Nodes, but each chat remains in the exact Node text box chosen for that exact message
 
-Last updated: 2026-08-08
+Last updated: 2026-08-11
 
 # Process Story: A selected email can reference, link, float, chat, and stay visible
 

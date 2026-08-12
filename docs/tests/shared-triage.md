@@ -3,7 +3,7 @@
 1. Shared Triage opens the thread chat rail automatically when accessible chats already exist and uses the same manual thread-level toggle and textbox-backed chat rules as My Triage.
 2. Individual email messages do not show separate chat buttons or overflow menus.
 3. Highlighting email text shows a chat action first and does not automatically fill the composer.
-4. Clicking the highlight action opens the rail, places the quote in the composer, and focuses it without writing to the database.
+4. Clicking the highlight action opens the rail, keeps the quote visibly highlighted, and waits for the user to click the exact grouping before sending without writing to the database.
 5. The thread chat rail is one scrollable view grouped only by exact Node and text box; messages sharing both remain in one group.
 6. Each chat group header shows a clickable Node icon and Node title.
 7. If the thread has several Nodes, the user chooses which Node receives a new chat; Mango never guesses.
@@ -13,6 +13,7 @@
 11. Reconciling unchanged email metadata must not restart the chat-rail load, discard stored text-box chats, or repeat Node reads.
 12. A chat send reuses the exact shared-mailbox stored message when present, otherwise fetches only that exact provider message, and never calls triage conversion or queues remaining-thread ingestion.
 13. After the backend acknowledges a chat, the open rail shows it immediately in its exact Node and text-box group without waiting for realtime or another Node read.
+14. Every saved highlighted-email chat renders its exact stored quote and offsets as a lasting highlight in the email body.
 
 Last updated: 2026-08-11
 

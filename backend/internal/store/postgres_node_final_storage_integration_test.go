@@ -114,8 +114,9 @@ func TestPostgresNodeFinalTextboxChatEmailAndAttachmentStorage(t *testing.T) {
 	}
 	rolledBackTextboxID := "00000000-0000-4000-8000-000000000510"
 	invalidFirstChatPayload, _ := json.Marshal(map[string]any{
-		"block_id": rolledBackTextboxID, "create_email_textbox_on_send": true,
-		"selection_source": "email", "selection_block_id": rolledBackTextboxID,
+		"block_id": rolledBackTextboxID, "ensure_email_textbox_link_on_send": true,
+		"email_textbox_color_on_send": "#0EA5E9",
+		"selection_source":            "email", "selection_block_id": rolledBackTextboxID,
 		"selection_message_id": stagedEmailMessageID, "selection_quote": "Staged quote",
 		"selection_start": 1, "selection_end": 13,
 		"author_id": owner.UserID, "author_name": "Node Final Owner", "message": "",
@@ -142,8 +143,9 @@ func TestPostgresNodeFinalTextboxChatEmailAndAttachmentStorage(t *testing.T) {
 	firstChatTextboxID := "00000000-0000-4000-8000-000000000511"
 	firstChatID := "00000000-0000-4000-8000-000000000512"
 	firstChatPayload, _ := json.Marshal(map[string]any{
-		"block_id": firstChatTextboxID, "create_email_textbox_on_send": true,
-		"selection_source": "email", "selection_block_id": firstChatTextboxID,
+		"block_id": firstChatTextboxID, "ensure_email_textbox_link_on_send": true,
+		"email_textbox_color_on_send": "#0EA5E9",
+		"selection_source":            "email", "selection_block_id": firstChatTextboxID,
 		"selection_message_id": stagedEmailMessageID, "selection_quote": "Staged quote",
 		"selection_start": 1, "selection_end": 13,
 		"author_id": owner.UserID, "author_name": "Node Final Owner", "message": "Commit this chat",
@@ -169,6 +171,64 @@ func TestPostgresNodeFinalTextboxChatEmailAndAttachmentStorage(t *testing.T) {
 	}
 	if committedTextboxes != 1 || committedRelationships != 1 || committedChats != 1 {
 		t.Fatalf("first-chat transaction textbox/relationship/chat=%d/%d/%d", committedTextboxes, committedRelationships, committedChats)
+	}
+	existingTextboxMessageID := "00000000-0000-4000-8000-000000000513"
+	if _, err := db.Exec(`insert into email_messages(
+  company_id,email_message_id,email_thread_id,provider_message_id,message_order,subject,snippet,sender_snapshot
+) values($1::uuid,$2::uuid,$3::uuid,'provider-node-message-3',2,'Existing text box email','Existing text box snippet',
+  '[{"name":"Sender","email":"sender@example.test"}]'::jsonb)`, company.CompanyID, existingTextboxMessageID, emailThreadID); err != nil {
+		t.Fatal(err)
+	}
+	existingTextboxID := "00000000-0000-4000-8000-000000000514"
+	if _, err := repo.CommitEditorJSONDocument(EditorJSONCommitInput{
+		Document: EditorJSONDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeNode,
+			ResourceID: node.NodeID, DocumentID: existingTextboxID},
+		OperationID: newUUIDv7String(), ClientID: "node-existing-destination", ActorUserID: owner.UserID,
+		BaseRevision: 0, SchemaVersion: MangoTiptapSchemaVersion, JSONDocument: document,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	existingTextboxNodeWidePayload, _ := json.Marshal(map[string]any{
+		"email_message_id": existingTextboxMessageID, "link_scope": "message",
+		"attached_timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: newUUIDv7String(),
+		Type: "Attached email", Information: string(existingTextboxNodeWidePayload), ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	existingTextboxChatID := "00000000-0000-4000-8000-000000000515"
+	existingTextboxChatPayload, _ := json.Marshal(map[string]any{
+		"block_id": existingTextboxID, "ensure_email_textbox_link_on_send": true,
+		"email_textbox_color_on_send": "#14B8A6",
+		"selection_source":            "email", "selection_block_id": existingTextboxID,
+		"selection_message_id": existingTextboxMessageID, "selection_quote": "Existing quote",
+		"selection_start": 2, "selection_end": 16,
+		"author_id": owner.UserID, "author_name": "Node Final Owner", "message": "Use this text box",
+		"created_timestamp": time.Now().UTC().Format(time.RFC3339Nano), "attachments": []any{},
+		"entity_links": []any{}, "mentioned_user_ids": []string{}, "mentioned_group_ids": []string{},
+	})
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: existingTextboxChatID,
+		Type: CommunicationsEmailCollaborationChatInformationType, Information: string(existingTextboxChatPayload), ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var existingTextboxLinks, existingTextboxChats int
+	var existingTextboxColor string
+	if err := db.QueryRow(`select
+  (select count(*) from email_relationships where company_id=$1::uuid and email_message_id=$4::uuid
+    and resource_type='node' and resource_id=$2::uuid and resource_textbox_id=$3::text),
+  (select count(*) from node_textbox_chats where company_id=$1::uuid and node_id=$2::uuid
+    and textbox_id=$3::uuid and chat_id=$5::uuid),
+  (select color from node_textboxes where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid)`,
+		company.CompanyID, node.NodeID, existingTextboxID, existingTextboxMessageID, existingTextboxChatID).
+		Scan(&existingTextboxLinks, &existingTextboxChats, &existingTextboxColor); err != nil {
+		t.Fatal(err)
+	}
+	if existingTextboxLinks != 1 || existingTextboxChats != 1 || existingTextboxColor != "#14B8A6" {
+		t.Fatalf("existing textbox link/chat/color=%d/%d/%q", existingTextboxLinks, existingTextboxChats, existingTextboxColor)
 	}
 	emailPayload, _ := json.Marshal(map[string]any{
 		"block_id": textboxID, "email_message_id": emailMessageID,
