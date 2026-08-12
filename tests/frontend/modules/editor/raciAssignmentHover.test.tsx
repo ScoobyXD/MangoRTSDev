@@ -142,6 +142,8 @@ test("RACI cards resolve directory names, place two assignments per row, and pre
     assert.equal(assignmentNameRows.at(-1)?.dataset.raciAssignmentRowWidth, "full", "the fifth assignment owns the final row by itself");
     assert.equal(assignmentNameRows.at(-1)?.style.gridColumn, "1 / -1", "an unpaired final name receives the full card width");
     const roleGrid = container.querySelector<HTMLElement>('[aria-label="RACI assignments"]');
+    assert.equal(roleGrid?.parentElement?.style.width, "100%", "the shared RACI board fills narrow surfaces");
+    assert.equal(roleGrid?.parentElement?.style.maxWidth, "780px", "the shared RACI board keeps the compact Node and Logic Gate width on wide surfaces");
     assert.equal(roleGrid?.style.gridTemplateColumns, "repeat(4, minmax(170px, 1fr))", "all four expanded RACI cards retain equal widths");
     const responsibleEmptyRow = container.querySelector<HTMLElement>('[data-raci-assignment-empty="responsible"]');
     assert.ok(responsibleEmptyRow);
