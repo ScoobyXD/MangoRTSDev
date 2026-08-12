@@ -95,7 +95,7 @@ import {
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../../modules/dashboardEvents";
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
 import { buildLogicGateRoute, buildProjectRoute } from "../../app/deepLinkRoutes";
-import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, LogicGateRail, NodeEditorPopup, NodeInboxRail, RACIMatrixViewerSelector, RACIRoleInboxMatrix, SharedInboxRACISettingsModal, type RACIMatrixViewerListEntry } from "./HomeParts";
+import { DeleteHomeEntitiesConfirmationModal, EmailReferencePreviewModal, HomeBulkEditMenu, HomeColumnResizeHandle, LogicGateRail, NodeEditorPopup, NodeInboxRail, RACIMatrixViewerSelector, RACIRoleInboxMatrix, SharedInboxRACISettingsModal, type RACIMatrixViewerListEntry } from "./HomeParts";
 import { UpdatesView } from "./UpdatesView";
 import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "./HomeMailWorkspace";
 import { OutboundEmailUndoBanner } from "../../modules/communications/OutboundEmailUndoBanner";
@@ -462,6 +462,17 @@ export function HomePage({
   const [selectionAnchorMessageID, setSelectionAnchorMessageID] = useState("");
   const [selectedMessage, setSelectedMessage] = useState<EmailMessage | null>(null);
   const [selectedThreadMessages, setSelectedThreadMessages] = useState<EmailMessage[]>([]);
+  const [emailReferencePreview, setEmailReferencePreview] = useState<{
+    requestID: number;
+    entity: EditorEntityLink;
+    message: EmailMessage | null;
+    threadMessages: EmailMessage[];
+    sharedInboxID?: string;
+    accountEmail?: string;
+    loading: boolean;
+    error: string;
+  } | null>(null);
+  const emailReferencePreviewRequestIDRef = useRef(0);
   const [queuedArchiveEmailCount, setQueuedArchiveEmailCount] = useState(0);
   const [pendingStarredMessageIDs, setPendingStarredMessageIDs] = useState<Set<string>>(new Set());
   const [messageContextMenu, setMessageContextMenu] = useState<{ x: number; y: number; messageIDs: string[] } | null>(null);
@@ -4724,50 +4735,108 @@ export function HomePage({
     if (onNavigate) onNavigate(targetPath);
     else window.location.assign(targetPath);
   }, [companyID, onNavigate]);
-  const openReferencedEmail = useCallback(async (entity: EditorEntityLink) => {
+  const closeReferencedEmail = useCallback(() => {
+    emailReferencePreviewRequestIDRef.current += 1;
+    setEmailReferencePreview(null);
+  }, []);
+  const openReferencedEmail = useCallback((entity: EditorEntityLink) => {
     if (entity.entityType !== "email_message") return;
     const sharedInboxID = entity.emailSharedInboxID?.trim() ?? "";
     const sharedFolder = sharedInboxID
       ? sharedInboxes.find((folder) => folder.folder_id === sharedInboxID || folder.shared_inbox_id === sharedInboxID)
       : undefined;
-    const targetViewID = sharedFolder ? `shared:${sharedFolder.folder_id}` as HomeViewID : "my-triage";
-    const targetMailbox = entity.emailMailbox && entity.emailMailbox !== "drafts" && entity.emailMailbox !== "archive"
-      ? entity.emailMailbox
-      : "all";
-    selectHomeView(targetViewID, targetMailbox);
-    setNodeEditorOverlay(null);
-    setError("");
+    const previewSharedInboxID = sharedFolder?.folder_id || sharedInboxID || undefined;
+    const previewAccountEmail = previewSharedInboxID ? undefined : entity.emailAccountEmail?.trim().toLowerCase() || undefined;
+    const requestID = emailReferencePreviewRequestIDRef.current + 1;
+    emailReferencePreviewRequestIDRef.current = requestID;
+    setEmailReferencePreview({
+      requestID,
+      entity,
+      message: null,
+      threadMessages: [],
+      sharedInboxID: previewSharedInboxID,
+      accountEmail: previewAccountEmail,
+      loading: true,
+      error: "",
+    });
+
+    void (async () => {
+      let selected: EmailMessage | null = null;
+      try {
+        const loadedSelected = await getEmailMessage(entity.entityID, companyID, previewSharedInboxID, { accountEmail: previewAccountEmail });
+        selected = loadedSelected;
+        if (emailReferencePreviewRequestIDRef.current !== requestID) return;
+        setEmailReferencePreview((current) => current?.requestID === requestID
+          ? { ...current, message: loadedSelected, threadMessages: [loadedSelected], loading: true }
+          : current);
+
+        const threadID = loadedSelected.thread_id?.trim() || entity.emailThreadID?.trim() || "";
+        if (!threadID) {
+          setEmailReferencePreview((current) => current?.requestID === requestID ? { ...current, loading: false } : current);
+          return;
+        }
+        const thread = await getEmailThread(threadID, companyID, previewSharedInboxID, previewAccountEmail);
+        const messageIDs = cleanIDList([...(thread.message_ids ?? []), loadedSelected.id]);
+        const loadedMessages = await Promise.all(messageIDs.map(async (messageID) => {
+          try {
+            return await getEmailMessage(messageID, companyID, previewSharedInboxID, { accountEmail: previewAccountEmail });
+          } catch {
+            return null;
+          }
+        }));
+        if (emailReferencePreviewRequestIDRef.current !== requestID) return;
+        const availableMessages = loadedMessages.filter((message): message is EmailMessage => Boolean(message));
+        const threadMessages = mergeEmailThreadDetailMessages([loadedSelected], availableMessages);
+        const selectedMessage = threadMessages.find((message) => message.id === loadedSelected.id) ?? loadedSelected;
+        const missingMessageCount = messageIDs.length - availableMessages.length;
+        setEmailReferencePreview((current) => current?.requestID === requestID ? {
+          ...current,
+          message: selectedMessage,
+          threadMessages,
+          loading: false,
+          error: missingMessageCount > 0 ? `${missingMessageCount} email ${missingMessageCount === 1 ? "message" : "messages"} could not be loaded.` : "",
+        } : current);
+      } catch (cause) {
+        if (emailReferencePreviewRequestIDRef.current !== requestID) return;
+        setEmailReferencePreview((current) => current?.requestID === requestID ? {
+          ...current,
+          message: selected ?? current.message,
+          threadMessages: selected ? mergeEmailThreadDetailMessages(current.threadMessages, [selected]) : current.threadMessages,
+          loading: false,
+          error: formatError(cause, selected ? "Unable to load the complete email thread" : "Unable to open the referenced email"),
+        } : current);
+      }
+    })();
+  }, [companyID, sharedInboxes]);
+  const loadReferencedEmailMessageBody = useCallback(async (messageID: string): Promise<EmailMessage | null> => {
+    const preview = emailReferencePreview;
+    if (!preview) return null;
     try {
-      const message = entity.emailMessage ?? await getEmailMessage(
-        entity.entityID,
-        companyID,
-        sharedFolder?.folder_id || sharedInboxID || undefined,
-        { accountEmail: sharedFolder ? undefined : entity.emailAccountEmail },
-      );
-      const rowKey = emailMessageRowKey(message);
-      selectedMessageRef.current = message;
-      selectedMessageIDRef.current = message.id;
-      selectedMessageRowKeyRef.current = rowKey;
-      setMessages((current) => mergeEmailMessageIntoMessageList(current, message, {
-        companyID,
-        sharedInboxID: sharedFolder?.folder_id || sharedInboxID || undefined,
-        accountEmail: sharedFolder ? undefined : entity.emailAccountEmail,
-        mailbox: targetMailbox,
-        limit: MESSAGE_BATCH_SIZE,
-      }));
-      setSelectedMessage(message);
-      setSelectedMessageID(message.id);
-      setSelectedMessageRowKey(rowKey);
-      setSelectedMessageIDs(new Set([rowKey]));
-      setSelectionAnchorMessageID(message.id);
+      const loaded = await getEmailMessage(messageID, companyID, preview.sharedInboxID, { accountEmail: preview.accountEmail });
+      if (emailReferencePreviewRequestIDRef.current !== preview.requestID) return null;
+      setEmailReferencePreview((current) => {
+        if (current?.requestID !== preview.requestID) return current;
+        const threadMessages = mergeEmailThreadDetailMessages(current.threadMessages, [loaded]);
+        return {
+          ...current,
+          message: current.message?.id === loaded.id ? mergeEmailDetailMessage(current.message, loaded) : current.message,
+          threadMessages,
+        };
+      });
+      return loaded;
     } catch (cause) {
-      setError(formatError(cause, "Unable to open the referenced email"));
+      if (emailReferencePreviewRequestIDRef.current === preview.requestID) {
+        setEmailReferencePreview((current) => current?.requestID === preview.requestID
+          ? { ...current, error: formatError(cause, "Unable to load the email message") }
+          : current);
+      }
+      return null;
     }
-  }, [companyID, selectHomeView, sharedInboxes]);
+  }, [companyID, emailReferencePreview]);
 
   const openEmailPickerEntity = useCallback((entity: EditorEntityLink) => {
     if (entity.entityType === "email_message") {
-      void openReferencedEmail(entity);
+      openReferencedEmail(entity);
       return;
     }
     if (entity.entityType === "node") {
@@ -4790,7 +4859,7 @@ export function HomePage({
   useEffect(() => {
     const onOpenEmailReference = (event: Event) => {
       const entity = (event as CustomEvent<EditorEntityLink>).detail;
-      if (entity?.entityType === "email_message") void openReferencedEmail(entity);
+      if (entity?.entityType === "email_message") openReferencedEmail(entity);
     };
     window.addEventListener(EVENT_EDITOR_EMAIL_REFERENCE_OPEN, onOpenEmailReference);
     return () => window.removeEventListener(EVENT_EDITOR_EMAIL_REFERENCE_OPEN, onOpenEmailReference);
@@ -6136,6 +6205,20 @@ export function HomePage({
             requestAppDockTab({ kind: "node", entityID: nodeEditorOverlay.nodeID, label: nodeEditorOverlay.nodeTitle });
             closeNodeEditorOverlay();
           }}
+        />
+      )}
+      {emailReferencePreview && (
+        <EmailReferencePreviewModal
+          message={emailReferencePreview.message}
+          threadMessages={emailReferencePreview.threadMessages}
+          nodes={nodes}
+          companyID={companyID}
+          sharedInboxID={emailReferencePreview.sharedInboxID}
+          accountEmail={emailReferencePreview.accountEmail}
+          loading={emailReferencePreview.loading}
+          error={emailReferencePreview.error}
+          onLoadMessageBody={loadReferencedEmailMessageBody}
+          onClose={closeReferencedEmail}
         />
       )}
     </div>

@@ -8,7 +8,6 @@ import { CalendarInviteCard } from "../communications/CalendarInviteCard";
 import { OutboundEmailUndoBanner } from "../communications/OutboundEmailUndoBanner";
 import { isOutboundEmailUndoneError } from "../communications/outboundEmailUndo";
 import { visibleEmailAttachmentsForBody } from "../communications/emailAttachments.js";
-import { splitEmailQuotedHistory } from "../communications/emailQuotedContent.js";
 import { emailThreadMessageRenderKey, emailThreadMessageSourceLabel, normalizeEmailThreadMessages, type EmailThreadMessageCandidate } from "../communications/emailThreadMessages.js";
 import { buildReplyAllRecipients } from "../communications/emailRecipients";
 import { downloadMangoAttachment, fetchMangoAttachmentBlob, loadMangoAttachmentObjectURL, type AttachmentRequestJSON, type MangoAttachment, type MangoAttachmentResourceType, type MangoAttachmentUploadProgress, type MangoAttachmentVariantType, type MangoResourceAttachment } from "../attachments/attachmentApi";
@@ -5643,7 +5642,6 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
   const [sentReplies, setSentReplies] = useState<EmailMessage[]>([]);
   const [expandedThreadMessageID, setExpandedThreadMessageID] = useState("");
-  const [quotedHistoryMessageIDs, setQuotedHistoryMessageIDs] = useState<Set<string>>(() => new Set());
   const [toDraft, setToDraft] = useState("");
   const [ccDraft, setCcDraft] = useState("");
   const [bccDraft, setBccDraft] = useState("");
@@ -6573,11 +6571,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
               const hideInlineMessageChrome = singleMessageOnly;
               const isExpanded = singleMessageOnly || expandedThreadMessageID === threadMessageID;
               const fullThreadBody = threadMessage.body || threadMessage.snippet || "";
-              const quotedContent = splitEmailQuotedHistory(fullThreadBody);
-              const quotedHistoryVisible = quotedHistoryMessageIDs.has(threadMessageID);
-              const displayThreadBody = quotedHistoryVisible ? fullThreadBody : quotedContent.authoredBody;
-              const threadBody = emailBodyText(displayThreadBody);
-              const collapsedSnippet = emailBodyText(quotedContent.authoredBody || threadMessage.snippet || "").replace(/\s+/g, " ").trim();
+              const threadBody = emailBodyText(fullThreadBody);
+              const collapsedSnippet = emailBodyText(threadMessage.snippet || fullThreadBody).replace(/\s+/g, " ").trim();
               const useRichThreadBody = !canUseEmailSelection || /<(?:img|table|video|audio)\b|\bcid:/i.test(threadMessage.body ?? "") || (threadMessage.attachments ?? []).some((attachment) => attachment.is_inline || Boolean(attachment.content_id));
               const threadMessageIsSent = sentReplies.some((reply) => reply.id === threadMessage.id)
                 || (threadMessage.from ?? []).some((address) => Boolean(accountEmail?.trim()) && address.email.trim().toLowerCase() === accountEmail?.trim().toLowerCase())
@@ -6760,7 +6755,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                   {isExpanded && (useRichThreadBody ? (
                     <EmailBodyFrame
                       message={threadMessage}
-                      body={displayThreadBody}
+                      body={fullThreadBody}
                       apiBase={apiBase}
                       companyID={companyID}
                       sharedInboxID={sharedInboxID}
@@ -6795,32 +6790,6 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                       )}
                     </div>
                   ))}
-                  {isExpanded && quotedContent.hasQuotedHistory && (
-                    <div
-                      data-email-quoted-history-control="true"
-                      style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 7, flexWrap: "wrap", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: "rgba(248,250,252,0.78)", padding: "6px 7px", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.12), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
-                    >
-                      <span style={{ color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 700 }}>
-                        {quotedHistoryVisible ? "Full provider body is visible." : "Earlier quoted messages are hidden from this reply."}
-                      </span>
-                      <button
-                        type="button"
-                        aria-expanded={quotedHistoryVisible}
-                        onClick={() => {
-                          setSelectionDraft(null);
-                          setQuotedHistoryMessageIDs((current) => {
-                            const next = new Set(current);
-                            if (next.has(threadMessageID)) next.delete(threadMessageID);
-                            else next.add(threadMessageID);
-                            return next;
-                          });
-                        }}
-                        style={{ minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: accent, cursor: "pointer", padding: "3px 8px", fontSize: 10.5, fontWeight: 850, boxShadow: EDITOR_NEU_SHADOW }}
-                      >
-                        {quotedHistoryVisible ? "Hide quoted history" : "Show quoted history"}
-                      </button>
-                    </div>
-                  )}
                   {isExpanded && (
                     <EmailMessageAttachments
                       message={threadMessage}
