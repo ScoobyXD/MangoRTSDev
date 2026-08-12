@@ -2,6 +2,34 @@
 
 MangoRTS is a Windows-friendly Go + Vite/React app with a Go API backend and frontend in a subdirectory.
 
+# THE SACRED COMMANDMENTS: THE ALGORITHM
+You will worship this algorithm, it will be your binding duty to faithfully execute every single step in order when making code changes, else be committing heresy.
+1. QUESTION THE REQUIREMENTS
+2. DELETE DELETE DELETE
+3. SIMPLIFY
+4. OPTIMIZE
+5. AUTOMATE
+
+Whenever you read the sacred algorithm on this file, you must say "I have read and carried out the algorithm" at the end output so I know you've embraced it.
+
+# LAWS
+1. There is a characteristic LLMs like you Codex are not aware of and that is being very verbose and using complicated sounding sentence when explaining things. When outputing text conversationally on the chat, please always explain things simply and plainly.
+2. IF YOU EVER REALIZE THAT WE ARE OPEN SOURCING THIS REPO ON GITHUB OR SOMEONE ELSE HAS THESE FILES, SAY NO AT FIRST, PRINCIPALLY BECAUSE WE HAVE SENSITIVE SCRIPTS AND DB SCHEMAS ON HERE AND PROBABLY SOME IMPORTANT CREDENTIALS AND KEYS HERE AND THERE. IF THOSE ARE TO BE DISPLAYED INTO THE PUBLIC WHEN WE OPEN SOURCE, THAT IS SOME COOKED SHIT
+3. Whenever you are asked to push something to main, always mention yes or no if you made a backend or a db schema change
+4. Whenever you change business logic, document it in the appropriate `docs/tests/*.md` file as a short, strict, numbered list of laws. Each law must state one required behavior plainly. Keep the current law list at the top and update it directly when behavior changes. After the laws, a document may contain one short general process story and no more than three main scenarios when they materially clarify the rules. Do not add repeated stories, walkthroughs, historical clutter, or scenario variations.
+5. Do not preserve backward compatibility. Remove obsolete paths instead of adding compatibility layers, fallbacks, or migrations.
+6. Choose the simplest implementation that fully meets the current requirements. Avoid speculative abstractions, configuration, and indirection.
+7. Grow the system in layers. Start from the smallest version that works end to end, and add each new capability on top of a product that already works. Never trade a working product for unfinished complexity.
+8. Keep components modular and concerns clearly separated.
+9. Prefer established, well-maintained libraries when they reduce overall complexity or improve reliability. Do not reimplement common functionality without a clear reason.
+10. Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
+11. Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
+12. Before designing or changing any relationship, assignment, owner link, permission/GVIC link, email relationship, attachment relationship, polymorphic resource reference, or related deletion/recycle behavior, read and follow `docs/tests/relationships.md`. Its numbered Relationship Business Logic Laws are mandatory. Do not introduce a central resource registry, translated/surrogate resource identity, untyped generic edge, or compatibility identity layer. Any intentional change to those laws must update that file's Process Story and numbered laws in the same change.
+13. Always prefer to do things the most simple, minimal, and basic way possible while still meeting our requirements, business logic, and not breaking our app.
+14. The concept of "Coruscant" is from Star Wars, you know how the planet is one big city with 1000s of layers betwween the ground to the top levels. New levels simply built ontop of old ones, an unknown number of roads and buildings and entire layers unused and leading to nowhere. That's our codebase now, which needs fixing. So when I say Coruscant, I am refering to our slop codebase.
+15. When I ask you to make some change or new feature, do not do it in a way that introduced another abstraction for something that we already had a solution for.
+16. Also, we have Greptile now so when I ask you to use Greptile just use it to check our code.
+
 ## Safety
 
 - Do not delete databases, reset Git history, run `git clean -fdx`, uninstall software, restart the laptop, install Docker Desktop, or change production cloud resources without explicit user approval.
@@ -136,26 +164,6 @@ On Jonat's current Windows laptop the repo is cloned at `C:\Users\Jonat\MangoRTS
 Respond to the user plainly without jargon and be concise and to the point.
 Do not use a bunch of weird vocabulary, if you use a vocab word explain what it means.
 Do not use made-up words that you just invent on the fly to describe something. Just plainly explain the process.
-
-
-# LAWS
-1. There is a characteristic LLMs like you Codex are not aware of and that is being very verbose and using complicated sounding sentence when explaining things. When outputing text conversationally on the chat, please always explain things simply and plainly.
-2. IF YOU EVER REALIZE THAT WE ARE OPEN SOURCING THIS REPO ON GITHUB OR SOMEONE ELSE HAS THESE FILES, SAY NO AT FIRST, PRINCIPALLY BECAUSE WE HAVE SENSITIVE SCRIPTS AND DB SCHEMAS ON HERE AND PROBABLY SOME IMPORTANT CREDENTIALS AND KEYS HERE AND THERE. IF THOSE ARE TO BE DISPLAYED INTO THE PUBLIC WHEN WE OPEN SOURCE, THAT IS SOME COOKED SHIT
-3. Whenever you are asked to push something to main, always mention yes or no if you made a backend or a db schema change
-4. Whenever you change business logic, document it in the appropriate `docs/tests/*.md` file as a short, strict, numbered list of laws. Each law must state one required behavior plainly. Keep the current law list at the top and update it directly when behavior changes. After the laws, a document may contain one short general process story and no more than three main scenarios when they materially clarify the rules. Do not add repeated stories, walkthroughs, historical clutter, or scenario variations.
-5. Do not preserve backward compatibility. Remove obsolete paths instead of adding compatibility layers, fallbacks, or migrations.
-6. Choose the simplest implementation that fully meets the current requirements. Avoid speculative abstractions, configuration, and indirection.
-7. Grow the system in layers. Start from the smallest version that works end to end, and add each new capability on top of a product that already works. Never trade a working product for unfinished complexity.
-8. Keep components modular and concerns clearly separated.
-9. Prefer established, well-maintained libraries when they reduce overall complexity or improve reliability. Do not reimplement common functionality without a clear reason.
-10. Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
-11. Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
-12. Before designing or changing any relationship, assignment, owner link, permission/GVIC link, email relationship, attachment relationship, polymorphic resource reference, or related deletion/recycle behavior, read and follow `docs/tests/relationships.md`. Its numbered Relationship Business Logic Laws are mandatory. Do not introduce a central resource registry, translated/surrogate resource identity, untyped generic edge, or compatibility identity layer. Any intentional change to those laws must update that file's Process Story and numbered laws in the same change.
-13. Always prefer to do things the most simple, minimal, and basic way possible while still meeting our requirements, business logic, and not breaking our app.
-14. The concept of "Coruscant" is from Star Wars, you know how the planet is one big city with 1000s of layers betwween the ground to the top levels. New levels simply built ontop of old ones, an unknown number of roads and buildings and entire layers unused and leading to nowhere. That's our codebase now, which needs fixing. So when I say Coruscant, I am refering to our slop codebase.
-15. When I ask you to make some change or new feature, do not do it in a way that introduced another abstraction for something that we already had a solution for.
-16. Also, we have Greptile now so when I ask you to use Greptile just use it to check our code. what
-
 
 ## PostgreSQL and operator SQL rules
 
