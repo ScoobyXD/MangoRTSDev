@@ -176,7 +176,8 @@ export function parseEditorAttachedEmails(items: EditorProjectionItem[]): Editor
 
 export function buildEditorTextBlockChatPayload(input: {
   blockID: string;
-  createEmailTextBoxOnSend?: boolean;
+  ensureEmailTextBoxLinkOnSend?: boolean;
+  emailTextBoxColorOnSend?: string;
   parentID?: string;
   selectionSource?: "text" | "email";
   selectionBlockID?: string;
@@ -196,7 +197,8 @@ export function buildEditorTextBlockChatPayload(input: {
 }): string {
   return JSON.stringify({
     block_id: input.blockID,
-    create_email_textbox_on_send: input.createEmailTextBoxOnSend === true,
+    ensure_email_textbox_link_on_send: input.ensureEmailTextBoxLinkOnSend === true,
+    email_textbox_color_on_send: input.emailTextBoxColorOnSend?.trim().toUpperCase() ?? "",
     parent_id: input.parentID ?? "",
     selection_source: input.selectionSource ?? "text",
     selection_block_id: input.selectionBlockID?.trim() ?? "",

@@ -109,10 +109,11 @@ test("parses node text block chat projection payloads", () => {
   assert.deepEqual(messages[0].attachments, [{ id: "attachment-1", attachmentID: "attachment-1", name: "notes.csv", type: "text/csv", size: 42, dataURL: undefined }]);
 });
 
-test("first email-selection chat payload commits its pending text box only on send", () => {
+test("email-selection chat payload commits its exact text-box link only on send", () => {
   const payload = JSON.parse(buildEditorTextBlockChatPayload({
     blockID: "00000000-0000-4000-8000-000000000511",
-    createEmailTextBoxOnSend: true,
+    ensureEmailTextBoxLinkOnSend: true,
+    emailTextBoxColorOnSend: "#0ea5e9",
     selectionSource: "email",
     selectionBlockID: "00000000-0000-4000-8000-000000000511",
     selectionMessageID: "00000000-0000-4000-8000-000000000509",
@@ -125,7 +126,8 @@ test("first email-selection chat payload commits its pending text box only on se
     createdTimestamp: "2026-08-08T12:00:00.000Z",
   })) as Record<string, unknown>;
 
-  assert.equal(payload.create_email_textbox_on_send, true);
+  assert.equal(payload.ensure_email_textbox_link_on_send, true);
+  assert.equal(payload.email_textbox_color_on_send, "#0EA5E9");
   assert.equal(payload.block_id, payload.selection_block_id);
   assert.equal(payload.selection_source, "email");
 });

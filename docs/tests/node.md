@@ -13,8 +13,8 @@
 11. Every email chat belongs to one exact Node, one exact text box in that Node, and one exact email message linked to that text box.
 12. Chats about the same email message in different Nodes remain separate.
 13. Highlighting email text and opening its chat preview creates no Node, text box, email relationship, or chat row.
-14. Clicking the highlight chat action opens the chat rail, places the quote in the composer, and focuses the composer without writing to the database.
-15. Sending the first chat from an unlinked message atomically creates the exact Node-local text box, message-to-textbox relationship, and chat.
+14. Clicking the highlight chat action keeps the exact quote visibly highlighted and waits for the user to click the destination text-box chat column without writing to the database.
+15. Sending the first chat from an unlinked message atomically links the chosen existing text box or creates the first text box, then creates the exact chat; failure creates neither relationship nor chat.
 16. If a triage thread has no Node, its first sent chat atomically creates a floating Node with priority **Not Assigned**; if it has several Nodes, the user chooses the destination Node before send.
 17. Cancelling an unsent email-chat preview leaves the database unchanged.
 18. Dragging one exact email message onto a Node text box links that message; dragging a whole thread onto a text box is rejected.
@@ -36,6 +36,7 @@
 34. Concurrent identical shared-draft and stored-thread reads share one request, while a committed realtime change forces a fresh canonical read.
 35. Every attached-email thread starts collapsed when a Node opens and performs no thread-body or this Node's shared-draft read until the user opens that exact thread.
 36. Sending a chat authored by the current user moves the shared chat view to the new message at the bottom.
+37. Every saved email-selection chat renders its exact stored quote and offsets as a lasting email highlight; cancelling an unsent selection removes only its temporary highlight.
 
 Last updated: 2026-08-11
 

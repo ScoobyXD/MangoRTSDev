@@ -3,7 +3,7 @@
 1. The thread chat rail opens automatically when the selected conversation already has accessible chats; one thread-level button also opens and closes it manually.
 2. Individual email messages do not show separate chat buttons or overflow menus.
 3. Highlighting email text shows a chat action first and does not automatically fill the composer.
-4. Clicking the highlight action opens the rail, places the quote in the composer, and focuses it without writing to the database.
+4. Clicking the highlight action opens the rail, keeps the quote visibly highlighted, and waits for the user to click the exact grouping before sending without writing to the database.
 5. The thread chat rail is one scrollable view grouped only by exact Node and text box; messages sharing both remain in one group.
 6. Each chat group header shows a clickable Node icon and Node title.
 7. If the thread has several Nodes, the user chooses which Node receives a new chat; Mango never guesses.
@@ -14,6 +14,7 @@
 12. A chat send reuses the exact mailbox-scoped stored message when present, otherwise fetches only that exact provider message, and never calls triage conversion or queues remaining-thread ingestion.
 13. Sending a chat adds it to the open rail before the network request starts; success keeps that exact optimistic row, while failure removes it and restores the complete composer for retry.
 14. A later chat for an already-linked exact email message uses the normal Node text-box-chat create command only; it does not repeat email, relationship, permission, participant, or collaboration setup.
+15. Every saved highlighted-email chat renders its exact stored quote and offsets as a lasting highlight in the email body.
 
 Last updated: 2026-08-11
 

@@ -147,9 +147,14 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeSurface, /<LinkedEmailPreviewPane/);
   assert.match(nodeSurface, /const stageEmailSelectionChatTextBlock = useCallback/);
   assert.match(nodeSurface, /temporaryEmailChatBlocksRef\.current\.set\(blockID, temporaryBlock\)/);
-  assert.match(nodeSurface, /const blockID = existingBlockID \|\| stageEmailSelectionChatTextBlock\(messageID\)/);
-  assert.match(nodeSurface, /const createEmailTextBoxOnSend = temporaryEmailChatBlocksRef\.current\.has\(blockID\)/);
-  assert.match(nodeSurface, /createEmailTextBoxOnSend,/);
+  assert.match(nodeSurface, /if \(existingDestinations\.length === 0\) \{[\s\S]{0,180}stageEmailSelectionChatTextBlock\(messageID\)/);
+  assert.match(nodeSurface, /const ensureEmailTextBoxLinkOnSend = selectionAnchor\?\.source === "email"/);
+  assert.match(nodeSurface, /ensureEmailTextBoxLinkOnSend,/);
+  assert.match(nodeSurface, /const choosePendingEmailChatDestination/);
+  assert.match(nodeSurface, /data-email-chat-destination-action=\{pendingEmailChatSelection \? "true" : undefined\}/);
+  assert.match(nodeSurface, /chatHighlightsByMessageID=\{emailChatHighlightsByMessageID\}/);
+  assert.match(nodeParts, /chatHighlightsByMessageID\[storedMessageID\]/);
+  assert.doesNotMatch(nodeParts, /addEmailLocalHighlight\(selectionDraft\);\s*onSelectionChatRequest\(selectionDraft\)/);
   assert.match(nodeSurface, /cancelTemporaryEmailChatDraft\(chatBlockID, selectionAnchor\)/);
   assert.match(nodeSurface, /removeStoredEmailLocalHighlight\(emailAnchor\.messageID, emailAnchor\)/);
   assert.match(nodeSurface, /temporaryEmailChat: false/);

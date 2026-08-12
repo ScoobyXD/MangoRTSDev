@@ -29,6 +29,9 @@
 27. The rail opens automatically when the selected thread already has at least one accessible chat.
 28. A failed atomic first-chat command creates none of its Node, relationship, text-box, or chat writes and preserves the complete composer for retry.
 29. Removing one Node's relationship, text box, or chat does not remove another Node's copy of that work.
+30. A saved highlighted-email chat keeps its exact quoted range visibly highlighted in My Triage, Shared Triage, and the Node email view until the last chat using that range is removed.
+31. When a highlighted-email action has existing triage groupings, Mango waits for the user to click the exact grouping before assigning the composer destination.
+32. In a Node, a highlighted-email action waits for the user to click the exact text-box chat column; the first send atomically links the exact message to that existing text box when allowed and creates the chat, or creates neither.
 
 Last updated: 2026-08-11
 

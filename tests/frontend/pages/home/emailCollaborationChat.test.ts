@@ -219,6 +219,9 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(workspace, /\{emailChatAvailable && \([\s\S]*<EmailCollaborationChatSurface[\s\S]*active=\{emailChatVisible\}/);
   assert.doesNotMatch(workspace, /threadMessages=\{selectedThreadMessages\}/);
   assert.match(workspace, /onExistingChatsChange=\{handleExistingEmailChatsChange\}/);
+  assert.match(workspace, /onEmailChatHighlightsChange=\{setEmailChatHighlights\}/);
+  assert.match(workspace, /emailChatHighlights=\{emailChatHighlights\}/);
+  assert.match(workspace, /activeEmailSelection=\{emailSelection\}/);
   assert.match(workspace, /onOpenNode=\{openEmailChatNode\}/);
   assert.match(workspace, /data-email-chat-column-resizer="true"[\s\S]*onPointerDown=\{startEmailChatColumnResize\}[\s\S]*background: "transparent"/);
   assert.match(workspace, /resizeEmailChatColumnAtPointer\(bounds\.left, bounds\.width, clientX\)/);
@@ -226,6 +229,7 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(detail, /data-email-thread-chat-toggle="true"[\s\S]*onClick=\{onToggleEmailChat\}/);
   assert.doesNotMatch(detail, /title="Chat about this email message"|data-email-message-actions="true"/);
   assert.match(detail, /data-email-selection-chat-action="true"[\s\S]*onTextSelection\(\{ quote, startOffset, endOffset \}\)/);
+  assert.match(detail, /applyEmailBodyHighlights\(frameRef\.current\?\.contentDocument, highlights, selectionNavigation \?\? activeSelection\)/);
 
   assert.match(surface, /listEmailThreadChatGroups\(\{[\s\S]*messageID: message\.id,[\s\S]*threadID: message\.thread_id/);
   assert.doesNotMatch(surface, /listEmailCollaborations|getEmailCollaboration|ListNodeProjections|threadMessages/);
@@ -237,6 +241,7 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(surface, /sectionKeysByMessageID=\{sectionKeysByChatID\}/);
   assert.match(surface, /onOpenSectionNode=\{onOpenNode\}/);
   assert.match(surface, /sectionActionLabel="New chat"/);
+  assert.match(surface, /selectSectionOnClick=\{Boolean\(selection\)\}/);
   assert.match(surface, /selectedSectionKey=\{selectedChatGroupKey\}/);
   assert.match(surface, /composerDestinationLabel=\{composerDestinationLabel\}/);
   assert.match(surface, /reserveScrollbarGutter/);
@@ -299,6 +304,8 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(sharedChat, /sectionNodeIDsByBlockID\?: Record<string, string>/);
   assert.match(sharedChat, /sectionKeysByMessageID\?: Record<string, string>/);
   assert.match(sharedChat, /sectionActionLabel\?: string/);
+  assert.match(sharedChat, /selectSectionOnClick\?: boolean/);
+  assert.match(sharedChat, /data-chat-section-selectable=\{selectSectionOnClick \? "true" : undefined\}/);
   assert.match(sharedChat, /composerDestinationLabel\?: string/);
   assert.match(sharedChat, /data-chat-section-action="true"/);
   assert.match(sharedChat, /data-chat-section-selected=\{sectionSelected \? "true" : undefined\}/);

@@ -83,6 +83,7 @@ type EmailCollaborationChatSurfaceProps = {
   onActionSuccess: (message: string, delayedCollaboration?: CommunicationsEmailCollaboration) => void;
   onActionRequestHandled: () => void;
   onExistingChatsChange?: (hasChats: boolean) => void;
+  onEmailChatHighlightsChange?: (highlights: EmailCollaborationSelection[]) => void;
   onOpenNode?: (nodeID: string) => void;
 };
 
@@ -161,6 +162,7 @@ export function EmailCollaborationChatSurface({
   onActionSuccess,
   onActionRequestHandled,
   onExistingChatsChange,
+  onEmailChatHighlightsChange,
   onOpenNode,
 }: EmailCollaborationChatSurfaceProps) {
   const apiBase = readAuthConfig().apiBase;
@@ -182,6 +184,7 @@ export function EmailCollaborationChatSurface({
   const [selectedMentionPrincipals, setSelectedMentionPrincipals] = React.useState<MentionableCompanyUser[]>([]);
   const [replyTargetID, setReplyTargetID] = React.useState("");
   const [activeMessageID, setActiveMessageID] = React.useState("");
+  const [composerFocusRequestID, setComposerFocusRequestID] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
   const [submitting, setSubmitting] = React.useState(false);
   const loadSequenceRef = React.useRef(0);
@@ -222,6 +225,22 @@ export function EmailCollaborationChatSurface({
     startOffset: selection.startOffset,
     endOffset: selection.endOffset,
   } : undefined;
+  const emailChatHighlights = React.useMemo<EmailCollaborationSelection[]>(() => messages.flatMap((chatMessage) => {
+    const messageID = chatMessage.selectionSource === "email" ? chatMessage.selectionMessageID?.trim() ?? "" : "";
+    const quote = chatMessage.selectionQuote?.trim() ?? "";
+    const startOffset = chatMessage.selectionStart;
+    const endOffset = chatMessage.selectionEnd;
+    if (!messageID || !quote || typeof startOffset !== "number" || typeof endOffset !== "number" || endOffset <= startOffset) return [];
+    const highlight = { messageID, quote, startOffset, endOffset };
+    const providerMessageID = threadTextboxLinks.find((link) => link.email_message_id === messageID)?.provider_message_id?.trim() ?? "";
+    return providerMessageID && providerMessageID !== messageID
+      ? [highlight, { ...highlight, messageID: providerMessageID }]
+      : [highlight];
+  }), [messages, threadTextboxLinks]);
+
+  React.useEffect(() => {
+    onEmailChatHighlightsChange?.(emailChatHighlights);
+  }, [emailChatHighlights, onEmailChatHighlightsChange]);
 
   const chatGroupLabel = React.useCallback((group: CommunicationsEmailThreadChatGroup) => {
     const nodeLabel = group.node_name.trim() || "Node " + group.node_id.slice(0, 8);
@@ -1124,6 +1143,7 @@ export function EmailCollaborationChatSurface({
     setActiveTextBlockID(group.textbox_id);
     setReplyTargetID("");
     setActiveMessageID("");
+    setComposerFocusRequestID((current) => current + 1);
   }, [acceptCollaboration, chatGroupLabel, collaborations, onError, rememberSelectedChatGroup, selection, targetEmailMessageID, threadChatGroups, threadTextboxLinks]);
 
   const cancelChatGroupDestination = React.useCallback(() => {
@@ -1159,6 +1179,15 @@ export function EmailCollaborationChatSurface({
     ]);
     if (selectionChoiceKeyRef.current === choiceKey) return;
     selectionChoiceKeyRef.current = choiceKey;
+    rememberSelectedChatGroup("");
+    selectionInternalEmailMessageIDRef.current = "";
+    setActiveTextBlockID("");
+    setReplyTargetID("");
+    setActiveMessageID("");
+    if (threadChatGroups.length > 0) {
+      acceptCollaboration(null, false);
+      return;
+    }
     if (collaborations.length === 1) {
       if (collaboration?.collaboration_id !== collaborations[0].collaboration_id) {
         void selectCollaborationTarget(collaborations[0]);
@@ -1170,7 +1199,7 @@ export function EmailCollaborationChatSurface({
       return;
     }
     startNewFloatingNodeChat();
-  }, [acceptCollaboration, collaboration?.collaboration_id, collaborations, loading, selection, selectCollaborationTarget, startNewFloatingNodeChat]);
+  }, [acceptCollaboration, collaboration?.collaboration_id, collaborations, loading, rememberSelectedChatGroup, selection, selectCollaborationTarget, startNewFloatingNodeChat, threadChatGroups.length]);
 
   const selectedChatGroup = selectedChatGroupKey
     ? threadChatGroups.find((group) => emailThreadChatGroupKey(group) === selectedChatGroupKey)
@@ -1207,8 +1236,10 @@ export function EmailCollaborationChatSurface({
           <span data-email-chat-node-header="true" style={{ minWidth: 0, display: "inline-flex", alignItems: "center", gap: 7 }}>
             <ExplorerRowIcon kind="node" />
             <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {collaboration
-                ? collaborationNodeLabel(collaboration)
+              {selection && !selectedChatGroup
+                ? "Choose a chat grouping"
+                : collaboration
+                  ? collaborationNodeLabel(collaboration)
                 : collaborations.length > 1 ? "Choose a chat grouping" : message.subject?.trim() || "New email Node"}
             </span>
           </span>
@@ -1217,6 +1248,7 @@ export function EmailCollaborationChatSurface({
         sectionNodeIDsByBlockID={sectionNodeIDsByBlockID}
         sectionKeysByMessageID={sectionKeysByChatID}
         sectionActionLabel="New chat"
+        selectSectionOnClick={Boolean(selection)}
         selectedSectionKey={selectedChatGroupKey}
         composerDestinationLabel={composerDestinationLabel}
         reserveScrollbarGutter
@@ -1230,6 +1262,7 @@ export function EmailCollaborationChatSurface({
         active={active}
         currentUserID={currentUserID}
         activeMessageID={activeMessageID}
+        composerFocusRequestID={composerFocusRequestID}
         accent="#475569"
         surfaceText="#111827"
         panelBackground={EDITOR_NEU_SURFACE}

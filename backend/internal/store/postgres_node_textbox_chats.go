@@ -11,36 +11,38 @@ import (
 )
 
 type nodeTextboxChatPayload struct {
-	BlockID            string          `json:"block_id"`
-	CreateEmailTextbox bool            `json:"create_email_textbox_on_send"`
-	ParentID           string          `json:"parent_id"`
-	SelectionSource    string          `json:"selection_source"`
-	SelectionBlockID   string          `json:"selection_block_id"`
-	SelectionMessageID string          `json:"selection_message_id"`
-	SelectionQuote     string          `json:"selection_quote"`
-	SelectionStart     *int            `json:"selection_start"`
-	SelectionEnd       *int            `json:"selection_end"`
-	AuthorID           string          `json:"author_id"`
-	AuthorName         string          `json:"author_name"`
-	Message            string          `json:"message"`
-	CreatedTimestamp   string          `json:"created_timestamp"`
-	EditedTimestamp    string          `json:"edited_timestamp"`
-	Attachments        json.RawMessage `json:"attachments"`
-	EntityLinks        json.RawMessage `json:"entity_links"`
-	MentionedUserIDs   json.RawMessage `json:"mentioned_user_ids"`
-	MentionedGroupIDs  json.RawMessage `json:"mentioned_group_ids"`
+	BlockID                string          `json:"block_id"`
+	EnsureEmailTextboxLink bool            `json:"ensure_email_textbox_link_on_send"`
+	EmailTextboxColor      string          `json:"email_textbox_color_on_send"`
+	ParentID               string          `json:"parent_id"`
+	SelectionSource        string          `json:"selection_source"`
+	SelectionBlockID       string          `json:"selection_block_id"`
+	SelectionMessageID     string          `json:"selection_message_id"`
+	SelectionQuote         string          `json:"selection_quote"`
+	SelectionStart         *int            `json:"selection_start"`
+	SelectionEnd           *int            `json:"selection_end"`
+	AuthorID               string          `json:"author_id"`
+	AuthorName             string          `json:"author_name"`
+	Message                string          `json:"message"`
+	CreatedTimestamp       string          `json:"created_timestamp"`
+	EditedTimestamp        string          `json:"edited_timestamp"`
+	Attachments            json.RawMessage `json:"attachments"`
+	EntityLinks            json.RawMessage `json:"entity_links"`
+	MentionedUserIDs       json.RawMessage `json:"mentioned_user_ids"`
+	MentionedGroupIDs      json.RawMessage `json:"mentioned_group_ids"`
 }
 
-func createPostgresEmailSelectionTextboxForFirstChatTx(ctx context.Context, tx *sql.Tx, input NodeInformationInput, payload nodeTextboxChatPayload) error {
-	if !payload.CreateEmailTextbox {
+func ensurePostgresEmailSelectionTextboxLinkForFirstChatTx(ctx context.Context, tx *sql.Tx, input NodeInformationInput, payload nodeTextboxChatPayload) error {
+	if !payload.EnsureEmailTextboxLink {
 		return nil
 	}
 	textboxID := cleanUUIDText(payload.BlockID)
 	selectionTextboxID := cleanUUIDText(payload.SelectionBlockID)
 	emailMessageID := cleanUUIDText(payload.SelectionMessageID)
+	textboxColor := strings.ToUpper(strings.TrimSpace(payload.EmailTextboxColor))
 	if textboxID == "" || selectionTextboxID != textboxID || emailMessageID == "" ||
 		strings.TrimSpace(payload.ParentID) != "" || strings.ToLower(strings.TrimSpace(payload.SelectionSource)) != "email" ||
-		strings.TrimSpace(payload.SelectionQuote) == "" {
+		strings.TrimSpace(payload.SelectionQuote) == "" || !validNodeTextboxColor(textboxColor) {
 		return ErrInvalid
 	}
 	var textboxExists, nodeWideEmailExists bool
@@ -57,18 +59,26 @@ func createPostgresEmailSelectionTextboxForFirstChatTx(ctx context.Context, tx *
 )`, input.CompanyID, input.NodeID, textboxID, emailMessageID).Scan(&textboxExists, &nodeWideEmailExists); err != nil {
 		return err
 	}
-	if textboxExists || !nodeWideEmailExists {
+	if !nodeWideEmailExists {
 		return ErrInvalid
 	}
-	ref := EditorJSONDocumentRef{
-		CompanyID: input.CompanyID, ResourceType: EntityTypeNode,
-		ResourceID: input.NodeID, DocumentID: textboxID,
+	if !textboxExists {
+		ref := EditorJSONDocumentRef{
+			CompanyID: input.CompanyID, ResourceType: EntityTypeNode,
+			ResourceID: input.NodeID, DocumentID: textboxID,
+		}
+		storage, ok := postgresEditorTextboxStorageFor(ref)
+		if !ok {
+			return ErrInvalid
+		}
+		if err := insertEmptyPostgresEditorTextboxTx(ctx, tx, storage, ref); err != nil {
+			return err
+		}
 	}
-	storage, ok := postgresEditorTextboxStorageFor(ref)
-	if !ok {
-		return ErrInvalid
-	}
-	if err := insertEmptyPostgresEditorTextboxTx(ctx, tx, storage, ref); err != nil {
+	if _, err := tx.ExecContext(ctx, `update node_textboxes
+set color=coalesce(color,$4),updated_timestamp=case when color is null then now() else updated_timestamp end
+where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid and deleted_timestamp is null`,
+		input.CompanyID, input.NodeID, textboxID, textboxColor); err != nil {
 		return err
 	}
 	attachedPayload, err := json.Marshal(nodeAttachedEmailPayload{
@@ -442,7 +452,7 @@ func upsertPostgresNodeTextboxChatTx(ctx context.Context, tx *sql.Tx, input Node
 	if err := json.Unmarshal([]byte(input.Information), &rawPayload); err != nil {
 		return domain.NodeProjection{}, false, ErrInvalid
 	}
-	if err := createPostgresEmailSelectionTextboxForFirstChatTx(ctx, tx, input, rawPayload); err != nil {
+	if err := ensurePostgresEmailSelectionTextboxLinkForFirstChatTx(ctx, tx, input, rawPayload); err != nil {
 		return domain.NodeProjection{}, false, err
 	}
 	chat, err := normalizeNodeTextboxChatPayload(ctx, tx, input.CompanyID, input)
