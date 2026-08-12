@@ -12,7 +12,6 @@
 //███████████████████████
 
 // TODO: Improve error handling.
-// TODO: Annotate with proper Papaparse types.
 // TODO: Create a custom editor surface and image source for imports.
 // TODO: Determine if the document upload cap can be increased.
 // TODO: Identify duplicate imports requested on the same day.
@@ -20,6 +19,10 @@
 // TODO: Consider rate limits for uploading items.
 // TODO: Consider retries for uploading failed items.
 // TODO: Handle upload cancellation.
+// TODO: Consider implementation of an interface to support custom format extractors.
+// TODO: Analyze workChain/method chaining & settled pattern for CSV parsing.
+// TODO: Handle other image formats include data:image/ or Base64 Strings.
+
 
 
 
@@ -28,8 +31,8 @@
 //█████████████
 
 // TODO: Determine if the "Node" import from Tiptap core may be required in the future.
-import { Editor } from "@tiptap/core";
-import { Markdown } from "@tiptap/markdown";
+import { Editor, JSONContent } from "@tiptap/core";
+import { Markdown, MarkdownToken } from "@tiptap/markdown";
 
 // Helper code to allow us to determine the currently active company.
 import {
@@ -48,7 +51,7 @@ import {
 } from "../editor/tiptap/mangoTiptapDocument.js";
 
 import { 
-    type MangoTiptapExtensionOptions,
+    // type MangoTiptapExtensionOptions,
     createMangoTiptapExtensions,
     MangoAttachmentImage,
     normalizeMangoTiptapBlockIDs,
@@ -74,14 +77,14 @@ import {
 
 // Import the main request dispatcher and schema to parse responses.
 import {
-    type RequestJSONInit,
+    // type RequestJSONInit,
     createRequestJSON,
     requestJSON,
 } from "../api/requestJSON.js";
 
 import {
     type CompanyExplorerV2Row,
-} from "../folders/companyExplorerLazyApi.js";
+} from "../company-explorer/companyExplorerLazyApi.js";
 
 // Import commands to create logic gates.
 import {
@@ -95,7 +98,12 @@ import {
 } from "../company-explorer/CompanyExplorerContentModel.js";
 
 // Import the Papaparse CSV Parser.
-import Papa from "papaparse";
+import Papa, {
+    type ParseLocalConfig,
+    type ParseStepResult,
+    type ParseResult,
+    type Parser,
+} from "papaparse";
 
 
 //█████████████████████████████████
@@ -111,14 +119,14 @@ function assembleDocumentUploadPathname(resourceID: string, resourceType: string
     return `/v1/editor-json/${resourceType}/${resourceID}/documents/${documentID}?company_id=${encodeURIComponent(fetchCurrentCompanyID())}`;
 }
 
-const DEFAULT_CSV_PARSE_CONFIG = {
+export const DEFAULT_CSV_PARSE_CONFIG = {
     delimiter: ",",
     header: true,
     worker: true,
     skipEmptyLines: true,
 }
 
-type standardizedImportFields = {
+export type standardizedImportFields = {
     title: string,
     documentContent: string,
 
@@ -130,6 +138,23 @@ type standardizedImportFields = {
     // For Example: [..., greatGrandparentFolderName, grandparentFolderName, parentFolderName]
     folderHierarchy: string[]
 }
+
+const CLICKUP_API_URLS = {
+    "getAuthorizedUser": "https://api.clickup.com/api/v2/user",
+    "getAuthorizedWorkspaces": "https://api.clickup.com/api/v2/team",
+    "getWorkspacePlan": "https://api.clickup.com/api/v2/team/{team_id}/plan",
+    "searchForDocs": "https://api.clickup.com/api/v3/workspaces/{workspace_id}/docs",
+    "fetchDoc": "https://api.clickup.com/api/v3/workspaces/{workspace_id}/docs/{doc_id}",
+    "fetchPageListing": "https://api.clickup.com/api/v3/workspaces/{workspace_id}/docs/{doc_id}/page_listing",
+    "fetchPages": "https://api.clickup.com/api/v3/workspaces/{workspace_id}/docs/{doc_id}/pages",
+    "getPage": "https://api.clickup.com/api/v3/workspaces/{workspace_id}/docs/{doc_id}/pages/{page_id}"
+} as const;
+export type ClickUpAPIEndpoints = keyof typeof CLICKUP_API_URLS;
+
+export interface ISpecializedParser {
+    (parsedCSVROW: ParseStepResult) : standardizedImportFields;
+};
+
 
 //██████████████████████████████
 //██ Importer Logic Functions ██
@@ -250,7 +275,7 @@ async function convertMarkdownToMangoTiptap(markdownString: string, targetResour
     const markdownAwareMangoAttachmentImageNode = MangoAttachmentImage.extend({
 
         markdownTokenName: "image",
-        parseMarkdown: (token: any, helpers: any) => {
+        parseMarkdown: (token: MarkdownToken) => { // Also accepts "helpers"
 
             // Token attributes are provided by Marked/MarkedJS, the Markdown parsing library
             // Tiptap's Markdown parsing utility relies on.
@@ -299,6 +324,7 @@ async function convertMarkdownToMangoTiptap(markdownString: string, targetResour
 
     // Create a Mango editor and use it to parse the provided markdown into a Tiptap document.
     const mangoTiptapExtensions = createMangoTiptapExtensions(mangoTiptapExtensionOptions);
+    // TODO: Investigate editor reuse between batch imports.
     const conversionEditor = new Editor({
         extensions: [
             Markdown,
@@ -311,8 +337,11 @@ async function convertMarkdownToMangoTiptap(markdownString: string, targetResour
     if(!markdownString || markdownString === ""){
 
         let emptyDocument = createEmptyMangoTiptapDocument();
-        emptyDocument.document = normalizeMangoTiptapBlockIDs(document);
+
+        // TODO: Identify if the output of a new document creation still requires block ID normalization.
+        emptyDocument.document = normalizeMangoTiptapBlockIDs(emptyDocument.document);
         return emptyDocument;
+
     }
 
     else{
@@ -321,24 +350,66 @@ async function convertMarkdownToMangoTiptap(markdownString: string, targetResour
 
         // Walk through the Tiptap document to fetch and upload images. As nodes can be nested, append
         // nested items to the queue.
-        let nodeQueue = tiptapDocument.content ?? [];
+
+        // Image nodes need to be "hoisted" to the root level of the document content, as not all nodes are allowed as children.
+        // Here, we keep track of all top-level nodes and children "mangoAttachmenImage" nodes in the order encountered.
+        let topLevelNodesInOrderOfEncounter = [];
+
+        type depthTrackedNode = {
+            node: JSONContent,
+            parent: JSONContent | null;
+        }
+
+        // Mark all of the nodes in the top level of the document as root nodes.
+        let nodeQueue = (tiptapDocument.content ?? []).map( (item: JSONContent): depthTrackedNode => ({node: item, parent: null}) );
         while(nodeQueue.length > 0){
-            let currentNode = nodeQueue.shift();
-            
-            if(currentNode.content){
-                nodeQueue.push(...(currentNode.content));
+            let currentDepthTrackedNode = nodeQueue.shift();
+            let currentNode = currentDepthTrackedNode?.node;
+
+            if(!currentNode || !currentDepthTrackedNode){
+                throw new Error("Something went wrong while parsing image nodes.");
             }
 
-            if(currentNode && currentNode.type == "mangoAttachmentImage"){
-                const href = currentNode.attrs.attachmentId;
+            // If the current node is at the root, push it into the top-level document array.
+            if((!currentDepthTrackedNode.parent)){
+                topLevelNodesInOrderOfEncounter.push(currentNode);
+            }
+            
+            // TODO: Verify this search scenario is DFS and implement a more standard searching method.
+            if(currentNode.content){
+                nodeQueue = [
+                    ...currentNode.content.map( (item: JSONContent): depthTrackedNode => ({node: item, parent: currentNode}) ),
+                    ...nodeQueue,
+                ];
+            }
 
-                const imageContentJSON = fetchAndUploadImage(href, targetResourceID, targetResourceType);
+            if(currentNode.type === "mangoAttachmentImage"){
+
+                // Remove the current node from it's parent if it has one.
+                if(currentDepthTrackedNode.parent){
+                    const currentNodeIndexInParent = currentDepthTrackedNode.parent.content.indexOf(currentNode);
+                    currentDepthTrackedNode.parent.content.splice(currentNodeIndexInParent, 1);
+                }
+
+                const href = currentNode?.attrs?.attachmentId;
+
+                if(!href){
+                    throw new Error("HREF link improperly returned.");
+                }
+                
+                const imageContentJSON = await fetchAndUploadImage(href, targetResourceID, targetResourceType);
 
                 // TODO: Develop a method to stay in sync with the format of Mango Image JSONs.
                 currentNode.attrs = imageContentJSON.attrs;
 
+                // Push the node into the top-level document array.
+                topLevelNodesInOrderOfEncounter.push(currentNode);
+
             }
         }
+
+        // Use the updated list of top-level nodes as the document content.
+        tiptapDocument.content = topLevelNodesInOrderOfEncounter;
 
         // Finally, convert the Tiptap-format document into a Mango-Tiptap document.
         return convertTiptapToMangoTiptap(tiptapDocument);
@@ -348,7 +419,7 @@ async function convertMarkdownToMangoTiptap(markdownString: string, targetResour
 
 // Wraps Tiptap documents in a Mango wrapper and assigns Mango block IDs
 // for Tiptap-Mango compatability.
-function convertTiptapToMangoTiptap(document: any): MangoTiptapDocument {
+function convertTiptapToMangoTiptap(document: JSONContent): MangoTiptapDocument {
 
     let convertedDocument = createEmptyMangoTiptapDocument();
 
@@ -363,9 +434,9 @@ function convertTiptapToMangoTiptap(document: any): MangoTiptapDocument {
 
 // Newly created folders are placed at the top of the explorer list.
 // Returns the "entity_id" of the newly created row.
-async function createFolder(folderName: string, parentFolderID: string=""): Promise<string>{
+export async function createFolder(folderName: string, parentFolderID: string=""): Promise<string>{
 
-    let folderCreationStatus = await requestJSON<CompanyExplorerV2Row>(API_FOLDER_CREATION_PATHNAME, {
+    let folderCreationStatus = await requestJSON<CompanyExplorerV2Row>(fetchApiBase(), API_FOLDER_CREATION_PATHNAME, {
         method: "POST",
         body: JSON.stringify({
             company_id: fetchCurrentCompanyID(),
@@ -397,7 +468,7 @@ async function createLogicGate(logicGateTitle: string, parentFolderID: string){
     //     return <T>(path: string, init?: RequestInit): Promise<T> => requestJSON<T>(fetchApiBase(), path, init as RequestJSONInit);
     // }
 
-    const commandStatus = await createWorkspaceEntityBatchCommand<CompanyExplorerWorkspaceEntityBatchResponse>({
+    const batchResponse = await createWorkspaceEntityBatchCommand<CompanyExplorerWorkspaceEntityBatchResponse>({
         companyID: fetchCurrentCompanyID(),
         entityKind: "logic_gate",
         folderID: parentFolderID,
@@ -426,22 +497,29 @@ async function createLogicGate(logicGateTitle: string, parentFolderID: string){
         //     b_position: "Child"
         // }],
 
-        // TODO: Cle
+        // TODO: Analyze usage.
         // requestJSON: bindTwoCallToThreeCallRequestJSON,
         requestJSON: createRequestJSON(fetchApiBase()),
     });
 
-    const logicGateIDs = commandStatus.logicgates;
+    const logicGateRecords = batchResponse["logic_gates"];
+
+    const logicGateID = logicGateRecords?.[0]?.logic_gate_id;
+
+    if(!logicGateID){
+        throw new Error("Oops, something went wrong during logic gate creation and a new logic gate ID wasn't returned!");
+    }
 
     // TODO: Before returning, better understand the return type of a logic gate fetch.
-    return logicGateIDs?.[0];
+    return logicGateID;
+
 }
 
-async function attachDocumentToResource(resourceID: string, document: MangoTiptapDocument, resourceType: string="logic-gate", documentID: string="logic-gate-overview"){
+async function attachDocumentToResource(resourceID: string, document: MangoTiptapDocument, resourceType: string="logic_gate", documentID: string="logic-gate-overview"){
 
     const requestURL = assembleDocumentUploadPathname(resourceID, resourceType, documentID);
 
-    const requestStatus = await requestJSON(requestURL, {
+    const requestStatus = await requestJSON(fetchApiBase(), requestURL, {
         method: "POST",
         body: JSON.stringify({
             operation_id: generateStableInformationID(),
@@ -454,13 +532,25 @@ async function attachDocumentToResource(resourceID: string, document: MangoTipta
             annotations: [],
         }),
     });
+
+    return requestStatus;
 }
 
-async function countLinesInCSV(csv: File): Promise<number>{
+export async function locateCSVHeaders(csv: File): Promise<string[]>{
+    const headersOnlyCSVConfig = {
+        ...DEFAULT_CSV_PARSE_CONFIG,
+        preview: 2,
+    };
+
+    return (await wrappedCSVParse(csv, headersOnlyCSVConfig))?.meta?.fields
+
+}
+
+export async function countLinesInCSV(csv: File): Promise<number>{
 
     let lineCount = 0
 
-    function stepCount(results: any, parser: any): void{
+    function stepCount(): void{
         lineCount += 1;
     }
 
@@ -477,11 +567,12 @@ async function countLinesInCSV(csv: File): Promise<number>{
 }
 
 // TODO: Identify optimal type of parse config.
-function wrappedCSVParse(csv: File, parseConfig: any): Promise<any>{
+export function wrappedCSVParse(csv: File, parseConfig: ParseLocalConfig): Promise<ParseResult>{
 
-    return new Promise((resolve, reject) => {
+    // TODO: Add proper error handling.
+    return new Promise((resolve) => {
 
-        function parsedCSVComplete(results: any, file: any){
+        function parsedCSVComplete(results: ParseResult){ // Also provides "file".
             resolve(results);
         }
 
@@ -497,140 +588,200 @@ function wrappedCSVParse(csv: File, parseConfig: any): Promise<any>{
 
 // A closure that parses a single line of a CSV using a parser specialized for the format of the
 // current CSV. All imported items will be stored under a single parent folder.
-async function setupSpecializedParserAndDisplayProgressCall(specializedParser: (parsedCSVROW: any) => standardizedImportFields, rootImportFolder: string){
+// TODO: Eventually, completion should be awaitable outside of this function. In the meantime, completion is triggered when a target number of lines is parsed.
+export function setupSpecializedParserAndDisplayProgressCall(specializedParser: ISpecializedParser, rootImportFolderID: string, targetLinesParsed: number, stepCallback:(itemName: string) => void, completionCallback: () => void){
 
     // Keep track of the name and Mango ID of folders that have been made within the import folder.
+    // NOTE: Folders should be keyed under full path so that identically named folders under different paths don't collapse into one.
+    //       For example, with /Management/Documents/... and /Engineering/Documents/... all child documents would be stored in the 
+    //       documents folder that appears first.
     let createdFolders: Record<string, string> = {};
 
-    return async (results: any, parser: any) => {
+    // Keep track of the number of lines being parsed at once.
+    let activeParsers = 0;
+
+    // TODO: Remove this when the number of parsed lines is not used as the end condition.
+    let numberOfParsedLines = 0;
+
+    return async (results: ParseStepResult, parser: Parser) => {
 
         // Pause the parser to handle the current input.
         parser.pause();
+        activeParsers += 1;
 
         // TODO: Enable Error Handling
         if(results.errors.length > 0) {
             console.error(results.errors);
         }
 
-        const standardizedOutput = specializedParser(results.data);
+        // TODO: Consider only parsing the results.data, and properly annotating types.
+        //       Specialized parsers should not generally need more information.
+        const standardizedOutput = specializedParser(results);
 
         const logicGateName = standardizedOutput.title ?? "Imported Document";
         const documentContent = standardizedOutput.documentContent;
         const folderHierarchy = standardizedOutput.folderHierarchy;
 
+        // TODO: Cleanup this code handling to be clearer and more concise. Different additions have accumulated to accomadate more cases.
         // Work through the folder hierarchy from top down, creating higher-level folders before lower-level folders.
         // Already created folders are cached.
+        let mostRecentFolderID = null;
         for(let i = 0; i < folderHierarchy.length; i++){
             
             const currentFolderName = folderHierarchy[i];
+            const currentFolderHierarchy = folderHierarchy.slice(0, (i) + 1).join(">");
 
             // If the current folder is at the top of the folder hierarchy, make it directly under the root import folder.
             // Otherwise, make it underneath the folder located one level up in the hierarchy.
-            const parentFolderName = (i == 0) ? rootImportFolder : folderHierarchy[i - 1];
-
-            // Create the parent folder if it hasn't already been created.
-            if(!(currentFolderName in createdFolders)){
-                const newFolderID = await createFolder(currentFolderName, parentFolderName);
-                createdFolders[currentFolderName] = newFolderID;
+            const parentFolderHierarchy = (i == 0) ? null : folderHierarchy.slice(0, (i - 1) + 1).join(">");
+            const parentFolderID = parentFolderHierarchy ? createdFolders[parentFolderHierarchy] : rootImportFolderID;
+            
+            // If the parent folder ID doesn't exist even after looking it up, something went wrong during it's initial creation.
+            if(!parentFolderID){
+                throw new Error("Something went wrong during folder creation and a parent folder couldn't be found.");
             }
+
+            // Create the current folder if it hasn't already been created.
+            if(!(currentFolderHierarchy in createdFolders)){
+                const newFolderID = await createFolder(currentFolderName, parentFolderID);
+                createdFolders[currentFolderHierarchy] = newFolderID;
+            }
+
+            mostRecentFolderID = createdFolders[currentFolderHierarchy];
         }
 
         // Now identify the parent folder of the current logic gate being created, the last folder in the hierarchy.
         // If, for some reason, no folders were given, place the new node directly under the root import folder.
-        const currentParentFolder = folderHierarchy.at(-1) ?? rootImportFolder;
+        const currentParentFolder = mostRecentFolderID ?? rootImportFolderID; // Originally: folderHierarchy.at(-1);
 
         // Create the containing logic gate.
-        const newLogicGateID = await createLogicGate(logicGateName, createdFolders[currentParentFolder]);
+        const newLogicGateID = await createLogicGate(logicGateName, currentParentFolder);
 
         // Parse the document content and attach it to the logic gate.
         const document = await convertMarkdownToMangoTiptap(documentContent, newLogicGateID, "logic_gate");
-        await attachDocumentToResource(newLogicGateID, document)
+        await attachDocumentToResource(newLogicGateID, document);
 
 
-        // Update display progress.
+        // TODO: Update display progress here.
 
-        // Resume parsing.
-        parser.resume
+        // TODO: Remove this when the number of parsed lines is not used as the end condition.
+        // Resume parsing if no other parsers are active.
+        activeParsers -= 1;
+        if(activeParsers <= 0){
+            parser.resume();
+        }
+
+        // TODO: Remove when the number of parsed lines isn't used as the end condition.
+        numberOfParsedLines += 1;
+        stepCallback(logicGateName);
+        if(numberOfParsedLines >= targetLinesParsed){
+            completionCallback();
+        }
+
     }
 }
 
-function parseLinearTask(parsedCSVRow: any): standardizedImportFields{
+// TODO: Remove .data accessors when the type of the .data can be determined and parsed in directly.
+export function parseLinearTask(parsedCSVRow: ParseStepResult): standardizedImportFields{
     return {
-        title: parsedCSVRow["Title"],
-        documentContent: parsedCSVRow["Description"],
-        folderHierarchy: [parsedCSVRow["Team"]],
+        title: parsedCSVRow.data["Title"],
+        documentContent: parsedCSVRow.data["Description"],
+        folderHierarchy: [parsedCSVRow.data["Team"]],
     };
 }
 
-function parseClickUpTask(parsedCSVRow: any): standardizedImportFields{
+// TODO: Remove .data accessors when the type of the .data can be determined and parsed in directly.
+export function parseClickUpTask(parsedCSVRow: ParseStepResult): standardizedImportFields{
 
     // Split the folder hierarchy into pieces and remove any surrounding whitespace (done using "map").
-    const folderHierarchy = parsedCSVRow["Space Name"].split(">").map( (value: string) => { value.trim(); } );
+    const folderHierarchy = parsedCSVRow.data["Space Name"]?.split(">")?.map( (value: string) => value.trim() ) || [];
 
     return {
-        title: parsedCSVRow["Title"],
-        documentContent: parsedCSVRow["Description"],
+        title: parsedCSVRow.data["Title"],
+        documentContent: parsedCSVRow.data["Description"],
         folderHierarchy,
     };
 
 }
 
-async function parseAndImport(csv: File){
+export function determineCSVType(headers: string[]): {importSource: string|null, parser: ISpecializedParser|null}{
 
-    let importSource = "";
-
-    // Get and Parse the Current Import Date
-    // TODO: Ensure ISO date formatting sufficiently matches local time expectations.
-    const currentISODate = new Date();
-    const currentDate = currentISODate.toISOString().split("T")[0];
-
-    // Read the headers of the CSV.
-    const headersOnlyCSVConfig = {
-        ...DEFAULT_CSV_PARSE_CONFIG,
-        preview: 2,
-    }
-
-    const headers = (await wrappedCSVParse(csv, headersOnlyCSVConfig))?.meta?.fields;
-
-    // TODO: Improve error handling and reporting.
-    if(!headers){
-        throw new Error("Headers couldn't be found for this CSV. At the moment we're unable to tell where it came from.");
-    }
-
-    // Branch based on the type of CSV Imported.
-    let specializedTaskParser;
     if(headers.includes("ID") && headers.includes("Team") && headers.includes("Title")){
-        importSource = "Linear";
-        specializedTaskParser = parseLinearTask;
-        
+        return {
+            importSource: "Linear",
+            parser: parseLinearTask,
+        };
     }
 
     else if(headers.includes("Task ID") && headers.includes("Task Custom ID") && headers.includes("Task Link")){
-        importSource = "ClickUp";
-        specializedTaskParser = parseClickUpTask;
+        return {
+            importSource: "ClickUp",
+            parser: parseClickUpTask,
+        };
     }
 
     else {
-        throw new Error("Oops, we are unable to read the type of file you provided at the moment!");
-        // TODO: Display an error, as other CSV formats are not currently supported.
+        return {
+            importSource: null,
+            parser: null,
+        };
     }
 
-    // Setup a parent folder for the export.
-    const folderName = `${currentDate} ${importSource} Import`;
-    const importFolderID = await createFolder(folderName);
-
-    // Prepare for the full parse.
-    const fullCSVParseConfig = {
-        ...DEFAULT_CSV_PARSE_CONFIG,
-        step: setupSpecializedParserAndDisplayProgressCall(specializedTaskParser, importFolderID),
-
-        // TODO: A cleaner adapter may be required to work with both promises and Papaparse.
-        // Disable workers to allow pausing of the parser for compatability with a promise-based step-function.
-        worker: false,
-
-    };
-
-    await wrappedCSVParse(csv, fullCSVParseConfig);
-    // TODO: Report Results.
-
 }
+
+
+// // TODO: Standardize the format of different importer methods and unify any repeated logic.
+// export async function fetchThroughAPIAndImport(APIToken: string){
+
+//     // TODO: Store import source as a higher-level enum.
+//     let importSource = "";
+
+//     // Get and Parse the Current Import Date
+//     // TODO: Ensure ISO date formatting sufficiently matches local time expectations.
+//     const currentISODate = new Date();
+//     const currentDate = currentISODate.toISOString().split("T")[0];
+
+//     // Determine the type of the API token provided
+//     if(APIToken.startsWith("pat_")){
+//         importSource = "ClickUp";
+//     } else{
+//         // TODO: Replace error throw with visual feedback on the interface.
+//         throw new Error("Oops! We're unable to handle this type of API key right now.");
+//     }
+
+//     // TODO: Import source is displayable.
+
+//     // TODO: Document common steps.
+//     // Handle the API import based on the identified source.
+//     if(importSource == "ClickUp"){
+
+//         // Check API Key Permissions.
+//         const options = {
+//             method: "GET",
+//             headers: {
+//                 accept: "application/json",
+//                 Authorization: APIToken,
+//             },
+//         };
+//         const response = await fetch(CLICKUP_API_URLS["getAuthorizedWorkspaces"], options)
+//             .then(res => res.json())
+//             // .then(res => console.log(res))
+//             .catch(err => console.error(err));
+
+        
+//         // TODO: Implement workspace selection in the UI. For now, the first workspace is selected.
+//         let selectedWorkspace = response?.teams?.id;
+
+//         // TODO: Catch and display authentication errors.
+//         if(!selectedWorkspace){
+//             throw new Error("Oops, something went wrong while testing the provided API credential.");
+//         }
+
+
+
+
+//     }
+
+//     // TODO: Report Results.
+
+// }
