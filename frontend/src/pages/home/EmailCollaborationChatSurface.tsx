@@ -1029,8 +1029,17 @@ export function EmailCollaborationChatSurface({
       setSectionLabelsByBlockID((current) => ({ ...current, [sectionKey]: message.subject?.trim() || "Email Node" }));
       expireLocalChatEchoSuppression(pending.chat.id);
       invalidateNodeRecordStoreCaches(apiBase, companyID, created.node_id);
+      let refreshFailed = false;
+      try {
+        await loadThreadChats(created, loadSequenceRef.current);
+      } catch {
+        refreshFailed = true;
+      }
       onClearSelection();
       onSuccess();
+      if (refreshFailed) {
+        onError("Chat was saved, but its destination could not refresh. Reload this email before sending another highlighted chat.");
+      }
     } catch (cause) {
       rollBackPendingChat(pending.chat.id);
       setDraft(originalDraft);
@@ -1041,7 +1050,7 @@ export function EmailCollaborationChatSurface({
     } finally {
       setSubmitting(false);
     }
-  }, [acceptCollaboration, accountEmail, activeTextBlockID, apiBase, buildPendingChat, chatGroupLabel, collaboration, collaborationTargetMessage, collaborations, companyID, draft, draftAttachments, expireLocalChatEchoSuppression, importIntoExistingNode, message.subject, message.thread_id, messages, newNodeDestinationSelected, onClearSelection, onError, onSuccess, replyTargetID, rollBackPendingChat, sectionKeysByChatID, selectedChatGroupKey, selectedChatNodeID, selectedMentionPrincipals, selection, sharedInboxID, showPendingChat, submitExistingTextBoxChat, submitting, targetEmailMessageID, threadChatGroups, threadTextboxLinks]);
+  }, [acceptCollaboration, accountEmail, activeTextBlockID, apiBase, buildPendingChat, chatGroupLabel, collaboration, collaborationTargetMessage, collaborations, companyID, draft, draftAttachments, expireLocalChatEchoSuppression, importIntoExistingNode, loadThreadChats, message.subject, message.thread_id, messages, newNodeDestinationSelected, onClearSelection, onError, onSuccess, replyTargetID, rollBackPendingChat, sectionKeysByChatID, selectedChatGroupKey, selectedChatNodeID, selectedMentionPrincipals, selection, sharedInboxID, showPendingChat, submitExistingTextBoxChat, submitting, targetEmailMessageID, threadChatGroups, threadTextboxLinks]);
   const attachFiles = React.useCallback(async (files: FileList | File[]) => {
     const candidates = Array.from(files);
     if (candidates.length === 0) return;
