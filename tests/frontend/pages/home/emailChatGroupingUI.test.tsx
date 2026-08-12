@@ -84,23 +84,32 @@ test("highlighted-email destinations render nested Node surfaces and select, fla
       const [selectedNodeID, setSelectedNodeID] = React.useState("");
       const [flashedSectionKey, setFlashedSectionKey] = React.useState("");
       const [flashedNodeID, setFlashedNodeID] = React.useState("");
-      const destinationLabel = selectedSectionKey === "node-a:textbox-a"
-        ? "Alpha Node · First grouping"
-        : selectedSectionKey === "node-b:textbox-b"
-          ? "Beta Node · Second grouping"
-          : selectedNodeID ? `${selectedNodeID === "node-a" ? "Alpha Node" : "Beta Node"} · New grouping` : undefined;
+      const [destinationError, setDestinationError] = React.useState("");
+      const destination = selectedSectionKey
+        ? {
+          kind: "existing_node_existing_textbox" as const,
+          nodeID: selectedNodeID,
+          nodeName: selectedNodeID === "node-a" ? "Alpha Node" : "Beta Node",
+        }
+        : selectedNodeID ? {
+          kind: "existing_node_new_textbox" as const,
+          nodeID: selectedNodeID,
+          nodeName: selectedNodeID === "node-a" ? "Alpha Node" : "Beta Node",
+        } : undefined;
       const selectSection = (sectionKey: string) => {
         const nodeID = sectionKey.startsWith("node-a:") ? "node-a" : "node-b";
         setSelectedNodeID(nodeID);
         setSelectedSectionKey(sectionKey);
         setFlashedNodeID(nodeID);
         setFlashedSectionKey(sectionKey);
+        setDestinationError("");
       };
       const selectNode = (nodeID: string) => {
         setSelectedNodeID(nodeID);
         setSelectedSectionKey("");
         setFlashedNodeID(nodeID);
         setFlashedSectionKey("");
+        setDestinationError("");
       };
       return (
         <ChatPane
@@ -126,8 +135,17 @@ test("highlighted-email destinations render nested Node surfaces and select, fla
           selectedNodeSectionID={selectedNodeID}
           flashedSectionKey={flashedSectionKey}
           flashedNodeSectionID={flashedNodeID}
-          composerDestinationLabel={destinationLabel}
+          composerDestination={destination}
+          composerDestinationError={destinationError}
           reserveScrollbarGutter
+          selectionAnchor={{
+            blockID: "email-chat",
+            source: "email",
+            messageID: "email-message-1",
+            quote: "Highlighted routing text",
+            startOffset: 0,
+            endOffset: 24,
+          }}
           draft="Ready to send"
           companyUsers={[]}
           draftAttachments={[]}
@@ -158,8 +176,15 @@ test("highlighted-email destinations render nested Node surfaces and select, fla
           onClearComposerDestination={() => {
             setSelectedSectionKey("");
             setSelectedNodeID("");
+            setDestinationError("");
           }}
-          onSubmit={() => submittedDestinations.push(selectedSectionKey)}
+          onSubmit={() => {
+            if (!selectedSectionKey && !selectedNodeID) {
+              setDestinationError("Please select a destination.");
+              return;
+            }
+            submittedDestinations.push(selectedSectionKey);
+          }}
         />
       );
     }
@@ -175,6 +200,16 @@ test("highlighted-email destinations render nested Node surfaces and select, fla
     assert.equal(messageScroller.style.scrollbarGutter, "stable");
     assert.equal(messageScroller.style.paddingRight, "16px");
 
+    const highlightField = container.querySelector<HTMLElement>('[data-chat-composer-highlight="true"]');
+    const destinationField = container.querySelector<HTMLElement>('[data-chat-composer-destination="true"]');
+    assert.ok(highlightField);
+    assert.ok(destinationField);
+    assert.equal(
+      Boolean(highlightField.compareDocumentPosition(destinationField) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING),
+      true,
+      "highlighted text renders above its destination",
+    );
+
     const nodeSections = Array.from(container.querySelectorAll<HTMLElement>('[data-email-chat-node-section="true"]'));
     assert.deepEqual(nodeSections.map((section) => section.dataset.chatNodeId), ["node-a", "node-b"]);
     assert.equal(nodeSections[0]?.querySelectorAll('[data-email-chat-message-section="true"]').length, 1);
@@ -184,14 +219,16 @@ test("highlighted-email destinations render nested Node surfaces and select, fla
     await act(async () => betaNodeDestination.click());
     assert.equal(container.querySelector('[data-chat-node-selected="true"]')?.getAttribute("data-chat-node-id"), "node-b");
     assert.equal(container.querySelector('[data-email-chat-node-section="true"][data-chat-destination-flash="true"]')?.getAttribute("data-chat-node-id"), "node-b");
-    assert.equal(container.querySelector('[data-chat-composer-destination="true"]')?.textContent?.includes("New chat to Beta Node · New grouping"), true);
+    assert.equal(container.querySelector('[data-chat-composer-destination="true"]')?.textContent?.includes("Beta Node"), true);
+    assert.equal(container.querySelector('[data-chat-composer-destination="true"]')?.textContent?.includes("Existing Node · New Text Box"), true);
 
     const articles = Array.from(container.querySelectorAll<HTMLElement>('[role="article"]'));
     assert.deepEqual(articles.map((article) => article.dataset.nodeChatMessageId), ["chat-1", "chat-3", "chat-2", "chat-4"]);
     assert.ok(articles[0]?.querySelector('[data-node-chat-message-id="chat-3"]'), "the reply remains nested under its parent");
 
     await act(async () => articles[3]?.click());
-    assert.equal(container.querySelector('[data-chat-composer-destination="true"]')?.textContent?.includes("New chat to Beta Node · Second grouping"), true);
+    assert.equal(container.querySelector('[data-chat-composer-destination="true"]')?.textContent?.includes("Beta Node"), true);
+    assert.equal(container.querySelector('[data-chat-composer-destination="true"]')?.textContent?.includes("Existing Node · Existing Text Box"), true);
     assert.equal(container.querySelector('[data-chat-section-selected="true"]')?.getAttribute("data-chat-section-key"), "node-b:textbox-b");
     assert.equal(container.querySelector('[data-email-chat-message-section="true"][data-chat-destination-flash="true"]')?.getAttribute("data-chat-section-key"), "node-b:textbox-b");
 
@@ -199,7 +236,8 @@ test("highlighted-email destinations render nested Node surfaces and select, fla
     assert.ok(firstNewChat);
     await act(async () => firstNewChat.click());
     assert.equal(container.querySelector('[data-chat-section-selected="true"]')?.textContent?.includes("First grouping"), true);
-    assert.equal(container.querySelector('[data-chat-composer-destination="true"]')?.textContent?.includes("New chat to Alpha Node · First grouping"), true);
+    assert.equal(container.querySelector('[data-chat-composer-destination="true"]')?.textContent?.includes("Alpha Node"), true);
+    assert.equal(container.querySelector('[data-chat-composer-destination="true"]')?.textContent?.includes("Existing Node · Existing Text Box"), true);
 
     const composer = container.querySelector<HTMLTextAreaElement>("textarea");
     assert.ok(composer);
@@ -210,7 +248,11 @@ test("highlighted-email destinations render nested Node surfaces and select, fla
     assert.ok(cancel);
     await act(async () => cancel.click());
     assert.equal(container.querySelector('[data-chat-section-selected="true"]'), null);
-    assert.equal(container.querySelector('[data-chat-composer-destination="true"]'), null);
+    assert.equal(container.querySelector('[data-chat-composer-destination="true"]')?.textContent?.includes("Select a Node or text-box grouping"), true);
+
+    await act(async () => composer.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+    assert.equal(container.querySelector('[data-chat-composer-destination-invalid="true"]')?.textContent?.includes("Please select a destination."), true);
+    assert.deepEqual(submittedDestinations, ["node-a:textbox-a"]);
   } finally {
     if (mountedRoot) await act(async () => mountedRoot?.unmount());
     for (const restore of restores.reverse()) restore();

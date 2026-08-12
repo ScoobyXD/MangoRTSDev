@@ -182,6 +182,8 @@ export function EmailCollaborationChatSurface({
   const [threadTextboxLinks, setThreadTextboxLinks] = React.useState<CommunicationsEmailThreadTextboxLink[]>([]);
   const [selectedChatGroupKey, setSelectedChatGroupKey] = React.useState("");
   const [selectedChatNodeID, setSelectedChatNodeID] = React.useState("");
+  const [newNodeDestinationSelected, setNewNodeDestinationSelected] = React.useState(false);
+  const [selectionDestinationError, setSelectionDestinationError] = React.useState("");
   const [destinationFlash, setDestinationFlash] = React.useState({ nodeID: "", sectionKey: "" });
   const [draft, setDraft] = React.useState("");
   const [draftAttachments, setDraftAttachments] = React.useState<EditorChatAttachment[]>([]);
@@ -421,6 +423,8 @@ export function EmailCollaborationChatSurface({
       setThreadTextboxLinks([]);
       setSelectedChatGroupKey("");
       setSelectedChatNodeID("");
+      setNewNodeDestinationSelected(false);
+      setSelectionDestinationError("");
       setDestinationFlash({ nodeID: "", sectionKey: "" });
       setReplyTargetID("");
       setActiveTextBlockID("");
@@ -924,6 +928,10 @@ export function EmailCollaborationChatSurface({
       await submitExistingTextBoxChat(replyCollaboration, replyGroup.textbox_id, replyEmailMessageID);
       return;
     }
+    if (selection && !newNodeDestinationSelected && !selectedChatGroupKey && !selectedChatNodeID) {
+      setSelectionDestinationError("Please select a destination.");
+      return;
+    }
     const selectedGroup = selectedChatGroupKey
       ? threadChatGroups.find((group) => emailThreadChatGroupKey(group) === selectedChatGroupKey)
       : undefined;
@@ -950,7 +958,7 @@ export function EmailCollaborationChatSurface({
       }
       return;
     }
-    if (collaborations.length > 1 && !collaboration) {
+    if (collaborations.length > 1 && !collaboration && !newNodeDestinationSelected) {
       onError("Choose a chat grouping or another destination before sending this chat.");
       return;
     }
@@ -1033,7 +1041,7 @@ export function EmailCollaborationChatSurface({
     } finally {
       setSubmitting(false);
     }
-  }, [acceptCollaboration, accountEmail, activeTextBlockID, apiBase, buildPendingChat, chatGroupLabel, collaboration, collaborationTargetMessage, collaborations, companyID, draft, draftAttachments, expireLocalChatEchoSuppression, importIntoExistingNode, message.subject, message.thread_id, messages, onClearSelection, onError, onSuccess, replyTargetID, rollBackPendingChat, sectionKeysByChatID, selectedChatGroupKey, selectedMentionPrincipals, selection, sharedInboxID, showPendingChat, submitExistingTextBoxChat, submitting, targetEmailMessageID, threadChatGroups, threadTextboxLinks]);
+  }, [acceptCollaboration, accountEmail, activeTextBlockID, apiBase, buildPendingChat, chatGroupLabel, collaboration, collaborationTargetMessage, collaborations, companyID, draft, draftAttachments, expireLocalChatEchoSuppression, importIntoExistingNode, message.subject, message.thread_id, messages, newNodeDestinationSelected, onClearSelection, onError, onSuccess, replyTargetID, rollBackPendingChat, sectionKeysByChatID, selectedChatGroupKey, selectedChatNodeID, selectedMentionPrincipals, selection, sharedInboxID, showPendingChat, submitExistingTextBoxChat, submitting, targetEmailMessageID, threadChatGroups, threadTextboxLinks]);
   const attachFiles = React.useCallback(async (files: FileList | File[]) => {
     const candidates = Array.from(files);
     if (candidates.length === 0) return;
@@ -1139,25 +1147,6 @@ export function EmailCollaborationChatSurface({
     return node?.name?.trim() || "Node " + item.node_id.slice(0, 8);
   };
 
-  const selectCollaborationTarget = React.useCallback(async (nextCollaboration: CommunicationsEmailCollaboration) => {
-    pendingNewNodeIDRef.current = "";
-    acceptCollaboration(nextCollaboration);
-    setReplyTargetID("");
-    const requestSequence = loadSequenceRef.current + 1;
-    loadSequenceRef.current = requestSequence;
-    setLoading(true);
-    try {
-      await loadThreadChats(nextCollaboration, requestSequence);
-      if (loadSequenceRef.current === requestSequence) onSuccess();
-    } catch (cause) {
-      if (loadSequenceRef.current === requestSequence && !isAbortError(cause)) {
-        onError(formatEmailCollaborationChatError(cause, "Failed to load this Node chat."));
-      }
-    } finally {
-      if (loadSequenceRef.current === requestSequence) setLoading(false);
-    }
-  }, [acceptCollaboration, loadThreadChats, onError, onSuccess]);
-
   const selectNodeChatDestination = React.useCallback((nodeID: string) => {
     const nextCollaboration = collaborations.find((item) => item.node_id === nodeID);
     if (!nextCollaboration) {
@@ -1173,6 +1162,8 @@ export function EmailCollaborationChatSurface({
       ))
       : undefined;
     pendingNewNodeIDRef.current = "";
+    setNewNodeDestinationSelected(false);
+    setSelectionDestinationError("");
     acceptCollaboration(nextCollaboration, false);
     setSelectedChatNodeID(nodeID);
     if (authoritativeGroup && exactTextboxLink) {
@@ -1215,6 +1206,8 @@ export function EmailCollaborationChatSurface({
     }
     const destinationKey = emailThreadChatGroupKey(group);
     pendingNewNodeIDRef.current = "";
+    setNewNodeDestinationSelected(false);
+    setSelectionDestinationError("");
     acceptCollaboration(nextCollaboration, false);
     setSelectedChatNodeID(group.node_id);
     rememberSelectedChatGroup(destinationKey);
@@ -1230,8 +1223,11 @@ export function EmailCollaborationChatSurface({
   }, [acceptCollaboration, collaborations, flashChatDestination, onError, rememberSelectedChatGroup, selectNodeChatDestination, selection, targetEmailMessageID, threadChatGroups, threadTextboxLinks]);
 
   const cancelChatGroupDestination = React.useCallback(() => {
+    pendingNewNodeIDRef.current = "";
     rememberSelectedChatGroup("");
     setSelectedChatNodeID("");
+    setNewNodeDestinationSelected(false);
+    setSelectionDestinationError("");
     selectionInternalEmailMessageIDRef.current = "";
     setActiveTextBlockID("");
     setReplyTargetID("");
@@ -1244,6 +1240,8 @@ export function EmailCollaborationChatSurface({
     acceptCollaboration(null);
     rememberSelectedChatGroup("");
     setSelectedChatNodeID("");
+    setNewNodeDestinationSelected(true);
+    setSelectionDestinationError("");
     selectionInternalEmailMessageIDRef.current = "";
     setActiveTextBlockID("");
     setReplyTargetID("");
@@ -1253,6 +1251,8 @@ export function EmailCollaborationChatSurface({
   React.useEffect(() => {
     if (!selection) {
       selectionChoiceKeyRef.current = "";
+      setNewNodeDestinationSelected(false);
+      setSelectionDestinationError("");
       return;
     }
     if (loading) return;
@@ -1266,18 +1266,25 @@ export function EmailCollaborationChatSurface({
     selectionChoiceKeyRef.current = choiceKey;
     rememberSelectedChatGroup("");
     setSelectedChatNodeID("");
+    setNewNodeDestinationSelected(false);
+    setSelectionDestinationError("");
     selectionInternalEmailMessageIDRef.current = "";
     setActiveTextBlockID("");
     setReplyTargetID("");
     setActiveMessageID("");
-    if (threadChatGroups.length > 0) {
+    const exactTextboxLinks = threadTextboxLinks.filter((link) => (
+      link.provider_message_id.trim() === targetEmailMessageID
+    ));
+    if (exactTextboxLinks.length === 1) {
+      selectNodeChatDestination(exactTextboxLinks[0].node_id);
+      return;
+    }
+    if (exactTextboxLinks.length > 1) {
       acceptCollaboration(null, false);
       return;
     }
     if (collaborations.length === 1) {
-      if (collaboration?.collaboration_id !== collaborations[0].collaboration_id) {
-        void selectCollaborationTarget(collaborations[0]);
-      }
+      selectNodeChatDestination(collaborations[0].node_id);
       return;
     }
     if (collaborations.length > 1) {
@@ -1285,7 +1292,7 @@ export function EmailCollaborationChatSurface({
       return;
     }
     startNewFloatingNodeChat();
-  }, [acceptCollaboration, collaboration?.collaboration_id, collaborations, loading, rememberSelectedChatGroup, selection, selectCollaborationTarget, startNewFloatingNodeChat, threadChatGroups.length]);
+  }, [acceptCollaboration, collaborations, loading, rememberSelectedChatGroup, selection, selectNodeChatDestination, startNewFloatingNodeChat, targetEmailMessageID, threadTextboxLinks]);
 
   const selectedChatGroup = selectedChatGroupKey
     ? threadChatGroups.find((group) => emailThreadChatGroupKey(group) === selectedChatGroupKey)
@@ -1294,11 +1301,35 @@ export function EmailCollaborationChatSurface({
   const selectedNodeExactLink = selectedNodeSectionID
     ? emailTextboxLinkForMessage(threadTextboxLinks, targetEmailMessageID, selectedNodeSectionID)
     : undefined;
-  const composerDestinationLabel = selectedChatGroup
-    ? chatGroupLabel(selectedChatGroup)
-    : selectedNodeSectionID
-      ? `${sectionNodeLabelsByNodeID[selectedNodeSectionID] ?? "Selected Node"} · ${selectedNodeExactLink ? `Linked text box ${selectedNodeExactLink.textbox_id.slice(0, 8)}` : "New grouping"}`
-      : undefined;
+  const composerDestination = !selection
+    ? undefined
+    : newNodeDestinationSelected
+      ? { kind: "new_node_new_textbox" as const }
+      : selectedChatGroup
+        ? {
+          kind: "existing_node_existing_textbox" as const,
+          nodeID: selectedChatGroup.node_id,
+          nodeName: sectionNodeLabelsByNodeID[selectedChatGroup.node_id] ?? "Selected Node",
+        }
+        : selectedNodeSectionID
+          ? {
+            kind: selectedNodeExactLink ? "existing_node_existing_textbox" as const : "existing_node_new_textbox" as const,
+            nodeID: selectedNodeSectionID,
+            nodeName: sectionNodeLabelsByNodeID[selectedNodeSectionID] ?? "Selected Node",
+          }
+          : undefined;
+
+  React.useEffect(() => {
+    if (!active || !selection || !composerDestination) return undefined;
+    const clearDestinationOutsideSelection = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest('[data-chat-node-selectable="true"], [data-chat-section-selectable="true"], [data-chat-composer-shell="true"], [data-chat-new-node-destination="true"]')) return;
+      cancelChatGroupDestination();
+    };
+    document.addEventListener("pointerdown", clearDestinationOutsideSelection);
+    return () => document.removeEventListener("pointerdown", clearDestinationOutsideSelection);
+  }, [active, cancelChatGroupDestination, composerDestination, selection]);
 
   return (
     <aside
@@ -1330,28 +1361,45 @@ export function EmailCollaborationChatSurface({
           <span data-email-chat-node-header="true" style={{ minWidth: 0, display: "inline-flex", alignItems: "center", gap: 7 }}>
             <ExplorerRowIcon kind="node" />
             <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {selection && !selectedChatGroup && !selectedNodeSectionID
-                ? "Choose a chat grouping"
+              {selection && newNodeDestinationSelected
+                ? "New Node · New Text Box"
+                : selection && !selectedChatGroup && !selectedNodeSectionID
+                  ? "Choose a chat grouping"
                 : collaboration
                   ? collaborationNodeLabel(collaboration)
                 : collaborations.length > 1 ? "Choose a chat grouping" : message.subject?.trim() || "New email Node"}
             </span>
           </span>
         )}
+        headerTrailing={selection && !replyTargetID ? (
+          <button
+            type="button"
+            data-chat-new-node-destination="true"
+            aria-label="Choose New Node and New Text Box"
+            title="New Node · New Text Box"
+            aria-pressed={newNodeDestinationSelected}
+            onClick={startNewFloatingNodeChat}
+            style={{ position: "relative", width: 29, height: 27, flex: "0 0 auto", display: "grid", placeItems: "center", border: newNodeDestinationSelected ? "1px solid rgba(100,116,139,0.36)" : "1px solid rgba(148,163,184,0.26)", borderRadius: 8, background: "rgba(255,255,255,0.78)", color: "#475569", cursor: "pointer", padding: 0, boxShadow: newNodeDestinationSelected ? "0 4px 10px rgba(100,116,139,0.16)" : "1px 1px 4px rgba(15,23,42,0.06)" }}
+          >
+            <ExplorerRowIcon kind="node" />
+            <strong aria-hidden="true" style={{ position: "absolute", right: 2, bottom: 1, width: 11, height: 11, display: "grid", placeItems: "center", borderRadius: 999, background: "#ffffff", color: "#475569", fontSize: 10, lineHeight: 1 }}>+</strong>
+          </button>
+        ) : undefined}
         sectionLabelsByBlockID={sectionLabelsByBlockID}
         sectionNodeIDsByBlockID={sectionNodeIDsByBlockID}
         sectionNodeLabelsByNodeID={sectionNodeLabelsByNodeID}
         sectionNodeOrder={sectionNodeOrder}
         sectionKeysByMessageID={sectionKeysByChatID}
         sectionActionLabel="New chat"
-        selectSectionOnClick={Boolean(selection)}
+        selectSectionOnClick={Boolean(selection && !replyTargetID)}
         selectedSectionKey={selectedChatGroupKey}
         selectedNodeSectionID={selectedNodeSectionID}
         flashedSectionKey={destinationFlash.sectionKey}
         flashedNodeSectionID={destinationFlash.nodeID}
-        composerDestinationLabel={composerDestinationLabel}
+        composerDestination={replyTargetID ? undefined : composerDestination}
+        composerDestinationError={replyTargetID ? undefined : selectionDestinationError}
         reserveScrollbarGutter
-        selectionAnchor={selectionAnchor}
+        selectionAnchor={replyTargetID ? undefined : selectionAnchor}
         draft={draft}
         companyUsers={principals}
         draftAttachments={draftAttachments}
