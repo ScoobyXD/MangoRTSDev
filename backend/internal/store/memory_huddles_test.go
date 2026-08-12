@@ -101,6 +101,74 @@ func TestMemoryHuddleLifecycleKeepsTypedIdentityAndRecycleRestore(t *testing.T) 
 	}
 }
 
+func TestMemoryHuddleLogicGateRelationshipsAndNodeSnapshots(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-111111111111"
+	userID := "22222222-2222-4222-8222-222222222222"
+	huddleSource, err := repo.CreateLogicGate(companyID, "Daily Huddle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	huddle, err := repo.ConvertLogicGateToHuddle(companyID, huddleSource.LogicGateID, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Customer Health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	kpi, err := repo.CreateKPI(HuddleCreateInput{CompanyID: companyID, OwnerID: logicGate.LogicGateID, Name: "Renewal rate"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := HuddleLogicGateRelationshipInput{CompanyID: companyID, HuddleLogicGateID: huddle.HuddleLogicGateID, LogicGateID: logicGate.LogicGateID}
+	if err := repo.CreateHuddleLogicGateRelationship(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateHuddleLogicGateRelationship(link); err != nil {
+		t.Fatalf("idempotent relationship create: %v", err)
+	}
+	cards, err := repo.ListHuddleLogicGateCards(companyID, huddle.HuddleLogicGateID)
+	if err != nil || len(cards) != 1 || cards[0].LogicGateID != logicGate.LogicGateID || len(cards[0].KPIs) != 1 || cards[0].KPIs[0].KPIID != kpi.KPIID {
+		t.Fatalf("Huddle Logic Gate cards = %+v, err=%v", cards, err)
+	}
+
+	node, err := repo.CreateHuddleNode(HuddleCreateInput{CompanyID: companyID, OwnerID: huddle.HuddleLogicGateID, Name: "Monday", ActorID: userID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.CreateKPI(HuddleCreateInput{CompanyID: companyID, OwnerID: logicGate.LogicGateID, Name: "New after snapshot"}); err != nil {
+		t.Fatal(err)
+	}
+	nodeCards, err := repo.ListHuddleNodeLogicGateCards(companyID, node.HuddleNodeID)
+	if err != nil || len(nodeCards) != 1 || len(nodeCards[0].KPIs) != 1 || nodeCards[0].KPIs[0].KPIID != kpi.KPIID {
+		t.Fatalf("Huddle Node snapshot cards = %+v, err=%v", nodeCards, err)
+	}
+	if _, err := repo.UpdateKPI(HuddleUpdateInput{CompanyID: companyID, ResourceID: kpi.KPIID, Name: "Current renewal rate"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteHuddleLogicGateRelationship(link); err != nil {
+		t.Fatal(err)
+	}
+	cards, err = repo.ListHuddleLogicGateCards(companyID, huddle.HuddleLogicGateID)
+	if err != nil || len(cards) != 0 {
+		t.Fatalf("live Huddle cards after unlink = %+v, err=%v", cards, err)
+	}
+	nodeCards, err = repo.ListHuddleNodeLogicGateCards(companyID, node.HuddleNodeID)
+	if err != nil || len(nodeCards) != 1 || len(nodeCards[0].KPIs) != 1 || nodeCards[0].KPIs[0].Name != "Current renewal rate" {
+		t.Fatalf("snapshot membership with current KPI data = %+v, err=%v", nodeCards, err)
+	}
+
+	otherCompanyID := "33333333-3333-4333-8333-333333333333"
+	otherGate, err := repo.CreateLogicGate(otherCompanyID, "Other company")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateHuddleLogicGateRelationship(HuddleLogicGateRelationshipInput{CompanyID: companyID, HuddleLogicGateID: huddle.HuddleLogicGateID, LogicGateID: otherGate.LogicGateID}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-company relationship error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestHuddleMigrationUsesExactExplorerColumns(t *testing.T) {
 	body, err := os.ReadFile("../../db/migrations/20260811_huddles_kpis.sql")
 	if err != nil {
@@ -126,6 +194,32 @@ func TestCanonicalHuddleSchemaHasNoPatchMarker(t *testing.T) {
 	}
 	if strings.Contains(string(body), "\n+-- Bare-bones Huddles and KPIs") {
 		t.Fatal("canonical Huddle schema contains a leading patch marker and is not executable SQL")
+	}
+}
+
+func TestHuddleRelationshipMigrationUsesOnlyTypedTables(t *testing.T) {
+	body, err := os.ReadFile("../../db/migrations/20260811_zz_huddle_logic_gate_relationships.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlText := strings.ToLower(string(body))
+	for _, required := range []string{
+		"create table if not exists huddle_logic_gate_relationships",
+		"primary key (company_id,huddle_logic_gate_id,logic_gate_id)",
+		"create table if not exists huddle_node_logic_gate_relationships",
+		"primary key (company_id,huddle_node_id,logic_gate_id)",
+		"create table if not exists huddle_node_kpi_relationships",
+		"primary key (company_id,huddle_node_id,logic_gate_id,kpi_id)",
+		"alter table huddle_nodes drop column if exists body_json",
+	} {
+		if !strings.Contains(sqlText, required) {
+			t.Fatalf("Huddle relationship migration missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"resource_registry", "resource_type text", "relationship_id uuid"} {
+		if strings.Contains(sqlText, forbidden) {
+			t.Fatalf("Huddle relationship migration contains forbidden generic storage %q", forbidden)
+		}
 	}
 }
 

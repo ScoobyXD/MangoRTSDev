@@ -1598,15 +1598,25 @@ type HuddleMoveInput struct {
 	ActorID        string
 }
 
+type HuddleLogicGateRelationshipInput struct {
+	CompanyID         string
+	HuddleLogicGateID string
+	LogicGateID       string
+}
+
 type HuddleRepository interface {
 	ConvertLogicGateToHuddle(companyID, logicGateID, actorID string) (domain.HuddleLogicGate, error)
 	ListHuddleLogicGates(companyID string) ([]domain.HuddleLogicGate, error)
 	GetHuddleLogicGate(companyID, huddleLogicGateID string) (domain.HuddleLogicGate, error)
 	UpdateHuddleLogicGate(input HuddleUpdateInput) (domain.HuddleLogicGate, error)
 	DeleteHuddleLogicGate(companyID, huddleLogicGateID, deletedByUserID string) error
+	ListHuddleLogicGateCards(companyID, huddleLogicGateID string) ([]domain.HuddleLogicGateCard, error)
+	CreateHuddleLogicGateRelationship(input HuddleLogicGateRelationshipInput) error
+	DeleteHuddleLogicGateRelationship(input HuddleLogicGateRelationshipInput) error
 	ListHuddleNodes(companyID, huddleLogicGateID string) ([]domain.HuddleNode, error)
 	CreateHuddleNode(input HuddleCreateInput) (domain.HuddleNode, error)
 	GetHuddleNode(companyID, huddleNodeID string) (domain.HuddleNode, error)
+	ListHuddleNodeLogicGateCards(companyID, huddleNodeID string) ([]domain.HuddleLogicGateCard, error)
 	UpdateHuddleNode(input HuddleUpdateInput) (domain.HuddleNode, error)
 	DeleteHuddleNode(companyID, huddleNodeID, deletedByUserID string) error
 	ListKPIs(companyID, logicGateID string) ([]domain.KPI, error)

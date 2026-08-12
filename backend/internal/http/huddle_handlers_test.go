@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,45 @@ import (
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 )
+
+func TestHuddleLogicGateRelationshipRoutesCreateAndReadTypedCards(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	handler := NewServer(repo).Routes()
+	companyID := "78787878-7878-4787-8787-787878787878"
+	admin := mustCreateUserPinUser(t, repo, "huddle-relationship-admin", companyID, "huddle-relationship-admin@example.com", domain.RoleCompanyAdmin)
+	huddleID := createHuddleLogicGateForHTTPTest(t, repo, companyID)
+	logicGate, err := repo.CreateLogicGate(companyID, "Customer Health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.CreateKPI(store.HuddleCreateInput{CompanyID: companyID, OwnerID: logicGate.LogicGateID, Name: "Renewal rate"}); err != nil {
+		t.Fatal(err)
+	}
+
+	path := "/v1/huddle-logic-gates/" + huddleID + "/logic-gates/" + logicGate.LogicGateID
+	req := httptest.NewRequest(http.MethodPut, path, bytes.NewBufferString(fmt.Sprintf(`{"company_id":%q}`, companyID)))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, userPinRequestWithActor(req, admin, companyID, domain.RoleCompanyAdmin))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT relationship status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/v1/huddle-logic-gates/"+huddleID+"/logic-gates?company_id="+companyID, nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, userPinRequestWithActor(req, admin, companyID, domain.RoleCompanyAdmin))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET relationship cards status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		LogicGates []domain.HuddleLogicGateCard `json:"logic_gates"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.LogicGates) != 1 || payload.LogicGates[0].LogicGateID != logicGate.LogicGateID || len(payload.LogicGates[0].KPIs) != 1 {
+		t.Fatalf("relationship cards = %+v", payload.LogicGates)
+	}
+}
 
 func TestHuddleExplorerItemMutationsRequireHuddleLogicGateEditAccess(t *testing.T) {
 	repo := store.NewMemoryRepo()

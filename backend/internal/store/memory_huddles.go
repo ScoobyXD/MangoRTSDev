@@ -60,6 +60,7 @@ func (r *MemoryRepo) ConvertLogicGateToHuddle(companyID, logicGateID, actorID st
 	delete(r.logicGateText, key(companyID, logicGateID))
 	delete(r.logicGateRels, key(companyID, logicGateID))
 	delete(r.logicGateRACI, key(companyID, logicGateID))
+	r.deleteMemoryHuddleRelationshipsForLogicGateLocked(companyID, logicGateID)
 	r.deleteMemoryHuddlePoliciesLocked(companyID, EntityTypeLogicGate, logicGateID)
 	for k, board := range r.kanbanBoards {
 		if board.CompanyID == companyID && board.LogicGateID != nil && *board.LogicGateID == logicGateID {
@@ -117,6 +118,124 @@ func (r *MemoryRepo) UpdateHuddleLogicGate(input HuddleUpdateInput) (domain.Hudd
 	return item, nil
 }
 
+func memoryHuddleLogicGateRelationshipKey(companyID, huddleLogicGateID, logicGateID string) string {
+	return companyID + ":" + huddleLogicGateID + ":" + logicGateID
+}
+
+func memoryHuddleNodeLogicGateRelationshipKey(companyID, huddleNodeID, logicGateID string) string {
+	return companyID + ":" + huddleNodeID + ":" + logicGateID
+}
+
+func memoryHuddleNodeKPIRelationshipKey(companyID, huddleNodeID, logicGateID, kpiID string) string {
+	return companyID + ":" + huddleNodeID + ":" + logicGateID + ":" + kpiID
+}
+
+func (r *MemoryRepo) deleteMemoryHuddleRelationshipsForLogicGateLocked(companyID, logicGateID string) {
+	for relationshipKey, relationship := range r.huddleLogicGateRelationships {
+		if relationship.CompanyID == companyID && relationship.LogicGateID == logicGateID {
+			delete(r.huddleLogicGateRelationships, relationshipKey)
+		}
+	}
+	for relationshipKey, relationship := range r.huddleNodeLogicGateRelationships {
+		if relationship.CompanyID == companyID && relationship.LogicGateID == logicGateID {
+			delete(r.huddleNodeLogicGateRelationships, relationshipKey)
+		}
+	}
+	for relationshipKey, relationship := range r.huddleNodeKPIRelationships {
+		if relationship.CompanyID == companyID && relationship.LogicGateID == logicGateID {
+			delete(r.huddleNodeKPIRelationships, relationshipKey)
+		}
+	}
+	for kpiKey, kpi := range r.kpis {
+		if kpi.CompanyID == companyID && kpi.LogicGateID == logicGateID {
+			delete(r.kpis, kpiKey)
+		}
+	}
+}
+
+func (r *MemoryRepo) huddleLogicGateCardsLocked(companyID string, logicGateIDs, kpiIDs map[string]bool) []domain.HuddleLogicGateCard {
+	items := []domain.HuddleLogicGateCard{}
+	for logicGateID := range logicGateIDs {
+		gate, ok := r.logicGates[key(companyID, logicGateID)]
+		if !ok {
+			continue
+		}
+		card := domain.HuddleLogicGateCard{CompanyID: companyID, LogicGateID: gate.LogicGateID, Header: gate.Header, KPIs: []domain.KPI{}}
+		for _, kpi := range r.kpis {
+			if kpi.CompanyID == companyID && kpi.LogicGateID == logicGateID && (kpiIDs == nil || kpiIDs[kpi.KPIID]) {
+				card.KPIs = append(card.KPIs, kpi)
+			}
+		}
+		sort.Slice(card.KPIs, func(i, j int) bool {
+			if card.KPIs[i].CreatedTimestamp.Equal(card.KPIs[j].CreatedTimestamp) {
+				return card.KPIs[i].KPIID < card.KPIs[j].KPIID
+			}
+			return card.KPIs[i].CreatedTimestamp.Before(card.KPIs[j].CreatedTimestamp)
+		})
+		items = append(items, card)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		left, right := strings.ToLower(items[i].Header), strings.ToLower(items[j].Header)
+		if left == right {
+			return items[i].LogicGateID < items[j].LogicGateID
+		}
+		return left < right
+	})
+	return items
+}
+
+func (r *MemoryRepo) ListHuddleLogicGateCards(companyID, huddleLogicGateID string) ([]domain.HuddleLogicGateCard, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	logicGateIDs := map[string]bool{}
+	for _, relationship := range r.huddleLogicGateRelationships {
+		if relationship.CompanyID != companyID || relationship.HuddleLogicGateID != huddleLogicGateID {
+			continue
+		}
+		logicGateIDs[relationship.LogicGateID] = true
+	}
+	return r.huddleLogicGateCardsLocked(companyID, logicGateIDs, nil), nil
+}
+
+func (r *MemoryRepo) CreateHuddleLogicGateRelationship(input HuddleLogicGateRelationshipInput) error {
+	input.CompanyID = cleanUUIDText(input.CompanyID)
+	input.HuddleLogicGateID = cleanUUIDText(input.HuddleLogicGateID)
+	input.LogicGateID = cleanUUIDText(input.LogicGateID)
+	if input.CompanyID == "" || input.HuddleLogicGateID == "" || input.LogicGateID == "" {
+		return ErrInvalid
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.huddleLogicGates[key(input.CompanyID, input.HuddleLogicGateID)]; !ok {
+		return ErrNotFound
+	}
+	if _, ok := r.logicGates[key(input.CompanyID, input.LogicGateID)]; !ok {
+		return ErrNotFound
+	}
+	relationshipKey := memoryHuddleLogicGateRelationshipKey(input.CompanyID, input.HuddleLogicGateID, input.LogicGateID)
+	if _, ok := r.huddleLogicGateRelationships[relationshipKey]; !ok {
+		r.huddleLogicGateRelationships[relationshipKey] = domain.HuddleLogicGateRelationship{CompanyID: input.CompanyID, HuddleLogicGateID: input.HuddleLogicGateID, LogicGateID: input.LogicGateID, CreatedTimestamp: time.Now().UTC()}
+	}
+	return nil
+}
+
+func (r *MemoryRepo) DeleteHuddleLogicGateRelationship(input HuddleLogicGateRelationshipInput) error {
+	input.CompanyID = cleanUUIDText(input.CompanyID)
+	input.HuddleLogicGateID = cleanUUIDText(input.HuddleLogicGateID)
+	input.LogicGateID = cleanUUIDText(input.LogicGateID)
+	if input.CompanyID == "" || input.HuddleLogicGateID == "" || input.LogicGateID == "" {
+		return ErrInvalid
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	relationshipKey := memoryHuddleLogicGateRelationshipKey(input.CompanyID, input.HuddleLogicGateID, input.LogicGateID)
+	if _, ok := r.huddleLogicGateRelationships[relationshipKey]; !ok {
+		return ErrNotFound
+	}
+	delete(r.huddleLogicGateRelationships, relationshipKey)
+	return nil
+}
+
 func (r *MemoryRepo) DeleteHuddleLogicGate(companyID, id, userID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -133,6 +252,11 @@ func (r *MemoryRepo) DeleteHuddleLogicGate(companyID, id, userID string) error {
 	r.addSimpleHuddleRecycleLocked(companyID, userID, "huddle_logic_gate", id, item.Header)
 	r.deleteMemoryHuddlePoliciesLocked(companyID, EntityTypeHuddleLogicGate, id)
 	delete(r.huddleLogicGates, k)
+	for relationshipKey, relationship := range r.huddleLogicGateRelationships {
+		if relationship.CompanyID == companyID && relationship.HuddleLogicGateID == id {
+			delete(r.huddleLogicGateRelationships, relationshipKey)
+		}
+	}
 	for ik, p := range r.huddleExplorerItems {
 		if p.CompanyID == companyID && p.ResourceType == EntityTypeHuddleLogicGate && p.ResourceID == id {
 			delete(r.huddleExplorerItems, ik)
@@ -168,6 +292,18 @@ func (r *MemoryRepo) CreateHuddleNode(input HuddleCreateInput) (domain.HuddleNod
 	item := domain.HuddleNode{CompanyID: input.CompanyID, HuddleNodeID: newUUIDv7String(), HuddleLogicGateID: input.OwnerID, Name: input.Name, CreatedTimestamp: now, UpdatedTimestamp: now}
 	r.huddleNodes[key(input.CompanyID, item.HuddleNodeID)] = item
 	r.ensureV2PolicySettingsLocked(input.CompanyID, EntityTypeHuddleNode, item.HuddleNodeID)
+	for _, relationship := range r.huddleLogicGateRelationships {
+		if relationship.CompanyID != input.CompanyID || relationship.HuddleLogicGateID != input.OwnerID {
+			continue
+		}
+		nodeRelationship := domain.HuddleNodeLogicGateRelationship{CompanyID: input.CompanyID, HuddleNodeID: item.HuddleNodeID, LogicGateID: relationship.LogicGateID, CreatedTimestamp: now}
+		r.huddleNodeLogicGateRelationships[memoryHuddleNodeLogicGateRelationshipKey(input.CompanyID, item.HuddleNodeID, relationship.LogicGateID)] = nodeRelationship
+		for _, kpi := range r.kpis {
+			if kpi.CompanyID == input.CompanyID && kpi.LogicGateID == relationship.LogicGateID {
+				r.huddleNodeKPIRelationships[memoryHuddleNodeKPIRelationshipKey(input.CompanyID, item.HuddleNodeID, relationship.LogicGateID, kpi.KPIID)] = domain.HuddleNodeKPIRelationship{CompanyID: input.CompanyID, HuddleNodeID: item.HuddleNodeID, LogicGateID: relationship.LogicGateID, KPIID: kpi.KPIID, CreatedTimestamp: now}
+			}
+		}
+	}
 	return item, nil
 }
 
@@ -179,6 +315,24 @@ func (r *MemoryRepo) GetHuddleNode(companyID, id string) (domain.HuddleNode, err
 		return domain.HuddleNode{}, ErrNotFound
 	}
 	return item, nil
+}
+
+func (r *MemoryRepo) ListHuddleNodeLogicGateCards(companyID, huddleNodeID string) ([]domain.HuddleLogicGateCard, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	logicGateIDs := map[string]bool{}
+	kpiIDs := map[string]bool{}
+	for _, relationship := range r.huddleNodeLogicGateRelationships {
+		if relationship.CompanyID == companyID && relationship.HuddleNodeID == huddleNodeID {
+			logicGateIDs[relationship.LogicGateID] = true
+		}
+	}
+	for _, relationship := range r.huddleNodeKPIRelationships {
+		if relationship.CompanyID == companyID && relationship.HuddleNodeID == huddleNodeID {
+			kpiIDs[relationship.KPIID] = true
+		}
+	}
+	return r.huddleLogicGateCardsLocked(companyID, logicGateIDs, kpiIDs), nil
 }
 func (r *MemoryRepo) UpdateHuddleNode(input HuddleUpdateInput) (domain.HuddleNode, error) {
 	input.Name = strings.TrimSpace(input.Name)
@@ -208,6 +362,16 @@ func (r *MemoryRepo) DeleteHuddleNode(companyID, id, userID string) error {
 	r.addSimpleHuddleRecycleLocked(companyID, userID, "huddle_node", id, item.Name)
 	r.deleteMemoryHuddlePoliciesLocked(companyID, EntityTypeHuddleNode, id)
 	delete(r.huddleNodes, k)
+	for relationshipKey, relationship := range r.huddleNodeLogicGateRelationships {
+		if relationship.CompanyID == companyID && relationship.HuddleNodeID == id {
+			delete(r.huddleNodeLogicGateRelationships, relationshipKey)
+		}
+	}
+	for relationshipKey, relationship := range r.huddleNodeKPIRelationships {
+		if relationship.CompanyID == companyID && relationship.HuddleNodeID == id {
+			delete(r.huddleNodeKPIRelationships, relationshipKey)
+		}
+	}
 	return nil
 }
 
@@ -274,6 +438,11 @@ func (r *MemoryRepo) DeleteKPI(companyID, id, userID string) error {
 	}
 	r.addSimpleHuddleRecycleLocked(companyID, userID, "kpi", id, item.Name)
 	delete(r.kpis, k)
+	for relationshipKey, relationship := range r.huddleNodeKPIRelationships {
+		if relationship.CompanyID == companyID && relationship.KPIID == id {
+			delete(r.huddleNodeKPIRelationships, relationshipKey)
+		}
+	}
 	return nil
 }
 

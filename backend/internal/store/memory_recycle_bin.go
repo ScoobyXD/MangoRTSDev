@@ -52,6 +52,10 @@ type memoryRecycleBinSnapshot struct {
 	effectiveAccess               map[string]domain.EffectiveResourceAccess
 	emailNodeLinks                map[string]communicationsEmailNodeLink
 	logicGateShortcuts            map[string]domain.UserLogicGateShortcut
+
+	huddleLogicGateRelationships     map[string]domain.HuddleLogicGateRelationship
+	huddleNodeLogicGateRelationships map[string]domain.HuddleNodeLogicGateRelationship
+	huddleNodeKPIRelationships       map[string]domain.HuddleNodeKPIRelationship
 }
 
 func (r *MemoryRepo) ListRecycleBinItems(companyID, deletedByUserID string) ([]domain.RecycleBinItem, error) {
@@ -251,6 +255,10 @@ func (r *MemoryRepo) snapshotRecycleStateLocked() memoryRecycleBinSnapshot {
 		effectiveAccess:               cloneMap(r.effectiveAccess),
 		emailNodeLinks:                cloneMap(r.emailNodeLinks),
 		logicGateShortcuts:            cloneMap(r.logicGateShortcuts),
+
+		huddleLogicGateRelationships:     cloneMap(r.huddleLogicGateRelationships),
+		huddleNodeLogicGateRelationships: cloneMap(r.huddleNodeLogicGateRelationships),
+		huddleNodeKPIRelationships:       cloneMap(r.huddleNodeKPIRelationships),
 	}
 }
 
@@ -264,6 +272,9 @@ func (r *MemoryRepo) restoreRecycleSnapshotLocked(snapshot memoryRecycleBinSnaps
 	r.huddleLogicGates = cloneMap(snapshot.huddleLogicGates)
 	r.huddleNodes = cloneMap(snapshot.huddleNodes)
 	r.kpis = cloneMap(snapshot.kpis)
+	r.huddleLogicGateRelationships = cloneMap(snapshot.huddleLogicGateRelationships)
+	r.huddleNodeLogicGateRelationships = cloneMap(snapshot.huddleNodeLogicGateRelationships)
+	r.huddleNodeKPIRelationships = cloneMap(snapshot.huddleNodeKPIRelationships)
 	r.huddleExplorerFolders = cloneMap(snapshot.huddleExplorerFolders)
 	r.huddleExplorerItems = cloneMap(snapshot.huddleExplorerItems)
 	r.logicGateInfo = cloneSliceMap(snapshot.logicGateInfo)

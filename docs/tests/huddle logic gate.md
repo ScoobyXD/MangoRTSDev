@@ -20,12 +20,30 @@
 18. The page reuses the normal Node and Logic Gate RACI role cards, people-and-group picker, Editor tab, Permissions tab, and shared Mango editor toolbar in its top header area.
 19. The shared editor toolbar includes the existing font size, bold, underline, italic, strikethrough, highlight, alignment, alphabetical list, numerical list, dense bullet list, checklist, and table controls.
 20. Pin, fullscreen, delete, and close are compact icon actions in the top-right header instead of text buttons.
-21. The page has three horizontally resizable columns: the TipTap editor on the left, an empty middle column, and the Huddle Node list on the right.
-22. The right column contains a **Create Huddle Node** action that immediately creates **New Huddle Node** without a prompt, and one single-click card for each Huddle Node owned by this Huddle Logic Gate.
-23. Huddle Logic Gates use the existing RACI and permission tables with direct typed ownership, but do not expose **Apply to descendants** or **Apply to descendants including customized** actions.
-24. Deleting a Huddle Logic Gate is blocked while it owns any Huddle Nodes.
-25. Deleting an empty Huddle Logic Gate moves it and its restorable direct policies and Huddle Explorer placement to the Recycle Bin; restoring it reuses the same UUID.
-26. The first version has no Huddle settings, frequency, regular Logic Gate membership, KPI aggregation, snapshots, timeline, chat, or automatic Huddle Node creation.
-27. Realtime current-audience resolution recognizes `huddle_logic_gate` and resolves its users from that Huddle Logic Gate's direct typed permission policy.
+21. The page has three horizontally resizable columns: the TipTap editor on the left, related normal Logic Gates in the middle, and Huddle Nodes on the right.
+22. `huddle_logic_gate_relationships` is the only live authority that links a Huddle Logic Gate to a normal Logic Gate, and each row stores the literal `company_id`, `huddle_logic_gate_id`, and `logic_gate_id`.
+23. A Huddle Logic Gate may link to many normal Logic Gates, and the same normal Logic Gate may link to many Huddle Logic Gates.
+24. One exact Huddle Logic Gate and normal Logic Gate pair has at most one row, and repeating the link command is idempotent.
+25. Adding or removing a Logic Gate relationship changes only that relationship and does not create, delete, copy, or grant access to either endpoint or any KPI.
+26. The middle column uses one two-section card for every currently linked Logic Gate: the top shows the Logic Gate and the bottom shows small cards for that Logic Gate's current KPIs.
+27. The middle-column plus button opens the existing Universal Picker in locked `##` link mode with the Logic Gate tab active; the Node, Project, and Email tabs remain visible but disabled.
+28. Choosing a Logic Gate in that picker creates only the exact `huddle_logic_gate_relationships` row and inserts no editor text or generic relationship.
+29. Removing a Logic Gate card deletes only the exact relationship and does not rewrite any previously created Huddle Node snapshot.
+30. The middle column reads the current Logic Gate header and current KPI set when it loads; it uses no background stream and no copied display payload.
+31. The right column contains a **Create Huddle Node** action that immediately creates **New Huddle Node** without a prompt, and one single-click card for each Huddle Node owned by this Huddle Logic Gate.
+32. Huddle Logic Gates use the existing RACI and permission tables with direct typed ownership, but do not expose **Apply to descendants** or **Apply to descendants including customized** actions.
+33. Deleting a Huddle Logic Gate is blocked while it owns any Huddle Nodes.
+34. Deleting an empty Huddle Logic Gate moves it, its live Logic Gate relationships, its restorable direct policies, and its Huddle Explorer placement to the Recycle Bin; restoring it reuses the same UUID and exact relationships.
+35. Realtime current-audience resolution recognizes `huddle_logic_gate` and resolves its users from that Huddle Logic Gate's direct typed permission policy.
 
 Last updated: 2026-08-11
+
+# Process Story: Link current Logic Gates and capture a Huddle Node
+
+An editor uses the middle-column plus button and chooses one normal Logic Gate through the locked `##` Universal Picker
+↓
+Mango creates one typed `huddle_logic_gate_relationships` row and shows the shared Logic Gate card with its current KPI cards
+↓
+Creating a Huddle Node atomically records the current Logic Gate and KPI identities for that new Huddle Node
+↓
+The Huddle Logic Gate stays live, while the Huddle Node keeps that creation-time relationship set and reads current displayed Logic Gate and KPI fields when opened
