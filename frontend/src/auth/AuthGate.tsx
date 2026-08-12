@@ -28,6 +28,7 @@ import { listCompanyUsers, markCommunicationsWorkspaceResourcesStale } from "../
 import { normalizeAppPath, parseDeepLinkRoute } from "../app/deepLinkRoutes";
 import { RecycleBinPage } from "../pages/recycle-bin/RecycleBinPage";
 import { RealtimeHealthChrome } from "../modules/realtime/RealtimeHealthChrome";
+import { SimpleMangoImporter } from "../modules/settings/importer/Importer"
 
 type PendingChallenge = Extract<LoginResult, { status: "new_password_required" }> | null;
 type AppLayoutModule = typeof import("../app/applayout");
@@ -1419,6 +1420,11 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
         </section>
       </div>
       {canManageSelectedCompany && <section style={{ ...sectionStyle, marginTop: 14 }}>
+
+        <section style={{ ...sectionStyle, marginTop:14, marginBottom: 14 }}>
+          <SimpleMangoImporter />
+        </section>
+
         <div style={settingsSectionHeaderRowStyle}>
           <h2 style={sectionTitleStyle}>Onboarding</h2>
           <span style={settingsSectionScopeStyle}>{activeCompanyLabel}</span>
