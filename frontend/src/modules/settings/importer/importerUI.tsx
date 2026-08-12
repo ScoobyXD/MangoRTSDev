@@ -10,13 +10,12 @@ import {
   useMemo,
   useRef,
   useState,
-  RefObject
 } from "react";
 import "./importerUIResources/importToMango.css";
 import "./importerUIResources/dotCursor.css";
 import { InlineSvg } from "./importerUIResources/inlineSVG";
 import { useImportSequencer, createImportCommands } from "./importerUIResources/importerUIAPI";
-import type { ImportToMangoHandle, ImportToMangoProps, MangoOption, MangoSettings } from "./importerUIResources/types";
+import type { ImportToMangoHandle, ImportToMangoProps, MangoSettings, ImportToMangoPropsCreator } from "./importerUIResources/types";
 
 import { createMangoImporterProps } from "./importerConfig";
 
@@ -37,43 +36,23 @@ export type {
 // component's logic for the actual HTML content.
 // ═══════════════════════════════════════════════════════════════════════
 
-// TODO: Verify usage.
-function mergeRefs<T>(...refs: Array<React.Ref<T> | undefined>) {
-  return (value: T | null) => {
-    for(const ref of refs) {
-      if(!ref){
-        continue;
-      }
-      if(typeof ref === "function") {
-        ref(value)
-      }
-      else {
-        (ref as React.MutableRefObject<T | null>).current = value;
-      }
-    }
-  };
-}
-
-// TODO: Verify Usage.
-type SimpleMangoImporterProps = {
-  mangoImporterPropCreator?: (ref: RefObject<ImportToMangoHandle>) => ImportToMangoHandle;
-}
-
 
 // Preferred!
 // This is the simplified importer that uses the default function behavior specified in the importer configuration.
-export const SimpleMangoImporter = forwardRef<ImportToMangoHandle, SimpleMangoImporterProps>(
-  function SimpleMangoImporter({mangoImporterPropCreator=createMangoImporterProps}, outerRef: RefObject<ImportToMangoHandle>,){
+export const SimpleMangoImporter = forwardRef<ImportToMangoHandle, ImportToMangoPropsCreator>(
+  function SimpleMangoImporter(
+    {
+      mangoImporterPropCreator=createMangoImporterProps
+    },
+    ref
+  ) {
     
-    // TODO: Verify Usage.
-    const handleRef = useRef<ImportToMangoHandle>(null);
-
-    const mangoProps = mangoImporterPropCreator(outerRef);
+    const mangoProps = mangoImporterPropCreator(ref);
 
     // TODO: Verify merging of refs.
     return (
       <ImportToMango
-        ref={mergeRefs(outerRef, handleRef)}
+        ref={ref}
         title={mangoProps.title ?? "Import to Mango"}
         subtitle={mangoProps.subtitle ?? "Import your data from Linear and ClickUp"}
         sources={mangoProps.sources}
@@ -105,7 +84,7 @@ export const ImportToMango = forwardRef<ImportToMangoHandle, ImportToMangoProps>
       onRetry,
       onOpenWorkspace,
     },
-    ref: RefObject<ImportToMangoHandle>,
+    ref,
   ) {
 
     if(!sources || !options){
@@ -385,7 +364,7 @@ export const ImportToMango = forwardRef<ImportToMangoHandle, ImportToMangoProps>
                 <input className="uml-state uml-desk uml-desk--cfg" type="radio" name="uml-desk" id="uml-desk-cfg" checked={deskOpen} onChange={() => setDeskOpen(true)} />
                 <label className="uml-cog dot-cursor" htmlFor="uml-desk-cfg">
                   <span className="uml-sr">Import configuration</span>
-                  <InlineSvg src="./importerUI/vectors/growthTree.svg" className="uml-cog__svg" />
+                  <InlineSvg src="./importerUIResources/vectors/growthTree.svg" className="uml-cog__svg" />
                 </label>
 
                 <div className="uml-scene" aria-hidden="true">
@@ -464,7 +443,7 @@ export const ImportToMango = forwardRef<ImportToMangoHandle, ImportToMangoProps>
                       <i className="uml-tape uml-tape--back" />
                     </div>
 
-                    <InlineSvg src="./importerUI/vectors/growthTree.svg" className="uml-tree" />
+                    <InlineSvg src="./importerUIResources/vectors/growthTree.svg" className="uml-tree" />
                   </div>
                 </div>
 
