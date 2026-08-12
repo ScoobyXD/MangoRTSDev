@@ -9,7 +9,7 @@ import { createElement, RefObject } from "react";
 
 import { type ImportToMangoHandle } from "./importerUI";
 import { InlineSvg } from "./importerUIResources/inlineSVG";
-import { MangoSettings, MangoSource } from "./importerUIResources/types";
+import { ImportToMangoProps, MangoSettings, MangoSource } from "./importerUIResources/types";
 
 import { locateCSVHeaders, countLinesInCSV, determineCSVType } from "./importerLogic";
 
@@ -28,7 +28,7 @@ import { DEFAULT_CSV_PARSE_CONFIG } from "./importerLogic";
 
 // If you need to edit the logic that occurs on certain UI events, this logic can be found below.
 // TODO: Verify if this is an implementation of the "factory" pattern.
-export function createMangoImporterProps(ref: RefObject<ImportToMangoHandle>){
+export function createMangoImporterProps(ref: RefObject<ImportToMangoHandle>): ImportToMangoProps{
 
   // TODO: Consider assigning specialized parsers here as well.
   const sources: Record<string, MangoSource> = {
@@ -112,7 +112,7 @@ export function createMangoImporterProps(ref: RefObject<ImportToMangoHandle>){
 
     },
 
-    onApiKeySubmit: (apiKey: string) => {
+    onApiKeySubmit: () => { // Will take an "apiKey" string.
       ref.current?.reject("Oops, API Key imports are not yet ready for production at the moment.")
     },
 
