@@ -21,7 +21,7 @@ async function flushAsyncWork(rounds = 8) {
   });
 }
 
-test("KPI plus creates a selected inline name and only double-click opens the popup", async () => {
+test("KPI plus creates a selected inline name and one click opens the shared large editor popup", async () => {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
     pretendToBeVisual: true,
     url: "http://localhost/",
@@ -115,9 +115,11 @@ test("KPI plus creates a selected inline name and only double-click opens the po
     const card = container.querySelector<HTMLButtonElement>('button[data-mango-kpi-card="kpi-1"]');
     assert.ok(card);
     await act(async () => card.click());
-    assert.equal(dom.window.document.querySelector('[role="dialog"][aria-label="KPI"]'), null, "single-click must not open the popup");
-    await act(async () => card.dispatchEvent(new dom.window.MouseEvent("dblclick", { bubbles: true })));
-    assert.ok(dom.window.document.querySelector('[role="dialog"][aria-label="KPI"]'), "double-click should open the popup");
+    const dialog = dom.window.document.querySelector('[role="dialog"][aria-label="KPI"][data-kpi-editor-popup="centered-large"]');
+    assert.ok(dialog, "single-click should open the shared large popup");
+    assert.ok(dialog.querySelector('button[aria-label="Close KPI"]'), "the popup should expose the standard red X close action");
+    assert.ok(dialog.querySelector('[role="toolbar"]'), "the existing Mango editor toolbar should live in the popup header");
+    assert.ok(dialog.querySelector('[data-editor-save-status]'), "the existing Mango save status should be visible in the popup header");
   } finally {
     if (mountedRoot) await act(async () => mountedRoot?.unmount());
     for (const restore of restores.reverse()) restore();

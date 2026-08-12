@@ -22,6 +22,7 @@ test("Huddle UI uses the routed page, shared Huddle relationship cards, picker, 
   const page = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/HuddleLogicGatePage.tsx"), "utf8");
   const surface = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/HuddleResourceSurface.tsx"), "utf8");
   const cards = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/HuddleLogicGateCards.tsx"), "utf8");
+  const kpis = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/LogicGateKPISection.tsx"), "utf8");
   const picker = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/UniversalEntityPicker.tsx"), "utf8");
   const explorer = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/HuddleExplorerSection.tsx"), "utf8");
   const routes = readFileSync(resolve(process.cwd(), "frontend/src/app/deepLinkRoutes.ts"), "utf8");
@@ -31,7 +32,7 @@ test("Huddle UI uses the routed page, shared Huddle relationship cards, picker, 
   assert.match(surface, /<RACIAssignmentBoard/);
   assert.match(surface, /<BareMangoEditorToolbar/);
   assert.match(surface, /visibleTabIDs=\{isGate \? \["editor", "permissions", "format", "outline-styles"\] : \["permissions"\]\}/);
-  assert.match(surface, /<HuddleLogicGateCards items=\{logicGateCards\}/);
+  assert.match(surface, /<HuddleLogicGateCards\s+items=\{logicGateCards\}/);
   assert.match(surface, /initialMode="link"/);
   assert.match(surface, /initialCategory="logic_gate"/);
   assert.match(surface, /lockMode/);
@@ -39,6 +40,13 @@ test("Huddle UI uses the routed page, shared Huddle relationship cards, picker, 
   assert.match(surface, /data-huddle-node-snapshot="true"/);
   assert.match(cards, /data-huddle-logic-gate-card/);
   assert.match(cards, /data-huddle-kpi-card/);
+  assert.match(cards, /onClick=\{\(\) => onOpenLogicGate\(item\)\}/);
+  assert.match(cards, /onClick=\{\(\) => onOpenKPI\(item, kpi\)\}/);
+  assert.match(surface, /openEditorEntityLink\(\{ entityType: "logic_gate"/);
+  assert.match(surface, /<KPIEditorPopup/);
+  assert.match(kpis, /data-kpi-editor-popup="centered-large"/);
+  assert.match(kpis, /saveStateStorageKey=\{saveStateStorageKey\}/);
+  assert.match(kpis, /aria-label="Close KPI"/);
   assert.match(picker, /props\.lockMode/);
   assert.match(picker, /setCategory\(props\.lockMode \? option\.type : active \? "all" : option\.type\)/);
   assert.match(surface, /data-huddle-column-layout=\{isGate \? "three-resizable-columns" : "two-resizable-columns"\}/);

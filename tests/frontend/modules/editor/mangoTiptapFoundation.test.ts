@@ -176,6 +176,41 @@ async function writeRawMangoTiptapPending(record: Record<string, unknown>): Prom
   }
 }
 
+test("KPI and Huddle editor recovery records use the shared Mango pending-document validator", async () => {
+  const previous = {
+    indexedDB: globalThis.indexedDB,
+    IDBKeyRange: globalThis.IDBKeyRange,
+  };
+  Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: fakeIndexedDB });
+  Object.defineProperty(globalThis, "IDBKeyRange", { configurable: true, value: IDBKeyRange });
+  try {
+    for (const resourceType of ["kpi", "huddle_logic_gate"] as const) {
+      const storageKey = `company-huddle-recovery:${resourceType}:resource-${resourceType}:document-${resourceType}`;
+      await writeRawMangoTiptapPending({
+        record_version: 2,
+        storage_key: storageKey,
+        company_id: "company-huddle-recovery",
+        resource_type: resourceType,
+        resource_id: `resource-${resourceType}`,
+        document_id: `document-${resourceType}`,
+        document: createEmptyMangoTiptapDocument(),
+        annotations: [],
+        generation: 1,
+        operation_id: `operation-${resourceType}`,
+        client_id: "client-huddle-recovery",
+        base_revision: 0,
+        captured_at: 1,
+      });
+      assert.equal((await readExactMangoTiptapPending(storageKey))?.resource_type, resourceType);
+    }
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
+      else Object.defineProperty(globalThis, key, { configurable: true, value });
+    }
+  }
+});
+
 test("editor lifecycle pins dirty work until persistence is confirmed", () => {
   const lifecycle = new MangoEditorLifecycle();
   assert.equal(lifecycle.getSnapshot().state, "sleeping");

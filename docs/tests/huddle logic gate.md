@@ -35,8 +35,10 @@
 33. Deleting a Huddle Logic Gate is blocked while it owns any Huddle Nodes.
 34. Deleting an empty Huddle Logic Gate moves it, its live Logic Gate relationships, its restorable direct policies, and its Huddle Explorer placement to the Recycle Bin; restoring it reuses the same UUID and exact relationships.
 35. Realtime current-audience resolution recognizes `huddle_logic_gate` and resolves its users from that Huddle Logic Gate's direct typed permission policy.
+36. Single-clicking the normal Logic Gate section of a middle-column card opens that exact Logic Gate on its normal full-page route.
+37. Single-clicking a KPI section of a middle-column card opens that exact KPI in the shared KPI editor popup.
 
-Last updated: 2026-08-11
+Last updated: 2026-08-12
 
 # Process Story: Link current Logic Gates and capture a Huddle Node
 

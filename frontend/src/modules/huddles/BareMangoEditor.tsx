@@ -13,6 +13,7 @@ type Props = {
   currentUserID?: string;
   requestJSON: <T>(path: string, init?: RequestInit & { json?: unknown }) => Promise<T>;
   ariaLabel: string;
+  editable?: boolean;
 };
 
 export type BareMangoEditorControls = {
@@ -46,7 +47,8 @@ export const BareMangoEditorToolbar: React.FC<{
   onSelectTab?: (tab: EditorTabID) => void;
   formattingDisabled?: boolean;
   reserveHeaderOffset?: boolean;
-}> = ({ controls, activeTab = "editor", visibleTabIDs = ["editor", "format", "outline-styles"], onSelectTab = () => undefined, formattingDisabled = false, reserveHeaderOffset = false }) => {
+  saveStateStorageKey?: string;
+}> = ({ controls, activeTab = "editor", visibleTabIDs = ["editor", "format", "outline-styles"], onSelectTab = () => undefined, formattingDisabled = false, reserveHeaderOffset = false, saveStateStorageKey }) => {
   const applyInline = (command: "bold" | "underline" | "italic" | "strikethrough") => controls.controllerRef.current?.toggleInlineFormat(command);
   return (
     <EditorTabBar
@@ -92,12 +94,13 @@ export const BareMangoEditorToolbar: React.FC<{
       onInsertTable={() => controls.controllerRef.current?.insertTable()}
       formattingDisabled={formattingDisabled}
       reserveHeaderOffset={reserveHeaderOffset}
+      saveStateStorageKey={saveStateStorageKey}
       singleLine
     />
   );
 };
 
-export const BareMangoEditorDocument: React.FC<Props & { controls: BareMangoEditorControls; style?: React.CSSProperties }> = ({ companyID, resourceType, resourceID, currentUserID, requestJSON, ariaLabel, controls, style }) => (
+export const BareMangoEditorDocument: React.FC<Props & { controls: BareMangoEditorControls; style?: React.CSSProperties }> = ({ companyID, resourceType, resourceID, currentUserID, requestJSON, ariaLabel, editable = true, controls, style }) => (
   <MangoTiptapEditor
     companyID={companyID}
     resourceType={resourceType}
@@ -105,6 +108,7 @@ export const BareMangoEditorDocument: React.FC<Props & { controls: BareMangoEdit
     documentID={resourceID}
     currentUserID={currentUserID}
     requestJSON={requestJSON}
+    editable={editable}
     ariaLabel={ariaLabel}
     placeholder="Start writing…"
     formattingControllerRef={controls.controllerRef}
@@ -115,13 +119,3 @@ export const BareMangoEditorDocument: React.FC<Props & { controls: BareMangoEdit
     style={{ height: "100%", minHeight: 0, overflowY: "auto", padding: "18px 22px", fontSize: controls.fontSize, ...style }}
   />
 );
-
-export const BareMangoEditor: React.FC<Props> = (props) => {
-  const controls = useBareMangoEditorControls();
-  return (
-    <div style={{ minHeight: 0, height: "100%", display: "grid", gridTemplateRows: "42px minmax(0, 1fr)", overflow: "hidden" }}>
-      <BareMangoEditorToolbar controls={controls} reserveHeaderOffset={false} />
-      <BareMangoEditorDocument {...props} controls={controls} />
-    </div>
-  );
-};

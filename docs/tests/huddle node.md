@@ -27,8 +27,10 @@
 25. A Huddle Node cannot exist without its owning Huddle Logic Gate.
 26. The first version has no editable body, copied KPI data, frequency, period, timeline events, background synchronization, or chat behavior.
 27. Realtime current-audience resolution recognizes `huddle_node` and resolves its users from that Huddle Node's direct typed permission policy.
+28. Single-clicking the normal Logic Gate section of a left-column snapshot card closes the Huddle Node popup and opens that exact Logic Gate on its normal full-page route.
+29. Single-clicking a KPI section of a left-column snapshot card opens that exact KPI in the shared KPI editor popup without changing the captured snapshot set.
 
-Last updated: 2026-08-11
+Last updated: 2026-08-12
 
 # Process Story: A Huddle Node freezes relationships but reads current source data
 
