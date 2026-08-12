@@ -881,7 +881,7 @@ export function RACIAssignmentBoard({
   onRemovePrincipal: (role: LogicGateRACIRole, principalType: LogicGateRACIPrincipalType, principalID: string) => void;
 }) {
   return (
-    <div style={{ minWidth: 0, width: "100%", display: "grid", gap: 6, overflowX: "auto", overflowY: "hidden" }}>
+    <div style={{ minWidth: 0, width: "100%", maxWidth: 780, display: "grid", gap: 6, overflowX: "auto", overflowY: "hidden" }}>
       {overwrittenByAncestor && (
         <div style={{ fontSize: 10, color: "#64748b" }}>This item currently follows the policy applied by an ancestor.</div>
       )}
