@@ -18,6 +18,7 @@ import {
   getCalendarInviteEvent,
   getCommunicationsArchiveJob,
   getEmailMessage,
+  getEmailMessageWithStoredThread,
   getEmailCollaborationThread,
   getNodeEmailThread,
   getEmailSignature,
@@ -1414,6 +1415,37 @@ test("email detail fetch ignores preview-only list cache entries", async () => {
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();
+  }
+});
+
+test("stored thread detail returns every durable message row in stored order", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedPath = "";
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    requestedPath = input.toString();
+    return jsonResponse({
+      message: { ...message("message-3", { body: "Third with quoted history" }), thread_id: "thread-1", message_order: 2 },
+      stored_thread: {
+        email_thread_id: "stored-thread-1",
+        thread_id: "thread-1",
+        history_complete: true,
+        messages: [
+          { ...message("message-1", { body: "First" }), thread_id: "thread-1", message_order: 0 },
+          { ...message("message-2", { body: "Second" }), thread_id: "thread-1", message_order: 1 },
+          { ...message("message-3", { body: "Third with quoted history" }), thread_id: "thread-1", message_order: 2 },
+        ],
+      },
+    });
+  };
+  try {
+    const result = await getEmailMessageWithStoredThread("message-3", "company-1", undefined, { accountEmail: "owner@example.com" });
+    assert.equal(requestedPath, "/v1/communications/messages/message-3?include_stored_thread=true&company_id=company-1&account_email=owner%40example.com");
+    assert.deepEqual(result.storedThread?.messages.map((storedMessage) => storedMessage.id), ["message-1", "message-2", "message-3"]);
+    assert.deepEqual(result.storedThread?.messages.map((storedMessage) => storedMessage.message_order), [0, 1, 2]);
+    assert.equal(result.storedThread?.messages.every((storedMessage) => storedMessage.detail_fetched), true);
+    assert.equal(result.message.id, "message-3");
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
 

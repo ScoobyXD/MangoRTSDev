@@ -81,15 +81,18 @@ test("an inline email reference opens the existing complete thread viewer in a c
 
   assert.ok(openStart >= 0 && openEnd > openStart);
   assert.match(openReference, /setEmailReferencePreview/);
-  assert.match(openReference, /await getEmailMessage\(entity\.entityID/);
-  assert.match(openReference, /await getEmailThread\(threadID/);
-  assert.match(openReference, /Promise\.all\(messageIDs\.map/);
-  assert.match(openReference, /mergeEmailThreadDetailMessages\(\[loadedSelected\], availableMessages\)/);
+  assert.match(openReference, /await getEmailMessageWithStoredThread\(entity\.entityID/);
+  assert.match(openReference, /storedResult\.storedThread\?\.messages/);
+  assert.match(openReference, /await listEmailCollaborations\(/);
+  assert.doesNotMatch(openReference, /getEmailThread|thread\.message_ids|Promise\.all\(messageIDs\.map/);
   assert.doesNotMatch(openReference, /selectHomeView|setNodeEditorOverlay/);
   assert.match(homePage, /<EmailReferencePreviewModal/);
   assert.match(homeParts, /data-email-reference-preview="true"/);
   assert.match(homeParts, /UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE/);
   assert.match(homeParts, /data-email-reference-preview-close="true"/);
+  assert.match(homeParts, /data-email-reference-preview-fullscreen="true"/);
+  assert.match(homeParts, /UnifiedNodeShellFullscreenIcon/);
+  assert.match(homeParts, /data-email-reference-resource=\{resource\.kind\}/);
   assert.match(homeParts, /previewOnly/);
 });
 
@@ -337,16 +340,12 @@ test("triage email selection, history, and archive prefetch preserve the foregro
   assert.match(homePage, /useEffect\(\(\) => \{ void loadMessages\(\); \}, \[loadMessages\]\)/);
   assert.match(homePage, /preserveCurrentThread[\s\S]{0,300}: \[visiblePrimaryMessage\]/);
   assert.match(homePage, /loadSelectedThreadMessageBody/);
-  assert.match(homePage, /if \(!providerMailAvailable \|\| collaborationThread\.history_complete\) return/);
-  assert.match(homePage, /setSelectedThreadMessages\(mergeEmailThreadDetailMessages\(\s*collaborationThreadMessages,\s*\[selectedWithLocalReplies\]/);
+  assert.match(homePage, /const collaborationThread = await getEmailCollaborationThread[\s\S]{0,1800}return;/);
+  assert.match(homePage, /await getEmailMessageWithStoredThread\(selectedMessageID/);
+  assert.match(homePage, /storedResult\.storedThread\?\.messages \?\? \[selectedWithLocalReplies\]/);
   assert.match(homePage, /setSelectedThreadMessages\(mergeEmailThreadDetailMessages\(\s*collaborationThreadMessages,\s*\[collaborationFallback\]/);
-  assert.match(homePage, /await getEmailMessage\(selectedMessageID[\s\S]{0,2200}await getEmailThread\(threadID/);
-  assert.match(homePage, /authoritativeMessageIDs = cleanIDList\(thread\.message_ids \?\? \[\]\)/);
-  assert.match(homePage, /const missingMessageIDs = missingEmailThreadMessageIDs\(/);
-  assert.match(homePage, /for \(let index = 0; index < missingMessageIDs\.length; index \+= 4\)/);
-  assert.match(homePage, /EMAIL_THREAD_PREVIEW_MAX_PAGES = 8/);
-  assert.match(homePage, /Some messages in this email thread could not be loaded/);
-  assert.doesNotMatch(homePage, /Promise\.all\(detailIDs/);
+  assert.doesNotMatch(homePage, /missingEmailThreadMessageIDs|EMAIL_THREAD_PREVIEW_MAX_PAGES|authoritativeMessageIDs/);
+  assert.doesNotMatch(homePage, /for \(let index = 0; index < missingMessageIDs\.length/);
   assert.match(homeParts, /onLoadMessageBody/);
 });
 

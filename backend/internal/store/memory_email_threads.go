@@ -316,7 +316,11 @@ func (r *MemoryRepo) GetCommunicationsEmailMessageForScope(input CommunicationsE
 		}
 		for _, message := range thread.Messages {
 			if message.ProviderMessageID == input.ProviderMessageID {
-				return CommunicationsEmailMessageLookupResult{Message: message.Message, Provider: thread.Provider}, nil
+				return CommunicationsEmailMessageLookupResult{
+					Message:  message.Message,
+					Provider: thread.Provider,
+					Thread:   cloneCommunicationsEmailThread(thread),
+				}, nil
 			}
 		}
 	}

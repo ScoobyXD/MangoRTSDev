@@ -274,26 +274,6 @@ export function unreadEmailThreadMessagesForSelection(
   return matches.length > 0 ? matches : [selected];
 }
 
-export function missingEmailThreadMessageIDs(
-  authoritativeMessageIDs: string[],
-  selectedMessageID: string,
-  loadedMessages: EmailMessage[],
-): string[] {
-  const loadedIDs = new Set([
-    selectedMessageID,
-    ...loadedMessages.map((message) => message.id),
-  ].map((id) => id.trim()).filter(Boolean));
-  const missing: string[] = [];
-  const seen = new Set<string>();
-  for (const rawID of authoritativeMessageIDs) {
-    const messageID = rawID.trim();
-    if (!messageID || loadedIDs.has(messageID) || seen.has(messageID)) continue;
-    seen.add(messageID);
-    missing.push(messageID);
-  }
-  return missing;
-}
-
 export function getHomeGridTemplateColumns(widths: HomeColumnWidths): string {
   return [
     `${widths[0]}px`,

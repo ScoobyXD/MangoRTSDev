@@ -73,6 +73,67 @@ func TestEmailCollaborationThreadDefaultReadReturnsEveryStoredMessageInOrderWith
 	}
 }
 
+func TestCommunicationsMessageStoredThreadReadReturnsEveryStoredRowWithoutProviderReconstruction(t *testing.T) {
+	repo, owner, _, _ := newEmailCollaborationThreadTestRepo(t)
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID: owner.UserID, Provider: "google", AccountEmail: owner.Email,
+		Scope: "personal", GrantID: "must-not-be-used", Status: "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+		CompanyID: emailCollaborationThreadTestCompanyID, PersonalUserID: owner.UserID,
+		PersonalAccountEmail: owner.Email, AccountEmail: owner.Email, Provider: "google",
+		ProviderThreadID: "stored-message-thread", SelectedMessageID: "stored-message-3", HistoryComplete: true,
+		Messages: []domain.EmailMessageSnapshot{
+			{ID: "stored-message-3", ThreadID: "stored-message-thread", Body: "Third message with quoted copies of the first and second messages", Date: 300},
+			{ID: "stored-message-1", ThreadID: "stored-message-thread", Body: "First message", Date: 100},
+			{ID: "stored-message-2", ThreadID: "stored-message-thread", Body: "Second message", Date: 200},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	client := newEmailCollaborationThreadTestClient()
+	client.threadsByID["stored-message-thread"] = NylasThread{ID: "stored-message-thread", MessageIDs: []string{"provider-reconstruction-must-not-run"}}
+	server := newEmailCollaborationThreadTestServer(repo, client)
+	defer server.Close()
+	path := "/v1/communications/messages/stored-message-3?company_id=" + emailCollaborationThreadTestCompanyID + "&account_email=" + owner.Email + "&include_stored_thread=true"
+	req := emailCollaborationThreadTestRequestWithActor(httptest.NewRequest(http.MethodGet, path, nil), owner, domain.RoleCompanyUser)
+	rec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Message      domain.EmailMessageSnapshot `json:"message"`
+		StoredThread struct {
+			EmailThreadID   string                        `json:"email_thread_id"`
+			ThreadID        string                        `json:"thread_id"`
+			Messages        []domain.EmailMessageSnapshot `json:"messages"`
+			HistoryComplete bool                          `json:"history_complete"`
+		} `json:"stored_thread"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Message.ID != "stored-message-3" || response.StoredThread.ThreadID != "stored-message-thread" || !response.StoredThread.HistoryComplete {
+		t.Fatalf("stored thread response=%+v", response)
+	}
+	if got := emailCollaborationThreadTestMessageIDs(response.StoredThread.Messages); got != "stored-message-1,stored-message-2,stored-message-3" {
+		t.Fatalf("stored message rows=%q", got)
+	}
+	for index, message := range response.StoredThread.Messages {
+		if message.MessageOrder == nil || *message.MessageOrder != index {
+			t.Fatalf("stored message %q order=%v, want %d", message.ID, message.MessageOrder, index)
+		}
+	}
+	threadGrants, threadIDs, messageGrants, messageIDs := client.calls()
+	if len(threadGrants)+len(threadIDs)+len(messageGrants)+len(messageIDs) != 0 {
+		t.Fatalf("stored message read called provider: %v %v %v %v", threadGrants, threadIDs, messageGrants, messageIDs)
+	}
+}
+
 func TestNodeEmailThreadRouteReturnsDurableStoredHistory(t *testing.T) {
 	repo, owner, _, _ := newEmailCollaborationThreadTestRepo(t)
 	collaboration := ensureEmailCollaborationThreadTestCollaboration(t, repo, store.CommunicationsEmailCollaborationEnsureInput{

@@ -33,7 +33,7 @@ import { EditorTabBar } from "../../modules/editor/EditorTabBar";
 import { UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS, type EditorTabID } from "../../modules/editor/editorTabs";
 import { beginEditorAttachmentMutation, finishEditorAttachmentMutation, type EditorAttachmentMutationState } from "../../modules/editor/editorAttachmentPreparation";
 import { UnifiedRichEditorSurface, type UnifiedRichEditorFormattingController } from "../../modules/editor/UnifiedRichEditorSurface";
-import { UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE, UnifiedNodeShell, type UnifiedNodeShellAction } from "../../modules/editor/UnifiedNodeShell";
+import { UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE, UnifiedNodeShell, UnifiedNodeShellFullscreenIcon, type UnifiedNodeShellAction } from "../../modules/editor/UnifiedNodeShell";
 import { ChatIcon } from "../../modules/editor/NodeWorkspaceSurfaceShared";
 import { applyEmailBodyHighlights, type EmailBodyHighlightRange } from "../../modules/editor/emailBodyHighlights";
 import type { EditorOutlineStyleID } from "../../modules/editor/plainTextEditing";
@@ -6307,7 +6307,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
     </article>
   );
 }
-export function MessageDetail({ message, threadMessages = [], nodes, companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, chatOpen, previewOnly = false, emailNodeDestinationSearch, emailChatHighlights = [], activeEmailSelection, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onToggleEmailChat, onOpenCollaborationNode, onOpenLogicGate, onContentTopChange }: {
+export function MessageDetail({ message, threadMessages = [], nodes, companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, chatOpen, previewOnly = false, previewHeaderResources, emailNodeDestinationSearch, emailChatHighlights = [], activeEmailSelection, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onToggleEmailChat, onOpenCollaborationNode, onOpenLogicGate, onContentTopChange }: {
   message: EmailMessage;
   threadMessages?: EmailMessage[];
   nodes: NodeRecord[];
@@ -6322,6 +6322,7 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
   chatAvailable: boolean;
   chatOpen: boolean;
   previewOnly?: boolean;
+  previewHeaderResources?: React.ReactNode;
   emailNodeDestinationSearch: React.ReactNode;
   emailChatHighlights?: readonly EmailCollaborationSelection[];
   activeEmailSelection?: EmailCollaborationSelection | null;
@@ -6485,9 +6486,10 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
   }, [onContentTopChange]);
   return (
     <div ref={detailRootRef} style={{ ...detailStyle, position: "relative", gridTemplateRows: previewOnly ? "auto minmax(0, 1fr)" : detailStyle.gridTemplateRows }}>
-      <div style={{ ...panelHeaderStyle, paddingRight: previewOnly ? 30 : undefined }}>
-        <div style={{ minWidth: 0 }}>
+      <div style={{ ...panelHeaderStyle, paddingRight: previewOnly ? 66 : undefined }}>
+        <div style={{ minWidth: 0, display: "grid", gap: 6 }}>
           <h2 style={detailSubjectStyle}>{message.subject || "(no subject)"}</h2>
+          {previewOnly && previewHeaderResources}
         </div>
         {loading && <span style={mutedSmallStyle}>Loading</span>}
       </div>
@@ -6589,9 +6591,10 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
   );
 }
 
-export function EmailReferencePreviewModal({ message, threadMessages, nodes, companyID, sharedInboxID, accountEmail, loading, error, onLoadMessageBody, onClose }: {
+export function EmailReferencePreviewModal({ message, threadMessages, resources, nodes, companyID, sharedInboxID, accountEmail, loading, error, onLoadMessageBody, onOpenNode, onOpenLogicGate, onClose }: {
   message: EmailMessage | null;
   threadMessages: EmailMessage[];
+  resources: Array<{ kind: "node" | "logic_gate"; id: string; label: string }>;
   nodes: NodeRecord[];
   companyID: string;
   sharedInboxID?: string;
@@ -6599,14 +6602,35 @@ export function EmailReferencePreviewModal({ message, threadMessages, nodes, com
   loading: boolean;
   error: string;
   onLoadMessageBody: (messageID: string) => Promise<EmailMessage | null>;
+  onOpenNode: (nodeID: string) => void;
+  onOpenLogicGate: (logicGateID: string) => void;
   onClose: () => void;
 }) {
+  const [fullscreen, setFullscreen] = React.useState(false);
+  React.useEffect(() => setNodeEditorFullscreenChromeActive(fullscreen), [fullscreen]);
+  const resourceButtons = resources.length > 0 ? (
+    <div data-email-reference-preview-resources="true" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+      {resources.map((resource) => (
+        <button
+          key={`${resource.kind}:${resource.id}`}
+          type="button"
+          data-email-reference-resource={resource.kind}
+          title={`Open ${resource.kind === "node" ? "node" : "Logic Gate"}: ${resource.label}`}
+          onClick={() => resource.kind === "node" ? onOpenNode(resource.id) : onOpenLogicGate(resource.id)}
+          style={{ display: "inline-flex", alignItems: "center", gap: 6, minHeight: 28, maxWidth: 280, padding: "3px 9px 3px 6px", border: `1px solid ${resource.kind === "node" ? "rgba(51,221,213,0.34)" : "rgba(25,240,122,0.38)"}`, borderRadius: 8, background: resource.kind === "node" ? "rgba(236,254,255,0.9)" : "rgba(236,253,245,0.92)", color: "#334155", fontSize: 11, fontWeight: 850, cursor: "pointer" }}
+        >
+          <ExplorerRowIcon kind={resource.kind} />
+          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{resource.label}</span>
+        </button>
+      ))}
+    </div>
+  ) : null;
   return (
     <AppModalPortal onRequestClose={onClose}>
       <div
         data-email-reference-preview-backdrop="true"
         onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
-        style={{ position: "fixed", inset: 0, zIndex: 1, display: "grid", placeItems: "center", padding: 20, background: "rgba(15,23,42,0.42)" }}
+        style={{ position: "fixed", inset: 0, zIndex: 1, display: "grid", placeItems: "center", padding: fullscreen ? 0 : 16, background: "rgba(15,23,42,0.42)" }}
       >
         <section
           role="dialog"
@@ -6614,8 +6638,19 @@ export function EmailReferencePreviewModal({ message, threadMessages, nodes, com
           aria-label={message?.subject ? `Email thread: ${message.subject}` : "Email thread preview"}
           data-email-reference-preview="true"
           onPointerDown={(event) => event.stopPropagation()}
-          style={{ position: "relative", width: "min(900px, calc(100vw - 40px))", height: "min(760px, calc(100dvh - 40px))", minHeight: "min(360px, calc(100dvh - 40px))", display: "grid", gridTemplateRows: error ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)", gap: 8, padding: "14px 12px 12px", boxSizing: "border-box", border: "1px solid rgba(148,163,184,0.26)", borderRadius: 16, background: "linear-gradient(180deg, #fbfbfd 0%, #f2f4f8 100%)", boxShadow: "0 24px 70px rgba(15,23,42,0.28)", overflow: "hidden" }}
+          style={{ position: "relative", width: fullscreen ? `calc(100vw - ${NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX * 2}px)` : "min(1180px, calc(100vw - 32px))", height: fullscreen ? `calc(100dvh - ${NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX * 2}px)` : "min(860px, calc(100dvh - 32px))", minHeight: "min(360px, calc(100dvh - 32px))", display: "grid", gridTemplateRows: error ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)", gap: 8, padding: "14px 12px 12px", boxSizing: "border-box", border: "1px solid rgba(148,163,184,0.26)", borderRadius: fullscreen ? 14 : 16, background: "linear-gradient(180deg, #fbfbfd 0%, #f2f4f8 100%)", boxShadow: "0 24px 70px rgba(15,23,42,0.28)", overflow: "hidden" }}
         >
+          <button
+            type="button"
+            title={fullscreen ? "Restore email preview" : "Fullscreen email preview"}
+            aria-label={fullscreen ? "Restore email preview" : "Fullscreen email preview"}
+            aria-pressed={fullscreen}
+            data-email-reference-preview-fullscreen="true"
+            onClick={() => setFullscreen((current) => !current)}
+            style={{ position: "absolute", top: 8, right: 39, zIndex: 3, width: 24, height: 24, display: "grid", placeItems: "center", padding: 0, border: "1px solid rgba(148,163,184,0.34)", borderRadius: 8, background: "linear-gradient(180deg, #ffffff 0%, #eef2f7 100%)", color: "#475569", boxShadow: "0 6px 16px rgba(15,23,42,0.14)", cursor: "pointer" }}
+          >
+            <UnifiedNodeShellFullscreenIcon active={fullscreen} />
+          </button>
           <button
             type="button"
             title="Close email preview"
@@ -6647,6 +6682,7 @@ export function EmailReferencePreviewModal({ message, threadMessages, nodes, com
               chatAvailable={false}
               chatOpen={false}
               previewOnly
+              previewHeaderResources={resourceButtons}
               emailNodeDestinationSearch={null}
               onLoadMessageBody={onLoadMessageBody}
               onReply={() => undefined}
