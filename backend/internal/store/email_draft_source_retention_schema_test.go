@@ -42,6 +42,38 @@ func TestEmailDraftSourceRetentionSchemaContract(t *testing.T) {
 	}
 }
 
+func TestEmailDraftScopeMigrationRemovesOnlyAmbiguousLegacyDrafts(t *testing.T) {
+	raw, err := os.ReadFile("../../db/migrations/20260811_zzz_email_draft_scope.sql")
+	if err != nil {
+		t.Fatalf("read email draft scope migration: %v", err)
+	}
+	migration := strings.ToLower(string(raw))
+	normalized := strings.Join(strings.Fields(migration), " ")
+	for _, required := range []string{
+		"begin;",
+		"update attachment_relationships relationship",
+		"relationship.resource_type='email_draft'",
+		"draft.email_thread_id is null and draft.created_by_user_id is null",
+		"draft.email_thread_id is not null and (draft.origin_node_id is null or draft.source_email_message_id is null)",
+		"delete from email_drafts where (email_thread_id is null and created_by_user_id is null) or (email_thread_id is not null and (origin_node_id is null or source_email_message_id is null))",
+		"drop constraint if exists email_drafts_origin_node_fkey",
+		"references nodes(company_id,node_id) on delete cascade",
+		"commit;",
+	} {
+		if !strings.Contains(normalized, strings.Join(strings.Fields(required), " ")) {
+			t.Errorf("email draft scope migration missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"email draft migration stopped: personal draft owner is ambiguous",
+		"email draft migration stopped: shared draft node or source message is ambiguous",
+	} {
+		if strings.Contains(migration, forbidden) {
+			t.Errorf("email draft scope migration retains obsolete blocking path %q", forbidden)
+		}
+	}
+}
+
 func emailDraftCreateTableContract(t *testing.T, sqlText string) string {
 	t.Helper()
 	const startNeedle = "create table if not exists email_drafts ("

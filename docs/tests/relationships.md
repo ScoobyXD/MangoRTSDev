@@ -46,6 +46,7 @@ Later membership changes do not rewrite that Huddle Node, while current source d
 17. A triage command that creates a new email grouping or stores a highlighted-email selection reuses the exact mailbox-scoped stored message when present, fetches only that exact provider message when absent, and never queues thread ingestion or links a thread to a text box.
 18. When a highlighted-email chat's exact message has no text-box relationship in the chosen Node, selecting an existing chat grouping atomically links that message to the grouping's exact existing text box and creates the chat without creating another text box.
 19. The Node email view uses the same atomic rule when the user chooses an existing text-box chat column; a failed relationship or chat write leaves both absent.
+20. The email-draft scope cutover deletes only obsolete draft rows that cannot name their required exact owner or exact Node and source message, and retires only their typed `email_draft` attachment relationships before deletion; it never invents an endpoint or changes a valid email relationship.
 
 Last updated: 2026-08-12
 
@@ -68,6 +69,8 @@ A highlighted-email or new-grouping send reuses the exact stored message or impo
 Removing one Node's relationship leaves all other Node-local work and the stored email truth intact
 ↓
 Every endpoint keeps its literal typed identity; no registry, surrogate identity, or generic untyped edge is introduced
+↓
+The forward draft cutover removes only legacy drafts without the exact identities required by this model and retires only their typed draft attachment links
 
 Last updated: 2026-08-12
 # Process Story: Policy inheritance follows typed parents without moving permissions into Explorer
