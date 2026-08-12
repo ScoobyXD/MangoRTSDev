@@ -28,13 +28,12 @@ import {
 import { downloadEmailAttachment, parseEmailAddressList, type CommunicationsSharedInbox, type CommunicationsSharedInboxRACIRole, type CommunicationsSharedInboxRACIPrincipalType, type CompanyUser, type EmailAddress, type EmailAttachment, type EmailMessage } from "../../modules/communications/communicationsApi";
 import { CalendarInviteCard } from "../../modules/communications/CalendarInviteCard";
 import { emailAttachmentHasResolvableContent } from "../../modules/communications/emailAttachments";
-import { splitEmailQuotedHistory } from "../../modules/communications/emailQuotedContent";
 import { emailThreadMessageRenderKey, emailThreadMessageSourceLabel, normalizeEmailThreadMessages, type EmailThreadMessageCandidate } from "../../modules/communications/emailThreadMessages";
 import { EditorTabBar } from "../../modules/editor/EditorTabBar";
 import { UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS, type EditorTabID } from "../../modules/editor/editorTabs";
 import { beginEditorAttachmentMutation, finishEditorAttachmentMutation, type EditorAttachmentMutationState } from "../../modules/editor/editorAttachmentPreparation";
 import { UnifiedRichEditorSurface, type UnifiedRichEditorFormattingController } from "../../modules/editor/UnifiedRichEditorSurface";
-import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../../modules/editor/UnifiedNodeShell";
+import { UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE, UnifiedNodeShell, type UnifiedNodeShellAction } from "../../modules/editor/UnifiedNodeShell";
 import { ChatIcon } from "../../modules/editor/NodeWorkspaceSurfaceShared";
 import { applyEmailBodyHighlights, type EmailBodyHighlightRange } from "../../modules/editor/emailBodyHighlights";
 import type { EditorOutlineStyleID } from "../../modules/editor/plainTextEditing";
@@ -6152,7 +6151,7 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
   return { srcDoc };
 }
 
-function EmailConversationMessage({ message, companyID, sharedInboxID, accountEmail, fill, expanded, latest, timelineStart, timelineEnd, busy, calendarResponseAvailable, loadingBody = false, chatHighlights = [], activeSelection, selectionNavigation, onToggleExpanded, onLoadBody, onReply, onReplyAll, onEmailSelection }: {
+function EmailConversationMessage({ message, companyID, sharedInboxID, accountEmail, fill, expanded, latest, showReplyActions, timelineStart, timelineEnd, busy, calendarResponseAvailable, loadingBody = false, chatHighlights = [], activeSelection, selectionNavigation, onToggleExpanded, onLoadBody, onReply, onReplyAll, onEmailSelection }: {
   message: EmailMessage;
   companyID: string;
   sharedInboxID?: string;
@@ -6160,6 +6159,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
   fill: boolean;
   expanded: boolean;
   latest: boolean;
+  showReplyActions: boolean;
   timelineStart: boolean;
   timelineEnd: boolean;
   busy: boolean;
@@ -6181,17 +6181,11 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
   const messageDate = formatMessageDate(message.date);
   const bodyLoaded = emailMessageBodyIsLoaded(message);
   const body = bodyLoaded ? (message.body ?? "") : "";
-  const quotedContent = React.useMemo(() => splitEmailQuotedHistory(body), [body]);
-  const [quotedHistoryVisible, setQuotedHistoryVisible] = React.useState(false);
-  React.useEffect(() => {
-    setQuotedHistoryVisible(Boolean(selectionNavigation && quotedContent.hasQuotedHistory));
-  }, [body, message.id, quotedContent.hasQuotedHistory, selectionNavigation?.requestID]);
-  const displayBody = quotedHistoryVisible ? body : quotedContent.authoredBody;
   const attachments = visibleEmailAttachmentsForBody(body, allAttachments);
   const hasAttachments = attachments.length > 0;
   const hasCalendarInvite = allAttachments.some(emailAttachmentIsCalendarInvite);
   const collaborationID = message.collaboration_id?.trim() || undefined;
-  const bodyDocument = useEmailBodyDocument(message.id, displayBody, allAttachments, companyID, sharedInboxID, accountEmail, collaborationID, expanded && bodyLoaded);
+  const bodyDocument = useEmailBodyDocument(message.id, body, allAttachments, companyID, sharedInboxID, accountEmail, collaborationID, expanded && bodyLoaded);
   const sent = messageIsSent(message);
   const frameMinHeight = fill ? 0 : 120;
   const frameStyle: React.CSSProperties | undefined = fill ? undefined : {
@@ -6274,19 +6268,6 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
             selectionNavigation={selectionNavigation}
           />
         ))}
-        {expanded && bodyLoaded && quotedContent.hasQuotedHistory && (
-          <div data-email-quoted-history-control="true" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", padding: "7px 9px", border: "1px solid rgba(148, 163, 184, 0.2)", borderRadius: 9, background: "rgba(248, 250, 252, 0.72)", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.12), inset -2px -2px 6px rgba(255,255,255,0.82)" }}>
-            <span style={mutedSmallStyle}>{quotedHistoryVisible ? "Full provider body is visible." : "Earlier quoted messages are hidden from this reply."}</span>
-            <button
-              type="button"
-              aria-expanded={quotedHistoryVisible}
-              style={{ ...mailPanelSmallButtonStyle, minHeight: 30 }}
-              onClick={() => setQuotedHistoryVisible((visible) => !visible)}
-            >
-              {quotedHistoryVisible ? "Hide quoted history" : "Show quoted history"}
-            </button>
-          </div>
-        )}
         {expanded && hasAttachments && (
           <div style={mailAttachmentSectionStyle}>
             <div style={mailAttachmentHeaderStyle}>
@@ -6316,7 +6297,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
             disabled={busy || !calendarResponseAvailable}
           />
         )}
-        {expanded && latest && (
+        {expanded && latest && showReplyActions && (
           <div data-email-primary-reply-actions="true" style={{ display: "flex", gap: 7, flexWrap: "wrap", paddingTop: 2 }}>
             <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReply(message)}>Reply</button>
             <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReplyAll(message)}>Reply all</button>
@@ -6326,7 +6307,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
     </article>
   );
 }
-export function MessageDetail({ message, threadMessages = [], nodes, companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, chatOpen, emailNodeDestinationSearch, emailChatHighlights = [], activeEmailSelection, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onToggleEmailChat, onOpenCollaborationNode, onOpenLogicGate, onContentTopChange }: {
+export function MessageDetail({ message, threadMessages = [], nodes, companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, chatOpen, previewOnly = false, emailNodeDestinationSearch, emailChatHighlights = [], activeEmailSelection, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onToggleEmailChat, onOpenCollaborationNode, onOpenLogicGate, onContentTopChange }: {
   message: EmailMessage;
   threadMessages?: EmailMessage[];
   nodes: NodeRecord[];
@@ -6340,6 +6321,7 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
   deleteAvailable: boolean;
   chatAvailable: boolean;
   chatOpen: boolean;
+  previewOnly?: boolean;
   emailNodeDestinationSearch: React.ReactNode;
   emailChatHighlights?: readonly EmailCollaborationSelection[];
   activeEmailSelection?: EmailCollaborationSelection | null;
@@ -6371,6 +6353,7 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
     () => orderEmailConversationMessages(canonicalConversationMessages, conversationOrder),
     [canonicalConversationMessages, conversationOrder],
   );
+  const conversationMessageIdentity = canonicalConversationMessages.map((conversationMessage) => conversationMessage.id).join("\x1f");
   const [expandedMessageIDs, setExpandedMessageIDs] = React.useState<Set<string>>(() => new Set([newestMessageID]));
   const [loadingMessageBodyIDs, setLoadingMessageBodyIDs] = React.useState<Set<string>>(() => new Set());
   const messageBodyInflightRef = React.useRef<Map<string, Promise<EmailMessage | null>>>(new Map());
@@ -6413,10 +6396,19 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
     if (!emailMessageBodyIsLoaded(navigationTargetMessage)) void loadConversationMessageBody(navigationTargetMessage);
   }, [loadConversationMessageBody, navigationTargetMessage?.id, selectionNavigation?.requestID]);
   React.useLayoutEffect(() => {
+    if (previewOnly) return;
     setExpandedMessageIDs(newestMessageID ? new Set([newestMessageID]) : new Set());
     const newestMessage = canonicalConversationMessages[canonicalConversationMessages.length - 1];
     if (!loading && newestMessage && !emailMessageBodyIsLoaded(newestMessage)) void loadConversationMessageBody(newestMessage);
-  }, [loadConversationMessageBody, loading, newestMessageID]);
+  }, [loadConversationMessageBody, loading, newestMessageID, previewOnly]);
+  React.useLayoutEffect(() => {
+    if (!previewOnly) return;
+    setExpandedMessageIDs(new Set(canonicalConversationMessages.map((conversationMessage) => conversationMessage.id)));
+    if (loading) return;
+    void Promise.all(canonicalConversationMessages
+      .filter((conversationMessage) => !emailMessageBodyIsLoaded(conversationMessage))
+      .map(loadConversationMessageBody));
+  }, [conversationMessageIdentity, loadConversationMessageBody, loading, previewOnly]);
   React.useLayoutEffect(() => {
     if (singleMessage || conversationOrder !== "oldest") return undefined;
     const scrollIdentity = `${conversationIdentity}:${conversationMessages.length}`;
@@ -6492,14 +6484,14 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
     };
   }, [onContentTopChange]);
   return (
-    <div ref={detailRootRef} style={{ ...detailStyle, position: "relative" }}>
-      <div style={panelHeaderStyle}>
+    <div ref={detailRootRef} style={{ ...detailStyle, position: "relative", gridTemplateRows: previewOnly ? "auto minmax(0, 1fr)" : detailStyle.gridTemplateRows }}>
+      <div style={{ ...panelHeaderStyle, paddingRight: previewOnly ? 30 : undefined }}>
         <div style={{ minWidth: 0 }}>
           <h2 style={detailSubjectStyle}>{message.subject || "(no subject)"}</h2>
         </div>
         {loading && <span style={mutedSmallStyle}>Loading</span>}
       </div>
-      <div style={{ ...toolbarStyle, display: "flex", alignItems: "center", flexWrap: "nowrap", minWidth: 0 }}>
+      {!previewOnly && <div style={{ ...toolbarStyle, display: "flex", alignItems: "center", flexWrap: "nowrap", minWidth: 0 }}>
         <div className="mango-editor-header-scroll" style={{ minWidth: 0, display: "flex", flexWrap: "nowrap", alignItems: "center", gap: 6, overflowX: "auto", overflowY: "hidden" }}>
           {!singleMessage && (
             <>
@@ -6562,7 +6554,7 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
             <ChatIcon color={chatOpen ? "#475569" : "rgba(71,85,105,0.88)"} />
           </button>
         )}
-      </div>
+      </div>}
       <div ref={conversationScrollRef} data-email-conversation-scroll="true" data-email-conversation-count={conversationMessages.length} style={bodyContainerStyle}>
         {conversationMessages.map((conversationMessage, index) => (
           <EmailConversationMessage
@@ -6576,6 +6568,7 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
             timelineEnd={index === conversationMessages.length - 1}
             expanded={singleMessage || expandedMessageIDs.has(conversationMessage.id)}
             latest={conversationMessage.id === newestMessageID}
+            showReplyActions={!previewOnly}
             busy={busy}
             calendarResponseAvailable={!sharedInboxID || archiveAvailable}
             loadingBody={loadingMessageBodyIDs.has(conversationMessage.id) || (loading && conversationMessage.id === message.id && !emailMessageBodyIsLoaded(conversationMessage))}
@@ -6593,6 +6586,87 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
         ))}
       </div>
     </div>
+  );
+}
+
+export function EmailReferencePreviewModal({ message, threadMessages, nodes, companyID, sharedInboxID, accountEmail, loading, error, onLoadMessageBody, onClose }: {
+  message: EmailMessage | null;
+  threadMessages: EmailMessage[];
+  nodes: NodeRecord[];
+  companyID: string;
+  sharedInboxID?: string;
+  accountEmail?: string;
+  loading: boolean;
+  error: string;
+  onLoadMessageBody: (messageID: string) => Promise<EmailMessage | null>;
+  onClose: () => void;
+}) {
+  return (
+    <AppModalPortal onRequestClose={onClose}>
+      <div
+        data-email-reference-preview-backdrop="true"
+        onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
+        style={{ position: "fixed", inset: 0, zIndex: 1, display: "grid", placeItems: "center", padding: 20, background: "rgba(15,23,42,0.42)" }}
+      >
+        <section
+          role="dialog"
+          aria-modal="true"
+          aria-label={message?.subject ? `Email thread: ${message.subject}` : "Email thread preview"}
+          data-email-reference-preview="true"
+          onPointerDown={(event) => event.stopPropagation()}
+          style={{ position: "relative", width: "min(900px, calc(100vw - 40px))", height: "min(760px, calc(100dvh - 40px))", minHeight: "min(360px, calc(100dvh - 40px))", display: "grid", gridTemplateRows: error ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)", gap: 8, padding: "14px 12px 12px", boxSizing: "border-box", border: "1px solid rgba(148,163,184,0.26)", borderRadius: 16, background: "linear-gradient(180deg, #fbfbfd 0%, #f2f4f8 100%)", boxShadow: "0 24px 70px rgba(15,23,42,0.28)", overflow: "hidden" }}
+        >
+          <button
+            type="button"
+            title="Close email preview"
+            aria-label="Close email preview"
+            data-email-reference-preview-close="true"
+            onClick={onClose}
+            style={{ ...UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE, position: "absolute", top: 8, right: 9, zIndex: 3 }}
+          >
+            X
+          </button>
+          {error && (
+            <div role="status" style={{ marginRight: 30, border: "1px solid rgba(185,28,28,0.24)", borderRadius: 9, background: "rgba(254,242,242,0.92)", color: "#991b1b", padding: "7px 9px", fontSize: 11, fontWeight: 800 }}>
+              {error}
+            </div>
+          )}
+          {message ? (
+            <MessageDetail
+              message={message}
+              threadMessages={threadMessages}
+              nodes={nodes}
+              companyID={companyID}
+              sharedInboxID={sharedInboxID}
+              accountEmail={accountEmail}
+              loading={loading}
+              archiveAvailable={false}
+              archiveLabel="Archive"
+              busy={false}
+              deleteAvailable={false}
+              chatAvailable={false}
+              chatOpen={false}
+              previewOnly
+              emailNodeDestinationSearch={null}
+              onLoadMessageBody={onLoadMessageBody}
+              onReply={() => undefined}
+              onReplyAll={() => undefined}
+              onCreateSharedDraft={() => undefined}
+              onForward={() => undefined}
+              onArchive={() => undefined}
+              onDelete={() => undefined}
+              onToggleRead={() => undefined}
+              onToggleStar={() => undefined}
+              onToggleEmailChat={() => undefined}
+            />
+          ) : (
+            <div style={{ minHeight: 0, display: "grid", placeItems: "center", color: error ? "#991b1b" : "rgba(71,85,105,0.78)", fontSize: 12, fontWeight: 850 }}>
+              {loading ? "Loading email thread" : "Email thread unavailable"}
+            </div>
+          )}
+        </section>
+      </div>
+    </AppModalPortal>
   );
 }
 

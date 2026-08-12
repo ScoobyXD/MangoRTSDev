@@ -122,8 +122,8 @@ test("triage drag parsing makes a shared inbox authoritative over personal accou
 test("triage email bodies render before cancellable inline-image hydration completes", () => {
   const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
 
-  assert.match(homeParts, /useEmailBodyDocument\(message\.id, displayBody, allAttachments, companyID, sharedInboxID, accountEmail, collaborationID, expanded && bodyLoaded\)/);
-  assert.match(homeParts, /const quotedContent = React\.useMemo\(\(\) => splitEmailQuotedHistory\(body\), \[body\]\)/);
+  assert.match(homeParts, /useEmailBodyDocument\(message\.id, body, allAttachments, companyID, sharedInboxID, accountEmail, collaborationID, expanded && bodyLoaded\)/);
+  assert.doesNotMatch(homeParts, /splitEmailQuotedHistory|Show quoted history|Hide quoted history/);
   assert.match(homeParts, /if \(!enabled \|\| !body\.trim\(\) \|\| inlineAttachments\.length === 0\) return undefined/);
   assert.match(homeParts, /downloadEmailAttachment\(messageID, providerAttachmentID, companyID, sharedInboxID, \{ signal: controller\.signal, accountEmail, collaborationID \}\)/);
   assert.match(homeParts, /const item = await loadInlineAttachment\(attachment\);[\s\S]{0,300}setDownloadedSourceByContentID/);

@@ -37,14 +37,13 @@ test("node-attached email viewer discloses per-message recipients while retainin
   assert.match(nodeParts, /\{isExpanded && \(useRichThreadBody/);
   assert.match(nodeParts, /\{isExpanded && \(\s*<EmailMessageAttachments/);
   assert.match(nodeParts, /<EmailBodyFrame/);
-  assert.match(nodeParts, /splitEmailQuotedHistory\(fullThreadBody\)/);
-  assert.match(nodeParts, /body=\{displayThreadBody\}/);
+  assert.match(nodeParts, /const threadBody = emailBodyText\(fullThreadBody\)/);
+  assert.match(nodeParts, /body=\{fullThreadBody\}/);
   assert.match(nodeParts, /data-email-timeline-item=\{singleMessageOnly \? undefined : "true"\}/);
   assert.match(nodeParts, /normalizeEmailThreadMessages\(candidates, "oldest"\)/);
   assert.match(nodeParts, /data-email-message-id=\{threadMessage\.id\}/);
   assert.match(nodeParts, /data-email-message-sources=\{emailThreadMessageSourceLabel\(threadMessage\)\}/);
-  assert.match(nodeParts, /Show quoted history/);
-  assert.match(nodeParts, /Hide quoted history/);
+  assert.doesNotMatch(nodeParts, /splitEmailQuotedHistory|Show quoted history|Hide quoted history|data-email-quoted-history-control/);
   assert.match(nodeParts, /onSelectionChange=\{canUseEmailSelection/);
   assert.match(nodeParts, /rewriteEmailCIDImages/);
   assert.match(nodeParts, /Download image/);
@@ -71,6 +70,27 @@ test("node-attached email viewer discloses per-message recipients while retainin
   assert.match(universalPickerEmailPane, /const page = await listEmailMessages\(\{/);
   assert.match(calendarInviteCard, /Calendar invitation/);
   assert.match(nodeParts, /window\.setTimeout\(\(\) => replyEditorControllerRef\.current\?\.focus\(\), 0\)/);
+});
+
+test("an inline email reference opens the existing complete thread viewer in a closable modal", () => {
+  const homePage = source("frontend/src/pages/home/HomePage.tsx");
+  const homeParts = source("frontend/src/pages/home/HomeParts.tsx");
+  const openStart = homePage.indexOf("const openReferencedEmail");
+  const openEnd = homePage.indexOf("const loadReferencedEmailMessageBody", openStart);
+  const openReference = homePage.slice(openStart, openEnd);
+
+  assert.ok(openStart >= 0 && openEnd > openStart);
+  assert.match(openReference, /setEmailReferencePreview/);
+  assert.match(openReference, /await getEmailMessage\(entity\.entityID/);
+  assert.match(openReference, /await getEmailThread\(threadID/);
+  assert.match(openReference, /Promise\.all\(messageIDs\.map/);
+  assert.match(openReference, /mergeEmailThreadDetailMessages\(\[loadedSelected\], availableMessages\)/);
+  assert.doesNotMatch(openReference, /selectHomeView|setNodeEditorOverlay/);
+  assert.match(homePage, /<EmailReferencePreviewModal/);
+  assert.match(homeParts, /data-email-reference-preview="true"/);
+  assert.match(homeParts, /UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE/);
+  assert.match(homeParts, /data-email-reference-preview-close="true"/);
+  assert.match(homeParts, /previewOnly/);
 });
 
 test("node email and linked text boxes expose animated two-way navigation and computed colors", () => {

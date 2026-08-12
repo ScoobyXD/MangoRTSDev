@@ -518,11 +518,11 @@ test("mail thread detail supports exact-message replies, saved editor sizing, an
   assert.doesNotMatch(homeStyles, /\n\s*height: fill \? "100%" : undefined,/);
   assert.match(homeParts, /alignItems: fill \? "start" : "stretch"/);
   assert.doesNotMatch(homeParts, /fill \? \(hasAttachments \? 300 : 360\) : 120/);
-  assert.match(homeParts, /setExpandedMessageIDs\(newestMessageID \? new Set\(\[newestMessageID\]\)/);
-  assert.match(homeParts, /if \(!loading && newestMessage && !emailMessageBodyIsLoaded\(newestMessage\)\)/);
+  assert.match(homeParts, /if \(previewOnly\) return;[\s\S]{0,180}setExpandedMessageIDs\(newestMessageID \? new Set\(\[newestMessageID\]\)/);
+  assert.match(homeParts, /if \(!previewOnly\) return;[\s\S]{0,180}setExpandedMessageIDs\(new Set\(canonicalConversationMessages\.map/);
   assert.match(homeMailWorkspace, /emailConversationShouldShowLoadingShell\(selectedMessage, selectedThreadMessages, loadingDetail\)/);
   assert.match(homeMailWorkspace, /data-email-conversation-loading="true"[\s\S]*Loading conversation/);
-  assert.match(homeParts, /splitEmailQuotedHistory\(body\)/);
+  assert.doesNotMatch(homeParts, /splitEmailQuotedHistory/);
   assert.match(homeParts, /data-email-timeline-item="true"/);
   assert.match(homeParts, /data-email-message-id=\{message\.id\}/);
   assert.match(homeParts, /data-email-message-sources=\{emailThreadMessageSourceLabel\(message\)\}/);
@@ -533,8 +533,11 @@ test("mail thread detail supports exact-message replies, saved editor sizing, an
   assert.match(homeParts, /conversationScrollRef\.current[\s\S]*scrollTop = scrollContainer\.scrollHeight/);
   assert.match(homeParts, /data-message-direction=\{sent \? "sent" : "received"\}/);
   assert.match(homeParts, /mailConversationCardStyle\(expanded, sent, fill\)/);
-  assert.match(homeParts, /Show quoted history/);
-  assert.match(homeParts, /Earlier quoted messages are hidden from this reply/);
+  assert.doesNotMatch(homeParts, /Show quoted history|Earlier quoted messages are hidden from this reply/);
+  assert.match(homeParts, /EmailReferencePreviewModal/);
+  assert.match(homeParts, /UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE/);
+  assert.match(homeParts, /data-email-reference-preview-close="true"/);
+  assert.match(homeParts, /previewOnly/);
   assert.match(homeParts, /saveMailReplyEditorHeight/);
   assert.match(homeParts, /MAIL_REPLY_EDITOR_MIN_HEIGHT_PX/);
   assert.match(homePage, /saveCurrentComposeDraft\(\{ quiet: true \}\);\s*setCompose\(emptyCompose\);/);
