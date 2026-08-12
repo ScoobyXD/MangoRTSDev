@@ -1269,7 +1269,7 @@ button, input, textarea, select {
 .email-chat-textbox-group {
   min-width: 0;
   border: 1px solid transparent;
-  transition: transform 150ms ease, box-shadow 150ms ease, background 150ms ease;
+  transition: transform 120ms ease, box-shadow 140ms ease;
 }
 
 .email-chat-node-section[data-chat-node-selectable="true"],
@@ -1286,16 +1286,15 @@ button, input, textarea, select {
 }
 
 .email-chat-node-section:hover,
-.email-chat-node-section:focus-within,
-.email-chat-node-section[data-chat-node-selected="true"] {
-  transform: translateY(-1px);
-  background:
-    linear-gradient(135deg, rgba(255,255,255,0.94), rgba(230,252,255,0.64) 46%, rgba(247,239,255,0.70)) padding-box,
-    linear-gradient(135deg, rgba(92,238,255,0.78), rgba(128,216,255,0.72) 34%, rgba(183,124,255,0.82) 72%, rgba(255,255,255,0.86)) border-box;
-  box-shadow: 0 10px 24px rgba(15,23,42,0.11), 0 0 16px rgba(183,124,255,0.12), inset 1px 1px 0 rgba(255,255,255,0.9);
+.email-chat-node-section:focus-within {
+  transform: translateY(-2px);
+  box-shadow: 0 7px 16px rgba(100,116,139,0.18), 0 1px 4px rgba(15,23,42,0.08);
 }
 
 .email-chat-node-section[data-chat-node-selected="true"] {
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.94), rgba(230,252,255,0.64) 46%, rgba(247,239,255,0.70)) padding-box,
+    linear-gradient(135deg, rgba(92,238,255,0.78), rgba(128,216,255,0.72) 34%, rgba(183,124,255,0.82) 72%, rgba(255,255,255,0.86)) border-box;
   box-shadow: 0 10px 24px rgba(15,23,42,0.11), 0 0 0 2px rgba(128,216,255,0.30), 0 0 18px rgba(183,124,255,0.18), inset 1px 1px 0 rgba(255,255,255,0.92);
 }
 
@@ -1352,16 +1351,15 @@ button, input, textarea, select {
 }
 
 .email-chat-textbox-group:hover,
-.email-chat-textbox-group:focus-within,
-.email-chat-textbox-group[data-chat-section-selected="true"] {
-  transform: translateY(-1px);
-  background:
-    linear-gradient(135deg, rgba(255,255,255,0.96), rgba(230,252,255,0.58) 46%, rgba(247,239,255,0.64)) padding-box,
-    linear-gradient(135deg, rgba(92,238,255,0.86), rgba(128,216,255,0.78) 34%, rgba(183,124,255,0.86) 72%, rgba(255,255,255,0.9)) border-box;
-  box-shadow: 0 8px 18px rgba(15,23,42,0.10), 0 0 14px rgba(128,216,255,0.12), inset 1px 1px 0 rgba(255,255,255,0.92);
+.email-chat-textbox-group:focus-within {
+  transform: translateY(-2px);
+  box-shadow: 0 5px 12px rgba(100,116,139,0.18), 0 1px 3px rgba(15,23,42,0.08);
 }
 
 .email-chat-textbox-group[data-chat-section-selected="true"] {
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.96), rgba(230,252,255,0.58) 46%, rgba(247,239,255,0.64)) padding-box,
+    linear-gradient(135deg, rgba(92,238,255,0.86), rgba(128,216,255,0.78) 34%, rgba(183,124,255,0.86) 72%, rgba(255,255,255,0.9)) border-box;
   box-shadow: 0 8px 18px rgba(15,23,42,0.10), 0 0 0 2px rgba(183,124,255,0.28), 0 0 18px rgba(128,216,255,0.18), inset 1px 1px 0 rgba(255,255,255,0.92);
 }
 
@@ -1475,8 +1473,8 @@ button, input, textarea, select {
 [data-node-email-chat-parent-destination="true"]:focus-visible,
 [data-email-chat-destination-candidate="true"]:hover,
 [data-email-chat-destination-candidate="true"]:focus-within {
-  transform: translateY(-1px);
-  box-shadow: 0 10px 24px rgba(15,23,42,0.12), 0 0 0 2px rgba(128,216,255,0.25), 0 0 18px rgba(183,124,255,0.16) !important;
+  transform: translateY(-2px);
+  box-shadow: 0 7px 16px rgba(100,116,139,0.18), 0 1px 4px rgba(15,23,42,0.08) !important;
 }
 
 [data-email-chat-destination-candidate="true"] {
