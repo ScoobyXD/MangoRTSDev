@@ -54,10 +54,13 @@ func (r *MemoryRepo) ListCommunicationsEmailThreadChatGroups(input Communication
 				chatsByTextboxID[payload.BlockID] = append(chatsByTextboxID[payload.BlockID], projection)
 			}
 		}
+		var textboxDisplayOrder int64
 		for _, projection := range projections {
 			if !isEditorTextBoxType(projection.Type) {
 				continue
 			}
+			currentTextboxDisplayOrder := textboxDisplayOrder
+			textboxDisplayOrder++
 			var payload struct {
 				Title           string   `json:"title"`
 				EmailMessageID  string   `json:"email_message_id"`
@@ -73,7 +76,6 @@ func (r *MemoryRepo) ListCommunicationsEmailThreadChatGroups(input Communication
 			}
 			linkedMessages := make([]domain.CommunicationsEmailThreadChatLinkedMessage, 0, len(messageIDs))
 			linkedMessageIDs := map[string]bool{}
-			latestActivity := time.Time{}
 			for _, emailMessageID := range messageIDs {
 				cleanMessageID := cleanUUIDText(emailMessageID)
 				candidate, ok := messageByID[cleanMessageID]
@@ -86,9 +88,6 @@ func (r *MemoryRepo) ListCommunicationsEmailThreadChatGroups(input Communication
 					EmailMessageID: candidate.EmailMessageID, ProviderMessageID: candidate.ProviderMessageID,
 					MessageTimestamp: messageTimestamp,
 				})
-				if latestActivity.Before(messageTimestamp) {
-					latestActivity = messageTimestamp
-				}
 			}
 			groupKey := item.NodeID + "\x1f" + projection.InformationID
 			for _, linkedMessage := range linkedMessages {
@@ -112,25 +111,26 @@ func (r *MemoryRepo) ListCommunicationsEmailThreadChatGroups(input Communication
 				}
 				return chats[i].InformationID < chats[j].InformationID
 			})
-			for _, chat := range chats {
-				if latestActivity.Before(chat.CreatedTimestamp) {
-					latestActivity = chat.CreatedTimestamp
-				}
-			}
 			seen[groupKey] = true
 			groups = append(groups, domain.CommunicationsEmailThreadChatGroup{
 				NodeID: item.NodeID, NodeName: node.Title, TextboxID: projection.InformationID,
-				TextboxTitle: strings.TrimSpace(payload.Title), EmailThreadID: thread.EmailThreadID,
-				LinkedMessages: linkedMessages, LatestActivityTimestamp: latestActivity, Chats: chats,
+				TextboxTitle: strings.TrimSpace(payload.Title), TextboxDisplayOrder: currentTextboxDisplayOrder,
+				EmailThreadID:  thread.EmailThreadID,
+				LinkedMessages: linkedMessages, Chats: chats,
 			})
 		}
 	}
 	sort.SliceStable(groups, func(i, j int) bool {
-		if !groups[i].LatestActivityTimestamp.Equal(groups[j].LatestActivityTimestamp) {
-			return groups[i].LatestActivityTimestamp.Before(groups[j].LatestActivityTimestamp)
+		leftNodeName := strings.ToLower(strings.TrimSpace(groups[i].NodeName))
+		rightNodeName := strings.ToLower(strings.TrimSpace(groups[j].NodeName))
+		if leftNodeName != rightNodeName {
+			return leftNodeName < rightNodeName
 		}
 		if groups[i].NodeID != groups[j].NodeID {
 			return groups[i].NodeID < groups[j].NodeID
+		}
+		if groups[i].TextboxDisplayOrder != groups[j].TextboxDisplayOrder {
+			return groups[i].TextboxDisplayOrder < groups[j].TextboxDisplayOrder
 		}
 		return groups[i].TextboxID < groups[j].TextboxID
 	})

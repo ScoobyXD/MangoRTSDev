@@ -640,10 +640,15 @@ type ChatPaneProps = {
   headerTrailing?: React.ReactNode;
   sectionLabelsByBlockID?: Record<string, string>;
   sectionNodeIDsByBlockID?: Record<string, string>;
+  sectionNodeLabelsByNodeID?: Record<string, string>;
+  sectionNodeOrder?: string[];
   sectionKeysByMessageID?: Record<string, string>;
   sectionActionLabel?: string;
   selectSectionOnClick?: boolean;
   selectedSectionKey?: string;
+  selectedNodeSectionID?: string;
+  flashedSectionKey?: string;
+  flashedNodeSectionID?: string;
   composerDestinationLabel?: string;
   reserveScrollbarGutter?: boolean;
   hideHeader?: boolean;
@@ -677,6 +682,7 @@ type ChatPaneProps = {
   onNavigateToMessage: (messageID: string) => void;
   onOpenSectionNode?: (nodeID: string) => void;
   onSectionAction?: (sectionKey: string) => void;
+  onNodeSectionAction?: (nodeID: string) => void;
   onClearComposerDestination?: () => void;
   onReply: (messageID: string) => void;
   onEditMessage: (messageID: string, message: string) => Promise<void>;
@@ -716,10 +722,15 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   headerTrailing,
   sectionLabelsByBlockID = {},
   sectionNodeIDsByBlockID = {},
+  sectionNodeLabelsByNodeID = {},
+  sectionNodeOrder = [],
   sectionKeysByMessageID = {},
   sectionActionLabel,
   selectSectionOnClick = false,
   selectedSectionKey = "",
+  selectedNodeSectionID = "",
+  flashedSectionKey = "",
+  flashedNodeSectionID = "",
   composerDestinationLabel,
   reserveScrollbarGutter = false,
   hideHeader = false,
@@ -753,6 +764,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   onNavigateToMessage,
   onOpenSectionNode,
   onSectionAction,
+  onNodeSectionAction,
   onClearComposerDestination,
   onReply,
   onEditMessage,
@@ -784,6 +796,55 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       return leftOrder - rightOrder || left.index - right.index;
     }).map(({ thread }) => thread);
   }, [sectionKeysByMessageID, sectionLabelsByBlockID, threads]);
+  const nodeSectionGroups = useMemo(() => {
+    const chatSections: Array<{
+      sectionKey: string;
+      sectionLabel: string;
+      nodeID: string;
+      threads: typeof sectionedThreads;
+    }> = [];
+    for (const thread of sectionedThreads) {
+      const sectionKey = sectionKeysByMessageID[thread.message.id] ?? thread.message.blockID;
+      const previous = chatSections[chatSections.length - 1];
+      if (previous?.sectionKey === sectionKey) {
+        previous.threads.push(thread);
+        continue;
+      }
+      chatSections.push({
+        sectionKey,
+        sectionLabel: sectionLabelsByBlockID[sectionKey] ?? "",
+        nodeID: sectionNodeIDsByBlockID[sectionKey] ?? "",
+        threads: [thread],
+      });
+    }
+    const nodes: Array<{
+      nodeID: string;
+      nodeLabel: string;
+      sections: typeof chatSections;
+    }> = [];
+    for (const section of chatSections) {
+      const previous = nodes[nodes.length - 1];
+      if (previous?.nodeID === section.nodeID) {
+        previous.sections.push(section);
+        continue;
+      }
+      nodes.push({
+        nodeID: section.nodeID,
+        nodeLabel: sectionNodeLabelsByNodeID[section.nodeID] ?? "",
+        sections: [section],
+      });
+    }
+    if (sectionNodeOrder.length === 0) return nodes;
+    const nodesByID = new Map(nodes.filter((node) => node.nodeID).map((node) => [node.nodeID, node]));
+    const orderedNodes = sectionNodeOrder.map((nodeID) => nodesByID.get(nodeID) ?? {
+      nodeID,
+      nodeLabel: sectionNodeLabelsByNodeID[nodeID] ?? "",
+      sections: [],
+    });
+    const orderedNodeIDs = new Set(sectionNodeOrder);
+    orderedNodes.push(...nodes.filter((node) => !node.nodeID || !orderedNodeIDs.has(node.nodeID)));
+    return orderedNodes;
+  }, [sectionKeysByMessageID, sectionLabelsByBlockID, sectionNodeIDsByBlockID, sectionNodeLabelsByNodeID, sectionNodeOrder, sectionedThreads]);
   const replyTarget = replyTargetID ? messages.find((message) => message.id === replyTargetID) : undefined;
   const canSubmit = editable && editorChatAttachmentsReadyForSubmit(draftAttachments) && (draft.trim().length > 0 || draftAttachments.length > 0);
   const [storedHeight, setStoredHeight] = useState(() => readStoredChatPaneHeight(heightStorageKey));
@@ -1219,94 +1280,113 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         ) : (
           <>
             <div ref={messageListRef} className="editor-document-scroll mango-pane-enter" style={{ minHeight: 0, display: "grid", alignContent: "start", gap: 8, overflowY: "auto", overflowX: "hidden", scrollbarGutter: reserveScrollbarGutter ? "stable" : undefined, padding: reserveScrollbarGutter ? "9px 16px 9px 8px" : "9px 8px", ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
-              {sectionedThreads.map((thread, index) => {
-                const sectionKey = sectionKeysByMessageID[thread.message.id] ?? thread.message.blockID;
-                const previousSectionKey = index > 0
-                  ? sectionKeysByMessageID[sectionedThreads[index - 1].message.id] ?? sectionedThreads[index - 1].message.blockID
-                  : "";
-                const sectionLabel = sectionLabelsByBlockID[sectionKey] ?? "";
-                const sectionNodeID = sectionNodeIDsByBlockID[sectionKey] ?? "";
-                const sectionSelected = selectedSectionKey === sectionKey;
+              {nodeSectionGroups.map((nodeGroup, nodeIndex) => {
+                const showNodeSurface = Boolean(nodeGroup.nodeID && nodeGroup.nodeLabel);
+                const nodeSelected = selectedNodeSectionID === nodeGroup.nodeID;
+                const nodeFlashed = flashedNodeSectionID === nodeGroup.nodeID;
                 return (
-                  <React.Fragment key={thread.message.id}>
-                    {sectionLabel && previousSectionKey !== sectionKey && (
-                      <div
-                        data-email-chat-message-section="true"
-                        data-chat-section-selected={sectionSelected ? "true" : undefined}
-                        aria-current={sectionSelected ? "true" : undefined}
-                        onClick={selectSectionOnClick && onSectionAction ? (event) => {
-                          const target = event.target;
-                          if (target instanceof Element && target.closest("button, a, input, textarea, select")) return;
-                          onSectionAction(sectionKey);
-                        } : undefined}
-                        style={{ minHeight: 28, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, borderTop: index > 0 ? `1px solid ${ruleColor}` : undefined, borderLeft: sectionSelected ? `3px solid ${accent}` : "3px solid transparent", borderRadius: 8, padding: index > 0 ? "11px 5px 3px" : "3px 5px", background: sectionSelected ? "linear-gradient(135deg, rgba(230,252,255,0.58), rgba(247,239,255,0.58))" : "transparent", color: "#475569", fontSize: 10.5, fontWeight: 850, boxShadow: sectionSelected ? "inset 1px 1px 0 rgba(255,255,255,0.84), 0 4px 12px rgba(15,23,42,0.06)" : undefined, cursor: selectSectionOnClick ? "pointer" : undefined }}
-                      >
-                        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {sectionNodeID && onOpenSectionNode ? (
-                            <button
-                              type="button"
-                              aria-label={`Open Node ${sectionLabel}`}
-                              onClick={() => onOpenSectionNode(sectionNodeID)}
-                              style={{ minWidth: 0, maxWidth: "100%", border: 0, padding: 0, background: "transparent", color: "inherit", font: "inherit", display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}
-                            >
-                              <ExplorerEntityIcon kind="node" />
-                              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sectionLabel}</span>
-                            </button>
-                          ) : (
-                            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                              <ExplorerEntityIcon kind="node" />
-                              <span>{sectionLabel}</span>
-                            </span>
-                          )}
-                        </span>
-                        {sectionActionLabel && onSectionAction && (
-                          <button
-                            type="button"
-                            data-chat-section-action="true"
-                            aria-label={`${sectionActionLabel} in ${sectionLabel}`}
-                            aria-pressed={sectionSelected}
-                            onClick={() => onSectionAction(sectionKey)}
-                            style={{ flex: "0 0 auto", minHeight: 24, border: sectionSelected ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: sectionSelected ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: sectionSelected ? accent : surfaceText, cursor: "pointer", font: "inherit", fontSize: 10, fontWeight: 900, padding: "3px 8px", boxShadow: sectionSelected ? "0 6px 14px rgba(15,23,42,0.09), 0 0 10px rgba(183,124,255,0.14)" : EDITOR_NEU_SHADOW }}
-                          >
-                            {sectionActionLabel}
-                          </button>
-                        )}
-                      </div>
+                  <section
+                    key={nodeGroup.nodeID || `ungrouped-${nodeIndex}`}
+                    data-email-chat-node-section={showNodeSurface ? "true" : undefined}
+                    data-chat-node-id={nodeGroup.nodeID || undefined}
+                    data-chat-node-selectable={selectSectionOnClick ? "true" : undefined}
+                    data-chat-node-selected={nodeSelected ? "true" : undefined}
+                    data-chat-destination-flash={nodeFlashed ? "true" : undefined}
+                    aria-current={nodeSelected ? "true" : undefined}
+                    className={showNodeSurface ? "email-chat-node-section" : undefined}
+                    onClick={showNodeSurface && selectSectionOnClick && onNodeSectionAction ? (event) => {
+                      const target = event.target;
+                      if (target instanceof Element && target.closest("[data-email-chat-message-section], button, a, input, textarea, select")) return;
+                      onNodeSectionAction(nodeGroup.nodeID);
+                    } : undefined}
+                  >
+                    {showNodeSurface && (
+                      <header data-email-chat-node-header="true">
+                        <button
+                          type="button"
+                          aria-label={selectSectionOnClick ? `Choose Node ${nodeGroup.nodeLabel}` : `Open Node ${nodeGroup.nodeLabel}`}
+                          aria-pressed={nodeSelected}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (selectSectionOnClick && onNodeSectionAction) onNodeSectionAction(nodeGroup.nodeID);
+                            else onOpenSectionNode?.(nodeGroup.nodeID);
+                          }}
+                        >
+                          <ExplorerEntityIcon kind="node" />
+                          <span>{nodeGroup.nodeLabel}</span>
+                        </button>
+                        {selectSectionOnClick && <span>Choose Node</span>}
+                      </header>
                     )}
-                    <div
-                      data-chat-section-key={sectionKey}
-                      data-chat-section-selectable={selectSectionOnClick ? "true" : undefined}
-                      onClickCapture={selectSectionOnClick && onSectionAction ? (event) => {
-                        const target = event.target;
-                        if (target instanceof Element && target.closest("button, a, input, textarea, select")) return;
-                        onSectionAction(sectionKey);
-                      } : undefined}
-                      style={{ display: "contents" }}
-                    >
-                      <ChatThreadItem
-                        node={thread}
-                        depth={0}
-                        isLastSibling={false}
-                        apiBase={apiBase}
-                        companyID={companyID}
-                        currentUserID={currentUserID}
-                        editable={editable}
-                        activeMessageID={activeMessageID}
-                        companyUsers={companyUsers}
-                        accent={accent}
-                        surfaceText={surfaceText}
-                        ruleColor={ruleColor}
-                        collapsedThreadIDs={collapsedThreadIDs}
-                        onToggleCollapse={toggleThreadCollapse}
-                        onActivate={onActivateMessage}
-                        onNavigate={onNavigateToMessage}
-                        onReply={handleReply}
-                        onEdit={onEditMessage}
-                        onDelete={onDeleteMessage}
-                        onPreviewImage={setPreviewAttachment}
-                      />
+                    <div className={showNodeSurface ? "email-chat-node-textboxes" : undefined}>
+                      {nodeGroup.sections.map((section) => {
+                        const sectionSelected = selectedSectionKey === section.sectionKey;
+                        const sectionFlashed = flashedSectionKey === section.sectionKey;
+                        return (
+                          <section
+                            key={section.sectionKey}
+                            data-email-chat-message-section={section.sectionLabel ? "true" : undefined}
+                            data-chat-section-key={section.sectionKey}
+                            data-chat-section-selectable={selectSectionOnClick ? "true" : undefined}
+                            data-chat-section-selected={sectionSelected ? "true" : undefined}
+                            data-chat-destination-flash={sectionFlashed ? "true" : undefined}
+                            aria-current={sectionSelected ? "true" : undefined}
+                            className={section.sectionLabel ? "email-chat-textbox-group" : undefined}
+                            onClickCapture={section.sectionLabel && selectSectionOnClick && onSectionAction ? (event) => {
+                              const target = event.target;
+                              if (target instanceof Element && target.closest("button, a, input, textarea, select")) return;
+                              event.stopPropagation();
+                              onSectionAction(section.sectionKey);
+                            } : undefined}
+                          >
+                            {section.sectionLabel && (
+                              <header className="email-chat-textbox-header">
+                                <span>{section.sectionLabel}</span>
+                                {sectionActionLabel && onSectionAction && (
+                                  <button
+                                    type="button"
+                                    data-chat-section-action="true"
+                                    aria-label={`${sectionActionLabel} in ${section.sectionLabel}`}
+                                    aria-pressed={sectionSelected}
+                                    onClick={() => onSectionAction(section.sectionKey)}
+                                  >
+                                    {sectionActionLabel}
+                                  </button>
+                                )}
+                              </header>
+                            )}
+                            <div className={section.sectionLabel ? "email-chat-textbox-threads" : undefined}>
+                              {section.threads.map((thread) => (
+                                <ChatThreadItem
+                                  key={thread.message.id}
+                                  node={thread}
+                                  depth={0}
+                                  isLastSibling={false}
+                                  apiBase={apiBase}
+                                  companyID={companyID}
+                                  currentUserID={currentUserID}
+                                  editable={editable}
+                                  activeMessageID={activeMessageID}
+                                  companyUsers={companyUsers}
+                                  accent={accent}
+                                  surfaceText={surfaceText}
+                                  ruleColor={ruleColor}
+                                  collapsedThreadIDs={collapsedThreadIDs}
+                                  onToggleCollapse={toggleThreadCollapse}
+                                  onActivate={onActivateMessage}
+                                  onNavigate={onNavigateToMessage}
+                                  onReply={handleReply}
+                                  onEdit={onEditMessage}
+                                  onDelete={onDeleteMessage}
+                                  onPreviewImage={setPreviewAttachment}
+                                />
+                              ))}
+                            </div>
+                          </section>
+                        );
+                      })}
                     </div>
-                  </React.Fragment>
+                  </section>
                 );
               })}
             </div>

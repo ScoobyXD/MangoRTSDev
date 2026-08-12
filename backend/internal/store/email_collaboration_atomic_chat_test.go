@@ -7,7 +7,6 @@ import (
 	"miraeopus/backend/internal/domain"
 	"sync"
 	"testing"
-	"time"
 )
 
 func TestMemoryEmailCollaborationEnsureConvergesFallbackAndKnownThread(t *testing.T) {
@@ -285,7 +284,7 @@ func TestMemoryEmailThreadChatGroupsIncludeEveryNodeTextboxWithoutCreatingTextbo
 	}
 }
 
-func TestMemoryEmailChatSelectsExistingGroupingAtomicallyAndKeepsActivityOrder(t *testing.T) {
+func TestMemoryEmailChatSelectsExistingGroupingAtomicallyAndKeepsTextboxOrder(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-701300000151"
 	sharedInboxID := "11111111-1111-4111-8111-701300000152"
@@ -358,15 +357,14 @@ func TestMemoryEmailChatSelectsExistingGroupingAtomicallyAndKeepsActivityOrder(t
 		t.Fatalf("conflicting same-Node grouping err=%v, want ErrInvalid", err)
 	}
 
-	time.Sleep(2 * time.Millisecond)
-	latestFirstGroupChatID := NewUUIDv7String()
+	appendedFirstGroupChatID := NewUUIDv7String()
 	if _, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "support@example.com", Provider: "google", CreatedByUserID: creator.UserID,
 		TargetNodeID: first.Collaboration.NodeID, Message: firstMessage,
-		InitialChat: &NodeInformationInput{InformationID: latestFirstGroupChatID, Type: CommunicationsEmailCollaborationChatInformationType, ActorUserID: creator.UserID,
-			Information: `{"block_id":"` + firstBlockID + `","selection_source":"email","selection_message_id":"` + NewUUIDv7String() + `","message":"latest first-group chat"}`},
+		InitialChat: &NodeInformationInput{InformationID: appendedFirstGroupChatID, Type: CommunicationsEmailCollaborationChatInformationType, ActorUserID: creator.UserID,
+			Information: `{"block_id":"` + firstBlockID + `","selection_source":"email","selection_message_id":"` + NewUUIDv7String() + `","message":"appended first-group chat"}`},
 	}); err != nil {
-		t.Fatalf("append latest chat to first grouping: %v", err)
+		t.Fatalf("append chat to first grouping: %v", err)
 	}
 
 	chatView, err = repo.ListCommunicationsEmailThreadChatGroups(CommunicationsEmailCollaborationListInput{
@@ -377,17 +375,17 @@ func TestMemoryEmailChatSelectsExistingGroupingAtomicallyAndKeepsActivityOrder(t
 		t.Fatal(err)
 	}
 	groups = chatView.Groups
-	if len(groups) != 2 || groups[0].TextboxID != secondBlockID || groups[1].TextboxID != firstBlockID {
-		t.Fatalf("group latest-activity order = %+v, want second grouping then newly active first grouping", groups)
+	if len(groups) != 2 || groups[0].TextboxID != firstBlockID || groups[1].TextboxID != secondBlockID {
+		t.Fatalf("group textbox order = %+v, want first grouping then second grouping", groups)
 	}
-	if len(groups[1].Chats) != 3 {
-		t.Fatalf("first grouping chats=%d, want 3", len(groups[1].Chats))
+	if len(groups[0].Chats) != 3 {
+		t.Fatalf("first grouping chats=%d, want 3", len(groups[0].Chats))
 	}
-	for index := 1; index < len(groups[1].Chats); index++ {
-		previous, current := groups[1].Chats[index-1], groups[1].Chats[index]
+	for index := 1; index < len(groups[0].Chats); index++ {
+		previous, current := groups[0].Chats[index-1], groups[0].Chats[index]
 		if current.CreatedTimestamp.Before(previous.CreatedTimestamp) ||
 			(current.CreatedTimestamp.Equal(previous.CreatedTimestamp) && current.InformationID < previous.InformationID) {
-			t.Fatalf("first grouping chat order = %+v", groups[1].Chats)
+			t.Fatalf("first grouping chat order = %+v", groups[0].Chats)
 		}
 	}
 	for _, chat := range groups[0].Chats {

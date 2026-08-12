@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"miraeopus/backend/internal/domain"
 	"sort"
+	"strings"
 )
 
 const postgresEmailThreadChatTargetCTE = `
@@ -44,7 +45,7 @@ func (r *PostgresRepo) ListCommunicationsEmailThreadChatGroups(input Communicati
 	args := emailThreadChatQueryArgs(input, scope)
 	rows, err := r.db.QueryContext(ctx, postgresEmailThreadChatTargetCTE+`
 select relationship.resource_id::text,node.name,relationship.resource_textbox_id,
-       coalesce(textbox.title,''),relationship.email_thread_id::text,
+       coalesce(textbox.title,''),textbox.display_order,relationship.email_thread_id::text,
        relationship.email_message_id::text,message.provider_message_id,
        coalesce(message.message_timestamp,message.created_timestamp)
 from target_thread target
@@ -77,9 +78,10 @@ order by relationship.resource_id,relationship.resource_textbox_id,
 	groupIndex := map[string]int{}
 	for rows.Next() {
 		var nodeID, nodeName, textboxID, textboxTitle, emailThreadID string
+		var textboxDisplayOrder int64
 		var linked domain.CommunicationsEmailThreadChatLinkedMessage
 		if err := rows.Scan(
-			&nodeID, &nodeName, &textboxID, &textboxTitle, &emailThreadID,
+			&nodeID, &nodeName, &textboxID, &textboxTitle, &textboxDisplayOrder, &emailThreadID,
 			&linked.EmailMessageID, &linked.ProviderMessageID, &linked.MessageTimestamp,
 		); err != nil {
 			rows.Close()
@@ -92,7 +94,8 @@ order by relationship.resource_id,relationship.resource_textbox_id,
 			groupIndex[groupKey] = index
 			groups = append(groups, domain.CommunicationsEmailThreadChatGroup{
 				NodeID: nodeID, NodeName: nodeName, TextboxID: textboxID, TextboxTitle: textboxTitle,
-				EmailThreadID: emailThreadID, LinkedMessages: []domain.CommunicationsEmailThreadChatLinkedMessage{},
+				TextboxDisplayOrder: textboxDisplayOrder,
+				EmailThreadID:       emailThreadID, LinkedMessages: []domain.CommunicationsEmailThreadChatLinkedMessage{},
 				Chats: []domain.NodeProjection{},
 			})
 		}
@@ -101,9 +104,6 @@ order by relationship.resource_id,relationship.resource_textbox_id,
 			NodeID: nodeID, TextboxID: textboxID, EmailMessageID: linked.EmailMessageID,
 			ProviderMessageID: linked.ProviderMessageID,
 		})
-		if groups[index].LatestActivityTimestamp.Before(linked.MessageTimestamp) {
-			groups[index].LatestActivityTimestamp = linked.MessageTimestamp
-		}
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -146,9 +146,6 @@ order by chat.created_timestamp,chat.chat_id`, args...)
 		}
 		if index, ok := groupIndex[chat.NodeID+"\x1f"+payload.BlockID]; ok {
 			groups[index].Chats = append(groups[index].Chats, chat)
-			if groups[index].LatestActivityTimestamp.Before(chat.CreatedTimestamp) {
-				groups[index].LatestActivityTimestamp = chat.CreatedTimestamp
-			}
 		}
 	}
 	if err := chatRows.Err(); err != nil {
@@ -162,11 +159,16 @@ order by chat.created_timestamp,chat.chat_id`, args...)
 	}
 	groups = visibleGroups
 	sort.SliceStable(groups, func(i, j int) bool {
-		if !groups[i].LatestActivityTimestamp.Equal(groups[j].LatestActivityTimestamp) {
-			return groups[i].LatestActivityTimestamp.Before(groups[j].LatestActivityTimestamp)
+		leftNodeName := strings.ToLower(strings.TrimSpace(groups[i].NodeName))
+		rightNodeName := strings.ToLower(strings.TrimSpace(groups[j].NodeName))
+		if leftNodeName != rightNodeName {
+			return leftNodeName < rightNodeName
 		}
 		if groups[i].NodeID != groups[j].NodeID {
 			return groups[i].NodeID < groups[j].NodeID
+		}
+		if groups[i].TextboxDisplayOrder != groups[j].TextboxDisplayOrder {
+			return groups[i].TextboxDisplayOrder < groups[j].TextboxDisplayOrder
 		}
 		return groups[i].TextboxID < groups[j].TextboxID
 	})

@@ -698,14 +698,14 @@ type CommunicationsEmailCollaboration struct {
 // thread and the chats owned by that textbox. Thread chat is a read view over
 // canonical email relationships and Node textbox chats; it owns no data.
 type CommunicationsEmailThreadChatGroup struct {
-	NodeID                  string                                       `json:"node_id"`
-	NodeName                string                                       `json:"node_name"`
-	TextboxID               string                                       `json:"textbox_id"`
-	TextboxTitle            string                                       `json:"textbox_title"`
-	EmailThreadID           string                                       `json:"email_thread_id"`
-	LinkedMessages          []CommunicationsEmailThreadChatLinkedMessage `json:"linked_messages"`
-	LatestActivityTimestamp time.Time                                    `json:"latest_activity_timestamp"`
-	Chats                   []NodeProjection                             `json:"chats"`
+	NodeID              string                                       `json:"node_id"`
+	NodeName            string                                       `json:"node_name"`
+	TextboxID           string                                       `json:"textbox_id"`
+	TextboxTitle        string                                       `json:"textbox_title"`
+	TextboxDisplayOrder int64                                        `json:"textbox_display_order"`
+	EmailThreadID       string                                       `json:"email_thread_id"`
+	LinkedMessages      []CommunicationsEmailThreadChatLinkedMessage `json:"linked_messages"`
+	Chats               []NodeProjection                             `json:"chats"`
 }
 
 type CommunicationsEmailThreadChatLinkedMessage struct {

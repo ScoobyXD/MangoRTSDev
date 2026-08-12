@@ -33,7 +33,7 @@ function chat(
   };
 }
 
-test("highlighted-email grouping clicks and New chat controls select, identify, send, and cancel the exact destination", { timeout: 8_000 }, async () => {
+test("highlighted-email destinations render nested Node surfaces and select, flash, send, and cancel the exact level", { timeout: 8_000 }, async () => {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
     pretendToBeVisual: true,
     url: "http://localhost/",
@@ -81,19 +81,39 @@ test("highlighted-email grouping clicks and New chat controls select, identify, 
 
     function Harness() {
       const [selectedSectionKey, setSelectedSectionKey] = React.useState("");
+      const [selectedNodeID, setSelectedNodeID] = React.useState("");
+      const [flashedSectionKey, setFlashedSectionKey] = React.useState("");
+      const [flashedNodeID, setFlashedNodeID] = React.useState("");
       const destinationLabel = selectedSectionKey === "node-a:textbox-a"
         ? "Alpha Node · First grouping"
-        : selectedSectionKey === "node-b:textbox-b" ? "Beta Node · Second grouping" : undefined;
+        : selectedSectionKey === "node-b:textbox-b"
+          ? "Beta Node · Second grouping"
+          : selectedNodeID ? `${selectedNodeID === "node-a" ? "Alpha Node" : "Beta Node"} · New grouping` : undefined;
+      const selectSection = (sectionKey: string) => {
+        const nodeID = sectionKey.startsWith("node-a:") ? "node-a" : "node-b";
+        setSelectedNodeID(nodeID);
+        setSelectedSectionKey(sectionKey);
+        setFlashedNodeID(nodeID);
+        setFlashedSectionKey(sectionKey);
+      };
+      const selectNode = (nodeID: string) => {
+        setSelectedNodeID(nodeID);
+        setSelectedSectionKey("");
+        setFlashedNodeID(nodeID);
+        setFlashedSectionKey("");
+      };
       return (
         <ChatPane
           blockID="email-chat"
           editable
           messages={messages}
           sectionLabelsByBlockID={{
-            "node-a:textbox-a": "Alpha Node · First grouping",
-            "node-b:textbox-b": "Beta Node · Second grouping",
+            "node-a:textbox-a": "First grouping",
+            "node-b:textbox-b": "Second grouping",
           }}
           sectionNodeIDsByBlockID={{ "node-a:textbox-a": "node-a", "node-b:textbox-b": "node-b" }}
+          sectionNodeLabelsByNodeID={{ "node-a": "Alpha Node", "node-b": "Beta Node" }}
+          sectionNodeOrder={["node-a", "node-b"]}
           sectionKeysByMessageID={{
             "chat-1": "node-a:textbox-a",
             "chat-2": "node-a:textbox-a",
@@ -103,6 +123,9 @@ test("highlighted-email grouping clicks and New chat controls select, identify, 
           sectionActionLabel="New chat"
           selectSectionOnClick
           selectedSectionKey={selectedSectionKey}
+          selectedNodeSectionID={selectedNodeID}
+          flashedSectionKey={flashedSectionKey}
+          flashedNodeSectionID={flashedNodeID}
           composerDestinationLabel={destinationLabel}
           reserveScrollbarGutter
           draft="Ready to send"
@@ -130,8 +153,12 @@ test("highlighted-email grouping clicks and New chat controls select, identify, 
           onClearSelectionAnchor={() => undefined}
           onAttachFiles={() => undefined}
           onRemoveDraftAttachment={() => undefined}
-          onSectionAction={setSelectedSectionKey}
-          onClearComposerDestination={() => setSelectedSectionKey("")}
+          onSectionAction={selectSection}
+          onNodeSectionAction={selectNode}
+          onClearComposerDestination={() => {
+            setSelectedSectionKey("");
+            setSelectedNodeID("");
+          }}
           onSubmit={() => submittedDestinations.push(selectedSectionKey)}
         />
       );
@@ -148,17 +175,30 @@ test("highlighted-email grouping clicks and New chat controls select, identify, 
     assert.equal(messageScroller.style.scrollbarGutter, "stable");
     assert.equal(messageScroller.style.paddingRight, "16px");
 
+    const nodeSections = Array.from(container.querySelectorAll<HTMLElement>('[data-email-chat-node-section="true"]'));
+    assert.deepEqual(nodeSections.map((section) => section.dataset.chatNodeId), ["node-a", "node-b"]);
+    assert.equal(nodeSections[0]?.querySelectorAll('[data-email-chat-message-section="true"]').length, 1);
+
+    const betaNodeDestination = container.querySelector<HTMLButtonElement>('[aria-label="Choose Node Beta Node"]');
+    assert.ok(betaNodeDestination);
+    await act(async () => betaNodeDestination.click());
+    assert.equal(container.querySelector('[data-chat-node-selected="true"]')?.getAttribute("data-chat-node-id"), "node-b");
+    assert.equal(container.querySelector('[data-email-chat-node-section="true"][data-chat-destination-flash="true"]')?.getAttribute("data-chat-node-id"), "node-b");
+    assert.equal(container.querySelector('[data-chat-composer-destination="true"]')?.textContent?.includes("New chat to Beta Node · New grouping"), true);
+
     const articles = Array.from(container.querySelectorAll<HTMLElement>('[role="article"]'));
     assert.deepEqual(articles.map((article) => article.dataset.nodeChatMessageId), ["chat-1", "chat-3", "chat-2", "chat-4"]);
     assert.ok(articles[0]?.querySelector('[data-node-chat-message-id="chat-3"]'), "the reply remains nested under its parent");
 
     await act(async () => articles[3]?.click());
     assert.equal(container.querySelector('[data-chat-composer-destination="true"]')?.textContent?.includes("New chat to Beta Node · Second grouping"), true);
+    assert.equal(container.querySelector('[data-chat-section-selected="true"]')?.getAttribute("data-chat-section-key"), "node-b:textbox-b");
+    assert.equal(container.querySelector('[data-email-chat-message-section="true"][data-chat-destination-flash="true"]')?.getAttribute("data-chat-section-key"), "node-b:textbox-b");
 
-    const firstNewChat = container.querySelector<HTMLButtonElement>('[aria-label="New chat in Alpha Node · First grouping"]');
+    const firstNewChat = container.querySelector<HTMLButtonElement>('[aria-label="New chat in First grouping"]');
     assert.ok(firstNewChat);
     await act(async () => firstNewChat.click());
-    assert.equal(container.querySelector('[data-chat-section-selected="true"]')?.textContent?.includes("Alpha Node"), true);
+    assert.equal(container.querySelector('[data-chat-section-selected="true"]')?.textContent?.includes("First grouping"), true);
     assert.equal(container.querySelector('[data-chat-composer-destination="true"]')?.textContent?.includes("New chat to Alpha Node · First grouping"), true);
 
     const composer = container.querySelector<HTMLTextAreaElement>("textarea");
