@@ -279,6 +279,13 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(surface, /if \(collaboration\) \{\s*if \(activeTextBlockID\) \{[\s\S]*const activeSelectionMessageID = selection[\s\S]*await submitExistingTextBoxChat\(collaboration, activeTextBlockID, activeSelectionMessageID\)/);
   assert.match(surface, /showPendingChat\([\s\S]{0,260}setSubmitting\(true\);\s*try \{\s*const created = await ensureEmailCollaboration/);
   assert.match(surface, /linkedTextBlock:[\s\S]*initialChat: pending\.write/);
+  const newNodeChatSend = surface.slice(
+    surface.indexOf("const originalDraft = draft;", surface.indexOf("const submit = React.useCallback")),
+    surface.indexOf("const attachFiles = React.useCallback"),
+  );
+  assert.match(newNodeChatSend, /acceptCollaboration\(created\)[\s\S]*await loadThreadChats\(created, loadSequenceRef\.current\)/);
+  assert.match(newNodeChatSend, /let refreshFailed = false;[\s\S]*catch \{\s*refreshFailed = true;\s*\}[\s\S]*onClearSelection\(\);\s*onSuccess\(\);\s*if \(refreshFailed\)/);
+  assert.match(newNodeChatSend, /Chat was saved, but its destination could not refresh\./);
   assert.doesNotMatch(surface, /Choose email node priority|setPriorityMenuOpen|data-email-action-popover|aria-label="Close email comments"/);
   assert.match(surface, /const ensured = await ensureEmailCollaboration\(\{[\s\S]*acceptCollaboration\(ensured\)/);
   assert.doesNotMatch(surface, /const importedCollaborations = await listEmailCollaborations/);
