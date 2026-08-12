@@ -37,35 +37,35 @@ import { Markdown, MarkdownToken } from "@tiptap/markdown";
 // Helper code to allow us to determine the currently active company.
 import {
     getActiveCompanyID,
-} from "../../auth/currentCompany.js";
+} from "../../../auth/currentCompany.js";
 
 // Reading the auth config allows us to locate the API base.
 import {
     readAuthConfig,
-} from "../../auth/cognitoAuth.js";
+} from "../../../auth/cognitoAuth.js";
 
 // Import the extension pieces that extend Tiptap into Mango-flavored Tiptap.
 import {
     type MangoTiptapDocument,
     createEmptyMangoTiptapDocument,
-} from "../editor/tiptap/mangoTiptapDocument.js";
+} from "../../editor/tiptap/mangoTiptapDocument.js";
 
 import { 
     // type MangoTiptapExtensionOptions,
     createMangoTiptapExtensions,
     MangoAttachmentImage,
     normalizeMangoTiptapBlockIDs,
-} from "../editor/tiptap/mangoTiptapExtensions.js";
+} from "../../editor/tiptap/mangoTiptapExtensions.js";
 
 // Import code that supports the uploading of Mango-Tiptap documents.
 import {
     generateStableInformationID,
-} from "../editor/editorTypes.js";
+} from "../../editor/editorTypes.js";
 
 // Import a function that finalizes the format and layout of Tiptap-Mango images.
 import { 
     createMangoTiptapAttachmentContent,
-} from "../editor/tiptap/mangoTiptapRichClipboard.js";
+} from "../../editor/tiptap/mangoTiptapRichClipboard.js";
 
 // Import helper code to upload images to Mango's S3 Backend.
 import {
@@ -73,29 +73,29 @@ import {
     type UploadMangoAttachmentInput,
     defaultAttachmentRequestJSON,
     uploadMangoAttachment,
-} from "../attachments/attachmentApi.js";
+} from "../../attachments/attachmentApi.js";
 
 // Import the main request dispatcher and schema to parse responses.
 import {
     // type RequestJSONInit,
     createRequestJSON,
     requestJSON,
-} from "../api/requestJSON.js";
+} from "../../api/requestJSON.js";
 
 import {
     type CompanyExplorerV2Row,
-} from "../company-explorer/companyExplorerLazyApi.js";
+} from "../../company-explorer/companyExplorerLazyApi.js";
 
 // Import commands to create logic gates.
 import {
     createWorkspaceEntityBatchCommand,
     createWorkspaceEntityBatchClientID,
-} from "../workspace/workspaceEntityCommands.js";
+} from "../../workspace/workspaceEntityCommands.js";
 
 // Import a helper type to parse createWorkspaceEntityBatchCommand responses.
 import {
     type CompanyExplorerWorkspaceEntityBatchResponse
-} from "../company-explorer/CompanyExplorerContentModel.js";
+} from "../../company-explorer/CompanyExplorerContentModel.js";
 
 // Import the Papaparse CSV Parser.
 import Papa, {
@@ -332,6 +332,11 @@ async function convertMarkdownToMangoTiptap(markdownString: string, targetResour
         ]
     });
 
+    // TODO: Properly handle issues with opening a new editor.
+    if(!conversionEditor){
+        throw new Error("Oops, something went wrong while setting up an editor for conversion!");
+    }
+
 
     // If the markdown string is empty, respond immediately with an empty Mango Tiptap Document.
     if(!markdownString || markdownString === ""){
@@ -370,8 +375,8 @@ async function convertMarkdownToMangoTiptap(markdownString: string, targetResour
                 throw new Error("Something went wrong while parsing image nodes.");
             }
 
-            // If the current node is at the root, push it into the top-level document array.
-            if((!currentDepthTrackedNode.parent)){
+            // If the current node is at the root (and isn't an image), push it into the top-level document array.
+            if(!(currentDepthTrackedNode.parent) && !(currentNode.type === "mangoAttachmentImage")){
                 topLevelNodesInOrderOfEncounter.push(currentNode);
             }
             
