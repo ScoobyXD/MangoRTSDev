@@ -166,3 +166,22 @@ test("durable stored thread order wins over inconsistent display timestamps", ()
   assert.deepEqual(normalizeEmailThreadMessages(candidates).map((value) => value.id), ["first", "second", "third"]);
   assert.deepEqual(normalizeEmailThreadMessages(candidates, "newest").map((value) => value.id), ["third", "second", "first"]);
 });
+
+test("provider gaps cannot reverse the durable relative order of stored messages", () => {
+  const candidates = [
+    candidate("collaboration", message("stored-first", { date: 300, message_order: 0 })),
+    candidate("provider", message("provider-gap", { date: 200 })),
+    candidate("collaboration", message("stored-second", { date: 100, message_order: 1 })),
+  ];
+
+  assert.deepEqual(normalizeEmailThreadMessages(candidates).map((value) => value.id), [
+    "provider-gap",
+    "stored-first",
+    "stored-second",
+  ]);
+  assert.deepEqual(normalizeEmailThreadMessages(candidates, "newest").map((value) => value.id), [
+    "stored-second",
+    "stored-first",
+    "provider-gap",
+  ]);
+});
