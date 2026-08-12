@@ -16,6 +16,7 @@
 14. A later chat for an already-linked exact email message uses the normal Node text-box-chat create command only; it does not repeat email, relationship, permission, participant, or collaboration setup.
 15. Every saved highlighted-email chat renders its exact stored quote and offsets as a lasting highlight in the email body.
 16. Selecting a conversation with a durable stored thread shows every exact stored message once in stored message order; the left mailbox list remains one row for that thread.
+17. If stored history is incomplete, My Triage keeps every stored message visible while loading missing provider messages; a provider failure never replaces that stored history with one representative message.
 
 Last updated: 2026-08-12
 

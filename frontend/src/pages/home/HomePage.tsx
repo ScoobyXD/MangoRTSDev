@@ -2581,9 +2581,7 @@ export function HomePage({
               setSelectedMessage(selectedSnapshot);
               setSelectedThreadMessages(mergeEmailThreadDetailMessages(collaborationThreadMessages, [selectedSnapshot]));
             }
-            const durableStoredThreadAvailable = Boolean(collaborationThread.email_thread_id?.trim())
-              && collaborationThreadMessages.length > 0;
-            if (!providerMailAvailable || durableStoredThreadAvailable) return;
+            if (!providerMailAvailable || collaborationThread.history_complete) return;
           } catch (collaborationThreadError) {
             if (!providerMailAvailable) throw collaborationThreadError;
           }
@@ -2600,7 +2598,10 @@ export function HomePage({
           local_replies: existingSelected.local_replies,
         } : selectedWithCollaboration;
         setSelectedMessage(selectedWithLocalReplies);
-        setSelectedThreadMessages([selectedWithLocalReplies]);
+        setSelectedThreadMessages(mergeEmailThreadDetailMessages(
+          collaborationThreadMessages,
+          [selectedWithLocalReplies],
+        ));
 
         const threadID = (selected.thread_id ?? "").trim();
         if (!threadID) return;
@@ -2702,7 +2703,10 @@ export function HomePage({
         const collaborationFallback = selectedMessageRef.current;
         if (collaborationFallback?.id === selectedMessageID && collaborationFallback.collaboration_id?.trim()) {
           setSelectedMessage(collaborationFallback);
-          setSelectedThreadMessages([collaborationFallback]);
+          setSelectedThreadMessages(mergeEmailThreadDetailMessages(
+            collaborationThreadMessages,
+            [collaborationFallback],
+          ));
           return;
         }
         if (isEmailAccessExpiredError(detailError)) {
