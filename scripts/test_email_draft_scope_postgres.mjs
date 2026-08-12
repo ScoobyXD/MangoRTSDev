@@ -120,7 +120,6 @@ try {
       attachment_relationship_id uuid not null,
       resource_type text not null,
       resource_id text not null,
-      updated_timestamp timestamptz not null default now(),
       deleted_timestamp timestamptz,
       primary key(company_id,attachment_relationship_id)
     );

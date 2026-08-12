@@ -11,7 +11,7 @@ where email_thread_id is null
   and email_account_type='personal_email_account';
 
 update attachment_relationships relationship
-set deleted_timestamp=now(),updated_timestamp=now()
+set deleted_timestamp=now()
 where relationship.resource_type='email_draft'
   and relationship.deleted_timestamp is null
   and exists (

@@ -52,6 +52,7 @@ func TestEmailDraftScopeMigrationRemovesOnlyAmbiguousLegacyDrafts(t *testing.T) 
 	for _, required := range []string{
 		"begin;",
 		"update attachment_relationships relationship",
+		"set deleted_timestamp=now()",
 		"relationship.resource_type='email_draft'",
 		"draft.email_thread_id is null and draft.created_by_user_id is null",
 		"draft.email_thread_id is not null and (draft.origin_node_id is null or draft.source_email_message_id is null)",
@@ -67,8 +68,9 @@ func TestEmailDraftScopeMigrationRemovesOnlyAmbiguousLegacyDrafts(t *testing.T) 
 	for _, forbidden := range []string{
 		"email draft migration stopped: personal draft owner is ambiguous",
 		"email draft migration stopped: shared draft node or source message is ambiguous",
+		"update attachment_relationships relationship set deleted_timestamp=now(),updated_timestamp=now()",
 	} {
-		if strings.Contains(migration, forbidden) {
+		if strings.Contains(normalized, strings.Join(strings.Fields(forbidden), " ")) {
 			t.Errorf("email draft scope migration retains obsolete blocking path %q", forbidden)
 		}
 	}
