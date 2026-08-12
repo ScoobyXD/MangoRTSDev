@@ -55,7 +55,7 @@ func TestCommunicationsEmailDraftPersonalScopePreventsIDORAcrossUsersAndAccounts
 	assertHTTPDraftIDs(t, fixture.request(t, http.MethodGet, "/v1/communications/drafts?company_id="+url.QueryEscape(fixture.companyID), nil, fixture.owner, domain.RoleCompanyUser))
 }
 
-func TestCommunicationsEmailDraftSharedScopeUsesInboxPermissionsAndImmutableScope(t *testing.T) {
+func TestCommunicationsEmailDraftSharedInboxScopeRemainsCreatorOwnedAndImmutable(t *testing.T) {
 	fixture := newCommunicationsEmailDraftScopeHTTPFixture(t)
 	const sharedDraftA = "shared-a-draft"
 	const sharedDraftB = "shared-b-draft"
@@ -78,10 +78,10 @@ func TestCommunicationsEmailDraftSharedScopeUsesInboxPermissionsAndImmutableScop
 	assertHTTPDraftIDs(t, fixture.request(t, http.MethodGet, fixture.draftListPath("", fixture.sharedB.FolderID), nil, fixture.owner, domain.RoleCompanyUser), sharedDraftB)
 	fixture.expectStatus(t, http.MethodGet, fixture.draftListPath("", fixture.sharedA.FolderID), nil, fixture.attacker, domain.RoleCompanyUser, http.StatusNotFound)
 
-	fixture.expectStatus(t, http.MethodGet, fixture.draftByIDPath(sharedDraftA, "", fixture.sharedA.FolderID), nil, fixture.viewer, domain.RoleCompanyUser, http.StatusOK)
+	fixture.expectStatus(t, http.MethodGet, fixture.draftByIDPath(sharedDraftA, "", fixture.sharedA.FolderID), nil, fixture.viewer, domain.RoleCompanyUser, http.StatusNotFound)
 	fixture.expectStatus(t, http.MethodPut, "/v1/communications/drafts/"+sharedDraftA, map[string]any{
 		"company_id": fixture.companyID, "shared_inbox_id": fixture.sharedA.FolderID, "subject": "member updated",
-	}, fixture.viewer, domain.RoleCompanyUser, http.StatusOK)
+	}, fixture.viewer, domain.RoleCompanyUser, http.StatusNotFound)
 
 	fixture.expectStatus(t, http.MethodGet, fixture.draftByIDPath(sharedDraftA, "", fixture.sharedB.FolderID), nil, fixture.owner, domain.RoleCompanyUser, http.StatusNotFound)
 	fixture.expectStatus(t, http.MethodPut, "/v1/communications/drafts/"+sharedDraftA, map[string]any{
@@ -90,19 +90,17 @@ func TestCommunicationsEmailDraftSharedScopeUsesInboxPermissionsAndImmutableScop
 	fixture.expectStatus(t, http.MethodDelete, fixture.draftByIDPath(sharedDraftA, "", fixture.sharedB.FolderID), nil, fixture.owner, domain.RoleCompanyUser, http.StatusNotFound)
 
 	unchanged := fixture.request(t, http.MethodGet, fixture.draftByIDPath(sharedDraftA, "", fixture.sharedA.FolderID), nil, fixture.owner, domain.RoleCompanyUser)
-	if unchanged.Code != http.StatusOK || decodeHTTPDraft(t, unchanged).Subject != "member updated" {
+	if unchanged.Code != http.StatusOK || decodeHTTPDraft(t, unchanged).Subject != "shared A" {
 		t.Fatalf("shared A after IDOR attempts status=%d body=%s", unchanged.Code, unchanged.Body.String())
 	}
 	updated := fixture.request(t, http.MethodPut, "/v1/communications/drafts/"+sharedDraftA, map[string]any{
 		"company_id": fixture.companyID, "shared_inbox_id": fixture.sharedA.FolderID, "account_email": "another-spoof@example.com", "subject": "editor updated",
 	}, fixture.editor, domain.RoleCompanyUser)
-	if updated.Code != http.StatusOK {
-		t.Fatalf("editor update status=%d body=%s", updated.Code, updated.Body.String())
+	if updated.Code != http.StatusNotFound {
+		t.Fatalf("non-owner update status=%d body=%s", updated.Code, updated.Body.String())
 	}
-	if draft := decodeHTTPDraft(t, updated); draft.Subject != "editor updated" || draft.AccountEmail != "shared-a@example.com" {
-		t.Fatalf("editor-updated draft = %+v", draft)
-	}
-	fixture.expectStatus(t, http.MethodDelete, fixture.draftByIDPath(sharedDraftA, "", fixture.sharedA.FolderID), nil, fixture.editor, domain.RoleCompanyUser, http.StatusOK)
+	fixture.expectStatus(t, http.MethodDelete, fixture.draftByIDPath(sharedDraftA, "", fixture.sharedA.FolderID), nil, fixture.editor, domain.RoleCompanyUser, http.StatusNotFound)
+	fixture.expectStatus(t, http.MethodDelete, fixture.draftByIDPath(sharedDraftA, "", fixture.sharedA.FolderID), nil, fixture.owner, domain.RoleCompanyUser, http.StatusOK)
 }
 
 type communicationsEmailDraftScopeHTTPFixture struct {

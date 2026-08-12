@@ -23,7 +23,7 @@ func TestEmailDraftSourceRetentionSchemaContract(t *testing.T) {
 	}
 	for _, required := range []string{
 		"references email_threads(company_id,email_thread_id) on delete cascade",
-		"references nodes(company_id,node_id) on delete set null",
+		"references nodes(company_id,node_id) on delete cascade",
 		"references email_messages(company_id,email_message_id) on delete restrict",
 		"deleted_timestamp timestamptz",
 		"send_idempotency_key text",

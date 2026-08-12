@@ -139,7 +139,7 @@ func TestEmailCollaborationSharedDraftSendUsesExactDraftEnvelopeAndFinalizes(t *
 	}
 }
 
-func TestUniversalSharedDraftSendsFromExactPersonalMailboxWithoutCreatingNode(t *testing.T) {
+func TestSharedDraftWithoutNodeIsRejected(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	const companyID = "11111111-1111-4111-8111-701300000399"
 	repo.EnsureCompany(companyID, "Universal draft without Node")
@@ -174,7 +174,7 @@ func TestUniversalSharedDraftSendsFromExactPersonalMailboxWithoutCreatingNode(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	draft, err := repo.UpsertCommunicationsEmailDraft(store.CommunicationsEmailDraftInput{
+	_, err = repo.UpsertCommunicationsEmailDraft(store.CommunicationsEmailDraftInput{
 		CompanyID: companyID, DraftID: "universal-no-node-draft",
 		PersonalUserID: owner.UserID, PersonalAccountEmail: owner.Email, ParticipantUserID: owner.UserID,
 		IsShared: true, CreatedByUserID: owner.UserID, UpdatedByUserID: owner.UserID,
@@ -182,31 +182,11 @@ func TestUniversalSharedDraftSendsFromExactPersonalMailboxWithoutCreatingNode(t 
 		ToRecipients: "customer@example.com", Subject: "Re: Question", BodyEditorHTML: "<p>Answer</p>",
 		ReplyToMessageJSON: string(replyJSON),
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	nylas := &fakeNylasClient{message: NylasMessage{ID: source.ID, ThreadID: source.ThreadID}}
-	server := NewServerWithOptions(repo, ServerOptions{
-		NylasConfig: testNylasConfig(), NylasClient: nylas,
-		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
-	})
-	defer server.Close()
-	server.nylasGate = newNylasRequestGate(0)
-	path := "/v1/communications/drafts/" + draft.DraftID + "/send?company_id=" + companyID + "&account_email=" + owner.Email
-	request := attachmentRequestWithActor(
-		httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString("{\"expected_revision\":1}")),
-		owner, companyID, domain.RoleCompanyUser,
-	)
-	recorder := httptest.NewRecorder()
-	server.Routes().ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusCreated {
-		t.Fatalf("no-Node universal send status=%d body=%s", recorder.Code, recorder.Body.String())
+	if !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("shared draft without Node error=%v, want ErrInvalid", err)
 	}
 	if nodes, err := repo.ListNodes(companyID); err != nil || len(nodes) != 0 {
-		t.Fatalf("universal send invented Nodes=%+v err=%v", nodes, err)
-	}
-	if nylas.sendCalls != 1 || nylas.lastSendGrantID != "universal-no-node-grant" || nylas.sent.ReplyToMessageID != source.ID {
-		t.Fatalf("no-Node provider send calls=%d grant=%q request=%+v", nylas.sendCalls, nylas.lastSendGrantID, nylas.sent)
+		t.Fatalf("rejected shared draft invented Nodes=%+v err=%v", nodes, err)
 	}
 }
 

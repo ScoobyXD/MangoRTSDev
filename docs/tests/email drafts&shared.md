@@ -1,69 +1,68 @@
-# Email Draft Business Logic Laws
+# Email Draft and Node Reply Business Logic Laws
 
-1. Mango stores personal email drafts and Node-shared email drafts in the existing `email_drafts` table; it does not create a second draft table or use provider Drafts as application state.
-2. Every draft is exactly one of two collaboration scopes: personal or Node-shared. `email_drafts.owner_user_id` is non-null only for a personal draft; `node_id` and `node_textbox_id` are non-null only for a Node-shared draft; a database check enforces exactly one shape.
-3. A personal draft belongs to one exact user, one exact sending-account scope, and, for a reply, one exact internal source email message. The sending account may be the user's personal mailbox or a shared inbox, but the draft remains owner-only.
-4. Only the personal draft owner may list, open, edit, send, or discard that draft. Opening the source email through a Node or shared mailbox does not share the personal draft.
-5. `Reply` and `Reply All` always create or reopen the current user's personal draft for the exact source message and sending-account scope.
-6. Partial unique indexes enforce at most one active personal reply draft for the same owner, source message, and exact personal-account or shared-inbox sending scope. Active means non-deleted with `send_state` equal to `draft` or `sending`.
-7. `Create Shared Draft` is the only action that creates or reopens a Node-shared draft. Reply and Reply All never create a Node-shared draft implicitly.
-8. A Node-shared draft belongs to one exact Node, one exact email thread, one exact source email message, and one dedicated Node text box through direct same-company foreign keys.
-9. A partial unique index enforces at most one active Node-shared draft for the same exact Node and email thread. Sent and soft-deleted rows do not block a later deliberate draft.
-10. The same email thread may have separate Node-shared drafts in separate Nodes. Content or activity in one Node's draft never appears in another Node's draft.
-11. A personal draft and a Node-shared draft for the same source message may exist at the same time and never automatically copy, merge, overwrite, delete, or convert each other.
-12. Creating a Node-shared draft outside a Node requires the user to choose one existing accessible Node that already contains the thread, then opens that Node's dedicated draft text box. Mango never guesses a Node, creates a thread-wide draft, or lists a Node-shared draft in a My Triage or Shared Triage Drafts tab.
-13. The first Node-shared-draft command atomically creates the draft and its dedicated Node text box, or creates neither.
-14. `email_drafts` is the authority for stable `draft_id`, owner-or-Node scope, `email_thread_id`, `source_email_message_id`, sending-account scope, recipients, subject, editor body, revision, send claim/idempotency state, `sent_email_message_id`, timestamps, and soft deletion.
-15. The dedicated `node_textboxes` row is the authority for the Node-local panel, placement, title, color, and chat container. It does not store a second authoritative copy of email recipients, subject, or body.
-16. A Node-shared draft uses direct `node_id` and `node_textbox_id` values from `nodes` and `node_textboxes`. The old presentation-only `origin_node_id` contract is removed rather than retained beside the authoritative Node identity. Mango does not create a generic relationship, surrogate resource ID, participant table, or copied permission grant.
-17. Current access to the exact Node authorizes viewing its Node-shared drafts and editing or discarding only an active one under the existing Node permission rules. Losing Node access immediately removes shared-draft access.
-18. Node access never grants mailbox credentials or send authority. Sending also requires current authorization for the exact selected sending account.
-19. The selected **From** account must be connected, authorized for the sender, and valid for the draft's immutable source mailbox scope when send is claimed.
-20. Every reply draft keeps the immutable internal `source_email_message_id`; sending loads the canonical source from `email_messages` and validates that it belongs to the stored thread.
-21. Mango never sends from a duplicated reply-source JSON snapshot and never falls back to a guessed provider message, latest thread message, subject match, or body match.
-22. Provider account, grant, thread, and message identifiers remain exact mailbox-scoped metadata and are never used as cross-mailbox resource identities.
-23. Draft editing reuses Mango's existing TipTap editor and JSON conversion conventions, the existing draft revision field, and the existing realtime outbox, subscription, and live-update paths.
-24. The implementation must not add another editor framework, websocket path, polling loop, lock service, operational-transform engine, merge engine, or collaboration state store for email drafts.
-25. Every shared-draft update, send, and discard command compares the expected revision. A stale command fails with the canonical current revision and cannot overwrite newer content.
-26. An open Node-shared editor applies canonical live updates through the existing subscription path. Unsaved local content must remain visible for deliberate review after a stale-write conflict.
-27. Draft attachments use the existing `attachments` and `attachment_relationships` rows with the exact `email_draft` resource type and stable `draft_id`; file bytes never enter draft JSON.
-28. A draft has only the existing `draft`, `sending`, and `sent` send states. While `sending`, body, recipient, account, and attachment mutations are frozen.
-29. A successful send creates the exact sent `email_messages` row, records its ID on the draft, changes the draft to `sent`, and keeps that draft as a frozen readable record.
-30. A sent draft cannot be edited, sent again, or discarded. The sent email follows the normal same-thread ingestion and Node-wide message relationship rules.
-31. Discard uses the existing soft-deletion field and removes only the exact personal draft or exact Node-shared draft. It never deletes the Node, text box, chat, source email, sent email, thread, or the other draft scope.
-32. Closing a personal composer or Node-shared-draft panel does not discard the draft.
-33. Chat about a Node-shared draft belongs to its dedicated Node text box and uses the existing `node_textbox_chats` system, mentions, revisions, and realtime delivery.
-34. A chat selection from draft text must identify the exact Node-shared draft directly, preserve the selected quote and offsets, and never pretend that unsent draft text is an `email_message`.
-35. Removing one Node's email relationship does not delete that Node's existing shared draft, dedicated text box, or chat. It removes only the exact email relationship and its relationship-derived source-email access.
-36. Recycling a Node preserves its Node-shared drafts with that Node. Permanently deleting the Node removes its Node-scoped drafts, dedicated text boxes, chats, and draft-only attachment relationships without deleting the normalized source thread, source messages, or sent messages.
-37. The cutover is forward-only. An ordinary shared-inbox draft becomes owner-only only when its stored creator identifies one valid current owner. An active thread-wide shared draft may use only its one valid stored origin Node. Any ambiguous row stops migration for explicit human resolution; Mango never guesses an owner or Node, copies one draft to several Nodes, or keeps a legacy fallback.
+1. Mango stores both personal drafts and Node-shared drafts in the existing `email_drafts` table. Provider Drafts are not application state, and there is no second Mango draft store.
+2. The only reply entry actions are **Reply** and **Reply all**. From the Node email column, either action opens the exact source message in its existing linked text box or creates that one text box first when it does not exist.
+3. Opening the reply scope chooser creates no email draft. A draft is created or reopened only after the user explicitly chooses **My draft** or **Shared draft**.
+4. A linked text box is identified by the exact internal `email_message_id`. Mango reuses that existing message-to-text-box placement instead of creating a second composer, relationship registry, or draft panel.
+5. A personal draft belongs to one exact creator, one exact sending-account scope, and one exact internal source message. A shared-inbox sending account does not make a personal draft visible to other shared-inbox members.
+6. Only the personal draft creator may list, open, edit, send, or discard that draft. Node access and shared-inbox access do not weaken personal ownership.
+7. A Node-shared draft belongs to one exact Node, one exact stored email thread, and one exact internal source message. The same source message in another Node is a separate shared draft.
+8. One partial unique index permits at most one active shared draft for the same Node and source message. Separate partial unique indexes permit at most one active personal reply draft for the same creator, source message, and exact personal-account or shared-inbox scope.
+9. Personal and Node-shared drafts for the same message may coexist. Mango never automatically copies, converts, merges, overwrites, or deletes one scope because the other scope exists.
+10. Current access to the exact Node grants access to that Node's shared draft under Mango's existing Node permission model. Losing Node access immediately removes shared-draft access.
+11. A shared draft stores one scalar **From** account selected when the draft is created. That sending identity is immutable for the life of the shared draft; collaborators do not collectively become the sender.
+12. Node access grants draft collaboration only. It never grants mailbox credentials or send authority. Sending still requires current authorization for the draft's exact stored From account.
+13. The inline reply UI uses Mango's existing elevated neuomorphic surface, colors, focus highlights, transitions, TipTap editor, and formatting controls. It contains From, To, Cc, Bcc, Subject, body, attachments, signature content, save status, and Send.
+14. From is displayed inline as the one exact sending account. To, Cc, Bcc, Subject, body, and attachments are editable after the user chooses a draft scope.
+15. Reply uses the canonical reply target. Reply all uses the existing recipient de-duplication rules and excludes the sending account.
+16. Signature content uses the existing account-scoped signature loader and is applied at most once per reply session. It is saved as part of the draft body; no second signature state is added.
+17. Draft attachments use the existing `attachments` and `attachment_relationships` rows with resource type `email_draft` and the stable `draft_id`. File bytes never enter draft JSON. Removing an attachment removes the exact draft attachment relationship.
+18. Draft edits are debounced for 500 ms and show Saving, Saved, or Save failed. Typing does not reload the email message, the thread, other Node email threads, the Node page, or attachment bytes.
+19. A collapsed email card loads no thread detail. Expanding one card loads only that card's thread. A linked text box resolves its one exact message directly and does not fan out across every email or thread attached to the Node.
+20. Attachment bytes and previews are loaded only when the user explicitly opens or downloads that attachment. Thread expansion does not eagerly download every attachment body.
+21. Mango adds no polling loop, alternate websocket, merge engine, lock service, duplicate editor, or duplicate collaboration state store for email drafts.
+22. Shared-draft updates, sends, and discards compare the expected revision. A stale command cannot overwrite or send a newer revision; the local editor content remains visible with a failure state for deliberate recovery.
+23. Closing the text box or reply surface does not discard either draft. Discard is an explicit soft delete of the exact selected draft only.
+24. Every reply draft keeps the immutable internal `source_email_message_id`. Send loads the canonical stored source and validates its exact stored thread; it never guesses by subject, body, latest thread message, or provider ID alone.
+25. Shared sends reuse the existing durable send claim and provider idempotency path. Body, recipient, account, and attachment mutations are frozen while the draft is in `sending` state.
+26. Every outbound reply uses Mango's existing 10-second safe-send controller. The UI shows the decreasing progress bar, **Send now**, and **Undo**; all three actions control the same pending send.
+27. A successful send creates or updates the exact normalized sent `email_messages` record, promotes the draft's attachment relationships to that message, and retires the active draft. It never deletes the source message or thread.
+28. Permanently deleting a Node cascades its Node-scoped shared drafts. Deleting or losing one email relationship does not invent a new Node or copy the draft elsewhere.
+29. The cutover is forward-only. Existing personal-account drafts may use their exact stored creator as owner. An old row with no unambiguous owner, Node, or source message stops migration for human resolution; Mango never guesses or copies it to several scopes.
 
-Last updated: 2026-08-11
+Last updated: 2026-08-12
 
-# Process Story: Personal work stays personal and shared work stays inside one Node
+# Process Story
 
-A user chooses Reply or Reply All and resumes only that user's exact personal draft
+The user clicks Reply or Reply all on one exact email message
 ↓
-The user may instead choose Create Shared Draft and nominate one Node that already contains the thread
+Mango opens or creates that message's linked Node text box without creating a draft
 ↓
-Mango creates or reopens that Node's one shared draft and dedicated text box, where current Node users edit and chat through the existing revision and realtime paths
+The user chooses My draft or Shared draft
 ↓
-Only a user authorized for the selected sending account may send; success freezes the sent draft and adds the sent message to the existing thread
+Mango creates or reopens only that exact scope and shows the full inline reply editor
+↓
+Edits autosave after 500 ms without refreshing message or thread data
+↓
+Send enters the existing 10-second safe-send gate with Send now and Undo
+↓
+An authorized send records the sent message in the existing normalized thread
 
-## Scenario 1: Personal and Node-shared drafts coexist
+## Scenario 1: Scope chooser creates nothing
 
-- Alice chooses Reply in Node A, then chooses Create Shared Draft for the same message in Node A.
-- Her personal draft remains visible only to Alice; the shared draft is visible to current users of Node A.
-- Editing, sending, or discarding either draft does not mutate the other.
+- Alice clicks Reply on a message in Node A.
+- Mango opens that message's linked text box and shows My draft and Shared draft.
+- Until Alice chooses one, `email_drafts` is unchanged and the fields remain non-editable.
 
-## Scenario 2: One thread exists in two Nodes
+## Scenario 2: Personal and shared drafts coexist
 
-- The same stored thread is attached to Node A and Node B.
-- Creating a shared draft in Node A creates or reopens only Node A's draft and dedicated text box.
-- Node B shows no Node A draft. Creating a shared draft in Node B creates a separate draft with separate content, revision, attachments, chat, and send lifecycle.
+- Alice chooses My draft and writes private notes.
+- Later she opens the same reply and deliberately chooses Shared draft.
+- Mango opens Node A's separate shared draft; it does not copy Alice's personal body into it.
+- Other Node A users can edit the shared draft but cannot see Alice's personal draft.
 
-## Scenario 3: Concurrent edit and send
+## Scenario 3: One thread in two Nodes
 
-- Alice and Bob open the same Node-shared draft through Node A and receive updates through the existing live subscription.
-- Alice saves a newer revision; Bob's stale edit or send fails with the canonical revision and cannot overwrite or send Alice's version.
-- An authorized current-revision send uses the existing safe-send claim and idempotency rules, then preserves the draft as frozen `sent` state.
+- The same stored source message is linked in Node A and Node B.
+- A shared draft created in Node A is visible only through Node A.
+- Node B may create its own independent shared draft for the same source message.

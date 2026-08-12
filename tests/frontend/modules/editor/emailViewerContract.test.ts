@@ -181,7 +181,9 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeParts, /singleMessageOnly/);
   assert.match(nodeParts, /data-email-single-message=\{singleMessageOnly \? "true" : undefined\}/);
   assert.match(nodeParts, /data-linked-email-message-metadata="true"/);
-  assert.match(nodeParts, /setThreadMessages\(singleMessageOnly \? \[payload\]/);
+  assert.match(nodeParts, /if \(singleMessageOnly\) \{/);
+  assert.match(nodeParts, /await getNodeEmailMessage\(companyID, nodeID, cleanEmailThreadID, cleanEmailMessageID\)/);
+  assert.match(nodeParts, /setThreadMessages\(\[payload\]\)/);
   assert.match(nodeParts, /applyEmailBodyHighlights\(frameDocument, highlights, activeSelection\)/);
   assert.match(emailBodyHighlights, /data-mango-email-body-highlight/);
   assert.match(emailBodyHighlights, /unwrapExistingHighlights/);

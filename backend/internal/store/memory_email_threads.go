@@ -341,6 +341,33 @@ func (r *MemoryRepo) GetCommunicationsNodeEmailThread(companyID, nodeID, emailTh
 	return item, nil
 }
 
+func (r *MemoryRepo) GetCommunicationsNodeEmailMessage(companyID, nodeID, emailThreadID, emailMessageID string) (domain.CommunicationsNodeEmailThread, error) {
+	companyID, nodeID, emailThreadID, emailMessageID = cleanUUIDText(companyID), cleanUUIDText(nodeID), cleanUUIDText(emailThreadID), cleanUUIDText(emailMessageID)
+	if companyID == "" || nodeID == "" || emailThreadID == "" || emailMessageID == "" {
+		return domain.CommunicationsNodeEmailThread{}, ErrInvalid
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	item, ok := r.nodeEmailThreads[memoryNodeEmailThreadKey(companyID, nodeID, emailThreadID)]
+	if !ok {
+		return domain.CommunicationsNodeEmailThread{}, ErrNotFound
+	}
+	thread, ok := r.emailThreads[key(companyID, emailThreadID)]
+	if !ok {
+		return domain.CommunicationsNodeEmailThread{}, ErrNotFound
+	}
+	clonedThread := cloneCommunicationsEmailThread(thread)
+	for _, message := range clonedThread.Messages {
+		if message.EmailMessageID != emailMessageID {
+			continue
+		}
+		item.Thread = clonedThread
+		item.Thread.Messages = []domain.CommunicationsEmailMessage{message}
+		return item, nil
+	}
+	return domain.CommunicationsNodeEmailThread{}, ErrNotFound
+}
+
 func (r *MemoryRepo) linkCommunicationsEmailThreadToNodeLocked(companyID, nodeID, informationID, emailThreadID, selectedMessageID, actorUserID string, now time.Time) (domain.CommunicationsNodeEmailThread, error) {
 	selectedInternalMessageID := cleanUUIDText(selectedMessageID)
 	if thread, ok := r.emailThreads[key(companyID, emailThreadID)]; ok {

@@ -182,6 +182,7 @@ type CommunicationsRepository interface {
 	CheckEmailSQSWorkerSchemaReadinessContext(ctx context.Context) error
 	ListCommunicationsEmailThreadNodeIDs(companyID, emailThreadID string) ([]string, error)
 	GetCommunicationsNodeEmailThread(companyID, nodeID, emailThreadID string) (domain.CommunicationsNodeEmailThread, error)
+	GetCommunicationsNodeEmailMessage(companyID, nodeID, emailThreadID, emailMessageID string) (domain.CommunicationsNodeEmailThread, error)
 	ImportCommunicationsEmailIntoNode(input CommunicationsNodeEmailImportInput) (CommunicationsNodeEmailImportResult, error)
 	EnsureCommunicationsEmailCollaboration(ctx context.Context, input CommunicationsEmailCollaborationEnsureInput) (CommunicationsEmailCollaborationEnsureResult, error)
 	ListCommunicationsEmailCollaborations(input CommunicationsEmailCollaborationListInput) ([]domain.CommunicationsEmailCollaboration, error)

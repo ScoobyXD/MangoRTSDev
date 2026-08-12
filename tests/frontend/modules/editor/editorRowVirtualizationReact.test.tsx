@@ -116,6 +116,7 @@ function nodeEmailProjection(blockID: string): NodeProjectionItem {
       messageID: `thread-root-${blockID}`,
       emailMessageID: `email-message-${blockID}`,
       threadID: `thread-${blockID}`,
+      emailThreadID: `durable-thread-${blockID}`,
       subject: `Email for ${blockID}`,
       from: "sender@example.test",
       attachedTimestamp: createdTimestamp,
@@ -345,6 +346,43 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
   }
   const fetchImplementation = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = new URL(String(input), dom.window.location.href);
+    if (url.pathname === `/v1/nodes/${NODE_ID}/email-threads/durable-thread-node-block-0`) {
+      const rootMessage = {
+        email_message_id: "email-message-node-block-0",
+        id: "thread-root-node-block-0",
+        thread_id: "thread-node-block-0",
+        subject: "Email for node-block-0",
+        snippet: "Earlier message in linked thread",
+        body: "Earlier linked email body.",
+        date: 1_768_521_500,
+        unread: false,
+        starred: false,
+        from: [{ name: "Earlier Sender", email: "earlier@example.test" }],
+        to: [{ name: "Recipient Person", email: "recipient@example.test" }],
+      };
+      const linkedMessage = {
+        email_message_id: "internal-message-node-block-0",
+        id: "message-node-block-0",
+        thread_id: "thread-node-block-0",
+        subject: "Email for node-block-0",
+        snippet: "Full linked message preview",
+        body: "Complete linked email body.",
+        date: 1_768_521_600,
+        unread: false,
+        starred: false,
+        from: [{ name: "Sender Person", email: "sender@example.test" }],
+        to: [{ name: "Recipient Person", email: "recipient@example.test" }],
+        cc: [{ name: "Copy Person", email: "copy@example.test" }],
+        bcc: [{ name: "Blind Copy", email: "blind@example.test" }],
+      };
+      return jsonResponse({
+        email_thread_id: "durable-thread-node-block-0",
+        thread_id: "thread-node-block-0",
+        messages: url.searchParams.get("message_id") ? [linkedMessage] : [rootMessage, linkedMessage],
+        history_complete: true,
+        download_status: "complete",
+      });
+    }
     if (url.pathname === "/v1/communications/messages/thread-root-node-block-0") return jsonResponse({
       message: {
         email_message_id: "email-message-node-block-0",

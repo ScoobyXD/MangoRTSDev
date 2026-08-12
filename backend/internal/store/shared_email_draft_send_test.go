@@ -16,6 +16,13 @@ func TestMemorySharedEmailDraftClaimLifecycleAndImmutableIdentity(t *testing.T) 
 	creator := mustEmailCollaborationGuardUser(t, repo, companyID, "shared-draft-creator", "owner@example.com", domain.RoleCompanyUser)
 	participant := mustEmailCollaborationGuardUser(t, repo, companyID, "shared-draft-participant", "participant@example.com", domain.RoleCompanyUser)
 	outsider := mustEmailCollaborationGuardUser(t, repo, companyID, "shared-draft-outsider", "outsider@example.com", domain.RoleCompanyUser)
+	const fixedSender = "fixed-sender@example.com"
+	if _, err := repo.UpsertUserEmailConnection(UserEmailConnectionInput{
+		UserID: creator.UserID, Provider: "google", AccountEmail: fixedSender,
+		Scope: "personal", GrantID: "fixed-sender-grant", Status: "connected",
+	}); err != nil {
+		t.Fatalf("create fixed sender connection: %v", err)
+	}
 
 	created, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), CommunicationsEmailCollaborationEnsureInput{
 		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
@@ -54,14 +61,14 @@ func TestMemorySharedEmailDraftClaimLifecycleAndImmutableIdentity(t *testing.T) 
 		ParticipantUserID: creator.UserID, IsShared: true, ExpectedRevision: 0,
 		CreatedByUserID: creator.UserID, UpdatedByUserID: creator.UserID,
 		Kind: "compose", SourceMessageID: collaboration.RootMessageID,
-		AccountEmail: creator.Email, ToRecipients: "customer@example.com",
+		AccountEmail: fixedSender, ToRecipients: "customer@example.com",
 		Subject: "Shared reply", BodyEditorHTML: "<p>First</p>", ReplyToMessageJSON: "{}",
 	})
 	if err != nil {
 		t.Fatalf("create shared draft: %v", err)
 	}
 	if !draft.IsShared || draft.Kind != "reply" || draft.Revision != 1 ||
-		draft.SourceMessageID != collaboration.RootMessageID || draft.AccountEmail != creator.Email ||
+		draft.SourceMessageID != collaboration.RootMessageID || draft.AccountEmail != fixedSender ||
 		draft.ToRecipients != "customer@example.com" {
 		t.Fatalf("canonical shared draft = %+v", draft)
 	}
@@ -76,14 +83,15 @@ func TestMemorySharedEmailDraftClaimLifecycleAndImmutableIdentity(t *testing.T) 
 		CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
 		ParticipantUserID: creator.UserID,
 	})
-	if err != nil || len(mailboxDrafts) != 1 || mailboxDrafts[0].DraftID != draftID {
-		t.Fatalf("source mailbox universal draft list = %+v err=%v", mailboxDrafts, err)
+	if err != nil || len(mailboxDrafts) != 0 {
+		t.Fatalf("source mailbox must not list Node-shared draft = %+v err=%v", mailboxDrafts, err)
 	}
 
 	updated, err := repo.UpsertCommunicationsEmailDraft(CommunicationsEmailDraftInput{
 		CompanyID: companyID, DraftID: draftID, CollaborationID: collaboration.CollaborationID,
 		ParticipantUserID: participant.UserID, IsShared: true, ExpectedRevision: 1,
 		UpdatedByUserID: participant.UserID, Kind: "forward", SourceMessageID: "retarget-attempt",
+		AccountEmail: fixedSender,
 		ToRecipients: "attacker@example.com", CcRecipients: "team@example.com",
 		Subject: "Participant edit", BodyEditorHTML: "<p>Second</p>",
 		ReplyToMessageJSON: "{\"id\":\"retarget-attempt\",\"thread_id\":\"other-thread\"}",
@@ -93,6 +101,7 @@ func TestMemorySharedEmailDraftClaimLifecycleAndImmutableIdentity(t *testing.T) 
 	}
 	if updated.Revision != 2 || updated.SourceMessageID != draft.SourceMessageID ||
 		updated.ReplyToMessageJSON != draft.ReplyToMessageJSON ||
+		updated.AccountEmail != fixedSender ||
 		updated.ToRecipients != "attacker@example.com" || updated.CcRecipients != "team@example.com" ||
 		updated.Subject != "Participant edit" || updated.BodyEditorHTML != "<p>Second</p>" {
 		t.Fatalf("identity-preserving update = %+v, original=%+v", updated, draft)

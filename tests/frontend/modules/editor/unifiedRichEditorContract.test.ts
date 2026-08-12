@@ -247,7 +247,8 @@ test("shared editor surfaces retain semantic identity, placeholders, and urgent 
   assert.match(projectSummary, /formattingDisabled=\{!activeRichTextBlockID \|\| !blocks\.some\(\(block\) => block\.id === activeRichTextBlockID\)\}/);
   assert.match(projectSummary, /setActiveRichTextBlockID\(""\);\s*projectFormattingControllerRef\.current = null/);
   assert.match(projectSummary, /<AttachedEmailOrganizerPane[\s\S]*attachmentResourceType="project"[\s\S]*attachmentResourceID=\{projectID\}[\s\S]*attachmentInformationID=\{block\.id\}/);
-  assert.match(nodeWorkspaceParts, /resourceType: attachmentResourceType/);
+  assert.match(nodeWorkspaceParts, /const replyAttachmentResourceType: MangoAttachmentResourceType = activeDraft \? "email_draft" : attachmentResourceType/);
+  assert.match(nodeWorkspaceParts, /resourceType: replyAttachmentResourceType/);
   assert.match(nodeWorkspaceParts, /resourceID: replyAttachmentResourceID/);
   assert.match(richTextEditing, /element\.getAttribute\(EDITOR_MENTION_KIND_ATTRIBUTE\)/);
   assert.match(richTextEditing, /span\.setAttribute\(EDITOR_MENTION_KIND_ATTRIBUTE, mentionKind\)/);

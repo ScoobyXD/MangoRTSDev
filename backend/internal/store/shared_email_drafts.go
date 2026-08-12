@@ -11,16 +11,10 @@ import (
 )
 
 func (r *MemoryRepo) isSharedEmailDraftParticipantLocked(draft domain.CommunicationsEmailDraft, userID string) bool {
-	if !draft.IsShared || strings.TrimSpace(draft.EmailThreadID) == "" || strings.TrimSpace(userID) == "" {
+	if !draft.IsShared || strings.TrimSpace(draft.OriginNodeID) == "" || strings.TrimSpace(userID) == "" {
 		return false
 	}
-	for _, collaboration := range r.emailCollaborations {
-		if collaboration.CompanyID == draft.CompanyID && collaboration.EmailThreadID == draft.EmailThreadID &&
-			r.userHasEffectiveAccessLocked(draft.CompanyID, userID, EntityTypeNode, collaboration.NodeID, EntityPermissionEdit) {
-			return true
-		}
-	}
-	return false
+	return r.userHasEffectiveAccessLocked(draft.CompanyID, userID, EntityTypeNode, draft.OriginNodeID, EntityPermissionEdit)
 }
 
 func (r *MemoryRepo) upsertSharedCommunicationsEmailDraft(input CommunicationsEmailDraftInput) (domain.CommunicationsEmailDraft, error) {
@@ -73,21 +67,18 @@ func (r *MemoryRepo) upsertSharedCommunicationsEmailDraft(input CommunicationsEm
 		}
 	}
 	input.EmailThreadID = collaboration.EmailThreadID
-	requestedSender := normalizeEmail(input.AccountEmail)
-	if requestedSender != "" && requestedSender != normalizeEmail(collaboration.AccountEmail) {
-		connection, ok := r.emailConnections[emailConnectionKey(input.ParticipantUserID, requestedSender)]
-		if !ok || connection.CompanyID != input.CompanyID || connection.Status != "connected" || strings.TrimSpace(connection.GrantID) == "" {
-			return domain.CommunicationsEmailDraft{}, ErrNotFound
-		}
-	}
 	input.OriginNodeID = cleanUUIDText(input.OriginNodeID)
-	if strings.TrimSpace(input.OriginNodeID) != "" && (collaboration.NodeID == "" || input.OriginNodeID != collaboration.NodeID) {
+	if input.OriginNodeID == "" {
+		input.OriginNodeID = collaboration.NodeID
+	}
+	if input.OriginNodeID == "" || collaboration.NodeID == "" || input.OriginNodeID != collaboration.NodeID {
 		return domain.CommunicationsEmailDraft{}, ErrInvalid
 	}
 	draftKey := communicationsEmailDraftKey(input.CompanyID, input.DraftID)
 	existing, exists := r.emailDrafts[draftKey]
 	if exists {
-		if existing.DeletedTimestamp != nil || !existing.IsShared || existing.EmailThreadID != collaboration.EmailThreadID {
+		if existing.DeletedTimestamp != nil || !existing.IsShared || existing.EmailThreadID != collaboration.EmailThreadID ||
+			existing.OriginNodeID != input.OriginNodeID {
 			return domain.CommunicationsEmailDraft{}, ErrAlreadyExists
 		}
 		if existing.SendState == communicationsEmailDraftSendStateSending {
@@ -95,6 +86,14 @@ func (r *MemoryRepo) upsertSharedCommunicationsEmailDraft(input CommunicationsEm
 		}
 		input.SourceMessageID = existing.SourceMessageID
 		input.ReplyToMessageJSON = existing.ReplyToMessageJSON
+		input.AccountEmail = existing.AccountEmail
+	}
+	requestedSender := normalizeEmail(input.AccountEmail)
+	if !exists && requestedSender != "" && requestedSender != normalizeEmail(collaboration.AccountEmail) {
+		connection, ok := r.emailConnections[emailConnectionKey(input.ParticipantUserID, requestedSender)]
+		if !ok || connection.CompanyID != input.CompanyID || connection.Status != "connected" || strings.TrimSpace(connection.GrantID) == "" {
+			return domain.CommunicationsEmailDraft{}, ErrNotFound
+		}
 	}
 
 	input, err := canonicalSharedEmailDraftInput(input, collaboration)
@@ -124,7 +123,8 @@ func (r *MemoryRepo) upsertSharedCommunicationsEmailDraft(input CommunicationsEm
 			return domain.CommunicationsEmailDraft{}, versionConflict(0)
 		}
 		for _, other := range r.emailDrafts {
-			if other.CompanyID == draft.CompanyID && other.IsShared && other.EmailThreadID == draft.EmailThreadID && other.DeletedTimestamp == nil {
+			if other.CompanyID == draft.CompanyID && other.IsShared && other.OriginNodeID == draft.OriginNodeID &&
+				other.SourceMessageID == draft.SourceMessageID && other.DeletedTimestamp == nil {
 				other.CollaborationID = collaboration.CollaborationID
 				return other, nil
 			}
@@ -155,15 +155,8 @@ func (r *PostgresRepo) appendParticipantSharedCommunicationsEmailDrafts(input Co
 select `+communicationsEmailDraftSelectColumns()+`
 from email_drafts
 where company_id=$1::uuid and deleted_timestamp is null
- and email_thread_id is not null
- and exists (
-  select 1 from email_relationships relationship
-  where relationship.company_id=email_drafts.company_id
-   and relationship.email_thread_id=email_drafts.email_thread_id
-   and relationship.resource_type='node'
-   and relationship.resource_textbox_id is null
-   and mangorts_user_can_access_resource(relationship.company_id,relationship.resource_type,
-       relationship.resource_id,$2::uuid,'edit'))
+ and email_thread_id is not null and origin_node_id is not null
+ and mangorts_user_can_access_resource(email_drafts.company_id,'node',origin_node_id,$2::uuid,'edit')
 order by updated_timestamp desc,draft_id`, strings.TrimSpace(input.CompanyID), participantUserID)
 	if err != nil {
 		return nil, err
@@ -179,7 +172,7 @@ order by updated_timestamp desc,draft_id`, strings.TrimSpace(input.CompanyID), p
 			return nil, err
 		}
 		if _, ok := seen[draft.DraftID]; !ok {
-			draft.CollaborationID, _ = postgresAccessibleEmailCollaborationIDForThread(context.Background(), r.db, draft.CompanyID, draft.EmailThreadID, participantUserID)
+			draft.CollaborationID, _ = postgresAccessibleEmailCollaborationIDForNode(context.Background(), r.db, draft.CompanyID, draft.EmailThreadID, draft.OriginNodeID, participantUserID)
 			seen[draft.DraftID] = struct{}{}
 			drafts = append(drafts, draft)
 		}
@@ -202,32 +195,26 @@ func (r *PostgresRepo) getParticipantSharedCommunicationsEmailDraft(input Commun
 select `+communicationsEmailDraftSelectColumns()+`
 from email_drafts
 where company_id=$1::uuid and draft_id=$2 and deleted_timestamp is null
- and email_thread_id is not null
- and exists (
-  select 1 from email_relationships relationship
-  where relationship.company_id=email_drafts.company_id
-   and relationship.email_thread_id=email_drafts.email_thread_id
-   and relationship.resource_type='node'
-   and relationship.resource_textbox_id is null
-   and mangorts_user_can_access_resource(relationship.company_id,relationship.resource_type,
-       relationship.resource_id,$3::uuid,'edit'))`, companyID, draftID, participantUserID))
+ and email_thread_id is not null and origin_node_id is not null
+ and mangorts_user_can_access_resource(email_drafts.company_id,'node',origin_node_id,$3::uuid,'edit')`, companyID, draftID, participantUserID))
 	if err == nil {
-		draft.CollaborationID, _ = postgresAccessibleEmailCollaborationIDForThread(context.Background(), r.db, companyID, draft.EmailThreadID, participantUserID)
+		draft.CollaborationID, _ = postgresAccessibleEmailCollaborationIDForNode(context.Background(), r.db, companyID, draft.EmailThreadID, draft.OriginNodeID, participantUserID)
 	}
 	return draft, err
 }
 
-func postgresAccessibleEmailCollaborationIDForThread(ctx context.Context, q emailCollaborationQueryer, companyID, emailThreadID, participantUserID string) (string, error) {
+func postgresAccessibleEmailCollaborationIDForNode(ctx context.Context, q emailCollaborationQueryer, companyID, emailThreadID, nodeID, participantUserID string) (string, error) {
 	var relationshipID string
 	err := q.QueryRowContext(ctx, `
 select relationship.email_relationship_id::text
 from email_relationships relationship
 where relationship.company_id=$1::uuid and relationship.email_thread_id=$2::uuid
+ and relationship.resource_id=$3::uuid
  and relationship.resource_type='node' and relationship.resource_textbox_id is null
  and mangorts_user_can_access_resource(relationship.company_id,relationship.resource_type,
-     relationship.resource_id,$3::uuid,'edit')
+     relationship.resource_id,$4::uuid,'edit')
 order by relationship.created_timestamp,relationship.email_relationship_id
-limit 1`, companyID, emailThreadID, participantUserID).Scan(&relationshipID)
+limit 1`, companyID, emailThreadID, nodeID, participantUserID).Scan(&relationshipID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
 	}
@@ -279,8 +266,33 @@ where company_id=$1::uuid and email_message_id=$2::uuid`, companyID, cleanUUIDTe
 		}
 	}
 	input.EmailThreadID = collaboration.EmailThreadID
+	input.OriginNodeID = cleanUUIDText(input.OriginNodeID)
+	if input.OriginNodeID == "" {
+		input.OriginNodeID = collaboration.NodeID
+	}
+	if input.OriginNodeID == "" || collaboration.NodeID == "" || input.OriginNodeID != collaboration.NodeID {
+		return domain.CommunicationsEmailDraft{}, ErrInvalid
+	}
+	existing, existingErr := scanCommunicationsEmailDraft(tx.QueryRowContext(ctx, `
+select `+communicationsEmailDraftSelectColumns()+`
+from email_drafts where company_id=$1::uuid and draft_id=$2 for update`, companyID, draftID))
+	if existingErr != nil && !errors.Is(existingErr, ErrNotFound) {
+		return domain.CommunicationsEmailDraft{}, existingErr
+	}
+	if existingErr == nil && (existing.DeletedTimestamp != nil || !existing.IsShared || existing.EmailThreadID != collaboration.EmailThreadID ||
+		existing.OriginNodeID != input.OriginNodeID) {
+		return domain.CommunicationsEmailDraft{}, ErrAlreadyExists
+	}
+	if existingErr == nil && existing.SendState == communicationsEmailDraftSendStateSending {
+		return domain.CommunicationsEmailDraft{}, ErrSendInProgress
+	}
+	if existingErr == nil {
+		input.SourceMessageID = existing.SourceMessageID
+		input.ReplyToMessageJSON = existing.ReplyToMessageJSON
+		input.AccountEmail = existing.AccountEmail
+	}
 	requestedSender := normalizeEmail(input.AccountEmail)
-	if requestedSender != "" && requestedSender != normalizeEmail(collaboration.AccountEmail) {
+	if existingErr != nil && requestedSender != "" && requestedSender != normalizeEmail(collaboration.AccountEmail) {
 		var authorized bool
 		if err := tx.QueryRowContext(ctx, `
 select exists (
@@ -294,10 +306,6 @@ select exists (
 			return domain.CommunicationsEmailDraft{}, ErrNotFound
 		}
 	}
-	input.OriginNodeID = cleanUUIDText(input.OriginNodeID)
-	if strings.TrimSpace(input.OriginNodeID) != "" && (collaboration.NodeID == "" || input.OriginNodeID != collaboration.NodeID) {
-		return domain.CommunicationsEmailDraft{}, ErrInvalid
-	}
 	input, err = canonicalSharedEmailDraftInput(input, collaboration)
 	if err != nil {
 		return domain.CommunicationsEmailDraft{}, err
@@ -308,18 +316,6 @@ select email_message_id::text from email_messages
 where company_id=$1::uuid and email_thread_id=$2::uuid and email_message_id=$3::uuid`,
 		companyID, collaboration.EmailThreadID, input.SourceMessageID).Scan(&sourceEmailMessageID); err != nil {
 		return domain.CommunicationsEmailDraft{}, err
-	}
-	existing, existingErr := scanCommunicationsEmailDraft(tx.QueryRowContext(ctx, `
-select `+communicationsEmailDraftSelectColumns()+`
-from email_drafts where company_id=$1::uuid and draft_id=$2 for update`, companyID, draftID))
-	if existingErr != nil && !errors.Is(existingErr, ErrNotFound) {
-		return domain.CommunicationsEmailDraft{}, existingErr
-	}
-	if existingErr == nil && (existing.DeletedTimestamp != nil || !existing.IsShared || existing.EmailThreadID != collaboration.EmailThreadID) {
-		return domain.CommunicationsEmailDraft{}, ErrAlreadyExists
-	}
-	if existingErr == nil && existing.SendState == communicationsEmailDraftSendStateSending {
-		return domain.CommunicationsEmailDraft{}, ErrSendInProgress
 	}
 	draft, err := normalizeCommunicationsEmailDraftInput(input)
 	if err != nil {
@@ -344,11 +340,11 @@ returning `+communicationsEmailDraftSelectColumns(),
 		if input.ExpectedRevision != 0 {
 			return domain.CommunicationsEmailDraft{}, versionConflict(0)
 		}
-		lockKey := companyID + ":" + collaboration.EmailThreadID
+		lockKey := companyID + ":" + input.OriginNodeID + ":" + sourceEmailMessageID
 		if _, err := tx.ExecContext(ctx, `select pg_advisory_xact_lock(hashtextextended($1,0))`, lockKey); err != nil {
 			return domain.CommunicationsEmailDraft{}, err
 		}
-		otherDraftID, err := postgresSharedEmailDraftWithSourceTx(ctx, tx, companyID, collaboration.EmailThreadID)
+		otherDraftID, err := postgresSharedEmailDraftWithSourceTx(ctx, tx, companyID, input.OriginNodeID, sourceEmailMessageID)
 		if err != nil {
 			return domain.CommunicationsEmailDraft{}, err
 		}
@@ -397,15 +393,8 @@ func (r *PostgresRepo) softDeleteParticipantSharedCommunicationsEmailDraft(input
 		return ErrInvalid
 	}
 	now := sharedEmailDraftSendClaimNow(input.Now)
-	permission := `
-exists (
- select 1 from email_relationships relationship
- where relationship.company_id=email_drafts.company_id
-  and relationship.email_thread_id=email_drafts.email_thread_id
-  and relationship.resource_type='node'
-  and relationship.resource_textbox_id is null
-  and mangorts_user_can_access_resource(relationship.company_id,relationship.resource_type,
-      relationship.resource_id,$3::uuid,'edit'))`
+	permission := `origin_node_id is not null and
+mangorts_user_can_access_resource(email_drafts.company_id,'node',origin_node_id,$3::uuid,'edit')`
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {

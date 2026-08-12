@@ -110,6 +110,31 @@ func TestNodeEmailThreadRouteReturnsDurableStoredHistory(t *testing.T) {
 	if response.Messages[0].Body != "Stored root body" || response.Messages[1].Body != "Stored reply body" {
 		t.Fatalf("stored node thread bodies = %+v", response.Messages)
 	}
+	var replyEmailMessageID string
+	for _, message := range stored.Messages {
+		if message.ProviderMessageID == "node-thread-reply" {
+			replyEmailMessageID = message.EmailMessageID
+			break
+		}
+	}
+	if replyEmailMessageID == "" {
+		t.Fatal("stored reply internal message id missing")
+	}
+	exactReq := emailCollaborationThreadTestRequestWithActor(httptest.NewRequest(http.MethodGet, path+"&message_id="+replyEmailMessageID, nil), owner, domain.RoleCompanyUser)
+	exactRec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(exactRec, exactReq)
+	if exactRec.Code != http.StatusOK {
+		t.Fatalf("exact message status=%d, want 200 body=%s", exactRec.Code, exactRec.Body.String())
+	}
+	var exactResponse struct {
+		Messages []NylasMessage `json:"messages"`
+	}
+	if err := json.NewDecoder(exactRec.Body).Decode(&exactResponse); err != nil {
+		t.Fatal(err)
+	}
+	if len(exactResponse.Messages) != 1 || exactResponse.Messages[0].ID != "node-thread-reply" || exactResponse.Messages[0].Body != "Stored reply body" {
+		t.Fatalf("exact stored Node message = %+v", exactResponse.Messages)
+	}
 	threadGrants, threadIDs, messageGrants, messageIDs := client.calls()
 	if len(threadGrants)+len(threadIDs)+len(messageGrants)+len(messageIDs) != 0 {
 		t.Fatalf("node stored read called provider: %v %v %v %v", threadGrants, threadIDs, messageGrants, messageIDs)
