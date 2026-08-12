@@ -13,6 +13,7 @@ import {
   EDITOR_NEU_SURFACE,
 } from "../editor/NodeWorkspaceSurfaceShared";
 import type { EditorTabID } from "../editor/editorTabs";
+import { UniversalEntityPicker, type UniversalEntityPickerAnchor } from "../editor/UniversalEntityPicker";
 import type { LogicGateRACIAssignment, LogicGateRACIPrincipalType, LogicGateRACIRole } from "../logic-gates/types";
 import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog";
 import {
@@ -21,6 +22,7 @@ import {
   useBareMangoEditorControls,
 } from "./BareMangoEditor";
 import { HuddleResourceIcon } from "./HuddleResourceIcon";
+import { HuddleLogicGateCards, type HuddleLogicGateCardItem } from "./HuddleLogicGateCards";
 import { DEFAULT_HUDDLE_COLUMN_LAYOUT, resizeHuddleColumns, type HuddleColumnLayout } from "./huddleColumnLayout";
 
 export type HuddleResourceType = "huddle_logic_gate" | "huddle_node";
@@ -65,6 +67,8 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
   const [name, setName] = useState(resource.name);
   const [savedName, setSavedName] = useState(resource.name);
   const [nodes, setNodes] = useState<HuddleNode[]>([]);
+  const [logicGateCards, setLogicGateCards] = useState<HuddleLogicGateCardItem[]>([]);
+  const [logicGatePickerAnchor, setLogicGatePickerAnchor] = useState<UniversalEntityPickerAnchor | null>(null);
   const [raci, setRaci] = useState<LogicGateRACIAssignment[]>([]);
   const [raciRevision, setRaciRevision] = useState("");
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
@@ -80,13 +84,14 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
   const load = useCallback(async () => {
     setError("");
     try {
-      const [item, policy, usersPayload, groupsPayload] = await Promise.all([
+      const [item, policy, usersPayload, groupsPayload, cardsPayload] = await Promise.all([
         isGate
           ? requestJSON<HuddleGate>(`/v1/huddle-logic-gates/${encodeURIComponent(resource.resourceID)}?company_id=${encodeURIComponent(companyID)}`)
           : requestJSON<HuddleNode>(`/v1/huddle-nodes/${encodeURIComponent(resource.resourceID)}?company_id=${encodeURIComponent(companyID)}`),
         requestJSON<RACIPolicy>(`/v1/resources/${resource.resourceType}/${encodeURIComponent(resource.resourceID)}/gvic?company_id=${encodeURIComponent(companyID)}`),
         requestJSON<{ users?: CompanyUser[] }>(`/v1/companies/${encodeURIComponent(companyID)}/users`),
         requestJSON<{ groups?: CompanyUserGroup[]; members?: CompanyUserGroupMember[] }>(`/v1/companies/${encodeURIComponent(companyID)}/user-groups`),
+        requestJSON<{ logic_gates?: HuddleLogicGateCardItem[] }>(`${isGate ? "/v1/huddle-logic-gates" : "/v1/huddle-nodes"}/${encodeURIComponent(resource.resourceID)}/logic-gates?company_id=${encodeURIComponent(companyID)}`),
       ]);
       const loadedName = isGate ? (item as HuddleGate).header : (item as HuddleNode).name;
       setName(loadedName);
@@ -96,6 +101,7 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
       setCompanyUsers(usersPayload.users ?? []);
       setCompanyUserGroups(groupsPayload.groups ?? []);
       setCompanyUserGroupMembers(groupsPayload.members ?? []);
+      setLogicGateCards(cardsPayload.logic_gates ?? []);
       if (isGate) {
         const data = await requestJSON<{ huddle_nodes?: HuddleNode[] }>(`/v1/huddle-logic-gates/${encodeURIComponent(resource.resourceID)}/nodes?company_id=${encodeURIComponent(companyID)}`);
         setNodes(data.huddle_nodes ?? []);
@@ -191,6 +197,38 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
     }
   };
 
+  const refreshLogicGateCards = async () => {
+    const data = await requestJSON<{ logic_gates?: HuddleLogicGateCardItem[] }>(`${isGate ? "/v1/huddle-logic-gates" : "/v1/huddle-nodes"}/${encodeURIComponent(resource.resourceID)}/logic-gates?company_id=${encodeURIComponent(companyID)}`);
+    setLogicGateCards(data.logic_gates ?? []);
+  };
+
+  const openLogicGatePicker = (event: React.MouseEvent<HTMLButtonElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setLogicGatePickerAnchor({ left: rect.left, top: rect.bottom + 6 });
+  };
+
+  const addLogicGate = async (logicGateID: string) => {
+    try {
+      await requestJSON(`/v1/huddle-logic-gates/${encodeURIComponent(resource.resourceID)}/logic-gates/${encodeURIComponent(logicGateID)}`, {
+        method: "PUT",
+        json: { company_id: companyID },
+      });
+      setLogicGatePickerAnchor(null);
+      await refreshLogicGateCards();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not add Logic Gate");
+    }
+  };
+
+  const removeLogicGate = async (item: HuddleLogicGateCardItem) => {
+    try {
+      await requestJSON(`/v1/huddle-logic-gates/${encodeURIComponent(resource.resourceID)}/logic-gates/${encodeURIComponent(item.logic_gate_id)}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
+      setLogicGateCards((current) => current.filter((candidate) => candidate.logic_gate_id !== item.logic_gate_id));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not remove Logic Gate");
+    }
+  };
+
   const deleteResource = async () => {
     if (!window.confirm(`Move “${name}” to the Recycle Bin?`)) return;
     try {
@@ -269,7 +307,7 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
           <BareMangoEditorToolbar
             controls={editorControls}
             activeTab={activeTab}
-            visibleTabIDs={["editor", "permissions", "format", "outline-styles"]}
+            visibleTabIDs={isGate ? ["editor", "permissions", "format", "outline-styles"] : ["permissions"]}
             onSelectTab={selectToolbarTab}
             reserveHeaderOffset={false}
           />
@@ -316,20 +354,37 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
         data-huddle-column-layout={isGate ? "three-resizable-columns" : "two-resizable-columns"}
         style={{ ...bodyStyle, gridTemplateColumns: bodyTemplate }}
       >
-        <div aria-label={`${name} editor column`} style={editorColumnStyle}>
-          <BareMangoEditorDocument
-            companyID={companyID}
-            resourceType={resource.resourceType}
-            resourceID={resource.resourceID}
-            currentUserID={currentUserID}
-            requestJSON={requestJSON}
-            ariaLabel={`${name} editor`}
-            controls={editorControls}
-            style={{ padding: "22px 26px", background: "rgba(255,255,255,.72)" }}
-          />
-        </div>
-        <div role="separator" aria-label={isGate ? "Resize Huddle editor and middle columns" : "Resize Huddle Node editor and chat columns"} aria-orientation="vertical" onPointerDown={isGate ? (event) => startGateResize(0, event) : startNodeResize} style={columnResizeHandleStyle}><span style={columnResizeGripStyle} /></div>
-        <div aria-label={isGate ? "Reserved Huddle middle column" : "Reserved Huddle Node chat column"} style={emptyColumnStyle} />
+        {isGate ? (
+          <div aria-label={`${name} editor column`} style={editorColumnStyle}>
+            <BareMangoEditorDocument
+              companyID={companyID}
+              resourceType="huddle_logic_gate"
+              resourceID={resource.resourceID}
+              currentUserID={currentUserID}
+              requestJSON={requestJSON}
+              ariaLabel={`${name} editor`}
+              controls={editorControls}
+              style={{ padding: "22px 26px", background: "rgba(255,255,255,.72)" }}
+            />
+          </div>
+        ) : (
+          <section aria-label={`${name} Logic Gate snapshot`} data-huddle-node-snapshot="true" style={relationshipColumnStyle}>
+            <div style={relationshipColumnHeaderStyle}><strong>Logic Gate snapshot</strong></div>
+            <HuddleLogicGateCards items={logicGateCards} emptyLabel="No Logic Gates were linked when this Huddle Node was created." />
+          </section>
+        )}
+        <div role="separator" aria-label={isGate ? "Resize Huddle editor and Logic Gate columns" : "Resize Huddle Node snapshot and chat columns"} aria-orientation="vertical" onPointerDown={isGate ? (event) => startGateResize(0, event) : startNodeResize} style={columnResizeHandleStyle}><span style={columnResizeGripStyle} /></div>
+        {isGate ? (
+          <section aria-label="Huddle Logic Gates" style={relationshipColumnStyle}>
+            <div style={relationshipColumnHeaderStyle}>
+              <strong>Logic Gates</strong>
+              <button type="button" aria-label="Add Logic Gate" title="Add Logic Gate" onClick={openLogicGatePicker} style={createNodeButtonStyle}>+</button>
+            </div>
+            <HuddleLogicGateCards items={logicGateCards} emptyLabel="No Logic Gates linked yet." onRemove={(item) => void removeLogicGate(item)} />
+          </section>
+        ) : (
+          <div aria-label="Reserved Huddle Node chat column" style={emptyColumnStyle} />
+        )}
         {isGate && (
           <>
             <div role="separator" aria-label="Resize Huddle middle and Node columns" aria-orientation="vertical" onPointerDown={(event) => startGateResize(1, event)} style={columnResizeHandleStyle}><span style={columnResizeGripStyle} /></div>
@@ -368,6 +423,23 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
           entityID={resource.resourceID}
           title={`${name} permissions`}
           onClose={() => { setPermissions(false); setActiveTab("editor"); }}
+        />
+      )}
+      {isGate && logicGatePickerAnchor && (
+        <UniversalEntityPicker
+          companyID={companyID}
+          requestJSON={requestJSON}
+          sourceLabel="Huddle Logic Gate"
+          linkTargetTypes={["logic_gate"]}
+          initialMode="link"
+          initialCategory="logic_gate"
+          lockMode
+          anchor={logicGatePickerAnchor}
+          onChoose={async (entity, mode) => {
+            if (mode !== "link" || entity.entityType !== "logic_gate") return;
+            await addLogicGate(entity.entityID);
+          }}
+          onCancel={() => setLogicGatePickerAnchor(null)}
         />
       )}
     </section>
@@ -443,6 +515,8 @@ const errorPlaceholderStyle: React.CSSProperties = { height: 0, minHeight: 0, ov
 const bodyStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, display: "grid", gap: 0, padding: "4px 10px 10px", overflowX: "auto", overflowY: "hidden" };
 const editorColumnStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, overflow: "hidden", border: "1px solid rgba(255,255,255,.84)", borderRadius: 12, background: "rgba(255,255,255,.72)", boxShadow: EDITOR_NEU_SHADOW };
 const emptyColumnStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, border: "1px solid rgba(255,255,255,.72)", borderRadius: 12, background: "linear-gradient(145deg,rgba(246,249,252,.76),rgba(236,241,247,.62))", boxShadow: "inset 4px 4px 12px rgba(148,163,184,.12), inset -4px -4px 12px rgba(255,255,255,.72)" };
+const relationshipColumnStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, display: "grid", gridTemplateRows: "40px minmax(0,1fr)", overflow: "hidden", padding: 9, border: "1px solid rgba(255,255,255,.84)", borderRadius: 12, background: EDITOR_NEU_SURFACE, boxShadow: EDITOR_NEU_SHADOW };
+const relationshipColumnHeaderStyle: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "0 3px 6px", color: "#243047", fontSize: 14 };
 const columnResizeHandleStyle: React.CSSProperties = { minWidth: 8, height: "100%", display: "grid", placeItems: "center", cursor: "col-resize", touchAction: "none" };
 const columnResizeGripStyle: React.CSSProperties = { width: 3, height: 42, borderRadius: 999, background: "linear-gradient(180deg,#67e8f9,#38bdf8,#a78bfa)", boxShadow: "0 0 8px rgba(56,189,248,.35)" };
 const nodeColumnStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, display: "grid", gridTemplateRows: "40px minmax(0,1fr)", overflow: "hidden", padding: 9, border: "1px solid rgba(255,255,255,.84)", borderRadius: 12, background: EDITOR_NEU_SURFACE, boxShadow: EDITOR_NEU_SHADOW };

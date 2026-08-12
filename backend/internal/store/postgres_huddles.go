@@ -155,6 +155,102 @@ func (r *PostgresRepo) UpdateHuddleLogicGate(input HuddleUpdateInput) (domain.Hu
 	}
 	return scanHuddleLogicGate(r.db.QueryRow(`update huddle_logic_gates set header=$3,updated_timestamp=statement_timestamp() where company_id=$1::uuid and huddle_logic_gate_id=$2::uuid returning company_id::text,huddle_logic_gate_id::text,header,created_timestamp,updated_timestamp`, input.CompanyID, input.ResourceID, input.Name))
 }
+
+func scanHuddleLogicGateCards(rows *sql.Rows) ([]domain.HuddleLogicGateCard, error) {
+	items := []domain.HuddleLogicGateCard{}
+	for rows.Next() {
+		var companyID, logicGateID, header string
+		var kpiID, kpiName sql.NullString
+		var kpiCreated, kpiUpdated sql.NullTime
+		if err := rows.Scan(&companyID, &logicGateID, &header, &kpiID, &kpiName, &kpiCreated, &kpiUpdated); err != nil {
+			return nil, err
+		}
+		if len(items) == 0 || items[len(items)-1].LogicGateID != logicGateID {
+			items = append(items, domain.HuddleLogicGateCard{CompanyID: companyID, LogicGateID: logicGateID, Header: header, KPIs: []domain.KPI{}})
+		}
+		if kpiID.Valid {
+			items[len(items)-1].KPIs = append(items[len(items)-1].KPIs, domain.KPI{
+				CompanyID: companyID, KPIID: kpiID.String, LogicGateID: logicGateID, Name: kpiName.String,
+				CreatedTimestamp: kpiCreated.Time, UpdatedTimestamp: kpiUpdated.Time,
+			})
+		}
+	}
+	return items, rows.Err()
+}
+
+func (r *PostgresRepo) ListHuddleLogicGateCards(companyID, huddleLogicGateID string) ([]domain.HuddleLogicGateCard, error) {
+	rows, err := r.db.Query(`
+select gate.company_id::text,gate.logic_gate_id::text,gate.header,
+       kpi.kpi_id::text,kpi.name,kpi.created_timestamp,kpi.updated_timestamp
+from huddle_logic_gate_relationships relationship
+join logic_gates gate
+  on gate.company_id=relationship.company_id and gate.logic_gate_id=relationship.logic_gate_id
+left join kpis kpi
+  on kpi.company_id=relationship.company_id and kpi.logic_gate_id=relationship.logic_gate_id
+where relationship.company_id=$1::uuid and relationship.huddle_logic_gate_id=$2::uuid
+order by lower(gate.header),gate.logic_gate_id,kpi.created_timestamp,kpi.kpi_id`, companyID, huddleLogicGateID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanHuddleLogicGateCards(rows)
+}
+
+func (r *PostgresRepo) CreateHuddleLogicGateRelationship(input HuddleLogicGateRelationshipInput) error {
+	input.CompanyID = cleanUUIDText(input.CompanyID)
+	input.HuddleLogicGateID = cleanUUIDText(input.HuddleLogicGateID)
+	input.LogicGateID = cleanUUIDText(input.LogicGateID)
+	if input.CompanyID == "" || input.HuddleLogicGateID == "" || input.LogicGateID == "" {
+		return ErrInvalid
+	}
+	result, err := r.db.Exec(`
+insert into huddle_logic_gate_relationships(company_id,huddle_logic_gate_id,logic_gate_id)
+select huddle.company_id,huddle.huddle_logic_gate_id,gate.logic_gate_id
+from huddle_logic_gates huddle
+join logic_gates gate on gate.company_id=huddle.company_id
+where huddle.company_id=$1::uuid and huddle.huddle_logic_gate_id=$2::uuid and gate.logic_gate_id=$3::uuid
+on conflict(company_id,huddle_logic_gate_id,logic_gate_id) do nothing`, input.CompanyID, input.HuddleLogicGateID, input.LogicGateID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected > 0 {
+		return nil
+	}
+	var exists bool
+	if err = r.db.QueryRow(`select exists(select 1 from huddle_logic_gate_relationships where company_id=$1::uuid and huddle_logic_gate_id=$2::uuid and logic_gate_id=$3::uuid)`, input.CompanyID, input.HuddleLogicGateID, input.LogicGateID).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *PostgresRepo) DeleteHuddleLogicGateRelationship(input HuddleLogicGateRelationshipInput) error {
+	input.CompanyID = cleanUUIDText(input.CompanyID)
+	input.HuddleLogicGateID = cleanUUIDText(input.HuddleLogicGateID)
+	input.LogicGateID = cleanUUIDText(input.LogicGateID)
+	if input.CompanyID == "" || input.HuddleLogicGateID == "" || input.LogicGateID == "" {
+		return ErrInvalid
+	}
+	result, err := r.db.Exec(`delete from huddle_logic_gate_relationships where company_id=$1::uuid and huddle_logic_gate_id=$2::uuid and logic_gate_id=$3::uuid`, input.CompanyID, input.HuddleLogicGateID, input.LogicGateID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *PostgresRepo) ListHuddleNodes(companyID, ownerID string) ([]domain.HuddleNode, error) {
 	rows, err := r.db.Query(`select company_id::text,huddle_node_id::text,huddle_logic_gate_id::text,name,created_timestamp,updated_timestamp from huddle_nodes where company_id=$1::uuid and huddle_logic_gate_id=$2::uuid order by created_timestamp,huddle_node_id`, companyID, ownerID)
 	if err != nil {
@@ -177,7 +273,7 @@ func (r *PostgresRepo) CreateHuddleNode(input HuddleCreateInput) (domain.HuddleN
 		return domain.HuddleNode{}, ErrInvalid
 	}
 	ctx := context.Background()
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return domain.HuddleNode{}, err
 	}
@@ -190,6 +286,21 @@ func (r *PostgresRepo) CreateHuddleNode(input HuddleCreateInput) (domain.HuddleN
 	if err = postgresCreateDirectPolicyTx(ctx, tx, input.CompanyID, EntityTypeHuddleNode, id); err != nil {
 		return domain.HuddleNode{}, err
 	}
+	if _, err = tx.ExecContext(ctx, `
+insert into huddle_node_logic_gate_relationships(company_id,huddle_node_id,logic_gate_id)
+select company_id,$3::uuid,logic_gate_id
+from huddle_logic_gate_relationships
+where company_id=$1::uuid and huddle_logic_gate_id=$2::uuid`, input.CompanyID, input.OwnerID, id); err != nil {
+		return domain.HuddleNode{}, err
+	}
+	if _, err = tx.ExecContext(ctx, `
+insert into huddle_node_kpi_relationships(company_id,huddle_node_id,logic_gate_id,kpi_id)
+select relationship.company_id,$3::uuid,relationship.logic_gate_id,kpi.kpi_id
+from huddle_logic_gate_relationships relationship
+join kpis kpi on kpi.company_id=relationship.company_id and kpi.logic_gate_id=relationship.logic_gate_id
+where relationship.company_id=$1::uuid and relationship.huddle_logic_gate_id=$2::uuid`, input.CompanyID, input.OwnerID, id); err != nil {
+		return domain.HuddleNode{}, err
+	}
 	if err = tx.Commit(); err != nil {
 		return domain.HuddleNode{}, err
 	}
@@ -197,6 +308,30 @@ func (r *PostgresRepo) CreateHuddleNode(input HuddleCreateInput) (domain.HuddleN
 }
 func (r *PostgresRepo) GetHuddleNode(companyID, id string) (domain.HuddleNode, error) {
 	return scanHuddleNode(r.db.QueryRow(`select company_id::text,huddle_node_id::text,huddle_logic_gate_id::text,name,created_timestamp,updated_timestamp from huddle_nodes where company_id=$1::uuid and huddle_node_id=$2::uuid`, companyID, id))
+}
+
+func (r *PostgresRepo) ListHuddleNodeLogicGateCards(companyID, huddleNodeID string) ([]domain.HuddleLogicGateCard, error) {
+	rows, err := r.db.Query(`
+select gate.company_id::text,gate.logic_gate_id::text,gate.header,
+       kpi.kpi_id::text,kpi.name,kpi.created_timestamp,kpi.updated_timestamp
+from huddle_node_logic_gate_relationships relationship
+join logic_gates gate
+  on gate.company_id=relationship.company_id and gate.logic_gate_id=relationship.logic_gate_id
+left join huddle_node_kpi_relationships snapshot_kpi
+  on snapshot_kpi.company_id=relationship.company_id
+ and snapshot_kpi.huddle_node_id=relationship.huddle_node_id
+ and snapshot_kpi.logic_gate_id=relationship.logic_gate_id
+left join kpis kpi
+  on kpi.company_id=snapshot_kpi.company_id
+ and kpi.logic_gate_id=snapshot_kpi.logic_gate_id
+ and kpi.kpi_id=snapshot_kpi.kpi_id
+where relationship.company_id=$1::uuid and relationship.huddle_node_id=$2::uuid
+order by lower(gate.header),gate.logic_gate_id,kpi.created_timestamp,kpi.kpi_id`, companyID, huddleNodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanHuddleLogicGateCards(rows)
 }
 func (r *PostgresRepo) UpdateHuddleNode(input HuddleUpdateInput) (domain.HuddleNode, error) {
 	input.Name = strings.TrimSpace(input.Name)
@@ -422,6 +557,22 @@ func (r *PostgresRepo) deleteHuddleObject(companyID, kind, id, userID string) er
 	}
 	if kind == "huddle_logic_gate" {
 		if err = add("huddle_explorer_items", `company_id=$1::uuid and huddle_type='huddle_logic_gate' and resource_huddle_resource_id=$2::uuid`, companyID, id); err != nil {
+			return err
+		}
+		if err = add("huddle_logic_gate_relationships", `company_id=$1::uuid and huddle_logic_gate_id=$2::uuid`, companyID, id); err != nil {
+			return err
+		}
+	}
+	if kind == "huddle_node" {
+		if err = add("huddle_node_logic_gate_relationships", `company_id=$1::uuid and huddle_node_id=$2::uuid`, companyID, id); err != nil {
+			return err
+		}
+		if err = add("huddle_node_kpi_relationships", `company_id=$1::uuid and huddle_node_id=$2::uuid`, companyID, id); err != nil {
+			return err
+		}
+	}
+	if kind == "kpi" {
+		if err = add("huddle_node_kpi_relationships", `company_id=$1::uuid and kpi_id=$2::uuid`, companyID, id); err != nil {
 			return err
 		}
 	}

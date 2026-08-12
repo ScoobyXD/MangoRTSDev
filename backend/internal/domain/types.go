@@ -896,6 +896,35 @@ type KPI struct {
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
 
+type HuddleLogicGateRelationship struct {
+	CompanyID         string    `json:"company_id"`
+	HuddleLogicGateID string    `json:"huddle_logic_gate_id"`
+	LogicGateID       string    `json:"logic_gate_id"`
+	CreatedTimestamp  time.Time `json:"created_timestamp"`
+}
+
+type HuddleNodeLogicGateRelationship struct {
+	CompanyID        string    `json:"company_id"`
+	HuddleNodeID     string    `json:"huddle_node_id"`
+	LogicGateID      string    `json:"logic_gate_id"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+}
+
+type HuddleNodeKPIRelationship struct {
+	CompanyID        string    `json:"company_id"`
+	HuddleNodeID     string    `json:"huddle_node_id"`
+	LogicGateID      string    `json:"logic_gate_id"`
+	KPIID            string    `json:"kpi_id"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+}
+
+type HuddleLogicGateCard struct {
+	CompanyID   string `json:"company_id"`
+	LogicGateID string `json:"logic_gate_id"`
+	Header      string `json:"header"`
+	KPIs        []KPI  `json:"kpis"`
+}
+
 type HuddleExplorerFolder struct {
 	CompanyID        string    `json:"company_id"`
 	FolderID         string    `json:"folder_id"`

@@ -137,8 +137,6 @@ func postgresEditorResourceExistsTx(ctx context.Context, tx *sql.Tx, ref EditorD
 		table, idColumn = "projects", "project_id"
 	case EntityTypeHuddleLogicGate:
 		table, idColumn = "huddle_logic_gates", "huddle_logic_gate_id"
-	case EntityTypeHuddleNode:
-		table, idColumn = "huddle_nodes", "huddle_node_id"
 	case EntityTypeKPI:
 		table, idColumn = "kpis", "kpi_id"
 	default:

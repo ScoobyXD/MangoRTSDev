@@ -6094,22 +6094,12 @@ create table if not exists huddle_nodes (
   huddle_node_id uuid not null,
   huddle_logic_gate_id uuid not null,
   name text not null,
-  body_json jsonb not null default '{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph"}]},"annotations":[]}'::jsonb,
-  revision bigint not null default 0,
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
-  deleted_timestamp timestamptz,
   primary key (company_id,huddle_node_id),
   foreign key (company_id,huddle_logic_gate_id)
     references huddle_logic_gates(company_id,huddle_logic_gate_id) on delete restrict,
-  constraint huddle_nodes_name_chk check (btrim(name) <> ''),
-  constraint huddle_nodes_revision_chk check (revision >= 0),
-  constraint huddle_nodes_body_chk check (
-    body_json->>'format'='mango-tiptap-json'
-    and body_json->>'schema_version'='1'
-    and body_json->'document'->>'type'='doc'
-    and jsonb_typeof(body_json->'annotations')='array'
-  )
+  constraint huddle_nodes_name_chk check (btrim(name) <> '')
 );
 
 create index if not exists idx_huddle_nodes_owner
@@ -6139,6 +6129,55 @@ create table if not exists kpis (
 
 create index if not exists idx_kpis_logic_gate
   on kpis(company_id,logic_gate_id,created_timestamp,kpi_id);
+
+create unique index if not exists uq_kpis_owner_identity
+  on kpis(company_id,logic_gate_id,kpi_id);
+
+create table if not exists huddle_logic_gate_relationships (
+  company_id uuid not null,
+  huddle_logic_gate_id uuid not null,
+  logic_gate_id uuid not null,
+  created_timestamp timestamptz not null default now(),
+  primary key (company_id,huddle_logic_gate_id,logic_gate_id),
+  foreign key (company_id,huddle_logic_gate_id)
+    references huddle_logic_gates(company_id,huddle_logic_gate_id) on delete cascade,
+  foreign key (company_id,logic_gate_id)
+    references logic_gates(company_id,logic_gate_id) on delete cascade
+);
+
+create index if not exists idx_huddle_logic_gate_relationships_logic_gate
+  on huddle_logic_gate_relationships(company_id,logic_gate_id,huddle_logic_gate_id);
+
+create table if not exists huddle_node_logic_gate_relationships (
+  company_id uuid not null,
+  huddle_node_id uuid not null,
+  logic_gate_id uuid not null,
+  created_timestamp timestamptz not null default now(),
+  primary key (company_id,huddle_node_id,logic_gate_id),
+  foreign key (company_id,huddle_node_id)
+    references huddle_nodes(company_id,huddle_node_id) on delete cascade,
+  foreign key (company_id,logic_gate_id)
+    references logic_gates(company_id,logic_gate_id) on delete cascade
+);
+
+create index if not exists idx_huddle_node_logic_gate_relationships_logic_gate
+  on huddle_node_logic_gate_relationships(company_id,logic_gate_id,huddle_node_id);
+
+create table if not exists huddle_node_kpi_relationships (
+  company_id uuid not null,
+  huddle_node_id uuid not null,
+  logic_gate_id uuid not null,
+  kpi_id uuid not null,
+  created_timestamp timestamptz not null default now(),
+  primary key (company_id,huddle_node_id,logic_gate_id,kpi_id),
+  foreign key (company_id,huddle_node_id,logic_gate_id)
+    references huddle_node_logic_gate_relationships(company_id,huddle_node_id,logic_gate_id) on delete cascade,
+  foreign key (company_id,logic_gate_id,kpi_id)
+    references kpis(company_id,logic_gate_id,kpi_id) on delete cascade
+);
+
+create index if not exists idx_huddle_node_kpi_relationships_kpi
+  on huddle_node_kpi_relationships(company_id,kpi_id,huddle_node_id);
 
 create table if not exists huddle_explorer_folders (
   company_id uuid not null,

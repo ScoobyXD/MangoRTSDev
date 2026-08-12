@@ -110,6 +110,10 @@ type MemoryRepo struct {
 	domainEventAppendErr           error
 	notifications                  map[string]domain.Notification
 	recycleBin                     map[string]memoryRecycleBinItem
+
+	huddleLogicGateRelationships     map[string]domain.HuddleLogicGateRelationship
+	huddleNodeLogicGateRelationships map[string]domain.HuddleNodeLogicGateRelationship
+	huddleNodeKPIRelationships       map[string]domain.HuddleNodeKPIRelationship
 }
 
 func NewMemoryRepo() *MemoryRepo {
@@ -210,6 +214,10 @@ func NewMemoryRepo() *MemoryRepo {
 		workspaceReadVersions:          map[string]int64{},
 		notifications:                  map[string]domain.Notification{},
 		recycleBin:                     map[string]memoryRecycleBinItem{},
+
+		huddleLogicGateRelationships:     map[string]domain.HuddleLogicGateRelationship{},
+		huddleNodeLogicGateRelationships: map[string]domain.HuddleNodeLogicGateRelationship{},
+		huddleNodeKPIRelationships:       map[string]domain.HuddleNodeKPIRelationship{},
 	}
 }
 

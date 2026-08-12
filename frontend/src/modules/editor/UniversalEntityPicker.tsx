@@ -44,6 +44,7 @@ export type UniversalEntityPickerProps = {
   linkTargetTypes: readonly EditorEntityType[];
   initialMode?: UniversalEntityPickerMode;
   initialCategory?: UniversalEntityPickerCategory;
+  lockMode?: boolean;
   anchor: UniversalEntityPickerAnchor;
   onChoose: (entity: EditorEntityLink, mode: UniversalEntityPickerMode) => Promise<void>;
   onCancel: () => void;
@@ -325,6 +326,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
     });
   };
   const setPickerMode = (nextMode: UniversalEntityPickerMode) => {
+	if (props.lockMode && nextMode !== mode) return;
     if (nextMode === "link" && props.linkTargetTypes.length === 0) return;
     setMode(nextMode);
     setCategory("all");
@@ -334,12 +336,12 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
   };
   const onInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Escape") { event.preventDefault(); props.onCancel(); return; }
-    if (event.key === "#" && !query && mode === "reference" && props.linkTargetTypes.length > 0) {
+    if (!props.lockMode && event.key === "#" && !query && mode === "reference" && props.linkTargetTypes.length > 0) {
       event.preventDefault();
       setPickerMode("link");
       return;
     }
-    if (event.key === "Backspace" && !query && mode === "link") {
+    if (!props.lockMode && event.key === "Backspace" && !query && mode === "link") {
       event.preventDefault();
       setPickerMode("reference");
       return;
@@ -405,7 +407,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
         {categoryOptions.map((option) => {
           const enabled = mode === "reference" || props.linkTargetTypes.includes(option.type);
           const active = category === option.type;
-          return <button key={option.type} type="button" disabled={!enabled || busy} aria-pressed={active} onClick={() => { setCategory(active ? "all" : option.type); setQuery(""); }} style={{ width: "100%", minWidth: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "7px 9px", border: active ? "1px solid rgba(8,145,178,.30)" : "1px solid rgba(255,255,255,.72)", borderRadius: 11, background: active ? "linear-gradient(145deg,#e8fbff,#f5efff)" : EDITOR_NEU_ACTIVE_SURFACE, boxShadow: active ? "inset 2px 2px 5px rgba(174,174,192,.18)" : EDITOR_NEU_SHADOW, color: enabled ? "#263247" : "#94a3b8", cursor: enabled ? "pointer" : "not-allowed", fontSize: 11, fontWeight: 800, whiteSpace: "nowrap" }}>{option.type === "email_message" ? <HeaderTriageIcon color={enabled ? "#0ea5e9" : "#94a3b8"} /> : <ExplorerRowIcon kind={option.type} />}{option.label}</button>;
+          return <button key={option.type} type="button" disabled={!enabled || busy} aria-pressed={active} onClick={() => { setCategory(props.lockMode ? option.type : active ? "all" : option.type); setQuery(""); }} style={{ width: "100%", minWidth: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "7px 9px", border: active ? "1px solid rgba(8,145,178,.30)" : "1px solid rgba(255,255,255,.72)", borderRadius: 11, background: active ? "linear-gradient(145deg,#e8fbff,#f5efff)" : EDITOR_NEU_ACTIVE_SURFACE, boxShadow: active ? "inset 2px 2px 5px rgba(174,174,192,.18)" : EDITOR_NEU_SHADOW, color: enabled ? "#263247" : "#94a3b8", cursor: enabled ? "pointer" : "not-allowed", fontSize: 11, fontWeight: 800, whiteSpace: "nowrap" }}>{option.type === "email_message" ? <HeaderTriageIcon color={enabled ? "#0ea5e9" : "#94a3b8"} /> : <ExplorerRowIcon kind={option.type} />}{option.label}</button>;
         })}
       </div>
       {category === "email_message" ? (
@@ -422,8 +424,8 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
         {(loading || emailSearchLoading) && <div style={{ padding: 12, color: "#64748b", fontSize: 11 }}>Loading…</div>}
       </div>}
       <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 42, padding: "8px 14px", borderTop: "1px solid rgba(255,255,255,.72)", color: "#64748b", fontSize: 10 }}>
-        {props.linkTargetTypes.length > 0 ? <button type="button" disabled={busy} onClick={() => setPickerMode(mode === "reference" ? "link" : "reference")} style={{ padding: "5px 8px", border: 0, borderRadius: 8, background: mode === "link" ? "rgba(124,58,237,.12)" : "rgba(8,145,178,.10)", color: mode === "link" ? "#6d28d9" : "#0e7490", cursor: "pointer", fontSize: 10, fontWeight: 900 }}>{mode === "link" ? "## Link" : "# Reference"}</button> : <span># Reference</span>}
-        <span>{mode === "link" ? "Backspace for # reference" : "# for ## link"} · ↑↓ choose · Enter/Tab select · Esc close</span>
+        {props.linkTargetTypes.length > 0 && !props.lockMode ? <button type="button" disabled={busy} onClick={() => setPickerMode(mode === "reference" ? "link" : "reference")} style={{ padding: "5px 8px", border: 0, borderRadius: 8, background: mode === "link" ? "rgba(124,58,237,.12)" : "rgba(8,145,178,.10)", color: mode === "link" ? "#6d28d9" : "#0e7490", cursor: "pointer", fontSize: 10, fontWeight: 900 }}>{mode === "link" ? "## Link" : "# Reference"}</button> : <span>{mode === "link" ? "## Link" : "# Reference"}</span>}
+        <span>{props.lockMode ? "Logic Gates only" : mode === "link" ? "Backspace for # reference" : "# for ## link"} · ↑↓ choose · Enter/Tab select · Esc close</span>
         {error && <span role="alert" style={{ marginLeft: "auto", color: "#b91c1c", fontWeight: 800 }}>{error}</span>}
       </div>
       </div>

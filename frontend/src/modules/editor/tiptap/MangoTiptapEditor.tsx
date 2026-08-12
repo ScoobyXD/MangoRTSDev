@@ -1960,7 +1960,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         <UniversalEntityPicker
           companyID={companyID}
           requestJSON={requestJSON}
-          sourceType={resourceType === "huddle_node" ? "node" : resourceType === "huddle_logic_gate" || resourceType === "kpi" ? "logic_gate" : resourceType}
+          sourceType={resourceType === "huddle_logic_gate" || resourceType === "kpi" ? "logic_gate" : resourceType}
           linkTargetTypes={linkTargetTypes}
           anchor={universalPickerDraft.anchor}
           onChoose={chooseUniversalPickerEntity}

@@ -242,13 +242,18 @@ where company_id=$1::uuid
 }
 
 var recycleSnapshotTables = map[string]bool{
-	"company_explorer_folders":     true,
-	"nodes":                        true,
-	"logic_gates":                  true,
-	"projects":                     true,
-	"huddle_logic_gates":           true,
-	"huddle_nodes":                 true,
-	"kpis":                         true,
+	"company_explorer_folders": true,
+	"nodes":                    true,
+	"logic_gates":              true,
+	"projects":                 true,
+	"huddle_logic_gates":       true,
+	"huddle_nodes":             true,
+	"kpis":                     true,
+
+	"huddle_logic_gate_relationships":      true,
+	"huddle_node_logic_gate_relationships": true,
+	"huddle_node_kpi_relationships":        true,
+
 	"huddle_explorer_folders":      true,
 	"huddle_explorer_items":        true,
 	"node_textboxes":               true,
@@ -287,6 +292,9 @@ var recycleRestoreTableOrder = []string{
 	"huddle_logic_gates",
 	"huddle_nodes",
 	"kpis",
+	"huddle_logic_gate_relationships",
+	"huddle_node_logic_gate_relationships",
+	"huddle_node_kpi_relationships",
 	"node_textboxes",
 	"node_textboxes_history",
 	"node_textbox_chats",
@@ -477,6 +485,11 @@ func postgresSnapshotRecyclePayloadWithCacheTx(ctx context.Context, tx *sql.Tx, 
 		}
 		if err := addTable("user_logic_gate_shortcuts", `company_id=$1::uuid and logic_gate_id = any(string_to_array($2, ',')::uuid[])`, companyID, logicGateIDCSV); err != nil {
 			return nil, err
+		}
+		for _, tableName := range []string{"kpis", "huddle_logic_gate_relationships", "huddle_node_logic_gate_relationships", "huddle_node_kpi_relationships"} {
+			if err := addTable(tableName, `company_id=$1::uuid and logic_gate_id = any(string_to_array($2, ',')::uuid[])`, companyID, logicGateIDCSV); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if len(projectIDs) > 0 {

@@ -11,7 +11,7 @@ import {
 import type { MangoTiptapPersistedAnnotation } from "./mangoTiptapAnnotations.js";
 import { validateMangoTiptapDocument, type MangoTiptapDocument } from "./mangoTiptapDocument.js";
 
-export type MangoTiptapResourceType = "node" | "project" | "logic_gate" | "huddle_logic_gate" | "huddle_node" | "kpi";
+export type MangoTiptapResourceType = "node" | "project" | "logic_gate" | "huddle_logic_gate" | "kpi";
 export type MangoTiptapRequest = <T>(path: string, init?: RequestInit & {
   json?: unknown; editorTraceContext?: EditorTraceContext | null }) => Promise<T>;
 
