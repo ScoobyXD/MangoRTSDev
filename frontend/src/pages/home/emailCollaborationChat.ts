@@ -98,10 +98,12 @@ export function orderEmailThreadChatGroups(
   groups: CommunicationsEmailThreadChatGroup[],
 ): CommunicationsEmailThreadChatGroup[] {
   return [...groups].sort((left, right) => {
-    const activity = Date.parse(left.latest_activity_timestamp) - Date.parse(right.latest_activity_timestamp);
-    if (activity !== 0) return activity;
+    const nodeName = left.node_name.trim().localeCompare(right.node_name.trim(), undefined, { sensitivity: "base" });
+    if (nodeName !== 0) return nodeName;
     const node = left.node_id.localeCompare(right.node_id);
-    return node !== 0 ? node : left.textbox_id.localeCompare(right.textbox_id);
+    if (node !== 0) return node;
+    const displayOrder = left.textbox_display_order - right.textbox_display_order;
+    return displayOrder !== 0 ? displayOrder : left.textbox_id.localeCompare(right.textbox_id);
   });
 }
 

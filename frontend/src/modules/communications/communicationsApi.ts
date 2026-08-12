@@ -514,13 +514,13 @@ export type CommunicationsEmailThreadChatGroup = {
   node_name: string;
   textbox_id: string;
   textbox_title: string;
+  textbox_display_order: number;
   email_thread_id: string;
   linked_messages: Array<{
     email_message_id: string;
     provider_message_id: string;
     message_timestamp: string;
   }>;
-  latest_activity_timestamp: string;
   chats: EditorProjectionItem[];
 };
 

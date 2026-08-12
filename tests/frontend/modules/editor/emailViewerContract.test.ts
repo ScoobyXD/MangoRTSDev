@@ -151,6 +151,10 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeSurface, /const ensureEmailTextBoxLinkOnSend = selectionAnchor\?\.source === "email"/);
   assert.match(nodeSurface, /ensureEmailTextBoxLinkOnSend,/);
   assert.match(nodeSurface, /const choosePendingEmailChatDestination/);
+  assert.match(nodeSurface, /const linkedDestination = existingDestinations\.find\(\(block\) => textBlockHasEmailMessage\(block, messageID\)\)[\s\S]*openSelectionChat\(\{ \.\.\.anchor, blockID: linkedDestination\.id \}, linkedDestination\.id\)/);
+  assert.match(nodeSurface, /const destinationBlock = linkedBlock \?\? requestedBlock/);
+  assert.match(nodeSurface, /data-node-email-chat-parent-destination="true"[\s\S]*choosePendingEmailChatNodeDestination/);
+  assert.match(nodeSurface, /data-email-chat-destination-candidate=\{pendingEmailChatSelection[\s\S]*data-chat-destination-flash=\{flashedEmailChatDestinationBlockID === block\.id/);
   assert.match(nodeSurface, /data-email-chat-destination-action=\{pendingEmailChatSelection \? "true" : undefined\}/);
   assert.match(nodeSurface, /chatHighlightsByMessageID=\{emailChatHighlightsByMessageID\}/);
   assert.match(nodeParts, /chatHighlightsByMessageID\[storedMessageID\]/);

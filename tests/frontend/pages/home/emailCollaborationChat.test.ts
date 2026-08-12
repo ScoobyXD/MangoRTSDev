@@ -25,7 +25,6 @@ import {
 function chatGroup(
   nodeID: string,
   textboxID: string,
-  latestActivity: string,
   linkedProviderMessageIDs: string[],
 ): CommunicationsEmailThreadChatGroup {
   return {
@@ -33,13 +32,13 @@ function chatGroup(
     node_name: `Node ${nodeID}`,
     textbox_id: textboxID,
     textbox_title: `Text box ${textboxID}`,
+    textbox_display_order: 0,
     email_thread_id: "email-thread-1",
     linked_messages: linkedProviderMessageIDs.map((providerMessageID, index) => ({
       email_message_id: `email-message-${nodeID}-${textboxID}-${index}`,
       provider_message_id: providerMessageID,
       message_timestamp: `2026-08-11T09:0${index}:00.000Z`,
     })),
-    latest_activity_timestamp: latestActivity,
     chats: [],
   };
 }
@@ -66,10 +65,12 @@ test("an acknowledged triage chat appears immediately and is not duplicated by r
   assert.strictEqual(appendAcknowledgedEmailCollaborationChat(appended, acknowledged), appended);
 });
 
-test("email chat groups stay intact in oldest-to-newest latest-activity order", () => {
-  const newest = chatGroup("node-b", "textbox-b", "2026-08-11T12:00:00.000Z", ["provider-b"]);
-  const tiedSecond = chatGroup("node-b", "textbox-a", "2026-08-11T10:00:00.000Z", ["provider-c"]);
-  const tiedFirst = chatGroup("node-a", "textbox-z", "2026-08-11T10:00:00.000Z", ["provider-a"]);
+test("email chat groups stay in stable Node and text-box display order regardless of response order", () => {
+  const newest = chatGroup("node-b", "textbox-b", ["provider-b"]);
+  const tiedSecond = chatGroup("node-b", "textbox-a", ["provider-c"]);
+  const tiedFirst = chatGroup("node-a", "textbox-z", ["provider-a"]);
+  newest.textbox_display_order = 1;
+  tiedSecond.textbox_display_order = 0;
   assert.deepEqual(
     orderEmailThreadChatGroups([newest, tiedSecond, tiedFirst]).map((group) => [group.node_id, group.textbox_id]),
     [["node-a", "textbox-z"], ["node-b", "textbox-a"], ["node-b", "textbox-b"]],
@@ -77,7 +78,7 @@ test("email chat groups stay intact in oldest-to-newest latest-activity order", 
 });
 
 test("authoritative exact-message links choose existing textboxes and reject same-Node conflicts", () => {
-  const selected = chatGroup("node-a", "textbox-a", "2026-08-11T10:00:00.000Z", ["provider-a"]);
+  const selected = chatGroup("node-a", "textbox-a", ["provider-a"]);
   const links = [
     { node_id: "node-a", textbox_id: "textbox-hidden", email_message_id: "email-hidden", provider_message_id: "provider-hidden" },
     { node_id: "node-b", textbox_id: "textbox-b", email_message_id: "email-other-node", provider_message_id: "provider-active" },
@@ -211,6 +212,7 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   const surface = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/EmailCollaborationChatSurface.tsx"), "utf8");
   const destinationSearch = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/EmailNodeDestinationSearch.tsx"), "utf8");
   const sharedChat = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
+  const styles = readFileSync(resolve(process.cwd(), "frontend/src/index.css"), "utf8");
 
   assert.match(workspace, /const commentOnEmailSelection = React\.useCallback[\s\S]*setEmailSelection\(selection\);[\s\S]*setEmailChatSession\(\{ key: emailChatKey, visible: true \}\)/);
   assert.match(workspace, /const toggleEmailChat = React\.useCallback[\s\S]*visible: !current\.visible/);
@@ -238,6 +240,8 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.doesNotMatch(surface, /aria-label="Chat destination Node"|Choose destination Node/);
   assert.match(surface, /sectionLabelsByBlockID=\{sectionLabelsByBlockID\}/);
   assert.match(surface, /sectionNodeIDsByBlockID=\{sectionNodeIDsByBlockID\}/);
+  assert.match(surface, /sectionNodeLabelsByNodeID=\{sectionNodeLabelsByNodeID\}/);
+  assert.match(surface, /sectionNodeOrder=\{sectionNodeOrder\}/);
   assert.match(surface, /sectionKeysByMessageID=\{sectionKeysByChatID\}/);
   assert.match(surface, /onOpenSectionNode=\{onOpenNode\}/);
   assert.match(surface, /sectionActionLabel="New chat"/);
@@ -246,6 +250,7 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(surface, /composerDestinationLabel=\{composerDestinationLabel\}/);
   assert.match(surface, /reserveScrollbarGutter/);
   assert.match(surface, /onSectionAction=\{selectExistingChatGroup\}/);
+  assert.match(surface, /onNodeSectionAction=\{selectNodeChatDestination\}/);
   assert.match(surface, /onClearComposerDestination=\{cancelChatGroupDestination\}/);
   assert.doesNotMatch(surface, /chronologicalMessages/);
   assert.match(sharedChat, /const threads = useMemo\(\(\) => buildChatThreads\(messages\), \[messages\]\)/);
@@ -302,6 +307,8 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(sharedChat, /headerLeading\?: React\.ReactNode/);
   assert.match(sharedChat, /sectionLabelsByBlockID\?: Record<string, string>/);
   assert.match(sharedChat, /sectionNodeIDsByBlockID\?: Record<string, string>/);
+  assert.match(sharedChat, /sectionNodeLabelsByNodeID\?: Record<string, string>/);
+  assert.match(sharedChat, /sectionNodeOrder\?: string\[\]/);
   assert.match(sharedChat, /sectionKeysByMessageID\?: Record<string, string>/);
   assert.match(sharedChat, /sectionActionLabel\?: string/);
   assert.match(sharedChat, /selectSectionOnClick\?: boolean/);
@@ -312,8 +319,10 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(sharedChat, /data-chat-composer-destination="true"[\s\S]*New chat to \{composerDestinationLabel\}/);
   assert.match(sharedChat, /reserveScrollbarGutter\?: boolean/);
   assert.match(sharedChat, /scrollbarGutter: reserveScrollbarGutter \? "stable" : undefined[\s\S]*padding: reserveScrollbarGutter \? "9px 16px 9px 8px" : "9px 8px"/);
-  assert.match(sharedChat, /aria-label=\{`Open Node \$\{sectionLabel\}`\}[\s\S]*onClick=\{\(\) => onOpenSectionNode\(sectionNodeID\)\}/);
-  assert.match(sharedChat, /borderTop: index > 0 \? `1px solid \$\{ruleColor\}`/);
+  assert.match(sharedChat, /data-email-chat-node-section=\{showNodeSurface \? "true" : undefined\}[\s\S]*data-email-chat-message-section=\{section\.sectionLabel \? "true" : undefined\}/);
+  assert.match(sharedChat, /aria-label=\{selectSectionOnClick \? `Choose Node \$\{nodeGroup\.nodeLabel\}` : `Open Node \$\{nodeGroup\.nodeLabel\}`\}/);
+  assert.match(sharedChat, /data-chat-destination-flash=\{nodeFlashed \? "true" : undefined\}[\s\S]*data-chat-destination-flash=\{sectionFlashed \? "true" : undefined\}/);
+  assert.match(styles, /\.email-chat-node-section:hover[\s\S]*\.email-chat-textbox-group:hover[\s\S]*@keyframes email-chat-destination-flash/);
   assert.match(surface, /<ChatPane[\s\S]*fillHeight/);
 });
 test("email-created nodes reuse canonical chat data with one node email column", () => {

@@ -188,13 +188,13 @@ test("email thread chat groups use one direct mailbox-scoped read", async () => 
       node_name: "Inbox work",
       textbox_id: "textbox-1",
       textbox_title: "First review",
+      textbox_display_order: 0,
       email_thread_id: "thread-internal-1",
       linked_messages: [{
         email_message_id: "message-internal-1",
         provider_message_id: "message-1",
         message_timestamp: "2026-08-11T10:00:00Z",
       }],
-      latest_activity_timestamp: "2026-08-11T10:00:00Z",
       chats: [],
     }], textbox_links: [{
       node_id: "node-1",

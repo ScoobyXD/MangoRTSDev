@@ -1264,3 +1264,242 @@ button, input, textarea, select {
     transition: none !important;
   }
 }
+/* Email chat destinations are real nested surfaces: Node first, then text boxes in Node order. */
+.email-chat-node-section,
+.email-chat-textbox-group {
+  min-width: 0;
+  border: 1px solid transparent;
+  transition: transform 150ms ease, box-shadow 150ms ease, background 150ms ease;
+}
+
+.email-chat-node-section[data-chat-node-selectable="true"],
+.email-chat-textbox-group[data-chat-section-selectable="true"] {
+  cursor: pointer;
+}
+
+.email-chat-node-section {
+  display: grid;
+  gap: 7px;
+  border-radius: 13px;
+  padding: 7px;
+  background: rgba(248, 250, 252, 0.48);
+}
+
+.email-chat-node-section:hover,
+.email-chat-node-section:focus-within,
+.email-chat-node-section[data-chat-node-selected="true"] {
+  transform: translateY(-1px);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.94), rgba(230,252,255,0.64) 46%, rgba(247,239,255,0.70)) padding-box,
+    linear-gradient(135deg, rgba(92,238,255,0.78), rgba(128,216,255,0.72) 34%, rgba(183,124,255,0.82) 72%, rgba(255,255,255,0.86)) border-box;
+  box-shadow: 0 10px 24px rgba(15,23,42,0.11), 0 0 16px rgba(183,124,255,0.12), inset 1px 1px 0 rgba(255,255,255,0.9);
+}
+
+.email-chat-node-section[data-chat-node-selected="true"] {
+  box-shadow: 0 10px 24px rgba(15,23,42,0.11), 0 0 0 2px rgba(128,216,255,0.30), 0 0 18px rgba(183,124,255,0.18), inset 1px 1px 0 rgba(255,255,255,0.92);
+}
+
+.email-chat-node-section > [data-email-chat-node-header="true"] {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #334155;
+  font-size: 10.5px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.email-chat-node-section > [data-email-chat-node-header="true"] button {
+  min-width: 0;
+  border: 0;
+  padding: 3px 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.email-chat-node-section > [data-email-chat-node-header="true"] button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.email-chat-node-section > [data-email-chat-node-header="true"] > span {
+  flex: 0 0 auto;
+  color: #64748b;
+  font-size: 9px;
+}
+
+.email-chat-node-textboxes,
+.email-chat-textbox-threads {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.email-chat-textbox-group {
+  display: grid;
+  gap: 7px;
+  border-radius: 11px;
+  padding: 6px;
+  background: rgba(255,255,255,0.62);
+}
+
+.email-chat-textbox-group:hover,
+.email-chat-textbox-group:focus-within,
+.email-chat-textbox-group[data-chat-section-selected="true"] {
+  transform: translateY(-1px);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.96), rgba(230,252,255,0.58) 46%, rgba(247,239,255,0.64)) padding-box,
+    linear-gradient(135deg, rgba(92,238,255,0.86), rgba(128,216,255,0.78) 34%, rgba(183,124,255,0.86) 72%, rgba(255,255,255,0.9)) border-box;
+  box-shadow: 0 8px 18px rgba(15,23,42,0.10), 0 0 14px rgba(128,216,255,0.12), inset 1px 1px 0 rgba(255,255,255,0.92);
+}
+
+.email-chat-textbox-group[data-chat-section-selected="true"] {
+  box-shadow: 0 8px 18px rgba(15,23,42,0.10), 0 0 0 2px rgba(183,124,255,0.28), 0 0 18px rgba(128,216,255,0.18), inset 1px 1px 0 rgba(255,255,255,0.92);
+}
+
+.email-chat-textbox-header {
+  min-height: 25px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #475569;
+  font-size: 10.5px;
+  font-weight: 850;
+}
+
+.email-chat-textbox-header > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-left: 3px;
+}
+
+.email-chat-textbox-header button {
+  flex: 0 0 auto;
+  min-height: 24px;
+  border: 1px solid rgba(148,163,184,0.34);
+  border-radius: 8px;
+  background: linear-gradient(145deg, rgba(255,255,255,0.96), rgba(241,245,249,0.86));
+  color: #111827;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 900;
+  padding: 3px 8px;
+  box-shadow: 2px 2px 5px rgba(15,23,42,0.08), -1px -1px 3px rgba(255,255,255,0.92);
+}
+
+.email-chat-textbox-group[data-chat-section-selected="true"] .email-chat-textbox-header button {
+  border-color: transparent;
+  color: #2563eb;
+  background:
+    linear-gradient(135deg, rgba(230,252,255,0.75), rgba(247,239,255,0.75)) padding-box,
+    linear-gradient(135deg, rgba(92,238,255,0.9), rgba(183,124,255,0.9)) border-box;
+}
+
+.email-chat-node-section[data-chat-destination-flash="true"],
+.email-chat-textbox-group[data-chat-destination-flash="true"] {
+  animation: email-chat-destination-flash 1s ease-out;
+}
+
+@keyframes email-chat-destination-flash {
+  0%, 38% {
+    box-shadow: 0 0 0 3px rgba(92,238,255,0.88), 0 0 0 6px rgba(183,124,255,0.52), 0 0 24px rgba(128,216,255,0.64), inset 1px 1px 0 rgba(255,255,255,0.96);
+  }
+  100% {
+    box-shadow: 0 8px 18px rgba(15,23,42,0.10), 0 0 0 0 rgba(183,124,255,0), 0 0 0 rgba(128,216,255,0), inset 1px 1px 0 rgba(255,255,255,0.92);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .email-chat-node-section,
+  .email-chat-textbox-group {
+    transition: none;
+  }
+
+  .email-chat-node-section[data-chat-destination-flash="true"],
+  .email-chat-textbox-group[data-chat-destination-flash="true"] {
+    animation: none;
+    box-shadow: 0 0 0 3px rgba(92,238,255,0.82), 0 0 0 6px rgba(183,124,255,0.46);
+  }
+}
+
+[data-node-email-chat-parent-destination="true"] {
+  grid-column: 1 / -1;
+  min-width: 0;
+  margin: 5px 0 9px 41px;
+  border: 1px solid transparent;
+  border-radius: 13px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  text-align: left;
+  color: #334155;
+  cursor: pointer;
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.94), rgba(230,252,255,0.58), rgba(247,239,255,0.64)) padding-box,
+    linear-gradient(135deg, rgba(92,238,255,0.68), rgba(183,124,255,0.72)) border-box;
+  box-shadow: 3px 3px 9px rgba(15,23,42,0.08), -2px -2px 6px rgba(255,255,255,0.9);
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+[data-node-email-chat-parent-destination="true"] > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+[data-node-email-chat-parent-destination="true"] strong {
+  font-size: 11px;
+  font-weight: 900;
+}
+
+[data-node-email-chat-parent-destination="true"] small {
+  color: #64748b;
+  font-size: 9.5px;
+  line-height: 1.35;
+}
+
+[data-node-email-chat-parent-destination="true"]:hover,
+[data-node-email-chat-parent-destination="true"]:focus-visible,
+[data-email-chat-destination-candidate="true"]:hover,
+[data-email-chat-destination-candidate="true"]:focus-within {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(15,23,42,0.12), 0 0 0 2px rgba(128,216,255,0.25), 0 0 18px rgba(183,124,255,0.16) !important;
+}
+
+[data-email-chat-destination-candidate="true"] {
+  cursor: pointer;
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+[data-email-chat-destination-authoritative="true"] {
+  box-shadow: 0 0 0 2px rgba(128,216,255,0.28), 0 0 18px rgba(183,124,255,0.16) !important;
+}
+
+[data-node-text-box-row][data-chat-destination-flash="true"] {
+  animation: email-chat-destination-flash 1s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-node-email-chat-parent-destination="true"],
+  [data-email-chat-destination-candidate="true"] {
+    transition: none;
+  }
+
+  [data-node-text-box-row][data-chat-destination-flash="true"] {
+    animation: none;
+    box-shadow: 0 0 0 3px rgba(92,238,255,0.82), 0 0 0 6px rgba(183,124,255,0.46) !important;
+  }
+}
