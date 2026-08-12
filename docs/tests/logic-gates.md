@@ -16,8 +16,15 @@ Last updated: 2026-08-08
 2. A Node whose priority is **Not Assigned** remains **Not Assigned** unless the user explicitly chooses a numeric priority.
 3. Choosing a Logic Gate in the email Universal Linker immediately creates the email Node there with Requested status and priority **Not Assigned**.
 4. Logic Gate assignment storage and Kanban projection storage accept a null Node priority.
+5. One normal Logic Gate may relate to more than one Huddle Logic Gate through the existing `huddle_logic_gate_relationships` table.
+6. The rectangle directly below the normal Logic Gate RACI row is split into two equal sections: related Huddle Logic Gates on the left and owned KPIs on the right.
+7. Each section has its own plus button; the Huddle plus opens the shared Universal Picker in locked `##` Huddle-only mode, while the KPI plus immediately creates **New KPI** through the existing KPI command.
+8. A related Huddle Logic Gate appears as a raised card with the shared Huddle Logic Gate icon and current header.
+9. The normal Logic Gate surface reads, creates, and removes the same exact Huddle relationship edge used by the Huddle Logic Gate surface, with no copied list or second authority.
+10. A normal Logic Gate Huddle relationship mutation requires Edit access to the open Logic Gate and View access to the selected Huddle Logic Gate.
+11. Removing a Huddle card removes only that exact edge and does not delete either Logic Gate, any KPI, or any Huddle Node snapshot.
 
-Last updated: 2026-08-08
+Last updated: 2026-08-12
 
 # Process Story: A Logic Gate assigns live RACI responsibility
 

@@ -158,6 +158,67 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusOK, item)
 		return
 	}
+	if len(parts) >= 2 && parts[1] == "huddle-logic-gates" {
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		if len(parts) == 2 && r.Method == http.MethodGet {
+			if !s.requireEntityView(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
+				return
+			}
+			items, err := s.repo.ListHuddleLogicGatesForLogicGate(companyID, logicGateID)
+			if err != nil {
+				writeHuddleError(w, err)
+				return
+			}
+			actor, _ := authenticatedActor(r)
+			visible := items[:0]
+			for _, item := range items {
+				allowed, accessErr := s.actorCanViewHuddleResource(actor, companyID, store.EntityTypeHuddleLogicGate, item.HuddleLogicGateID)
+				if accessErr != nil {
+					writeError(w, http.StatusInternalServerError, "failed_to_check_entity_permission")
+					return
+				}
+				if allowed {
+					visible = append(visible, item)
+				}
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"huddle_logic_gates": visible})
+			return
+		}
+		if len(parts) != 3 || (r.Method != http.MethodPut && r.Method != http.MethodDelete) {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		huddleLogicGateID := parts[2]
+		if r.Method == http.MethodPut {
+			var req struct {
+				CompanyID string `json:"company_id"`
+			}
+			if json.NewDecoder(r.Body).Decode(&req) != nil {
+				writeError(w, http.StatusBadRequest, "invalid_json")
+				return
+			}
+			companyID = strings.TrimSpace(req.CompanyID)
+		}
+		if !s.requireEntityEdit(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
+			return
+		}
+		if !s.requireEntityView(w, r, companyID, store.EntityTypeHuddleLogicGate, huddleLogicGateID, "huddle_logic_gate_not_found") {
+			return
+		}
+		input := store.HuddleLogicGateRelationshipInput{CompanyID: companyID, HuddleLogicGateID: huddleLogicGateID, LogicGateID: logicGateID}
+		var err error
+		if r.Method == http.MethodPut {
+			err = s.repo.CreateHuddleLogicGateRelationship(input)
+		} else {
+			err = s.repo.DeleteHuddleLogicGateRelationship(input)
+		}
+		if err != nil {
+			writeHuddleError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+		return
+	}
 
 	if len(parts) == 1 {
 		if r.Method == http.MethodPut {

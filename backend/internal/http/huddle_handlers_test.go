@@ -50,6 +50,30 @@ func TestHuddleLogicGateRelationshipRoutesCreateAndReadTypedCards(t *testing.T) 
 	if len(payload.LogicGates) != 1 || payload.LogicGates[0].LogicGateID != logicGate.LogicGateID || len(payload.LogicGates[0].KPIs) != 1 {
 		t.Fatalf("relationship cards = %+v", payload.LogicGates)
 	}
+
+	reversePath := "/v1/logic-gates/" + logicGate.LogicGateID + "/huddle-logic-gates"
+	req = httptest.NewRequest(http.MethodGet, reversePath+"?company_id="+companyID, nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, userPinRequestWithActor(req, admin, companyID, domain.RoleCompanyAdmin))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET reverse relationships status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var reversePayload struct {
+		HuddleLogicGates []domain.HuddleLogicGate `json:"huddle_logic_gates"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &reversePayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(reversePayload.HuddleLogicGates) != 1 || reversePayload.HuddleLogicGates[0].HuddleLogicGateID != huddleID {
+		t.Fatalf("reverse relationship cards = %+v", reversePayload.HuddleLogicGates)
+	}
+
+	req = httptest.NewRequest(http.MethodPut, reversePath+"/"+huddleID, bytes.NewBufferString(fmt.Sprintf(`{"company_id":%q}`, companyID)))
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, userPinRequestWithActor(req, admin, companyID, domain.RoleCompanyAdmin))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("idempotent reverse PUT relationship status = %d, body=%s", rec.Code, rec.Body.String())
+	}
 }
 
 func TestHuddleExplorerItemMutationsRequireHuddleLogicGateEditAccess(t *testing.T) {

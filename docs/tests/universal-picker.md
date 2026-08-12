@@ -67,15 +67,15 @@ UP4 - The picker has exactly two meanings. `#` is reference mode and may insert 
 
 UP5 - While the focused search is empty, typing `#` in reference mode changes to link mode only when the host supplied at least one legal link target. While the focused search is empty, Backspace in link mode changes to reference mode. The footer mode control performs the same transition. Every mode transition returns to All, clears the query, and clears workspace results.
 
-UP6 - The category row is ordered Nodes, Projects, Logic Gates, Emails. The matching single-letter shortcuts are N then Tab, A then Tab, L then Tab, and E then Tab. A shortcut changes category and clears the shortcut text; it does not select a result.
+UP6 - The ordinary category row is ordered Nodes, Projects, Logic Gates, Emails. A normal Logic Gate's Huddle relationship launcher adds one contextual Huddles category at the end. The matching single-letter shortcuts are N then Tab, A then Tab, L then Tab, E then Tab, and contextual H then Tab. A shortcut changes category and clears the shortcut text; it does not select a result.
 
 UP7 - Clicking an active category selects that exact type and clears the query. Clicking the already active category returns to All. In link mode a category is enabled only if the source host supplied that type as a legal link destination; a disabled category cannot be selected by pointer or keyboard.
 
-UP8 - Reference mode permits all four exact types: Node, Logic Gate, Project, and email message. Link mode permits only the host's typed destination list and never expands that list because a result happens to be visible or pinned.
+UP8 - Reference mode permits the four ordinary exact types: Node, Logic Gate, Project, and email message. A Huddle Logic Gate is available only when a relationship host explicitly supplies `huddle_logic_gate` as a legal link target. Link mode permits only the host's typed destination list and never expands that list because a result happens to be visible or pinned.
 
-UP9 - The legal `##` matrix is exact: Node may link to a Logic Gate, Project, or email message; Logic Gate may link to a Project; Project may link to an email message; and a selected email may link to a Node, Logic Gate, or Project. Email-to-email linking is not supported.
+UP9 - The legal `##` matrix is exact: Node may link to a Logic Gate, Project, or email message; a Logic Gate editor may link to a Project; the normal Logic Gate Huddle tray may link to a Huddle Logic Gate; Project may link to an email message; and a selected email may link to a Node, Logic Gate, or Project. Email-to-email linking is not supported.
 
-UP10 - A blank All, Nodes, Logic Gates, or Projects view reads the current user's complete company-scoped Pinned tree. It preserves stored folder/pin sibling order and indentation, expands the tree for display, hides empty folders after type filtering, and does not invent recency or write recent-use state.
+UP10 - A blank All, Nodes, Logic Gates, or Projects view reads the current user's complete company-scoped Pinned tree. A blank contextual Huddles view combines visible Huddle Logic Gate pins with the authorized company Huddle Logic Gate list. It preserves stored folder/pin sibling order and indentation, hides empty folders after type filtering, deduplicates exact Huddle identities, and does not invent recency or write recent-use state.
 
 UP11 - A nonblank All query searches allowed Nodes, Projects, Logic Gates, and personal email in that order. A selected Nodes, Projects, Logic Gates, or Emails tab searches only that exact source and does not scan the other resource tables. Matching pinned entities remain first. Results with the same canonical type and ID as a matching pin appear only once.
 
@@ -119,7 +119,7 @@ UP30 - Backspace on or immediately after an inline email entity unwraps it to it
 
 UP31 - In editor `##` mode, the host relationship command completes before the picker replaces the unchanged trigger with a durable target-reference chip. If the trigger/document changed after the command completed, Mango reports that the relationship succeeded without inserting into a different document and does not repeat or roll back the relationship implicitly.
 
-UP32 - Node-to-Logic-Gate uses the existing priority-valid assign-or-move command with Requested destination status. Node-to-Project uses the existing atomic typed Node/Project command. Logic-Gate-to-Project creates or reuses the existing Gate/Project row. The picker does not duplicate their authorization, cardinality, idempotency, event, projection, or timeline rules.
+UP32 - Node-to-Logic-Gate uses the existing priority-valid assign-or-move command with Requested destination status. Node-to-Project uses the existing atomic typed Node/Project command. Logic-Gate-to-Project creates or reuses the existing Gate/Project row. A normal Logic Gate-to-Huddle-Logic-Gate choice creates or reuses the existing typed `huddle_logic_gate_relationships` row. The picker does not duplicate their authorization, cardinality, idempotency, event, projection, or timeline rules.
 
 UP33 - Linking an email to a Node or using a Node Attach email action uses the existing exact-message Node import/attachment command. Linking an email to a Project or using Project Attach email uses the existing Project exact-message attachment command. Before either typed command, the picker ensures the exact provider message is durably ingested when necessary and supplies its real Mango `email_message_id` plus account/mailbox scope rather than a surrogate picker identity.
 

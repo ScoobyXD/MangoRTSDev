@@ -6,12 +6,12 @@
 4. One normal Logic Gate may own any number of KPIs.
 5. A KPI name must be nonblank.
 6. `body_json` stores one document through the existing Mango TipTap JSON editor contract.
-7. A normal Logic Gate shows a thin **KPI** section directly below its RACI cards.
+7. A normal Logic Gate shows one thin relationship tray directly below its RACI cards, divided evenly between related Huddle Logic Gates on the left and KPIs on the right.
 8. Clicking the KPI section's square plus button immediately creates one KPI named **New KPI** for the exact open Logic Gate and adds its card without opening the KPI popup.
 9. The new card immediately enters inline name editing, focuses its name, and selects the complete **New KPI** text so typing replaces it and one Backspace clears it.
 10. Enter or blur saves a nonblank inline name through the normal KPI update command; a blank inline name is never sent and leaves the saved **New KPI** name unchanged.
-11. A KPI card shows the KPI name and a short gray preview derived from the body document.
-12. Single-clicking a KPI card in a normal Logic Gate, Huddle Logic Gate, or Huddle Node opens the same KPI editor popup for that exact KPI.
+11. A KPI card shows the shared orange, red, and yellow chart icon beside the KPI name in its top row and a short gray preview derived from the body document below it.
+12. Single-clicking anywhere on a KPI card, including its name, icon, preview, or blank padding, in a normal Logic Gate, Huddle Logic Gate, or Huddle Node opens the same KPI editor popup for that exact KPI.
 13. The KPI editor popup is large and centered, places the existing Mango editor toolbar and save status in its header, and uses the standard red top-right X close action.
 14. The KPI body uses the existing Mango TipTap save pipeline, including the 500 millisecond edit batch, pending-document recovery, database acknowledgement, and visible pending, saving, saved, or failed status.
 15. Right-clicking a KPI card in its owning normal Logic Gate exposes a delete action for that exact KPI.

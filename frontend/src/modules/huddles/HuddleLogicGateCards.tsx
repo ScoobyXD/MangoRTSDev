@@ -6,6 +6,7 @@ import {
   EDITOR_NEU_SOFT_BORDER,
   EDITOR_NEU_SURFACE,
 } from "../editor/NodeWorkspaceSurfaceShared.js";
+import { KPIIcon } from "./KPIIcon.js";
 
 export type HuddleLogicGateCardItem = {
   company_id: string;
@@ -62,7 +63,7 @@ export const HuddleLogicGateCards: React.FC<{
               onClick={() => onOpenKPI(item, kpi)}
               style={kpiCardStyle}
             >
-              <span aria-hidden="true" style={kpiDotStyle} />
+              <KPIIcon size={18} />
               <span style={kpiNameStyle}>{kpi.name}</span>
             </button>
           ))}
@@ -82,6 +83,5 @@ const logicGateTitleStyle: React.CSSProperties = { minWidth: 0, overflow: "hidde
 const removeButtonStyle: React.CSSProperties = { width: 26, height: 26, display: "grid", placeItems: "center", border: "1px solid rgba(244,63,94,.18)", borderRadius: 8, background: "rgba(255,255,255,.72)", color: "#be123c", cursor: "pointer", fontSize: 17, lineHeight: 1, boxShadow: "2px 2px 6px rgba(148,163,184,.16)" };
 const kpiSectionStyle: React.CSSProperties = { display: "grid", gap: 6, padding: 8, background: "rgba(248,250,252,.64)" };
 const noKPIStyle: React.CSSProperties = { padding: "5px 7px", color: "#94a3b8", fontSize: 11, fontWeight: 650 };
-const kpiCardStyle: React.CSSProperties = { minWidth: 0, width: "100%", display: "grid", gridTemplateColumns: "8px minmax(0,1fr)", alignItems: "center", gap: 7, padding: "7px 9px", border: "1px solid rgba(148,163,184,.18)", borderRadius: 9, background: EDITOR_NEU_ACTIVE_SURFACE, color: "inherit", textAlign: "left", cursor: "pointer", font: "inherit", boxShadow: "2px 3px 7px rgba(148,163,184,.14), -2px -2px 6px rgba(255,255,255,.78)" };
-const kpiDotStyle: React.CSSProperties = { width: 7, height: 7, borderRadius: 999, background: "linear-gradient(135deg,#22d3ee,#8b5cf6)", boxShadow: "0 0 6px rgba(139,92,246,.28)" };
+const kpiCardStyle: React.CSSProperties = { minWidth: 0, width: "100%", display: "grid", gridTemplateColumns: "18px minmax(0,1fr)", alignItems: "center", gap: 7, padding: "7px 9px", border: "1px solid rgba(148,163,184,.18)", borderRadius: 9, background: EDITOR_NEU_ACTIVE_SURFACE, color: "inherit", textAlign: "left", cursor: "pointer", font: "inherit", boxShadow: "2px 3px 7px rgba(148,163,184,.14), -2px -2px 6px rgba(255,255,255,.78)" };
 const kpiNameStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#475569", fontSize: 11, fontWeight: 750 };

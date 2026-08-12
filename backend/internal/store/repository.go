@@ -1611,6 +1611,7 @@ type HuddleRepository interface {
 	UpdateHuddleLogicGate(input HuddleUpdateInput) (domain.HuddleLogicGate, error)
 	DeleteHuddleLogicGate(companyID, huddleLogicGateID, deletedByUserID string) error
 	ListHuddleLogicGateCards(companyID, huddleLogicGateID string) ([]domain.HuddleLogicGateCard, error)
+	ListHuddleLogicGatesForLogicGate(companyID, logicGateID string) ([]domain.HuddleLogicGate, error)
 	CreateHuddleLogicGateRelationship(input HuddleLogicGateRelationshipInput) error
 	DeleteHuddleLogicGateRelationship(input HuddleLogicGateRelationshipInput) error
 	ListHuddleNodes(companyID, huddleLogicGateID string) ([]domain.HuddleNode, error)

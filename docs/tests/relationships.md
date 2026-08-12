@@ -12,12 +12,15 @@
 10. Recycling a Huddle Logic Gate, Huddle Node, normal Logic Gate, or KPI captures every affected Huddle relationship promised for restoration before foreign-key cleanup removes the live row.
 11. Restoring a recycled endpoint restores its exact captured Huddle relationships in dependency-safe order; permanent deletion leaves no stale relationship or placeholder.
 12. Removing one live Huddle Logic Gate relationship deletes only that edge and never deletes either endpoint, any KPI, or any existing Huddle Node snapshot.
+13. The Huddle Logic Gate surface and the normal Logic Gate surface create, read, and remove the same `huddle_logic_gate_relationships` rows; neither surface owns a second relationship list.
+14. The normal Logic Gate relationship tray may change an edge only when the actor can edit that normal Logic Gate and view the selected Huddle Logic Gate.
+15. Reading relationships from a normal Logic Gate returns only related Huddle Logic Gates that the actor may currently view.
 
 Last updated: 2026-08-11
 
 # Process Story: Live Huddle membership becomes an immutable Huddle Node relationship snapshot
 
-An editor links an existing normal Logic Gate to one Huddle Logic Gate through the locked Logic Gate picker
+An editor links an existing normal Logic Gate to one Huddle Logic Gate through either surface's locked typed picker
 ↓
 Mango stores one exact typed `huddle_logic_gate_relationships` edge and reads current KPIs through the normal Logic Gate's existing `kpis.logic_gate_id`
 ↓
@@ -450,6 +453,8 @@ Converting a normal Logic Gate and creating its required Huddle Logic Gate Explo
 ### Law 33 — Huddle membership and Huddle Node snapshots use fixed typed edges
 
 `huddle_logic_gate_relationships` MUST store one exact same-company `huddle_logic_gate_id + logic_gate_id` pair for each live membership. One endpoint may participate in many pairs, repeated creation MUST be idempotent, and removing one pair MUST remove only that edge.
+
+The Huddle Logic Gate page and normal Logic Gate editor MUST read and mutate that same row from opposite directions. A normal Logic Gate editor mutation requires Edit access to that Logic Gate and View access to the selected Huddle Logic Gate; its reverse read MUST omit Huddle Logic Gates the actor cannot view. This reverse UI and API MUST NOT create another table, copied list, policy parent, or relationship authority.
 
 Creating a Huddle Node MUST atomically copy the owner Huddle Logic Gate's current normal Logic Gate identities into `huddle_node_logic_gate_relationships` and the current KPI identities for those Logic Gates into `huddle_node_kpi_relationships`. Those captured relationship sets MUST remain immutable after creation and MUST NOT be rewritten by later live membership or KPI-set changes.
 

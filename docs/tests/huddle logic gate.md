@@ -37,6 +37,10 @@
 35. Realtime current-audience resolution recognizes `huddle_logic_gate` and resolves its users from that Huddle Logic Gate's direct typed permission policy.
 36. Single-clicking the normal Logic Gate section of a middle-column card opens that exact Logic Gate on its normal full-page route.
 37. Single-clicking a KPI section of a middle-column card opens that exact KPI in the shared KPI editor popup.
+38. A normal Logic Gate shows its currently related Huddle Logic Gates by reading the same live relationship rows in the reverse direction.
+39. The normal Logic Gate's Huddle plus button opens the shared Universal Picker in locked `##` mode with only Huddle Logic Gates enabled, and choosing one creates the same exact idempotent relationship edge.
+40. Every Huddle Logic Gate card on a normal Logic Gate shows the shared Huddle Logic Gate icon and current header, and opening or removing that card never copies or deletes either endpoint.
+41. KPI cards shown inside Huddle Logic Gate and Huddle Node cards use the shared orange, red, and yellow KPI chart icon.
 
 Last updated: 2026-08-12
 
