@@ -197,6 +197,28 @@ func (r *MemoryRepo) ListHuddleLogicGateCards(companyID, huddleLogicGateID strin
 	return r.huddleLogicGateCardsLocked(companyID, logicGateIDs, nil), nil
 }
 
+func (r *MemoryRepo) ListHuddleLogicGatesForLogicGate(companyID, logicGateID string) ([]domain.HuddleLogicGate, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	items := []domain.HuddleLogicGate{}
+	for _, relationship := range r.huddleLogicGateRelationships {
+		if relationship.CompanyID != companyID || relationship.LogicGateID != logicGateID {
+			continue
+		}
+		if item, ok := r.huddleLogicGates[key(companyID, relationship.HuddleLogicGateID)]; ok {
+			items = append(items, item)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		left, right := strings.ToLower(items[i].Header), strings.ToLower(items[j].Header)
+		if left == right {
+			return items[i].HuddleLogicGateID < items[j].HuddleLogicGateID
+		}
+		return left < right
+	})
+	return items, nil
+}
+
 func (r *MemoryRepo) CreateHuddleLogicGateRelationship(input HuddleLogicGateRelationshipInput) error {
 	input.CompanyID = cleanUUIDText(input.CompanyID)
 	input.HuddleLogicGateID = cleanUUIDText(input.HuddleLogicGateID)

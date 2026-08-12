@@ -133,7 +133,7 @@ function requiredString(value: unknown, error: string): string {
 }
 
 function recoveryResourceType(value: unknown): MangoTiptapResourceType {
-  if (value === "node" || value === "project" || value === "logic_gate") return value;
+  if (value === "node" || value === "project" || value === "logic_gate" || value === "huddle_logic_gate" || value === "kpi") return value;
   throw new Error("invalid_tiptap_pending_resource_type");
 }
 

@@ -132,6 +132,10 @@ func TestMemoryHuddleLogicGateRelationshipsAndNodeSnapshots(t *testing.T) {
 	if err != nil || len(cards) != 1 || cards[0].LogicGateID != logicGate.LogicGateID || len(cards[0].KPIs) != 1 || cards[0].KPIs[0].KPIID != kpi.KPIID {
 		t.Fatalf("Huddle Logic Gate cards = %+v, err=%v", cards, err)
 	}
+	linkedHuddles, err := repo.ListHuddleLogicGatesForLogicGate(companyID, logicGate.LogicGateID)
+	if err != nil || len(linkedHuddles) != 1 || linkedHuddles[0].HuddleLogicGateID != huddle.HuddleLogicGateID {
+		t.Fatalf("Logic Gate Huddle cards = %+v, err=%v", linkedHuddles, err)
+	}
 
 	node, err := repo.CreateHuddleNode(HuddleCreateInput{CompanyID: companyID, OwnerID: huddle.HuddleLogicGateID, Name: "Monday", ActorID: userID})
 	if err != nil {
@@ -153,6 +157,10 @@ func TestMemoryHuddleLogicGateRelationshipsAndNodeSnapshots(t *testing.T) {
 	cards, err = repo.ListHuddleLogicGateCards(companyID, huddle.HuddleLogicGateID)
 	if err != nil || len(cards) != 0 {
 		t.Fatalf("live Huddle cards after unlink = %+v, err=%v", cards, err)
+	}
+	linkedHuddles, err = repo.ListHuddleLogicGatesForLogicGate(companyID, logicGate.LogicGateID)
+	if err != nil || len(linkedHuddles) != 0 {
+		t.Fatalf("Logic Gate Huddle cards after unlink = %+v, err=%v", linkedHuddles, err)
 	}
 	nodeCards, err = repo.ListHuddleNodeLogicGateCards(companyID, node.HuddleNodeID)
 	if err != nil || len(nodeCards) != 1 || len(nodeCards[0].KPIs) != 1 || nodeCards[0].KPIs[0].Name != "Current renewal rate" {

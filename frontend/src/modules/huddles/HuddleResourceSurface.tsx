@@ -5,6 +5,7 @@ import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { HeaderRecycleBinIcon } from "../../icons/index.js";
 import type { CompanyUser, CompanyUserGroup, CompanyUserGroupMember } from "../communications/communicationsApi";
 import { RACIAssignmentBoard } from "../editor/EditorLinkedDocumentPanels";
+import { openEditorEntityLink } from "../editor/editorEntityLinks";
 import {
   EDITOR_NEU_PANEL_BACKGROUND,
   EDITOR_NEU_PANEL_SHADOW,
@@ -14,7 +15,9 @@ import {
 } from "../editor/NodeWorkspaceSurfaceShared";
 import type { EditorTabID } from "../editor/editorTabs";
 import { UniversalEntityPicker, type UniversalEntityPickerAnchor } from "../editor/UniversalEntityPicker";
+import { getLogicGateRecordSingleFlight } from "../logic-gates/logicGateRecordStore";
 import type { LogicGateRACIAssignment, LogicGateRACIPrincipalType, LogicGateRACIRole } from "../logic-gates/types";
+import { canEditResourceAccess } from "../nodes/types";
 import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog";
 import {
   BareMangoEditorDocument,
@@ -22,7 +25,8 @@ import {
   useBareMangoEditorControls,
 } from "./BareMangoEditor";
 import { HuddleResourceIcon } from "./HuddleResourceIcon";
-import { HuddleLogicGateCards, type HuddleLogicGateCardItem } from "./HuddleLogicGateCards";
+import { HuddleLogicGateCards, type HuddleLogicGateCardItem, type HuddleLogicGateKPIItem } from "./HuddleLogicGateCards";
+import { KPIEditorPopup, type KPIEditorItem } from "./LogicGateKPISection";
 import { DEFAULT_HUDDLE_COLUMN_LAYOUT, resizeHuddleColumns, type HuddleColumnLayout } from "./huddleColumnLayout";
 
 export type HuddleResourceType = "huddle_logic_gate" | "huddle_node";
@@ -68,6 +72,7 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
   const [savedName, setSavedName] = useState(resource.name);
   const [nodes, setNodes] = useState<HuddleNode[]>([]);
   const [logicGateCards, setLogicGateCards] = useState<HuddleLogicGateCardItem[]>([]);
+  const [openKPI, setOpenKPI] = useState<{ item: KPIEditorItem; canEdit: boolean } | null>(null);
   const [logicGatePickerAnchor, setLogicGatePickerAnchor] = useState<UniversalEntityPickerAnchor | null>(null);
   const [raci, setRaci] = useState<LogicGateRACIAssignment[]>([]);
   const [raciRevision, setRaciRevision] = useState("");
@@ -229,6 +234,30 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
     }
   };
 
+  const openLogicGate = (item: HuddleLogicGateCardItem) => {
+    if (!isGate) onClose();
+    openEditorEntityLink({ entityType: "logic_gate", entityID: item.logic_gate_id, label: item.header });
+  };
+
+  const openKPIEditor = async (item: HuddleLogicGateCardItem, kpi: HuddleLogicGateKPIItem) => {
+    setOpenKPI({ item: kpi, canEdit: false });
+    try {
+      const details = await getLogicGateRecordSingleFlight(apiBase, companyID, item.logic_gate_id);
+      const canEdit = canEditResourceAccess(details);
+      setOpenKPI((current) => current?.item.kpi_id === kpi.kpi_id ? { ...current, canEdit } : current);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not check KPI edit access");
+    }
+  };
+
+  const updateOpenKPI = (saved: KPIEditorItem) => {
+    setOpenKPI((current) => current?.item.kpi_id === saved.kpi_id ? { ...current, item: saved } : current);
+    setLogicGateCards((current) => current.map((gate) => ({
+      ...gate,
+      kpis: gate.kpis.map((kpi) => kpi.kpi_id === saved.kpi_id ? { ...kpi, name: saved.name } : kpi),
+    })));
+  };
+
   const deleteResource = async () => {
     if (!window.confirm(`Move “${name}” to the Recycle Bin?`)) return;
     try {
@@ -370,7 +399,12 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
         ) : (
           <section aria-label={`${name} Logic Gate snapshot`} data-huddle-node-snapshot="true" style={relationshipColumnStyle}>
             <div style={relationshipColumnHeaderStyle}><strong>Logic Gate snapshot</strong></div>
-            <HuddleLogicGateCards items={logicGateCards} emptyLabel="No Logic Gates were linked when this Huddle Node was created." />
+            <HuddleLogicGateCards
+              items={logicGateCards}
+              emptyLabel="No Logic Gates were linked when this Huddle Node was created."
+              onOpenLogicGate={openLogicGate}
+              onOpenKPI={(item, kpi) => void openKPIEditor(item, kpi)}
+            />
           </section>
         )}
         <div role="separator" aria-label={isGate ? "Resize Huddle editor and Logic Gate columns" : "Resize Huddle Node snapshot and chat columns"} aria-orientation="vertical" onPointerDown={isGate ? (event) => startGateResize(0, event) : startNodeResize} style={columnResizeHandleStyle}><span style={columnResizeGripStyle} /></div>
@@ -380,7 +414,13 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
               <strong>Logic Gates</strong>
               <button type="button" aria-label="Add Logic Gate" title="Add Logic Gate" onClick={openLogicGatePicker} style={createNodeButtonStyle}>+</button>
             </div>
-            <HuddleLogicGateCards items={logicGateCards} emptyLabel="No Logic Gates linked yet." onRemove={(item) => void removeLogicGate(item)} />
+            <HuddleLogicGateCards
+              items={logicGateCards}
+              emptyLabel="No Logic Gates linked yet."
+              onOpenLogicGate={openLogicGate}
+              onOpenKPI={(item, kpi) => void openKPIEditor(item, kpi)}
+              onRemove={(item) => void removeLogicGate(item)}
+            />
           </section>
         ) : (
           <div aria-label="Reserved Huddle Node chat column" style={emptyColumnStyle} />
@@ -423,6 +463,17 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
           entityID={resource.resourceID}
           title={`${name} permissions`}
           onClose={() => { setPermissions(false); setActiveTab("editor"); }}
+        />
+      )}
+      {openKPI && (
+        <KPIEditorPopup
+          companyID={companyID}
+          item={openKPI.item}
+          canEdit={openKPI.canEdit}
+          currentUserID={currentUserID}
+          requestJSON={requestJSON}
+          onSaved={updateOpenKPI}
+          onClose={() => setOpenKPI(null)}
         />
       )}
       {isGate && logicGatePickerAnchor && (

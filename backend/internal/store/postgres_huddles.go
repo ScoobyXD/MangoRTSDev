@@ -196,6 +196,29 @@ order by lower(gate.header),gate.logic_gate_id,kpi.created_timestamp,kpi.kpi_id`
 	return scanHuddleLogicGateCards(rows)
 }
 
+func (r *PostgresRepo) ListHuddleLogicGatesForLogicGate(companyID, logicGateID string) ([]domain.HuddleLogicGate, error) {
+	rows, err := r.db.Query(`
+select huddle.company_id::text,huddle.huddle_logic_gate_id::text,huddle.header,huddle.created_timestamp,huddle.updated_timestamp
+from huddle_logic_gate_relationships relationship
+join huddle_logic_gates huddle
+  on huddle.company_id=relationship.company_id and huddle.huddle_logic_gate_id=relationship.huddle_logic_gate_id
+where relationship.company_id=$1::uuid and relationship.logic_gate_id=$2::uuid
+order by lower(huddle.header),huddle.huddle_logic_gate_id`, companyID, logicGateID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []domain.HuddleLogicGate{}
+	for rows.Next() {
+		item, scanErr := scanHuddleLogicGate(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (r *PostgresRepo) CreateHuddleLogicGateRelationship(input HuddleLogicGateRelationshipInput) error {
 	input.CompanyID = cleanUUIDText(input.CompanyID)
 	input.HuddleLogicGateID = cleanUUIDText(input.HuddleLogicGateID)
