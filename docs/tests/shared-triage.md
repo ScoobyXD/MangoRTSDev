@@ -14,8 +14,10 @@
 12. A chat send reuses the exact shared-mailbox stored message when present, otherwise fetches only that exact provider message, and never calls triage conversion or queues remaining-thread ingestion.
 13. After the backend acknowledges a chat, the open rail shows it immediately in its exact Node and text-box group without waiting for realtime or another Node read.
 14. Every saved highlighted-email chat renders its exact stored quote and offsets as a lasting highlight in the email body.
+15. Selecting a conversation with a durable stored thread shows every exact stored message once in stored message order; the left mailbox list remains one row for that thread.
+16. If stored history is incomplete, Shared Triage keeps every stored message visible in durable relative order while loading missing provider messages; a provider failure never replaces that stored history with one representative message.
 
-Last updated: 2026-08-11
+Last updated: 2026-08-12
 
 # Process Story: Shared Triage conversion queues exact-account completion
 

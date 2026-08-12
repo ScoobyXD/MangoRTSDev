@@ -76,6 +76,7 @@ export type EmailFolder = {
 export type EmailMessage = {
   email_message_id?: string;
   email_thread_id?: string;
+  message_order?: number;
   id: string;
   detail_fetched?: boolean;
   thread_id?: string;

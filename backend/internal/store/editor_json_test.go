@@ -54,6 +54,13 @@ func TestMangoTiptapJSONStrictContractAcceptsFeatureDocument(t *testing.T) {
 	}
 }
 
+func TestMangoTiptapJSONAcceptsEmailMessageReference(t *testing.T) {
+	raw := json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"mangoEntityLink","attrs":{"entityType":"email_message","entityId":"provider-message-1","label":"Quarterly update","emailMessageId":"11111111-1111-4111-8111-111111111111","emailThreadId":"provider-thread-1","emailAccountEmail":"owner@example.com","emailSharedInboxId":"","emailMailbox":"primary"}}]}]}}`)
+	if _, err := ValidateMangoTiptapJSON(raw); err != nil {
+		t.Fatalf("email message reference rejected: %v", err)
+	}
+}
+
 func TestMangoTiptapJSONCanonicalEmptyDocumentRequiresParagraph(t *testing.T) {
 	invalid := json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[]}}`)
 	if _, err := ValidateMangoTiptapJSON(invalid); !errors.Is(err, ErrInvalid) {

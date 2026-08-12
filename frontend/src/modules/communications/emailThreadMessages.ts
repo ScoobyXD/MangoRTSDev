@@ -84,6 +84,14 @@ function messageTimestamp(message: EmailMessage): number {
   return Number.isFinite(message.date ?? NaN) ? Math.max(0, Math.trunc(message.date ?? 0)) : 0;
 }
 
+function storedMessageOrder(message: EmailMessage): number | null {
+  return Number.isFinite(message.message_order ?? NaN) ? Math.max(0, Math.trunc(message.message_order ?? 0)) : null;
+}
+
+function chronologicalMessageDelta(left: EmailMessage, right: EmailMessage): number {
+  return messageTimestamp(left) - messageTimestamp(right) || left.id.localeCompare(right.id);
+}
+
 function reconciliationSignature(message: EmailMessage): string {
   const threadID = message.thread_id?.trim() ?? "";
   const fullBody = message.body || message.snippet || "";
@@ -225,10 +233,21 @@ export function normalizeEmailThreadMessages(
   }
 
   const normalized = [...authoritative, ...localGroups].map(entryToMessage);
+  const storedTimeline = normalized
+    .filter((message) => storedMessageOrder(message) !== null)
+    .sort((left, right) => (storedMessageOrder(left) ?? 0) - (storedMessageOrder(right) ?? 0) || left.id.localeCompare(right.id));
+  const timelinePositions = new Map<EmailMessage, number>();
+  storedTimeline.forEach((message, index) => timelinePositions.set(message, index * 2));
+  normalized.forEach((message) => {
+    if (storedMessageOrder(message) !== null) return;
+    const nextStoredIndex = storedTimeline.findIndex((storedMessage) => chronologicalMessageDelta(message, storedMessage) < 0);
+    const insertionIndex = nextStoredIndex >= 0 ? nextStoredIndex : storedTimeline.length;
+    timelinePositions.set(message, insertionIndex * 2 - 1);
+  });
   normalized.sort((left, right) => {
-    const dateDelta = messageTimestamp(left) - messageTimestamp(right);
-    const idDelta = left.id.localeCompare(right.id);
-    return order === "oldest" ? dateDelta || idDelta : -dateDelta || -idDelta;
+    const positionDelta = (timelinePositions.get(left) ?? 0) - (timelinePositions.get(right) ?? 0);
+    const timelineDelta = positionDelta || chronologicalMessageDelta(left, right);
+    return order === "oldest" ? timelineDelta : -timelineDelta;
   });
   return normalized;
 }

@@ -94,8 +94,9 @@ Last updated: 2026-08-08
 18. After Backspace or Delete removes an empty nested list marker, pressing Backspace or Delete again removes only its remaining blank row; the parent row, nested rows, and following rows keep their exact structure and numbering.
 19. In Automatic Numbering, Enter at the end of a nonempty ordinary row immediately before an existing numbered list inserts one empty first item into that list; the ordinary row and list identity stay unchanged, the list restarts at its canonical first marker, every existing item keeps its content, formatting, identity, and order while its marker advances by one, and the caret moves into the new item.
 20. In Automatic Numbering, Enter at the end of a numbered row with nested rows inserts one empty peer immediately before those nested rows; Tab makes only that empty peer the first nested row, keeps every existing nested and following row at its prior depth and in its prior order, and restarts each affected ordered level at its canonical first marker.
+21. An `email_message` entity is valid durable editor JSON; activating it opens the existing Triage conversation viewer and never creates an email relationship.
 
-Last updated: 2026-08-10
+Last updated: 2026-08-12
 
 # Process Story: Editor policy status follows the draft automatically
 

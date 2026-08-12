@@ -2598,7 +2598,10 @@ export function HomePage({
           local_replies: existingSelected.local_replies,
         } : selectedWithCollaboration;
         setSelectedMessage(selectedWithLocalReplies);
-        setSelectedThreadMessages([selectedWithLocalReplies]);
+        setSelectedThreadMessages(mergeEmailThreadDetailMessages(
+          collaborationThreadMessages,
+          [selectedWithLocalReplies],
+        ));
 
         const threadID = (selected.thread_id ?? "").trim();
         if (!threadID) return;
@@ -2700,7 +2703,10 @@ export function HomePage({
         const collaborationFallback = selectedMessageRef.current;
         if (collaborationFallback?.id === selectedMessageID && collaborationFallback.collaboration_id?.trim()) {
           setSelectedMessage(collaborationFallback);
-          setSelectedThreadMessages([collaborationFallback]);
+          setSelectedThreadMessages(mergeEmailThreadDetailMessages(
+            collaborationThreadMessages,
+            [collaborationFallback],
+          ));
           return;
         }
         if (isEmailAccessExpiredError(detailError)) {

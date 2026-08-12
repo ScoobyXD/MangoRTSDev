@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestEmailCollaborationThreadDefaultReadUsesMangoWithoutProviderCall(t *testing.T) {
+func TestEmailCollaborationThreadDefaultReadReturnsEveryStoredMessageInOrderWithoutProviderCall(t *testing.T) {
 	repo, owner, _, _ := newEmailCollaborationThreadTestRepo(t)
 	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
 		UserID: owner.UserID, Provider: "google", AccountEmail: owner.Email,
@@ -25,6 +25,20 @@ func TestEmailCollaborationThreadDefaultReadUsesMangoWithoutProviderCall(t *test
 			Body: "<p><strong>Stored rich body</strong></p>",
 		},
 	})
+	if _, err := repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+		CompanyID: emailCollaborationThreadTestCompanyID, PersonalUserID: owner.UserID,
+		PersonalAccountEmail: owner.Email, AccountEmail: owner.Email, Provider: "google",
+		ProviderThreadID: "stored-thread", SelectedMessageID: "stored-root",
+		Messages: []domain.EmailMessageSnapshot{
+			{ID: "stored-root", ThreadID: "stored-thread", Subject: "Stored immediately", Body: "<p><strong>Stored rich body</strong></p>", Date: 300},
+			{ID: "stored-incoming-1", ThreadID: "stored-thread", Subject: "Stored incoming 1", Body: "First", Date: 100},
+			{ID: "stored-outgoing-1", ThreadID: "stored-thread", Subject: "Stored outgoing 1", Body: "Second", Date: 200},
+			{ID: "stored-outgoing-2", ThreadID: "stored-thread", Subject: "Stored outgoing 2", Body: "Fourth", Date: 400},
+			{ID: "stored-incoming-2", ThreadID: "stored-thread", Subject: "Stored incoming 2", Body: "Fifth", Date: 500},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	client := newEmailCollaborationThreadTestClient()
 	client.threadsByID["stored-thread"] = NylasThread{ID: "stored-thread", MessageIDs: []string{"provider-secret"}}
 	client.messagesByID["provider-secret"] = NylasMessage{ID: "provider-secret", ThreadID: "stored-thread", Body: "Provider-only body"}
@@ -42,9 +56,16 @@ func TestEmailCollaborationThreadDefaultReadUsesMangoWithoutProviderCall(t *test
 	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
 		t.Fatal(err)
 	}
-	if response.HistoryComplete || len(response.Messages) != 1 || response.Messages[0].ID != "stored-root" ||
-		response.Messages[0].Body != "<p><strong>Stored rich body</strong></p>" {
+	if response.HistoryComplete || len(response.Messages) != 5 {
 		t.Fatalf("stored default response = %+v", response)
+	}
+	if got := emailCollaborationThreadTestMessageIDs(response.Messages); got != "stored-incoming-1,stored-outgoing-1,stored-root,stored-outgoing-2,stored-incoming-2" {
+		t.Fatalf("stored message ids=%q", got)
+	}
+	for index, message := range response.Messages {
+		if message.MessageOrder == nil || *message.MessageOrder != index {
+			t.Fatalf("stored message %q order=%v, want %d", message.ID, message.MessageOrder, index)
+		}
 	}
 	threadGrants, threadIDs, messageGrants, messageIDs := client.calls()
 	if len(threadGrants)+len(threadIDs)+len(messageGrants)+len(messageIDs) != 0 {
@@ -88,13 +109,13 @@ func TestNodeEmailThreadRouteReturnsDurableStoredHistory(t *testing.T) {
 		t.Fatalf("status=%d, want 200 body=%s", rec.Code, rec.Body.String())
 	}
 	var response struct {
-		NodeID            string         `json:"node_id"`
-		InformationID     string         `json:"information_id"`
-		EmailThreadID     string         `json:"email_thread_id"`
-		SelectedMessageID string         `json:"selected_message_id"`
-		ThreadID          string         `json:"thread_id"`
-		Messages          []NylasMessage `json:"messages"`
-		HistoryComplete   bool           `json:"history_complete"`
+		NodeID            string                        `json:"node_id"`
+		InformationID     string                        `json:"information_id"`
+		EmailThreadID     string                        `json:"email_thread_id"`
+		SelectedMessageID string                        `json:"selected_message_id"`
+		ThreadID          string                        `json:"thread_id"`
+		Messages          []domain.EmailMessageSnapshot `json:"messages"`
+		HistoryComplete   bool                          `json:"history_complete"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
 		t.Fatal(err)
@@ -109,6 +130,11 @@ func TestNodeEmailThreadRouteReturnsDurableStoredHistory(t *testing.T) {
 	}
 	if response.Messages[0].Body != "Stored root body" || response.Messages[1].Body != "Stored reply body" {
 		t.Fatalf("stored node thread bodies = %+v", response.Messages)
+	}
+	for index, message := range response.Messages {
+		if message.MessageOrder == nil || *message.MessageOrder != index {
+			t.Fatalf("stored node message %q order=%v, want %d", message.ID, message.MessageOrder, index)
+		}
 	}
 	var replyEmailMessageID string
 	for _, message := range stored.Messages {
