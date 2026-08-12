@@ -84,6 +84,10 @@ function messageTimestamp(message: EmailMessage): number {
   return Number.isFinite(message.date ?? NaN) ? Math.max(0, Math.trunc(message.date ?? 0)) : 0;
 }
 
+function storedMessageOrder(message: EmailMessage): number | null {
+  return Number.isFinite(message.message_order ?? NaN) ? Math.max(0, Math.trunc(message.message_order ?? 0)) : null;
+}
+
 function reconciliationSignature(message: EmailMessage): string {
   const threadID = message.thread_id?.trim() ?? "";
   const fullBody = message.body || message.snippet || "";
@@ -226,9 +230,13 @@ export function normalizeEmailThreadMessages(
 
   const normalized = [...authoritative, ...localGroups].map(entryToMessage);
   normalized.sort((left, right) => {
-    const dateDelta = messageTimestamp(left) - messageTimestamp(right);
+    const leftStoredOrder = storedMessageOrder(left);
+    const rightStoredOrder = storedMessageOrder(right);
+    const positionDelta = leftStoredOrder !== null && rightStoredOrder !== null
+      ? leftStoredOrder - rightStoredOrder
+      : messageTimestamp(left) - messageTimestamp(right);
     const idDelta = left.id.localeCompare(right.id);
-    return order === "oldest" ? dateDelta || idDelta : -dateDelta || -idDelta;
+    return order === "oldest" ? positionDelta || idDelta : -positionDelta || -idDelta;
   });
   return normalized;
 }

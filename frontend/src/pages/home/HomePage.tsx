@@ -2581,7 +2581,9 @@ export function HomePage({
               setSelectedMessage(selectedSnapshot);
               setSelectedThreadMessages(mergeEmailThreadDetailMessages(collaborationThreadMessages, [selectedSnapshot]));
             }
-            if (!providerMailAvailable || collaborationThread.history_complete) return;
+            const durableStoredThreadAvailable = Boolean(collaborationThread.email_thread_id?.trim())
+              && collaborationThreadMessages.length > 0;
+            if (!providerMailAvailable || durableStoredThreadAvailable) return;
           } catch (collaborationThreadError) {
             if (!providerMailAvailable) throw collaborationThreadError;
           }

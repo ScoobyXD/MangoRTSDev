@@ -15,8 +15,9 @@
 13. Sending a chat adds it to the open rail before the network request starts; success keeps that exact optimistic row, while failure removes it and restores the complete composer for retry.
 14. A later chat for an already-linked exact email message uses the normal Node text-box-chat create command only; it does not repeat email, relationship, permission, participant, or collaboration setup.
 15. Every saved highlighted-email chat renders its exact stored quote and offsets as a lasting highlight in the email body.
+16. Selecting a conversation with a durable stored thread shows every exact stored message once in stored message order; the left mailbox list remains one row for that thread.
 
-Last updated: 2026-08-11
+Last updated: 2026-08-12
 
 # Process Story: My Triage conversion queues durable email completion
 

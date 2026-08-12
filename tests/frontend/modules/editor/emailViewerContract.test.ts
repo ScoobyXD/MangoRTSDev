@@ -317,6 +317,7 @@ test("triage email selection, history, and archive prefetch preserve the foregro
   assert.match(homePage, /useEffect\(\(\) => \{ void loadMessages\(\); \}, \[loadMessages\]\)/);
   assert.match(homePage, /preserveCurrentThread[\s\S]{0,300}: \[visiblePrimaryMessage\]/);
   assert.match(homePage, /loadSelectedThreadMessageBody/);
+  assert.match(homePage, /durableStoredThreadAvailable[\s\S]{0,180}if \(!providerMailAvailable \|\| durableStoredThreadAvailable\) return/);
   assert.match(homePage, /await getEmailMessage\(selectedMessageID[\s\S]{0,2200}await getEmailThread\(threadID/);
   assert.match(homePage, /authoritativeMessageIDs = cleanIDList\(thread\.message_ids \?\? \[\]\)/);
   assert.match(homePage, /const missingMessageIDs = missingEmailThreadMessageIDs\(/);

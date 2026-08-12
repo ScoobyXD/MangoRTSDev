@@ -59,7 +59,10 @@ func cleanEmailCollaborationThreadMessageIDs(values []string) []string {
 func storedEmailThreadMessages(thread domain.CommunicationsEmailThread) []domain.EmailMessageSnapshot {
 	messages := make([]domain.EmailMessageSnapshot, 0, len(thread.Messages))
 	for _, item := range thread.Messages {
-		messages = append(messages, item.Message)
+		message := item.Message
+		messageOrder := item.MessageOrder
+		message.MessageOrder = &messageOrder
+		messages = append(messages, message)
 	}
 	return messages
 }

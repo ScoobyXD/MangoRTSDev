@@ -37,8 +37,10 @@
 35. A Node opens with every attached-email thread collapsed and reads a thread body or that exact Node's shared draft only after the user opens that exact thread.
 36. A chat authored by the current user moves the shared message view to the new message at the bottom.
 37. Every saved email-selection chat renders its exact stored quote and offsets as a lasting highlight in My Triage, Shared Triage, and Node email views.
+38. My Triage and Shared Triage keep one mailbox row per conversation, but selecting a durable stored thread renders every exact stored message once in stored message order.
+39. A one-hash email reference persists as the existing typed email chip and activates the existing Triage conversation viewer; it creates no relationship, email route, or second viewer.
 
-Last updated: 2026-08-11
+Last updated: 2026-08-12
 
 # Process Story: DEV cutover collapses only safe legacy job metadata
 

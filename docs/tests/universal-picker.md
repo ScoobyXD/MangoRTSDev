@@ -4,8 +4,9 @@
 2. Linking a selected email to a Logic Gate immediately creates its Node there with priority **Not Assigned**.
 3. Linking a selected email to a Project requires only the Project Logic Gate choice and creates the Node with priority **Not Assigned**.
 4. Reference mode opens the exact selected resource without changing the email.
+5. A one-hash email reference saves as the existing typed email chip and opens the existing Triage conversation viewer; it creates no relationship, email route, or second viewer.
 
-Last updated: 2026-08-09
+Last updated: 2026-08-12
 
 # Process Story: Email linking chooses an exact destination without forcing priority
 
@@ -111,9 +112,9 @@ UP26 - Arrow keys wrap through loaded email rows and keep the highlighted row in
 
 UP27 - A chosen email entity uses the provider message ID as its exact provider identity and stores the subject label, normalized account email, active mailbox, provider thread ID when known, internal Mango `email_message_id` when known, and the selected provider message payload for the immediate host command. If the internal ID is not known, selection first runs the exact authorized ingestion command and replaces the entity payload with the returned durable Mango identity. Those identities must not be translated through a generic resource registry.
 
-UP28 - An email reference chip is a typed `email_message` atom with the canonical envelope icon. Its durable Tiptap/legacy attributes preserve the provider message ID plus known internal message ID, thread ID, account, shared-inbox scope, and mailbox so copy/paste, JSON persistence, static rendering, remount, and later activation retain the same email.
+UP28 - An email reference chip is a typed `email_message` atom with the canonical envelope icon. The frontend schema and backend JSON validator both accept that exact type. Its durable Tiptap/legacy attributes preserve the provider message ID plus known internal message ID, thread ID, account, shared-inbox scope, and mailbox so copy/paste, JSON persistence, static rendering, remount, and later activation retain the same email.
 
-UP29 - Activating a persisted email reference dispatches the exact stored email identity to Home. Personal scope opens My Triage; shared-inbox scope opens the matching Shared Triage folder. Mango restores the stored mailbox when valid, selects the exact provider message from loaded state when available, or fetches that exact message with the stored company/account/shared scope. It must not invent a fake resource route.
+UP29 - Activating a persisted email reference dispatches the exact stored email identity to Home and uses the existing Triage conversation detail. Personal scope opens My Triage; shared-inbox scope opens the matching Shared Triage folder. Mango restores the stored mailbox when valid, selects the exact provider message from loaded state when available, or fetches that exact message with the stored company/account/shared scope. A durable stored thread shows every exact stored message in stored message order. Mango must not invent a fake resource route or a second email viewer.
 
 UP30 - Backspace on or immediately after an inline email entity unwraps it to its stored subject label as ordinary text, exactly like the other entity types. This changes only document markup and never detaches, deletes, sends, moves, or otherwise mutates the email.
 

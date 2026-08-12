@@ -121,7 +121,7 @@ func validateEditorJSONNode(value any, path string, depth int, count *int, block
 		entityType, typeOK := attrs["entityType"].(string)
 		entityID, idOK := attrs["entityId"].(string)
 		label, labelOK := attrs["label"].(string)
-		if !typeOK || (entityType != "node" && entityType != "logic_gate" && entityType != "project") ||
+		if !typeOK || (entityType != "node" && entityType != "logic_gate" && entityType != "project" && entityType != "email_message") ||
 			!idOK || strings.TrimSpace(entityID) == "" || !labelOK || strings.TrimSpace(label) == "" {
 			return fmt.Errorf("%w: entity identity required", ErrInvalid)
 		}

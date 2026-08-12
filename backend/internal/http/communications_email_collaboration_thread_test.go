@@ -77,10 +77,10 @@ func (c *emailCollaborationThreadTestClient) calls() ([]string, []string, []stri
 }
 
 type emailCollaborationThreadTestResponse struct {
-	CollaborationID string         `json:"collaboration_id"`
-	ThreadID        string         `json:"thread_id"`
-	Messages        []NylasMessage `json:"messages"`
-	HistoryComplete bool           `json:"history_complete"`
+	CollaborationID string                        `json:"collaboration_id"`
+	ThreadID        string                        `json:"thread_id"`
+	Messages        []domain.EmailMessageSnapshot `json:"messages"`
+	HistoryComplete bool                          `json:"history_complete"`
 }
 
 func newEmailCollaborationThreadTestRepo(t *testing.T) (*store.MemoryRepo, domain.User, domain.User, domain.User) {
@@ -152,7 +152,7 @@ func emailCollaborationThreadTestRequestWithActor(req *http.Request, user domain
 	return req.WithContext(context.WithValue(req.Context(), actorContextKey{}, actor))
 }
 
-func emailCollaborationThreadTestMessageIDs(messages []NylasMessage) string {
+func emailCollaborationThreadTestMessageIDs(messages []domain.EmailMessageSnapshot) string {
 	ids := make([]string, 0, len(messages))
 	for _, message := range messages {
 		ids = append(ids, message.ID)
