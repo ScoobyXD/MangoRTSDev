@@ -323,6 +323,14 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(sharedChat, /aria-label=\{selectSectionOnClick \? `Choose Node \$\{nodeGroup\.nodeLabel\}` : `Open Node \$\{nodeGroup\.nodeLabel\}`\}/);
   assert.match(sharedChat, /data-chat-destination-flash=\{nodeFlashed \? "true" : undefined\}[\s\S]*data-chat-destination-flash=\{sectionFlashed \? "true" : undefined\}/);
   assert.match(styles, /\.email-chat-node-section:hover[\s\S]*\.email-chat-textbox-group:hover[\s\S]*@keyframes email-chat-destination-flash/);
+  const nodeHoverStyle = styles.match(/\.email-chat-node-section:hover,\s*\n\.email-chat-node-section:focus-within \{([\s\S]*?)\}/)?.[1] ?? "";
+  const textboxHoverStyle = styles.match(/\.email-chat-textbox-group:hover,\s*\n\.email-chat-textbox-group:focus-within \{([\s\S]*?)\}/)?.[1] ?? "";
+  const nodeWorkspaceHoverStyle = styles.match(/\[data-node-email-chat-parent-destination="true"\]:hover,[\s\S]*?\{([\s\S]*?)\}/)?.[1] ?? "";
+  for (const hoverStyle of [nodeHoverStyle, textboxHoverStyle, nodeWorkspaceHoverStyle]) {
+    assert.match(hoverStyle, /transform: translateY\(-2px\)/);
+    assert.match(hoverStyle, /box-shadow:/);
+    assert.doesNotMatch(hoverStyle, /background|92,238,255|128,216,255|183,124,255/);
+  }
   assert.match(surface, /<ChatPane[\s\S]*fillHeight/);
 });
 test("email-created nodes reuse canonical chat data with one node email column", () => {
