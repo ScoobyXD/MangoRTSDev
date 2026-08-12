@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"errors"
+	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"strings"
@@ -31,9 +32,20 @@ func (s *Server) handleNodeEmailThread(w http.ResponseWriter, r *http.Request, n
 	if !s.requireEntityView(w, r, companyID, store.EntityTypeNode, nodeID, "node_not_found") {
 		return
 	}
-	item, err := s.repo.GetCommunicationsNodeEmailThread(companyID, nodeID, emailThreadID)
+	messageID := strings.TrimSpace(r.URL.Query().Get("message_id"))
+	var item domain.CommunicationsNodeEmailThread
+	var err error
+	if messageID == "" {
+		item, err = s.repo.GetCommunicationsNodeEmailThread(companyID, nodeID, emailThreadID)
+	} else {
+		item, err = s.repo.GetCommunicationsNodeEmailMessage(companyID, nodeID, emailThreadID, messageID)
+	}
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "node_email_thread_not_found")
+		if messageID != "" {
+			writeError(w, http.StatusNotFound, "node_email_message_not_found")
+		} else {
+			writeError(w, http.StatusNotFound, "node_email_thread_not_found")
+		}
 		return
 	}
 	if err != nil {

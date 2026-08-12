@@ -108,6 +108,7 @@ func sharedEmailDraftContextForThread(thread domain.CommunicationsEmailThread, s
 	}, nil
 }
 func preserveSharedEmailDraftIdentity(input *domain.CommunicationsEmailDraft, existing domain.CommunicationsEmailDraft) {
+	input.AccountEmail = existing.AccountEmail
 	input.Kind = existing.Kind
 	input.SourceMessageID = existing.SourceMessageID
 	input.EmailThreadID = existing.EmailThreadID
@@ -417,6 +418,7 @@ where company_id=$1::uuid and draft_id=$2
    and relationship.email_thread_id=email_drafts.email_thread_id
    and relationship.email_relationship_id=$3::uuid
    and relationship.resource_type='node'
+   and relationship.resource_id=email_drafts.origin_node_id
    and relationship.resource_textbox_id is null
    and mangorts_user_can_access_resource(relationship.company_id,relationship.resource_type,
        relationship.resource_id,$4::uuid,'edit'))
@@ -514,6 +516,7 @@ where company_id=$1::uuid and draft_id=$2
    and relationship.email_thread_id=email_drafts.email_thread_id
    and relationship.email_relationship_id=$3::uuid
    and relationship.resource_type='node'
+	   and relationship.resource_id=email_drafts.origin_node_id
 	   and relationship.resource_textbox_id is null)`
 	}
 	query += ` for update`
@@ -581,13 +584,13 @@ where company_id=$1::uuid and draft_id=$2 and email_thread_id=$3::uuid
 	return tx.Commit()
 }
 
-func postgresSharedEmailDraftWithSourceTx(ctx context.Context, tx *sql.Tx, companyID, emailThreadID string) (string, error) {
+func postgresSharedEmailDraftWithSourceTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, sourceMessageID string) (string, error) {
 	var draftID string
 	err := tx.QueryRowContext(ctx, `
 select draft_id from email_drafts
-where company_id=$1::uuid and email_thread_id=$2::uuid
+where company_id=$1::uuid and origin_node_id=$2::uuid and source_email_message_id=$3::uuid
  and deleted_timestamp is null
-limit 1 for update`, companyID, emailThreadID).Scan(&draftID)
+limit 1 for update`, companyID, nodeID, sourceMessageID).Scan(&draftID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}

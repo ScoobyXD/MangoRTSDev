@@ -25,6 +25,9 @@ func (r *MemoryRepo) ListCommunicationsEmailDrafts(input CommunicationsEmailDraf
 			continue
 		}
 		include := scope.matchesDraft(draft)
+		if !participantOnly && strings.TrimSpace(input.ParticipantUserID) != "" {
+			include = include && !draft.IsShared && draft.CreatedByUserID == strings.TrimSpace(input.ParticipantUserID)
+		}
 		if participantOnly {
 			include = r.isSharedEmailDraftParticipantLocked(draft, input.ParticipantUserID)
 		}
@@ -53,6 +56,9 @@ func (r *MemoryRepo) GetCommunicationsEmailDraft(input CommunicationsEmailDraftG
 
 	draft, ok := r.emailDrafts[communicationsEmailDraftKey(companyID, draftID)]
 	authorized := ok && scope.matchesDraft(draft)
+	if !participantOnly && strings.TrimSpace(input.ParticipantUserID) != "" {
+		authorized = authorized && !draft.IsShared && draft.CreatedByUserID == strings.TrimSpace(input.ParticipantUserID)
+	}
 	if participantOnly {
 		authorized = ok && r.isSharedEmailDraftParticipantLocked(draft, input.ParticipantUserID)
 	}
@@ -112,7 +118,7 @@ func (r *MemoryRepo) UpsertCommunicationsEmailDraft(input CommunicationsEmailDra
 	}
 	now := time.Now().UTC()
 	existing, exists := r.emailDrafts[communicationsEmailDraftKey(draft.CompanyID, draft.DraftID)]
-	if exists && !communicationsEmailDraftScopesMatch(existing, draft) {
+	if exists && (!communicationsEmailDraftScopesMatch(existing, draft) || existing.IsShared || existing.CreatedByUserID != draft.CreatedByUserID) {
 		return domain.CommunicationsEmailDraft{}, ErrAlreadyExists
 	}
 	if !exists {
@@ -143,6 +149,9 @@ func (r *MemoryRepo) SoftDeleteCommunicationsEmailDraft(input CommunicationsEmai
 	key := communicationsEmailDraftKey(companyID, draftID)
 	draft, ok := r.emailDrafts[key]
 	authorized := ok && scope.matchesDraft(draft)
+	if !participantOnly && strings.TrimSpace(input.ParticipantUserID) != "" {
+		authorized = authorized && !draft.IsShared && draft.CreatedByUserID == strings.TrimSpace(input.ParticipantUserID)
+	}
 	if participantOnly {
 		authorized = ok && r.isSharedEmailDraftParticipantLocked(draft, input.ParticipantUserID)
 	}

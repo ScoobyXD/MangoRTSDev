@@ -1218,6 +1218,31 @@ export async function getNodeEmailThread(
   }, cloneCommunicationsStoredEmailThread);
 }
 
+export async function getNodeEmailMessage(
+  companyID: string,
+  nodeID: string,
+  emailThreadID: string,
+  emailMessageID: string,
+  options: { refresh?: boolean } = {},
+): Promise<EmailMessage> {
+  const cleanCompanyID = companyID.trim();
+  const cleanNodeID = nodeID.trim();
+  const cleanEmailThreadID = emailThreadID.trim();
+  const cleanEmailMessageID = emailMessageID.trim();
+  if (!cleanCompanyID || !cleanNodeID || !cleanEmailThreadID || !cleanEmailMessageID) throw new Error("node_email_message_id_required");
+  const cacheKey = `node-email-message:${cleanCompanyID}:${cleanNodeID}:${cleanEmailThreadID}:${cleanEmailMessageID}`;
+  if (options.refresh) invalidateCacheKey(cacheKey);
+  const stored = await cachedRead(cacheKey, NODE_EMAIL_THREAD_CACHE_TTL_MS, async () => {
+    const query = new URLSearchParams({ company_id: cleanCompanyID, message_id: cleanEmailMessageID });
+    return apiFetchJSON<CommunicationsStoredEmailThread>(
+      `/v1/nodes/${encodeURIComponent(cleanNodeID)}/email-threads/${encodeURIComponent(cleanEmailThreadID)}?${query.toString()}`,
+    );
+  }, cloneCommunicationsStoredEmailThread);
+  const message = stored.messages[0];
+  if (!message) throw new Error("node_email_message_not_found");
+  return cloneMessage(message);
+}
+
 export async function ensureEmailCollaboration(input: EnsureCommunicationsEmailCollaborationInput): Promise<CommunicationsEmailCollaboration> {
   const cleanCompanyID = input.companyID.trim();
   if (!cleanCompanyID || !input.message.id.trim()) throw new Error("email_collaboration_source_required");

@@ -541,6 +541,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [emailReplyBlockID, setEmailReplyBlockID] = useState("");
   const [emailPickerAnchor, setEmailPickerAnchor] = useState<UniversalEntityPickerAnchor | null>(null);
   const [expandedLinkedEmailBlockIDs, setExpandedLinkedEmailBlockIDs] = useState<Set<string>>(() => new Set());
+  const [pendingEmailReply, setPendingEmailReply] = useState<{ blockID: string; targetMessageID: string; replyAll: boolean; requestID: number } | null>(null);
   const [nodeEmailFocusExpanded, setNodeEmailFocusExpanded] = useState(false);
   const [assignedLogicGateRecords, setAssignedLogicGateRecords] = useState<LogicGateRecord[]>([]);
   const [lastAssignedLogicGateID, setLastAssignedLogicGateID] = useState("");
@@ -1284,6 +1285,18 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     textBlockProjectionSaveController.startLatestContentSave(blockID);
     return blockID;
   }, [blocks, companyID, editorTextCanEdit, nodeAttachedEmails, nodeID, textBlockProjectionSaveController]);
+
+  const openEmailReplyInTextBlock = useCallback((sourceMessageID: string, targetMessageID: string, replyAll: boolean) => {
+    const blockID = createEmailTextBlock(sourceMessageID);
+    if (!blockID) return;
+    setExpandedLinkedEmailBlockIDs((current) => new Set(current).add(blockID));
+    setPendingEmailReply((current) => ({
+      blockID,
+      targetMessageID,
+      replyAll,
+      requestID: (current?.requestID ?? 0) + 1,
+    }));
+  }, [createEmailTextBlock]);
 
   const stageEmailSelectionChatTextBlock = useCallback((messageID: string) => {
     const cleanMessageID = messageID.trim();
@@ -3044,6 +3057,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               onEmailSelectionChatRequest={openEmailSelectionChat}
               onEmailSelectionTextBoxRequest={(messageID, quote) => { createEmailTextBlock(messageID, quote); }}
               onEmailMessageTextBoxRequest={(messageID) => { createEmailTextBlock(messageID); }}
+              onEmailReplyTextBoxRequest={openEmailReplyInTextBlock}
               onEmailMessageActivate={revealEmailTextBlock}
               onEmailSelectionNodeRequest={(messageID, quote) => { void createNodeFromEmailSelection(messageID, quote); }}
               emailFocusExpanded={nodeEmailFocusActive}
@@ -3385,6 +3399,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                                 onEmailSelectionChatRequest={openEmailSelectionChat}
                                 onEmailSelectionTextBoxRequest={(messageID, quote) => { createEmailTextBlock(messageID, quote); }}
                                 onEmailSelectionNodeRequest={(messageID, quote) => { void createNodeFromEmailSelection(messageID, quote); }}
+                                initialReplyTargetMessageID={pendingEmailReply?.blockID === block.id ? pendingEmailReply.targetMessageID : undefined}
+                                initialReplyAll={pendingEmailReply?.blockID === block.id ? pendingEmailReply.replyAll : false}
+                                initialReplyRequestID={pendingEmailReply?.blockID === block.id ? pendingEmailReply.requestID : 0}
                                 onError={onError}
                               />
                             </div>

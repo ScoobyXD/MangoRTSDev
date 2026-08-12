@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { AppModalPortal, useAppFloatingMenuDismissal, useAppOverlayPortalTarget, useAppViewportAnchorRect } from "../../app/AppModalPortal.js";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { ExplorerEntityIcon } from "../../icons/index.js";
-import { downloadEmailAttachment, getEmailCollaborationThread, getEmailMessage, getEmailSignature, getEmailThread, getNodeEmailThread, listEmailDrafts, listEmailMessages, saveEmailDraft, sendEmail, sendEmailCollaborationDraft, type CommunicationsEmailDraft, type EmailAddress, type EmailAttachment, type EmailMessage } from "../communications/communicationsApi";
+import { deleteEmailDraft, downloadEmailAttachment, getEmailCollaborationThread, getEmailMessage, getEmailSignature, getEmailThread, getNodeEmailMessage, getNodeEmailThread, listEmailDrafts, listEmailMessages, saveEmailDraft, sendEmail, sendEmailCollaborationDraft, type CommunicationsEmailDraft, type EmailAddress, type EmailAttachment, type EmailMessage } from "../communications/communicationsApi";
 import { CalendarInviteCard } from "../communications/CalendarInviteCard";
 import { OutboundEmailUndoBanner } from "../communications/OutboundEmailUndoBanner";
 import { isOutboundEmailUndoneError } from "../communications/outboundEmailUndo";
@@ -11,7 +11,7 @@ import { visibleEmailAttachmentsForBody } from "../communications/emailAttachmen
 import { splitEmailQuotedHistory } from "../communications/emailQuotedContent.js";
 import { emailThreadMessageRenderKey, emailThreadMessageSourceLabel, normalizeEmailThreadMessages, type EmailThreadMessageCandidate } from "../communications/emailThreadMessages.js";
 import { buildReplyAllRecipients } from "../communications/emailRecipients";
-import { downloadMangoAttachment, fetchMangoAttachmentBlob, loadMangoAttachmentObjectURL, type AttachmentRequestJSON, type MangoAttachment, type MangoAttachmentResourceType, type MangoAttachmentUploadProgress, type MangoAttachmentVariantType, type MangoResourceAttachment } from "../attachments/attachmentApi";
+import { deleteMangoAttachmentPermanently, downloadMangoAttachment, fetchMangoAttachmentBlob, loadMangoAttachmentObjectURL, type AttachmentRequestJSON, type MangoAttachment, type MangoAttachmentResourceType, type MangoAttachmentUploadProgress, type MangoAttachmentVariantType, type MangoResourceAttachment } from "../attachments/attachmentApi";
 import { classifyAttachmentPresentation, classifyAttachmentPreview, splitAttachmentFilename, type AttachmentPresentationKind, type AttachmentPreviewKind } from "../attachments/attachmentPresentation";
 import { canDeleteEditorTextBlockChatMessage, canEditEditorTextBlockChatMessage, type EditorAttachedEmail, type EditorChatAttachment, type EditorTextBlockChatMessage } from "./editorProjection";
 import {
@@ -3327,6 +3327,7 @@ type AttachedEmailOrganizerPaneProps = {
   onEmailSelectionTextBoxRequest?: (messageID: string, quote: string) => void;
   onEmailSelectionNodeRequest?: (messageID: string, quote: string) => void;
   onEmailMessageTextBoxRequest?: (messageID: string) => void;
+  onEmailReplyTextBoxRequest?: (sourceMessageID: string, targetMessageID: string, replyAll: boolean) => void;
   onEmailMessageActivate?: (messageID: string) => void;
   messageAccents?: Record<string, string>;
   onReplyEditorFocus?: () => void;
@@ -3549,22 +3550,16 @@ const AttachedEmailThreadCard: React.FC<{
   onSelectionTextBoxRequest?: (messageID: string, quote: string) => void;
   onSelectionNodeRequest?: (messageID: string, quote: string) => void;
   onMessageTextBoxRequest?: (messageID: string) => void;
+  onReplyTextBoxRequest?: (sourceMessageID: string, targetMessageID: string, replyAll: boolean) => void;
   messageAccents?: Record<string, string>;
   companyUsers?: MentionableCompanyUser[];
-}> = ({ email, nodeID = "", apiBase = "", companyID, currentUserID = "", companyUsers = [], attachmentRequestJSON, attachmentResourceType, attachmentResourceID, attachmentInformationID, attachmentEditorSurface, editable, accent, surfaceText, strokeColor, ruleColor, selected, collapsed, draggable, replyTargetMessageID = "", replyAll = false, activeSelection = null, initialFocusMessageID, initialFocusMessageRequestID = 0, highlightRemovalRequest = null, chatHighlightsByMessageID = {}, onToggleCollapsed, onSelect, onFocusMessageFound, onMessageActivate, onReply, onReplyComplete, onReplyEditorFocus, onError, onContextMenu, onDragStart, onDragEnd, onDropOnEmail, onSelectionChatRequest, onSelectionTextBoxRequest, onSelectionNodeRequest, onMessageTextBoxRequest, messageAccents = {} }) => {
+}> = ({ email, nodeID = "", apiBase = "", companyID, currentUserID = "", companyUsers = [], attachmentRequestJSON, attachmentResourceType, attachmentResourceID, attachmentInformationID, attachmentEditorSurface, editable, accent, surfaceText, strokeColor, ruleColor, selected, collapsed, draggable, replyTargetMessageID = "", replyAll = false, activeSelection = null, initialFocusMessageID, initialFocusMessageRequestID = 0, highlightRemovalRequest = null, chatHighlightsByMessageID = {}, onToggleCollapsed, onSelect, onFocusMessageFound, onMessageActivate, onReply, onReplyComplete, onReplyEditorFocus, onError, onContextMenu, onDragStart, onDragEnd, onDropOnEmail, onSelectionChatRequest, onSelectionTextBoxRequest, onSelectionNodeRequest, onMessageTextBoxRequest, onReplyTextBoxRequest, messageAccents = {} }) => {
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
 	const [threadDownloadStatus, setThreadDownloadStatus] = useState<EmailThreadDownloadStatus>("complete");
 	const handledFocusMessageRequestRef = useRef("");
 	const refreshStoredThreadRef = useRef<() => void>(() => undefined);
-	const [activeSharedDraft, setActiveSharedDraft] = useState<CommunicationsEmailDraft | null>(null);
-	const autoOpenedSharedDraftRef = useRef("");
-	const onSelectRef = useRef(onSelect);
-	const onReplyRef = useRef(onReply);
-	onSelectRef.current = onSelect;
-	onReplyRef.current = onReply;
-
 	useEffect(() => {
 		if (collapsed) {
 			setLoading(false);
@@ -3599,7 +3594,7 @@ const AttachedEmailThreadCard: React.FC<{
 			cancelled = true;
 			refreshStoredThreadRef.current = () => undefined;
 		};
-	}, [collapsed, companyID, email, nodeID]);
+	}, [collapsed, companyID, email.accountEmail, email.collaborationID, email.emailMessageID, email.emailThreadID, email.messageID, email.sharedInboxID, email.threadID, nodeID]);
 
 	useEffect(() => {
 		if (threadDownloadStatus !== "downloading") return;
@@ -3616,30 +3611,6 @@ const AttachedEmailThreadCard: React.FC<{
 			},
 		});
 	}, [apiBase, companyID, currentUserID, email.accountEmail, email.messageID, email.sharedInboxID, email.threadID, threadDownloadStatus]);
-
-  useEffect(() => {
-    if (collapsed) {
-      setActiveSharedDraft(null);
-      return;
-    }
-    const durableThreadID = email.emailThreadID?.trim() ?? "";
-    if (!durableThreadID || !email.collaborationID?.trim()) {
-      setActiveSharedDraft(null);
-      return;
-    }
-    let cancelled = false;
-    void listEmailDrafts(companyID, {}).then((drafts) => {
-      if (cancelled) return;
-      const draft = drafts.find((candidate) => candidate.is_shared && candidate.email_thread_id?.trim() === durableThreadID) ?? null;
-      setActiveSharedDraft(draft);
-      if (draft?.origin_node_id?.trim() === nodeID.trim() && autoOpenedSharedDraftRef.current !== draft.draft_id) {
-        autoOpenedSharedDraftRef.current = draft.draft_id;
-        onSelectRef.current();
-        onReplyRef.current(draft.reply_to_message?.id?.trim() || email.messageID, true);
-      }
-    }).catch(() => undefined);
-    return () => { cancelled = true; };
-  }, [collapsed, companyID, email.collaborationID, email.emailThreadID, email.messageID, nodeID]);
 
   const initialFocusProviderMessageID = initialFocusMessageID?.trim() === email.emailMessageID
     ? email.messageID
@@ -3766,24 +3737,9 @@ const AttachedEmailThreadCard: React.FC<{
             background: rootMessageAccent ? `linear-gradient(90deg, ${rootMessageAccent}30, ${rootMessageAccent}0c 58%, rgba(255,255,255,0.96))` : undefined,
           }}
         >
-          <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr) auto${activeSharedDraft ? " auto" : ""} auto auto${hasThreadChildren ? " 22px" : ""}`, alignItems: "center", gap: 7 }}>
+          <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr) auto auto auto${hasThreadChildren ? " 22px" : ""}`, alignItems: "center", gap: 7 }}>
             <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 900 }}>{email.subject}</span>
             <span style={{ fontSize: 9.5, fontWeight: 800, color: accent, whiteSpace: "nowrap" }}>{formatTimestamp(email.date)}</span>
-            {activeSharedDraft && (
-              <button
-                type="button"
-                title="Toggle universal shared draft"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  if (replyComposerOpen) onReplyComplete();
-                  else onReply(activeSharedDraft.reply_to_message?.id?.trim() || email.messageID, true);
-                }}
-                style={replyButtonStyle(true)}
-              >
-                Draft 1
-              </button>
-            )}
             <button
               type="button"
               disabled={!replyAvailable}
@@ -3896,6 +3852,8 @@ const AttachedEmailThreadCard: React.FC<{
               onSelectionTextBoxRequest={onSelectionTextBoxRequest ? (selection) => { const durable = durableSelection(selection); if (durable) onSelectionTextBoxRequest(durable[0], selection.quote); } : undefined}
               onSelectionNodeRequest={onSelectionNodeRequest ? (selection) => { const durable = durableSelection(selection); if (durable) onSelectionNodeRequest(durable[0], selection.quote); } : undefined}
               onMessageTextBoxRequest={onMessageTextBoxRequest ? (providerMessageID) => { const internalMessageID = internalMessageIDForProvider(providerMessageID); if (!internalMessageID) { onError("email_message_id_missing"); return; } onMessageTextBoxRequest(internalMessageID); } : undefined}
+              replyInTextBox={Boolean(onReplyTextBoxRequest)}
+              onReplyTextBoxRequest={onReplyTextBoxRequest}
               messageAccents={messageAccents}
             />
           </div>
@@ -4000,6 +3958,9 @@ type LinkedEmailPreviewPaneProps = {
   onEmailSelectionChatRequest?: (messageID: string, selection: EmailSelectionDraft) => void;
   onEmailSelectionTextBoxRequest?: (messageID: string, quote: string) => void;
   onEmailSelectionNodeRequest?: (messageID: string, quote: string) => void;
+  initialReplyTargetMessageID?: string;
+  initialReplyAll?: boolean;
+  initialReplyRequestID?: number;
   onError: (message: string) => void;
 };
 
@@ -4021,22 +3982,41 @@ async function resolveLinkedEmailPreview(
   const directProjection = emails.find((email) => email.id.trim() === cleanMessageID);
   if (directProjection) return { email: directProjection, focusMessageID: directProjection.messageID };
 
-  const threadResults = await Promise.allSettled(emails.map(async (email) => ({
-    email,
-    messages: (await loadAttachedEmailThreadPreview(email, companyID, nodeID)).messages,
-  })));
-  for (const result of threadResults) {
-    if (result.status !== "fulfilled") continue;
-    const matchedMessage = result.value.messages.find((message) => message.email_message_id?.trim() === cleanMessageID);
-    if (matchedMessage) {
-      return { email: result.value.email, focusMessageID: matchedMessage.id };
+  const mailboxCandidates: Array<EditorAttachedEmail | null> = emails.length > 0 ? emails : [null];
+  if (nodeID.trim()) {
+    for (const candidate of mailboxCandidates) {
+      const emailThreadID = candidate?.emailThreadID?.trim() ?? "";
+      if (!emailThreadID) continue;
+      try {
+        const message = await getNodeEmailMessage(companyID, nodeID, emailThreadID, cleanMessageID);
+        const emailMessageID = message.email_message_id?.trim() ?? "";
+        if (!emailMessageID) throw new Error("email_message_id_missing");
+        return {
+          email: {
+            ...(candidate ?? {
+              id: `linked-email:${cleanMessageID}`,
+              messageID: message.id,
+              emailMessageID,
+              attachedTimestamp: "",
+              subject: message.subject || "(no subject)",
+            }),
+            messageID: message.id,
+            emailMessageID,
+            threadID: message.thread_id?.trim() || candidate?.threadID,
+            subject: message.subject || candidate?.subject || "(no subject)",
+            snippet: message.snippet || candidate?.snippet,
+            from: formatAddressList(message.from) || candidate?.from,
+            date: message.date ?? candidate?.date,
+          },
+          focusMessageID: message.id,
+        };
+      } catch {
+        // Try the next Node-attached thread before using mailbox access.
+      }
     }
   }
-
-  const mailboxCandidates: Array<EditorAttachedEmail | null> = emails.length > 0 ? emails : [null];
   const attemptedScopes = new Set<string>();
   for (const candidate of mailboxCandidates) {
-    if (candidate?.collaborationID?.trim()) continue;
     const mailboxScope = resolveEditorEmailMailboxScope(candidate?.sharedInboxID, candidate?.accountEmail);
     const scopeKey = `${mailboxScope.sharedInboxID ?? ""}\u0000${mailboxScope.accountEmail ?? ""}`;
     if (attemptedScopes.has(scopeKey)) continue;
@@ -4054,8 +4034,8 @@ async function resolveLinkedEmailPreview(
             attachedTimestamp: "",
             subject: message.subject || "(no subject)",
           }),
-          collaborationID: undefined,
-          emailThreadID: undefined,
+          collaborationID: candidate?.collaborationID,
+          emailThreadID: candidate?.emailThreadID,
           messageID: message.id,
           emailMessageID,
           threadID: message.thread_id?.trim() || candidate?.threadID,
@@ -4097,12 +4077,24 @@ export const LinkedEmailPreviewPane: React.FC<LinkedEmailPreviewPaneProps> = ({
   onEmailSelectionChatRequest,
   onEmailSelectionTextBoxRequest,
   onEmailSelectionNodeRequest,
+  initialReplyTargetMessageID,
+  initialReplyAll = false,
+  initialReplyRequestID = 0,
   onError,
 }) => {
   const [resolvedPreview, setResolvedPreview] = useState<ResolvedLinkedEmailPreview | null>(null);
   const [resolving, setResolving] = useState(true);
   const [resolveError, setResolveError] = useState("");
   const [resolveRequestID, setResolveRequestID] = useState(0);
+  const resolutionScopeKey = useMemo(() => emails.map((email) => [
+    email.id,
+    email.messageID,
+    email.emailMessageID,
+    email.collaborationID ?? "",
+    email.emailThreadID ?? "",
+    email.sharedInboxID ?? "",
+    email.accountEmail ?? "",
+  ].join("\u0000")).join("\u0001"), [emails]);
 
   useEffect(() => {
     let cancelled = false;
@@ -4122,7 +4114,7 @@ export const LinkedEmailPreviewPane: React.FC<LinkedEmailPreviewPaneProps> = ({
         if (!cancelled) setResolving(false);
       });
     return () => { cancelled = true; };
-  }, [companyID, emails, messageID, nodeID, resolveRequestID]);
+  }, [companyID, messageID, nodeID, resolutionScopeKey, resolveRequestID]);
 
   return (
     <div data-node-linked-email-preview="true" className="editor-document-scroll" style={{ minWidth: 0, minHeight: 0, overflow: "visible", padding: 8, background: "#ffffff", ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
@@ -4142,6 +4134,7 @@ export const LinkedEmailPreviewPane: React.FC<LinkedEmailPreviewPaneProps> = ({
       {resolvedPreview && (
         <EmailConversationPane
           messageID={resolvedPreview.focusMessageID}
+          emailMessageID={resolvedPreview.email.emailMessageID}
           collaborationID={resolvedPreview.email.collaborationID}
           nodeID={nodeID}
           emailThreadID={resolvedPreview.email.emailThreadID}
@@ -4166,6 +4159,9 @@ export const LinkedEmailPreviewPane: React.FC<LinkedEmailPreviewPaneProps> = ({
           chatHighlightsByMessageID={chatHighlightsByMessageID}
           initialFocusMessageID={resolvedPreview.focusMessageID}
           initialFocusMessageRequestID={resolveRequestID + 1}
+          initialReplyTargetMessageID={initialReplyTargetMessageID}
+          initialReplyAll={initialReplyAll}
+          initialReplyRequestID={initialReplyRequestID}
           inlineExpansion
           singleMessageOnly
           onError={onError}
@@ -4178,7 +4174,7 @@ export const LinkedEmailPreviewPane: React.FC<LinkedEmailPreviewPaneProps> = ({
     </div>
   );
 };
-export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, nodeID = "", apiBase = "", companyID, currentUserID = "", companyUsers = [], attachmentRequestJSON, attachmentResourceType, attachmentResourceID, attachmentInformationID, attachmentEditorSurface, storageKey, tabbed = false, expandContent = false, editable, accent, surfaceText, strokeColor, ruleColor, selectedMessageID, focusMessageID, focusBlockID, focusMessageRequestID = 0, activeEmailSelection = null, emailHighlightRemovalRequest = null, chatHighlightsByMessageID = {}, onSelectMessage, onClearSelectedMessage, onRemoveEmail, onEmailSelectionChatRequest, onEmailSelectionTextBoxRequest, onEmailSelectionNodeRequest, onEmailMessageTextBoxRequest, onEmailMessageActivate, messageAccents = {}, onReplyEditorFocus, emailFocusExpanded = false, onRequestEmailFocusToggle, onError }) => {
+export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, nodeID = "", apiBase = "", companyID, currentUserID = "", companyUsers = [], attachmentRequestJSON, attachmentResourceType, attachmentResourceID, attachmentInformationID, attachmentEditorSurface, storageKey, tabbed = false, expandContent = false, editable, accent, surfaceText, strokeColor, ruleColor, selectedMessageID, focusMessageID, focusBlockID, focusMessageRequestID = 0, activeEmailSelection = null, emailHighlightRemovalRequest = null, chatHighlightsByMessageID = {}, onSelectMessage, onClearSelectedMessage, onRemoveEmail, onEmailSelectionChatRequest, onEmailSelectionTextBoxRequest, onEmailSelectionNodeRequest, onEmailMessageTextBoxRequest, onEmailReplyTextBoxRequest, onEmailMessageActivate, messageAccents = {}, onReplyEditorFocus, emailFocusExpanded = false, onRequestEmailFocusToggle, onError }) => {
   const [layout, setLayout] = useState<AttachedEmailPaneLayout>(() => readStoredAttachedEmailPaneLayout(storageKey));
   const [expandedThreadIDs, setExpandedThreadIDs] = useState<Set<string>>(() => new Set());
   const [draggingMessageID, setDraggingMessageID] = useState("");
@@ -4504,6 +4500,7 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
       onSelectionTextBoxRequest={onEmailSelectionTextBoxRequest}
       onSelectionNodeRequest={onEmailSelectionNodeRequest}
       onMessageTextBoxRequest={onEmailMessageTextBoxRequest}
+      onReplyTextBoxRequest={onEmailReplyTextBoxRequest}
       messageAccents={messageAccents}
     />
   );
@@ -4814,6 +4811,7 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
 
 type EmailConversationPaneProps = {
   messageID: string;
+  emailMessageID?: string;
   collaborationID?: string;
   nodeID?: string;
   emailThreadID?: string;
@@ -4840,6 +4838,8 @@ type EmailConversationPaneProps = {
   initialFocusMessageID?: string;
   initialFocusMessageRequestID?: number;
   initialReplyAll?: boolean;
+  initialReplyRequestID?: number;
+  replyInTextBox?: boolean;
   inlineExpansion?: boolean;
   singleMessageOnly?: boolean;
   onReplyComplete?: () => void;
@@ -4849,6 +4849,7 @@ type EmailConversationPaneProps = {
   onSelectionTextBoxRequest?: (selection: EmailSelectionDraft) => void;
   onSelectionNodeRequest?: (selection: EmailSelectionDraft) => void;
   onMessageTextBoxRequest?: (messageID: string) => void;
+  onReplyTextBoxRequest?: (sourceMessageID: string, targetMessageID: string, replyAll: boolean) => void;
   onMessageActivate?: (messageID: string) => void;
   messageAccents?: Record<string, string>;
 };
@@ -5591,8 +5592,22 @@ function estimateEditorBodyLineCount(value: string): number {
   return Math.max(1, normalized.split("\n").length);
 }
 
+function emailDraftEditorAttachments(draft: CommunicationsEmailDraft): EditorChatAttachment[] {
+  return (draft.attachments ?? []).map((link) => {
+    const attachmentID = link.attachment_id?.trim() || link.resource_attachment_id?.trim() || "";
+    return {
+      id: attachmentID,
+      attachmentID,
+      name: link.attachment?.original_filename?.trim() || "attachment",
+      type: link.attachment?.mime_type?.trim() || "application/octet-stream",
+      size: Number.isFinite(link.attachment?.byte_size) ? Math.max(0, Math.round(link.attachment?.byte_size ?? 0)) : 0,
+    };
+  }).filter((attachment) => attachment.id);
+}
+
 export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   messageID,
+  emailMessageID,
   collaborationID,
   nodeID = "",
   emailThreadID,
@@ -5619,6 +5634,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   initialFocusMessageID,
   initialFocusMessageRequestID = 0,
   initialReplyAll = false,
+  initialReplyRequestID = 0,
+  replyInTextBox = false,
   inlineExpansion = false,
   singleMessageOnly = false,
   onReplyComplete,
@@ -5627,6 +5644,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   onSelectionChatRequest,
   onSelectionTextBoxRequest,
   onSelectionNodeRequest,
+  onReplyTextBoxRequest,
   onMessageTextBoxRequest,
   onMessageActivate,
   messageAccents = {},
@@ -5669,6 +5687,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [sharedDraft, setSharedDraft] = useState<CommunicationsEmailDraft | null>(null);
+  const [personalDraft, setPersonalDraft] = useState<CommunicationsEmailDraft | null>(null);
+  const [draftScope, setDraftScope] = useState<"personal" | "shared" | "">("");
+  const [draftSaveStatus, setDraftSaveStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const [senderAccountDraft, setSenderAccountDraft] = useState(accountEmail?.trim() ?? "");
   const lastSharedDraftSavedFingerprintRef = useRef("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -5688,6 +5709,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const universalDraftEnabled = Boolean(collaborationID?.trim() && emailThreadID?.trim() && nodeID.trim());
   const applySharedDraft = useCallback((draft: CommunicationsEmailDraft) => {
     setSharedDraft(draft);
+    setDraftScope("shared");
     setSenderAccountDraft(draft.account_email?.trim() || accountEmail?.trim() || "");
     setToDraft(draft.to_recipients);
     setCcDraft(draft.cc_recipients);
@@ -5702,20 +5724,29 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     if (sourceProviderMessageID) setReplyTargetMessageID(sourceProviderMessageID);
   }, [accountEmail]);
 
+  const applyPersonalDraft = useCallback((draft: CommunicationsEmailDraft) => {
+    setPersonalDraft(draft);
+    setDraftScope("personal");
+    setSenderAccountDraft(draft.account_email?.trim() || accountEmail?.trim() || "");
+    setToDraft(draft.to_recipients);
+    setCcDraft(draft.cc_recipients);
+    setBccDraft(draft.bcc_recipients);
+    setSubjectDraft(draft.subject);
+    setBodyDraft(draft.body_editor_html);
+    setDraftAttachments(emailDraftEditorAttachments(draft));
+    setDraftAttachments(emailDraftEditorAttachments(draft));
+    lastSharedDraftSavedFingerprintRef.current = universalEmailDraftFingerprint({
+      sender: draft.account_email ?? "", to: draft.to_recipients, cc: draft.cc_recipients,
+      bcc: draft.bcc_recipients, subject: draft.subject, body: draft.body_editor_html,
+    });
+  }, [accountEmail]);
+
   useEffect(() => {
-    if (!universalDraftEnabled) {
-      setSharedDraft(null);
-      return;
-    }
-    let cancelled = false;
-    void listEmailDrafts(companyID, {}).then((drafts) => {
-      if (cancelled) return;
-      const activeDraft = drafts.find((draft) => draft.is_shared && draft.email_thread_id?.trim() === emailThreadID?.trim()) ?? null;
-      setSharedDraft(activeDraft);
-      if (activeDraft?.origin_node_id?.trim() === nodeID.trim()) applySharedDraft(activeDraft);
-    }).catch(() => undefined);
-    return () => { cancelled = true; };
-  }, [applySharedDraft, companyID, emailThreadID, nodeID, universalDraftEnabled]);
+    setSharedDraft(null);
+    setPersonalDraft(null);
+    setDraftScope("");
+    setDraftSaveStatus("idle");
+  }, [messageID, nodeID]);
 
   mailboxSignatureStateRef.current = mailboxSignatureState;
   replySubmissionIdentityRef.current = { messageID, replyTargetMessageID, scopeKey: mailboxSignatureScopeKey };
@@ -5762,10 +5793,6 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   }, [companyID, mailboxScope.accountEmail, mailboxScope.sharedInboxID, mailboxSignatureScopeKey]);
 
   useEffect(() => {
-    void loadMailboxSignature().catch(() => undefined);
-  }, [loadMailboxSignature]);
-
-  useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setStoredThreadDownloadStatus("complete");
@@ -5789,6 +5816,20 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setSelectionDraft(null);
     setEmailHighlightsByMessageID({ [messageID]: readStoredEmailLocalHighlights(messageID) });
     void (async () => {
+      if (singleMessageOnly) {
+        const cleanEmailThreadID = emailThreadID?.trim() ?? "";
+        const cleanEmailMessageID = emailMessageID?.trim() ?? "";
+        const payload = cleanEmailThreadID && cleanEmailMessageID && nodeID.trim()
+          ? await getNodeEmailMessage(companyID, nodeID, cleanEmailThreadID, cleanEmailMessageID)
+          : await getEmailMessage(messageID, companyID, mailboxScope.sharedInboxID, { accountEmail: mailboxScope.accountEmail });
+        if (cancelled) return;
+        setMessage(payload);
+        setThreadMessages([payload]);
+        setSentReplies(payload.local_replies ?? []);
+        setToDraft(formatAddressList(payload.reply_to?.length ? payload.reply_to : payload.from));
+        setSubjectDraft(replySubject(payload.subject));
+        return;
+      }
       const cleanEmailThreadID = emailThreadID?.trim() ?? "";
       const storedThread = cleanEmailThreadID && nodeID.trim()
         ? await getNodeEmailThread(companyID, nodeID, cleanEmailThreadID)
@@ -5810,7 +5851,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         storedDownload?.history_complete ?? true,
         storedDownload?.thread_id,
       ));
-      setThreadMessages(singleMessageOnly ? [payload] : immediateMessages.length ? immediateMessages : [payload]);
+      setThreadMessages(immediateMessages.length ? immediateMessages : [payload]);
       setSentReplies(payload.local_replies ?? []);
       setToDraft(formatAddressList(payload.reply_to?.length ? payload.reply_to : payload.from));
       setCcDraft("");
@@ -5818,7 +5859,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       setSubjectDraft(replySubject(payload.subject));
       setBodyDraft("");
 
-      if (singleMessageOnly || storedThread || collaborationThread) return;
+      if (storedThread || collaborationThread) return;
 
       const threadID = payload.thread_id?.trim();
       if (!threadID) return;
@@ -5867,7 +5908,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [collaborationID, companyID, emailThreadID, mailboxScope, messageID, nodeID, singleMessageOnly]);
+  }, [collaborationID, companyID, emailMessageID, emailThreadID, mailboxScope, messageID, nodeID, singleMessageOnly]);
 
 	useEffect(() => {
 		if (storedThreadDownloadStatus !== "downloading" || singleMessageOnly || replyTargetMessageID) return;
@@ -5932,23 +5973,27 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const recipients = parseEmailAddressDraft(toDraft);
   const ccRecipients = parseEmailAddressDraft(ccDraft);
   const bccRecipients = parseEmailAddressDraft(bccDraft);
-  const providerReplyAvailable = editable && !singleMessageOnly;
-  const replyEditingEnabled = providerReplyAvailable && !sending;
-  const canSend = replyEditingEnabled && Boolean(message) && Boolean(replyTargetMessageID) && (recipients.length + ccRecipients.length + bccRecipients.length) > 0 && subjectDraft.trim() && editorBodyHasEmailContent(bodyDraft);
+  const providerReplyAvailable = editable;
+  const replyActionEnabled = providerReplyAvailable && !sending;
+  const replyEditingEnabled = providerReplyAvailable && !sending && Boolean(draftScope);
+  const activeDraft = draftScope === "shared" ? sharedDraft : draftScope === "personal" ? personalDraft : null;
+  const canSend = replyEditingEnabled && Boolean(activeDraft) && draftSaveStatus !== "saving" && Boolean(message) && Boolean(replyTargetMessageID) && (recipients.length + ccRecipients.length + bccRecipients.length) > 0 && subjectDraft.trim() && editorBodyHasEmailContent(bodyDraft);
   const replyEditorLineCount = useMemo(() => estimateEditorBodyLineCount(bodyDraft), [bodyDraft]);
   const replyEditorMinHeight = inlineExpansion ? 112 : 138;
   const replyEditorMaxHeight = inlineExpansion ? 272 : 340;
   const replyEditorHeight = Math.min(replyEditorMaxHeight, replyEditorMinHeight + Math.max(0, replyEditorLineCount - 4) * 18);
+  const replyAttachmentResourceType: MangoAttachmentResourceType = activeDraft ? "email_draft" : attachmentResourceType;
   const replyAttachmentResourceID = useMemo(() => (
-    attachmentResourceID.trim()
+    activeDraft?.draft_id.trim()
+    || attachmentResourceID.trim()
     || messageID.trim()
-  ), [attachmentResourceID, messageID, nodeID]);
+  ), [activeDraft?.draft_id, attachmentResourceID, messageID]);
   const replyEditorImageAttachmentContext = attachmentRequestJSON && apiBase.trim() && companyID.trim() && replyAttachmentResourceID
     ? {
       requestJSON: attachmentRequestJSON,
       apiBase,
       companyID,
-      resourceType: attachmentResourceType,
+      resourceType: replyAttachmentResourceType,
       resourceID: replyAttachmentResourceID,
       informationID: attachmentInformationID?.trim() || undefined,
       editorSurface: attachmentEditorSurface,
@@ -6105,17 +6150,22 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
 
   const openUniversalDraft = useCallback(async (target: EmailMessage, replyAll: boolean) => {
     if (!universalDraftEnabled) return null;
-    if (sharedDraft) {
-      applySharedDraft(sharedDraft);
-      setReplyAllMode(replyAll);
-      return sharedDraft;
-    }
     const sourceMessageID = target.email_message_id?.trim() || "";
     if (!sourceMessageID) throw new Error("email_message_id_missing");
+    const existing = (await listEmailDrafts(companyID, {}, { refresh: true })).find((draft) => (
+      draft.is_shared
+      && draft.origin_node_id?.trim() === nodeID.trim()
+      && draft.source_message_id?.trim() === sourceMessageID
+    ));
+    if (existing) {
+      applySharedDraft(existing);
+      setReplyAllMode(replyAll);
+      return existing;
+    }
     const recipientDrafts = replyAll ? replyAllAddressDrafts(target, senderAccountDraft || accountEmail) : null;
     const saved = await saveEmailDraft({
       companyID,
-      draftID: `draft:reply:thread:${emailThreadID?.trim()}`,
+      draftID: `draft:reply:message:${sourceMessageID}:node:${nodeID.trim()}`,
       sharedInboxID: mailboxScope.sharedInboxID,
       accountEmail: mailboxScope.accountEmail,
       senderAccountEmail: senderAccountDraft || accountEmail,
@@ -6137,7 +6187,54 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     applySharedDraft(saved);
     setReplyAllMode(replyAll);
     return saved;
-  }, [accountEmail, applySharedDraft, bodyDraft, collaborationID, companyID, emailThreadID, mailboxScope.accountEmail, mailboxScope.sharedInboxID, message?.subject, nodeID, senderAccountDraft, sharedDraft, universalDraftEnabled]);
+  }, [accountEmail, applySharedDraft, bodyDraft, collaborationID, companyID, emailThreadID, mailboxScope.accountEmail, mailboxScope.sharedInboxID, message?.subject, nodeID, senderAccountDraft, universalDraftEnabled]);
+
+  const openPersonalDraft = useCallback(async (target: EmailMessage, replyAll: boolean) => {
+    const sourceMessageID = target.email_message_id?.trim() || "";
+    if (!sourceMessageID) throw new Error("email_message_id_missing");
+    const drafts = await listEmailDrafts(companyID, mailboxScope, { refresh: true });
+    const existing = drafts.find((draft) => !draft.is_shared && draft.source_message_id?.trim() === sourceMessageID);
+    if (existing) {
+      applyPersonalDraft(existing);
+      setReplyAllMode(replyAll);
+      return existing;
+    }
+    const recipientDrafts = replyAll ? replyAllAddressDrafts(target, senderAccountDraft || accountEmail) : null;
+    const accountKey = mailboxScope.sharedInboxID || mailboxScope.accountEmail || senderAccountDraft || accountEmail;
+    const saved = await saveEmailDraft({
+      companyID,
+      draftID: `draft:reply:message:${sourceMessageID}:user:${currentUserID.trim()}:account:${accountKey}`,
+      sharedInboxID: mailboxScope.sharedInboxID,
+      accountEmail: mailboxScope.accountEmail,
+      senderAccountEmail: senderAccountDraft || accountEmail,
+      kind: "reply",
+      sourceMessageID,
+      replyToMessageID: target.id,
+      to: recipientDrafts?.to ?? formatAddressList(target.reply_to?.length ? target.reply_to : target.from),
+      cc: recipientDrafts?.cc ?? "",
+      bcc: "",
+      subject: replySubject(target.subject || message?.subject || ""),
+      bodyEditorHTML: bodyDraft,
+      replyToMessage: target,
+    });
+    applyPersonalDraft(saved);
+    setReplyAllMode(replyAll);
+    return saved;
+  }, [accountEmail, applyPersonalDraft, bodyDraft, companyID, currentUserID, mailboxScope, message?.subject, senderAccountDraft]);
+
+  const chooseDraftScope = useCallback((scope: "personal" | "shared") => {
+    if (!replyTargetMessage) return;
+    setDraftSaveStatus("saving");
+    const request = scope === "shared"
+      ? openUniversalDraft(replyTargetMessage, replyAllMode)
+      : openPersonalDraft(replyTargetMessage, replyAllMode);
+    void request.then(() => setDraftSaveStatus("saved")).catch((cause) => {
+      setDraftSaveStatus("failed");
+      const nextError = cause instanceof Error ? cause.message : "failed_to_open_email_draft";
+      setError(nextError);
+      onError(nextError);
+    });
+  }, [onError, openPersonalDraft, openUniversalDraft, replyAllMode, replyTargetMessage]);
 
   useEffect(() => {
     const targetID = initialReplyTargetMessageID?.trim() ?? "";
@@ -6145,11 +6242,21 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       appliedInitialReplyTargetRef.current = "";
       return;
     }
-    const targetKey = `${messageID}:${targetID}:${initialReplyAll ? "all" : "reply"}`;
+    const targetKey = `${messageID}:${targetID}:${initialReplyAll ? "all" : "reply"}:${initialReplyRequestID}`;
     if (!editable || appliedInitialReplyTargetRef.current === targetKey) return;
     const target = displayThreadMessages.find((item) => item.id === targetID);
     if (!target) return;
     appliedInitialReplyTargetRef.current = targetKey;
+    if (replyInTextBox && onReplyTextBoxRequest) {
+      const sourceMessageID = target.email_message_id?.trim() || "";
+      if (!sourceMessageID) {
+        onError("email_message_id_missing");
+        return;
+      }
+      onReplyTextBoxRequest(sourceMessageID, target.id, initialReplyAll);
+      onReplyComplete?.();
+      return;
+    }
     setReplyTargetMessageID(target.id);
     setReplyAllMode(initialReplyAll);
     const replyDrafts = initialReplyAll ? replyAllAddressDrafts(target, accountEmail) : null;
@@ -6158,15 +6265,10 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setBccDraft("");
     setSubjectDraft(replySubject(target.subject || message?.subject || ""));
     ensureReplySignature(target.id);
-    if (universalDraftEnabled) {
-      void openUniversalDraft(target, initialReplyAll).catch((cause) => {
-        const nextError = cause instanceof Error ? cause.message : "failed_to_open_shared_email_draft";
-        setError(nextError);
-        onError(nextError);
-      });
-    }
+    setDraftScope("");
+    setDraftSaveStatus("idle");
     window.requestAnimationFrame(() => replyEditorControllerRef.current?.focus());
-  }, [accountEmail, displayThreadMessages, editable, ensureReplySignature, initialReplyAll, initialReplyTargetMessageID, message?.subject, messageID, onError, openUniversalDraft, universalDraftEnabled]);
+  }, [accountEmail, displayThreadMessages, editable, ensureReplySignature, initialReplyAll, initialReplyRequestID, initialReplyTargetMessageID, message?.subject, messageID, onError, onReplyComplete, onReplyTextBoxRequest, openUniversalDraft, replyInTextBox, universalDraftEnabled]);
 
   const readEmailSelectionDraft = useCallback((): EmailSelectionDraft | null => {
     if (!canUseEmailSelection) return null;
@@ -6260,7 +6362,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     void Promise.allSettled(incomingFiles.map((file) => uploadEditorAttachment(file, {
       requestJSON: attachmentRequestJSON,
       companyID,
-      resourceType: attachmentResourceType,
+      resourceType: replyAttachmentResourceType,
       resourceID: replyAttachmentResourceID,
       sourceKind: "email_outgoing",
       relationshipKind: "email_attachment",
@@ -6281,14 +6383,37 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         setError(nextError);
         onError(nextError);
       });
-  }, [apiBase, attachmentEditorSurface, attachmentInformationID, attachmentRequestJSON, attachmentResourceType, companyID, editable, messageID, onError, replyAttachmentResourceID, replyTargetMessageID]);
+  }, [apiBase, attachmentEditorSurface, attachmentInformationID, attachmentRequestJSON, companyID, editable, messageID, onError, replyAttachmentResourceID, replyAttachmentResourceType, replyTargetMessageID]);
 
   const removeEmailDraftAttachment = useCallback((attachmentID: string) => {
-    setDraftAttachments((current) => current.filter((attachment) => attachment.id !== attachmentID));
-  }, []);
+    const cleanAttachmentID = attachmentID.trim();
+    if (!cleanAttachmentID || !activeDraft || !attachmentRequestJSON) return;
+    void deleteMangoAttachmentPermanently(attachmentRequestJSON, {
+      companyID,
+      resourceType: "email_draft",
+      resourceID: activeDraft.draft_id,
+      attachmentID: cleanAttachmentID,
+    }).then(() => {
+      setDraftAttachments((current) => current.filter((attachment) => attachment.id !== cleanAttachmentID));
+    }).catch((cause) => {
+      const nextError = cause instanceof Error ? cause.message : "failed_to_remove_attachment";
+      setError(nextError);
+      onError(nextError);
+    });
+  }, [activeDraft, attachmentRequestJSON, companyID, onError]);
 
   const selectReplyTarget = useCallback((target: EmailMessage, replyAll = false) => {
-    if (!replyEditingEnabled) return;
+    if (!providerReplyAvailable || sending) return;
+    if (replyInTextBox && onReplyTextBoxRequest) {
+      const sourceMessageID = target.email_message_id?.trim() || "";
+      if (!sourceMessageID) {
+        onError("email_message_id_missing");
+        return;
+      }
+      onReplyTextBoxRequest(sourceMessageID, target.id, replyAll);
+      onReplyComplete?.();
+      return;
+    }
     if (replyTargetMessageID === target.id && replyAllMode === replyAll) {
       replySignatureSessionRef.current = null;
       setReplyTargetMessageID("");
@@ -6303,58 +6428,57 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setBccDraft("");
     setSubjectDraft(replySubject(target.subject || message?.subject || ""));
     ensureReplySignature(target.id);
-    if (universalDraftEnabled) {
-      void openUniversalDraft(target, replyAll).catch((cause) => {
-        const nextError = cause instanceof Error ? cause.message : "failed_to_open_shared_email_draft";
-        setError(nextError);
-        onError(nextError);
-      });
-    }
+    setDraftScope("");
+    setDraftSaveStatus("idle");
     window.requestAnimationFrame(() => replyEditorControllerRef.current?.focus());
-  }, [accountEmail, ensureReplySignature, message?.subject, onError, openUniversalDraft, replyAllMode, replyEditingEnabled, replyTargetMessageID, universalDraftEnabled]);
+  }, [accountEmail, ensureReplySignature, message?.subject, onError, onReplyComplete, onReplyTextBoxRequest, providerReplyAvailable, replyAllMode, replyInTextBox, replyTargetMessageID, sending]);
 
   useEffect(() => {
-    if (!universalDraftEnabled || !sharedDraft || !replyTargetMessage || sending) return undefined;
+    if (!activeDraft || !replyTargetMessage || sending) return undefined;
     const fingerprint = universalEmailDraftFingerprint({
       sender: senderAccountDraft, to: toDraft, cc: ccDraft, bcc: bccDraft, subject: subjectDraft, body: bodyDraft,
     });
     if (fingerprint === lastSharedDraftSavedFingerprintRef.current) return undefined;
+    setDraftSaveStatus("saving");
     const timer = window.setTimeout(() => {
       void saveEmailDraft({
         companyID,
-        draftID: sharedDraft.draft_id,
+        draftID: activeDraft.draft_id,
         sharedInboxID: mailboxScope.sharedInboxID,
         accountEmail: mailboxScope.accountEmail,
         senderAccountEmail: senderAccountDraft || accountEmail,
         kind: "reply",
-        sourceMessageID: sharedDraft.source_message_id,
-        replyToMessageID: sharedDraft.reply_to_message?.id,
+        sourceMessageID: activeDraft.source_message_id,
+        replyToMessageID: activeDraft.reply_to_message?.id,
         to: toDraft,
         cc: ccDraft,
         bcc: bccDraft,
         subject: subjectDraft,
         bodyEditorHTML: bodyDraft,
-        replyToMessage: sharedDraft.reply_to_message,
-        collaborationID: collaborationID?.trim(),
-        emailThreadID: emailThreadID?.trim(),
-        originNodeID: sharedDraft.origin_node_id,
-        sharedDraft: true,
-        revision: sharedDraft.revision ?? 0,
+        replyToMessage: activeDraft.reply_to_message,
+        collaborationID: draftScope === "shared" ? collaborationID?.trim() : undefined,
+        emailThreadID: draftScope === "shared" ? emailThreadID?.trim() : undefined,
+        originNodeID: draftScope === "shared" ? activeDraft.origin_node_id : undefined,
+        sharedDraft: draftScope === "shared",
+        revision: activeDraft.revision ?? 0,
       }).then((saved) => {
         lastSharedDraftSavedFingerprintRef.current = fingerprint;
-        setSharedDraft(saved);
+        if (draftScope === "shared") setSharedDraft(saved);
+        else setPersonalDraft(saved);
+        setDraftSaveStatus("saved");
       }).catch((cause) => {
-        const nextError = cause instanceof Error ? cause.message : "failed_to_save_shared_email_draft";
+        setDraftSaveStatus("failed");
+        const nextError = cause instanceof Error ? cause.message : "failed_to_save_email_draft";
         setError(nextError);
         onError(nextError);
       });
-    }, 600);
+    }, 500);
     return () => window.clearTimeout(timer);
-  }, [accountEmail, bccDraft, bodyDraft, ccDraft, collaborationID, companyID, emailThreadID, mailboxScope.accountEmail, mailboxScope.sharedInboxID, onError, replyTargetMessage, senderAccountDraft, sending, sharedDraft, subjectDraft, toDraft, universalDraftEnabled]);
+  }, [accountEmail, activeDraft, bccDraft, bodyDraft, ccDraft, collaborationID, companyID, draftScope, emailThreadID, mailboxScope.accountEmail, mailboxScope.sharedInboxID, onError, replyTargetMessage, senderAccountDraft, sending, subjectDraft, toDraft]);
 
   const submitReply = () => {
     if (!message || !replyTargetMessage || !canSend) return;
-    if (universalDraftEnabled && sharedDraft && collaborationID?.trim()) {
+    if (draftScope === "shared" && sharedDraft && collaborationID?.trim()) {
       setSending(true);
       setError("");
       void saveEmailDraft({
@@ -6385,6 +6509,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       })).then((result) => {
         setSentReplies((current) => [...current, result.message]);
         setSharedDraft(null);
+        setDraftScope("");
         setReplyTargetMessageID("");
         setReplyAllMode(false);
         setBodyDraft("");
@@ -6459,7 +6584,12 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
           || latestIdentity.replyTargetMessageID !== submittedIdentity.replyTargetMessageID
           || latestIdentity.scopeKey !== submittedIdentity.scopeKey
         ) return;
+        if (personalDraft) {
+          void deleteEmailDraft(companyID, personalDraft.draft_id, mailboxScope).catch(() => undefined);
+        }
         setSentReplies((current) => [...current, sentWithTimestamp]);
+        setPersonalDraft(null);
+        setDraftScope("");
         setBodyDraft("");
         setDraftAttachments([]);
         replySignatureSessionRef.current = null;
@@ -6698,7 +6828,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                         )}
                         <button
                           type="button"
-                          disabled={!replyEditingEnabled}
+                          disabled={!replyActionEnabled}
                           onClick={() => selectReplyTarget(threadMessage, false)}
                           style={{
                             minHeight: 22,
@@ -6706,8 +6836,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                             borderRadius: 7,
                             background: EDITOR_NEU_SURFACE,
                             color: accent,
-                            cursor: replyEditingEnabled ? "pointer" : "default",
-                            opacity: replyEditingEnabled ? 1 : 0.46,
+                            cursor: replyActionEnabled ? "pointer" : "default",
+                            opacity: replyActionEnabled ? 1 : 0.46,
                             padding: "0 8px",
                             fontSize: 10.5,
                             fontWeight: 900,
@@ -6719,7 +6849,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                         </button>
                         <button
                           type="button"
-                          disabled={!replyEditingEnabled}
+                          disabled={!replyActionEnabled}
                           onClick={() => selectReplyTarget(threadMessage, true)}
                           style={{
                             minHeight: 22,
@@ -6727,8 +6857,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                             borderRadius: 7,
                             background: EDITOR_NEU_SURFACE,
                             color: accent,
-                            cursor: replyEditingEnabled ? "pointer" : "default",
-                            opacity: replyEditingEnabled ? 1 : 0.46,
+                            cursor: replyActionEnabled ? "pointer" : "default",
+                            opacity: replyActionEnabled ? 1 : 0.46,
                             padding: "0 8px",
                             fontSize: 10.5,
                             fontWeight: 900,
@@ -6949,6 +7079,24 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
             }}
           >
             <OutboundEmailUndoBanner />
+            <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+              {draftScope ? (
+                <span style={{ minHeight: 28, display: "inline-flex", alignItems: "center", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: accent, padding: "0 9px", fontSize: 10.5, fontWeight: 900, boxShadow: EDITOR_NEU_SHADOW }}>
+                  {draftScope === "shared" ? "Shared draft" : "My draft"}
+                </span>
+              ) : (
+                <>
+                  <span style={{ color: surfaceText, fontSize: 10.5, fontWeight: 900 }}>Create reply as</span>
+                  <button type="button" onClick={() => chooseDraftScope("personal")} style={{ minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: accent, cursor: "pointer", padding: "0 9px", fontSize: 10.5, fontWeight: 900, boxShadow: EDITOR_NEU_SHADOW }}>My draft</button>
+                  <button type="button" onClick={() => chooseDraftScope("shared")} style={{ minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: accent, cursor: universalDraftEnabled ? "pointer" : "default", opacity: universalDraftEnabled ? 1 : 0.46, padding: "0 9px", fontSize: 10.5, fontWeight: 900, boxShadow: EDITOR_NEU_SHADOW }} disabled={!universalDraftEnabled}>Shared draft</button>
+                </>
+              )}
+              {draftSaveStatus !== "idle" && (
+                <span role="status" style={{ color: draftSaveStatus === "failed" ? "#991b1b" : "rgba(100,116,139,0.82)", fontSize: 10, fontWeight: 850 }}>
+                  {draftSaveStatus === "saving" ? "Saving…" : draftSaveStatus === "saved" ? "Saved" : "Save failed"}
+                </span>
+              )}
+            </div>
             {!inlineExpansion && (
               <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 800 }}>
                 {replyAllMode ? "Replying all" : "Replying"} to {formatAddressList(replyTargetMessage.from) || "Unknown sender"} - {formatTimestamp(replyTargetMessage.date)}{formatEmailRelativeTime(replyTargetMessage.date) ? ` (${formatEmailRelativeTime(replyTargetMessage.date)})` : ""}
@@ -6956,7 +7104,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
             )}
             <div style={{ display: "grid", gridTemplateColumns: "42px minmax(0, 1fr)", gap: 6, alignItems: "center", color: surfaceText, fontSize: 10.5, fontWeight: 850 }}>
               <span>From:</span>
-              <input value={senderAccountDraft} disabled={!replyEditingEnabled} onChange={(event) => setSenderAccountDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
+              <input value={senderAccountDraft} readOnly aria-readonly="true" title="This draft uses one exact sending account" style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "rgba(248,250,252,0.94)", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
               <span>To:</span>
               <input value={toDraft} disabled={!replyEditingEnabled} onChange={(event) => setToDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
               <span>Cc:</span>

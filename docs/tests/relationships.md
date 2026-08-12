@@ -11,8 +11,8 @@
 9. Opening an email-selection chat preview creates no text box, email relationship, or chat relationship.
 10. Sending the first chat from an email-selection preview atomically links the chosen existing text box or creates the first Node-local text box, then creates the email-to-textbox relationship and chat, or creates none of them.
 11. Cancelling an unsent email-selection chat preview requires no relationship deletion because no relationship has been written.
-12. A Node-shared email draft belongs directly to one exact Node, one exact email thread, and one dedicated text box in that Node; the same thread may have a separate shared draft in another Node.
-13. The shared draft stores the exact Node and text-box identities directly and never creates a generic draft edge, resource registry, surrogate identity, participant table, or copied permission grant.
+12. A Node-shared email draft belongs directly to one exact Node, one exact email thread, and one exact source message. The reply UI reuses that message's existing Node-local text box or creates the one permitted typed email-to-text-box relationship first; the draft does not own a second text-box identity.
+13. The shared draft stores the exact Node, thread, and source-message identities directly and never creates a generic draft edge, resource registry, surrogate identity, participant table, copied permission grant, or separate draft-to-text-box relationship.
 14. Removing one Node's email relationship removes only that Node's typed email edge and leaves every other Node, stored thread/message, local shared draft, local text box, chat, and surviving attachment relationship unchanged.
 15. Email-to-Node, email-to-textbox, chat, and draft rules do not create a generic resource registry, surrogate identity, or untyped edge.
 16. An ordinary root chat or reply in an existing triage grouping uses only the normal Node text-box-chat insert and creates no email, relationship, permission, participant, or collaboration row.
@@ -20,7 +20,7 @@
 18. When a highlighted-email chat's exact message has no text-box relationship in the chosen Node, selecting an existing chat grouping atomically links that message to the grouping's exact existing text box and creates the chat without creating another text box.
 19. The Node email view uses the same atomic rule when the user chooses an existing text-box chat column; a failed relationship or chat write leaves both absent.
 
-Last updated: 2026-08-11
+Last updated: 2026-08-12
 
 # Process Story: One email thread can appear in several Nodes while message work stays Node-local
 
@@ -29,6 +29,8 @@ A stored email thread may have exact Node-wide `email_relationships` in several 
 Each newly completed message inherits every distinct Node-wide destination already used by that thread, but never inherits a text-box destination
 ↓
 Inside each Node, one exact message may link to one exact Node text box; the same message may link to a different text box in another Node
+↓
+Reply or Reply all opens that exact message's Node-local text box, while any shared draft remains keyed directly by the exact Node, thread, and source message
 ↓
 Opening a highlighted-email chat preview creates no relationship or resource
 ↓
@@ -40,7 +42,7 @@ Removing one Node's relationship leaves all other Node-local work and the stored
 ↓
 Every endpoint keeps its literal typed identity; no registry, surrogate identity, or generic untyped edge is introduced
 
-Last updated: 2026-08-10
+Last updated: 2026-08-12
 # Process Story: Policy inheritance follows typed parents without moving permissions into Explorer
 
 A permission or RACI resolver receives one exact resource type and ID

@@ -25,7 +25,9 @@ from email_drafts
 where company_id = $1::uuid
 	and deleted_timestamp is null
 	and shared_inbox_id = $2::uuid
-order by updated_timestamp desc, draft_id asc`, scope.companyID, scope.sharedInboxID)
+	and email_thread_id is null
+	and ($3='' or created_by_user_id = $3::uuid)
+order by updated_timestamp desc, draft_id asc`, scope.companyID, scope.sharedInboxID, cleanUUIDText(input.ParticipantUserID))
 	} else {
 		rows, err = r.db.Query(`
 select `+communicationsEmailDraftSelectColumns()+`
@@ -34,7 +36,9 @@ where company_id = $1::uuid
 	and deleted_timestamp is null
 	and personal_user_id = $2::uuid
 	and personal_account_email = $3
-order by updated_timestamp desc, draft_id asc`, scope.companyID, scope.personalUserID, scope.personalAccountEmail)
+	and email_thread_id is null
+	and ($4='' or created_by_user_id = $4::uuid)
+order by updated_timestamp desc, draft_id asc`, scope.companyID, scope.personalUserID, scope.personalAccountEmail, cleanUUIDText(input.ParticipantUserID))
 	}
 	if err != nil {
 		return nil, err
@@ -73,18 +77,22 @@ func (r *PostgresRepo) GetCommunicationsEmailDraft(input CommunicationsEmailDraf
 select `+communicationsEmailDraftSelectColumns()+`
 from email_drafts
 where company_id = $1::uuid
-	and draft_id = $2
-	and shared_inbox_id = $3::uuid
-	and deleted_timestamp is null`, scope.companyID, draftID, scope.sharedInboxID))
+		and draft_id = $2
+		and shared_inbox_id = $3::uuid
+		and email_thread_id is null
+		and ($4='' or created_by_user_id = $4::uuid)
+		and deleted_timestamp is null`, scope.companyID, draftID, scope.sharedInboxID, cleanUUIDText(input.ParticipantUserID)))
 	} else {
 		draft, err = scanCommunicationsEmailDraft(r.db.QueryRow(`
 select `+communicationsEmailDraftSelectColumns()+`
 from email_drafts
 where company_id = $1::uuid
 	and draft_id = $2
-	and personal_user_id = $3::uuid
-	and personal_account_email = $4
-	and deleted_timestamp is null`, scope.companyID, draftID, scope.personalUserID, scope.personalAccountEmail))
+		and personal_user_id = $3::uuid
+		and personal_account_email = $4
+		and email_thread_id is null
+		and ($5='' or created_by_user_id = $5::uuid)
+		and deleted_timestamp is null`, scope.companyID, draftID, scope.personalUserID, scope.personalAccountEmail, cleanUUIDText(input.ParticipantUserID)))
 	}
 	return draft, err
 }
@@ -154,6 +162,7 @@ on conflict(company_id,draft_id) do update set
  scheduled_send_timestamp=excluded.scheduled_send_timestamp,
  revision=email_drafts.revision+1,send_state='draft',updated_timestamp=now(),deleted_timestamp=null
 where email_drafts.email_thread_id is null
+	and email_drafts.created_by_user_id=excluded.created_by_user_id
  and email_drafts.email_account_type=excluded.email_account_type
  and email_drafts.personal_user_id is not distinct from excluded.personal_user_id
  and email_drafts.personal_account_email is not distinct from excluded.personal_account_email
@@ -199,7 +208,9 @@ where company_id = $1::uuid
 	and personal_user_id is not distinct from nullif($4, '')::uuid
 	and personal_account_email is not distinct from nullif($5, '')
 	and shared_inbox_id is not distinct from nullif($6, '')::uuid
-	and deleted_timestamp is null`, scope.companyID, draftID, updatedByUserID, scope.personalUserID, scope.personalAccountEmail, scope.sharedInboxID)
+	and email_thread_id is null
+	and created_by_user_id = nullif($7, '')::uuid
+	and deleted_timestamp is null`, scope.companyID, draftID, updatedByUserID, scope.personalUserID, scope.personalAccountEmail, scope.sharedInboxID, cleanUUIDText(input.ParticipantUserID))
 	if err != nil {
 		return err
 	}

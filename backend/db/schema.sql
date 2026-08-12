@@ -3806,7 +3806,7 @@ create table if not exists email_drafts (
   foreign key (company_id,email_thread_id)
     references email_threads(company_id,email_thread_id) on delete cascade,
   foreign key (company_id,origin_node_id)
-    references nodes(company_id,node_id) on delete set null (origin_node_id),
+    references nodes(company_id,node_id) on delete cascade,
   foreign key (company_id,source_email_message_id)
     references email_messages(company_id,email_message_id) on delete restrict,
   foreign key (company_id,sent_email_message_id)
@@ -3832,7 +3832,9 @@ create table if not exists email_drafts (
     sender_account_email='' or sender_account_email=lower(btrim(sender_account_email))
   ),
   constraint email_drafts_origin_node_chk check (
-    origin_node_id is null or email_thread_id is not null
+    (email_thread_id is null and origin_node_id is null and created_by_user_id is not null)
+    or
+    (email_thread_id is not null and origin_node_id is not null and source_email_message_id is not null)
   ),
   constraint email_drafts_kind_chk check (kind in ('compose','reply','forward')),
   constraint email_drafts_revision_chk check (revision > 0),
@@ -3845,9 +3847,18 @@ create index if not exists idx_email_drafts_personal_updated
 create index if not exists idx_email_drafts_shared_updated
   on email_drafts(company_id,shared_inbox_id,updated_timestamp desc)
   where deleted_timestamp is null and email_account_type='shared_email_account';
-create unique index if not exists idx_email_drafts_active_thread
-  on email_drafts(company_id,email_thread_id)
-  where deleted_timestamp is null and email_thread_id is not null;
+drop index if exists idx_email_drafts_active_thread;
+create unique index if not exists idx_email_drafts_active_shared_message_node
+  on email_drafts(company_id,origin_node_id,source_email_message_id)
+  where deleted_timestamp is null and email_thread_id is not null and send_state in ('draft','sending');
+create unique index if not exists idx_email_drafts_active_personal_message_personal_account
+  on email_drafts(company_id,created_by_user_id,source_email_message_id,personal_user_id,personal_account_email)
+  where deleted_timestamp is null and email_thread_id is null and source_email_message_id is not null
+    and email_account_type='personal_email_account' and send_state in ('draft','sending');
+create unique index if not exists idx_email_drafts_active_personal_message_shared_inbox
+  on email_drafts(company_id,created_by_user_id,source_email_message_id,shared_inbox_id)
+  where deleted_timestamp is null and email_thread_id is null and source_email_message_id is not null
+    and email_account_type='shared_email_account' and send_state in ('draft','sending');
 create index if not exists idx_email_drafts_origin_node
   on email_drafts(company_id,origin_node_id,updated_timestamp desc)
   where deleted_timestamp is null and origin_node_id is not null;
