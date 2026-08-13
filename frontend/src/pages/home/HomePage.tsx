@@ -23,11 +23,10 @@ import {
   fetchCommunicationsAuthURL,
   fetchCommunicationsWorkspaceResources,
   fetchCommunicationsStatus,
-	getEmailCollaborationThread,
 	getCommunicationsArchiveJob,
   markCommunicationsArchiveJobsStaleForMailboxChange,
   getEmailMessage,
-  getEmailMessageWithStoredThread,
+  getStoredEmailThread,
   getEmailSignature,
   invalidateCommunicationsCache,
   invalidateCommunicationsMailboxCache,
@@ -2544,9 +2543,12 @@ export function HomePage({
     const selectedCollaborationID = selectedListMessage?.id === selectedMessageID
       ? selectedListMessage.collaboration_id?.trim() ?? ""
       : "";
+    const storedEmailThreadID = selectedListMessage?.id === selectedMessageID
+      ? selectedListMessage.email_thread_id?.trim() ?? ""
+      : "";
     const providerMailAvailable = canLoadMailForView(activeViewID)
       && (!selectedListMessage || emailMessageUsesActiveProviderScope(selectedListMessage, activeViewID, currentUserID, activeMailAccountEmail));
-    if (!providerMailAvailable && !selectedCollaborationID) {
+    if (!providerMailAvailable && !storedEmailThreadID) {
       setLoadingDetail(false);
       setSelectedThreadMessages([]);
       return;
@@ -2565,52 +2567,36 @@ export function HomePage({
     const loadDetail = async () => {
       setLoadingDetail(true);
       setError("");
-      let collaborationThreadMessages: EmailMessage[] = [];
       try {
-        if (selectedCollaborationID) {
-          try {
-            const collaborationThread = await getEmailCollaborationThread(companyID, selectedCollaborationID);
-            if (cancelled) return;
-            collaborationThreadMessages = collaborationThread.messages.map((threadMessage) => ({
-              ...threadMessage,
-              collaboration_id: selectedCollaborationID,
-              collaboration_node_id: selectedListMessage?.collaboration_node_id,
-              collaboration_information_id: selectedListMessage?.collaboration_information_id,
-              collaboration_scope_type: selectedListMessage?.collaboration_scope_type,
-              collaboration_personal_user_id: selectedListMessage?.collaboration_personal_user_id,
-              collaboration_shared_inbox_id: selectedListMessage?.collaboration_shared_inbox_id,
-              collaboration_account_email: selectedListMessage?.collaboration_account_email,
-              client_source_scope_key: selectedListMessage?.client_source_scope_key,
-            }));
-            const collaborationSelected = collaborationThreadMessages.find((candidate) => candidate.id === selectedMessageID)
-              ?? collaborationThreadMessages[0]
-              ?? null;
-            if (collaborationSelected) {
-              const selectedSnapshot = selectedListMessage?.id === collaborationSelected.id
-                ? {
-                  ...selectedListMessage,
-                  ...collaborationSelected,
-                  unread: selectedListMessage.unread,
-                  starred: selectedListMessage.starred,
-                  folders: selectedListMessage.folders ?? collaborationSelected.folders,
-                  folder_ids: selectedListMessage.folder_ids ?? collaborationSelected.folder_ids,
-                }
-                : collaborationSelected;
-              selectedMessageRef.current = selectedSnapshot;
-              setSelectedMessage(selectedSnapshot);
-              setSelectedThreadMessages(mergeEmailThreadDetailMessages(collaborationThreadMessages, [selectedSnapshot]));
-            }
-            return;
-          } catch (collaborationThreadError) {
-            if (!providerMailAvailable) throw collaborationThreadError;
-          }
-        }
-        const storedResult = await getEmailMessageWithStoredThread(selectedMessageID, companyID, sharedInboxID, {
-          userID: currentUserID,
-          accountEmail: activeMailAccountEmail,
-        });
+        const storedThreadMessages = storedEmailThreadID
+          ? (await getStoredEmailThread(storedEmailThreadID, companyID, sharedInboxID, {
+            userID: currentUserID,
+            accountEmail: activeMailAccountEmail,
+          })).messages.map((threadMessage) => withLocalReadOverlay({
+            ...threadMessage,
+            collaboration_id: selectedCollaborationID || undefined,
+            collaboration_node_id: selectedListMessage?.collaboration_node_id,
+            collaboration_information_id: selectedListMessage?.collaboration_information_id,
+            collaboration_scope_type: selectedListMessage?.collaboration_scope_type,
+            collaboration_personal_user_id: selectedListMessage?.collaboration_personal_user_id,
+            collaboration_shared_inbox_id: selectedListMessage?.collaboration_shared_inbox_id,
+            collaboration_account_email: selectedListMessage?.collaboration_account_email,
+          }))
+          : [];
         if (cancelled) return;
-        const selected = withLocalReadOverlay(storedResult.message);
+        const storedSelected = storedThreadMessages.find((candidate) => (
+          candidate.id === selectedMessageID ||
+          Boolean(selectedListMessage?.email_message_id && candidate.email_message_id === selectedListMessage.email_message_id)
+        )) ?? null;
+        const loadedSelected = storedEmailThreadID ? storedSelected : (providerMailAvailable
+          ? withLocalReadOverlay(await getEmailMessage(selectedMessageID, companyID, sharedInboxID, {
+            userID: currentUserID,
+            accountEmail: activeMailAccountEmail,
+          }))
+          : null);
+        if (cancelled) return;
+        if (!loadedSelected) throw new Error("stored_email_message_not_found");
+        const selected = withLocalReadOverlay(loadedSelected);
         const existingSelected = selectedMessageRef.current;
         const selectedWithCollaboration = existingSelected?.id === selected.id ? {
           ...existingSelected,
@@ -2624,31 +2610,23 @@ export function HomePage({
           ...selectedWithCollaboration,
           local_replies: existingSelected.local_replies,
         } : selectedWithCollaboration;
-        const storedThreadMessages = (storedResult.storedThread?.messages ?? [selectedWithLocalReplies]).map(withLocalReadOverlay);
+        const completeThreadMessages = storedThreadMessages.length > 0 ? storedThreadMessages : [selectedWithLocalReplies];
+        selectedMessageRef.current = selectedWithLocalReplies;
         setSelectedMessage(selectedWithLocalReplies);
         setSelectedThreadMessages(mergeEmailThreadDetailMessages(
-          storedThreadMessages,
+          completeThreadMessages,
           [selectedWithLocalReplies],
         ));
-        if (storedThreadMessages.length > 1) {
+        if (completeThreadMessages.length > 1) {
           const selectedThreadKey = emailThreadKey(selectedWithLocalReplies);
           setMessages((previous) => previous.map((message) => (
             emailThreadKey(message) === selectedThreadKey
-              ? { ...message, thread_message_count: storedThreadMessages.length }
+              ? { ...message, thread_message_count: completeThreadMessages.length }
               : message
           )));
         }
       } catch (detailError) {
         if (cancelled) return;
-        const collaborationFallback = selectedMessageRef.current;
-        if (collaborationFallback?.id === selectedMessageID && collaborationFallback.collaboration_id?.trim()) {
-          setSelectedMessage(collaborationFallback);
-          setSelectedThreadMessages(mergeEmailThreadDetailMessages(
-            collaborationThreadMessages,
-            [collaborationFallback],
-          ));
-          return;
-        }
         if (isEmailAccessExpiredError(detailError)) {
           void handleEmailAccessExpired(detailError);
           return;
@@ -4692,15 +4670,19 @@ export function HomePage({
 
     void (async () => {
       try {
-        const storedResult = await getEmailMessageWithStoredThread(entity.entityID, companyID, previewSharedInboxID, { accountEmail: previewAccountEmail });
+        const emailThreadID = entity.emailThreadID?.trim() ?? "";
+        if (!emailThreadID) throw new Error("stored_email_thread_id_missing");
+        const storedThread = await getStoredEmailThread(emailThreadID, companyID, previewSharedInboxID, { accountEmail: previewAccountEmail });
         if (emailReferencePreviewRequestIDRef.current !== requestID) return;
-        const loadedSelected = storedResult.message;
-        const threadMessages = mergeEmailThreadDetailMessages(storedResult.storedThread?.messages ?? [], [loadedSelected]);
-        const selectedMessage = threadMessages.find((message) => message.id === loadedSelected.id) ?? loadedSelected;
-        const threadID = loadedSelected.thread_id?.trim() || entity.emailThreadID?.trim() || "";
+        const threadMessages = mergeEmailThreadDetailMessages(storedThread.messages, []);
+        const selectedMessage = threadMessages.find((message) => (
+          message.id === entity.entityID || Boolean(entity.emailMessageID && message.email_message_id === entity.emailMessageID)
+        ));
+        if (!selectedMessage) throw new Error("stored_email_message_not_found");
+        const threadID = selectedMessage.thread_id?.trim() || "";
         const matchingCollaborations = await listEmailCollaborations({
           companyID,
-          messageID: loadedSelected.id,
+          messageID: selectedMessage.id,
           threadID,
           sharedInboxID: previewSharedInboxID,
           accountEmail: previewAccountEmail,
@@ -4739,28 +4721,8 @@ export function HomePage({
   const loadReferencedEmailMessageBody = useCallback(async (messageID: string): Promise<EmailMessage | null> => {
     const preview = emailReferencePreview;
     if (!preview) return null;
-    try {
-      const loaded = await getEmailMessage(messageID, companyID, preview.sharedInboxID, { accountEmail: preview.accountEmail });
-      if (emailReferencePreviewRequestIDRef.current !== preview.requestID) return null;
-      setEmailReferencePreview((current) => {
-        if (current?.requestID !== preview.requestID) return current;
-        const threadMessages = mergeEmailThreadDetailMessages(current.threadMessages, [loaded]);
-        return {
-          ...current,
-          message: current.message?.id === loaded.id ? mergeEmailDetailMessage(current.message, loaded) : current.message,
-          threadMessages,
-        };
-      });
-      return loaded;
-    } catch (cause) {
-      if (emailReferencePreviewRequestIDRef.current === preview.requestID) {
-        setEmailReferencePreview((current) => current?.requestID === preview.requestID
-          ? { ...current, error: formatError(cause, "Unable to load the email message") }
-          : current);
-      }
-      return null;
-    }
-  }, [companyID, emailReferencePreview]);
+    return preview.threadMessages.find((message) => message.id === messageID || message.email_message_id === messageID) ?? null;
+  }, [emailReferencePreview]);
 
   const openEmailPickerEntity = useCallback((entity: EditorEntityLink) => {
     if (entity.entityType === "email_message") {

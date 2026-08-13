@@ -460,6 +460,8 @@ func (s *Server) handleCommunicationsMyLogicGateByID(w http.ResponseWriter, r *h
 
 func emailMessageSnapshotFromNylas(message NylasMessage) domain.EmailMessageSnapshot {
 	return domain.EmailMessageSnapshot{
+		EmailMessageID:   strings.TrimSpace(message.EmailMessageID),
+		EmailThreadID:    strings.TrimSpace(message.EmailThreadID),
 		ID:               strings.TrimSpace(message.ID),
 		ThreadID:         strings.TrimSpace(message.ThreadID),
 		Subject:          strings.TrimSpace(message.Subject),

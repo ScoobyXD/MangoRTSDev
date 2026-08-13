@@ -309,7 +309,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
               entityID,
               label: message.subject?.trim() || "(no subject)",
               emailMessageID: message.email_message_id?.trim() || undefined,
-              emailThreadID: message.thread_id?.trim() || undefined,
+              emailThreadID: message.email_thread_id?.trim() || undefined,
               emailAccountEmail,
               emailMailbox: "all" as const,
               emailMessage: message,
@@ -340,7 +340,8 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
     setError("");
     try {
       let selectedEntity: UniversalEntityPickerEntity = entity;
-      if (entity.entityType === "email_message" && entity.emailMessage && !entity.emailMessage.email_message_id?.trim()) {
+      if (entity.entityType === "email_message" && entity.emailMessage &&
+        (!entity.emailMessage.email_message_id?.trim() || !entity.emailMessage.email_thread_id?.trim())) {
         const storedMessage = await ensureEmailMessageIngested(entity.entityID, {
           companyID: props.companyID,
           sharedInboxID: entity.emailSharedInboxID,
@@ -349,7 +350,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
         selectedEntity = {
           ...entity,
           emailMessageID: storedMessage.email_message_id?.trim() || undefined,
-          emailThreadID: storedMessage.thread_id?.trim() || entity.emailThreadID,
+          emailThreadID: storedMessage.email_thread_id?.trim() || undefined,
           emailMessage: storedMessage,
         };
       }
@@ -367,7 +368,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
       entityID: message.id,
       label: message.subject?.trim() || "(no subject)",
       emailMessageID: message.email_message_id?.trim() || undefined,
-      emailThreadID: message.thread_id?.trim() || undefined,
+      emailThreadID: message.email_thread_id?.trim() || undefined,
       emailAccountEmail: accountEmail,
       emailMailbox: mailbox,
       emailMessage: message,

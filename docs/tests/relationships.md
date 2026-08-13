@@ -50,6 +50,7 @@ Later membership changes do not rewrite that Huddle Node, while current source d
 18. When a highlighted-email chat's exact message has no text-box relationship in the chosen Node, selecting an existing chat grouping atomically links that message to the grouping's exact existing text box and creates the chat without creating another text box.
 19. The Node email view uses the same atomic rule when the user chooses an existing text-box chat column; a failed relationship or chat write leaves both absent.
 20. The email-draft scope cutover deletes only obsolete draft rows that cannot name their required exact owner or exact Node and source message, and retires only their typed `email_draft` attachment relationships before deletion; it never invents an endpoint or changes a valid email relationship.
+21. A stored-thread reader or inline email reference carries the exact internal `email_thread_id`; a provider message ID or provider thread ID never selects a durable Mango thread.
 
 Last updated: 2026-08-12
 
@@ -164,7 +165,7 @@ Last updated: 2026-08-06
 
 A user opens the universal picker from a resource editor, the Node header's default `##` linker, or a selected My Triage/Shared Triage email
 ↓
-Single-hashtag reference mode opens or inserts the chosen exact Node, Logic Gate, Project, or email message without creating a relationship
+Single-hashtag reference mode opens or inserts the chosen exact Node, Logic Gate, Project, or email message without creating a relationship; an email reference carries its exact internal message and thread identities
 ↓
 Double-hashtag link mode keeps the source and chosen result's unchanged canonical types and IDs and permits only the documented pair
 ↓

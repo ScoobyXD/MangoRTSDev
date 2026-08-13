@@ -383,6 +383,7 @@ func (s *Server) handleCommunicationsStoredMessages(w http.ResponseWriter, r *ht
 	for _, stored := range storedMessages {
 		message := nylasMessageFromStoredSnapshot(stored.Message)
 		message.EmailMessageID = stored.EmailMessageID
+		message.EmailThreadID = stored.EmailThreadID
 		if message.ThreadID == "" {
 			message.ThreadID = stored.ProviderThreadID
 		}
@@ -409,7 +410,7 @@ func (s *Server) handleCommunicationsStoredMessages(w http.ResponseWriter, r *ht
 
 func nylasMessageFromStoredSnapshot(message domain.EmailMessageSnapshot) NylasMessage {
 	return NylasMessage{
-		EmailMessageID: message.EmailMessageID, ID: message.ID, ThreadID: message.ThreadID,
+		EmailMessageID: message.EmailMessageID, EmailThreadID: message.EmailThreadID, ID: message.ID, ThreadID: message.ThreadID,
 		Subject: message.Subject, Snippet: message.Snippet, Body: message.Body, Date: message.Date,
 		Unread: message.Unread, Starred: message.Starred,
 		From: nylasAddressesFromStoredSnapshots(message.From), To: nylasAddressesFromStoredSnapshots(message.To),
@@ -579,6 +580,35 @@ func (s *Server) handleCommunicationsThreadByID(w http.ResponseWriter, r *http.R
 	if !requireCompanyAccess(w, r, companyID) {
 		return
 	}
+	if isTruthyQueryValue(r.URL.Query().Get("stored")) {
+		scope, scopeOK := s.resolveCommunicationsEmailScope(
+			w, actor, companyID, sharedInboxID, r.URL.Query().Get("account_email"), store.EntityPermissionEdit,
+		)
+		if !scopeOK {
+			return
+		}
+		thread, err := s.repo.GetCommunicationsEmailThreadContext(r.Context(), companyID, threadID)
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrInvalid) || (err == nil && !storedEmailThreadMatchesScope(thread, scope)) {
+			writeError(w, http.StatusNotFound, "stored_email_thread_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_load_stored_email_thread")
+			return
+		}
+		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
+			"thread": map[string]any{
+				"email_thread_id":     thread.EmailThreadID,
+				"thread_id":           thread.ProviderThreadID,
+				"messages":            storedEmailThreadMessages(thread),
+				"history_complete":    thread.HistoryComplete,
+				"download_status":     thread.DownloadStatus,
+				"fetched_at":          thread.FetchedAt,
+				"last_download_error": thread.LastDownloadError,
+			},
+		})
+		return
+	}
 	connection, ok := s.requireCommunicationsConnection(w, r, actor, companyID, sharedInboxID, store.EntityPermissionEdit)
 	if !ok {
 		return
@@ -704,37 +734,6 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 
 	switch r.Method {
 	case http.MethodGet:
-		if isTruthyQueryValue(r.URL.Query().Get("include_stored_thread")) {
-			personalUserID, personalAccountEmail := actor.User.UserID, connection.AccountEmail
-			if sharedInboxID != "" {
-				personalUserID, personalAccountEmail = "", ""
-			}
-			stored, storedErr := s.repo.GetCommunicationsEmailMessageForScope(store.CommunicationsEmailMessageLookupInput{
-				CompanyID: companyID, PersonalUserID: personalUserID,
-				PersonalAccountEmail: personalAccountEmail, SharedInboxID: sharedInboxID,
-				AccountEmail: connection.AccountEmail, ProviderMessageID: messageID,
-			})
-			if storedErr == nil {
-				messages := storedEmailThreadMessages(stored.Thread)
-				writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
-					"message": stored.Message,
-					"stored_thread": map[string]any{
-						"email_thread_id":     stored.Thread.EmailThreadID,
-						"thread_id":           stored.Thread.ProviderThreadID,
-						"messages":            messages,
-						"history_complete":    stored.Thread.HistoryComplete,
-						"download_status":     stored.Thread.DownloadStatus,
-						"fetched_at":          stored.Thread.FetchedAt,
-						"last_download_error": stored.Thread.LastDownloadError,
-					},
-				})
-				return
-			}
-			if !errors.Is(storedErr, store.ErrNotFound) {
-				writeError(w, http.StatusInternalServerError, "failed_to_load_stored_email_thread")
-				return
-			}
-		}
 		message, err := s.communicationsMessage(r.Context(), connection, messageID)
 		if err != nil {
 			s.writeNylasError(w, r, connection, err)
@@ -819,6 +818,7 @@ func (s *Server) ingestCommunicationsMessage(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	message.EmailMessageID = internalEmailMessageIDForProvider(thread, message.ID)
+	message.EmailThreadID = thread.EmailThreadID
 	if message.EmailMessageID == "" {
 		writeError(w, http.StatusInternalServerError, "failed_to_ingest_email_message")
 		return

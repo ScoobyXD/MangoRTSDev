@@ -15,7 +15,7 @@
 13. Sending a chat adds it to the open rail before the network request starts; success keeps that exact optimistic row, while failure removes it and restores the complete composer for retry.
 14. A later chat for an already-linked exact email message uses the normal Node text-box-chat create command only; it does not repeat email, relationship, permission, participant, or collaboration setup.
 15. Every saved highlighted-email chat renders its exact stored quote and offsets as a lasting highlight in the email body.
-16. Selecting a conversation with a durable stored thread shows every exact stored message once in stored message order; the left mailbox list remains one row for that thread.
+16. Selecting a conversation passes its exact durable `email_thread_id` into the same stored-thread read used by the Node email column and shows every related `email_messages` row once in `message_order`; the left mailbox list remains one row for that thread.
 17. A quoted copy inside one message body is never a substitute for another stored message; every `email_messages` row remains its own visible card.
 
 Last updated: 2026-08-12

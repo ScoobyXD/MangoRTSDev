@@ -68,6 +68,7 @@ test("collaboration snapshots project stable row identity and source annotations
   const source = collaboration("collaboration-1", {
     scope_type: "shared",
     shared_inbox_id: " shared-1 ",
+    email_thread_id: " durable-thread-1 ",
     provider_thread_id: " provider-thread-1 ",
     latest_message_id: " latest-message-1 ",
     latest_message: message("   ", { thread_id: "   ", subject: "Latest snapshot" }),
@@ -76,6 +77,7 @@ test("collaboration snapshots project stable row identity and source annotations
   const projected = emailCollaborationListMessage(source);
   assert.equal(projected?.id, "latest-message-1");
   assert.equal(projected?.thread_id, "provider-thread-1");
+  assert.equal(projected?.email_thread_id, "durable-thread-1");
   assert.equal(projected?.collaboration_id, "collaboration-1");
   assert.equal(projected?.collaboration_node_id, "node-collaboration-1");
   assert.equal(projected?.collaboration_information_id, "information-collaboration-1");

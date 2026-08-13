@@ -319,7 +319,6 @@ func (r *MemoryRepo) GetCommunicationsEmailMessageForScope(input CommunicationsE
 				return CommunicationsEmailMessageLookupResult{
 					Message:  message.Message,
 					Provider: thread.Provider,
-					Thread:   cloneCommunicationsEmailThread(thread),
 				}, nil
 			}
 		}

@@ -483,6 +483,7 @@ export type CommunicationsEmailCollaborationParticipant = {
 export type CommunicationsEmailCollaboration = {
   company_id: string;
   collaboration_id: string;
+  email_thread_id?: string;
   node_id: string;
   attached_email_information_id: string;
   scope_type?: "personal" | "shared" | string;
@@ -566,11 +567,6 @@ export type CommunicationsStoredEmailThread = {
   download_status?: "partial" | "downloading" | "complete" | "failed";
   fetched_at?: string;
   last_download_error?: string;
-};
-
-export type CommunicationsEmailMessageStoredThreadResult = {
-  message: EmailMessage;
-  storedThread: CommunicationsStoredEmailThread | null;
 };
 
 export type SendCommunicationsEmailCollaborationDraftResult = {
@@ -832,37 +828,33 @@ export async function getEmailMessage(
   }
 }
 
-export async function getEmailMessageWithStoredThread(
-  messageID: string,
+export async function getStoredEmailThread(
+  emailThreadID: string,
   companyID: string,
   sharedInboxID?: string,
   localReplyScope: Pick<LocalEmailReplyScope, "userID" | "accountEmail"> = {},
-): Promise<CommunicationsEmailMessageStoredThreadResult> {
+): Promise<CommunicationsStoredEmailThread> {
   ensureCommunicationsCacheAuthScope();
-  const cleanMessageID = messageID.trim();
-  if (!cleanMessageID || !companyID.trim()) throw new Error("email_message_scope_required");
+  const cleanEmailThreadID = emailThreadID.trim();
+  if (!cleanEmailThreadID || !companyID.trim()) throw new Error("email_thread_scope_required");
   const replyScope: LocalEmailReplyScope = { companyID, sharedInboxID, ...localReplyScope };
-  const queryParams = new URLSearchParams({ include_stored_thread: "true" });
+  const queryParams = new URLSearchParams({ stored: "true" });
   queryParams.set("company_id", companyID.trim());
   if (sharedInboxID?.trim()) queryParams.set("shared_inbox_id", sharedInboxID.trim());
   if (!sharedInboxID?.trim() && localReplyScope.accountEmail?.trim()) {
     queryParams.set("account_email", localReplyScope.accountEmail.trim().toLowerCase());
   }
-  const payload = await apiFetchJSON<{ message: EmailMessage; stored_thread?: CommunicationsStoredEmailThread | null }>(
-    `/v1/communications/messages/${encodeURIComponent(cleanMessageID)}?${queryParams.toString()}`,
+  const payload = await apiFetchJSON<{ thread?: CommunicationsStoredEmailThread | null }>(
+    `/v1/communications/threads/${encodeURIComponent(cleanEmailThreadID)}?${queryParams.toString()}`,
   );
   const hydrate = (message: EmailMessage): EmailMessage => hydrateEmailMessageLocalReplies(
     cloneMessage({ ...message, detail_fetched: true }),
     replyScope,
   );
-  const storedThread = payload.stored_thread ? {
-    ...cloneCommunicationsStoredEmailThread(payload.stored_thread),
-    messages: (payload.stored_thread.messages ?? []).map(hydrate),
-  } : null;
-  const selected = storedThread?.messages.find((message) => message.id === cleanMessageID) ?? hydrate(payload.message);
+  if (!payload.thread) throw new Error("stored_email_thread_not_found");
   return {
-    message: cloneMessage(selected),
-    storedThread,
+    ...cloneCommunicationsStoredEmailThread(payload.thread),
+    messages: (payload.thread.messages ?? []).map(hydrate),
   };
 }
 

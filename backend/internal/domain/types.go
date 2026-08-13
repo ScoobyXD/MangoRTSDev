@@ -505,6 +505,7 @@ type EmailAttachmentSnapshot struct {
 
 type EmailMessageSnapshot struct {
 	EmailMessageID   string                    `json:"email_message_id,omitempty"`
+	EmailThreadID    string                    `json:"email_thread_id,omitempty"`
 	MessageOrder     *int                      `json:"message_order,omitempty"`
 	ID               string                    `json:"id"`
 	ThreadID         string                    `json:"thread_id,omitempty"`

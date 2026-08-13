@@ -138,6 +138,7 @@ export function emailCollaborationListMessage(collaboration: CommunicationsEmail
     ...snapshot,
     id: messageID,
     thread_id: snapshot.thread_id?.trim() || collaboration.provider_thread_id?.trim() || undefined,
+    email_thread_id: collaboration.email_thread_id?.trim() || snapshot.email_thread_id?.trim() || undefined,
     collaboration_id: collaboration.collaboration_id,
     collaboration_node_id: collaboration.node_id,
     collaboration_information_id: collaboration.attached_email_information_id,
