@@ -6,7 +6,7 @@ import {
   getEmailCollaboration,
   listEmailDrafts,
   saveEmailDraft,
-  sendEmailCollaborationDraft,
+  sendSharedEmailDraft,
 } from "../../../../frontend/src/modules/communications/communicationsApi.js";
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -82,7 +82,7 @@ test("collaboration API preserves exact shared-inbox source identity", async () 
   }
 });
 
-test("shared draft API serializes collaboration identity and optimistic revision", async () => {
+test("shared draft API serializes direct Node identity and optimistic revision", async () => {
   const calls: Array<{ path: string; method: string; body?: Record<string, unknown> }> = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -103,7 +103,8 @@ test("shared draft API serializes collaboration identity and optimistic revision
         bcc_recipients: "",
         subject: "Re: Review",
         body_editor_html: "Updated together",
-        collaboration_id: "collaboration-1",
+        origin_node_id: "node-1",
+        email_thread_id: "thread-1",
         is_shared: true,
         revision: 8,
         created_timestamp: "2026-07-13T12:00:00Z",
@@ -124,14 +125,17 @@ test("shared draft API serializes collaboration identity and optimistic revision
       bcc: "",
       subject: "Re: Review",
       bodyEditorHTML: "Updated together",
-      collaborationID: " collaboration-1 ",
+      originNodeID: " node-1 ",
+      emailThreadID: " thread-1 ",
       sharedDraft: true,
       revision: 7.9,
     });
 
     assert.equal(calls[0]?.path, "/v1/communications/drafts/draft%3Ashared%2F1");
     assert.equal(calls[0]?.method, "PUT");
-    assert.equal(calls[0]?.body?.collaboration_id, "collaboration-1");
+    assert.equal(calls[0]?.body?.collaboration_id, undefined);
+    assert.equal(calls[0]?.body?.origin_node_id, "node-1");
+    assert.equal(calls[0]?.body?.email_thread_id, "thread-1");
     assert.equal(calls[0]?.body?.is_shared, true);
     assert.equal(calls[0]?.body?.revision, 7);
     assert.equal(calls[0]?.body?.source_message_id, "message-1");
@@ -142,7 +146,7 @@ test("shared draft API serializes collaboration identity and optimistic revision
   }
 });
 
-test("shared draft send uses immutable collaboration source after the universal undo window", async (t: any) => {
+test("shared draft send uses the exact draft after the universal undo window", async (t: any) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const originalFetch = globalThis.fetch;
   const calls: Array<{ path: string; method: string; body?: Record<string, unknown> }> = [];
@@ -168,9 +172,8 @@ test("shared draft send uses immutable collaboration source after the universal 
   };
 
   try {
-    const pendingSend = sendEmailCollaborationDraft({
+    const pendingSend = sendSharedEmailDraft({
       companyID: " company/1 ",
-      collaborationID: " collaboration/1 ",
       draftID: " draft:shared/1 ",
       expectedRevision: 9.8,
     });
@@ -179,24 +182,22 @@ test("shared draft send uses immutable collaboration source after the universal 
     const sent = await pendingSend;
 
     assert.deepEqual(calls, [{
-      path: "/v1/communications/email-collaborations/collaboration%2F1/drafts/draft%3Ashared%2F1/send?company_id=company%2F1",
+      path: "/v1/communications/drafts/draft%3Ashared%2F1/send?company_id=company%2F1",
       method: "POST",
       body: { expected_revision: 9 },
     }]);
-    assert.equal(sent.collaboration_id, "collaboration/1");
     assert.equal(sent.draft_id, "draft:shared/1");
     assert.equal(sent.draft_deleted, false);
     sent.message.from![0]!.name = "Local sender";
     assert.equal(responsePayload.message.from[0]!.name, "Sender");
 
     await assert.rejects(
-      () => sendEmailCollaborationDraft({
+      () => sendSharedEmailDraft({
         companyID: "company/1",
-        collaborationID: "collaboration/1",
         draftID: "draft:shared/1",
         expectedRevision: 0,
       }),
-      /email_collaboration_draft_send_input_required/,
+      /email_draft_send_input_required/,
     );
     assert.equal(calls.length, 1);
   } finally {

@@ -29,6 +29,7 @@ func TestEmailDraftSourceRetentionSchemaContract(t *testing.T) {
 		"send_idempotency_key text",
 		"sent_email_message_id uuid",
 		"origin_node_id uuid",
+		"is_shared boolean not null default false",
 	} {
 		if !strings.Contains(strings.Join(strings.Fields(draftTable), " "), strings.Join(strings.Fields(required), " ")) {
 			t.Fatalf("final email_drafts missing retention/safe-send contract %q", required)
@@ -39,6 +40,28 @@ func TestEmailDraftSourceRetentionSchemaContract(t *testing.T) {
 		if strings.Contains(runtime, forbidden) {
 			t.Fatalf("draft request path contains schema DDL %q", forbidden)
 		}
+	}
+}
+
+func TestEmailDraftIdentityMigrationUsesDirectSharedFlag(t *testing.T) {
+	raw, err := os.ReadFile("../../db/migrations/20260813_email_draft_identity.sql")
+	if err != nil {
+		t.Fatalf("read email draft identity migration: %v", err)
+	}
+	normalized := strings.Join(strings.Fields(strings.ToLower(string(raw))), " ")
+	for _, required := range []string{
+		"add column if not exists is_shared boolean",
+		"alter column is_shared set not null",
+		"drop column if exists collaboration_id",
+		"not is_shared and email_thread_id is null",
+		"is_shared and email_thread_id is not null",
+	} {
+		if !strings.Contains(normalized, strings.Join(strings.Fields(required), " ")) {
+			t.Errorf("email draft identity migration missing %q", required)
+		}
+	}
+	if strings.Contains(normalized, "attachment_relationships") {
+		t.Error("email draft identity migration must not rewrite attachment relationships")
 	}
 }
 

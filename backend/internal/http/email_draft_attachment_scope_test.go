@@ -16,7 +16,7 @@ import (
 
 func TestEmailCollaborationSharedDraftAttachmentMutationsFreezeWhileSending(t *testing.T) {
 	const companyID = "11111111-1111-4111-8111-701300000317"
-	repo, owner, collaboration, draft, _ := seedEmailCollaborationSharedDraftRecoveryHTTPTest(t, companyID, "attachment-freeze")
+	repo, owner, _, draft, _ := seedEmailCollaborationSharedDraftRecoveryHTTPTest(t, companyID, "attachment-freeze")
 	server := NewServer(repo)
 	resourceID := communicationsEmailDraftResourceID(draft)
 	listPath := "/v1/resources/email_draft/" + resourceID + "/attachments?company_id=" + url.QueryEscape(companyID)
@@ -27,7 +27,7 @@ func TestEmailCollaborationSharedDraftAttachmentMutationsFreezeWhileSending(t *t
 		t.Fatalf("pre-send attachment read status=%d body=%s", listBefore.Code, listBefore.Body.String())
 	}
 	if _, err := repo.ClaimCommunicationsEmailDraftSend(store.CommunicationsEmailDraftSendClaimInput{
-		CompanyID: companyID, DraftID: draft.DraftID, CollaborationID: collaboration.CollaborationID,
+		CompanyID: companyID, DraftID: draft.DraftID,
 		ParticipantUserID: owner.UserID, ExpectedRevision: draft.Revision, ProviderGrantID: "shared-send-recovery-grant-attachment-freeze",
 	}); err != nil {
 		t.Fatalf("claim shared draft send: %v", err)

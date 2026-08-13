@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"miraeopus/backend/internal/domain"
 )
@@ -134,13 +135,77 @@ func TestMemoryCommunicationsEmailDraftPersonalScopeIsExactAndImmutable(t *testi
 	}
 }
 
+func TestMemoryCommunicationsEmailReplyRequiresStoredSourceMessage(t *testing.T) {
+	repo, companyID, owner, _, _, _ := newEmailDraftScopeStoreFixture(t)
+
+	_, err := repo.UpsertCommunicationsEmailDraft(CommunicationsEmailDraftInput{
+		CompanyID: companyID, DraftID: "draft:reply:not-ingested", PersonalUserID: owner.UserID,
+		PersonalAccountEmail: "owner-a@example.com", CreatedByUserID: owner.UserID,
+		UpdatedByUserID: owner.UserID, Kind: "reply", AccountEmail: "owner-a@example.com",
+	})
+	if !errors.Is(err, ErrEmailReplySourceNotIngested) {
+		t.Fatalf("reply without source error = %v, want ErrEmailReplySourceNotIngested", err)
+	}
+
+	_, err = repo.UpsertCommunicationsEmailDraft(CommunicationsEmailDraftInput{
+		CompanyID: companyID, DraftID: "draft:reply:missing-source", PersonalUserID: owner.UserID,
+		PersonalAccountEmail: "owner-a@example.com", CreatedByUserID: owner.UserID,
+		UpdatedByUserID: owner.UserID, Kind: "reply", AccountEmail: "owner-a@example.com",
+		SourceMessageID: "67676767-6767-4767-8767-676767676799",
+	})
+	if !errors.Is(err, ErrEmailDraftSourceNotFound) {
+		t.Fatalf("reply with unknown source error = %v, want ErrEmailDraftSourceNotFound", err)
+	}
+}
+
+func TestMemorySharedEmailDraftListUsesFiveItemCursorPages(t *testing.T) {
+	repo, companyID, owner, _, _, _ := newEmailDraftScopeStoreFixture(t)
+	node, err := repo.CreateNode(companyID, "Paged drafts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseTime := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+	repo.mu.Lock()
+	for index := 0; index < 6; index++ {
+		draftID := "paged-shared-" + string(rune('a'+index))
+		repo.emailDrafts[communicationsEmailDraftKey(companyID, draftID)] = domain.CommunicationsEmailDraft{
+			CompanyID: companyID, DraftID: draftID, IsShared: true, OriginNodeID: node.NodeID,
+			SourceMessageID:  "67676767-6767-4767-8767-67676767679" + string(rune('0'+index)),
+			SendState:        communicationsEmailDraftSendStateDraft,
+			UpdatedTimestamp: baseTime.Add(-time.Duration(index) * time.Minute),
+		}
+	}
+	repo.mu.Unlock()
+
+	first, err := repo.ListCommunicationsEmailDrafts(CommunicationsEmailDraftListInput{
+		CompanyID: companyID, ParticipantUserID: owner.UserID, Limit: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 5 || first[0].DraftID != "paged-shared-a" || first[4].DraftID != "paged-shared-e" {
+		t.Fatalf("first page = %+v", first)
+	}
+	before := first[4].UpdatedTimestamp
+	second, err := repo.ListCommunicationsEmailDrafts(CommunicationsEmailDraftListInput{
+		CompanyID: companyID, ParticipantUserID: owner.UserID, Limit: 5,
+		BeforeUpdatedAt: &before, BeforeDraftID: first[4].DraftID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second) != 1 || second[0].DraftID != "paged-shared-f" {
+		t.Fatalf("second page = %+v", second)
+	}
+}
+
 func TestMemoryCommunicationsEmailDraftSharedScopeIsExactAndImmutable(t *testing.T) {
 	repo, companyID, owner, _, sharedA, sharedB := newEmailDraftScopeStoreFixture(t)
 	const draftID = "draft:shared:scope-guard"
 
 	if _, err := repo.UpsertCommunicationsEmailDraft(CommunicationsEmailDraftInput{
 		CompanyID: companyID, DraftID: draftID, SharedInboxID: sharedA.FolderID,
-		CreatedByUserID: owner.UserID, UpdatedByUserID: owner.UserID, Kind: "reply", AccountEmail: "shared-a@example.com", Subject: "shared A",
+		CreatedByUserID: owner.UserID, UpdatedByUserID: owner.UserID, Kind: "compose", AccountEmail: "shared-a@example.com", Subject: "shared A",
 	}); err != nil {
 		t.Fatalf("create shared draft: %v", err)
 	}
@@ -154,7 +219,7 @@ func TestMemoryCommunicationsEmailDraftSharedScopeIsExactAndImmutable(t *testing
 	}
 	if _, err := repo.UpsertCommunicationsEmailDraft(CommunicationsEmailDraftInput{
 		CompanyID: companyID, DraftID: draftID, SharedInboxID: sharedB.FolderID,
-		CreatedByUserID: owner.UserID, UpdatedByUserID: owner.UserID, Kind: "reply", Subject: "takeover",
+		CreatedByUserID: owner.UserID, UpdatedByUserID: owner.UserID, Kind: "compose", Subject: "takeover",
 	}); !errors.Is(err, ErrAlreadyExists) {
 		t.Fatalf("cross-inbox upsert error = %v, want ErrAlreadyExists", err)
 	}

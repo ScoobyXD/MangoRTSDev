@@ -209,10 +209,6 @@ func (s *Server) handleCommunicationsEmailCollaborationByID(w http.ResponseWrite
 	}
 	collaborationID := strings.TrimSpace(parts[0])
 	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
-	if r.Method == http.MethodPost && len(parts) == 4 && parts[1] == "drafts" && parts[3] == "send" {
-		s.handleCommunicationsEmailCollaborationDraftSend(w, r, actor, companyID, collaborationID, strings.TrimSpace(parts[2]))
-		return
-	}
 	if len(parts) == 2 && parts[1] == "participants" {
 		// Participation is a permanent side effect of an accepted chat mention,
 		// never a standalone grant operation.

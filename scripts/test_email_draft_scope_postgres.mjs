@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const migration = join(repoRoot, "backend", "db", "migrations", "20260811_zzz_email_draft_scope.sql");
+const scopeMigration = join(repoRoot, "backend", "db", "migrations", "20260811_zzz_email_draft_scope.sql");
+const identityMigration = join(repoRoot, "backend", "db", "migrations", "20260813_email_draft_identity.sql");
 
 function postgresBinary(name) {
   const suffix = process.platform === "win32" ? ".exe" : "";
@@ -100,6 +101,7 @@ try {
       email_thread_id uuid,
       origin_node_id uuid,
       source_email_message_id uuid,
+      collaboration_id uuid,
       email_account_type text not null,
       personal_user_id uuid,
       personal_account_email text,
@@ -150,7 +152,8 @@ try {
     from email_drafts;
   `);
 
-  runFile(migration);
+  runFile(scopeMigration);
+  runFile(identityMigration);
   expectScalar("select count(*) from email_drafts", "2", "only exact-scope drafts retained");
   expectScalar("select count(*) from email_drafts where draft_id='valid-personal' and created_by_user_id=personal_user_id", "1", "personal owner backfilled");
   expectScalar("select count(*) from email_drafts where draft_id='valid-shared'", "1", "valid shared draft retained");
@@ -158,8 +161,12 @@ try {
   expectScalar("select count(*) from attachment_relationships where deleted_timestamp is not null", "3", "ambiguous draft attachment links retired");
   expectScalar("select count(*) from pg_constraint where conrelid='email_drafts'::regclass and conname='email_drafts_origin_node_fkey'", "0", "legacy set-null Node foreign key removed");
   expectScalar("select confdeltype from pg_constraint where conrelid='email_drafts'::regclass and conname='email_drafts_company_id_origin_node_id_fkey'", "c", "Node foreign key cascades");
+  expectScalar("select count(*) from email_drafts where draft_id='valid-personal' and not is_shared", "1", "personal draft classified directly");
+  expectScalar("select count(*) from email_drafts where draft_id='valid-shared' and is_shared", "1", "shared draft classified directly");
+  expectScalar("select count(*) from pg_attribute where attrelid='email_drafts'::regclass and attname='collaboration_id' and attnum>0 and not attisdropped", "0", "obsolete collaboration identity removed");
 
-  runFile(migration);
+  runFile(scopeMigration);
+  runFile(identityMigration);
   expectScalar("select count(*) from email_drafts", "2", "migration rerun is idempotent");
   expectScalar("select count(*) from attachment_relationships where deleted_timestamp is not null", "3", "migration rerun preserves retired links");
   console.log(`Email draft scope disposable PostgreSQL contract passed on server_version_num=${version}`);

@@ -30,14 +30,36 @@ func (r *MemoryRepo) ListCommunicationsEmailDrafts(input CommunicationsEmailDraf
 		}
 		if participantOnly {
 			include = r.isSharedEmailDraftParticipantLocked(draft, input.ParticipantUserID)
+			if nodeID := cleanUUIDText(input.OriginNodeID); nodeID != "" {
+				include = include && draft.OriginNodeID == nodeID
+			}
+			if sourceID := cleanUUIDText(input.SourceMessageID); sourceID != "" {
+				include = include && draft.SourceMessageID == sourceID
+			}
+			if input.BeforeUpdatedAt != nil {
+				include = include && (draft.UpdatedTimestamp.Before(*input.BeforeUpdatedAt) ||
+					(draft.UpdatedTimestamp.Equal(*input.BeforeUpdatedAt) && draft.DraftID > strings.TrimSpace(input.BeforeDraftID)))
+			}
 		}
 		if include {
 			drafts = append(drafts, draft)
 		}
 	}
 	sort.SliceStable(drafts, func(i, j int) bool {
+		if drafts[i].UpdatedTimestamp.Equal(drafts[j].UpdatedTimestamp) {
+			return drafts[i].DraftID < drafts[j].DraftID
+		}
 		return drafts[i].UpdatedTimestamp.After(drafts[j].UpdatedTimestamp)
 	})
+	if participantOnly {
+		limit := input.Limit
+		if limit <= 0 || limit > 5 {
+			limit = 5
+		}
+		if len(drafts) > limit {
+			drafts = drafts[:limit]
+		}
+	}
 	return drafts, nil
 }
 
@@ -113,7 +135,7 @@ func (r *MemoryRepo) UpsertCommunicationsEmailDraft(input CommunicationsEmailDra
 			}
 		}
 		if !found {
-			return domain.CommunicationsEmailDraft{}, ErrNotFound
+			return domain.CommunicationsEmailDraft{}, ErrEmailDraftSourceNotFound
 		}
 	}
 	now := time.Now().UTC()
@@ -260,6 +282,9 @@ func normalizeCommunicationsEmailDraftInput(input CommunicationsEmailDraftInput)
 	if kind == "" {
 		return domain.CommunicationsEmailDraft{}, ErrInvalid
 	}
+	if kind == "reply" && cleanUUIDText(input.SourceMessageID) == "" {
+		return domain.CommunicationsEmailDraft{}, ErrEmailReplySourceNotIngested
+	}
 	replyToJSON := strings.TrimSpace(input.ReplyToMessageJSON)
 	if replyToJSON == "" {
 		replyToJSON = "{}"
@@ -276,7 +301,7 @@ func normalizeCommunicationsEmailDraftInput(input CommunicationsEmailDraftInput)
 		CreatedByUserID:        strings.TrimSpace(input.CreatedByUserID),
 		UpdatedByUserID:        strings.TrimSpace(input.UpdatedByUserID),
 		Kind:                   kind,
-		SourceMessageID:        strings.TrimSpace(input.SourceMessageID),
+		SourceMessageID:        cleanUUIDText(input.SourceMessageID),
 		AccountEmail:           normalizeEmail(input.AccountEmail),
 		ToRecipients:           input.ToRecipients,
 		CcRecipients:           input.CcRecipients,

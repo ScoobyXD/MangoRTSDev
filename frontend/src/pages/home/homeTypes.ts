@@ -32,7 +32,8 @@ export type ComposeState = {
   body: string;
   attachments: ComposeAttachment[];
   scheduledAt: string;
-  collaborationID: string;
+	originNodeID: string;
+	emailThreadID: string;
   sharedDraft: boolean;
   draftRevision: number;
 };
@@ -61,7 +62,8 @@ export const emptyCompose: ComposeState = {
   body: "",
   attachments: [],
   scheduledAt: "",
-  collaborationID: "",
+	originNodeID: "",
+	emailThreadID: "",
   sharedDraft: false,
   draftRevision: 0,
 };

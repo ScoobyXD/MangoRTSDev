@@ -843,6 +843,49 @@ func (r *PostgresRepo) deleteNodeProjection(input NodeProjectionDeleteInput) err
 		return ErrNotFound
 	}
 
+	var emailThreadID string
+	var resourceTextboxID sql.NullString
+	relationshipErr := tx.QueryRowContext(ctx, `
+select email_thread_id::text,resource_textbox_id
+from email_relationships
+where company_id=$1::uuid and email_relationship_id=$3::uuid
+  and resource_type='node' and resource_id=$2::uuid
+for update`, companyID, nodeID, informationID).Scan(&emailThreadID, &resourceTextboxID)
+	if relationshipErr != nil && !errors.Is(relationshipErr, sql.ErrNoRows) {
+		return relationshipErr
+	}
+	if relationshipErr == nil {
+		var hasNodeWork bool
+		if err := tx.QueryRowContext(ctx, `
+select
+  $4::text is not null
+  or exists (
+    select 1 from email_relationships relationship
+    where relationship.company_id=$1::uuid and relationship.email_thread_id=$3::uuid
+      and relationship.resource_type='node' and relationship.resource_id=$2::uuid
+      and relationship.resource_textbox_id is not null
+  )
+  or exists (
+    select 1 from node_textbox_chats chat
+    join email_messages message on message.company_id=chat.company_id
+      and message.email_message_id=chat.selection_email_message_id
+    where chat.company_id=$1::uuid and chat.node_id=$2::uuid
+      and chat.selection_source='email' and chat.deleted_timestamp is null
+      and message.email_thread_id=$3::uuid
+  )
+  or exists (
+    select 1 from email_drafts draft
+    where draft.company_id=$1::uuid and draft.origin_node_id=$2::uuid
+      and draft.email_thread_id=$3::uuid and draft.is_shared
+      and draft.deleted_timestamp is null and draft.send_state in ('draft','sending')
+  )`, companyID, nodeID, emailThreadID, resourceTextboxID).Scan(&hasNodeWork); err != nil {
+			return err
+		}
+		if hasNodeWork {
+			return ErrEmailRelationshipHasNodeWork
+		}
+	}
+
 	deletedRelationship, err := tx.ExecContext(ctx, `
 delete from email_relationships
 where company_id=$1::uuid

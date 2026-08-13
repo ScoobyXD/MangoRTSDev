@@ -604,7 +604,6 @@ type CommunicationsEmailDraft struct {
 	PersonalUserID           string     `json:"personal_user_id,omitempty"`
 	PersonalAccountEmail     string     `json:"personal_account_email,omitempty"`
 	SharedInboxID            string     `json:"shared_inbox_id,omitempty"`
-	CollaborationID          string     `json:"collaboration_id,omitempty"`
 	EmailThreadID            string     `json:"email_thread_id,omitempty"`
 	OriginNodeID             string     `json:"origin_node_id,omitempty"`
 	IsShared                 bool       `json:"is_shared,omitempty"`

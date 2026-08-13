@@ -2,10 +2,61 @@ package store
 
 import (
 	"context"
+	"errors"
 	"miraeopus/backend/internal/domain"
 	"slices"
 	"testing"
 )
+
+func TestMemoryEmailRelationshipRemovalStopsWhenNodeThreadHasSharedDraft(t *testing.T) {
+	repo := NewMemoryRepo()
+	const companyID = "11111111-1111-4111-8111-701300000091"
+	repo.EnsureCompany(companyID, "Protected email relationship")
+	owner := mustEmailCollaborationGuardUser(t, repo, companyID, "protected-email-owner", "owner@example.com", domain.RoleCompanyUser)
+	if _, err := repo.UpsertUserEmailConnection(UserEmailConnectionInput{
+		UserID: owner.UserID, Provider: "google", AccountEmail: owner.Email,
+		GrantID: "protected-email-grant", Status: "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	created, err := repo.EnsureCommunicationsEmailCollaboration(context.Background(), CommunicationsEmailCollaborationEnsureInput{
+		CompanyID: companyID, PersonalUserID: owner.UserID, PersonalAccountEmail: owner.Email,
+		AccountEmail: owner.Email, Provider: "google", CreatedByUserID: owner.UserID,
+		Message: domain.EmailMessageSnapshot{
+			ID: "protected-message", ThreadID: "protected-thread", Subject: "Protected",
+			From: []domain.EmailAddressSnapshot{{Email: "customer@example.com"}},
+			To:   []domain.EmailAddressSnapshot{{Email: owner.Email}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	collaboration := created.Collaboration
+	draft, err := repo.UpsertCommunicationsEmailDraft(CommunicationsEmailDraftInput{
+		CompanyID: companyID, DraftID: "protected-shared-draft", OriginNodeID: collaboration.NodeID,
+		EmailThreadID: collaboration.EmailThreadID, SourceMessageID: collaboration.RootMessageID,
+		ParticipantUserID: owner.UserID, CreatedByUserID: owner.UserID, UpdatedByUserID: owner.UserID,
+		IsShared: true, Kind: "reply", AccountEmail: owner.Email,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteNodeProjection(companyID, collaboration.NodeID, collaboration.AttachedEmailInformationID); !errors.Is(err, ErrEmailRelationshipHasNodeWork) {
+		t.Fatalf("delete protected email relationship error = %v, want ErrEmailRelationshipHasNodeWork", err)
+	}
+	if _, found := emailCollaborationGuardFindProjection(t, repo, companyID, collaboration.NodeID, collaboration.AttachedEmailInformationID); !found {
+		t.Fatal("blocked relationship removal changed the Node")
+	}
+	if err := repo.SoftDeleteCommunicationsEmailDraft(CommunicationsEmailDraftDeleteInput{
+		CompanyID: companyID, DraftID: draft.DraftID, ParticipantUserID: owner.UserID,
+		UpdatedByUserID: owner.UserID, ExpectedRevision: draft.Revision,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteNodeProjection(companyID, collaboration.NodeID, collaboration.AttachedEmailInformationID); err != nil {
+		t.Fatalf("delete accidental relationship after draft discard: %v", err)
+	}
+}
 
 func TestMemoryEmailRelationshipUsesOrdinaryNodePermissionsAndDeletesOnlyTheRelationship(t *testing.T) {
 	repo := NewMemoryRepo()

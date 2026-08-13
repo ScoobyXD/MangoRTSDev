@@ -133,7 +133,7 @@ test("all send APIs enforce the shared window and every send surface exposes the
   const node = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
 
   assert.match(api, /export async function sendEmail\(input: SendEmailInput\)/);
-  assert.match(api, /export async function sendEmailCollaborationDraft\(input:/);
+  assert.match(api, /export async function sendSharedEmailDraft\(input:/);
   assert.doesNotMatch(api, /undoWindowMs/);
   const scheduler = readFileSync(resolve(process.cwd(), "frontend/src/modules/communications/outboundEmailUndo.ts"), "utf8");
   assert.doesNotMatch(scheduler, /undoWindowMs\?:/);

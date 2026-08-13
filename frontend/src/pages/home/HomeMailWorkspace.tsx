@@ -811,7 +811,7 @@ export function HomeMailWorkspace({
               const pendingStarred = pendingStarredMessageIDs.has(message.id);
               const starHovered = hoveredStarMessageID === rowKey;
               const starHighlighted = pendingStarred || message.starred || starHovered;
-              const sharedDraftSource = draftRow && message.collaboration_id?.trim()
+			  const sharedDraftSource = draftRow && message.collaboration_node_id?.trim()
                 ? message.collaboration_account_email?.trim() || "email collaboration"
                 : "";
               const rowAddressLabel = draftRow

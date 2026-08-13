@@ -150,8 +150,9 @@ func TestNodeEmailThreadRouteReturnsDurableStoredHistory(t *testing.T) {
 		PersonalAccountEmail: owner.Email, AccountEmail: owner.Email, Provider: "google",
 		ProviderThreadID: "node-thread", SelectedMessageID: "node-thread-root", HistoryComplete: true,
 		Messages: []domain.EmailMessageSnapshot{
-			{ID: "node-thread-root", ThreadID: "node-thread", Subject: "Stored root", Body: "Stored root body", Date: 1},
-			{ID: "node-thread-reply", ThreadID: "node-thread", Subject: "Stored reply", Body: "Stored reply body", Date: 2},
+			{ID: "node-thread-root", ThreadID: "node-thread", Subject: "Stored root", Snippet: "Root preview", Body: "Stored root body", Date: 1},
+			{ID: "node-thread-reply", ThreadID: "node-thread", Subject: "Stored reply", Snippet: "Reply preview", Body: "Stored reply body", Date: 2,
+				Attachments: []domain.EmailAttachmentSnapshot{{ID: "provider-attachment", Filename: "reply.txt", Size: 12}}},
 		},
 	})
 	if err != nil {
@@ -209,6 +210,26 @@ func TestNodeEmailThreadRouteReturnsDurableStoredHistory(t *testing.T) {
 	if replyEmailMessageID == "" {
 		t.Fatal("stored reply internal message id missing")
 	}
+	summaryReq := emailCollaborationThreadTestRequestWithActor(httptest.NewRequest(http.MethodGet, path+"&summary=true", nil), owner, domain.RoleCompanyUser)
+	summaryRec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(summaryRec, summaryReq)
+	if summaryRec.Code != http.StatusOK {
+		t.Fatalf("summary status=%d, want 200 body=%s", summaryRec.Code, summaryRec.Body.String())
+	}
+	var summaryResponse struct {
+		Messages []domain.EmailMessageSnapshot `json:"messages"`
+	}
+	if err := json.NewDecoder(summaryRec.Body).Decode(&summaryResponse); err != nil {
+		t.Fatal(err)
+	}
+	if len(summaryResponse.Messages) != 2 || summaryResponse.Messages[0].Snippet != "Root preview" || summaryResponse.Messages[1].Snippet != "Reply preview" {
+		t.Fatalf("stored Node summaries = %+v", summaryResponse.Messages)
+	}
+	for _, message := range summaryResponse.Messages {
+		if message.Body != "" || len(message.Attachments) != 0 {
+			t.Fatalf("summary loaded message detail = %+v", message)
+		}
+	}
 	exactReq := emailCollaborationThreadTestRequestWithActor(httptest.NewRequest(http.MethodGet, path+"&message_id="+replyEmailMessageID, nil), owner, domain.RoleCompanyUser)
 	exactRec := httptest.NewRecorder()
 	server.Routes().ServeHTTP(exactRec, exactReq)
@@ -221,7 +242,7 @@ func TestNodeEmailThreadRouteReturnsDurableStoredHistory(t *testing.T) {
 	if err := json.NewDecoder(exactRec.Body).Decode(&exactResponse); err != nil {
 		t.Fatal(err)
 	}
-	if len(exactResponse.Messages) != 1 || exactResponse.Messages[0].ID != "node-thread-reply" || exactResponse.Messages[0].Body != "Stored reply body" {
+	if len(exactResponse.Messages) != 1 || exactResponse.Messages[0].ID != "node-thread-reply" || exactResponse.Messages[0].Body != "Stored reply body" || len(exactResponse.Messages[0].Attachments) != 1 {
 		t.Fatalf("exact stored Node message = %+v", exactResponse.Messages)
 	}
 	threadGrants, threadIDs, messageGrants, messageIDs := client.calls()

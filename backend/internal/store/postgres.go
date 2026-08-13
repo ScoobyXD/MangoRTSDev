@@ -54,6 +54,7 @@ func (r *PostgresRepo) CheckApplicationSchemaReadiness() error {
 		{"email_messages", "email_message_id"},
 		{"email_relationships", "resource_textbox_id"},
 		{"email_drafts", "send_idempotency_key"},
+		{"email_drafts", "is_shared"},
 		{"email_drafts", "sent_email_message_id"},
 		{"attachment_relationships", "resource_type"},
 		{"attachment_relationships", "resource_id"},

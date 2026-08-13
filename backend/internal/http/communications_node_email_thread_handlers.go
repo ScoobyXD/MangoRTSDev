@@ -52,13 +52,20 @@ func (s *Server) handleNodeEmailThread(w http.ResponseWriter, r *http.Request, n
 		writeError(w, http.StatusInternalServerError, "failed_to_load_node_email_thread")
 		return
 	}
+	messages := storedEmailThreadMessages(item.Thread)
+	if messageID == "" && r.URL.Query().Get("summary") == "true" {
+		for index := range messages {
+			messages[index].Body = ""
+			messages[index].Attachments = nil
+		}
+	}
 	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
 		"node_id":             item.NodeID,
 		"information_id":      item.InformationID,
 		"email_thread_id":     item.EmailThreadID,
 		"selected_message_id": item.SelectedMessageID,
 		"thread_id":           item.Thread.ProviderThreadID,
-		"messages":            storedEmailThreadMessages(item.Thread),
+		"messages":            messages,
 		"history_complete":    item.Thread.HistoryComplete,
 		"download_status":     item.Thread.DownloadStatus,
 		"fetched_at":          item.Thread.FetchedAt,

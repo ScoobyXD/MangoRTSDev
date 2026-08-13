@@ -25,7 +25,7 @@ from email_drafts
 where company_id = $1::uuid
 	and deleted_timestamp is null
 	and shared_inbox_id = $2::uuid
-	and email_thread_id is null
+	and not is_shared
 	and ($3='' or created_by_user_id = $3::uuid)
 order by updated_timestamp desc, draft_id asc`, scope.companyID, scope.sharedInboxID, cleanUUIDText(input.ParticipantUserID))
 	} else {
@@ -36,7 +36,7 @@ where company_id = $1::uuid
 	and deleted_timestamp is null
 	and personal_user_id = $2::uuid
 	and personal_account_email = $3
-	and email_thread_id is null
+	and not is_shared
 	and ($4='' or created_by_user_id = $4::uuid)
 order by updated_timestamp desc, draft_id asc`, scope.companyID, scope.personalUserID, scope.personalAccountEmail, cleanUUIDText(input.ParticipantUserID))
 	}
@@ -79,7 +79,7 @@ from email_drafts
 where company_id = $1::uuid
 		and draft_id = $2
 		and shared_inbox_id = $3::uuid
-		and email_thread_id is null
+		and not is_shared
 		and ($4='' or created_by_user_id = $4::uuid)
 		and deleted_timestamp is null`, scope.companyID, draftID, scope.sharedInboxID, cleanUUIDText(input.ParticipantUserID)))
 	} else {
@@ -90,7 +90,7 @@ where company_id = $1::uuid
 	and draft_id = $2
 		and personal_user_id = $3::uuid
 		and personal_account_email = $4
-		and email_thread_id is null
+		and not is_shared
 		and ($5='' or created_by_user_id = $5::uuid)
 		and deleted_timestamp is null`, scope.companyID, draftID, scope.personalUserID, scope.personalAccountEmail, cleanUUIDText(input.ParticipantUserID)))
 	}
@@ -140,17 +140,17 @@ limit 2`, draft.CompanyID, draft.SourceMessageID, draft.ScopeType,
 			return domain.CommunicationsEmailDraft{}, err
 		}
 		if sourceEmailMessageID == "" {
-			return domain.CommunicationsEmailDraft{}, ErrNotFound
+			return domain.CommunicationsEmailDraft{}, ErrEmailDraftSourceNotFound
 		}
 	}
 	saved, err := scanCommunicationsEmailDraft(r.db.QueryRow(`
 insert into email_drafts (
- company_id,draft_id,email_thread_id,origin_node_id,source_email_message_id,email_account_type,
+ company_id,draft_id,email_thread_id,origin_node_id,source_email_message_id,is_shared,email_account_type,
  personal_user_id,personal_account_email,shared_inbox_id,sender_account_email,
  created_by_user_id,updated_by_user_id,kind,to_recipients,cc_recipients,bcc_recipients,
  subject,body_editor_html,scheduled_send_timestamp,created_timestamp,updated_timestamp,deleted_timestamp
 ) values (
- $1::uuid,$2,null,null,nullif($3,'')::uuid,case $4 when 'personal' then 'personal_email_account' else 'shared_email_account' end,nullif($5,'')::uuid,nullif($6,''),nullif($7,'')::uuid,$8,
+ $1::uuid,$2,null,null,nullif($3,'')::uuid,false,case $4 when 'personal' then 'personal_email_account' else 'shared_email_account' end,nullif($5,'')::uuid,nullif($6,''),nullif($7,'')::uuid,$8,
  nullif($9,'')::uuid,nullif($10,'')::uuid,$11,$12,$13,$14,$15,$16,$17,now(),now(),null
 )
 on conflict(company_id,draft_id) do update set
@@ -161,7 +161,7 @@ on conflict(company_id,draft_id) do update set
  subject=excluded.subject,body_editor_html=excluded.body_editor_html,
  scheduled_send_timestamp=excluded.scheduled_send_timestamp,
  revision=email_drafts.revision+1,send_state='draft',updated_timestamp=now(),deleted_timestamp=null
-where email_drafts.email_thread_id is null
+where not email_drafts.is_shared
 	and email_drafts.created_by_user_id=excluded.created_by_user_id
  and email_drafts.email_account_type=excluded.email_account_type
  and email_drafts.personal_user_id is not distinct from excluded.personal_user_id
@@ -208,7 +208,7 @@ where company_id = $1::uuid
 	and personal_user_id is not distinct from nullif($4, '')::uuid
 	and personal_account_email is not distinct from nullif($5, '')
 	and shared_inbox_id is not distinct from nullif($6, '')::uuid
-	and email_thread_id is null
+	and not is_shared
 	and created_by_user_id = nullif($7, '')::uuid
 	and deleted_timestamp is null`, scope.companyID, draftID, updatedByUserID, scope.personalUserID, scope.personalAccountEmail, scope.sharedInboxID, cleanUUIDText(input.ParticipantUserID))
 	if err != nil {
@@ -322,10 +322,9 @@ case email_account_type when 'personal_email_account' then 'personal' else 'shar
 coalesce(personal_user_id::text, ''),
 coalesce(personal_account_email, ''),
 coalesce(shared_inbox_id::text, ''),
-'',
 coalesce(email_thread_id::text, ''),
 coalesce(origin_node_id::text, ''),
-email_thread_id is not null,
+	is_shared,
 revision,
 send_state,
 send_claim_token,
@@ -382,7 +381,6 @@ func scanCommunicationsEmailDraft(row interface{ Scan(dest ...any) error }) (dom
 		&draft.PersonalUserID,
 		&draft.PersonalAccountEmail,
 		&draft.SharedInboxID,
-		&draft.CollaborationID,
 		&draft.EmailThreadID,
 		&draft.OriginNodeID,
 		&draft.IsShared,

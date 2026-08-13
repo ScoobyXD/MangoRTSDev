@@ -46,7 +46,7 @@ func TestEmailCollaborationSharedDraftSendUsesExactDraftEnvelopeAndFinalizes(t *
 	}
 	collaboration := ensured.Collaboration
 	draft, err := repo.UpsertCommunicationsEmailDraft(store.CommunicationsEmailDraftInput{
-		CompanyID: companyID, DraftID: "shared-send-draft", CollaborationID: collaboration.CollaborationID,
+		CompanyID: companyID, DraftID: "shared-send-draft", OriginNodeID: collaboration.NodeID, EmailThreadID: collaboration.EmailThreadID,
 		ParticipantUserID: creator.UserID, IsShared: true, ExpectedRevision: 0,
 		CreatedByUserID: creator.UserID, UpdatedByUserID: creator.UserID,
 		SourceMessageID: collaboration.RootMessageID, Subject: "Re: Snapshot subject",
@@ -68,8 +68,7 @@ func TestEmailCollaborationSharedDraftSendUsesExactDraftEnvelopeAndFinalizes(t *
 	})
 	defer server.Close()
 	server.nylasGate = newNylasRequestGate(0)
-	path := "/v1/communications/email-collaborations/" + collaboration.CollaborationID +
-		"/drafts/" + draft.DraftID + "/send?company_id=" + companyID
+	path := "/v1/communications/drafts/" + draft.DraftID + "/send?company_id=" + companyID
 
 	performSend := func() *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString("{\"expected_revision\":1}"))
@@ -268,7 +267,7 @@ func TestEmailCollaborationSharedDraftSendRecoversDurableCompletionFailureWithSa
 	}
 	collaboration := ensured.Collaboration
 	draft, err := repo.UpsertCommunicationsEmailDraft(store.CommunicationsEmailDraftInput{
-		CompanyID: companyID, DraftID: "shared-send-finalize-draft", CollaborationID: collaboration.CollaborationID,
+		CompanyID: companyID, DraftID: "shared-send-finalize-draft", OriginNodeID: collaboration.NodeID, EmailThreadID: collaboration.EmailThreadID,
 		ParticipantUserID: creator.UserID, IsShared: true, ExpectedRevision: 0,
 		CreatedByUserID: creator.UserID, UpdatedByUserID: creator.UserID,
 		SourceMessageID: collaboration.RootMessageID, Subject: "Reply", BodyEditorHTML: "<p>Sent once</p>",
@@ -293,8 +292,7 @@ func TestEmailCollaborationSharedDraftSendRecoversDurableCompletionFailureWithSa
 	})
 	defer server.Close()
 	server.nylasGate = newNylasRequestGate(0)
-	path := "/v1/communications/email-collaborations/" + collaboration.CollaborationID +
-		"/drafts/" + draft.DraftID + "/send?company_id=" + companyID
+	path := "/v1/communications/drafts/" + draft.DraftID + "/send?company_id=" + companyID
 	performSend := func() *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString("{\"expected_revision\":1}"))
 		req = attachmentRequestWithActor(req, creator, companyID, domain.RoleCompanyUser)
@@ -405,8 +403,7 @@ func TestEmailCollaborationSharedDraftSendErrorRecoveryChoosesKeyByProviderCerta
 			})
 			defer server.Close()
 			server.nylasGate = newNylasRequestGate(0)
-			path := "/v1/communications/email-collaborations/" + collaboration.CollaborationID +
-				"/drafts/" + draft.DraftID + "/send?company_id=" + tt.companyID
+			path := "/v1/communications/drafts/" + draft.DraftID + "/send?company_id=" + tt.companyID
 			performSend := func() *httptest.ResponseRecorder {
 				req := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString("{\"expected_revision\":1}"))
 				req = attachmentRequestWithActor(req, owner, tt.companyID, domain.RoleCompanyUser)
@@ -475,7 +472,7 @@ func seedEmailCollaborationSharedDraftRecoveryHTTPTest(t *testing.T, companyID, 
 	}
 	draft, err := repo.UpsertCommunicationsEmailDraft(store.CommunicationsEmailDraftInput{
 		CompanyID: companyID, DraftID: "shared-send-recovery-draft-" + suffix,
-		CollaborationID: ensured.Collaboration.CollaborationID, ParticipantUserID: owner.UserID,
+		OriginNodeID: ensured.Collaboration.NodeID, EmailThreadID: ensured.Collaboration.EmailThreadID, ParticipantUserID: owner.UserID,
 		IsShared: true, CreatedByUserID: owner.UserID, UpdatedByUserID: owner.UserID,
 		SourceMessageID: ensured.Collaboration.RootMessageID, Subject: "Reply once", BodyEditorHTML: "<p>Recover me</p>",
 	})
@@ -508,8 +505,7 @@ func TestEmailCollaborationSharedDraftSendRecoversMissingProviderMessageIDWithSa
 	})
 	defer server.Close()
 	server.nylasGate = newNylasRequestGate(0)
-	path := "/v1/communications/email-collaborations/" + collaboration.CollaborationID +
-		"/drafts/" + draft.DraftID + "/send?company_id=" + companyID
+	path := "/v1/communications/drafts/" + draft.DraftID + "/send?company_id=" + companyID
 	performSend := func() *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString("{\"expected_revision\":1}"))
 		req = attachmentRequestWithActor(req, owner, companyID, domain.RoleCompanyUser)
@@ -546,7 +542,7 @@ func TestEmailCollaborationSharedDraftSendRecoversMissingProviderMessageIDWithSa
 
 func TestEmailCollaborationSharedDraftFreshPreflightFailureReleasesClaim(t *testing.T) {
 	const companyID = "11111111-1111-4111-8111-701300000319"
-	repo, owner, collaboration, draft, nylas := seedEmailCollaborationSharedDraftRecoveryHTTPTest(t, companyID, "fresh-preflight")
+	repo, owner, _, draft, nylas := seedEmailCollaborationSharedDraftRecoveryHTTPTest(t, companyID, "fresh-preflight")
 	nylas.message.ID = "provider-returned-a-different-message"
 	server := NewServerWithOptions(repo, ServerOptions{
 		NylasConfig: testNylasConfig(), NylasClient: nylas,
@@ -554,8 +550,7 @@ func TestEmailCollaborationSharedDraftFreshPreflightFailureReleasesClaim(t *test
 	})
 	defer server.Close()
 	server.nylasGate = newNylasRequestGate(0)
-	path := "/v1/communications/email-collaborations/" + collaboration.CollaborationID +
-		"/drafts/" + draft.DraftID + "/send?company_id=" + companyID
+	path := "/v1/communications/drafts/" + draft.DraftID + "/send?company_id=" + companyID
 	req := attachmentRequestWithActor(
 		httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString("{\"expected_revision\":1}")),
 		owner, companyID, domain.RoleCompanyUser,
@@ -583,7 +578,7 @@ func TestEmailCollaborationSharedDraftFreshPreflightFailureReleasesClaim(t *test
 
 func TestEmailCollaborationSharedDraftRecoveredPreflightFailurePreservesUncertainClaim(t *testing.T) {
 	const companyID = "11111111-1111-4111-8111-701300000320"
-	repo, owner, collaboration, draft, baseNylas := seedEmailCollaborationSharedDraftRecoveryHTTPTest(t, companyID, "recovered-preflight")
+	repo, owner, _, draft, baseNylas := seedEmailCollaborationSharedDraftRecoveryHTTPTest(t, companyID, "recovered-preflight")
 	nylas := &sequencedSendNylasClient{NylasClient: baseNylas, results: []NylasMessage{{}}}
 	baseNow := time.Date(2026, 7, 14, 4, 0, 0, 0, time.UTC)
 	recoveryRepo := &recoveryClockEmailDraftRepository{Repository: repo, now: baseNow}
@@ -593,8 +588,7 @@ func TestEmailCollaborationSharedDraftRecoveredPreflightFailurePreservesUncertai
 	})
 	defer server.Close()
 	server.nylasGate = newNylasRequestGate(0)
-	path := "/v1/communications/email-collaborations/" + collaboration.CollaborationID +
-		"/drafts/" + draft.DraftID + "/send?company_id=" + companyID
+	path := "/v1/communications/drafts/" + draft.DraftID + "/send?company_id=" + companyID
 	performSend := func() *httptest.ResponseRecorder {
 		req := attachmentRequestWithActor(
 			httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString("{\"expected_revision\":1}")),
@@ -668,7 +662,7 @@ func TestCommunicationsEmailDraftRecoveredSendWindowExhausted(t *testing.T) {
 
 func TestEmailCollaborationSharedDraftRecoveredDispatchMarginBlocksProviderReplay(t *testing.T) {
 	const companyID = "11111111-1111-4111-8111-701300000321"
-	repo, owner, collaboration, draft, baseNylas := seedEmailCollaborationSharedDraftRecoveryHTTPTest(t, companyID, "dispatch-margin")
+	repo, owner, _, draft, baseNylas := seedEmailCollaborationSharedDraftRecoveryHTTPTest(t, companyID, "dispatch-margin")
 	nylas := &sequencedSendNylasClient{NylasClient: baseNylas, results: []NylasMessage{{}}}
 	firstNow := time.Date(2026, 7, 14, 6, 0, 0, 0, time.UTC)
 	recoveryRepo := &recoveryClockEmailDraftRepository{Repository: repo, now: firstNow}
@@ -678,8 +672,7 @@ func TestEmailCollaborationSharedDraftRecoveredDispatchMarginBlocksProviderRepla
 	})
 	defer server.Close()
 	server.nylasGate = newNylasRequestGate(0)
-	path := "/v1/communications/email-collaborations/" + collaboration.CollaborationID +
-		"/drafts/" + draft.DraftID + "/send?company_id=" + companyID
+	path := "/v1/communications/drafts/" + draft.DraftID + "/send?company_id=" + companyID
 	performSend := func() *httptest.ResponseRecorder {
 		req := attachmentRequestWithActor(
 			httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString("{\"expected_revision\":1}")),
@@ -730,7 +723,7 @@ func TestEmailCollaborationSharedDraftRecoveredDispatchMarginBlocksProviderRepla
 
 func TestEmailCollaborationSharedDraftExpiredRecoveryReturnsCanonicalDiscardGuidance(t *testing.T) {
 	const companyID = "11111111-1111-4111-8111-701300000314"
-	repo, owner, collaboration, draft, baseNylas := seedEmailCollaborationSharedDraftRecoveryHTTPTest(t, companyID, "expired")
+	repo, owner, _, draft, baseNylas := seedEmailCollaborationSharedDraftRecoveryHTTPTest(t, companyID, "expired")
 	nylas := &sequencedSendNylasClient{NylasClient: baseNylas, results: []NylasMessage{{}}}
 	baseNow := time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)
 	recoveryRepo := &recoveryClockEmailDraftRepository{Repository: repo, now: baseNow}
@@ -740,8 +733,7 @@ func TestEmailCollaborationSharedDraftExpiredRecoveryReturnsCanonicalDiscardGuid
 	})
 	defer server.Close()
 	server.nylasGate = newNylasRequestGate(0)
-	sendPath := "/v1/communications/email-collaborations/" + collaboration.CollaborationID +
-		"/drafts/" + draft.DraftID + "/send?company_id=" + companyID
+	sendPath := "/v1/communications/drafts/" + draft.DraftID + "/send?company_id=" + companyID
 	performSend := func() *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, sendPath, bytes.NewBufferString("{\"expected_revision\":1}"))
 		req = attachmentRequestWithActor(req, owner, companyID, domain.RoleCompanyUser)
@@ -795,7 +787,7 @@ func TestEmailCollaborationSharedDraftExpiredRecoveryReturnsCanonicalDiscardGuid
 
 func TestEmailCollaborationSharedDraftRecoveryRejectsChangedGrantWithoutProviderRetry(t *testing.T) {
 	const companyID = "11111111-1111-4111-8111-701300000318"
-	repo, owner, collaboration, draft, baseNylas := seedEmailCollaborationSharedDraftRecoveryHTTPTest(t, companyID, "changed-grant")
+	repo, owner, _, draft, baseNylas := seedEmailCollaborationSharedDraftRecoveryHTTPTest(t, companyID, "changed-grant")
 	nylas := &sequencedSendNylasClient{NylasClient: baseNylas, results: []NylasMessage{{}}}
 	baseNow := time.Date(2026, 7, 14, 3, 0, 0, 0, time.UTC)
 	recoveryRepo := &recoveryClockEmailDraftRepository{Repository: repo, now: baseNow}
@@ -805,8 +797,7 @@ func TestEmailCollaborationSharedDraftRecoveryRejectsChangedGrantWithoutProvider
 	})
 	defer server.Close()
 	server.nylasGate = newNylasRequestGate(0)
-	sendPath := "/v1/communications/email-collaborations/" + collaboration.CollaborationID +
-		"/drafts/" + draft.DraftID + "/send?company_id=" + companyID
+	sendPath := "/v1/communications/drafts/" + draft.DraftID + "/send?company_id=" + companyID
 	performSend := func() *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, sendPath, bytes.NewBufferString("{\"expected_revision\":1}"))
 		req = attachmentRequestWithActor(req, owner, companyID, domain.RoleCompanyUser)

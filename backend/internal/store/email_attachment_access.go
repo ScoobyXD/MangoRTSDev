@@ -65,9 +65,10 @@ select draft.send_state, (
     draft.company_id,'shared_inbox',draft.shared_inbox_id,$2::uuid,$4::text))
   or exists (
     select 1 from email_relationships relationship
-    where relationship.company_id=draft.company_id
-      and relationship.email_thread_id=draft.email_thread_id
-      and relationship.resource_type='node'
+		where relationship.company_id=draft.company_id
+		  and relationship.email_thread_id=draft.email_thread_id
+		  and relationship.resource_type='node'
+		  and relationship.resource_id=draft.origin_node_id
       and relationship.resource_textbox_id is null
       and mangorts_user_can_access_resource(relationship.company_id,relationship.resource_type,
         relationship.resource_id,$2::uuid,$4::text)
@@ -141,10 +142,8 @@ func (r *MemoryRepo) GetEmailAttachmentResourceAccess(input EmailAttachmentResou
 		}
 		allowed := draft.PersonalUserID == input.UserID ||
 			(draft.SharedInboxID != "" && r.userHasEffectiveAccessLocked(input.CompanyID, input.UserID, EntityTypeSharedInbox, draft.SharedInboxID, input.AccessLevel))
-		if !allowed && draft.CollaborationID != "" {
-			if relationship, ok := r.emailCollaborations[key(input.CompanyID, draft.CollaborationID)]; ok {
-				allowed = r.userHasEffectiveAccessLocked(input.CompanyID, input.UserID, EntityTypeNode, relationship.NodeID, input.AccessLevel)
-			}
+		if !allowed && draft.IsShared && draft.OriginNodeID != "" {
+			allowed = r.userHasEffectiveAccessLocked(input.CompanyID, input.UserID, EntityTypeNode, draft.OriginNodeID, input.AccessLevel)
 		}
 		return EmailAttachmentResourceAccess{Allowed: allowed, SendState: draft.SendState}, nil
 	case "email_signature":

@@ -33,6 +33,12 @@ var (
 	ErrRACIStorageUnavailable        = errors.New("RACI storage unavailable")
 	ErrSharedInboxStorageUnavailable = errors.New("shared inbox storage unavailable")
 	ErrEmailAccountUnavailable       = errors.New("email account unavailable")
+	ErrEmailReplySourceNotIngested   = errors.New("email reply source not ingested")
+	ErrEmailDraftSourceNotFound      = errors.New("email draft source not found")
+	ErrEmailDraftNodeMismatch        = errors.New("email draft node mismatch")
+	ErrEmailDraftNodeAccessDenied    = errors.New("email draft node access denied")
+	ErrEmailDraftSenderNotConnected  = errors.New("email draft sender not connected")
+	ErrEmailRelationshipHasNodeWork  = errors.New("email relationship has node work")
 	ErrUploadStateConflict           = errors.New("attachment upload state conflict")
 	ErrUploadIntentExpired           = errors.New("attachment upload intent expired")
 	ErrUploadPayloadConflict         = errors.New("attachment upload idempotency payload conflict")
@@ -2476,6 +2482,11 @@ type CommunicationsEmailDraftListInput struct {
 	PersonalAccountEmail string
 	SharedInboxID        string
 	ParticipantUserID    string
+	OriginNodeID         string
+	SourceMessageID      string
+	Limit                int
+	BeforeUpdatedAt      *time.Time
+	BeforeDraftID        string
 }
 
 type CommunicationsEmailDraftGetInput struct {
@@ -2495,7 +2506,6 @@ type CommunicationsEmailDraftInput struct {
 	SharedInboxID          string
 	CreatedByUserID        string
 	ParticipantUserID      string
-	CollaborationID        string
 	EmailThreadID          string
 	OriginNodeID           string
 	IsShared               bool
@@ -2535,7 +2545,6 @@ func (e *VersionConflictError) Unwrap() error { return ErrVersionConflict }
 type CommunicationsEmailDraftSendClaimInput struct {
 	CompanyID            string
 	DraftID              string
-	CollaborationID      string
 	ParticipantUserID    string
 	PersonalUserID       string
 	PersonalAccountEmail string
@@ -2563,13 +2572,11 @@ type CommunicationsEmailDraftSendReleaseInput struct {
 	ClaimToken string
 }
 
-// CommunicationsEmailDraftSendCompleteInput commits the two durable effects of
-// a successful provider send together: advance the collaboration snapshot and
-// tombstone the claimed shared draft. Implementations must be atomic.
+// CommunicationsEmailDraftSendCompleteInput commits the stored sent message and
+// tombstones the claimed draft atomically after a successful provider send.
 type CommunicationsEmailDraftSendCompleteInput struct {
 	CompanyID       string
 	DraftID         string
-	CollaborationID string
 	ClaimToken      string
 	UpdatedByUserID string
 	Message         domain.EmailMessageSnapshot

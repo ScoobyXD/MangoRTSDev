@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"miraeopus/backend/internal/domain"
@@ -28,7 +29,6 @@ type communicationsEmailDraftRequest struct {
 	BodyEditorHTML         string          `json:"body_editor_html"`
 	ReplyToMessage         json.RawMessage `json:"reply_to_message"`
 	ScheduledSendTimestamp string          `json:"scheduled_send_timestamp"`
-	CollaborationID        string          `json:"collaboration_id"`
 	EmailThreadID          string          `json:"email_thread_id"`
 	OriginNodeID           string          `json:"origin_node_id"`
 	IsShared               bool            `json:"is_shared"`
@@ -53,7 +53,6 @@ type communicationsEmailDraftResponse struct {
 	SharedInboxID          string                      `json:"shared_inbox_id,omitempty"`
 	Kind                   string                      `json:"kind"`
 	SourceMessageID        string                      `json:"source_message_id,omitempty"`
-	CollaborationID        string                      `json:"collaboration_id,omitempty"`
 	EmailThreadID          string                      `json:"email_thread_id,omitempty"`
 	OriginNodeID           string                      `json:"origin_node_id,omitempty"`
 	IsShared               bool                        `json:"is_shared,omitempty"`
@@ -97,7 +96,7 @@ func (s *Server) handleCommunicationsEmailDraftByID(w http.ResponseWriter, r *ht
 			writeError(w, http.StatusNotFound, "not_found")
 			return
 		}
-		s.handleCommunicationsEmailCollaborationDraftSend(w, r, actor, strings.TrimSpace(r.URL.Query().Get("company_id")), "", draftID)
+		s.handleCommunicationsSharedEmailDraftSend(w, r, actor, strings.TrimSpace(r.URL.Query().Get("company_id")), draftID)
 		return
 	}
 	if draftID == "" || strings.Contains(draftID, "/") {
@@ -143,10 +142,25 @@ func (s *Server) handleCommunicationsEmailDraftList(w http.ResponseWriter, r *ht
 	listInput := store.CommunicationsEmailDraftListInput{
 		CompanyID:         companyID,
 		ParticipantUserID: actor.User.UserID,
+		OriginNodeID:      r.URL.Query().Get("origin_node_id"),
+		SourceMessageID:   r.URL.Query().Get("source_message_id"),
+		Limit:             5,
 	}
 	if scopeAvailable {
 		listInput = scope.draftListInput(companyID)
 		listInput.ParticipantUserID = actor.User.UserID
+	}
+	if listInput.OriginNodeID != "" && listInput.SourceMessageID != "" {
+		listInput.Limit = 1
+	}
+	if cursor := strings.TrimSpace(r.URL.Query().Get("cursor")); cursor != "" {
+		updatedAt, draftID, err := parseCommunicationsEmailDraftCursor(cursor)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_email_draft_cursor")
+			return
+		}
+		listInput.BeforeUpdatedAt = &updatedAt
+		listInput.BeforeDraftID = draftID
 	}
 	drafts, err := s.repo.ListCommunicationsEmailDrafts(listInput)
 	if errors.Is(err, store.ErrInvalid) {
@@ -163,9 +177,13 @@ func (s *Server) handleCommunicationsEmailDraftList(w http.ResponseWriter, r *ht
 	}
 	responses := make([]communicationsEmailDraftResponse, 0, len(drafts))
 	for _, draft := range drafts {
-		responses = append(responses, s.communicationsEmailDraftResponse(draft))
+		responses = append(responses, communicationsEmailDraftSummaryResponse(draft))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"drafts": responses})
+	nextCursor := ""
+	if len(drafts) == listInput.Limit && listInput.Limit > 1 {
+		nextCursor = communicationsEmailDraftCursor(drafts[len(drafts)-1])
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"drafts": responses, "next_cursor": nextCursor})
 }
 
 func (s *Server) handleCommunicationsEmailDraftGet(w http.ResponseWriter, r *http.Request, draftID string) {
@@ -246,12 +264,13 @@ func (s *Server) handleCommunicationsEmailDraftUpsert(w http.ResponseWriter, r *
 		if !requireCompanyAccess(w, r, companyID) {
 			return
 		}
-		if strings.TrimSpace(req.CollaborationID) == "" || strings.TrimSpace(req.SharedInboxID) != "" || normalizeEmailForCompare(req.AccountEmail) != "" {
-			var ok bool
-			scope, ok = s.resolveCommunicationsEmailDraftScope(w, actor, companyID, req.SharedInboxID, req.AccountEmail, store.EntityPermissionEdit)
-			if !ok {
-				return
-			}
+		if strings.TrimSpace(req.OriginNodeID) == "" {
+			writeError(w, http.StatusBadRequest, "email_draft_node_required")
+			return
+		}
+		if strings.TrimSpace(req.SourceMessageID) == "" {
+			writeError(w, http.StatusConflict, "email_reply_source_not_ingested")
+			return
 		}
 	} else {
 		var ok bool
@@ -280,7 +299,6 @@ func (s *Server) handleCommunicationsEmailDraftUpsert(w http.ResponseWriter, r *
 		PersonalAccountEmail:   scope.personalAccountEmail,
 		SharedInboxID:          scope.sharedInboxID,
 		ParticipantUserID:      actor.User.UserID,
-		CollaborationID:        req.CollaborationID,
 		EmailThreadID:          req.EmailThreadID,
 		OriginNodeID:           req.OriginNodeID,
 		IsShared:               req.IsShared,
@@ -298,12 +316,32 @@ func (s *Server) handleCommunicationsEmailDraftUpsert(w http.ResponseWriter, r *
 		ReplyToMessageJSON:     replyToJSON,
 		ScheduledSendTimestamp: scheduledAt,
 	})
+	if errors.Is(err, store.ErrEmailReplySourceNotIngested) {
+		writeError(w, http.StatusConflict, "email_reply_source_not_ingested")
+		return
+	}
+	if errors.Is(err, store.ErrEmailDraftSourceNotFound) {
+		writeError(w, http.StatusConflict, "email_draft_source_not_found")
+		return
+	}
+	if errors.Is(err, store.ErrEmailDraftNodeMismatch) {
+		writeError(w, http.StatusConflict, "email_draft_node_mismatch")
+		return
+	}
+	if errors.Is(err, store.ErrEmailDraftNodeAccessDenied) {
+		writeError(w, http.StatusForbidden, "email_draft_node_access_denied")
+		return
+	}
+	if errors.Is(err, store.ErrEmailDraftSenderNotConnected) {
+		writeError(w, http.StatusConflict, "email_draft_sender_not_connected")
+		return
+	}
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_email_draft")
 		return
 	}
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusConflict, "email_draft_connection_not_available")
+		writeError(w, http.StatusNotFound, "email_draft_not_found")
 		return
 	}
 	if errors.Is(err, store.ErrAlreadyExists) {
@@ -609,6 +647,9 @@ func (s *Server) communicationsEmailDraftResponse(draft domain.CommunicationsEma
 		attachments = []domain.ResourceAttachment{}
 	}
 	replyToMessage := json.RawMessage(draft.ReplyToMessageJSON)
+	if draft.IsShared {
+		replyToMessage = nil
+	}
 	if len(replyToMessage) == 0 || !json.Valid(replyToMessage) || string(replyToMessage) == "{}" {
 		replyToMessage = nil
 	}
@@ -619,7 +660,6 @@ func (s *Server) communicationsEmailDraftResponse(draft domain.CommunicationsEma
 		PersonalUserID:         draft.PersonalUserID,
 		PersonalAccountEmail:   draft.PersonalAccountEmail,
 		SharedInboxID:          draft.SharedInboxID,
-		CollaborationID:        draft.CollaborationID,
 		EmailThreadID:          draft.EmailThreadID,
 		OriginNodeID:           draft.OriginNodeID,
 		IsShared:               draft.IsShared,
@@ -640,6 +680,43 @@ func (s *Server) communicationsEmailDraftResponse(draft domain.CommunicationsEma
 		UpdatedTimestamp:       draft.UpdatedTimestamp,
 		Attachments:            attachments,
 	}
+}
+
+func communicationsEmailDraftSummaryResponse(draft domain.CommunicationsEmailDraft) communicationsEmailDraftResponse {
+	return communicationsEmailDraftResponse{
+		CompanyID: draft.CompanyID, DraftID: draft.DraftID, ScopeType: draft.ScopeType,
+		PersonalUserID: draft.PersonalUserID, PersonalAccountEmail: draft.PersonalAccountEmail,
+		SharedInboxID: draft.SharedInboxID, EmailThreadID: draft.EmailThreadID,
+		OriginNodeID: draft.OriginNodeID, IsShared: draft.IsShared, Revision: draft.Revision,
+		CreatedByUserID: draft.CreatedByUserID, UpdatedByUserID: draft.UpdatedByUserID,
+		Kind: draft.Kind, SourceMessageID: draft.SourceMessageID, AccountEmail: draft.AccountEmail,
+		ToRecipients: draft.ToRecipients, CcRecipients: draft.CcRecipients,
+		BccRecipients: draft.BccRecipients, Subject: draft.Subject,
+		CreatedTimestamp: draft.CreatedTimestamp, UpdatedTimestamp: draft.UpdatedTimestamp,
+		Attachments: []domain.ResourceAttachment{},
+	}
+}
+
+type communicationsEmailDraftListCursor struct {
+	UpdatedAt time.Time `json:"updated_at"`
+	DraftID   string    `json:"draft_id"`
+}
+
+func communicationsEmailDraftCursor(draft domain.CommunicationsEmailDraft) string {
+	payload, _ := json.Marshal(communicationsEmailDraftListCursor{UpdatedAt: draft.UpdatedTimestamp, DraftID: draft.DraftID})
+	return base64.RawURLEncoding.EncodeToString(payload)
+}
+
+func parseCommunicationsEmailDraftCursor(value string) (time.Time, string, error) {
+	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(value))
+	if err != nil {
+		return time.Time{}, "", err
+	}
+	var cursor communicationsEmailDraftListCursor
+	if err := json.Unmarshal(payload, &cursor); err != nil || cursor.UpdatedAt.IsZero() || strings.TrimSpace(cursor.DraftID) == "" {
+		return time.Time{}, "", errors.New("invalid email draft cursor")
+	}
+	return cursor.UpdatedAt.UTC(), strings.TrimSpace(cursor.DraftID), nil
 }
 
 func communicationsEmailDraftResourceID(draft domain.CommunicationsEmailDraft) string {

@@ -5260,8 +5260,8 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
     const cleanDraftID = compose.draftID.trim() || createHomeMailDraftID();
     const cleanSharedInboxID = compose.sharedInboxID.trim();
     const cleanAccountEmail = compose.accountEmail.trim().toLowerCase();
-    const cleanCollaborationID = compose.sharedDraft ? compose.collaborationID.trim() : "";
-    if (!cleanCompanyID || (!cleanCollaborationID && !cleanSharedInboxID && (!currentUserID.trim() || !cleanAccountEmail))) {
+    const cleanOriginNodeID = compose.sharedDraft ? compose.originNodeID.trim() : "";
+    if (!cleanCompanyID || (!cleanOriginNodeID && !cleanSharedInboxID && (!currentUserID.trim() || !cleanAccountEmail))) {
       setAttachmentError("Email attachment context is unavailable.");
       return;
     }
@@ -5287,8 +5287,8 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
           sourceKind: "email_outgoing",
           relationshipKind: "email_attachment",
           messageID: preparedCompose.replyToMessageID.trim() || undefined,
-          editorSurface: preparedCompose.sharedDraft && preparedCompose.collaborationID.trim()
-            ? "email-collaboration-shared-draft"
+          editorSurface: preparedCompose.sharedDraft && preparedCompose.originNodeID.trim()
+            ? "node-shared-email-draft"
             : preparedSharedInboxID ? "shared-triage-compose" : "my-triage-compose",
         });
         const attachment = uploaded.attachment;
@@ -6299,8 +6299,8 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
         )}
         {expanded && latest && showReplyActions && (
           <div data-email-primary-reply-actions="true" style={{ display: "flex", gap: 7, flexWrap: "wrap", paddingTop: 2 }}>
-            <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReply(message)}>Reply</button>
-            <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReplyAll(message)}>Reply all</button>
+			<button type="button" style={mailPanelSmallButtonStyle} disabled={busy || !message.email_message_id?.trim()} title={message.email_message_id?.trim() ? "Reply" : "Reply is available after Mango ingests this email"} onClick={() => onReply(message)}>Reply</button>
+			<button type="button" style={mailPanelSmallButtonStyle} disabled={busy || !message.email_message_id?.trim()} title={message.email_message_id?.trim() ? "Reply all" : "Reply is available after Mango ingests this email"} onClick={() => onReplyAll(message)}>Reply all</button>
           </div>
         )}
       </div>
@@ -6512,8 +6512,8 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
               <button type="button" style={mailPanelSmallButtonStyle} disabled={allConversationMessagesExpanded} onClick={expandAllConversationMessages}>Expand all threads</button>
             </>
           )}
-          <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReply(message)}>Reply</button>
-          <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReplyAll(message)}>Reply all</button>
+		  <button type="button" style={mailPanelSmallButtonStyle} disabled={busy || !message.email_message_id?.trim()} title={message.email_message_id?.trim() ? "Reply" : "Reply is available after Mango ingests this email"} onClick={() => onReply(message)}>Reply</button>
+		  <button type="button" style={mailPanelSmallButtonStyle} disabled={busy || !message.email_message_id?.trim()} title={message.email_message_id?.trim() ? "Reply all" : "Reply is available after Mango ingests this email"} onClick={() => onReplyAll(message)}>Reply all</button>
           <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onCreateSharedDraft(message)}>Create shared draft</button>
           <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onForward(message)}>Forward</button>
           <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={onToggleRead}>{message.unread ? "Mark read" : "Mark unread"}</button>

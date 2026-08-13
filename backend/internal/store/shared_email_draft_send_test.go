@@ -44,12 +44,22 @@ func TestMemorySharedEmailDraftClaimLifecycleAndImmutableIdentity(t *testing.T) 
 	}); err != nil {
 		t.Fatalf("AddCommunicationsEmailCollaborationParticipants: %v", err)
 	}
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID: companyID, EntityType: EntityTypeNode, EntityID: collaboration.NodeID,
+		DefaultAccess: ResourceDefaultAccessNoAccess, DefaultAccessSet: true,
+		Permissions: []EntityPermissionInput{
+			{SubjectType: EntityPermissionSubjectUser, SubjectID: creator.UserID, AccessLevel: EntityPermissionEdit},
+			{SubjectType: EntityPermissionSubjectUser, SubjectID: participant.UserID, AccessLevel: EntityPermissionEdit},
+		},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions: %v", err)
+	}
 	scheduled := collaboration.CreatedTimestamp
 	if _, err := repo.UpsertCommunicationsEmailDraft(CommunicationsEmailDraftInput{
-		CompanyID: companyID, DraftID: "scheduled-shared-draft", CollaborationID: collaboration.CollaborationID,
+		CompanyID: companyID, DraftID: "scheduled-shared-draft", OriginNodeID: collaboration.NodeID, EmailThreadID: collaboration.EmailThreadID,
 		ParticipantUserID: creator.UserID, IsShared: true, ExpectedRevision: 0,
 		CreatedByUserID: creator.UserID, UpdatedByUserID: creator.UserID,
-		SourceMessageID: "shared-draft-source", Subject: "Scheduled", BodyEditorHTML: "<p>Not allowed</p>",
+		SourceMessageID: collaboration.RootMessageID, Subject: "Scheduled", BodyEditorHTML: "<p>Not allowed</p>",
 		ScheduledSendTimestamp: &scheduled,
 	}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("scheduled shared draft error = %v, want ErrInvalid", err)
@@ -57,7 +67,7 @@ func TestMemorySharedEmailDraftClaimLifecycleAndImmutableIdentity(t *testing.T) 
 
 	const draftID = "shared-draft-lifecycle"
 	draft, err := repo.UpsertCommunicationsEmailDraft(CommunicationsEmailDraftInput{
-		CompanyID: companyID, DraftID: draftID, CollaborationID: collaboration.CollaborationID,
+		CompanyID: companyID, DraftID: draftID, OriginNodeID: collaboration.NodeID, EmailThreadID: collaboration.EmailThreadID,
 		ParticipantUserID: creator.UserID, IsShared: true, ExpectedRevision: 0,
 		CreatedByUserID: creator.UserID, UpdatedByUserID: creator.UserID,
 		Kind: "compose", SourceMessageID: collaboration.RootMessageID,
@@ -88,7 +98,7 @@ func TestMemorySharedEmailDraftClaimLifecycleAndImmutableIdentity(t *testing.T) 
 	}
 
 	updated, err := repo.UpsertCommunicationsEmailDraft(CommunicationsEmailDraftInput{
-		CompanyID: companyID, DraftID: draftID, CollaborationID: collaboration.CollaborationID,
+		CompanyID: companyID, DraftID: draftID, OriginNodeID: collaboration.NodeID, EmailThreadID: collaboration.EmailThreadID,
 		ParticipantUserID: participant.UserID, IsShared: true, ExpectedRevision: 1,
 		UpdatedByUserID: participant.UserID, Kind: "forward", SourceMessageID: "retarget-attempt",
 		AccountEmail: fixedSender,
@@ -108,7 +118,7 @@ func TestMemorySharedEmailDraftClaimLifecycleAndImmutableIdentity(t *testing.T) 
 	}
 
 	reopened, err := repo.UpsertCommunicationsEmailDraft(CommunicationsEmailDraftInput{
-		CompanyID: companyID, DraftID: "duplicate-shared-draft", CollaborationID: collaboration.CollaborationID,
+		CompanyID: companyID, DraftID: "duplicate-shared-draft", OriginNodeID: collaboration.NodeID, EmailThreadID: collaboration.EmailThreadID,
 		ParticipantUserID: creator.UserID, IsShared: true, ExpectedRevision: 0,
 		CreatedByUserID: creator.UserID, UpdatedByUserID: creator.UserID,
 		SourceMessageID: collaboration.RootMessageID, Subject: "Duplicate", BodyEditorHTML: "<p>Duplicate</p>",
@@ -118,7 +128,7 @@ func TestMemorySharedEmailDraftClaimLifecycleAndImmutableIdentity(t *testing.T) 
 	}
 
 	_, err = repo.UpsertCommunicationsEmailDraft(CommunicationsEmailDraftInput{
-		CompanyID: companyID, DraftID: draftID, CollaborationID: collaboration.CollaborationID,
+		CompanyID: companyID, DraftID: draftID, OriginNodeID: collaboration.NodeID, EmailThreadID: collaboration.EmailThreadID,
 		ParticipantUserID: creator.UserID, IsShared: true, ExpectedRevision: 1,
 		UpdatedByUserID: creator.UserID, Kind: "reply", SourceMessageID: draft.SourceMessageID,
 		AccountEmail: creator.Email, ToRecipients: updated.ToRecipients,
@@ -148,13 +158,13 @@ func TestMemorySharedEmailDraftClaimLifecycleAndImmutableIdentity(t *testing.T) 
 	}
 
 	if _, err := repo.ClaimCommunicationsEmailDraftSend(CommunicationsEmailDraftSendClaimInput{
-		CompanyID: companyID, DraftID: draftID, CollaborationID: collaboration.CollaborationID,
+		CompanyID: companyID, DraftID: draftID,
 		ParticipantUserID: outsider.UserID, ExpectedRevision: 2, ProviderGrantID: "shared-draft-test-grant",
 	}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("outsider claim error = %v, want ErrNotFound", err)
 	}
 	claim, err := repo.ClaimCommunicationsEmailDraftSend(CommunicationsEmailDraftSendClaimInput{
-		CompanyID: companyID, DraftID: draftID, CollaborationID: collaboration.CollaborationID,
+		CompanyID: companyID, DraftID: draftID,
 		ParticipantUserID: participant.UserID, ExpectedRevision: 2, ProviderGrantID: "shared-draft-test-grant",
 	})
 	if err != nil || claim.ClaimToken == "" || claim.IdempotencyKey == "" ||
@@ -162,13 +172,13 @@ func TestMemorySharedEmailDraftClaimLifecycleAndImmutableIdentity(t *testing.T) 
 		t.Fatalf("first send claim = %+v err=%v", claim, err)
 	}
 	if _, err := repo.ClaimCommunicationsEmailDraftSend(CommunicationsEmailDraftSendClaimInput{
-		CompanyID: companyID, DraftID: draftID, CollaborationID: collaboration.CollaborationID,
+		CompanyID: companyID, DraftID: draftID,
 		ParticipantUserID: creator.UserID, ExpectedRevision: 2, ProviderGrantID: "shared-draft-test-grant",
 	}); !errors.Is(err, ErrSendInProgress) {
 		t.Fatalf("concurrent claim error = %v, want ErrSendInProgress", err)
 	}
 	if _, err := repo.UpsertCommunicationsEmailDraft(CommunicationsEmailDraftInput{
-		CompanyID: companyID, DraftID: draftID, CollaborationID: collaboration.CollaborationID,
+		CompanyID: companyID, DraftID: draftID, OriginNodeID: collaboration.NodeID, EmailThreadID: collaboration.EmailThreadID,
 		ParticipantUserID: creator.UserID, IsShared: true, ExpectedRevision: 2,
 		UpdatedByUserID: creator.UserID, Subject: "Edit while sending", BodyEditorHTML: "<p>Blocked</p>",
 	}); !errors.Is(err, ErrSendInProgress) {
@@ -186,14 +196,14 @@ func TestMemorySharedEmailDraftClaimLifecycleAndImmutableIdentity(t *testing.T) 
 		t.Fatalf("release claim: %v", err)
 	}
 	retry, err := repo.ClaimCommunicationsEmailDraftSend(CommunicationsEmailDraftSendClaimInput{
-		CompanyID: companyID, DraftID: draftID, CollaborationID: collaboration.CollaborationID,
+		CompanyID: companyID, DraftID: draftID,
 		ParticipantUserID: creator.UserID, ExpectedRevision: 2, ProviderGrantID: "shared-draft-test-grant",
 	})
 	if err != nil || retry.IdempotencyKey == claim.IdempotencyKey || retry.ClaimToken == claim.ClaimToken || retry.Recovered {
 		t.Fatalf("retry claim = %+v err=%v, first=%+v", retry, err, claim)
 	}
 	if err := repo.CompleteCommunicationsEmailDraftSend(CommunicationsEmailDraftSendCompleteInput{
-		CompanyID: companyID, DraftID: draftID, CollaborationID: collaboration.CollaborationID,
+		CompanyID: companyID, DraftID: draftID,
 		ClaimToken: retry.ClaimToken, UpdatedByUserID: participant.UserID,
 		Message: domain.EmailMessageSnapshot{ID: "sent-shared-message", ThreadID: collaboration.ProviderThreadID},
 	}); err != nil {
@@ -238,7 +248,7 @@ func seedSharedEmailDraftRecoveryTest(t *testing.T, suffix string) (*MemoryRepo,
 	}
 	draft, err := repo.UpsertCommunicationsEmailDraft(CommunicationsEmailDraftInput{
 		CompanyID: companyID, DraftID: "recovery-draft-" + suffix,
-		CollaborationID: ensured.Collaboration.CollaborationID, ParticipantUserID: owner.UserID,
+		OriginNodeID: ensured.Collaboration.NodeID, EmailThreadID: ensured.Collaboration.EmailThreadID, ParticipantUserID: owner.UserID,
 		IsShared: true, CreatedByUserID: owner.UserID, UpdatedByUserID: owner.UserID,
 		SourceMessageID: ensured.Collaboration.RootMessageID, Subject: "Recovery", BodyEditorHTML: "<p>Once</p>",
 	})
@@ -252,7 +262,7 @@ func TestMemorySharedEmailDraftStaleClaimRecoveryPreservesProviderIdempotency(t 
 	repo, owner, collaboration, draft := seedSharedEmailDraftRecoveryTest(t, "01")
 	firstNow := time.Date(2026, 7, 13, 20, 0, 0, 0, time.UTC)
 	claimInput := CommunicationsEmailDraftSendClaimInput{
-		CompanyID: draft.CompanyID, DraftID: draft.DraftID, CollaborationID: collaboration.CollaborationID,
+		CompanyID: draft.CompanyID, DraftID: draft.DraftID,
 		ParticipantUserID: owner.UserID, ExpectedRevision: draft.Revision, ProviderGrantID: "recovery-grant-01", Now: firstNow,
 	}
 	first, err := repo.ClaimCommunicationsEmailDraftSend(claimInput)
@@ -276,14 +286,14 @@ func TestMemorySharedEmailDraftStaleClaimRecoveryPreservesProviderIdempotency(t 
 		t.Fatalf("recovered clocks = idempotency=%v claimed=%v", recovered.Draft.SendIdempotencyTimestamp, recovered.Draft.SendClaimedTimestamp)
 	}
 	if err := repo.CompleteCommunicationsEmailDraftSend(CommunicationsEmailDraftSendCompleteInput{
-		CompanyID: draft.CompanyID, DraftID: draft.DraftID, CollaborationID: collaboration.CollaborationID,
+		CompanyID: draft.CompanyID, DraftID: draft.DraftID,
 		ClaimToken: first.ClaimToken, UpdatedByUserID: owner.UserID,
 		Message: domain.EmailMessageSnapshot{ID: "old-claim-must-not-complete", ThreadID: collaboration.ProviderThreadID},
 	}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("superseded claim completion error = %v, want ErrNotFound", err)
 	}
 	if err := repo.CompleteCommunicationsEmailDraftSend(CommunicationsEmailDraftSendCompleteInput{
-		CompanyID: draft.CompanyID, DraftID: draft.DraftID, CollaborationID: collaboration.CollaborationID,
+		CompanyID: draft.CompanyID, DraftID: draft.DraftID,
 		ClaimToken: recovered.ClaimToken, UpdatedByUserID: owner.UserID,
 		Message: domain.EmailMessageSnapshot{ID: "recovered-sent-message", ThreadID: collaboration.ProviderThreadID},
 	}); err != nil {
@@ -292,10 +302,10 @@ func TestMemorySharedEmailDraftStaleClaimRecoveryPreservesProviderIdempotency(t 
 }
 
 func TestMemorySharedEmailDraftExpiredRecoveryCanOnlyBeDiscarded(t *testing.T) {
-	repo, owner, collaboration, draft := seedSharedEmailDraftRecoveryTest(t, "02")
+	repo, owner, _, draft := seedSharedEmailDraftRecoveryTest(t, "02")
 	firstNow := time.Date(2026, 7, 13, 21, 0, 0, 0, time.UTC)
 	claimInput := CommunicationsEmailDraftSendClaimInput{
-		CompanyID: draft.CompanyID, DraftID: draft.DraftID, CollaborationID: collaboration.CollaborationID,
+		CompanyID: draft.CompanyID, DraftID: draft.DraftID,
 		ParticipantUserID: owner.UserID, ExpectedRevision: draft.Revision, ProviderGrantID: "recovery-grant-02", Now: firstNow,
 	}
 	first, err := repo.ClaimCommunicationsEmailDraftSend(claimInput)
@@ -334,10 +344,10 @@ func TestMemorySharedEmailDraftExpiredRecoveryCanOnlyBeDiscarded(t *testing.T) {
 }
 
 func TestMemorySharedEmailDraftRecoveryRejectsChangedProviderGrantAndAllowsDiscard(t *testing.T) {
-	repo, owner, collaboration, draft := seedSharedEmailDraftRecoveryTest(t, "03")
+	repo, owner, _, draft := seedSharedEmailDraftRecoveryTest(t, "03")
 	firstNow := time.Date(2026, 7, 14, 2, 0, 0, 0, time.UTC)
 	claimInput := CommunicationsEmailDraftSendClaimInput{
-		CompanyID: draft.CompanyID, DraftID: draft.DraftID, CollaborationID: collaboration.CollaborationID,
+		CompanyID: draft.CompanyID, DraftID: draft.DraftID,
 		ParticipantUserID: owner.UserID, ExpectedRevision: draft.Revision,
 		ProviderGrantID: "original-grant", Now: firstNow,
 	}

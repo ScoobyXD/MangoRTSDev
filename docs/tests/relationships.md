@@ -41,9 +41,9 @@ Later membership changes do not rewrite that Huddle Node, while current source d
 9. Opening an email-selection chat preview creates no text box, email relationship, or chat relationship.
 10. Sending the first chat from an email-selection preview atomically links the chosen existing text box or creates the first Node-local text box, then creates the email-to-textbox relationship and chat, or creates none of them.
 11. Cancelling an unsent email-selection chat preview requires no relationship deletion because no relationship has been written.
-12. A Node-shared email draft belongs directly to one exact Node, one exact email thread, and one exact source message. The reply UI reuses that message's existing Node-local text box or creates the one permitted typed email-to-text-box relationship first; the draft does not own a second text-box identity.
+12. A Node-shared email draft belongs directly to one exact Node, one exact email thread, and one exact source message. Current permission to view that Node permits viewing and editing its shared draft. The reply UI reuses that message's existing Node-local text box or creates the one permitted typed email-to-text-box relationship first; the draft does not own a second text-box identity.
 13. The shared draft stores the exact Node, thread, and source-message identities directly and never creates a generic draft edge, resource registry, surrogate identity, participant table, copied permission grant, or separate draft-to-text-box relationship.
-14. Removing one Node's email relationship removes only that Node's typed email edge and leaves every other Node, stored thread/message, local shared draft, local text box, chat, and surviving attachment relationship unchanged.
+14. Removing a Node email relationship is allowed only when that Node and thread have no textbox relationship, email-selection chat, or active shared draft; otherwise the command returns `email_removal_has_node_work` and changes nothing.
 15. Email-to-Node, email-to-textbox, chat, and draft rules do not create a generic resource registry, surrogate identity, or untyped edge.
 16. An ordinary root chat or reply in an existing triage grouping uses only the normal Node text-box-chat insert and creates no email, relationship, permission, participant, or collaboration row.
 17. A triage command that creates a new email grouping or stores a highlighted-email selection reuses the exact mailbox-scoped stored message when present, fetches only that exact provider message when absent, and never queues thread ingestion or links a thread to a text box.
@@ -70,7 +70,7 @@ An ordinary root chat or reply appends directly to an existing grouping without 
 ↓
 A highlighted-email or new-grouping send reuses the exact stored message or imports only the missing exact provider message; thread completion remains separate background ingestion
 ↓
-Removing one Node's relationship leaves all other Node-local work and the stored email truth intact
+An accidental Node email relationship with no Node-local work may be removed, while a relationship with a textbox link, email-selection chat, or active shared draft is preserved
 ↓
 Every endpoint keeps its literal typed identity; no registry, surrogate identity, or generic untyped edge is introduced
 ↓
@@ -448,7 +448,7 @@ One `email_thread_id` and its exact stored messages MAY have Node-wide `email_re
 
 A textbox-specific relationship MUST name one exact `email_message_id`, one exact Node, and one exact textbox in that Node. The same message may be linked to at most one textbox inside one Node. Repeating the same Node/message/textbox command converges to the existing typed edge, a different textbox in that same Node is rejected, and a textbox in a different Node is allowed.
 
-Removing one Node-wide or textbox-specific email relationship deletes only that exact relationship. It MUST NOT delete or rewrite another Node's relationship, the stored thread or message, another Node's textbox or chat, an email chat quote, or any surviving attachment relationship.
+Removing a Node-wide or textbox-specific email relationship is permitted only when that Node and thread have no textbox relationship, email-selection chat, or active shared draft. A blocked command MUST change nothing and return `email_removal_has_node_work`. A permitted removal deletes only that exact relationship and MUST NOT delete or rewrite another Node's relationship, the stored thread or message, another Node's textbox or chat, or any surviving attachment relationship.
 
 ### Law 32 — Huddle ownership and placement use exact Huddle identities
 
