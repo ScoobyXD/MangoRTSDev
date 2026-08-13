@@ -86,6 +86,7 @@ test("Google Docs rich HTML keeps its text and imports its remote image as a dur
     const image = document.content?.find((node) => node.type === "mangoAttachmentImage");
     assert.equal(image?.attrs?.attachmentId, "google-docs-image");
     assert.equal(image?.attrs?.alignment, "left");
+    assert.equal(image?.attrs?.position, "break", "new pasted images remain break-text until the user moves them");
     assert.equal(image?.attrs?.displayWidth, 546);
     const validation = validateMangoTiptapDocument({ format: "mango-tiptap-json", schema_version: 1, document });
     assert.equal(validation.valid, true, validation.valid ? "" : validation.error);
@@ -117,6 +118,7 @@ test("new attachment image content follows the active alignment instead of defau
     created_timestamp: "2026-07-29T16:00:00Z",
   }, "right");
   assert.equal(content.attrs?.alignment, "right");
+  assert.equal(content.attrs?.position, "break");
 });
 
 test("plain clipboard text and a file-backed image become one durable paste", async () => {

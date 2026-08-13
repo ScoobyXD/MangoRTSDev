@@ -8,15 +8,21 @@ import TaskList from "@tiptap/extension-task-list";
 import TextAlign from "@tiptap/extension-text-align";
 import { Color, FontSize, TextStyle } from "@tiptap/extension-text-style";
 import StarterKit from "@tiptap/starter-kit";
-import { Fragment, type Node as ProseMirrorNode } from "@tiptap/pm/model";
+import { Fragment, type Node as ProseMirrorNode, type Slice } from "@tiptap/pm/model";
 import { NodeSelection, Plugin, PluginKey, TextSelection, type Transaction } from "@tiptap/pm/state";
-import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { dropPoint } from "@tiptap/pm/transform";
+import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import { createEditorEntityIconElement, editorEntityTypeLabel } from "../editorEntityLinks.js";
 import { EDITOR_MENTION_MENU_VISIBLE_ROWS, mentionUserProfileColor } from "../editorMentions.js";
 import { normalizeEditorHighlightColor } from "../richTextEditing.js";
 import { getCurrentEditorTraceContext, traceEditorFunction } from "../editorTrace.js";
 import type { EditorOutlineStyleID } from "../plainTextEditing.js";
 import type { MangoTiptapDocument } from "./mangoTiptapDocument.js";
+import {
+  setMangoTiptapAnnotations,
+  type MangoTiptapAnnotation,
+} from "./mangoTiptapAnnotations.js";
+import { mangoTiptapImagePlacementAtX, type MangoTiptapImagePosition } from "./mangoTiptapImagePlacement.js";
 
 export { Editor as MangoTiptapEditorEngine } from "@tiptap/core";
 
@@ -520,7 +526,7 @@ export type MangoAttachmentImageAttributes = {
   displayWidth: number | null;
   displayHeight: number | null;
   alignment: "left" | "center" | "right";
-  position: "inline" | "break";
+  position: MangoTiptapImagePosition;
   layout: "content" | "wide";
   alt: string;
   title: string;
@@ -552,7 +558,7 @@ export const MangoAttachmentImage = Node.create({
       },
       position: {
         default: "break",
-        parseHTML: (element) => ["inline", "break"].includes(element.getAttribute("data-position") ?? "") ? element.getAttribute("data-position") : "break",
+        parseHTML: (element) => ["wrap", "break"].includes(element.getAttribute("data-position") ?? "") ? element.getAttribute("data-position") : "break",
       },
       layout: {
         default: "content",
@@ -593,6 +599,69 @@ export const MangoAttachmentImage = Node.create({
     })];
   },
 });
+
+function mappedAnnotationsAfterImageMove(
+  annotations: readonly MangoTiptapAnnotation[],
+  transaction: Transaction,
+  sourceFrom: number,
+  sourceTo: number,
+  destination: number,
+): MangoTiptapAnnotation[] {
+  return annotations.flatMap((annotation) => {
+    if (annotation.from === sourceFrom && annotation.to === sourceTo) {
+      return [{ ...annotation, from: destination, to: destination + (sourceTo - sourceFrom) }];
+    }
+    const from = transaction.mapping.mapResult(annotation.from, 1);
+    const to = transaction.mapping.mapResult(annotation.to, -1);
+    return from.deletedAcross || to.deletedAcross || to.pos <= from.pos
+      ? []
+      : [{ ...annotation, from: from.pos, to: to.pos }];
+  });
+}
+
+export function handleMangoTiptapImageDrop(
+  view: EditorView,
+  event: DragEvent,
+  slice: Slice,
+  moved: boolean,
+  annotations: readonly MangoTiptapAnnotation[] = [],
+): boolean {
+  const selection = view.state.selection;
+  const image = slice.content.childCount === 1 ? slice.content.firstChild : null;
+  if (
+    !moved
+    || !(selection instanceof NodeSelection)
+    || selection.node.type.name !== "mangoAttachmentImage"
+    || image?.type.name !== "mangoAttachmentImage"
+  ) return false;
+  const eventPosition = view.posAtCoords({ left: event.clientX, top: event.clientY });
+  if (!eventPosition) return false;
+  const insertionPosition = dropPoint(view.state.doc, eventPosition.pos, slice) ?? eventPosition.pos;
+  const placement = mangoTiptapImagePlacementAtX(event.clientX, view.dom.getBoundingClientRect());
+  const transaction = view.state.tr.deleteSelection();
+  const destination = transaction.mapping.map(insertionPosition);
+  const movedImage = image.type.create({ ...image.attrs, ...placement }, image.content, image.marks);
+  const documentBeforeInsert = transaction.doc;
+  transaction.replaceRangeWith(destination, destination, movedImage);
+  if (transaction.doc.eq(documentBeforeInsert)) return true;
+  if (transaction.doc.eq(view.state.doc)) return true;
+  const resolvedDestination = transaction.doc.resolve(destination);
+  if (resolvedDestination.nodeAfter?.type.name === "mangoAttachmentImage") {
+    transaction.setSelection(NodeSelection.create(transaction.doc, destination));
+  }
+  if (annotations.length > 0) {
+    setMangoTiptapAnnotations(transaction, mappedAnnotationsAfterImageMove(
+      annotations,
+      transaction,
+      selection.from,
+      selection.to,
+      destination,
+    ));
+  }
+  view.focus();
+  view.dispatch(transaction.setMeta("uiEvent", "drop"));
+  return true;
+}
 
 export const MangoBlockIdentity = Extension.create({
   name: "mangoBlockIdentity",

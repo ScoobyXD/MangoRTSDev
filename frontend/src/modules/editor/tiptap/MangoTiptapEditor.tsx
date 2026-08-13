@@ -82,6 +82,7 @@ import {
 } from "./mangoTiptapDocument.js";
 import {
   createMangoTiptapExtensions,
+  handleMangoTiptapImageDrop,
   handleMangoTiptapOutlineEnter,
   indentMangoTiptapSelection,
   MangoAttachmentImage,
@@ -93,6 +94,9 @@ import {
   showMangoTiptapPasteLoading,
   type MangoAttachmentImageAttributes,
 } from "./mangoTiptapExtensions.js";
+import {
+  mangoTiptapImagePlacementDOMAttributes,
+} from "./mangoTiptapImagePlacement.js";
 import {
   createMangoTiptapAttachmentContent,
   parseMangoTiptapRichClipboardContent,
@@ -541,7 +545,8 @@ export const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
         if (Math.abs(horizontalDelta / drag.startWidth) >= Math.abs(verticalDelta / drag.startHeight)) height = width / aspectRatio;
         else width = height * aspectRatio;
       }
-      const maximumWidth = Math.max(48, rootRef.current?.getBoundingClientRect().width || width);
+      const editorWidth = rootRef.current?.closest(".mango-tiptap-prosemirror, .mango-tiptap-static-document")?.getBoundingClientRect().width || width;
+      const maximumWidth = Math.max(48, attributes.position === "wrap" ? editorWidth * 0.5 : editorWidth);
       if (width > maximumWidth) {
         width = maximumWidth;
         if (changesWidth && changesHeight) height = width / (drag.startWidth / drag.startHeight);
@@ -621,7 +626,7 @@ export const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
         if ((event.target as HTMLElement).closest?.("button")) return;
         onSelect?.();
       }}
-      style={{ position: "relative", display: "flex", justifyContent: attributes.alignment === "left" ? "flex-start" : attributes.alignment === "right" ? "flex-end" : "center", margin: "8px 0", cursor: "pointer" }}
+      style={{ position: "relative", display: "flex", justifyContent: attributes.alignment === "left" ? "flex-start" : attributes.alignment === "right" ? "flex-end" : "center", cursor: "pointer" }}
     >
       <div
         ref={frameRef}
@@ -758,7 +763,10 @@ function attachmentNodeViewExtension(
   };
   return MangoAttachmentImage.extend({
     addNodeView() {
-      return ReactNodeViewRenderer(ImageNodeView);
+      return ReactNodeViewRenderer(ImageNodeView, {
+        className: "mango-tiptap-image-placement",
+        attrs: ({ node }) => mangoTiptapImagePlacementDOMAttributes(node.attrs),
+      });
     },
   });
 }
@@ -1440,6 +1448,13 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           event.preventDefault();
           return true;
         },
+        handleDrop: (view, event, slice, moved) => handleMangoTiptapImageDrop(
+          view,
+          event,
+          slice,
+          moved,
+          editorRef.current ? readMappedMangoTiptapAnnotations(editorRef.current) : [],
+        ),
         handleKeyDown: (view, event) => {
           if (event.key === "#" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.isComposing) {
             const { selection } = view.state;

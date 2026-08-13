@@ -84,7 +84,8 @@ function structuredDocument(): MangoTiptapDocument {
         ],
       }] },
       { type: "table", content: [{ type: "tableRow", content: [{ type: "tableCell", attrs: { colspan: 1, rowspan: 1 }, content: [{ type: "paragraph", content: [{ type: "text", text: "Cell" }] }] }] }] },
-      { type: "mangoAttachmentImage", attrs: { attachmentId: "image-1", filename: "image.png", mimeType: "image/png", alignment: "center", position: "break", layout: "content" } },
+      { type: "mangoAttachmentImage", attrs: { attachmentId: "image-1", filename: "image.png", mimeType: "image/png", alignment: "right", position: "wrap", layout: "content" } },
+      { type: "paragraph", attrs: { blockId: "wrapped-text" }, content: [{ type: "text", text: "Text wraps beside the image." }] },
     ] },
   };
 }
@@ -153,6 +154,8 @@ test("static JSON renderer paints true ProseMirror ranges across blocks, lists, 
   assert.match(html, /Fourth-level item/);
   assert.match(html, /<table/);
   assert.match(html, /data-static-image="image-1"/);
+  assert.match(html, /class="mango-tiptap-image-placement" data-mango-image-position="wrap" data-mango-image-alignment="right"/);
+  assert.match(html, /Text wraps beside the image/);
   assert.match(html, /data-mango-entity-id="project-1"/);
   assert.match(html, /href="\/projects\/project-1"/);
   assert.match(html, /mango-editor-entity-icon/);
@@ -184,6 +187,7 @@ test("static JSON renderer paints true ProseMirror ranges across blocks, lists, 
   assert.match(compactDefaultsHTML, /data-compact-image="compact-image"/);
   assert.match(compactDefaultsHTML, /data-alignment="left"/);
   assert.match(compactDefaultsHTML, /data-position="break"/);
+  assert.match(compactDefaultsHTML, /class="mango-tiptap-image-placement" data-mango-image-position="break" data-mango-image-alignment="left"/);
   assert.match(compactDefaultsHTML, /data-layout="content"/);
 
   const presentationCSS = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/tiptap/mangoTiptap.css"), "utf8");
@@ -191,6 +195,11 @@ test("static JSON renderer paints true ProseMirror ranges across blocks, lists, 
   assert.match(presentationCSS, /line-height:\s*20px/);
   assert.match(presentationCSS, /padding:\s*12px 13px/);
   assert.match(presentationCSS, /min-height:\s*100%/);
+  assert.match(presentationCSS, /display:\s*flow-root/, "the editor contains wrapped floats even at its narrowest mounted width");
+  assert.match(presentationCSS, /data-mango-image-position="wrap"[^}]+max-width:\s*min\(50%, 840px\)/s);
+  assert.match(presentationCSS, /data-mango-image-alignment="left"[^}]+float:\s*left/s);
+  assert.match(presentationCSS, /data-mango-image-alignment="right"[^}]+float:\s*right/s);
+  assert.match(presentationCSS, /data-mango-image-position="break"[^}]+clear:\s*both/s);
   assert.match(presentationCSS, /\.mango-tiptap-active-surface[^}]+height:\s*100%/s);
   assert.match(presentationCSS, /\.mango-tiptap-prosemirror:focus[^}]+outline:\s*none/s);
   assert.match(presentationCSS, /data-mango-editor-editable="true"[^}]+cursor:\s*text/s);
@@ -510,6 +519,9 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
       assert.ok(editorRoot.querySelector(`[data-mango-annotation-id="${annotation.id}"]`), `sleeping renderer should paint ${annotation.id}`);
     }
     assert.equal(editorRoot.querySelector('[data-mango-annotation-id="annotation-image"]'), null, "dormant changes must not paint on sleeping surfaces");
+    const sleepingImagePlacement = editorRoot.querySelector<HTMLElement>('[data-mango-attachment-id="image-1"]')?.closest<HTMLElement>(".mango-tiptap-image-placement");
+    assert.equal(sleepingImagePlacement?.dataset.mangoImagePosition, "wrap");
+    assert.equal(sleepingImagePlacement?.dataset.mangoImageAlignment, "right");
 
     const exactObserver = observers.filter((observer) => observer.rootMargin === "0px" && observer.isObserving(editorRoot)).at(-1);
     assert.ok(exactObserver);
@@ -552,6 +564,9 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     assert.equal(activeProseMirror.getAttribute("contenteditable"), "true", "the clicked JSON document should become a real editable surface");
     assert.equal(dom.window.document.activeElement, activeProseMirror, "the first pointer activation must focus the attached editor without requiring a second click");
     assert.equal(activeProseMirror.dataset.mangoLegacyLeadingDateHeading, "true");
+    const activeInitialImagePlacement = activeProseMirror.querySelector<HTMLElement>('[data-mango-attachment-id="image-1"]')?.closest<HTMLElement>(".mango-tiptap-image-placement");
+    assert.equal(activeInitialImagePlacement?.dataset.mangoImagePosition, sleepingImagePlacement?.dataset.mangoImagePosition, "active and sleeping renderers use the same image placement");
+    assert.equal(activeInitialImagePlacement?.dataset.mangoImageAlignment, sleepingImagePlacement?.dataset.mangoImageAlignment, "active and sleeping renderers use the same image side");
 
     editorRoot.scrollTop = 321;
     holdAnimationFrames = true;
@@ -627,14 +642,14 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
       activeImageFrame.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
     });
     await waitFor(() => activeImageFrame.dataset.selected === "true", "clicking an inline image should create a visible Tiptap node selection");
-    assert.equal(controllerRef.current?.readFormatState().textAlignment, "center", "the selected image starts with its stored center alignment");
+    assert.equal(controllerRef.current?.readFormatState().textAlignment, "right", "the selected wrapped image starts on its stored side");
     await act(async () => { assert.equal(controllerRef.current?.applyTextAlignment("left"), true); });
     assert.equal(controllerRef.current?.readFormatState().textAlignment, "left", "the selected image node attributes must receive the toolbar alignment");
     await waitFor(() => postStarted, "selected image alignment must use the normal durable document save");
     const postedImage = postedDocument?.document.content?.find((node) => node.type === "mangoAttachmentImage");
     assert.equal(postedImage?.attrs?.attachmentId, "image-1");
     assert.equal(Object.prototype.hasOwnProperty.call(postedImage?.attrs ?? {}, "alignment"), false, "the default left alignment should not be sent");
-    assert.equal(Object.prototype.hasOwnProperty.call(postedImage?.attrs ?? {}, "position"), false, "the default break position should not be sent");
+    assert.equal(postedImage?.attrs?.position, "wrap", "the additive wrapped placement should be sent without changing the JSON envelope version");
     assert.equal(Object.prototype.hasOwnProperty.call(postedImage?.attrs ?? {}, "layout"), false, "the default content layout should not be sent");
     assert.doesNotMatch(JSON.stringify(postedDocument), /"indentLevel":0|"textAlign":null/);
     releasePost?.();
@@ -645,6 +660,9 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     activeImageFrame = activeProseMirror.querySelector<HTMLElement>('[data-mango-attachment-id="image-1"]');
     assert.ok(activeImageFrame);
     await waitFor(() => activeImageFrame.dataset.selected === "true", "the persisted image alignment must preserve its node selection");
+    const activeMovedImagePlacement = activeImageFrame.closest<HTMLElement>(".mango-tiptap-image-placement");
+    assert.equal(activeMovedImagePlacement?.dataset.mangoImagePosition, "wrap");
+    assert.equal(activeMovedImagePlacement?.dataset.mangoImageAlignment, "left");
     assert.equal(activeImageFrame.closest(".node-mangoAttachmentImage")?.getAttribute("draggable"), "true", "the selected inline image remains movable through Tiptap drag and drop");
     assert.equal(activeImageFrame.querySelector('[data-mango-tiptap-image-frame="true"]')?.getAttribute("draggable"), "true", "dragging the visible image frame starts a real node move");
     const copiedEventData = new Map<string, string>();
