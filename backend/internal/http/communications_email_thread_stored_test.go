@@ -98,7 +98,7 @@ func TestCommunicationsStoredThreadReadUsesExactDurableThreadIDWithoutProviderRe
 	client.threadsByID["stored-message-thread"] = NylasThread{ID: "stored-message-thread", MessageIDs: []string{"provider-reconstruction-must-not-run"}}
 	server := newEmailCollaborationThreadTestServer(repo, client)
 	defer server.Close()
-	path := "/v1/communications/threads/" + storedThread.EmailThreadID + "?stored=true&company_id=" + emailCollaborationThreadTestCompanyID + "&account_email=" + owner.Email
+	path := "/v1/communications/threads/" + storedThread.EmailThreadID + "?company_id=" + emailCollaborationThreadTestCompanyID + "&account_email=" + owner.Email
 	req := emailCollaborationThreadTestRequestWithActor(httptest.NewRequest(http.MethodGet, path, nil), owner, domain.RoleCompanyUser)
 	rec := httptest.NewRecorder()
 	server.Routes().ServeHTTP(rec, req)

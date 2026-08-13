@@ -37,7 +37,7 @@
 35. A Node opens with every attached-email thread collapsed and reads a thread body or that exact Node's shared draft only after the user opens that exact thread.
 36. A chat authored by the current user moves the shared message view to the new message at the bottom.
 37. Every saved email-selection chat renders its exact stored quote and offsets as a lasting highlight in My Triage, Shared Triage, and Node email views.
-38. My Triage, Shared Triage, and the Node email column pass the exact durable `email_thread_id` into the same stored-thread read, render every related `email_messages` row once in `message_order`, and show each expanded message's complete stored body.
+38. My Triage, Shared Triage, and the Node email column pass the exact durable `email_thread_id` into the same stored-thread read, render every related `email_messages` row once in `message_order`, and show each expanded message's complete stored body. The thread-detail route accepts only that durable ID and has no provider-thread, collaboration, or paged-message fallback.
 39. A one-hash email reference stores the exact durable `email_thread_id` and opens that same stored-thread read and renderer in a quick modal with the standard red close button; it creates no relationship, email route, provider-thread lookup, or second email-rendering system.
 40. A quoted copy of an earlier email inside another message body is body content only. It never counts as thread membership and never permits Mango to omit that earlier stored message row.
 

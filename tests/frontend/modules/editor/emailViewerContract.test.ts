@@ -57,9 +57,8 @@ test("node-attached email viewer discloses per-message recipients while retainin
   assert.match(nodeParts, /accountEmail=\{email\.accountEmail\}/);
   assert.match(calendarInviteCard, /respondToCalendarInvite\(\{ messageID, status, companyID, sharedInboxID, accountEmail \}\)/);
   assert.match(nodeParts, /downloadEmailAttachment\(message\.id, providerAttachmentID, companyID, sharedInboxID, \{ accountEmail, collaborationID \}\)/);
-  assert.match(nodeParts, /getEmailMessage\(email\.messageID, companyID, mailboxScope\.sharedInboxID, \{ accountEmail: mailboxScope\.accountEmail \}\)/);
-  assert.match(nodeParts, /getEmailThread\(threadID, companyID, mailboxScope\.sharedInboxID, mailboxScope\.accountEmail\)/);
-  assert.match(nodeParts, /listEmailMessages\(\{ companyID, \.\.\.mailboxScope, mailbox: "all"/);
+  assert.match(nodeParts, /getNodeEmailThread\(companyID, cleanNodeID, durableThreadID, options\)/);
+  assert.doesNotMatch(nodeParts, /getEmailThread\(|listEmailMessages\(|getEmailMessage\(|thread\.message_ids/);
   assert.match(nodeParts, /account_email: mailboxScope\.accountEmail/);
   assert.match(universalPickerEmailPane, /status\.connected && status\.status === "connected"/);
   assert.match(universalPickerEmailPane, /if \(!active \|\| !accountResolved \|\| !accountEmail\) return undefined/);
@@ -213,7 +212,7 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeParts, /data-email-single-message=\{singleMessageOnly \? "true" : undefined\}/);
   assert.match(nodeParts, /data-linked-email-message-metadata="true"/);
   assert.match(nodeParts, /if \(singleMessageOnly\) \{/);
-  assert.match(nodeParts, /await getNodeEmailMessage\(companyID, nodeID, cleanEmailThreadID, cleanEmailMessageID\)/);
+  assert.match(nodeParts, /await getNodeEmailMessage\(companyID, cleanNodeID, cleanEmailThreadID, cleanEmailMessageID\)/);
   assert.match(nodeParts, /setThreadMessages\(\[payload\]\)/);
   assert.match(nodeParts, /applyEmailBodyHighlights\(frameDocument, highlights, activeSelection\)/);
   assert.match(emailBodyHighlights, /data-mango-email-body-highlight/);

@@ -31,7 +31,6 @@ import {
   invalidateCommunicationsCache,
   invalidateCommunicationsMailboxCache,
   invalidateEmailMessageCache,
-  invalidateEmailThreadCache,
   listCompanyUsers,
   listCompanyUserGroups,
   listEmailFolders,
@@ -2024,14 +2023,6 @@ export function HomePage({
         if (change?.message_id) {
           invalidateEmailMessageCache(
             change.message_id,
-            subscribedTarget.companyID,
-            subscribedTarget.sharedInboxID || undefined,
-            subscribedTarget.sharedInboxID ? undefined : subscribedTarget.accountEmail,
-          );
-        }
-        if (change?.thread_id) {
-          invalidateEmailThreadCache(
-            change.thread_id,
             subscribedTarget.companyID,
             subscribedTarget.sharedInboxID || undefined,
             subscribedTarget.sharedInboxID ? undefined : subscribedTarget.accountEmail,

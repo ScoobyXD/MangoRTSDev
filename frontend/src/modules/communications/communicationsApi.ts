@@ -111,22 +111,6 @@ export type EmailMessage = {
   client_source_scope_key?: string;
 };
 
-export type EmailThread = {
-  id: string;
-  subject?: string;
-  snippet?: string;
-  unread?: boolean;
-  starred?: boolean;
-  folders?: string[];
-  participants?: EmailAddress[];
-  message_ids?: string[];
-  draft_ids?: string[];
-  earliest_message_date?: number;
-  latest_message_received_date?: number;
-  latest_message_sent_date?: number;
-  latest_draft_or_message?: EmailMessage;
-};
-
 export type ListMessagesParams = {
   limit?: number;
   pageToken?: string;
@@ -614,7 +598,6 @@ let statusCache: CacheEntry<CommunicationsStatus> | null = null;
 const foldersCache = new Map<string, CacheEntry<EmailFolder[]>>();
 const messagePageCache = new Map<string, CacheEntry<MessagePage>>();
 const messageDetailCache = new Map<string, MessageDetailCacheEntry>();
-const emailThreadCache = new Map<string, CacheEntry<EmailThread>>();
 const archiveJobCache = new Map<string, CommunicationsArchiveJobCacheEntry>();
 const archiveJobInflight = new Map<string, Promise<CommunicationsArchiveJob>>();
 const recentArchivedMessages = new Map<string, ScopedMessageCacheEntry>();
@@ -626,7 +609,6 @@ const foldersCacheWriters = new Map<string, Promise<EmailFolder[]>>();
 const messagePageInflight = new Map<string, Promise<MessagePage>>();
 const messagePageCacheWriters = new Map<string, Promise<MessagePage>>();
 const messageDetailInflight = new Map<string, Promise<EmailMessage>>();
-const emailThreadInflight = new Map<string, Promise<EmailThread>>();
 const communicationsReadCache = new Map<string, CacheEntry<unknown>>();
 const communicationsReadInflight = new Map<string, Promise<unknown>>();
 let communicationsAuthSessionGeneration = getAuthSessionCacheGeneration();
@@ -838,7 +820,7 @@ export async function getStoredEmailThread(
   const cleanEmailThreadID = emailThreadID.trim();
   if (!cleanEmailThreadID || !companyID.trim()) throw new Error("email_thread_scope_required");
   const replyScope: LocalEmailReplyScope = { companyID, sharedInboxID, ...localReplyScope };
-  const queryParams = new URLSearchParams({ stored: "true" });
+  const queryParams = new URLSearchParams();
   queryParams.set("company_id", companyID.trim());
   if (sharedInboxID?.trim()) queryParams.set("shared_inbox_id", sharedInboxID.trim());
   if (!sharedInboxID?.trim() && localReplyScope.accountEmail?.trim()) {
@@ -856,42 +838,6 @@ export async function getStoredEmailThread(
     ...cloneCommunicationsStoredEmailThread(payload.thread),
     messages: (payload.thread.messages ?? []).map(hydrate),
   };
-}
-
-export async function getEmailThread(threadID: string, companyID?: string, sharedInboxID?: string, accountEmail?: string): Promise<EmailThread> {
-  ensureCommunicationsCacheAuthScope();
-  const cleanThreadID = threadID.trim();
-  if (!cleanThreadID) throw new Error("email_thread_id_required");
-  const cacheKey = emailThreadCacheKey(cleanThreadID, companyID, sharedInboxID, accountEmail);
-  const cacheEntry = emailThreadCache.get(cacheKey) ?? null;
-  const cached = readCache(cacheEntry, MESSAGE_DETAIL_CACHE_TTL_MS, cloneEmailThread);
-  if (cached) return cached;
-  const existingInflight = emailThreadInflight.get(cacheKey);
-  if (existingInflight) return cloneEmailThread(await existingInflight);
-  const queryParams = new URLSearchParams();
-  if (companyID?.trim()) queryParams.set("company_id", companyID.trim());
-  if (sharedInboxID?.trim()) queryParams.set("shared_inbox_id", sharedInboxID.trim());
-  if (!sharedInboxID?.trim() && accountEmail?.trim()) queryParams.set("account_email", accountEmail.trim().toLowerCase());
-  const query = queryParams.toString();
-  const request = apiFetchJSON<{ thread: EmailThread }>(`/v1/communications/threads/${encodeURIComponent(cleanThreadID)}${query ? `?${query}` : ""}`)
-    .then((payload) => {
-      const thread = cloneEmailThread(payload.thread);
-      if (emailThreadInflight.get(cacheKey) === request) {
-        emailThreadCache.set(cacheKey, { value: thread, fetchedAt: Date.now() });
-      }
-      return thread;
-    })
-    .finally(() => {
-      if (emailThreadInflight.get(cacheKey) === request) emailThreadInflight.delete(cacheKey);
-    });
-  emailThreadInflight.set(cacheKey, request);
-  try {
-    return cloneEmailThread(await request);
-  } catch (error) {
-    const stale = isNylasRateLimitedError(error) ? readCache(cacheEntry, MESSAGE_STALE_ON_RATE_LIMIT_TTL_MS, cloneEmailThread) : null;
-    if (stale) return stale;
-    throw error;
-  }
 }
 
 export async function downloadEmailAttachment(
@@ -1925,10 +1871,6 @@ export function invalidateCommunicationsCache(scope?: { status?: boolean; folder
     messageDetailCache.clear();
     messageDetailInflight.clear();
   }
-  if (full || scope?.messagePages || scope?.messages) {
-    emailThreadCache.clear();
-    emailThreadInflight.clear();
-  }
   if (full) {
     recentArchivedMessages.clear();
     recentPrimaryMessages.clear();
@@ -1980,14 +1922,6 @@ export function invalidateEmailMessageCache(messageID: string, companyID?: strin
   for (const key of messageDetailInflight.keys()) {
     if ((scoped && key === scopedKey) || (!scoped && messageCacheKeyMatchesID(key, cleanMessageID))) messageDetailInflight.delete(key);
   }
-}
-
-export function invalidateEmailThreadCache(threadID: string, companyID?: string, sharedInboxID?: string, accountEmail?: string): void {
-  const cleanThreadID = threadID.trim();
-  if (!cleanThreadID) return;
-  const key = emailThreadCacheKey(cleanThreadID, companyID, sharedInboxID, accountEmail);
-  emailThreadCache.delete(key);
-  emailThreadInflight.delete(key);
 }
 
 export function invalidateCommunicationsWorkspaceResourceCache(companyID: string): void {
@@ -2748,13 +2682,6 @@ function messageDetailCacheKeyMatchesScope(
   return parts.length >= 4 && parts[0] === companyID && parts[1] === sharedInboxID && parts[2] === accountEmail;
 }
 
-function emailThreadCacheKey(threadID: string, companyID?: string, sharedInboxID?: string, accountEmail?: string): string {
-  const cleanCompanyID = companyID?.trim() ?? "";
-  const cleanSharedInboxID = sharedInboxID?.trim() ?? "";
-  const cleanAccountEmail = cleanSharedInboxID ? "" : accountEmail?.trim().toLowerCase() ?? "";
-  return `${cleanCompanyID}\x1f${cleanSharedInboxID}\x1f${cleanAccountEmail}\x1f${threadID.trim()}`;
-}
-
 function communicationsCachePathMatchesMailbox(
   path: string,
   scope: { companyID: string; sharedInboxID?: string; accountEmail?: string },
@@ -2842,17 +2769,6 @@ function cloneMessage(message: EmailMessage): EmailMessage {
     logic_gate_count: message.logic_gate_count,
     read_status: message.read_status ? { ...message.read_status } : undefined,
     local_replies: message.local_replies ? message.local_replies.map((reply) => cloneMessage(reply)) : undefined,
-  };
-}
-
-function cloneEmailThread(thread: EmailThread): EmailThread {
-  return {
-    ...thread,
-    participants: cloneEmailAddresses(thread.participants),
-    folders: thread.folders ? [...thread.folders] : undefined,
-    message_ids: thread.message_ids ? [...thread.message_ids] : undefined,
-    draft_ids: thread.draft_ids ? [...thread.draft_ids] : undefined,
-    latest_draft_or_message: thread.latest_draft_or_message ? cloneMessage(thread.latest_draft_or_message) : undefined,
   };
 }
 

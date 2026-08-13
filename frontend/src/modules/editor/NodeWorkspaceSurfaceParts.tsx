@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { AppModalPortal, useAppFloatingMenuDismissal, useAppOverlayPortalTarget, useAppViewportAnchorRect } from "../../app/AppModalPortal.js";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { ExplorerEntityIcon } from "../../icons/index.js";
-import { deleteEmailDraft, downloadEmailAttachment, getEmailCollaborationThread, getEmailMessage, getEmailSignature, getEmailThread, getNodeEmailMessage, getNodeEmailThread, listEmailDrafts, listEmailMessages, saveEmailDraft, sendEmail, sendEmailCollaborationDraft, type CommunicationsEmailDraft, type EmailAddress, type EmailAttachment, type EmailMessage } from "../communications/communicationsApi";
+import { deleteEmailDraft, downloadEmailAttachment, getEmailSignature, getNodeEmailMessage, getNodeEmailThread, listEmailDrafts, saveEmailDraft, sendEmail, sendEmailCollaborationDraft, type CommunicationsEmailDraft, type EmailAddress, type EmailAttachment, type EmailMessage } from "../communications/communicationsApi";
 import { CalendarInviteCard } from "../communications/CalendarInviteCard";
 import { OutboundEmailUndoBanner } from "../communications/OutboundEmailUndoBanner";
 import { isOutboundEmailUndoneError } from "../communications/outboundEmailUndo";
@@ -3607,44 +3607,14 @@ async function loadAttachedEmailThreadPreview(
   options: { refresh?: boolean } = {},
 ): Promise<AttachedEmailThreadPreview> {
   const durableThreadID = email.emailThreadID?.trim() ?? "";
-  if (durableThreadID && nodeID.trim()) {
-    const durableThread = await getNodeEmailThread(companyID, nodeID, durableThreadID, options);
-    const primary = durableThread.messages.find((message) => message.id === email.messageID)
-      ?? durableThread.messages[0] ?? null;
-    return { messages: primary
-      ? mergeEmailThreadMessages(primary, durableThread.messages, primary.local_replies ?? [])
-      : [], downloadStatus: resolveEmailThreadDownloadStatus(durableThread.download_status, durableThread.history_complete, durableThread.thread_id) };
-  }
-  const mailboxScope = resolveEditorEmailMailboxScope(email.sharedInboxID, email.accountEmail);
-  const collaborationID = email.collaborationID?.trim() ?? "";
-  if (collaborationID) {
-    const collaborationThread = await getEmailCollaborationThread(companyID, collaborationID);
-    const primary = collaborationThread.messages.find((message) => message.id === email.messageID)
-      ?? collaborationThread.messages[0]
-      ?? null;
-    return { messages: primary
-      ? mergeEmailThreadMessages(primary, collaborationThread.messages, primary.local_replies ?? [])
-      : [], downloadStatus: resolveEmailThreadDownloadStatus(collaborationThread.download_status, collaborationThread.history_complete, collaborationThread.thread_id) };
-  }
-  const primary = await getEmailMessage(email.messageID, companyID, mailboxScope.sharedInboxID, { accountEmail: mailboxScope.accountEmail });
-  const threadID = primary.thread_id?.trim() || email.threadID?.trim() || "";
-  if (!threadID) return { messages: mergeEmailThreadMessages(primary, [primary], primary.local_replies ?? []), downloadStatus: "complete" };
-  try {
-    const thread = await getEmailThread(threadID, companyID, mailboxScope.sharedInboxID, mailboxScope.accountEmail);
-    const ids = Array.from(new Set((thread.message_ids ?? []).map((id) => id.trim()).filter(Boolean)));
-    if (!ids.includes(primary.id)) ids.unshift(primary.id);
-    const details = await Promise.all(ids.map(async (id) => {
-      if (id === primary.id) return primary;
-      try {
-        return await getEmailMessage(id, companyID, mailboxScope.sharedInboxID, { accountEmail: mailboxScope.accountEmail });
-      } catch {
-        return thread.latest_draft_or_message?.id === id ? thread.latest_draft_or_message : null;
-      }
-    }));
-    return { messages: mergeEmailThreadMessages(primary, details.filter((item): item is EmailMessage => Boolean(item)), primary.local_replies ?? []), downloadStatus: "complete" };
-  } catch {
-    return { messages: mergeEmailThreadMessages(primary, [primary], primary.local_replies ?? []), downloadStatus: "complete" };
-  }
+  const cleanNodeID = nodeID.trim();
+  if (!durableThreadID || !cleanNodeID) throw new Error("stored_email_thread_id_missing");
+  const durableThread = await getNodeEmailThread(companyID, cleanNodeID, durableThreadID, options);
+  const primary = durableThread.messages.find((message) => message.id === email.messageID)
+    ?? durableThread.messages[0] ?? null;
+  return { messages: primary
+    ? mergeEmailThreadMessages(primary, durableThread.messages, primary.local_replies ?? [])
+    : [], downloadStatus: resolveEmailThreadDownloadStatus(durableThread.download_status, durableThread.history_complete, durableThread.thread_id) };
 }
 
 const AttachedEmailThreadCard: React.FC<{
@@ -4121,10 +4091,10 @@ async function resolveLinkedEmailPreview(
   const directProjection = emails.find((email) => email.id.trim() === cleanMessageID);
   if (directProjection) return { email: directProjection, focusMessageID: directProjection.messageID };
 
-  const mailboxCandidates: Array<EditorAttachedEmail | null> = emails.length > 0 ? emails : [null];
+  const mailboxCandidates = emails;
   if (nodeID.trim()) {
     for (const candidate of mailboxCandidates) {
-      const emailThreadID = candidate?.emailThreadID?.trim() ?? "";
+      const emailThreadID = candidate.emailThreadID?.trim() ?? "";
       if (!emailThreadID) continue;
       try {
         const message = await getNodeEmailMessage(companyID, nodeID, emailThreadID, cleanMessageID);
@@ -4132,61 +4102,20 @@ async function resolveLinkedEmailPreview(
         if (!emailMessageID) throw new Error("email_message_id_missing");
         return {
           email: {
-            ...(candidate ?? {
-              id: `linked-email:${cleanMessageID}`,
-              messageID: message.id,
-              emailMessageID,
-              attachedTimestamp: "",
-              subject: message.subject || "(no subject)",
-            }),
+            ...candidate,
             messageID: message.id,
             emailMessageID,
-            threadID: message.thread_id?.trim() || candidate?.threadID,
-            subject: message.subject || candidate?.subject || "(no subject)",
-            snippet: message.snippet || candidate?.snippet,
-            from: formatAddressList(message.from) || candidate?.from,
-            date: message.date ?? candidate?.date,
+            threadID: message.thread_id?.trim() || candidate.threadID,
+            subject: message.subject || candidate.subject || "(no subject)",
+            snippet: message.snippet || candidate.snippet,
+            from: formatAddressList(message.from) || candidate.from,
+            date: message.date ?? candidate.date,
           },
           focusMessageID: message.id,
         };
       } catch {
-        // Try the next Node-attached thread before using mailbox access.
+        // Try the next exact Node-attached durable thread.
       }
-    }
-  }
-  const attemptedScopes = new Set<string>();
-  for (const candidate of mailboxCandidates) {
-    const mailboxScope = resolveEditorEmailMailboxScope(candidate?.sharedInboxID, candidate?.accountEmail);
-    const scopeKey = `${mailboxScope.sharedInboxID ?? ""}\u0000${mailboxScope.accountEmail ?? ""}`;
-    if (attemptedScopes.has(scopeKey)) continue;
-    attemptedScopes.add(scopeKey);
-    try {
-      const message = await getEmailMessage(cleanMessageID, companyID, mailboxScope.sharedInboxID, { accountEmail: mailboxScope.accountEmail });
-      const emailMessageID = message.email_message_id?.trim() ?? "";
-      if (!emailMessageID) throw new Error("email_message_id_missing");
-      return {
-        email: {
-          ...(candidate ?? {
-            id: `linked-email:${cleanMessageID}`,
-            messageID: message.id,
-            emailMessageID,
-            attachedTimestamp: "",
-            subject: message.subject || "(no subject)",
-          }),
-          collaborationID: candidate?.collaborationID,
-          emailThreadID: candidate?.emailThreadID,
-          messageID: message.id,
-          emailMessageID,
-          threadID: message.thread_id?.trim() || candidate?.threadID,
-          subject: message.subject || candidate?.subject || "(no subject)",
-          snippet: message.snippet || candidate?.snippet,
-          from: formatAddressList(message.from) || candidate?.from,
-          date: message.date ?? candidate?.date,
-        },
-        focusMessageID: message.id,
-      };
-    } catch {
-      // Try the next attached mailbox scope before reporting that the link is unavailable.
     }
   }
   return null;
@@ -5043,8 +4972,6 @@ const EMAIL_SELECTION_ACTION_GAP = 5;
 const EMAIL_SELECTION_ACTION_PADDING = 4;
 const EMAIL_SELECTION_ACTION_BORDER = 1;
 const EMAIL_SELECTION_ACTION_OFFSET = 8;
-const EMAIL_THREAD_MESSAGE_BATCH_SIZE = 12;
-
 type EmailBodyImageSelection = {
   src: string;
   filename: string;
@@ -5954,12 +5881,13 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setSelectionDraft(null);
     setEmailHighlightsByMessageID({ [messageID]: readStoredEmailLocalHighlights(messageID) });
     void (async () => {
+      const cleanEmailThreadID = emailThreadID?.trim() ?? "";
+      const cleanNodeID = nodeID.trim();
+      if (!cleanEmailThreadID || !cleanNodeID) throw new Error("stored_email_thread_id_missing");
       if (singleMessageOnly) {
-        const cleanEmailThreadID = emailThreadID?.trim() ?? "";
         const cleanEmailMessageID = emailMessageID?.trim() ?? "";
-        const payload = cleanEmailThreadID && cleanEmailMessageID && nodeID.trim()
-          ? await getNodeEmailMessage(companyID, nodeID, cleanEmailThreadID, cleanEmailMessageID)
-          : await getEmailMessage(messageID, companyID, mailboxScope.sharedInboxID, { accountEmail: mailboxScope.accountEmail });
+        if (!cleanEmailMessageID) throw new Error("stored_email_message_id_missing");
+        const payload = await getNodeEmailMessage(companyID, cleanNodeID, cleanEmailThreadID, cleanEmailMessageID);
         if (cancelled) return;
         setMessage(payload);
         setThreadMessages([payload]);
@@ -5968,76 +5896,27 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         setSubjectDraft(replySubject(payload.subject));
         return;
       }
-      const cleanEmailThreadID = emailThreadID?.trim() ?? "";
-      const storedThread = cleanEmailThreadID && nodeID.trim()
-        ? await getNodeEmailThread(companyID, nodeID, cleanEmailThreadID)
-        : null;
-      const cleanCollaborationID = collaborationID?.trim() ?? "";
-      const collaborationThread = !storedThread && cleanCollaborationID
-        ? await getEmailCollaborationThread(companyID, cleanCollaborationID)
-        : null;
-      const immediateMessages = storedThread?.messages.length ? storedThread.messages : collaborationThread?.messages ?? [];
+      const storedThread = await getNodeEmailThread(companyID, cleanNodeID, cleanEmailThreadID);
+      const immediateMessages = storedThread.messages;
       const payload = immediateMessages.find((item) => item.id === messageID)
+        ?? immediateMessages.find((item) => item.email_message_id === emailMessageID)
         ?? immediateMessages[0]
-        ?? await getEmailMessage(messageID, companyID, mailboxScope.sharedInboxID, { accountEmail: mailboxScope.accountEmail });
-      if (!payload) throw new Error("email_collaboration_thread_unavailable");
+        ?? null;
+      if (!payload) throw new Error("stored_email_thread_empty");
       if (cancelled) return;
       setMessage(payload);
-      const storedDownload = storedThread ?? collaborationThread;
       setStoredThreadDownloadStatus(resolveEmailThreadDownloadStatus(
-        storedDownload?.download_status,
-        storedDownload?.history_complete ?? true,
-        storedDownload?.thread_id,
+        storedThread.download_status,
+        storedThread.history_complete,
+        storedThread.thread_id,
       ));
-      setThreadMessages(immediateMessages.length ? immediateMessages : [payload]);
+      setThreadMessages(immediateMessages);
       setSentReplies(payload.local_replies ?? []);
       setToDraft(formatAddressList(payload.reply_to?.length ? payload.reply_to : payload.from));
       setCcDraft("");
       setBccDraft("");
       setSubjectDraft(replySubject(payload.subject));
       setBodyDraft("");
-
-      if (storedThread || collaborationThread) return;
-
-      const threadID = payload.thread_id?.trim();
-      if (!threadID) return;
-      try {
-        const thread = await getEmailThread(threadID, companyID, mailboxScope.sharedInboxID, mailboxScope.accountEmail);
-        if (cancelled) return;
-        let ids = Array.from(new Set((thread.message_ids ?? []).map((item) => item.trim()).filter(Boolean)));
-        if (ids.length === 0) {
-          const page = await listEmailMessages({ companyID, ...mailboxScope, mailbox: "all", limit: EMAIL_THREAD_MESSAGE_BATCH_SIZE, threadID, refresh: true });
-          ids = Array.from(new Set((page.messages ?? []).map((item) => item.id).filter(Boolean)));
-        }
-        if (!ids.includes(payload.id)) ids.unshift(payload.id);
-        const details = await Promise.all(ids.map(async (id) => {
-          if (id === payload.id) return payload;
-          try {
-            return await getEmailMessage(id, companyID, mailboxScope.sharedInboxID, { accountEmail: mailboxScope.accountEmail });
-          } catch {
-            return thread.latest_draft_or_message?.id === id ? thread.latest_draft_or_message : null;
-          }
-        }));
-        if (!cancelled) setThreadMessages(details.filter((item): item is EmailMessage => Boolean(item)));
-      } catch {
-        try {
-          const page = await listEmailMessages({ companyID, ...mailboxScope, mailbox: "all", limit: EMAIL_THREAD_MESSAGE_BATCH_SIZE, threadID, refresh: true });
-          if (cancelled) return;
-          const ids = Array.from(new Set((page.messages ?? []).map((item) => item.id).filter(Boolean)));
-          if (!ids.includes(payload.id)) ids.unshift(payload.id);
-          const details = await Promise.all(ids.map(async (id) => {
-            if (id === payload.id) return payload;
-            try {
-              return await getEmailMessage(id, companyID, mailboxScope.sharedInboxID, { accountEmail: mailboxScope.accountEmail });
-            } catch {
-              return (page.messages ?? []).find((item) => item.id === id) ?? null;
-            }
-          }));
-          if (!cancelled) setThreadMessages(details.filter((item): item is EmailMessage => Boolean(item)));
-        } catch {
-          if (!cancelled) setThreadMessages([payload]);
-        }
-      }
     })()
       .catch((cause) => {
         if (!cancelled) setError(cause instanceof Error ? cause.message : "failed_to_load_email");
@@ -6046,13 +5925,12 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [collaborationID, companyID, emailMessageID, emailThreadID, mailboxScope, messageID, nodeID, singleMessageOnly]);
+  }, [companyID, emailMessageID, emailThreadID, messageID, nodeID, singleMessageOnly]);
 
 	useEffect(() => {
 		if (storedThreadDownloadStatus !== "downloading" || singleMessageOnly || replyTargetMessageID) return;
 		const cleanEmailThreadID = emailThreadID?.trim() ?? "";
-		const cleanCollaborationID = collaborationID?.trim() ?? "";
-		if ((!cleanEmailThreadID || !nodeID.trim()) && !cleanCollaborationID) return;
+		if (!cleanEmailThreadID || !nodeID.trim()) return;
 		const scope = mailboxScope.sharedInboxID
 			? realtimeSharedMailboxScope(mailboxScope.sharedInboxID)
 			: realtimePersonalMailboxScope(currentUserID, mailboxScope.accountEmail ?? "");
@@ -6062,30 +5940,20 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
 			onMailboxMessageChanged: (change) => {
 				if (change.message_id && change.message_id !== messageID && change.thread_id !== message?.thread_id) return;
 				void (async () => {
-				const storedThread = cleanEmailThreadID && nodeID.trim()
-					? await getNodeEmailThread(companyID, nodeID, cleanEmailThreadID, { refresh: true })
-          : null;
-        const collaborationThread = !storedThread && cleanCollaborationID
-          ? await getEmailCollaborationThread(companyID, cleanCollaborationID)
-          : null;
+				const storedThread = await getNodeEmailThread(companyID, nodeID, cleanEmailThreadID, { refresh: true });
         if (cancelled) return;
-        const refreshed = storedThread ?? collaborationThread;
-        if (!refreshed) {
-          setStoredThreadDownloadStatus("partial");
-          return;
-        }
-        const refreshedMessages = refreshed.messages ?? [];
+        const refreshedMessages = storedThread.messages ?? [];
         const refreshedMessage = refreshedMessages.find((item) => item.id === messageID)
           ?? refreshedMessages[0]
           ?? null;
         if (refreshedMessage) {
           setMessage(refreshedMessage);
           setThreadMessages(refreshedMessages.length ? refreshedMessages : [refreshedMessage]);
-        }
+				}
 				setStoredThreadDownloadStatus(resolveEmailThreadDownloadStatus(
-          refreshed.download_status,
-          refreshed.history_complete,
-          refreshed.thread_id,
+          storedThread.download_status,
+          storedThread.history_complete,
+          storedThread.thread_id,
 				));
 				})().catch(() => undefined);
 			},
@@ -6094,7 +5962,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
 			cancelled = true;
 			unsubscribe();
 		};
-	}, [apiBase, collaborationID, companyID, currentUserID, emailThreadID, mailboxScope, message?.thread_id, messageID, nodeID, replyTargetMessageID, singleMessageOnly, storedThreadDownloadStatus]);
+	}, [apiBase, companyID, currentUserID, emailThreadID, mailboxScope, message?.thread_id, messageID, nodeID, replyTargetMessageID, singleMessageOnly, storedThreadDownloadStatus]);
 
   useEffect(() => {
     if (!highlightRemovalRequest) return;
