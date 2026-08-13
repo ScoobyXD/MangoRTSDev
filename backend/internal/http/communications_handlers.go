@@ -557,8 +557,8 @@ func (s *Server) applyCommunicationsArchivedMessage(connection domain.UserEmailC
 	s.invalidateCommunicationsMessageMutations(connection.UserID, cacheScope, []string{messageID}, true)
 }
 func (s *Server) handleCommunicationsThreadByID(w http.ResponseWriter, r *http.Request) {
-	threadID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/communications/threads/"), "/")
-	if threadID == "" || strings.Contains(threadID, "/") {
+	emailThreadID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/communications/threads/"), "/")
+	if emailThreadID == "" || strings.Contains(emailThreadID, "/") {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
@@ -580,50 +580,32 @@ func (s *Server) handleCommunicationsThreadByID(w http.ResponseWriter, r *http.R
 	if !requireCompanyAccess(w, r, companyID) {
 		return
 	}
-	if isTruthyQueryValue(r.URL.Query().Get("stored")) {
-		scope, scopeOK := s.resolveCommunicationsEmailScope(
-			w, actor, companyID, sharedInboxID, r.URL.Query().Get("account_email"), store.EntityPermissionEdit,
-		)
-		if !scopeOK {
-			return
-		}
-		thread, err := s.repo.GetCommunicationsEmailThreadContext(r.Context(), companyID, threadID)
-		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrInvalid) || (err == nil && !storedEmailThreadMatchesScope(thread, scope)) {
-			writeError(w, http.StatusNotFound, "stored_email_thread_not_found")
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_load_stored_email_thread")
-			return
-		}
-		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
-			"thread": map[string]any{
-				"email_thread_id":     thread.EmailThreadID,
-				"thread_id":           thread.ProviderThreadID,
-				"messages":            storedEmailThreadMessages(thread),
-				"history_complete":    thread.HistoryComplete,
-				"download_status":     thread.DownloadStatus,
-				"fetched_at":          thread.FetchedAt,
-				"last_download_error": thread.LastDownloadError,
-			},
-		})
+	scope, scopeOK := s.resolveCommunicationsEmailScope(
+		w, actor, companyID, sharedInboxID, r.URL.Query().Get("account_email"), store.EntityPermissionEdit,
+	)
+	if !scopeOK {
 		return
 	}
-	connection, ok := s.requireCommunicationsConnection(w, r, actor, companyID, sharedInboxID, store.EntityPermissionEdit)
-	if !ok {
+	thread, err := s.repo.GetCommunicationsEmailThreadContext(r.Context(), companyID, emailThreadID)
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrInvalid) || (err == nil && !storedEmailThreadMatchesScope(thread, scope)) {
+		writeError(w, http.StatusNotFound, "stored_email_thread_not_found")
 		return
 	}
-	var thread NylasThread
-	err := s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
-		var err error
-		thread, err = s.nylasClient.GetThread(ctx, connection.GrantID, threadID)
-		return err
-	})
 	if err != nil {
-		s.writeNylasError(w, r, connection, err)
+		writeError(w, http.StatusInternalServerError, "failed_to_load_stored_email_thread")
 		return
 	}
-	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"thread": thread})
+	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
+		"thread": map[string]any{
+			"email_thread_id":     thread.EmailThreadID,
+			"thread_id":           thread.ProviderThreadID,
+			"messages":            storedEmailThreadMessages(thread),
+			"history_complete":    thread.HistoryComplete,
+			"download_status":     thread.DownloadStatus,
+			"fetched_at":          thread.FetchedAt,
+			"last_download_error": thread.LastDownloadError,
+		},
+	})
 }
 
 func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.Request) {

@@ -22,11 +22,9 @@ import {
   getEmailCollaborationThread,
   getNodeEmailThread,
   getEmailSignature,
-  getEmailThread,
   invalidateCommunicationsCache,
   invalidateCommunicationsMailboxCache,
   invalidateEmailMessageCache,
-  invalidateEmailThreadCache,
   listCompanyUsers,
   listCompanyUserGroups,
   listLogicGates,
@@ -1438,7 +1436,7 @@ test("stored thread detail returns every durable message row in stored order", a
   };
   try {
     const result = await getStoredEmailThread("stored-thread-1", "company-1", undefined, { accountEmail: "owner@example.com" });
-    assert.equal(requestedPath, "/v1/communications/threads/stored-thread-1?stored=true&company_id=company-1&account_email=owner%40example.com");
+    assert.equal(requestedPath, "/v1/communications/threads/stored-thread-1?company_id=company-1&account_email=owner%40example.com");
     assert.deepEqual(result.messages.map((storedMessage) => storedMessage.id), ["message-1", "message-2", "message-3"]);
     assert.deepEqual(result.messages.map((storedMessage) => storedMessage.message_order), [0, 1, 2]);
     assert.equal(result.messages.every((storedMessage) => storedMessage.detail_fetched), true);
@@ -1604,9 +1602,6 @@ test("mailbox hint invalidation is exact across personal accounts and shared inb
     if (url.pathname === "/v1/communications/messages/same") {
       return jsonResponse({ message: { id: "same", subject: key, unread: false, starred: false, body: key } });
     }
-    if (url.pathname === "/v1/communications/threads/thread-1") {
-      return jsonResponse({ thread: { id: "thread-1", message_ids: [key] } });
-    }
     throw new Error(`unexpected_request:${url}`);
   }) as typeof fetch;
   try {
@@ -1617,9 +1612,6 @@ test("mailbox hint invalidation is exact across personal accounts and shared inb
       getEmailMessage("same", "company-1", undefined, { accountEmail: "a@example.com" }),
       getEmailMessage("same", "company-1", undefined, { accountEmail: "b@example.com" }),
       getEmailMessage("same", "company-1", "shared-1"),
-      getEmailThread("thread-1", "company-1", undefined, "a@example.com"),
-      getEmailThread("thread-1", "company-1", undefined, "b@example.com"),
-      getEmailThread("thread-1", "company-1", "shared-1"),
     ]);
 
     invalidateCommunicationsMailboxCache(accountA, { messagePages: true });
@@ -1638,15 +1630,6 @@ test("mailbox hint invalidation is exact across personal accounts and shared inb
     assert.equal(calls.get("/v1/communications/messages/same|personal:b@example.com"), 1);
     assert.equal(calls.get("/v1/communications/messages/same|shared:shared-1"), 1);
 
-    invalidateEmailThreadCache("thread-1", "company-1", "shared-1");
-    await Promise.all([
-      getEmailThread("thread-1", "company-1", undefined, "a@example.com"),
-      getEmailThread("thread-1", "company-1", undefined, "b@example.com"),
-      getEmailThread("thread-1", "company-1", "shared-1"),
-    ]);
-    assert.equal(calls.get("/v1/communications/threads/thread-1|personal:a@example.com"), 1);
-    assert.equal(calls.get("/v1/communications/threads/thread-1|personal:b@example.com"), 1);
-    assert.equal(calls.get("/v1/communications/threads/thread-1|shared:shared-1"), 2);
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();
@@ -1761,46 +1744,6 @@ test("identical forced message-list refreshes share one in-flight request", asyn
     assert.deepEqual(secondPage.messages.map((item) => item.id), ["fresh"]);
     assert.equal((await listEmailMessages({ mailbox: "primary", limit: 12 })).messages[0]?.id, "fresh");
     assert.equal(calls.length, 1);
-  } finally {
-    globalThis.fetch = originalFetch;
-    invalidateCommunicationsCache();
-  }
-});
-
-test("email thread reads coalesce, cache, clone, and preserve mailbox scope", async () => {
-  invalidateCommunicationsCache();
-  const calls: string[] = [];
-  const originalFetch = globalThis.fetch;
-  let releaseGate!: () => void;
-  const gate = new Promise<void>((resolve) => {
-    releaseGate = resolve;
-  });
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const path = input.toString();
-    calls.push(path);
-    if (calls.length === 1) await gate;
-    return jsonResponse({
-      thread: {
-        id: "thread-1",
-        message_ids: path.includes("shared_inbox_id") ? ["shared-message"] : ["personal-message"],
-        participants: [{ email: "person@example.test" }],
-      },
-    });
-  }) as typeof fetch;
-  try {
-    const first = getEmailThread("thread-1", "company-1");
-    const second = getEmailThread("thread-1", "company-1");
-    releaseGate();
-    const [firstThread, secondThread] = await Promise.all([first, second]);
-    firstThread.message_ids?.push("caller-only");
-
-    assert.deepEqual(secondThread.message_ids, ["personal-message"]);
-    assert.deepEqual((await getEmailThread("thread-1", "company-1")).message_ids, ["personal-message"]);
-    assert.deepEqual((await getEmailThread("thread-1", "company-1", "shared-1")).message_ids, ["shared-message"]);
-    assert.deepEqual(calls, [
-      "/v1/communications/threads/thread-1?company_id=company-1",
-      "/v1/communications/threads/thread-1?company_id=company-1&shared_inbox_id=shared-1",
-    ]);
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();
