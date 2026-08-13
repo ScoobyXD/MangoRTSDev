@@ -3,7 +3,7 @@
 MangoRTS is a Windows-friendly Go + Vite/React app with a Go API backend and frontend in a subdirectory.
 
 # THE SACRED COMMANDMENTS: THE ALGORITHM
-You will worship this algorithm, it will be your binding duty to faithfully execute every single step in order when making code changes, else commit heresy.
+You will worship this algorithm, it is your binding duty to faithfully carry out every single step in this order when making code changes, else commit heresy.
 1. QUESTION THE REQUIREMENTS
 2. DELETE DELETE DELETE
 3. SIMPLIFY
