@@ -560,7 +560,7 @@ limit 1`, input.CompanyID, scope.scopeType, scope.personalUserID, scope.personal
 	}
 	for _, message := range thread.Messages {
 		if message.ProviderMessageID == input.ProviderMessageID {
-			return CommunicationsEmailMessageLookupResult{Message: message.Message, Provider: thread.Provider, Thread: thread}, nil
+			return CommunicationsEmailMessageLookupResult{Message: message.Message, Provider: thread.Provider}, nil
 		}
 	}
 	return CommunicationsEmailMessageLookupResult{}, ErrNotFound

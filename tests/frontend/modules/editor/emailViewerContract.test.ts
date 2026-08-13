@@ -75,16 +75,18 @@ test("node-attached email viewer discloses per-message recipients while retainin
 test("an inline email reference opens the existing complete thread viewer in a closable modal", () => {
   const homePage = source("frontend/src/pages/home/HomePage.tsx");
   const homeParts = source("frontend/src/pages/home/HomeParts.tsx");
+  const universalPicker = source("frontend/src/modules/editor/UniversalEntityPicker.tsx");
   const openStart = homePage.indexOf("const openReferencedEmail");
   const openEnd = homePage.indexOf("const loadReferencedEmailMessageBody", openStart);
   const openReference = homePage.slice(openStart, openEnd);
 
   assert.ok(openStart >= 0 && openEnd > openStart);
   assert.match(openReference, /setEmailReferencePreview/);
-  assert.match(openReference, /await getEmailMessageWithStoredThread\(entity\.entityID/);
-  assert.match(openReference, /storedResult\.storedThread\?\.messages/);
+  assert.match(openReference, /const emailThreadID = entity\.emailThreadID\?\.trim\(\)/);
+  assert.match(openReference, /await getStoredEmailThread\(emailThreadID/);
+  assert.match(openReference, /mergeEmailThreadDetailMessages\(storedThread\.messages, \[\]\)/);
   assert.match(openReference, /await listEmailCollaborations\(/);
-  assert.doesNotMatch(openReference, /getEmailThread|thread\.message_ids|Promise\.all\(messageIDs\.map/);
+  assert.doesNotMatch(openReference, /getEmailMessageWithStoredThread|getEmailThread|thread\.message_ids|Promise\.all\(messageIDs\.map/);
   assert.doesNotMatch(openReference, /selectHomeView|setNodeEditorOverlay/);
   assert.match(homePage, /<EmailReferencePreviewModal/);
   assert.match(homeParts, /data-email-reference-preview="true"/);
@@ -94,6 +96,8 @@ test("an inline email reference opens the existing complete thread viewer in a c
   assert.match(homeParts, /UnifiedNodeShellFullscreenIcon/);
   assert.match(homeParts, /data-email-reference-resource=\{resource\.kind\}/);
   assert.match(homeParts, /previewOnly/);
+  assert.match(universalPicker, /emailThreadID: message\.email_thread_id\?\.trim\(\) \|\| undefined/);
+  assert.doesNotMatch(universalPicker, /emailThreadID: message\.thread_id\?\.trim\(\) \|\| undefined/);
 });
 
 test("node email and linked text boxes expose animated two-way navigation and computed colors", () => {
@@ -340,10 +344,10 @@ test("triage email selection, history, and archive prefetch preserve the foregro
   assert.match(homePage, /useEffect\(\(\) => \{ void loadMessages\(\); \}, \[loadMessages\]\)/);
   assert.match(homePage, /preserveCurrentThread[\s\S]{0,300}: \[visiblePrimaryMessage\]/);
   assert.match(homePage, /loadSelectedThreadMessageBody/);
-  assert.match(homePage, /const collaborationThread = await getEmailCollaborationThread[\s\S]{0,1800}return;/);
-  assert.match(homePage, /await getEmailMessageWithStoredThread\(selectedMessageID/);
-  assert.match(homePage, /storedResult\.storedThread\?\.messages \?\? \[selectedWithLocalReplies\]/);
-  assert.match(homePage, /setSelectedThreadMessages\(mergeEmailThreadDetailMessages\(\s*collaborationThreadMessages,\s*\[collaborationFallback\]/);
+  assert.match(homePage, /const storedEmailThreadID = selectedListMessage\?\.id === selectedMessageID/);
+  assert.match(homePage, /await getStoredEmailThread\(storedEmailThreadID/);
+  assert.match(homePage, /completeThreadMessages = storedThreadMessages\.length > 0 \? storedThreadMessages : \[selectedWithLocalReplies\]/);
+  assert.doesNotMatch(homePage, /getEmailMessageWithStoredThread|getEmailCollaborationThread|collaborationFallback/);
   assert.doesNotMatch(homePage, /missingEmailThreadMessageIDs|EMAIL_THREAD_PREVIEW_MAX_PAGES|authoritativeMessageIDs/);
   assert.doesNotMatch(homePage, /for \(let index = 0; index < missingMessageIDs\.length/);
   assert.match(homeParts, /onLoadMessageBody/);

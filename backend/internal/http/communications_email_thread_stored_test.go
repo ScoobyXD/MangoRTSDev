@@ -73,7 +73,7 @@ func TestEmailCollaborationThreadDefaultReadReturnsEveryStoredMessageInOrderWith
 	}
 }
 
-func TestCommunicationsMessageStoredThreadReadReturnsEveryStoredRowWithoutProviderReconstruction(t *testing.T) {
+func TestCommunicationsStoredThreadReadUsesExactDurableThreadIDWithoutProviderReconstruction(t *testing.T) {
 	repo, owner, _, _ := newEmailCollaborationThreadTestRepo(t)
 	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
 		UserID: owner.UserID, Provider: "google", AccountEmail: owner.Email,
@@ -81,7 +81,7 @@ func TestCommunicationsMessageStoredThreadReadReturnsEveryStoredRowWithoutProvid
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+	storedThread, err := repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
 		CompanyID: emailCollaborationThreadTestCompanyID, PersonalUserID: owner.UserID,
 		PersonalAccountEmail: owner.Email, AccountEmail: owner.Email, Provider: "google",
 		ProviderThreadID: "stored-message-thread", SelectedMessageID: "stored-message-3", HistoryComplete: true,
@@ -90,15 +90,15 @@ func TestCommunicationsMessageStoredThreadReadReturnsEveryStoredRowWithoutProvid
 			{ID: "stored-message-1", ThreadID: "stored-message-thread", Body: "First message", Date: 100},
 			{ID: "stored-message-2", ThreadID: "stored-message-thread", Body: "Second message", Date: 200},
 		},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-
 	client := newEmailCollaborationThreadTestClient()
 	client.threadsByID["stored-message-thread"] = NylasThread{ID: "stored-message-thread", MessageIDs: []string{"provider-reconstruction-must-not-run"}}
 	server := newEmailCollaborationThreadTestServer(repo, client)
 	defer server.Close()
-	path := "/v1/communications/messages/stored-message-3?company_id=" + emailCollaborationThreadTestCompanyID + "&account_email=" + owner.Email + "&include_stored_thread=true"
+	path := "/v1/communications/threads/" + storedThread.EmailThreadID + "?stored=true&company_id=" + emailCollaborationThreadTestCompanyID + "&account_email=" + owner.Email
 	req := emailCollaborationThreadTestRequestWithActor(httptest.NewRequest(http.MethodGet, path, nil), owner, domain.RoleCompanyUser)
 	rec := httptest.NewRecorder()
 	server.Routes().ServeHTTP(rec, req)
@@ -106,26 +106,28 @@ func TestCommunicationsMessageStoredThreadReadReturnsEveryStoredRowWithoutProvid
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	var response struct {
-		Message      domain.EmailMessageSnapshot `json:"message"`
-		StoredThread struct {
+		Thread struct {
 			EmailThreadID   string                        `json:"email_thread_id"`
 			ThreadID        string                        `json:"thread_id"`
 			Messages        []domain.EmailMessageSnapshot `json:"messages"`
 			HistoryComplete bool                          `json:"history_complete"`
-		} `json:"stored_thread"`
+		} `json:"thread"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Message.ID != "stored-message-3" || response.StoredThread.ThreadID != "stored-message-thread" || !response.StoredThread.HistoryComplete {
+	if response.Thread.EmailThreadID != storedThread.EmailThreadID || response.Thread.ThreadID != "stored-message-thread" || !response.Thread.HistoryComplete {
 		t.Fatalf("stored thread response=%+v", response)
 	}
-	if got := emailCollaborationThreadTestMessageIDs(response.StoredThread.Messages); got != "stored-message-1,stored-message-2,stored-message-3" {
+	if got := emailCollaborationThreadTestMessageIDs(response.Thread.Messages); got != "stored-message-1,stored-message-2,stored-message-3" {
 		t.Fatalf("stored message rows=%q", got)
 	}
-	for index, message := range response.StoredThread.Messages {
+	for index, message := range response.Thread.Messages {
 		if message.MessageOrder == nil || *message.MessageOrder != index {
 			t.Fatalf("stored message %q order=%v, want %d", message.ID, message.MessageOrder, index)
+		}
+		if message.EmailThreadID != storedThread.EmailThreadID || message.EmailMessageID == "" {
+			t.Fatalf("stored message %q durable ids=(%q,%q)", message.ID, message.EmailThreadID, message.EmailMessageID)
 		}
 	}
 	threadGrants, threadIDs, messageGrants, messageIDs := client.calls()

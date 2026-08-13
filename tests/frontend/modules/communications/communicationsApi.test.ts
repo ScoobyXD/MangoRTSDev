@@ -18,7 +18,7 @@ import {
   getCalendarInviteEvent,
   getCommunicationsArchiveJob,
   getEmailMessage,
-  getEmailMessageWithStoredThread,
+  getStoredEmailThread,
   getEmailCollaborationThread,
   getNodeEmailThread,
   getEmailSignature,
@@ -1424,8 +1424,7 @@ test("stored thread detail returns every durable message row in stored order", a
   globalThis.fetch = async (input: RequestInfo | URL) => {
     requestedPath = input.toString();
     return jsonResponse({
-      message: { ...message("message-3", { body: "Third with quoted history" }), thread_id: "thread-1", message_order: 2 },
-      stored_thread: {
+      thread: {
         email_thread_id: "stored-thread-1",
         thread_id: "thread-1",
         history_complete: true,
@@ -1438,12 +1437,11 @@ test("stored thread detail returns every durable message row in stored order", a
     });
   };
   try {
-    const result = await getEmailMessageWithStoredThread("message-3", "company-1", undefined, { accountEmail: "owner@example.com" });
-    assert.equal(requestedPath, "/v1/communications/messages/message-3?include_stored_thread=true&company_id=company-1&account_email=owner%40example.com");
-    assert.deepEqual(result.storedThread?.messages.map((storedMessage) => storedMessage.id), ["message-1", "message-2", "message-3"]);
-    assert.deepEqual(result.storedThread?.messages.map((storedMessage) => storedMessage.message_order), [0, 1, 2]);
-    assert.equal(result.storedThread?.messages.every((storedMessage) => storedMessage.detail_fetched), true);
-    assert.equal(result.message.id, "message-3");
+    const result = await getStoredEmailThread("stored-thread-1", "company-1", undefined, { accountEmail: "owner@example.com" });
+    assert.equal(requestedPath, "/v1/communications/threads/stored-thread-1?stored=true&company_id=company-1&account_email=owner%40example.com");
+    assert.deepEqual(result.messages.map((storedMessage) => storedMessage.id), ["message-1", "message-2", "message-3"]);
+    assert.deepEqual(result.messages.map((storedMessage) => storedMessage.message_order), [0, 1, 2]);
+    assert.equal(result.messages.every((storedMessage) => storedMessage.detail_fetched), true);
   } finally {
     globalThis.fetch = originalFetch;
   }

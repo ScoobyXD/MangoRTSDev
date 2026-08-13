@@ -241,6 +241,7 @@ func (f *NylasFolder) UnmarshalJSON(raw []byte) error {
 
 type NylasMessage struct {
 	EmailMessageID              string                                  `json:"email_message_id,omitempty"`
+	EmailThreadID               string                                  `json:"email_thread_id,omitempty"`
 	ID                          string                                  `json:"id"`
 	ThreadID                    string                                  `json:"thread_id,omitempty"`
 	Subject                     string                                  `json:"subject"`

@@ -60,9 +60,21 @@ func storedEmailThreadMessages(thread domain.CommunicationsEmailThread) []domain
 	messages := make([]domain.EmailMessageSnapshot, 0, len(thread.Messages))
 	for _, item := range thread.Messages {
 		message := item.Message
+		message.EmailMessageID = item.EmailMessageID
+		message.EmailThreadID = thread.EmailThreadID
 		messageOrder := item.MessageOrder
 		message.MessageOrder = &messageOrder
 		messages = append(messages, message)
 	}
 	return messages
+}
+
+func storedEmailThreadMatchesScope(thread domain.CommunicationsEmailThread, scope resolvedCommunicationsEmailScope) bool {
+	if scope.sharedInboxID != "" {
+		return thread.ScopeType == store.CommunicationsEmailCollaborationScopeShared &&
+			thread.SharedInboxID == scope.sharedInboxID
+	}
+	return thread.ScopeType == store.CommunicationsEmailCollaborationScopePersonal &&
+		thread.PersonalUserID == scope.personalUserID &&
+		normalizeEmailForCompare(thread.PersonalAccountEmail) == normalizeEmailForCompare(scope.personalAccountEmail)
 }
