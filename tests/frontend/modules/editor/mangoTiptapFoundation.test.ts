@@ -31,6 +31,7 @@ import {
 } from "../../../../frontend/src/modules/editor/editorDataFormat.js";
 import {
   createMangoTiptapExtensions,
+  handleMangoTiptapImageDrop,
   handleMangoTiptapOutlineEnter,
   indentMangoTiptapSelection,
   MangoTiptapEditorEngine,
@@ -39,6 +40,10 @@ import {
   outdentMangoTiptapSelection,
   readMangoTiptapSelectionState,
 } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapExtensions.js";
+import {
+  mangoTiptapImagePlacementAtX,
+  normalizeMangoTiptapImagePlacement,
+} from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapImagePlacement.js";
 import {
   calculateMangoTiptapTableGrowth,
   growMangoTiptapTable,
@@ -73,6 +78,15 @@ class MemoryStorage implements Storage {
   key(index: number): string | null { return [...this.values.keys()][index] ?? null; }
   removeItem(key: string): void { this.values.delete(key); }
   setItem(key: string, value: string): void { this.values.set(key, value); }
+}
+
+function installGlobal(name: string, value: unknown, restores: Array<() => void>): void {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, name);
+  Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+  restores.push(() => {
+    if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+    else delete (globalThis as Record<string, unknown>)[name];
+  });
 }
 
 test("an image failure remains visible after ordinary text later saves", () => {
@@ -241,6 +255,160 @@ test("Mango validates only the versioned document envelope before Tiptap opens i
   assert.equal(validateMangoTiptapDocument(wrongVersion).valid, false);
   const wrongRoot = { ...createEmptyMangoTiptapDocument(), document: { type: "paragraph" } };
   assert.equal(validateMangoTiptapDocument(wrongRoot).valid, false);
+});
+
+test("image placement uses stable side zones while old and pasted JSON stays break-text by default", () => {
+  const bounds = { left: 100, width: 1_000 } as DOMRect;
+  assert.deepEqual(mangoTiptapImagePlacementAtX(399, bounds), { position: "wrap", alignment: "left" });
+  assert.deepEqual(mangoTiptapImagePlacementAtX(400, bounds), { position: "break", alignment: "center" });
+  assert.deepEqual(mangoTiptapImagePlacementAtX(800, bounds), { position: "break", alignment: "center" });
+  assert.deepEqual(mangoTiptapImagePlacementAtX(801, bounds), { position: "wrap", alignment: "right" });
+  assert.deepEqual(mangoTiptapImagePlacementAtX(500, { left: 500, width: 0 } as DOMRect), { position: "break", alignment: "center" });
+  assert.deepEqual(normalizeMangoTiptapImagePlacement({ alignment: "left" }), { position: "break", alignment: "left" });
+  assert.deepEqual(normalizeMangoTiptapImagePlacement({ position: "break", alignment: "right" }), { position: "break", alignment: "right" });
+  assert.deepEqual(normalizeMangoTiptapImagePlacement({ position: "wrap", alignment: "center" }), { position: "break", alignment: "center" });
+
+  const editor = new MangoTiptapEditorEngine({
+    extensions: createMangoTiptapExtensions({ editable: false }),
+    content: { type: "doc", content: [{ type: "mangoAttachmentImage", attrs: { attachmentId: "old-image" } }] },
+  });
+  try {
+    const oldImage = editor.getJSON().content?.[0];
+    assert.equal(oldImage?.attrs?.position, "break", "missing legacy position hydrates as break-text");
+    const compact = compactMangoTiptapDocument({
+      format: "mango-tiptap-json",
+      schema_version: 1,
+      document: editor.getJSON(),
+    }, editor.schema);
+    assert.equal(Object.prototype.hasOwnProperty.call(compact.document.content?.[0]?.attrs ?? {}, "position"), false, "default break-text needs no JSON migration");
+  } finally {
+    editor.destroy();
+  }
+});
+
+test("one ProseMirror image-drop transaction moves the document anchor, snaps placement, preserves annotations, and survives undo, redo, resize, and remount", () => {
+  const restores: Array<() => void> = [];
+  const dom = new JSDOM("<!doctype html><div id=\"editor\"></div><div id=\"remount\"></div>", { url: "https://mango.test/" });
+  const domGlobals = dom.window as unknown as typeof globalThis;
+  installGlobal("window", dom.window, restores);
+  installGlobal("document", dom.window.document, restores);
+  installGlobal("Node", domGlobals.Node, restores);
+  installGlobal("Element", domGlobals.Element, restores);
+  installGlobal("HTMLElement", domGlobals.HTMLElement, restores);
+  installGlobal("MouseEvent", domGlobals.MouseEvent, restores);
+  installGlobal("MutationObserver", domGlobals.MutationObserver, restores);
+  installGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => setTimeout(() => callback(Date.now()), 0), restores);
+  installGlobal("cancelAnimationFrame", (handle: number) => clearTimeout(handle), restores);
+  const initialDocument = {
+    type: "doc",
+    content: [
+      { type: "paragraph", attrs: { blockId: "before" }, content: [{ type: "text", text: "Before" }] },
+      { type: "mangoAttachmentImage", attrs: { attachmentId: "move-image", filename: "move.png", position: "break", alignment: "center", displayWidth: 160, displayHeight: 90 } },
+      { type: "paragraph", attrs: { blockId: "after" }, content: [{ type: "text", text: "After" }] },
+    ],
+  };
+  const editor = new MangoTiptapEditorEngine({
+    element: dom.window.document.querySelector<HTMLElement>("#editor"),
+    extensions: createMangoTiptapExtensions({ editable: true }),
+    content: initialDocument,
+  });
+  editor.registerPlugin(MangoTiptapAnnotations);
+  let remounted: MangoTiptapEditorEngine | undefined;
+  try {
+    let imagePosition = -1;
+    editor.state.doc.descendants((node, position) => {
+      if (node.type.name === "mangoAttachmentImage") imagePosition = position;
+    });
+    assert.ok(imagePosition >= 0);
+    updateMangoTiptapAnnotations(editor, [{ id: "image-comment", kind: "comment", from: imagePosition, to: imagePosition + 1 }]);
+    editor.commands.setNodeSelection(imagePosition);
+    const imageSlice = editor.state.selection.content();
+    let requestedDropPosition = editor.state.doc.content.size;
+    Object.defineProperty(editor.view, "posAtCoords", {
+      configurable: true,
+      value: () => ({ pos: requestedDropPosition, inside: -1 }),
+    });
+    Object.defineProperty(editor.view.dom, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ left: 0, width: 1_000, top: 0, bottom: 600, right: 1_000, height: 600, x: 0, y: 0, toJSON: () => ({}) }),
+    });
+    const drop = (clientX: number) => handleMangoTiptapImageDrop(
+      editor.view,
+      new MouseEvent("drop", { clientX, clientY: 20 }) as unknown as DragEvent,
+      editor.state.selection.content(),
+      true,
+      readMappedMangoTiptapAnnotations(editor),
+    );
+
+    assert.equal(handleMangoTiptapImageDrop(
+      editor.view,
+      new MouseEvent("drop", { clientX: 100, clientY: 20 }) as unknown as DragEvent,
+      imageSlice,
+      true,
+      readMappedMangoTiptapAnnotations(editor),
+    ), true);
+    assert.deepEqual(editor.getJSON().content?.map((node) => node.type), ["paragraph", "paragraph", "mangoAttachmentImage"], "vertical drop position moves the existing image node down");
+    let editorContent = editor.getJSON().content ?? [];
+    let movedImage = editorContent[editorContent.length - 1];
+    assert.equal(movedImage?.attrs?.position, "wrap");
+    assert.equal(movedImage?.attrs?.alignment, "left");
+    let movedImagePosition = -1;
+    editor.state.doc.descendants((node, position) => {
+      if (node.type.name === "mangoAttachmentImage") movedImagePosition = position;
+    });
+    assert.deepEqual(readMappedMangoTiptapAnnotations(editor), [{ id: "image-comment", kind: "comment", from: movedImagePosition, to: movedImagePosition + 1 }]);
+
+    assert.equal(editor.commands.undo(), true);
+    assert.deepEqual(editor.getJSON().content?.map((node) => node.type), ["paragraph", "mangoAttachmentImage", "paragraph"]);
+    assert.equal(editor.getJSON().content?.[1]?.attrs?.position, "break");
+    assert.equal(editor.commands.redo(), true);
+    assert.deepEqual(editor.getJSON().content?.map((node) => node.type), ["paragraph", "paragraph", "mangoAttachmentImage"]);
+
+    movedImagePosition = -1;
+    editor.state.doc.descendants((node, position) => {
+      if (node.type.name === "mangoAttachmentImage") movedImagePosition = position;
+    });
+    editor.commands.setNodeSelection(movedImagePosition);
+    assert.equal(editor.commands.updateAttributes("mangoAttachmentImage", { displayWidth: 240, displayHeight: 135 }), true);
+    editorContent = editor.getJSON().content ?? [];
+    movedImage = editorContent[editorContent.length - 1];
+    assert.equal(movedImage?.attrs?.displayWidth, 240);
+    assert.equal(movedImage?.attrs?.position, "wrap", "resizing a wrapped image keeps its placement");
+
+    requestedDropPosition = 0;
+    editor.commands.setNodeSelection(movedImagePosition);
+    assert.equal(drop(500), true);
+    assert.equal(editor.getJSON().content?.[0]?.type, "mangoAttachmentImage", "dropping upward moves the same node to the requested anchor");
+    assert.equal(editor.getJSON().content?.[0]?.attrs?.position, "break");
+    assert.equal(editor.getJSON().content?.[0]?.attrs?.alignment, "center");
+
+    imagePosition = 0;
+    editor.commands.setNodeSelection(imagePosition);
+    requestedDropPosition = editor.state.doc.content.size;
+    assert.equal(drop(900), true);
+    editorContent = editor.getJSON().content ?? [];
+    movedImage = editorContent[editorContent.length - 1];
+    assert.equal(movedImage?.attrs?.position, "wrap");
+    assert.equal(movedImage?.attrs?.alignment, "right");
+
+    const persisted = compactMangoTiptapDocument({ format: "mango-tiptap-json", schema_version: 1, document: editor.getJSON() }, editor.schema);
+    assert.equal(persisted.schema_version, 1);
+    const persistedContent = persisted.document.content ?? [];
+    assert.equal(persistedContent[persistedContent.length - 1]?.attrs?.position, "wrap", "wrap is one additive optional image attribute in the existing schema version");
+    remounted = new MangoTiptapEditorEngine({
+      element: dom.window.document.querySelector<HTMLElement>("#remount"),
+      extensions: createMangoTiptapExtensions({ editable: true }),
+      content: persisted.document,
+    });
+    const remountedContent = remounted.getJSON().content ?? [];
+    assert.equal(remountedContent[remountedContent.length - 1]?.attrs?.position, "wrap");
+    assert.equal(remountedContent[remountedContent.length - 1]?.attrs?.alignment, "right");
+  } finally {
+    remounted?.destroy();
+    editor.destroy();
+    restores.reverse().forEach((restore) => restore());
+    dom.window.close();
+  }
 });
 
 test("schema-default compaction shortens the reported Node Text Box JSON and round trips exactly", () => {

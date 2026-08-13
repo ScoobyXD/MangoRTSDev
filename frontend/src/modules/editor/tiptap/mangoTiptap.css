@@ -1,11 +1,40 @@
 .mango-tiptap-static-document,
 .mango-tiptap-prosemirror {
+  display: flow-root;
   padding: 12px 13px;
   font-family: var(--mango-font-family);
   font-size: 14px;
   line-height: 20px;
   overflow-wrap: anywhere;
   tab-size: 4;
+}
+
+.mango-tiptap-image-placement {
+  box-sizing: border-box;
+}
+
+.mango-tiptap-image-placement[data-mango-image-position="break"] {
+  width: 100%;
+  clear: both;
+  margin: 8px 0;
+}
+
+.mango-tiptap-image-placement[data-mango-image-position="wrap"] {
+  width: fit-content;
+  max-width: min(50%, 840px);
+  margin-block: 8px;
+}
+
+.mango-tiptap-image-placement[data-mango-image-position="wrap"][data-mango-image-alignment="left"] {
+  float: left;
+  clear: left;
+  margin-right: 16px;
+}
+
+.mango-tiptap-image-placement[data-mango-image-position="wrap"][data-mango-image-alignment="right"] {
+  float: right;
+  clear: right;
+  margin-left: 16px;
 }
 
 .mango-tiptap-prosemirror {

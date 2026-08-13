@@ -5,6 +5,7 @@ import { isDormantMangoTiptapAnnotation, type MangoTiptapAnnotation } from "./ma
 import { ExplorerEntityIcon } from "../../../icons/index.js";
 import { editorEntityRoute, editorEntityTypeLabel, isEditorEmailMailbox, isEditorEntityType, openEditorEntityLink } from "../editorEntityLinks.js";
 import "./mangoTiptap.css";
+import { mangoTiptapImagePlacementDOMAttributes } from "./mangoTiptapImagePlacement.js";
 
 export type MangoStaticAttachmentImageProps = {
   attachmentId: string;
@@ -234,7 +235,15 @@ function renderNode(
       const annotated = covering.reduce<React.ReactNode>((current, annotation) => (
         <div className={annotationClass(annotation)} data-mango-annotation-id={annotation.id} data-mango-annotation-kind={annotation.kind}>{current}</div>
       ), linkedContent);
-      return <React.Fragment key={key}>{annotated}</React.Fragment>;
+      return (
+        <div
+          key={key}
+          className="mango-tiptap-image-placement"
+          {...mangoTiptapImagePlacementDOMAttributes({ position: imagePosition, alignment })}
+        >
+          {annotated}
+        </div>
+      );
     }
     default: return null;
   }

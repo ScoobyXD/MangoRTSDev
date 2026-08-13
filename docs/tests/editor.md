@@ -95,8 +95,11 @@ Last updated: 2026-08-08
 19. In Automatic Numbering, Enter at the end of a nonempty ordinary row immediately before an existing numbered list inserts one empty first item into that list; the ordinary row and list identity stay unchanged, the list restarts at its canonical first marker, every existing item keeps its content, formatting, identity, and order while its marker advances by one, and the caret moves into the new item.
 20. In Automatic Numbering, Enter at the end of a numbered row with nested rows inserts one empty peer immediately before those nested rows; Tab makes only that empty peer the first nested row, keeps every existing nested and following row at its prior depth and in its prior order, and restarts each affected ordered level at its canonical first marker.
 21. An `email_message` entity is valid durable editor JSON; activating it opens the existing Triage conversation viewer and never creates an email relationship.
+22. A new pasted image and an existing image with missing or `break` position must render as a full-row break-text image.
+23. Dropping an existing document image in the leftmost or rightmost 30 percent of the editor must move its Tiptap node to the drop anchor and wrap following text on that side; dropping it in the middle 40 percent must move it as a centered break-text image.
+24. Wrapped image placement must use only the optional `wrap` image position plus existing alignment in schema version 1, and the active and sleeping renderers must match without coordinates or data migration.
 
-Last updated: 2026-08-12
+Last updated: 2026-08-13
 
 # Process Story: Editor policy status follows the draft automatically
 
