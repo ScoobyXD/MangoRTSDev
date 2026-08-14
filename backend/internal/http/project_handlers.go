@@ -177,6 +177,12 @@ func (s *Server) handleProjectSubresource(w http.ResponseWriter, r *http.Request
 		return
 	}
 	switch parts[1] {
+	case "email-threads":
+		if len(parts) != 3 {
+			writeError(w, http.StatusNotFound, "not_found")
+			return
+		}
+		s.handleProjectEmailThread(w, r, projectID, parts[2])
 	case "information":
 		if len(parts) != 2 {
 			writeError(w, http.StatusNotFound, "not_found")
@@ -648,13 +654,15 @@ func (s *Server) handleProjectScopedNodeCreate(w http.ResponseWriter, r *http.Re
 	if !s.requireEntityEdit(w, r, companyID, store.EntityTypeProject, projectID, "project_not_found") {
 		return
 	}
-	if req.InitialAssignment == nil || strings.TrimSpace(req.InitialAssignment.LogicGateID) == "" {
-		writeError(w, http.StatusBadRequest, "project_node_logic_gate_required")
-		return
-	}
-	logicGateID := strings.TrimSpace(req.InitialAssignment.LogicGateID)
-	if !s.requireKanbanLogicGateEffectiveAccess(w, companyID, s.entityPermissionActorUserID(r, companyID), logicGateID, store.EntityPermissionEdit) {
-		return
+	if req.InitialAssignment != nil {
+		logicGateID := strings.TrimSpace(req.InitialAssignment.LogicGateID)
+		if logicGateID == "" {
+			writeError(w, http.StatusBadRequest, "project_node_logic_gate_invalid")
+			return
+		}
+		if !s.requireKanbanLogicGateEffectiveAccess(w, companyID, s.entityPermissionActorUserID(r, companyID), logicGateID, store.EntityPermissionEdit) {
+			return
+		}
 	}
 	actor, _ := authenticatedActor(r)
 	input := store.ProjectScopedNodeCreateInput{

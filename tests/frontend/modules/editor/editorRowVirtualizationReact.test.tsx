@@ -185,12 +185,11 @@ function assertBoundedRows(container: ParentNode, kind: "node" | "project", maxi
   return rowIDs;
 }
 
-function assertPaneToggles(row: HTMLElement, expected: readonly [boolean, boolean, boolean]) {
+function assertProjectPaneToggles(row: HTMLElement, expected: readonly [boolean, boolean]) {
   const toggles = Array.from(row.querySelectorAll<HTMLButtonElement>(
-    'button[aria-label="Toggle email column"], button[aria-label="Toggle text editor column"], button[aria-label="Toggle chat column"]',
+    'button[aria-label="Toggle text editor column"], button[aria-label="Toggle chat column"]',
   ));
   assert.deepEqual(toggles.map((button) => button.getAttribute("aria-label")), [
-    "Toggle email column",
     "Toggle text editor column",
     "Toggle chat column",
   ]);
@@ -198,7 +197,7 @@ function assertPaneToggles(row: HTMLElement, expected: readonly [boolean, boolea
 }
 
 function assertOnlyEditorOpen(row: HTMLElement) {
-  assertPaneToggles(row, [false, true, false]);
+  assertProjectPaneToggles(row, [true, false]);
 }
 
 

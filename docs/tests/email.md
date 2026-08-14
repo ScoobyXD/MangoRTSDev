@@ -4,14 +4,14 @@
 2. Selecting a Node in the email Universal Linker adds the email to that existing Node.
 3. Selecting a Logic Gate immediately creates a new email Node in that Logic Gate with priority **Not Assigned**.
 4. Selecting a Project requires one Project Logic Gate choice, then creates a new email Node there with priority **Not Assigned**.
-5. One stored email thread may belong to multiple Nodes, and one Node may contain multiple stored email threads.
-6. Every newly ingested message inherits every Node-wide destination already used by its thread.
+5. One stored email thread may belong to multiple Nodes and Projects, and each Node or Project may contain multiple stored email threads.
+6. Every newly ingested message inherits every Node-wide and Project-wide destination already used by its thread.
 7. New-message ingestion never creates or copies a text-box relationship, chat, or shared-draft panel state.
-8. An email thread never links to a text box; only an exact email message may do so.
-9. One exact email message may link to at most one text box per Node and may link to a different text box in another Node.
-10. Every email chat belongs to one exact Node, one exact text box in that Node, and one exact linked email message. Mango does not create unlinked email chats.
+8. An email thread never links to a text box; only an exact email message may link to one exact Node or Project text box.
+9. One exact email message may link to at most one text box per Node or Project and may use different text boxes in different owners.
+10. Every email chat belongs to one exact Node or Project, one exact textbox in that resource, and one exact linked email message. Mango does not create unlinked email chats.
 11. Chats about the same message in different Nodes remain separate.
-12. Highlighting email text only shows the **Turn highlighted email text into a chat** action. Clicking it keeps the exact quote visibly highlighted and waits for the user to click the exact triage grouping or Node text-box chat column without writing to the database.
+12. Highlighting email text only shows the **Turn highlighted email text into a chat** action. Clicking it keeps the exact quote visibly highlighted and stages the exact Node or Project textbox destination without writing to the database.
 13. If the chosen Node already links that message to the chosen text box, the chat appends there. Otherwise the first send atomically links the chosen existing text box or creates the first text box, then creates the exact chat.
 14. If a triage thread has no Node, the first sent chat creates a floating Node with priority **Not Assigned** and no popup. If the thread has several Nodes, the user chooses the destination Node before send.
 15. Clearing the quote or closing its unsent rail cancels the preview without creating or deleting database rows.
@@ -19,7 +19,7 @@
 17. Each triage chat group header shows a clickable Node icon and Node title.
 18. The chat rail opens automatically when the selected thread already has accessible chats. The email thread header owns the one neutral manual toggle. Individual messages show no chat button or three-dot overflow button.
 19. The chat rail's top and bottom borders align with the displayed email-message card, not the subject and action toolbar above that card.
-20. Dragging an exact email message onto a Node text box links that message. Dragging an email thread onto a text box is rejected.
+20. Email messages are not draggable into Node or Project text boxes. Exact-message textbox association happens only through the highlighted-email chat destination flow.
 21. Reply and Reply All create or reopen only the current user's personal draft for the exact source message and sending-account scope.
 22. Create Shared Draft creates or reopens one shared draft for one exact Node and email thread, with one dedicated Node text box.
 23. A thread present in several Nodes may have a separate shared draft in each Node; no Node can see or edit another Node's draft through the shared thread.
@@ -40,8 +40,9 @@
 38. My Triage, Shared Triage, and the Node email column pass the exact durable `email_thread_id` into the same stored-thread read, render every related `email_messages` row once in `message_order`, and show each expanded message's complete stored body. The thread-detail route accepts only that durable ID and has no provider-thread, collaboration, or paged-message fallback.
 39. A one-hash email reference stores the exact durable `email_thread_id` and opens that same stored-thread read and renderer in a quick modal with the standard red close button; it creates no relationship, email route, provider-thread lookup, or second email-rendering system.
 40. A quoted copy of an earlier email inside another message body is body content only. It never counts as thread membership and never permits Mango to omit that earlier stored message row.
+41. A Project displays attached threads in one Project-wide email column. Highlighting an unlinked exact message defaults to Create New Textbox; clicking an existing Project textbox highlights that frame, changes the destination field, and the first send atomically creates the exact Project/textbox/message relationship and chat.
 
-Last updated: 2026-08-12
+Last updated: 2026-08-14
 
 # Process Story: DEV cutover collapses only safe legacy job metadata
 

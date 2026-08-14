@@ -153,6 +153,7 @@ UP46 - Permission filtering continues through later ranked candidate batches onl
 UP47 - Every search GET is read-only. It must not open a repair transaction, upsert the three default Company Explorer folders, backfill placement, advance policy or folder versions, or fire write triggers. Creation and migration workflows own required default-state repair.
 
 UP48 - The search architecture in UP43 through UP47 is the rule for Mango free-text resource searches: narrow by company, selected type, text, and bounded rank first; authorize that narrowed set last. A listing endpoint that intentionally returns a complete tree is not a free-text search and retains its separately documented tree-visibility behavior.
+UP49 - The Project Logic Gates / Nodes toolbar uses the shared Universal picker in link mode with Nodes as its only enabled target. Selecting a Node calls the typed Project relationship command; its separate Create floating Node button creates and links one Node without requiring a Logic Gate.
 
 # Scenarios
 

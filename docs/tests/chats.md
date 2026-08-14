@@ -29,11 +29,11 @@
 27. The rail opens automatically when the selected thread already has at least one accessible chat.
 28. A failed atomic first-chat command creates none of its Node, relationship, text-box, or chat writes and preserves the complete composer for retry.
 29. Removing one Node's relationship, text box, or chat does not remove another Node's copy of that work.
-30. A saved highlighted-email chat keeps its exact quoted range visibly highlighted in My Triage, Shared Triage, and the Node email view until the last chat using that range is removed.
+30. A saved highlighted-email chat keeps its exact quoted range visibly highlighted in My Triage, Shared Triage, and the Node or Project email view until the last chat using that range is removed.
 31. My Triage and Shared Triage enforce one exact pending destination for a highlighted-email chat: an exact existing text-box link is selected automatically when unambiguous, one existing Node with no exact link defaults to a new text box in that Node, no existing Node defaults to a new Node and new text box, and every ambiguous multi-Node case waits for an explicit choice.
-32. The Node email view applies the same exact-message rules: an existing exact-message text-box link opens and flashes that text-box chat automatically, while an unlinked exact message may use any elevated text-box surface or the elevated Node parent for an explicit new grouping, and the first send creates the allowed link and chat atomically or creates neither.
+32. The Node email view applies the same exact-message rules: an existing exact-message textbox link opens and flashes that chat automatically; an unlinked exact message defaults to a staged new textbox, and clicking an existing textbox highlights its frame and changes the destination to Existing Node · Existing Text Box before the first atomic send.
 33. Only a highlighted-text-to-chat composer shows the routing template, with the exact highlighted quote in the top field and the pending destination in the field directly below it.
-34. A highlighted-email destination has exactly one of three labels: **New Node · New Text Box**, **Existing Node · New Text Box**, or **Existing Node · Existing Text Box**.
+34. A triage or Node highlighted-email destination has exactly one of three labels: **New Node · New Text Box**, **Existing Node · New Text Box**, or **Existing Node · Existing Text Box**. A Project destination is **Existing Project · New Text Box** or **Existing Project · Existing Text Box**.
 35. An existing-Node destination shows the Node icon followed by the real Node name in Mango's rectangular entity chip; a text box has no displayed or invented name in the destination field.
 36. Clicking an existing text-box grouping selects **Existing Node · Existing Text Box**, clicking a Node parent selects **Existing Node · New Text Box** unless that exact message already has a text-box link there, and clicking the Node-plus action selects **New Node · New Text Box**.
 37. If the exact message already has a text-box link in the chosen Node, Mango resolves every Node-local choice to **Existing Node · Existing Text Box** and never moves, replaces, or duplicates that link.
@@ -42,8 +42,9 @@
 40. Clicking inside the composer, its highlighted-text field, its destination field, or a destination grouping does not accidentally clear the pending destination.
 41. Reply and grouping-header **New chat** commands inherit their exact existing text-box destination and do not show or require the highlighted-text routing template.
 42. The Node-plus action, grouping clicks, default destination, destination X, outside-click dismissal, soft frame, and validation error are presentation state only; the first successful Send remains the only command that may create the allowed Node, text box, email relationship, and chat together.
+43. The Project-wide email column uses the same highlighted-email destination contract. An unlinked exact message defaults to Existing Project · New Text Box; clicking an existing Project textbox highlights its frame and changes the destination to Existing Project · Existing Text Box, and the first send atomically creates the exact Project textbox relationship and chat.
 
-Last updated: 2026-08-12
+Last updated: 2026-08-14
 
 # General Process Story
 

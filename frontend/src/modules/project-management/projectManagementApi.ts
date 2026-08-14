@@ -442,17 +442,16 @@ export async function createProjectNode(input: {
   projectID: string;
   title: string;
   position?: number;
-  logicGateID: string;
+  logicGateID?: string;
 }): Promise<{ node?: unknown; relationship?: ProjectRelationshipProjection; implicit_relationships?: ProjectRelationshipProjection[] }> {
-  const logicGateID = input.logicGateID.trim();
-  if (!logicGateID) throw new Error("A Project node must belong to a Logic Gate.");
+  const logicGateID = input.logicGateID?.trim() ?? "";
   return apiFetchJSON<{ node?: unknown; relationship?: ProjectRelationshipProjection; implicit_relationships?: ProjectRelationshipProjection[] }>(`/v1/projects/${encodeURIComponent(input.projectID)}/nodes`, {
     method: "POST",
     body: JSON.stringify({
       company_id: input.companyID,
       title: input.title,
       position: input.position ?? 0,
-      initial_assignment: { logic_gate_id: logicGateID, position: input.position ?? 0 },
+      initial_assignment: logicGateID ? { logic_gate_id: logicGateID, position: input.position ?? 0 } : undefined,
     }),
   });
 }

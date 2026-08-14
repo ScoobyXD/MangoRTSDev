@@ -6262,7 +6262,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
             minHeight={frameMinHeight}
             fillAvailableHeight={fill}
             style={frameStyle}
-            onTextSelection={onEmailSelection ? (selection) => onEmailSelection({ ...selection, messageID: message.id }) : undefined}
+            onTextSelection={onEmailSelection ? (selection) => onEmailSelection({ ...selection, messageID: message.id, emailMessageID: message.email_message_id?.trim() || undefined }) : undefined}
             highlights={chatHighlights}
             activeSelection={activeSelection}
             selectionNavigation={selectionNavigation}

@@ -574,6 +574,16 @@ type CommunicationsNodeEmailThread struct {
 	Thread            CommunicationsEmailThread `json:"thread"`
 }
 
+type CommunicationsProjectEmailThread struct {
+	CompanyID         string                    `json:"company_id"`
+	ProjectID         string                    `json:"project_id"`
+	InformationID     string                    `json:"information_id"`
+	EmailThreadID     string                    `json:"email_thread_id"`
+	SelectedMessageID string                    `json:"selected_message_id"`
+	CreatedTimestamp  time.Time                 `json:"created_timestamp"`
+	Thread            CommunicationsEmailThread `json:"thread"`
+}
+
 type CommunicationsMessageReadStatus struct {
 	ScopeType                string                            `json:"-"`
 	ScopeID                  string                            `json:"-"`

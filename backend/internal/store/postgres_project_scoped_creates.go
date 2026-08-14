@@ -90,19 +90,23 @@ func (r *PostgresRepo) createNodeAssociatedWithProjectTx(ctx context.Context, tx
 		card = &cardValue
 		assignmentEvents = append(assignmentEvents, assignmentResult.Events...)
 	}
-	gateRelationshipID, err := upsertProjectRelationshipSourceTx(ctx, tx, ProjectRelationshipInput{
-		CompanyID: input.CompanyID, ProjectID: input.ProjectID, ResourceType: EntityTypeLogicGate,
-		ResourceID: input.InitialAssignment.LogicGateID, Position: input.Position,
-	})
-	if err != nil {
-		return ProjectScopedNodeCreateResult{}, err
-	}
-	if err := syncProjectRelationshipProjectionDependenciesTx(ctx, tx, ProjectRelationshipProjectionDependencyInput{CompanyID: input.CompanyID, RelationshipID: gateRelationshipID}); err != nil {
-		return ProjectScopedNodeCreateResult{}, err
-	}
-	gateProjection, err := projectRelationshipProjectionByIDTx(ctx, tx, input.CompanyID, gateRelationshipID)
-	if err != nil {
-		return ProjectScopedNodeCreateResult{}, err
+	implicitRelationships := make([]domain.ProjectRelationshipProjection, 0, 1)
+	if input.InitialAssignment != nil {
+		gateRelationshipID, err := upsertProjectRelationshipSourceTx(ctx, tx, ProjectRelationshipInput{
+			CompanyID: input.CompanyID, ProjectID: input.ProjectID, ResourceType: EntityTypeLogicGate,
+			ResourceID: input.InitialAssignment.LogicGateID, Position: input.Position,
+		})
+		if err != nil {
+			return ProjectScopedNodeCreateResult{}, err
+		}
+		if err := syncProjectRelationshipProjectionDependenciesTx(ctx, tx, ProjectRelationshipProjectionDependencyInput{CompanyID: input.CompanyID, RelationshipID: gateRelationshipID}); err != nil {
+			return ProjectScopedNodeCreateResult{}, err
+		}
+		gateProjection, err := projectRelationshipProjectionByIDTx(ctx, tx, input.CompanyID, gateRelationshipID)
+		if err != nil {
+			return ProjectScopedNodeCreateResult{}, err
+		}
+		implicitRelationships = append(implicitRelationships, gateProjection)
 	}
 	relationshipID, err := insertProjectRelationshipForScopedCreateTx(ctx, tx, ProjectRelationshipInput{
 		CompanyID:    input.CompanyID,
@@ -133,11 +137,12 @@ func (r *PostgresRepo) createNodeAssociatedWithProjectTx(ctx context.Context, tx
 		return ProjectScopedNodeCreateResult{}, err
 	}
 	meta := workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)
-	events, err := r.appendDomainEventsTx(ctx, tx, []DomainEventInput{
-		nodeCreatedWorkspaceEventInputWithMetadata(node, meta),
-		projectRelationshipUpsertedWorkspaceEventInput(gateProjection, input.ActorUserID),
-		projectRelationshipUpsertedWorkspaceEventInput(projection, input.ActorUserID),
-	})
+	eventInputs := []DomainEventInput{nodeCreatedWorkspaceEventInputWithMetadata(node, meta)}
+	for _, gateProjection := range implicitRelationships {
+		eventInputs = append(eventInputs, projectRelationshipUpsertedWorkspaceEventInput(gateProjection, input.ActorUserID))
+	}
+	eventInputs = append(eventInputs, projectRelationshipUpsertedWorkspaceEventInput(projection, input.ActorUserID))
+	events, err := r.appendDomainEventsTx(ctx, tx, eventInputs)
 	if err != nil {
 		return ProjectScopedNodeCreateResult{}, err
 	}
@@ -145,7 +150,7 @@ func (r *PostgresRepo) createNodeAssociatedWithProjectTx(ctx context.Context, tx
 	return ProjectScopedNodeCreateResult{
 		Node:                  node,
 		Relationship:          &projection,
-		ImplicitRelationships: []domain.ProjectRelationshipProjection{gateProjection},
+		ImplicitRelationships: implicitRelationships,
 		Information:           information,
 		Assignment:            assignment,
 		Card:                  card,

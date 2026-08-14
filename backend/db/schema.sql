@@ -3487,6 +3487,10 @@ create unique index if not exists idx_email_relationships_one_node_textbox_per_m
   on email_relationships(company_id, email_message_id, resource_id)
   where resource_type='node' and resource_textbox_id is not null;
 
+create unique index if not exists idx_email_relationships_one_project_textbox_per_message
+  on email_relationships(company_id, email_message_id, resource_id)
+  where resource_type='project' and resource_textbox_id is not null;
+
 create table if not exists node_textboxes_history (
   company_id uuid not null,
   node_id uuid not null,

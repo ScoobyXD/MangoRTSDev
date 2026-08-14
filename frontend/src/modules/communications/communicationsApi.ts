@@ -1221,6 +1221,46 @@ export async function getNodeEmailMessage(
   return cloneMessage(message);
 }
 
+export async function getProjectEmailThread(
+  companyID: string,
+  projectID: string,
+  emailThreadID: string,
+  options: { refresh?: boolean } = {},
+): Promise<CommunicationsStoredEmailThread> {
+  const cleanCompanyID = companyID.trim();
+  const cleanProjectID = projectID.trim();
+  const cleanEmailThreadID = emailThreadID.trim();
+  if (!cleanCompanyID || !cleanProjectID || !cleanEmailThreadID) throw new Error("project_email_thread_id_required");
+  const cacheKey = `project-email-thread:${cleanCompanyID}:${cleanProjectID}:${cleanEmailThreadID}`;
+  if (options.refresh) invalidateCacheKey(cacheKey);
+  return cachedRead(cacheKey, NODE_EMAIL_THREAD_CACHE_TTL_MS, async () => {
+    const query = new URLSearchParams({ company_id: cleanCompanyID });
+    return apiFetchJSON<CommunicationsStoredEmailThread>(
+      `/v1/projects/${encodeURIComponent(cleanProjectID)}/email-threads/${encodeURIComponent(cleanEmailThreadID)}?${query.toString()}`,
+    );
+  }, cloneCommunicationsStoredEmailThread);
+}
+
+export async function getProjectEmailMessage(
+  companyID: string,
+  projectID: string,
+  emailThreadID: string,
+  emailMessageID: string,
+  options: { refresh?: boolean } = {},
+): Promise<EmailMessage> {
+  const cleanEmailMessageID = emailMessageID.trim();
+  if (!cleanEmailMessageID) throw new Error("project_email_message_id_required");
+  const query = new URLSearchParams({ company_id: companyID.trim(), message_id: cleanEmailMessageID });
+  const cacheKey = `project-email-message:${companyID.trim()}:${projectID.trim()}:${emailThreadID.trim()}:${cleanEmailMessageID}`;
+  if (options.refresh) invalidateCacheKey(cacheKey);
+  const stored = await cachedRead(cacheKey, NODE_EMAIL_THREAD_CACHE_TTL_MS, async () => apiFetchJSON<CommunicationsStoredEmailThread>(
+    `/v1/projects/${encodeURIComponent(projectID.trim())}/email-threads/${encodeURIComponent(emailThreadID.trim())}?${query.toString()}`,
+  ), cloneCommunicationsStoredEmailThread);
+  const message = stored.messages[0];
+  if (!message) throw new Error("project_email_message_not_found");
+  return cloneMessage(message);
+}
+
 export async function ensureEmailCollaboration(input: EnsureCommunicationsEmailCollaborationInput): Promise<CommunicationsEmailCollaboration> {
   const cleanCompanyID = input.companyID.trim();
   if (!cleanCompanyID || !input.message.id.trim()) throw new Error("email_collaboration_source_required");

@@ -183,6 +183,8 @@ type CommunicationsRepository interface {
 	ListCommunicationsEmailThreadNodeIDs(companyID, emailThreadID string) ([]string, error)
 	GetCommunicationsNodeEmailThread(companyID, nodeID, emailThreadID string) (domain.CommunicationsNodeEmailThread, error)
 	GetCommunicationsNodeEmailMessage(companyID, nodeID, emailThreadID, emailMessageID string) (domain.CommunicationsNodeEmailThread, error)
+	GetCommunicationsProjectEmailThread(companyID, projectID, emailThreadID string) (domain.CommunicationsProjectEmailThread, error)
+	GetCommunicationsProjectEmailMessage(companyID, projectID, emailThreadID, emailMessageID string) (domain.CommunicationsProjectEmailThread, error)
 	ImportCommunicationsEmailIntoNode(input CommunicationsNodeEmailImportInput) (CommunicationsNodeEmailImportResult, error)
 	EnsureCommunicationsEmailCollaboration(ctx context.Context, input CommunicationsEmailCollaborationEnsureInput) (CommunicationsEmailCollaborationEnsureResult, error)
 	ListCommunicationsEmailCollaborations(input CommunicationsEmailCollaborationListInput) ([]domain.CommunicationsEmailCollaboration, error)

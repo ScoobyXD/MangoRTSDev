@@ -14,7 +14,9 @@ import (
 type projectAttachedEmailPayload struct {
 	BlockID           string `json:"block_id"`
 	EmailMessageID    string `json:"email_message_id"`
+	EmailThreadID     string `json:"email_thread_id"`
 	AttachedTimestamp string `json:"attached_timestamp"`
+	LinkScope         string `json:"link_scope"`
 }
 
 func projectProjectionAsInformation(item domain.ProjectProjection) domain.ProjectInformation {
@@ -213,7 +215,7 @@ func normalizeProjectTextboxChatPayload(ctx context.Context, tx *sql.Tx, input P
     and relationship.email_message_id=$2::uuid
     and relationship.resource_type='project'
     and relationship.resource_id=$3::uuid
-    and relationship.resource_textbox_id=$4
+    and (relationship.resource_textbox_id=$4 or relationship.resource_textbox_id is null)
   union all
   select 1 from project_textbox_chats chat
   where chat.company_id=$1::uuid and chat.project_id=$3::uuid
@@ -304,6 +306,10 @@ where not exists (
 }
 
 func upsertPostgresProjectTextboxChatTx(ctx context.Context, tx *sql.Tx, input ProjectInformationInput) (domain.ProjectProjection, error) {
+	var payload nodeTextboxChatPayload
+	if json.Unmarshal([]byte(input.Information), &payload) != nil {
+		return domain.ProjectProjection{}, ErrInvalid
+	}
 	chat, err := normalizeProjectTextboxChatPayload(ctx, tx, input)
 	if err != nil {
 		return domain.ProjectProjection{}, err
@@ -315,7 +321,48 @@ where company_id=$1::uuid and project_id=$2::uuid and textbox_id=$3 and deleted_
 		return domain.ProjectProjection{}, err
 	}
 	if !textboxExists {
-		return domain.ProjectProjection{}, ErrNotFound
+		if !payload.EnsureEmailTextboxLink || chat.SelectionSource != "email" || chat.SelectionTextboxID != chat.TextboxID || chat.ParentChatID != "" {
+			return domain.ProjectProjection{}, ErrNotFound
+		}
+		ref := EditorJSONDocumentRef{
+			CompanyID: input.CompanyID, ResourceType: EntityTypeProject,
+			ResourceID: input.ProjectID, DocumentID: chat.TextboxID,
+		}
+		storage, ok := postgresEditorTextboxStorageFor(ref)
+		if !ok {
+			return domain.ProjectProjection{}, ErrInvalid
+		}
+		if err := insertEmptyPostgresEditorTextboxTx(ctx, tx, storage, ref); err != nil {
+			return domain.ProjectProjection{}, err
+		}
+	}
+	if chat.SelectionSource == "email" {
+		if _, err := tx.ExecContext(ctx, `select pg_advisory_xact_lock(hashtextextended($1::text || ':' || $2::text || ':' || $3::text,0))`,
+			input.CompanyID, input.ProjectID, chat.SelectionEmailMessageID); err != nil {
+			return domain.ProjectProjection{}, err
+		}
+		if _, err := tx.ExecContext(ctx, `insert into email_relationships(
+  company_id,email_relationship_id,email_thread_id,email_message_id,resource_type,resource_id,resource_textbox_id,created_timestamp
+)
+select wide.company_id,gen_random_uuid(),wide.email_thread_id,wide.email_message_id,
+       'project',wide.resource_id,$4,clock_timestamp()
+from email_relationships wide
+where wide.company_id=$1::uuid and wide.resource_type='project' and wide.resource_id=$2::uuid
+  and wide.email_message_id=$3::uuid and wide.resource_textbox_id is null
+order by wide.created_timestamp,wide.email_relationship_id limit 1
+on conflict do nothing`, input.CompanyID, input.ProjectID, chat.SelectionEmailMessageID, chat.TextboxID); err != nil {
+			return domain.ProjectProjection{}, err
+		}
+		var linked bool
+		if err := tx.QueryRowContext(ctx, `select exists(select 1 from email_relationships
+where company_id=$1::uuid and resource_type='project' and resource_id=$2::uuid
+  and email_message_id=$3::uuid and resource_textbox_id=$4)`,
+			input.CompanyID, input.ProjectID, chat.SelectionEmailMessageID, chat.TextboxID).Scan(&linked); err != nil {
+			return domain.ProjectProjection{}, err
+		}
+		if !linked {
+			return domain.ProjectProjection{}, ErrInvalid
+		}
 	}
 	_, existed, err := postgresProjectTextboxChatProjectionTx(ctx, tx, input.CompanyID, input.ProjectID, input.InformationID)
 	if err != nil {
@@ -448,8 +495,14 @@ func addPostgresProjectEmailRelationshipTx(ctx context.Context, tx *sql.Tx, inpu
 	}
 	payload.BlockID = cleanUUIDText(payload.BlockID)
 	payload.EmailMessageID = cleanUUIDText(payload.EmailMessageID)
+	payload.LinkScope = strings.ToLower(strings.TrimSpace(payload.LinkScope))
+	if payload.LinkScope == "" {
+		payload.LinkScope = "message"
+	}
 	actorUserID := cleanUUIDText(input.ActorUserID)
-	if payload.BlockID == "" || payload.EmailMessageID == "" || actorUserID == "" {
+	if payload.EmailMessageID == "" || actorUserID == "" ||
+		(payload.LinkScope != "message" && payload.LinkScope != "thread") ||
+		(payload.LinkScope == "thread" && payload.BlockID != "") {
 		return domain.ProjectProjection{}, ErrInvalid
 	}
 	if existing, found, err := postgresProjectEmailRelationshipProjectionTx(ctx, tx, input.CompanyID, input.ProjectID, input.InformationID); err != nil {
@@ -480,9 +533,9 @@ from email_messages message
 join email_threads thread on thread.company_id=message.company_id and thread.email_thread_id=message.email_thread_id
 join email_connections connection on connection.company_id=thread.company_id
  and connection.email_connection_id=thread.email_connection_id
-join project_textboxes textbox on textbox.company_id=message.company_id
-  and textbox.project_id=$3::uuid and textbox.textbox_id=$4 and textbox.deleted_timestamp is null
 where message.company_id=$1::uuid and message.email_message_id=$2::uuid
+	and ($4='' or exists(select 1 from project_textboxes textbox where textbox.company_id=$1::uuid
+	  and textbox.project_id=$3::uuid and textbox.textbox_id=$4 and textbox.deleted_timestamp is null))
   and ((connection.connection_type='personal' and connection.personal_user_id=$5::uuid)
     or exists (
       select 1 from shared_inboxes inbox
@@ -497,18 +550,70 @@ where message.company_id=$1::uuid and message.email_message_id=$2::uuid
 		}
 		return domain.ProjectProjection{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `insert into email_relationships(
+	if payload.BlockID != "" {
+		var existingRelationshipID, existingTextboxID string
+		err := tx.QueryRowContext(ctx, `select email_relationship_id::text,resource_textbox_id
+from email_relationships
+where company_id=$1::uuid and resource_type='project' and resource_id=$2::uuid
+  and email_message_id=$3::uuid and resource_textbox_id is not null
+order by created_timestamp,email_relationship_id limit 1`, input.CompanyID, input.ProjectID, payload.EmailMessageID).
+			Scan(&existingRelationshipID, &existingTextboxID)
+		if err == nil {
+			if existingTextboxID != payload.BlockID {
+				return domain.ProjectProjection{}, ErrInvalid
+			}
+			projection, found, projectionErr := postgresProjectEmailRelationshipProjectionTx(ctx, tx, input.CompanyID, input.ProjectID, existingRelationshipID)
+			if projectionErr != nil {
+				return domain.ProjectProjection{}, projectionErr
+			}
+			if found {
+				return projection, nil
+			}
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return domain.ProjectProjection{}, err
+		}
+	}
+	var insertErr error
+	if payload.LinkScope == "thread" {
+		_, insertErr = tx.ExecContext(ctx, `insert into email_relationships(
+  company_id,email_relationship_id,email_thread_id,email_message_id,resource_type,resource_id,resource_textbox_id,created_timestamp
+)
+select $1::uuid,case when message.email_message_id=$4::uuid then $2::uuid else gen_random_uuid() end,
+       $3::uuid,message.email_message_id,'project',$5::uuid,nullif($6,''),$7
+from email_messages message
+where message.company_id=$1::uuid and message.email_thread_id=$3::uuid
+on conflict do nothing`, input.CompanyID, input.InformationID, emailThreadID, payload.EmailMessageID, input.ProjectID, payload.BlockID, attachedAt)
+	} else {
+		_, insertErr = tx.ExecContext(ctx, `insert into email_relationships(
   company_id,email_relationship_id,email_thread_id,email_message_id,resource_type,resource_id,resource_textbox_id,created_timestamp
 ) values($1::uuid,$2::uuid,$3::uuid,$4::uuid,'project',$5::uuid,$6,$7)`,
-		input.CompanyID, input.InformationID, emailThreadID, payload.EmailMessageID, input.ProjectID, payload.BlockID, attachedAt); err != nil {
-		return domain.ProjectProjection{}, err
+			input.CompanyID, input.InformationID, emailThreadID, payload.EmailMessageID, input.ProjectID, payload.BlockID, attachedAt)
+	}
+	if insertErr != nil {
+		return domain.ProjectProjection{}, insertErr
 	}
 	projection, found, err := postgresProjectEmailRelationshipProjectionTx(ctx, tx, input.CompanyID, input.ProjectID, input.InformationID)
 	if err != nil {
 		return domain.ProjectProjection{}, err
 	}
 	if !found {
-		return domain.ProjectProjection{}, ErrNotFound
+		var existingRelationshipID string
+		err := tx.QueryRowContext(ctx, `select email_relationship_id::text
+from email_relationships
+where company_id=$1::uuid and resource_type='project' and resource_id=$2::uuid
+  and email_message_id=$3::uuid and resource_textbox_id is not distinct from nullif($4,'')
+order by created_timestamp,email_relationship_id limit 1`, input.CompanyID, input.ProjectID, payload.EmailMessageID, payload.BlockID).
+			Scan(&existingRelationshipID)
+		if err != nil {
+			return domain.ProjectProjection{}, ErrNotFound
+		}
+		projection, found, err = postgresProjectEmailRelationshipProjectionTx(ctx, tx, input.CompanyID, input.ProjectID, existingRelationshipID)
+		if err != nil || !found {
+			if err != nil {
+				return domain.ProjectProjection{}, err
+			}
+			return domain.ProjectProjection{}, ErrNotFound
+		}
 	}
 	return projection, nil
 }

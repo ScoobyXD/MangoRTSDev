@@ -934,10 +934,8 @@ from node_logic_gate_assignments
 where company_id=$1::uuid and node_id=$2::uuid
 order by updated_timestamp desc, created_timestamp desc, assignment_id desc
 limit 1`, input.CompanyID, input.ResourceID).Scan(&logicGateID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ProjectRelationshipMutationResult{}, ErrProjectNodeLogicGateRequired
-	}
-	if err != nil {
+	hasLogicGate := err == nil && strings.TrimSpace(logicGateID) != ""
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return ProjectRelationshipMutationResult{}, err
 	}
 	var alreadyRelated bool
@@ -953,27 +951,37 @@ select exists (
 		return ProjectRelationshipMutationResult{}, err
 	}
 
-	gateRelationshipID, err := upsertProjectRelationshipSourceTx(ctx, tx, ProjectRelationshipInput{
-		CompanyID: input.CompanyID, ProjectID: input.ProjectID, ResourceType: EntityTypeLogicGate,
-		ResourceID: logicGateID, Position: input.Position,
-	})
-	if err != nil {
-		return ProjectRelationshipMutationResult{}, err
+	implicitRelationships := make([]domain.ProjectRelationshipProjection, 0, 1)
+	gateRelationshipID := ""
+	if hasLogicGate {
+		gateRelationshipID, err = upsertProjectRelationshipSourceTx(ctx, tx, ProjectRelationshipInput{
+			CompanyID: input.CompanyID, ProjectID: input.ProjectID, ResourceType: EntityTypeLogicGate,
+			ResourceID: logicGateID, Position: input.Position,
+		})
+		if err != nil {
+			return ProjectRelationshipMutationResult{}, err
+		}
 	}
 	nodeRelationshipID, err := upsertProjectRelationshipSourceTx(ctx, tx, input)
 	if err != nil {
 		return ProjectRelationshipMutationResult{}, err
 	}
 	for _, relationshipID := range []string{gateRelationshipID, nodeRelationshipID} {
+		if relationshipID == "" {
+			continue
+		}
 		if err := syncProjectRelationshipProjectionDependenciesTx(ctx, tx, ProjectRelationshipProjectionDependencyInput{
 			CompanyID: input.CompanyID, RelationshipID: relationshipID,
 		}); err != nil {
 			return ProjectRelationshipMutationResult{}, err
 		}
 	}
-	gateProjection, err := projectRelationshipProjectionByIDTx(ctx, tx, input.CompanyID, gateRelationshipID)
-	if err != nil {
-		return ProjectRelationshipMutationResult{}, err
+	if gateRelationshipID != "" {
+		gateProjection, err := projectRelationshipProjectionByIDTx(ctx, tx, input.CompanyID, gateRelationshipID)
+		if err != nil {
+			return ProjectRelationshipMutationResult{}, err
+		}
+		implicitRelationships = append(implicitRelationships, gateProjection)
 	}
 	nodeProjection, err := projectRelationshipProjectionByIDTx(ctx, tx, input.CompanyID, nodeRelationshipID)
 	if err != nil {
@@ -989,7 +997,7 @@ select exists (
 	}
 	return ProjectRelationshipMutationResult{
 		Relationship:          &nodeProjection,
-		ImplicitRelationships: []domain.ProjectRelationshipProjection{gateProjection},
+		ImplicitRelationships: implicitRelationships,
 	}, nil
 }
 

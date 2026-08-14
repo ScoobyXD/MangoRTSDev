@@ -326,13 +326,13 @@ insert into email_relationships (
   resource_type,resource_id,resource_textbox_id,created_timestamp
 )
 select target.company_id,gen_random_uuid(),target.email_thread_id,target.email_message_id,
-       'node',destination.resource_id,null,now()
+       destination.resource_type,destination.resource_id,null,now()
 from email_messages target
 cross join (
-  select distinct resource_id
+  select distinct resource_type,resource_id
   from email_relationships
   where company_id=$1::uuid and email_thread_id=$2::uuid
-    and resource_type='node' and resource_textbox_id is null
+    and resource_type in ('node','project') and resource_textbox_id is null
 ) destination
 where target.company_id=$1::uuid and target.email_thread_id=$2::uuid
   and target.provider_message_id=$3 and target.download_complete
@@ -681,6 +681,53 @@ where message.company_id=$1::uuid
 	message.Message.ThreadID = item.Thread.ProviderThreadID
 	item.Thread.Messages = []domain.CommunicationsEmailMessage{message}
 	return item, nil
+}
+
+func (r *PostgresRepo) GetCommunicationsProjectEmailThread(companyID, projectID, emailThreadID string) (domain.CommunicationsProjectEmailThread, error) {
+	companyID, projectID, emailThreadID = cleanUUIDText(companyID), cleanUUIDText(projectID), cleanUUIDText(emailThreadID)
+	if companyID == "" || projectID == "" || emailThreadID == "" {
+		return domain.CommunicationsProjectEmailThread{}, ErrInvalid
+	}
+	ctx := context.Background()
+	var item domain.CommunicationsProjectEmailThread
+	err := r.db.QueryRowContext(ctx, `
+select relationship.company_id::text,relationship.resource_id::text,
+       relationship.email_relationship_id::text,relationship.email_thread_id::text,
+       relationship.email_message_id::text,relationship.created_timestamp
+from email_relationships relationship
+where relationship.company_id=$1::uuid and relationship.resource_type='project'
+  and relationship.resource_id=$2::uuid and relationship.email_thread_id=$3::uuid
+order by relationship.resource_textbox_id nulls first,relationship.created_timestamp,relationship.email_relationship_id
+limit 1`, companyID, projectID, emailThreadID).Scan(
+		&item.CompanyID, &item.ProjectID, &item.InformationID, &item.EmailThreadID,
+		&item.SelectedMessageID, &item.CreatedTimestamp,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.CommunicationsProjectEmailThread{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.CommunicationsProjectEmailThread{}, err
+	}
+	item.Thread, err = postgresCommunicationsEmailThreadByID(ctx, r.db, companyID, emailThreadID)
+	return item, err
+}
+
+func (r *PostgresRepo) GetCommunicationsProjectEmailMessage(companyID, projectID, emailThreadID, emailMessageID string) (domain.CommunicationsProjectEmailThread, error) {
+	item, err := r.GetCommunicationsProjectEmailThread(companyID, projectID, emailThreadID)
+	if err != nil {
+		return domain.CommunicationsProjectEmailThread{}, err
+	}
+	emailMessageID = cleanUUIDText(emailMessageID)
+	if emailMessageID == "" {
+		return domain.CommunicationsProjectEmailThread{}, ErrInvalid
+	}
+	for _, message := range item.Thread.Messages {
+		if message.EmailMessageID == emailMessageID {
+			item.Thread.Messages = []domain.CommunicationsEmailMessage{message}
+			return item, nil
+		}
+	}
+	return domain.CommunicationsProjectEmailThread{}, ErrNotFound
 }
 
 func linkPostgresCommunicationsEmailThreadToNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, relationshipID, emailThreadID, selectedMessageID, _ string) error {

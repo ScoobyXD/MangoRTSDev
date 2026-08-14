@@ -2216,34 +2216,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
   }, [attachedEmails, canEdit, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
 
-  const linkDroppedEmailToTextBlock = useCallback(async (blockID: string, dataTransfer: DataTransfer) => {
-    if (!canEdit) return;
-    const dragged = parseDraggedEmail(dataTransfer);
-    if (!dragged) return;
-    const block = blocks.find((candidate) => candidate.id === blockID);
-    if (!block) return;
-    const primaryEmailMessageID = dragged.emailMessageID;
-    if (block.emailMessageID && !textBlockHasEmailMessage(block, primaryEmailMessageID)) {
-      throw new Error("This text box is already linked to another email message or thread.");
-    }
-    await attachEmail(dragged);
-    await requestJSON<unknown>(`/v1/nodes/${nodeID}/information`, {
-      method: "POST",
-      body: JSON.stringify({
-        company_id: companyID,
-        type: EDITOR_ATTACHED_EMAIL_TYPE,
-        information: buildEditorAttachedEmailPayload({ ...dragged, blockID, linkWholeThread: false }),
-        information_id: generateStableInformationID(),
-      }),
-    });
-    const color = block.color?.trim() || nextNodeTextBlockColor(blocks.map((candidate) => candidate.color ?? ""));
-    updateTextBlockContent(blockID, { color });
-    setBlocks((current) => current.map((candidate) => candidate.id === blockID
-      ? { ...candidate, emailMessageID: primaryEmailMessageID, color }
-      : candidate));
-    onProjectionMutation();
-  }, [attachEmail, blocks, canEdit, companyID, nodeID, onProjectionMutation, requestJSON, updateTextBlockContent]);
-
   const removeAttachedEmail = useCallback(async (emailID: string) => {
     if (!canEdit || !nodeID || !companyID) return;
     const cleanEmailID = emailID.trim();
@@ -2737,17 +2709,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       onError("");
       return;
     }
-    if (existingDestinations.length === 0) {
-      const blockID = stageEmailSelectionChatTextBlock(messageID);
-      if (!blockID) return;
-      openSelectionChat({ ...anchor, blockID }, blockID);
-      flashEmailChatDestination(blockID);
-      setChatComposerFocusRequestIDs((current) => ({ ...current, [blockID]: (current[blockID] ?? 0) + 1 }));
-      return;
-    }
-    setPendingEmailChatSelection(anchor);
-    setActiveChatBlockID("");
-    setFocusedTextBlockID("");
+    const blockID = stageEmailSelectionChatTextBlock(messageID);
+    if (!blockID) return;
+    openSelectionChat({ ...anchor, blockID }, blockID);
+    flashEmailChatDestination(blockID);
+    setChatComposerFocusRequestIDs((current) => ({ ...current, [blockID]: (current[blockID] ?? 0) + 1 }));
+    setPendingEmailChatSelection(existingDestinations.length > 0 ? anchor : null);
   };
   const choosePendingEmailChatDestination = (blockID: string): boolean => {
     if (!pendingEmailChatSelection) return false;
@@ -2755,6 +2722,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const requestedBlock = blocks.find((block) => block.id === blockID && !block.temporaryEmailChat);
     const destinationBlock = linkedBlock ?? requestedBlock;
     if (!destinationBlock) return true;
+    const stagedBlock = blocks.find((block) => block.temporaryEmailChat && textBlockHasEmailMessage(block, pendingEmailChatSelection.messageID ?? ""));
+    if (stagedBlock && stagedBlock.id !== destinationBlock.id) {
+      cancelTemporaryEmailChatDraft(stagedBlock.id, pendingEmailChatSelection);
+    }
     openSelectionChat({ ...pendingEmailChatSelection, blockID: destinationBlock.id }, destinationBlock.id);
     setPendingEmailChatSelection(null);
     flashEmailChatDestination(destinationBlock.id);
@@ -3366,22 +3337,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     if (target instanceof Element && target.closest("button, a, input, textarea, select")) return;
                     if (choosePendingEmailChatDestination(block.id)) event.stopPropagation();
                   } : undefined}
-                  onDragOver={(event) => {
-                    if (!canEdit || block.temporaryEmailChat) return;
-                    if (event.dataTransfer.types.includes(EMAIL_DRAG_MIME)) {
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = "link";
-                    }
-                  }}
-                  onDrop={(event) => {
-                    if (!canEdit || block.temporaryEmailChat) return;
-                    if (!event.dataTransfer.types.includes(EMAIL_DRAG_MIME)) return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    void linkDroppedEmailToTextBlock(block.id, event.dataTransfer).catch((cause) => {
-                      onError(cause instanceof Error ? cause.message : "failed_to_link_email_to_text_box");
-                    });
-                  }}
                   style={{ height: linkedEmailExpanded ? "auto" : TEXT_BLOCK_ROW_HEIGHT, minHeight: TEXT_BLOCK_ROW_HEIGHT, minWidth: 0, display: "grid", gridTemplateRows: linkedEmailExpanded ? "38px auto" : "38px minmax(0, 1fr)", borderTop: `1px solid ${textBlockIsFocused ? "transparent" : blockColor || EDITOR_NEU_SOFT_BORDER}`, borderRight: `1px solid ${textBlockIsFocused ? "transparent" : blockColor || EDITOR_NEU_SOFT_BORDER}`, borderBottom: `1px solid ${textBlockIsFocused ? "transparent" : blockColor || EDITOR_NEU_SOFT_BORDER}`, borderLeft: `${blockColor ? 4 : 1}px solid ${blockColor || (textBlockIsFocused ? "transparent" : EDITOR_NEU_SOFT_BORDER)}`, borderRadius: 14, background: blockColor ? "#ffffff" : `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${textBlockIsFocused ? EDITOR_NEU_EDGE_FRAME : "linear-gradient(135deg, rgba(255,255,255,0.76), rgba(255,255,255,0.76))"} border-box`, overflow: linkedEmailExpanded ? "visible" : "hidden", boxShadow: textBlockIsFocused ? "8px 8px 20px rgba(174,174,192,0.26), -7px -7px 16px rgba(255,255,255,0.92), 0 0 18px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.88)" : EDITOR_NEU_SHADOW }}
                 >
                   <div

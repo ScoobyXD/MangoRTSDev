@@ -53,6 +53,7 @@ import type { EmailNodeAttachmentChange } from "./emailCollaborationRows";
 
 export type EmailCollaborationSelection = {
   messageID: string;
+  emailMessageID?: string;
   quote: string;
   startOffset: number;
   endOffset: number;
@@ -699,13 +700,23 @@ export function EmailCollaborationChatSurface({
         || (collaboration?.message?.id?.trim() === providerMessageID ? collaboration.root_message_id?.trim() : "")
         || destinationTextboxLink?.email_message_id
         || "";
+      emailMessageID = selection?.emailMessageID?.trim() || emailMessageID;
       const currentNodeCollaboration = collaborations.find((item) => item.node_id === cleanNodeID);
       const shouldAttachEmail = !existingTextboxLink && emailNodeImportRequired(cleanNodeID, currentNodeCollaboration?.node_id ?? "", emailMessageID);
       const subject = message.subject?.trim() || "Email";
       let attachedEmailInformationID = collaboration?.attached_email_information_id?.trim() ?? "";
       const color = nextNodeTextBlockColor([]);
       const textBlockID = existingGroup?.textbox_id ?? existingTextboxLink?.textbox_id ?? generateStableInformationID();
-      const payloadEmailMessageID = emailMessageID || generateStableInformationID();
+      if (!emailMessageID && !existingGroup && !existingTextboxLink) {
+        ensuredCollaboration = await ensureEmailCollaboration({
+          companyID, message: collaborationTargetMessage, messageID: providerMessageID,
+          threadID: message.thread_id, sharedInboxID, accountEmail, targetNodeID: cleanNodeID,
+        });
+        acceptCollaboration(ensuredCollaboration);
+        emailMessageID = ensuredCollaboration.root_message_id?.trim() || ensuredCollaboration.message?.email_message_id?.trim() || "";
+      }
+      if (!emailMessageID) throw new Error("email_message_id_missing");
+      const payloadEmailMessageID = emailMessageID;
       const textBlockWrite = existingGroup || existingTextboxLink ? undefined : {
         type: EDITOR_TEXT_BLOCK_TYPE,
         informationID: textBlockID,
@@ -787,7 +798,7 @@ export function EmailCollaborationChatSurface({
     } finally {
       setSubmitting(false);
     }
-  }, [acceptCollaboration, accountEmail, apiBase, buildPendingChat, chatGroupLabel, collaboration?.attached_email_information_id, collaborationTargetMessage, collaborations, companyID, draft, draftAttachments, expireLocalChatEchoSuppression, loadThreadChats, message.id, message.subject, message.thread_id, nodes, onActionRequestHandled, onActionSuccess, onClearSelection, onError, onNodeAttachmentChange, onSuccess, replyTargetID, rollBackPendingChat, selectedMentionPrincipals, selection?.messageID, sharedInboxID, showPendingChat, submitting, threadChatGroups, threadTextboxLinks]);
+  }, [acceptCollaboration, accountEmail, apiBase, buildPendingChat, chatGroupLabel, collaboration?.attached_email_information_id, collaborationTargetMessage, collaborations, companyID, draft, draftAttachments, expireLocalChatEchoSuppression, loadThreadChats, message.id, message.subject, message.thread_id, nodes, onActionRequestHandled, onActionSuccess, onClearSelection, onError, onNodeAttachmentChange, onSuccess, replyTargetID, rollBackPendingChat, selectedMentionPrincipals, selection?.emailMessageID, selection?.messageID, sharedInboxID, showPendingChat, submitting, threadChatGroups, threadTextboxLinks]);
 
   const ensureLinkedEmailTextBlock = React.useCallback(async (activeCollaboration: CommunicationsEmailCollaboration): Promise<string> => {
     const activeNodeID = activeCollaboration.node_id.trim();
@@ -798,6 +809,7 @@ export function EmailCollaborationChatSurface({
       || (message.id.trim() === providerMessageID ? message.email_message_id?.trim() : "")
       || (activeCollaboration.message?.id?.trim() === providerMessageID ? activeCollaboration.root_message_id?.trim() : "")
       || "";
+    emailMessageID = selection?.emailMessageID?.trim() || emailMessageID;
     if (!activeNodeID || !providerMessageID) throw new Error("email_collaboration_node_missing");
     const existingTextboxLink = emailTextboxLinkForMessage(threadTextboxLinks, providerMessageID, activeNodeID);
     if (existingTextboxLink) {
@@ -808,7 +820,16 @@ export function EmailCollaborationChatSurface({
     }
 
     const textBlockID = generateStableInformationID();
-    const payloadEmailMessageID = emailMessageID || generateStableInformationID();
+    if (!emailMessageID) {
+      const ingested = await ensureEmailCollaboration({
+        companyID, message: collaborationTargetMessage, messageID: providerMessageID,
+        threadID: message.thread_id, sharedInboxID, accountEmail, targetNodeID: activeNodeID,
+      });
+      acceptCollaboration(ingested);
+      emailMessageID = ingested.root_message_id?.trim() || ingested.message?.email_message_id?.trim() || "";
+    }
+    if (!emailMessageID) throw new Error("email_message_id_missing");
+    const payloadEmailMessageID = emailMessageID;
     const color = nextNodeTextBlockColor([]);
     const linkedTextBlock = {
       type: EDITOR_TEXT_BLOCK_TYPE,
@@ -838,7 +859,7 @@ export function EmailCollaborationChatSurface({
     invalidateNodeRecordStoreCaches(apiBase, companyID, activeNodeID);
     setActiveTextBlockID(textBlockID);
     return textBlockID;
-  }, [acceptCollaboration, accountEmail, apiBase, collaborationTargetMessage, companyID, message, selection?.messageID, sharedInboxID, threadTextboxLinks]);
+  }, [acceptCollaboration, accountEmail, apiBase, collaborationTargetMessage, companyID, message, selection?.emailMessageID, selection?.messageID, sharedInboxID, threadTextboxLinks]);
   const createEmailNode = React.useCallback(async (priority?: number, logicGateID = "", projectID = "", createNew = false) => {
     if (submitting) return;
     setSubmitting(true);
