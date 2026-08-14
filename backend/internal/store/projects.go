@@ -207,9 +207,6 @@ func NormalizeProjectScopedNodeCreateInput(input ProjectScopedNodeCreateInput) (
 	if err != nil {
 		return ProjectScopedNodeCreateInput{}, err
 	}
-	if assignment == nil {
-		return ProjectScopedNodeCreateInput{}, ErrProjectNodeLogicGateRequired
-	}
 	input.InitialAssignment = assignment
 	return input, nil
 }

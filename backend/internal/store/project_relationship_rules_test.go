@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestMemoryProjectRelationshipsRequireAssignedNodesAndImplicitlyAddLogicGate(t *testing.T) {
+func TestMemoryProjectRelationshipsAllowFloatingNodesAndImplicitlyAddAssignedLogicGate(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-701400000101"
 	repo.EnsureCompany(companyID, "Project relationship rules company")
@@ -39,11 +39,12 @@ func TestMemoryProjectRelationshipsRequireAssignedNodesAndImplicitlyAddLogicGate
 	if readdedGate.Relationship.RelationshipID != directGate.Relationship.RelationshipID {
 		t.Fatalf("direct Logic Gate relationship ID changed: first=%s second=%s", directGate.Relationship.RelationshipID, readdedGate.Relationship.RelationshipID)
 	}
-	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
+	floating, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
 		CompanyID: companyID, ProjectID: projectResult.Project.ProjectID,
 		ResourceType: EntityTypeNode, ResourceID: node.NodeID,
-	}); !errors.Is(err, ErrProjectNodeLogicGateRequired) {
-		t.Fatalf("standalone Node relationship err = %v, want ErrProjectNodeLogicGateRequired", err)
+	})
+	if err != nil || floating.Relationship == nil || len(floating.ImplicitRelationships) != 0 {
+		t.Fatalf("floating Node relationship = %+v err=%v, want Node with no implicit Logic Gate", floating, err)
 	}
 	if _, err := repo.CreateLogicGateAssociatedWithProject(ProjectScopedLogicGateCreateInput{
 		CompanyID: companyID, ProjectID: projectResult.Project.ProjectID, Header: "Blocked Gate",

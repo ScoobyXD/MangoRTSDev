@@ -133,13 +133,19 @@ func (r *MemoryRepo) CreateNodeAssociatedWithProject(input ProjectScopedNodeCrea
 		card = &cardValue
 		assignmentEvents = append(assignmentEvents, assignmentResult.Events...)
 	}
-	gateProjection, err := r.upsertProjectRelationshipSourceLocked(ProjectRelationshipInput{
-		CompanyID: input.CompanyID, ProjectID: input.ProjectID, ResourceType: EntityTypeLogicGate,
-		ResourceID: input.InitialAssignment.LogicGateID, Position: input.Position,
-	})
-	if err != nil {
-		rollback()
-		return ProjectScopedNodeCreateResult{}, err
+	implicitRelationships := make([]domain.ProjectRelationshipProjection, 0, 1)
+	logicGateIDs := make([]string, 0, 1)
+	if input.InitialAssignment != nil {
+		gateProjection, err := r.upsertProjectRelationshipSourceLocked(ProjectRelationshipInput{
+			CompanyID: input.CompanyID, ProjectID: input.ProjectID, ResourceType: EntityTypeLogicGate,
+			ResourceID: input.InitialAssignment.LogicGateID, Position: input.Position,
+		})
+		if err != nil {
+			rollback()
+			return ProjectScopedNodeCreateResult{}, err
+		}
+		implicitRelationships = append(implicitRelationships, gateProjection)
+		logicGateIDs = append(logicGateIDs, input.InitialAssignment.LogicGateID)
 	}
 	relationshipID := newUUIDv7String()
 	relationship := domain.ProjectRelationship{
@@ -158,14 +164,17 @@ func (r *MemoryRepo) CreateNodeAssociatedWithProject(input ProjectScopedNodeCrea
 		return ProjectScopedNodeCreateResult{}, err
 	}
 	projection := r.projectRelationshipProjection[projectRelationshipKey(input.CompanyID, relationshipID)]
-	r.syncRACIMatrixProjectionForProjectResourcesLocked(input.CompanyID, []string{node.NodeID}, []string{input.InitialAssignment.LogicGateID})
-	r.bumpLogicGateWorkReadVersionLocked(input.CompanyID, input.InitialAssignment.LogicGateID)
+	r.syncRACIMatrixProjectionForProjectResourcesLocked(input.CompanyID, []string{node.NodeID}, logicGateIDs)
+	if input.InitialAssignment != nil {
+		r.bumpLogicGateWorkReadVersionLocked(input.CompanyID, input.InitialAssignment.LogicGateID)
+	}
 	meta := workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)
-	events, err := r.appendDomainEventsLocked([]DomainEventInput{
-		nodeCreatedWorkspaceEventInputWithMetadata(node, meta),
-		projectRelationshipUpsertedWorkspaceEventInput(gateProjection, input.ActorUserID),
-		projectRelationshipUpsertedWorkspaceEventInput(projection, input.ActorUserID),
-	})
+	eventInputs := []DomainEventInput{nodeCreatedWorkspaceEventInputWithMetadata(node, meta)}
+	for _, gateProjection := range implicitRelationships {
+		eventInputs = append(eventInputs, projectRelationshipUpsertedWorkspaceEventInput(gateProjection, input.ActorUserID))
+	}
+	eventInputs = append(eventInputs, projectRelationshipUpsertedWorkspaceEventInput(projection, input.ActorUserID))
+	events, err := r.appendDomainEventsLocked(eventInputs)
 	if err != nil {
 		rollback()
 		return ProjectScopedNodeCreateResult{}, err
@@ -174,7 +183,7 @@ func (r *MemoryRepo) CreateNodeAssociatedWithProject(input ProjectScopedNodeCrea
 	return ProjectScopedNodeCreateResult{
 		Node:                  r.withNodeReadModelLocked(node),
 		Relationship:          &projection,
-		ImplicitRelationships: []domain.ProjectRelationshipProjection{gateProjection},
+		ImplicitRelationships: implicitRelationships,
 		Information:           information,
 		Assignment:            assignment,
 		Card:                  card,

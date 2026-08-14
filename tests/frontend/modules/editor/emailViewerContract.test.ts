@@ -173,7 +173,7 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeSurface, /<LinkedEmailPreviewPane/);
   assert.match(nodeSurface, /const stageEmailSelectionChatTextBlock = useCallback/);
   assert.match(nodeSurface, /temporaryEmailChatBlocksRef\.current\.set\(blockID, temporaryBlock\)/);
-  assert.match(nodeSurface, /if \(existingDestinations\.length === 0\) \{[\s\S]{0,180}stageEmailSelectionChatTextBlock\(messageID\)/);
+  assert.match(nodeSurface, /const blockID = stageEmailSelectionChatTextBlock\(messageID\);[\s\S]{0,320}setPendingEmailChatSelection\(existingDestinations\.length > 0 \? anchor : null\)/);
   assert.match(nodeSurface, /const ensureEmailTextBoxLinkOnSend = selectionAnchor\?\.source === "email"/);
   assert.match(nodeSurface, /ensureEmailTextBoxLinkOnSend,/);
   assert.match(nodeSurface, /const choosePendingEmailChatDestination/);
@@ -242,17 +242,14 @@ test("node drag and Universal-picker email attachment retain exact provider mail
   assert.doesNotMatch(editorProjection, /attachments: input\.attachments/);
 });
 
-test("only one exact email message can be dropped onto a Node text box", () => {
+test("email messages cannot be dragged onto Node text boxes", () => {
   const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
+  const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
 
-  assert.match(nodeSurface, /const linkDroppedEmailToTextBlock[\s\S]*const dragged = parseDraggedEmail\(dataTransfer\);[\s\S]*if \(!dragged\) return/);
-  assert.match(nodeSurface, /buildEditorAttachedEmailPayload\(\{ \.\.\.dragged, blockID, linkWholeThread: false \}\)/);
-  assert.match(nodeSurface, /onDragOver=\{\(event\) => \{[\s\S]{0,240}event\.dataTransfer\.types\.includes\(EMAIL_DRAG_MIME\)/);
-  assert.match(nodeSurface, /onDrop=\{\(event\) => \{[\s\S]{0,240}if \(!event\.dataTransfer\.types\.includes\(EMAIL_DRAG_MIME\)\) return/);
-  const textBoxDropStart = nodeSurface.indexOf("const linkDroppedEmailToTextBlock");
-  const textBoxDropEnd = nodeSurface.indexOf("const removeAttachedEmail", textBoxDropStart);
-  assert.ok(textBoxDropStart >= 0 && textBoxDropEnd > textBoxDropStart);
-  assert.doesNotMatch(nodeSurface.slice(textBoxDropStart, textBoxDropEnd), /application\/x-mango-node-attached-email/);
+  assert.doesNotMatch(nodeSurface, /const linkDroppedEmailToTextBlock/);
+  assert.doesNotMatch(nodeSurface, /buildEditorAttachedEmailPayload\(\{ \.\.\.dragged, blockID, linkWholeThread: false \}\)/);
+  assert.doesNotMatch(nodeParts, /draggable=\{editable && Boolean\(threadMessage\.email_message_id\?\.trim\(\)\)\}/);
+  assert.doesNotMatch(nodeParts, /event\.dataTransfer\.setData\(EMAIL_DRAG_MIME/);
 });
 
 test("triage thread controls and reply resize pointer lifecycle are explicit", () => {

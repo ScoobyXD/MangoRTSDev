@@ -368,6 +368,7 @@ const PROJECT_SUMMARY_SPLIT_MAX = 74;
 const PROJECT_RELATIONSHIP_NODE_DRAG_MIME = "application/x-mangorts-project-relationship-node";
 const PROJECT_CRITICAL_STEP_DRAG_MIME = "application/x-mangorts-project-critical-step";
 const PROJECT_RELATIONSHIP_GROUPING_STORAGE_KEY = "mangorts-project-relationship-groupings-v1";
+const PROJECT_EMAIL_COLUMN_LAYOUT_ID = "project-email-column";
 const PROJECT_HEALTH_OPTIONS: ProjectHealth[] = ["On Track", "AT RISK", "Off Track"];
 function dispatchHomeTriageConversionApplied(detail: HomeTriageConversionAppliedDetail): void {
   if (typeof window === "undefined") return;
@@ -407,7 +408,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const projectTextBlockContentRef = useRef(new Map<string, EditorTextBlockContent>());
   const projectTextBlockContentRevisionRef = useRef(0);
   const projectLoadRequestRef = useRef(0);
-  const relationshipPickerRequestRef = useRef(0);
   const projectSaveScopeRef = useRef("");
   const handledProjectFocusRequestRef = useRef("");
   const { accounts } = useCompanyAccounts(companyID);
@@ -438,7 +438,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [tiptapPinnedBlockIDs, setTiptapPinnedBlockIDs] = useState<Set<string>>(() => new Set());
   const [activeRichTextBlockID, setActiveRichTextBlockID] = useState("");
   const [activeRowBlockID, setActiveRowBlockID] = useState("");
-  const [emailReplyBlockID, setEmailReplyBlockID] = useState("");
   const [openEditorBlockIDs, setOpenEditorBlockIDs] = useState<Set<string>>(() => new Set());
   const [openChatBlockIDs, setOpenChatBlockIDs] = useState<Set<string>>(() => new Set());
   const [openEmailBlockIDs, setOpenEmailBlockIDs] = useState<Set<string>>(() => new Set());
@@ -448,6 +447,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [chatDraftAttachments, setChatDraftAttachments] = useState<Record<string, EditorChatAttachment[]>>({});
   const [chatReplyTargets, setChatReplyTargets] = useState<Record<string, string>>({});
   const [chatSelectionAnchors, setChatSelectionAnchors] = useState<Record<string, TextBlockSelectionDraft>>({});
+  const [pendingProjectEmailChatSelection, setPendingProjectEmailChatSelection] = useState<TextBlockSelectionDraft | null>(null);
+  const [projectEmailChatDestinationBlockID, setProjectEmailChatDestinationBlockID] = useState("");
+  const [projectEmailChatDefaultBlockID, setProjectEmailChatDefaultBlockID] = useState("");
   const [activeChatMessageIDs, setActiveChatMessageIDs] = useState<Record<string, string>>({});
   const [chatNavigationRequests, setChatNavigationRequests] = useState<Record<string, { anchorMessageID: string; requestID: number }>>({});
   const [chatMessageFocusRequests, setChatMessageFocusRequests] = useState<Record<string, { messageID: string; requestID: number }>>({});
@@ -463,12 +465,8 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [relationshipContextMenu, setRelationshipContextMenu] = useState<RelationshipCanvasContextMenuState | null>(null);
   const [relationshipDeleteConfirmation, setRelationshipDeleteConfirmation] = useState<{ isLogicGate: boolean; resourceIDs: string[]; label: string; position?: ConfirmActionMenuPosition | null } | null>(null);
   const [relationshipDropActive, setRelationshipDropActive] = useState(false);
-  const [relationshipPickerOpen, setRelationshipPickerOpen] = useState(false);
-  const [relationshipPickerQuery, setRelationshipPickerQuery] = useState("");
-  const [relationshipPickerResults, setRelationshipPickerResults] = useState<CompanyExplorerSearchResult[]>([]);
-  const [relationshipPickerLoading, setRelationshipPickerLoading] = useState(false);
-  const [relationshipPickerError, setRelationshipPickerError] = useState("");
-  const [relationshipPickerAddingKey, setRelationshipPickerAddingKey] = useState("");
+  const [relationshipPickerAnchor, setRelationshipPickerAnchor] = useState<UniversalEntityPickerAnchor | null>(null);
+  const [relationshipPickerBusy, setRelationshipPickerBusy] = useState(false);
   const [relationshipGroupings, setRelationshipGroupings] = useState<ProjectRelationshipGroupingSetting[]>(() => (
     DEFAULT_PROJECT_RELATIONSHIP_GROUPINGS.map((grouping) => ({ ...grouping }))
   ));
@@ -503,47 +501,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   blocksRef.current = blocks;
   projectRef.current = project;
   const projectSaveScope = `${companyID}:${projectID.trim()}`;
-  const relationshipPickerSearchText = relationshipPickerQuery.trim();
-  const eligibleProjectNodeIDs = useMemo(() => new Set(
-    (workspace?.nodes ?? [])
-      .filter((node) => (node.logic_gate_ids ?? []).some((logicGateID) => logicGateID.trim()))
-      .map((node) => node.node_id.trim())
-      .filter(Boolean),
-  ), [workspace?.nodes]);
-  const relationshipPickerRows = useMemo(() => (
-    buildCompanyExplorerSearchTreeRows(relationshipPickerResults)
-      .filter((row) => {
-        const nodeID = row.nodeID?.trim() || row.resourceID?.trim() || "";
-        return row.syntheticKind === "search_result" && row.kind === "node" && eligibleProjectNodeIDs.has(nodeID);
-      })
-  ), [eligibleProjectNodeIDs, relationshipPickerResults]);
-  const existingRelationshipKeys = useMemo(() => new Set(
-    relationships.map((relationship) => `${relationship.resource_type}:${relationship.resource_id}`),
-  ), [relationships]);
-
-  const openRelationshipPicker = useCallback(() => {
-    setRelationshipPickerOpen(true);
-    setRelationshipPickerQuery("");
-    setRelationshipPickerResults([]);
-    setRelationshipPickerError("");
-    setRelationshipPickerLoading(false);
-    setRelationshipPickerAddingKey("");
-  }, []);
-
-  const closeRelationshipPicker = useCallback(() => {
-    relationshipPickerRequestRef.current += 1;
-    setRelationshipPickerOpen(false);
-    setRelationshipPickerQuery("");
-    setRelationshipPickerResults([]);
-    setRelationshipPickerError("");
-    setRelationshipPickerLoading(false);
-    setRelationshipPickerAddingKey("");
-  }, []);
-
   useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
     setRelationships((current) => reconcileProjectResourceDisplayTitles(current, update, companyID));
     setCriticalPath((current) => reconcileProjectResourceDisplayTitles(current, update, companyID));
-    setRelationshipPickerResults((current) => reconcileCompanyExplorerSearchResultTitles(current, update));
     setSelectedCriticalPathNode((current) => reconcileSelectedNodeTitle(current, update, companyID));
     setSelectedRelationshipNodePanel((current) => reconcileSelectedNodeTitle(current, update, companyID));
     setRelationshipContextMenu((current) => {
@@ -553,46 +513,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     });
   }), [companyID]);
 
-  useEffect(() => {
-    if (!relationshipPickerOpen || !relationshipPickerSearchText) {
-      setRelationshipPickerResults([]);
-      setRelationshipPickerLoading(false);
-      setRelationshipPickerError("");
-      return undefined;
-    }
-    const requestID = relationshipPickerRequestRef.current + 1;
-    relationshipPickerRequestRef.current = requestID;
-    let cancelled = false;
-    setRelationshipPickerLoading(true);
-    setRelationshipPickerError("");
-    const titleVersionAtStart = readCommittedEntityTitleVersion();
-    void fetchCompanyExplorerSearchResults(
-      apiBase,
-      companyID,
-      relationshipPickerSearchText,
-      30,
-      ["node"],
-    )
-      .then((payload) => {
-        if (cancelled || relationshipPickerRequestRef.current !== requestID) return;
-        setRelationshipPickerResults(foldCommittedEntityTitlesSince(
-          payload.results ?? [], companyID, titleVersionAtStart,
-          reconcileCompanyExplorerSearchResultTitles,
-        ));
-      })
-      .catch((searchError) => {
-        if (cancelled || relationshipPickerRequestRef.current !== requestID) return;
-        setRelationshipPickerResults([]);
-        setRelationshipPickerError(searchError instanceof Error ? searchError.message : "Failed to search eligible Nodes");
-      })
-      .finally(() => {
-        if (cancelled || relationshipPickerRequestRef.current !== requestID) return;
-        setRelationshipPickerLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [apiBase, companyID, relationshipPickerOpen, relationshipPickerSearchText]);
 
   projectSaveScopeRef.current = projectSaveScope;
   const projectTextBlockSaveController = useMemo<TextBlockProjectionSaveController<EditorTextBlockContent>>(
@@ -623,13 +543,8 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
 
   useEffect(() => {
     projectLoadRequestRef.current += 1;
-    relationshipPickerRequestRef.current += 1;
-    setRelationshipPickerOpen(false);
-    setRelationshipPickerQuery("");
-    setRelationshipPickerResults([]);
-    setRelationshipPickerLoading(false);
-    setRelationshipPickerError("");
-    setRelationshipPickerAddingKey("");
+    setRelationshipPickerAnchor(null);
+    setRelationshipPickerBusy(false);
     projectTextBlockContentRef.current.clear();
     projectTextBlockContentRevisionRef.current = 0;
     setSavingID("");
@@ -682,7 +597,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       const nextChatMessages = parseEditorTextBlockChats(view.projections ?? []);
       const nextAttachedEmails = parseEditorAttachedEmails(view.projections ?? []);
       const chatBlockIDs = new Set(nextChatMessages.map((message) => message.blockID));
-      const emailBlockIDs = new Set(nextAttachedEmails.map((email) => email.blockID?.trim() ?? "").filter(Boolean));
       if (
         !contentSaveWasPendingAtStart
         && projectTextBlockContentRevisionRef.current === contentRevisionAtStart
@@ -701,11 +615,11 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         if (paneProjectIDRef.current !== cleanProjectID) {
           paneProjectIDRef.current = cleanProjectID;
           setOpenEditorBlockIDs(new Set(nextBlockIDs));
-          setOpenEmailBlockIDs(new Set(Array.from(emailBlockIDs).filter((id) => nextBlockIDs.has(id))));
+          setOpenEmailBlockIDs(new Set([PROJECT_EMAIL_COLUMN_LAYOUT_ID]));
           setOpenChatBlockIDs(new Set(Array.from(chatBlockIDs).filter((id) => nextBlockIDs.has(id))));
         } else {
           setOpenEditorBlockIDs((current) => new Set(Array.from(current).filter((id) => nextBlockIDs.has(id))));
-          setOpenEmailBlockIDs((current) => new Set(Array.from(current).filter((id) => nextBlockIDs.has(id))));
+          setOpenEmailBlockIDs((current) => new Set(Array.from(current).filter((id) => id === PROJECT_EMAIL_COLUMN_LAYOUT_ID)));
           setOpenChatBlockIDs((current) => new Set(Array.from(current).filter((id) => nextBlockIDs.has(id))));
         }
       }
@@ -886,15 +800,14 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     });
     setSelectionAnchorRelationshipNodeID((current) => (current && !visible.has(current) ? "" : current));
   }, [visibleRelationshipNodeIDs]);
-  const attachedEmailsByBlockID = useMemo(() => {
-    const grouped = new Map<string, EditorAttachedEmail[]>();
+  const projectAttachedEmails = useMemo(() => {
+    const byThread = new Map<string, EditorAttachedEmail>();
     for (const email of attachedEmails) {
-      const blockID = email.blockID ?? "";
-      const bucket = grouped.get(blockID) ?? [];
-      bucket.push(email);
-      grouped.set(blockID, bucket);
+      if (email.blockID?.trim()) continue;
+      const threadKey = email.emailThreadID?.trim() || email.threadID?.trim() || email.messageID;
+      if (!byThread.has(threadKey)) byThread.set(threadKey, email);
     }
-    return grouped;
+    return Array.from(byThread.values());
   }, [attachedEmails]);
   const focusTargetBlockID = useMemo(() => {
     const targetID = focusInformationID?.trim() ?? "";
@@ -911,7 +824,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   );
   const pinnedProjectRowIndices = useMemo(() => {
     const indices = new Set<number>();
-    for (const blockID of [focusedTextBlockID, activeRichTextBlockID, activeRowBlockID, emailReplyBlockID]) {
+    for (const blockID of [focusedTextBlockID, activeRichTextBlockID, activeRowBlockID]) {
       if (!blockID) continue;
       const index = blocks.findIndex((block) => block.id === blockID);
       if (index >= 0) indices.add(index);
@@ -921,7 +834,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       if (index >= 0) indices.add(index);
     }
     return Array.from(indices);
-  }, [activeRichTextBlockID, activeRowBlockID, blocks, emailReplyBlockID, focusedTextBlockID, tiptapPinnedBlockIDs]);
+  }, [activeRichTextBlockID, activeRowBlockID, blocks, focusedTextBlockID, tiptapPinnedBlockIDs]);
   const projectRowVirtualizer = useBoundedEditorRowVirtualization({
     itemCount: blocks.length,
     rowHeight: TEXT_BLOCK_ROW_HEIGHT,
@@ -1201,14 +1114,14 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     }
   }, [attachmentRequestJSON, blocks, companyID, editorDataFormat.gate?.editor_format, loadProject, projectID, projectVersionRestoring]);
 
-  const addTextBlock = useCallback(() => {
+  const addTextBlock = useCallback((title = "Project Summary", deferSave = false) => {
     if (!editorDataFormat.gate) {
       setError("Editor data format is still loading.");
-      return;
+      return "";
     }
     const id = generateStableInformationID();
     const initialContent: EditorTextBlockContent = {
-      title: "Project Summary",
+      title,
       document: "",
       attachments: [],
     };
@@ -1221,13 +1134,123 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     };
     projectTextBlockContentRef.current.set(id, initialContent);
     projectTextBlockContentRevisionRef.current += 1;
-    projectTextBlockSaveController.markHasChanged(id, initialContent);
+    if (!deferSave) projectTextBlockSaveController.markHasChanged(id, initialContent);
     setError("");
     setBlocks((current) => [nextBlock, ...current]);
     setOpenEditorBlockIDs((current) => new Set(current).add(id));
     markEditorHistoryChanged({ companyID, resourceType: "project", resourceID: projectID });
-    projectTextBlockSaveController.startLatestContentSave(id);
+    if (!deferSave) projectTextBlockSaveController.startLatestContentSave(id);
+    return id;
   }, [companyID, editorDataFormat.gate, projectID, projectTextBlockSaveController]);
+
+  const openProjectEmailSelectionChat = useCallback((messageID: string, selection: { quote: string; startOffset: number; endOffset: number; x: number; y: number }) => {
+    const cleanMessageID = messageID.trim();
+    const linkedBlockID = attachedEmails.find((email) => (
+      Boolean(email.blockID?.trim())
+      && [email.emailMessageID, email.messageID].some((candidate) => candidate?.trim() === cleanMessageID)
+    ))?.blockID?.trim() ?? "";
+    if (linkedBlockID && blocks.some((block) => block.id === linkedBlockID)) {
+      const anchor: TextBlockSelectionDraft = {
+        blockID: linkedBlockID, source: "email", messageID: cleanMessageID, quote: selection.quote,
+        startOffset: selection.startOffset, endOffset: selection.endOffset,
+        x: selection.x, y: selection.y,
+      };
+      setPendingProjectEmailChatSelection(null);
+      setProjectEmailChatDestinationBlockID(linkedBlockID);
+      setProjectEmailChatDefaultBlockID("");
+      setChatSelectionAnchors((current) => ({ ...current, [linkedBlockID]: anchor }));
+      setOpenChatBlockIDs((current) => new Set(current).add(linkedBlockID));
+      setFocusedTextBlockID(linkedBlockID);
+      setChatComposerFocusRequestIDs((current) => ({ ...current, [linkedBlockID]: (current[linkedBlockID] ?? 0) + 1 }));
+      setError("");
+      return;
+    }
+    const blockID = addTextBlock("Email text box", true);
+    if (!blockID) return;
+    const anchor: TextBlockSelectionDraft = {
+      blockID, source: "email", messageID: cleanMessageID, quote: selection.quote,
+      startOffset: selection.startOffset, endOffset: selection.endOffset,
+      x: selection.x, y: selection.y,
+    };
+    setPendingProjectEmailChatSelection(anchor);
+    setProjectEmailChatDestinationBlockID(blockID);
+    setProjectEmailChatDefaultBlockID(blockID);
+    setChatSelectionAnchors((current) => ({ ...current, [blockID]: anchor }));
+    setOpenChatBlockIDs((current) => new Set(current).add(blockID));
+    setFocusedTextBlockID(blockID);
+    setChatComposerFocusRequestIDs((current) => ({ ...current, [blockID]: (current[blockID] ?? 0) + 1 }));
+    setError("");
+  }, [addTextBlock, attachedEmails, blocks]);
+
+  const clearProjectEmailSelectionChat = useCallback((blockID: string) => {
+    if (blockID === projectEmailChatDefaultBlockID) {
+      projectTextBlockContentRef.current.delete(blockID);
+      projectTextBlockContentRevisionRef.current += 1;
+      projectTextBlockSaveController.removeBlock(blockID);
+      setBlocks((current) => current.filter((block) => block.id !== blockID));
+      setOpenEditorBlockIDs((current) => {
+        const next = new Set(current);
+        next.delete(blockID);
+        return next;
+      });
+      setOpenChatBlockIDs((current) => {
+        const next = new Set(current);
+        next.delete(blockID);
+        return next;
+      });
+      setChatDrafts((current) => omitRecordKey(current, blockID));
+      setChatDraftEntityLinks((current) => omitRecordKey(current, blockID));
+      setChatDraftAttachments((current) => omitRecordKey(current, blockID));
+    }
+    setChatSelectionAnchors((current) => omitRecordKey(current, blockID));
+    setPendingProjectEmailChatSelection(null);
+    setProjectEmailChatDestinationBlockID("");
+    setProjectEmailChatDefaultBlockID("");
+  }, [projectEmailChatDefaultBlockID, projectTextBlockSaveController]);
+
+  const chooseProjectEmailChatDestination = useCallback((blockID: string) => {
+    if (!pendingProjectEmailChatSelection || !blocks.some((block) => block.id === blockID)) return false;
+    const anchor = { ...pendingProjectEmailChatSelection, blockID };
+    const previousBlockID = projectEmailChatDestinationBlockID;
+    if (projectEmailChatDefaultBlockID && projectEmailChatDefaultBlockID !== blockID) {
+      projectTextBlockContentRef.current.delete(projectEmailChatDefaultBlockID);
+      projectTextBlockContentRevisionRef.current += 1;
+      projectTextBlockSaveController.removeBlock(projectEmailChatDefaultBlockID);
+      setBlocks((current) => current.filter((block) => block.id !== projectEmailChatDefaultBlockID));
+      setOpenEditorBlockIDs((current) => {
+        const next = new Set(current);
+        next.delete(projectEmailChatDefaultBlockID);
+        return next;
+      });
+      setProjectEmailChatDefaultBlockID("");
+    }
+    const moveDraft = <T,>(current: Record<string, T>) => {
+      if (!previousBlockID || previousBlockID === blockID || !(previousBlockID in current)) return current;
+      const next = { ...current };
+      if (!(blockID in next)) next[blockID] = next[previousBlockID];
+      delete next[previousBlockID];
+      return next;
+    };
+    setChatDrafts(moveDraft);
+    setChatDraftEntityLinks(moveDraft);
+    setChatDraftAttachments(moveDraft);
+    setChatSelectionAnchors((current) => {
+      const next = { ...current };
+      delete next[projectEmailChatDestinationBlockID];
+      next[blockID] = anchor;
+      return next;
+    });
+    setOpenChatBlockIDs((current) => {
+      const next = new Set(current);
+      next.delete(projectEmailChatDestinationBlockID);
+      next.add(blockID);
+      return next;
+    });
+    setProjectEmailChatDestinationBlockID(blockID);
+    setFocusedTextBlockID(blockID);
+    setChatComposerFocusRequestIDs((current) => ({ ...current, [blockID]: (current[blockID] ?? 0) + 1 }));
+    return true;
+  }, [blocks, pendingProjectEmailChatSelection, projectEmailChatDefaultBlockID, projectEmailChatDestinationBlockID, projectTextBlockSaveController]);
 
   const removeTextBlock = useCallback(async (blockID: string) => {
     if (!editorDataFormat.gate) {
@@ -1372,8 +1395,10 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         type: EDITOR_TEXT_BLOCK_CHAT_TYPE,
         information: buildEditorTextBlockChatPayload({
           blockID,
+          ensureEmailTextBoxLinkOnSend: selection?.source === "email" && blockID === projectEmailChatDefaultBlockID,
           parentID,
           selectionSource: selection?.source,
+          selectionBlockID: selection?.source === "email" ? blockID : undefined,
           selectionMessageID: selection?.messageID,
           selectionQuote: selection?.quote,
           selectionStart: selection?.startOffset,
@@ -1392,10 +1417,20 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       setChatDraftAttachments((current) => ({ ...current, [blockID]: [] }));
       setChatReplyTargets((current) => omitRecordKey(current, blockID));
       setChatSelectionAnchors((current) => omitRecordKey(current, blockID));
+      if (selection?.source === "email") {
+        if (blockID === projectEmailChatDefaultBlockID) {
+          const content = projectTextBlockContentRef.current.get(blockID);
+          if (content) await flushProjectTextBlockSave(blockID, content);
+        }
+        setPendingProjectEmailChatSelection(null);
+        setProjectEmailChatDestinationBlockID("");
+        setProjectEmailChatDefaultBlockID("");
+        await loadProject({ showLoading: false });
+      }
     } catch (chatError) {
       setError(chatError instanceof Error ? chatError.message : "Failed to add chat message");
     }
-  }, [chatDraftAttachments, chatDraftEntityLinks, chatDrafts, chatReplyTargets, chatSelectionAnchors, companyID, currentUserID, currentUserName, projectID]);
+  }, [chatDraftAttachments, chatDraftEntityLinks, chatDrafts, chatReplyTargets, chatSelectionAnchors, companyID, currentUserID, currentUserName, flushProjectTextBlockSave, loadProject, projectEmailChatDefaultBlockID, projectID]);
 
   const deleteChatMessage = useCallback(async (messageID: string) => {
     setChatMessages((current) => current.filter((message) => message.id !== messageID));
@@ -1528,7 +1563,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     const id = generateStableInformationID();
     const nextEmail: EditorAttachedEmail = {
       id,
-      blockID,
+      blockID: blockID || undefined,
       messageID: payload.messageID,
       emailMessageID: payload.emailMessageID,
       threadID: payload.threadID,
@@ -1547,11 +1582,11 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         projectID,
         informationID: id,
         type: EDITOR_ATTACHED_EMAIL_TYPE,
-        information: buildEditorAttachedEmailPayload({ blockID, ...payload }),
+        information: buildEditorAttachedEmailPayload({ blockID, ...payload, linkWholeThread: !blockID }),
       });
       setAttachedEmails((current) => [nextEmail, ...current.filter((email) => email.messageID !== nextEmail.messageID || email.blockID !== blockID)]);
-      setOpenEmailBlockIDs((current) => new Set(current).add(blockID));
-      setSelectedEmailIDsByBlock((current) => ({ ...current, [blockID]: payload.messageID }));
+      setOpenEmailBlockIDs((current) => new Set(current).add(blockID || PROJECT_EMAIL_COLUMN_LAYOUT_ID));
+      setSelectedEmailIDsByBlock((current) => ({ ...current, [blockID || PROJECT_EMAIL_COLUMN_LAYOUT_ID]: payload.messageID }));
       setEmailPicker(null);
     } catch (emailError) {
       const message = emailError instanceof Error ? emailError.message : "Failed to attach email";
@@ -1588,7 +1623,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     const incoming = new Set<string>();
     for (const target of targets) {
       const resourceID = target.resourceID.trim();
-      if (!resourceID || !eligibleProjectNodeIDs.has(resourceID)) continue;
+      if (!resourceID) continue;
       const key = `node:${resourceID}`;
       if (incoming.has(key)) continue;
       const existing = existingByKey.get(key);
@@ -1624,24 +1659,20 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       setError(relationshipError instanceof Error ? relationshipError.message : "Failed to add relationships");
       return ensuredRelationships;
     }
-  }, [companyID, eligibleProjectNodeIDs, loadProject, projectID, relationships]);
-  const addRelationshipFromPicker = useCallback(async (target: ProjectRelationshipDropTarget) => {
-    const resourceID = target.resourceID.trim();
-    if (!resourceID) return;
-    const key = `node:${resourceID}`;
-    setRelationshipPickerAddingKey(key);
-    setRelationshipPickerError("");
+  }, [companyID, loadProject, projectID, relationships]);
+  const addRelationshipFromPicker = useCallback(async (entity: EditorEntityLink) => {
+    if (entity.entityType !== "node" || !entity.entityID.trim() || relationshipPickerBusy) return;
+    const resourceID = entity.entityID.trim();
+    setRelationshipPickerBusy(true);
     try {
       const ensured = await addRelationshipTargets([{ resourceType: "node", resourceID }]);
       if (ensured.some((relationship) => relationship.resource_type === "node" && relationship.resource_id === resourceID)) {
-        closeRelationshipPicker();
-      } else {
-        setRelationshipPickerError("Only Nodes that belong to a Logic Gate can be added to this Project.");
+        setRelationshipPickerAnchor(null);
       }
     } finally {
-      setRelationshipPickerAddingKey("");
+      setRelationshipPickerBusy(false);
     }
-  }, [addRelationshipTargets, closeRelationshipPicker]);
+  }, [addRelationshipTargets, relationshipPickerBusy]);
   const convertTriageMessagesToProject = useCallback(async (
     drag: ReturnType<typeof readTriageMessageDrag>,
     logicGateID = "",
@@ -1870,6 +1901,29 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       },
     });
   }, [selectedRelationshipNodeIDs]);
+
+  const createFloatingProjectNode = useCallback(async () => {
+    setError("");
+    try {
+      const result = await createProjectNode({
+        companyID,
+        projectID,
+        title: "New Node",
+        position: relationships.length + 1,
+      });
+      const createdRelationships = [
+        ...(result.implicit_relationships ?? []),
+        ...(result.relationship ? [result.relationship] : []),
+      ];
+      if (createdRelationships.length > 0) {
+        setRelationships((current) => mergeProjectRelationships(current, createdRelationships));
+      } else {
+        await loadProject({ showLoading: false });
+      }
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : "Failed to create floating Node");
+    }
+  }, [companyID, loadProject, projectID, relationships.length]);
 
   const createRelationshipNode = useCallback(async () => {
     setRelationshipContextMenu(null);
@@ -2518,6 +2572,24 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           <div style={columnToolbarStyle}>
             <div style={columnTitleStyle}>Timeline</div>
             <div style={toolbarActionsStyle}>
+              <button
+                type="button"
+                title={openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID) ? "Hide Project email column" : "Show Project email column"}
+                aria-label="Toggle Project email column"
+                aria-pressed={openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID)}
+                onClick={() => setOpenEmailBlockIDs((current) => toggleSetValue(current, PROJECT_EMAIL_COLUMN_LAYOUT_ID))}
+                style={projectTextBlockIconButtonStyle(accent, openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID))}
+              >
+                <MailIcon color={accent} />
+              </button>
+              <button
+                type="button"
+                style={projectEmailAttachButtonStyle}
+                onClick={(event) => {
+                  const bounds = event.currentTarget.getBoundingClientRect();
+                  setEmailPicker({ blockID: "", anchor: { left: bounds.left, top: bounds.bottom + 7 } });
+                }}
+              >Attach email</button>
               <EditorTabBar
                 activeTab={permissionsOpen ? "permissions" : "editor"}
                 outlineStyle={outlineStyle}
@@ -2571,7 +2643,42 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               />
             </div>
           </div>
-          <div ref={textBlocksScrollRef} className="kanban-board-scroll" style={textBlocksScrollStyle}>
+          <div style={{ minHeight: 0, display: "grid", gridTemplateColumns: openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID) ? `${projectSidePaneWidths.email}px 8px minmax(0, 1fr)` : "minmax(0, 1fr)" }}>
+            {openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID) ? (
+              <div style={{ ...projectEmailPaneWrapStyle, minHeight: 0, overflow: "hidden", borderRight: `1px solid ${EDITOR_NEU_SOFT_BORDER}` }}>
+                <AttachedEmailOrganizerPane
+                  emails={projectAttachedEmails}
+                  projectID={projectID}
+                  apiBase={apiBase}
+                  companyID={companyID}
+                  currentUserID={currentUserID}
+                  companyUsers={companyUsers}
+                  attachmentRequestJSON={attachmentRequestJSON}
+                  attachmentResourceType="project"
+                  attachmentResourceID={projectID}
+                  attachmentEditorSurface="project-attached-email-reply"
+                  storageKey={`project-summary-email-pane:${companyID}:${projectID}`}
+                  editable
+                  accent={accent}
+                  surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
+                  strokeColor={EDITOR_NEU_SOFT_BORDER}
+                  ruleColor={PROJECT_SUMMARY_RULE}
+                  selectedMessageID={selectedEmailIDsByBlock[PROJECT_EMAIL_COLUMN_LAYOUT_ID] ?? ""}
+                  onSelectMessage={(messageID) => setSelectedEmailIDsByBlock((current) => ({ ...current, [PROJECT_EMAIL_COLUMN_LAYOUT_ID]: messageID }))}
+                  onClearSelectedMessage={() => setSelectedEmailIDsByBlock((current) => omitRecordKey(current, PROJECT_EMAIL_COLUMN_LAYOUT_ID))}
+                  onRemoveEmail={removeAttachedEmail}
+                  onEmailSelectionChatRequest={openProjectEmailSelectionChat}
+                  onReplyEditorFocus={() => {
+                    setFocusedTextBlockID("");
+                    setActiveRichTextBlockID("");
+                    projectFormattingControllerRef.current = null;
+                  }}
+                  onError={setError}
+                />
+              </div>
+            ) : null}
+            {openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID) ? <div role="separator" aria-label="Resize Project email column" aria-orientation="vertical" onPointerDown={(event) => beginProjectColumnResize("email", event)} style={projectColumnResizeHandleStyle} /> : null}
+            <div ref={textBlocksScrollRef} className="kanban-board-scroll" style={textBlocksScrollStyle}>
             <button
               type="button"
               title="Add text box"
@@ -2587,32 +2694,33 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                 const index = entry.index;
                 const block = blocks[index];
                 if (!block) return null;
-                const emailOpen = openEmailBlockIDs.has(block.id);
-                const emailMounted = emailOpen || emailReplyBlockID === block.id;
                 const editorOpen = openEditorBlockIDs.has(block.id) || tiptapPinnedBlockIDs.has(block.id);
                 const chatOpen = openChatBlockIDs.has(block.id);
                 const bodyColumns = [
-                  emailOpen ? `${projectSidePaneWidths.email}px` : "",
-                  emailOpen ? "8px" : "",
                   editorOpen ? "minmax(360px, 1fr)" : "",
                   chatOpen ? "8px" : "",
                   chatOpen ? `${projectSidePaneWidths.chat}px` : "",
                 ].filter(Boolean).join(" ") || "minmax(0, 1fr)";
-                const minimumWidth = (emailOpen ? projectSidePaneWidths.email + 8 : 0) + (editorOpen ? 360 : 0) + (chatOpen ? projectSidePaneWidths.chat + 8 : 0);
+                const minimumWidth = (editorOpen ? 360 : 0) + (chatOpen ? projectSidePaneWidths.chat + 8 : 0);
                 const blockSaveStorageKey = mangoTiptapPendingStorageKey({ companyID, resourceType: "project", resourceID: projectID, documentID: block.id });
                 const blockSaveFallback = savingID === block.id ? { status: "saving" as const } : { status: "saved" as const, updatedTimestamp: block.updatedTimestamp };
                 const blockSaveNeedsFailureAttention = Boolean(textBlockSaveFailures[block.id]);
                 return (
                   <div key={block.id} style={{ ...projectTimelineRowStyle, height: TEXT_BLOCK_ROW_HEIGHT + TEXT_BLOCK_ROW_GAP, paddingBottom: TEXT_BLOCK_ROW_GAP, boxSizing: "border-box", overflow: "hidden" }}>
                     <TimelineCell accent={accent} muted={false} isLast={index === blocks.length - 1} />
-                    <div className={`mango-fixed-editor-row${blockSaveNeedsFailureAttention ? " mango-editor-save-failed-frame" : ""}`} data-project-text-box-row={block.id} style={{ ...projectTextBlockCardStyle(focusedTextBlockID === block.id), height: TEXT_BLOCK_ROW_HEIGHT, display: "grid", gridTemplateRows: "38px minmax(0, 1fr)" }}>
+                    <div
+                      className={`mango-fixed-editor-row${blockSaveNeedsFailureAttention ? " mango-editor-save-failed-frame" : ""}`}
+                      data-project-text-box-row={block.id}
+                      data-email-chat-destination={projectEmailChatDestinationBlockID === block.id ? "true" : undefined}
+                      onClickCapture={pendingProjectEmailChatSelection && block.id !== projectEmailChatDefaultBlockID ? (event) => {
+                        const target = event.target;
+                        if (target instanceof Element && target.closest("button, a, input, textarea, select")) return;
+                        if (chooseProjectEmailChatDestination(block.id)) event.stopPropagation();
+                      } : undefined}
+                      style={{ ...projectTextBlockCardStyle(focusedTextBlockID === block.id), height: TEXT_BLOCK_ROW_HEIGHT, display: "grid", gridTemplateRows: "38px minmax(0, 1fr)", outline: projectEmailChatDestinationBlockID === block.id ? `3px solid ${accent}` : undefined, outlineOffset: -2 }}
+                    >
                       <div className="mango-editor-header-scroll" style={{ minWidth: 0, overflowX: "auto", overflowY: "hidden", borderBottom: `1px solid ${PROJECT_SUMMARY_RULE}`, background: "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))" }}>
-                        <div style={{ minWidth: Math.max(448, minimumWidth), height: 37, display: "grid", gridTemplateColumns: `${emailOpen ? projectSidePaneWidths.email : 44}px minmax(360px, 1fr) ${chatOpen ? projectSidePaneWidths.chat : 44}px`, alignItems: "center", gap: 4, padding: "4px 6px", boxSizing: "border-box" }}>
-                          <div style={{ display: "flex", justifyContent: "flex-start" }}>
-                            <button type="button" title={emailOpen ? "Hide email" : "Open email"} aria-label="Toggle email column" aria-pressed={emailOpen} onClick={() => setOpenEmailBlockIDs((current) => toggleSetValue(current, block.id))} style={projectTextBlockIconButtonStyle(accent, emailOpen)}>
-                              <MailIcon color={accent} />
-                            </button>
-                          </div>
+                        <div style={{ minWidth: Math.max(448, minimumWidth), height: 37, display: "grid", gridTemplateColumns: `minmax(360px, 1fr) ${chatOpen ? projectSidePaneWidths.chat : 44}px`, alignItems: "center", gap: 4, padding: "4px 6px", boxSizing: "border-box" }}>
                           <div style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
                             <button type="button" title={editorOpen ? "Hide text editor" : "Open text editor"} aria-label="Toggle text editor column" aria-pressed={editorOpen} onClick={() => {
                               if (editorOpen) {
@@ -2652,53 +2760,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                       </div>
                       <div style={{ minWidth: 0, minHeight: 0, overflowX: "auto", overflowY: "hidden" }}>
                         <div data-project-text-box-columns="email-editor-chat" style={{ minWidth: Math.max(1, minimumWidth), height: TEXT_BLOCK_MIN_HEIGHT, display: "grid", gridTemplateColumns: bodyColumns }}>
-                          {emailMounted && (
-                            <div style={{ ...projectEmailPaneWrapStyle, height: TEXT_BLOCK_MIN_HEIGHT, display: emailOpen ? "grid" : "none", overflow: "hidden", borderRight: `1px solid ${EDITOR_NEU_SOFT_BORDER}` }}>
-                              <div style={projectEmailPaneToolbarStyle}>
-                                <button
-                                  type="button"
-                                  style={projectEmailAttachButtonStyle}
-                                  onClick={(event) => {
-                                    const bounds = event.currentTarget.getBoundingClientRect();
-                                    setEmailPicker({ blockID: block.id, anchor: { left: bounds.left, top: bounds.bottom + 7 } });
-                                  }}
-                                >Attach email</button>
-                              </div>
-							<AttachedEmailOrganizerPane
-                                emails={attachedEmailsByBlockID.get(block.id) ?? []}
-                                apiBase={apiBase}
-								companyID={companyID}
-								currentUserID={currentUserID}
-                                attachmentRequestJSON={attachmentRequestJSON}
-                                attachmentResourceType="project"
-                                attachmentResourceID={projectID}
-                                attachmentInformationID={block.id}
-                                attachmentEditorSurface="project-attached-email-reply"
-                                storageKey={`project-summary-email-pane:${companyID}:${projectID}:${block.id}`}
-                                editable
-                                accent={accent}
-                                surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
-                                strokeColor={EDITOR_NEU_SOFT_BORDER}
-                                ruleColor={PROJECT_SUMMARY_RULE}
-                                selectedMessageID={selectedEmailIDsByBlock[block.id] ?? ""}
-                                onSelectMessage={(messageID) => {
-                                  setActiveRowBlockID(block.id);
-                                  setSelectedEmailIDsByBlock((current) => ({ ...current, [block.id]: messageID }));
-                                }}
-                                onClearSelectedMessage={() => setSelectedEmailIDsByBlock((current) => omitRecordKey(current, block.id))}
-                                onRemoveEmail={removeAttachedEmail}
-                                onReplyEditorFocus={() => {
-                                  setActiveRowBlockID(block.id);
-                                  setEmailReplyBlockID(block.id);
-                                  setFocusedTextBlockID(block.id);
-                                  setActiveRichTextBlockID("");
-                                  projectFormattingControllerRef.current = null;
-                                }}
-                                onError={setError}
-                              />
-                            </div>
-                          )}
-                          {emailOpen && <div role="separator" aria-label="Resize email column" aria-orientation="vertical" onPointerDown={(event) => beginProjectColumnResize("email", event)} style={projectColumnResizeHandleStyle} />}
                           {editorOpen && (
                             <div style={{ minWidth: 0, height: TEXT_BLOCK_MIN_HEIGHT, overflow: "hidden" }}>
                               <NodeTextBlockEditor
@@ -2718,7 +2779,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                 documentValue={block.document}
                                 documentScrollMemoryRef={projectDocumentScrollMemoryRef}
                                  chatMessages={chatMessagesByBlockID.get(block.id) ?? []}
-                                 onEntityLink={(entity) => linkEmailFromEditor(block.id, entity)}
                                 activeChatAnchorMessageID={activeChatMessageIDs[block.id] ?? ""}
                                 chatNavigationRequest={chatNavigationRequests[block.id] ?? null}
                                 surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
@@ -2784,6 +2844,11 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                 entityRequestJSON={attachmentRequestJSON}
                                 messages={chatMessagesByBlockID.get(block.id) ?? []}
                                 selectionAnchor={chatSelectionAnchors[block.id]}
+                                composerDestination={chatSelectionAnchors[block.id]?.source === "email" ? {
+                                  kind: block.id === projectEmailChatDefaultBlockID ? "existing_project_new_textbox" : "existing_project_existing_textbox",
+                                  nodeID: projectID,
+                                  nodeName: project?.name || "Project",
+                                } : undefined}
                                 draft={chatDrafts[block.id] ?? ""}
                                 draftEntityLinks={chatDraftEntityLinks[block.id] ?? []}
                                 companyUsers={companyUsers}
@@ -2815,7 +2880,8 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                 onEditMessage={editChatMessage}
                                 onDeleteMessage={(messageID) => void deleteChatMessage(messageID)}
                                 onClearReply={() => setChatReplyTargets((current) => omitRecordKey(current, block.id))}
-                                onClearSelectionAnchor={() => setChatSelectionAnchors((current) => omitRecordKey(current, block.id))}
+                                onClearSelectionAnchor={() => clearProjectEmailSelectionChat(block.id)}
+                                onClearComposerDestination={() => clearProjectEmailSelectionChat(block.id)}
                                 onAttachFiles={(files) => attachChatDraftFiles(block.id, files)}
                                 onRemoveDraftAttachment={(attachmentID) => setChatDraftAttachments((current) => ({ ...current, [block.id]: (current[block.id] ?? []).filter((attachment) => attachment.id !== attachmentID) }))}
                                 onSubmit={() => void submitChatMessage(block.id)}
@@ -2828,6 +2894,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                   </div>
                 );
               })}
+            </div>
             </div>
           </div>
         </section>
@@ -2858,14 +2925,31 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               <div style={projectWorkPanelActionsStyle}>
                 <button
                   type="button"
-                  aria-label="Add Node"
-                  aria-expanded={relationshipPickerOpen}
-                  aria-controls="project-relationship-picker"
-                  style={projectRelationshipAddButtonStyle(accent, relationshipPickerOpen)}
-                  onClick={relationshipPickerOpen ? closeRelationshipPicker : openRelationshipPicker}
+                  aria-label="Create floating Node"
+                  title="Create floating Node"
+                  style={projectRelationshipAddButtonStyle(accent, false)}
+                  onClick={() => { void createFloatingProjectNode(); }}
                 >
+                  <ExplorerRowIcon kind="node" />
                   <span aria-hidden="true" style={projectRelationshipAddIconStyle}>+</span>
-                  Add
+                  Create floating Node
+                </button>
+                <button
+                  type="button"
+                  aria-label="Open Universal Picker to link a Node"
+                  aria-expanded={Boolean(relationshipPickerAnchor)}
+                  disabled={relationshipPickerBusy}
+                  style={projectRelationshipAddButtonStyle(accent, Boolean(relationshipPickerAnchor))}
+                  onClick={(event) => {
+                    if (relationshipPickerAnchor) {
+                      setRelationshipPickerAnchor(null);
+                      return;
+                    }
+                    const bounds = event.currentTarget.getBoundingClientRect();
+                    setRelationshipPickerAnchor({ left: bounds.left, top: bounds.bottom + 7 });
+                  }}
+                >
+                  Link Node
                 </button>
                 <UniversalGroupingControls
                   groupings={relationshipGroupings}
@@ -2879,22 +2963,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               </div>
             ) : null}
           </div>
-          {activeRightPanelTab === "relationships" && relationshipPickerOpen ? (
-            <div id="project-relationship-picker" style={projectRelationshipPickerFrameStyle}>
-              <ProjectRelationshipSearchPicker
-                accent={accent}
-                query={relationshipPickerQuery}
-                rows={relationshipPickerRows}
-                loading={relationshipPickerLoading}
-                error={relationshipPickerError}
-                existingRelationshipKeys={existingRelationshipKeys}
-                addingKey={relationshipPickerAddingKey}
-                onQueryChange={setRelationshipPickerQuery}
-                onCancel={closeRelationshipPicker}
-                onSelectTarget={(target) => void addRelationshipFromPicker(target)}
-              />
-            </div>
-          ) : null}
           {activeRightPanelTab === "relationships" ? (
           <div
             className="kanban-board-scroll"
@@ -3009,6 +3077,23 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           ) : null}
         </aside>
       </div>
+      {relationshipPickerAnchor ? (
+        <UniversalEntityPicker
+          companyID={companyID}
+          requestJSON={attachmentRequestJSON}
+          sourceType="project"
+          linkTargetTypes={["node"]}
+          initialMode="link"
+          initialCategory="node"
+          lockMode
+          anchor={relationshipPickerAnchor}
+          onCancel={() => setRelationshipPickerAnchor(null)}
+          onChoose={async (entity: EditorEntityLink, mode: UniversalEntityPickerMode) => {
+            if (mode === "link") await addRelationshipFromPicker(entity);
+            else openEditorEntityLink(entity);
+          }}
+        />
+      ) : null}
       {emailPicker ? (
         <UniversalEntityPicker
           companyID={companyID}
@@ -3346,96 +3431,6 @@ function CriticalPathTable({
             Add Step
           </button>
         ) : null}
-      </div>
-    </div>
-  );
-}
-
-function ProjectRelationshipSearchPicker({
-  accent,
-  query,
-  rows,
-  loading,
-  error,
-  existingRelationshipKeys,
-  addingKey,
-  onQueryChange,
-  onCancel,
-  onSelectTarget,
-}: {
-  accent: string;
-  query: string;
-  rows: ExplorerTreeNode[];
-  loading: boolean;
-  error: string;
-  existingRelationshipKeys: Set<string>;
-  addingKey: string;
-  onQueryChange: (value: string) => void;
-  onCancel: () => void;
-  onSelectTarget: (target: ProjectRelationshipDropTarget) => void;
-}) {
-  const hasQuery = query.trim().length > 0;
-  return (
-    <div style={projectRelationshipPickerSurfaceStyle}>
-      <div style={criticalPathNodePickerSearchRowStyle}>
-        <CompanyExplorerSearchBox
-          value={query}
-          onChange={onQueryChange}
-          onEscape={onCancel}
-          placeholder="Search Explorer Nodes in Logic Gates"
-          ariaLabel="Search Explorer Nodes in Logic Gates"
-          autoFocus
-          style={criticalPathNodePickerSearchBoxStyle}
-        />
-        <button type="button" style={criticalPathNodePickerCancelButtonStyle} onClick={onCancel}>
-          Cancel
-        </button>
-      </div>
-      <div role="listbox" aria-label="Eligible Node search results" style={criticalPathNodePickerResultsStyle}>
-        {!hasQuery ? (
-          <div style={criticalPathNodePickerEmptyStyle}>Search for a Node that belongs to a Logic Gate</div>
-        ) : loading ? (
-          <div style={criticalPathNodePickerEmptyStyle}>Searching...</div>
-        ) : error ? (
-          <div style={criticalPathNodePickerErrorStyle}>{error}</div>
-        ) : rows.length === 0 ? (
-          <div style={criticalPathNodePickerEmptyStyle}>No eligible Node matches</div>
-        ) : (
-          rows.map((row) => {
-            if (row.kind !== "node") return null;
-            const resourceID = row.nodeID?.trim() || row.resourceID?.trim() || "";
-            if (!resourceID) return null;
-            const key = `node:${resourceID}`;
-            const alreadyAdded = existingRelationshipKeys.has(key);
-            const adding = addingKey === key;
-            return (
-              <button
-                key={row.id}
-                type="button"
-                role="option"
-                aria-selected="false"
-                disabled={alreadyAdded || Boolean(addingKey)}
-                style={projectRelationshipPickerResultButtonStyle(alreadyAdded || Boolean(addingKey))}
-                onClick={() => onSelectTarget({ resourceType: "node", resourceID })}
-              >
-                <span style={criticalPathNodePickerResultIconStyle(accent)}>
-                  <ExplorerRowIcon kind="node" />
-                </span>
-                <span style={criticalPathNodePickerResultTextStyle}>
-                  <span style={criticalPathNodePickerResultTitleStyle}>{row.label}</span>
-                  <span style={criticalPathNodePickerResultPathStyle}>
-                    Node{row.folderLabel ? ` · ${row.folderLabel}` : ""}
-                  </span>
-                </span>
-                {alreadyAdded || adding ? (
-                  <span style={projectRelationshipPickerResultStatusStyle}>
-                    {alreadyAdded ? "Added" : "Adding..."}
-                  </span>
-                ) : null}
-              </button>
-            );
-          })
-        )}
       </div>
     </div>
   );
@@ -4433,13 +4428,6 @@ const projectRelationshipAddIconStyle: React.CSSProperties = {
   lineHeight: 1,
 };
 
-const projectRelationshipPickerFrameStyle: React.CSSProperties = {
-  minWidth: 0,
-  flexShrink: 0,
-  padding: "0 2px 8px",
-  boxSizing: "border-box",
-};
-
 const columnTitleStyle: React.CSSProperties = {
   fontSize: 14,
   fontWeight: 850,
@@ -4715,11 +4703,6 @@ const criticalPathNodePickerSurfaceStyle: React.CSSProperties = {
   boxShadow: "9px 10px 22px rgba(174,174,192,0.22), -7px -7px 16px rgba(255,255,255,0.86), inset 1px 1px 0 rgba(255,255,255,0.78)",
 };
 
-const projectRelationshipPickerSurfaceStyle: React.CSSProperties = {
-  ...criticalPathNodePickerSurfaceStyle,
-  borderRadius: 10,
-};
-
 const criticalPathNodePickerSearchRowStyle: React.CSSProperties = {
   minWidth: 0,
   display: "grid",
@@ -4786,22 +4769,6 @@ const criticalPathNodePickerResultButtonStyle: React.CSSProperties = {
   padding: "7px 9px",
   textAlign: "left",
   boxShadow: "2px 2px 8px rgba(174,174,192,0.12), -2px -2px 8px rgba(255,255,255,0.76)",
-};
-
-function projectRelationshipPickerResultButtonStyle(disabled: boolean): React.CSSProperties {
-  return {
-    ...criticalPathNodePickerResultButtonStyle,
-    gridTemplateColumns: "24px minmax(0, 1fr) auto",
-    cursor: disabled ? "default" : "pointer",
-    opacity: disabled ? 0.68 : 1,
-  };
-}
-
-const projectRelationshipPickerResultStatusStyle: React.CSSProperties = {
-  color: "#64748b",
-  fontSize: 10,
-  fontWeight: 900,
-  whiteSpace: "nowrap",
 };
 
 function criticalPathNodePickerResultIconStyle(accent: string): React.CSSProperties {
@@ -5186,14 +5153,7 @@ const projectEmailPaneWrapStyle: React.CSSProperties = {
   height: "100%",
   minHeight: 0,
   display: "grid",
-  gridTemplateRows: "auto minmax(0, 1fr)",
-};
-
-const projectEmailPaneToolbarStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "flex-end",
-  padding: "6px 7px",
-  borderBottom: `1px solid ${PROJECT_SUMMARY_RULE}`,
+  gridTemplateRows: "minmax(0, 1fr)",
 };
 
 const projectEmailAttachButtonStyle: React.CSSProperties = {

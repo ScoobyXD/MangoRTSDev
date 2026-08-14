@@ -462,10 +462,8 @@ func (r *MemoryRepo) UpsertProjectRelationship(input ProjectRelationshipInput) (
 	if _, ok := r.nodes[key(input.CompanyID, input.ResourceID)]; !ok {
 		return ProjectRelationshipMutationResult{}, ErrNotFound
 	}
-	assignment, ok := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.ResourceID, "")
-	if !ok || strings.TrimSpace(assignment.LogicGateID) == "" {
-		return ProjectRelationshipMutationResult{}, ErrProjectNodeLogicGateRequired
-	}
+	assignment, hasAssignment := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.ResourceID, "")
+	hasAssignment = hasAssignment && strings.TrimSpace(assignment.LogicGateID) != ""
 	alreadyRelated := false
 	for _, relationship := range r.projectRelationships {
 		if relationship.CompanyID == input.CompanyID && relationship.ProjectID == input.ProjectID &&
@@ -488,26 +486,32 @@ func (r *MemoryRepo) UpsertProjectRelationship(input ProjectRelationshipInput) (
 		r.nodeTimelineEvents = previousTimelineEvents
 	}
 
-	gateProjection, err := r.upsertProjectRelationshipSourceLocked(ProjectRelationshipInput{
-		CompanyID: input.CompanyID, ProjectID: input.ProjectID, ResourceType: EntityTypeLogicGate,
-		ResourceID: assignment.LogicGateID, Position: input.Position,
-	})
-	if err != nil {
-		rollback()
-		return ProjectRelationshipMutationResult{}, err
+	implicitRelationships := make([]domain.ProjectRelationshipProjection, 0, 1)
+	logicGateIDs := make([]string, 0, 1)
+	if hasAssignment {
+		gateProjection, err := r.upsertProjectRelationshipSourceLocked(ProjectRelationshipInput{
+			CompanyID: input.CompanyID, ProjectID: input.ProjectID, ResourceType: EntityTypeLogicGate,
+			ResourceID: assignment.LogicGateID, Position: input.Position,
+		})
+		if err != nil {
+			rollback()
+			return ProjectRelationshipMutationResult{}, err
+		}
+		implicitRelationships = append(implicitRelationships, gateProjection)
+		logicGateIDs = append(logicGateIDs, assignment.LogicGateID)
 	}
 	nodeProjection, err := r.upsertProjectRelationshipSourceLocked(input)
 	if err != nil {
 		rollback()
 		return ProjectRelationshipMutationResult{}, err
 	}
-	r.syncRACIMatrixProjectionForProjectResourcesLocked(input.CompanyID, []string{input.ResourceID}, []string{assignment.LogicGateID})
+	r.syncRACIMatrixProjectionForProjectResourcesLocked(input.CompanyID, []string{input.ResourceID}, logicGateIDs)
 	if !alreadyRelated {
 		r.appendProjectAssignmentTimelineEventLocked(input.CompanyID, input.ResourceID, input.ActorUserID, input.ProjectID, time.Now().UTC())
 	}
 	return ProjectRelationshipMutationResult{
 		Relationship:          &nodeProjection,
-		ImplicitRelationships: []domain.ProjectRelationshipProjection{gateProjection},
+		ImplicitRelationships: implicitRelationships,
 	}, nil
 }
 

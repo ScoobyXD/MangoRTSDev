@@ -874,6 +874,7 @@ N145 - One consolidated Node read supplies its initial timeline events, and Post
 N146 - Every attached-email thread starts collapsed when a Node opens. A collapsed card performs no thread-body or shared-draft read, and only opening that exact card loads it.
 
 N147 - A newly added current-user chat moves the shared ChatPane to its bottom; messages added by other users do not force the reader away from the current position.
+N148 - Email message cards are not draggable into Node textboxes. Highlighting an unlinked exact message defaults to a staged new textbox; clicking an existing textbox highlights its frame and changes the chat destination to Existing Node · Existing Text Box before the first atomic send.
 
 ### Scenario N-S23: Email, Editor, And Chat Column Correction
 

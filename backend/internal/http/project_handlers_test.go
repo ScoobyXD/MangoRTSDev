@@ -119,6 +119,30 @@ func TestProjectScopedNodeCreateRequiresInitialAssignmentLogicGateEditAccess(t *
 	}
 }
 
+func TestProjectScopedNodeCreateAllowsFloatingNode(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "66666666-6666-4666-8666-666666666422"
+	repo.EnsureCompany(companyID, "Project Floating Node Co")
+	editor := mustLogicGateWorkHTTPUser(t, repo, companyID, "project-floating-node-editor")
+	projectResult, err := repo.CreateProject(store.ProjectInput{CompanyID: companyID, Name: "Floating Project", Status: store.ProjectDefaultStatus})
+	if err != nil || projectResult.Project == nil {
+		t.Fatalf("CreateProject = %+v err=%v", projectResult, err)
+	}
+	server := NewServer(repo)
+	defer server.Close()
+	payload := map[string]any{"company_id": companyID, "title": "Floating project node"}
+	req := logicGateWorkV2Request(t, http.MethodPost, "/v1/projects/"+projectResult.Project.ProjectID+"/nodes", payload, editor, companyID)
+	rr := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("POST floating project node status = %d body=%s, want 201", rr.Code, rr.Body.String())
+	}
+	relationships, err := repo.ListProjectRelationshipProjections(companyID, projectResult.Project.ProjectID)
+	if err != nil || len(relationships) != 1 || relationships[0].ResourceType != store.EntityTypeNode {
+		t.Fatalf("floating project relationships = %+v err=%v, want one Node", relationships, err)
+	}
+}
+
 func TestProjectRelationshipsPOSTAssociatesExistingLogicGate(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "66666666-6666-4666-8666-666666666429"

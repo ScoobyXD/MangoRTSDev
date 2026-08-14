@@ -246,7 +246,7 @@ test("shared editor surfaces retain semantic identity, placeholders, and urgent 
   assert.match(projectSummary, /const \[activeRichTextBlockID, setActiveRichTextBlockID\] = useState\(""\)/);
   assert.match(projectSummary, /formattingDisabled=\{!activeRichTextBlockID \|\| !blocks\.some\(\(block\) => block\.id === activeRichTextBlockID\)\}/);
   assert.match(projectSummary, /setActiveRichTextBlockID\(""\);\s*projectFormattingControllerRef\.current = null/);
-  assert.match(projectSummary, /<AttachedEmailOrganizerPane[\s\S]*attachmentResourceType="project"[\s\S]*attachmentResourceID=\{projectID\}[\s\S]*attachmentInformationID=\{block\.id\}/);
+  assert.match(projectSummary, /<AttachedEmailOrganizerPane[\s\S]*projectID=\{projectID\}[\s\S]*attachmentResourceType="project"[\s\S]*attachmentResourceID=\{projectID\}/);
   assert.match(nodeWorkspaceParts, /const replyAttachmentResourceType: MangoAttachmentResourceType = activeDraft \? "email_draft" : attachmentResourceType/);
   assert.match(nodeWorkspaceParts, /resourceType: replyAttachmentResourceType/);
   assert.match(nodeWorkspaceParts, /resourceID: replyAttachmentResourceID/);
@@ -306,7 +306,7 @@ test("attached-email reply focus clears the outer node or project formatting tar
   assert.match(nodeWorkspaceParts, /onReplyEditorFocus=\{onReplyEditorFocus\}/);
   assert.match(nodeWorkspaceParts, /onFocus=\{onReplyEditorFocus\}/);
   assert.match(nodeWorkspace, /onReplyEditorFocus=\{\(\) => \{\s*setEmailReplyBlockID\(NODE_EMAIL_COLUMN_LAYOUT_ID\);\s*setFocusedTextBlockID\(""\);\s*if \(formattingControllerRef\) formattingControllerRef\.current = null/);
-  assert.match(projectSummary, /onReplyEditorFocus=\{\(\) => \{\s*setActiveRowBlockID\(block\.id\);\s*setEmailReplyBlockID\(block\.id\);\s*setFocusedTextBlockID\(block\.id\);\s*setActiveRichTextBlockID\(""\);\s*projectFormattingControllerRef\.current = null/);
+  assert.match(projectSummary, /onReplyEditorFocus=\{\(\) => \{\s*setFocusedTextBlockID\(""\);\s*setActiveRichTextBlockID\(""\);\s*projectFormattingControllerRef\.current = null/);
 });
 
 test("format availability never disables editor navigation tabs", () => {

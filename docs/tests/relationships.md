@@ -30,16 +30,16 @@ Later membership changes do not rewrite that Huddle Node, while current source d
 
 # Current Email Relationship Business Logic Laws
 
-1. `email_relationships` remains the typed authority that connects an exact internal email message to a Node and optionally to one exact Node text box.
-2. One stored email thread may have Node-wide relationships in multiple Nodes, and one Node may have multiple stored email threads.
-3. One exact email message may have at most one textbox-specific relationship in each Node.
-4. The same exact email message may link to different text boxes in different Nodes.
-5. The database enforces semantic-edge uniqueness and the one-textbox-per-message-per-Node law under concurrent writes.
-6. A newly completed message inherits every distinct Node-wide destination already present for its thread.
+1. `email_relationships` is the typed authority that connects one exact internal email message to a Node or Project and optionally to one exact textbox owned by that resource.
+2. One stored email thread may have wide relationships in multiple Nodes and Projects, and each Node or Project may have multiple stored email threads.
+3. One exact email message may have at most one textbox-specific relationship in each Node or Project.
+4. The same exact email message may link to different text boxes in different owning resources.
+5. The database enforces semantic-edge uniqueness and one-textbox-per-message-per-owner under concurrent writes.
+6. A newly completed message inherits every distinct Node-wide and Project-wide destination already present for its thread.
 7. New-message ingestion never creates or copies a textbox-specific relationship, chat, or shared-draft display state.
-8. An email-selection chat is valid only when the exact internal email message has an `email_relationships` row for that chat's exact Node and Node text box.
-9. Opening an email-selection chat preview creates no text box, email relationship, or chat relationship.
-10. Sending the first chat from an email-selection preview atomically links the chosen existing text box or creates the first Node-local text box, then creates the email-to-textbox relationship and chat, or creates none of them.
+8. An email-selection chat is valid only when the exact internal email message has an `email_relationships` row for that chat's exact Node or Project and textbox.
+9. Opening an email-selection chat preview may stage a new local textbox presentation but creates no email relationship or chat.
+10. Sending the first chat from an email-selection preview atomically links the chosen existing textbox or the staged new textbox, then creates the email-to-textbox relationship and chat, or creates neither relationship nor chat.
 11. Cancelling an unsent email-selection chat preview requires no relationship deletion because no relationship has been written.
 12. A Node-shared email draft belongs directly to one exact Node, one exact email thread, and one exact source message. The reply UI reuses that message's existing Node-local text box or creates the one permitted typed email-to-text-box relationship first; the draft does not own a second text-box identity.
 13. The shared draft stores the exact Node, thread, and source-message identities directly and never creates a generic draft edge, resource registry, surrogate identity, participant table, copied permission grant, or separate draft-to-text-box relationship.
@@ -52,17 +52,17 @@ Later membership changes do not rewrite that Huddle Node, while current source d
 20. The email-draft scope cutover deletes only obsolete draft rows that cannot name their required exact owner or exact Node and source message, and retires only their typed `email_draft` attachment relationships before deletion; it never invents an endpoint or changes a valid email relationship.
 21. A stored-thread reader or inline email reference carries the exact internal `email_thread_id`; a provider message ID or provider thread ID never selects a durable Mango thread, and a missing durable ID fails instead of falling back to a provider or collaboration lookup.
 
-Last updated: 2026-08-12
+Last updated: 2026-08-14
 
-# Process Story: One email thread can appear in several Nodes while message work stays Node-local
+# Process Story: One email thread can appear in several Nodes and Projects while message work stays local
 
-A stored email thread may have exact Node-wide `email_relationships` in several Nodes
+A stored email thread may have exact wide `email_relationships` in several Nodes and Projects
 ↓
-Each newly completed message inherits every distinct Node-wide destination already used by that thread, but never inherits a text-box destination
+Each newly completed message inherits every distinct Node-wide and Project-wide destination already used by that thread, but never inherits a textbox destination
 ↓
-Inside each Node, one exact message may link to one exact Node text box; the same message may link to a different text box in another Node
+Inside each Node or Project, one exact message may link to one exact local textbox; the same message may link to a different textbox in another owner
 ↓
-Reply or Reply all opens that exact message's Node-local text box, while any shared draft remains keyed directly by the exact Node, thread, and source message
+Reply or Reply all remains in that exact resource context, while any Node-shared draft remains keyed directly by the exact Node, thread, and source message
 ↓
 Opening a highlighted-email chat preview creates no relationship or resource
 ↓
@@ -70,13 +70,13 @@ An ordinary root chat or reply appends directly to an existing grouping without 
 ↓
 A highlighted-email or new-grouping send reuses the exact stored message or imports only the missing exact provider message; thread completion remains separate background ingestion
 ↓
-Removing one Node's relationship leaves all other Node-local work and the stored email truth intact
+Removing one owner's relationship leaves all other local work and the stored email truth intact
 ↓
 Every endpoint keeps its literal typed identity; no registry, surrogate identity, or generic untyped edge is introduced
 ↓
 The forward draft cutover removes only legacy drafts without the exact identities required by this model and retires only their typed draft attachment links
 
-Last updated: 2026-08-12
+Last updated: 2026-08-14
 # Process Story: Policy inheritance follows typed parents without moving permissions into Explorer
 
 A permission or RACI resolver receives one exact resource type and ID
@@ -111,7 +111,7 @@ A user opens the Node header's double-hash picker and chooses a Logic Gate, Proj
 ↓
 Mango carries the unchanged Node type/ID and chosen target type/ID into the established typed command
 ↓
-A Logic Gate choice creates the first assignment or moves the current assignment, a Project choice creates the one allowed Node `project_relationships` row and its required Logic Gate relationship, and an Email choice attaches the exact stored message
+A Logic Gate choice creates the first assignment or moves the current assignment, a Project choice creates the one allowed Node `project_relationships` row and creates or reuses a Project/Logic-Gate relationship only when the Node currently has a Logic Gate, and an Email choice attaches the exact stored message
 ↓
 The first exact Project relationship atomically snapshots one durable Node timeline stamp; an idempotent repeat creates no duplicate stamp
 ↓
@@ -119,19 +119,19 @@ The picker and clickable header chips remain presentation only and never become 
 
 Last updated: 2026-08-07
 
-# Process Story: A completed email message inherits exact Node-wide destinations
+# Process Story: A completed email message inherits exact Node-wide and Project-wide destinations
 
 A qualifying Inbox arrival reconciles a stored email thread
 ↓
 Mango identifies the exact newly completed `email_messages.email_message_id`
 ↓
-Inside that message transaction, Mango reads the distinct current Node-wide `email_relationships` destinations for the same company/thread
+Inside that message transaction, Mango reads the distinct current Node-wide and Project-wide `email_relationships` destinations for the same company/thread
 ↓
-Only missing typed Node relationships are inserted idempotently for the new message
+Only missing typed Node and Project relationships are inserted idempotently for the new message
 ↓
 No endpoint is guessed, no access is granted, no textbox placement is copied, and an unplaced thread remains unplaced
 
-Last updated: 2026-08-07
+Last updated: 2026-08-14
 
 # Process Story: RACI groups remain typed live relationships
 
@@ -197,7 +197,7 @@ Removing one relationship removes only that edge unless the owning subsystem has
 ↓
 Deleting a personal pin folder removes only its descendant folder and pin records, never the pinned resources
 
-Last updated: 2026-08-10
+Last updated: 2026-08-14
 
 # Relationship Business Logic Laws
 
@@ -430,11 +430,11 @@ Node search location derives only from exact source relationships: a fully visib
 
 Removing historical Node placement rows or their now-empty deterministic folder MUST NOT delete a Node, Logic Gate assignment, Project relationship, email relationship, attachment relationship, chat ownership, RACI assignment, permission, or any other endpoint or typed edge.
 
-### Law 29 — New email messages inherit only exact Node-wide thread destinations
+### Law 29 — New email messages inherit exact Node-wide and Project-wide thread destinations
 
-When a provider message becomes completely stored under an existing `email_thread_id`, Mango MUST atomically create only the missing `email_relationships` rows for the distinct current destinations where the same company/thread already has `resource_type='node'` and `resource_textbox_id is null`. The new relationship MUST use the exact stored `email_message_id`, exact Node ID, exact company, and canonical `node` type.
+When a provider message becomes completely stored under an existing `email_thread_id`, Mango MUST atomically create only the missing `email_relationships` rows for distinct current destinations where the same company/thread has `resource_type in ('node','project')` and `resource_textbox_id is null`. Each relationship uses the exact stored `email_message_id`, exact owner ID, exact company, and canonical owner type.
 
-This propagation is idempotent and MUST NOT recopy an existing message, invent or choose a Node for an unplaced thread, copy Project/Logic-Gate/textbox destinations, grant permissions or RACI, create a chat/draft, or treat a relationship as provider-thread membership authority. The message upsert and its missing Node-wide relationships commit or roll back together.
+This propagation is idempotent and MUST NOT invent an owner for an unplaced thread, copy Logic-Gate or textbox destinations, grant permissions or RACI, create a chat/draft, or treat a relationship as provider-thread membership authority. The message upsert and its missing wide relationships commit or roll back together.
 
 ### Law 30 — Policy parentage reuses canonical typed relationships
 
@@ -442,11 +442,11 @@ Policy settings and assignments MUST remain in `resource_gvic_settings`, `resour
 
 Inherited resolution may follow those live typed parent edges, but it MUST NOT copy them into policy tables, invent a generic resource edge, or make Company Explorer a second policy authority. Comparing a saved raw policy with its immediate parent's raw policy may change the policy mode to inherited or customized; it MUST NOT change resource placement, assignment, ownership, or endpoint identity.
 
-### Law 31 — Email threads may span Nodes, while textbox links remain exact and Node-local
+### Law 31 — Email threads may span Nodes and Projects, while textbox links remain exact and owner-local
 
-One `email_thread_id` and its exact stored messages MAY have Node-wide `email_relationships` in more than one Node. A Node-wide relationship has `resource_type='node'` and a null `resource_textbox_id`; it exposes the thread in that exact Node but does not make that Node the thread owner.
+One `email_thread_id` and its exact stored messages MAY have wide `email_relationships` in more than one Node or Project. A wide relationship has canonical `resource_type`, the exact owner ID, and a null `resource_textbox_id`; it exposes the thread in that exact resource but does not make that resource the email owner.
 
-A textbox-specific relationship MUST name one exact `email_message_id`, one exact Node, and one exact textbox in that Node. The same message may be linked to at most one textbox inside one Node. Repeating the same Node/message/textbox command converges to the existing typed edge, a different textbox in that same Node is rejected, and a textbox in a different Node is allowed.
+A textbox-specific relationship MUST name one exact `email_message_id`, one exact Node or Project, and one exact textbox in that resource. The same message may be linked to at most one textbox inside each owner. Repeating the same owner/message/textbox command converges, a different textbox in that owner is rejected, and a textbox in a different owner is allowed.
 
 Removing one Node-wide or textbox-specific email relationship deletes only that exact relationship. It MUST NOT delete or rewrite another Node's relationship, the stored thread or message, another Node's textbox or chat, an email chat quote, or any surviving attachment relationship.
 

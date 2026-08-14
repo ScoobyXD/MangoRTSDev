@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
@@ -369,6 +370,52 @@ func (r *MemoryRepo) GetCommunicationsNodeEmailMessage(companyID, nodeID, emailT
 		return item, nil
 	}
 	return domain.CommunicationsNodeEmailThread{}, ErrNotFound
+}
+
+func (r *MemoryRepo) GetCommunicationsProjectEmailThread(companyID, projectID, emailThreadID string) (domain.CommunicationsProjectEmailThread, error) {
+	companyID, projectID, emailThreadID = cleanUUIDText(companyID), cleanUUIDText(projectID), cleanUUIDText(emailThreadID)
+	if companyID == "" || projectID == "" || emailThreadID == "" {
+		return domain.CommunicationsProjectEmailThread{}, ErrInvalid
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	thread, ok := r.emailThreads[key(companyID, emailThreadID)]
+	if !ok {
+		return domain.CommunicationsProjectEmailThread{}, ErrNotFound
+	}
+	for _, projection := range r.projectText[key(companyID, projectID)] {
+		if projection.Type != "Attached email" {
+			continue
+		}
+		var payload projectAttachedEmailPayload
+		if json.Unmarshal([]byte(projection.Information), &payload) != nil || cleanUUIDText(payload.EmailThreadID) != emailThreadID {
+			continue
+		}
+		return domain.CommunicationsProjectEmailThread{
+			CompanyID: companyID, ProjectID: projectID, InformationID: projection.InformationID,
+			EmailThreadID: emailThreadID, SelectedMessageID: cleanUUIDText(payload.EmailMessageID),
+			CreatedTimestamp: projection.CreatedTimestamp, Thread: cloneCommunicationsEmailThread(thread),
+		}, nil
+	}
+	return domain.CommunicationsProjectEmailThread{}, ErrNotFound
+}
+
+func (r *MemoryRepo) GetCommunicationsProjectEmailMessage(companyID, projectID, emailThreadID, emailMessageID string) (domain.CommunicationsProjectEmailThread, error) {
+	item, err := r.GetCommunicationsProjectEmailThread(companyID, projectID, emailThreadID)
+	if err != nil {
+		return domain.CommunicationsProjectEmailThread{}, err
+	}
+	emailMessageID = cleanUUIDText(emailMessageID)
+	if emailMessageID == "" {
+		return domain.CommunicationsProjectEmailThread{}, ErrInvalid
+	}
+	for _, message := range item.Thread.Messages {
+		if message.EmailMessageID == emailMessageID {
+			item.Thread.Messages = []domain.CommunicationsEmailMessage{message}
+			return item, nil
+		}
+	}
+	return domain.CommunicationsProjectEmailThread{}, ErrNotFound
 }
 
 func (r *MemoryRepo) linkCommunicationsEmailThreadToNodeLocked(companyID, nodeID, informationID, emailThreadID, selectedMessageID, actorUserID string, now time.Time) (domain.CommunicationsNodeEmailThread, error) {
