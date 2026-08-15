@@ -66,13 +66,19 @@ function mergeRefs<T>(...refs: readonly Ref<T>[]): (refSetParameter: T | null) =
 
 // Preferred!
 // This is the simplified importer that uses the default function behavior specified in the importer configuration.
-export const SimpleMangoImporter = forwardRef<ImportToMangoHandle, null>(
+export const SimpleMangoImporter = forwardRef<ImportToMangoHandle, Record<string, never>>(
   function SimpleMangoImporter(
+    _props,
     forwardedRef
   ) {
 
     const internalRef = useRef<ImportToMangoHandle | null>(null);
-    const mangoProps = createMangoImporterProps(internalRef);
+
+    const mangoPropsRef = useRef<ImportToMangoProps | null>(null);
+    if(mangoPropsRef.current === null){
+      mangoPropsRef.current = createMangoImporterProps(internalRef);
+    }
+    const mangoProps = mangoPropsRef.current;
 
     // TODO: Verify merging of refs.
     const setRefs = mergeRefs(internalRef, forwardedRef);
