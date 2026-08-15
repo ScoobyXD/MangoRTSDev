@@ -219,7 +219,10 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(workspace, /const handleExistingEmailChatsChange = React\.useCallback[\s\S]*if \(!hasChats \|\| !emailChatKey\) return;[\s\S]*\{ key: emailChatKey, visible: true \}/);
   assert.match(workspace, /onEmailSelection=\{commentOnEmailSelection\}/);
   assert.match(workspace, /\{emailChatAvailable && \([\s\S]*<EmailCollaborationChatSurface[\s\S]*active=\{emailChatVisible\}/);
-  assert.doesNotMatch(workspace, /threadMessages=\{selectedThreadMessages\}/);
+  const messageDetailStart = workspace.indexOf("<MessageDetail");
+  const messageDetailEnd = workspace.indexOf("/>", messageDetailStart);
+  assert.ok(messageDetailStart >= 0 && messageDetailEnd > messageDetailStart);
+  assert.match(workspace.slice(messageDetailStart, messageDetailEnd), /threadMessages=\{selectedThreadMessages\}/);
   assert.match(workspace, /onExistingChatsChange=\{handleExistingEmailChatsChange\}/);
   assert.match(workspace, /onEmailChatHighlightsChange=\{setEmailChatHighlights\}/);
   assert.match(workspace, /emailChatHighlights=\{emailChatHighlights\}/);
@@ -232,6 +235,12 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.doesNotMatch(detail, /title="Chat about this email message"|data-email-message-actions="true"/);
   assert.match(detail, /data-email-selection-chat-action="true"[\s\S]*onTextSelection\(\{ quote, startOffset, endOffset \}\)/);
   assert.match(detail, /applyEmailBodyHighlights\(frameRef\.current\?\.contentDocument, highlights, selectionNavigation \?\? activeSelection\)/);
+  const conversationBuilderStart = detail.indexOf("export function conversationMessagesForDetail");
+  const conversationBuilderEnd = detail.indexOf("const emailBodyLoadingStyle", conversationBuilderStart);
+  assert.ok(conversationBuilderStart >= 0 && conversationBuilderEnd > conversationBuilderStart);
+  const conversationBuilder = detail.slice(conversationBuilderStart, conversationBuilderEnd);
+  assert.doesNotMatch(conversationBuilder, /local_replies|source:\s*"local"|inheritedThreadID/);
+  assert.match(conversationBuilder, /threadMessages\.length > 0 \? threadMessages : \[message\]/);
 
   assert.match(surface, /listEmailThreadChatGroups\(\{[\s\S]*messageID: message\.id,[\s\S]*threadID: message\.thread_id/);
   assert.doesNotMatch(surface, /listEmailCollaborations|getEmailCollaboration|ListNodeProjections|threadMessages/);
