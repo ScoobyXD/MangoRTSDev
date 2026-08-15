@@ -16,6 +16,7 @@ import {
 import "./importerUIResources/importToMango.css";
 import "./importerUIResources/dotCursor.css";
 import { InlineSvg } from "./importerUIResources/inlineSVG";
+import growthTreeURL from "./importerUIResources/vectors/growthTree?url"
 import { useImportSequencer, createImportCommands } from "./importerUIResources/importerUIAPI";
 import type { ImportToMangoHandle, ImportToMangoProps, MangoSettings } from "./importerUIResources/types";
 
@@ -384,7 +385,7 @@ export const ImportToMango = forwardRef<ImportToMangoHandle, ImportToMangoProps>
                 <input className="uml-state uml-desk uml-desk--cfg" type="radio" name="uml-desk" id="uml-desk-cfg" checked={deskOpen} onChange={() => setDeskOpen(true)} />
                 <label className="uml-cog dot-cursor" htmlFor="uml-desk-cfg">
                   <span className="uml-sr">Import configuration</span>
-                  <InlineSvg src="./importerUIResources/vectors/growthTree.svg" className="uml-cog__svg" />
+                  <InlineSvg src={growthTreeURL} className="uml-cog__svg" />
                 </label>
 
                 <div className="uml-scene" aria-hidden="true">
@@ -463,7 +464,7 @@ export const ImportToMango = forwardRef<ImportToMangoHandle, ImportToMangoProps>
                       <i className="uml-tape uml-tape--back" />
                     </div>
 
-                    <InlineSvg src="./importerUIResources/vectors/growthTree.svg" className="uml-tree" />
+                    <InlineSvg src={growthTreeURL} className="uml-tree" />
                   </div>
                 </div>
 
