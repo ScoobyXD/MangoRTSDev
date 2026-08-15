@@ -16,7 +16,7 @@ import {
 import "./importerUIResources/importToMango.css";
 import "./importerUIResources/dotCursor.css";
 import { InlineSvg } from "./importerUIResources/inlineSVG";
-import growthTreeURL from "./importerUIResources/vectors/growthTree?url"
+import growthTreeURL from "./importerUIResources/vectors/growthTree.svg?url"
 import { useImportSequencer, createImportCommands } from "./importerUIResources/importerUIAPI";
 import type { ImportToMangoHandle, ImportToMangoProps, MangoSettings } from "./importerUIResources/types";
 
