@@ -32,7 +32,7 @@
 
 // TODO: Determine if the "Node" import from Tiptap core may be required in the future.
 import { Editor, JSONContent } from "@tiptap/core";
-import { Markdown, MarkdownToken } from "@tiptap/markdown";
+import { Markdown } from "@tiptap/markdown"; // MarkdownToken appears in the TipTap documentation, but it doesn't seem available yet.
 
 // Helper code to allow us to determine the currently active company.
 import {
@@ -99,7 +99,7 @@ import {
 
 // Import the Papaparse CSV Parser.
 import Papa, {
-    type ParseLocalConfig,
+    type ParseConfig,
     type ParseStepResult,
     type ParseResult,
     type Parser,
@@ -151,8 +151,9 @@ const CLICKUP_API_URLS = {
 } as const;
 export type ClickUpAPIEndpoints = keyof typeof CLICKUP_API_URLS;
 
+// Rows are parsed with headers (creating Records) but with dynamic typing disabled, resulting in string types on both sides of the Record.
 export interface ISpecializedParser {
-    (parsedCSVROW: ParseStepResult) : standardizedImportFields;
+    (parsedCSVROW: ParseStepResult<Record<string, string>>) : standardizedImportFields;
 };
 
 
@@ -275,7 +276,7 @@ async function convertMarkdownToMangoTiptap(markdownString: string, targetResour
     const markdownAwareMangoAttachmentImageNode = MangoAttachmentImage.extend({
 
         markdownTokenName: "image",
-        parseMarkdown: (token: MarkdownToken) => { // Also accepts "helpers"
+        parseMarkdown: (token) => { // Also accepts "helpers"
 
             // Token attributes are provided by Marked/MarkedJS, the Markdown parsing library
             // Tiptap's Markdown parsing utility relies on.
@@ -333,7 +334,7 @@ async function convertMarkdownToMangoTiptap(markdownString: string, targetResour
     });
 
     // TODO: Properly handle issues with opening a new editor.
-    if(!conversionEditor){
+    if(!(conversionEditor?.markdown)){
         throw new Error("Oops, something went wrong while setting up an editor for conversion!");
     }
 
@@ -391,7 +392,7 @@ async function convertMarkdownToMangoTiptap(markdownString: string, targetResour
             if(currentNode.type === "mangoAttachmentImage"){
 
                 // Remove the current node from it's parent if it has one.
-                if(currentDepthTrackedNode.parent){
+                if(currentDepthTrackedNode.parent?.content){
                     const currentNodeIndexInParent = currentDepthTrackedNode.parent.content.indexOf(currentNode);
                     currentDepthTrackedNode.parent.content.splice(currentNodeIndexInParent, 1);
                 }
@@ -547,7 +548,7 @@ export async function locateCSVHeaders(csv: File): Promise<string[]>{
         preview: 2,
     };
 
-    return (await wrappedCSVParse(csv, headersOnlyCSVConfig))?.meta?.fields
+    return (await wrappedCSVParse(csv, headersOnlyCSVConfig))?.meta?.fields ?? [];
 
 }
 
@@ -572,12 +573,12 @@ export async function countLinesInCSV(csv: File): Promise<number>{
 }
 
 // TODO: Identify optimal type of parse config.
-export function wrappedCSVParse(csv: File, parseConfig: ParseLocalConfig): Promise<ParseResult>{
+export function wrappedCSVParse(csv: File, parseConfig: ParseConfig<Record<string, string>>): Promise<ParseResult<Record<string, string>>>{
 
     // TODO: Add proper error handling.
     return new Promise((resolve) => {
 
-        function parsedCSVComplete(results: ParseResult){ // Also provides "file".
+        function parsedCSVComplete(results: ParseResult<Record<string, string>>){ // Also provides "file".
             resolve(results);
         }
 
@@ -608,7 +609,7 @@ export function setupSpecializedParserAndDisplayProgressCall(specializedParser: 
     // TODO: Remove this when the number of parsed lines is not used as the end condition.
     let numberOfParsedLines = 0;
 
-    return async (results: ParseStepResult, parser: Parser) => {
+    return async (results: ParseStepResult<Record<string, string>>, parser: Parser) => {
 
         // Pause the parser to handle the current input.
         parser.pause();
@@ -687,7 +688,7 @@ export function setupSpecializedParserAndDisplayProgressCall(specializedParser: 
 }
 
 // TODO: Remove .data accessors when the type of the .data can be determined and parsed in directly.
-export function parseLinearTask(parsedCSVRow: ParseStepResult): standardizedImportFields{
+export function parseLinearTask(parsedCSVRow: ParseStepResult<Record<string, string>>): standardizedImportFields{
     return {
         title: parsedCSVRow.data["Title"],
         documentContent: parsedCSVRow.data["Description"],
@@ -696,7 +697,7 @@ export function parseLinearTask(parsedCSVRow: ParseStepResult): standardizedImpo
 }
 
 // TODO: Remove .data accessors when the type of the .data can be determined and parsed in directly.
-export function parseClickUpTask(parsedCSVRow: ParseStepResult): standardizedImportFields{
+export function parseClickUpTask(parsedCSVRow: ParseStepResult<Record<string, string>>): standardizedImportFields{
 
     // Split the folder hierarchy into pieces and remove any surrounding whitespace (done using "map").
     const folderHierarchy = parsedCSVRow.data["Space Name"]?.split(">")?.map( (value: string) => value.trim() ) || [];

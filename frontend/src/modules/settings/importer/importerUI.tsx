@@ -3,6 +3,8 @@
 // - This file was generated in part by an assortment of LLM models with some supervision near 2026-08-11.
 
 import {
+  type Ref,
+  type MutableRefObject,
   forwardRef,
   useCallback,
   useEffect,
@@ -15,7 +17,7 @@ import "./importerUIResources/importToMango.css";
 import "./importerUIResources/dotCursor.css";
 import { InlineSvg } from "./importerUIResources/inlineSVG";
 import { useImportSequencer, createImportCommands } from "./importerUIResources/importerUIAPI";
-import type { ImportToMangoHandle, ImportToMangoProps, MangoSettings, ImportToMangoPropsCreator } from "./importerUIResources/types";
+import type { ImportToMangoHandle, ImportToMangoProps, MangoSettings } from "./importerUIResources/types";
 
 import { createMangoImporterProps } from "./importerConfig";
 
@@ -23,6 +25,31 @@ export type {
   MangoSource, MangoTextOption, MangoToggleOption, MangoOption, MangoSettings,
   BrowseItem, MangoError, ImportToMangoHandle, ImportToMangoProps,
 } from "./importerUIResources/types";
+
+
+// TODO: Verify usage and refactor into a more React-like pattern.
+// A helper function
+function mergeRefs<T>(...refs: readonly Ref<T>[]): (refSetParameter: T | null) => void {
+
+  return (refSetParameter: T | null): void => {
+
+    for(const ref of refs){
+
+      // If the ref is a callback ref, call it with the passed in parameter.
+      if(typeof ref === "function"){
+        ref(refSetParameter);
+      }
+
+      // If the ref takes a value, set it's current value to the passed in parameter.
+      else if(ref != null){
+
+        // A workaround for React 18 to avoid rewriting later React structure.
+        (ref as MutableRefObject<T | null>).current = refSetParameter;
+      }
+    }
+
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 // THE COMPONENT — pure UI state and rendering only.
@@ -39,31 +66,18 @@ export type {
 
 // Preferred!
 // This is the simplified importer that uses the default function behavior specified in the importer configuration.
-export const SimpleMangoImporter = forwardRef<ImportToMangoHandle, ImportToMangoPropsCreator>(
+export const SimpleMangoImporter = forwardRef<ImportToMangoHandle, null>(
   function SimpleMangoImporter(
-    {
-      mangoImporterPropCreator=createMangoImporterProps
-    },
-    ref
+    forwardedRef
   ) {
-    
-    const mangoProps = mangoImporterPropCreator(ref);
+
+    const internalRef = useRef<ImportToMangoHandle | null>(null);
+    const mangoProps = createMangoImporterProps(internalRef);
 
     // TODO: Verify merging of refs.
+    const setRefs = mergeRefs(internalRef, forwardedRef);
     return (
-      <ImportToMango
-        ref={ref}
-        title={mangoProps.title ?? "Import to Mango"}
-        subtitle={mangoProps.subtitle ?? "Import your data from Linear and ClickUp"}
-        sources={mangoProps.sources}
-        options={mangoProps.options}
-        onFileSelected={mangoProps.onFileSelected}
-        onApiKeySubmit={mangoProps.onApiKeySubmit}
-        onConfirm={mangoProps.onConfirm}
-        onCancel={mangoProps.onCancel}
-        onRetry={mangoProps.onRetry}
-        onOpenWorkspace={mangoProps.onOpenWorkspace}
-      />
+      <ImportToMango {...mangoProps} ref={setRefs}/>
     );
   },
 );
