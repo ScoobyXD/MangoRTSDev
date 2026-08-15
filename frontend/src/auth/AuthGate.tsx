@@ -28,7 +28,7 @@ import { listCompanyUsers, markCommunicationsWorkspaceResourcesStale } from "../
 import { normalizeAppPath, parseDeepLinkRoute } from "../app/deepLinkRoutes";
 import { RecycleBinPage } from "../pages/recycle-bin/RecycleBinPage";
 import { RealtimeHealthChrome } from "../modules/realtime/RealtimeHealthChrome";
-import { SimpleMangoImporter } from "../modules/settings/importer/importUI"
+import { SimpleMangoImporter } from "../modules/settings/importer/importerUI"
 
 type PendingChallenge = Extract<LoginResult, { status: "new_password_required" }> | null;
 type AppLayoutModule = typeof import("../app/applayout");
