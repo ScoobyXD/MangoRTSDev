@@ -1012,6 +1012,7 @@ export function HomeMailWorkspace({
             ) : (
               <MessageDetail
                 message={selectedMessage}
+                threadMessages={selectedThreadMessages}
                 nodes={nodes}
                 companyID={companyID}
                 sharedInboxID={selectedMessage.collaboration_shared_inbox_id || (activeViewID.startsWith("shared:") ? activeViewID.slice("shared:".length).trim() : undefined)}

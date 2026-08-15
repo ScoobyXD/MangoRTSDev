@@ -498,7 +498,8 @@ test("mail thread detail supports exact-message replies, saved editor sizing, an
   const homeMailWorkspace = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeMailWorkspace.tsx"), "utf8");
   const homeStyles = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/homeStyles.ts"), "utf8");
 
-  assert.match(homeParts, /normalizeEmailThreadMessages\(candidates, "oldest"\)/);
+  assert.match(homeParts, /const sourceMessages = threadMessages\.length > 0 \? threadMessages : \[message\]/);
+  assert.match(homeParts, /normalizeEmailThreadMessages\(sourceMessages\.map/);
   assert.match(homeParts, /aria-label="Email conversation order"/);
   assert.match(homeParts, /setConversationOrder\("oldest"\)[\s\S]*\[conversationIdentity\]/);
   assert.match(homeParts, /onReply\(message\)/);

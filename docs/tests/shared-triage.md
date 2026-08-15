@@ -14,7 +14,7 @@
 12. A chat send reuses the exact shared-mailbox stored message when present, otherwise fetches only that exact provider message, and never calls triage conversion or queues remaining-thread ingestion.
 13. After the backend acknowledges a chat, the open rail shows it immediately in its exact Node and text-box group without waiting for realtime or another Node read.
 14. Every saved highlighted-email chat renders its exact stored quote and offsets as a lasting highlight in the email body.
-15. Selecting a conversation passes its exact durable `email_thread_id` into the same stored-thread read used by the Node email column and shows every related `email_messages` row once in `message_order`; the left mailbox list remains one row for that thread.
+15. Selecting a conversation passes its exact durable `email_thread_id` into the same stored-thread read used by the Node email column and passes those rows into the detail renderer, which shows every related `email_messages` row once in `message_order` and never promotes locally remembered sent replies into message cards; the left mailbox list remains one row for that thread.
 16. A quoted copy inside one message body is never a substitute for another stored message; every `email_messages` row remains its own visible card.
 
 Last updated: 2026-08-12

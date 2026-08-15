@@ -28,7 +28,7 @@ import {
 import { downloadEmailAttachment, parseEmailAddressList, type CommunicationsSharedInbox, type CommunicationsSharedInboxRACIRole, type CommunicationsSharedInboxRACIPrincipalType, type CompanyUser, type EmailAddress, type EmailAttachment, type EmailMessage } from "../../modules/communications/communicationsApi";
 import { CalendarInviteCard } from "../../modules/communications/CalendarInviteCard";
 import { emailAttachmentHasResolvableContent } from "../../modules/communications/emailAttachments";
-import { emailThreadMessageRenderKey, emailThreadMessageSourceLabel, normalizeEmailThreadMessages, type EmailThreadMessageCandidate } from "../../modules/communications/emailThreadMessages";
+import { emailThreadMessageRenderKey, emailThreadMessageSourceLabel, normalizeEmailThreadMessages } from "../../modules/communications/emailThreadMessages";
 import { EditorTabBar } from "../../modules/editor/EditorTabBar";
 import { UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS, type EditorTabID } from "../../modules/editor/editorTabs";
 import { beginEditorAttachmentMutation, finishEditorAttachmentMutation, type EditorAttachmentMutationState } from "../../modules/editor/editorAttachmentPreparation";
@@ -5764,25 +5764,12 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
 
 export function conversationMessagesForDetail(message: EmailMessage, threadMessages: EmailMessage[]): EmailMessage[] {
   const fallbackScopeKey = message.client_source_scope_key?.trim() || "mailbox";
-  const candidates: EmailThreadMessageCandidate[] = [];
   const sourceMessages = threadMessages.length > 0 ? threadMessages : [message];
-  for (const candidate of [...sourceMessages, message]) {
-    const scopeKey = candidate.client_source_scope_key?.trim() || fallbackScopeKey;
-    candidates.push({
-      message: candidate,
-      source: candidate.collaboration_id?.trim() ? "collaboration" : "provider",
-      scopeKey,
-    });
-    for (const reply of candidate.local_replies ?? []) {
-      candidates.push({
-        message: { ...reply, local_replies: undefined },
-        source: "local",
-        scopeKey,
-        inheritedThreadID: candidate.thread_id,
-      });
-    }
-  }
-  return normalizeEmailThreadMessages(candidates, "oldest");
+  return normalizeEmailThreadMessages(sourceMessages.map((candidate) => ({
+    message: candidate,
+    source: candidate.collaboration_id?.trim() ? "collaboration" : "provider",
+    scopeKey: candidate.client_source_scope_key?.trim() || fallbackScopeKey,
+  })), "oldest");
 }
 const emailBodyLoadingStyle: React.CSSProperties = {
   minHeight: 260,
