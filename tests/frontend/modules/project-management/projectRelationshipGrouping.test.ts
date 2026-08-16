@@ -251,6 +251,10 @@ test("Project Logic Gates and Nodes wires universal rows without the old card gr
     resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"),
     "utf8",
   );
+  const universalLinkerControls = readFileSync(
+    resolve(process.cwd(), "frontend/src/modules/editor/UniversalLinkerControls.tsx"),
+    "utf8",
+  );
 
   assert.match(source, /<UniversalGroupingControls/);
   assert.match(source, /buildProjectRelationshipGroupingModel/);
@@ -267,10 +271,17 @@ test("Project Logic Gates and Nodes wires universal rows without the old card gr
   assert.match(source, /relationshipNodePanelRowStyle\(\)/);
   assert.match(source, /function relationshipNodePanelRowStyle\(\): React\.CSSProperties \{[^}]*width: "100%"[^}]*marginLeft: 0/);
   assert.doesNotMatch(source, /function relationshipNodePanelRowStyle\(\): React\.CSSProperties \{[^}]*relationshipRowLeftOffset/);
-  assert.match(source, /aria-label="Create floating Node"/);
-  assert.match(source, /aria-label="Open Universal Picker to link a Node"/);
+  assert.match(source, /<UniversalLinkerControls[\s\S]*createFloatingNodeAriaLabel="Create floating Node in Project"[\s\S]*openPickerAriaLabel="Open Universal Picker to link a Node"/);
+  assert.match(universalLinkerControls, /gridTemplateColumns: "34px minmax\(0, 1fr\)"/);
+  assert.match(universalLinkerControls, /data-universal-linker-floating-node-button="true"[\s\S]*<FloatingNodeIcon/);
+  assert.match(universalLinkerControls, /data-universal-linker-picker-button="true"[\s\S]*<strong aria-hidden="true"[\s\S]*##[\s\S]*Ready! Open universal linker/);
+  assert.doesNotMatch(source, />Link Node</);
+  assert.doesNotMatch(source, /projectRelationshipAddButtonStyle|projectRelationshipAddIconStyle/);
   assert.match(source, /linkTargetTypes=\{\["node"\]\}/);
   assert.match(source, /initialCategory="node"[\s\S]*lockMode/);
+  assert.match(source, /draggable=\{Boolean\(nodeID && \(!referencedGateID \|\| visibleGateID\)\)\}/);
+  assert.match(source, /startProjectRelationshipNodeDrag\(event, relationship, visibleGateID\)/);
+  assert.match(source, /moveLogicGateAssignment\(\{[\s\S]*logicGateID: toLogicGateID,[\s\S]*fromLogicGateID,/);
   assert.doesNotMatch(source, /<ProjectRelationshipSearchPicker/);
   assert.doesNotMatch(source, /Search Explorer Nodes in Logic Gates/);
   assert.match(source, /fetchCompanyExplorerBranchResourceIDs\(apiBase, companyID, payload\.folderID, "node"\)/);

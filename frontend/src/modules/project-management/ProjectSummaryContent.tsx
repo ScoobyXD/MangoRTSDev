@@ -32,6 +32,7 @@ import { getExplorerDropPayloadItems, getExplorerDropPayloadItemType, type Explo
 import { createRequestJSON } from "../api/requestJSON.js";
 import { openEditorEntityLink, type EditorEntityLink } from "../editor/editorEntityLinks.js";
 import { UniversalEntityPicker, type UniversalEntityPickerAnchor, type UniversalEntityPickerMode } from "../editor/UniversalEntityPicker.js";
+import { UniversalLinkerControls } from "../editor/UniversalLinkerControls.js";
 import {
   buildEditorAttachedEmailPayload,
   buildEditorTextBlockChatPayload,
@@ -466,7 +467,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [relationshipDeleteConfirmation, setRelationshipDeleteConfirmation] = useState<{ isLogicGate: boolean; resourceIDs: string[]; label: string; position?: ConfirmActionMenuPosition | null } | null>(null);
   const [relationshipDropActive, setRelationshipDropActive] = useState(false);
   const [relationshipPickerAnchor, setRelationshipPickerAnchor] = useState<UniversalEntityPickerAnchor | null>(null);
-  const [relationshipPickerBusy, setRelationshipPickerBusy] = useState(false);
+  const [relationshipActionBusy, setRelationshipActionBusy] = useState(false);
   const [relationshipGroupings, setRelationshipGroupings] = useState<ProjectRelationshipGroupingSetting[]>(() => (
     DEFAULT_PROJECT_RELATIONSHIP_GROUPINGS.map((grouping) => ({ ...grouping }))
   ));
@@ -544,7 +545,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   useEffect(() => {
     projectLoadRequestRef.current += 1;
     setRelationshipPickerAnchor(null);
-    setRelationshipPickerBusy(false);
+    setRelationshipActionBusy(false);
     projectTextBlockContentRef.current.clear();
     projectTextBlockContentRevisionRef.current = 0;
     setSavingID("");
@@ -1661,18 +1662,18 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     }
   }, [companyID, loadProject, projectID, relationships]);
   const addRelationshipFromPicker = useCallback(async (entity: EditorEntityLink) => {
-    if (entity.entityType !== "node" || !entity.entityID.trim() || relationshipPickerBusy) return;
+    if (entity.entityType !== "node" || !entity.entityID.trim() || relationshipActionBusy) return;
     const resourceID = entity.entityID.trim();
-    setRelationshipPickerBusy(true);
+    setRelationshipActionBusy(true);
     try {
       const ensured = await addRelationshipTargets([{ resourceType: "node", resourceID }]);
       if (ensured.some((relationship) => relationship.resource_type === "node" && relationship.resource_id === resourceID)) {
         setRelationshipPickerAnchor(null);
       }
     } finally {
-      setRelationshipPickerBusy(false);
+      setRelationshipActionBusy(false);
     }
-  }, [addRelationshipTargets, relationshipPickerBusy]);
+  }, [addRelationshipTargets, relationshipActionBusy]);
   const convertTriageMessagesToProject = useCallback(async (
     drag: ReturnType<typeof readTriageMessageDrag>,
     logicGateID = "",
@@ -1903,6 +1904,8 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   }, [selectedRelationshipNodeIDs]);
 
   const createFloatingProjectNode = useCallback(async () => {
+    if (relationshipActionBusy) return;
+    setRelationshipActionBusy(true);
     setError("");
     try {
       const result = await createProjectNode({
@@ -1922,8 +1925,10 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       }
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : "Failed to create floating Node");
+    } finally {
+      setRelationshipActionBusy(false);
     }
-  }, [companyID, loadProject, projectID, relationships.length]);
+  }, [companyID, loadProject, projectID, relationshipActionBusy, relationships.length]);
 
   const createRelationshipNode = useCallback(async () => {
     setRelationshipContextMenu(null);
@@ -2275,7 +2280,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
             type="button"
             role="row"
             data-project-relationship-row="true"
-            draggable={Boolean(nodeID && visibleGateID)}
+            draggable={Boolean(nodeID && (!referencedGateID || visibleGateID))}
             style={relationshipNodeRowStyle(depth, hoveredRelationshipNodeID === relationship.relationship_id, selectedRelationshipNodeIDs.has(relationship.relationship_id))}
             aria-expanded={expanded}
             onClick={(event) => {
@@ -2923,24 +2928,16 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
             </div>
             {activeRightPanelTab === "relationships" ? (
               <div style={projectWorkPanelActionsStyle}>
-                <button
-                  type="button"
-                  aria-label="Create floating Node"
-                  title="Create floating Node"
-                  style={projectRelationshipAddButtonStyle(accent, false)}
-                  onClick={() => { void createFloatingProjectNode(); }}
-                >
-                  <ExplorerRowIcon kind="node" />
-                  <span aria-hidden="true" style={projectRelationshipAddIconStyle}>+</span>
-                  Create floating Node
-                </button>
-                <button
-                  type="button"
-                  aria-label="Open Universal Picker to link a Node"
-                  aria-expanded={Boolean(relationshipPickerAnchor)}
-                  disabled={relationshipPickerBusy}
-                  style={projectRelationshipAddButtonStyle(accent, Boolean(relationshipPickerAnchor))}
-                  onClick={(event) => {
+                <UniversalLinkerControls
+                  busy={relationshipActionBusy}
+                  pickerOpen={Boolean(relationshipPickerAnchor)}
+                  createFloatingNodeAriaLabel="Create floating Node in Project"
+                  openPickerAriaLabel="Open Universal Picker to link a Node"
+                  onCreateFloatingNode={() => {
+                    setRelationshipPickerAnchor(null);
+                    void createFloatingProjectNode();
+                  }}
+                  onTogglePicker={(event) => {
                     if (relationshipPickerAnchor) {
                       setRelationshipPickerAnchor(null);
                       return;
@@ -2948,9 +2945,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                     const bounds = event.currentTarget.getBoundingClientRect();
                     setRelationshipPickerAnchor({ left: bounds.left, top: bounds.bottom + 7 });
                   }}
-                >
-                  Link Node
-                </button>
+                />
                 <UniversalGroupingControls
                   groupings={relationshipGroupings}
                   fieldOptions={PROJECT_RELATIONSHIP_GROUPING_FIELDS}
@@ -4401,31 +4396,6 @@ const projectWorkPanelActionsStyle: React.CSSProperties = {
   alignItems: "center",
   justifyContent: "flex-end",
   gap: 8,
-};
-
-function projectRelationshipAddButtonStyle(accent: string, active: boolean): React.CSSProperties {
-  return {
-    minHeight: 30,
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 6,
-    border: `1px solid ${active ? accent : "rgba(91, 141, 239, 0.34)"}`,
-    borderRadius: 9,
-    background: active ? "rgba(239, 246, 255, 0.96)" : "#ffffff",
-    color: active ? accent : "#1d4ed8",
-    cursor: "pointer",
-    fontFamily: "inherit",
-    fontSize: 11,
-    fontWeight: 900,
-    padding: "0 10px",
-    boxShadow: "2px 2px 7px rgba(174,174,192,0.14), -2px -2px 7px rgba(255,255,255,0.78)",
-  };
-}
-
-const projectRelationshipAddIconStyle: React.CSSProperties = {
-  fontSize: 18,
-  fontWeight: 700,
-  lineHeight: 1,
 };
 
 const columnTitleStyle: React.CSSProperties = {

@@ -38,7 +38,7 @@ Last updated: 2026-08-07
 
 # Process Story: The universal picker references or links an exact typed resource
 
-A user opens the shared universal picker from a Node, Logic Gate, or Project editor, a Node or Project Attach email action, or a selected My Triage/Shared Triage message
+A user opens the shared universal picker from a Node, Logic Gate, or Project editor, the Project Logic Gates / Nodes relationship launcher, a Node or Project Attach email action, or a selected My Triage/Shared Triage message
 ↓
 The picker opens above a transparent dismiss layer, focuses one search field, and shows Nodes, Projects, Logic Gates, and Emails as typed categories
 ↓
@@ -54,7 +54,7 @@ Choosing an email preserves its provider message identity and mailbox scope; if 
 ↓
 The picker creates no generic relationship, translated identity, compose surface, send path, draft path, or compatibility email picker
 
-Last updated: 2026-08-07
+Last updated: 2026-08-16
 
 # Universal Picker Business Logic Laws
 
@@ -74,7 +74,7 @@ UP7 - Clicking an active category selects that exact type and clears the query. 
 
 UP8 - Reference mode permits the four ordinary exact types: Node, Logic Gate, Project, and email message. A Huddle Logic Gate is available only when a relationship host explicitly supplies `huddle_logic_gate` as a legal link target. Link mode permits only the host's typed destination list and never expands that list because a result happens to be visible or pinned.
 
-UP9 - The legal `##` matrix is exact: Node may link to a Logic Gate, Project, or email message; a Logic Gate editor may link to a Project; the normal Logic Gate Huddle tray may link to a Huddle Logic Gate; Project may link to an email message; and a selected email may link to a Node, Logic Gate, or Project. Email-to-email linking is not supported.
+UP9 - The legal `##` matrix is exact: Node may link to a Logic Gate, Project, or email message; a Logic Gate editor may link to a Project; the normal Logic Gate Huddle tray may link to a Huddle Logic Gate; Project may link to a Node from its Logic Gates / Nodes launcher or to an email message from Attach email; and a selected email may link to a Node, Logic Gate, or Project. Email-to-email linking is not supported.
 
 UP10 - A blank All, Nodes, Logic Gates, or Projects view reads the current user's complete company-scoped Pinned tree. A blank contextual Huddles view combines visible Huddle Logic Gate pins with the authorized company Huddle Logic Gate list. It preserves stored folder/pin sibling order and indentation, hides empty folders after type filtering, deduplicates exact Huddle identities, and does not invent recency or write recent-use state.
 
@@ -153,7 +153,7 @@ UP46 - Permission filtering continues through later ranked candidate batches onl
 UP47 - Every search GET is read-only. It must not open a repair transaction, upsert the three default Company Explorer folders, backfill placement, advance policy or folder versions, or fire write triggers. Creation and migration workflows own required default-state repair.
 
 UP48 - The search architecture in UP43 through UP47 is the rule for Mango free-text resource searches: narrow by company, selected type, text, and bounded rank first; authorize that narrowed set last. A listing endpoint that intentionally returns a complete tree is not a free-text search and retains its separately documented tree-visibility behavior.
-UP49 - The Project Logic Gates / Nodes toolbar uses the shared Universal picker in link mode with Nodes as its only enabled target. Selecting a Node calls the typed Project relationship command; its separate Create floating Node button creates and links one Node without requiring a Logic Gate.
+UP49 - The Project Logic Gates / Nodes toolbar renders the exact shared My Triage launcher pair. Its `Ready! Open universal linker` control opens the shared Universal picker locked to `##` link mode with Nodes as its only enabled target, and its compact document-plus control creates and links one floating Node without requiring a Logic Gate.
 
 # Scenarios
 

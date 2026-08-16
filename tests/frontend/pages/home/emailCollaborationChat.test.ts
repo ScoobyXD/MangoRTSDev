@@ -211,6 +211,7 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   const detail = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
   const surface = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/EmailCollaborationChatSurface.tsx"), "utf8");
   const destinationSearch = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/EmailNodeDestinationSearch.tsx"), "utf8");
+  const universalLinkerControls = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/UniversalLinkerControls.tsx"), "utf8");
   const sharedChat = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
   const styles = readFileSync(resolve(process.cwd(), "frontend/src/index.css"), "utf8");
 
@@ -311,7 +312,9 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.doesNotMatch(surface, /parseEditorAttachedEmails|resolveEmailCollaborationChatPlacement/);
 
   assert.match(destinationSearch, /<UniversalEntityPicker[\s\S]*sourceLabel="Email"[\s\S]*initialMode="link"/);
-  assert.match(destinationSearch, /data-email-floating-node-button="true"[\s\S]*aria-label="Create floating node from email"/);
+  assert.match(destinationSearch, /<UniversalLinkerControls[\s\S]*createFloatingNodeAriaLabel="Create floating node from email"/);
+  assert.match(universalLinkerControls, /data-universal-linker-floating-node-button="true"[\s\S]*title="Create floating node"/);
+  assert.match(universalLinkerControls, /data-universal-linker-picker-button="true"[\s\S]*Ready! Open universal linker/);
   assert.match(destinationSearch, /const createFloatingNode[\s\S]*onSubmit\(\{ kind: "standalone" \}\)/);
   assert.match(destinationSearch, /mode === "reference"[\s\S]*onOpenEntity\(entity\)/);
   assert.match(destinationSearch, /entity\.entityType === "node"[\s\S]*onSubmit\(\{ kind: "node", nodeID: entity\.entityID \}\)/);

@@ -166,7 +166,7 @@ Last updated: 2026-08-06
 
 # Process Story: The universal picker references or links exact typed resources
 
-A user opens the universal picker from a resource editor, the Node header's default `##` linker, or a selected My Triage/Shared Triage email
+A user opens the universal picker from a resource editor, the Node header's default `##` linker, the Project Logic Gates / Nodes launcher, or a selected My Triage/Shared Triage email
 ↓
 Single-hashtag reference mode opens or inserts the chosen exact Node, Logic Gate, Project, or email message without creating a relationship; an email reference carries its exact internal message and thread identities
 ↓
@@ -174,11 +174,11 @@ Double-hashtag link mode keeps the source and chosen result's unchanged canonica
 ↓
 An email-to-Node choice uses the established exact-message import command; an email-to-Logic-Gate or email-to-Project choice creates the email Node and then uses the existing typed Logic Gate/Project assignment commands; a Node-to-email or Project-to-email choice uses that owner's established exact-message attachment command
 ↓
-Node-to-Logic-Gate uses the Logic Gate work-assignment command, while Node-to-Project and Logic-Gate-to-Project use `project_relationships`
+Node-to-Logic-Gate uses the Logic Gate work-assignment command, while Node-to-Project, Logic-Gate-to-Project, and Project-to-Node use `project_relationships`; Project-to-Node also creates or reuses the selected Node's current Project/Logic-Gate relationship when that assignment exists
 ↓
 Authorization, cardinality, idempotency, timeline stamps, projections, and events remain owned by those commands; the picker creates no generic edge or resource registry, and an editor chip remains only a reference
 
-Last updated: 2026-08-06
+Last updated: 2026-08-16
 
 # Process Story: Mango relates resources by their exact identities
 
