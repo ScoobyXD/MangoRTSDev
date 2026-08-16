@@ -42,6 +42,7 @@
 40. A quoted copy of an earlier email inside another message body is body content only. Every email viewer collapses reliably detected quoted history by default behind **Show subthread**, which reveals that exact message's complete stored body without changing thread membership. Quoted body content never permits Mango to omit an earlier stored message row.
 41. A Project displays attached threads in one Project-wide email column. Highlighting an unlinked exact message defaults to Create New Textbox; clicking an existing Project textbox highlights that frame, changes the destination field, and the first send atomically creates the exact Project/textbox/message relationship and chat.
 42. Automatic ingestion accepts a post-activation trigger only when that exact provider message is in Inbox or Sent, then reconciles every real member of that provider thread into one durable thread under the exact email connection. Archive-, Draft-, Trash-, Spam-, and other folder-only triggers remain ineligible; another connection's copy never qualifies or merges with it.
+43. Mango sends to and receives from external email addresses without requiring a Mango user or contact. To, Cc, and Bcc accept any syntactically valid address, company users are suggestions only, and Send or Save commits valid address text still pending in a recipient field.
 
 Last updated: 2026-08-16
 

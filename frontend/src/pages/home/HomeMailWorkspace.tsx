@@ -965,6 +965,7 @@ export function HomeMailWorkspace({
       <section style={mailViewerPanelStyle(showDetailResizeHandle)}>
         {compose.open ? (
           <ComposePanel
+            key={compose.draftID}
             compose={compose}
             busy={busy === "send"}
             replyMessage={compose.replyToMessage ?? (selectedMessage?.id === compose.replyToMessageID ? selectedMessage : null)}

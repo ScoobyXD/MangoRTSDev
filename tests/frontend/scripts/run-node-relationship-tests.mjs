@@ -150,6 +150,10 @@ const componentTests = [
     file: resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/emailChatGroupingUI.test.js"),
   },
   {
+    source: resolve(repoRoot, "tests/frontend/pages/home/composeRecipients.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/composeRecipients.test.js"),
+  },
+  {
     source: resolve(repoRoot, "tests/frontend/app/raciTabsLazySection.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/app/raciTabsLazySection.test.js"),
   },
