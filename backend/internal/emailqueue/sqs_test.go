@@ -97,3 +97,11 @@ func TestSQSSendsCompactFIFOMessageAndReceivesOneWithLongPolling(t *testing.T) {
 		t.Fatalf("delete input = %+v", client.deleteInput)
 	}
 }
+
+func TestNilSQSSenderReturnsConfigurationError(t *testing.T) {
+	var queue *SQS
+	err := queue.Send(context.Background(), Message{})
+	if err == nil || err.Error() != "email SQS sender is not configured" {
+		t.Fatalf("nil sender error = %v", err)
+	}
+}

@@ -12,6 +12,8 @@ const moduleLocals = read("infra/modules/mangorts-platform/locals.tf");
 const devMain = read("infra/aws-dev/main.tf");
 const devVariables = read("infra/aws-dev/variables.tf");
 const devWorkflow = read(".github/workflows/deploy-dev.yml");
+const localBackend = read("scripts/start_local_cognito_backend.ps1");
+const apiMain = read("backend/cmd/miraeopus-api/main.go");
 
 test("DEV email work queue and work DLQ are encrypted FIFO with fixed SQS delivery", () => {
   for (const queue of ["email_work", "email_work_dlq"]) {
@@ -81,6 +83,23 @@ test("normal DEV deploy runs the queues and one worker while reconciliation stay
 	assert.match(deployPolicy, /ReadQueueNames[\s\S]*?sqs:ListQueues/);
 	assert.match(deployPolicy, /ReadSchedulerCollections[\s\S]*?scheduler:ListScheduleGroups[\s\S]*?scheduler:ListSchedules/);
   assert.match(sqs, /resource "aws_sqs_queue" "email_work_dlq"[\s\S]*?depends_on = \[aws_iam_role_policy_attachment\.github_deploy_email_sqs\]/);
+});
+
+test("cloud-integrated local backend reuses the deployed DEV queue", () => {
+  assert.match(localBackend, /Get-ContainerEnvironmentValue -Container \$backendContainer -Name "MANGORTS_EMAIL_WORK_QUEUE_URL"/);
+  assert.match(localBackend, /\$env:MANGORTS_EMAIL_WORK_QUEUE_URL = \$emailWorkQueueURL/);
+  assert.match(localBackend, /throw "The deployed DEV backend task does not provide MANGORTS_EMAIL_WORK_QUEUE_URL/);
+  assert.doesNotMatch(localBackend, /First-NonBlank @\(\s*\$env:MANGORTS_EMAIL_WORK_QUEUE_URL/);
+  assert.match(localBackend, /Unable to list the deployed DEV backend task definition/);
+  assert.match(localBackend, /Unable to read the deployed DEV backend task definition/);
+  assert.doesNotMatch(localBackend, /MANGORTS_EMAIL_WORK_QUEUE_URL\s*=\s*"https:\/\//);
+});
+
+test("API represents a missing concrete SQS client as a nil sender", () => {
+  assert.match(apiMain, /var emailQueueSender emailqueue\.Sender/);
+  assert.match(apiMain, /if emailSQS != nil \{\s*emailQueueSender = emailSQS\s*\}/);
+  assert.match(apiMain, /EmailQueue:\s+emailQueueSender/);
+  assert.doesNotMatch(apiMain, /EmailQueue:\s+emailSQS/);
 });
 
 test("worker and schedule cannot enable before final schema and external dependencies", () => {

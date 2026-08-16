@@ -61,6 +61,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	var emailQueueSender emailqueue.Sender
+	if emailSQS != nil {
+		emailQueueSender = emailSQS
+	}
 	if runtimeRole == "email-worker" && emailSQS == nil {
 		log.Fatal("MANGORTS_EMAIL_WORK_QUEUE_URL is required for the email worker")
 	}
@@ -87,7 +91,7 @@ func main() {
 		AttachmentStorage:           httpapi.NewS3AttachmentStorageFromEnv(),
 		RealtimeTicketSecret:        secretEnvValue("MANGORTS_REALTIME_TICKET_SECRET", "realtime_ticket_secret", "ticket_secret", "MANGORTS_REALTIME_TICKET_SECRET"),
 		RealtimeBackplane:           realtimeBackplane,
-		EmailQueue:                  emailSQS,
+		EmailQueue:                  emailQueueSender,
 		EmailWorkerOnly:             runtimeRole == "email-worker",
 		EmailWorkerExternalRealtime: runtimeRole == "email-worker" && externalRealtime,
 	})

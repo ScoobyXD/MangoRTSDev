@@ -191,13 +191,13 @@ function Get-LatestBackendContainerDefinition {
     --output json
 
   if ($LASTEXITCODE -ne 0) {
-    return $null
+    throw "Unable to list the deployed DEV backend task definition. Run aws sso login for the selected profile and verify ECS read access."
   }
 
   $list = $raw | ConvertFrom-Json
   $taskDefinitionArn = @($list.taskDefinitionArns | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)[0]
   if ([string]::IsNullOrWhiteSpace($taskDefinitionArn)) {
-    return $null
+    throw "No deployed DEV backend task definition was found for $family."
   }
 
   $taskRaw = & aws ecs describe-task-definition `
@@ -207,11 +207,15 @@ function Get-LatestBackendContainerDefinition {
     --output json
 
   if ($LASTEXITCODE -ne 0) {
-    return $null
+    throw "Unable to read the deployed DEV backend task definition. Run aws sso login for the selected profile and verify ECS read access."
   }
 
   $task = $taskRaw | ConvertFrom-Json
-  return @($task.taskDefinition.containerDefinitions | Where-Object { $_.name -eq "backend" } | Select-Object -First 1)[0]
+  $container = @($task.taskDefinition.containerDefinitions | Where-Object { $_.name -eq "backend" } | Select-Object -First 1)[0]
+  if ($null -eq $container) {
+    throw "The deployed DEV backend task definition has no backend container."
+  }
+  return $container
 }
 
 function Get-ContainerEnvironmentValue {
@@ -285,10 +289,7 @@ $localEmailFromCandidate = First-NonBlank @(
   $MangoLocalEmailFrom,
   $tfvarsEmailFrom
 )
-$backendContainer = $null
-if (-not $SkipNylas -or [string]::IsNullOrWhiteSpace($localEmailFromCandidate)) {
-  $backendContainer = Get-LatestBackendContainerDefinition -ProjectName $projectName -EnvironmentName $environmentName
-}
+$backendContainer = Get-LatestBackendContainerDefinition -ProjectName $projectName -EnvironmentName $environmentName
 
 $appURL = First-NonBlank @(
   $AppURL,
@@ -303,6 +304,10 @@ $emailFromAddress = First-NonBlank @(
   $tfvarsEmailFrom,
   (Get-ContainerEnvironmentValue -Container $backendContainer -Name "MANGORTS_EMAIL_FROM")
 )
+$emailWorkQueueURL = Get-ContainerEnvironmentValue -Container $backendContainer -Name "MANGORTS_EMAIL_WORK_QUEUE_URL"
+if ([string]::IsNullOrWhiteSpace($emailWorkQueueURL)) {
+  throw "The deployed DEV backend task does not provide MANGORTS_EMAIL_WORK_QUEUE_URL. Deploy DEV with email_sqs_enabled=true before starting the cloud-integrated local backend."
+}
 
 $nylasClientID = First-NonBlank @(
   $MangoLocalNylasClientID,
@@ -375,6 +380,7 @@ $env:ALLOW_INMEMORY_FALLBACK = "false"
 $env:MANGORTS_ADDR = ":8080"
 $env:MANGORTS_ALLOWED_ORIGIN = $AllowedOrigin
 $env:MANGORTS_APP_URL = $appURL
+$env:MANGORTS_EMAIL_WORK_QUEUE_URL = $emailWorkQueueURL
 if ([string]::IsNullOrWhiteSpace($emailFromAddress)) {
   Remove-Item Env:\MANGORTS_EMAIL_FROM -ErrorAction SilentlyContinue
 } else {
@@ -477,6 +483,7 @@ if ($nylasConfigured) {
 if ($AwsProfile) {
   Write-Host "AWS profile: $AwsProfile"
 }
+Write-Host "Email SQS: using the deployed DEV work queue."
 
 Push-Location (Join-Path $repoRoot "backend")
 try {

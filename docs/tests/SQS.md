@@ -14,7 +14,7 @@ The worker deletes the SQS message only after that durable commit succeeds
 ↓
 Valkey notifies the exact open mailbox, and the browser reloads PostgreSQL truth
 
-Last updated: 2026-08-09
+Last updated: 2026-08-16
 
 ## The simple route
 
@@ -36,6 +36,8 @@ SQS owns delivery and retries. PostgreSQL stores results and prevents duplicate 
 10. The worker stores the provider result and exact typed relationships in PostgreSQL before acknowledging SQS.
 11. The required `realtime_outbox` notice must also be durable before SQS acknowledgement. Valkey publication itself happens afterward and does not repeat provider work.
 12. A repeated delivery sees the same permanent job identity and does not repeat completed provider work.
+13. The cloud-integrated local backend startup reads the exact deployed DEV queue URL from the existing DEV API task definition, exports it to the local API process, and fails before startup when DEV has no queue; a developer never copies or stores that URL manually.
+14. An API process without an email queue carries a real nil sender and returns a controlled queue error when ingestion is requested; it never calls a method on a nil SQS pointer.
 
 ## Retry timing
 
