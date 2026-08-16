@@ -51,8 +51,9 @@ Later membership changes do not rewrite that Huddle Node, while current source d
 19. The Node email view uses the same atomic rule when the user chooses an existing text-box chat column; a failed relationship or chat write leaves both absent.
 20. The email-draft scope cutover deletes only obsolete draft rows that cannot name their required exact owner or exact Node and source message, and retires only their typed `email_draft` attachment relationships before deletion; it never invents an endpoint or changes a valid email relationship.
 21. A stored-thread reader or inline email reference carries the exact internal `email_thread_id`; a provider message ID or provider thread ID never selects a durable Mango thread, and a missing durable ID fails instead of falling back to a provider or collaboration lookup.
+22. Completing a Mango-originated Sent message keeps its original exact `email_message` attachment links and retires only redundant imported links for that same internal message; an attachment with another live owner remains live.
 
-Last updated: 2026-08-14
+Last updated: 2026-08-16
 
 # Process Story: One email thread can appear in several Nodes and Projects while message work stays local
 
@@ -63,6 +64,8 @@ Each newly completed message inherits every distinct Node-wide and Project-wide 
 Inside each Node or Project, one exact message may link to one exact local textbox; the same message may link to a different textbox in another owner
 ↓
 Reply or Reply all remains in that exact resource context, while any Node-shared draft remains keyed directly by the exact Node, thread, and source message
+↓
+Completing a Mango-originated Sent message keeps its original exact attachment links and removes only redundant imported links for that same internal message
 ↓
 Opening a highlighted-email chat preview creates no relationship or resource
 ↓
@@ -76,7 +79,7 @@ Every endpoint keeps its literal typed identity; no registry, surrogate identity
 ↓
 The forward draft cutover removes only legacy drafts without the exact identities required by this model and retires only their typed draft attachment links
 
-Last updated: 2026-08-14
+Last updated: 2026-08-16
 # Process Story: Policy inheritance follows typed parents without moving permissions into Explorer
 
 A permission or RACI resolver receives one exact resource type and ID

@@ -30,6 +30,7 @@ type Message struct {
 	JobID             string    `json:"job_id,omitempty"`
 	CompanyID         string    `json:"company_id,omitempty"`
 	EmailConnectionID string    `json:"email_connection_id,omitempty"`
+	EnqueueSourceID   string    `json:"enqueue_source_id,omitempty"`
 	ReconciliationID  string    `json:"reconciliation_id,omitempty"`
 	ScanStartedAt     time.Time `json:"scan_started_at,omitempty"`
 	LowerBound        time.Time `json:"lower_bound,omitempty"`
@@ -73,6 +74,7 @@ func (m Message) DeduplicationID() string {
 		m.JobID,
 		m.ReconciliationID,
 		m.EmailConnectionID,
+		m.EnqueueSourceID,
 		m.ConnectionCursor,
 		m.ProviderPageToken,
 	}, "\x1f")

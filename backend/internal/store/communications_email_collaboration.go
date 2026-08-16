@@ -365,7 +365,7 @@ func mergeEmailMessageSnapshot(existing, incoming domain.EmailMessageSnapshot) d
 		merged.ReplyTo = incoming.ReplyTo
 	}
 	if len(incoming.Attachments) > 0 {
-		merged.Attachments = incoming.Attachments
+		merged.Attachments = mergeEmailAttachmentSnapshots(existing.Attachments, incoming.Attachments, incoming.DownloadComplete)
 	}
 	if len(incoming.Folders) > 0 {
 		merged.Folders = incoming.Folders
@@ -379,4 +379,60 @@ func mergeEmailMessageSnapshot(existing, incoming domain.EmailMessageSnapshot) d
 	}
 	merged.DownloadComplete = existing.DownloadComplete || incoming.DownloadComplete
 	return merged
+}
+
+func mergeEmailAttachmentSnapshots(
+	existing, incoming []domain.EmailAttachmentSnapshot,
+	incomingDownloadComplete bool,
+) []domain.EmailAttachmentSnapshot {
+	existing = normalizeEmailAttachmentSnapshots(existing)
+	incoming = normalizeEmailAttachmentSnapshots(incoming)
+	if len(incoming) == 0 {
+		return existing
+	}
+	if len(existing) == 0 {
+		return incoming
+	}
+
+	merged := append([]domain.EmailAttachmentSnapshot(nil), existing...)
+	byProviderID := make(map[string]int, len(merged))
+	for index, attachment := range merged {
+		if providerAttachmentID := strings.TrimSpace(attachment.ID); providerAttachmentID != "" {
+			byProviderID[providerAttachmentID] = index
+		}
+	}
+	for _, attachment := range incoming {
+		providerAttachmentID := strings.TrimSpace(attachment.ID)
+		index, matched := byProviderID[providerAttachmentID]
+		if providerAttachmentID == "" || !matched {
+			merged = append(merged, attachment)
+			if providerAttachmentID != "" {
+				byProviderID[providerAttachmentID] = len(merged) - 1
+			}
+			continue
+		}
+
+		existingAttachmentID := strings.TrimSpace(merged[index].AttachmentID)
+		if incomingDownloadComplete {
+			if existingAttachmentID != "" {
+				attachment.AttachmentID = existingAttachmentID
+			}
+		} else if strings.TrimSpace(attachment.AttachmentID) == "" {
+			attachment.AttachmentID = existingAttachmentID
+		}
+		merged[index] = attachment
+	}
+	return normalizeEmailAttachmentSnapshots(merged)
+}
+
+func emailAttachmentSnapshotsHaveMangoIDs(attachments []domain.EmailAttachmentSnapshot) bool {
+	if len(attachments) == 0 {
+		return false
+	}
+	for _, attachment := range attachments {
+		if strings.TrimSpace(attachment.AttachmentID) == "" {
+			return false
+		}
+	}
+	return true
 }

@@ -36,7 +36,7 @@ func (f *fakeSQSAPI) DeleteMessage(_ context.Context, input *sqs.DeleteMessageIn
 func TestMessageUsesExactPermanentConnectionGroupAndStableDeduplication(t *testing.T) {
 	message := Message{
 		SchemaVersion: SchemaVersion,
-		Kind:          KindIngestion, JobID: "job-1", CompanyID: "company-1", EmailConnectionID: "connection-1",
+		Kind:          KindIngestion, JobID: "job-1", CompanyID: "company-1", EmailConnectionID: "connection-1", EnqueueSourceID: "webhook:receipt-1",
 	}
 	if err := message.Validate(); err != nil {
 		t.Fatal(err)
@@ -46,6 +46,11 @@ func TestMessageUsesExactPermanentConnectionGroupAndStableDeduplication(t *testi
 	}
 	if got, again := message.DeduplicationID(), message.DeduplicationID(); got == "" || got != again {
 		t.Fatalf("dedup IDs are not stable: %q %q", got, again)
+	}
+	reopened := message
+	reopened.EnqueueSourceID = "reconciliation:scan-2"
+	if reopened.DeduplicationID() == message.DeduplicationID() {
+		t.Fatal("a reopened ingestion generation reused the prior FIFO deduplication ID")
 	}
 	control := Message{SchemaVersion: SchemaVersion, Kind: KindReconciliationControl, ReconciliationID: "scan-1", ScanStartedAt: time.Now().UTC()}
 	if got := control.GroupID(); got != ReconciliationControlGroup {

@@ -88,14 +88,14 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 	}
 	receiptKey, receiptFirstSeenAt, duplicate := s.nylasWebhooks.remember(body, time.Now().UTC())
 	if duplicate {
-		hasQueueableCreation := false
+		hasQueueableIngestion := false
 		for _, change := range changes {
-			if change.Trigger == "message.created" && strings.TrimSpace(change.MessageID) != "" {
-				hasQueueableCreation = true
+			if (change.Trigger == "message.created" || change.Trigger == "message.updated") && strings.TrimSpace(change.MessageID) != "" {
+				hasQueueableIngestion = true
 				break
 			}
 		}
-		if !hasQueueableCreation {
+		if !hasQueueableIngestion {
 			writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 			return
 		}
@@ -367,7 +367,7 @@ func (s *Server) applyCommunicationsWebhookChange(ctx context.Context, duplicate
 		}
 		return nil
 	}
-	if change.Trigger == "message.created" && change.MessageID != "" &&
+	if (change.Trigger == "message.created" || change.Trigger == "message.updated") && change.MessageID != "" &&
 		grantContext.connection.CompanyID != "" && grantContext.connection.EmailConnectionID != "" {
 		if s.emailQueue == nil {
 			return errors.New("email SQS sender is not configured")
@@ -381,14 +381,15 @@ func (s *Server) applyCommunicationsWebhookChange(ctx context.Context, duplicate
 		if err != nil {
 			return fmt.Errorf("queue live email ingestion: %w", err)
 		}
-		if !created && (job.Status != store.CommunicationsEmailIngestionJobAccepted || job.SQSAcceptedTimestamp != nil ||
-			job.EnqueueSourceID != "webhook:"+strings.TrimSpace(receiptKey)) {
+		if created || (job.Status == store.CommunicationsEmailIngestionJobAccepted && job.SQSAcceptedTimestamp == nil &&
+			job.EnqueueSourceID == "webhook:"+strings.TrimSpace(receiptKey)) {
+			if err := s.enqueueCommunicationsEmailIngestionJob(ctx, job); err != nil {
+				return fmt.Errorf("queue live email ingestion: %w", err)
+			}
+		}
+		if change.Trigger == "message.created" {
 			return nil
 		}
-		if err := s.enqueueCommunicationsEmailIngestionJob(ctx, job); err != nil {
-			return fmt.Errorf("queue live email ingestion: %w", err)
-		}
-		return nil
 	}
 	if duplicate {
 		return nil

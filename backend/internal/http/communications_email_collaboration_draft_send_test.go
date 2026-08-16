@@ -55,15 +55,71 @@ func TestEmailCollaborationSharedDraftSendUsesExactDraftEnvelopeAndFinalizes(t *
 	if err != nil {
 		t.Fatal(err)
 	}
+	storage := newFakeAttachmentObjectStorage()
+	attachmentID := seedEmailAttachmentForCommunicationsTest(
+		t, repo, storage, creator.UserID, companyID, draft.DraftID, "shared-sent.txt", "text/plain", []byte("shared sent attachment"),
+	)
 
 	nylas := &fakeNylasClient{message: NylasMessage{
 		ID: "shared-send-source", ThreadID: "shared-send-thread", Subject: "Provider subject", Date: 20,
 		From: []NylasEmailAddress{{Name: "Provider sender", Email: "provider-sender@example.com"}},
 		To:   []NylasEmailAddress{{Email: creator.Email}},
 		Cc:   []NylasEmailAddress{{Email: "team@example.com"}},
+	}, sendResponseAttachments: []NylasAttachment{
+		{ID: "shared-provider-attachment", Filename: "shared-sent.txt"},
+		{ID: "shared-provider-only", Filename: "provider-only.txt"},
 	}}
+	importedAttachmentID := store.ImportedEmailAttachmentID(
+		companyID, collaboration.EmailThreadID, "sent-message", "shared-provider-attachment", "", "shared-sent.txt",
+	)
+	providerOnlyAttachmentID := store.ImportedEmailAttachmentID(
+		companyID, collaboration.EmailThreadID, "sent-message", "shared-provider-only", "", "provider-only.txt",
+	)
+	nylas.onSend = func(NylasSendMessageRequest) {
+		storage.objects["shared-worker-first-import"] = fakeAttachmentObject{contentType: "text/plain", body: []byte("worker")}
+		storage.objects["shared-worker-first-provider-only"] = fakeAttachmentObject{contentType: "text/plain", body: []byte("provider only")}
+		thread, err := repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+			CompanyID: companyID, PersonalUserID: creator.UserID, PersonalAccountEmail: creator.Email,
+			AccountEmail: creator.Email, Provider: "google", ProviderThreadID: "shared-send-thread", SelectedMessageID: "sent-message",
+			Messages: []domain.EmailMessageSnapshot{{
+				ID: "sent-message", ThreadID: "shared-send-thread", Subject: "Worker first", DownloadComplete: true,
+				Attachments: []domain.EmailAttachmentSnapshot{
+					{ID: "shared-provider-attachment", AttachmentID: importedAttachmentID, Filename: "shared-sent.txt"},
+					{ID: "shared-provider-only", AttachmentID: providerOnlyAttachmentID, Filename: "provider-only.txt"},
+				},
+			}}, HistoryComplete: true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		stored, ok := storedEmailMessageForProvider(thread, "sent-message")
+		if !ok {
+			t.Fatal("worker-completed shared sent message missing")
+		}
+		for _, imported := range []struct {
+			attachmentID string
+			filename     string
+			storageKey   string
+		}{
+			{importedAttachmentID, "shared-sent.txt", "shared-worker-first-import"},
+			{providerOnlyAttachmentID, "provider-only.txt", "shared-worker-first-provider-only"},
+		} {
+			if _, _, err := repo.CreateAttachmentWithResourceLink(store.AttachmentCreateInput{
+				CompanyID: companyID, AttachmentID: imported.attachmentID, UploadedByUserID: creator.UserID,
+				OriginalFilename: imported.filename, MimeType: "text/plain", ByteSize: 6,
+				SHA256: strings.Repeat("1", 64), SHA256VerificationMethod: "server_stream",
+				StorageBucket: storage.bucket, StorageKey: imported.storageKey, SourceKind: store.AttachmentSourceEmailIncoming,
+				ResourceLink: store.ResourceAttachmentInput{
+					CompanyID: companyID, ResourceType: "email_message", ResourceID: stored.EmailMessageID,
+					RelationshipKind: store.AttachmentRelationshipEmailAttachment, CreatedByUserID: creator.UserID,
+				},
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	server := NewServerWithOptions(repo, ServerOptions{
-		NylasConfig: testNylasConfig(), NylasClient: nylas,
+		NylasConfig: testNylasConfig(), NylasClient: nylas, AttachmentStorage: storage,
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
 	})
 	defer server.Close()
@@ -125,6 +181,37 @@ func TestEmailCollaborationSharedDraftSendUsesExactDraftEnvelopeAndFinalizes(t *
 		CompanyID: companyID, DraftID: draft.DraftID, ParticipantUserID: creator.UserID,
 	}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("finalized draft error=%v, want ErrNotFound", err)
+	}
+	thread, err := repo.GetCommunicationsEmailThreadContext(context.Background(), companyID, collaboration.EmailThreadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedSent, ok := storedEmailMessageForProvider(thread, "sent-message")
+	if !ok || !storedSent.Message.DownloadComplete || len(storedSent.Message.Attachments) != 2 {
+		t.Fatalf("stored shared sent message=%+v present=%v", storedSent, ok)
+	}
+	storedAttachmentIDs := map[string]string{}
+	for _, attachment := range storedSent.Message.Attachments {
+		storedAttachmentIDs[attachment.ID] = attachment.AttachmentID
+	}
+	if storedAttachmentIDs["shared-provider-attachment"] != attachmentID ||
+		storedAttachmentIDs["shared-provider-only"] != providerOnlyAttachmentID {
+		t.Fatalf("stored shared sent attachment metadata=%v", storedAttachmentIDs)
+	}
+	sentLinks, err := repo.ListResourceAttachments(companyID, "email_message", storedSent.EmailMessageID)
+	linkedAttachmentIDs := map[string]bool{}
+	for _, link := range sentLinks {
+		linkedAttachmentIDs[link.AttachmentID] = true
+	}
+	if err != nil || len(sentLinks) != 2 || !linkedAttachmentIDs[attachmentID] ||
+		!linkedAttachmentIDs[providerOnlyAttachmentID] || linkedAttachmentIDs[importedAttachmentID] {
+		t.Fatalf("stored shared sent attachment links=%+v err=%v", sentLinks, err)
+	}
+	if _, err := repo.GetAttachment(companyID, importedAttachmentID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("worker-imported shared attachment still live: %v", err)
+	}
+	if _, err := repo.GetAttachment(companyID, providerOnlyAttachmentID); err != nil {
+		t.Fatalf("provider-only shared attachment was removed: %v", err)
 	}
 
 	retry := performSend()

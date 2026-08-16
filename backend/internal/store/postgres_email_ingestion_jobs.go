@@ -132,6 +132,35 @@ where company_id=$1::uuid and email_thread_id=$2::uuid`,
 		return CommunicationsEmailIngestionJob{}, false, err
 	}
 	item, err = scanPostgresCommunicationsEmailIngestionJob(tx.QueryRowContext(ctx, `
+update email_ingestion_jobs
+set priority=least(priority,$4),
+    email_thread_id=nullif($5,'')::uuid,
+    provider_thread_id=case when $6<>'' then $6 else provider_thread_id end,
+    status='accepted',provider_attempt_count=0,attempt_token=null,
+    enqueue_source_id=case when $7<>'' then $7 else enqueue_source_id end,
+    sqs_accepted_timestamp=null,last_error='',
+    completed_timestamp=null,failed_timestamp=null,updated_timestamp=now()
+where company_id=$1::uuid and email_connection_id=$2::uuid and provider_message_id=$3
+  and status='completed' and email_thread_id is null
+  and (nullif($5,'') is not null or ($7<>'' and enqueue_source_id<>$7))
+returning `+postgresCommunicationsEmailIngestionJobColumns,
+		input.CompanyID, input.EmailConnectionID, input.ProviderMessageID, input.Priority,
+		input.EmailThreadID, input.ProviderThreadID, input.EnqueueSourceID))
+	if err == nil {
+		if input.EmailThreadID != "" {
+			if _, err := tx.ExecContext(ctx, `update email_threads
+set download_status='downloading',last_download_error='',updated_timestamp=now()
+where company_id=$1::uuid and email_thread_id=$2::uuid`,
+				input.CompanyID, input.EmailThreadID); err != nil {
+				return CommunicationsEmailIngestionJob{}, false, err
+			}
+		}
+		return item, true, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return CommunicationsEmailIngestionJob{}, false, err
+	}
+	item, err = scanPostgresCommunicationsEmailIngestionJob(tx.QueryRowContext(ctx, `
 select `+postgresCommunicationsEmailIngestionJobColumns+`
 from email_ingestion_jobs
 where company_id=$1::uuid and email_connection_id=$2::uuid and provider_message_id=$3

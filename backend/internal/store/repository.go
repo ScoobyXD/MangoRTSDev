@@ -168,6 +168,7 @@ type CommunicationsRepository interface {
 	UpsertCommunicationsEmailThreadContext(ctx context.Context, input CommunicationsEmailThreadUpsertInput) (domain.CommunicationsEmailThread, error)
 	GetCommunicationsEmailThread(companyID, emailThreadID string) (domain.CommunicationsEmailThread, error)
 	GetCommunicationsEmailThreadContext(ctx context.Context, companyID, emailThreadID string) (domain.CommunicationsEmailThread, error)
+	ConvergeCommunicationsEmailThreadAttachmentLinksContext(ctx context.Context, companyID, emailThreadID string) (bool, error)
 	ListCommunicationsEmailThreadsForAccount(input CommunicationsEmailAccountReadInput) ([]domain.CommunicationsEmailThread, error)
 	ListCommunicationsEmailMessagesForAccount(input CommunicationsEmailAccountReadInput) ([]domain.CommunicationsEmailMessage, error)
 	GetCommunicationsEmailMessageForScope(input CommunicationsEmailMessageLookupInput) (CommunicationsEmailMessageLookupResult, error)

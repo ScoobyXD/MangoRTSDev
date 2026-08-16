@@ -662,6 +662,22 @@ select exists(
 	return link, nil
 }
 
+func (r *PostgresRepo) ConvergeCommunicationsEmailThreadAttachmentLinksContext(ctx context.Context, companyID, emailThreadID string) (bool, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	changed, err := convergeCommunicationsEmailThreadAttachmentLinksTx(ctx, tx, companyID, emailThreadID)
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return changed, nil
+}
+
 func (r *PostgresRepo) SoftDeleteResourceAttachment(input ResourceAttachmentDeleteInput) error {
 	companyID := strings.TrimSpace(input.CompanyID)
 	resourceType := NormalizeAttachmentResourceType(input.ResourceType)

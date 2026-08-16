@@ -55,6 +55,39 @@ func (r *MemoryRepo) ensureCommunicationsEmailIngestionJobLocked(input Communica
 	for jobID, item := range r.emailIngestionJobs {
 		if item.CompanyID == input.CompanyID && item.EmailConnectionID == input.EmailConnectionID &&
 			item.ProviderMessageID == input.ProviderMessageID {
+			newSource := input.EnqueueSourceID != "" && input.EnqueueSourceID != item.EnqueueSourceID
+			if item.Status == CommunicationsEmailIngestionJobCompleted && item.EmailThreadID == "" &&
+				(input.EmailThreadID != "" || newSource) {
+				now := time.Now().UTC()
+				item.Status = CommunicationsEmailIngestionJobAccepted
+				item.ProviderAttemptCount = 0
+				item.AttemptToken = ""
+				item.EmailThreadID = input.EmailThreadID
+				if input.ProviderThreadID != "" {
+					item.ProviderThreadID = input.ProviderThreadID
+				}
+				if input.EnqueueSourceID != "" {
+					item.EnqueueSourceID = input.EnqueueSourceID
+				}
+				item.SQSAcceptedTimestamp = nil
+				item.CompletedTimestamp = nil
+				item.FailedTimestamp = nil
+				item.LastError = ""
+				if input.Priority < item.Priority {
+					item.Priority = input.Priority
+				}
+				item.UpdatedTimestamp = now
+				r.emailIngestionJobs[jobID] = item
+				if input.EmailThreadID != "" {
+					threadKey := key(input.CompanyID, input.EmailThreadID)
+					thread := r.emailThreads[threadKey]
+					thread.DownloadStatus = CommunicationsEmailThreadDownloadDownloading
+					thread.LastDownloadError = ""
+					thread.UpdatedTimestamp = now
+					r.emailThreads[threadKey] = thread
+				}
+				return cloneCommunicationsEmailIngestionJob(item), true, nil
+			}
 			if communicationsEmailIngestionJobActive(item.Status) {
 				if input.Priority < item.Priority {
 					item.Priority = input.Priority

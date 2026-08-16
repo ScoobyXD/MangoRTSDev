@@ -38,6 +38,7 @@ type fakeNylasClient struct {
 	message                     NylasMessage
 	sent                        NylasSendMessageRequest
 	sentAttachmentBodies        [][]byte
+	sendResponseAttachments     []NylasAttachment
 	sendCalls                   int
 	skipOutboundAttachmentReads bool
 	onSend                      func(NylasSendMessageRequest)
@@ -445,6 +446,7 @@ func (f *fakeNylasClient) SendMessage(ctx context.Context, grantID string, reque
 	f.sent = request
 	skipOutboundAttachmentReads := f.skipOutboundAttachmentReads
 	onSend := f.onSend
+	responseAttachments := append([]NylasAttachment(nil), f.sendResponseAttachments...)
 	f.mu.Unlock()
 
 	if onSend != nil {
@@ -471,7 +473,7 @@ func (f *fakeNylasClient) SendMessage(ctx context.Context, grantID string, reque
 	f.mu.Lock()
 	f.sentAttachmentBodies = bodies
 	f.mu.Unlock()
-	return NylasMessage{ID: "sent-message", Subject: request.Subject, To: request.To}, nil
+	return NylasMessage{ID: "sent-message", Subject: request.Subject, To: request.To, Attachments: responseAttachments}, nil
 }
 
 func seedEmailAttachmentForCommunicationsTest(t *testing.T, repo *store.MemoryRepo, storage *fakeAttachmentObjectStorage, actorUserID, companyID, resourceID, filename, contentType string, content []byte) string {
@@ -608,6 +610,24 @@ type countingCommunicationsAttachmentRepo struct {
 	getAttachmentVariantCalls       int
 	listAttachmentResourceLinkCalls int
 	sizeOverrides                   map[string]int64
+}
+
+type afterCommunicationsEmailThreadUpsertRepo struct {
+	store.Repository
+	once      sync.Once
+	shouldRun func(store.CommunicationsEmailThreadUpsertInput, domain.CommunicationsEmailThread) bool
+	after     func(domain.CommunicationsEmailThread)
+}
+
+func (r *afterCommunicationsEmailThreadUpsertRepo) UpsertCommunicationsEmailThreadContext(
+	ctx context.Context,
+	input store.CommunicationsEmailThreadUpsertInput,
+) (domain.CommunicationsEmailThread, error) {
+	thread, err := r.Repository.UpsertCommunicationsEmailThreadContext(ctx, input)
+	if err == nil && r.shouldRun != nil && r.shouldRun(input, thread) {
+		r.once.Do(func() { r.after(thread) })
+	}
+	return thread, err
 }
 
 func (r *countingCommunicationsAttachmentRepo) ReadAttachmentContent(ctx context.Context, companyID, attachmentID, variantType string) (store.AttachmentContentRead, error) {
@@ -827,6 +847,414 @@ func TestCommunicationsSendUsesLeanPreflightAndLazyProviderOpen(t *testing.T) {
 	}
 	if len(response.Message.Attachments) != 1 || response.Message.Attachments[0].Content != "" {
 		t.Fatalf("response attachments = %+v, want metadata only", response.Message.Attachments)
+	}
+	connection, err := fixture.repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID: fixture.userID, Provider: "google", AccountEmail: fixture.accountEmail,
+		GrantID: "grant-send-test", Status: "connected",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identities, err := fixture.repo.ResolveCommunicationsEmailMessageIdentitiesForConnectionContext(
+		context.Background(), fixture.companyID, connection.EmailConnectionID, []string{"sent-message"},
+	)
+	if err != nil || identities["sent-message"].EmailThreadID == "" {
+		t.Fatalf("sent message identity=%v err=%v", identities, err)
+	}
+	thread, err := fixture.repo.GetCommunicationsEmailThreadContext(context.Background(), fixture.companyID, identities["sent-message"].EmailThreadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, ok := storedEmailMessageForProvider(thread, "sent-message")
+	if !ok || !stored.Message.DownloadComplete || len(stored.Message.Attachments) != 1 || stored.Message.Attachments[0].AttachmentID != attachmentID {
+		t.Fatalf("stored sent message=%+v present=%v", stored, ok)
+	}
+	links, err := fixture.repo.ListResourceAttachments(fixture.companyID, "email_message", stored.EmailMessageID)
+	if err != nil || len(links) != 1 || links[0].AttachmentID != attachmentID {
+		t.Fatalf("stored sent attachment links=%+v err=%v", links, err)
+	}
+}
+
+func TestCommunicationsSendResponseMatchesDuplicateFilenamesByProviderIDOnce(t *testing.T) {
+	message := communicationsSendResponseWithLocalContent(NylasMessage{Attachments: []NylasAttachment{
+		{ID: "provider-1", Filename: "same.txt"},
+		{ID: "provider-2", Filename: "same.txt"},
+	}}, NylasSendMessageRequest{Attachments: []NylasAttachment{
+		{ID: "provider-2", AttachmentID: "local-2", Filename: "same.txt"},
+		{ID: "provider-1", AttachmentID: "local-1", Filename: "same.txt"},
+	}})
+	if len(message.Attachments) != 2 || message.Attachments[0].AttachmentID != "local-1" ||
+		message.Attachments[1].AttachmentID != "local-2" {
+		t.Fatalf("matched duplicate filenames=%+v", message.Attachments)
+	}
+}
+
+func TestCommunicationsSendRetiresWorkerImportedAttachmentWhenLocalSendFinishes(t *testing.T) {
+	fixture := newCommunicationsSendTestFixture(t)
+	localAttachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, fixture.accountEmail, "draft-worker-first"), "same.txt", []byte("local"))
+	var importedAttachmentID, providerOnlyAttachmentID string
+	fixture.nylas.sendResponseAttachments = []NylasAttachment{
+		{ID: "provider-attachment", Filename: "same.txt"},
+		{ID: "provider-only-attachment", Filename: "provider-only.txt"},
+	}
+	fixture.nylas.onSend = func(NylasSendMessageRequest) {
+		fixture.storage.objects["worker-first-import"] = fakeAttachmentObject{contentType: "text/plain", body: []byte("worker")}
+		fixture.storage.objects["worker-first-provider-only"] = fakeAttachmentObject{contentType: "text/plain", body: []byte("provider only")}
+		preliminary, err := fixture.repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+			CompanyID: fixture.companyID, PersonalUserID: fixture.userID, PersonalAccountEmail: fixture.accountEmail,
+			AccountEmail: fixture.accountEmail, Provider: "google", SelectedMessageID: "sent-message",
+			Messages: []domain.EmailMessageSnapshot{{ID: "sent-message", Subject: "Worker first"}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		importedAttachmentID = store.ImportedEmailAttachmentID(
+			fixture.companyID, preliminary.EmailThreadID, "sent-message", "provider-attachment", "", "same.txt",
+		)
+		providerOnlyAttachmentID = store.ImportedEmailAttachmentID(
+			fixture.companyID, preliminary.EmailThreadID, "sent-message", "provider-only-attachment", "", "provider-only.txt",
+		)
+		snapshot := domain.EmailMessageSnapshot{
+			ID: "sent-message", Subject: "Worker first", DownloadComplete: true,
+			Attachments: []domain.EmailAttachmentSnapshot{
+				{ID: "provider-attachment", AttachmentID: importedAttachmentID, Filename: "same.txt"},
+				{ID: "provider-only-attachment", AttachmentID: providerOnlyAttachmentID, Filename: "provider-only.txt"},
+			},
+		}
+		thread, err := fixture.repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+			CompanyID: fixture.companyID, PersonalUserID: fixture.userID, PersonalAccountEmail: fixture.accountEmail,
+			AccountEmail: fixture.accountEmail, Provider: "google", SelectedMessageID: snapshot.ID,
+			Messages: []domain.EmailMessageSnapshot{snapshot}, HistoryComplete: true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		stored, ok := storedEmailMessageForProvider(thread, snapshot.ID)
+		if !ok {
+			t.Fatal("worker-completed sent message missing")
+		}
+		for _, imported := range []struct {
+			attachmentID string
+			filename     string
+			storageKey   string
+		}{
+			{importedAttachmentID, "same.txt", "worker-first-import"},
+			{providerOnlyAttachmentID, "provider-only.txt", "worker-first-provider-only"},
+		} {
+			if _, _, err := fixture.repo.CreateAttachmentWithResourceLink(store.AttachmentCreateInput{
+				CompanyID: fixture.companyID, AttachmentID: imported.attachmentID, UploadedByUserID: fixture.userID,
+				OriginalFilename: imported.filename, MimeType: "text/plain", ByteSize: 6,
+				SHA256: strings.Repeat("1", sha256.Size*2), SHA256VerificationMethod: "server_stream",
+				StorageBucket: fixture.storage.bucket, StorageKey: imported.storageKey, SourceKind: store.AttachmentSourceEmailIncoming,
+				ResourceLink: store.ResourceAttachmentInput{
+					CompanyID: fixture.companyID, ResourceType: "email_message", ResourceID: stored.EmailMessageID,
+					RelationshipKind: store.AttachmentRelationshipEmailAttachment, CreatedByUserID: fixture.userID,
+				},
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := fixture.repo.LinkResourceAttachment(store.ResourceAttachmentInput{
+			CompanyID: fixture.companyID, ResourceType: "email_draft", ResourceID: "draft-worker-first",
+			AttachmentID: importedAttachmentID, RelationshipKind: store.AttachmentRelationshipEmailAttachment,
+			CreatedByUserID: fixture.userID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rec := fixture.send(t, map[string]any{
+		"to": []map[string]string{{"email": "friend@example.com"}}, "subject": "Worker first", "body": "Body",
+		"attachments": []map[string]any{{"attachment_id": localAttachmentID, "filename": "same.txt"}},
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	connection, err := fixture.repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID: fixture.userID, Provider: "google", AccountEmail: fixture.accountEmail, GrantID: "grant-send-test", Status: "connected",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identities, err := fixture.repo.ResolveCommunicationsEmailMessageIdentitiesForConnectionContext(
+		context.Background(), fixture.companyID, connection.EmailConnectionID, []string{"sent-message"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := fixture.repo.GetCommunicationsEmailThreadContext(context.Background(), fixture.companyID, identities["sent-message"].EmailThreadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, ok := storedEmailMessageForProvider(thread, "sent-message")
+	if !ok || !stored.Message.DownloadComplete || len(stored.Message.Attachments) != 2 {
+		t.Fatalf("converged sent message=%+v present=%v", stored, ok)
+	}
+	storedAttachmentIDs := map[string]string{}
+	for _, attachment := range stored.Message.Attachments {
+		storedAttachmentIDs[attachment.ID] = attachment.AttachmentID
+	}
+	if storedAttachmentIDs["provider-attachment"] != localAttachmentID ||
+		storedAttachmentIDs["provider-only-attachment"] != providerOnlyAttachmentID {
+		t.Fatalf("converged sent attachment metadata=%v", storedAttachmentIDs)
+	}
+	links, err := fixture.repo.ListResourceAttachments(fixture.companyID, "email_message", stored.EmailMessageID)
+	linkedAttachmentIDs := map[string]bool{}
+	for _, link := range links {
+		linkedAttachmentIDs[link.AttachmentID] = true
+	}
+	if err != nil || len(links) != 2 || !linkedAttachmentIDs[localAttachmentID] ||
+		!linkedAttachmentIDs[providerOnlyAttachmentID] || linkedAttachmentIDs[importedAttachmentID] {
+		t.Fatalf("converged sent links=%+v err=%v", links, err)
+	}
+	if _, err := fixture.repo.GetAttachment(fixture.companyID, importedAttachmentID); err != nil {
+		t.Fatalf("shared worker-imported attachment owner was deleted: %v", err)
+	}
+	remainingLinks, err := fixture.repo.ListAttachmentResourceLinks(fixture.companyID, importedAttachmentID)
+	if err != nil || len(remainingLinks) != 1 || remainingLinks[0].ResourceType != "email_draft" ||
+		remainingLinks[0].ResourceID != "draft-worker-first" {
+		t.Fatalf("shared worker-imported attachment links=%+v err=%v", remainingLinks, err)
+	}
+	providerOnlyLinks, err := fixture.repo.ListAttachmentResourceLinks(fixture.companyID, providerOnlyAttachmentID)
+	if err != nil || len(providerOnlyLinks) != 1 || providerOnlyLinks[0].ResourceType != "email_message" ||
+		providerOnlyLinks[0].ResourceID != stored.EmailMessageID {
+		t.Fatalf("provider-only attachment links=%+v err=%v", providerOnlyLinks, err)
+	}
+}
+
+func TestCommunicationsSendRewritesCompleteWorkerAttachmentWhenEveryProviderAttachmentMapsLocally(t *testing.T) {
+	fixture := newCommunicationsSendTestFixture(t)
+	localAttachmentID := fixture.seedAttachment(
+		t, personalEmailDraftResourceID(fixture.userID, fixture.accountEmail, "draft-worker-first-all-local"),
+		"all-local.txt", []byte("local"),
+	)
+	var importedAttachmentID string
+	fixture.nylas.sendResponseAttachments = []NylasAttachment{{ID: "provider-all-local", Filename: "all-local.txt"}}
+	fixture.nylas.onSend = func(NylasSendMessageRequest) {
+		fixture.storage.objects["worker-first-all-local"] = fakeAttachmentObject{contentType: "text/plain", body: []byte("worker")}
+		preliminary, err := fixture.repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+			CompanyID: fixture.companyID, PersonalUserID: fixture.userID, PersonalAccountEmail: fixture.accountEmail,
+			AccountEmail: fixture.accountEmail, Provider: "google", SelectedMessageID: "sent-message",
+			Messages: []domain.EmailMessageSnapshot{{ID: "sent-message", Subject: "Worker first all local"}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		importedAttachmentID = store.ImportedEmailAttachmentID(
+			fixture.companyID, preliminary.EmailThreadID, "sent-message", "provider-all-local", "", "all-local.txt",
+		)
+		thread, err := fixture.repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+			CompanyID: fixture.companyID, PersonalUserID: fixture.userID, PersonalAccountEmail: fixture.accountEmail,
+			AccountEmail: fixture.accountEmail, Provider: "google", SelectedMessageID: "sent-message",
+			Messages: []domain.EmailMessageSnapshot{{
+				ID: "sent-message", Subject: "Worker first all local", DownloadComplete: true,
+				Attachments: []domain.EmailAttachmentSnapshot{{
+					ID: "provider-all-local", AttachmentID: importedAttachmentID, Filename: "all-local.txt",
+				}},
+			}}, HistoryComplete: true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		stored, ok := storedEmailMessageForProvider(thread, "sent-message")
+		if !ok {
+			t.Fatal("worker-completed all-local sent message missing")
+		}
+		if _, _, err := fixture.repo.CreateAttachmentWithResourceLink(store.AttachmentCreateInput{
+			CompanyID: fixture.companyID, AttachmentID: importedAttachmentID, UploadedByUserID: fixture.userID,
+			OriginalFilename: "all-local.txt", MimeType: "text/plain", ByteSize: 6,
+			SHA256: strings.Repeat("1", sha256.Size*2), SHA256VerificationMethod: "server_stream",
+			StorageBucket: fixture.storage.bucket, StorageKey: "worker-first-all-local", SourceKind: store.AttachmentSourceEmailIncoming,
+			ResourceLink: store.ResourceAttachmentInput{
+				CompanyID: fixture.companyID, ResourceType: "email_message", ResourceID: stored.EmailMessageID,
+				RelationshipKind: store.AttachmentRelationshipEmailAttachment, CreatedByUserID: fixture.userID,
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rec := fixture.send(t, map[string]any{
+		"to": []map[string]string{{"email": "friend@example.com"}}, "subject": "Worker first all local", "body": "Body",
+		"attachments": []map[string]any{{"attachment_id": localAttachmentID, "filename": "all-local.txt"}},
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	connection, err := fixture.repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID: fixture.userID, Provider: "google", AccountEmail: fixture.accountEmail, GrantID: "grant-send-test", Status: "connected",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identities, err := fixture.repo.ResolveCommunicationsEmailMessageIdentitiesForConnectionContext(
+		context.Background(), fixture.companyID, connection.EmailConnectionID, []string{"sent-message"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := fixture.repo.GetCommunicationsEmailThreadContext(
+		context.Background(), fixture.companyID, identities["sent-message"].EmailThreadID,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, ok := storedEmailMessageForProvider(thread, "sent-message")
+	if !ok || !stored.Message.DownloadComplete || len(stored.Message.Attachments) != 1 ||
+		stored.Message.Attachments[0].AttachmentID != localAttachmentID {
+		t.Fatalf("all-local sent message=%+v present=%v", stored, ok)
+	}
+	links, err := fixture.repo.ListResourceAttachments(fixture.companyID, "email_message", stored.EmailMessageID)
+	if err != nil || len(links) != 1 || links[0].AttachmentID != localAttachmentID {
+		t.Fatalf("all-local sent links=%+v err=%v", links, err)
+	}
+	if _, err := fixture.repo.GetAttachment(fixture.companyID, importedAttachmentID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("redundant all-local worker attachment still live: %v", err)
+	}
+}
+
+func TestCommunicationsSendConvergesWhenWorkerCompletesBetweenPartialPersistenceAndLocalLink(t *testing.T) {
+	fixture := newCommunicationsSendTestFixture(t)
+	localAttachmentID := fixture.seedAttachment(
+		t, personalEmailDraftResourceID(fixture.userID, fixture.accountEmail, "draft-concurrent-worker"),
+		"same.txt", []byte("local"),
+	)
+	fixture.nylas.sendResponseAttachments = []NylasAttachment{
+		{ID: "provider-local", Filename: "same.txt"},
+		{ID: "provider-only", Filename: "provider-only.txt"},
+	}
+
+	var importedLocalID, providerOnlyID string
+	workerRaceRan := false
+	fixture.server.repo = &afterCommunicationsEmailThreadUpsertRepo{
+		Repository: fixture.countingRepo,
+		shouldRun: func(input store.CommunicationsEmailThreadUpsertInput, _ domain.CommunicationsEmailThread) bool {
+			return len(input.Messages) == 1 && input.Messages[0].ID == "sent-message" &&
+				!input.Messages[0].DownloadComplete && len(input.Messages[0].Attachments) == 2
+		},
+		after: func(staleThread domain.CommunicationsEmailThread) {
+			workerRaceRan = true
+			stored, ok := storedEmailMessageForProvider(staleThread, "sent-message")
+			if !ok {
+				t.Fatal("partially persisted direct message missing")
+			}
+			importedLocalID = store.ImportedEmailAttachmentID(
+				fixture.companyID, staleThread.EmailThreadID, "sent-message", "provider-local", "", "same.txt",
+			)
+			providerOnlyID = store.ImportedEmailAttachmentID(
+				fixture.companyID, staleThread.EmailThreadID, "sent-message", "provider-only", "", "provider-only.txt",
+			)
+			for _, imported := range []struct {
+				attachmentID string
+				filename     string
+				storageKey   string
+			}{
+				{importedLocalID, "same.txt", "concurrent-worker-local"},
+				{providerOnlyID, "provider-only.txt", "concurrent-worker-provider-only"},
+			} {
+				fixture.storage.objects[imported.storageKey] = fakeAttachmentObject{contentType: "text/plain", body: []byte("worker")}
+				if _, _, err := fixture.repo.CreateAttachmentWithResourceLink(store.AttachmentCreateInput{
+					CompanyID: fixture.companyID, AttachmentID: imported.attachmentID, UploadedByUserID: fixture.userID,
+					OriginalFilename: imported.filename, MimeType: "text/plain", ByteSize: 6,
+					SHA256: strings.Repeat("2", sha256.Size*2), SHA256VerificationMethod: "server_stream",
+					StorageBucket: fixture.storage.bucket, StorageKey: imported.storageKey, SourceKind: store.AttachmentSourceEmailIncoming,
+					ResourceLink: store.ResourceAttachmentInput{
+						CompanyID: fixture.companyID, ResourceType: "email_message", ResourceID: stored.EmailMessageID,
+						RelationshipKind: store.AttachmentRelationshipEmailAttachment, CreatedByUserID: fixture.userID,
+					},
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			workerSnapshot := domain.EmailMessageSnapshot{
+				ID: "sent-message", Subject: "Concurrent worker", DownloadComplete: true,
+				Attachments: []domain.EmailAttachmentSnapshot{
+					{ID: "provider-local", AttachmentID: importedLocalID, Filename: "same.txt"},
+					{ID: "provider-only", AttachmentID: providerOnlyID, Filename: "provider-only.txt"},
+				},
+			}
+			workerThread, err := fixture.repo.UpsertCommunicationsEmailThreadContext(
+				context.Background(), communicationsEmailThreadInputFromStoredThread(staleThread, workerSnapshot, staleThread.HistoryComplete),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			workerStored, ok := storedEmailMessageForProvider(workerThread, "sent-message")
+			if !ok || !workerStored.Message.DownloadComplete || len(workerStored.Message.Attachments) != 2 {
+				t.Fatalf("worker-completed message=%+v present=%v", workerStored, ok)
+			}
+			workerAttachmentIDs := map[string]string{}
+			for _, attachment := range workerStored.Message.Attachments {
+				workerAttachmentIDs[attachment.ID] = attachment.AttachmentID
+			}
+			if workerAttachmentIDs["provider-local"] != localAttachmentID ||
+				workerAttachmentIDs["provider-only"] != providerOnlyID {
+				t.Fatalf("worker completion overwrote partial local metadata: %v", workerAttachmentIDs)
+			}
+			changed, err := fixture.repo.ConvergeCommunicationsEmailThreadAttachmentLinksContext(
+				context.Background(), fixture.companyID, workerThread.EmailThreadID,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if changed {
+				t.Fatal("worker convergence retired an import before the local attachment was linked")
+			}
+		},
+	}
+
+	rec := fixture.send(t, map[string]any{
+		"to": []map[string]string{{"email": "friend@example.com"}}, "subject": "Concurrent worker", "body": "Body",
+		"attachments": []map[string]any{{"attachment_id": localAttachmentID, "filename": "same.txt"}},
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !workerRaceRan {
+		t.Fatal("deterministic worker race hook did not run")
+	}
+
+	connection, err := fixture.repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID: fixture.userID, Provider: "google", AccountEmail: fixture.accountEmail, GrantID: "grant-send-test", Status: "connected",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identities, err := fixture.repo.ResolveCommunicationsEmailMessageIdentitiesForConnectionContext(
+		context.Background(), fixture.companyID, connection.EmailConnectionID, []string{"sent-message"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := fixture.repo.GetCommunicationsEmailThreadContext(
+		context.Background(), fixture.companyID, identities["sent-message"].EmailThreadID,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, ok := storedEmailMessageForProvider(thread, "sent-message")
+	if !ok || !stored.Message.DownloadComplete || len(stored.Message.Attachments) != 2 {
+		t.Fatalf("concurrent sent message=%+v present=%v", stored, ok)
+	}
+	storedAttachmentIDs := map[string]string{}
+	for _, attachment := range stored.Message.Attachments {
+		storedAttachmentIDs[attachment.ID] = attachment.AttachmentID
+	}
+	if storedAttachmentIDs["provider-local"] != localAttachmentID || storedAttachmentIDs["provider-only"] != providerOnlyID {
+		t.Fatalf("concurrent sent attachment metadata=%v", storedAttachmentIDs)
+	}
+	links, err := fixture.repo.ListResourceAttachments(fixture.companyID, "email_message", stored.EmailMessageID)
+	linkedAttachmentIDs := map[string]bool{}
+	for _, link := range links {
+		linkedAttachmentIDs[link.AttachmentID] = true
+	}
+	if err != nil || len(links) != 2 || !linkedAttachmentIDs[localAttachmentID] ||
+		!linkedAttachmentIDs[providerOnlyID] || linkedAttachmentIDs[importedLocalID] {
+		t.Fatalf("concurrent sent links=%+v err=%v", links, err)
+	}
+	if _, err := fixture.repo.GetAttachment(fixture.companyID, importedLocalID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("redundant concurrent worker attachment still live: %v", err)
 	}
 }
 
@@ -3416,9 +3844,10 @@ func TestNylasWebhookVerifiesSignatureDeduplicatesAndStoresReadStatus(t *testing
 	config := testNylasConfig()
 	config.WebhookSecret = "webhook-secret"
 	nylas := &fakeNylasClient{}
+	ingestionQueue := &recordingEmailQueueSender{}
 	server := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{
 		NylasConfig: config,
-		EmailQueue:  &recordingEmailQueueSender{},
+		EmailQueue:  ingestionQueue,
 		NylasClient: nylas,
 		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
 			token: {Subject: user.CognitoSubject, Email: user.Email, Name: user.DisplayName},
@@ -3867,9 +4296,10 @@ func TestNylasWebhookPublishesSharedMailboxHintOnlyToCurrentAudience(t *testing.
 	config := testNylasConfig()
 	config.WebhookSecret = "webhook-secret"
 	nylas := &fakeNylasClient{}
+	ingestionQueue := &recordingEmailQueueSender{}
 	server := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{
 		NylasConfig: config,
-		EmailQueue:  &recordingEmailQueueSender{},
+		EmailQueue:  ingestionQueue,
 		NylasClient: nylas,
 		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
 			visibleToken: {Subject: visible.CognitoSubject, Email: visible.Email, Name: visible.DisplayName},
@@ -3917,6 +4347,10 @@ func TestNylasWebhookPublishesSharedMailboxHintOnlyToCurrentAudience(t *testing.
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("shared updated webhook status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(ingestionQueue.messages) != 1 || ingestionQueue.messages[0].Kind != emailqueue.KindIngestion ||
+		ingestionQueue.messages[0].EmailConnectionID == "" {
+		t.Fatalf("message.updated ingestion queue=%+v", ingestionQueue.messages)
 	}
 	updated := visibleClient.readJSON(t)
 	if updated["type"] != realtimeMessageMailboxMessageChanged || updated["company_id"] != companyID || updated["scope"] != scope ||

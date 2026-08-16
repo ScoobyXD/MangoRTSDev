@@ -1056,16 +1056,52 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	message = communicationsSendResponseWithLocalContent(message, sendReq)
-	internalMessageID, err := s.persistCommunicationsSentMessage(r.Context(), cleanCompanyID, strings.TrimSpace(r.URL.Query().Get("shared_inbox_id")), connection, message)
+	sentThread, internalMessageID, err := s.persistCommunicationsSentMessage(r.Context(), cleanCompanyID, strings.TrimSpace(r.URL.Query().Get("shared_inbox_id")), connection, message)
 	if err != nil {
 		log.Printf("communications sent message persistence failed user_id=%s message_id=%s err=%v", connection.UserID, message.ID, err)
 		writeError(w, http.StatusInternalServerError, "failed_to_store_sent_email")
 		return
 	}
+	storedCompleteMessageMerged := false
+	if storedMessage, ok := storedEmailMessageForProvider(sentThread, message.ID); ok && storedMessage.Message.DownloadComplete {
+		storedCompleteMessageMerged = true
+		message = communicationsSendResponseWithLocalContent(message, NylasSendMessageRequest{
+			Attachments: nylasAttachmentsFromStoredSnapshots(storedMessage.Message.Attachments),
+		})
+	}
 	if err := s.linkCommunicationsSentAttachments(cleanCompanyID, connection.UserID, internalMessageID, sendReq.Attachments); err != nil {
 		log.Printf("communications send attachment promotion failed user_id=%s message_id=%s email_message_id=%s err=%v", connection.UserID, message.ID, internalMessageID, err)
 		writeError(w, http.StatusInternalServerError, "failed_to_store_sent_email_attachments")
 		return
+	}
+	sentMessageComplete := communicationsSentMessageDownloadComplete(message)
+	localAttachmentsComplete := communicationsAttachmentsHaveMangoIDs(sendReq.Attachments)
+	sentSnapshot := emailMessageSnapshotFromNylas(message)
+	if storedCompleteMessageMerged && sentMessageComplete && len(sentSnapshot.Attachments) > 0 {
+		if sentThread, err = s.repo.UpsertCommunicationsEmailThreadContext(r.Context(), communicationsEmailThreadInputFromStoredThread(sentThread, sentSnapshot, sentThread.HistoryComplete)); err != nil {
+			log.Printf("communications sent message attachment merge failed user_id=%s message_id=%s email_message_id=%s err=%v", connection.UserID, message.ID, internalMessageID, err)
+			writeError(w, http.StatusInternalServerError, "failed_to_store_sent_email_attachments")
+			return
+		}
+	}
+	if !sentSnapshot.DownloadComplete && sentMessageComplete {
+		sentSnapshot.DownloadComplete = true
+		if sentThread, err = s.repo.UpsertCommunicationsEmailThreadContext(r.Context(), communicationsEmailThreadInputFromStoredThread(sentThread, sentSnapshot, sentThread.HistoryComplete)); err != nil {
+			log.Printf("communications sent message completion failed user_id=%s message_id=%s email_message_id=%s err=%v", connection.UserID, message.ID, internalMessageID, err)
+			writeError(w, http.StatusInternalServerError, "failed_to_complete_sent_email")
+			return
+		}
+	}
+	if localAttachmentsComplete && len(sendReq.Attachments) > 0 {
+		changed, convergeErr := s.repo.ConvergeCommunicationsEmailThreadAttachmentLinksContext(r.Context(), cleanCompanyID, sentThread.EmailThreadID)
+		if convergeErr != nil {
+			log.Printf("communications sent attachment convergence failed user_id=%s message_id=%s email_message_id=%s err=%v", connection.UserID, message.ID, internalMessageID, convergeErr)
+			writeError(w, http.StatusInternalServerError, "failed_to_store_sent_email_attachments")
+			return
+		}
+		if changed {
+			s.wakeAttachmentDeletionCleanup()
+		}
 	}
 	if message.TrackingOptions == nil || !message.TrackingOptions.Opens {
 		log.Printf("nylas send response missing open tracking user_id=%s grant_id=%s message_id=%s subject=%q", connection.UserID, connection.GrantID, message.ID, sendReq.Subject)
@@ -1077,11 +1113,11 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusCreated, map[string]any{"message": message})
 }
 
-func (s *Server) persistCommunicationsSentMessage(ctx context.Context, companyID, sharedInboxID string, connection domain.UserEmailConnection, message NylasMessage) (string, error) {
+func (s *Server) persistCommunicationsSentMessage(ctx context.Context, companyID, sharedInboxID string, connection domain.UserEmailConnection, message NylasMessage) (domain.CommunicationsEmailThread, string, error) {
 	companyID = strings.TrimSpace(companyID)
 	sharedInboxID = strings.TrimSpace(sharedInboxID)
 	if companyID == "" || strings.TrimSpace(message.ID) == "" {
-		return "", store.ErrInvalid
+		return domain.CommunicationsEmailThread{}, "", store.ErrInvalid
 	}
 	input := store.CommunicationsEmailThreadUpsertInput{
 		CompanyID: companyID, Provider: strings.TrimSpace(connection.Provider),
@@ -1099,14 +1135,14 @@ func (s *Server) persistCommunicationsSentMessage(ctx context.Context, companyID
 	}
 	thread, err := s.repo.UpsertCommunicationsEmailThreadContext(ctx, input)
 	if err != nil {
-		return "", err
+		return domain.CommunicationsEmailThread{}, "", err
 	}
 	for _, stored := range thread.Messages {
 		if stored.ProviderMessageID == message.ID {
-			return stored.EmailMessageID, nil
+			return thread, stored.EmailMessageID, nil
 		}
 	}
-	return "", store.ErrNotFound
+	return domain.CommunicationsEmailThread{}, "", store.ErrNotFound
 }
 
 func (s *Server) linkCommunicationsSentAttachments(companyID, userID, emailMessageID string, attachments []NylasAttachment) error {
@@ -1149,21 +1185,40 @@ func communicationsSendResponseWithLocalContent(message NylasMessage, sendReq Ny
 	for index := range attachments {
 		attachments[index].Content = ""
 	}
+	matched := make([]bool, len(attachments))
 	for _, sentAttachment := range sendReq.Attachments {
-		matchIndex := -1
+		exactMatch, contentIDMatch, filenameMatch := -1, -1, -1
 		for index, responseAttachment := range attachments {
-			contentIDMatches := strings.TrimSpace(sentAttachment.ContentID) != "" && strings.EqualFold(strings.TrimSpace(responseAttachment.ContentID), strings.TrimSpace(sentAttachment.ContentID))
-			filenameMatches := strings.TrimSpace(sentAttachment.Filename) != "" && strings.EqualFold(strings.TrimSpace(responseAttachment.Filename), strings.TrimSpace(sentAttachment.Filename))
-			if contentIDMatches || filenameMatches {
-				matchIndex = index
+			if matched[index] {
+				continue
+			}
+			if strings.TrimSpace(sentAttachment.ID) != "" && strings.TrimSpace(responseAttachment.ID) == strings.TrimSpace(sentAttachment.ID) {
+				exactMatch = index
 				break
 			}
+			if contentIDMatch < 0 && strings.TrimSpace(sentAttachment.ContentID) != "" &&
+				strings.EqualFold(strings.TrimSpace(responseAttachment.ContentID), strings.TrimSpace(sentAttachment.ContentID)) {
+				contentIDMatch = index
+			}
+			if filenameMatch < 0 && strings.TrimSpace(sentAttachment.Filename) != "" &&
+				strings.EqualFold(strings.TrimSpace(responseAttachment.Filename), strings.TrimSpace(sentAttachment.Filename)) {
+				filenameMatch = index
+			}
+		}
+		matchIndex := exactMatch
+		if matchIndex < 0 {
+			matchIndex = contentIDMatch
+		}
+		if matchIndex < 0 {
+			matchIndex = filenameMatch
 		}
 		if matchIndex < 0 {
 			sentAttachment.Content = ""
 			attachments = append(attachments, sentAttachment)
+			matched = append(matched, true)
 			continue
 		}
+		matched[matchIndex] = true
 		if strings.TrimSpace(attachments[matchIndex].AttachmentID) == "" {
 			attachments[matchIndex].AttachmentID = sentAttachment.AttachmentID
 		}
@@ -1189,6 +1244,22 @@ func communicationsSendResponseWithLocalContent(message NylasMessage, sendReq Ny
 		message.Attachments = attachments
 	}
 	return message
+}
+
+func communicationsSentMessageDownloadComplete(message NylasMessage) bool {
+	if messageNeedsRawMIMEAttachmentRecovery(message) {
+		return false
+	}
+	return communicationsAttachmentsHaveMangoIDs(message.Attachments)
+}
+
+func communicationsAttachmentsHaveMangoIDs(attachments []NylasAttachment) bool {
+	for _, attachment := range attachments {
+		if strings.TrimSpace(attachment.AttachmentID) == "" {
+			return false
+		}
+	}
+	return true
 }
 
 func defaultCommunicationsTrackingOptions() *NylasTrackingOptions {

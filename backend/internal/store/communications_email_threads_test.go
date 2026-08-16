@@ -390,6 +390,23 @@ func TestMemoryCommunicationsEmailIngestionJobsAreDurableAndIdempotent(t *testin
 	}
 }
 
+func TestMergeEmailMessageSnapshotPreservesPromotedAttachmentAcrossCompletionRace(t *testing.T) {
+	local := domain.EmailAttachmentSnapshot{ID: "provider-attachment", AttachmentID: "local-attachment", Filename: "same.txt"}
+	imported := domain.EmailAttachmentSnapshot{ID: "provider-attachment", AttachmentID: "imported-attachment", Filename: "same.txt"}
+
+	existingLocal := domain.EmailMessageSnapshot{ID: "sent-message", Attachments: []domain.EmailAttachmentSnapshot{local}}
+	workerFinal := domain.EmailMessageSnapshot{ID: "sent-message", Attachments: []domain.EmailAttachmentSnapshot{imported}, DownloadComplete: true}
+	if got := mergeEmailMessageSnapshot(existingLocal, workerFinal); len(got.Attachments) != 1 || got.Attachments[0].AttachmentID != local.AttachmentID {
+		t.Fatalf("worker completion replaced promoted attachment: %+v", got.Attachments)
+	}
+
+	existingImported := domain.EmailMessageSnapshot{ID: "sent-message", Attachments: []domain.EmailAttachmentSnapshot{imported}, DownloadComplete: true}
+	localPromotion := domain.EmailMessageSnapshot{ID: "sent-message", Attachments: []domain.EmailAttachmentSnapshot{local}}
+	if got := mergeEmailMessageSnapshot(existingImported, localPromotion); len(got.Attachments) != 1 || got.Attachments[0].AttachmentID != local.AttachmentID {
+		t.Fatalf("local promotion did not replace imported attachment: %+v", got.Attachments)
+	}
+}
+
 func TestMemoryCommunicationsEmailIngestionAttemptsAreFencedAndStopAtThree(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-111111111296"

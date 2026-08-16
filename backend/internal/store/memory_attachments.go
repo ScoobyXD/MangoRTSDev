@@ -334,6 +334,99 @@ func (r *MemoryRepo) LinkResourceAttachmentContext(ctx context.Context, input Re
 	return cloneResourceAttachment(storedLink), nil
 }
 
+func (r *MemoryRepo) ConvergeCommunicationsEmailThreadAttachmentLinksContext(ctx context.Context, companyID, emailThreadID string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	companyID, emailThreadID = cleanUUIDText(companyID), cleanUUIDText(emailThreadID)
+	if companyID == "" || emailThreadID == "" {
+		return false, ErrInvalid
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.emailThreads[key(companyID, emailThreadID)]; !ok {
+		return false, ErrNotFound
+	}
+	return r.convergeCommunicationsEmailThreadAttachmentLinksLocked(companyID, emailThreadID), nil
+}
+
+func (r *MemoryRepo) convergeCommunicationsEmailThreadAttachmentLinksLocked(companyID, emailThreadID string) bool {
+	thread, ok := r.emailThreads[key(companyID, emailThreadID)]
+	if !ok {
+		return false
+	}
+	rules := map[string]map[string]string{}
+	for _, message := range thread.Messages {
+		if !message.Message.DownloadComplete {
+			continue
+		}
+		for _, attachment := range message.Message.Attachments {
+			rule, valid := redundantImportedEmailAttachmentRuleForSnapshot(
+				companyID, emailThreadID, message.EmailMessageID, message.ProviderMessageID, attachment,
+			)
+			if !valid {
+				continue
+			}
+			canonical, exists := r.attachments[attachmentKey(companyID, rule.CanonicalAttachmentID)]
+			if !exists || canonical.DeletedTimestamp != nil {
+				continue
+			}
+			if rules[rule.EmailMessageID] == nil {
+				rules[rule.EmailMessageID] = map[string]string{}
+			}
+			rules[rule.EmailMessageID][rule.ImportedAttachmentID] = rule.CanonicalAttachmentID
+		}
+	}
+	if len(rules) == 0 {
+		return false
+	}
+	liveMessageLinks := map[string]map[string]struct{}{}
+	for _, link := range r.resourceAttachments {
+		if link.CompanyID != companyID || link.ResourceType != "email_message" || link.DeletedTimestamp != nil || rules[link.ResourceID] == nil {
+			continue
+		}
+		if liveMessageLinks[link.ResourceID] == nil {
+			liveMessageLinks[link.ResourceID] = map[string]struct{}{}
+		}
+		liveMessageLinks[link.ResourceID][link.AttachmentID] = struct{}{}
+	}
+	now := time.Now().UTC()
+	retired := map[string]struct{}{}
+	for relationshipID, link := range r.resourceAttachments {
+		if link.CompanyID != companyID || link.ResourceType != "email_message" || link.DeletedTimestamp != nil {
+			continue
+		}
+		canonicalAttachmentID, redundant := rules[link.ResourceID][link.AttachmentID]
+		if !redundant {
+			continue
+		}
+		if _, canonicalLinked := liveMessageLinks[link.ResourceID][canonicalAttachmentID]; !canonicalLinked {
+			continue
+		}
+		link.DeletedTimestamp = &now
+		r.resourceAttachments[relationshipID] = link
+		retired[link.AttachmentID] = struct{}{}
+	}
+	if len(retired) == 0 {
+		return false
+	}
+	liveOwners := map[string]struct{}{}
+	for _, link := range r.resourceAttachments {
+		if link.CompanyID == companyID && link.DeletedTimestamp == nil {
+			liveOwners[link.AttachmentID] = struct{}{}
+		}
+	}
+	for attachmentID := range retired {
+		if _, owned := liveOwners[attachmentID]; !owned {
+			storedAttachmentKey := attachmentKey(companyID, attachmentID)
+			attachment := r.attachments[storedAttachmentKey]
+			attachment.DeletedTimestamp = &now
+			r.attachments[storedAttachmentKey] = attachment
+		}
+	}
+	return true
+}
+
 func (r *MemoryRepo) SoftDeleteResourceAttachment(input ResourceAttachmentDeleteInput) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
