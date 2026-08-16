@@ -1106,6 +1106,8 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 	if message.TrackingOptions == nil || !message.TrackingOptions.Opens {
 		log.Printf("nylas send response missing open tracking user_id=%s grant_id=%s message_id=%s subject=%q", connection.UserID, connection.GrantID, message.ID, sendReq.Subject)
 	}
+	message.EmailMessageID = internalMessageID
+	message.EmailThreadID = sentThread.EmailThreadID
 	now := time.Now().UTC()
 	cacheScope := communicationsConnectionCacheScope(connection)
 	s.commCache.patchMessagePages(connection.UserID, cacheScope, message, now)
