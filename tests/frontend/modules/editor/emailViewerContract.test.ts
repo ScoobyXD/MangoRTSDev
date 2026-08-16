@@ -77,7 +77,7 @@ test("node-attached email viewer discloses per-message recipients while retainin
   assert.match(nodeParts, /window\.setTimeout\(\(\) => replyEditorControllerRef\.current\?\.focus\(\), 0\)/);
 });
 
-test("an inline email reference opens the existing complete thread viewer in a closable modal", () => {
+test("an inline email reference opens every available stored thread row in a closable modal", () => {
   const homePage = source("frontend/src/pages/home/HomePage.tsx");
   const homeParts = source("frontend/src/pages/home/HomeParts.tsx");
   const universalPicker = source("frontend/src/modules/editor/UniversalEntityPicker.tsx");
@@ -94,13 +94,14 @@ test("an inline email reference opens the existing complete thread viewer in a c
   assert.match(openReference, /throw new Error\("stored_email_reference_scope_missing"\)/);
   assert.doesNotMatch(openReference, /entity\.emailAccountEmail\?\.trim\(\)\.toLowerCase\(\) \|\| activeMailAccountEmail/);
   assert.match(openReference, /await getStoredEmailThread\(emailThreadID/);
-  assert.match(openReference, /if \(!storedThread\.history_complete\)/);
-  assert.match(openReference, /storedThread\.download_status === "failed"/);
-  assert.match(openReference, /storedThread\.last_download_error\?\.trim\(\) \|\| "stored_email_thread_download_failed"/);
-  assert.match(openReference, /message: null,[\s\S]{0,100}threadMessages: \[\],[\s\S]{0,180}waitingForHistory: true,[\s\S]{0,60}loading: true/);
+  assert.doesNotMatch(openReference, /if \(!storedThread\.history_complete\)/);
+  assert.match(openReference, /const waitingForHistory = !storedThread\.history_complete && storedThread\.download_status !== "failed"/);
   assert.match(openReference, /mergeEmailThreadDetailMessages\(storedThread\.messages, \[\]\)/);
   assert.match(openReference, /message\.email_message_id === emailMessageID/);
   assert.doesNotMatch(openReference, /message\.id === (?:entity|emailReferencePreviewEntity)\.entityID/);
+  assert.match(openReference, /message: selectedMessage,[\s\S]{0,100}threadMessages,[\s\S]{0,180}waitingForHistory,[\s\S]{0,60}loading: false/);
+  assert.ok(openReference.indexOf("message: selectedMessage") < openReference.indexOf("await listEmailCollaborations"));
+  assert.match(openReference, /if \(current\.message && current\.threadMessages\.length > 0\) \{\s*return \{ \.\.\.current, loading: false, error \};/);
   assert.match(openReference, /await listEmailCollaborations\(/);
   assert.match(openReference, /subscribeRealtimeScope\(apiBase, companyID, scope/);
   assert.match(openReference, /onAccepted: refresh/);
@@ -374,11 +375,13 @@ test("triage email selection, history, and archive prefetch preserve the foregro
   assert.match(homePage, /await getStoredEmailThread\(durableEmailThreadID/);
   assert.match(homePage, /const exactSelectedRow = emailMessageRowKey\(message\) === selectedMessageRowKey/);
   assert.match(homePage, /email_message_id: durableEmailMessageID,[\s\S]{0,100}email_thread_id: durableEmailThreadID/);
-  assert.match(homePage, /if \(!storedThread\.history_complete\)/);
-  assert.match(homePage, /waitingForStoredHistory = true;[\s\S]{0,100}setSelectedThreadMessages\(\[\]\)/);
+  assert.doesNotMatch(homePage, /waitingForStoredHistory/);
+  assert.doesNotMatch(homePage, /if \(!storedThread\.history_complete\)/);
   assert.match(homePage, /candidate\.email_message_id === durableEmailMessageID/);
   assert.match(homePage, /const completeThreadMessages = storedThreadMessages/);
+  assert.match(homePage, /setSelectedThreadMessages\(mergeEmailThreadDetailMessages\([\s\S]{0,120}completeThreadMessages/);
   assert.match(homePage, /setLoadingDetail\(true\);\s*setSelectedThreadMessages\(\[\]\)/);
+  assert.match(homePage, /finally \{\s*if \(!cancelled\) setLoadingDetail\(false\);/);
   assert.match(homePage, /catch \(detailError\) \{[\s\S]{0,100}setSelectedThreadMessages\(\[\]\)/);
   assert.doesNotMatch(homePage, /storedThreadMessages\.length > 0 \? storedThreadMessages : \[selectedWithLocalReplies\]/);
   assert.doesNotMatch(homePage, /getEmailMessageWithStoredThread|getEmailCollaborationThread|collaborationFallback/);
