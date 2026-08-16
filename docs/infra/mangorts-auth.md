@@ -63,7 +63,9 @@ aws sso login --profile <profile>
 .\scripts\start_local_cognito_backend.ps1 -AwsProfile <profile> -StopExisting
 ```
 
-The script exports short-lived AWS credentials from the selected AWS CLI profile into `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` before launching the Go backend. This is required because the backend signs Cognito admin and SES email calls from process environment credentials. The active AWS identity must be allowed to call `cognito-idp:AdminCreateUser`, `cognito-idp:AdminSetUserPassword`, `cognito-idp:AdminGetUser`, `cognito-idp:AdminDeleteUser`, and `ses:SendEmail` for the configured resources.
+The script exports short-lived AWS credentials from the selected AWS CLI profile into `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` before launching the Go backend. This is required because the backend signs Cognito admin, SES email, and SQS calls from process environment credentials. The active AWS identity must be allowed to call `cognito-idp:AdminCreateUser`, `cognito-idp:AdminSetUserPassword`, `cognito-idp:AdminGetUser`, `cognito-idp:AdminDeleteUser`, `ses:SendEmail`, `ecs:ListTaskDefinitions`, `ecs:DescribeTaskDefinition`, and `sqs:SendMessage` for the configured DEV resources.
+
+The script reads `MANGORTS_EMAIL_WORK_QUEUE_URL` from the deployed DEV API task definition and exports that exact URL to the local API. The existing private DEV email worker consumes the queued work; the script does not start a second local worker and never requires a copied queue URL. Startup stops with a clear error when AWS SSO or ECS access is unavailable or the deployed DEV task has no email queue.
 
 For local invitation emails, the script also exports:
 

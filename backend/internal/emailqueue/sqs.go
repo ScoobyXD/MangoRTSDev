@@ -37,6 +37,9 @@ func newSQS(client sqsAPI, queueURL string) (*SQS, error) {
 }
 
 func (q *SQS) Send(ctx context.Context, message Message) error {
+	if q == nil {
+		return errors.New("email SQS sender is not configured")
+	}
 	if err := message.Validate(); err != nil {
 		return err
 	}
