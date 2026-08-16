@@ -5018,6 +5018,30 @@ function appendRecipient(addresses: EmailAddress[], address: EmailAddress): Emai
   return addresses.some((item) => recipientKey(item) === key) ? addresses : [...addresses, address];
 }
 
+function parseCompleteRecipientDraft(value: string): EmailAddress[] | null {
+  const parts = value.split(/[;,]/).map((part) => part.trim()).filter(Boolean);
+  if (parts.length === 0) return [];
+  const parsed = parts.flatMap((part) => parseEmailAddressList(part));
+  return parsed.length === parts.length ? parsed : null;
+}
+
+function commitPendingComposeRecipients(
+  compose: ComposeState,
+  drafts: Record<ComposeRecipientField, string>,
+): ComposeState {
+  const commit = (field: ComposeRecipientField) => {
+    const pending = parseCompleteRecipientDraft(drafts[field]);
+    if (!pending || pending.length === 0) return compose[field];
+    return serializeRecipients(pending.reduce(appendRecipient, parseEmailAddressList(compose[field])));
+  };
+  const to = commit("to");
+  const cc = commit("cc");
+  const bcc = commit("bcc");
+  return to === compose.to && cc === compose.cc && bcc === compose.bcc
+    ? compose
+    : { ...compose, to, cc, bcc };
+}
+
 function matchingCompanyUsers(users: CompanyUser[], value: string, existingRecipients: EmailAddress[]): CompanyUser[] {
   const query = recipientQuery(value);
   const existingEmails = new Set(existingRecipients.map(recipientKey));
@@ -5144,19 +5168,42 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
     if (!recipient) return;
     addRecipient(field, recipient);
   };
-  const commitRecipientDraft = (field: ComposeRecipientField, suggestions: CompanyUser[], options?: { forceRaw?: boolean }) => {
+  const commitRecipientDraft = (field: ComposeRecipientField, suggestions: CompanyUser[], options?: { forceRaw?: boolean; refocus?: boolean }) => {
     const draft = recipientDrafts[field].trim();
     if (suggestions.length > 0 && !options?.forceRaw) {
       pickRecipient(field, suggestions[0]);
       return true;
     }
-    const parsed = parseEmailAddressList(draft);
-    if (parsed.length === 0) return false;
+    const parsed = parseCompleteRecipientDraft(draft);
+    if (!parsed || parsed.length === 0) return false;
     updateRecipientField(field, parsed.reduce(appendRecipient, parseEmailAddressList(compose[field])));
     setRecipientDrafts((current) => ({ ...current, [field]: "" }));
-    setActiveRecipientField(field);
-    focusRecipientInput(field);
+    if (options?.refocus !== false) {
+      setActiveRecipientField(field);
+      focusRecipientInput(field);
+    }
     return true;
+  };
+  const commitPendingRecipients = () => {
+    for (const field of ["to", "cc", "bcc"] as const) {
+      const input = recipientInputRefs.current[field];
+      if (parseCompleteRecipientDraft(recipientDrafts[field]) !== null) {
+        input?.setCustomValidity("");
+        continue;
+      }
+      input?.setCustomValidity("Enter a valid email address.");
+      input?.reportValidity();
+      setActiveRecipientField(field);
+      focusRecipientInput(field);
+      return null;
+    }
+    const committed = commitPendingComposeRecipients(compose, recipientDrafts);
+    setRecipientDrafts((current) => ({
+      to: (parseCompleteRecipientDraft(current.to)?.length ?? 0) > 0 ? "" : current.to,
+      cc: (parseCompleteRecipientDraft(current.cc)?.length ?? 0) > 0 ? "" : current.cc,
+      bcc: (parseCompleteRecipientDraft(current.bcc)?.length ?? 0) > 0 ? "" : current.bcc,
+    }));
+    return committed;
   };
   const removeRecipient = (field: ComposeRecipientField, address: EmailAddress) => {
     updateRecipientField(field, parseEmailAddressList(compose[field]).filter((item) => recipientKey(item) !== recipientKey(address)));
@@ -5195,14 +5242,17 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
           <input
             ref={(element) => { recipientInputRefs.current[field] = element; }}
             style={recipientDraftInputStyle}
+            aria-label={`${placeholder} recipients`}
             value={draft}
             onFocus={() => setActiveRecipientField(field)}
             onBlur={() => {
+              commitRecipientDraft(field, [], { forceRaw: true, refocus: false });
               window.setTimeout(() => {
                 setActiveRecipientField((current) => current === field ? "" : current);
               }, 120);
             }}
             onChange={(event) => {
+              event.currentTarget.setCustomValidity("");
               setActiveRecipientField(field);
               setRecipientDrafts((current) => ({ ...current, [field]: event.target.value }));
             }}
@@ -5219,7 +5269,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
               }
               if (event.key === "," || event.key === ";") {
                 event.preventDefault();
-                commitRecipientDraft(field, suggestions, { forceRaw: parseEmailAddressList(draft).length > 0 });
+                commitRecipientDraft(field, suggestions, { forceRaw: (parseCompleteRecipientDraft(draft)?.length ?? 0) > 0 });
                 return;
               }
               if (event.key === "Backspace" && draft.length === 0 && recipients.length > 0) {
@@ -5485,13 +5535,20 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
     : undefined;
   const handleSubmit = (event: React.FormEvent) => {
     const body = bodyEditorControllerRef.current?.flush() ?? compose.body;
-    const submittedCompose = body === compose.body ? compose : { ...compose, body };
+    const composeWithRecipients = commitPendingRecipients();
+    if (!composeWithRecipients) {
+      event.preventDefault();
+      return;
+    }
+    const submittedCompose = body === compose.body ? composeWithRecipients : { ...composeWithRecipients, body };
     onChange(submittedCompose);
     onSubmit(event, submittedCompose);
   };
   const handleSaveDraft = () => {
     const body = bodyEditorControllerRef.current?.flush() ?? compose.body;
-    const composeToSave = body === compose.body ? compose : { ...compose, body };
+    const composeWithRecipients = commitPendingRecipients();
+    if (!composeWithRecipients) return;
+    const composeToSave = body === compose.body ? composeWithRecipients : { ...composeWithRecipients, body };
     onChange(composeToSave);
     onSaveDraft(composeToSave);
   };
