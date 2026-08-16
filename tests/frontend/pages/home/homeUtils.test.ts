@@ -12,7 +12,6 @@ import {
   buildSharedInboxRows,
   condenseEmailThreadMessages,
   emailConversationLogicGateIDs,
-  emailConversationShouldShowLoadingShell,
   emailAttachmentIsReferencedInline,
   emailAttachmentHasResolvableContent,
   emailAttachmentIsInlineContent,
@@ -121,8 +120,12 @@ test("triage drag parsing makes a shared inbox authoritative over personal accou
 test("triage email bodies render before cancellable inline-image hydration completes", () => {
   const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
 
-  assert.match(homeParts, /useEmailBodyDocument\(message\.id, body, allAttachments, companyID, sharedInboxID, accountEmail, collaborationID, expanded && bodyLoaded\)/);
-  assert.doesNotMatch(homeParts, /splitEmailQuotedHistory|Show quoted history|Hide quoted history/);
+  assert.match(homeParts, /<EmailQuotedHistory body=\{body\}>/);
+  assert.match(homeParts, /useEmailBodyDocument\(message\.id, body, attachments, companyID, sharedInboxID, accountEmail, collaborationID, true\)/);
+  assert.match(homeParts, /const inlineSourceByAttachmentRef = React\.useRef\(new Map<string, string>\(\)\)/);
+  assert.match(homeParts, /if \(cachedSourceURL\) return \{ keys, sourceURL: cachedSourceURL \}/);
+  assert.match(homeParts, /inlineSourceByAttachmentRef\.current\.set\(attachmentKey, sourceURL\)/);
+  assert.match(homeParts, /inlineObjectURLsRef\.current\.forEach\(\(objectURL\) => URL\.revokeObjectURL\(objectURL\)\)/);
   assert.match(homeParts, /if \(!enabled \|\| !body\.trim\(\) \|\| inlineAttachments\.length === 0\) return undefined/);
   assert.match(homeParts, /downloadEmailAttachment\(messageID, providerAttachmentID, companyID, sharedInboxID, \{ signal: controller\.signal, accountEmail, collaborationID \}\)/);
   assert.match(homeParts, /const item = await loadInlineAttachment\(attachment\);[\s\S]{0,300}setDownloadedSourceByContentID/);
@@ -361,16 +364,6 @@ test("email entity indicators inherit Logic Gates from their attached Node acros
     emailConversationLogicGateIDs([first, second], nodeByID),
     ["gate-direct", "gate-shared", "gate-from-node", "gate-second"],
   );
-});
-
-test("known multi-message selections keep a loading shell until the conversation is ready", () => {
-  const selected = emailMessage("newest", "thread-1", 300, { thread_message_count: 3 });
-  const older = emailMessage("older", "thread-1", 100);
-
-  assert.equal(emailConversationShouldShowLoadingShell(selected, [selected], true), true);
-  assert.equal(emailConversationShouldShowLoadingShell(selected, [older, selected], true), false);
-  assert.equal(emailConversationShouldShowLoadingShell(selected, [selected], false), false);
-  assert.equal(emailConversationShouldShowLoadingShell({ thread_message_count: 1 }, [selected], true), false);
 });
 
 test("archive advance selects the visible row below and falls back to the previous row at the end", () => {

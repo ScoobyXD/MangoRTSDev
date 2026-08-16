@@ -5,9 +5,10 @@ import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/Con
 import { ExplorerEntityIcon } from "../../icons/index.js";
 import { deleteEmailDraft, downloadEmailAttachment, getEmailSignature, getNodeEmailMessage, getNodeEmailThread, getProjectEmailMessage, getProjectEmailThread, listEmailDrafts, saveEmailDraft, sendEmail, sendEmailCollaborationDraft, type CommunicationsEmailDraft, type EmailAddress, type EmailAttachment, type EmailMessage } from "../communications/communicationsApi";
 import { CalendarInviteCard } from "../communications/CalendarInviteCard";
+import { EmailQuotedHistory } from "../communications/EmailQuotedHistory";
 import { OutboundEmailUndoBanner } from "../communications/OutboundEmailUndoBanner";
 import { isOutboundEmailUndoneError } from "../communications/outboundEmailUndo";
-import { visibleEmailAttachmentsForBody } from "../communications/emailAttachments.js";
+import { emailAttachmentIsReferencedInline, visibleEmailAttachmentsForBody } from "../communications/emailAttachments.js";
 import { emailThreadMessageRenderKey, emailThreadMessageSourceLabel, normalizeEmailThreadMessages, type EmailThreadMessageCandidate } from "../communications/emailThreadMessages.js";
 import { buildReplyAllRecipients } from "../communications/emailRecipients";
 import { deleteMangoAttachmentPermanently, downloadMangoAttachment, fetchMangoAttachmentBlob, loadMangoAttachmentObjectURL, type AttachmentRequestJSON, type MangoAttachment, type MangoAttachmentResourceType, type MangoAttachmentUploadProgress, type MangoAttachmentVariantType, type MangoResourceAttachment } from "../attachments/attachmentApi";
@@ -5064,26 +5065,27 @@ const EmailBodyFrame: React.FC<{
   const frameCleanupRef = useRef<() => void>(() => undefined);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const filenameBySourceRef = useRef<Record<string, string>>({});
+  const inlineSourceByAttachmentRef = useRef(new Map<string, string>());
+  const inlineObjectURLsRef = useRef(new Set<string>());
 
   useEffect(() => {
     let cancelled = false;
-    const objectURLs: string[] = [];
     setSelectedImage(null);
     setPreviewImage(null);
     setSrcDoc(messageDocument(body, compact));
     filenameBySourceRef.current = {};
-    const inlineAttachments = attachments.filter((attachment) => (
-      attachment.is_inline
-      || Boolean(attachment.content_id?.trim())
-      || emailAttachmentContentIDKeys(attachment).some((key) => body.toLowerCase().includes(`cid:${key.toLowerCase()}`))
-    ));
+    const inlineAttachments = attachments.filter((attachment) => emailAttachmentIsReferencedInline(body, attachment));
     if (inlineAttachments.length === 0) return undefined;
     const controller = new AbortController();
+    const attachmentScopeKey = `${companyID}\x1f${sharedInboxID ?? accountEmail?.trim().toLowerCase() ?? ""}\x1f${message.id}`;
     void Promise.all(inlineAttachments.map(async (attachment) => {
       const inlineURL = emailAttachmentDataURL(attachment);
       if (inlineURL) return { attachment, sourceURL: inlineURL };
       const mangoAttachmentID = attachment.attachment_id?.trim() ?? "";
       const providerAttachmentID = attachment.id?.trim() ?? "";
+      const attachmentKey = mangoAttachmentID ? `${attachmentScopeKey}\x1fmango:${mangoAttachmentID}` : providerAttachmentID ? `${attachmentScopeKey}\x1fprovider:${providerAttachmentID}` : "";
+      const cachedSourceURL = attachmentKey ? inlineSourceByAttachmentRef.current.get(attachmentKey) ?? "" : "";
+      if (cachedSourceURL) return { attachment, sourceURL: cachedSourceURL };
       try {
         const sourceURL = mangoAttachmentID
           ? await loadMangoAttachmentObjectURL(apiBase, companyID, mangoAttachmentID, "display", { signal: controller.signal })
@@ -5094,7 +5096,8 @@ const EmailBodyFrame: React.FC<{
           if (sourceURL.startsWith("blob:")) URL.revokeObjectURL(sourceURL);
           return { attachment, sourceURL: "" };
         }
-        if (sourceURL.startsWith("blob:")) objectURLs.push(sourceURL);
+        if (attachmentKey && sourceURL) inlineSourceByAttachmentRef.current.set(attachmentKey, sourceURL);
+        if (sourceURL.startsWith("blob:")) inlineObjectURLsRef.current.add(sourceURL);
         return { attachment, sourceURL };
       } catch {
         return { attachment, sourceURL: "" };
@@ -5107,11 +5110,15 @@ const EmailBodyFrame: React.FC<{
     return () => {
       cancelled = true;
       controller.abort();
-      objectURLs.forEach((url) => URL.revokeObjectURL(url));
     };
   }, [accountEmail, apiBase, attachments, body, collaborationID, compact, companyID, message.id, sharedInboxID]);
 
-  useEffect(() => () => frameCleanupRef.current(), []);
+  useEffect(() => () => {
+    frameCleanupRef.current();
+    inlineObjectURLsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    inlineObjectURLsRef.current.clear();
+    inlineSourceByAttachmentRef.current.clear();
+  }, []);
 
   useEffect(() => {
     applyEmailBodyHighlights(iframeRef.current?.contentDocument, highlights, activeSelection);
@@ -6732,7 +6739,6 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
               const hideInlineMessageChrome = singleMessageOnly;
               const isExpanded = singleMessageOnly || expandedThreadMessageID === threadMessageID;
               const fullThreadBody = threadMessage.body || threadMessage.snippet || "";
-              const threadBody = emailBodyText(fullThreadBody);
               const collapsedSnippet = emailBodyText(threadMessage.snippet || fullThreadBody).replace(/\s+/g, " ").trim();
               const useRichThreadBody = !canUseEmailSelection || /<(?:img|table|video|audio)\b|\bcid:/i.test(threadMessage.body ?? "") || (threadMessage.attachments ?? []).some((attachment) => attachment.is_inline || Boolean(attachment.content_id));
               const threadMessageIsSent = sentReplies.some((reply) => reply.id === threadMessage.id)
@@ -6899,44 +6905,48 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                       ) : null}
                     </div>
                   )}
-                  {isExpanded && (useRichThreadBody ? (
-                    <EmailBodyFrame
-                      message={threadMessage}
-                      body={fullThreadBody}
-                      apiBase={apiBase}
-                      companyID={companyID}
-                      sharedInboxID={sharedInboxID}
-                      accountEmail={accountEmail}
-                      collaborationID={collaborationID}
-                      compact={inlineExpansion}
-                      strokeColor={strokeColor}
-                      accent={accent}
-                      highlights={highlightsForThreadMessage(threadMessage)}
-                      activeSelection={activeSelectionForThreadMessage(threadMessage)}
-                      onSelectionChange={canUseEmailSelection ? (selection) => updateFrameSelection(threadMessageID, threadMessage.email_message_id ?? "", selection) : undefined}
-                    />
-                  ) : (
-                    <div
-                      ref={isSelectedMessage ? selectedEmailBodyRef : undefined}
-                      {...{ [EMAIL_BODY_MESSAGE_ID_ATTRIBUTE]: threadMessageID }}
-                      style={{
-                        marginTop: 7,
-                        color: "#111827",
-                        cursor: "text",
-                        fontSize: 13.5,
-                        lineHeight: 1.5,
-                        whiteSpace: "pre-wrap",
-                        overflowWrap: "anywhere",
-                        userSelect: "text",
-                      }}
-                    >
-                      {renderEmailTextWithHighlights(
-                        threadBody || "(empty email)",
-                        highlightsForThreadMessage(threadMessage),
-                        activeSelectionForThreadMessage(threadMessage)
+                  {isExpanded && (
+                    <EmailQuotedHistory body={fullThreadBody}>
+                      {(visibleThreadBody) => useRichThreadBody ? (
+                        <EmailBodyFrame
+                          message={threadMessage}
+                          body={visibleThreadBody}
+                          apiBase={apiBase}
+                          companyID={companyID}
+                          sharedInboxID={sharedInboxID}
+                          accountEmail={accountEmail}
+                          collaborationID={collaborationID}
+                          compact={inlineExpansion}
+                          strokeColor={strokeColor}
+                          accent={accent}
+                          highlights={highlightsForThreadMessage(threadMessage)}
+                          activeSelection={activeSelectionForThreadMessage(threadMessage)}
+                          onSelectionChange={canUseEmailSelection ? (selection) => updateFrameSelection(threadMessageID, threadMessage.email_message_id ?? "", selection) : undefined}
+                        />
+                      ) : (
+                        <div
+                          ref={isSelectedMessage ? selectedEmailBodyRef : undefined}
+                          {...{ [EMAIL_BODY_MESSAGE_ID_ATTRIBUTE]: threadMessageID }}
+                          style={{
+                            marginTop: 7,
+                            color: "#111827",
+                            cursor: "text",
+                            fontSize: 13.5,
+                            lineHeight: 1.5,
+                            whiteSpace: "pre-wrap",
+                            overflowWrap: "anywhere",
+                            userSelect: "text",
+                          }}
+                        >
+                          {renderEmailTextWithHighlights(
+                            emailBodyText(visibleThreadBody) || "(empty email)",
+                            highlightsForThreadMessage(threadMessage),
+                            activeSelectionForThreadMessage(threadMessage)
+                          )}
+                        </div>
                       )}
-                    </div>
-                  ))}
+                    </EmailQuotedHistory>
+                  )}
                   {isExpanded && (
                     <EmailMessageAttachments
                       message={threadMessage}

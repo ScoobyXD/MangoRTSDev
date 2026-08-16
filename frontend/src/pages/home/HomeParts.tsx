@@ -27,6 +27,7 @@ import {
 } from "../../modules/attachments/attachmentApi";
 import { downloadEmailAttachment, parseEmailAddressList, type CommunicationsSharedInbox, type CommunicationsSharedInboxRACIRole, type CommunicationsSharedInboxRACIPrincipalType, type CompanyUser, type EmailAddress, type EmailAttachment, type EmailMessage } from "../../modules/communications/communicationsApi";
 import { CalendarInviteCard } from "../../modules/communications/CalendarInviteCard";
+import { EmailQuotedHistory } from "../../modules/communications/EmailQuotedHistory";
 import { emailAttachmentHasResolvableContent } from "../../modules/communications/emailAttachments";
 import { emailThreadMessageRenderKey, emailThreadMessageSourceLabel, normalizeEmailThreadMessages } from "../../modules/communications/emailThreadMessages";
 import { EditorTabBar } from "../../modules/editor/EditorTabBar";
@@ -5764,8 +5765,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
 
 export function conversationMessagesForDetail(message: EmailMessage, threadMessages: EmailMessage[]): EmailMessage[] {
   const fallbackScopeKey = message.client_source_scope_key?.trim() || "mailbox";
-  const sourceMessages = threadMessages.length > 0 ? threadMessages : [message];
-  return normalizeEmailThreadMessages(sourceMessages.map((candidate) => ({
+  return normalizeEmailThreadMessages(threadMessages.map((candidate) => ({
     message: candidate,
     source: candidate.collaboration_id?.trim() ? "collaboration" : "provider",
     scopeKey: candidate.client_source_scope_key?.trim() || fallbackScopeKey,
@@ -6050,6 +6050,8 @@ function emailMessageBodyIsLoaded(message: EmailMessage): boolean {
 function useEmailBodyDocument(messageID: string, body: string, attachments: EmailAttachment[], companyID: string, sharedInboxID: string | undefined, accountEmail: string | undefined, collaborationID: string | undefined, enabled: boolean): { srcDoc: string } {
   const apiBase = readAuthConfig().apiBase;
   const collaborationIDRef = React.useRef(collaborationID);
+  const inlineSourceByAttachmentRef = React.useRef(new Map<string, string>());
+  const inlineObjectURLsRef = React.useRef(new Set<string>());
   collaborationIDRef.current = collaborationID;
   const inlineAttachments = React.useMemo(
     () => attachments.filter((attachment) => emailAttachmentIsReferencedInline(body, attachment)),
@@ -6087,13 +6089,16 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
     const attachmentsToDownload = inlineAttachments.filter((attachment) => !emailAttachmentDataURL(attachment));
     if (attachmentsToDownload.length === 0) return undefined;
     let cancelled = false;
-    const objectURLs: string[] = [];
     const controller = new AbortController();
+    const attachmentScopeKey = `${companyID}\x1f${sharedInboxID ?? accountEmail?.trim().toLowerCase() ?? ""}\x1f${messageID}`;
     const loadInlineAttachment = async (attachment: EmailAttachment): Promise<{ keys: string[]; sourceURL: string }> => {
       const keys = emailAttachmentContentIDKeys(attachment);
       try {
         const mangoAttachmentID = attachment.attachment_id?.trim() ?? "";
         const providerAttachmentID = attachment.id?.trim() ?? "";
+        const attachmentKey = mangoAttachmentID ? `${attachmentScopeKey}\x1fmango:${mangoAttachmentID}` : providerAttachmentID ? `${attachmentScopeKey}\x1fprovider:${providerAttachmentID}` : "";
+        const cachedSourceURL = attachmentKey ? inlineSourceByAttachmentRef.current.get(attachmentKey) ?? "" : "";
+        if (cachedSourceURL) return { keys, sourceURL: cachedSourceURL };
         let sourceURL = "";
         if (mangoAttachmentID) {
           sourceURL = await loadMangoAttachmentObjectURL(apiBase, companyID, mangoAttachmentID, "display", { signal: controller.signal });
@@ -6106,7 +6111,8 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
           if (sourceURL.startsWith("blob:")) URL.revokeObjectURL(sourceURL);
           return { keys, sourceURL: "" };
         }
-        if (sourceURL && sourceURL.startsWith("blob:")) objectURLs.push(sourceURL);
+        if (attachmentKey && sourceURL) inlineSourceByAttachmentRef.current.set(attachmentKey, sourceURL);
+        if (sourceURL.startsWith("blob:")) inlineObjectURLsRef.current.add(sourceURL);
         return { keys, sourceURL };
       } catch {
         return { keys, sourceURL: "" };
@@ -6124,9 +6130,14 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
     return () => {
       cancelled = true;
       controller.abort();
-      objectURLs.forEach((objectURL) => URL.revokeObjectURL(objectURL));
     };
   }, [accountEmail, apiBase, body, companyID, enabled, hydrationKey, inlineAttachmentKey, inlineAttachments, messageID, sharedInboxID]);
+
+  React.useEffect(() => () => {
+    inlineObjectURLsRef.current.forEach((objectURL) => URL.revokeObjectURL(objectURL));
+    inlineObjectURLsRef.current.clear();
+    inlineSourceByAttachmentRef.current.clear();
+  }, []);
 
   const srcDoc = React.useMemo(() => {
     if (!enabled) return "";
@@ -6136,6 +6147,37 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
   }, [body, downloadedCIDState, embeddedSourceByContentID, enabled, hydrationKey]);
 
   return { srcDoc };
+}
+
+function EmailConversationBodyFrame({ message, body, attachments, companyID, sharedInboxID, accountEmail, collaborationID, fill, frameMinHeight, frameStyle, chatHighlights, activeSelection, selectionNavigation, onEmailSelection }: {
+  message: EmailMessage;
+  body: string;
+  attachments: EmailAttachment[];
+  companyID: string;
+  sharedInboxID?: string;
+  accountEmail?: string;
+  collaborationID?: string;
+  fill: boolean;
+  frameMinHeight: number;
+  frameStyle?: React.CSSProperties;
+  chatHighlights: readonly EmailBodyHighlightRange[];
+  activeSelection?: EmailCollaborationSelection | null;
+  selectionNavigation?: EmailCollaborationNavigation | null;
+  onEmailSelection?: (selection: EmailCollaborationSelection) => void;
+}) {
+  const bodyDocument = useEmailBodyDocument(message.id, body, attachments, companyID, sharedInboxID, accountEmail, collaborationID, true);
+  return (
+    <AutoHeightEmailBodyFrame
+      srcDoc={bodyDocument.srcDoc}
+      minHeight={frameMinHeight}
+      fillAvailableHeight={fill}
+      style={frameStyle}
+      onTextSelection={onEmailSelection ? (selection) => onEmailSelection({ ...selection, messageID: message.id, emailMessageID: message.email_message_id?.trim() || undefined }) : undefined}
+      highlights={chatHighlights}
+      activeSelection={activeSelection}
+      selectionNavigation={selectionNavigation}
+    />
+  );
 }
 
 function EmailConversationMessage({ message, companyID, sharedInboxID, accountEmail, fill, expanded, latest, showReplyActions, timelineStart, timelineEnd, busy, calendarResponseAvailable, loadingBody = false, chatHighlights = [], activeSelection, selectionNavigation, onToggleExpanded, onLoadBody, onReply, onReplyAll, onEmailSelection }: {
@@ -6172,7 +6214,6 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
   const hasAttachments = attachments.length > 0;
   const hasCalendarInvite = allAttachments.some(emailAttachmentIsCalendarInvite);
   const collaborationID = message.collaboration_id?.trim() || undefined;
-  const bodyDocument = useEmailBodyDocument(message.id, body, allAttachments, companyID, sharedInboxID, accountEmail, collaborationID, expanded && bodyLoaded);
   const sent = messageIsSent(message);
   const frameMinHeight = fill ? 0 : 120;
   const frameStyle: React.CSSProperties | undefined = fill ? undefined : {
@@ -6244,16 +6285,26 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
             {!loadingBody && <button type="button" style={mailPanelSmallButtonStyle} onClick={onLoadBody}>Retry</button>}
           </div>
         ) : (
-          <AutoHeightEmailBodyFrame
-            srcDoc={bodyDocument.srcDoc}
-            minHeight={frameMinHeight}
-            fillAvailableHeight={fill}
-            style={frameStyle}
-            onTextSelection={onEmailSelection ? (selection) => onEmailSelection({ ...selection, messageID: message.id, emailMessageID: message.email_message_id?.trim() || undefined }) : undefined}
-            highlights={chatHighlights}
-            activeSelection={activeSelection}
-            selectionNavigation={selectionNavigation}
-          />
+          <EmailQuotedHistory body={body}>
+            {(visibleBody) => (
+              <EmailConversationBodyFrame
+                message={message}
+                body={visibleBody}
+                attachments={allAttachments}
+                companyID={companyID}
+                sharedInboxID={sharedInboxID}
+                accountEmail={accountEmail}
+                collaborationID={collaborationID}
+                fill={fill}
+                frameMinHeight={frameMinHeight}
+                frameStyle={frameStyle}
+                chatHighlights={chatHighlights}
+                activeSelection={activeSelection}
+                selectionNavigation={selectionNavigation}
+                onEmailSelection={onEmailSelection}
+              />
+            )}
+          </EmailQuotedHistory>
         ))}
         {expanded && hasAttachments && (
           <div style={mailAttachmentSectionStyle}>
@@ -6330,11 +6381,12 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
   onContentTopChange?: (offset: number) => void;
 }) {
   const canonicalConversationMessages = conversationMessagesForDetail(message, threadMessages);
+  const conversationUnavailable = canonicalConversationMessages.length === 0;
   const nodeByID = new Map(nodes.map((node) => [node.node_id, node]));
   const associatedNodeMessage = canonicalConversationMessages.find((candidate) => candidate.collaboration_node_id?.trim()) ?? null;
   const conversationLogicGateIDs = emailConversationLogicGateIDs(canonicalConversationMessages, nodeByID);
   const singleMessage = canonicalConversationMessages.length <= 1;
-  const newestMessageID = canonicalConversationMessages[canonicalConversationMessages.length - 1]?.id ?? message.id;
+  const newestMessageID = canonicalConversationMessages[canonicalConversationMessages.length - 1]?.id ?? "";
   const [conversationOrder, setConversationOrder] = React.useState<EmailConversationOrder>("oldest");
   const conversationIdentity = message.thread_id?.trim() || message.id;
   const conversationMessages = React.useMemo(
@@ -6480,7 +6532,7 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
         </div>
         {loading && <span style={mutedSmallStyle}>Loading</span>}
       </div>
-      {!previewOnly && <div style={{ ...toolbarStyle, display: "flex", alignItems: "center", flexWrap: "nowrap", minWidth: 0 }}>
+      {!previewOnly && !conversationUnavailable && <div style={{ ...toolbarStyle, display: "flex", alignItems: "center", flexWrap: "nowrap", minWidth: 0 }}>
         <div className="mango-editor-header-scroll" style={{ minWidth: 0, display: "flex", flexWrap: "nowrap", alignItems: "center", gap: 6, overflowX: "auto", overflowY: "hidden" }}>
           {!singleMessage && (
             <>
@@ -6545,7 +6597,11 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
         )}
       </div>}
       <div ref={conversationScrollRef} data-email-conversation-scroll="true" data-email-conversation-count={conversationMessages.length} style={bodyContainerStyle}>
-        {conversationMessages.map((conversationMessage, index) => (
+        {conversationUnavailable ? (
+          <div role="status" data-email-conversation-unavailable="true" style={emailBodyLoadingStyle}>
+            {loading ? "Loading conversation" : "Conversation unavailable"}
+          </div>
+        ) : conversationMessages.map((conversationMessage, index) => (
           <EmailConversationMessage
             key={emailThreadMessageRenderKey(conversationMessage)}
             message={conversationMessage}

@@ -187,6 +187,100 @@ func TestMemoryCommunicationsEmailPlacementsAreScopedToExactConnection(t *testin
 	}
 }
 
+func TestMemoryCommunicationsEmailMessageIdentitiesRequireOneExactConnectionMatch(t *testing.T) {
+	repo := NewMemoryRepo()
+	const companyID = "11111111-1111-4111-8111-111111111196"
+	repo.EnsureCompany(companyID, "Stored identity company")
+	firstUser, err := repo.UpsertAuthUser("identity-first", "first@example.com", "First")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondUser, err := repo.UpsertAuthUser("identity-second", "second@example.com", "Second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, subject := range []string{"identity-first", "identity-second"} {
+		if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
+			t.Fatal(err)
+		}
+	}
+	firstConnection, err := repo.UpsertUserEmailConnection(UserEmailConnectionInput{
+		CompanyID: companyID, UserID: firstUser.UserID, Provider: "google", AccountEmail: firstUser.Email,
+		Scope: "personal", GrantID: "first-grant", Status: "connected",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondConnection, err := repo.UpsertUserEmailConnection(UserEmailConnectionInput{
+		CompanyID: companyID, UserID: secondUser.UserID, Provider: "google", AccountEmail: secondUser.Email,
+		Scope: "personal", GrantID: "second-grant", Status: "connected",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const providerMessageID = "same-provider-message-in-two-mailboxes"
+	firstThread, err := repo.UpsertCommunicationsEmailThread(CommunicationsEmailThreadUpsertInput{
+		CompanyID: companyID, PersonalUserID: firstUser.UserID, PersonalAccountEmail: firstUser.Email,
+		AccountEmail: firstUser.Email, Provider: "google", ProviderThreadID: "first-provider-thread",
+		SelectedMessageID: providerMessageID,
+		Messages:          []domain.EmailMessageSnapshot{{ID: providerMessageID, ThreadID: "first-provider-thread"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondThread, err := repo.UpsertCommunicationsEmailThread(CommunicationsEmailThreadUpsertInput{
+		CompanyID: companyID, PersonalUserID: secondUser.UserID, PersonalAccountEmail: secondUser.Email,
+		AccountEmail: secondUser.Email, Provider: "google", ProviderThreadID: "second-provider-thread",
+		SelectedMessageID: providerMessageID,
+		Messages:          []domain.EmailMessageSnapshot{{ID: providerMessageID, ThreadID: "second-provider-thread"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	identities, err := repo.ResolveCommunicationsEmailMessageIdentitiesForConnectionContext(
+		context.Background(), companyID, firstConnection.EmailConnectionID, []string{providerMessageID},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := identities[providerMessageID]
+	if identity.EmailThreadID != firstThread.EmailThreadID || identity.EmailMessageID != firstThread.Messages[0].EmailMessageID {
+		t.Fatalf("first connection identity=%+v, want first stored row", identity)
+	}
+	identities, err = repo.ResolveCommunicationsEmailMessageIdentitiesForConnectionContext(
+		context.Background(), companyID, secondConnection.EmailConnectionID, []string{providerMessageID},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity = identities[providerMessageID]
+	if identity.EmailThreadID != secondThread.EmailThreadID || identity.EmailMessageID != secondThread.Messages[0].EmailMessageID {
+		t.Fatalf("second connection identity=%+v, want second stored row", identity)
+	}
+
+	if _, err := repo.UpsertCommunicationsEmailThread(CommunicationsEmailThreadUpsertInput{
+		CompanyID: companyID, PersonalUserID: firstUser.UserID, PersonalAccountEmail: firstUser.Email,
+		AccountEmail: firstUser.Email, Provider: "google", ProviderThreadID: "duplicate-provider-thread",
+		SelectedMessageID: "duplicate-thread-root",
+		Messages: []domain.EmailMessageSnapshot{
+			{ID: "duplicate-thread-root", ThreadID: "duplicate-provider-thread"},
+			{ID: providerMessageID, ThreadID: "duplicate-provider-thread"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	identities, err = repo.ResolveCommunicationsEmailMessageIdentitiesForConnectionContext(
+		context.Background(), companyID, firstConnection.EmailConnectionID, []string{providerMessageID},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found := identities[providerMessageID]; found {
+		t.Fatalf("ambiguous same-connection provider identity was returned: %+v", identities[providerMessageID])
+	}
+}
+
 func TestCommunicationsEmailThreadRejectsCrossThreadAndMissingSelectedMessage(t *testing.T) {
 	repo := NewMemoryRepo()
 	input := CommunicationsEmailThreadUpsertInput{

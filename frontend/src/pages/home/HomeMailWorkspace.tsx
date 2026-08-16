@@ -5,7 +5,7 @@ import type { EditorEntityLink, EditorEntityLinkRequest } from "../../modules/ed
 import type { NodeRecord } from "../../modules/nodes/types";
 import type { LogicGateRecord } from "../../modules/logic-gates/types";
 import type { ComposeState, HomeViewID, MessageSelectionModifiers } from "./homeTypes";
-import { canDragTriageMessageFromMailbox, EMAIL_CHAT_COLUMN_MIN_WIDTH, EMAIL_DETAIL_COLUMN_MIN_WIDTH, emailConversationShouldShowLoadingShell, emailMessageHasMultipleThreadMessages, emailMessageLogicGateIDs, emailMessageRowAriaLabel, emailThreadMessageCount, formatAddressList, formatMessageDate, isMailRowActivationKey, mailboxLabel, messageReadStatusLabel, messageReadStatusTitle, resizeEmailChatColumnAtPointer, type EmailConversationOrder } from "./homeUtils";
+import { canDragTriageMessageFromMailbox, EMAIL_CHAT_COLUMN_MIN_WIDTH, EMAIL_DETAIL_COLUMN_MIN_WIDTH, emailMessageHasMultipleThreadMessages, emailMessageLogicGateIDs, emailMessageRowAriaLabel, emailThreadMessageCount, formatAddressList, formatMessageDate, isMailRowActivationKey, mailboxLabel, messageReadStatusLabel, messageReadStatusTitle, resizeEmailChatColumnAtPointer, type EmailConversationOrder } from "./homeUtils";
 import { EmailEntityIconButton, HomeColumnResizeHandle, ComposePanel, DeleteMessagesConfirmationModal, MessageDetail, MessageLeadingIndicators, type EmailCollaborationNavigation } from "./HomeParts";
 import { EmailCollaborationChatSurface, type EmailCollaborationSelection } from "./EmailCollaborationChatSurface";
 import { EmailNodeDestinationSearch } from "./EmailNodeDestinationSearch";
@@ -516,9 +516,7 @@ export function HomeMailWorkspace({
   const triageAdvanceEnabled = isArchivableListView && mailbox === "primary";
   const advanceDisabled = !canAdvanceTriagePage || !!busy || loadingMessages || loadingMoreMessages || messages.length === 0;
   const allDropdownActive = mailbox === "all" || mailbox === "spam";
-  const selectedConversationLoading = selectedMessage
-    ? emailConversationShouldShowLoadingShell(selectedMessage, selectedThreadMessages, loadingDetail)
-    : false;
+  const selectedConversationLoading = Boolean(selectedMessage && loadingDetail);
 
   if (unassignedSharedInbox) {
     return (

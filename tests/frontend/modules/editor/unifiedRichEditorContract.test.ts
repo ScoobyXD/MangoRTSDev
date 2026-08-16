@@ -498,8 +498,9 @@ test("mail thread detail supports exact-message replies, saved editor sizing, an
   const homeMailWorkspace = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeMailWorkspace.tsx"), "utf8");
   const homeStyles = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/homeStyles.ts"), "utf8");
 
-  assert.match(homeParts, /const sourceMessages = threadMessages\.length > 0 \? threadMessages : \[message\]/);
-  assert.match(homeParts, /normalizeEmailThreadMessages\(sourceMessages\.map/);
+  assert.match(homeParts, /normalizeEmailThreadMessages\(threadMessages\.map/);
+  assert.doesNotMatch(homeParts, /threadMessages\.length > 0 \? threadMessages : \[message\]/);
+  assert.match(homeParts, /data-email-conversation-unavailable="true"[\s\S]{0,180}Conversation unavailable/);
   assert.match(homeParts, /aria-label="Email conversation order"/);
   assert.match(homeParts, /setConversationOrder\("oldest"\)[\s\S]*\[conversationIdentity\]/);
   assert.match(homeParts, /onReply\(message\)/);
@@ -521,9 +522,9 @@ test("mail thread detail supports exact-message replies, saved editor sizing, an
   assert.doesNotMatch(homeParts, /fill \? \(hasAttachments \? 300 : 360\) : 120/);
   assert.match(homeParts, /if \(previewOnly\) return;[\s\S]{0,180}setExpandedMessageIDs\(newestMessageID \? new Set\(\[newestMessageID\]\)/);
   assert.match(homeParts, /if \(!previewOnly\) return;[\s\S]{0,180}setExpandedMessageIDs\(new Set\(canonicalConversationMessages\.map/);
-  assert.match(homeMailWorkspace, /emailConversationShouldShowLoadingShell\(selectedMessage, selectedThreadMessages, loadingDetail\)/);
+  assert.match(homeMailWorkspace, /selectedConversationLoading = Boolean\(selectedMessage && loadingDetail\)/);
   assert.match(homeMailWorkspace, /data-email-conversation-loading="true"[\s\S]*Loading conversation/);
-  assert.doesNotMatch(homeParts, /splitEmailQuotedHistory/);
+  assert.match(homeParts, /<EmailQuotedHistory body=\{body\}>/);
   assert.match(homeParts, /data-email-timeline-item="true"/);
   assert.match(homeParts, /data-email-message-id=\{message\.id\}/);
   assert.match(homeParts, /data-email-message-sources=\{emailThreadMessageSourceLabel\(message\)\}/);
@@ -534,7 +535,6 @@ test("mail thread detail supports exact-message replies, saved editor sizing, an
   assert.match(homeParts, /conversationScrollRef\.current[\s\S]*scrollTop = scrollContainer\.scrollHeight/);
   assert.match(homeParts, /data-message-direction=\{sent \? "sent" : "received"\}/);
   assert.match(homeParts, /mailConversationCardStyle\(expanded, sent, fill\)/);
-  assert.doesNotMatch(homeParts, /Show quoted history|Earlier quoted messages are hidden from this reply/);
   assert.match(homeParts, /EmailReferencePreviewModal/);
   assert.match(homeParts, /UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE/);
   assert.match(homeParts, /data-email-reference-preview-close="true"/);

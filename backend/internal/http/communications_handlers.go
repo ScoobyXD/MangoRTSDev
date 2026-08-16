@@ -721,6 +721,10 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 			s.writeNylasError(w, r, connection, err)
 			return
 		}
+		enrichedMessages := s.enrichCommunicationsMessagesStoredIdentitiesForConnection(r.Context(), connection, companyID, []NylasMessage{message})
+		if len(enrichedMessages) == 1 {
+			message = enrichedMessages[0]
+		}
 		message = s.enrichCommunicationsMessagePlacementsForConnection(connection, companyID, message)
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"message": message})
 	case http.MethodPut:
@@ -1755,7 +1759,7 @@ func (s *Server) communicationsMessagePage(ctx context.Context, connection domai
 	cacheQuery.Refresh = false
 	if !query.Refresh {
 		if page, ok := s.commCache.getMessagePage(connection.UserID, cacheScope, cacheQuery, communicationsMessagesCacheTTL, now); ok {
-			return s.enrichCommunicationsMessagePageForConnection(connection, query.CompanyID, page), nil
+			return s.enrichCommunicationsMessagePageForConnection(ctx, connection, query.CompanyID, page), nil
 		}
 	}
 	flightGeneration, releaseAdmission := s.commCache.beginMessagePageGeneration(connection.UserID, cacheScope)
@@ -1790,7 +1794,7 @@ func (s *Server) communicationsMessagePage(ctx context.Context, connection domai
 	if err != nil {
 		return NylasMessagePage{}, err
 	}
-	return s.enrichCommunicationsMessagePageForConnection(connection, query.CompanyID, page), nil
+	return s.enrichCommunicationsMessagePageForConnection(ctx, connection, query.CompanyID, page), nil
 }
 
 func (s *Server) communicationsOldestMessageSnapshot(ctx context.Context, connection domain.UserEmailConnection, query NylasMessageQuery) (NylasMessagePage, error) {
@@ -1916,11 +1920,48 @@ func (s *Server) enrichCommunicationsMessagePage(userID, companyID string, page 
 	return page
 }
 
-func (s *Server) enrichCommunicationsMessagePageForConnection(connection domain.UserEmailConnection, companyID string, page NylasMessagePage) NylasMessagePage {
+func (s *Server) enrichCommunicationsMessagePageForConnection(ctx context.Context, connection domain.UserEmailConnection, companyID string, page NylasMessagePage) NylasMessagePage {
 	page = cloneNylasMessagePage(page)
 	page.Messages = s.enrichCommunicationsMessagesReadStatuses(connection, page.Messages)
+	page.Messages = s.enrichCommunicationsMessagesStoredIdentitiesForConnection(ctx, connection, companyID, page.Messages)
 	page.Messages = s.enrichCommunicationsMessagesPlacementsForConnection(connection, companyID, page.Messages)
 	return page
+}
+
+func (s *Server) enrichCommunicationsMessagesStoredIdentitiesForConnection(ctx context.Context, connection domain.UserEmailConnection, companyID string, messages []NylasMessage) []NylasMessage {
+	companyID = strings.TrimSpace(companyID)
+	emailConnectionID := strings.TrimSpace(connection.EmailConnectionID)
+	if s == nil || s.repo == nil || companyID == "" || emailConnectionID == "" || len(messages) == 0 {
+		return messages
+	}
+	providerMessageIDs := make([]string, 0, len(messages))
+	for index := range messages {
+		messages[index].EmailMessageID = ""
+		messages[index].EmailThreadID = ""
+		if providerMessageID := strings.TrimSpace(messages[index].ID); providerMessageID != "" {
+			providerMessageIDs = append(providerMessageIDs, providerMessageID)
+		}
+	}
+	providerMessageIDs = cleanStringList(providerMessageIDs)
+	if len(providerMessageIDs) == 0 {
+		return messages
+	}
+	identities, err := s.repo.ResolveCommunicationsEmailMessageIdentitiesForConnectionContext(
+		ctx, companyID, emailConnectionID, providerMessageIDs,
+	)
+	if err != nil {
+		log.Printf("failed to resolve communications stored email identities company_id=%s email_connection_id=%s message_count=%d: %v", companyID, emailConnectionID, len(providerMessageIDs), err)
+		return messages
+	}
+	for index := range messages {
+		identity, ok := identities[strings.TrimSpace(messages[index].ID)]
+		if !ok {
+			continue
+		}
+		messages[index].EmailMessageID = strings.TrimSpace(identity.EmailMessageID)
+		messages[index].EmailThreadID = strings.TrimSpace(identity.EmailThreadID)
+	}
+	return messages
 }
 
 func (s *Server) enrichCommunicationsMessageReadStatus(connection domain.UserEmailConnection, message NylasMessage) NylasMessage {

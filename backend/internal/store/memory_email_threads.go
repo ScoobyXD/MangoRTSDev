@@ -326,6 +326,53 @@ func (r *MemoryRepo) GetCommunicationsEmailMessageForScope(input CommunicationsE
 	}
 	return CommunicationsEmailMessageLookupResult{}, ErrNotFound
 }
+
+func (r *MemoryRepo) ResolveCommunicationsEmailMessageIdentitiesForConnectionContext(_ context.Context, companyID, emailConnectionID string, providerMessageIDs []string) (map[string]CommunicationsEmailMessageIdentity, error) {
+	companyID = strings.TrimSpace(companyID)
+	emailConnectionID = strings.TrimSpace(emailConnectionID)
+	if companyID == "" || emailConnectionID == "" {
+		return nil, ErrInvalid
+	}
+	providerMessageIDs = normalizeUniqueStrings(providerMessageIDs, 0)
+	identities := make(map[string]CommunicationsEmailMessageIdentity, len(providerMessageIDs))
+	if len(providerMessageIDs) == 0 {
+		return identities, nil
+	}
+	wanted := make(map[string]struct{}, len(providerMessageIDs))
+	for _, providerMessageID := range providerMessageIDs {
+		wanted[providerMessageID] = struct{}{}
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	ambiguous := make(map[string]struct{})
+	for _, thread := range r.emailThreads {
+		if thread.CompanyID != companyID || thread.EmailConnectionID != emailConnectionID {
+			continue
+		}
+		for _, message := range thread.Messages {
+			if _, ok := wanted[message.ProviderMessageID]; !ok {
+				continue
+			}
+			if _, duplicate := ambiguous[message.ProviderMessageID]; duplicate {
+				continue
+			}
+			candidate := CommunicationsEmailMessageIdentity{
+				ProviderMessageID: message.ProviderMessageID,
+				EmailMessageID:    message.EmailMessageID,
+				EmailThreadID:     message.EmailThreadID,
+			}
+			if _, found := identities[message.ProviderMessageID]; found {
+				delete(identities, message.ProviderMessageID)
+				ambiguous[message.ProviderMessageID] = struct{}{}
+				continue
+			}
+			identities[message.ProviderMessageID] = candidate
+		}
+	}
+	return identities, nil
+}
+
 func (r *MemoryRepo) GetCommunicationsNodeEmailThread(companyID, nodeID, emailThreadID string) (domain.CommunicationsNodeEmailThread, error) {
 	companyID, nodeID, emailThreadID = cleanUUIDText(companyID), cleanUUIDText(nodeID), cleanUUIDText(emailThreadID)
 	if companyID == "" || nodeID == "" || emailThreadID == "" {
