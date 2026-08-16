@@ -106,6 +106,10 @@ const testFiles = [
 ];
 const componentTests = [
   {
+    source: resolve(repoRoot, "tests/frontend/modules/communications/EmailQuotedHistory.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/communications/EmailQuotedHistory.test.js"),
+  },
+  {
     source: resolve(repoRoot, "tests/frontend/modules/huddles/logicGateKPISection.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/huddles/logicGateKPISection.test.js"),
   },

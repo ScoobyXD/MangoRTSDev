@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"miraeopus/backend/internal/domain"
 	"strings"
 )
@@ -580,6 +581,58 @@ limit 1`, input.CompanyID, scope.scopeType, scope.personalUserID, scope.personal
 		}
 	}
 	return CommunicationsEmailMessageLookupResult{}, ErrNotFound
+}
+
+func (r *PostgresRepo) ResolveCommunicationsEmailMessageIdentitiesForConnectionContext(ctx context.Context, companyID, emailConnectionID string, providerMessageIDs []string) (map[string]CommunicationsEmailMessageIdentity, error) {
+	companyID = cleanUUIDText(companyID)
+	emailConnectionID = cleanUUIDText(emailConnectionID)
+	if companyID == "" || emailConnectionID == "" {
+		return nil, ErrInvalid
+	}
+	providerMessageIDs = normalizeUniqueStrings(providerMessageIDs, 0)
+	identities := make(map[string]CommunicationsEmailMessageIdentity, len(providerMessageIDs))
+	if len(providerMessageIDs) == 0 {
+		return identities, nil
+	}
+	args := []any{companyID, emailConnectionID}
+	placeholders := make([]string, 0, len(providerMessageIDs))
+	for _, providerMessageID := range providerMessageIDs {
+		args = append(args, providerMessageID)
+		placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+	}
+	rows, err := r.db.QueryContext(ctx, `
+select message.provider_message_id,
+       message.email_message_id::text,
+       message.email_thread_id::text
+from email_messages message
+join email_threads thread
+  on thread.company_id=message.company_id
+ and thread.email_thread_id=message.email_thread_id
+where message.company_id=$1::uuid
+  and thread.email_connection_id=$2::uuid
+  and message.provider_message_id in (`+strings.Join(placeholders, ",")+`)
+order by message.provider_message_id, message.email_thread_id, message.email_message_id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ambiguous := make(map[string]struct{})
+	for rows.Next() {
+		var identity CommunicationsEmailMessageIdentity
+		if err := rows.Scan(&identity.ProviderMessageID, &identity.EmailMessageID, &identity.EmailThreadID); err != nil {
+			return nil, err
+		}
+		if _, duplicate := ambiguous[identity.ProviderMessageID]; duplicate {
+			continue
+		}
+		if _, found := identities[identity.ProviderMessageID]; found {
+			delete(identities, identity.ProviderMessageID)
+			ambiguous[identity.ProviderMessageID] = struct{}{}
+			continue
+		}
+		identities[identity.ProviderMessageID] = identity
+	}
+	return identities, rows.Err()
 }
 
 func (r *PostgresRepo) GetCommunicationsNodeEmailThread(companyID, nodeID, emailThreadID string) (domain.CommunicationsNodeEmailThread, error) {

@@ -164,6 +164,8 @@ export function mergeEmailMessageWithCollaboration(
     collaboration_personal_user_id: collaborationMessage.collaboration_personal_user_id,
     collaboration_shared_inbox_id: collaborationMessage.collaboration_shared_inbox_id,
     collaboration_account_email: collaborationMessage.collaboration_account_email,
+    email_message_id: providerMessage.email_message_id?.trim() || undefined,
+    email_thread_id: providerMessage.email_thread_id?.trim() || undefined,
     client_source_scope_key: providerMessage.client_source_scope_key?.trim() || collaborationMessage.client_source_scope_key?.trim() || "mailbox",
   };
 }

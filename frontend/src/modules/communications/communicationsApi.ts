@@ -750,7 +750,13 @@ export async function ensureEmailMessageIngested(
     `/v1/communications/messages/${encodeURIComponent(cleanMessageID)}/ingest${query}`,
     { method: "POST" },
   );
-  return cloneMessage(payload.message);
+  const message = cloneMessage(payload.message);
+  applyEmailMessageToCachedPages(message, {
+    companyID: scope.companyID,
+    sharedInboxID: scope.sharedInboxID,
+    accountEmail: scope.accountEmail,
+  });
+  return message;
 }
 
 export function sortEmailMessagesByDateDescending(messages: EmailMessage[]): EmailMessage[] {

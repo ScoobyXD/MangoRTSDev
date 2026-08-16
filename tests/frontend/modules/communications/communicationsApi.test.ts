@@ -84,24 +84,48 @@ test("communications folder query scopes shared inbox folder reads", () => {
 test("stored search and selected-message ingestion preserve the exact mailbox scope", async () => {
   const originalFetch = globalThis.fetch;
   const calls: Array<{ path: string; method: string }> = [];
+  invalidateCommunicationsCache();
   globalThis.fetch = async (input, init) => {
     const path = String(input);
     calls.push({ path, method: init?.method ?? "GET" });
     if (path.includes("/stored-messages")) return jsonResponse({ messages: [{ ...message("stored"), email_message_id: "internal-stored" }] });
-    return jsonResponse({ message: { ...message("provider-only"), email_message_id: "internal-provider" } });
+    if (path.includes("/messages?") && path.includes("other%40example.com")) {
+      return jsonResponse({ messages: [message("provider-only")] });
+    }
+    if (path.includes("/messages?")) return jsonResponse({ messages: [message("provider-only")] });
+    return jsonResponse({ message: { ...message("provider-only"), email_message_id: "internal-provider", email_thread_id: "internal-thread" } });
   };
   try {
     const page = await listStoredEmailMessages({
       companyID: "company-1", accountEmail: "Owner@Example.com", mailbox: "primary", limit: 12, q: "invoice",
     });
     assert.equal(page.messages[0]?.email_message_id, "internal-stored");
+    const ownerScope = {
+      companyID: "company-1", accountEmail: "Owner@Example.com", mailbox: "primary" as const, limit: 12,
+    };
+    const otherScope = {
+      companyID: "company-1", accountEmail: "other@example.com", mailbox: "primary" as const, limit: 12,
+    };
+    assert.equal((await listEmailMessages(ownerScope)).messages[0]?.email_message_id, undefined);
+    assert.equal((await listEmailMessages(otherScope)).messages[0]?.email_message_id, undefined);
     const stored = await ensureEmailMessageIngested("provider-only", {
       companyID: "company-1", accountEmail: "Owner@Example.com",
     });
     assert.equal(stored.email_message_id, "internal-provider");
+    assert.equal((await listEmailMessages(ownerScope)).messages[0]?.email_message_id, "internal-provider");
+    assert.equal((await listEmailMessages(ownerScope)).messages[0]?.email_thread_id, "internal-thread");
+    assert.equal((await listEmailMessages(otherScope)).messages[0]?.email_message_id, undefined);
     assert.deepEqual(calls, [
       {
         path: "/v1/communications/stored-messages?limit=12&mailbox=primary&company_id=company-1&account_email=owner%40example.com&q=invoice",
+        method: "GET",
+      },
+      {
+        path: "/v1/communications/messages?limit=12&mailbox=primary&company_id=company-1&account_email=owner%40example.com",
+        method: "GET",
+      },
+      {
+        path: "/v1/communications/messages?limit=12&mailbox=primary&company_id=company-1&account_email=other%40example.com",
         method: "GET",
       },
       {
@@ -110,6 +134,7 @@ test("stored search and selected-message ingestion preserve the exact mailbox sc
       },
     ]);
   } finally {
+    invalidateCommunicationsCache();
     globalThis.fetch = originalFetch;
   }
 });

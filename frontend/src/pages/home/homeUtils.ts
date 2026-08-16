@@ -1,7 +1,6 @@
 import { mergeEmailMessageIntoMessageList, sortEmailMessagesByDateDescending, type CommunicationsSharedInbox, type EmailAddress, type EmailFolder, type EmailMailbox, type EmailMessage, type EmailReadStatus, type UserLogicGateShortcut } from "../../modules/communications/communicationsApi.js";
 import { normalizeEmailContentID } from "../../modules/communications/emailAttachments.js";
 import {
-  emailMessageHasMultipleThreadMessages,
   emailThreadKey,
   emailThreadMessageCount,
 } from "../../modules/communications/emailThreads.js";
@@ -206,14 +205,6 @@ export function nextEmailMessageAfterRemoval(messages: EmailMessage[], selectedR
   const selectedIndex = messages.findIndex((message) => emailMessageRowKey(message) === selectedRowKey);
   if (selectedIndex < 0) return null;
   return messages[selectedIndex + 1] ?? messages[selectedIndex - 1] ?? null;
-}
-
-export function emailConversationShouldShowLoadingShell(
-  message: Pick<EmailMessage, "thread_message_count">,
-  threadMessages: EmailMessage[],
-  loading: boolean,
-): boolean {
-  return loading && emailMessageHasMultipleThreadMessages(message) && threadMessages.length <= 1;
 }
 
 export function emailMessageRowAriaLabel(

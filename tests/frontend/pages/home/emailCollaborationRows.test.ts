@@ -215,15 +215,30 @@ test("every loaded provider message in a matching source thread receives collabo
   const source = collaboration("thread-collaboration", {
     personal_user_id: "user-1",
     account_email: "owner@example.test",
-    latest_message: message("latest", { thread_id: "same-thread", date: 300 }),
+    email_thread_id: "older-durable-thread",
+    latest_message: message("latest", {
+      thread_id: "same-thread",
+      email_message_id: "older-durable-message",
+      email_thread_id: "older-durable-thread",
+      date: 300,
+    }),
   });
   const merged = mergeEmailCollaborationsForView([
-    message("latest", { thread_id: "same-thread", date: 300 }),
+    message("latest", {
+      thread_id: "same-thread",
+      email_message_id: "current-durable-message",
+      email_thread_id: "current-durable-thread",
+      date: 300,
+    }),
     message("older", { thread_id: "same-thread", date: 100 }),
   ], [source], "my-triage", new Set(), "owner@example.test", "provider-scope", "user-1");
 
   assert.equal(merged.length, 2);
   assert.deepEqual(merged.map((item) => item.collaboration_id), ["thread-collaboration", "thread-collaboration"]);
+  assert.equal(merged[0]?.email_message_id, "current-durable-message");
+  assert.equal(merged[0]?.email_thread_id, "current-durable-thread");
+  assert.equal(merged[1]?.email_message_id, undefined);
+  assert.equal(merged[1]?.email_thread_id, undefined);
   assert.equal(condenseEmailThreadMessages(merged).length, 1);
 });
 

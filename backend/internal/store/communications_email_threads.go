@@ -48,6 +48,12 @@ type CommunicationsEmailMessageLookupResult struct {
 	Provider string
 }
 
+type CommunicationsEmailMessageIdentity struct {
+	ProviderMessageID string
+	EmailMessageID    string
+	EmailThreadID     string
+}
+
 func normalizeCommunicationsEmailMessageLookupInput(input CommunicationsEmailMessageLookupInput) (CommunicationsEmailMessageLookupInput, communicationsEmailCollaborationScope, error) {
 	companyID, scope, err := normalizeCommunicationsEmailCollaborationScope(
 		input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail,

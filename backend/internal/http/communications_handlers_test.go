@@ -109,6 +109,35 @@ type failOnceWebhookAudienceRepo struct {
 	calls    int
 }
 
+type recordingCommunicationsEmailIdentityRepo struct {
+	store.Repository
+	mu                sync.Mutex
+	companyIDs        []string
+	connectionIDs     []string
+	providerIDBatches [][]string
+}
+
+func (r *recordingCommunicationsEmailIdentityRepo) ResolveCommunicationsEmailMessageIdentitiesForConnectionContext(ctx context.Context, companyID, emailConnectionID string, providerMessageIDs []string) (map[string]store.CommunicationsEmailMessageIdentity, error) {
+	r.mu.Lock()
+	r.companyIDs = append(r.companyIDs, companyID)
+	r.connectionIDs = append(r.connectionIDs, emailConnectionID)
+	r.providerIDBatches = append(r.providerIDBatches, append([]string(nil), providerMessageIDs...))
+	r.mu.Unlock()
+	return r.Repository.ResolveCommunicationsEmailMessageIdentitiesForConnectionContext(ctx, companyID, emailConnectionID, providerMessageIDs)
+}
+
+func (r *recordingCommunicationsEmailIdentityRepo) identityCalls() ([]string, []string, [][]string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	companyIDs := append([]string(nil), r.companyIDs...)
+	connectionIDs := append([]string(nil), r.connectionIDs...)
+	batches := make([][]string, len(r.providerIDBatches))
+	for index := range r.providerIDBatches {
+		batches[index] = append([]string(nil), r.providerIDBatches[index]...)
+	}
+	return companyIDs, connectionIDs, batches
+}
+
 func (r *failOnceWebhookAudienceRepo) ResolveEffectiveUsersForResource(
 	ctx context.Context,
 	companyID, resourceType, resourceID, accessLevel string,
@@ -1954,6 +1983,119 @@ func TestCommunicationsHandlersReadProviderAndQueueVisibleIngestion(t *testing.T
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/send", sendBody, token, http.StatusCreated)
 	if nylas.lastSendGrantID != "grant-1" || nylas.sent.Subject != "Hi" {
 		t.Fatalf("provider send grant=%q payload=%+v", nylas.lastSendGrantID, nylas.sent)
+	}
+}
+
+func TestCommunicationsProviderListAndDetailUseConnectionScopedStoredIdentities(t *testing.T) {
+	t.Parallel()
+	key := mustRSAKey(t)
+	baseRepo := store.NewMemoryRepo()
+	const (
+		subject   = "stored-identity-user"
+		companyID = "11111111-1111-4111-8111-701300000402"
+	)
+	baseRepo.EnsureCompany(companyID, "Stored identity response company")
+	user, err := baseRepo.UpsertAuthUser(subject, "identity@example.com", "Identity User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := baseRepo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	connection, err := baseRepo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		CompanyID: companyID, UserID: user.UserID, Provider: "google", AccountEmail: user.Email,
+		Scope: "personal", GrantID: "identity-grant", Status: "connected",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedThread, err := baseRepo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+		CompanyID: companyID, PersonalUserID: user.UserID, PersonalAccountEmail: user.Email,
+		AccountEmail: user.Email, Provider: "google", ProviderThreadID: "provider-thread",
+		SelectedMessageID: "provider-root", HistoryComplete: true,
+		Messages: []domain.EmailMessageSnapshot{
+			{ID: "provider-root", ThreadID: "provider-thread", Subject: "Thread", Date: 10, Folders: []string{"INBOX"}},
+			{ID: "provider-reply", ThreadID: "provider-thread", Subject: "Re: Thread", Date: 20, Folders: []string{"INBOX"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedByProviderID := make(map[string]domain.CommunicationsEmailMessage, len(storedThread.Messages))
+	for _, message := range storedThread.Messages {
+		storedByProviderID[message.ProviderMessageID] = message
+	}
+	providerMessages := []NylasMessage{
+		{ID: "provider-root", ThreadID: "provider-thread", EmailMessageID: "provider-bogus-root", EmailThreadID: "provider-bogus-thread", Subject: "Thread", Date: 10, Folders: []string{"INBOX"}},
+		{ID: "provider-reply", ThreadID: "provider-thread", EmailMessageID: "provider-bogus-reply", EmailThreadID: "provider-bogus-thread", Subject: "Re: Thread", Date: 20, Folders: []string{"INBOX"}},
+		{ID: "provider-only", ThreadID: "provider-only-thread", EmailMessageID: "provider-bogus-only", EmailThreadID: "provider-bogus-only-thread", Subject: "Not stored", Date: 30, Folders: []string{"INBOX"}},
+	}
+	nylas := &fakeNylasClient{
+		messages: providerMessages,
+		messagesByID: map[string]NylasMessage{
+			"provider-reply": providerMessages[1],
+		},
+	}
+	repo := &recordingCommunicationsEmailIdentityRepo{Repository: baseRepo}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas,
+	}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
+	baseQuery := "company_id=" + url.QueryEscape(companyID) + "&account_email=" + url.QueryEscape(user.Email)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/communications/messages?"+baseQuery+"&limit=5", nil)
+	req.Header.Set("Authorization", token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var page NylasMessagePage
+	if err := json.NewDecoder(rec.Body).Decode(&page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Messages) != 3 {
+		t.Fatalf("provider list messages=%+v", page.Messages)
+	}
+	for _, message := range page.Messages {
+		stored, ok := storedByProviderID[message.ID]
+		if !ok {
+			if message.EmailMessageID != "" || message.EmailThreadID != "" {
+				t.Fatalf("unstored provider message retained non-Mango identities: %+v", message)
+			}
+			continue
+		}
+		if message.EmailMessageID != stored.EmailMessageID || message.EmailThreadID != storedThread.EmailThreadID {
+			t.Fatalf("list message %q durable ids=(%q,%q), want (%q,%q)", message.ID, message.EmailMessageID, message.EmailThreadID, stored.EmailMessageID, storedThread.EmailThreadID)
+		}
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/v1/communications/messages/provider-reply?"+baseQuery, nil)
+	req.Header.Set("Authorization", token)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("detail status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var detail struct {
+		Message NylasMessage `json:"message"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&detail); err != nil {
+		t.Fatal(err)
+	}
+	wantReply := storedByProviderID["provider-reply"]
+	if detail.Message.EmailMessageID != wantReply.EmailMessageID || detail.Message.EmailThreadID != storedThread.EmailThreadID {
+		t.Fatalf("detail durable ids=(%q,%q), want (%q,%q)", detail.Message.EmailMessageID, detail.Message.EmailThreadID, wantReply.EmailMessageID, storedThread.EmailThreadID)
+	}
+
+	companyIDs, connectionIDs, batches := repo.identityCalls()
+	if len(batches) != 2 || len(batches[0]) != 3 || len(batches[1]) != 1 {
+		t.Fatalf("identity batch calls=%+v, want one list batch and one detail batch", batches)
+	}
+	for index := range batches {
+		if companyIDs[index] != companyID || connectionIDs[index] != connection.EmailConnectionID {
+			t.Fatalf("identity call %d scope=(%q,%q), want (%q,%q)", index, companyIDs[index], connectionIDs[index], companyID, connection.EmailConnectionID)
+		}
 	}
 }
 

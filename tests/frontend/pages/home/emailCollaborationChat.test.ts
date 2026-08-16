@@ -240,7 +240,8 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.ok(conversationBuilderStart >= 0 && conversationBuilderEnd > conversationBuilderStart);
   const conversationBuilder = detail.slice(conversationBuilderStart, conversationBuilderEnd);
   assert.doesNotMatch(conversationBuilder, /local_replies|source:\s*"local"|inheritedThreadID/);
-  assert.match(conversationBuilder, /threadMessages\.length > 0 \? threadMessages : \[message\]/);
+  assert.match(conversationBuilder, /normalizeEmailThreadMessages\(threadMessages\.map/);
+  assert.doesNotMatch(conversationBuilder, /threadMessages\.length > 0|\[message\]/);
 
   assert.match(surface, /listEmailThreadChatGroups\(\{[\s\S]*messageID: message\.id,[\s\S]*threadID: message\.thread_id/);
   assert.doesNotMatch(surface, /listEmailCollaborations|getEmailCollaboration|ListNodeProjections|threadMessages/);
