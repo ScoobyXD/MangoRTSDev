@@ -2563,7 +2563,6 @@ export function HomePage({
       client_source_scope_key: selectedListMessage?.client_source_scope_key?.trim() || activeEmailMailboxScopeKey,
     });
     const loadDetail = async () => {
-      let waitingForStoredHistory = false;
       setLoadingDetail(true);
       setSelectedThreadMessages([]);
       setError("");
@@ -2611,14 +2610,6 @@ export function HomePage({
             };
           }));
         }
-        if (!storedThread.history_complete) {
-          if (storedThread.download_status === "failed") {
-            throw new Error(storedThread.last_download_error?.trim() || "stored_email_thread_download_failed");
-          }
-          waitingForStoredHistory = true;
-          setSelectedThreadMessages([]);
-          return;
-        }
         const storedThreadMessages = storedThread.messages.map((threadMessage) => withLocalReadOverlay({
           ...threadMessage,
           collaboration_id: selectedCollaborationID || undefined,
@@ -2664,7 +2655,7 @@ export function HomePage({
         }
         setError(formatError(detailError, "Failed to load message"));
       } finally {
-        if (!cancelled && !waitingForStoredHistory) setLoadingDetail(false);
+        if (!cancelled) setLoadingDetail(false);
       }
     };
     void loadDetail();
@@ -4730,25 +4721,22 @@ export function HomePage({
         const providerThreadID = storedThread.thread_id?.trim()
           || emailReferencePreviewEntity.emailMessage?.thread_id?.trim()
           || "";
-        if (!storedThread.history_complete) {
-          if (storedThread.download_status === "failed") {
-            throw new Error(storedThread.last_download_error?.trim() || "stored_email_thread_download_failed");
-          }
-          setEmailReferencePreview((current) => current?.requestID === emailReferencePreviewRequestID ? {
-            ...current,
-            message: null,
-            threadMessages: [],
-            resources: [],
-            providerThreadID,
-            waitingForHistory: true,
-            loading: true,
-            error: "",
-          } : current);
-          return;
-        }
+        const waitingForHistory = !storedThread.history_complete && storedThread.download_status !== "failed";
+        const threadDownloadError = !storedThread.history_complete && storedThread.download_status === "failed"
+          ? storedThread.last_download_error?.trim() || "Stored email thread download failed. Showing available messages."
+          : "";
         const threadMessages = mergeEmailThreadDetailMessages(storedThread.messages, []);
         const selectedMessage = threadMessages.find((message) => message.email_message_id === emailMessageID);
         if (!selectedMessage) throw new Error("stored_email_message_not_found");
+        setEmailReferencePreview((current) => current?.requestID === emailReferencePreviewRequestID ? {
+          ...current,
+          message: selectedMessage,
+          threadMessages,
+          providerThreadID,
+          waitingForHistory,
+          loading: false,
+          error: threadDownloadError,
+        } : current);
         const threadID = selectedMessage.thread_id?.trim() || "";
         const matchingCollaborations = await listEmailCollaborations({
           companyID,
@@ -4772,25 +4760,26 @@ export function HomePage({
         ];
         setEmailReferencePreview((current) => current?.requestID === emailReferencePreviewRequestID ? {
           ...current,
-          message: selectedMessage,
-          threadMessages,
           resources,
-          providerThreadID,
-          waitingForHistory: false,
-          loading: false,
-          error: "",
         } : current);
       } catch (cause) {
         if (cancelled || emailReferencePreviewRequestIDRef.current !== emailReferencePreviewRequestID) return;
-        setEmailReferencePreview((current) => current?.requestID === emailReferencePreviewRequestID ? {
-          ...current,
-          message: null,
-          threadMessages: [],
-          resources: [],
-          waitingForHistory: false,
-          loading: false,
-          error: formatError(cause, "Unable to open the referenced email"),
-        } : current);
+        setEmailReferencePreview((current) => {
+          if (current?.requestID !== emailReferencePreviewRequestID) return current;
+          const error = formatError(cause, "Unable to open the referenced email");
+          if (current.message && current.threadMessages.length > 0) {
+            return { ...current, loading: false, error };
+          }
+          return {
+            ...current,
+            message: null,
+            threadMessages: [],
+            resources: [],
+            waitingForHistory: false,
+            loading: false,
+            error,
+          };
+        });
       }
     })();
     return () => { cancelled = true; };
