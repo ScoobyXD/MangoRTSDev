@@ -19,17 +19,6 @@ var (
 )
 
 func (s *Server) processCommunicationsEmailIngestionProviderWork(ctx context.Context, job store.CommunicationsEmailIngestionJob) error {
-	// A status/outbox transaction can fail after provider data was stored. On
-	// redelivery, reuse that durable truth instead of repeating provider calls.
-	if strings.TrimSpace(job.EmailThreadID) != "" {
-		thread, err := s.repo.GetCommunicationsEmailThreadContext(ctx, job.CompanyID, job.EmailThreadID)
-		if err == nil && thread.HistoryComplete && storedEmailMessageDownloadComplete(thread, job.ProviderMessageID) {
-			return nil
-		}
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
-			return err
-		}
-	}
 	if s.nylasClient == nil {
 		return errCommunicationsEmailIngestionUnavailable
 	}
@@ -58,51 +47,25 @@ func (s *Server) processCommunicationsEmailIngestionProviderWork(ctx context.Con
 		if trigger.Date < connection.IngestionStartedAt.Unix() {
 			return nil
 		}
-		eligible, inboxErr := s.communicationsEmailMessageIsInInbox(ctx, connection, trigger)
-		if inboxErr != nil {
-			return normalizeCommunicationsEmailProviderError(connection, inboxErr)
+		eligible, folderErr := s.communicationsEmailMessageIsInInboxOrSent(ctx, connection, trigger)
+		if folderErr != nil {
+			return normalizeCommunicationsEmailProviderError(connection, folderErr)
 		}
 		if !eligible {
 			return nil
 		}
 	}
 
-	var thread domain.CommunicationsEmailThread
-	if strings.TrimSpace(job.EmailThreadID) != "" {
-		thread, err = s.repo.GetCommunicationsEmailThreadContext(ctx, job.CompanyID, job.EmailThreadID)
-	} else {
-		preliminary := emailMessageSnapshotFromNylas(trigger)
-		preliminary.DownloadComplete = false
-		thread, err = s.repo.UpsertCommunicationsEmailThreadContext(ctx,
-			s.communicationsEmailThreadInputForConnection(ctx, connection, preliminary, false),
-		)
-	}
-	if err != nil {
-		return err
-	}
-	if thread.EmailConnectionID != "" && thread.EmailConnectionID != job.EmailConnectionID {
-		return store.ErrInvalid
-	}
-	job.EmailThreadID = thread.EmailThreadID
-	job.ProviderThreadID = firstNonBlank(thread.ProviderThreadID, trigger.ThreadID, job.ProviderThreadID)
-	attachedJob, _, attachErr := s.repo.EnsureCommunicationsEmailIngestionJobContext(ctx, store.CommunicationsEmailIngestionJobInput{
-		CompanyID: job.CompanyID, EmailConnectionID: job.EmailConnectionID, EmailThreadID: thread.EmailThreadID,
-		ProviderMessageID: job.ProviderMessageID, ProviderThreadID: job.ProviderThreadID, Priority: job.Priority,
-	})
-	if attachErr != nil {
-		return attachErr
-	}
-	job.EmailThreadID = attachedJob.EmailThreadID
-
+	providerThreadID := firstNonBlank(trigger.ThreadID, job.ProviderThreadID)
 	messageIDs := []string{trigger.ID}
-	if strings.TrimSpace(job.ProviderThreadID) != "" {
+	if providerThreadID != "" {
 		var providerThread NylasThread
 		err = s.withCommunicationsNylasGate(ctx, connection, func(callCtx context.Context) error {
 			var callErr error
-			providerThread, callErr = s.nylasClient.GetThread(callCtx, connection.GrantID, job.ProviderThreadID)
+			providerThread, callErr = s.nylasClient.GetThread(callCtx, connection.GrantID, providerThreadID)
 			return callErr
 		})
-		if err != nil || strings.TrimSpace(providerThread.ID) != strings.TrimSpace(job.ProviderThreadID) {
+		if err != nil || strings.TrimSpace(providerThread.ID) != providerThreadID {
 			if err == nil {
 				err = errEmailCollaborationSourceUnavailable
 			}
@@ -115,12 +78,85 @@ func (s *Server) processCommunicationsEmailIngestionProviderWork(ctx context.Con
 		return store.ErrInvalid
 	}
 
-	for _, messageID := range messageIDs {
+	var thread domain.CommunicationsEmailThread
+	if strings.TrimSpace(job.EmailThreadID) != "" {
 		thread, err = s.repo.GetCommunicationsEmailThreadContext(ctx, job.CompanyID, job.EmailThreadID)
+	} else {
+		identities, resolveErr := s.repo.ResolveCommunicationsEmailMessageIdentitiesForConnectionContext(
+			ctx, job.CompanyID, job.EmailConnectionID, messageIDs,
+		)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		storedThreadID := ""
+		for _, messageID := range messageIDs {
+			identity, ok := identities[messageID]
+			if !ok {
+				continue
+			}
+			if storedThreadID != "" && storedThreadID != identity.EmailThreadID {
+				return errEmailCollaborationSourceUnavailable
+			}
+			storedThreadID = identity.EmailThreadID
+		}
+		if storedThreadID != "" {
+			thread, err = s.repo.GetCommunicationsEmailThreadContext(ctx, job.CompanyID, storedThreadID)
+		} else {
+			preliminary := emailMessageSnapshotFromNylas(trigger)
+			preliminary.DownloadComplete = false
+			thread, err = s.repo.UpsertCommunicationsEmailThreadContext(ctx,
+				s.communicationsEmailThreadInputForConnection(ctx, connection, preliminary, false),
+			)
+		}
+	}
+	if err != nil {
+		return err
+	}
+	if thread.EmailConnectionID != "" && thread.EmailConnectionID != job.EmailConnectionID {
+		return store.ErrInvalid
+	}
+	if strings.TrimSpace(thread.ProviderThreadID) != "" && providerThreadID != "" &&
+		strings.TrimSpace(thread.ProviderThreadID) != providerThreadID {
+		return errEmailCollaborationSourceUnavailable
+	}
+	if strings.TrimSpace(thread.ProviderThreadID) == "" && providerThreadID != "" {
+		providerMessageIDs := make(map[string]struct{}, len(messageIDs))
+		for _, messageID := range messageIDs {
+			providerMessageIDs[messageID] = struct{}{}
+		}
+		var anchor domain.EmailMessageSnapshot
+		for _, stored := range thread.Messages {
+			if _, ok := providerMessageIDs[stored.ProviderMessageID]; ok {
+				anchor = stored.Message
+				break
+			}
+		}
+		if strings.TrimSpace(anchor.ID) == "" {
+			return errEmailCollaborationSourceUnavailable
+		}
+		anchor.ThreadID = providerThreadID
+		thread.ProviderThreadID = providerThreadID
+		thread, err = s.repo.UpsertCommunicationsEmailThreadContext(ctx,
+			communicationsEmailThreadInputFromStoredThread(thread, anchor, false),
+		)
 		if err != nil {
 			return err
 		}
-		if storedEmailMessageDownloadComplete(thread, messageID) {
+	}
+	job.EmailThreadID = thread.EmailThreadID
+	job.ProviderThreadID = firstNonBlank(thread.ProviderThreadID, providerThreadID)
+	attachedJob, _, attachErr := s.repo.EnsureCommunicationsEmailIngestionJobContext(ctx, store.CommunicationsEmailIngestionJobInput{
+		CompanyID: job.CompanyID, EmailConnectionID: job.EmailConnectionID, EmailThreadID: thread.EmailThreadID,
+		ProviderMessageID: job.ProviderMessageID, ProviderThreadID: job.ProviderThreadID, Priority: job.Priority,
+	})
+	if attachErr != nil {
+		return attachErr
+	}
+	job.EmailThreadID = attachedJob.EmailThreadID
+
+	for _, messageID := range messageIDs {
+		storedMessage, stored := storedEmailMessageForProvider(thread, messageID)
+		if stored && storedMessage.Message.DownloadComplete {
 			continue
 		}
 		message := trigger
@@ -144,9 +180,14 @@ func (s *Server) processCommunicationsEmailIngestionProviderWork(ctx context.Con
 		if emailMessageHasUnresolvedCIDAttachments(message) {
 			return errCommunicationsEmailAttachmentUnavailable
 		}
+		if stored {
+			message = communicationsSendResponseWithLocalContent(message, NylasSendMessageRequest{
+				Attachments: nylasAttachmentsFromStoredSnapshots(storedMessage.Message.Attachments),
+			})
+		}
 		preliminarySnapshot := emailMessageSnapshotFromNylas(message)
 		preliminarySnapshot.DownloadComplete = false
-		thread, err = s.repo.UpsertCommunicationsEmailThreadContext(ctx, communicationsEmailThreadInputFromStoredThread(thread, preliminarySnapshot, thread.HistoryComplete))
+		thread, err = s.repo.UpsertCommunicationsEmailThreadContext(ctx, communicationsEmailThreadInputFromStoredThread(thread, preliminarySnapshot, false))
 		if err != nil {
 			return err
 		}
@@ -156,17 +197,20 @@ func (s *Server) processCommunicationsEmailIngestionProviderWork(ctx context.Con
 		}
 		snapshot := emailMessageSnapshotFromNylas(message)
 		snapshot.DownloadComplete = true
-		if _, err = s.repo.UpsertCommunicationsEmailThreadContext(ctx, communicationsEmailThreadInputFromStoredThread(thread, snapshot, false)); err != nil {
+		if thread, err = s.repo.UpsertCommunicationsEmailThreadContext(ctx, communicationsEmailThreadInputFromStoredThread(thread, snapshot, false)); err != nil {
 			return err
 		}
 	}
 
-	thread, err = s.repo.GetCommunicationsEmailThreadContext(ctx, job.CompanyID, thread.EmailThreadID)
-	if err != nil || len(thread.Messages) == 0 {
-		if err == nil {
-			err = store.ErrInvalid
-		}
+	if len(thread.Messages) == 0 {
+		return store.ErrInvalid
+	}
+	attachmentsChanged, err := s.repo.ConvergeCommunicationsEmailThreadAttachmentLinksContext(ctx, thread.CompanyID, thread.EmailThreadID)
+	if err != nil {
 		return err
+	}
+	if attachmentsChanged {
+		s.wakeAttachmentDeletionCleanup()
 	}
 	anchor := thread.Messages[0].Message
 	if _, err = s.repo.UpsertCommunicationsEmailThreadContext(ctx, communicationsEmailThreadInputFromStoredThread(thread, anchor, true)); err != nil {
@@ -209,7 +253,7 @@ func normalizeCommunicationsEmailProviderError(connection domain.UserEmailConnec
 	return err
 }
 
-func (s *Server) communicationsEmailMessageIsInInbox(ctx context.Context, connection domain.UserEmailConnection, message NylasMessage) (bool, error) {
+func (s *Server) communicationsEmailMessageIsInInboxOrSent(ctx context.Context, connection domain.UserEmailConnection, message NylasMessage) (bool, error) {
 	var folders []NylasFolder
 	err := s.withCommunicationsNylasGate(ctx, connection, func(callCtx context.Context) error {
 		var callErr error
@@ -219,14 +263,15 @@ func (s *Server) communicationsEmailMessageIsInInbox(ctx context.Context, connec
 	if err != nil {
 		return false, err
 	}
-	inboxID := strings.TrimSpace(findNylasSystemFolderID(folders, "inbox"))
-	for _, folder := range append(append([]string(nil), message.Folders...), message.FolderIDs...) {
-		folder = strings.Trim(strings.ToLower(strings.TrimSpace(folder)), "\\")
-		if folder == "inbox" || (inboxID != "" && folder == strings.ToLower(inboxID)) {
-			return true, nil
-		}
-	}
-	return false, nil
+	return communicationsEmailMessageHasInboxOrSentFolder(message, folders), nil
+}
+
+func communicationsEmailMessageHasInboxOrSentFolder(message NylasMessage, folders []NylasFolder) bool {
+	return nylasMessageHasAnyFolder(message, []string{
+		"inbox", "sent",
+		findNylasSystemFolderID(folders, "inbox"),
+		findNylasSystemFolderID(folders, "sent"),
+	})
 }
 
 func (s *Server) communicationsEmailThreadInputForConnection(ctx context.Context, connection domain.UserEmailConnection, message domain.EmailMessageSnapshot, historyComplete bool) store.CommunicationsEmailThreadUpsertInput {
@@ -250,13 +295,13 @@ func (s *Server) communicationsEmailThreadInputForConnection(ctx context.Context
 	return input
 }
 
-func storedEmailMessageDownloadComplete(thread domain.CommunicationsEmailThread, providerMessageID string) bool {
+func storedEmailMessageForProvider(thread domain.CommunicationsEmailThread, providerMessageID string) (domain.CommunicationsEmailMessage, bool) {
 	for _, item := range thread.Messages {
 		if item.ProviderMessageID == providerMessageID {
-			return item.Message.DownloadComplete
+			return item, true
 		}
 	}
-	return false
+	return domain.CommunicationsEmailMessage{}, false
 }
 
 func internalEmailMessageIDForProvider(thread domain.CommunicationsEmailThread, providerMessageID string) string {
@@ -313,7 +358,7 @@ func (s *Server) storeImportedEmailMessageAttachments(ctx context.Context, conne
 			}
 		}
 		providerAttachmentID := firstNonBlank(attachment.ID, attachment.AttachmentID)
-		mangoAttachmentID = deterministicImportedEmailAttachmentID(thread.CompanyID, thread.EmailThreadID, message.ID, providerAttachmentID, attachment.ContentID, attachment.Filename)
+		mangoAttachmentID = store.ImportedEmailAttachmentID(thread.CompanyID, thread.EmailThreadID, message.ID, providerAttachmentID, attachment.ContentID, attachment.Filename)
 		exists, getErr := s.repo.AttachmentExistsContext(ctx, thread.CompanyID, mangoAttachmentID)
 		if getErr != nil {
 			return NylasMessage{}, getErr
@@ -385,14 +430,6 @@ func importedEmailAttachmentBytes(ctx context.Context, s *Server, connection dom
 	}
 	return body, nil
 }
-func deterministicImportedEmailAttachmentID(parts ...string) string {
-	sum := sha256.Sum256([]byte(strings.Join(parts, "\x1f")))
-	b := append([]byte(nil), sum[:16]...)
-	b[6] = (b[6] & 0x0f) | 0x50
-	b[8] = (b[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
-}
-
 func (s *Server) linkImportedEmailAttachment(ctx context.Context, companyID, actorUserID, emailMessageID, attachmentID string, inline bool) error {
 	relationship := store.AttachmentRelationshipEmailAttachment
 	if inline {

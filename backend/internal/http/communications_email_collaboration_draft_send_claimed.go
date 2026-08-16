@@ -256,6 +256,7 @@ func (s *Server) handleCommunicationsEmailCollaborationDraftSend(w http.Response
 		message.ThreadID = strings.TrimSpace(sourceMessage.ThreadID)
 	}
 	sentSnapshot := emailMessageSnapshotFromNylas(message)
+	sentSnapshot.DownloadComplete = communicationsSentMessageDownloadComplete(message)
 	if strings.TrimSpace(sentSnapshot.ID) == "" {
 		writeError(w, http.StatusBadGateway, "email_provider_send_response_missing_message_id")
 		return
@@ -266,6 +267,9 @@ func (s *Server) handleCommunicationsEmailCollaborationDraftSend(w http.Response
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_complete_sent_email_draft")
 		return
+	}
+	if len(sendReq.Attachments) > 0 && communicationsAttachmentsHaveMangoIDs(sendReq.Attachments) {
+		s.wakeAttachmentDeletionCleanup()
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"message": message, "collaboration_id": collaborationID, "draft_id": draftID,

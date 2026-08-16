@@ -23,6 +23,37 @@ const (
 	CommunicationsEmailDraftSendRecoveryWindow = time.Hour
 )
 
+func completedEmailMessagePromotesAttachments(message domain.EmailMessageSnapshot) bool {
+	if !message.DownloadComplete || len(message.Attachments) == 0 {
+		return false
+	}
+	for _, attachment := range message.Attachments {
+		if cleanUUIDText(attachment.AttachmentID) == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func mergeStoredCompleteEmailMessageAttachments(thread domain.CommunicationsEmailThread, message domain.EmailMessageSnapshot) domain.EmailMessageSnapshot {
+	var stored domain.EmailMessageSnapshot
+	for _, candidate := range thread.Messages {
+		if strings.TrimSpace(candidate.ProviderMessageID) == strings.TrimSpace(message.ID) && candidate.Message.DownloadComplete {
+			stored = candidate.Message
+			break
+		}
+	}
+	if strings.TrimSpace(stored.ID) == "" || len(stored.Attachments) == 0 {
+		return message
+	}
+	// The send snapshot owns promoted local IDs; stored provider imports only fill its gaps.
+	message.Attachments = mergeEmailAttachmentSnapshots(stored.Attachments, message.Attachments, false)
+	if len(message.Attachments) > 0 && emailAttachmentSnapshotsHaveMangoIDs(message.Attachments) {
+		message.DownloadComplete = true
+	}
+	return message
+}
+
 func versionConflict(currentRevision int64) error {
 	return &VersionConflictError{CurrentRevision: currentRevision}
 }
@@ -341,11 +372,17 @@ func (r *MemoryRepo) CompleteCommunicationsEmailDraftSend(input CommunicationsEm
 	if strings.TrimSpace(message.ThreadID) == "" {
 		message.ThreadID = providerThreadID
 	}
+	message = mergeStoredCompleteEmailMessageAttachments(storedThread, message)
+	promotesAttachments := completedEmailMessagePromotesAttachments(message)
+	storedMessage := message
+	if promotesAttachments {
+		storedMessage.DownloadComplete = false
+	}
 	updatedThread, err := r.upsertCommunicationsEmailThreadLocked(CommunicationsEmailThreadUpsertInput{
 		CompanyID: companyID, PersonalUserID: storedThread.PersonalUserID,
 		PersonalAccountEmail: storedThread.PersonalAccountEmail, SharedInboxID: storedThread.SharedInboxID,
 		AccountEmail: storedThread.AccountEmail, Provider: storedThread.Provider, ProviderThreadID: message.ThreadID,
-		SelectedMessageID: message.ID, Messages: []domain.EmailMessageSnapshot{message},
+		SelectedMessageID: message.ID, Messages: []domain.EmailMessageSnapshot{storedMessage},
 		HistoryComplete: storedThread.HistoryComplete, FetchedAt: time.Now().UTC(),
 	})
 	if err != nil {
@@ -372,6 +409,18 @@ func (r *MemoryRepo) CompleteCommunicationsEmailDraftSend(input CommunicationsEm
 		if _, err := r.upsertResourceAttachmentLocked(link); err != nil {
 			return err
 		}
+	}
+	if promotesAttachments {
+		if _, err := r.upsertCommunicationsEmailThreadLocked(CommunicationsEmailThreadUpsertInput{
+			CompanyID: companyID, PersonalUserID: storedThread.PersonalUserID,
+			PersonalAccountEmail: storedThread.PersonalAccountEmail, SharedInboxID: storedThread.SharedInboxID,
+			AccountEmail: storedThread.AccountEmail, Provider: storedThread.Provider, ProviderThreadID: message.ThreadID,
+			SelectedMessageID: message.ID, Messages: []domain.EmailMessageSnapshot{message},
+			HistoryComplete: storedThread.HistoryComplete, FetchedAt: time.Now().UTC(),
+		}); err != nil {
+			return err
+		}
+		r.convergeCommunicationsEmailThreadAttachmentLinksLocked(companyID, updatedThread.EmailThreadID)
 	}
 	for _, relationshipID := range draftRelationshipIDs {
 		link := r.resourceAttachments[relationshipID]
@@ -539,15 +588,39 @@ where company_id=$1::uuid and draft_id=$2
 	if message.ThreadID == "" {
 		message.ThreadID = thread.ProviderThreadID
 	}
+	message = mergeStoredCompleteEmailMessageAttachments(thread, message)
+	promotesAttachments := completedEmailMessagePromotesAttachments(message)
+	storedMessage := message
+	if promotesAttachments {
+		storedMessage.DownloadComplete = false
+	}
 	updatedThread, err := upsertPostgresCommunicationsEmailThreadTx(ctx, tx, CommunicationsEmailThreadUpsertInput{
 		CompanyID: companyID, PersonalUserID: thread.PersonalUserID,
 		PersonalAccountEmail: thread.PersonalAccountEmail, SharedInboxID: thread.SharedInboxID,
 		AccountEmail: thread.AccountEmail, Provider: thread.Provider, ProviderThreadID: message.ThreadID,
-		SelectedMessageID: message.ID, Messages: []domain.EmailMessageSnapshot{message},
+		SelectedMessageID: message.ID, Messages: []domain.EmailMessageSnapshot{storedMessage},
 		HistoryComplete: thread.HistoryComplete, FetchedAt: time.Now().UTC(),
 	})
 	if err != nil {
 		return err
+	}
+	if !promotesAttachments {
+		message = mergeStoredCompleteEmailMessageAttachments(updatedThread, message)
+		promotesAttachments = completedEmailMessagePromotesAttachments(message)
+		if promotesAttachments {
+			storedMessage = message
+			storedMessage.DownloadComplete = false
+			updatedThread, err = upsertPostgresCommunicationsEmailThreadTx(ctx, tx, CommunicationsEmailThreadUpsertInput{
+				CompanyID: companyID, PersonalUserID: thread.PersonalUserID,
+				PersonalAccountEmail: thread.PersonalAccountEmail, SharedInboxID: thread.SharedInboxID,
+				AccountEmail: thread.AccountEmail, Provider: thread.Provider, ProviderThreadID: message.ThreadID,
+				SelectedMessageID: message.ID, Messages: []domain.EmailMessageSnapshot{storedMessage},
+				HistoryComplete: thread.HistoryComplete, FetchedAt: time.Now().UTC(),
+			})
+			if err != nil {
+				return err
+			}
+		}
 	}
 	var sentEmailMessageID string
 	for _, item := range updatedThread.Messages {
@@ -561,6 +634,20 @@ where company_id=$1::uuid and draft_id=$2
 	}
 	if err := promoteEmailDraftAttachmentRelationshipsTx(ctx, tx, companyID, draftID, sentEmailMessageID); err != nil {
 		return err
+	}
+	if promotesAttachments {
+		if _, err := upsertPostgresCommunicationsEmailThreadTx(ctx, tx, CommunicationsEmailThreadUpsertInput{
+			CompanyID: companyID, PersonalUserID: thread.PersonalUserID,
+			PersonalAccountEmail: thread.PersonalAccountEmail, SharedInboxID: thread.SharedInboxID,
+			AccountEmail: thread.AccountEmail, Provider: thread.Provider, ProviderThreadID: message.ThreadID,
+			SelectedMessageID: message.ID, Messages: []domain.EmailMessageSnapshot{message},
+			HistoryComplete: thread.HistoryComplete, FetchedAt: time.Now().UTC(),
+		}); err != nil {
+			return err
+		}
+		if _, err := convergeCommunicationsEmailThreadAttachmentLinksTx(ctx, tx, companyID, updatedThread.EmailThreadID); err != nil {
+			return err
+		}
 	}
 	result, err := tx.ExecContext(ctx, `
 update email_drafts set send_state='sent',send_claim_token='',

@@ -2,11 +2,185 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"miraeopus/backend/internal/domain"
 	"strings"
 	"time"
 )
+
+func ImportedEmailAttachmentID(parts ...string) string {
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x1f")))
+	b := append([]byte(nil), sum[:16]...)
+	b[6] = (b[6] & 0x0f) | 0x50
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+type redundantImportedEmailAttachmentRule struct {
+	EmailMessageID        string `json:"email_message_id"`
+	CanonicalAttachmentID string `json:"canonical_attachment_id"`
+	ImportedAttachmentID  string `json:"imported_attachment_id"`
+}
+
+func redundantImportedEmailAttachmentRuleForSnapshot(
+	companyID, emailThreadID, emailMessageID, providerMessageID string,
+	attachment domain.EmailAttachmentSnapshot,
+) (redundantImportedEmailAttachmentRule, bool) {
+	canonicalAttachmentID := cleanUUIDText(attachment.AttachmentID)
+	providerAttachmentID := strings.TrimSpace(attachment.ID)
+	if canonicalAttachmentID == "" || providerAttachmentID == "" {
+		return redundantImportedEmailAttachmentRule{}, false
+	}
+	importedAttachmentID := ImportedEmailAttachmentID(
+		companyID, emailThreadID, providerMessageID, providerAttachmentID, attachment.ContentID, attachment.Filename,
+	)
+	if importedAttachmentID == canonicalAttachmentID {
+		return redundantImportedEmailAttachmentRule{}, false
+	}
+	return redundantImportedEmailAttachmentRule{
+		EmailMessageID: cleanUUIDText(emailMessageID), CanonicalAttachmentID: canonicalAttachmentID,
+		ImportedAttachmentID: importedAttachmentID,
+	}, cleanUUIDText(emailMessageID) != ""
+}
+
+func convergeCommunicationsEmailThreadAttachmentLinksTx(
+	ctx context.Context, tx *sql.Tx, companyID, emailThreadID string,
+) (bool, error) {
+	companyID, emailThreadID = cleanUUIDText(companyID), cleanUUIDText(emailThreadID)
+	if companyID == "" || emailThreadID == "" {
+		return false, ErrInvalid
+	}
+	rows, err := tx.QueryContext(ctx, `
+select email_message_id::text,provider_message_id,attachment_metadata
+from email_messages
+where company_id=$1::uuid and email_thread_id=$2::uuid and download_complete
+  and jsonb_typeof(attachment_metadata)='array' and jsonb_array_length(attachment_metadata)>0
+order by email_message_id
+for update`, companyID, emailThreadID)
+	if err != nil {
+		return false, err
+	}
+	rules := make([]redundantImportedEmailAttachmentRule, 0)
+	for rows.Next() {
+		var emailMessageID, providerMessageID string
+		var raw json.RawMessage
+		if err := rows.Scan(&emailMessageID, &providerMessageID, &raw); err != nil {
+			rows.Close()
+			return false, err
+		}
+		var attachments []domain.EmailAttachmentSnapshot
+		if err := json.Unmarshal(raw, &attachments); err != nil {
+			continue
+		}
+		for _, attachment := range attachments {
+			if rule, ok := redundantImportedEmailAttachmentRuleForSnapshot(
+				companyID, emailThreadID, emailMessageID, providerMessageID, attachment,
+			); ok {
+				rules = append(rules, rule)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return false, err
+	}
+	if err := rows.Close(); err != nil {
+		return false, err
+	}
+	if len(rules) == 0 {
+		return false, nil
+	}
+	rulesJSON, err := json.Marshal(rules)
+	if err != nil {
+		return false, err
+	}
+	locked, err := tx.QueryContext(ctx, `
+select attachment.attachment_id::text
+from attachments attachment
+where attachment.company_id=$1::uuid
+  and exists (
+    select 1
+    from jsonb_to_recordset($2::jsonb) as rule(canonical_attachment_id text,imported_attachment_id text)
+    where attachment.attachment_id::text in (rule.canonical_attachment_id,rule.imported_attachment_id)
+  )
+order by attachment.attachment_id
+for update of attachment`, companyID, string(rulesJSON))
+	if err != nil {
+		return false, err
+	}
+	for locked.Next() {
+		var ignored string
+		if err := locked.Scan(&ignored); err != nil {
+			locked.Close()
+			return false, err
+		}
+	}
+	if err := locked.Err(); err != nil {
+		locked.Close()
+		return false, err
+	}
+	if err := locked.Close(); err != nil {
+		return false, err
+	}
+	retiredRows, err := tx.QueryContext(ctx, `
+with rules as (
+  select email_message_id,canonical_attachment_id,imported_attachment_id
+  from jsonb_to_recordset($2::jsonb) as rule(
+    email_message_id text,canonical_attachment_id text,imported_attachment_id text
+  )
+)
+update attachment_relationships redundant
+set deleted_timestamp=coalesce(redundant.deleted_timestamp,clock_timestamp())
+from rules rule
+where redundant.company_id=$1::uuid
+  and redundant.resource_type='email_message'
+  and redundant.resource_id=rule.email_message_id
+  and redundant.attachment_id::text=rule.imported_attachment_id
+  and redundant.deleted_timestamp is null
+  and rule.canonical_attachment_id<>rule.imported_attachment_id
+  and exists (
+    select 1 from attachments canonical
+    where canonical.company_id=redundant.company_id
+      and canonical.attachment_id::text=rule.canonical_attachment_id
+      and canonical.deleted_timestamp is null
+  )
+  and exists (
+    select 1 from attachment_relationships canonical_link
+    where canonical_link.company_id=redundant.company_id
+      and canonical_link.resource_type='email_message'
+      and canonical_link.resource_id=redundant.resource_id
+      and canonical_link.attachment_id::text=rule.canonical_attachment_id
+      and canonical_link.deleted_timestamp is null
+  )
+returning redundant.attachment_id::text`, companyID, string(rulesJSON))
+	if err != nil {
+		return false, err
+	}
+	retired := make([]string, 0)
+	for retiredRows.Next() {
+		var attachmentID string
+		if err := retiredRows.Scan(&attachmentID); err != nil {
+			retiredRows.Close()
+			return false, err
+		}
+		retired = append(retired, attachmentID)
+	}
+	if err := retiredRows.Err(); err != nil {
+		retiredRows.Close()
+		return false, err
+	}
+	if err := retiredRows.Close(); err != nil {
+		return false, err
+	}
+	retired = cleanUUIDTextSlice(retired)
+	if err := markUnownedAttachmentsPendingTx(ctx, tx, companyID, retired); err != nil {
+		return false, err
+	}
+	return len(retired) > 0, nil
+}
 
 // retireAttachmentRelationshipsTx is the single database-side owner unlink
 // path. It locks each affected attachment before changing links so a concurrent
@@ -140,29 +314,26 @@ func retireAttachmentOwnerRelationshipsTx(ctx context.Context, tx *sql.Tx, compa
 }
 
 func markUnownedAttachmentsPendingTx(ctx context.Context, tx *sql.Tx, companyID string, attachmentIDs []string) error {
-	for _, attachmentID := range attachmentIDs {
-		var stillOwned bool
-		if err := tx.QueryRowContext(ctx, `
-select exists(
-  select 1
-  from attachment_relationships relationship
-  where relationship.company_id=$1::uuid
-    and relationship.attachment_id=$2::uuid
-    and relationship.deleted_timestamp is null
-)`, companyID, attachmentID).Scan(&stillOwned); err != nil {
-			return err
-		}
-		if stillOwned {
-			continue
-		}
-		if _, err := tx.ExecContext(ctx, `
+	companyID = cleanUUIDText(companyID)
+	attachmentIDs = cleanUUIDTextSlice(attachmentIDs)
+	if companyID == "" {
+		return ErrInvalid
+	}
+	if len(attachmentIDs) == 0 {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `
 update attachments
 set deleted_timestamp=coalesce(deleted_timestamp,clock_timestamp())
-where company_id=$1::uuid and attachment_id=$2::uuid`, companyID, attachmentID); err != nil {
-			return err
-		}
-	}
-	return nil
+where company_id=$1::uuid
+  and attachment_id=any(string_to_array($2,',')::uuid[])
+  and not exists (
+    select 1 from attachment_relationships relationship
+    where relationship.company_id=attachments.company_id
+      and relationship.attachment_id=attachments.attachment_id
+      and relationship.deleted_timestamp is null
+  )`, companyID, strings.Join(attachmentIDs, ","))
+	return err
 }
 func retireNodeTextboxChatTreeRelationshipsTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, rootChatID string) error {
 	rows, err := tx.QueryContext(ctx, `

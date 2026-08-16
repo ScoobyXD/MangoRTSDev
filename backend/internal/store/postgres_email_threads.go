@@ -271,7 +271,55 @@ where company_id=$1::uuid and email_thread_id=$2::uuid`,
 		input.FetchedAt, input.LastDownloadError, providerKey); err != nil {
 		return domain.CommunicationsEmailThread{}, err
 	}
+	messageIDs := make([]string, 0, len(input.Messages))
 	for _, message := range input.Messages {
+		messageIDs = append(messageIDs, message.ID)
+	}
+	messageIDsJSON, err := marshalEmailSnapshotJSON(messageIDs)
+	if err != nil {
+		return domain.CommunicationsEmailThread{}, err
+	}
+	existingMessages := make(map[string]domain.EmailMessageSnapshot, len(input.Messages))
+	rows, err := tx.QueryContext(ctx, `
+select provider_message_id,attachment_metadata::text,download_complete
+from email_messages
+where company_id=$1::uuid and email_thread_id=$2::uuid
+  and provider_message_id in (
+    select value from jsonb_array_elements_text($3::jsonb) message_id(value)
+  )
+order by provider_message_id
+for update`, input.CompanyID, emailThreadID, messageIDsJSON)
+	if err != nil {
+		return domain.CommunicationsEmailThread{}, err
+	}
+	for rows.Next() {
+		var providerMessageID, attachmentsJSON string
+		var downloadComplete bool
+		if err := rows.Scan(&providerMessageID, &attachmentsJSON, &downloadComplete); err != nil {
+			rows.Close()
+			return domain.CommunicationsEmailThread{}, err
+		}
+		var attachments []domain.EmailAttachmentSnapshot
+		if err := json.Unmarshal([]byte(attachmentsJSON), &attachments); err != nil {
+			rows.Close()
+			return domain.CommunicationsEmailThread{}, err
+		}
+		existingMessages[providerMessageID] = domain.EmailMessageSnapshot{
+			ID: providerMessageID, Attachments: attachments, DownloadComplete: downloadComplete,
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return domain.CommunicationsEmailThread{}, err
+	}
+	if err := rows.Close(); err != nil {
+		return domain.CommunicationsEmailThread{}, err
+	}
+	for _, message := range input.Messages {
+		if existing, ok := existingMessages[message.ID]; ok {
+			message.Attachments = mergeEmailAttachmentSnapshots(existing.Attachments, message.Attachments, message.DownloadComplete)
+			message.DownloadComplete = existing.DownloadComplete || message.DownloadComplete
+		}
 		fromJSON, err := marshalEmailSnapshotJSON(message.From)
 		if err != nil {
 			return domain.CommunicationsEmailThread{}, err
@@ -311,7 +359,7 @@ do update set
   starred=excluded.starred,
   folder_snapshot=case when jsonb_array_length(excluded.folder_snapshot)>0 then excluded.folder_snapshot else email_messages.folder_snapshot end,
   folder_id_snapshot=case when jsonb_array_length(excluded.folder_id_snapshot)>0 then excluded.folder_id_snapshot else email_messages.folder_id_snapshot end,
-  attachment_metadata=case when jsonb_array_length(excluded.attachment_metadata)>0 then excluded.attachment_metadata else email_messages.attachment_metadata end,
+  attachment_metadata=excluded.attachment_metadata,
   download_complete=email_messages.download_complete or excluded.download_complete,
   updated_timestamp=now()`,
 			input.CompanyID, newUUIDv7String(), emailThreadID, message.ID,

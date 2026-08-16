@@ -3,7 +3,9 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/emailqueue"
 	"miraeopus/backend/internal/store"
@@ -117,7 +119,7 @@ func newEmailOutboxBoundaryFixture(t *testing.T) (*store.MemoryRepo, store.Commu
 	return repo, job, client
 }
 
-func TestEmailIngestionOutboxFailureRedeliversHintWithoutRepeatingProviderWork(t *testing.T) {
+func TestEmailIngestionOutboxFailureRedeliveryRevalidatesProviderTruth(t *testing.T) {
 	base, job, client := newEmailOutboxBoundaryFixture(t)
 	repo := &emailOutboxBoundaryRepo{Repository: base, fail: true}
 	server := NewServerWithOptions(repo, ServerOptions{
@@ -137,7 +139,8 @@ func TestEmailIngestionOutboxFailureRedeliversHintWithoutRepeatingProviderWork(t
 		t.Fatalf("rolled-back status/outbox transaction=%+v err=%v", pendingStatus, err)
 	}
 	thread, err := base.GetCommunicationsEmailThreadContext(context.Background(), job.CompanyID, job.EmailThreadID)
-	if err != nil || !thread.HistoryComplete || !storedEmailMessageDownloadComplete(thread, job.ProviderMessageID) {
+	storedMessage, stored := storedEmailMessageForProvider(thread, job.ProviderMessageID)
+	if err != nil || !thread.HistoryComplete || !stored || !storedMessage.Message.DownloadComplete {
 		t.Fatalf("durable provider truth=%+v err=%v", thread, err)
 	}
 
@@ -147,8 +150,8 @@ func TestEmailIngestionOutboxFailureRedeliversHintWithoutRepeatingProviderWork(t
 		t.Fatalf("outbox recovery acknowledged=%v err=%v", acknowledged, err)
 	}
 	_, _, _, messageIDs := client.calls()
-	if len(messageIDs) != 1 || messageIDs[0] != "outbox-boundary-message" {
-		t.Fatalf("provider message calls=%v, want exactly one", messageIDs)
+	if len(messageIDs) != 2 || messageIDs[0] != "outbox-boundary-message" || messageIDs[1] != "outbox-boundary-message" {
+		t.Fatalf("provider message calls=%v, want safe revalidation after unsettled completion", messageIDs)
 	}
 	if got := repo.enqueueCount(); got != 2 {
 		t.Fatalf("outbox attempts=%d, want failed insert plus redelivery insert", got)
@@ -629,6 +632,611 @@ func TestCommunicationsEmailIngestionWorkerStoresThreadAttachmentsAndLaterManual
 	}
 }
 
+func TestCommunicationsEmailIngestionWorkerReconcilesSentTriggerIntoExistingThread(t *testing.T) {
+	repo, owner, _, _ := newEmailCollaborationThreadTestRepo(t)
+	connection, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		CompanyID: emailCollaborationThreadTestCompanyID, UserID: owner.UserID,
+		Provider: "google", AccountEmail: owner.Email, Scope: "personal", GrantID: "sent-trigger-grant", Status: "connected",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseDate := time.Now().UTC().Add(time.Second).Unix()
+	providerThreadID := "sent-trigger-thread"
+	stored, err := repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+		CompanyID: emailCollaborationThreadTestCompanyID, PersonalUserID: owner.UserID, PersonalAccountEmail: owner.Email,
+		AccountEmail: owner.Email, Provider: "google", ProviderThreadID: providerThreadID, SelectedMessageID: "sent-trigger-root",
+		Messages: []domain.EmailMessageSnapshot{
+			{ID: "sent-trigger-root", ThreadID: providerThreadID, Date: baseDate, Folders: []string{"INBOX"}, DownloadComplete: true},
+			{ID: "sent-trigger-later", ThreadID: providerThreadID, Date: baseDate + 2, Folders: []string{"INBOX"}, DownloadComplete: true},
+		},
+		HistoryComplete: true, FetchedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client := newEmailCollaborationThreadTestClient()
+	client.folders = []NylasFolder{{ID: "sent-trigger-inbox", SystemFolder: "inbox"}}
+	client.threadsByID[providerThreadID] = NylasThread{
+		ID: providerThreadID, MessageIDs: []string{"sent-trigger-root", "sent-trigger-sent", "sent-trigger-later", "sent-trigger-sent"},
+	}
+	client.messagesByID["sent-trigger-sent"] = NylasMessage{
+		ID: "sent-trigger-sent", ThreadID: providerThreadID, Date: baseDate + 1,
+		Subject: "Re: Sent trigger", Body: "<p>sent</p>", Folders: []string{"SENT"},
+	}
+	server := NewServerWithOptions(repo, ServerOptions{
+		NylasClient: client, NylasConfig: testNylasConfig(),
+		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true, DisableRealtimeSpine: true,
+	})
+	defer server.Close()
+	server.nylasGate = newNylasRequestGate(0)
+
+	job, created, err := repo.EnsureCommunicationsEmailIngestionJobContext(context.Background(), store.CommunicationsEmailIngestionJobInput{
+		CompanyID: connection.CompanyID, EmailConnectionID: connection.EmailConnectionID,
+		ProviderMessageID: "sent-trigger-sent", ProviderThreadID: providerThreadID,
+		Priority: store.CommunicationsEmailIngestionPriorityLive,
+	})
+	if err != nil || !created || job.EmailThreadID != "" {
+		t.Fatalf("sent trigger job=%+v created=%v err=%v", job, created, err)
+	}
+	acknowledged, err := server.processEmailIngestionDelivery(context.Background(), emailqueue.Message{
+		JobID: job.IngestionJobID, CompanyID: job.CompanyID, EmailConnectionID: job.EmailConnectionID,
+	})
+	if err != nil || !acknowledged {
+		t.Fatalf("sent trigger acknowledged=%v err=%v", acknowledged, err)
+	}
+
+	thread, err := repo.GetCommunicationsEmailThreadContext(context.Background(), stored.CompanyID, stored.EmailThreadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantIDs := []string{"sent-trigger-root", "sent-trigger-sent", "sent-trigger-later"}
+	if !thread.HistoryComplete || len(thread.Messages) != len(wantIDs) {
+		t.Fatalf("reconciled thread=%+v", thread)
+	}
+	for index, wantID := range wantIDs {
+		message := thread.Messages[index]
+		if message.ProviderMessageID != wantID || message.MessageOrder != index || !message.Message.DownloadComplete {
+			t.Fatalf("message[%d]=%+v, want provider=%s order=%d complete", index, message, wantID, index)
+		}
+		if message.EmailThreadID != stored.EmailThreadID {
+			t.Fatalf("message[%d] thread=%s, want %s", index, message.EmailThreadID, stored.EmailThreadID)
+		}
+	}
+	if got := thread.Messages[1].Message.Folders; len(got) != 1 || got[0] != "SENT" {
+		t.Fatalf("stored sent folders=%v", got)
+	}
+	completedJob, err := repo.GetCommunicationsEmailIngestionJobContext(context.Background(), job.IngestionJobID)
+	if err != nil || completedJob.EmailThreadID != stored.EmailThreadID || completedJob.Status != store.CommunicationsEmailIngestionJobCompleted {
+		t.Fatalf("completed sent job=%+v err=%v", completedJob, err)
+	}
+	threadGrants, _, _, requestedMessageIDs := client.calls()
+	if len(threadGrants) != 1 || len(requestedMessageIDs) != 1 || requestedMessageIDs[0] != "sent-trigger-sent" {
+		t.Fatalf("provider calls thread_grants=%v message_ids=%v", threadGrants, requestedMessageIDs)
+	}
+}
+
+func TestCommunicationsEmailIngestionWorkerReconcilesMissingSentMemberFromPreviouslyStoredTrigger(t *testing.T) {
+	repo, owner, _, _ := newEmailCollaborationThreadTestRepo(t)
+	connection, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		CompanyID: emailCollaborationThreadTestCompanyID, UserID: owner.UserID,
+		Provider: "google", AccountEmail: owner.Email, Scope: "personal", GrantID: "stored-trigger-grant", Status: "connected",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseDate := time.Now().UTC().Add(time.Second).Unix()
+	providerThreadID := "stored-trigger-thread"
+	stored, err := repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+		CompanyID: emailCollaborationThreadTestCompanyID, PersonalUserID: owner.UserID, PersonalAccountEmail: owner.Email,
+		AccountEmail: owner.Email, Provider: "google", ProviderThreadID: providerThreadID, SelectedMessageID: "stored-trigger-root",
+		Messages: []domain.EmailMessageSnapshot{
+			{ID: "stored-trigger-root", ThreadID: providerThreadID, Date: baseDate, DownloadComplete: true},
+			{ID: "stored-trigger-known", ThreadID: providerThreadID, Date: baseDate + 2, Folders: []string{"SENT"}, DownloadComplete: true},
+		},
+		HistoryComplete: true, FetchedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client := newEmailCollaborationThreadTestClient()
+	client.folders = []NylasFolder{{ID: "stored-trigger-inbox", SystemFolder: "inbox"}}
+	client.threadsByID[providerThreadID] = NylasThread{
+		ID: providerThreadID, MessageIDs: []string{"stored-trigger-root", "stored-trigger-missing-sent", "stored-trigger-known"},
+	}
+	client.messagesByID["stored-trigger-known"] = NylasMessage{
+		ID: "stored-trigger-known", ThreadID: providerThreadID, Date: baseDate + 2, Folders: []string{"SENT"},
+	}
+	client.messagesByID["stored-trigger-missing-sent"] = NylasMessage{
+		ID: "stored-trigger-missing-sent", ThreadID: providerThreadID, Date: baseDate + 1, Folders: []string{"SENT"},
+	}
+	server := NewServerWithOptions(repo, ServerOptions{
+		NylasClient: client, NylasConfig: testNylasConfig(),
+		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true, DisableRealtimeSpine: true,
+	})
+	defer server.Close()
+	server.nylasGate = newNylasRequestGate(0)
+
+	job, created, err := repo.EnsureCommunicationsEmailIngestionJobContext(context.Background(), store.CommunicationsEmailIngestionJobInput{
+		CompanyID: connection.CompanyID, EmailConnectionID: connection.EmailConnectionID,
+		ProviderMessageID: "stored-trigger-known", ProviderThreadID: providerThreadID,
+		Priority: store.CommunicationsEmailIngestionPriorityLive,
+	})
+	if err != nil || !created || job.EmailThreadID != "" {
+		t.Fatalf("previously stored trigger job=%+v created=%v err=%v", job, created, err)
+	}
+	acknowledged, err := server.processEmailIngestionDelivery(context.Background(), emailqueue.Message{
+		JobID: job.IngestionJobID, CompanyID: job.CompanyID, EmailConnectionID: job.EmailConnectionID,
+	})
+	if err != nil || !acknowledged {
+		t.Fatalf("previously stored trigger acknowledged=%v err=%v", acknowledged, err)
+	}
+	thread, err := repo.GetCommunicationsEmailThreadContext(context.Background(), stored.CompanyID, stored.EmailThreadID)
+	if err != nil || len(thread.Messages) != 3 || thread.Messages[1].ProviderMessageID != "stored-trigger-missing-sent" {
+		t.Fatalf("previously stored trigger reconciliation=%+v err=%v", thread, err)
+	}
+}
+
+func TestCommunicationsEmailIngestionWorkerStoresUnknownSentThreadWithoutCrossingConnections(t *testing.T) {
+	repo, owner, otherOwner, _ := newEmailCollaborationThreadTestRepo(t)
+	currentConnection, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		CompanyID: emailCollaborationThreadTestCompanyID, UserID: owner.UserID,
+		Provider: "google", AccountEmail: owner.Email, Scope: "personal", GrantID: "current-sent-grant", Status: "connected",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherConnection, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		CompanyID: emailCollaborationThreadTestCompanyID, UserID: otherOwner.UserID,
+		Provider: "google", AccountEmail: otherOwner.Email, Scope: "personal", GrantID: "other-sent-grant", Status: "connected",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseDate := time.Now().UTC().Add(time.Second).Unix()
+	providerThreadID := "cross-connection-sent-thread"
+	otherThread, err := repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+		CompanyID: emailCollaborationThreadTestCompanyID, PersonalUserID: otherOwner.UserID, PersonalAccountEmail: otherOwner.Email,
+		AccountEmail: otherOwner.Email, Provider: "google", ProviderThreadID: providerThreadID, SelectedMessageID: "cross-connection-root",
+		Messages: []domain.EmailMessageSnapshot{{
+			ID: "cross-connection-root", ThreadID: providerThreadID, Date: baseDate, DownloadComplete: true,
+		}},
+		HistoryComplete: true, FetchedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client := newEmailCollaborationThreadTestClient()
+	client.folders = []NylasFolder{
+		{ID: "cross-connection-inbox", SystemFolder: "inbox"},
+		{ID: "cross-connection-sent-folder", SystemFolder: "sent"},
+	}
+	client.threadsByID[providerThreadID] = NylasThread{
+		ID: providerThreadID, MessageIDs: []string{"cross-connection-root", "cross-connection-sent", "cross-connection-root"},
+	}
+	client.messagesByID["cross-connection-root"] = NylasMessage{
+		ID: "cross-connection-root", ThreadID: providerThreadID, Date: baseDate,
+	}
+	client.messagesByID["cross-connection-sent"] = NylasMessage{
+		ID: "cross-connection-sent", ThreadID: providerThreadID, Date: baseDate + 1, FolderIDs: []string{"cross-connection-sent-folder"},
+	}
+	client.messagesByID["cross-connection-unrelated"] = NylasMessage{ID: "cross-connection-unrelated", Date: baseDate + 2, Folders: []string{"SENT"}}
+	server := NewServerWithOptions(repo, ServerOptions{
+		NylasClient: client, NylasConfig: testNylasConfig(),
+		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true, DisableRealtimeSpine: true,
+	})
+	defer server.Close()
+	server.nylasGate = newNylasRequestGate(0)
+
+	job, created, err := repo.EnsureCommunicationsEmailIngestionJobContext(context.Background(), store.CommunicationsEmailIngestionJobInput{
+		CompanyID: currentConnection.CompanyID, EmailConnectionID: currentConnection.EmailConnectionID,
+		ProviderMessageID: "cross-connection-sent", ProviderThreadID: providerThreadID,
+		Priority: store.CommunicationsEmailIngestionPriorityLive,
+	})
+	if err != nil || !created {
+		t.Fatalf("unknown sent job created=%v err=%v", created, err)
+	}
+	acknowledged, err := server.processEmailIngestionDelivery(context.Background(), emailqueue.Message{
+		JobID: job.IngestionJobID, CompanyID: job.CompanyID, EmailConnectionID: job.EmailConnectionID,
+	})
+	if err != nil || !acknowledged {
+		t.Fatalf("unknown sent acknowledged=%v err=%v", acknowledged, err)
+	}
+	identities, err := repo.ResolveCommunicationsEmailMessageIdentitiesForConnectionContext(
+		context.Background(), currentConnection.CompanyID, currentConnection.EmailConnectionID,
+		[]string{"cross-connection-root", "cross-connection-sent", "cross-connection-unrelated"},
+	)
+	if err != nil || len(identities) != 2 || identities["cross-connection-root"].EmailThreadID == "" ||
+		identities["cross-connection-root"].EmailThreadID != identities["cross-connection-sent"].EmailThreadID {
+		t.Fatalf("current connection sent identities=%v err=%v", identities, err)
+	}
+	currentThread, err := repo.GetCommunicationsEmailThreadContext(context.Background(), currentConnection.CompanyID, identities["cross-connection-sent"].EmailThreadID)
+	if err != nil || currentThread.EmailConnectionID != currentConnection.EmailConnectionID || len(currentThread.Messages) != 2 ||
+		currentThread.Messages[0].ProviderMessageID != "cross-connection-root" || currentThread.Messages[1].ProviderMessageID != "cross-connection-sent" {
+		t.Fatalf("current connection thread=%+v err=%v", currentThread, err)
+	}
+	unchangedOtherThread, err := repo.GetCommunicationsEmailThreadContext(context.Background(), otherThread.CompanyID, otherThread.EmailThreadID)
+	if err != nil || len(unchangedOtherThread.Messages) != 1 || unchangedOtherThread.EmailConnectionID != otherConnection.EmailConnectionID ||
+		unchangedOtherThread.EmailThreadID == currentThread.EmailThreadID {
+		t.Fatalf("other connection thread changed=%+v err=%v", unchangedOtherThread, err)
+	}
+	completedJob, err := repo.GetCommunicationsEmailIngestionJobContext(context.Background(), job.IngestionJobID)
+	if err != nil || completedJob.Status != store.CommunicationsEmailIngestionJobCompleted || completedJob.EmailThreadID != currentThread.EmailThreadID {
+		t.Fatalf("unknown sent completed job=%+v err=%v", completedJob, err)
+	}
+	_, _, _, beforeDuplicate := client.calls()
+	acknowledged, err = server.processEmailIngestionDelivery(context.Background(), emailqueue.Message{
+		JobID: job.IngestionJobID, CompanyID: job.CompanyID, EmailConnectionID: job.EmailConnectionID,
+	})
+	if err != nil || !acknowledged {
+		t.Fatalf("duplicate sent delivery acknowledged=%v err=%v", acknowledged, err)
+	}
+	_, _, _, afterDuplicate := client.calls()
+	if len(afterDuplicate) != len(beforeDuplicate) {
+		t.Fatalf("completed duplicate repeated provider work before=%v after=%v", beforeDuplicate, afterDuplicate)
+	}
+}
+
+func TestCommunicationsEmailIngestionWorkerRetriesMissingSiblingAfterPartialFailure(t *testing.T) {
+	repo, owner, _, _ := newEmailCollaborationThreadTestRepo(t)
+	connection, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		CompanyID: emailCollaborationThreadTestCompanyID, UserID: owner.UserID,
+		Provider: "google", AccountEmail: owner.Email, Scope: "personal", GrantID: "sent-retry-grant", Status: "connected",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseDate := time.Now().UTC().Add(time.Second).Unix()
+	const providerThreadID = "sent-retry-thread"
+	stored, err := repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+		CompanyID: emailCollaborationThreadTestCompanyID, PersonalUserID: owner.UserID, PersonalAccountEmail: owner.Email,
+		AccountEmail: owner.Email, Provider: "google", ProviderThreadID: providerThreadID, SelectedMessageID: "sent-retry-trigger",
+		Messages: []domain.EmailMessageSnapshot{{
+			ID: "sent-retry-trigger", ThreadID: providerThreadID, Date: baseDate, Folders: []string{"SENT"}, DownloadComplete: true,
+		}},
+		HistoryComplete: true, FetchedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client := newEmailCollaborationThreadTestClient()
+	client.folders = []NylasFolder{{ID: "sent-retry-inbox", SystemFolder: "inbox"}, {ID: "sent-retry-sent", SystemFolder: "sent"}}
+	client.threadsByID[providerThreadID] = NylasThread{ID: providerThreadID, MessageIDs: []string{"sent-retry-trigger", "sent-retry-missing"}}
+	client.messagesByID["sent-retry-trigger"] = NylasMessage{
+		ID: "sent-retry-trigger", ThreadID: providerThreadID, Date: baseDate, FolderIDs: []string{"sent-retry-sent"},
+	}
+	client.messagesByID["sent-retry-missing"] = NylasMessage{
+		ID: "sent-retry-missing", ThreadID: providerThreadID, Date: baseDate + 1, Folders: []string{"INBOX"},
+	}
+	client.messageErrorsByID["sent-retry-missing"] = errors.New("temporary sibling fetch failure")
+	server := NewServerWithOptions(repo, ServerOptions{
+		NylasClient: client, NylasConfig: testNylasConfig(),
+		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true, DisableRealtimeSpine: true,
+	})
+	defer server.Close()
+	server.nylasGate = newNylasRequestGate(0)
+
+	job, created, err := repo.EnsureCommunicationsEmailIngestionJobContext(context.Background(), store.CommunicationsEmailIngestionJobInput{
+		CompanyID: connection.CompanyID, EmailConnectionID: connection.EmailConnectionID,
+		ProviderMessageID: "sent-retry-trigger", ProviderThreadID: providerThreadID,
+		Priority: store.CommunicationsEmailIngestionPriorityLive,
+	})
+	if err != nil || !created {
+		t.Fatalf("retry job created=%v err=%v", created, err)
+	}
+	delivery := emailqueue.Message{JobID: job.IngestionJobID, CompanyID: job.CompanyID, EmailConnectionID: job.EmailConnectionID}
+	acknowledged, err := server.processEmailIngestionDelivery(context.Background(), delivery)
+	if err == nil || acknowledged {
+		t.Fatalf("partial failure acknowledged=%v err=%v", acknowledged, err)
+	}
+	failedJob, err := repo.GetCommunicationsEmailIngestionJobContext(context.Background(), job.IngestionJobID)
+	if err != nil || failedJob.Status != store.CommunicationsEmailIngestionJobAccepted || failedJob.EmailThreadID != stored.EmailThreadID {
+		t.Fatalf("retryable attached job=%+v err=%v", failedJob, err)
+	}
+	partial, err := repo.GetCommunicationsEmailThreadContext(context.Background(), stored.CompanyID, stored.EmailThreadID)
+	if err != nil || len(partial.Messages) != 1 {
+		t.Fatalf("partial thread=%+v err=%v", partial, err)
+	}
+	delete(client.messageErrorsByID, "sent-retry-missing")
+	acknowledged, err = server.processEmailIngestionDelivery(context.Background(), delivery)
+	if err != nil || !acknowledged {
+		t.Fatalf("retry acknowledged=%v err=%v", acknowledged, err)
+	}
+	completed, err := repo.GetCommunicationsEmailThreadContext(context.Background(), stored.CompanyID, stored.EmailThreadID)
+	if err != nil || len(completed.Messages) != 2 || completed.Messages[1].ProviderMessageID != "sent-retry-missing" ||
+		!completed.Messages[1].Message.DownloadComplete {
+		t.Fatalf("completed retry thread=%+v err=%v", completed, err)
+	}
+	completedJob, err := repo.GetCommunicationsEmailIngestionJobContext(context.Background(), job.IngestionJobID)
+	if err != nil || completedJob.Status != store.CommunicationsEmailIngestionJobCompleted || completedJob.ProviderAttemptCount != 2 {
+		t.Fatalf("completed retry job=%+v err=%v", completedJob, err)
+	}
+}
+
+func TestCommunicationsEmailIngestionWorkerUpgradesBlankProviderThreadWithoutForking(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		storedID  string
+		triggerID string
+	}{
+		{name: "stored trigger", storedID: "blank-thread-trigger", triggerID: "blank-thread-trigger"},
+		{name: "stored sibling", storedID: "blank-thread-sibling", triggerID: "blank-thread-new-sent"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo, owner, _, _ := newEmailCollaborationThreadTestRepo(t)
+			connection, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+				CompanyID: emailCollaborationThreadTestCompanyID, UserID: owner.UserID,
+				Provider: "google", AccountEmail: owner.Email, Scope: "personal", GrantID: "blank-thread-grant-" + test.name, Status: "connected",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			baseDate := time.Now().UTC().Add(time.Second).Unix()
+			stored, err := repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+				CompanyID: emailCollaborationThreadTestCompanyID, PersonalUserID: owner.UserID, PersonalAccountEmail: owner.Email,
+				AccountEmail: owner.Email, Provider: "google", SelectedMessageID: test.storedID,
+				Messages:        []domain.EmailMessageSnapshot{{ID: test.storedID, Date: baseDate, DownloadComplete: true}},
+				HistoryComplete: true, FetchedAt: time.Now().UTC(),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			storedMessageID := stored.Messages[0].EmailMessageID
+			const providerThreadID = "upgraded-provider-thread"
+			otherID := "blank-thread-new-member"
+			if test.triggerID != test.storedID {
+				otherID = test.storedID
+			}
+			client := newEmailCollaborationThreadTestClient()
+			client.folders = []NylasFolder{{ID: "blank-thread-inbox", SystemFolder: "inbox"}, {ID: "blank-thread-sent", SystemFolder: "sent"}}
+			client.threadsByID[providerThreadID] = NylasThread{ID: providerThreadID, MessageIDs: []string{test.storedID, test.triggerID, otherID}}
+			client.messagesByID[test.triggerID] = NylasMessage{
+				ID: test.triggerID, ThreadID: providerThreadID, Date: baseDate + 1, FolderIDs: []string{"blank-thread-sent"},
+			}
+			client.messagesByID[otherID] = NylasMessage{ID: otherID, ThreadID: providerThreadID, Date: baseDate + 2, Folders: []string{"INBOX"}}
+			server := NewServerWithOptions(repo, ServerOptions{
+				NylasClient: client, NylasConfig: testNylasConfig(),
+				DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true, DisableRealtimeSpine: true,
+			})
+			defer server.Close()
+			server.nylasGate = newNylasRequestGate(0)
+			job, created, err := repo.EnsureCommunicationsEmailIngestionJobContext(context.Background(), store.CommunicationsEmailIngestionJobInput{
+				CompanyID: connection.CompanyID, EmailConnectionID: connection.EmailConnectionID,
+				ProviderMessageID: test.triggerID, ProviderThreadID: providerThreadID, Priority: store.CommunicationsEmailIngestionPriorityLive,
+			})
+			if err != nil || !created {
+				t.Fatalf("blank provider job created=%v err=%v", created, err)
+			}
+			acknowledged, err := server.processEmailIngestionDelivery(context.Background(), emailqueue.Message{
+				JobID: job.IngestionJobID, CompanyID: job.CompanyID, EmailConnectionID: job.EmailConnectionID,
+			})
+			if err != nil || !acknowledged {
+				t.Fatalf("blank provider delivery acknowledged=%v err=%v", acknowledged, err)
+			}
+			identities, err := repo.ResolveCommunicationsEmailMessageIdentitiesForConnectionContext(
+				context.Background(), connection.CompanyID, connection.EmailConnectionID, []string{test.storedID, test.triggerID, otherID},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for providerMessageID, identity := range identities {
+				if identity.EmailThreadID != stored.EmailThreadID {
+					t.Fatalf("identity %s forked to %s, want %s", providerMessageID, identity.EmailThreadID, stored.EmailThreadID)
+				}
+			}
+			upgraded, err := repo.GetCommunicationsEmailThreadContext(context.Background(), stored.CompanyID, stored.EmailThreadID)
+			if err != nil || upgraded.ProviderThreadID != providerThreadID || len(upgraded.Messages) != len(identities) {
+				t.Fatalf("upgraded thread=%+v identities=%v err=%v", upgraded, identities, err)
+			}
+			if identity := identities[test.storedID]; identity.EmailMessageID != storedMessageID {
+				t.Fatalf("stored message ID changed=%+v, want %s", identity, storedMessageID)
+			}
+		})
+	}
+}
+
+func TestCommunicationsEmailIngestionWorkerRejectsUnknownNonInboxOrSentTriggers(t *testing.T) {
+	for _, folder := range []string{"ARCHIVE", "DRAFT", "TRASH"} {
+		t.Run(strings.ToLower(folder), func(t *testing.T) {
+			repo, owner, _, _ := newEmailCollaborationThreadTestRepo(t)
+			connection, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+				CompanyID: emailCollaborationThreadTestCompanyID, UserID: owner.UserID,
+				Provider: "google", AccountEmail: owner.Email, Scope: "personal", GrantID: "noneligible-" + strings.ToLower(folder), Status: "connected",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			messageID := "noneligible-" + strings.ToLower(folder)
+			client := newEmailCollaborationThreadTestClient()
+			client.folders = []NylasFolder{{ID: "noneligible-inbox", SystemFolder: "inbox"}, {ID: "noneligible-sent", SystemFolder: "sent"}}
+			client.messagesByID[messageID] = NylasMessage{
+				ID: messageID, ThreadID: "noneligible-thread", Date: time.Now().UTC().Add(time.Second).Unix(), Folders: []string{folder},
+			}
+			server := NewServerWithOptions(repo, ServerOptions{
+				NylasClient: client, NylasConfig: testNylasConfig(),
+				DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true, DisableRealtimeSpine: true,
+			})
+			defer server.Close()
+			server.nylasGate = newNylasRequestGate(0)
+			job, created, err := repo.EnsureCommunicationsEmailIngestionJobContext(context.Background(), store.CommunicationsEmailIngestionJobInput{
+				CompanyID: connection.CompanyID, EmailConnectionID: connection.EmailConnectionID,
+				ProviderMessageID: messageID, ProviderThreadID: "noneligible-thread", Priority: store.CommunicationsEmailIngestionPriorityLive,
+			})
+			if err != nil || !created {
+				t.Fatalf("noneligible job created=%v err=%v", created, err)
+			}
+			acknowledged, err := server.processEmailIngestionDelivery(context.Background(), emailqueue.Message{
+				JobID: job.IngestionJobID, CompanyID: job.CompanyID, EmailConnectionID: job.EmailConnectionID,
+			})
+			if err != nil || !acknowledged {
+				t.Fatalf("noneligible delivery acknowledged=%v err=%v", acknowledged, err)
+			}
+			completed, err := repo.GetCommunicationsEmailIngestionJobContext(context.Background(), job.IngestionJobID)
+			if err != nil || completed.EmailThreadID != "" || completed.Status != store.CommunicationsEmailIngestionJobCompleted {
+				t.Fatalf("noneligible completed job=%+v err=%v", completed, err)
+			}
+			threadGrants, _, _, _ := client.calls()
+			if len(threadGrants) != 0 {
+				t.Fatalf("noneligible trigger fetched provider thread grants=%v", threadGrants)
+			}
+			if folder == "DRAFT" {
+				updated := client.messagesByID[messageID]
+				updated.Folders = []string{"SENT"}
+				client.messagesByID[messageID] = updated
+				client.threadsByID[updated.ThreadID] = NylasThread{ID: updated.ThreadID, MessageIDs: []string{messageID}}
+				reopened, reopenedForQueue, err := repo.EnsureCommunicationsEmailIngestionJobContext(context.Background(), store.CommunicationsEmailIngestionJobInput{
+					CompanyID: connection.CompanyID, EmailConnectionID: connection.EmailConnectionID,
+					ProviderMessageID: messageID, ProviderThreadID: updated.ThreadID,
+					Priority: store.CommunicationsEmailIngestionPriorityLive, EnqueueSourceID: "webhook:sent-update",
+				})
+				if err != nil || !reopenedForQueue || reopened.IngestionJobID != job.IngestionJobID ||
+					reopened.Status != store.CommunicationsEmailIngestionJobAccepted || reopened.ProviderAttemptCount != 0 {
+					t.Fatalf("sent transition reopened job=%+v queue=%v err=%v", reopened, reopenedForQueue, err)
+				}
+				acknowledged, err = server.processEmailIngestionDelivery(context.Background(), emailqueue.Message{
+					JobID: reopened.IngestionJobID, CompanyID: reopened.CompanyID, EmailConnectionID: reopened.EmailConnectionID,
+				})
+				if err != nil || !acknowledged {
+					t.Fatalf("sent transition acknowledged=%v err=%v", acknowledged, err)
+				}
+				storedJob, err := repo.GetCommunicationsEmailIngestionJobContext(context.Background(), job.IngestionJobID)
+				if err != nil || storedJob.Status != store.CommunicationsEmailIngestionJobCompleted || storedJob.EmailThreadID == "" ||
+					storedJob.ProviderAttemptCount != 1 {
+					t.Fatalf("sent transition completed job=%+v err=%v", storedJob, err)
+				}
+				storedThread, err := repo.GetCommunicationsEmailThreadContext(context.Background(), connection.CompanyID, storedJob.EmailThreadID)
+				if err != nil || len(storedThread.Messages) != 1 || storedThread.Messages[0].ProviderMessageID != messageID {
+					t.Fatalf("sent transition durable thread=%+v err=%v", storedThread, err)
+				}
+			}
+		})
+	}
+}
+
+func TestCommunicationsEmailIngestionWorkerPreservesCompleteMangoSentAttachment(t *testing.T) {
+	repo, owner, _, _ := newEmailCollaborationThreadTestRepo(t)
+	connection, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		CompanyID: emailCollaborationThreadTestCompanyID, UserID: owner.UserID,
+		Provider: "google", AccountEmail: owner.Email, Scope: "personal", GrantID: "sent-attachment-grant", Status: "connected",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseDate := time.Now().UTC().Add(time.Second).Unix()
+	const providerThreadID = "sent-attachment-thread"
+	attachmentID := store.NewUUIDv7String()
+	thread, err := repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+		CompanyID: connection.CompanyID, PersonalUserID: owner.UserID, PersonalAccountEmail: owner.Email,
+		AccountEmail: owner.Email, Provider: "google", ProviderThreadID: providerThreadID, SelectedMessageID: "sent-attachment-root",
+		Messages: []domain.EmailMessageSnapshot{
+			{ID: "sent-attachment-root", ThreadID: providerThreadID, Date: baseDate, DownloadComplete: true},
+			{
+				ID: "sent-attachment-trigger", ThreadID: providerThreadID, Date: baseDate + 1, Folders: []string{"SENT"}, DownloadComplete: true,
+				Attachments: []domain.EmailAttachmentSnapshot{{ID: "provider-sent-file", AttachmentID: attachmentID, Filename: "sent.txt", ContentType: "text/plain"}},
+			},
+		},
+		HistoryComplete: true, FetchedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sentMessage, ok := storedEmailMessageForProvider(thread, "sent-attachment-trigger")
+	if !ok {
+		t.Fatal("stored sent attachment message missing")
+	}
+	storage := newFakeAttachmentObjectStorage()
+	body := []byte("sent attachment")
+	storageKey := attachmentOriginalObjectKey(connection.CompanyID, attachmentID)
+	storage.objects[storageKey] = fakeAttachmentObject{contentType: "text/plain", body: body}
+	digest := sha256.Sum256(body)
+	if _, _, err := repo.CreateAttachmentWithResourceLink(store.AttachmentCreateInput{
+		CompanyID: connection.CompanyID, AttachmentID: attachmentID, UploadedByUserID: owner.UserID,
+		OriginalFilename: "sent.txt", MimeType: "text/plain", ByteSize: int64(len(body)), SHA256: fmt.Sprintf("%x", digest[:]),
+		SHA256VerificationMethod: "server_stream", StorageBucket: storage.bucket, StorageKey: storageKey, SourceKind: store.AttachmentSourceEmailOutgoing,
+		ResourceLink: store.ResourceAttachmentInput{
+			CompanyID: connection.CompanyID, ResourceType: "email_message", ResourceID: sentMessage.EmailMessageID,
+			AttachmentID: attachmentID, RelationshipKind: store.AttachmentRelationshipEmailAttachment, CreatedByUserID: owner.UserID,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	redundantAttachmentID := store.ImportedEmailAttachmentID(
+		connection.CompanyID, thread.EmailThreadID, "sent-attachment-trigger", "provider-sent-file", "", "sent.txt",
+	)
+	redundantBody := []byte("interrupted worker duplicate")
+	redundantStorageKey := attachmentOriginalObjectKey(connection.CompanyID, redundantAttachmentID)
+	storage.objects[redundantStorageKey] = fakeAttachmentObject{contentType: "text/plain", body: redundantBody}
+	redundantDigest := sha256.Sum256(redundantBody)
+	if _, _, err := repo.CreateAttachmentWithResourceLink(store.AttachmentCreateInput{
+		CompanyID: connection.CompanyID, AttachmentID: redundantAttachmentID, UploadedByUserID: owner.UserID,
+		OriginalFilename: "sent.txt", MimeType: "text/plain", ByteSize: int64(len(redundantBody)), SHA256: fmt.Sprintf("%x", redundantDigest[:]),
+		SHA256VerificationMethod: "server_stream", StorageBucket: storage.bucket, StorageKey: redundantStorageKey, SourceKind: store.AttachmentSourceEmailIncoming,
+		ResourceLink: store.ResourceAttachmentInput{
+			CompanyID: connection.CompanyID, ResourceType: "email_message", ResourceID: sentMessage.EmailMessageID,
+			AttachmentID: redundantAttachmentID, RelationshipKind: store.AttachmentRelationshipEmailAttachment, CreatedByUserID: owner.UserID,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	client := newEmailCollaborationThreadTestClient()
+	client.folders = []NylasFolder{{ID: "sent-attachment-inbox", SystemFolder: "inbox"}, {ID: "sent-attachment-sent", SystemFolder: "sent"}}
+	client.threadsByID[providerThreadID] = NylasThread{
+		ID: providerThreadID, MessageIDs: []string{"sent-attachment-root", "sent-attachment-trigger", "sent-attachment-sibling"},
+	}
+	client.messagesByID["sent-attachment-trigger"] = NylasMessage{
+		ID: "sent-attachment-trigger", ThreadID: providerThreadID, Date: baseDate + 1, FolderIDs: []string{"sent-attachment-sent"},
+		Attachments: []NylasAttachment{{ID: "provider-sent-file", Filename: "sent.txt", ContentType: "text/plain"}},
+	}
+	client.messagesByID["sent-attachment-sibling"] = NylasMessage{
+		ID: "sent-attachment-sibling", ThreadID: providerThreadID, Date: baseDate + 2, FolderIDs: []string{"sent-attachment-inbox"},
+	}
+	server := NewServerWithOptions(repo, ServerOptions{
+		NylasClient: client, NylasConfig: testNylasConfig(), AttachmentStorage: storage,
+		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true, DisableRealtimeSpine: true,
+	})
+	defer server.Close()
+	server.nylasGate = newNylasRequestGate(0)
+	job, created, err := repo.EnsureCommunicationsEmailIngestionJobContext(context.Background(), store.CommunicationsEmailIngestionJobInput{
+		CompanyID: connection.CompanyID, EmailConnectionID: connection.EmailConnectionID,
+		ProviderMessageID: "sent-attachment-trigger", ProviderThreadID: providerThreadID, Priority: store.CommunicationsEmailIngestionPriorityLive,
+	})
+	if err != nil || !created {
+		t.Fatalf("sent attachment job created=%v err=%v", created, err)
+	}
+	acknowledged, err := server.processEmailIngestionDelivery(context.Background(), emailqueue.Message{
+		JobID: job.IngestionJobID, CompanyID: job.CompanyID, EmailConnectionID: job.EmailConnectionID,
+	})
+	if err != nil || !acknowledged {
+		t.Fatalf("sent attachment delivery acknowledged=%v err=%v", acknowledged, err)
+	}
+	completed, err := repo.GetCommunicationsEmailThreadContext(context.Background(), thread.CompanyID, thread.EmailThreadID)
+	if err != nil || len(completed.Messages) != 3 {
+		t.Fatalf("completed sent attachment thread=%+v err=%v", completed, err)
+	}
+	preserved, ok := storedEmailMessageForProvider(completed, "sent-attachment-trigger")
+	if !ok || !preserved.Message.DownloadComplete || len(preserved.Message.Attachments) != 1 || preserved.Message.Attachments[0].AttachmentID != attachmentID {
+		t.Fatalf("preserved sent attachment message=%+v present=%v", preserved, ok)
+	}
+	links, err := repo.ListResourceAttachments(connection.CompanyID, "email_message", sentMessage.EmailMessageID)
+	if err != nil || len(links) != 1 || links[0].AttachmentID != attachmentID {
+		t.Fatalf("sent attachment links=%+v err=%v", links, err)
+	}
+	if _, err := repo.GetAttachment(connection.CompanyID, redundantAttachmentID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("interrupted worker duplicate remains live: %v", err)
+	}
+	client.mu.Lock()
+	downloadedAttachmentID := client.lastDownloadAttachmentID
+	client.mu.Unlock()
+	if downloadedAttachmentID != "" {
+		t.Fatalf("complete Mango sent attachment was downloaded again: %s", downloadedAttachmentID)
+	}
+}
+
 func TestEmailMessageHasUnresolvedCIDAttachmentsIgnoresRecoveryAttemptFlag(t *testing.T) {
 	unresolved := NylasMessage{Body: "<p>Signature</p><img src=\"cid:signature-logo\">", RawMIMEAttachmentsRecovered: true}
 	if !emailMessageHasUnresolvedCIDAttachments(unresolved) {
@@ -683,13 +1291,32 @@ func TestCommunicationsEmailConnectionScanStartsAtActivationAndQueuesRoutineWork
 	}
 	scanStarted := connection.LastSuccessfulScanAt.Add(time.Minute)
 	client := &fakeNylasClient{
-		folders: []NylasFolder{{ID: "scan-inbox", SystemFolder: "inbox"}},
+		folders: []NylasFolder{{ID: "scan-inbox", SystemFolder: "inbox"}, {ID: "scan-sent", SystemFolder: "sent"}},
 		messagePagesByToken: map[string]NylasMessagePage{
 			"": {Messages: []NylasMessage{
-				{ID: "scan-old", ThreadID: "scan-old-thread", Date: connection.IngestionStartedAt.Add(-time.Minute).Unix()},
-				{ID: "scan-new", ThreadID: "scan-new-thread", Date: scanStarted.Add(-time.Second).Unix()},
+				{ID: "scan-old", ThreadID: "scan-old-thread", Date: connection.IngestionStartedAt.Add(-time.Minute).Unix(), FolderIDs: []string{"scan-inbox"}},
+				{ID: "scan-new-inbox", ThreadID: "scan-new-inbox-thread", Date: scanStarted.Add(-time.Second).Unix(), FolderIDs: []string{"scan-inbox"}},
+				{ID: "scan-new-sent", ThreadID: "scan-new-sent-thread", Date: scanStarted.Add(-time.Second).Unix(), FolderIDs: []string{"scan-sent"}},
+				{ID: "scan-new-archive", ThreadID: "scan-new-archive-thread", Date: scanStarted.Add(-time.Second).Unix(), Folders: []string{"ARCHIVE"}},
 			}},
 		},
+	}
+	previouslySkipped, created, err := repo.EnsureCommunicationsEmailIngestionJobContext(context.Background(), store.CommunicationsEmailIngestionJobInput{
+		CompanyID: connection.CompanyID, EmailConnectionID: connection.EmailConnectionID,
+		ProviderMessageID: "scan-new-sent", ProviderThreadID: "scan-new-sent-thread",
+		Priority: store.CommunicationsEmailIngestionPriorityLive, EnqueueSourceID: "webhook:before-sent",
+	})
+	if err != nil || !created {
+		t.Fatalf("seed skipped sent job created=%v err=%v", created, err)
+	}
+	previousAttempt, started, err := repo.StartCommunicationsEmailIngestionAttemptContext(context.Background(), previouslySkipped.IngestionJobID)
+	if err != nil || !started {
+		t.Fatalf("seed skipped sent attempt started=%v err=%v", started, err)
+	}
+	if err := repo.CompleteCommunicationsEmailIngestionAttemptContext(
+		context.Background(), previouslySkipped.IngestionJobID, previousAttempt.AttemptToken, nil,
+	); err != nil {
+		t.Fatal(err)
 	}
 	sender := &recordingEmailQueueSender{}
 	server := NewServerWithOptions(repo, ServerOptions{
@@ -708,13 +1335,24 @@ func TestCommunicationsEmailConnectionScanStartsAtActivationAndQueuesRoutineWork
 	if err != nil || !acknowledged {
 		t.Fatalf("reconciliation acknowledged=%v err=%v", acknowledged, err)
 	}
-	if len(sender.messages) != 1 || sender.messages[0].Kind != emailqueue.KindIngestion {
+	if len(sender.messages) != 2 || sender.messages[0].Kind != emailqueue.KindIngestion || sender.messages[1].Kind != emailqueue.KindIngestion {
 		t.Fatalf("queued messages = %+v", sender.messages)
+	}
+	if sender.messages[1].JobID != previouslySkipped.IngestionJobID {
+		t.Fatalf("Sent repair created a replacement job: queued=%+v previous=%s", sender.messages[1], previouslySkipped.IngestionJobID)
+	}
+	if sender.messages[1].EnqueueSourceID != "reconciliation:scheduled-test" {
+		t.Fatalf("Sent repair queue generation = %q", sender.messages[1].EnqueueSourceID)
+	}
+	priorDelivery := sender.messages[1]
+	priorDelivery.EnqueueSourceID = "webhook:before-sent"
+	if sender.messages[1].DeduplicationID() == priorDelivery.DeduplicationID() {
+		t.Fatal("Sent repair reused the skipped delivery's FIFO deduplication ID")
 	}
 	client.mu.Lock()
 	query := client.lastQuery
 	client.mu.Unlock()
-	if query.FolderID != "scan-inbox" || query.ReceivedAfter > connection.IngestionStartedAt.Unix()-1 || query.ReceivedBefore != scanStarted.Unix() {
+	if query.FolderID != "" || query.ReceivedAfter > connection.IngestionStartedAt.Unix()-1 || query.ReceivedBefore != scanStarted.Unix() {
 		t.Fatalf("scan query = %+v activation=%s scan=%s", query, connection.IngestionStartedAt, scanStarted)
 	}
 	updated, err := repo.GetEmailConnectionByIDContext(context.Background(), connection.CompanyID, connection.EmailConnectionID)
@@ -736,7 +1374,7 @@ func TestEmailReconciliationRetriesOnlyTheExactOriginalDiscoverySource(t *testin
 	client := &fakeNylasClient{
 		folders: []NylasFolder{{ID: "scan-send-retry-inbox", SystemFolder: "inbox"}},
 		messagePagesByToken: map[string]NylasMessagePage{"": {Messages: []NylasMessage{{
-			ID: "scan-send-retry-message", ThreadID: "scan-send-retry-thread", Date: scanStarted.Add(-time.Second).Unix(),
+			ID: "scan-send-retry-message", ThreadID: "scan-send-retry-thread", Date: scanStarted.Add(-time.Second).Unix(), FolderIDs: []string{"scan-send-retry-inbox"},
 		}}}},
 	}
 	sender := &recordingEmailQueueSender{err: errors.New("temporary SQS send failure")}
@@ -778,7 +1416,7 @@ func TestEmailReconciliationRetriesOnlyTheExactOriginalDiscoverySource(t *testin
 	}
 }
 
-func TestEmailReconciliationNeverResendsAnyExistingStableJob(t *testing.T) {
+func TestEmailReconciliationDoesNotResendActiveDurableOrTerminalJobs(t *testing.T) {
 	repo, owner, _, _ := newEmailCollaborationThreadTestRepo(t)
 	connection, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
 		CompanyID: emailCollaborationThreadTestCompanyID, UserID: owner.UserID,
@@ -800,13 +1438,27 @@ func TestEmailReconciliationNeverResendsAnyExistingStableJob(t *testing.T) {
 	for _, status := range statuses {
 		providerMessageID := "existing-" + status
 		providerMessages = append(providerMessages, NylasMessage{
-			ID: providerMessageID, ThreadID: "thread-" + status, Date: scanStarted.Add(-time.Second).Unix(),
+			ID: providerMessageID, ThreadID: "thread-" + status, Date: scanStarted.Add(-time.Second).Unix(), FolderIDs: []string{"existing-jobs-inbox"},
 		})
-		job, created, ensureErr := repo.EnsureCommunicationsEmailIngestionJobContext(context.Background(), store.CommunicationsEmailIngestionJobInput{
+		jobInput := store.CommunicationsEmailIngestionJobInput{
 			CompanyID: connection.CompanyID, EmailConnectionID: connection.EmailConnectionID,
 			ProviderMessageID: providerMessageID, ProviderThreadID: "thread-" + status,
 			Priority: store.CommunicationsEmailIngestionPriorityScan,
-		})
+		}
+		if status == "completed" {
+			stored, err := repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+				CompanyID: connection.CompanyID, PersonalUserID: owner.UserID, PersonalAccountEmail: owner.Email,
+				AccountEmail: owner.Email, Provider: "google", ProviderThreadID: jobInput.ProviderThreadID,
+				SelectedMessageID: providerMessageID, Messages: []domain.EmailMessageSnapshot{{
+					ID: providerMessageID, ThreadID: jobInput.ProviderThreadID, DownloadComplete: true,
+				}}, HistoryComplete: true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			jobInput.EmailThreadID = stored.EmailThreadID
+		}
+		job, created, ensureErr := repo.EnsureCommunicationsEmailIngestionJobContext(context.Background(), jobInput)
 		if ensureErr != nil || !created {
 			t.Fatalf("ensure %s created=%v err=%v", status, created, ensureErr)
 		}

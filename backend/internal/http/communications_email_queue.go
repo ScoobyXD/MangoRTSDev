@@ -33,6 +33,7 @@ func (s *Server) enqueueCommunicationsEmailIngestionJob(ctx context.Context, job
 		JobID:             job.IngestionJobID,
 		CompanyID:         job.CompanyID,
 		EmailConnectionID: job.EmailConnectionID,
+		EnqueueSourceID:   job.EnqueueSourceID,
 	}); err != nil {
 		return err
 	}
@@ -386,8 +387,7 @@ func (s *Server) processEmailReconciliationConnection(ctx context.Context, messa
 	if err != nil {
 		return s.settleEmailReconciliationProviderError(ctx, connection, err)
 	}
-	inboxID := findNylasSystemFolderID(folders, "inbox")
-	if inboxID == "" {
+	if findNylasSystemFolderID(folders, "inbox") == "" && findNylasSystemFolderID(folders, "sent") == "" {
 		return false, errEmailCollaborationSourceUnavailable
 	}
 	var page NylasMessagePage
@@ -396,7 +396,6 @@ func (s *Server) processEmailReconciliationConnection(ctx context.Context, messa
 		page, callErr = s.nylasClient.ListMessages(callCtx, connection.GrantID, NylasMessageQuery{
 			Limit:          emailReconciliationProviderPageSize,
 			PageToken:      message.ProviderPageToken,
-			FolderID:       inboxID,
 			ReceivedAfter:  message.LowerBound.Unix(),
 			ReceivedBefore: message.ScanStartedAt.Unix(),
 		})
@@ -406,7 +405,8 @@ func (s *Server) processEmailReconciliationConnection(ctx context.Context, messa
 		return s.settleEmailReconciliationProviderError(ctx, connection, err)
 	}
 	for _, providerMessage := range page.Messages {
-		if strings.TrimSpace(providerMessage.ID) == "" || providerMessage.Date < connection.IngestionStartedAt.Unix() {
+		if strings.TrimSpace(providerMessage.ID) == "" || providerMessage.Date < connection.IngestionStartedAt.Unix() ||
+			!communicationsEmailMessageHasInboxOrSentFolder(providerMessage, folders) {
 			continue
 		}
 		job, created, err := s.repo.EnsureCommunicationsEmailIngestionJobContext(ctx, store.CommunicationsEmailIngestionJobInput{
