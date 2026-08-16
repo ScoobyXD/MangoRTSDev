@@ -1221,7 +1221,7 @@ test("My and Shared Triage submit the exact serialized editor HTML returned by f
   assert.match(submitHandler, /onChange\(submittedCompose\)/);
   assert.match(submitHandler, /onSubmit\(event, submittedCompose\)/);
   assert.match(homeParts, /const handleSaveDraft = \(\) => \{[\s\S]*bodyEditorControllerRef\.current\?\.flush\(\)[\s\S]*commitPendingRecipients\(\)[\s\S]*onSaveDraft\(composeToSave\)/);
-  assert.match(homeMailWorkspace, /key=\{JSON\.stringify\(\[companyID, currentUserID, compose\.sharedInboxID, compose\.accountEmail\.trim\(\)\.toLowerCase\(\), compose\.draftID, compose\.replyToMessageID\]\)\}/);
+  assert.match(homeMailWorkspace, /<ComposePanel\s+key=\{compose\.draftID\}/);
   assert.match(homeMailWorkspace, /onSaveComposeDraft: \(compose: ComposeState\) => void/);
   assert.match(homeMailWorkspace, /onSubmitCompose: \(event: React\.FormEvent, compose: ComposeState\) => void/);
   assert.match(submitCompose, /composeAtSubmit: ComposeState/);

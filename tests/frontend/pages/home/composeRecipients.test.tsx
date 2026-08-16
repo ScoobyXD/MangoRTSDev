@@ -93,7 +93,12 @@ test("compose sends and saves valid external recipients without requiring a Mang
           emailSignatureAccountEmail=""
           companyID=""
           currentUserID="user-1"
-          companyUsers={[]}
+          companyUsers={[{
+            company_id: "company-1",
+            user_id: "directory-decoy",
+            email: "literal.external@example.com.invalid",
+            display_name: "Directory Decoy",
+          }]}
           onChange={setCompose}
           onCancel={() => undefined}
           onSubmit={(event, submitted) => {
@@ -135,6 +140,14 @@ test("compose sends and saves valid external recipients without requiring a Mang
     const removeExternal = container.querySelector<HTMLButtonElement>('[aria-label="Remove outside.person@example.net"]');
     assert.ok(removeExternal);
     await act(async () => removeExternal.click());
+
+    await act(async () => replaceInputValue(toInput, "literal.external@example.com"));
+    await act(async () => Simulate.keyDown(toInput, { key: "Enter" }));
+    const removeLiteralExternal = container.querySelector<HTMLButtonElement>('[aria-label="Remove literal.external@example.com"]');
+    assert.ok(removeLiteralExternal, "a complete external address wins over a fuzzy Mango directory suggestion");
+    assert.equal(container.querySelector('[aria-label="Remove Directory Decoy (literal.external@example.com.invalid)"]'), null);
+    await act(async () => removeLiteralExternal.click());
+
     await act(async () => replaceInputValue(toInput, "not-an-email"));
     await act(async () => sendButton.click());
     assert.equal(submissions.length, 1, "malformed pending text blocks submission");
