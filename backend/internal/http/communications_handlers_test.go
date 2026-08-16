@@ -869,6 +869,9 @@ func TestCommunicationsSendUsesLeanPreflightAndLazyProviderOpen(t *testing.T) {
 	if !ok || !stored.Message.DownloadComplete || len(stored.Message.Attachments) != 1 || stored.Message.Attachments[0].AttachmentID != attachmentID {
 		t.Fatalf("stored sent message=%+v present=%v", stored, ok)
 	}
+	if response.Message.EmailMessageID != stored.EmailMessageID || response.Message.EmailThreadID != thread.EmailThreadID {
+		t.Fatalf("sent response durable ids=(%q,%q), want (%q,%q)", response.Message.EmailMessageID, response.Message.EmailThreadID, stored.EmailMessageID, thread.EmailThreadID)
+	}
 	links, err := fixture.repo.ListResourceAttachments(fixture.companyID, "email_message", stored.EmailMessageID)
 	if err != nil || len(links) != 1 || links[0].AttachmentID != attachmentID {
 		t.Fatalf("stored sent attachment links=%+v err=%v", links, err)
