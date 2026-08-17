@@ -22,7 +22,7 @@
 20. In a Node, dragging only the noninteractive header of one exact message onto a text box creates that exact textbox relationship without a chat; message bodies, selected text, buttons, links, and inputs never start the drag.
 21. Email and thread views inside a Node are read-only and expose no Reply, Reply All, draft, composer, signature, outgoing attachment, scheduling, or send control.
 22. Opening a Node never creates, lists, loads, saves, sends, or discards an email draft.
-23. Node email views retain received-message bodies and attachments, thread expansion, exact-message loading, highlights, selection chats, email-to-text-box actions, and calendar invitation responses.
+23. Node email views retain received-message bodies and attachments, thread expansion, exact-message loading, highlights, selection chats, and calendar invitation responses. Every stored-thread message header in the Node email column always shows a horizontal textbox-plus control that creates or reuses that exact message's textbox; only a linked message shows an adjacent textbox-navigation control, and message disclosure never navigates to a textbox.
 24. My Triage and Shared Triage retain New compose, Reply, Reply All, Forward, creator-owned mailbox drafts, signatures, attachments, scheduling, and safe send.
 25. Triage Reply and Reply All are available only for an exact message that already has an internal `email_message_id`; clicking Reply never imports a provider-only message.
 26. A Triage draft belongs to one exact creator and mailbox scope; a Shared Triage draft remains owner-only and is not a Node collaboration object.
@@ -47,7 +47,7 @@
 45. The textbox's permanent `color` decorates each exact linked message card, while the outer thread card remains neutral because a thread never links to a textbox.
 46. Frontend `linkedEmailMessageIDs` is derived only from the backend textbox projection's ordered `email_message_ids`, is never serialized as textbox metadata, never scans attached threads to infer or reorder membership, and never accepts a provider message ID or singular representative as relationship authority.
 47. The explicit remove control beside one exact message in Show email removes only its textbox relationship when no chat in that textbox is anchored to that message; removing one of several keeps the textbox color, removing the last returns the textbox to neutral, and a guarded rejection changes neither relationships nor color.
-48. While a highlighted-email chat is pending in a Node, clicking a textbox header selects that exact textbox as the destination unless the exact message is already authoritatively linked to another textbox in that Node.
+48. While a highlighted-email chat is pending in a Node, each eligible textbox-header click moves the same pending composer and draft and replaces its destination until the first successful Send, without writing before Send; an authoritative existing link remains the only allowed destination in that Node.
 49. Opening a Triage draft list loads summaries rather than every draft body or attachment relationship; opening or sending one scheduled draft loads only that exact draft and its attachments.
 50. Missing sources, denied mailbox access, disconnected senders, and invalid draft fields use separate error codes.
 51. A Node-wide email relationship cannot be removed while that Node and thread have a textbox-specific relationship or email-selection chat.
@@ -55,7 +55,7 @@
 53. Every outbound Triage or Project compose, reply, forward, or due scheduled draft uses the existing ten-second safe-send bar with **Send now** and **Undo**, then records the sent message and retires the exact draft after success.
 54. Node email viewing never enters the outbound safe-send path because Nodes contain no email reply or send action.
 
-Last updated: 2026-08-16
+Last updated: 2026-08-17
 
 # Process Story: DEV cutover collapses only safe legacy job metadata
 

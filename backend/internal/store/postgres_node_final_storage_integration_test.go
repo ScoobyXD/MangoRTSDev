@@ -825,9 +825,13 @@ where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid`,
 		company.CompanyID, node.NodeID, textboxID).Scan(&textboxRevision); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.DeleteNodeProjectionWithActor(NodeProjectionDeleteInput{
-		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: textboxID,
-		ExpectedRevision: &textboxRevision, ActorUserID: owner.UserID,
+	if _, err := repo.DeleteEditorJSONDocument(EditorJSONDeleteInput{
+		Document: EditorJSONDocumentRef{
+			CompanyID: company.CompanyID, ResourceType: EntityTypeNode,
+			ResourceID: node.NodeID, DocumentID: textboxID,
+		},
+		OperationID: newUUIDv7String(), ClientID: "node-textbox-email-integration",
+		ActorUserID: owner.UserID, BaseRevision: textboxRevision,
 	}); err != nil {
 		t.Fatalf("delete linked textbox: %v", err)
 	}

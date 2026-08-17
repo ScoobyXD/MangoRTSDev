@@ -329,6 +329,9 @@ func (r *MemoryRepo) DeleteEditorJSONDocument(input EditorJSONDeleteInput) (Edit
 		CompanyID: ref.CompanyID, ResourceType: ref.ResourceType,
 		ResourceID: ref.ResourceID, DocumentID: ref.DocumentID,
 	})
+	if ref.ResourceType == EntityTypeNode {
+		r.bumpNodeViewVersionLocked(ref.CompanyID, ref.ResourceID)
+	}
 	r.editorJSONVersions[key] = append(r.editorJSONVersions[key], EditorJSONVersion{
 		Revision: revision, SchemaVersion: MangoTiptapSchemaVersion,
 		JSONDocument: append(json.RawMessage(nil), document.JSONDocument...),

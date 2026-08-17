@@ -136,6 +136,40 @@ func (r *MemoryRepo) deleteEditorProjectionLocked(ref EditorDocumentRef) {
 	bucketKey := key(ref.CompanyID, ref.ResourceID)
 	switch ref.ResourceType {
 	case EntityTypeNode:
+		textboxID := cleanUUIDText(ref.DocumentID)
+		removedProjectionIDs := map[string]bool{}
+		for projectionID, projection := range r.nodeText[bucketKey] {
+			if projection.IsDeleted {
+				continue
+			}
+			remove := false
+			switch {
+			case isNodeTextboxChatType(projection.Type):
+				var chat nodeTextboxChatPayload
+				if textboxID != "" && json.Unmarshal([]byte(projection.Information), &chat) == nil && cleanUUIDText(chat.BlockID) == textboxID {
+					remove = true
+				}
+			case strings.EqualFold(strings.TrimSpace(projection.Type), "Attached email"):
+				var relationship nodeAttachedEmailPayload
+				if textboxID != "" && json.Unmarshal([]byte(projection.Information), &relationship) == nil && cleanUUIDText(relationship.BlockID) == textboxID {
+					remove = true
+				}
+			}
+			if remove {
+				delete(r.nodeText[bucketKey], projectionID)
+				removedProjectionIDs[projectionID] = true
+			}
+		}
+		if len(removedProjectionIDs) > 0 {
+			information := r.nodeInfo[bucketKey]
+			kept := information[:0]
+			for _, item := range information {
+				if !removedProjectionIDs[item.InformationID] {
+					kept = append(kept, item)
+				}
+			}
+			r.nodeInfo[bucketKey] = kept
+		}
 		if item, ok := r.nodeText[bucketKey][ref.DocumentID]; ok {
 			item.IsDeleted, item.Revision, item.UpdatedTimestamp = true, item.Revision+1, time.Now().UTC()
 			r.nodeText[bucketKey][ref.DocumentID] = item

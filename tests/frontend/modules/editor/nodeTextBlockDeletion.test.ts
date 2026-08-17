@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  projectionIDsForTextBlockDeletion,
   resolveAttachedEmailHostBlockID,
   shouldCreateInitialTextBlock,
 } from "../../../../frontend/src/modules/editor/nodeTextBlockDeletion.js";
@@ -20,15 +19,6 @@ test("initial text-box creation does not replace a deleted last box after reload
   assert.equal(shouldCreateInitialTextBlock({ ...base, editorSequence: 1 }), false);
   assert.equal(shouldCreateInitialTextBlock({ ...base, loadedTextBlockCount: 1 }), false);
   assert.equal(shouldCreateInitialTextBlock({ ...base, suppressAutomaticCreation: true }), false);
-});
-
-test("text-box deletion targets only the block and its chat projections", () => {
-  assert.deepEqual(projectionIDsForTextBlockDeletion("block-1", [
-    { id: "chat-1", blockID: "block-1" },
-    { id: "chat-2", blockID: "block-2" },
-    { id: "attached-email-projection", blockID: "" },
-    { id: "chat-1", blockID: "block-1" },
-  ]), ["block-1", "chat-1"]);
 });
 
 test("attached-email host resolution never returns a stale focused block", () => {

@@ -58,7 +58,6 @@ import {
   type NodeAttachmentUploadScope,
 } from "./nodeTextBlockAttachments";
 import {
-  projectionIDsForTextBlockDeletion,
   shouldCreateInitialTextBlock,
 } from "./nodeTextBlockDeletion";
 import { resolveEditorTextBlockChatAnchorMessageID } from "./editorTextBlockChatHighlights";
@@ -155,6 +154,13 @@ const TEXT_SIDE_PANE_WIDTH_STORAGE_KEY_PREFIX = "node-editor-side-pane-width-v2"
 const TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIX = "node-editor-pane-layout-v4";
 const LEGACY_TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIXES = ["node-editor-pane-layout-v3", "node-editor-pane-layout-v2"] as const;
 const EMAIL_SELECTION_NODE_TITLE_MAX_LENGTH = 80;
+
+function moveChatComposerEntry<T>(entries: Record<string, T>, sourceBlockID: string, destinationBlockID: string): Record<string, T> {
+  if (!Object.prototype.hasOwnProperty.call(entries, sourceBlockID)) return entries;
+  const next = { ...entries, [destinationBlockID]: entries[sourceBlockID] as T };
+  delete next[sourceBlockID];
+  return next;
+}
 
 function mentionedUserIDsFromChatDraft(draft: string, users: MentionableCompanyUser[]): string[] {
   const aliasCounts = new Map<string, number>();
@@ -1483,6 +1489,27 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     return true;
   }, [textBlockProjectionSaveController]);
 
+  const clearEmailChatSelectionAnchor = useCallback((blockID: string) => {
+    const cleanBlockID = blockID.trim();
+    if (!cleanBlockID) return;
+    setChatSelectionAnchors((current) => {
+      if (current[cleanBlockID]?.source !== "email") return current;
+      const next = { ...current };
+      delete next[cleanBlockID];
+      return next;
+    });
+  }, []);
+
+  const cancelPendingEmailChatSelection = useCallback(() => {
+    if (!pendingEmailChatSelection) return false;
+    const blockID = pendingEmailChatSelection.blockID.trim();
+    if (!blockID || !cancelTemporaryEmailChatDraft(blockID, pendingEmailChatSelection)) {
+      clearEmailChatSelectionAnchor(blockID);
+    }
+    setPendingEmailChatSelection(null);
+    return true;
+  }, [cancelTemporaryEmailChatDraft, clearEmailChatSelectionAnchor, pendingEmailChatSelection]);
+
   useEffect(() => {
     if (!shouldCreateInitialTextBlock({
       canEdit,
@@ -1654,30 +1681,18 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const previousBlockIndex = blocks.findIndex((block) => block.id === blockID);
     const previousBlock = previousBlockIndex >= 0 ? blocks[previousBlockIndex] : undefined;
     setBlocks((current) => current.filter((block) => block.id !== blockID));
-    // Attached-email projections and resource attachment links are node-owned and intentionally retained.
-    const deletedInformationIDs = projectionIDsForTextBlockDeletion(blockID, chatMessages);
+    // Node-wide attached-email projections and resource attachment links remain; the backend deletes textbox-owned children and relationships atomically.
+    const editorPath = `/v1/editor-json/node/${nodeID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`;
     try {
-      for (const informationID of deletedInformationIDs) {
-        try {
-          if (informationID === blockID) {
-            const editorPath = `/v1/editor-json/node/${nodeID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`;
-            const baseRevision = (await requestJSON<{ revision: number }>(editorPath)).revision;
-            await requestJSON<unknown>(editorPath, {
-              method: "DELETE",
-              body: JSON.stringify({
-                operation_id: generateStableInformationID(),
-                client_id: `node-delete:${author.userID}`,
-                base_revision: baseRevision,
-              }),
-            });
-          } else {
-            await requestJSON<unknown>(`/v1/nodes/${nodeID}/projection/${informationID}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
-          }
-        } catch (cause) {
-          const message = cause instanceof Error ? cause.message : "";
-          if (!message.includes("node_projection_not_found") && !message.includes("editor_document_not_found")) throw cause;
-        }
-      }
+      const baseRevision = (await requestJSON<{ revision: number }>(editorPath)).revision;
+      await requestJSON<unknown>(editorPath, {
+        method: "DELETE",
+        body: JSON.stringify({
+          operation_id: generateStableInformationID(),
+          client_id: `node-delete:${author.userID}`,
+          base_revision: baseRevision,
+        }),
+      });
     } catch (cause) {
       if (previousBlock) {
         setBlocks((current) => {
@@ -1748,7 +1763,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setFocusedTextBlockID((current) => current === blockID ? "" : current);
     markEditorHistoryChanged({ companyID, resourceType: "node", resourceID: nodeID });
     onProjectionMutation();
-  }, [author.userID, blocks, canEdit, chatMessages, companyID, editorDataFormat.gate?.editor_format, nodeID, onError, onProjectionMutation, requestJSON, textBlockProjectionSaveController]);
+  }, [author.userID, blocks, canEdit, companyID, editorDataFormat.gate?.editor_format, nodeID, onError, onProjectionMutation, requestJSON, textBlockProjectionSaveController]);
 
 
   const requestDeleteTextBlock = useCallback((blockID: string, position: ConfirmActionMenuPosition) => {
@@ -1828,6 +1843,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       && Boolean(selectionAnchor.messageID?.trim())
       && (createsEmailTextBoxOnSend || !chatBlock || !textBoxHasLinkedEmailMessage(chatBlock, selectionAnchor.messageID ?? ""));
     if (createsEmailTextBoxOnSend && !ensureEmailTextBoxLinkOnSend) return;
+    const pendingEmailSelectionOnSubmit = pendingEmailChatSelection?.blockID === blockID
+      ? pendingEmailChatSelection
+      : null;
     const emailTextBoxColorOnSend = ensureEmailTextBoxLinkOnSend
       ? chatBlock?.color?.trim() || nextNodeTextBlockColor(blocks.map((block) => block.color ?? ""))
       : undefined;
@@ -1850,6 +1868,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       entityLinks,
       mentionedUserIDs,
     };
+    if (pendingEmailSelectionOnSubmit) setPendingEmailChatSelection(null);
     setChatDrafts((current) => ({ ...current, [blockID]: "" }));
     setChatDraftEntityLinks((current) => {
       if (!current[blockID]?.length) return current;
@@ -1940,11 +1959,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       if (attachments.length > 0) setChatDraftAttachments((current) => ({ ...current, [blockID]: attachments }));
       if (parentID) setChatReplyTargets((current) => ({ ...current, [blockID]: parentID }));
       if (selectionAnchor) setChatSelectionAnchors((current) => ({ ...current, [blockID]: selectionAnchor }));
+      if (pendingEmailSelectionOnSubmit) {
+        setPendingEmailChatSelection((current) => current ?? pendingEmailSelectionOnSubmit);
+      }
       onError(cause instanceof Error ? cause.message : "failed_to_save_chat_message");
     } finally {
       chatSubmissionsInProgressRef.current.delete(blockID);
     }
-  }, [author.name, author.userID, blocks, canEdit, chatDraftAttachments, chatDraftEntityLinks, chatDrafts, chatReplyTargets, chatSelectionAnchors, companyID, companyUsers, nodeID, onError, onProjectionMutation, requestJSON, textBlockProjectionSaveController]);
+  }, [author.name, author.userID, blocks, canEdit, chatDraftAttachments, chatDraftEntityLinks, chatDrafts, chatReplyTargets, chatSelectionAnchors, companyID, companyUsers, nodeID, onError, onProjectionMutation, pendingEmailChatSelection, requestJSON, textBlockProjectionSaveController]);
 
   const deleteChatMessage = useCallback(async (messageID: string) => {
     if (!canEdit) return;
@@ -2756,7 +2778,25 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     openSelectionChat({ ...anchor, blockID }, blockID);
     flashEmailChatDestination(blockID);
     setChatComposerFocusRequestIDs((current) => ({ ...current, [blockID]: (current[blockID] ?? 0) + 1 }));
-    setPendingEmailChatSelection(existingDestinations.length > 0 ? anchor : null);
+    setPendingEmailChatSelection(existingDestinations.length > 0 ? { ...anchor, blockID } : null);
+  };
+  const movePendingEmailChatComposer = (sourceBlockID: string, destinationBlockID: string): boolean => {
+    const sourceID = sourceBlockID.trim();
+    const destinationID = destinationBlockID.trim();
+    if (!sourceID || !destinationID || sourceID === destinationID) return true;
+    const destinationHasDraft = Boolean(
+      chatDrafts[destinationID]
+      || chatDraftEntityLinks[destinationID]?.length
+      || chatDraftAttachments[destinationID]?.length
+    );
+    if (destinationHasDraft) {
+      onError("This text box already has an unsent chat draft. Send or clear it before choosing it as the destination.");
+      return false;
+    }
+    setChatDrafts((current) => moveChatComposerEntry(current, sourceID, destinationID));
+    setChatDraftEntityLinks((current) => moveChatComposerEntry(current, sourceID, destinationID));
+    setChatDraftAttachments((current) => moveChatComposerEntry(current, sourceID, destinationID));
+    return true;
   };
   const choosePendingEmailChatDestination = (blockID: string): boolean => {
     if (!pendingEmailChatSelection) return false;
@@ -2764,12 +2804,18 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const requestedBlock = blocks.find((block) => block.id === blockID && !block.temporaryEmailChat);
     const destinationBlock = linkedBlock ?? requestedBlock;
     if (!destinationBlock) return true;
-    const stagedBlock = blocks.find((block) => block.temporaryEmailChat && textBoxMatchesEmailSelection(block, pendingEmailChatSelection.messageID ?? ""));
-    if (stagedBlock && stagedBlock.id !== destinationBlock.id) {
-      cancelTemporaryEmailChatDraft(stagedBlock.id, pendingEmailChatSelection);
+    const currentBlockID = pendingEmailChatSelection.blockID.trim();
+    if (currentBlockID === destinationBlock.id) return true;
+    if (!movePendingEmailChatComposer(currentBlockID, destinationBlock.id)) return false;
+    const currentBlock = blocks.find((block) => block.id === currentBlockID);
+    if (currentBlock?.temporaryEmailChat) {
+      cancelTemporaryEmailChatDraft(currentBlockID, pendingEmailChatSelection);
+    } else {
+      clearEmailChatSelectionAnchor(currentBlockID);
     }
-    openSelectionChat({ ...pendingEmailChatSelection, blockID: destinationBlock.id }, destinationBlock.id);
-    setPendingEmailChatSelection(null);
+    const nextSelection = { ...pendingEmailChatSelection, blockID: destinationBlock.id };
+    openSelectionChat(nextSelection, destinationBlock.id);
+    setPendingEmailChatSelection(nextSelection);
     flashEmailChatDestination(destinationBlock.id);
     setChatComposerFocusRequestIDs((current) => ({
       ...current,
@@ -2787,8 +2833,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     const blockID = stageEmailSelectionChatTextBlock(pendingEmailChatSelection.messageID ?? "");
     if (!blockID) return;
-    openSelectionChat({ ...pendingEmailChatSelection, blockID }, blockID);
-    setPendingEmailChatSelection(null);
+    if (pendingEmailChatSelection.blockID === blockID) return;
+    if (!movePendingEmailChatComposer(pendingEmailChatSelection.blockID, blockID)) return;
+    clearEmailChatSelectionAnchor(pendingEmailChatSelection.blockID);
+    const nextSelection = { ...pendingEmailChatSelection, blockID };
+    openSelectionChat(nextSelection, blockID);
+    setPendingEmailChatSelection(nextSelection);
     flashEmailChatDestination(blockID);
     setChatComposerFocusRequestIDs((current) => ({ ...current, [blockID]: (current[blockID] ?? 0) + 1 }));
     onError("");
@@ -2796,11 +2846,11 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   useEffect(() => {
     if (!pendingEmailChatSelection) return undefined;
     const cancelPendingDestination = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setPendingEmailChatSelection(null);
+      if (event.key === "Escape") cancelPendingEmailChatSelection();
     };
     window.addEventListener("keydown", cancelPendingDestination);
     return () => window.removeEventListener("keydown", cancelPendingDestination);
-  }, [pendingEmailChatSelection]);
+  }, [cancelPendingEmailChatSelection, pendingEmailChatSelection]);
 
   const renderNodeTimelineEvent = (item: NodeTimelineEvent) => {
     const createdLabel = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.created_timestamp));
@@ -3218,6 +3268,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             resourceAttachment,
           }));
           const clearSelectionAnchor = () => {
+            if (pendingEmailChatSelection?.blockID === chatBlockID) {
+              cancelPendingEmailChatSelection();
+              return;
+            }
             if (cancelTemporaryEmailChatDraft(chatBlockID, selectionAnchor)) return;
             setChatSelectionAnchors((current) => {
               if (!(chatBlockID in current)) return current;
