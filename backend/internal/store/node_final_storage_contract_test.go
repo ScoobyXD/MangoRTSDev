@@ -16,6 +16,88 @@ func readNodeFinalContractFile(t *testing.T, parts ...string) string {
 	return strings.ToLower(string(body))
 }
 
+func TestNodeTextboxEmailProjectionKeepsEveryExactMessageInTimestampOrder(t *testing.T) {
+	source := strings.Join(strings.Fields(readNodeFinalContractFile(t, "postgres_node_final_storage.go")), " ")
+	required := "jsonb_agg(relationship.email_message_id::text order by message.message_timestamp nulls last,message.email_message_id) as email_message_ids"
+	if !strings.Contains(source, required) {
+		t.Fatalf("Node textbox email projection missing %q", required)
+	}
+	for _, forbidden := range []string{
+		"'email_message_id', coalesce(linked_email.email_message_id, '')",
+		"array_agg(relationship.email_message_id",
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("Node textbox email projection retained singular authority %q", forbidden)
+		}
+	}
+}
+
+func TestNodeLinkedTextboxColorIsAssignedAndPreservedByCanonicalWrites(t *testing.T) {
+	relationshipSource := strings.Join(strings.Fields(readNodeFinalContractFile(t, "postgres_node_final_storage.go")), " ")
+	for _, required := range []string{
+		`textboxcolor string ` + "`json:\"textbox_color\"`",
+		"for update",
+		"set color=coalesce(color,nullif($4,''))",
+	} {
+		if !strings.Contains(relationshipSource, required) {
+			t.Errorf("direct Node email relationship write missing %q", required)
+		}
+	}
+	metadataSource := strings.Join(strings.Fields(readNodeFinalContractFile(t, "postgres_editor_json_metadata.go")), " ")
+	for _, required := range []string{"for update", "from email_relationships", "input.color = storedcolor", `else { input.color = ""`} {
+		if !strings.Contains(metadataSource, required) {
+			t.Errorf("linked Node textbox metadata write missing %q", required)
+		}
+	}
+	deleteSource := strings.Join(strings.Fields(readNodeFinalContractFile(t, "postgres_nodes.go")), " ")
+	for _, required := range []string{
+		"select email_thread_id::text,resource_textbox_id from email_relationships",
+		"if relationshiptextboxid.valid",
+		"return erremailrelationshiphasnodework",
+		"select textbox_id::text from node_textboxes",
+		"for update",
+		"set color=null",
+		"and not exists ( select 1 from email_relationships relationship",
+	} {
+		if !strings.Contains(deleteSource, required) {
+			t.Errorf("final Node email relationship delete missing %q", required)
+		}
+	}
+	lockPosition := strings.Index(deleteSource, "select textbox_id::text from node_textboxes")
+	deletePosition := strings.Index(deleteSource, "delete from email_relationships where company_id=$1::uuid and email_relationship_id=$3::uuid")
+	if lockPosition < 0 || deletePosition < 0 || lockPosition > deletePosition {
+		t.Error("Node email relationship delete must lock its textbox before deleting the edge")
+	}
+}
+
+func TestNodeTextboxDeleteRemovesOnlyItsTypedEmailRelationshipsAfterItsChats(t *testing.T) {
+	source := strings.Join(strings.Fields(readNodeFinalContractFile(t, "postgres_editor_projection_revisions.go")), " ")
+	textboxLock := "select revision,deleted_timestamp is not null from node_textboxes where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid for update"
+	chatDelete := "delete from node_textbox_chats where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid"
+	relationshipDelete := "delete from email_relationships where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid and resource_textbox_id=$3::text"
+	textboxDelete := "update node_textboxes set deleted_timestamp=now()"
+	lockPosition := strings.Index(source, textboxLock)
+	chatPosition := strings.Index(source, chatDelete)
+	relationshipPosition := strings.Index(source, relationshipDelete)
+	textboxPosition := strings.Index(source, textboxDelete)
+	if lockPosition < 0 || chatPosition < 0 || relationshipPosition < 0 || textboxPosition < 0 {
+		t.Fatalf("Node textbox delete cleanup is incomplete: lock=%d chats=%d relationships=%d textbox=%d", lockPosition, chatPosition, relationshipPosition, textboxPosition)
+	}
+	if lockPosition > chatPosition || chatPosition > relationshipPosition || relationshipPosition > textboxPosition {
+		t.Fatal("Node textbox delete must lock the textbox, then remove owned chats, exact textbox relationships, and the textbox")
+	}
+}
+
+func TestNodeTextboxChatWriteLocksItsActiveTextboxBeforeInsert(t *testing.T) {
+	source := strings.Join(strings.Fields(readNodeFinalContractFile(t, "postgres_node_textbox_chats.go")), " ")
+	lock := "select textbox_id::text from node_textboxes where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid and deleted_timestamp is null for update"
+	lockPosition := strings.Index(source, lock)
+	insertPosition := strings.Index(source, "insert into node_textbox_chats(")
+	if lockPosition < 0 || insertPosition < 0 || lockPosition > insertPosition {
+		t.Fatalf("Node textbox chat insert must lock its active textbox first: lock=%d insert=%d", lockPosition, insertPosition)
+	}
+}
+
 func TestNodeProductionSQLUsesOnlyFinalStorage(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {

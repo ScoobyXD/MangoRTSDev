@@ -22,7 +22,7 @@
 20. Every outbound Triage or Project reply uses Mango's existing ten-second safe-send controller with the decreasing bar, **Send now**, and **Undo**.
 21. A due My Triage or Shared Triage scheduled draft loads that one exact draft body, reply target, and attachments before it enters the existing send path.
 22. A successful send records the normalized sent message in the same stored thread, promotes the draft attachment relationships to that message, and retires the draft.
-23. A Node email relationship cannot be removed while that Node and thread have a text-box relationship or email-selection chat; otherwise the relationship may be removed without deleting the stored message or thread.
+23. A Node-wide email relationship cannot be removed while that Node and thread have a text-box relationship or email-selection chat; otherwise the relationship may be removed without deleting the stored message or thread.
 24. Removing or deleting a Node never deletes an owner-only My Triage, Shared Triage, or Project reply draft merely because its source thread appeared in that Node.
 
 Last updated: 2026-08-16

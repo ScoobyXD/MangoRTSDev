@@ -1,7 +1,9 @@
 package store
 
 import (
+	"encoding/json"
 	"miraeopus/backend/internal/domain"
+	"strings"
 	"time"
 )
 
@@ -17,6 +19,38 @@ func (r *MemoryRepo) UpdateEditorJSONMetadata(input EditorJSONMetadataInput) (Ed
 	}
 	if !r.editorResourceExistsLocked(input.Document) {
 		return EditorJSONMetadataCommit{}, ErrNotFound
+	}
+	if input.Document.ResourceType == EntityTypeNode {
+		projections := r.nodeText[key(input.Document.CompanyID, input.Document.ResourceID)]
+		linked := false
+		for _, projection := range projections {
+			if projection.IsDeleted || !strings.EqualFold(strings.TrimSpace(projection.Type), "Attached email") {
+				continue
+			}
+			var relationship nodeAttachedEmailPayload
+			if json.Unmarshal([]byte(projection.Information), &relationship) == nil &&
+				cleanUUIDText(relationship.BlockID) == input.Document.DocumentID {
+				linked = true
+				break
+			}
+		}
+		if linked {
+			textboxInformation := strings.TrimSpace(projections[input.Document.DocumentID].Information)
+			textboxInformation = strings.TrimSpace(strings.TrimPrefix(textboxInformation, editorTextBlockProjectionPrefix))
+			var metadata struct {
+				Color string `json:"color"`
+			}
+			if json.Unmarshal([]byte(textboxInformation), &metadata) != nil {
+				return EditorJSONMetadataCommit{}, ErrInvalid
+			}
+			metadata.Color = strings.ToUpper(strings.TrimSpace(metadata.Color))
+			if !validNodeTextboxColor(metadata.Color) {
+				return EditorJSONMetadataCommit{}, ErrInvalid
+			}
+			input.Color = metadata.Color
+		} else {
+			input.Color = ""
+		}
 	}
 	information, err := editorProjectionInformationWithJSONMetadata(input, "")
 	if err != nil {

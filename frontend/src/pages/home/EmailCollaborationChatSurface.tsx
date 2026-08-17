@@ -724,7 +724,6 @@ export function EmailCollaborationChatSurface({
           title: "Email: " + subject,
           document: "",
           attachments: [],
-          emailMessageID: payloadEmailMessageID,
           color,
         }),
       };
@@ -829,7 +828,6 @@ export function EmailCollaborationChatSurface({
       emailMessageID = ingested.root_message_id?.trim() || ingested.message?.email_message_id?.trim() || "";
     }
     if (!emailMessageID) throw new Error("email_message_id_missing");
-    const payloadEmailMessageID = emailMessageID;
     const color = nextNodeTextBlockColor([]);
     const linkedTextBlock = {
       type: EDITOR_TEXT_BLOCK_TYPE,
@@ -838,7 +836,6 @@ export function EmailCollaborationChatSurface({
         title: "Email: " + (message.subject?.trim() || "Email"),
         document: "",
         attachments: [],
-        emailMessageID: payloadEmailMessageID,
         color,
       }),
     };
@@ -1029,7 +1026,6 @@ export function EmailCollaborationChatSurface({
             title: "Email: " + (message.subject?.trim() || "Email"),
             document: "",
             attachments: [],
-            emailMessageID: placeholderMessageID,
             color: nextNodeTextBlockColor([]),
           }),
         },

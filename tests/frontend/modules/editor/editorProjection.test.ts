@@ -20,14 +20,14 @@ test("text-block metadata payloads cannot carry a full document or attachment by
     title: " Decision notes ",
     document: "stale body must not be serialized",
     attachments: [{ id: "local", attachmentID: "attachment-1", name: "diagram.png", type: "image/png", size: 128, dataURL: "data:image/png;base64,AAAA" }],
-    emailMessageID: " message-9 ",
     color: " #0ea5e9 ",
   });
   assert.equal(payload.title, "Decision notes");
   assert.equal(JSON.stringify(payload).includes("stale body"), false);
   assert.equal(JSON.stringify(payload).includes("base64"), false);
   assert.equal(payload.attachments[0].attachment_id, "attachment-1");
-  assert.equal(payload.email_message_id, "message-9");
+  assert.equal("email_message_id" in payload, false);
+  assert.equal("email_message_ids" in payload, false);
   assert.equal(payload.color, "#0EA5E9");
   assert.equal("email_accent" in payload, false);
 });
@@ -208,7 +208,8 @@ test("parses titled node text block content payloads with legacy fallback", () =
     title: "Decision notes",
     document: "<!-- mango-editor-html-v1 --><b>Ship it</b>",
     attachments: [{ id: "attachment-2", attachment_id: "attachment-2", name: "diagram.png", type: "image/png", size: 128 }],
-    email_message_id: "message-9",
+    email_message_id: "obsolete-scalar-must-be-ignored",
+    email_message_ids: [" message-9 ", "message-10", "message-9", ""],
     color: "#0EA5E9",
   })}`;
   assert.equal(payload.includes("attachment_id"), true);
@@ -218,13 +219,14 @@ test("parses titled node text block content payloads with legacy fallback", () =
     title: "Decision notes",
     document: "<!-- mango-editor-html-v1 --><b>Ship it</b>",
     attachments: [{ id: "attachment-2", attachmentID: "attachment-2", name: "diagram.png", type: "image/png", size: 128, dataURL: undefined }],
-    emailMessageID: "message-9",
+    linkedEmailMessageIDs: ["message-9", "message-10"],
     color: "#0EA5E9",
   });
   assert.deepEqual(parseEditorTextBlockContent("legacy text"), {
     title: "",
     document: "legacy text",
     attachments: [],
+    linkedEmailMessageIDs: [],
   });
 });
 

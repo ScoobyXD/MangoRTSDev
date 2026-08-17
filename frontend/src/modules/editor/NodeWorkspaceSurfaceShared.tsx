@@ -77,7 +77,8 @@ export type TextBlockState = {
   title: string;
   document: string;
   attachments: EditorChatAttachment[];
-  emailMessageID?: string;
+  linkedEmailMessageIDs: string[];
+  stagedEmailMessageID?: string;
   color?: string;
   temporaryEmailChat?: boolean;
   createdTimestamp: string;

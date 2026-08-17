@@ -674,6 +674,8 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 		}); errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "node_not_found")
 			return
+		} else if writeNodeEmailRelationshipMutationError(w, err) {
+			return
 		} else if errors.Is(err, store.ErrEmailRelationshipHasNodeWork) {
 			writeError(w, http.StatusConflict, "email_removal_has_node_work")
 			return
@@ -682,6 +684,9 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			return
 		} else if errors.Is(err, store.ErrProjectionRevisionRequired) {
 			writeError(w, http.StatusBadRequest, "expected_revision_required")
+			return
+		} else if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_node_projection")
 			return
 		} else if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_delete_node_projection")
@@ -748,7 +753,13 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "node_not_found")
 			return
 		}
-
+		if writeNodeEmailRelationshipMutationError(w, err) {
+			return
+		}
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_node_information")
+			return
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_add_node_information")
 			return
@@ -765,6 +776,22 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeError(w, http.StatusNotFound, "not_found")
+}
+
+func writeNodeEmailRelationshipMutationError(w http.ResponseWriter, err error) bool {
+	switch {
+	case errors.Is(err, store.ErrEmailMessageIdentityInvalid):
+		writeError(w, http.StatusBadRequest, "invalid_email_message_identity")
+	case errors.Is(err, store.ErrEmailMessageNotAttachedToNode):
+		writeError(w, http.StatusConflict, "email_message_not_attached_to_node")
+	case errors.Is(err, store.ErrEmailMessageTextboxConflict):
+		writeError(w, http.StatusConflict, "email_message_already_linked_to_another_textbox")
+	case errors.Is(err, store.ErrEmailRelationshipRequiredByChat):
+		writeError(w, http.StatusConflict, "email_relationship_required_by_chat")
+	default:
+		return false
+	}
+	return true
 }
 
 func nodeDetailsIncludeInformationHistory(r *http.Request) bool {

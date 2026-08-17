@@ -12,19 +12,19 @@ test("ordinary Node plus creates an unlinked empty text box", () => {
   const content = createOrdinaryNodeTextBlockContent();
   assert.equal(content.document, "");
   assert.deepEqual(content.attachments, []);
-  assert.equal(content.emailMessageID, undefined);
+  assert.equal("emailMessageID" in content, false);
   assert.equal(content.color, undefined);
   assert.equal(content.title, "Hello I am a title");
 });
 
-test("explicit email action creates an email-linked text box", () => {
+test("explicit email action creates presentation content without relationship metadata", () => {
   const content = createEmailLinkedNodeTextBlockContent({
     title: "Email: Quarterly update",
     document: "<p>Selected quote</p>",
-    messageID: " provider-message-1 ",
     color: " #14b8a6 ",
   });
-  assert.equal(content.emailMessageID, "provider-message-1");
+  assert.equal("emailMessageID" in content, false);
+  assert.equal("linkedEmailMessageIDs" in content, false);
   assert.equal(content.color, "#14B8A6");
   assert.equal(content.title, "Email: Quarterly update");
   assert.equal(content.document, "<p>Selected quote</p>");

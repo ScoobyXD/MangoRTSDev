@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -58,6 +59,31 @@ func (r *PostgresRepo) UpdateEditorJSONMetadata(input EditorJSONMetadataInput) (
 		}
 		if err = insertEmptyPostgresEditorTextboxTx(ctx, tx, storage, textboxRef); err != nil {
 			return EditorJSONMetadataCommit{}, err
+		}
+		var currentColor sql.NullString
+		if err = tx.QueryRowContext(ctx, `select color
+from node_textboxes
+where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid
+  and deleted_timestamp is null
+for update`, input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID).Scan(&currentColor); err != nil {
+			return EditorJSONMetadataCommit{}, err
+		}
+		var linked bool
+		if err = tx.QueryRowContext(ctx, `select exists(
+  select 1 from email_relationships
+  where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid
+    and resource_textbox_id=$3::text
+)`, input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID).Scan(&linked); err != nil {
+			return EditorJSONMetadataCommit{}, err
+		}
+		if linked {
+			storedColor := strings.ToUpper(strings.TrimSpace(currentColor.String))
+			if !currentColor.Valid || !validNodeTextboxColor(storedColor) {
+				return EditorJSONMetadataCommit{}, ErrInvalid
+			}
+			input.Color = storedColor
+		} else {
+			input.Color = ""
 		}
 		err = tx.QueryRowContext(ctx, `
 			update node_textboxes

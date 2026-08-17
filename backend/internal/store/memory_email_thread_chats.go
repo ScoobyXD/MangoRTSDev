@@ -45,13 +45,25 @@ func (r *MemoryRepo) ListCommunicationsEmailThreadChatGroups(input Communication
 			return domain.CommunicationsEmailThreadChatView{}, err
 		}
 		chatsByTextboxID := map[string][]domain.NodeProjection{}
+		linkedMessageIDsByTextboxID := map[string][]string{}
 		for _, projection := range projections {
-			if !isNodeTextboxChatType(projection.Type) {
+			if isNodeTextboxChatType(projection.Type) {
+				var payload nodeTextboxChatPayload
+				if json.Unmarshal([]byte(projection.Information), &payload) == nil && payload.BlockID != "" {
+					chatsByTextboxID[payload.BlockID] = append(chatsByTextboxID[payload.BlockID], projection)
+				}
 				continue
 			}
-			var payload nodeTextboxChatPayload
-			if json.Unmarshal([]byte(projection.Information), &payload) == nil && payload.BlockID != "" {
-				chatsByTextboxID[payload.BlockID] = append(chatsByTextboxID[payload.BlockID], projection)
+			if strings.EqualFold(strings.TrimSpace(projection.Type), "Attached email") {
+				var payload nodeAttachedEmailPayload
+				if json.Unmarshal([]byte(projection.Information), &payload) != nil {
+					continue
+				}
+				textboxID := cleanUUIDText(payload.BlockID)
+				emailMessageID := cleanUUIDText(payload.EmailMessageID)
+				if textboxID != "" && emailMessageID != "" {
+					linkedMessageIDsByTextboxID[textboxID] = append(linkedMessageIDsByTextboxID[textboxID], emailMessageID)
+				}
 			}
 		}
 		var textboxDisplayOrder int64
@@ -62,18 +74,13 @@ func (r *MemoryRepo) ListCommunicationsEmailThreadChatGroups(input Communication
 			currentTextboxDisplayOrder := textboxDisplayOrder
 			textboxDisplayOrder++
 			var payload struct {
-				Title           string   `json:"title"`
-				EmailMessageID  string   `json:"email_message_id"`
-				EmailMessageIDs []string `json:"email_message_ids"`
+				Title string `json:"title"`
 			}
 			raw := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(projection.Information), editorTextBlockProjectionPrefix))
 			if json.Unmarshal([]byte(raw), &payload) != nil {
 				continue
 			}
-			messageIDs := append([]string(nil), payload.EmailMessageIDs...)
-			if payload.EmailMessageID != "" {
-				messageIDs = append(messageIDs, payload.EmailMessageID)
-			}
+			messageIDs := linkedMessageIDsByTextboxID[projection.InformationID]
 			linkedMessages := make([]domain.CommunicationsEmailThreadChatLinkedMessage, 0, len(messageIDs))
 			linkedMessageIDs := map[string]bool{}
 			for _, emailMessageID := range messageIDs {

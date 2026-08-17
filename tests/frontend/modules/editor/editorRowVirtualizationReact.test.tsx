@@ -104,17 +104,45 @@ function nodeChatProjection(blockID: string, message = `Chat for ${blockID}`): N
   };
 }
 
-function nodeEmailProjection(blockID: string): NodeProjectionItem {
+function nodeEmailProjection(blockID: string, nodeWide = false): NodeProjectionItem {
   const createdTimestamp = timestamp(62);
   return {
     company_id: COMPANY_ID,
     node_id: NODE_ID,
-    information_id: `email-${blockID}`,
+    information_id: `${nodeWide ? "node-email" : "email"}-${blockID}`,
+    type: "Attached email",
+    information: buildEditorAttachedEmailPayload({
+      blockID: nodeWide ? undefined : blockID,
+      messageID: `thread-root-${blockID}`,
+      emailMessageID: `email-message-${blockID}`,
+      threadID: `thread-${blockID}`,
+      emailThreadID: `durable-thread-${blockID}`,
+      subject: `Email for ${blockID}`,
+      from: "sender@example.test",
+      attachedTimestamp: createdTimestamp,
+    }),
+    revision: 1,
+    created_timestamp: createdTimestamp,
+    updated_timestamp: createdTimestamp,
+  };
+}
+
+function nodeLinkedEmailMessageProjection(
+  blockID: string,
+  messageID: string,
+  emailMessageID: string,
+  informationID = `email-${emailMessageID}`,
+): NodeProjectionItem {
+  const createdTimestamp = timestamp(63);
+  return {
+    company_id: COMPANY_ID,
+    node_id: NODE_ID,
+    information_id: informationID,
     type: "Attached email",
     information: buildEditorAttachedEmailPayload({
       blockID,
-      messageID: `thread-root-${blockID}`,
-      emailMessageID: `email-message-${blockID}`,
+      messageID,
+      emailMessageID,
       threadID: `thread-${blockID}`,
       emailThreadID: `durable-thread-${blockID}`,
       subject: `Email for ${blockID}`,
@@ -292,6 +320,7 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
   Object.defineProperty(dom.window, "IntersectionObserver", { configurable: true, value: TestIntersectionObserver });
   const scrolledIntoView: HTMLElement[] = [];
   Object.defineProperty(dom.window.HTMLElement.prototype, "scrollIntoView", { configurable: true, value(this: HTMLElement) { scrolledIntoView.push(this); } });
+  Object.defineProperty(dom.window.HTMLElement.prototype, "animate", { configurable: true, value() { return {}; } });
   if (!dom.window.Range.prototype.getClientRects) dom.window.Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
   if (!dom.window.Range.prototype.getBoundingClientRect) dom.window.Range.prototype.getBoundingClientRect = () => new dom.window.DOMRect();
   if (!dom.window.document.elementFromPoint) {
@@ -339,86 +368,109 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
   let currentNodeProjectionItems = [...nodeTextBlockProjectionItems, nodeChatProjection("node-block-59")];
   const projectProjectionItems = projectProjections(60);
   const serverDocuments = new Map<string, { document: ReturnType<typeof tiptapDocument>; revision: number }>();
+  const relationshipInformationWrites: Array<Record<string, unknown>> = [];
+  const editorMetadataPatchBodies: Array<Record<string, unknown>> = [];
+  const nodeMutationRequests: Array<{ path: string; method: string }> = [];
+  let failNextRelationshipInformationWrite = false;
+  let failNextRelationshipDelete = false;
   for (const projection of [...nodeTextBlockProjectionItems, ...projectProjectionItems]) {
     const payload = JSON.parse(projection.information.slice(TEXT_BLOCK_PREFIX.length)) as { document: string };
     serverDocuments.set(projection.information_id, { document: JSON.parse(payload.document) as ReturnType<typeof tiptapDocument>, revision: 0 });
   }
+  const storedThreadMessages = [
+    {
+      email_message_id: "email-message-node-block-0",
+      id: "thread-root-node-block-0",
+      thread_id: "thread-node-block-0",
+      subject: "Email for node-block-0",
+      snippet: "Earlier message in linked thread",
+      body: "Earlier linked email body.",
+      date: 1_768_521_500,
+      unread: false,
+      starred: false,
+      from: [{ name: "Earlier Sender", email: "earlier@example.test" }],
+      to: [{ name: "Recipient Person", email: "recipient@example.test" }],
+    },
+    {
+      email_message_id: "internal-message-node-block-0",
+      id: "message-node-block-0",
+      thread_id: "thread-node-block-0",
+      subject: "Email for node-block-0",
+      snippet: "Full linked message preview",
+      body: "Complete linked email body.",
+      date: 1_768_521_600,
+      unread: false,
+      starred: false,
+      from: [{ name: "Sender Person", email: "sender@example.test" }],
+      to: [{ name: "Recipient Person", email: "recipient@example.test" }],
+      cc: [{ name: "Copy Person", email: "copy@example.test" }],
+      bcc: [{ name: "Blind Copy", email: "blind@example.test" }],
+    },
+    {
+      email_message_id: "internal-message-node-block-0-c",
+      id: "message-node-block-0-c",
+      thread_id: "thread-node-block-0",
+      subject: "Email for node-block-0",
+      snippet: "Third stored thread message",
+      body: "Third stored email body.",
+      date: 1_768_521_700,
+      unread: false,
+      starred: false,
+      from: [{ name: "Third Sender", email: "third@example.test" }],
+      to: [{ name: "Recipient Person", email: "recipient@example.test" }],
+    },
+    {
+      email_message_id: "internal-message-node-block-0-d",
+      id: "message-node-block-0-d",
+      thread_id: "thread-node-block-0",
+      subject: "Email for node-block-0",
+      snippet: "Fourth stored thread message",
+      body: "Fourth stored email body.",
+      date: 1_768_521_800,
+      unread: false,
+      starred: false,
+      from: [{ name: "Fourth Sender", email: "fourth@example.test" }],
+      to: [{ name: "Recipient Person", email: "recipient@example.test" }],
+    },
+    {
+      email_message_id: "internal-message-node-block-0-e",
+      id: "message-node-block-0-e",
+      thread_id: "thread-node-block-0",
+      subject: "Email for node-block-0",
+      snippet: "Fifth stored thread message",
+      body: "Fifth stored email body.",
+      date: 1_768_521_900,
+      unread: false,
+      starred: false,
+      from: [{ name: "Fifth Sender", email: "fifth@example.test" }],
+      to: [{ name: "Recipient Person", email: "recipient@example.test" }],
+    },
+  ];
   const fetchImplementation = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = new URL(String(input), dom.window.location.href);
     if (url.pathname === `/v1/nodes/${NODE_ID}/email-threads/durable-thread-node-block-0`) {
-      const rootMessage = {
-        email_message_id: "email-message-node-block-0",
-        id: "thread-root-node-block-0",
-        thread_id: "thread-node-block-0",
-        subject: "Email for node-block-0",
-        snippet: "Earlier message in linked thread",
-        body: "Earlier linked email body.",
-        date: 1_768_521_500,
-        unread: false,
-        starred: false,
-        from: [{ name: "Earlier Sender", email: "earlier@example.test" }],
-        to: [{ name: "Recipient Person", email: "recipient@example.test" }],
-      };
-      const linkedMessage = {
-        email_message_id: "internal-message-node-block-0",
-        id: "message-node-block-0",
-        thread_id: "thread-node-block-0",
-        subject: "Email for node-block-0",
-        snippet: "Full linked message preview",
-        body: "Complete linked email body.",
-        date: 1_768_521_600,
-        unread: false,
-        starred: false,
-        from: [{ name: "Sender Person", email: "sender@example.test" }],
-        to: [{ name: "Recipient Person", email: "recipient@example.test" }],
-        cc: [{ name: "Copy Person", email: "copy@example.test" }],
-        bcc: [{ name: "Blind Copy", email: "blind@example.test" }],
-      };
+      const requestedMessageID = url.searchParams.get("message_id")?.trim() ?? "";
       return jsonResponse({
         email_thread_id: "durable-thread-node-block-0",
         thread_id: "thread-node-block-0",
-        messages: url.searchParams.get("message_id") ? [linkedMessage] : [rootMessage, linkedMessage],
+        messages: requestedMessageID
+          ? storedThreadMessages.filter((message) => message.email_message_id === requestedMessageID)
+          : storedThreadMessages,
         history_complete: true,
         download_status: "complete",
       });
     }
     if (url.pathname === "/v1/communications/messages/thread-root-node-block-0") return jsonResponse({
-      message: {
-        email_message_id: "email-message-node-block-0",
-        id: "thread-root-node-block-0",
-        thread_id: "thread-node-block-0",
-        subject: "Email for node-block-0",
-        snippet: "Earlier message in linked thread",
-        body: "Earlier linked email body.",
-        date: 1_768_521_500,
-        unread: false,
-        starred: false,
-        from: [{ name: "Earlier Sender", email: "earlier@example.test" }],
-        to: [{ name: "Recipient Person", email: "recipient@example.test" }],
-      },
+      message: storedThreadMessages[0],
     });
     if (url.pathname === "/v1/communications/messages/message-node-block-0") return jsonResponse({
-      message: {
-        email_message_id: "internal-message-node-block-0",
-        id: "message-node-block-0",
-        thread_id: "thread-node-block-0",
-        subject: "Email for node-block-0",
-        snippet: "Full linked message preview",
-        body: "Complete linked email body.",
-        date: 1_768_521_600,
-        unread: false,
-        starred: false,
-        from: [{ name: "Sender Person", email: "sender@example.test" }],
-        to: [{ name: "Recipient Person", email: "recipient@example.test" }],
-        cc: [{ name: "Copy Person", email: "copy@example.test" }],
-        bcc: [{ name: "Blind Copy", email: "blind@example.test" }],
-      },
+      message: storedThreadMessages[1],
     });
     if (url.pathname === "/v1/communications/threads/thread-node-block-0") return jsonResponse({
       thread: {
         id: "thread-node-block-0",
         subject: "Email for node-block-0",
-        message_ids: ["thread-root-node-block-0", "message-node-block-0"],
+        message_ids: storedThreadMessages.map((message) => message.id),
       },
     });
     if (url.pathname === "/v1/editor-data-format") return jsonResponse({
@@ -449,6 +501,10 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
       }
       const documentID = decodeURIComponent(url.pathname.split("/documents/")[1] ?? "");
       const current = serverDocuments.get(documentID) ?? { document: tiptapDocument(""), revision: 0 };
+      if ((init?.method ?? "GET").toUpperCase() === "PATCH") {
+        editorMetadataPatchBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+        return jsonResponse({ projection_revision: 2 });
+      }
       if ((init?.method ?? "GET").toUpperCase() === "POST") {
         const body = JSON.parse(String(init?.body ?? "{}")) as {
           operation_id: string;
@@ -505,6 +561,15 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     const noop = () => undefined;
     const runtimeErrors: string[] = [];
     const nodeRequestJSON = async <T,>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "POST" || method === "PATCH" || method === "DELETE") nodeMutationRequests.push({ path, method });
+      if (method === "DELETE" && path.startsWith(`/v1/nodes/${NODE_ID}/projection/`)) {
+        if (failNextRelationshipDelete) {
+          failNextRelationshipDelete = false;
+          throw new Error("email_textbox_relationship_has_chat");
+        }
+        return {} as T;
+      }
       if (path.includes("/editor-data-format")) {
         return {
           company_id: COMPANY_ID,
@@ -520,7 +585,68 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
           ...init,
           body: init?.json === undefined ? init?.body : JSON.stringify(init.json),
         });
+        if ((init?.method ?? "GET").toUpperCase() === "PATCH") {
+          const blockID = decodeURIComponent(path.split("/documents/")[1]?.split("?")[0] ?? "");
+          if (blockID && !currentNodeProjectionItems.some((projection) => projection.type === "Text box" && projection.information_id === blockID)) {
+            const metadata = JSON.parse(String(init?.body ?? "{}")) as { title?: string; attachments?: unknown[] };
+            const createdTimestamp = timestamp(64);
+            currentNodeProjectionItems = [{
+              company_id: COMPANY_ID,
+              node_id: NODE_ID,
+              information_id: blockID,
+              type: "Text box",
+              information: TEXT_BLOCK_PREFIX + JSON.stringify({
+                title: metadata.title ?? "",
+                document: "",
+                attachments: metadata.attachments ?? [],
+              }),
+              revision: 2,
+              created_timestamp: createdTimestamp,
+              updated_timestamp: createdTimestamp,
+            }, ...currentNodeProjectionItems];
+          }
+        }
         return await response.json() as T;
+      }
+      if (path === `/v1/nodes/${NODE_ID}/information` && (init?.method ?? "GET").toUpperCase() === "POST") {
+        const command = JSON.parse(String(init?.body ?? "{}")) as { information_id?: string; information?: string };
+        const relationship = JSON.parse(command.information ?? "{}") as {
+          block_id?: string;
+          email_message_id?: string;
+          textbox_color?: string;
+        };
+        relationshipInformationWrites.push(relationship as Record<string, unknown>);
+        if (failNextRelationshipInformationWrite) {
+          failNextRelationshipInformationWrite = false;
+          throw new Error("forced_exact_relationship_failure");
+        }
+        const blockID = relationship.block_id?.trim() ?? "";
+        const emailMessageID = relationship.email_message_id?.trim() ?? "";
+        const textBoxColor = relationship.textbox_color?.trim().toUpperCase() ?? "";
+        const providerMessageID = storedThreadMessages.find((message) => message.email_message_id === emailMessageID)?.id ?? "";
+        currentNodeProjectionItems = currentNodeProjectionItems.map((projection) => {
+          if (projection.type !== "Text box" || projection.information_id !== blockID) return projection;
+          const content = JSON.parse(projection.information.slice(TEXT_BLOCK_PREFIX.length)) as Record<string, unknown>;
+          const linkedMessageIDs = Array.isArray(content.email_message_ids)
+            ? content.email_message_ids.filter((value): value is string => typeof value === "string")
+            : [];
+          return {
+            ...projection,
+            revision: (projection.revision ?? 1) + 1,
+            information: TEXT_BLOCK_PREFIX + JSON.stringify({
+              ...content,
+              color: textBoxColor,
+              email_message_ids: Array.from(new Set([...linkedMessageIDs, emailMessageID])),
+            }),
+          };
+        });
+        if (blockID && emailMessageID && providerMessageID) {
+          currentNodeProjectionItems = [
+            ...currentNodeProjectionItems,
+            nodeLinkedEmailMessageProjection(blockID, providerMessageID, emailMessageID, command.information_id || `relationship-${emailMessageID}`),
+          ];
+        }
+        return { information_id: command.information_id } as T;
       }
       if (path.includes("/attachments")) return { attachments: [] } as T;
       return { relationships: [], projects: [], results: [] } as T;
@@ -725,21 +851,31 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     }
     const emailLinkedProjection = nodeProjections(1)[0];
     assert.ok(emailLinkedProjection);
+    const cleanEmailDropTargetProjection = nodeTextBlockProjectionItems[1];
+    assert.ok(cleanEmailDropTargetProjection);
     const emailLinkedPayload = JSON.parse(emailLinkedProjection.information.slice(TEXT_BLOCK_PREFIX.length)) as Record<string, unknown>;
     emailLinkedProjection.information = TEXT_BLOCK_PREFIX + JSON.stringify({
       ...emailLinkedPayload,
-      email_message_id: "internal-message-node-block-0",
+      email_message_ids: ["email-message-node-block-0", "internal-message-node-block-0"],
       color: "#3B82F6",
     });
     currentNodeProjectionItems = [
       emailLinkedProjection,
+      cleanEmailDropTargetProjection,
       nodeChatProjection("node-block-0"),
       nodeEmailProjection("node-block-0"),
+      nodeLinkedEmailMessageProjection(
+        "node-block-0",
+        "message-node-block-0",
+        "internal-message-node-block-0",
+        "email-child-node-block-0",
+      ),
+      nodeEmailProjection("node-block-0", true),
     ];
     nodeRoot = createRoot(nodeContainer);
     await act(async () => { nodeRoot?.render(renderNode({ loaded: true })); });
     await flushWork();
-    const emailNodeRow = nodeContainer.querySelector<HTMLElement>('[data-node-text-box-row="node-block-0"]');
+    let emailNodeRow = nodeContainer.querySelector<HTMLElement>('[data-node-text-box-row="node-block-0"]');
     assert.ok(emailNodeRow);
     assertNodePaneToggles(emailNodeRow, [true, true]);
     const emailColumn = nodeContainer.querySelector<HTMLElement>('[data-node-email-column="true"]');
@@ -747,8 +883,8 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     const removedEmailCollapseToggle = nodeContainer.querySelector<HTMLButtonElement>('button[aria-label="Collapse email column"]');
     const emailFocusToggle = nodeContainer.querySelector<HTMLButtonElement>('button[aria-label="Expand email column"]');
     const nodeEmailToggle = nodeContainer.querySelector<HTMLButtonElement>('button[aria-label="Toggle node email column"]');
-    const editorToggle = emailNodeRow.querySelector<HTMLButtonElement>('button[aria-label="Toggle text editor column"]');
-    const chatToggle = emailNodeRow.querySelector<HTMLButtonElement>('button[aria-label="Toggle chat column"]');
+    let editorToggle = emailNodeRow.querySelector<HTMLButtonElement>('button[aria-label="Toggle text editor column"]');
+    let chatToggle = emailNodeRow.querySelector<HTMLButtonElement>('button[aria-label="Toggle chat column"]');
     assert.ok(emailColumn, "attached email should render once in the node-wide column");
     assert.ok(emailWorkspace);
     assert.equal(removedEmailCollapseToggle, null, "the obsolete email-header collapse arrow should stay removed");
@@ -770,6 +906,260 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     assert.ok(emailNodeRow.querySelector('[data-node-chat-block-id="node-block-0"]'));
     assert.equal(emailNodeRow.querySelector('[data-node-chat-block-id="node-block-0"] [data-chat-pane-header="true"]'), null, "embedded Node chat should use the shared row header instead of rendering a second header");
     assert.match(nodeContainer.textContent ?? "", /Email for node-block-0/, "attached email should stay in the node-wide column");
+
+    const attachedThreadCard = emailColumn.querySelector<HTMLElement>('[role="button"][title="Email for node-block-0"]');
+    assert.ok(attachedThreadCard, "the durable Node-wide attachment should remain the thread-card representative");
+    const attachedThreadShell = attachedThreadCard.parentElement;
+    assert.ok(attachedThreadShell);
+    assert.equal(attachedThreadShell.style.borderLeftWidth, "1px", "the outer thread container must remain neutral");
+    assert.doesNotMatch(attachedThreadShell.style.borderLeftColor, /59,\s*130,\s*246|#3b82f6/i, "the text-box color must not paint the outer thread container");
+    scrolledIntoView.length = 0;
+    await act(async () => { attachedThreadCard.click(); });
+    await flushWork(24);
+    assert.equal(scrolledIntoView.length, 0, "opening the neutral thread container must not navigate to a linked text box");
+    const storedThreadItems = Array.from(emailColumn.querySelectorAll<HTMLElement>('[data-email-timeline-item="true"]'));
+    assert.equal(storedThreadItems.length, 5, "linking two exact messages must not shrink the normal five-message stored thread");
+    assert.deepEqual(storedThreadItems.map((item) => item.dataset.emailMessageId), [
+      "thread-root-node-block-0",
+      "message-node-block-0",
+      "message-node-block-0-c",
+      "message-node-block-0-d",
+      "message-node-block-0-e",
+    ]);
+    const exactTextBoxColor = /59,\s*130,\s*246|#3b82f6/i;
+    for (const [index, item] of storedThreadItems.entries()) {
+      const messageCard = item.lastElementChild as HTMLElement | null;
+      assert.ok(messageCard);
+      if (index < 2) {
+        assert.match(messageCard.style.borderLeftColor, exactTextBoxColor, `linked message ${index + 1} should use the text-box color`);
+      } else {
+        assert.doesNotMatch(messageCard.style.borderLeftColor, exactTextBoxColor, `unlinked message ${index + 1} must remain neutral to that text box`);
+      }
+    }
+    for (const linkedItem of storedThreadItems.slice(0, 2)) {
+      const exactMessageHeader = linkedItem.querySelector<HTMLButtonElement>('button[aria-label^="Collapse email from"], button[aria-label^="Expand email from"]');
+      assert.ok(exactMessageHeader);
+      scrolledIntoView.length = 0;
+      await act(async () => { exactMessageHeader.click(); });
+      await flushWork();
+      assert.ok(
+        scrolledIntoView.some((element) => element.dataset.nodeTextBoxRow === "node-block-0"),
+        `${linkedItem.dataset.emailMessageId} should navigate by its exact internal email_message_id`,
+      );
+    }
+    const fourthMessageHeader = storedThreadItems[3]?.querySelector<HTMLButtonElement>('button[aria-label^="Collapse email from"], button[aria-label^="Expand email from"]');
+    assert.ok(fourthMessageHeader);
+    await act(async () => { fourthMessageHeader.click(); });
+    await flushWork();
+    const refreshedFourthMessageItem = emailColumn.querySelector<HTMLElement>('[data-email-message-id="message-node-block-0-d"]');
+    const fourthMessageBody = refreshedFourthMessageItem?.querySelector<HTMLElement>('[data-mango-email-body-message-id="message-node-block-0-d"]');
+    assert.ok(fourthMessageBody);
+    const fourthMessageText = fourthMessageBody.firstChild;
+    assert.ok(fourthMessageText);
+    const fourthMessageSelection = dom.window.document.createRange();
+    fourthMessageSelection.setStart(fourthMessageText, 0);
+    fourthMessageSelection.setEnd(fourthMessageText, "Fourth stored".length);
+    const bodySelection = dom.window.getSelection();
+    bodySelection?.removeAllRanges();
+    bodySelection?.addRange(fourthMessageSelection);
+    nodeMutationRequests.length = 0;
+    editorMetadataPatchBodies.length = 0;
+    relationshipInformationWrites.length = 0;
+    await act(async () => {
+      fourthMessageBody.dispatchEvent(new dom.window.MouseEvent("pointerup", { bubbles: true }));
+    });
+    await flushWork();
+    const selectionChatAction = emailColumn.querySelector<HTMLButtonElement>('button[aria-label="Chat about selection"]');
+    assert.ok(selectionChatAction, "highlighting stored email text should offer the local chat action");
+    await act(async () => { selectionChatAction.click(); });
+    await flushWork(24);
+    assert.equal(nodeContainer.querySelectorAll('[data-email-chat-destination-candidate="true"]').length, 2, "the two existing text boxes should become pending destinations");
+    assert.equal(nodeContainer.querySelectorAll('[data-node-text-box-row]').length, 3, "the pending selection should remain in one temporary local text box");
+    const pendingDestinationHeader = nodeContainer.querySelector<HTMLElement>('[data-node-text-box-row="node-block-1"] [data-node-text-box-header="true"]');
+    assert.ok(pendingDestinationHeader);
+    await act(async () => { pendingDestinationHeader.click(); });
+    await flushWork(24);
+    const selectedDestinationRow = nodeContainer.querySelector<HTMLElement>('[data-node-text-box-row="node-block-1"]');
+    assert.ok(selectedDestinationRow?.querySelector('[data-node-chat-block-id="node-block-1"]'), "clicking the noninteractive header should move the local composer to that text box");
+    assert.equal(nodeContainer.querySelectorAll('[data-email-chat-destination-candidate="true"]').length, 0);
+    assert.equal(nodeContainer.querySelectorAll('[data-node-text-box-row]').length, 2, "choosing a destination should remove the temporary local text box");
+    assert.deepEqual(nodeMutationRequests, [], "staging and choosing a highlighted-email chat destination must not write before Enter");
+    assert.deepEqual(editorMetadataPatchBodies, []);
+    assert.deepEqual(relationshipInformationWrites, []);
+
+    const thirdMessageDragStrip = storedThreadItems[2]?.querySelector<HTMLElement>('[data-email-message-drag-strip="true"]');
+    const thirdMessageDragRegion = thirdMessageDragStrip?.querySelector<HTMLElement>('[data-email-message-drag-region="true"]');
+    const cleanEmailDropTarget = nodeContainer.querySelector<HTMLElement>('[data-node-text-box-row="node-block-1"] [data-node-text-box-header="true"]');
+    assert.ok(thirdMessageDragStrip, "an individual stored message should expose a header-only exact-link drag strip");
+    assert.ok(thirdMessageDragRegion, "the sender/date area should provide a real noninteractive drag region");
+    assert.ok(cleanEmailDropTarget, "an ordinary color-null text box should accept an exact message header drop");
+    const createDragTransfer = () => {
+      const values = new Map<string, string>();
+      const transfer = {
+        effectAllowed: "none",
+        dropEffect: "none",
+        setData(type: string, value: string) { values.set(type, value); },
+        getData(type: string) { return values.get(type) ?? ""; },
+        clearData(type?: string) { if (type) values.delete(type); else values.clear(); },
+      };
+      Object.defineProperty(transfer, "types", { get: () => Array.from(values.keys()) });
+      return { values, transfer };
+    };
+    relationshipInformationWrites.length = 0;
+    const thirdMessageBody = Array.from(storedThreadItems[2]?.querySelectorAll<HTMLElement>("div") ?? [])
+      .find((element) => element.textContent?.trim() === "Third stored thread message" && !element.closest('[data-email-message-drag-strip="true"]'));
+    assert.ok(thirdMessageBody, "the collapsed message body should remain outside the header drag strip");
+    const bodyDrag = createDragTransfer();
+    const bodyDragStart = new dom.window.Event("dragstart", { bubbles: true, cancelable: true });
+    Object.defineProperty(bodyDragStart, "dataTransfer", { value: bodyDrag.transfer });
+    thirdMessageBody.dispatchEvent(bodyDragStart);
+    assert.deepEqual(Array.from(bodyDrag.values.keys()), [], "dragging the message body must not create exact-link MIME");
+
+    const selectedHeaderDrag = createDragTransfer();
+    const selectedHeaderText = Array.from(thirdMessageDragRegion.children)
+      .find((element): element is HTMLElement => element instanceof HTMLElement && element.tagName === "SPAN");
+    assert.ok(selectedHeaderText);
+    const headerSelection = dom.window.getSelection();
+    const headerRange = dom.window.document.createRange();
+    headerRange.selectNodeContents(selectedHeaderText);
+    headerSelection?.removeAllRanges();
+    headerSelection?.addRange(headerRange);
+    thirdMessageDragRegion.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
+    const selectedHeaderDragStart = new dom.window.Event("dragstart", { bubbles: true, cancelable: true });
+    Object.defineProperty(selectedHeaderDragStart, "dataTransfer", { value: selectedHeaderDrag.transfer });
+    thirdMessageDragRegion.dispatchEvent(selectedHeaderDragStart);
+    assert.deepEqual(Array.from(selectedHeaderDrag.values.keys()), [], "dragging selected header text must not create exact-link MIME");
+    headerSelection?.removeAllRanges();
+
+    const interactiveHeaderDrag = createDragTransfer();
+    const headerButton = thirdMessageDragStrip.querySelector<HTMLButtonElement>("button");
+    assert.ok(headerButton);
+    headerButton.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
+    const interactiveHeaderDragStart = new dom.window.Event("dragstart", { bubbles: true, cancelable: true });
+    Object.defineProperty(interactiveHeaderDragStart, "dataTransfer", { value: interactiveHeaderDrag.transfer });
+    thirdMessageDragRegion.dispatchEvent(interactiveHeaderDragStart);
+    assert.deepEqual(Array.from(interactiveHeaderDrag.values.keys()), [], "dragging from a header button must not create exact-link MIME");
+
+    const linkHeaderDrag = createDragTransfer();
+    const headerLink = dom.window.document.createElement("a");
+    headerLink.href = "https://example.test/message";
+    headerLink.textContent = "Message link";
+    thirdMessageDragRegion.appendChild(headerLink);
+    headerLink.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
+    const linkHeaderDragStart = new dom.window.Event("dragstart", { bubbles: true, cancelable: true });
+    Object.defineProperty(linkHeaderDragStart, "dataTransfer", { value: linkHeaderDrag.transfer });
+    thirdMessageDragRegion.dispatchEvent(linkHeaderDragStart);
+    assert.deepEqual(Array.from(linkHeaderDrag.values.keys()), [], "dragging from a header link must not create exact-link MIME");
+    headerLink.remove();
+    assert.equal(relationshipInformationWrites.length, 0, "blocked body, selection, and control drags must not create relationship commands");
+
+    const { transfer: dragTransfer } = createDragTransfer();
+    editorMetadataPatchBodies.length = 0;
+    relationshipInformationWrites.length = 0;
+    runtimeErrors.length = 0;
+    await act(async () => {
+      const pointerDownEvent = new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true });
+      thirdMessageDragRegion.dispatchEvent(pointerDownEvent);
+      const dragStartEvent = new dom.window.Event("dragstart", { bubbles: true, cancelable: true });
+      Object.defineProperty(dragStartEvent, "dataTransfer", { value: dragTransfer });
+      thirdMessageDragRegion.dispatchEvent(dragStartEvent);
+      const dropEvent = new dom.window.Event("drop", { bubbles: true, cancelable: true });
+      Object.defineProperty(dropEvent, "dataTransfer", { value: dragTransfer });
+      cleanEmailDropTarget.dispatchEvent(dropEvent);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await flushWork(24);
+    assert.equal(relationshipInformationWrites.length, 1, "header drop should create one exact relationship command");
+    assert.equal(relationshipInformationWrites[0]?.block_id, "node-block-1");
+    assert.equal(relationshipInformationWrites[0]?.email_message_id, "internal-message-node-block-0-c");
+    const adoptedDropColor = String(relationshipInformationWrites[0]?.textbox_color ?? "");
+    assert.match(adoptedDropColor, /^#[0-9A-F]{6}$/, "a color-null destination should receive one approved permanent color in the relationship command");
+    assert.equal(editorMetadataPatchBodies.length, 0, "successful relationship color adoption must not issue a redundant metadata PATCH");
+    await act(async () => { nodeRoot?.render(renderNode({ loaded: true })); });
+    await flushWork(24);
+    const refreshedDropTargetRow = nodeContainer.querySelector<HTMLElement>('[data-node-text-box-row="node-block-1"]');
+    assert.ok(refreshedDropTargetRow?.querySelector('button[aria-label="Show linked email"]'), "canonical refresh should expose the exact linked message without a dirty-save block");
+    const adoptedColorProbe = dom.window.document.createElement("div");
+    adoptedColorProbe.style.color = adoptedDropColor;
+    assert.equal(refreshedDropTargetRow?.style.borderLeftColor, adoptedColorProbe.style.color, "the canonical text box should retain the atomically chosen relationship color");
+    const alreadyLinkedDropTarget = nodeContainer.querySelector<HTMLElement>('[data-node-text-box-row="node-block-0"] [data-node-text-box-header="true"]');
+    assert.ok(alreadyLinkedDropTarget);
+    await act(async () => {
+      const repeatedDropEvent = new dom.window.Event("drop", { bubbles: true, cancelable: true });
+      Object.defineProperty(repeatedDropEvent, "dataTransfer", { value: dragTransfer });
+      alreadyLinkedDropTarget.dispatchEvent(repeatedDropEvent);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await flushWork();
+    assert.equal(relationshipInformationWrites.length, 1, "canonical membership must reject linking the same internal email message to another text box");
+    assert.ok(runtimeErrors.some((message) => /already linked to another text box/i.test(message)));
+    runtimeErrors.length = 0;
+
+    const fourthMessageCreateTextBox = nodeContainer.querySelector<HTMLButtonElement>(
+      '[data-email-message-id="message-node-block-0-d"] button[aria-label="Create text box for this email"]',
+    );
+    assert.ok(fourthMessageCreateTextBox);
+    const textBlockIDsBeforeFailedLink = new Set(currentNodeProjectionItems
+      .filter((projection) => projection.type === "Text box")
+      .map((projection) => projection.information_id));
+    relationshipInformationWrites.length = 0;
+    editorMetadataPatchBodies.length = 0;
+    failNextRelationshipInformationWrite = true;
+    await act(async () => { fourthMessageCreateTextBox.click(); });
+    await flushWork(24);
+    const failedLinkProjection = currentNodeProjectionItems.find((projection) => (
+      projection.type === "Text box" && !textBlockIDsBeforeFailedLink.has(projection.information_id)
+    ));
+    assert.ok(
+      failedLinkProjection,
+      `the textbox metadata save should complete before the forced relationship failure (metadata=${editorMetadataPatchBodies.length}, relationships=${relationshipInformationWrites.length}, errors=${runtimeErrors.join(",")})`,
+    );
+    assert.equal(relationshipInformationWrites.length, 1);
+    assert.equal(relationshipInformationWrites[0]?.email_message_id, "internal-message-node-block-0-d", "the visible message action must carry its exact internal email_message_id");
+    const failedLinkColor = String(relationshipInformationWrites[0]?.textbox_color ?? "");
+    assert.match(failedLinkColor, /^#[0-9A-F]{6}$/);
+    assert.equal(editorMetadataPatchBodies.length, 1, "failure cleanup must not issue a second metadata PATCH");
+    const failedLinkLocalRow = nodeContainer.querySelector<HTMLElement>(`[data-node-text-box-row="${failedLinkProjection.information_id}"]`);
+    assert.ok(failedLinkLocalRow);
+    const failedLinkColorProbe = dom.window.document.createElement("div");
+    failedLinkColorProbe.style.color = failedLinkColor;
+    assert.notEqual(failedLinkLocalRow.style.borderLeftColor, failedLinkColorProbe.style.color, "a failed exact link must immediately return the saved textbox to its neutral frame");
+    assert.equal(failedLinkLocalRow.querySelector('button[aria-label="Show linked email"]'), null, "a failed exact link must not leave staged email membership visible");
+    assert.ok(runtimeErrors.includes("forced_exact_relationship_failure"));
+    runtimeErrors.length = 0;
+    await act(async () => { nodeRoot?.render(renderNode({ loaded: true })); });
+    await flushWork(24);
+    const failedLinkCanonicalRow = nodeContainer.querySelector<HTMLElement>(`[data-node-text-box-row="${failedLinkProjection.information_id}"]`);
+    assert.ok(failedLinkCanonicalRow, "canonical refresh should keep the already-saved ordinary textbox");
+    assert.notEqual(failedLinkCanonicalRow.style.borderLeftColor, failedLinkColorProbe.style.color);
+    assert.equal(failedLinkCanonicalRow.querySelector('button[aria-label="Show linked email"]'), null);
+
+    const selectedThreadCard = emailColumn.querySelector<HTMLElement>('[role="button"][title="Collapse email"]');
+    assert.ok(selectedThreadCard);
+    await act(async () => { selectedThreadCard.click(); });
+    await flushWork();
+    currentNodeProjectionItems = [
+      emailLinkedProjection,
+      nodeChatProjection("node-block-0"),
+      nodeEmailProjection("node-block-0"),
+      nodeLinkedEmailMessageProjection(
+        "node-block-0",
+        "message-node-block-0",
+        "internal-message-node-block-0",
+        "email-child-node-block-0",
+      ),
+      nodeEmailProjection("node-block-0", true),
+    ];
+    await act(async () => { nodeRoot?.render(renderNode({ loaded: true })); });
+    await flushWork(24);
+    emailNodeRow = nodeContainer.querySelector<HTMLElement>('[data-node-text-box-row="node-block-0"]');
+    assert.ok(emailNodeRow);
+    editorToggle = emailNodeRow.querySelector<HTMLButtonElement>('button[aria-label="Toggle text editor column"]');
+    chatToggle = emailNodeRow.querySelector<HTMLButtonElement>('button[aria-label="Toggle chat column"]');
+    assert.ok(editorToggle);
+    assert.ok(chatToggle);
 
     assert.equal(emailNodeRow.querySelector('[data-node-pane-header="editor"]')?.textContent?.includes("Editor"), true);
     assert.equal(emailNodeRow.querySelector('[data-node-pane-header="chat"]')?.textContent?.includes("Chat"), true);
@@ -807,16 +1197,65 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     assert.equal(emailNodeRow.querySelector<HTMLElement>('[data-node-linked-email-layout]')?.dataset.nodeLinkedEmailLayout, "content-column");
     assert.equal(linkedEmailToggle.getAttribute("aria-label"), "Hide linked email");
     const linkedEmailPreview = emailNodeRow.querySelector<HTMLElement>('[data-node-linked-email-preview="true"]');
-    assert.ok(linkedEmailPreview, "the exact child message should resolve through its attached root thread and expand inside the text box");
-    assert.equal(linkedEmailPreview.querySelectorAll('[data-email-single-message="true"]').length, 1, "the inline plane should contain exactly one email message");
+    assert.ok(linkedEmailPreview, "both exact messages should resolve through the stored thread and expand inside the text box");
+    const linkedPreviewMessages = Array.from(linkedEmailPreview.querySelectorAll<HTMLElement>('[data-email-single-message="true"]'));
+    assert.equal(linkedPreviewMessages.length, 2, "the inline plane should preserve both exact linked messages");
+    assert.deepEqual(linkedPreviewMessages.map((item) => item.dataset.emailMessageId), [
+      "thread-root-node-block-0",
+      "message-node-block-0",
+    ], "linked messages should render globally oldest-to-newest by stored timestamp");
     assert.equal(linkedEmailPreview.querySelector('[data-email-timeline-item="true"]'), null, "the inline plane should not render thread timeline chrome");
-    assert.ok(linkedEmailPreview.querySelector('[data-email-message-id="message-node-block-0"]'), "the inline plane should render the linked child rather than its attached thread root");
-    assert.doesNotMatch(linkedEmailPreview.textContent ?? "", /Earlier linked email body\./, "the inline plane should not include another message from the thread");
+    assert.ok(linkedEmailPreview.querySelector('[data-email-message-id="thread-root-node-block-0"]'), "the inline plane should retain the first linked message");
+    assert.ok(linkedEmailPreview.querySelector('[data-email-message-id="message-node-block-0"]'), "the inline plane should add the later linked message without replacing the first");
+    assert.match(linkedEmailPreview.textContent ?? "", /Earlier linked email body\./);
+    assert.doesNotMatch(linkedEmailPreview.textContent ?? "", /Third stored email body\.|Fourth stored email body\.|Fifth stored email body\./, "unlinked thread messages must not appear in the text-box preview");
+    for (const message of linkedPreviewMessages) {
+      const messageCard = message.lastElementChild as HTMLElement | null;
+      assert.ok(messageCard);
+      assert.match(messageCard.style.borderLeftColor, exactTextBoxColor, "each exact linked preview card should use the text-box color");
+    }
     assert.match(linkedEmailPreview.textContent ?? "", /From:\s*Sender Person <sender@example\.test>/);
     assert.match(linkedEmailPreview.textContent ?? "", /To:\s*Recipient Person <recipient@example\.test>/);
     assert.match(linkedEmailPreview.textContent ?? "", /Cc:\s*Copy Person <copy@example\.test>/);
     assert.match(linkedEmailPreview.textContent ?? "", /Bcc:\s*Blind Copy <blind@example\.test>/);
     assert.match(linkedEmailPreview.textContent ?? "", /Complete linked email body\./);
+    const removeLinkedEmailButtons = Array.from(linkedEmailPreview.querySelectorAll<HTMLButtonElement>('[data-remove-linked-email-message-id]'));
+    assert.deepEqual(removeLinkedEmailButtons.map((button) => button.dataset.removeLinkedEmailMessageId), [
+      "email-message-node-block-0",
+      "internal-message-node-block-0",
+    ], "each exact linked message should have one remove button in backend timestamp order");
+    nodeMutationRequests.length = 0;
+    await act(async () => { removeLinkedEmailButtons[1]?.click(); });
+    await flushWork();
+    assert.deepEqual(nodeMutationRequests, [{
+      path: `/v1/nodes/${NODE_ID}/projection/email-child-node-block-0?company_id=${encodeURIComponent(COMPANY_ID)}`,
+      method: "DELETE",
+    }], "the remove button should delete only the exact textbox relationship projection");
+    assert.deepEqual(
+      Array.from(linkedEmailPreview.querySelectorAll<HTMLElement>('[data-email-single-message="true"]')).map((item) => item.dataset.emailMessageId),
+      ["thread-root-node-block-0"],
+      "removing the later relationship should leave the earlier linked message visible",
+    );
+    const remainingRemoveButton = linkedEmailPreview.querySelector<HTMLButtonElement>(
+      '[data-remove-linked-email-message-id="email-message-node-block-0"]',
+    );
+    assert.ok(remainingRemoveButton);
+    failNextRelationshipDelete = true;
+    nodeMutationRequests.length = 0;
+    runtimeErrors.length = 0;
+    await act(async () => { remainingRemoveButton.click(); });
+    await flushWork();
+    assert.deepEqual(nodeMutationRequests, [{
+      path: `/v1/nodes/${NODE_ID}/projection/email-node-block-0?company_id=${encodeURIComponent(COMPANY_ID)}`,
+      method: "DELETE",
+    }], "a guarded removal should still target only the exact textbox relationship");
+    assert.ok(runtimeErrors.includes("email_textbox_relationship_has_chat"));
+    assert.deepEqual(
+      Array.from(linkedEmailPreview.querySelectorAll<HTMLElement>('[data-email-single-message="true"]')).map((item) => item.dataset.emailMessageId),
+      ["thread-root-node-block-0"],
+      "a backend anchored-chat rejection should restore the exact linked message",
+    );
+    runtimeErrors.length = 0;
     const textBoxContentColumn = emailNodeRow.querySelector<HTMLElement>('[data-node-text-box-content-column="true"]');
     const textBoxPaneLayout = emailNodeRow.querySelector<HTMLElement>('[data-node-text-box-columns="editor-chat"]');
     const fullHeightChat = emailNodeRow.querySelector<HTMLElement>('[data-node-chat-block-id="node-block-0"]');
@@ -845,9 +1284,12 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     assert.ok(linkedTextBoxHeader);
     await act(async () => { linkedTextBoxHeader.click(); });
     await flushWork(24);
-    assert.equal(closedEmailColumn.dataset.nodeEmailColumnState, "open", "clicking the linked text-box header should animate the retained email column open");
-    assert.equal(closedEmailColumn.getAttribute("aria-hidden"), "false");
-    assert.ok(scrolledIntoView.some((element) => element.dataset.emailMessageId === "message-node-block-0"), "the left email column should scroll to the exact child message linked to the text box");
+    assert.equal(closedEmailColumn.dataset.nodeEmailColumnState, "closed", "ordinary text-box header clicks must not redirect email focus");
+    assert.equal(closedEmailColumn.getAttribute("aria-hidden"), "true");
+    assert.equal(scrolledIntoView.length, 0, "ordinary text-box header clicks must not navigate the Node email column");
+    await act(async () => { nodeEmailToggle.click(); });
+    await flushWork();
+    assert.equal(closedEmailColumn.dataset.nodeEmailColumnState, "open", "the explicit Node email control should still reopen the email column");
 
     const textBoxActions = emailNodeRow.querySelector<HTMLButtonElement>('button[aria-label="Text box actions"]');
     assert.ok(textBoxActions);
@@ -1203,6 +1645,20 @@ test("real Node, Project, and Logic Gate page hosts load JSON editors and preser
     created_timestamp: now,
     updated_timestamp: now,
   };
+  const nodeWideAttachedEmail: NodeProjectionItem = {
+    ...attachedEmail,
+    information_id: "json-host-node-email",
+    information: buildEditorAttachedEmailPayload({
+      messageID: "durable-html-message",
+      emailMessageID: "internal-durable-html-message",
+      threadID: "durable-html-thread",
+      emailThreadID: "durable-provider-independent-thread",
+      subject: "HTML email stays outside Tiptap",
+      snippet: "<p><em>Rich HTML snapshot</em></p>",
+      from: "sender@example.test",
+      attachedTimestamp: now,
+    }),
+  };
   const projectProjection: ProjectProjection = {
     company_id: hostCompanyID,
     project_id: hostProjectID,
@@ -1364,7 +1820,7 @@ test("real Node, Project, and Logic Gate page hosts load JSON editors and preser
         nodeID={hostNodeID}
         canEdit
         assignedLogicGateIDs={[]}
-        projections={[nodeProjection, attachedEmail]}
+        projections={[nodeProjection, attachedEmail, nodeWideAttachedEmail]}
         companyUsers={[]}
         projectionsLoaded
         editorSequence={1}

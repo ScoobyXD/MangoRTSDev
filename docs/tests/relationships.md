@@ -32,7 +32,7 @@ Later membership changes do not rewrite that Huddle Node, while current source d
 
 1. `email_relationships` is the typed authority that connects one exact internal email message to a Node or Project and optionally to one exact textbox owned by that resource.
 2. One stored email thread may have wide relationships in multiple Nodes and Projects, and each Node or Project may have multiple stored email threads.
-3. One exact email message may have at most one textbox-specific relationship in each Node or Project.
+3. One exact email message may have at most one textbox-specific relationship in each Node or Project, while several exact messages may point to the same textbox.
 4. The same exact email message may link to different text boxes in different owning resources.
 5. The database enforces semantic-edge uniqueness and one-textbox-per-message-per-owner under concurrent writes.
 6. A newly completed message inherits every distinct Node-wide and Project-wide destination already present for its thread.
@@ -41,10 +41,10 @@ Later membership changes do not rewrite that Huddle Node, while current source d
 9. Opening an email-selection chat preview may stage a new local textbox presentation but creates no email relationship or chat.
 10. Sending the first chat from an email-selection preview atomically links the chosen existing textbox or the staged new textbox, then creates the email-to-textbox relationship and chat, or creates neither relationship nor chat.
 11. Cancelling an unsent email-selection chat preview requires no relationship deletion because no relationship has been written.
-12. A Node email or thread view is read-only and creates no personal draft, shared draft, reply relationship, draft-to-text-box relationship, sender grant, or draft participant row.
-13. Removing a Node email relationship is allowed only when that Node and thread have no textbox relationship or email-selection chat; otherwise the command returns `email_removal_has_node_work` and changes nothing.
-14. Email-to-Node, email-to-textbox, and chat rules do not create a generic resource registry, surrogate identity, or untyped edge.
-15. My Triage, Shared Triage, and retained Project reply drafts remain mailbox-owned records and do not become Node relationship authority merely because their source thread appears in a Node.
+12. A Node email or thread view is read-only and creates no personal draft, shared draft, reply relationship, draft-to-text-box relationship, sender grant, or draft participant row; My Triage, Shared Triage, and retained Project reply drafts remain mailbox-owned records and never become Node relationship authority merely because their source thread appears in a Node.
+13. Removing a Node-wide email relationship is allowed only when that Node and thread have no textbox relationship or email-selection chat; otherwise the command returns `email_removal_has_node_work` and changes nothing.
+14. Removing one Node's textbox-specific email relationship removes only that exact edge and leaves the Node-wide relationship, every other Node, stored thread/message, local text box, and surviving attachment relationship unchanged; removal is rejected while that exact message anchors a chat in that textbox.
+15. Email-to-Node, email-to-textbox, and chat rules do not create a generic resource registry, surrogate identity, or untyped edge.
 16. An ordinary root chat or chat reply in an existing triage grouping uses only the normal Node text-box-chat insert and creates no email, relationship, permission, participant, or collaboration row.
 17. A triage command that creates a new email grouping or stores a highlighted-email selection reuses the exact mailbox-scoped stored message when present, fetches only that exact provider message when absent, and never queues thread ingestion or links a thread to a text box.
 18. When a highlighted-email chat's exact message has no text-box relationship in the chosen Node, selecting an existing chat grouping atomically links that message to the grouping's exact existing text box and creates the chat without creating another text box.
@@ -52,6 +52,11 @@ Later membership changes do not rewrite that Huddle Node, while current source d
 20. Removing obsolete Node-scoped draft rows retires only their typed `email_draft` attachment relationships and never changes a valid email, textbox, chat, My Triage draft, Shared Triage draft, or Project draft relationship.
 21. A stored-thread reader or inline email reference carries the exact internal `email_thread_id`; a provider message ID or provider thread ID never selects a durable Mango thread, and a missing durable ID fails instead of falling back to a provider or collaboration lookup.
 22. Completing a Mango-originated Sent message keeps its original exact `email_message` attachment links and retires only redundant imported links for that same internal message; an attachment with another live owner remains live.
+23. A Node textbox projection exposes its complete ordered `email_message_ids` only as a value derived from canonical `email_relationships`; a client never saves that list or a singular representative as textbox-owned relationship metadata, and it renders that backend order without scanning thread cards to infer or reorder membership.
+24. Dragging the noninteractive header of one exact Node email message onto a textbox may create only that exact textbox relationship without creating a chat; a drag never starts from message body content, selected text, a button, a link, or an input.
+25. The ordered email list inside a Node textbox gives each exact message an explicit remove control that may remove only that textbox relationship; the command must atomically reject removal while that exact message anchors a chat in that textbox, and removing the last textbox relationship also returns that textbox to its neutral no-color state.
+26. A textbox's stored color may decorate every exact message card linked to it, but never its parent thread container; the textbox email control lists every linked exact message oldest-to-newest by stored message timestamp.
+27. Every email/textbox relationship and email-selection chat command uses Mango's exact internal `email_message_id`; provider message and thread IDs are display/provider context only and never relationship authority.
 
 Last updated: 2026-08-16
 
@@ -70,6 +75,10 @@ Completing a Mango-originated Sent message keeps its original exact attachment l
 Opening a highlighted-email chat preview creates no relationship or resource
 ↓
 An ordinary root chat or reply appends directly to an existing grouping without creating an email relationship; a highlighted-email chat links its exact message to the chosen grouping when required, and a failed atomic command creates none of its relationship or chat writes
+↓
+A direct exact-message header drop may create the same typed textbox edge without a chat; the textbox projection then derives every linked message ID, and its email control renders those exact messages directly in backend stored-timestamp order without changing thread membership
+↓
+The explicit remove control beside a linked message removes only that textbox edge when no chat in the textbox is anchored to that message; otherwise the server rejects the removal atomically
 ↓
 A highlighted-email or new-grouping send reuses the exact stored message or imports only the missing exact provider message; thread completion remains separate background ingestion
 ↓
@@ -449,9 +458,11 @@ Inherited resolution may follow those live typed parent edges, but it MUST NOT c
 
 One `email_thread_id` and its exact stored messages MAY have wide `email_relationships` in more than one Node or Project. A wide relationship has canonical `resource_type`, the exact owner ID, and a null `resource_textbox_id`; it exposes the thread in that exact resource but does not make that resource the email owner.
 
-A textbox-specific relationship MUST name one exact `email_message_id`, one exact Node or Project, and one exact textbox in that resource. The same message may be linked to at most one textbox inside each owner. Repeating the same owner/message/textbox command converges, a different textbox in that owner is rejected, and a textbox in a different owner is allowed.
+A textbox-specific relationship MUST name one exact `email_message_id`, one exact Node or Project, and one exact textbox in that resource. The same message may be linked to at most one textbox inside each owner, while several exact messages may link to one textbox. Repeating the same owner/message/textbox command converges, a different textbox in that owner is rejected, and a textbox in a different owner is allowed.
 
-Removing a Node-wide or textbox-specific email relationship is permitted only when that Node and thread have no textbox relationship or email-selection chat. A blocked command MUST change nothing and return `email_removal_has_node_work`. A permitted removal deletes only that exact relationship and MUST NOT delete or rewrite another owner's relationship, the stored thread or message, another owner's textbox or chat, any owner-only Triage or Project draft, or any surviving attachment relationship.
+Removing a Node-wide email relationship is permitted only when that Node and thread have no textbox-specific relationship or email-selection chat. A blocked command MUST change nothing and return `email_removal_has_node_work`.
+
+Removing one textbox-specific email relationship deletes only that exact edge and is rejected only while its exact message anchors a chat in that textbox. Deleting a Node textbox atomically removes that textbox's owned chats and textbox-specific email relationships while preserving its Node-wide email relationships. A permitted removal MUST NOT delete or rewrite another owner's relationship, the stored thread or message, another owner's textbox or chat, any owner-only Triage or Project draft, an email chat quote, or any surviving attachment relationship.
 
 ### Law 32 — Huddle ownership and placement use exact Huddle identities
 
