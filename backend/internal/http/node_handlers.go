@@ -676,6 +676,9 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			return
 		} else if writeNodeEmailRelationshipMutationError(w, err) {
 			return
+		} else if errors.Is(err, store.ErrEmailRelationshipHasNodeWork) {
+			writeError(w, http.StatusConflict, "email_removal_has_node_work")
+			return
 		} else if revisionConflict := (*store.ProjectionRevisionConflictError)(nil); errors.As(err, &revisionConflict) {
 			writeProjectionRevisionConflict(w, revisionConflict)
 			return

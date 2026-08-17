@@ -541,10 +541,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [focusedTextBlockID, setFocusedTextBlockID] = useState<string | null>(null);
   const [activeRowBlockID, setActiveRowBlockID] = useState("");
   const [tiptapPinnedBlockIDs, setTiptapPinnedBlockIDs] = useState<Set<string>>(() => new Set());
-  const [emailReplyBlockID, setEmailReplyBlockID] = useState("");
   const [emailPickerAnchor, setEmailPickerAnchor] = useState<UniversalEntityPickerAnchor | null>(null);
   const [expandedLinkedEmailBlockIDs, setExpandedLinkedEmailBlockIDs] = useState<Set<string>>(() => new Set());
-  const [pendingEmailReply, setPendingEmailReply] = useState<{ blockID: string; targetMessageID: string; replyAll: boolean; requestID: number } | null>(null);
   const [nodeEmailFocusExpanded, setNodeEmailFocusExpanded] = useState(false);
   const [assignedLogicGateRecords, setAssignedLogicGateRecords] = useState<LogicGateRecord[]>([]);
   const [lastAssignedLogicGateID, setLastAssignedLogicGateID] = useState("");
@@ -727,10 +725,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       const activeRowIndex = blocks.findIndex((block) => block.id === activeRowBlockID);
       if (activeRowIndex >= 0) indices.add(activeRowIndex);
     }
-    if (emailReplyBlockID) {
-      const replyRowIndex = blocks.findIndex((block) => block.id === emailReplyBlockID);
-      if (replyRowIndex >= 0) indices.add(replyRowIndex);
-    }
     for (const blockID of tiptapPinnedBlockIDs) {
       const pinnedIndex = blocks.findIndex((block) => block.id === blockID);
       if (pinnedIndex >= 0) indices.add(pinnedIndex);
@@ -739,7 +733,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       blocks.forEach((_block, index) => indices.add(index));
     }
     return Array.from(indices);
-  }, [activeChatBlockID, activeRowBlockID, blocks, emailReplyBlockID, expandedLinkedEmailBlockIDs, focusedTextBlockID, tiptapPinnedBlockIDs]);
+  }, [activeChatBlockID, activeRowBlockID, blocks, expandedLinkedEmailBlockIDs, focusedTextBlockID, tiptapPinnedBlockIDs]);
   const rowVirtualizer = useBoundedEditorRowVirtualization({
     itemCount: blocks.length,
     rowHeight: TEXT_BLOCK_ROW_HEIGHT,
@@ -1386,18 +1380,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       return "";
     }
   }, [attachedEmails, blocks, companyID, editorTextCanEdit, linkEmailMessageToTextBlock, nodeID, onError, onProjectionMutation, textBlockProjectionSaveController]);
-
-  const openEmailReplyInTextBlock = useCallback(async (sourceMessageID: string, targetMessageID: string, replyAll: boolean) => {
-    const blockID = await createEmailTextBlock(sourceMessageID);
-    if (!blockID) return;
-    setExpandedLinkedEmailBlockIDs((current) => new Set(current).add(blockID));
-    setPendingEmailReply((current) => ({
-      blockID,
-      targetMessageID,
-      replyAll,
-      requestID: (current?.requestID ?? 0) + 1,
-    }));
-  }, [createEmailTextBlock]);
 
   const stageEmailSelectionChatTextBlock = useCallback((messageID: string) => {
     const cleanMessageID = messageID.trim();
@@ -3104,10 +3086,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               apiBase={apiBase}
 				companyID={companyID}
 				currentUserID={author.userID}
-              companyUsers={companyUsers}
-              attachmentRequestJSON={requestJSON}
-              attachmentResourceType="node"
-              attachmentResourceID={nodeID}
+              repliesEnabled={false}
               storageKey={`node-editor-attached-email-layout-v1:${companyID || "company"}:${nodeID || "node"}`}
               tabbed={false}
               editable={canEdit}
@@ -3126,15 +3105,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               onSelectMessage={(messageID) => openBlockEmail(NODE_EMAIL_COLUMN_LAYOUT_ID, messageID)}
               onClearSelectedMessage={() => clearBlockEmail(NODE_EMAIL_COLUMN_LAYOUT_ID)}
               onRemoveEmail={(emailID) => { void removeAttachedEmail(emailID); }}
-              onReplyEditorFocus={() => {
-                setEmailReplyBlockID(NODE_EMAIL_COLUMN_LAYOUT_ID);
-                setFocusedTextBlockID("");
-                if (formattingControllerRef) formattingControllerRef.current = null;
-              }}
               onEmailSelectionChatRequest={openEmailSelectionChat}
               onEmailSelectionTextBoxRequest={(messageID, quote) => { void createEmailTextBlock(messageID, quote); }}
               onEmailMessageTextBoxRequest={(messageID) => { void createEmailTextBlock(messageID); }}
-              onEmailReplyTextBoxRequest={openEmailReplyInTextBlock}
               onEmailMessageActivate={revealEmailTextBlock}
               onEmailSelectionNodeRequest={(messageID, quote) => { void createNodeFromEmailSelection(messageID, quote); }}
               emailFocusExpanded={nodeEmailFocusActive}
@@ -3495,9 +3468,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                                 onEmailSelectionChatRequest={openEmailSelectionChat}
                                 onEmailSelectionTextBoxRequest={(messageID, quote) => { void createEmailTextBlock(messageID, quote); }}
                                 onEmailSelectionNodeRequest={(messageID, quote) => { void createNodeFromEmailSelection(messageID, quote); }}
-                                initialReplyTargetMessageID={pendingEmailReply?.blockID === block.id ? pendingEmailReply.targetMessageID : undefined}
-                                initialReplyAll={pendingEmailReply?.blockID === block.id ? pendingEmailReply.replyAll : false}
-                                initialReplyRequestID={pendingEmailReply?.blockID === block.id ? pendingEmailReply.requestID : 0}
                                 onRemoveEmail={(emailID) => { void removeAttachedEmail(emailID); }}
                                 onError={onError}
                               />

@@ -14,8 +14,10 @@ test("node email mailbox scopes normalize personal accounts and suppress them fo
   assert.deepEqual(resolveEditorEmailMailboxScope("", ""), {});
 });
 
-test("node-attached email viewer discloses per-message recipients while retaining thread, attachment, and image behavior", () => {
+test("node-attached email viewer is read-only while retaining thread, relationship, attachment, and image behavior", () => {
+  const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
   const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
+  const homeParts = source("frontend/src/pages/home/HomeParts.tsx");
   const universalPickerEmailPane = source("frontend/src/modules/editor/UniversalPickerEmailPane.tsx");
   const calendarInviteCard = source("frontend/src/modules/communications/CalendarInviteCard.tsx");
 
@@ -27,10 +29,10 @@ test("node-attached email viewer discloses per-message recipients while retainin
   assert.match(nodeParts, /onMessageActivate\?\.\(internalThreadMessageID\)/);
   assert.match(nodeParts, /focusMessageRequestID/);
   assert.match(nodeParts, /aria-expanded=\{!collapsed\}/);
-  assert.match(nodeParts, /replyAllAddressDrafts/);
-  assert.match(nodeParts, /Reply all/);
-  assert.match(nodeParts, /setCcDraft/);
-  assert.match(nodeParts, /setBccDraft/);
+  assert.match(nodeSurface, /repliesEnabled={false}/);
+  assert.doesNotMatch(nodeSurface, /onEmailReplyTextBoxRequest|pendingEmailReply|initialReplyTargetMessageID|initialReplyAll|initialReplyRequestID/);
+  assert.doesNotMatch(nodeParts, /sendSharedEmailDraft|Shared draft|originNodeID|sharedDraft:/);
+  assert.match(homeParts, /Reply all/);
   assert.match(nodeParts, /<strong>Cc:<\/strong> \{formatAddressList\(threadMessage\.cc\)\}/);
   assert.match(nodeParts, /<strong>Bcc:<\/strong> \{formatAddressList\(threadMessage\.bcc\)\}/);
   assert.match(nodeParts, /aria-expanded=\{isExpanded\}/);
@@ -63,7 +65,7 @@ test("node-attached email viewer discloses per-message recipients while retainin
   assert.match(nodeParts, /accountEmail=\{email\.accountEmail\}/);
   assert.match(calendarInviteCard, /respondToCalendarInvite\(\{ messageID, status, companyID, sharedInboxID, accountEmail \}\)/);
   assert.match(nodeParts, /downloadEmailAttachment\(message\.id, providerAttachmentID, companyID, sharedInboxID, \{ accountEmail, collaborationID \}\)/);
-  assert.match(nodeParts, /getNodeEmailThread\(companyID, cleanNodeID, durableThreadID, options\)/);
+  assert.match(nodeParts, /getNodeEmailThread\(companyID, cleanNodeID, durableThreadID, \{ \.\.\.options, summary: true \}\)/);
   assert.doesNotMatch(nodeParts, /getEmailThread\(|listEmailMessages\(|getEmailMessage\(|thread\.message_ids/);
   assert.match(nodeParts, /account_email: mailboxScope\.accountEmail/);
   assert.match(universalPickerEmailPane, /status\.connected && status\.status === "connected"/);
@@ -74,7 +76,6 @@ test("node-attached email viewer discloses per-message recipients while retainin
   assert.match(universalPickerEmailPane, /controller\.abort\(\)/);
   assert.match(universalPickerEmailPane, /const page = await listEmailMessages\(\{/);
   assert.match(calendarInviteCard, /Calendar invitation/);
-  assert.match(nodeParts, /window\.setTimeout\(\(\) => replyEditorControllerRef\.current\?\.focus\(\), 0\)/);
 });
 
 test("an inline email reference opens every available stored thread row in a closable modal", () => {

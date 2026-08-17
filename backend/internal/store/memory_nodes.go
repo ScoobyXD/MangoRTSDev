@@ -353,13 +353,6 @@ func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string) error {
 			delete(r.emailCollaborationParticipants, participantKey)
 		}
 	}
-	for draftKey, draft := range r.emailDrafts {
-		if draft.CompanyID == companyID && collaborationIDs[draft.CollaborationID] {
-			draft.CollaborationID = ""
-			draft.IsShared = false
-			r.emailDrafts[draftKey] = draft
-		}
-	}
 	for board, cards := range r.kanbanCards {
 		next := make([]domain.KanbanCard, 0, len(cards))
 		for _, card := range cards {
@@ -861,10 +854,45 @@ func (r *MemoryRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error
 	if projectionExists && strings.EqualFold(strings.TrimSpace(existing.Type), "Attached email") {
 		var relationship nodeAttachedEmailPayload
 		if json.Unmarshal([]byte(existing.Information), &relationship) == nil {
+			rawTextboxID := strings.TrimSpace(relationship.BlockID)
 			textboxID := cleanUUIDText(relationship.BlockID)
 			emailMessageID := cleanUUIDText(relationship.EmailMessageID)
 			textbox, textboxExists := r.nodeText[k][textboxID]
-			if textboxID != "" && emailMessageID != "" && textboxExists && isEditorTextBoxType(textbox.Type) {
+			if rawTextboxID == "" {
+				emailThreadID := ""
+				for _, link := range r.nodeEmailThreads {
+					if link.CompanyID == companyID && link.NodeID == nodeID && link.InformationID == informationID {
+						emailThreadID = link.EmailThreadID
+						break
+					}
+				}
+				if thread, found := r.emailThreads[key(companyID, emailThreadID)]; found {
+					messageIDs := map[string]bool{}
+					for _, message := range thread.Messages {
+						messageIDs[message.EmailMessageID] = true
+					}
+					for _, projection := range r.nodeText[k] {
+						if projection.IsDeleted {
+							continue
+						}
+						switch {
+						case strings.EqualFold(strings.TrimSpace(projection.Type), "Attached email"):
+							var linked nodeAttachedEmailPayload
+							if json.Unmarshal([]byte(projection.Information), &linked) == nil &&
+								cleanUUIDText(linked.BlockID) != "" && messageIDs[cleanUUIDText(linked.EmailMessageID)] {
+								return ErrEmailRelationshipHasNodeWork
+							}
+						case isNodeTextboxChatType(projection.Type):
+							var chat nodeTextboxChatPayload
+							if json.Unmarshal([]byte(projection.Information), &chat) == nil &&
+								strings.EqualFold(strings.TrimSpace(chat.SelectionSource), "email") &&
+								messageIDs[cleanUUIDText(chat.SelectionMessageID)] {
+								return ErrEmailRelationshipHasNodeWork
+							}
+						}
+					}
+				}
+			} else if textboxID != "" && emailMessageID != "" && textboxExists && isEditorTextBoxType(textbox.Type) {
 				for _, projection := range r.nodeText[k] {
 					if projection.IsDeleted || !isNodeTextboxChatType(projection.Type) {
 						continue
@@ -917,23 +945,14 @@ func (r *MemoryRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error
 				}
 			}
 		}
-		collaborationIDs := map[string]bool{}
 		for collaborationKey, collaboration := range r.emailCollaborations {
 			if collaboration.CompanyID == companyID && collaboration.NodeID == nodeID && collaboration.AttachedEmailInformationID == informationID {
-				collaborationIDs[collaboration.CollaborationID] = true
 				delete(r.emailCollaborations, collaborationKey)
 			}
 		}
 		for linkKey, link := range r.nodeEmailThreads {
 			if link.CompanyID == companyID && link.NodeID == nodeID && link.InformationID == informationID {
 				delete(r.nodeEmailThreads, linkKey)
-			}
-		}
-		for draftKey, draft := range r.emailDrafts {
-			if draft.CompanyID == companyID && collaborationIDs[draft.CollaborationID] {
-				draft.CollaborationID = ""
-				draft.IsShared = false
-				r.emailDrafts[draftKey] = draft
 			}
 		}
 	}

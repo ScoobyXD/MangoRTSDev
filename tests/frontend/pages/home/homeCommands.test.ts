@@ -55,6 +55,7 @@ test("image-only mail drafts are retained and draft snippets never expose editor
     companyID: "company-1",
     sharedInboxID: "",
     accountEmail: "sender@example.test",
+    sourceMessageID: "",
     replyToMessageID: "",
     replyToMessage: null,
     to: "",
@@ -64,9 +65,6 @@ test("image-only mail drafts are retained and draft snippets never expose editor
     body: EDITOR_RICH_TEXT_PREFIX + "<div><strong>Hello</strong> &amp; welcome</div>",
     attachments: [],
     scheduledAt: "",
-    collaborationID: "",
-    sharedDraft: false,
-    revision: 0,
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
   };

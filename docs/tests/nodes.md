@@ -9,10 +9,10 @@
 7. One exact email message may link to at most one text box per Node and may link to a different text box in another Node.
 8. Every email chat in a Node belongs to one exact email message and that message's exact local text box.
 9. Chats about the same email message in different Nodes remain separate.
-10. One Node may have at most one active shared draft for the same thread, owned by one dedicated text box in that Node.
-11. The same thread may have a separate shared draft in another Node, and neither Node shows, counts, or edits the other Node's draft.
-12. The draft content, editable **From** account, revision, attachments, and chat are shared only with current users of its exact Node.
-13. Removing one Node's email relationship leaves every other Node relationship, local text box, chat, stored thread/message, and surviving attachment relationship unchanged.
+10. Email and thread views inside a Node are read-only and expose no Reply, Reply All, draft, composer, signature, outgoing attachment, scheduling, or email-send control.
+11. Node email views retain received-message bodies and attachments, collapsed-thread lazy loading, highlights, exact-message text-box links, and email-selection chats.
+12. Opening, expanding, refreshing, or navigating Node email never creates, lists, loads, saves, sends, or discards an email draft.
+13. Removing one Node-wide email relationship is blocked when that Node and thread have a text-box relationship or email-selection chat; otherwise removal deletes only that Node's typed edge and leaves every other Node relationship, stored thread/message, creator-owned Triage or Project draft, and surviving attachment relationship unchanged.
 14. Deleting a Node text box removes its owned chats and textbox-specific email relationships while preserving its Node-wide email relationships and stored email truth.
 
 Last updated: 2026-08-16
@@ -27,7 +27,7 @@ Inside each Node, an exact message may link to one local text box and every chat
 ↓
 When the local text box does not yet exist, the first send atomically creates the text box, exact email relationship, and chat
 ↓
-Removing one Node's relationship removes only that Node's typed edge and leaves the other Nodes and stored email truth intact
+Removing one Node-wide relationship removes only that Node's typed edge and leaves the other Nodes and stored email truth intact
 
 Last updated: 2026-08-09
 # Process Story: Node headers show assignments and linking controls clearly
@@ -135,13 +135,13 @@ The removed unread-change API, cache, writers, viewer baselines, and database ta
 
 The production Node path must never query or write `node_information`, `node_projection_table`, or `node_projection_seen_snapshots`. Textbox creation and editing use the JSON editor API; the old projection-shaped text writer is rejected rather than translated or dual-written.
 
-Last updated: 2026-08-05
+Last updated: 2026-08-16
 
 # Nodes Tests
 
 Coverage Status:
 - Node attachment presentation and visibility-gated thumbnail behavior are covered by `tests/frontend/modules/attachments/attachmentPresentation.test.ts`; upload concurrency, partial-success, byte-limit, scope/permission invalidation, and delete-while-uploading behavior are covered by `tests/frontend/modules/editor/nodeTextBlockAttachments.test.ts`; shared people-palette behavior is covered by `tests/frontend/modules/editor/editorMentions.test.ts`.
-- Attached-email thread parity, resize cleanup, red removal actions, Reply/Reply All focus, and permission Save visibility are covered by `tests/frontend/modules/editor/emailViewerContract.test.ts`; node chat URL detection is covered by `tests/frontend/modules/editor/nodeChatLinks.test.ts`.
+- Attached-email read-only disclosure, exact-message lazy loading, received attachments, resize cleanup, red removal actions, and permission Save visibility are covered by `tests/frontend/modules/editor/emailViewerContract.test.ts`; node chat URL detection is covered by `tests/frontend/modules/editor/nodeChatLinks.test.ts`.
 - Shared conversion projection provenance is covered by `backend/internal/http/communications_triage_handlers_test.go` and `backend/internal/store/communications_email_conversion_test.go`.
 - Browser-direct additions must prove the 1 GiB/64 MiB/16 MiB policy, node-level progress/cancel/retry/resume, completed-only counts, one completion refresh, and completion after origin text-box deletion without projection recreation.
 - Business Logic Covered By Scenarios: 100%
@@ -219,12 +219,12 @@ N53 - Attached emails on nodes may store message/thread/provider metadata and Ma
 N54 - The node header Assign to Project button must size to its icon and current label instead of flex-growing into all remaining toolbar space. In the unassigned state it should remain compact for the `Assign to Project` label; after assignment it may grow for `Project: <project name>` up to the node header's project-control maximum and must ellipsize overflow text instead of pushing adjacent header actions away.
 N55 - The node header project assignment dropdown must use a compact horizontal width. Its nominal width is clamped to a minimum of 280px, a desktop maximum of 390px, and a compact-layout maximum of 320px, with the browser viewport maximum still allowed to reduce the rendered width when the viewport is narrower.
 N56 - Opening the node header project assignment dropdown near the right edge of the visible node workspace must shift the dropdown left just enough to keep the full list visible inside the node workspace or browser viewport. The dropdown must not remain right-anchored when that would clip project names or list content, and the left shift must preserve the normal node workspace side padding.
-N57 - When a user clicks Reply on an email attached inside a node, the reply composer appears as a bottom dock inside that email detail immediately; the user must not have to manually scroll down to reveal the To, Subject, toolbar, body, attachments, or send action.
-N58 - The attached-email reply composer remains anchored to the bottom of the email detail while the conversation body scrolls above it, and the reply body editor grows upward as additional rows are typed until its documented maximum height is reached.
-N59 - Attached-email reply sends use the same email-safe rich-editor serialization as My Triage and Shared Triage compose/reply: sanitized rich blocks, explicit line breaks, indentation, and spacing are preserved in outbound HTML instead of flattening into one long line.
+N57 - Email attached inside a Node is read-only and exposes no Reply, Reply All, compose dock, draft scope, recipients editor, signature, outgoing attachment, schedule, or send action.
+N58 - The attached-email detail uses its available height for stored conversation content and received attachments; no composer reserves or docks space beneath it.
+N59 - My Triage, Shared Triage, and Project attached-email replies keep their existing safe rich-editor serialization outside the Node surface.
 N60 - In automatic numbering mode, pressing Tab in ordinary non-outline node text inserts the five-space tab at the caret; it must not move the entire current text block unless the current line is actually a parsed outline/list item. Shift+Tab may still outdent leading indentation.
 N61 - Full node-window close actions render through the unified node shell's red close chrome with a white X across Home, app/sidebar, Kanban, Updates, Project, and dock-restored node shell surfaces.
-N62 - Attached-email reply body editors include a visual one-row bottom buffer through editor padding/scroll padding so the caret stays visible at the bottom; the buffer must not add fake blank lines to the sent email body.
+N62 - A Node attached-email view contains no reply-body editor or outgoing-editor padding; received message layout remains unchanged.
 N63 - Mango-authored outgoing email bodies are marked and displayed in Mango with preserved line breaks, spaces, and indentation in node-attached email detail views instead of being normalized into a flat sentence.
 N64 - Node text-box formatting is driven by the shared editor toolbar and formatting controller: font-size minus/value/plus, Bold, Underline, Italic, Strikethrough, the Highlight split button with **No highlight**, left/center/right alignment, table insertion, and the outline-style dropdown must match Logic Gate, project, and mail editor surfaces in look and behavior wherever a full node editor is opened. The highlight main hitbox applies the chosen color without opening the picker, while the arrow only opens the picker. Vibrant active styling applies only to the individual hitbox and remains distinct from hover, focus, and disabled state.
 N65 - Each node text box exposes an attachment-list control beside its attachment-upload control. Its count and rows include only active node `file_attachment` resource links whose `information_id` matches that text block.
@@ -234,10 +234,10 @@ N68 - Node users with edit access may see attachment counts/lists and download a
 N69 - Node attachment counts and lists are rebuilt from the backend node resource-link list when the workspace loads. Projection attachment references may support editor persistence, but they are not the canonical source for list/download availability.
 N70 - Per-text-box and node-wide attachment controls are part of the shared node workspace body, so every full node-window surface using that body receives the same attachment scope, count, list, permission, and download behavior.
 N71 - Node permissions opened from any full node-window entry point use the shared permissions contract in `docs/tests/permissions.md`: editable views always display `Save`, successful Save persists the current selection without closing, and read-only, denied, or failed-load views remain dismissible without writing.
-N72 - Node-attached email viewers use the shared email-thread contract: a subject-only conversation header; accessible per-message disclosure whose collapsed row shows sender/date/snippet and hides From/To/Cc/Bcc; expanded-only labeled participant details, full body, attachments, and exact-message Reply/Reply All; full-height body, expand-all, authenticated image actions, immediate reply focus, original-message context, and resize termination after pointer-up/cancel, lost capture, or window blur. Calendar invitations use the shared EMAIL103 authoritative event card with details, meeting/calendar actions, and provider-confirmed RSVP state.
-N73 - Editors can right-click an attached-email or attachment row and choose a red `Remove from node`; the action removes only that attached-email projection or node attachment relationship, while no-access users receive no destructive action.
+N72 - Node-attached email viewers use the shared read-only email-thread contract: a subject-only conversation header; accessible per-message disclosure whose collapsed row shows sender/date/snippet and hides From/To/Cc/Bcc; expanded-only labeled participant details, full body, received attachments, full-height viewing, and authenticated image actions. They expose no email reply or draft actions. Calendar invitations retain their authoritative event details without creating an email draft.
+N73 - Editors can right-click an attached-email or attachment row and choose a red `Remove from node`; the action removes only that attached-email projection or node attachment relationship, but email removal is rejected while that Node and thread have a textbox-specific relationship or email-selection chat, and no-access users receive no destructive action.
 N74 - Node chat detects safe `http://`, `https://`, `www.`, and bare-domain links, excludes trailing punctuation and email-address domains, renders links blue and underlined with opener isolation, and leaves unsafe/non-HTTP schemes as plain text.
-N75 - A personal attached-email projection stores `account_email`; a Shared Triage conversion stores both `shared_inbox_id` and `account_email`. Thread, attachment, Reply/Reply All, draft, and calendar operations use those stored fields instead of falling back to another grant.
+N75 - A personal attached-email projection stores `account_email`; a Shared Triage conversion stores both `shared_inbox_id` and `account_email`. Thread, received-attachment, and calendar reads use those stored fields instead of falling back to another grant; the Node performs no draft or reply mutation.
 N76 - Normal browser node file bytes go directly to the private attachment S3 bucket through intent-owned presigned PUTs. Mango API authenticates/authorizes, chooses IDs and keys, enforces limits, completes/aborts/verifies storage, and writes metadata/node links, but it never receives the browser file body.
 N77 - Node browser upload policy defaults to 1 GiB per file, single PUT through and including 64 MiB, and 16 MiB multipart parts above it. The direct path does not apply the old 12 MiB-per-text-box aggregate.
 N78 - Node upload preparation computes raw SHA-256 incrementally with bounded memory. Multipart concurrency is capped, progress is byte-based, cancellation aborts active requests, retry refreshes expired URLs, and resume does not re-upload S3-confirmed parts.
@@ -247,7 +247,7 @@ N81 - One successful completion invalidates the shared node attachment metadata 
 N82 - Node text boxes use `EditorDocumentSurface` as their rich editable host and the shared formatting controller for font size, bold, underline, italic, strikethrough, highlight color/No highlight, alignment, lists, links, tables, selection restoration, and pending-caret font/italic/strikethrough/highlight typing styles; node wrappers must not render a second rich `contentEditable` host or construct a local formatting controller.
 N83 - Each Node text box owns one exact collaboration document identity and pending-operation queue. Duplicate mounted local consumers share one network subscription; the last unmount or tombstone removes it. Title and attachment metadata may retain a serialized metadata queue, but document typing never enters that whole-envelope controller.
 N84 - Committed remote Node text-box operations apply promptly through the exact editor scope without echo-saving. Remote application preserves the logical selection through the shared editor hydration boundary; revision gaps, reconnect, and canonical replacement trigger automatic full-snapshot recovery and pending-operation reapplication.
-N85 - Focusing a node-attached email reply immediately clears the surrounding text block as the outer formatting target. The outer node toolbar disables its formatting controls, the reply toolbar becomes the only formatting owner, and node navigation tabs remain usable.
+N85 - Node-attached email is read-only and never becomes a formatting target. Opening or focusing it does not install a reply toolbar or replace the surrounding text block's formatting controller.
 N86 - Opening Relationships, Metadata, History, or Save Settings from the editor overflow hides or replaces the applicable node document workspace and prevents formatting against a hidden editor without unmounting or resetting its text-block layout. Only formatting controls are disabled; primary and overflow navigation actions remain operable.
 N87 - Node saved-version history is not loaded during ordinary node open. It loads on Save Settings activation, preserves manual save/restore behavior, and is cleared/reloaded for the current company/node target rather than blocking initial editor content.
 N88 - Node-open reference reads use StrictMode-safe shared ownership: node resource-attachment metadata is one node-scope cached request with explicit mutation invalidation, project relationships are singleflight/cached with invalidation before relationship refresh, and company accounts/users/group reference data is shared across editor instances with mutation/auth-scope invalidation.
@@ -258,7 +258,7 @@ N92 - Mounted Node chat performs one single-flight canonical durable-chat refres
 N93 - A node editor header keeps Editor, Permissions, the shared formatting toolbar, Outline Styles/Automatic Numbering, and the immediately adjacent More control on one nonwrapping line. Relationships, Metadata, History, Save Settings, save-version/related-node commands, and supported opener-specific secondary actions remain available in the accessible **More editor actions** overflow menu with their existing permission and disabled state.
 N94 - Node popups/panels, permissions and email dialogs, and image/attachment/email previews mount through the shared body-level overlay portal above Key Views, Explorer, Search Explorer, and feature-local stacking contexts. Blocking modal modes trap focus and restore prior focus on close; anchored Kanban editor panels may remain modeless until fullscreen. The Project Logic Gates / Nodes inline editor remains in document flow and does not use the overlay portal.
 N95 - The Responsible, Accountable, Consulted, and Informed cards remain in one compact four-column horizontal row with Kanban-strength layered gradients in their established role colors. Narrowing may clip that row beneath an adjacent pane, but must not wrap it vertically. Add occupies each card's top-right heading row; the full-width assignment surface displays `No assignments` once or one unwrapped row for every direct person and group, growing vertically to keep all assignments visible.
-N96 - The lazy EMAIL52 trigger creates one email-derived Node after provider validation with no Company Explorer placement. It directly customizes creator Responsible RACI and Edit permission, and retry or later replies for the same exact mailbox/thread identity reuse that Node.
+N96 - The lazy email-derived Node trigger creates one Node after provider validation with no Company Explorer placement. It directly customizes creator Responsible RACI and Edit permission, and retry or later replies for the same exact mailbox/thread identity reuse that Node.
 N97 - The email Node contains one protected canonical source-scoped `Attached email` projection with `created_from_email=true` plus shared `Text block chat` rows. Generic writes may add ordinary text boxes and other normal Node information but cannot overwrite/delete the canonical email projection. Saved-version, Project, Logic Gate/Kanban, RACI, and account behavior follows normal Node contracts; whole-Node delete and generic permission replacement remain protected while collaboration source/participant records exist.
 N98 - My/Shared Triage and the email Node mount the same shared ChatPane over the same canonical chat block ID and information rows. Message IDs, parent IDs, ordering, indentation, deletion ownership, mentions, attachments, composer state, and `chat:node:{node_id}` refresh are shared data, never copied histories. The Node header shows compact durable chat-author/mention context.
 N99 - An email-selection chat persists `selection_source=email`, the exact internal `email_message_id`, trimmed quote, and valid offsets. A text-box selection in the node-wide email chat additionally persists `selection_block_id`, so chat navigation can focus the originating editor while provider IDs remain display context only.
@@ -267,7 +267,7 @@ N101 - A Triage-comment email Node receives no Company Explorer item and no init
 N102 - A qualifying post-activation Inbox message that arrives after a Node thread download is appended automatically by the durable webhook/checkpoint ingestion path. Mango imports only missing or incomplete real provider messages, then gives each newly completed message the thread's existing Node-wide destinations without duplicating old messages or Node sources. Opening a Node remains provider-read-free, and a genuinely different mailbox/thread attached later becomes another left-pane browser tab.
 N103 - Clicking a persisted editor annotation highlight with no active text selection opens the owning text block's chat, expands the required thread, scrolls the exact stable comment ID into view, and moves accessible focus to that comment with a visible focus state. Multiple annotations resolve independently; normal selection, editing, keyboard behavior, and chat-to-text highlighting remain unchanged.
 N104 - Attached-email message cards list every attachment not actually referenced by the message body's normalized CID set. Both conversion-to-Node and attach-to-existing-Node retain immutable source mailbox/message/thread identity, while imported bodies, inline images, signatures, and ordinary attachment bytes are stored in Mango-owned email/attachment storage. Node collaborators read those stored copies through Node authorization; provider bytes are never embedded in the editable Node JSON projection.
-N105 - Reply and Reply All from an attached-email Node viewer load the signature for that retained exact mailbox scope and append it once to the live reply. Send fences on an outstanding scope-matched load and signs the flushed submitted body before provider submission. A late load preserves typed content, switching reply modes or rerendering does not duplicate it, and deliberate draft content is never replaced wholesale.
+N105 - An attached-email Node viewer never loads a mailbox signature and never creates or signs an outbound body. Signature loading and send fencing remain owned by My Triage, Shared Triage, and the retained Project reply surface.
 N106 - Transient Node popup view mode is owned by the active popup instance, not canonical Node/board projections. Same-Node refresh or title reconciliation preserves fullscreen; only explicit user exit/close or opening a different Node may restore the normal saved non-fullscreen ratio.
 N107 - Every Node rich-text body is an exact collaboration document with a server-ordered revision and ETag. Normal typing commits structured insert/delete operations plus the next revision and outbox event atomically; the projection row is a derived compatibility snapshot, not the mutation authority.
 N108 - Concurrent valid Node operations integrate automatically in deterministic collaboration order even when based on an older valid state. Stable operation IDs make lost-ack retries idempotent; ordinary users never receive a whole-document merge choice or `projection_revision_conflict` workflow.
@@ -275,7 +275,7 @@ N109 - Node saved state advances only after the backend acknowledges the committ
 N110 - Every unacknowledged Node operation is durably retained before loss under authenticated user, company, exact resource/document, browser client, and stable operation ID. It survives unmount, tab/browser refresh, and disconnect; only commit acknowledgement/deduplication removes it.
 N111 - Orange connection health permits Node typing into the durable operation queue while risky mutations are gated. Blinking red uses the app-global blocking portal; solid red requests browser refresh. Recovery restores the exact subscription and full snapshot, reapplies pending operations automatically, waits for acknowledgements, and never restores the deleted draft/conflict modal.
 N107 - Full node shells use a shared responsive vertical viewport inset of 8px per browser edge where they are viewport-positioned. Home, app/sidebar, dock-restored, and Kanban non-fullscreen node windows default to the taller available height; Project critical-path and Logic Gates / Nodes inline surfaces use the same maximum available-height rule inside their opener constraints. Explicit fullscreen surfaces retain the existing 8px inset and live-editor behavior.
-N108 - Every attached-email Reply and Reply All submission enters EMAIL90's centralized ten-second pre-dispatch gate. Its reply dock renders the same elevated non-green Undo/countdown surface; Undo starts no provider request and leaves the mounted composer intact under the node reply surface's existing persistence contract, while expiry dispatches once through the retained exact mailbox scope.
+N108 - A Node attached-email view never enters the centralized ten-second pre-dispatch gate because it exposes no outbound email action. My Triage, Shared Triage, and Project attached-email sends retain that gate unchanged.
 
 ## Scenarios
 
@@ -527,7 +527,7 @@ Expected:
 - Node text-box edits continue to save through node information/projection persistence.
 - Text-block chats remain chat composers and do not receive rich editor toolbar or rich editor keyboard semantics.
 - Opening Node Attach email uses the Universal picker Emails category to attach an exact existing personal-mailbox message and does not expose compose, reply, send, scheduled send, draft-save, or mailbox-mutation controls.
-- Replying to an attached email opens a complete bottom-docked composer immediately, keeps it visible while the email body scrolls above it, and lets the reply body expand upward as the reply grows.
+- Opening an attached email shows only stored conversation content and received attachments; it never mounts a composer below the thread.
 - Small node card previews, list rows, tree rows, timeline bars, picker rows, and other non-editor node summaries do not need to mount the unified node shell.
 - Home, app/sidebar, dock-restored, Updates, Kanban, Project inline node windows, and the Project Logic Gates / Nodes embedded node panel mount the `UnifiedNodeShell` adapter and expose only the actions enabled by that opener.
 - Viewport-positioned node shells leave only an 8px top and bottom gap by default, while constrained inline surfaces grow to the same responsive available-height ceiling.
@@ -553,7 +553,7 @@ Given:
 - A user uploads files with the node attachment button.
 - A user attaches images/files to text-block chat.
 - A user attaches an email to the node.
-- A user replies to an attached email with multiple lines and indentation.
+- A user opens an attached email whose stored body contains multiple lines and indentation.
 
 Expected:
 - Node text-box collaboration operations preserve rich text and durable attachment references; realtime payload validation rejects inline file bytes, data URLs, presigned URLs, and credentials.
@@ -566,10 +566,8 @@ Expected:
 - Attachment rows show an immediate type cue, visibility-gated image thumbnails through authenticated content reads, an always-visible extension badge (or `NO EXT`), and a right-side original-file download action. Only visible/near-visible image rows prefetch; closing the list aborts pending reads and releases object URLs.
 - Chat messages store attachment references and remain outside rich-editor semantics.
 - Attached-email projections store email metadata and attachment references only.
-- The attached-email reply composer is visible without manual scrolling and stays docked to the bottom of the selected email detail.
-- The attached-email reply body editor keeps a visual empty row beneath the last typed line so the caret remains visible at the bottom without sending extra blank lines.
-- Outbound attached-email reply HTML preserves explicit line breaks, spacing, and indentation from the unified editor.
-- Mango's node-attached email display preserves Mango-authored outbound line breaks, spaces, and indentation when the same message is viewed later inside Mango.
+- The attached-email view reserves no bottom space for an outbound editor.
+- Stored message bodies preserve their line breaks, spacing, and indentation when displayed inside the Node.
 - Loading the node does not require reading multi-megabyte inline base64 strings from node projection rows.
 
 ### Scenario N-S11: Text-Box And Node-Wide Attachment Lists
@@ -615,16 +613,16 @@ Given:
 
 Expected:
 - The email-count viewer fills the available viewport and preserves one scroll surface for the conversation.
-- Every message exposes its sender, To, Cc, and provider-supplied Bcc metadata plus Reply and Reply all actions.
 - Every stored message renders once in timestamp order when its neutral thread container is opened, and each individual message exposes its own disclosure control.
-- Reply all deduplicates the visible reply-to/from, To, and Cc addresses and never invents hidden Bcc recipients.
-- Personal attachments retain `account_email`, and shared conversions retain both `shared_inbox_id` and `account_email`, so Reply all excludes the active mailbox and all provider reads/mutations use the originating grant.
+- Every expanded message exposes its sender and stored To, Cc, and provider-supplied Bcc metadata, with no Reply, Reply All, compose, draft, or send action.
+- `Expand all threads` opens every collapsed attached-email thread group.
+- `Collapse all threads` closes every attached-email thread group, and each thread header independently exposes the same expand/collapse state.
+- Personal attachments retain `account_email`, and shared conversions retain both `shared_inbox_id` and `account_email`, so every thread, received-attachment, and calendar read uses the originating grant.
 - Selecting an inline image exposes Download; double-clicking it opens a full-screen preview.
 - Text selected in rich/image email bodies still exposes the existing chat/create-node actions.
 - Non-inline attachments show filename/type/size, download, and full-screen image preview.
 - Calendar invitations render the shared event card with available title, local time plus provider timezone, organizer, guests, location, current response, Join meeting, Copy link, and Open calendar; edit-authorized Accept, Tentative, and Decline prevent duplicate submission while pending and show saved state only after provider success.
-- Opening a reply focuses the unified reply editor immediately while the original message remains visible.
-- Reply focus synchronously clears the surrounding node text block as the outer formatting target, leaving the reply toolbar as the only formatting owner while the outer navigation tabs stay usable.
+- Opening an email never changes the surrounding Node text block's formatting target and never installs an email editor toolbar.
 - Releasing a vertical resize, cancelling it, losing pointer capture, or blurring the window ends resizing; later pointer movement cannot continue changing the editor height.
 
 ### Scenario N-S13: Remove Attached Rows From Node
@@ -641,7 +639,7 @@ Given:
 
 Expected:
 - Right-clicking an email row or attachment row shows `Remove from node` in red.
-- Removing an email deletes only its attached-email projection from the node.
+- Removing an email with no Node-local textbox or chat work deletes only its attached-email projection from the node; Node-local work rejects removal and changes nothing.
 - Removing an attachment unlinks the active node resource attachment and refreshes counts without deleting the stored attachment object.
 - No-access users do not receive either removal action.
 
@@ -769,7 +767,7 @@ Expected:
 - The verified webhook or rare bounded checkpoint reconciliation enqueues the future provider message without downloading inside the request or requiring either participant to open Mango.
 - The background worker reuses the mailbox-scoped durable thread, appends each missing real provider message once, copies only its missing Node-wide destination, and does not create a second Node source or projection.
 
-### Scenario N-S20: Annotation Navigation, Attached Files, And Reply Signature
+### Scenario N-S20: Annotation Navigation And Read-Only Attached Files
 
 Business logic covered:
 - N72
@@ -781,13 +779,13 @@ Business logic covered:
 Given:
 - One Node text block has multiple highlighted annotations mapped to different stable chat comment IDs, including a comment inside a collapsed thread.
 - The Node has one converted email and one directly attached email with body CID images and ordinary files.
-- The exact personal/shared signature may load after the user starts a reply.
+- The attached email may have received attachments under either a personal or shared mailbox identity.
 
 Expected:
 - Clicking each highlight without selecting text reveals the chat panel, expands only the needed thread, scrolls to the exact comment, and exposes a visible accessible focus target without the composer stealing focus.
 - Drag-selection and normal editor input do not trigger chat navigation, and existing chat-to-highlight behavior still works.
 - Both email paths display unreferenced files with metadata and authorized actions under the originating mailbox identity.
-- Reply and Reply All append the exact saved signature once, including after late hydration, without overwriting typed text.
+- The Node exposes no Reply, Reply All, signature, draft, outgoing attachment, or send action.
 
 ### Scenario N-S21: Same-Node Reconciliation Does Not Collapse Fullscreen
 
@@ -802,7 +800,7 @@ Expected:
 - The live Node editor and fresh canonical data remain visible.
 - The reconciliation does not reset local fullscreen or the saved restore ratio.
 - The popup returns to normal only through explicit user action, close, or a different-Node open.
-### Scenario N-S22: Attached Email Disclosure And Undo Send
+### Scenario N-S22: Attached Email Disclosure Is Read-Only
 
 Business logic covered:
 - N57
@@ -812,12 +810,12 @@ Business logic covered:
 - N108
 
 Given:
-- A Node-attached multi-message email has different From/To/Cc/Bcc participants, files, and inline images per message, and the user submits Reply or Reply All.
+- A Node-attached multi-message email has different From/To/Cc/Bcc participants, files, and inline images per message, and the user opens one message.
 
 Expected:
 - The Node conversation header shows only the subject; collapsed rows show sender/date/snippet without recipient noise, and accessible expansion reveals only the chosen message's labeled participants, body, attachments, and actions.
-- Reply targeting, mailbox identity, attachments, inline images, calendar actions, and the bottom-docked editor remain intact.
-- The reply dock shows the neutral ten-second Undo surface. No provider request begins before expiry; Undo prevents dispatch and leaves the reply available, while expiry sends exactly once through the retained mailbox scope.
+- Stored participants, mailbox identity, received attachments, inline images, and allowed calendar actions remain intact.
+- No outbound editor, signature, draft, scheduling, Undo Send, Send Now, or provider-send request exists inside the Node.
 
 N112 - Every Node has one optional, independently resizable, full-height email column to the left of its multi-text-box list. Importing one message stores one Node-wide attached-email source and displays every thread as a collapsed neutral card; the same thread may independently be attached to another Node. The exact `/v1/nodes/{node_id}/email-threads/{email_thread_id}` read starts only when that exact card is opened, routes through the Node's authorized durable link, and returns Mango-stored history rather than `not_found`. Expanding an email consumes the column's available viewport instead of retaining the old 620-pixel/72vh ceiling. Once an attachment exists, the Node Email toggle retains one three-track workspace shell: closing animates email width to zero plus a short fade/left transform and makes the pane inert, accessibility-hidden, and pointer-disabled; opening reverses the transition to the saved width. Each text box owns its editor, zero or more exact linked email messages, and optional message-linked chats. One exact message may link to at most one textbox in this Node, several exact messages may share one textbox, and another Node may link that message to its own textbox. Each linked message card uses the permanent color of its exact textbox; a thread container never receives that color. Email-created Nodes bind their initial editor to the selected source message, while the entire thread remains attached Node-wide.
 
@@ -871,7 +869,7 @@ N144 - A consolidated Node view returns text-box identity, order, metadata, type
 
 N145 - One consolidated Node read supplies its initial timeline events, and PostgreSQL loads all verification recipients for those events in one set-based query. The Node surface does not issue a second initial timeline request.
 
-N146 - Every attached-email thread starts collapsed when a Node opens. A collapsed card performs no thread-body or shared-draft read, and only opening that exact card loads it.
+N146 - Every attached-email thread starts collapsed when a Node opens. A collapsed card performs no thread-body read, and only opening that exact card loads it. Node opening and disclosure never request email drafts.
 
 N147 - A newly added current-user chat moves the shared ChatPane to its bottom; messages added by other users do not force the reader away from the current position.
 N148 - Only the noninteractive header of one exact Node email message is draggable into a textbox; message bodies, selected text, buttons, links, and inputs never start the drag. Dropping the header onto a textbox creates only that exact relationship without a chat. Each exact message in Show email has an explicit remove control that removes only that textbox edge when no chat in the textbox is anchored to the message. Highlighting an unlinked exact message defaults to a staged new textbox; clicking an existing textbox header highlights its frame and changes the chat destination to Existing Node · Existing Text Box before the first atomic send.

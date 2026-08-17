@@ -51,7 +51,9 @@ func TestNodeLinkedTextboxColorIsAssignedAndPreservedByCanonicalWrites(t *testin
 	}
 	deleteSource := strings.Join(strings.Fields(readNodeFinalContractFile(t, "postgres_nodes.go")), " ")
 	for _, required := range []string{
-		"select resource_textbox_id from email_relationships",
+		"select email_thread_id::text,resource_textbox_id from email_relationships",
+		"if relationshiptextboxid.valid",
+		"return erremailrelationshiphasnodework",
 		"select textbox_id::text from node_textboxes",
 		"for update",
 		"set color=null",

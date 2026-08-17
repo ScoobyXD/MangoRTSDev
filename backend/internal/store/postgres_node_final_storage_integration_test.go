@@ -546,6 +546,14 @@ func TestPostgresNodeTextboxSupportsSeveralExactEmailRelationshipsAndGuardedRemo
 	if err != nil || versionAfterLinks.Shared <= versionBeforeLinks.Shared {
 		t.Fatalf("direct relationship link view version before=%+v after=%+v err=%v", versionBeforeLinks, versionAfterLinks, err)
 	}
+	if err := repo.DeleteNodeProjection(company.CompanyID, node.NodeID, wideAID); !errors.Is(err, ErrEmailRelationshipHasNodeWork) {
+		t.Fatalf("Node-wide relationship removal with textbox work err=%v", err)
+	}
+	if count := countPostgresRows(t, db, `select count(*) from email_relationships
+where company_id=$1::uuid and email_relationship_id=$3::uuid and resource_type='node' and resource_id=$2::uuid`,
+		company.CompanyID, node.NodeID, wideAID); count != 1 {
+		t.Fatalf("blocked Node-wide removal left %d rows, want 1", count)
+	}
 
 	converged, err := repo.AddNodeInformationWithActor(NodeInformationInput{
 		CompanyID: company.CompanyID, NodeID: node.NodeID,

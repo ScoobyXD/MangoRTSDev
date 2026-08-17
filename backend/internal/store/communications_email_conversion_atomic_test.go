@@ -665,6 +665,12 @@ func TestMemoryNodeTextboxDeleteReleasesItsMessageAndPreservesTheWideRelationshi
 	if textboxRelationshipID == "" {
 		t.Fatal("initial exact textbox relationship missing")
 	}
+	if err := repo.DeleteNodeProjection(companyID, node.NodeID, result.AttachedEmailInformationIDs[0]); !errors.Is(err, ErrEmailRelationshipHasNodeWork) {
+		t.Fatalf("Node-wide relationship removal with textbox work err=%v", err)
+	}
+	if _, exists := repo.nodeText[key(companyID, node.NodeID)][result.AttachedEmailInformationIDs[0]]; !exists {
+		t.Fatal("blocked Node-wide relationship removal changed state")
+	}
 	current := repo.nodeText[key(companyID, node.NodeID)][firstTextboxID]
 	if current.Revision < 1 {
 		current.Revision = 1

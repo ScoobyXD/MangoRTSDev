@@ -69,6 +69,7 @@ func TestNodeEmailRelationshipRoutesReturnSpecific4xxResponses(t *testing.T) {
 		{"message missing from Node", store.ErrEmailMessageNotAttachedToNode, http.MethodPost, http.StatusConflict, "email_message_not_attached_to_node"},
 		{"message already in another textbox", store.ErrEmailMessageTextboxConflict, http.MethodPost, http.StatusConflict, "email_message_already_linked_to_another_textbox"},
 		{"anchored chat blocks delete", store.ErrEmailRelationshipRequiredByChat, http.MethodDelete, http.StatusConflict, "email_relationship_required_by_chat"},
+		{"Node-wide relationship has local work", store.ErrEmailRelationshipHasNodeWork, http.MethodDelete, http.StatusConflict, "email_removal_has_node_work"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

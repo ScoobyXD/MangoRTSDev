@@ -846,11 +846,13 @@ func (r *PostgresRepo) deleteNodeProjection(input NodeProjectionDeleteInput) err
 		return ErrNotFound
 	}
 
+	var emailThreadID string
 	var relationshipTextboxID sql.NullString
-	err = tx.QueryRowContext(ctx, `select resource_textbox_id
+	err = tx.QueryRowContext(ctx, `select email_thread_id::text,resource_textbox_id
 from email_relationships
 where company_id=$1::uuid and email_relationship_id=$3::uuid
-  and resource_type='node' and resource_id=$2::uuid`, companyID, nodeID, informationID).Scan(&relationshipTextboxID)
+  and resource_type='node' and resource_id=$2::uuid
+for update`, companyID, nodeID, informationID).Scan(&emailThreadID, &relationshipTextboxID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
@@ -867,6 +869,28 @@ from node_textboxes
 where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid
 for update`, companyID, nodeID, textboxID).Scan(&lockedTextboxID); err != nil {
 				return err
+			}
+		} else {
+			var hasNodeWork bool
+			if err := tx.QueryRowContext(ctx, `select
+  exists (
+    select 1 from email_relationships relationship
+    where relationship.company_id=$1::uuid and relationship.email_thread_id=$3::uuid
+      and relationship.resource_type='node' and relationship.resource_id=$2::uuid
+      and relationship.resource_textbox_id is not null
+  )
+  or exists (
+    select 1 from node_textbox_chats chat
+    join email_messages message on message.company_id=chat.company_id
+      and message.email_message_id=chat.selection_email_message_id
+    where chat.company_id=$1::uuid and chat.node_id=$2::uuid
+      and chat.selection_source='email' and chat.deleted_timestamp is null
+      and message.email_thread_id=$3::uuid
+  )`, companyID, nodeID, emailThreadID).Scan(&hasNodeWork); err != nil {
+				return err
+			}
+			if hasNodeWork {
+				return ErrEmailRelationshipHasNodeWork
 			}
 		}
 		var deletedTextboxID sql.NullString

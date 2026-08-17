@@ -28,6 +28,16 @@ func TestPostgresCommunicationsEmailDraftQueriesKeepExactImmutableScopePredicate
 	if strings.Contains(listBody, "personal_user_id = $2::uuid or shared_inbox_id is not null") {
 		t.Fatal("ListCommunicationsEmailDrafts retained broad personal-plus-all-shared predicate")
 	}
+	if !strings.Contains(listBody, "communicationsEmailDraftSummarySelectColumns()") {
+		t.Fatal("ListCommunicationsEmailDrafts must use the body-free summary projection")
+	}
+	summaryProjection := extractFunctionSourceForTest(t, source, "func communicationsEmailDraftSummarySelectColumns")
+	if strings.Contains(summaryProjection, "body_editor_html") {
+		t.Fatal("draft list summary projection reads full draft bodies")
+	}
+	if !strings.Contains(summaryProjection, "scheduled_send_timestamp") {
+		t.Fatal("draft list summary projection must include the scheduler timestamp")
+	}
 
 	getBody := extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) GetCommunicationsEmailDraft")
 	for _, required := range []string{
@@ -37,6 +47,15 @@ func TestPostgresCommunicationsEmailDraftQueriesKeepExactImmutableScopePredicate
 	} {
 		if !strings.Contains(getBody, required) {
 			t.Fatalf("GetCommunicationsEmailDraft missing exact scope predicate %q", required)
+		}
+	}
+	if !strings.Contains(getBody, "hydrateCommunicationsEmailDraftReplyTarget") {
+		t.Fatal("GetCommunicationsEmailDraft must restore the provider reply target for exact draft reads")
+	}
+	replyTargetBody := extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) hydrateCommunicationsEmailDraftReplyTarget")
+	for _, required := range []string{"message.provider_message_id", "thread.provider_thread_id", "draft.SourceMessageID"} {
+		if !strings.Contains(replyTargetBody, required) {
+			t.Fatalf("reply target hydration missing %q", required)
 		}
 	}
 
@@ -134,13 +153,36 @@ func TestMemoryCommunicationsEmailDraftPersonalScopeIsExactAndImmutable(t *testi
 	}
 }
 
+func TestMemoryCommunicationsEmailReplyRequiresStoredSourceMessage(t *testing.T) {
+	repo, companyID, owner, _, _, _ := newEmailDraftScopeStoreFixture(t)
+
+	_, err := repo.UpsertCommunicationsEmailDraft(CommunicationsEmailDraftInput{
+		CompanyID: companyID, DraftID: "draft:reply:not-ingested", PersonalUserID: owner.UserID,
+		PersonalAccountEmail: "owner-a@example.com", CreatedByUserID: owner.UserID,
+		UpdatedByUserID: owner.UserID, Kind: "reply", AccountEmail: "owner-a@example.com",
+	})
+	if !errors.Is(err, ErrEmailReplySourceNotIngested) {
+		t.Fatalf("reply without source error = %v, want ErrEmailReplySourceNotIngested", err)
+	}
+
+	_, err = repo.UpsertCommunicationsEmailDraft(CommunicationsEmailDraftInput{
+		CompanyID: companyID, DraftID: "draft:reply:missing-source", PersonalUserID: owner.UserID,
+		PersonalAccountEmail: "owner-a@example.com", CreatedByUserID: owner.UserID,
+		UpdatedByUserID: owner.UserID, Kind: "reply", AccountEmail: "owner-a@example.com",
+		SourceMessageID: "67676767-6767-4767-8767-676767676799",
+	})
+	if !errors.Is(err, ErrEmailDraftSourceNotFound) {
+		t.Fatalf("reply with unknown source error = %v, want ErrEmailDraftSourceNotFound", err)
+	}
+}
+
 func TestMemoryCommunicationsEmailDraftSharedScopeIsExactAndImmutable(t *testing.T) {
 	repo, companyID, owner, _, sharedA, sharedB := newEmailDraftScopeStoreFixture(t)
 	const draftID = "draft:shared:scope-guard"
 
 	if _, err := repo.UpsertCommunicationsEmailDraft(CommunicationsEmailDraftInput{
 		CompanyID: companyID, DraftID: draftID, SharedInboxID: sharedA.FolderID,
-		CreatedByUserID: owner.UserID, UpdatedByUserID: owner.UserID, Kind: "reply", AccountEmail: "shared-a@example.com", Subject: "shared A",
+		CreatedByUserID: owner.UserID, UpdatedByUserID: owner.UserID, Kind: "compose", AccountEmail: "shared-a@example.com", Subject: "shared A",
 	}); err != nil {
 		t.Fatalf("create shared draft: %v", err)
 	}
@@ -154,7 +196,7 @@ func TestMemoryCommunicationsEmailDraftSharedScopeIsExactAndImmutable(t *testing
 	}
 	if _, err := repo.UpsertCommunicationsEmailDraft(CommunicationsEmailDraftInput{
 		CompanyID: companyID, DraftID: draftID, SharedInboxID: sharedB.FolderID,
-		CreatedByUserID: owner.UserID, UpdatedByUserID: owner.UserID, Kind: "reply", Subject: "takeover",
+		CreatedByUserID: owner.UserID, UpdatedByUserID: owner.UserID, Kind: "compose", Subject: "takeover",
 	}); !errors.Is(err, ErrAlreadyExists) {
 		t.Fatalf("cross-inbox upsert error = %v, want ErrAlreadyExists", err)
 	}

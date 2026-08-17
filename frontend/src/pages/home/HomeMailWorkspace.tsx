@@ -279,7 +279,6 @@ export function HomeMailWorkspace({
   onOpenPendingMailbox,
   onOpenReply,
   onOpenReplyAll,
-  onCreateSharedDraft,
   onOpenSentMailbox,
   onOpenSpamMailbox,
   onOpenStarredMailbox,
@@ -369,7 +368,6 @@ export function HomeMailWorkspace({
   onOpenPendingMailbox: () => void;
   onOpenReply: (message?: EmailMessage) => void;
   onOpenReplyAll: (message?: EmailMessage) => void;
-  onCreateSharedDraft: (message: EmailMessage) => void;
   onOpenSentMailbox: () => void;
   onOpenSpamMailbox: () => void;
   onOpenStarredMailbox: () => void;
@@ -809,11 +807,8 @@ export function HomeMailWorkspace({
               const pendingStarred = pendingStarredMessageIDs.has(message.id);
               const starHovered = hoveredStarMessageID === rowKey;
               const starHighlighted = pendingStarred || message.starred || starHovered;
-              const sharedDraftSource = draftRow && message.collaboration_id?.trim()
-                ? message.collaboration_account_email?.trim() || "email collaboration"
-                : "";
               const rowAddressLabel = draftRow
-                ? (sharedDraftSource ? `Shared draft · ${sharedDraftSource}` : (formatAddressList(message.to) || "Draft"))
+                ? (formatAddressList(message.to) || "Draft")
                 : (formatAddressList(message.from) || "Unknown sender");
               const showReadStatus = mailbox === "sent" && !draftRow;
               const messageLogicGateIDs = emailMessageLogicGateIDs(message, nodeByID);
@@ -1037,7 +1032,6 @@ export function HomeMailWorkspace({
                 onLoadMessageBody={onLoadMessageBody}
                 onReply={onOpenReply}
                 onReplyAll={onOpenReplyAll}
-                onCreateSharedDraft={onCreateSharedDraft}
                 onForward={onOpenForward}
                 onArchive={onArchiveSelected}
                 onDelete={onDeleteSelected}

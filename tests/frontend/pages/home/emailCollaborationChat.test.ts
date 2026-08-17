@@ -401,8 +401,7 @@ test("email-created nodes reuse canonical chat data with one node email column",
   assert.match(nodeSurface, /blockID=\{block\.id\}[\s\S]*blockID=\{chatBlockID\}/);
   assert.match(nodeSurface, /tabbed=\{false\}/);
   assert.match(nodeParts, /role="tablist" aria-label="Attached email threads"/);
-  assert.match(nodeParts, /height: replyComposerOpen \? "clamp\(420px, calc\(100vh - 300px\), 760px\)" : "auto"/);
-  assert.match(nodeParts, /minHeight: replyComposerOpen \? undefined : 0/);
+  assert.match(nodeSurface, /repliesEnabled=\{false\}/);
   assert.match(nodeParts, /className="editor-document-scroll mango-pane-enter"/);
   assert.match(nodeSurface, /data-node-email-column="true"[\s\S]{0,2200}position: "sticky"[\s\S]{0,80}top: 38/);
   assert.match(nodeSurface, /data-node-text-box-columns="editor-chat"[\s\S]{0,420}transition: "grid-template-columns 180ms/);
