@@ -39,14 +39,12 @@ export function createOrdinaryNodeTextBlockContent(): EditorTextBlockContent {
 export function createEmailLinkedNodeTextBlockContent(input: {
   title: string;
   document?: string;
-  messageID: string;
   color: string;
 }): EditorTextBlockContent {
   return {
     title: input.title,
     document: input.document ?? "",
     attachments: [],
-    emailMessageID: input.messageID.trim(),
     color: input.color.trim().toUpperCase(),
   };
 }

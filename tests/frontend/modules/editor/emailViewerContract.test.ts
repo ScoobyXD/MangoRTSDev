@@ -24,7 +24,7 @@ test("node-attached email viewer discloses per-message recipients while retainin
   assert.match(nodeParts, /gridTemplateColumns: "20px minmax\(0, 1fr\)"/);
   assert.match(nodeParts, /linear-gradient\(180deg, rgba\(14,165,233,0\.34\), rgba\(124,58,237,0\.3\)\)/);
   assert.match(nodeParts, /width: 13,[\s\S]{0,120}border: "3px solid rgba\(248, 250, 252, 0\.96\)"/);
-  assert.match(nodeParts, /onMessageActivate\?\.\(threadMessageID\)/);
+  assert.match(nodeParts, /onMessageActivate\?\.\(internalThreadMessageID\)/);
   assert.match(nodeParts, /focusMessageRequestID/);
   assert.match(nodeParts, /aria-expanded=\{!collapsed\}/);
   assert.match(nodeParts, /replyAllAddressDrafts/);
@@ -121,7 +121,7 @@ test("an inline email reference opens every available stored thread row in a clo
   assert.doesNotMatch(universalPicker, /emailThreadID: message\.thread_id\?\.trim\(\) \|\| undefined/);
 });
 
-test("node email and linked text boxes expose animated two-way navigation and computed colors", () => {
+test("node email and linked text boxes use exact canonical message lists and textbox colors", () => {
   const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
   const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
   const emailBodyHighlights = source("frontend/src/modules/editor/emailBodyHighlights.ts");
@@ -129,19 +129,20 @@ test("node email and linked text boxes expose animated two-way navigation and co
   const indexCSS = source("frontend/src/index.css");
 
   assert.match(nodeSurface, /const revealEmailTextBlock = useCallback/);
-  assert.match(nodeSurface, /const revealNodeEmailMessage = useCallback/);
-  assert.match(nodeSurface, /revealNodeEmailMessage\(linkedEmailMessageID, block\.id\)/);
-  assert.match(nodeSurface, /const linkedEmailMessageID = block.emailMessageID/);
-  assert.match(nodeSurface, /const existingBlock = blocks\.find\(\(block\) => textBlockHasEmailMessage\(block, cleanMessageID\)\)/);
+  assert.doesNotMatch(nodeSurface, /const revealNodeEmailMessage = useCallback/);
+  assert.match(nodeSurface, /linkedEmailMessageIDs: content\.linkedEmailMessageIDs/);
+  assert.match(nodeSurface, /const existingBlock = blocks\.find\(\(block\) => textBoxHasLinkedEmailMessage\(block, cleanMessageID\)\)/);
   assert.match(nodeSurface, /if \(existingBlock\) \{[\s\S]{0,520}return existingBlock\.id/);
-  assert.match(nodeSurface, /messageID=\{linkedEmailMessageID\}/);
-  assert.match(nodeSurface, /emails=\{nodeAttachedEmails\}/);
+  assert.match(nodeSurface, /messageIDs=\{displayedLinkedEmailMessageIDs\}/);
+  assert.match(nodeSurface, /emails=\{attachedEmails\}/);
+  assert.match(nodeSurface, /if \(email\.blockID\?\.trim\(\)\) continue/);
   assert.doesNotMatch(nodeSurface, /Show linked email in email column/);
   assert.match(nodeSurface, /data-node-text-box-row/);
   assert.match(nodeSurface, /scrollIntoView\(\{ behavior: "smooth", block: "center", inline: "nearest" \}\)/);
   assert.match(nodeSurface, /onEmailMessageActivate=\{revealEmailTextBlock\}/);
   assert.doesNotMatch(nodeSurface, /editorEmailMessageAccent/);
-  assert.match(nodeSurface, /linkedEmailMessageID \? \(block\.color\?\.trim\(\) \?\? ""\) : ""/);
+  assert.match(nodeSurface, /const nodeEmailMessageAccents = linkedEmailMessageAccents\(blocks\)/);
+  assert.match(nodeSurface, /const blockColor = hasLinkedEmailMessages \? \(block\.color\?\.trim\(\) \?\? ""\) : ""/);
   assert.match(nodeSurface, /borderLeft: `\$\{blockColor \? 4 : 1\}px solid \$\{blockColor \|\| \(textBlockIsFocused \? "transparent" : EDITOR_NEU_SOFT_BORDER\)\}`/);
   assert.match(nodeSurface, /border: `1px solid \$\{blockColor \|\| EDITOR_NEU_SOFT_BORDER\}`/);
   assert.match(nodeSurface, /<MailIcon color=\{blockColor \|\| accent\} \/>/);
@@ -178,6 +179,14 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeParts, /height: replyComposerOpen \? "clamp\(420px, calc\(100vh - 300px\), 760px\)" : "auto"/);
   assert.match(nodeParts, /minHeight: replyComposerOpen \? undefined : 0/);
   assert.match(nodeParts, /fillHeight\?: boolean/);
+  assert.match(nodeParts, /Promise\.all\(linkedMessageIDs\.map\(\(messageID\) => resolveLinkedEmailPreview/);
+  assert.match(nodeParts, /resolvedPreviews\.map\(\(resolvedPreview\) =>/);
+  assert.match(nodeParts, /compareStoredEmailTimestamps/);
+  assert.match(nodeParts, /const internalMessageID = selection\.emailMessageID\?\.trim\(\) \?\? ""/);
+  assert.match(nodeParts, /messageAccents\[internalThreadMessageID\]/);
+  assert.doesNotMatch(nodeParts, /messageAccents\[threadMessageID\]/);
+  assert.doesNotMatch(nodeParts, /rootMessageAccent/);
+  assert.match(nodeParts, /borderLeftWidth: 1,[\s\S]{0,220}borderLeftColor: selected \? "transparent" : strokeColor/);
   assert.match(indexCSS, /@keyframes mango-pane-enter/);
   assert.match(indexCSS, /prefers-reduced-motion: reduce/);
   assert.match(nodeSurface, /data-node-email-timeline-rail=\{nodeEmailFocusActive \? "true" : undefined\}/);
@@ -199,7 +208,7 @@ test("node email and linked text boxes expose animated two-way navigation and co
   assert.match(nodeSurface, /const ensureEmailTextBoxLinkOnSend = selectionAnchor\?\.source === "email"/);
   assert.match(nodeSurface, /ensureEmailTextBoxLinkOnSend,/);
   assert.match(nodeSurface, /const choosePendingEmailChatDestination/);
-  assert.match(nodeSurface, /const linkedDestination = existingDestinations\.find\(\(block\) => textBlockHasEmailMessage\(block, messageID\)\)[\s\S]*openSelectionChat\(\{ \.\.\.anchor, blockID: linkedDestination\.id \}, linkedDestination\.id\)/);
+  assert.match(nodeSurface, /const linkedDestination = existingDestinations\.find\(\(block\) => textBoxHasLinkedEmailMessage\(block, messageID\)\)[\s\S]*openSelectionChat\(\{ \.\.\.anchor, blockID: linkedDestination\.id \}, linkedDestination\.id\)/);
   assert.match(nodeSurface, /const destinationBlock = linkedBlock \?\? requestedBlock/);
   assert.match(nodeSurface, /data-node-email-chat-parent-destination="true"[\s\S]*choosePendingEmailChatNodeDestination/);
   assert.match(nodeSurface, /data-email-chat-destination-candidate=\{pendingEmailChatSelection[\s\S]*data-chat-destination-flash=\{flashedEmailChatDestinationBlockID === block\.id/);
@@ -264,14 +273,49 @@ test("node drag and Universal-picker email attachment retain exact provider mail
   assert.doesNotMatch(editorProjection, /attachments: input\.attachments/);
 });
 
-test("email messages cannot be dragged onto Node text boxes", () => {
+test("exact Node email headers link and detach text boxes without accepting whole-email provider drags", () => {
   const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
   const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
+  const relationships = source("frontend/src/modules/editor/nodeEmailTextBoxRelationships.ts");
 
-  assert.doesNotMatch(nodeSurface, /const linkDroppedEmailToTextBlock/);
+  assert.match(nodeSurface, /const linkEmailMessageToTextBlock = useCallback/);
+  assert.match(nodeSurface, /if \(targetBlock\?\.pending\) await textBlockProjectionSaveController\.saveLatestContent\(cleanBlockID\)/);
+  assert.match(nodeSurface, /const textBoxColor = targetBlock\?\.color\?\.trim\(\)\.toUpperCase\(\)[\s\S]{0,180}nextNodeTextBlockColor/);
+  assert.match(nodeSurface, /type: EDITOR_ATTACHED_EMAIL_TYPE,[\s\S]{0,180}email_message_id: cleanMessageID,[\s\S]{0,100}textbox_color: textBoxColor,[\s\S]{0,100}link_scope: "message"/);
+  const linkFunction = nodeSurface.slice(
+    nodeSurface.indexOf("const linkEmailMessageToTextBlock = useCallback"),
+    nodeSurface.indexOf("const createEmailTextBlock = useCallback"),
+  );
+  const relationshipWrite = linkFunction.indexOf("await requestJSON<unknown>");
+  const successfulColorAdoption = linkFunction.indexOf("const latestContent = contentByBlockRef.current.get(cleanBlockID)");
+  assert.ok(relationshipWrite >= 0 && successfulColorAdoption > relationshipWrite, "the permanent color must enter local metadata only after the exact relationship succeeds");
+  assert.match(linkFunction, /const adoptedColor = latestContent\?\.color\?\.trim\(\)\.toUpperCase\(\) \|\| textBoxColor/);
+  assert.match(linkFunction, /contentByBlockRef\.current\.set\(cleanBlockID, coloredContent\)/);
+  assert.match(linkFunction, /setBlocks\(\(current\) => current\.map\(\(block\) => block\.id === cleanBlockID[\s\S]{0,120}color: block\.color\?\.trim\(\)\.toUpperCase\(\) \|\| adoptedColor/);
+  assert.doesNotMatch(linkFunction.slice(successfulColorAdoption), /markHasChanged|saveLatestContent/, "backend-owned link color must not create a redundant or split-success metadata save");
+  assert.match(linkFunction, /setBlocks\([\s\S]{0,220}onProjectionMutation\(\)/, "successful link color adoption must request canonical relationship refresh");
+  assert.match(nodeSurface, /EMAIL_MESSAGE_TEXT_BOX_LINK_DRAG_MIME/);
+  assert.match(nodeSurface, /parseEmailMessageTextBoxLinkDrag\(event\.dataTransfer\)/);
+  assert.match(nodeSurface, /email\.blockID\?\.trim\(\) === dragged\.sourceTextBoxID[\s\S]{0,100}email\.emailMessageID === dragged\.emailMessageID/);
+  assert.match(nodeSurface, /removeAttachedEmail\(relationship\.id\)/);
   assert.doesNotMatch(nodeSurface, /buildEditorAttachedEmailPayload\(\{ \.\.\.dragged, blockID, linkWholeThread: false \}\)/);
-  assert.doesNotMatch(nodeParts, /draggable=\{editable && Boolean\(threadMessage\.email_message_id\?\.trim\(\)\)\}/);
-  assert.doesNotMatch(nodeParts, /event\.dataTransfer\.setData\(EMAIL_DRAG_MIME/);
+
+  assert.match(nodeParts, /const messageHeaderDraggable = Boolean\(editable && nodeID\.trim\(\) && internalThreadMessageID\)/);
+  assert.match(nodeParts, /onPointerDownCapture=\{prepareEmailMessageTextBoxLinkDrag\}/);
+  assert.match(nodeParts, /data-email-message-drag-strip="true"[\s\S]{0,180}draggable=\{messageHeaderDraggable\}/);
+  assert.match(nodeParts, /data-email-message-drag-region="true"/, "full message headers need a visible noninteractive drag region");
+  assert.match(nodeParts, /\) : collapsedSnippet \? \(\s*<div style=/);
+  assert.match(nodeParts, /event\.stopPropagation\(\)/);
+  assert.match(nodeParts, /EMAIL_MESSAGE_HEADER_INTERACTIVE_SELECTOR/);
+  assert.match(nodeParts, /messageHeaderDragSourceTextBoxID/);
+  assert.doesNotMatch(nodeParts, /onMessageActivate\?\.\(email\.messageID\)/, "the neutral thread representative must not navigate as an exact linked message");
+  assert.match(nodeParts, /if \(internalMessageID\) onMessageActivate\?\.\(internalMessageID\)/);
+  assert.match(nodeParts, /if \(internalThreadMessageID\) onMessageActivate\?\.\(internalThreadMessageID\)/);
+
+  assert.match(relationships, /application\/x-mango-email-message-text-box-link/);
+  assert.match(relationships, /email_message_id: cleanEmailMessageID/);
+  assert.match(relationships, /source_textbox_id: sourceTextBoxID\.trim\(\)/);
+  assert.doesNotMatch(relationships, /\bmessage_id:|\bthread_id:|subject:|application\/x-mango-email-message"/);
 });
 
 test("triage thread controls and reply resize pointer lifecycle are explicit", () => {

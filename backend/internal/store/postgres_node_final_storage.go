@@ -10,11 +10,14 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type nodeAttachedEmailPayload struct {
 	BlockID           string `json:"block_id"`
 	EmailMessageID    string `json:"email_message_id"`
+	TextboxColor      string `json:"textbox_color"`
 	AttachedTimestamp string `json:"attached_timestamp"`
 	LinkScope         string `json:"link_scope"`
 }
@@ -67,8 +70,7 @@ select textbox.company_id::text, textbox.node_id::text, textbox.textbox_id::text
 	         'title', textbox.title,
 	         'color', coalesce(textbox.color, ''),
 	         'document', %s,
-         'email_message_id', coalesce(linked_email.email_message_id, ''),
-         'email_message_ids', coalesce(linked_email.email_message_ids, '[]'::jsonb),
+	         'email_message_ids', coalesce(linked_email.email_message_ids, '[]'::jsonb),
          'attachments', coalesce((
            select jsonb_agg(jsonb_build_object(
              'id', attachment.attachment_id::text, 'attachment_id', attachment.attachment_id::text,
@@ -88,8 +90,7 @@ select textbox.company_id::text, textbox.node_id::text, textbox.textbox_id::text
        false, textbox.revision, textbox.created_timestamp, textbox.updated_timestamp
 from node_textboxes textbox
 left join lateral (
-  select (array_agg(relationship.email_message_id::text order by message.message_order,message.provider_message_id))[1] as email_message_id,
-         jsonb_agg(relationship.email_message_id::text order by message.message_order,message.provider_message_id) as email_message_ids
+  select jsonb_agg(relationship.email_message_id::text order by message.message_timestamp nulls last,message.email_message_id) as email_message_ids
   from email_relationships relationship
   join email_messages message
     on message.company_id=relationship.company_id
@@ -220,16 +221,23 @@ func addPostgresNodeEmailRelationshipTx(ctx context.Context, tx *sql.Tx, input N
 	if json.Unmarshal([]byte(input.Information), &payload) != nil {
 		return domain.NodeProjection{}, ErrInvalid
 	}
+	rawBlockID := strings.TrimSpace(payload.BlockID)
+	rawEmailMessageID := strings.TrimSpace(payload.EmailMessageID)
 	payload.BlockID = cleanUUIDText(payload.BlockID)
 	payload.EmailMessageID = cleanUUIDText(payload.EmailMessageID)
+	payload.TextboxColor = strings.ToUpper(strings.TrimSpace(payload.TextboxColor))
 	payload.LinkScope = strings.ToLower(strings.TrimSpace(payload.LinkScope))
 	if payload.LinkScope == "" {
 		payload.LinkScope = "message"
 	}
 	actorUserID := cleanUUIDText(input.ActorUserID)
-	if payload.EmailMessageID == "" || actorUserID == "" ||
+	if rawEmailMessageID == "" || payload.EmailMessageID == "" {
+		return domain.NodeProjection{}, ErrEmailMessageIdentityInvalid
+	}
+	if (rawBlockID != "" && payload.BlockID == "") || actorUserID == "" ||
 		(payload.LinkScope != "message" && payload.LinkScope != "thread") ||
-		(payload.LinkScope == "thread" && payload.BlockID != "") {
+		(payload.LinkScope == "thread" && payload.BlockID != "") ||
+		(payload.TextboxColor != "" && (payload.BlockID == "" || !validNodeTextboxColor(payload.TextboxColor))) {
 		return domain.NodeProjection{}, ErrInvalid
 	}
 	if existing, found, err := postgresNodeFinalProjectionTx(ctx, tx, input.CompanyID, input.NodeID, relationshipID); err != nil {
@@ -257,28 +265,52 @@ from email_relationships where company_id=$1::uuid and email_relationship_id=$2:
 		attachedAt = parsed.UTC()
 	}
 	var emailThreadID string
-	err := tx.QueryRowContext(ctx, `select message.email_thread_id::text
+	var existingTextboxColor string
+	if payload.BlockID != "" {
+		if err := tx.QueryRowContext(ctx, `select coalesce(color,'')
+from node_textboxes
+where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid and deleted_timestamp is null
+for update`, input.CompanyID, input.NodeID, payload.BlockID).Scan(&existingTextboxColor); errors.Is(err, sql.ErrNoRows) {
+			return domain.NodeProjection{}, ErrInvalid
+		} else if err != nil {
+			return domain.NodeProjection{}, err
+		}
+		if err := tx.QueryRowContext(ctx, `select coalesce((
+  select relationship.email_thread_id::text
+  from email_relationships relationship
+  where relationship.company_id=$1::uuid and relationship.email_message_id=$3::uuid
+    and relationship.resource_type='node' and relationship.resource_id=$2::uuid
+    and relationship.resource_textbox_id is null
+  order by relationship.created_timestamp,relationship.email_relationship_id
+  limit 1
+), '')`, input.CompanyID, input.NodeID, payload.EmailMessageID).Scan(&emailThreadID); err != nil {
+			return domain.NodeProjection{}, err
+		}
+		if emailThreadID == "" {
+			return domain.NodeProjection{}, ErrEmailMessageNotAttachedToNode
+		}
+	} else {
+		err := tx.QueryRowContext(ctx, `select message.email_thread_id::text
 from email_messages message
 join email_threads thread on thread.company_id=message.company_id and thread.email_thread_id=message.email_thread_id
 join email_connections connection on connection.company_id=thread.company_id
  and connection.email_connection_id=thread.email_connection_id
 where message.company_id=$1::uuid and message.email_message_id=$2::uuid
-  and ($4='' or exists(select 1 from node_textboxes textbox where textbox.company_id=$1::uuid
-    and textbox.node_id=$3::uuid and textbox.textbox_id=$4::uuid and textbox.deleted_timestamp is null))
-  and ((connection.connection_type='personal' and connection.personal_user_id=$5::uuid)
+  and ((connection.connection_type='personal' and connection.personal_user_id=$3::uuid)
     or exists (
       select 1 from shared_inboxes inbox
       where inbox.company_id=thread.company_id
         and inbox.company_email_connection_id=thread.email_connection_id
         and mangorts_user_can_access_resource(
-          $1::uuid,'shared_inbox',inbox.shared_inbox_id,$5::uuid,'edit')
+          $1::uuid,'shared_inbox',inbox.shared_inbox_id,$3::uuid,'edit')
     ))`,
-		input.CompanyID, payload.EmailMessageID, input.NodeID, payload.BlockID, actorUserID).Scan(&emailThreadID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return domain.NodeProjection{}, ErrInvalid
-	}
-	if err != nil {
-		return domain.NodeProjection{}, err
+			input.CompanyID, payload.EmailMessageID, actorUserID).Scan(&emailThreadID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.NodeProjection{}, ErrInvalid
+		}
+		if err != nil {
+			return domain.NodeProjection{}, err
+		}
 	}
 	if payload.BlockID != "" {
 		existing, existingTextboxID, found, err := postgresNodeMessageTextboxEmailProjectionTx(
@@ -289,13 +321,18 @@ where message.company_id=$1::uuid and message.email_message_id=$2::uuid
 		}
 		if found {
 			if existingTextboxID != payload.BlockID {
-				return domain.NodeProjection{}, ErrInvalid
+				return domain.NodeProjection{}, ErrEmailMessageTextboxConflict
 			}
 			return existing, nil
 		}
+		if existingTextboxColor == "" && payload.TextboxColor == "" {
+			return domain.NodeProjection{}, ErrInvalid
+		}
 	}
+	var insertResult sql.Result
+	var err error
 	if payload.LinkScope == "thread" {
-		_, err = tx.ExecContext(ctx, `insert into email_relationships(
+		insertResult, err = tx.ExecContext(ctx, `insert into email_relationships(
   company_id,email_relationship_id,email_thread_id,email_message_id,resource_type,resource_id,resource_textbox_id,created_timestamp
 )
 select $1::uuid,
@@ -306,7 +343,7 @@ where message.company_id=$1::uuid and message.email_thread_id=$3::uuid
 on conflict do nothing`,
 			input.CompanyID, relationshipID, emailThreadID, payload.EmailMessageID, input.NodeID, payload.BlockID, attachedAt)
 	} else {
-		_, err = tx.ExecContext(ctx, `insert into email_relationships(
+		insertResult, err = tx.ExecContext(ctx, `insert into email_relationships(
   company_id,email_relationship_id,email_thread_id,email_message_id,resource_type,resource_id,resource_textbox_id,created_timestamp
 ) values($1::uuid,$2::uuid,$3::uuid,$4::uuid,'node',$5::uuid,nullif($6,''),$7)
 on conflict do nothing`,
@@ -314,6 +351,26 @@ on conflict do nothing`,
 	}
 	if err != nil {
 		return domain.NodeProjection{}, err
+	}
+	if payload.BlockID != "" {
+		inserted, err := insertResult.RowsAffected()
+		if err != nil {
+			return domain.NodeProjection{}, err
+		}
+		if inserted > 0 {
+			if existingTextboxColor == "" {
+				if _, err := tx.ExecContext(ctx, `update node_textboxes
+set color=coalesce(color,nullif($4,'')),
+    updated_timestamp=case when color is null then clock_timestamp() else updated_timestamp end
+where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid and deleted_timestamp is null`,
+					input.CompanyID, input.NodeID, payload.BlockID, payload.TextboxColor); err != nil {
+					return domain.NodeProjection{}, err
+				}
+			}
+			if _, err := tx.ExecContext(ctx, `select mangorts_bump_node_view_version($1::uuid,$2::uuid)`, input.CompanyID, input.NodeID); err != nil {
+				return domain.NodeProjection{}, err
+			}
+		}
 	}
 	projection, found, err := postgresNodeFinalProjectionTx(ctx, tx, input.CompanyID, input.NodeID, relationshipID)
 	if err != nil {
@@ -330,11 +387,23 @@ on conflict do nothing`,
 			return domain.NodeProjection{}, err
 		}
 		if !found || existingTextboxID != payload.BlockID {
+			if found {
+				return domain.NodeProjection{}, ErrEmailMessageTextboxConflict
+			}
 			return domain.NodeProjection{}, ErrInvalid
 		}
 		return existing, nil
 	}
 	return postgresNodeMessageWideEmailProjectionTx(ctx, tx, input.CompanyID, input.NodeID, payload.EmailMessageID)
+}
+
+func nodeEmailRelationshipMutationError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23503" &&
+		strings.TrimSpace(pgErr.Message) == "email relationship is required by an active Node chat" {
+		return ErrEmailRelationshipRequiredByChat
+	}
+	return err
 }
 
 func postgresNodeMessageTextboxEmailProjectionTx(

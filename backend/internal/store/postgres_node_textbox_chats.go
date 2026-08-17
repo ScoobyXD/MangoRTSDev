@@ -40,7 +40,10 @@ func ensurePostgresEmailSelectionTextboxLinkForFirstChatTx(ctx context.Context, 
 	selectionTextboxID := cleanUUIDText(payload.SelectionBlockID)
 	emailMessageID := cleanUUIDText(payload.SelectionMessageID)
 	textboxColor := strings.ToUpper(strings.TrimSpace(payload.EmailTextboxColor))
-	if textboxID == "" || selectionTextboxID != textboxID || emailMessageID == "" ||
+	if strings.TrimSpace(payload.SelectionMessageID) == "" || emailMessageID == "" {
+		return ErrEmailMessageIdentityInvalid
+	}
+	if textboxID == "" || selectionTextboxID != textboxID ||
 		strings.TrimSpace(payload.ParentID) != "" || strings.ToLower(strings.TrimSpace(payload.SelectionSource)) != "email" ||
 		strings.TrimSpace(payload.SelectionQuote) == "" || !validNodeTextboxColor(textboxColor) {
 		return ErrInvalid
@@ -60,7 +63,7 @@ func ensurePostgresEmailSelectionTextboxLinkForFirstChatTx(ctx context.Context, 
 		return err
 	}
 	if !nodeWideEmailExists {
-		return ErrInvalid
+		return ErrEmailMessageNotAttachedToNode
 	}
 	if !textboxExists {
 		ref := EditorJSONDocumentRef{
@@ -245,10 +248,13 @@ func normalizeNodeTextboxChatPayload(ctx context.Context, tx *sql.Tx, companyID 
 		}
 	} else {
 		selectionEmailMessageID = cleanUUIDText(selectionMessageID)
-		if selectionEmailMessageID == "" || cleanUUIDText(input.ActorUserID) == "" {
+		if selectionEmailMessageID == "" {
+			return normalizedNodeTextboxChat{}, ErrEmailMessageIdentityInvalid
+		}
+		if cleanUUIDText(input.ActorUserID) == "" {
 			return normalizedNodeTextboxChat{}, ErrInvalid
 		}
-		var canSelect bool
+		var canSelect, linkedToAnotherTextbox bool
 		if err := tx.QueryRowContext(ctx, `select exists(
   select 1
   from email_relationships relationship
@@ -257,11 +263,23 @@ func normalizeNodeTextboxChatPayload(ctx context.Context, tx *sql.Tx, companyID 
     and relationship.resource_type='node'
     and relationship.resource_id=$3::uuid
     and relationship.resource_textbox_id=$4::text
-)`, companyID, selectionEmailMessageID, input.NodeID, payload.BlockID).Scan(&canSelect); err != nil {
+), exists(
+  select 1
+  from email_relationships relationship
+  where relationship.company_id=$1::uuid
+    and relationship.email_message_id=$2::uuid
+    and relationship.resource_type='node'
+    and relationship.resource_id=$3::uuid
+    and relationship.resource_textbox_id is not null
+    and relationship.resource_textbox_id<>$4::text
+)`, companyID, selectionEmailMessageID, input.NodeID, payload.BlockID).Scan(&canSelect, &linkedToAnotherTextbox); err != nil {
 			return normalizedNodeTextboxChat{}, err
 		}
 		if !canSelect {
-			return normalizedNodeTextboxChat{}, ErrInvalid
+			if linkedToAnotherTextbox {
+				return normalizedNodeTextboxChat{}, ErrEmailMessageTextboxConflict
+			}
+			return normalizedNodeTextboxChat{}, ErrEmailMessageNotAttachedToNode
 		}
 	}
 	if (payload.SelectionStart == nil) != (payload.SelectionEnd == nil) ||

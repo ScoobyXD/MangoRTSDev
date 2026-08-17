@@ -831,7 +831,10 @@ func (r *PostgresRepo) deleteNodeProjection(input NodeProjectionDeleteInput) err
 
 	companyID := strings.TrimSpace(input.CompanyID)
 	nodeID := strings.TrimSpace(input.NodeID)
-	informationID := strings.TrimSpace(input.InformationID)
+	informationID := cleanUUIDText(input.InformationID)
+	if informationID == "" {
+		return ErrInvalid
+	}
 	var exists bool
 	if err := tx.QueryRowContext(ctx,
 		`select exists(select 1 from nodes where company_id=$1 and node_id=$2)`,
@@ -843,19 +846,58 @@ func (r *PostgresRepo) deleteNodeProjection(input NodeProjectionDeleteInput) err
 		return ErrNotFound
 	}
 
-	deletedRelationship, err := tx.ExecContext(ctx, `
-delete from email_relationships
-where company_id=$1::uuid
-  and email_relationship_id=$3::uuid
-  and resource_type='node'
-  and resource_id=$2::uuid`, companyID, nodeID, informationID)
-	if err != nil {
+	var relationshipTextboxID sql.NullString
+	err = tx.QueryRowContext(ctx, `select resource_textbox_id
+from email_relationships
+where company_id=$1::uuid and email_relationship_id=$3::uuid
+  and resource_type='node' and resource_id=$2::uuid`, companyID, nodeID, informationID).Scan(&relationshipTextboxID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	if affected, err := deletedRelationship.RowsAffected(); err != nil {
-		return err
-	} else if affected > 0 {
-		return tx.Commit()
+	if err == nil {
+		textboxID := ""
+		if relationshipTextboxID.Valid {
+			textboxID = cleanUUIDText(relationshipTextboxID.String)
+			if textboxID == "" {
+				return ErrInvalid
+			}
+			var lockedTextboxID string
+			if err := tx.QueryRowContext(ctx, `select textbox_id::text
+from node_textboxes
+where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid
+for update`, companyID, nodeID, textboxID).Scan(&lockedTextboxID); err != nil {
+				return err
+			}
+		}
+		var deletedTextboxID sql.NullString
+		if err := tx.QueryRowContext(ctx, `delete from email_relationships
+where company_id=$1::uuid and email_relationship_id=$3::uuid
+  and resource_type='node' and resource_id=$2::uuid
+returning resource_textbox_id`, companyID, nodeID, informationID).Scan(&deletedTextboxID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return nodeEmailRelationshipMutationError(err)
+		}
+		if deletedTextboxID.Valid {
+			if _, err := tx.ExecContext(ctx, `update node_textboxes textbox
+set color=null,updated_timestamp=clock_timestamp()
+where textbox.company_id=$1::uuid and textbox.node_id=$2::uuid and textbox.textbox_id=$3::uuid
+  and textbox.deleted_timestamp is null
+  and not exists (
+    select 1 from email_relationships relationship
+    where relationship.company_id=textbox.company_id
+      and relationship.resource_type='node'
+      and relationship.resource_id=textbox.node_id
+      and relationship.resource_textbox_id=textbox.textbox_id::text
+  )`, companyID, nodeID, textboxID); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `select mangorts_bump_node_view_version($1::uuid,$2::uuid)`, companyID, nodeID); err != nil {
+				return err
+			}
+		}
+		return nodeEmailRelationshipMutationError(tx.Commit())
 	}
 
 	previous, previousFound, err := postgresNodeProjectionTx(ctx, tx, companyID, nodeID, informationID)

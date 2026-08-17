@@ -205,6 +205,8 @@
     "../modules/editor/editorIndentGuides.test.ts",
     "../../../frontend/src/modules/editor/editorProjection.ts",
     "../modules/editor/editorProjection.test.ts",
+    "../../../frontend/src/modules/editor/nodeEmailTextBoxRelationships.ts",
+    "../modules/editor/nodeEmailTextBoxRelationships.test.ts",
     "../../../frontend/src/modules/editor/nodeTextBlockCreation.ts",
     "../modules/editor/nodeTextBlockCreation.test.ts",
     "../../../frontend/src/modules/editor/nodeTextBlockProjectionSaves.ts",

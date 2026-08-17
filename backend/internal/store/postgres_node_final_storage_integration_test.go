@@ -230,8 +230,19 @@ func TestPostgresNodeFinalTextboxChatEmailAndAttachmentStorage(t *testing.T) {
 	if existingTextboxLinks != 1 || existingTextboxChats != 1 || existingTextboxColor != "#14B8A6" {
 		t.Fatalf("existing textbox link/chat/color=%d/%d/%q", existingTextboxLinks, existingTextboxChats, existingTextboxColor)
 	}
+	emailNodeWidePayload, _ := json.Marshal(map[string]any{
+		"email_message_id": emailMessageID, "link_scope": "message",
+		"attached_timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: newUUIDv7String(),
+		Type: "Attached email", Information: string(emailNodeWidePayload), ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	emailPayload, _ := json.Marshal(map[string]any{
 		"block_id": textboxID, "email_message_id": emailMessageID,
+		"textbox_color":      "#0EA5E9",
 		"attached_timestamp": time.Now().UTC().Format(time.RFC3339Nano),
 	})
 	emailRelationshipID := "00000000-0000-4000-8000-000000000504"
@@ -248,11 +259,12 @@ func TestPostgresNodeFinalTextboxChatEmailAndAttachmentStorage(t *testing.T) {
 	if err != nil || converged.InformationID != emailRelationshipID {
 		t.Fatalf("same Node/message/textbox did not converge to exact relationship: %+v err=%v", converged, err)
 	}
-	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+	convergedByNodeEditor, err := repo.AddNodeInformationWithActor(NodeInformationInput{
 		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: newUUIDv7String(),
 		Type: "Attached email", Information: string(emailPayload), ActorUserID: other.UserID,
-	}); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("unowned exact email attach err=%v, want ErrInvalid", err)
+	})
+	if err != nil || convergedByNodeEditor.InformationID != emailRelationshipID {
+		t.Fatalf("Node editor could not reuse the Node-wide exact email: %+v err=%v", convergedByNodeEditor, err)
 	}
 	secondTextboxID := "00000000-0000-4000-8000-000000000509"
 	if _, err := repo.CommitEditorJSONDocument(EditorJSONCommitInput{
@@ -265,13 +277,14 @@ func TestPostgresNodeFinalTextboxChatEmailAndAttachmentStorage(t *testing.T) {
 	}
 	secondTextboxPayload, _ := json.Marshal(map[string]any{
 		"block_id": secondTextboxID, "email_message_id": emailMessageID,
+		"textbox_color":      "#14B8A6",
 		"attached_timestamp": time.Now().UTC().Format(time.RFC3339Nano),
 	})
 	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
 		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: newUUIDv7String(),
 		Type: "Attached email", Information: string(secondTextboxPayload), ActorUserID: owner.UserID,
-	}); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("same message in a second textbox of one Node err=%v, want ErrInvalid", err)
+	}); !errors.Is(err, ErrEmailMessageTextboxConflict) {
+		t.Fatalf("same message in a second textbox of one Node err=%v, want conflict", err)
 	}
 	secondNode, err := repo.CreateNode(company.CompanyID, "Second exact-message Node")
 	if err != nil {
@@ -287,8 +300,15 @@ func TestPostgresNodeFinalTextboxChatEmailAndAttachmentStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 	secondNodeRelationshipID := "00000000-0000-4000-8000-000000000511"
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: secondNode.NodeID, InformationID: newUUIDv7String(),
+		Type: "Attached email", Information: string(emailNodeWidePayload), ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatalf("attach exact message to second Node: %v", err)
+	}
 	secondNodePayload, _ := json.Marshal(map[string]any{
 		"block_id": secondNodeTextboxID, "email_message_id": emailMessageID,
+		"textbox_color":      "#14B8A6",
 		"attached_timestamp": time.Now().UTC().Format(time.RFC3339Nano),
 	})
 	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
@@ -389,8 +409,409 @@ where company_id=$1::uuid and attachment_id=$2::uuid`, company.CompanyID, attach
 		company.CompanyID, node.NodeID, secondNode.NodeID, emailMessageID).Scan(&nodeARelationships, &nodeBRelationships, &survivingMessages); err != nil {
 		t.Fatal(err)
 	}
-	if nodeARelationships != 0 || nodeBRelationships != 1 || survivingMessages != 1 {
+	if nodeARelationships != 1 || nodeBRelationships != 2 || survivingMessages != 1 {
 		t.Fatalf("isolated relationship delete left NodeA/NodeB/message=%d/%d/%d", nodeARelationships, nodeBRelationships, survivingMessages)
+	}
+}
+
+func TestPostgresNodeTextboxSupportsSeveralExactEmailRelationshipsAndGuardedRemoval(t *testing.T) {
+	db, repo := openRealtimePostgresIntegration(t)
+	company, err := repo.CreateCompany("Node multi-email textbox integration")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = db.Exec("delete from companies where company_id=$1::uuid", company.CompanyID) })
+	owner, err := repo.UpsertAuthUser("node-multi-email-owner", "node-multi-email-owner@example.test", "Node Multi Email Owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.CreateNode(company.CompanyID, "Multi-email textbox Node")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	connectionID := "00000000-0000-4000-8000-000000000610"
+	threadID := "00000000-0000-4000-8000-000000000611"
+	messageAID := "00000000-0000-4000-8000-000000000612"
+	messageBID := "00000000-0000-4000-8000-000000000613"
+	messageCID := "00000000-0000-4000-8000-000000000614"
+	if _, err := db.Exec(`insert into email_connections(
+  email_connection_id,company_id,connection_type,personal_user_id,provider,account_email,grant_id,connected_by_user_id
+) values($1::uuid,$2::uuid,'personal',$3::uuid,'google','node-multi-email-owner@example.test',
+  'node-multi-email-test-grant',$3::uuid)`, connectionID, company.CompanyID, owner.UserID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`insert into email_threads(
+  company_id,email_thread_id,email_connection_id,provider_thread_key,provider_thread_id,root_provider_message_id
+) values($1::uuid,$2::uuid,$3::uuid,'node-multi-email-thread-key','provider-node-multi-thread','provider-node-multi-a')`,
+		company.CompanyID, threadID, connectionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`insert into email_messages(
+  company_id,email_message_id,email_thread_id,provider_message_id,message_order,subject,snippet,sender_snapshot,message_timestamp
+) values
+  ($1::uuid,$2::uuid,$5::uuid,'provider-node-multi-a',0,'Message A','A','[]'::jsonb,'2026-01-02T12:00:00Z'),
+  ($1::uuid,$3::uuid,$5::uuid,'provider-node-multi-b',1,'Message B','B','[]'::jsonb,'2026-01-01T12:00:00Z'),
+  ($1::uuid,$4::uuid,$5::uuid,'provider-node-multi-c',2,'Message C','C','[]'::jsonb,'2026-01-03T12:00:00Z')`,
+		company.CompanyID, messageAID, messageBID, messageCID, threadID); err != nil {
+		t.Fatal(err)
+	}
+
+	textboxID := "00000000-0000-4000-8000-000000000615"
+	secondTextboxID := "00000000-0000-4000-8000-000000000616"
+	document := editorMergeTestDocument(t,
+		`{"type":"paragraph","attrs":{"blockId":"node-multi-email"},"content":[{"type":"text","text":"notes"}]}`)
+	if _, err := repo.CommitEditorJSONDocument(EditorJSONCommitInput{
+		Document: EditorJSONDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeNode,
+			ResourceID: node.NodeID, DocumentID: textboxID},
+		OperationID: newUUIDv7String(), ClientID: "node-multi-email", ActorUserID: owner.UserID,
+		BaseRevision: 0, SchemaVersion: MangoTiptapSchemaVersion, JSONDocument: document,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.CommitEditorJSONDocument(EditorJSONCommitInput{
+		Document: EditorJSONDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeNode,
+			ResourceID: node.NodeID, DocumentID: secondTextboxID},
+		OperationID: newUUIDv7String(), ClientID: "node-multi-email-second", ActorUserID: owner.UserID,
+		BaseRevision: 0, SchemaVersion: MangoTiptapSchemaVersion, JSONDocument: document,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	wideAID := "00000000-0000-4000-8000-000000000617"
+	wideBID := "00000000-0000-4000-8000-000000000618"
+	wideAPayload, _ := json.Marshal(map[string]any{"email_message_id": messageAID, "link_scope": "message"})
+	wideBPayload, _ := json.Marshal(map[string]any{"email_message_id": messageBID, "link_scope": "message"})
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: wideAID,
+		Type: "Attached email", Information: string(wideAPayload), ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: wideBID,
+		Type: "Attached email", Information: string(wideBPayload), ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	linkAID := "00000000-0000-4000-8000-000000000619"
+	linkBID := "00000000-0000-4000-8000-000000000620"
+	linkAPayload, _ := json.Marshal(map[string]any{
+		"block_id": textboxID, "email_message_id": messageAID, "link_scope": "message", "textbox_color": "#0EA5E9",
+	})
+	linkBPayload, _ := json.Marshal(map[string]any{
+		"block_id": textboxID, "email_message_id": messageBID, "link_scope": "message", "textbox_color": "#14B8A6",
+	})
+	versionBeforeLinks, err := repo.CurrentNodeViewVersion(company.CompanyID, node.NodeID, owner.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingColorPayload, _ := json.Marshal(map[string]any{
+		"block_id": textboxID, "email_message_id": messageAID, "link_scope": "message",
+	})
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID,
+		InformationID: "00000000-0000-4000-8000-000000000629",
+		Type:          "Attached email", Information: string(missingColorPayload), ActorUserID: owner.UserID,
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("uncolored textbox direct link without color err=%v", err)
+	}
+	versionAfterMissingColor, err := repo.CurrentNodeViewVersion(company.CompanyID, node.NodeID, owner.UserID)
+	if err != nil || versionAfterMissingColor.Shared != versionBeforeLinks.Shared {
+		t.Fatalf("failed colorless relationship changed view version before=%+v after=%+v err=%v", versionBeforeLinks, versionAfterMissingColor, err)
+	}
+	var missingColorRelationshipCount int
+	var missingColorTextboxStillNull bool
+	if err := db.QueryRow(`select
+  (select count(*) from email_relationships where company_id=$1::uuid and resource_type='node'
+    and resource_id=$2::uuid and resource_textbox_id=$3::text),
+  (select color is null from node_textboxes where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid)`,
+		company.CompanyID, node.NodeID, textboxID).Scan(&missingColorRelationshipCount, &missingColorTextboxStillNull); err != nil {
+		t.Fatal(err)
+	}
+	if missingColorRelationshipCount != 0 || !missingColorTextboxStillNull {
+		t.Fatalf("failed colorless relationship leaked edge/color=%d/null:%v", missingColorRelationshipCount, missingColorTextboxStillNull)
+	}
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: linkAID,
+		Type: "Attached email", Information: string(linkAPayload), ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: linkBID,
+		Type: "Attached email", Information: string(linkBPayload), ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	versionAfterLinks, err := repo.CurrentNodeViewVersion(company.CompanyID, node.NodeID, owner.UserID)
+	if err != nil || versionAfterLinks.Shared <= versionBeforeLinks.Shared {
+		t.Fatalf("direct relationship link view version before=%+v after=%+v err=%v", versionBeforeLinks, versionAfterLinks, err)
+	}
+
+	converged, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID,
+		InformationID: "00000000-0000-4000-8000-000000000624",
+		Type:          "Attached email", Information: string(linkAPayload), ActorUserID: owner.UserID,
+	})
+	if err != nil || converged.InformationID != linkAID {
+		t.Fatalf("idempotent exact relationship=%+v err=%v", converged, err)
+	}
+	versionAfterIdempotentLink, err := repo.CurrentNodeViewVersion(company.CompanyID, node.NodeID, owner.UserID)
+	if err != nil || versionAfterIdempotentLink.Shared != versionAfterLinks.Shared {
+		t.Fatalf("idempotent relationship changed view version before=%+v after=%+v err=%v", versionAfterLinks, versionAfterIdempotentLink, err)
+	}
+	conflictPayload, _ := json.Marshal(map[string]any{
+		"block_id": secondTextboxID, "email_message_id": messageAID, "link_scope": "message", "textbox_color": "#F59E0B",
+	})
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID,
+		InformationID: "00000000-0000-4000-8000-000000000625",
+		Type:          "Attached email", Information: string(conflictPayload), ActorUserID: owner.UserID,
+	}); !errors.Is(err, ErrEmailMessageTextboxConflict) {
+		t.Fatalf("second textbox conflict err=%v", err)
+	}
+	var linkedTextboxColor string
+	var conflictTextboxColorMissing bool
+	if err := db.QueryRow(`select
+  (select color from node_textboxes where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid),
+  (select color is null from node_textboxes where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$4::uuid)`,
+		company.CompanyID, node.NodeID, textboxID, secondTextboxID).Scan(&linkedTextboxColor, &conflictTextboxColorMissing); err != nil {
+		t.Fatal(err)
+	}
+	if linkedTextboxColor != "#0EA5E9" || !conflictTextboxColorMissing {
+		t.Fatalf("direct link primary/conflict colors=%q/null:%v", linkedTextboxColor, conflictTextboxColorMissing)
+	}
+	if _, err := repo.UpdateEditorJSONMetadata(EditorJSONMetadataInput{
+		Document: EditorDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeNode,
+			ResourceID: node.NodeID, DocumentID: textboxID},
+		Title: "Metadata saved after link",
+	}); err != nil {
+		t.Fatalf("empty-color metadata save after direct link: %v", err)
+	}
+	if err := db.QueryRow(`select color from node_textboxes
+where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid`,
+		company.CompanyID, node.NodeID, textboxID).Scan(&linkedTextboxColor); err != nil || linkedTextboxColor != "#0EA5E9" {
+		t.Fatalf("linked textbox color after stale metadata save=%q err=%v", linkedTextboxColor, err)
+	}
+	if _, err := repo.UpdateEditorJSONMetadata(EditorJSONMetadataInput{
+		Document: EditorDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeNode,
+			ResourceID: node.NodeID, DocumentID: textboxID},
+		Title: "Explicit recolor after link", Color: "#F59E0B",
+	}); err != nil {
+		t.Fatalf("explicit metadata recolor after direct link: %v", err)
+	}
+	if err := db.QueryRow(`select color from node_textboxes
+where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid`,
+		company.CompanyID, node.NodeID, textboxID).Scan(&linkedTextboxColor); err != nil || linkedTextboxColor != "#0EA5E9" {
+		t.Fatalf("linked textbox color after explicit metadata recolor=%q err=%v", linkedTextboxColor, err)
+	}
+	missingWidePayload, _ := json.Marshal(map[string]any{"block_id": textboxID, "email_message_id": messageCID, "link_scope": "message"})
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID,
+		InformationID: "00000000-0000-4000-8000-000000000626",
+		Type:          "Attached email", Information: string(missingWidePayload), ActorUserID: owner.UserID,
+	}); !errors.Is(err, ErrEmailMessageNotAttachedToNode) {
+		t.Fatalf("missing Node-wide relationship err=%v", err)
+	}
+	wideCID := "00000000-0000-4000-8000-000000000630"
+	wideCPayload, _ := json.Marshal(map[string]any{"email_message_id": messageCID, "link_scope": "message"})
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: wideCID,
+		Type: "Attached email", Information: string(wideCPayload), ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatalf("attach C Node-wide: %v", err)
+	}
+	linkCID := "00000000-0000-4000-8000-000000000631"
+	linkCPayload, _ := json.Marshal(map[string]any{
+		"block_id": secondTextboxID, "email_message_id": messageCID, "link_scope": "message", "textbox_color": "#8B5CF6",
+	})
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: linkCID,
+		Type: "Attached email", Information: string(linkCPayload), ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatalf("link C to neutral textbox: %v", err)
+	}
+	if err := repo.DeleteNodeProjectionWithActor(NodeProjectionDeleteInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: linkCID, ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatalf("remove final relationship from C textbox: %v", err)
+	}
+	if _, err := repo.UpdateEditorJSONMetadata(EditorJSONMetadataInput{
+		Document: EditorDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeNode,
+			ResourceID: node.NodeID, DocumentID: secondTextboxID},
+		Title: "Stale metadata after final detach", Color: "#8B5CF6",
+	}); err != nil {
+		t.Fatalf("stale metadata after final direct detach: %v", err)
+	}
+	if err := db.QueryRow(`select color is null from node_textboxes
+where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid`,
+		company.CompanyID, node.NodeID, secondTextboxID).Scan(&conflictTextboxColorMissing); err != nil || !conflictTextboxColorMissing {
+		t.Fatalf("final direct detach did not neutralize textbox null=%v err=%v", conflictTextboxColorMissing, err)
+	}
+	providerPayload, _ := json.Marshal(map[string]any{"block_id": textboxID, "email_message_id": "provider-node-multi-c", "link_scope": "message"})
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID,
+		InformationID: "00000000-0000-4000-8000-000000000627",
+		Type:          "Attached email", Information: string(providerPayload), ActorUserID: owner.UserID,
+	}); !errors.Is(err, ErrEmailMessageIdentityInvalid) {
+		t.Fatalf("provider relationship identity err=%v", err)
+	}
+
+	projections, err := repo.ListNodeProjections(company.CompanyID, node.NodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var linked struct {
+		EmailMessageIDs []string `json:"email_message_ids"`
+	}
+	for _, projection := range projections {
+		if projection.InformationID == textboxID {
+			if err := json.Unmarshal([]byte(strings.TrimPrefix(projection.Information, editorTextBlockProjectionPrefix)), &linked); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if len(linked.EmailMessageIDs) != 2 || linked.EmailMessageIDs[0] != messageBID || linked.EmailMessageIDs[1] != messageAID {
+		t.Fatalf("timestamp-ordered linked messages=%v", linked.EmailMessageIDs)
+	}
+	if count := countPostgresRows(t, db, `select count(*) from email_relationships
+where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid
+  and resource_textbox_id=$3::text`, company.CompanyID, node.NodeID, secondTextboxID); count != 0 {
+		t.Fatalf("conflict leaked %d relationship rows", count)
+	}
+
+	versionBeforeRemoval, err := repo.CurrentNodeViewVersion(company.CompanyID, node.NodeID, owner.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteNodeProjectionWithActor(NodeProjectionDeleteInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: linkBID, ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatalf("remove chat-free exact relationship: %v", err)
+	}
+	versionAfterRemoval, err := repo.CurrentNodeViewVersion(company.CompanyID, node.NodeID, owner.UserID)
+	if err != nil || versionAfterRemoval.Shared <= versionBeforeRemoval.Shared {
+		t.Fatalf("direct relationship removal view version before=%+v after=%+v err=%v", versionBeforeRemoval, versionAfterRemoval, err)
+	}
+	var wideBCount, textboxBCount int
+	if err := db.QueryRow(`select
+  (select count(*) from email_relationships where company_id=$1::uuid and email_relationship_id=$3::uuid),
+  (select count(*) from email_relationships where company_id=$1::uuid and email_message_id=$4::uuid
+    and resource_type='node' and resource_id=$2::uuid and resource_textbox_id is not null)`,
+		company.CompanyID, node.NodeID, wideBID, messageBID).Scan(&wideBCount, &textboxBCount); err != nil {
+		t.Fatal(err)
+	}
+	if wideBCount != 1 || textboxBCount != 0 {
+		t.Fatalf("chat-free removal wide/textbox=%d/%d", wideBCount, textboxBCount)
+	}
+	if err := db.QueryRow(`select color from node_textboxes
+where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid`,
+		company.CompanyID, node.NodeID, textboxID).Scan(&linkedTextboxColor); err != nil || linkedTextboxColor != "#0EA5E9" {
+		t.Fatalf("removing one of two relationships changed textbox color=%q err=%v", linkedTextboxColor, err)
+	}
+
+	chatID := "00000000-0000-4000-8000-000000000621"
+	chatPayload, _ := json.Marshal(map[string]any{
+		"block_id": textboxID, "selection_source": "email", "selection_message_id": messageAID,
+		"author_id": owner.UserID, "author_name": "Node Multi Email Owner", "message": "Anchored chat",
+		"attachments": []any{}, "entity_links": []any{}, "mentioned_user_ids": []string{}, "mentioned_group_ids": []string{},
+	})
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: chatID,
+		Type: CommunicationsEmailCollaborationChatInformationType, Information: string(chatPayload), ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	secondMessageChatID := "00000000-0000-4000-8000-000000000628"
+	secondMessageChatPayload, _ := json.Marshal(map[string]any{
+		"block_id": textboxID, "ensure_email_textbox_link_on_send": true,
+		"email_textbox_color_on_send": "#0EA5E9", "selection_source": "email",
+		"selection_block_id": textboxID, "selection_message_id": messageBID,
+		"selection_quote": "Second exact message", "selection_start": 0, "selection_end": 20,
+		"author_id": owner.UserID, "author_name": "Node Multi Email Owner", "message": "Second message chat",
+		"attachments": []any{}, "entity_links": []any{}, "mentioned_user_ids": []string{}, "mentioned_group_ids": []string{},
+	})
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: secondMessageChatID,
+		Type: CommunicationsEmailCollaborationChatInformationType, Information: string(secondMessageChatPayload), ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatalf("second exact message first-chat send to existing textbox: %v", err)
+	}
+	projections, err = repo.ListNodeProjections(company.CompanyID, node.NodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	linked.EmailMessageIDs = nil
+	for _, projection := range projections {
+		if projection.InformationID == textboxID {
+			if err := json.Unmarshal([]byte(strings.TrimPrefix(projection.Information, editorTextBlockProjectionPrefix)), &linked); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if len(linked.EmailMessageIDs) != 2 || linked.EmailMessageIDs[0] != messageBID || linked.EmailMessageIDs[1] != messageAID {
+		t.Fatalf("second-message Enter projection=%v", linked.EmailMessageIDs)
+	}
+	var exactTextboxLinks, exactEmailChats int
+	if err := db.QueryRow(`select
+  (select count(*) from email_relationships where company_id=$1::uuid and resource_type='node'
+    and resource_id=$2::uuid and resource_textbox_id=$3::text and email_message_id in ($4::uuid,$5::uuid)),
+  (select count(*) from node_textbox_chats where company_id=$1::uuid and node_id=$2::uuid
+    and textbox_id=$3::uuid and selection_source='email'
+    and selection_email_message_id in ($4::uuid,$5::uuid))`,
+		company.CompanyID, node.NodeID, textboxID, messageAID, messageBID).Scan(&exactTextboxLinks, &exactEmailChats); err != nil {
+		t.Fatal(err)
+	}
+	if exactTextboxLinks != 2 || exactEmailChats != 2 {
+		t.Fatalf("second-message Enter links/chats=%d/%d", exactTextboxLinks, exactEmailChats)
+	}
+	if err := repo.DeleteNodeProjectionWithActor(NodeProjectionDeleteInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: linkAID, ActorUserID: owner.UserID,
+	}); !errors.Is(err, ErrEmailRelationshipRequiredByChat) {
+		t.Fatalf("anchored relationship removal err=%v", err)
+	}
+	var linkACount, chatCount int
+	if err := db.QueryRow(`select
+  (select count(*) from email_relationships where company_id=$1::uuid and email_relationship_id=$3::uuid),
+  (select count(*) from node_textbox_chats where company_id=$1::uuid and node_id=$2::uuid and chat_id=$4::uuid)`,
+		company.CompanyID, node.NodeID, linkAID, chatID).Scan(&linkACount, &chatCount); err != nil {
+		t.Fatal(err)
+	}
+	if linkACount != 1 || chatCount != 1 {
+		t.Fatalf("blocked removal relationship/chat=%d/%d", linkACount, chatCount)
+	}
+	if err := db.QueryRow(`select color from node_textboxes
+where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid`,
+		company.CompanyID, node.NodeID, textboxID).Scan(&linkedTextboxColor); err != nil || linkedTextboxColor != "#0EA5E9" {
+		t.Fatalf("blocked detach changed textbox color=%q err=%v", linkedTextboxColor, err)
+	}
+
+	providerChatTextboxID := "00000000-0000-4000-8000-000000000622"
+	providerChatID := "00000000-0000-4000-8000-000000000623"
+	providerChatPayload, _ := json.Marshal(map[string]any{
+		"block_id": providerChatTextboxID, "ensure_email_textbox_link_on_send": true,
+		"email_textbox_color_on_send": "#0EA5E9", "selection_source": "email",
+		"selection_block_id": providerChatTextboxID, "selection_message_id": "provider-node-multi-a",
+		"selection_quote": "Provider identity", "author_id": owner.UserID, "message": "Must fail",
+		"attachments": []any{}, "entity_links": []any{}, "mentioned_user_ids": []string{}, "mentioned_group_ids": []string{},
+	})
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: providerChatID,
+		Type: CommunicationsEmailCollaborationChatInformationType, Information: string(providerChatPayload), ActorUserID: owner.UserID,
+	}); !errors.Is(err, ErrEmailMessageIdentityInvalid) {
+		t.Fatalf("provider chat identity err=%v", err)
+	}
+	var leakedTextbox, leakedChat int
+	if err := db.QueryRow(`select
+  (select count(*) from node_textboxes where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid),
+  (select count(*) from node_textbox_chats where company_id=$1::uuid and node_id=$2::uuid and chat_id=$4::uuid)`,
+		company.CompanyID, node.NodeID, providerChatTextboxID, providerChatID).Scan(&leakedTextbox, &leakedChat); err != nil {
+		t.Fatal(err)
+	}
+	if leakedTextbox != 0 || leakedChat != 0 {
+		t.Fatalf("provider chat failure leaked textbox/chat=%d/%d", leakedTextbox, leakedChat)
 	}
 }
 

@@ -3,6 +3,7 @@ import {
   parseEditorChatEntityLinks,
   type EditorChatEntityLink,
 } from "./chatEntityLinks.js";
+import { normalizeLinkedEmailMessageIDs } from "./nodeEmailTextBoxRelationships.js";
 
 export type { EditorChatEntityLink } from "./chatEntityLinks.js";
 
@@ -120,8 +121,11 @@ export type EditorTextBlockContent = {
   title: string;
   document: string;
   attachments?: EditorChatAttachment[];
-  emailMessageID?: string;
   color?: string;
+};
+
+export type ParsedEditorTextBlockContent = EditorTextBlockContent & {
+  linkedEmailMessageIDs: string[];
 };
 
 function compareProjectionFreshness(a: EditorProjectionItem, b: EditorProjectionItem): number {
@@ -254,17 +258,16 @@ export function buildEditorAttachedEmailPayload(input: {
   });
 }
 
-export function parseEditorTextBlockContent(value: string): EditorTextBlockContent {
-  if (!value.startsWith(EDITOR_TEXT_BLOCK_CONTENT_PREFIX)) return { title: "", document: value, attachments: [] };
+export function parseEditorTextBlockContent(value: string): ParsedEditorTextBlockContent {
+  if (!value.startsWith(EDITOR_TEXT_BLOCK_CONTENT_PREFIX)) return { title: "", document: value, attachments: [], linkedEmailMessageIDs: [] };
   const payload = parsePayload(value.slice(EDITOR_TEXT_BLOCK_CONTENT_PREFIX.length));
-  if (!payload || typeof payload !== "object") return { title: "", document: "", attachments: [] };
+  if (!payload || typeof payload !== "object") return { title: "", document: "", attachments: [], linkedEmailMessageIDs: [] };
   const record = payload as Record<string, unknown>;
-  const emailMessageID = stringValue(record, "email_message_id");
   return {
     title: stringValue(record, "title"),
     document: rawStringValue(record, "document"),
     attachments: parseEditorChatAttachments(record.attachments),
-    emailMessageID: emailMessageID || undefined,
+    linkedEmailMessageIDs: normalizeLinkedEmailMessageIDs(record.email_message_ids),
     color: stringValue(record, "color") || undefined,
   };
 }
@@ -272,14 +275,12 @@ export function parseEditorTextBlockContent(value: string): EditorTextBlockConte
 export function buildEditorTextBlockMetadataPayload(input: EditorTextBlockContent): {
   title: string;
   attachments: Record<string, unknown>[];
-  email_message_id: string;
   color?: string;
 } {
   const color = input.color?.trim().toUpperCase() ?? "";
   return {
     title: input.title.trim(),
     attachments: normalizeChatAttachments(input.attachments ?? []).map(editorAttachmentReferencePayload),
-    email_message_id: input.emailMessageID?.trim() ?? "",
     ...(color ? { color } : {}),
   };
 }

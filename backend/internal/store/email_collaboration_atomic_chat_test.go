@@ -117,7 +117,7 @@ func TestMemoryEmailCollaborationAppendsChatInExistingNodeWithoutConversionJob(t
 		Message: domain.EmailMessageSnapshot{ID: "append-message", ThreadID: "append-thread", Subject: "Append chat"},
 		LinkedTextBlock: &NodeInformationInput{
 			InformationID: textBlockID, Type: "Text box", ActorUserID: creator.UserID,
-			Information: editorTextBlockProjectionPrefix + `{"title":"Email","document":"","attachments":[],"email_message_id":"` + placeholderMessageID + `"}`,
+			Information: editorTextBlockProjectionPrefix + `{"title":"Email","document":"","attachments":[]}`,
 		},
 		InitialChat: &NodeInformationInput{
 			InformationID: firstChatID, Type: CommunicationsEmailCollaborationChatInformationType, ActorUserID: creator.UserID,
@@ -178,7 +178,7 @@ func TestMemoryEmailThreadChatGroupsIncludeEveryNodeTextboxWithoutCreatingTextbo
 		CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "support@example.com", Provider: "google", CreatedByUserID: creator.UserID,
 		Message: domain.EmailMessageSnapshot{ID: "thread-message-1", ThreadID: "thread-chat-groups", Subject: "First", DownloadComplete: true},
 		LinkedTextBlock: &NodeInformationInput{InformationID: firstBlockID, Type: "Text box", ActorUserID: creator.UserID,
-			Information: editorTextBlockProjectionPrefix + `{"title":"First","document":"","email_message_id":"` + NewUUIDv7String() + `"}`},
+			Information: editorTextBlockProjectionPrefix + `{"title":"First","document":""}`},
 		InitialChat: &NodeInformationInput{InformationID: firstChatID, Type: CommunicationsEmailCollaborationChatInformationType, ActorUserID: creator.UserID,
 			Information: `{"block_id":"` + firstBlockID + `","selection_source":"email","selection_message_id":"` + NewUUIDv7String() + `","message":"first node chat"}`},
 	})
@@ -195,7 +195,7 @@ func TestMemoryEmailThreadChatGroupsIncludeEveryNodeTextboxWithoutCreatingTextbo
 		TargetNodeID: secondNode.NodeID,
 		Message:      domain.EmailMessageSnapshot{ID: "thread-message-2", ThreadID: "thread-chat-groups", Subject: "Second", DownloadComplete: true},
 		LinkedTextBlock: &NodeInformationInput{InformationID: secondBlockID, Type: "Text box", ActorUserID: creator.UserID,
-			Information: editorTextBlockProjectionPrefix + `{"title":"Second","document":"","email_message_id":"` + NewUUIDv7String() + `"}`},
+			Information: editorTextBlockProjectionPrefix + `{"title":"Second","document":""}`},
 		InitialChat: &NodeInformationInput{InformationID: secondChatID, Type: CommunicationsEmailCollaborationChatInformationType, ActorUserID: creator.UserID,
 			Information: `{"block_id":"` + secondBlockID + `","selection_source":"email","selection_message_id":"` + NewUUIDv7String() + `","message":"second node chat"}`},
 	})
@@ -257,7 +257,7 @@ func TestMemoryEmailThreadChatGroupsIncludeEveryNodeTextboxWithoutCreatingTextbo
 		TargetNodeID: first.Collaboration.NodeID,
 		Message:      domain.EmailMessageSnapshot{ID: "thread-message-3", ThreadID: "thread-chat-groups", Subject: "Third", DownloadComplete: true},
 		LinkedTextBlock: &NodeInformationInput{InformationID: thirdBlockID, Type: "Text box", ActorUserID: creator.UserID,
-			Information: editorTextBlockProjectionPrefix + `{"title":"Third","document":"","email_message_id":"` + NewUUIDv7String() + `"}`},
+			Information: editorTextBlockProjectionPrefix + `{"title":"Third","document":""}`},
 		InitialChat: &NodeInformationInput{InformationID: thirdChatID, Type: CommunicationsEmailCollaborationChatInformationType, ActorUserID: creator.UserID,
 			Information: `{"block_id":"` + thirdBlockID + `","selection_source":"email","selection_message_id":"` + NewUUIDv7String() + `","message":"third message chat"}`},
 	}); err != nil {
@@ -296,7 +296,7 @@ func TestMemoryEmailChatSelectsExistingGroupingAtomicallyAndKeepsTextboxOrder(t 
 		CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "support@example.com", Provider: "google", CreatedByUserID: creator.UserID,
 		Message: firstMessage,
 		LinkedTextBlock: &NodeInformationInput{InformationID: firstBlockID, Type: "Text box", ActorUserID: creator.UserID,
-			Information: editorTextBlockProjectionPrefix + `{"title":"First grouping","document":"","email_message_id":"` + NewUUIDv7String() + `"}`},
+			Information: editorTextBlockProjectionPrefix + `{"title":"First grouping","document":""}`},
 		InitialChat: &NodeInformationInput{InformationID: firstChatID, Type: CommunicationsEmailCollaborationChatInformationType, ActorUserID: creator.UserID,
 			Information: `{"block_id":"` + firstBlockID + `","selection_source":"email","selection_message_id":"` + NewUUIDv7String() + `","message":"first chat"}`},
 	})
@@ -339,7 +339,7 @@ func TestMemoryEmailChatSelectsExistingGroupingAtomicallyAndKeepsTextboxOrder(t 
 		CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "support@example.com", Provider: "google", CreatedByUserID: creator.UserID,
 		TargetNodeID: first.Collaboration.NodeID, Message: thirdMessage,
 		LinkedTextBlock: &NodeInformationInput{InformationID: secondBlockID, Type: "Text box", ActorUserID: creator.UserID,
-			Information: editorTextBlockProjectionPrefix + `{"title":"Second grouping","document":"","email_message_id":"` + NewUUIDv7String() + `"}`},
+			Information: editorTextBlockProjectionPrefix + `{"title":"Second grouping","document":""}`},
 		InitialChat: &NodeInformationInput{InformationID: thirdChatID, Type: CommunicationsEmailCollaborationChatInformationType, ActorUserID: creator.UserID,
 			Information: `{"block_id":"` + secondBlockID + `","selection_source":"email","selection_message_id":"` + NewUUIDv7String() + `","message":"third message chat"}`},
 	}); err != nil {
@@ -353,8 +353,8 @@ func TestMemoryEmailChatSelectsExistingGroupingAtomicallyAndKeepsTextboxOrder(t 
 		InitialChat: &NodeInformationInput{InformationID: conflictingChatID, Type: CommunicationsEmailCollaborationChatInformationType, ActorUserID: creator.UserID,
 			Information: `{"block_id":"` + secondBlockID + `","selection_source":"email","selection_message_id":"` + NewUUIDv7String() + `","message":"must not move"}`},
 	})
-	if !errors.Is(err, ErrInvalid) {
-		t.Fatalf("conflicting same-Node grouping err=%v, want ErrInvalid", err)
+	if !errors.Is(err, ErrEmailMessageTextboxConflict) {
+		t.Fatalf("conflicting same-Node grouping err=%v, want textbox conflict", err)
 	}
 
 	appendedFirstGroupChatID := NewUUIDv7String()
@@ -407,7 +407,7 @@ func TestMemoryEmailChatUsesAuthoritativeChatFreeTextboxLink(t *testing.T) {
 		CompanyID: companyID, SharedInboxID: sharedInboxID, AccountEmail: "support@example.com", Provider: "google", CreatedByUserID: creator.UserID,
 		Message: message,
 		LinkedTextBlock: &NodeInformationInput{InformationID: textboxID, Type: "Text box", ActorUserID: creator.UserID,
-			Information: editorTextBlockProjectionPrefix + `{"title":"Chat-free grouping","document":"","email_message_id":"` + NewUUIDv7String() + `"}`},
+			Information: editorTextBlockProjectionPrefix + `{"title":"Chat-free grouping","document":""}`},
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -16,6 +16,58 @@ func readNodeFinalContractFile(t *testing.T, parts ...string) string {
 	return strings.ToLower(string(body))
 }
 
+func TestNodeTextboxEmailProjectionKeepsEveryExactMessageInTimestampOrder(t *testing.T) {
+	source := strings.Join(strings.Fields(readNodeFinalContractFile(t, "postgres_node_final_storage.go")), " ")
+	required := "jsonb_agg(relationship.email_message_id::text order by message.message_timestamp nulls last,message.email_message_id) as email_message_ids"
+	if !strings.Contains(source, required) {
+		t.Fatalf("Node textbox email projection missing %q", required)
+	}
+	for _, forbidden := range []string{
+		"'email_message_id', coalesce(linked_email.email_message_id, '')",
+		"array_agg(relationship.email_message_id",
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("Node textbox email projection retained singular authority %q", forbidden)
+		}
+	}
+}
+
+func TestNodeLinkedTextboxColorIsAssignedAndPreservedByCanonicalWrites(t *testing.T) {
+	relationshipSource := strings.Join(strings.Fields(readNodeFinalContractFile(t, "postgres_node_final_storage.go")), " ")
+	for _, required := range []string{
+		`textboxcolor string ` + "`json:\"textbox_color\"`",
+		"for update",
+		"set color=coalesce(color,nullif($4,''))",
+	} {
+		if !strings.Contains(relationshipSource, required) {
+			t.Errorf("direct Node email relationship write missing %q", required)
+		}
+	}
+	metadataSource := strings.Join(strings.Fields(readNodeFinalContractFile(t, "postgres_editor_json_metadata.go")), " ")
+	for _, required := range []string{"for update", "from email_relationships", "input.color = storedcolor", `else { input.color = ""`} {
+		if !strings.Contains(metadataSource, required) {
+			t.Errorf("linked Node textbox metadata write missing %q", required)
+		}
+	}
+	deleteSource := strings.Join(strings.Fields(readNodeFinalContractFile(t, "postgres_nodes.go")), " ")
+	for _, required := range []string{
+		"select resource_textbox_id from email_relationships",
+		"select textbox_id::text from node_textboxes",
+		"for update",
+		"set color=null",
+		"and not exists ( select 1 from email_relationships relationship",
+	} {
+		if !strings.Contains(deleteSource, required) {
+			t.Errorf("final Node email relationship delete missing %q", required)
+		}
+	}
+	lockPosition := strings.Index(deleteSource, "select textbox_id::text from node_textboxes")
+	deletePosition := strings.Index(deleteSource, "delete from email_relationships where company_id=$1::uuid and email_relationship_id=$3::uuid")
+	if lockPosition < 0 || deletePosition < 0 || lockPosition > deletePosition {
+		t.Error("Node email relationship delete must lock its textbox before deleting the edge")
+	}
+}
+
 func TestNodeProductionSQLUsesOnlyFinalStorage(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {

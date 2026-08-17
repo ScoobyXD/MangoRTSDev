@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
@@ -406,6 +407,49 @@ func (r *MemoryRepo) addNodeInformation(input NodeInformationInput) (domain.Node
 	if _, ok := r.nodes[key(companyID, nodeID)]; !ok {
 		return domain.NodeInformation{}, ErrNotFound
 	}
+	var rollback func()
+	committed := false
+	defer func() {
+		if rollback != nil && !committed {
+			rollback()
+		}
+	}()
+	if isNodeTextboxChatType(infoType) {
+		var payload nodeTextboxChatPayload
+		if json.Unmarshal([]byte(input.Information), &payload) == nil && payload.EnsureEmailTextboxLink {
+			snapshot := r.snapshotCommunicationsTriageConversionStateLocked()
+			rollback = func() { r.restoreCommunicationsTriageConversionStateLocked(snapshot) }
+			if err := r.ensureMemoryEmailSelectionTextboxLinkForFirstChatLocked(input, payload, companyID, nodeID); err != nil {
+				return domain.NodeInformation{}, err
+			}
+		}
+	}
+	if strings.EqualFold(infoType, "Attached email") {
+		var payload nodeAttachedEmailPayload
+		if json.Unmarshal([]byte(input.Information), &payload) != nil {
+			return domain.NodeInformation{}, ErrInvalid
+		}
+		rawBlockID := strings.TrimSpace(payload.BlockID)
+		rawEmailMessageID := strings.TrimSpace(payload.EmailMessageID)
+		payload.BlockID = cleanUUIDText(payload.BlockID)
+		payload.EmailMessageID = cleanUUIDText(payload.EmailMessageID)
+		payload.TextboxColor = strings.ToUpper(strings.TrimSpace(payload.TextboxColor))
+		payload.LinkScope = strings.ToLower(strings.TrimSpace(payload.LinkScope))
+		if payload.LinkScope == "" {
+			payload.LinkScope = "message"
+		}
+		if rawEmailMessageID == "" || payload.EmailMessageID == "" {
+			return domain.NodeInformation{}, ErrEmailMessageIdentityInvalid
+		}
+		if (rawBlockID != "" && payload.BlockID == "") ||
+			(payload.TextboxColor != "" && (payload.BlockID == "" || !validNodeTextboxColor(payload.TextboxColor))) ||
+			(payload.BlockID != "" && payload.LinkScope != "message") {
+			return domain.NodeInformation{}, ErrInvalid
+		}
+		if payload.BlockID != "" {
+			return r.addMemoryNodeTextboxEmailRelationshipLocked(input, payload, companyID, nodeID, informationID)
+		}
+	}
 
 	now := time.Now().UTC()
 	k := key(companyID, nodeID)
@@ -460,7 +504,215 @@ func (r *MemoryRepo) addNodeInformation(input NodeInformationInput) (domain.Node
 	}
 	r.nodeText[k][keyValue] = projection
 	r.bumpNodeViewVersionLocked(companyID, nodeID)
+	committed = true
 	return item, nil
+}
+
+func (r *MemoryRepo) ensureMemoryEmailSelectionTextboxLinkForFirstChatLocked(
+	input NodeInformationInput,
+	payload nodeTextboxChatPayload,
+	companyID, nodeID string,
+) error {
+	textboxID := cleanUUIDText(payload.BlockID)
+	selectionTextboxID := cleanUUIDText(payload.SelectionBlockID)
+	rawEmailMessageID := strings.TrimSpace(payload.SelectionMessageID)
+	emailMessageID := cleanUUIDText(rawEmailMessageID)
+	textboxColor := strings.ToUpper(strings.TrimSpace(payload.EmailTextboxColor))
+	if rawEmailMessageID == "" || emailMessageID == "" {
+		return ErrEmailMessageIdentityInvalid
+	}
+	if textboxID == "" || selectionTextboxID != textboxID ||
+		strings.TrimSpace(payload.ParentID) != "" ||
+		strings.ToLower(strings.TrimSpace(payload.SelectionSource)) != "email" ||
+		strings.TrimSpace(payload.SelectionQuote) == "" ||
+		cleanUUIDText(input.ActorUserID) == "" || cleanUUIDText(payload.AuthorID) == "" ||
+		!validNodeTextboxColor(textboxColor) ||
+		(payload.SelectionStart == nil) != (payload.SelectionEnd == nil) ||
+		(payload.SelectionStart != nil && (*payload.SelectionStart < 0 || *payload.SelectionEnd < *payload.SelectionStart)) {
+		return ErrInvalid
+	}
+	_, hasAttachments, err := normalizeChatAttachmentIDs(payload.Attachments)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(payload.Message) == "" && !hasAttachments {
+		return ErrInvalid
+	}
+	if _, _, err := normalizeJSONArray(payload.EntityLinks); err != nil {
+		return err
+	}
+	if _, err := normalizeChatUUIDArray(payload.MentionedUserIDs); err != nil {
+		return err
+	}
+	if _, err := normalizeChatUUIDArray(payload.MentionedGroupIDs); err != nil {
+		return err
+	}
+	if _, _, err := parseChatTimestamp(payload.CreatedTimestamp, true); err != nil {
+		return err
+	}
+	if _, _, err := parseChatTimestamp(payload.EditedTimestamp, false); err != nil {
+		return err
+	}
+
+	projectionKey := key(companyID, nodeID)
+	if r.nodeText[projectionKey] == nil {
+		r.nodeText[projectionKey] = map[string]domain.NodeProjection{}
+	}
+	if target, exists := r.nodeText[projectionKey][textboxID]; exists {
+		if target.IsDeleted || !isEditorTextBoxType(target.Type) {
+			return ErrInvalid
+		}
+	} else {
+		now := time.Now().UTC()
+		information := editorTextBlockProjectionPrefix + `{"title":"","color":"","document":"","attachments":[]}`
+		textbox := domain.NodeProjection{
+			CompanyID: companyID, NodeID: nodeID, InformationID: textboxID,
+			Type: "Text box", Information: information, Revision: 1,
+			CreatedTimestamp: now, UpdatedTimestamp: now,
+		}
+		r.nodeText[projectionKey][textboxID] = textbox
+		r.nodeInfo[projectionKey] = append(r.nodeInfo[projectionKey], nodeProjectionAsInformation(textbox))
+	}
+	attachedPayload := nodeAttachedEmailPayload{
+		BlockID: textboxID, EmailMessageID: emailMessageID, TextboxColor: textboxColor,
+		AttachedTimestamp: time.Now().UTC().Format(time.RFC3339Nano), LinkScope: "message",
+	}
+	_, err = r.addMemoryNodeTextboxEmailRelationshipLocked(input, attachedPayload, companyID, nodeID, "")
+	return err
+}
+
+func (r *MemoryRepo) addMemoryNodeTextboxEmailRelationshipLocked(
+	input NodeInformationInput,
+	payload nodeAttachedEmailPayload,
+	companyID, nodeID, informationID string,
+) (domain.NodeInformation, error) {
+	projectionKey := key(companyID, nodeID)
+	projections := r.nodeText[projectionKey]
+	target, targetExists := projections[payload.BlockID]
+	if !targetExists || target.IsDeleted || !isEditorTextBoxType(target.Type) {
+		return domain.NodeInformation{}, ErrInvalid
+	}
+	for _, projection := range projections {
+		if projection.IsDeleted || !strings.EqualFold(strings.TrimSpace(projection.Type), "Attached email") {
+			continue
+		}
+		var existing nodeAttachedEmailPayload
+		if json.Unmarshal([]byte(projection.Information), &existing) != nil ||
+			cleanUUIDText(existing.EmailMessageID) != payload.EmailMessageID {
+			continue
+		}
+		existingTextboxID := cleanUUIDText(existing.BlockID)
+		if existingTextboxID != "" {
+			if existingTextboxID != payload.BlockID {
+				return domain.NodeInformation{}, ErrEmailMessageTextboxConflict
+			}
+			return nodeProjectionAsInformation(projection), nil
+		}
+	}
+	var selectedMessage domain.CommunicationsEmailMessage
+	var selectedThread domain.CommunicationsEmailThread
+	foundWideMessage := false
+	for _, relationship := range r.nodeEmailThreads {
+		if relationship.CompanyID != companyID || relationship.NodeID != nodeID {
+			continue
+		}
+		thread, ok := r.emailThreads[key(companyID, relationship.EmailThreadID)]
+		if !ok {
+			continue
+		}
+		for _, message := range thread.Messages {
+			if message.EmailMessageID == payload.EmailMessageID {
+				selectedMessage, selectedThread, foundWideMessage = message, thread, true
+				break
+			}
+		}
+		if foundWideMessage {
+			break
+		}
+	}
+	if !foundWideMessage {
+		return domain.NodeInformation{}, ErrEmailMessageNotAttachedToNode
+	}
+	snapshot := selectedMessage.Message
+	snapshot.EmailMessageID = selectedMessage.EmailMessageID
+	wideInformation := attachedEmailProjectionInformationWithThread(
+		snapshot, selectedThread.SharedInboxID, selectedThread.AccountEmail,
+		selectedThread.EmailThreadID, time.Now().UTC(), true,
+	)
+	var widePayload map[string]any
+	if json.Unmarshal([]byte(wideInformation), &widePayload) != nil {
+		return domain.NodeInformation{}, ErrInvalid
+	}
+
+	prefix := ""
+	textboxInformation := strings.TrimSpace(target.Information)
+	if strings.HasPrefix(textboxInformation, editorTextBlockProjectionPrefix) {
+		prefix = editorTextBlockProjectionPrefix
+		textboxInformation = strings.TrimSpace(strings.TrimPrefix(textboxInformation, prefix))
+	}
+	var textboxPayload map[string]any
+	if json.Unmarshal([]byte(textboxInformation), &textboxPayload) != nil {
+		return domain.NodeInformation{}, ErrInvalid
+	}
+	existingColor, _ := textboxPayload["color"].(string)
+	existingColor = strings.ToUpper(strings.TrimSpace(existingColor))
+	if existingColor != "" && !validNodeTextboxColor(existingColor) {
+		return domain.NodeInformation{}, ErrInvalid
+	}
+	if existingColor == "" && payload.TextboxColor == "" {
+		return domain.NodeInformation{}, ErrInvalid
+	}
+	if informationID == "" {
+		informationID = newUUIDv7String()
+	}
+	if _, exists := projections[informationID]; exists {
+		return domain.NodeInformation{}, ErrInvalid
+	}
+
+	widePayload["block_id"] = payload.BlockID
+	widePayload["email_message_id"] = payload.EmailMessageID
+	widePayload["link_scope"] = "message"
+	if strings.TrimSpace(payload.AttachedTimestamp) != "" {
+		if _, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(payload.AttachedTimestamp)); err != nil {
+			return domain.NodeInformation{}, ErrInvalid
+		}
+		widePayload["attached_timestamp"] = strings.TrimSpace(payload.AttachedTimestamp)
+	} else {
+		widePayload["attached_timestamp"] = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	delete(widePayload, "textbox_color")
+	relationshipInformation, err := json.Marshal(widePayload)
+	if err != nil {
+		return domain.NodeInformation{}, err
+	}
+
+	now := time.Now().UTC()
+	if existingColor == "" {
+		textboxPayload["color"] = payload.TextboxColor
+		updatedInformation, err := json.Marshal(textboxPayload)
+		if err != nil {
+			return domain.NodeInformation{}, err
+		}
+		target.Information = prefix + string(updatedInformation)
+		if target.Revision < 1 {
+			target.Revision = 1
+		}
+		target.Revision++
+		target.UpdatedTimestamp = now
+		projections[payload.BlockID] = target
+	}
+	projection := domain.NodeProjection{
+		CompanyID: companyID, NodeID: nodeID, InformationID: informationID,
+		Type: "Attached email", Information: string(relationshipInformation), Revision: 1,
+		CreatedTimestamp: now, UpdatedTimestamp: now,
+	}
+	projections[informationID] = projection
+	r.nodeInfo[projectionKey] = append(r.nodeInfo[projectionKey], nodeProjectionAsInformation(projection))
+	sort.Slice(r.nodeInfo[projectionKey], func(i, j int) bool {
+		return r.nodeInfo[projectionKey][i].CreatedTimestamp.Before(r.nodeInfo[projectionKey][j].CreatedTimestamp)
+	})
+	r.bumpNodeViewVersionLocked(companyID, nodeID)
+	return nodeProjectionAsInformation(projection), nil
 }
 
 func (r *MemoryRepo) ListNodeProjections(companyID, nodeID string) ([]domain.NodeProjection, error) {
@@ -469,10 +721,82 @@ func (r *MemoryRepo) ListNodeProjections(companyID, nodeID string) ([]domain.Nod
 	if _, ok := r.nodes[key(companyID, nodeID)]; !ok {
 		return nil, ErrNotFound
 	}
+	projections := r.nodeText[key(companyID, nodeID)]
+	type linkedEmailMessage struct {
+		messageID string
+		timestamp time.Time
+	}
+	linkedByTextboxID := map[string][]linkedEmailMessage{}
+	for _, projection := range projections {
+		if projection.IsDeleted || !strings.EqualFold(strings.TrimSpace(projection.Type), "Attached email") {
+			continue
+		}
+		var payload struct {
+			BlockID        string `json:"block_id"`
+			EmailMessageID string `json:"email_message_id"`
+			Date           *int64 `json:"date"`
+		}
+		if json.Unmarshal([]byte(projection.Information), &payload) != nil {
+			continue
+		}
+		textboxID := cleanUUIDText(payload.BlockID)
+		emailMessageID := cleanUUIDText(payload.EmailMessageID)
+		textbox, textboxExists := projections[textboxID]
+		if textboxID == "" || emailMessageID == "" || !textboxExists || textbox.IsDeleted || !isEditorTextBoxType(textbox.Type) {
+			continue
+		}
+		messageTimestamp := projection.CreatedTimestamp
+		if payload.Date != nil {
+			if *payload.Date > 1_000_000_000_000 {
+				messageTimestamp = time.UnixMilli(*payload.Date).UTC()
+			} else {
+				messageTimestamp = time.Unix(*payload.Date, 0).UTC()
+			}
+		}
+		linkedByTextboxID[textboxID] = append(linkedByTextboxID[textboxID], linkedEmailMessage{
+			messageID: emailMessageID, timestamp: messageTimestamp,
+		})
+	}
+	for textboxID := range linkedByTextboxID {
+		sort.SliceStable(linkedByTextboxID[textboxID], func(i, j int) bool {
+			left, right := linkedByTextboxID[textboxID][i], linkedByTextboxID[textboxID][j]
+			if !left.timestamp.Equal(right.timestamp) {
+				return left.timestamp.Before(right.timestamp)
+			}
+			return left.messageID < right.messageID
+		})
+	}
 	items := make([]domain.NodeProjection, 0)
-	for _, item := range r.nodeText[key(companyID, nodeID)] {
+	for _, item := range projections {
 		if isEditorTextBoxType(item.Type) && item.IsDeleted {
 			continue
+		}
+		if isEditorTextBoxType(item.Type) {
+			prefix := ""
+			information := strings.TrimSpace(item.Information)
+			if strings.HasPrefix(information, editorTextBlockProjectionPrefix) {
+				prefix = editorTextBlockProjectionPrefix
+				information = strings.TrimSpace(strings.TrimPrefix(information, prefix))
+			}
+			var payload map[string]any
+			if json.Unmarshal([]byte(information), &payload) == nil {
+				delete(payload, "email_message_id")
+				delete(payload, "email_message_ids")
+				messageIDs := make([]string, 0, len(linkedByTextboxID[item.InformationID]))
+				seen := map[string]bool{}
+				for _, linked := range linkedByTextboxID[item.InformationID] {
+					if !seen[linked.messageID] {
+						seen[linked.messageID] = true
+						messageIDs = append(messageIDs, linked.messageID)
+					}
+				}
+				if len(messageIDs) > 0 {
+					payload["email_message_ids"] = messageIDs
+				}
+				if raw, err := json.Marshal(payload); err == nil {
+					item.Information = prefix + string(raw)
+				}
+			}
 		}
 		items = append(items, item)
 	}
@@ -520,6 +844,8 @@ func (r *MemoryRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error
 
 	k := key(companyID, nodeID)
 	existing, projectionExists := r.nodeText[k][informationID]
+	neutralTextboxID := ""
+	var neutralTextbox domain.NodeProjection
 	if projectionExists && isEditorTextBoxType(existing.Type) {
 		if existing.Revision < 1 {
 			existing.Revision = 1
@@ -533,6 +859,64 @@ func (r *MemoryRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error
 		}
 	}
 	if projectionExists && strings.EqualFold(strings.TrimSpace(existing.Type), "Attached email") {
+		var relationship nodeAttachedEmailPayload
+		if json.Unmarshal([]byte(existing.Information), &relationship) == nil {
+			textboxID := cleanUUIDText(relationship.BlockID)
+			emailMessageID := cleanUUIDText(relationship.EmailMessageID)
+			textbox, textboxExists := r.nodeText[k][textboxID]
+			if textboxID != "" && emailMessageID != "" && textboxExists && isEditorTextBoxType(textbox.Type) {
+				for _, projection := range r.nodeText[k] {
+					if projection.IsDeleted || !isNodeTextboxChatType(projection.Type) {
+						continue
+					}
+					var chat nodeTextboxChatPayload
+					if json.Unmarshal([]byte(projection.Information), &chat) == nil &&
+						strings.EqualFold(strings.TrimSpace(chat.SelectionSource), "email") &&
+						cleanUUIDText(chat.BlockID) == textboxID &&
+						cleanUUIDText(chat.SelectionMessageID) == emailMessageID {
+						return ErrEmailRelationshipRequiredByChat
+					}
+				}
+				hasOtherRelationship := false
+				for otherID, projection := range r.nodeText[k] {
+					if otherID == informationID || projection.IsDeleted ||
+						!strings.EqualFold(strings.TrimSpace(projection.Type), "Attached email") {
+						continue
+					}
+					var other nodeAttachedEmailPayload
+					if json.Unmarshal([]byte(projection.Information), &other) == nil &&
+						cleanUUIDText(other.BlockID) == textboxID {
+						hasOtherRelationship = true
+						break
+					}
+				}
+				if !hasOtherRelationship {
+					prefix := ""
+					information := strings.TrimSpace(textbox.Information)
+					if strings.HasPrefix(information, editorTextBlockProjectionPrefix) {
+						prefix = editorTextBlockProjectionPrefix
+						information = strings.TrimSpace(strings.TrimPrefix(information, prefix))
+					}
+					var payload map[string]any
+					if json.Unmarshal([]byte(information), &payload) != nil {
+						return ErrInvalid
+					}
+					payload["color"] = ""
+					raw, err := json.Marshal(payload)
+					if err != nil {
+						return err
+					}
+					neutralTextboxID = textboxID
+					neutralTextbox = textbox
+					neutralTextbox.Information = prefix + string(raw)
+					if neutralTextbox.Revision < 1 {
+						neutralTextbox.Revision = 1
+					}
+					neutralTextbox.Revision++
+					neutralTextbox.UpdatedTimestamp = time.Now().UTC()
+				}
+			}
+		}
 		collaborationIDs := map[string]bool{}
 		for collaborationKey, collaboration := range r.emailCollaborations {
 			if collaboration.CompanyID == companyID && collaboration.NodeID == nodeID && collaboration.AttachedEmailInformationID == informationID {
@@ -570,6 +954,9 @@ func (r *MemoryRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error
 			r.nodeText[k][informationID] = existing
 		} else {
 			delete(r.nodeText[k], informationID)
+		}
+		if neutralTextboxID != "" {
+			r.nodeText[k][neutralTextboxID] = neutralTextbox
 		}
 		r.bumpNodeViewVersionLocked(companyID, nodeID)
 	}

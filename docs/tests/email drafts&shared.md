@@ -3,7 +3,7 @@
 1. Mango stores both personal drafts and Node-shared drafts in the existing `email_drafts` table. Provider Drafts are not application state, and there is no second Mango draft store.
 2. The only reply entry actions are **Reply** and **Reply all**. From the Node email column, either action opens the exact source message in its existing linked text box or creates that one text box first when it does not exist.
 3. Opening the reply scope chooser creates no email draft. A draft is created or reopened only after the user explicitly chooses **My draft** or **Shared draft**.
-4. A linked text box is identified by the exact internal `email_message_id`. Mango reuses that existing message-to-text-box placement instead of creating a second composer, relationship registry, or draft panel.
+4. Each message-to-text-box placement is identified by the exact internal `email_message_id`. Mango reuses that message's existing linked text box instead of creating a second composer, relationship registry, or draft panel; other exact messages may share the same text box.
 5. A personal draft belongs to one exact creator, one exact sending-account scope, and one exact internal source message. A shared-inbox sending account does not make a personal draft visible to other shared-inbox members.
 6. Only the personal draft creator may list, open, edit, send, or discard that draft. Node access and shared-inbox access do not weaken personal ownership.
 7. A Node-shared draft belongs to one exact Node, one exact stored email thread, and one exact internal source message. The same source message in another Node is a separate shared draft.
@@ -18,7 +18,7 @@
 16. Signature content uses the existing account-scoped signature loader and is applied at most once per reply session. It is saved as part of the draft body; no second signature state is added.
 17. Draft attachments use the existing `attachments` and `attachment_relationships` rows with resource type `email_draft` and the stable `draft_id`. File bytes never enter draft JSON. Removing an attachment removes the exact draft attachment relationship.
 18. Draft edits are debounced for 500 ms and show Saving, Saved, or Save failed. Typing does not reload the email message, the thread, other Node email threads, the Node page, or attachment bytes.
-19. A collapsed email card loads no thread detail. Expanding one card loads only that card's thread. A linked text box resolves its one exact message directly and does not fan out across every email or thread attached to the Node.
+19. A collapsed email card loads no thread detail. Expanding one card loads only that card's thread. A linked text box resolves only its exact linked messages directly, oldest-to-newest by stored message timestamp, and does not fan out across unrelated email or thread data attached to the Node.
 20. Attachment bytes and previews are loaded only when the user explicitly opens or downloads that attachment. Thread expansion does not eagerly download every attachment body.
 21. Mango adds no polling loop, alternate websocket, merge engine, lock service, duplicate editor, or duplicate collaboration state store for email drafts.
 22. Shared-draft updates, sends, and discards compare the expected revision. A stale command cannot overwrite or send a newer revision; the local editor content remains visible with a failure state for deliberate recovery.
@@ -30,7 +30,7 @@
 28. Permanently deleting a Node cascades its Node-scoped shared drafts. Deleting or losing one email relationship does not invent a new Node or copy the draft elsewhere.
 29. The cutover is forward-only. Existing personal-account drafts may use their exact stored creator as owner. The migration retires attachment links and deletes only obsolete draft rows that lack an exact owner or an exact Node and source message; Mango never guesses, copies, or exposes those rows in a new scope.
 
-Last updated: 2026-08-12
+Last updated: 2026-08-16
 
 # Process Story
 
