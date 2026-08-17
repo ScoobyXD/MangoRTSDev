@@ -2666,6 +2666,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                               </div>
 							<AttachedEmailOrganizerPane
                                 emails={attachedEmailsByBlockID.get(block.id) ?? []}
+                                repliesEnabled
                                 apiBase={apiBase}
 								companyID={companyID}
 								currentUserID={currentUserID}

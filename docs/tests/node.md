@@ -20,25 +20,25 @@
 18. Dragging one exact email message onto a Node text box links that message; dragging a whole thread onto a text box is rejected.
 19. My Triage and Shared Triage show one thread chat rail divided into groups by exact Node, message, and text box.
 20. Every triage chat group header shows a clickable Node icon and Node title.
-21. Reply and Reply All create or reopen only the current user's owner-only personal draft for the exact source message and sending account.
-22. Create Shared Draft creates or reopens one shared draft for this exact Node and thread, with one dedicated text box in this Node.
-23. One Node may have at most one active shared draft for the same thread.
-24. A thread in another Node may have a separate shared draft with separate content, revision, attachments, chat, and send lifecycle.
-25. No Node shows, counts, opens, edits, or discards another Node's shared draft merely because both Nodes contain the same thread.
-26. A triage Create Shared Draft action must nominate an accessible Node that already contains the thread, then open that Node's dedicated draft text box.
-27. Shared draft body, recipients, attachments, revision, and editable **From** account are shared only with current users of this exact Node.
-28. A user may select only an authorized connected sending account in **From**, and send authorization is checked against that exact account.
-29. Reply and Reply All from a Node remain personal; only Create Shared Draft starts Node-shared editing.
-30. A successfully sent reply becomes a new message in the same thread and inherits every Node-wide destination for that thread.
-31. Closing the shared-draft text box never deletes the draft; discarding removes only this exact Node's draft.
+21. Email and thread views inside a Node are read-only.
+22. A Node exposes no Reply, Reply All, shared-draft, personal-draft, composer, outgoing attachment, signature, scheduling, or email-send control.
+23. Opening or expanding Node email never creates, lists, loads, saves, sends, or discards an email draft.
+24. A Node continues to show received-message bodies, received attachments, participants, and stored thread history.
+25. Every attached-email thread starts collapsed; opening one thread loads summaries, and opening one exact message loads only that message's body and received-attachment metadata.
+26. Node-wide email relationships and exact email-to-text-box relationships remain unchanged.
+27. Highlighted-email chats and exact-message text-box creation remain available and keep their existing atomic relationship rules.
+28. Saved chat quotes and offsets continue to render as lasting highlights in the Node email view.
+29. Removing a Node email relationship remains blocked when that Node and thread have a text-box relationship or email-selection chat.
+30. A newly ingested or sent provider message still inherits every Node-wide destination already used by its thread.
+31. My Triage and Shared Triage retain compose, owner drafts, attachments, signatures, scheduling, and sending. Project attached-email replies retain their existing owner-draft, attachment, signature, and send behavior without adding scheduling.
 32. An ordinary Node text box stores no color and uses the normal thin neutral frame; only a text box with an exact email relationship stores an approved non-red RGB `color`, and the interface uses that literal value without hashing an email ID. Red is reserved for a failed save.
 33. A consolidated Node view carries text-box metadata but not a duplicate canonical editor document body; each mounted editor reads its exact canonical document once.
-34. Concurrent identical shared-draft and stored-thread reads share one request, while a committed realtime change forces a fresh canonical read.
-35. Every attached-email thread starts collapsed when a Node opens and performs no thread-body or this Node's shared-draft read until the user opens that exact thread.
+34. Concurrent identical stored-thread reads share one request, while a committed relevant realtime change forces a fresh canonical read.
+35. A Node performs no email draft request during initial load, thread expansion, exact-message expansion, realtime refresh, or text-box navigation.
 36. Sending a chat authored by the current user moves the shared chat view to the new message at the bottom.
 37. Every saved email-selection chat renders its exact stored quote and offsets as a lasting email highlight; cancelling an unsent selection removes only its temporary highlight.
 
-Last updated: 2026-08-11
+Last updated: 2026-08-16
 
 # General Process Story
 
@@ -48,7 +48,7 @@ Mango relates every stored message and each later ingested message to every Node
 ↓
 Each Node may link one exact message to its own local text box and keep its own local chat
 ↓
-Each Node may create its own one shared draft and dedicated text box while the exact **From** account separately retains send authority
+Each Node reads its related email and received attachments without exposing any mail composer or draft lifecycle
 
 # Main Scenarios
 
@@ -60,6 +60,6 @@ The same stored thread appears in both Nodes. A new message receives both Node-w
 
 The user previews the quote without writes. The first sent chat creates the exact Node-local text box, message relationship, and chat together; cancelling creates nothing. Another Node may link the same message to a different text box and keep a separate chat.
 
-## Shared draft and reply from a Node
+## Read-only email inside a Node
 
-Reply and Reply All remain personal to their user. Create Shared Draft creates or opens only this Node's draft and dedicated text box; another Node containing the thread has no access to it and may create its own separate draft. An authorized **From** account sends it, freezes the sent draft, and adds the sent message to the same thread under normal Node-wide propagation.
+Opening a related thread reveals stored message summaries and then exact message bodies on demand. The user may download received attachments, highlight text, create or open the permitted exact-message text box, and chat about the message. The Node contains no Reply, Reply All, draft, signature, outgoing attachment, scheduling, or send action; ordinary mail work remains in Triage or the retained Project reply surface.

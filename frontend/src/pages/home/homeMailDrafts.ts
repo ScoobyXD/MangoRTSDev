@@ -1,5 +1,5 @@
 import type { CommunicationsEmailDraft, EmailMessage } from "../../modules/communications/communicationsApi.js";
-import { deleteEmailDraft, getEmailDraft, getEmailSignature, listEmailDraftPage, parseEmailAddressList, saveEmailDraft, saveEmailSignature } from "../../modules/communications/communicationsApi.js";
+import { deleteEmailDraft, getEmailDraft, getEmailSignature, listEmailDrafts, parseEmailAddressList, saveEmailDraft, saveEmailSignature } from "../../modules/communications/communicationsApi.js";
 import { applyEmailSignature, emailBodyHasSignature, emailBodyWithoutSignature } from "../../modules/editor/emailSignatureBody.js";
 import { EDITOR_RICH_TEXT_PREFIX, editorBodyHasEmailContent, linkifyEditorPlainTextToHTML, sanitizeEditorDocumentHTML } from "../../modules/editor/richTextEditing.js";
 import { emptyCompose, type ComposeAttachment, type ComposeKind, type ComposeState } from "./homeTypes.js";
@@ -9,7 +9,6 @@ const HOME_MAIL_SIGNATURE_STORAGE_PREFIX = "mangorts.home.mailSignature.v1";
 const homeMailDraftScopeRevisions = new Map<string, number>();
 const homeMailDraftLoadGenerations = new Map<string, number>();
 const homeMailDraftEnsurePromises = new Map<string, Promise<HomeMailDraft[]>>();
-const homeMailSharedDraftCursors = new Map<string, string>();
 const homeMailDraftRemoteMutationTails = new Map<string, Promise<void>>();
 const homeMailSignatureRemoteSaveQueues = new Map<string, Promise<void>>();
 const homeMailSignatureLocalRevisions = new Map<string, number>();
@@ -28,6 +27,7 @@ export type HomeMailDraft = {
   companyID: string;
   sharedInboxID: string;
   accountEmail: string;
+  sourceMessageID: string;
   replyToMessageID: string;
   replyToMessage?: EmailMessage | null;
   to: string;
@@ -37,10 +37,6 @@ export type HomeMailDraft = {
   body: string;
   attachments: ComposeAttachment[];
   scheduledAt: string;
-	originNodeID: string;
-	emailThreadID: string;
-  sharedDraft: boolean;
-  revision: number;
   createdAt: string;
   updatedAt: string;
   pendingRemoteSync?: boolean;
@@ -297,13 +293,6 @@ export function createHomeMailReplyDraftID(sharedInboxID: string, replyToMessage
   return `draft:reply:${encodeURIComponent(scope)}:${encodeURIComponent(cleanReplyToMessageID)}`;
 }
 
-export function createHomeMailSharedReplyDraftID(nodeID: string, sourceMessageID: string): string {
-  const cleanNodeID = nodeID.trim();
-  const cleanSourceMessageID = sourceMessageID.trim();
-  if (!cleanNodeID || !cleanSourceMessageID) return createHomeMailDraftID();
-  return `draft:reply:message:${cleanSourceMessageID}:node:${cleanNodeID}`;
-}
-
 export function createHomeMailForwardDraftID(sharedInboxID: string, messageID: string, accountEmail = "", userID = ""): string {
   const cleanMessageID = messageID.trim();
   if (!cleanMessageID) return createHomeMailDraftID();
@@ -331,6 +320,22 @@ function cloneAttachments(attachments: ComposeAttachment[] | undefined): Compose
     .filter((attachment): attachment is ComposeAttachment => Boolean(attachment));
 }
 
+function isLegacyNodeSharedDraft(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object") return false;
+  const item = raw as Record<string, unknown>;
+  const draftID = typeof item.id === "string"
+    ? item.id.trim()
+    : typeof item.draft_id === "string" ? item.draft_id.trim() : "";
+  const originNodeID = typeof item.originNodeID === "string"
+    ? item.originNodeID.trim()
+    : typeof item.origin_node_id === "string" ? item.origin_node_id.trim() : "";
+  return item.sharedDraft === true
+    || item.is_shared === true
+    || Boolean(originNodeID)
+    || /^draft:reply:message:.*:node:/.test(draftID)
+    || draftID.startsWith("draft:shared-reply:");
+}
+
 function normalizeDraft(raw: unknown, companyID: string, userID: string): HomeMailDraft | null {
   if (!raw || typeof raw !== "object") return null;
   const item = raw as Partial<HomeMailDraft>;
@@ -345,6 +350,7 @@ function normalizeDraft(raw: unknown, companyID: string, userID: string): HomeMa
     companyID: companyID.trim(),
     sharedInboxID: item.sharedInboxID?.trim() ?? "",
     accountEmail: item.accountEmail?.trim() ?? "",
+    sourceMessageID: item.sourceMessageID?.trim() ?? "",
     replyToMessageID: item.replyToMessageID?.trim() ?? "",
     replyToMessage: item.replyToMessage ? cloneMessage(item.replyToMessage) : null,
     to: item.to ?? "",
@@ -354,10 +360,6 @@ function normalizeDraft(raw: unknown, companyID: string, userID: string): HomeMa
     body: item.body ?? "",
     attachments: Array.isArray(item.attachments) ? cloneAttachments(item.attachments) : [],
     scheduledAt: item.scheduledAt?.trim() ?? "",
-	originNodeID: item.originNodeID?.trim() ?? "",
-	emailThreadID: item.emailThreadID?.trim() ?? "",
-    sharedDraft: item.sharedDraft === true,
-    revision: Number.isFinite(item.revision) ? Math.max(0, Math.trunc(item.revision ?? 0)) : 0,
     createdAt,
     updatedAt,
     pendingRemoteSync: item.pendingRemoteSync === true,
@@ -369,10 +371,19 @@ export function readHomeMailDrafts(companyID: string, userID: string): HomeMailD
   try {
     const parsed = JSON.parse(localStorage.getItem(draftsStorageKey(companyID, userID)) ?? "[]") as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed
+    const retained = parsed.filter((item) => !isLegacyNodeSharedDraft(item));
+    const drafts = retained
       .map((item) => normalizeDraft(item, companyID, userID))
       .filter((item): item is HomeMailDraft => !!item)
       .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
+    if (retained.length !== parsed.length) {
+      try {
+        localStorage.setItem(draftsStorageKey(companyID, userID), JSON.stringify(drafts));
+      } catch {
+        // Filtering still prevents obsolete Node-shared drafts from reappearing in this session.
+      }
+    }
+    return drafts;
   } catch {
     return [];
   }
@@ -383,21 +394,11 @@ export function homeMailDraftMatchesScope(
   sharedInboxID = "",
   accountEmail = "",
 ): boolean {
-  // Node-shared drafts are participant-scoped rather than mailbox-scoped.
-  if (draft.sharedDraft) return true;
   const cleanSharedInboxID = sharedInboxID.trim();
   if (cleanSharedInboxID) return draft.sharedInboxID.trim() === cleanSharedInboxID;
   if (draft.sharedInboxID.trim()) return false;
   const cleanAccountEmail = accountEmail.trim().toLowerCase();
   return !!cleanAccountEmail && draft.accountEmail.trim().toLowerCase() === cleanAccountEmail;
-}
-
-function homeMailPersonalDraftMatchesScope(
-  draft: HomeMailDraft,
-  sharedInboxID = "",
-  accountEmail = "",
-): boolean {
-  return !draft.sharedDraft && homeMailDraftMatchesScope(draft, sharedInboxID, accountEmail);
 }
 
 export function readHomeMailDraftsForScope(
@@ -424,7 +425,7 @@ function writeHomeMailDrafts(companyID: string, userID: string, drafts: HomeMail
   return sorted;
 }
 
-function replaceHomeMailDraftPersonalScope(
+function replaceHomeMailDraftScope(
   companyID: string,
   userID: string,
   sharedInboxID: string,
@@ -432,7 +433,7 @@ function replaceHomeMailDraftPersonalScope(
   scopedDrafts: HomeMailDraft[],
 ): HomeMailDraft[] {
   const currentDrafts = readHomeMailDrafts(companyID, userID);
-  const otherScopeDrafts = currentDrafts.filter((draft) => !homeMailPersonalDraftMatchesScope(draft, sharedInboxID, accountEmail));
+  const otherScopeDrafts = currentDrafts.filter((draft) => !homeMailDraftMatchesScope(draft, sharedInboxID, accountEmail));
   return writeHomeMailDrafts(companyID, userID, [...otherScopeDrafts, ...scopedDrafts])
     .filter((draft) => homeMailDraftMatchesScope(draft, sharedInboxID, accountEmail));
 }
@@ -455,17 +456,19 @@ export async function loadHomeMailDrafts(
 ): Promise<HomeMailDraft[]> {
   const loadAttempt = beginHomeMailDraftLoad(companyID, userID, sharedInboxID, accountEmail);
   const localDrafts = readHomeMailDrafts(companyID, userID)
-    .filter((draft) => homeMailPersonalDraftMatchesScope(draft, sharedInboxID, accountEmail));
+    .filter((draft) => homeMailDraftMatchesScope(draft, sharedInboxID, accountEmail));
   const readCurrentScope = () => readHomeMailDraftsForScope(companyID, userID, sharedInboxID, accountEmail);
   try {
 		const scope = { sharedInboxID: sharedInboxID.trim() || undefined, accountEmail: accountEmail.trim() || undefined };
-		const scopePage = scope.sharedInboxID || scope.accountEmail
-			? await listEmailDraftPage(companyID, scope, { refresh: true })
-			: { drafts: [], nextCursor: "" };
-		const remoteDrafts = scopePage.drafts
+		const remoteRows = scope.sharedInboxID || scope.accountEmail
+			? await listEmailDrafts(companyID, scope, { refresh: true })
+			: [];
+		const localByID = new Map(localDrafts.map((draft) => [draft.id, draft]));
+		const remoteDrafts = remoteRows
 			.map((draft) => homeMailDraftFromRemote(draft, companyID, userID))
       .filter((draft): draft is HomeMailDraft => Boolean(draft))
-      .filter((draft) => homeMailPersonalDraftMatchesScope(draft, sharedInboxID, accountEmail));
+      .map((draft) => preserveHomeMailDraftDetail(draft, localByID.get(draft.id)))
+      .filter((draft) => homeMailDraftMatchesScope(draft, sharedInboxID, accountEmail));
     if (!homeMailDraftLoadIsCurrent(loadAttempt)) return readCurrentScope();
     const supersededRemoteDraftIDs = supersededHomeMailDraftIDs(remoteDrafts);
     if (supersededRemoteDraftIDs.length > 0) {
@@ -495,34 +498,14 @@ export async function loadHomeMailDrafts(
     const failedPendingDrafts = pendingLocalDrafts.filter((draft) => failedPendingDraftIDs.has(draft.id));
     const scopedDrafts = mergeHomeMailDrafts([...activeRemoteDrafts, ...migratedDrafts], failedPendingDrafts);
     if (!homeMailDraftLoadIsCurrent(loadAttempt)) return readCurrentScope();
-    return replaceHomeMailDraftPersonalScope(companyID, userID, sharedInboxID, accountEmail, scopedDrafts);
+    return replaceHomeMailDraftScope(companyID, userID, sharedInboxID, accountEmail, scopedDrafts);
   } catch (error) {
     if (!homeMailDraftLoadIsCurrent(loadAttempt)) return readCurrentScope();
     if (homeMailDraftScopeFailureRequiresLocalPurge(error)) {
-      return replaceHomeMailDraftPersonalScope(companyID, userID, sharedInboxID, accountEmail, []);
+      return replaceHomeMailDraftScope(companyID, userID, sharedInboxID, accountEmail, []);
     }
     return readCurrentScope();
   }
-}
-
-export function nextHomeMailSharedDraftCursor(companyID: string, userID: string): string {
-	return homeMailSharedDraftCursors.get(draftsStorageKey(companyID, userID)) ?? "";
-}
-
-export async function loadMoreHomeSharedMailDrafts(
-	companyID: string,
-	userID: string,
-	cursor: string,
-): Promise<HomeMailDraft[]> {
-	const cleanCursor = cursor.trim();
-	if (!cleanCursor) return readHomeMailDrafts(companyID, userID);
-	const page = await listEmailDraftPage(companyID, {}, { cursor: cleanCursor, refresh: true });
-	homeMailSharedDraftCursors.set(draftsStorageKey(companyID, userID), page.nextCursor);
-	const incoming = page.drafts
-		.map((draft) => homeMailDraftFromRemote(draft, companyID, userID))
-		.filter((draft): draft is HomeMailDraft => Boolean(draft));
-	const merged = mergeHomeMailDrafts(incoming, readHomeMailDrafts(companyID, userID));
-	return writeHomeMailDrafts(companyID, userID, merged);
 }
 
 export async function loadHomeMailDraft(
@@ -530,11 +513,17 @@ export async function loadHomeMailDraft(
 	userID: string,
 	draft: HomeMailDraft,
 ): Promise<HomeMailDraft | null> {
-	const scope = draft.sharedDraft
-		? {}
-		: { sharedInboxID: draft.sharedInboxID || undefined, accountEmail: draft.accountEmail || undefined };
+	const scopeKey = homeMailDraftScopeKey(companyID, userID, draft.sharedInboxID, draft.accountEmail);
+	const expectedRevision = readHomeMailDraftScopeRevision(scopeKey);
+	const scope = { sharedInboxID: draft.sharedInboxID || undefined, accountEmail: draft.accountEmail || undefined };
 	const remote = await getEmailDraft(companyID, draft.id, scope);
-	return remote ? homeMailDraftFromRemote(remote, companyID, userID) : null;
+	const loaded = remote ? homeMailDraftFromRemote(remote, companyID, userID) : null;
+	if (!loaded || readHomeMailDraftScopeRevision(scopeKey) !== expectedRevision) return loaded;
+	const currentDrafts = readHomeMailDrafts(companyID, userID);
+	const current = currentDrafts.find((item) => item.id === draft.id);
+	if (!current || current.pendingRemoteSync || current.updatedAt !== draft.updatedAt) return loaded;
+	writeHomeMailDrafts(companyID, userID, [loaded, ...currentDrafts.filter((item) => item.id !== loaded.id)]);
+	return loaded;
 }
 
 export function syncHomeMailDraftFromCompose(
@@ -579,14 +568,12 @@ export function syncHomeMailDraftFromCompose(
         await deleteEmailDraft(companyID, draftID, {
           sharedInboxID: priorDraft.sharedInboxID || undefined,
           accountEmail: priorDraft.accountEmail || undefined,
-          revision: priorDraft.sharedDraft ? priorDraft.revision : undefined,
         });
         return readCurrentScope();
       }
       if (readHomeMailDraftScopeRevision(scopeKey) !== expectedLocalRevision) return readCurrentScope();
 		return readCurrentScope();
-    } catch (error) {
-      if (compose.sharedDraft) throw error;
+    } catch {
       return readCurrentScope();
     }
   });
@@ -637,19 +624,6 @@ export function ensureHomeMailDraftAttachmentTarget(
 export async function deleteHomeMailDraftRemote(companyID: string, userID: string, draftID: string): Promise<HomeMailDraft[]> {
   const existing = readHomeMailDrafts(companyID, userID).find((draft) => draft.id === draftID.trim()) ?? null;
   if (!existing) return deleteHomeMailDraft(companyID, userID, draftID);
-  if (existing.sharedDraft) {
-    // Revision-checked shared discard is server-authoritative. Keep the local
-    // copy intact when another participant already saved a newer revision.
-    await deleteEmailDraft(companyID, draftID, {
-      sharedInboxID: existing.sharedInboxID || existing.replyToMessage?.collaboration_shared_inbox_id || undefined,
-      accountEmail: existing.sharedInboxID || existing.replyToMessage?.collaboration_shared_inbox_id
-        ? undefined
-        : (existing.replyToMessage?.collaboration_account_email || existing.accountEmail || undefined),
-      revision: existing.revision,
-    });
-    deleteHomeMailDraft(companyID, userID, draftID);
-    return loadHomeMailDrafts(companyID, userID);
-  }
   deleteHomeMailDraft(companyID, userID, draftID);
   const readCurrentScope = () => readHomeMailDraftsForScope(
     companyID,
@@ -680,22 +654,9 @@ export async function deleteHomeMailDraftRemote(companyID: string, userID: strin
 export async function deleteHomeMailDraftsRemote(companyID: string, userID: string, draftIDs: string[]): Promise<HomeMailDraft[]> {
   const cleanDraftIDs = new Set(draftIDs.map((draftID) => draftID.trim()).filter(Boolean));
   const existingDrafts = readHomeMailDrafts(companyID, userID).filter((draft) => cleanDraftIDs.has(draft.id));
-  const sharedDrafts = existingDrafts.filter((draft) => draft.sharedDraft);
-  if (sharedDrafts.length > 0) {
-    await Promise.all(sharedDrafts.map((draft) => queueHomeMailDraftRemoteMutation(
-      homeMailDraftRemoteMutationKey(companyID, userID, draft.id, draft.sharedInboxID, draft.accountEmail),
-      () => deleteEmailDraft(companyID, draft.id, {
-        sharedInboxID: draft.sharedInboxID || draft.replyToMessage?.collaboration_shared_inbox_id || undefined,
-        accountEmail: draft.sharedInboxID || draft.replyToMessage?.collaboration_shared_inbox_id
-          ? undefined
-          : (draft.replyToMessage?.collaboration_account_email || draft.accountEmail || undefined),
-        revision: draft.revision,
-      }),
-    )));
-  }
   deleteHomeMailDrafts(companyID, userID, draftIDs);
   try {
-    await Promise.all(existingDrafts.filter((draft) => !draft.sharedDraft).map((draft) => queueHomeMailDraftRemoteMutation(
+    await Promise.all(existingDrafts.map((draft) => queueHomeMailDraftRemoteMutation(
       homeMailDraftRemoteMutationKey(companyID, userID, draft.id, draft.sharedInboxID, draft.accountEmail),
       () => deleteEmailDraft(companyID, draft.id, {
         sharedInboxID: draft.sharedInboxID || undefined,
@@ -709,10 +670,8 @@ export async function deleteHomeMailDraftsRemote(companyID: string, userID: stri
 }
 
 async function saveHomeMailDraftToDatabase(draft: HomeMailDraft): Promise<HomeMailDraft | null> {
-  const sourceSharedInboxID = draft.sharedInboxID || draft.replyToMessage?.collaboration_shared_inbox_id?.trim() || "";
-  const sourceAccountEmail = sourceSharedInboxID
-    ? ""
-    : (draft.replyToMessage?.collaboration_account_email?.trim() || draft.accountEmail);
+  const sourceSharedInboxID = draft.sharedInboxID.trim();
+  const sourceAccountEmail = sourceSharedInboxID ? "" : draft.accountEmail.trim();
   const saved = await saveEmailDraft({
     companyID: draft.companyID,
     draftID: draft.id,
@@ -720,7 +679,7 @@ async function saveHomeMailDraftToDatabase(draft: HomeMailDraft): Promise<HomeMa
     accountEmail: sourceAccountEmail || undefined,
     senderAccountEmail: draft.accountEmail || undefined,
     kind: draft.kind,
-    sourceMessageID: draft.replyToMessage?.email_message_id?.trim() || undefined,
+    sourceMessageID: draft.sourceMessageID || draft.replyToMessage?.email_message_id?.trim() || undefined,
     replyToMessageID: draft.kind === "reply" ? draft.replyToMessageID || undefined : undefined,
     to: draft.to,
     cc: draft.cc,
@@ -729,15 +688,12 @@ async function saveHomeMailDraftToDatabase(draft: HomeMailDraft): Promise<HomeMa
     bodyEditorHTML: draft.body,
     replyToMessage: draft.replyToMessage ?? null,
     scheduledSendTimestamp: draft.scheduledAt,
-	emailThreadID: draft.emailThreadID || undefined,
-	originNodeID: draft.originNodeID || undefined,
-    sharedDraft: draft.sharedDraft,
-    revision: draft.revision,
   });
   return homeMailDraftFromRemote(saved, draft.companyID, draft.userID);
 }
 
 function homeMailDraftFromRemote(draft: CommunicationsEmailDraft, companyID: string, userID: string): HomeMailDraft | null {
+  if (isLegacyNodeSharedDraft(draft)) return null;
   const id = draft.draft_id?.trim();
   if (!id) return null;
   return normalizeDraft({
@@ -747,7 +703,8 @@ function homeMailDraftFromRemote(draft: CommunicationsEmailDraft, companyID: str
     companyID,
     sharedInboxID: draft.shared_inbox_id ?? "",
     accountEmail: draft.account_email ?? draft.personal_account_email ?? "",
-    replyToMessageID: draft.reply_to_message?.id?.trim() || draft.source_message_id || "",
+    sourceMessageID: draft.source_message_id ?? "",
+    replyToMessageID: draft.reply_to_message?.id?.trim() || "",
     replyToMessage: draft.reply_to_message ?? null,
     to: draft.to_recipients ?? "",
     cc: draft.cc_recipients ?? "",
@@ -756,10 +713,6 @@ function homeMailDraftFromRemote(draft: CommunicationsEmailDraft, companyID: str
     body: draft.body_editor_html ?? "",
     attachments: remoteDraftAttachments(draft),
     scheduledAt: scheduledTimestampForCompose(draft.scheduled_send_timestamp ?? ""),
-	originNodeID: draft.origin_node_id ?? "",
-	emailThreadID: draft.email_thread_id ?? "",
-    sharedDraft: draft.is_shared === true,
-    revision: Number.isFinite(draft.revision) ? Math.max(0, Math.trunc(draft.revision ?? 0)) : 0,
     createdAt: draft.created_timestamp,
     updatedAt: draft.updated_timestamp,
     pendingRemoteSync: false,
@@ -778,25 +731,24 @@ function remoteDraftAttachments(draft: CommunicationsEmailDraft): ComposeAttachm
     .filter((attachment) => attachment.attachmentID);
 }
 
+function preserveHomeMailDraftDetail(summary: HomeMailDraft, local: HomeMailDraft | undefined): HomeMailDraft {
+  if (!local) return summary;
+  return {
+    ...summary,
+    sourceMessageID: summary.sourceMessageID || local.sourceMessageID,
+    replyToMessageID: local.replyToMessageID || summary.replyToMessageID,
+    replyToMessage: local.replyToMessage ? cloneMessage(local.replyToMessage) : summary.replyToMessage,
+    body: local.body,
+    attachments: cloneAttachments(local.attachments),
+  };
+}
+
 export function mergeHomeMailDrafts(primary: HomeMailDraft[], secondary: HomeMailDraft[]): HomeMailDraft[] {
   const byDraftKey = new Map<string, HomeMailDraft>();
   for (const draft of [...secondary, ...primary]) {
     const key = homeMailDraftSemanticKey(draft);
     const existing = byDraftKey.get(key);
-    const sharedRevisionWins = existing?.sharedDraft === true
-      && draft.sharedDraft
-			&& draft.originNodeID.trim() === existing.originNodeID.trim()
-      && draft.revision !== existing.revision
-      && draft.revision > existing.revision;
-    const sharedRevisionLoses = existing?.sharedDraft === true
-      && draft.sharedDraft
-			&& draft.originNodeID.trim() === existing.originNodeID.trim()
-      && draft.revision !== existing.revision
-      && draft.revision < existing.revision;
-    // A browser-local optimistic save receives a fresh local timestamp before
-    // the server can reject its stale expected revision. Never let that clock
-    // make stale shared content hide the canonical higher revision forever.
-    if (!existing || sharedRevisionWins || (!sharedRevisionLoses && Date.parse(draft.updatedAt) >= Date.parse(existing.updatedAt))) {
+    if (!existing || Date.parse(draft.updatedAt) >= Date.parse(existing.updatedAt)) {
       byDraftKey.set(key, draft);
     }
   }
@@ -809,10 +761,9 @@ export function supersededHomeMailDraftIDs(drafts: HomeMailDraft[]): string[] {
 }
 
 function homeMailDraftSemanticKey(draft: HomeMailDraft): string {
-	if (draft.sharedDraft && draft.originNodeID.trim()) {
-		return `shared-reply:${draft.originNodeID.trim()}:${draft.replyToMessage?.email_message_id?.trim() || draft.replyToMessageID.trim()}`;
-  }
-  const replyMessageID = draft.replyToMessageID.trim();
+  const replyMessageID = draft.sourceMessageID.trim()
+    || draft.replyToMessage?.email_message_id?.trim()
+    || draft.replyToMessageID.trim();
   const scope = draft.sharedInboxID.trim()
     ? `shared:${draft.sharedInboxID.trim()}`
     : `personal:${draft.userID.trim()}:${draft.accountEmail.trim().toLowerCase()}`;
@@ -821,7 +772,7 @@ function homeMailDraftSemanticKey(draft: HomeMailDraft): string {
 
 function normalizeHomeMailDraftKind(value: unknown, draftID: string): ComposeKind {
   if (value === "reply" || value === "forward" || value === "compose") return value;
-  if (draftID.startsWith("draft:reply:") || draftID.startsWith("draft:shared-reply:")) return "reply";
+  if (draftID.startsWith("draft:reply:")) return "reply";
   if (draftID.startsWith("draft:forward:")) return "forward";
   return "compose";
 }
@@ -900,6 +851,7 @@ export function saveHomeMailDraftFromCompose(
     companyID: companyID.trim(),
     sharedInboxID: compose.sharedInboxID.trim(),
     accountEmail: compose.accountEmail.trim(),
+    sourceMessageID: compose.replyToMessage?.email_message_id?.trim() || existing?.sourceMessageID || "",
     replyToMessageID: compose.replyToMessageID.trim(),
     replyToMessage: compose.replyToMessage ? cloneMessage(compose.replyToMessage) : null,
     to: compose.to,
@@ -908,11 +860,7 @@ export function saveHomeMailDraftFromCompose(
     subject: compose.subject,
     body: compose.body,
     attachments: cloneAttachments(compose.attachments),
-    scheduledAt: compose.sharedDraft ? "" : compose.scheduledAt.trim(),
-	originNodeID: compose.originNodeID.trim(),
-	emailThreadID: compose.emailThreadID.trim(),
-    sharedDraft: compose.sharedDraft,
-    revision: compose.draftRevision,
+    scheduledAt: compose.scheduledAt.trim(),
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
     pendingRemoteSync: true,
@@ -936,11 +884,7 @@ export function homeMailDraftToCompose(draft: HomeMailDraft): ComposeState {
     subject: draft.subject,
     body: draft.body,
     attachments: cloneAttachments(draft.attachments),
-    scheduledAt: draft.sharedDraft ? "" : draft.scheduledAt,
-	originNodeID: draft.originNodeID,
-	emailThreadID: draft.emailThreadID,
-    sharedDraft: draft.sharedDraft,
-    draftRevision: draft.revision,
+    scheduledAt: draft.scheduledAt,
   };
 }
 
@@ -952,7 +896,7 @@ export function homeMailDraftToMessage(draft: HomeMailDraft): EmailMessage {
   return {
     id: draft.id,
     subject: draft.subject.trim() || "(no subject)",
-    snippet: bodySnippet || inlineContentSnippet || attachmentSnippet || (draft.sharedDraft ? "Shared draft" : "Draft"),
+    snippet: bodySnippet || inlineContentSnippet || attachmentSnippet || "Draft",
     body: draft.body,
     date: Number.isFinite(updatedAtMs) ? Math.floor(updatedAtMs / 1000) : undefined,
     unread: false,
@@ -969,9 +913,6 @@ export function homeMailDraftToMessage(draft: HomeMailDraft): EmailMessage {
       size: attachment.size,
     })),
     folders: ["drafts", "draft"],
-		collaboration_node_id: draft.sharedDraft ? draft.originNodeID || undefined : undefined,
-    collaboration_shared_inbox_id: draft.sharedDraft ? draft.sharedInboxID || undefined : undefined,
-    collaboration_account_email: draft.sharedDraft ? draft.accountEmail || undefined : undefined,
   };
 }
 

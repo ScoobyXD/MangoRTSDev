@@ -5,7 +5,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"miraeopus/backend/internal/domain"
 )
@@ -29,6 +28,16 @@ func TestPostgresCommunicationsEmailDraftQueriesKeepExactImmutableScopePredicate
 	if strings.Contains(listBody, "personal_user_id = $2::uuid or shared_inbox_id is not null") {
 		t.Fatal("ListCommunicationsEmailDrafts retained broad personal-plus-all-shared predicate")
 	}
+	if !strings.Contains(listBody, "communicationsEmailDraftSummarySelectColumns()") {
+		t.Fatal("ListCommunicationsEmailDrafts must use the body-free summary projection")
+	}
+	summaryProjection := extractFunctionSourceForTest(t, source, "func communicationsEmailDraftSummarySelectColumns")
+	if strings.Contains(summaryProjection, "body_editor_html") {
+		t.Fatal("draft list summary projection reads full draft bodies")
+	}
+	if !strings.Contains(summaryProjection, "scheduled_send_timestamp") {
+		t.Fatal("draft list summary projection must include the scheduler timestamp")
+	}
 
 	getBody := extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) GetCommunicationsEmailDraft")
 	for _, required := range []string{
@@ -38,6 +47,15 @@ func TestPostgresCommunicationsEmailDraftQueriesKeepExactImmutableScopePredicate
 	} {
 		if !strings.Contains(getBody, required) {
 			t.Fatalf("GetCommunicationsEmailDraft missing exact scope predicate %q", required)
+		}
+	}
+	if !strings.Contains(getBody, "hydrateCommunicationsEmailDraftReplyTarget") {
+		t.Fatal("GetCommunicationsEmailDraft must restore the provider reply target for exact draft reads")
+	}
+	replyTargetBody := extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) hydrateCommunicationsEmailDraftReplyTarget")
+	for _, required := range []string{"message.provider_message_id", "thread.provider_thread_id", "draft.SourceMessageID"} {
+		if !strings.Contains(replyTargetBody, required) {
+			t.Fatalf("reply target hydration missing %q", required)
 		}
 	}
 
@@ -155,47 +173,6 @@ func TestMemoryCommunicationsEmailReplyRequiresStoredSourceMessage(t *testing.T)
 	})
 	if !errors.Is(err, ErrEmailDraftSourceNotFound) {
 		t.Fatalf("reply with unknown source error = %v, want ErrEmailDraftSourceNotFound", err)
-	}
-}
-
-func TestMemorySharedEmailDraftListUsesFiveItemCursorPages(t *testing.T) {
-	repo, companyID, owner, _, _, _ := newEmailDraftScopeStoreFixture(t)
-	node, err := repo.CreateNode(companyID, "Paged drafts")
-	if err != nil {
-		t.Fatal(err)
-	}
-	baseTime := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
-	repo.mu.Lock()
-	for index := 0; index < 6; index++ {
-		draftID := "paged-shared-" + string(rune('a'+index))
-		repo.emailDrafts[communicationsEmailDraftKey(companyID, draftID)] = domain.CommunicationsEmailDraft{
-			CompanyID: companyID, DraftID: draftID, IsShared: true, OriginNodeID: node.NodeID,
-			SourceMessageID:  "67676767-6767-4767-8767-67676767679" + string(rune('0'+index)),
-			SendState:        communicationsEmailDraftSendStateDraft,
-			UpdatedTimestamp: baseTime.Add(-time.Duration(index) * time.Minute),
-		}
-	}
-	repo.mu.Unlock()
-
-	first, err := repo.ListCommunicationsEmailDrafts(CommunicationsEmailDraftListInput{
-		CompanyID: companyID, ParticipantUserID: owner.UserID, Limit: 5,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(first) != 5 || first[0].DraftID != "paged-shared-a" || first[4].DraftID != "paged-shared-e" {
-		t.Fatalf("first page = %+v", first)
-	}
-	before := first[4].UpdatedTimestamp
-	second, err := repo.ListCommunicationsEmailDrafts(CommunicationsEmailDraftListInput{
-		CompanyID: companyID, ParticipantUserID: owner.UserID, Limit: 5,
-		BeforeUpdatedAt: &before, BeforeDraftID: first[4].DraftID,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(second) != 1 || second[0].DraftID != "paged-shared-f" {
-		t.Fatalf("second page = %+v", second)
 	}
 }
 

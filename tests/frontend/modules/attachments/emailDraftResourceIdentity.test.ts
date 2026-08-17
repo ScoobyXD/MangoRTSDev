@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { mangoEmailDraftResourceID } from "../../../../frontend/src/modules/attachments/attachmentApi.js";
 
-test("shared draft attachments use the exact stable V3 draft ID", () => {
+test("draft attachments use the exact stable V3 draft ID", () => {
   assert.equal(mangoEmailDraftResourceID({ draftID: " draft/shared:1 " }), "draft/shared:1");
 });
 
@@ -12,7 +12,7 @@ test("draft attachment identity rejects a missing stable draft ID", () => {
   assert.equal(mangoEmailDraftResourceID({ draftID: "   " }), "");
 });
 
-test("shared-draft file and inline-image uploads use the same stable draft resource", () => {
+test("draft file and inline-image uploads use the same stable draft resource", () => {
   const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
 
   const start = homeParts.indexOf("const composeAttachmentResourceID");

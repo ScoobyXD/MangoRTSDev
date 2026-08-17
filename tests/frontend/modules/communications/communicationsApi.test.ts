@@ -1245,7 +1245,7 @@ test("sendEmail leaves reply-history persistence to the caller", async (t: any) 
   }
 });
 
-test("durable draft API preserves mailbox scopes and exposes the participant collaboration branch", async () => {
+test("durable draft API preserves exact mailbox scopes and rejects company-only listing", async () => {
   const calls: Array<{ path: string; method: string; body?: Record<string, unknown> }> = [];
   const originalFetch = globalThis.fetch;
   const draft = {
@@ -1278,7 +1278,7 @@ test("durable draft API preserves mailbox scopes and exposes the participant col
     return jsonResponse({ drafts: [draft] });
   };
   try {
-    await listEmailDrafts("company-1", {});
+    assert.deepEqual(await listEmailDrafts("company-1", {}), []);
     await listEmailDrafts("company-1", { accountEmail: " Me@Example.Test " });
     await listEmailDrafts("company-1", { sharedInboxID: " shared-1 " });
     await saveEmailDraft({
@@ -1294,14 +1294,13 @@ test("durable draft API preserves mailbox scopes and exposes the participant col
     await deleteEmailDraft("company-1", "draft-1", { sharedInboxID: "shared-1" });
 
     assert.deepEqual(calls.map((call) => [call.method, call.path]), [
-      ["GET", "/v1/communications/drafts?company_id=company-1"],
       ["GET", "/v1/communications/drafts?company_id=company-1&account_email=me%40example.test"],
       ["GET", "/v1/communications/drafts?company_id=company-1&shared_inbox_id=shared-1"],
       ["PUT", "/v1/communications/drafts/draft-1"],
       ["DELETE", "/v1/communications/drafts/draft-1?company_id=company-1&shared_inbox_id=shared-1"],
     ]);
-    assert.equal(calls[3]?.body?.shared_inbox_id, "shared-1");
-    assert.equal(calls[3]?.body?.company_id, "company-1");
+    assert.equal(calls[2]?.body?.shared_inbox_id, "shared-1");
+    assert.equal(calls[2]?.body?.company_id, "company-1");
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();
@@ -1324,8 +1323,8 @@ test("duplicate draft and stored Node thread reads share one request while realt
     });
   };
   try {
-    await Promise.all(Array.from({ length: 12 }, () => listEmailDrafts("company-1", {})));
-    await listEmailDrafts("company-1", {});
+    await Promise.all(Array.from({ length: 12 }, () => listEmailDrafts("company-1", { accountEmail: "me@example.test" })));
+    await listEmailDrafts("company-1", { accountEmail: "me@example.test" });
     assert.equal(calls.filter((path) => path.startsWith("/v1/communications/drafts?")).length, 1);
 
     await Promise.all(Array.from({ length: 6 }, () => getNodeEmailThread("company-1", "node-1", "email-thread-1")));

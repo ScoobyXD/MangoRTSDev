@@ -32,10 +32,6 @@ export type ComposeState = {
   body: string;
   attachments: ComposeAttachment[];
   scheduledAt: string;
-	originNodeID: string;
-	emailThreadID: string;
-  sharedDraft: boolean;
-  draftRevision: number;
 };
 
 export type ComposeAttachment = {
@@ -62,10 +58,6 @@ export const emptyCompose: ComposeState = {
   body: "",
   attachments: [],
   scheduledAt: "",
-	originNodeID: "",
-	emailThreadID: "",
-  sharedDraft: false,
-  draftRevision: 0,
 };
 
 export type MailboxOption = {

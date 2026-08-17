@@ -4,9 +4,9 @@ import {
   deleteHomeMailDraft,
   deleteHomeMailDraftRemote,
   ensureHomeMailDraftAttachmentTarget,
-  createHomeMailSharedReplyDraftID,
   homeMailDraftMatchesScope,
   homeMailDraftToCompose,
+  loadHomeMailDraft,
   loadHomeMailDrafts,
   mergeHomeMailDrafts,
   readHomeMailDraftsForScope,
@@ -15,7 +15,6 @@ import {
   syncHomeMailDraftFromCompose,
   type HomeMailDraft,
 } from "../../../../frontend/src/pages/home/homeMailDrafts.js";
-import type { ComposeState } from "../../../../frontend/src/pages/home/homeTypes.js";
 
 function draft(overrides: Partial<HomeMailDraft>): HomeMailDraft {
   return {
@@ -25,6 +24,7 @@ function draft(overrides: Partial<HomeMailDraft>): HomeMailDraft {
     companyID: "company-1",
     sharedInboxID: "",
     accountEmail: "me@example.com",
+    sourceMessageID: "",
     replyToMessageID: "",
     replyToMessage: null,
     to: "",
@@ -34,10 +34,6 @@ function draft(overrides: Partial<HomeMailDraft>): HomeMailDraft {
     body: "",
     attachments: [],
     scheduledAt: "",
-    originNodeID: "",
-    emailThreadID: "",
-    sharedDraft: false,
-    revision: 0,
     createdAt: "2026-07-10T10:00:00.000Z",
     updatedAt: "2026-07-10T10:00:00.000Z",
     ...overrides,
@@ -64,71 +60,6 @@ test("reply drafts remain separate across shared inbox scopes", () => {
   assert.deepEqual(drafts.map((item) => item.id).sort(), ["shared-a", "shared-b"]);
 });
 
-test("shared reply drafts use one Node-and-source identity across participants", () => {
-  assert.equal(
-    createHomeMailSharedReplyDraftID("node-1", "message-1"),
-    "draft:reply:message:message-1:node:node-1",
-  );
-  const drafts = mergeHomeMailDrafts([
-    draft({
-      id: "first-client-id",
-      userID: "user-a",
-      originNodeID: "node-1",
-      sharedDraft: true,
-      replyToMessageID: "message-1",
-      body: "earlier",
-    }),
-    draft({
-      id: "second-client-id",
-      userID: "user-b",
-      originNodeID: "node-1",
-      sharedDraft: true,
-      replyToMessageID: "message-1",
-      body: "latest",
-      revision: 2,
-      updatedAt: "2026-07-10T12:00:00.000Z",
-    }),
-  ], []);
-
-  assert.equal(drafts.length, 1);
-  assert.equal(drafts[0]?.body, "latest");
-  assert.equal(drafts[0]?.revision, 2);
-});
-
-test("canonical shared revision beats a newer local timestamp after an optimistic conflict", () => {
-  const drafts = mergeHomeMailDrafts([
-    draft({
-      id: "draft:reply:message:message-1:node:node-1",
-      originNodeID: "node-1",
-      sharedDraft: true,
-      replyToMessageID: "message-1",
-      body: "canonical revision",
-      revision: 4,
-      updatedAt: "2026-07-10T12:00:00.000Z",
-    }),
-  ], [
-    draft({
-      id: "draft:reply:message:message-1:node:node-1",
-      originNodeID: "node-1",
-      sharedDraft: true,
-      replyToMessageID: "message-1",
-      body: "unsent local edit",
-      revision: 3,
-      updatedAt: "2026-07-10T13:00:00.000Z",
-      pendingRemoteSync: true,
-    }),
-  ]);
-
-  assert.equal(drafts.length, 1);
-  assert.equal(drafts[0]?.revision, 4);
-  assert.equal(drafts[0]?.body, "canonical revision");
-});
-
-test("legacy scheduled timestamps are cleared when a shared draft opens", () => {
-  assert.equal(homeMailDraftToCompose(draft({ sharedDraft: true, scheduledAt: "2026-07-14T10:00" })).scheduledAt, "");
-  assert.equal(homeMailDraftToCompose(draft({ sharedDraft: false, scheduledAt: "2026-07-14T10:00" })).scheduledAt, "2026-07-14T10:00");
-});
-
 test("personal drafts remain separate across account scopes", () => {
   const drafts = mergeHomeMailDrafts([
     draft({ id: "personal-a", accountEmail: "a@example.test", replyToMessageID: "message-1" }),
@@ -149,16 +80,40 @@ test("active draft scope never mixes personal and shared inbox rows", () => {
   assert.equal(homeMailDraftMatchesScope(sharedA, "inbox-a", "a@example.test"), true);
   assert.equal(homeMailDraftMatchesScope(sharedB, "inbox-a", "a@example.test"), false);
   assert.equal(homeMailDraftMatchesScope(personal, "", ""), false);
+});
 
-  const nodeDraft = draft({
-    id: "shared-node-draft",
-    sharedInboxID: "source-inbox",
-    accountEmail: "source@example.test",
+test("reply draft identity stays stable when an exact read adds the provider message ID", () => {
+  const drafts = mergeHomeMailDrafts([
+    draft({ id: "summary", kind: "reply", sourceMessageID: "stored-message-1", replyToMessageID: "" }),
+    draft({
+      id: "exact",
+      kind: "reply",
+      sourceMessageID: "stored-message-1",
+      replyToMessageID: "provider-message-1",
+      updatedAt: "2026-07-10T11:00:00.000Z",
+    }),
+  ], []);
+
+  assert.deepEqual(drafts.map((item) => item.id), ["exact"]);
+});
+
+test("obsolete browser-local Node shared drafts are discarded instead of entering a mailbox", async () => {
+  const retained = draft({ id: "personal-retained", accountEmail: "me@example.test" });
+  const obsolete = {
+    ...retained,
+    id: "draft:reply:message:message-1:node:node-1",
     originNodeID: "node-1",
+    emailThreadID: "thread-1",
     sharedDraft: true,
+    revision: 3,
+  };
+  await withDraftBrowserState([obsolete, retained], async ({ storedDrafts }) => {
+    assert.deepEqual(
+      readHomeMailDraftsForScope("company-1", "user-1", "", "me@example.test").map((item) => item.id),
+      ["personal-retained"],
+    );
+    assert.deepEqual(storedDrafts().map((item) => item.id), ["personal-retained"]);
   });
-  assert.equal(homeMailDraftMatchesScope(nodeDraft, "", "me@example.test"), true);
-  assert.equal(homeMailDraftMatchesScope(nodeDraft, "another-inbox", "other@example.test"), true);
 });
 
 test("remote reconciliation identifies only older semantic reply drafts for deletion", () => {
@@ -334,6 +289,97 @@ test("rapid navigation between personal accounts cannot cross-overwrite storage"
     const storedByID = new Map(storedDrafts().map((item) => [item.id, item]));
     assert.equal(storedByID.get("account-a")?.subject, "remote A");
     assert.equal(storedByID.get("account-b")?.subject, "remote B");
+  });
+});
+
+test("draft list summaries preserve cached full content while refreshing list fields", async () => {
+  const cached = draft({
+    id: "reply-summary",
+    kind: "reply",
+    accountEmail: "me@example.test",
+    sourceMessageID: "stored-message-1",
+    replyToMessageID: "provider-message-1",
+    replyToMessage: {
+      id: "provider-message-1",
+      email_message_id: "stored-message-1",
+      subject: "Source",
+      unread: false,
+      starred: false,
+    },
+    subject: "Old subject",
+    body: "Full cached body",
+    attachments: [{
+      id: "attachment-1",
+      attachmentID: "attachment-1",
+      filename: "report.pdf",
+      contentType: "application/pdf",
+      size: 42,
+    }],
+    scheduledAt: "2026-07-15T08:00",
+  });
+
+  await withDraftBrowserState([cached], async ({ storedDrafts }) => {
+    globalThis.fetch = async () => draftListResponse([remoteDraft({
+      id: cached.id,
+      kind: "reply",
+      accountEmail: cached.accountEmail,
+      sourceMessageID: cached.sourceMessageID,
+      subject: "New subject",
+      scheduledAt: "2026-07-16T09:30",
+    })]);
+
+    const [loaded] = await loadHomeMailDrafts("company-1", "user-1", "", cached.accountEmail);
+    assert.equal(loaded?.subject, "New subject");
+    assert.equal(loaded?.scheduledAt, "2026-07-16T09:30");
+    assert.equal(loaded?.body, "Full cached body");
+    assert.equal(loaded?.replyToMessageID, "provider-message-1");
+    assert.deepEqual(loaded?.attachments.map((attachment) => attachment.attachmentID), ["attachment-1"]);
+    assert.equal(storedDrafts()[0]?.body, "Full cached body");
+  });
+});
+
+test("an exact draft read caches the full body, attachments, and provider reply target", async () => {
+  const summary = draft({
+    id: "scheduled-reply",
+    kind: "reply",
+    accountEmail: "me@example.test",
+    sourceMessageID: "stored-message-1",
+    scheduledAt: "2026-07-15T08:00",
+  });
+
+  await withDraftBrowserState([summary], async ({ storedDrafts }) => {
+    globalThis.fetch = async () => draftSaveResponse(remoteDraft({
+      id: summary.id,
+      kind: "reply",
+      accountEmail: summary.accountEmail,
+      sourceMessageID: summary.sourceMessageID,
+      replyToMessage: {
+        id: "provider-message-1",
+        email_message_id: "stored-message-1",
+        thread_id: "provider-thread-1",
+        subject: "Source",
+        unread: false,
+        starred: false,
+      },
+      body: "Full server body",
+      attachments: [{
+        attachment_id: "attachment-1",
+        resource_attachment_id: "draft-resource-1",
+        attachment: {
+          original_filename: "report.pdf",
+          mime_type: "application/pdf",
+          byte_size: 42,
+        },
+      }],
+      scheduledAt: "2026-07-15T08:00:00.000Z",
+    }));
+
+    const loaded = await loadHomeMailDraft("company-1", "user-1", summary);
+    assert.equal(loaded?.replyToMessageID, "provider-message-1");
+    assert.equal(loaded?.body, "Full server body");
+    assert.deepEqual(loaded?.attachments.map((attachment) => attachment.attachmentID), ["attachment-1"]);
+    assert.equal(storedDrafts()[0]?.replyToMessageID, "provider-message-1");
+    assert.equal(storedDrafts()[0]?.body, "Full server body");
   });
 });
 
@@ -648,73 +694,12 @@ test("a delete queued behind a stalled load-time migration removes the remote dr
   });
 });
 
-test("shared-draft save returns the exact Node draft without reloading the draft list", async () => {
-  const remoteDraft = {
-    company_id: "company-1",
-    draft_id: "draft:reply:message:message-1:node:node-1",
-    scope_type: "shared",
-    shared_inbox_id: "source-inbox",
-    account_email: "source@example.test",
-    kind: "reply",
-    source_message_id: "message-1",
-    origin_node_id: "node-1",
-    email_thread_id: "thread-1",
-    is_shared: true,
-    revision: 2,
-    to_recipients: "recipient@example.test",
-    cc_recipients: "",
-    bcc_recipients: "",
-    subject: "Re: Source",
-    body_editor_html: "<div>Updated</div>",
-    created_timestamp: "2026-07-10T10:00:00.000Z",
-    updated_timestamp: "2026-07-10T12:00:00.000Z",
-    attachments: [],
-  };
-  const requests: string[] = [];
-  await withDraftBrowserState([], async () => {
-    globalThis.fetch = async (input) => {
-      requests.push(String(input));
-      return new Response(JSON.stringify({ draft: remoteDraft }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    };
-    const compose: ComposeState = {
-      kind: "reply",
-      open: true,
-      draftID: remoteDraft.draft_id,
-      sharedInboxID: remoteDraft.shared_inbox_id,
-      accountEmail: remoteDraft.account_email,
-      replyToMessageID: remoteDraft.source_message_id,
-      replyToMessage: null,
-      focusRequestID: 0,
-      to: remoteDraft.to_recipients,
-      cc: "",
-      bcc: "",
-      subject: remoteDraft.subject,
-      body: remoteDraft.body_editor_html,
-      attachments: [],
-      scheduledAt: "",
-      originNodeID: remoteDraft.origin_node_id,
-      emailThreadID: remoteDraft.email_thread_id,
-      sharedDraft: true,
-      draftRevision: 1,
-    };
-
-    const reconciled = await syncHomeMailDraftFromCompose("company-1", "user-1", compose, "");
-
-    assert.equal(reconciled[0]?.revision, 2);
-    assert.equal(requests.length, 1);
-    assert.equal(requests[0], "/v1/communications/drafts/draft%3Areply%3Amessage%3Amessage-1%3Anode%3Anode-1");
-  });
-});
-
 type DraftBrowserState = {
   storedDrafts: () => HomeMailDraft[];
 };
 
 async function withDraftBrowserState<T>(
-  drafts: HomeMailDraft[],
+  drafts: unknown[],
   run: (state: DraftBrowserState) => Promise<T>,
 ): Promise<T> {
   const originalFetch = globalThis.fetch;
@@ -769,7 +754,13 @@ function remoteDraft(input: {
   id: string;
   accountEmail: string;
   sharedInboxID?: string;
+  kind?: "compose" | "reply" | "forward";
+  sourceMessageID?: string;
+  replyToMessage?: Record<string, unknown>;
   subject?: string;
+  body?: string;
+  attachments?: unknown[];
+  scheduledAt?: string;
   updatedAt?: string;
 }): Record<string, unknown> {
   const sharedInboxID = input.sharedInboxID ?? "";
@@ -780,18 +771,19 @@ function remoteDraft(input: {
     personal_user_id: sharedInboxID ? undefined : "user-1",
     personal_account_email: sharedInboxID ? undefined : input.accountEmail,
     shared_inbox_id: sharedInboxID || undefined,
-    kind: "compose",
-    source_message_id: "",
+    kind: input.kind ?? "compose",
+    source_message_id: input.sourceMessageID ?? "",
     account_email: input.accountEmail,
     to_recipients: "",
     cc_recipients: "",
     bcc_recipients: "",
     subject: input.subject ?? "",
-    body_editor_html: "",
-    scheduled_send_timestamp: "",
+    body_editor_html: input.body ?? "",
+    reply_to_message: input.replyToMessage,
+    scheduled_send_timestamp: input.scheduledAt ?? "",
     created_timestamp: "2026-07-10T10:00:00.000Z",
     updated_timestamp: input.updatedAt ?? "2026-07-14T10:00:00.000Z",
-    attachments: [],
+    attachments: input.attachments ?? [],
   };
 }
 

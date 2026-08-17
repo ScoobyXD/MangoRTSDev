@@ -5260,8 +5260,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
     const cleanDraftID = compose.draftID.trim() || createHomeMailDraftID();
     const cleanSharedInboxID = compose.sharedInboxID.trim();
     const cleanAccountEmail = compose.accountEmail.trim().toLowerCase();
-    const cleanOriginNodeID = compose.sharedDraft ? compose.originNodeID.trim() : "";
-    if (!cleanCompanyID || (!cleanOriginNodeID && !cleanSharedInboxID && (!currentUserID.trim() || !cleanAccountEmail))) {
+    if (!cleanCompanyID || (!cleanSharedInboxID && (!currentUserID.trim() || !cleanAccountEmail))) {
       setAttachmentError("Email attachment context is unavailable.");
       return;
     }
@@ -5287,9 +5286,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
           sourceKind: "email_outgoing",
           relationshipKind: "email_attachment",
           messageID: preparedCompose.replyToMessageID.trim() || undefined,
-          editorSurface: preparedCompose.sharedDraft && preparedCompose.originNodeID.trim()
-            ? "node-shared-email-draft"
-            : preparedSharedInboxID ? "shared-triage-compose" : "my-triage-compose",
+          editorSurface: preparedSharedInboxID ? "shared-triage-compose" : "my-triage-compose",
         });
         const attachment = uploaded.attachment;
         return {
@@ -5444,9 +5441,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
     <input style={mailPanelInputStyle} value={compose.subject} onChange={(event) => update({ subject: event.target.value })} placeholder="Subject" />
   );
   const richEditorStyle = isReplyMode ? composeReplyRichEditorStyle(replyEditorHeight) : composeRichEditorStyle;
-  const composeEditorSurfaceID = compose.sharedDraft
-    ? "email-collaboration-shared-draft"
-    : compose.sharedInboxID.trim() ? "shared-triage-compose" : "my-triage-compose";
+  const composeEditorSurfaceID = compose.sharedInboxID.trim() ? "shared-triage-compose" : "my-triage-compose";
   const composeAttachmentResourceID = React.useMemo(
     () => mangoEmailDraftResourceID({ draftID: compose.draftID }),
     [compose.draftID],
@@ -5508,7 +5503,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
         )}
         <div style={isReplyMode ? composeHeaderActionsStyle : { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
           <button type="button" style={mailPanelSmallButtonStyle} onClick={handleSaveDraft}>
-            {compose.sharedDraft ? "Save shared draft" : "Save to My Drafts"}
+            Save to My Drafts
           </button>
           <button type="button" style={mailPanelSmallButtonStyle} onClick={onCancel}>Close</button>
         </div>
@@ -5639,17 +5634,15 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
           >
             {signatureEditorOpen ? "Hide Signature" : "Edit Signature"}
           </button>
-          {!compose.sharedDraft && (
-            <input
-              type="datetime-local"
-              aria-label="Schedule send"
-              style={{ ...mailPanelInputStyle, width: 190, minHeight: 30, height: 30, padding: "0 8px" }}
-              value={compose.scheduledAt}
-              onChange={(event) => update({ scheduledAt: event.currentTarget.value })}
-            />
-          )}
+          <input
+            type="datetime-local"
+            aria-label="Schedule send"
+            style={{ ...mailPanelInputStyle, width: 190, minHeight: 30, height: 30, padding: "0 8px" }}
+            value={compose.scheduledAt}
+            onChange={(event) => update({ scheduledAt: event.currentTarget.value })}
+          />
           {attachmentError && <span style={mutedSmallStyle}>{attachmentError}</span>}
-          {compose.draftID && <span style={mutedSmallStyle}>{compose.sharedDraft ? "Shared draft - visible to all email participants" : "Saved in My Drafts"}</span>}
+          {compose.draftID && <span style={mutedSmallStyle}>Saved in My Drafts</span>}
           {compose.scheduledAt && <span style={mutedSmallStyle}>Scheduled</span>}
           <span aria-hidden="true" style={{ flex: "1 1 160px" }} />
           <button type="submit" style={mailComposeSendButtonStyle} disabled={busy}>{busy ? "Sending" : compose.scheduledAt ? "Schedule" : "Send"}</button>
@@ -6307,7 +6300,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
     </article>
   );
 }
-export function MessageDetail({ message, threadMessages = [], nodes, companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, chatOpen, previewOnly = false, previewHeaderResources, emailNodeDestinationSearch, emailChatHighlights = [], activeEmailSelection, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onCreateSharedDraft, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onToggleEmailChat, onOpenCollaborationNode, onOpenLogicGate, onContentTopChange }: {
+export function MessageDetail({ message, threadMessages = [], nodes, companyID, sharedInboxID, accountEmail, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, chatAvailable, chatOpen, previewOnly = false, previewHeaderResources, emailNodeDestinationSearch, emailChatHighlights = [], activeEmailSelection, selectionNavigation, onLoadMessageBody, onReply, onReplyAll, onForward, onArchive, onDelete, onToggleRead, onToggleStar, onEmailSelection, onToggleEmailChat, onOpenCollaborationNode, onOpenLogicGate, onContentTopChange }: {
   message: EmailMessage;
   threadMessages?: EmailMessage[];
   nodes: NodeRecord[];
@@ -6330,7 +6323,6 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
   onLoadMessageBody: (messageID: string) => Promise<EmailMessage | null>;
   onReply: (message: EmailMessage) => void;
   onReplyAll: (message: EmailMessage) => void;
-  onCreateSharedDraft: (message: EmailMessage) => void;
   onForward: (message: EmailMessage) => void;
   onArchive: () => void;
   onDelete: () => void;
@@ -6514,7 +6506,6 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
           )}
 		  <button type="button" style={mailPanelSmallButtonStyle} disabled={busy || !message.email_message_id?.trim()} title={message.email_message_id?.trim() ? "Reply" : "Reply is available after Mango ingests this email"} onClick={() => onReply(message)}>Reply</button>
 		  <button type="button" style={mailPanelSmallButtonStyle} disabled={busy || !message.email_message_id?.trim()} title={message.email_message_id?.trim() ? "Reply all" : "Reply is available after Mango ingests this email"} onClick={() => onReplyAll(message)}>Reply all</button>
-          <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onCreateSharedDraft(message)}>Create shared draft</button>
           <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onForward(message)}>Forward</button>
           <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={onToggleRead}>{message.unread ? "Mark read" : "Mark unread"}</button>
           <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={onToggleStar}>{message.starred ? "Unstar" : "Star"}</button>
@@ -6687,7 +6678,6 @@ export function EmailReferencePreviewModal({ message, threadMessages, resources,
               onLoadMessageBody={onLoadMessageBody}
               onReply={() => undefined}
               onReplyAll={() => undefined}
-              onCreateSharedDraft={() => undefined}
               onForward={() => undefined}
               onArchive={() => undefined}
               onDelete={() => undefined}

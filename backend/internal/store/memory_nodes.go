@@ -353,11 +353,6 @@ func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string) error {
 			delete(r.emailCollaborationParticipants, participantKey)
 		}
 	}
-	for draftKey, draft := range r.emailDrafts {
-		if draft.CompanyID == companyID && draft.IsShared && draft.OriginNodeID == nodeID {
-			delete(r.emailDrafts, draftKey)
-		}
-	}
 	for board, cards := range r.kanbanCards {
 		next := make([]domain.KanbanCard, 0, len(cards))
 		for _, card := range cards {
@@ -540,12 +535,6 @@ func (r *MemoryRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error
 			}
 		}
 		if emailThreadID != "" {
-			for _, draft := range r.emailDrafts {
-				if draft.CompanyID == companyID && draft.OriginNodeID == nodeID && draft.EmailThreadID == emailThreadID &&
-					draft.IsShared && draft.DeletedTimestamp == nil && (draft.SendState == "" || draft.SendState == communicationsEmailDraftSendStateDraft || draft.SendState == communicationsEmailDraftSendStateSending) {
-					return ErrEmailRelationshipHasNodeWork
-				}
-			}
 			messageIDs := map[string]bool{}
 			if thread, ok := r.emailThreads[key(companyID, emailThreadID)]; ok {
 				for _, message := range thread.Messages {

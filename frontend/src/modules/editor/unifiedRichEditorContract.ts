@@ -20,7 +20,6 @@ export type UnifiedRichEditorSurfaceID =
   | "project-text-block"
   | "my-triage-compose"
   | "shared-triage-compose"
-  | "email-collaboration-shared-draft"
   | "attached-email-reply"
   | "email-signature";
 
@@ -57,7 +56,6 @@ export const UNIFIED_RICH_EDITOR_SURFACE_CONTRACTS: readonly UnifiedRichEditorSu
   { id: "project-text-block", persistenceBoundary: "project-information-projection", chatSurface: false },
   { id: "my-triage-compose", persistenceBoundary: "personal-mailbox", chatSurface: false },
   { id: "shared-triage-compose", persistenceBoundary: "shared-mailbox", chatSurface: false },
-  { id: "email-collaboration-shared-draft", persistenceBoundary: "shared-mailbox", chatSurface: false },
   { id: "attached-email-reply", persistenceBoundary: "personal-mailbox", chatSurface: false },
   { id: "email-signature", persistenceBoundary: "mailbox-signature", chatSurface: false },
 ] as const;

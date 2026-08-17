@@ -17,9 +17,6 @@ var (
 	ErrVersionConflict               = errors.New("version conflict")
 	ErrEditorDocumentTooLarge        = errors.New("editor document too large")
 	ErrEditorOwnerTextLimit          = errors.New("editor owner text limit exceeded")
-	ErrSendInProgress                = errors.New("send in progress")
-	ErrSendRecoveryExpired           = errors.New("send recovery window expired")
-	ErrSendRecoverySourceChanged     = errors.New("send recovery source changed")
 	ErrDirectProjectLogicGate        = errors.New("logic gates cannot be added directly to projects")
 	ErrProjectNodeLogicGateRequired  = errors.New("project nodes must belong to a logic gate")
 	ErrProjectNodeInAnotherProject   = errors.New("node already belongs to another project")
@@ -35,9 +32,6 @@ var (
 	ErrEmailAccountUnavailable       = errors.New("email account unavailable")
 	ErrEmailReplySourceNotIngested   = errors.New("email reply source not ingested")
 	ErrEmailDraftSourceNotFound      = errors.New("email draft source not found")
-	ErrEmailDraftNodeMismatch        = errors.New("email draft node mismatch")
-	ErrEmailDraftNodeAccessDenied    = errors.New("email draft node access denied")
-	ErrEmailDraftSenderNotConnected  = errors.New("email draft sender not connected")
 	ErrEmailRelationshipHasNodeWork  = errors.New("email relationship has node work")
 	ErrUploadStateConflict           = errors.New("attachment upload state conflict")
 	ErrUploadIntentExpired           = errors.New("attachment upload intent expired")
@@ -202,9 +196,6 @@ type CommunicationsRepository interface {
 	GetCommunicationsEmailDraft(input CommunicationsEmailDraftGetInput) (domain.CommunicationsEmailDraft, error)
 	UpsertCommunicationsEmailDraft(input CommunicationsEmailDraftInput) (domain.CommunicationsEmailDraft, error)
 	SoftDeleteCommunicationsEmailDraft(input CommunicationsEmailDraftDeleteInput) error
-	ClaimCommunicationsEmailDraftSend(input CommunicationsEmailDraftSendClaimInput) (CommunicationsEmailDraftSendClaim, error)
-	ReleaseCommunicationsEmailDraftSend(input CommunicationsEmailDraftSendReleaseInput) error
-	CompleteCommunicationsEmailDraftSend(input CommunicationsEmailDraftSendCompleteInput) error
 	GetCommunicationsEmailSignature(input CommunicationsEmailSignatureScopeInput) (domain.CommunicationsEmailSignature, error)
 	UpsertCommunicationsEmailSignature(input CommunicationsEmailSignatureInput) (domain.CommunicationsEmailSignature, error)
 	ListUserLogicGateShortcuts(userID, companyID string) ([]domain.UserLogicGateShortcut, error)
@@ -273,8 +264,7 @@ type EmailAttachmentResourceAccessInput struct {
 }
 
 type EmailAttachmentResourceAccess struct {
-	Allowed   bool
-	SendState string
+	Allowed bool
 }
 type AttachmentDeletionPlan struct {
 	Objects []attachmentcleanup.ObjectRef
@@ -2482,11 +2472,6 @@ type CommunicationsEmailDraftListInput struct {
 	PersonalAccountEmail string
 	SharedInboxID        string
 	ParticipantUserID    string
-	OriginNodeID         string
-	SourceMessageID      string
-	Limit                int
-	BeforeUpdatedAt      *time.Time
-	BeforeDraftID        string
 }
 
 type CommunicationsEmailDraftGetInput struct {
@@ -2505,11 +2490,6 @@ type CommunicationsEmailDraftInput struct {
 	PersonalAccountEmail   string
 	SharedInboxID          string
 	CreatedByUserID        string
-	ParticipantUserID      string
-	EmailThreadID          string
-	OriginNodeID           string
-	IsShared               bool
-	ExpectedRevision       int64
 	UpdatedByUserID        string
 	Kind                   string
 	SourceMessageID        string
@@ -2531,55 +2511,6 @@ type CommunicationsEmailDraftDeleteInput struct {
 	SharedInboxID        string
 	UpdatedByUserID      string
 	ParticipantUserID    string
-	ExpectedRevision     int64
-	// Now is an internal clock override used by deterministic recovery tests.
-	Now time.Time
-}
-type VersionConflictError struct {
-	CurrentRevision int64
-}
-
-func (e *VersionConflictError) Error() string { return ErrVersionConflict.Error() }
-func (e *VersionConflictError) Unwrap() error { return ErrVersionConflict }
-
-type CommunicationsEmailDraftSendClaimInput struct {
-	CompanyID            string
-	DraftID              string
-	ParticipantUserID    string
-	PersonalUserID       string
-	PersonalAccountEmail string
-	SharedInboxID        string
-	ExpectedRevision     int64
-	ProviderGrantID      string
-	// Now is an internal clock override used by deterministic repository and
-	// handler tests. Production callers leave it zero.
-	Now time.Time
-}
-
-type CommunicationsEmailDraftSendClaim struct {
-	Draft          domain.CommunicationsEmailDraft
-	ClaimToken     string
-	IdempotencyKey string
-	// Recovered is true when this claim took over an expired repository lease
-	// for a send whose provider outcome is still uncertain. Callers must not
-	// release such a claim merely because a pre-provider retry check fails.
-	Recovered bool
-}
-
-type CommunicationsEmailDraftSendReleaseInput struct {
-	CompanyID  string
-	DraftID    string
-	ClaimToken string
-}
-
-// CommunicationsEmailDraftSendCompleteInput commits the stored sent message and
-// tombstones the claimed draft atomically after a successful provider send.
-type CommunicationsEmailDraftSendCompleteInput struct {
-	CompanyID       string
-	DraftID         string
-	ClaimToken      string
-	UpdatedByUserID string
-	Message         domain.EmailMessageSnapshot
 }
 
 type CommunicationsEmailSignatureScopeInput struct {

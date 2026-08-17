@@ -529,8 +529,6 @@ func seedLiveEmailDraftAttachmentForCommunicationsTest(t *testing.T, repo *store
 }
 func personalEmailDraftResourceID(_, _, draftID string) string { return strings.TrimSpace(draftID) }
 
-func sharedEmailDraftResourceID(_, draftID string) string { return strings.TrimSpace(draftID) }
-
 func seedPersonalV3EmailMessageForCommunicationsTest(t *testing.T, repo *store.MemoryRepo, companyID, userID, accountEmail, provider string, message NylasMessage) domain.CommunicationsEmailThread {
 	t.Helper()
 	if strings.TrimSpace(message.ThreadID) == "" {

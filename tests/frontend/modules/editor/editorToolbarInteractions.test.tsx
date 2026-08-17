@@ -154,7 +154,7 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
         value="<!-- mango-editor-html-v1 -->seed"
         editable
         outlineStyle="automatic-outline-numbering"
-        surfaceID="email-collaboration-shared-draft"
+        surfaceID="shared-triage-compose"
         ariaLabel="Email body"
         surfaceText="#111827"
         accent="#7c3aed"
@@ -175,7 +175,7 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     mountedRoot = root;
     await act(async () => root.render(<>{toolbar}{editor}</>));
     await flushAsyncWork();
-    const editorRoot = container.querySelector<HTMLElement>('[data-mango-unified-rich-editor="email-collaboration-shared-draft"]');
+    const editorRoot = container.querySelector<HTMLElement>('[data-mango-unified-rich-editor="shared-triage-compose"]');
     assert.ok(editorRoot);
 
     const rememberSelection = async () => {
@@ -614,7 +614,7 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
       </AppModalPortal>,
     ));
     await flushAsyncWork();
-    const trappedEditor = dom.window.document.querySelector<HTMLElement>('[data-mango-unified-rich-editor="email-collaboration-shared-draft"]');
+    const trappedEditor = dom.window.document.querySelector<HTMLElement>('[data-mango-unified-rich-editor="shared-triage-compose"]');
     const trappedChatButton = dom.window.document.querySelector<HTMLButtonElement>('[data-testid="trapped-chat-button"]');
     assert.ok(trappedEditor);
     assert.ok(trappedChatButton);

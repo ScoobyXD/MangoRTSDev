@@ -3,40 +3,36 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"miraeopus/backend/internal/domain"
 	"strings"
 )
 
 func (r *PostgresRepo) ListCommunicationsEmailDrafts(input CommunicationsEmailDraftListInput) ([]domain.CommunicationsEmailDraft, error) {
-	scope, _, participantOnly, err := normalizeCommunicationsEmailDraftReadScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID, input.ParticipantUserID)
+	scope, err := normalizeCommunicationsEmailScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
 	if err != nil {
 		return nil, err
-	}
-	if participantOnly {
-		return r.appendParticipantSharedCommunicationsEmailDrafts(input, []domain.CommunicationsEmailDraft{})
 	}
 
 	var rows *sql.Rows
 	if scope.scopeType == "shared" {
 		rows, err = r.db.Query(`
-select `+communicationsEmailDraftSelectColumns()+`
+select `+communicationsEmailDraftSummarySelectColumns()+`
 from email_drafts
 where company_id = $1::uuid
 	and deleted_timestamp is null
 	and shared_inbox_id = $2::uuid
-	and not is_shared
 	and ($3='' or created_by_user_id = $3::uuid)
 order by updated_timestamp desc, draft_id asc`, scope.companyID, scope.sharedInboxID, cleanUUIDText(input.ParticipantUserID))
 	} else {
 		rows, err = r.db.Query(`
-select `+communicationsEmailDraftSelectColumns()+`
+select `+communicationsEmailDraftSummarySelectColumns()+`
 from email_drafts
 where company_id = $1::uuid
 	and deleted_timestamp is null
 	and personal_user_id = $2::uuid
 	and personal_account_email = $3
-	and not is_shared
 	and ($4='' or created_by_user_id = $4::uuid)
 order by updated_timestamp desc, draft_id asc`, scope.companyID, scope.personalUserID, scope.personalAccountEmail, cleanUUIDText(input.ParticipantUserID))
 	}
@@ -60,12 +56,9 @@ order by updated_timestamp desc, draft_id asc`, scope.companyID, scope.personalU
 }
 
 func (r *PostgresRepo) GetCommunicationsEmailDraft(input CommunicationsEmailDraftGetInput) (domain.CommunicationsEmailDraft, error) {
-	scope, _, participantOnly, err := normalizeCommunicationsEmailDraftReadScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID, input.ParticipantUserID)
+	scope, err := normalizeCommunicationsEmailScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
 	if err != nil {
 		return domain.CommunicationsEmailDraft{}, err
-	}
-	if participantOnly {
-		return r.getParticipantSharedCommunicationsEmailDraft(input)
 	}
 	draftID := strings.TrimSpace(input.DraftID)
 	if draftID == "" {
@@ -79,7 +72,6 @@ from email_drafts
 where company_id = $1::uuid
 		and draft_id = $2
 		and shared_inbox_id = $3::uuid
-		and not is_shared
 		and ($4='' or created_by_user_id = $4::uuid)
 		and deleted_timestamp is null`, scope.companyID, draftID, scope.sharedInboxID, cleanUUIDText(input.ParticipantUserID)))
 	} else {
@@ -90,17 +82,16 @@ where company_id = $1::uuid
 	and draft_id = $2
 		and personal_user_id = $3::uuid
 		and personal_account_email = $4
-		and not is_shared
 		and ($5='' or created_by_user_id = $5::uuid)
 		and deleted_timestamp is null`, scope.companyID, draftID, scope.personalUserID, scope.personalAccountEmail, cleanUUIDText(input.ParticipantUserID)))
 	}
-	return draft, err
+	if err != nil {
+		return domain.CommunicationsEmailDraft{}, err
+	}
+	return r.hydrateCommunicationsEmailDraftReplyTarget(draft)
 }
 
 func (r *PostgresRepo) UpsertCommunicationsEmailDraft(input CommunicationsEmailDraftInput) (domain.CommunicationsEmailDraft, error) {
-	if input.IsShared {
-		return r.upsertSharedCommunicationsEmailDraft(input)
-	}
 	draft, err := normalizeCommunicationsEmailDraftInput(input)
 	if err != nil {
 		return domain.CommunicationsEmailDraft{}, err
@@ -145,12 +136,12 @@ limit 2`, draft.CompanyID, draft.SourceMessageID, draft.ScopeType,
 	}
 	saved, err := scanCommunicationsEmailDraft(r.db.QueryRow(`
 insert into email_drafts (
- company_id,draft_id,email_thread_id,origin_node_id,source_email_message_id,is_shared,email_account_type,
+ company_id,draft_id,source_email_message_id,email_account_type,
  personal_user_id,personal_account_email,shared_inbox_id,sender_account_email,
  created_by_user_id,updated_by_user_id,kind,to_recipients,cc_recipients,bcc_recipients,
  subject,body_editor_html,scheduled_send_timestamp,created_timestamp,updated_timestamp,deleted_timestamp
 ) values (
- $1::uuid,$2,null,null,nullif($3,'')::uuid,false,case $4 when 'personal' then 'personal_email_account' else 'shared_email_account' end,nullif($5,'')::uuid,nullif($6,''),nullif($7,'')::uuid,$8,
+ $1::uuid,$2,nullif($3,'')::uuid,case $4 when 'personal' then 'personal_email_account' else 'shared_email_account' end,nullif($5,'')::uuid,nullif($6,''),nullif($7,'')::uuid,$8,
  nullif($9,'')::uuid,nullif($10,'')::uuid,$11,$12,$13,$14,$15,$16,$17,now(),now(),null
 )
 on conflict(company_id,draft_id) do update set
@@ -160,9 +151,8 @@ on conflict(company_id,draft_id) do update set
  cc_recipients=excluded.cc_recipients,bcc_recipients=excluded.bcc_recipients,
  subject=excluded.subject,body_editor_html=excluded.body_editor_html,
  scheduled_send_timestamp=excluded.scheduled_send_timestamp,
- revision=email_drafts.revision+1,send_state='draft',updated_timestamp=now(),deleted_timestamp=null
-where not email_drafts.is_shared
-	and email_drafts.created_by_user_id=excluded.created_by_user_id
+ updated_timestamp=now(),deleted_timestamp=null
+where email_drafts.created_by_user_id=excluded.created_by_user_id
  and email_drafts.email_account_type=excluded.email_account_type
  and email_drafts.personal_user_id is not distinct from excluded.personal_user_id
  and email_drafts.personal_account_email is not distinct from excluded.personal_account_email
@@ -176,16 +166,52 @@ returning `+communicationsEmailDraftSelectColumns(),
 	if errors.Is(err, ErrNotFound) {
 		return domain.CommunicationsEmailDraft{}, ErrAlreadyExists
 	}
+	if err == nil {
+		if replyToMessageJSON := strings.TrimSpace(draft.ReplyToMessageJSON); replyToMessageJSON != "" && replyToMessageJSON != "{}" {
+			saved.ReplyToMessageJSON = draft.ReplyToMessageJSON
+		} else {
+			return r.hydrateCommunicationsEmailDraftReplyTarget(saved)
+		}
+	}
 	return saved, err
 }
 
+func (r *PostgresRepo) hydrateCommunicationsEmailDraftReplyTarget(draft domain.CommunicationsEmailDraft) (domain.CommunicationsEmailDraft, error) {
+	if draft.Kind != "reply" || strings.TrimSpace(draft.SourceMessageID) == "" {
+		return draft, nil
+	}
+	var providerMessageID string
+	var providerThreadID string
+	err := r.db.QueryRow(`
+select message.provider_message_id,thread.provider_thread_id
+from email_messages message
+join email_threads thread
+  on thread.company_id=message.company_id
+ and thread.email_thread_id=message.email_thread_id
+where message.company_id=$1::uuid and message.email_message_id=$2::uuid`,
+		draft.CompanyID, draft.SourceMessageID).Scan(&providerMessageID, &providerThreadID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.CommunicationsEmailDraft{}, ErrEmailDraftSourceNotFound
+	}
+	if err != nil {
+		return domain.CommunicationsEmailDraft{}, err
+	}
+	payload, err := json.Marshal(map[string]string{
+		"id":               providerMessageID,
+		"email_message_id": draft.SourceMessageID,
+		"thread_id":        providerThreadID,
+	})
+	if err != nil {
+		return domain.CommunicationsEmailDraft{}, err
+	}
+	draft.ReplyToMessageJSON = string(payload)
+	return draft, nil
+}
+
 func (r *PostgresRepo) SoftDeleteCommunicationsEmailDraft(input CommunicationsEmailDraftDeleteInput) error {
-	scope, _, participantOnly, err := normalizeCommunicationsEmailDraftReadScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID, input.ParticipantUserID)
+	scope, err := normalizeCommunicationsEmailScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
 	if err != nil {
 		return err
-	}
-	if participantOnly {
-		return r.softDeleteParticipantSharedCommunicationsEmailDraft(input)
 	}
 	draftID := strings.TrimSpace(input.DraftID)
 	updatedByUserID := cleanUUIDText(input.UpdatedByUserID)
@@ -208,7 +234,6 @@ where company_id = $1::uuid
 	and personal_user_id is not distinct from nullif($4, '')::uuid
 	and personal_account_email is not distinct from nullif($5, '')
 	and shared_inbox_id is not distinct from nullif($6, '')::uuid
-	and not is_shared
 	and created_by_user_id = nullif($7, '')::uuid
 	and deleted_timestamp is null`, scope.companyID, draftID, updatedByUserID, scope.personalUserID, scope.personalAccountEmail, scope.sharedInboxID, cleanUUIDText(input.ParticipantUserID))
 	if err != nil {
@@ -322,18 +347,6 @@ case email_account_type when 'personal_email_account' then 'personal' else 'shar
 coalesce(personal_user_id::text, ''),
 coalesce(personal_account_email, ''),
 coalesce(shared_inbox_id::text, ''),
-coalesce(email_thread_id::text, ''),
-coalesce(origin_node_id::text, ''),
-	is_shared,
-revision,
-send_state,
-send_claim_token,
-send_idempotency_key,
-send_idempotency_grant_id,
-send_idempotency_timestamp,
-send_claimed_revision,
-send_claimed_timestamp,
-sent_provider_message_id,
 coalesce(created_by_user_id::text, ''),
 coalesce(updated_by_user_id::text, ''),
 kind,
@@ -344,6 +357,31 @@ cc_recipients,
 bcc_recipients,
 subject,
 body_editor_html,
+'{}',
+scheduled_send_timestamp,
+created_timestamp,
+updated_timestamp,
+deleted_timestamp`
+}
+
+func communicationsEmailDraftSummarySelectColumns() string {
+	return `
+company_id::text,
+draft_id,
+case email_account_type when 'personal_email_account' then 'personal' else 'shared' end,
+coalesce(personal_user_id::text, ''),
+coalesce(personal_account_email, ''),
+coalesce(shared_inbox_id::text, ''),
+coalesce(created_by_user_id::text, ''),
+coalesce(updated_by_user_id::text, ''),
+kind,
+coalesce(source_email_message_id::text, ''),
+sender_account_email,
+to_recipients,
+cc_recipients,
+bcc_recipients,
+subject,
+'',
 '{}',
 scheduled_send_timestamp,
 created_timestamp,
@@ -371,8 +409,6 @@ updated_timestamp`
 func scanCommunicationsEmailDraft(row interface{ Scan(dest ...any) error }) (domain.CommunicationsEmailDraft, error) {
 	var draft domain.CommunicationsEmailDraft
 	var scheduled sql.NullTime
-	var sendIdempotency sql.NullTime
-	var sendClaimed sql.NullTime
 	var deleted sql.NullTime
 	err := row.Scan(
 		&draft.CompanyID,
@@ -381,18 +417,6 @@ func scanCommunicationsEmailDraft(row interface{ Scan(dest ...any) error }) (dom
 		&draft.PersonalUserID,
 		&draft.PersonalAccountEmail,
 		&draft.SharedInboxID,
-		&draft.EmailThreadID,
-		&draft.OriginNodeID,
-		&draft.IsShared,
-		&draft.Revision,
-		&draft.SendState,
-		&draft.SendClaimToken,
-		&draft.SendIdempotencyKey,
-		&draft.SendIdempotencyGrantID,
-		&sendIdempotency,
-		&draft.SendClaimedRevision,
-		&sendClaimed,
-		&draft.SentMessageID,
 		&draft.CreatedByUserID,
 		&draft.UpdatedByUserID,
 		&draft.Kind,
@@ -417,12 +441,6 @@ func scanCommunicationsEmailDraft(row interface{ Scan(dest ...any) error }) (dom
 	}
 	if scheduled.Valid {
 		draft.ScheduledSendTimestamp = &scheduled.Time
-	}
-	if sendIdempotency.Valid {
-		draft.SendIdempotencyTimestamp = &sendIdempotency.Time
-	}
-	if sendClaimed.Valid {
-		draft.SendClaimedTimestamp = &sendClaimed.Time
 	}
 	if deleted.Valid {
 		draft.DeletedTimestamp = &deleted.Time

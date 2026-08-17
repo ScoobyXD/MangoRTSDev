@@ -36,23 +36,23 @@ Later membership changes do not rewrite that Huddle Node, while current source d
 4. The same exact email message may link to different text boxes in different Nodes.
 5. The database enforces semantic-edge uniqueness and the one-textbox-per-message-per-Node law under concurrent writes.
 6. A newly completed message inherits every distinct Node-wide destination already present for its thread.
-7. New-message ingestion never creates or copies a textbox-specific relationship, chat, or shared-draft display state.
+7. New-message ingestion never creates or copies a textbox-specific relationship, chat, or draft.
 8. An email-selection chat is valid only when the exact internal email message has an `email_relationships` row for that chat's exact Node and Node text box.
 9. Opening an email-selection chat preview creates no text box, email relationship, or chat relationship.
 10. Sending the first chat from an email-selection preview atomically links the chosen existing text box or creates the first Node-local text box, then creates the email-to-textbox relationship and chat, or creates none of them.
 11. Cancelling an unsent email-selection chat preview requires no relationship deletion because no relationship has been written.
-12. A Node-shared email draft belongs directly to one exact Node, one exact email thread, and one exact source message. Current permission to view that Node permits viewing and editing its shared draft. The reply UI reuses that message's existing Node-local text box or creates the one permitted typed email-to-text-box relationship first; the draft does not own a second text-box identity.
-13. The shared draft stores the exact Node, thread, and source-message identities directly and never creates a generic draft edge, resource registry, surrogate identity, participant table, copied permission grant, or separate draft-to-text-box relationship.
-14. Removing a Node email relationship is allowed only when that Node and thread have no textbox relationship, email-selection chat, or active shared draft; otherwise the command returns `email_removal_has_node_work` and changes nothing.
-15. Email-to-Node, email-to-textbox, chat, and draft rules do not create a generic resource registry, surrogate identity, or untyped edge.
+12. A Node email or thread view is read-only and creates no personal draft, shared draft, reply relationship, draft-to-text-box relationship, sender grant, or draft participant row.
+13. Removing a Node email relationship is allowed only when that Node and thread have no textbox relationship or email-selection chat; otherwise the command returns `email_removal_has_node_work` and changes nothing.
+14. Email-to-Node, email-to-textbox, and chat rules do not create a generic resource registry, surrogate identity, or untyped edge.
+15. My Triage, Shared Triage, and retained Project reply drafts remain mailbox-owned records and do not become Node relationship authority merely because their source thread appears in a Node.
 16. An ordinary root chat or reply in an existing triage grouping uses only the normal Node text-box-chat insert and creates no email, relationship, permission, participant, or collaboration row.
 17. A triage command that creates a new email grouping or stores a highlighted-email selection reuses the exact mailbox-scoped stored message when present, fetches only that exact provider message when absent, and never queues thread ingestion or links a thread to a text box.
 18. When a highlighted-email chat's exact message has no text-box relationship in the chosen Node, selecting an existing chat grouping atomically links that message to the grouping's exact existing text box and creates the chat without creating another text box.
 19. The Node email view uses the same atomic rule when the user chooses an existing text-box chat column; a failed relationship or chat write leaves both absent.
-20. The email-draft scope cutover deletes only obsolete draft rows that cannot name their required exact owner or exact Node and source message, and retires only their typed `email_draft` attachment relationships before deletion; it never invents an endpoint or changes a valid email relationship.
+20. Removing obsolete Node-scoped draft rows retires only their typed `email_draft` attachment relationships and never changes a valid email, textbox, chat, Triage draft, or Project draft relationship.
 21. A stored-thread reader or inline email reference carries the exact internal `email_thread_id`; a provider message ID or provider thread ID never selects a durable Mango thread.
 
-Last updated: 2026-08-12
+Last updated: 2026-08-16
 
 # Process Story: One email thread can appear in several Nodes while message work stays Node-local
 
@@ -62,19 +62,17 @@ Each newly completed message inherits every distinct Node-wide destination alrea
 ↓
 Inside each Node, one exact message may link to one exact Node text box; the same message may link to a different text box in another Node
 ↓
-Reply or Reply all opens that exact message's Node-local text box, while any shared draft remains keyed directly by the exact Node, thread, and source message
-↓
 Opening a highlighted-email chat preview creates no relationship or resource
 ↓
 An ordinary root chat or reply appends directly to an existing grouping without creating an email relationship; a highlighted-email chat links its exact message to the chosen grouping when required, and a failed atomic command creates none of its relationship or chat writes
 ↓
 A highlighted-email or new-grouping send reuses the exact stored message or imports only the missing exact provider message; thread completion remains separate background ingestion
 ↓
-An accidental Node email relationship with no Node-local work may be removed, while a relationship with a textbox link, email-selection chat, or active shared draft is preserved
+An accidental Node email relationship with no Node-local work may be removed, while a relationship with a textbox link or email-selection chat is preserved
 ↓
 Every endpoint keeps its literal typed identity; no registry, surrogate identity, or generic untyped edge is introduced
 ↓
-The forward draft cutover removes only legacy drafts without the exact identities required by this model and retires only their typed draft attachment links
+Node email viewing remains read-only and creates no draft or send relationship
 
 Last updated: 2026-08-12
 # Process Story: Policy inheritance follows typed parents without moving permissions into Explorer
@@ -448,7 +446,7 @@ One `email_thread_id` and its exact stored messages MAY have Node-wide `email_re
 
 A textbox-specific relationship MUST name one exact `email_message_id`, one exact Node, and one exact textbox in that Node. The same message may be linked to at most one textbox inside one Node. Repeating the same Node/message/textbox command converges to the existing typed edge, a different textbox in that same Node is rejected, and a textbox in a different Node is allowed.
 
-Removing a Node-wide or textbox-specific email relationship is permitted only when that Node and thread have no textbox relationship, email-selection chat, or active shared draft. A blocked command MUST change nothing and return `email_removal_has_node_work`. A permitted removal deletes only that exact relationship and MUST NOT delete or rewrite another Node's relationship, the stored thread or message, another Node's textbox or chat, or any surviving attachment relationship.
+Removing a Node-wide or textbox-specific email relationship is permitted only when that Node and thread have no textbox relationship or email-selection chat. A blocked command MUST change nothing and return `email_removal_has_node_work`. A permitted removal deletes only that exact relationship and MUST NOT delete or rewrite another Node's relationship, the stored thread or message, another Node's textbox or chat, any owner-only Triage or Project draft, or any surviving attachment relationship.
 
 ### Law 32 — Huddle ownership and placement use exact Huddle identities
 

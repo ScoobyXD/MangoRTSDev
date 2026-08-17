@@ -307,12 +307,14 @@ test("browser tab uses the Mango orange hexagon mark", () => {
   assert.match(faviconSVG, /points="32,5\.5 55,18\.75 55,45\.25 32,58\.5 9,45\.25 9,18\.75"/);
 });
 
-test("collaboration shared drafts are immediate-only and stay out of the browser scheduler", () => {
+test("personal and shared-inbox owner drafts retain the browser scheduler", () => {
   const homePage = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomePage.tsx"), "utf8");
   const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
 
-  assert.match(homePage, /return !draft\.sharedDraft && Number\.isFinite\(scheduledAtMs\)/);
-  assert.match(homeParts, /!compose\.sharedDraft && \(\s*<input\s+type="datetime-local"\s+aria-label="Schedule send"/s);
+  assert.match(homePage, /return Number\.isFinite\(scheduledAtMs\)/);
+  assert.match(homePage, /await loadHomeMailDraft\(companyID, currentUserID, draft\)[\s\S]{0,700}await sendHomeMailComposeCommand/);
+  assert.doesNotMatch(homePage, /draft\.sharedDraft/);
+  assert.match(homeParts, /<input\s+type="datetime-local"\s+aria-label="Schedule send"/s);
 });
 
 test("mailbox archive advance, non-scrollable fill, and provider-wide oldest ordering stay wired", () => {
