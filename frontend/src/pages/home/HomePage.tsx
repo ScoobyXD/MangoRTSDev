@@ -439,6 +439,7 @@ export function HomePage({
   me,
   onNavigate,
   embedded = false,
+  ownsEmailReferencePreview = true,
   initialViewID = "my-triage",
   onActiveViewChange,
   deepLinkNodeID,
@@ -5933,22 +5934,24 @@ export function HomePage({
           }}
         />
       )}
-      <EmailReferencePreviewHost
-        apiBase={apiBase}
-        companyID={companyID}
-        currentUserID={currentUserID}
-        sharedInboxes={sharedInboxes}
-        nodes={nodes}
-        logicGates={logicGates}
-        onOpenNode={(nodeID) => {
-          const node = nodeByID.get(nodeID);
-          if (node) openNodeEditorOverlay(node);
-        }}
-        onOpenLogicGate={(logicGateID) => {
-          const logicGate = logicGateByID.get(logicGateID);
-          if (logicGate) openLogicGateArena(logicGateID, logicGateTitle(logicGate));
-        }}
-      />
+      {ownsEmailReferencePreview && (
+        <EmailReferencePreviewHost
+          apiBase={apiBase}
+          companyID={companyID}
+          currentUserID={currentUserID}
+          sharedInboxes={sharedInboxes}
+          nodes={nodes}
+          logicGates={logicGates}
+          onOpenNode={(nodeID) => {
+            const node = nodeByID.get(nodeID);
+            if (node) openNodeEditorOverlay(node);
+          }}
+          onOpenLogicGate={(logicGateID) => {
+            const logicGate = logicGateByID.get(logicGateID);
+            if (logicGate) openLogicGateArena(logicGateID, logicGateTitle(logicGate));
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -6106,6 +6109,6 @@ const homeDialogSecondaryButtonStyle: React.CSSProperties = {
 };
 
 export const HomeFrameContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "mango" | "teal" | "light" | "dark" }> = () => (
-  <HomePage embedded />
+  <HomePage embedded ownsEmailReferencePreview={false} />
 );
 export type { HomePageProps, HomeViewID } from "./homeTypes";

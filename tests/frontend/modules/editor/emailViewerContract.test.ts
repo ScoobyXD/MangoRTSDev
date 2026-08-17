@@ -114,7 +114,9 @@ test("the shared inline email reference host opens the exact stored thread on ev
   assert.match(previewHost, /subscribeRealtimeScope\(apiBase, companyID, scope/);
   assert.doesNotMatch(previewHost, /change\.message_id/);
   assert.match(previewHost, /<EmailReferencePreviewModal/);
-  assert.match(homePage, /<EmailReferencePreviewHost[\s\S]{0,220}sharedInboxes=\{sharedInboxes\}[\s\S]{0,120}nodes=\{nodes\}[\s\S]{0,120}logicGates=\{logicGates\}/);
+  assert.match(homePage, /ownsEmailReferencePreview = true/);
+  assert.match(homePage, /\{ownsEmailReferencePreview && \(\s*<EmailReferencePreviewHost[\s\S]{0,220}sharedInboxes=\{sharedInboxes\}[\s\S]{0,120}nodes=\{nodes\}[\s\S]{0,120}logicGates=\{logicGates\}/);
+  assert.match(homePage, /HomeFrameContent[\s\S]{0,260}<HomePage embedded ownsEmailReferencePreview=\{false\} \/>/);
   assert.doesNotMatch(homePage, /EVENT_EDITOR_EMAIL_REFERENCE_OPEN|emailReferencePreviewRequestIDRef|<EmailReferencePreviewModal/);
   assert.match(appLayout, /const homePageOwnsEmailReferencePreview = !overrideContent && !isHuddleLogicGateView && !isLogicGateArenaView && isHomeView/);
   assert.match(appLayout, /\{!homePageOwnsEmailReferencePreview && \(\s*<EmailReferencePreviewHost/);
