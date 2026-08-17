@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"miraeopus/backend/internal/domain"
 )
 
@@ -10,25 +11,45 @@ func upsertPostgresNodeTextProjection(context.Context, *sql.Tx, NodeInformationI
 	return domain.NodeProjection{}, ErrInvalid
 }
 
-func deletePostgresNodeTextProjection(ctx context.Context, tx *sql.Tx, input NodeProjectionDeleteInput, previous domain.NodeProjection, previousFound bool) error {
+func deletePostgresNodeTextProjection(ctx context.Context, tx *sql.Tx, input NodeProjectionDeleteInput, _ domain.NodeProjection, _ bool) error {
 	if input.ExpectedRevision == nil {
 		return ErrProjectionRevisionRequired
 	}
 	if *input.ExpectedRevision < 1 {
 		return ErrInvalid
 	}
-	if !previousFound {
+	var currentRevision int64
+	var currentDeleted bool
+	if err := tx.QueryRowContext(ctx, `select revision,deleted_timestamp is not null
+from node_textboxes
+where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid
+for update`, input.CompanyID, input.NodeID, input.InformationID).Scan(&currentRevision, &currentDeleted); errors.Is(err, sql.ErrNoRows) {
 		return &ProjectionRevisionConflictError{}
+	} else if err != nil {
+		return err
 	}
-	if previous.IsDeleted || previous.Revision != *input.ExpectedRevision {
-		current := previous
-		return &ProjectionRevisionConflictError{NodeCurrent: &current}
+	if currentDeleted || currentRevision != *input.ExpectedRevision {
+		if !currentDeleted {
+			current, found, err := postgresNodeProjectionTx(ctx, tx, input.CompanyID, input.NodeID, input.InformationID)
+			if err != nil {
+				return err
+			}
+			if found {
+				return &ProjectionRevisionConflictError{NodeCurrent: &current}
+			}
+		}
+		return &ProjectionRevisionConflictError{}
 	}
 	if err := retireNodeTextboxAttachmentRelationshipsTx(ctx, tx, input.CompanyID, input.NodeID, input.InformationID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `delete from node_textbox_chats
  where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid`, input.CompanyID, input.NodeID, input.InformationID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `delete from email_relationships
+ where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid
+   and resource_textbox_id=$3::text`, input.CompanyID, input.NodeID, input.InformationID); err != nil {
 		return err
 	}
 	result, err := tx.ExecContext(ctx, `update node_textboxes set deleted_timestamp=now(), revision=revision+1, updated_timestamp=now()

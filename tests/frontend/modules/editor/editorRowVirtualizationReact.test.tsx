@@ -372,6 +372,7 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
   const editorMetadataPatchBodies: Array<Record<string, unknown>> = [];
   const nodeMutationRequests: Array<{ path: string; method: string }> = [];
   let failNextRelationshipInformationWrite = false;
+  let failNextRelationshipDelete = false;
   for (const projection of [...nodeTextBlockProjectionItems, ...projectProjectionItems]) {
     const payload = JSON.parse(projection.information.slice(TEXT_BLOCK_PREFIX.length)) as { document: string };
     serverDocuments.set(projection.information_id, { document: JSON.parse(payload.document) as ReturnType<typeof tiptapDocument>, revision: 0 });
@@ -562,6 +563,13 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     const nodeRequestJSON = async <T,>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
       const method = (init?.method ?? "GET").toUpperCase();
       if (method === "POST" || method === "PATCH" || method === "DELETE") nodeMutationRequests.push({ path, method });
+      if (method === "DELETE" && path.startsWith(`/v1/nodes/${NODE_ID}/projection/`)) {
+        if (failNextRelationshipDelete) {
+          failNextRelationshipDelete = false;
+          throw new Error("email_textbox_relationship_has_chat");
+        }
+        return {} as T;
+      }
       if (path.includes("/editor-data-format")) {
         return {
           company_id: COMPANY_ID,
@@ -1211,6 +1219,43 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     assert.match(linkedEmailPreview.textContent ?? "", /Cc:\s*Copy Person <copy@example\.test>/);
     assert.match(linkedEmailPreview.textContent ?? "", /Bcc:\s*Blind Copy <blind@example\.test>/);
     assert.match(linkedEmailPreview.textContent ?? "", /Complete linked email body\./);
+    const removeLinkedEmailButtons = Array.from(linkedEmailPreview.querySelectorAll<HTMLButtonElement>('[data-remove-linked-email-message-id]'));
+    assert.deepEqual(removeLinkedEmailButtons.map((button) => button.dataset.removeLinkedEmailMessageId), [
+      "email-message-node-block-0",
+      "internal-message-node-block-0",
+    ], "each exact linked message should have one remove button in backend timestamp order");
+    nodeMutationRequests.length = 0;
+    await act(async () => { removeLinkedEmailButtons[1]?.click(); });
+    await flushWork();
+    assert.deepEqual(nodeMutationRequests, [{
+      path: `/v1/nodes/${NODE_ID}/projection/email-child-node-block-0?company_id=${encodeURIComponent(COMPANY_ID)}`,
+      method: "DELETE",
+    }], "the remove button should delete only the exact textbox relationship projection");
+    assert.deepEqual(
+      Array.from(linkedEmailPreview.querySelectorAll<HTMLElement>('[data-email-single-message="true"]')).map((item) => item.dataset.emailMessageId),
+      ["thread-root-node-block-0"],
+      "removing the later relationship should leave the earlier linked message visible",
+    );
+    const remainingRemoveButton = linkedEmailPreview.querySelector<HTMLButtonElement>(
+      '[data-remove-linked-email-message-id="email-message-node-block-0"]',
+    );
+    assert.ok(remainingRemoveButton);
+    failNextRelationshipDelete = true;
+    nodeMutationRequests.length = 0;
+    runtimeErrors.length = 0;
+    await act(async () => { remainingRemoveButton.click(); });
+    await flushWork();
+    assert.deepEqual(nodeMutationRequests, [{
+      path: `/v1/nodes/${NODE_ID}/projection/email-node-block-0?company_id=${encodeURIComponent(COMPANY_ID)}`,
+      method: "DELETE",
+    }], "a guarded removal should still target only the exact textbox relationship");
+    assert.ok(runtimeErrors.includes("email_textbox_relationship_has_chat"));
+    assert.deepEqual(
+      Array.from(linkedEmailPreview.querySelectorAll<HTMLElement>('[data-email-single-message="true"]')).map((item) => item.dataset.emailMessageId),
+      ["thread-root-node-block-0"],
+      "a backend anchored-chat rejection should restore the exact linked message",
+    );
+    runtimeErrors.length = 0;
     const textBoxContentColumn = emailNodeRow.querySelector<HTMLElement>('[data-node-text-box-content-column="true"]');
     const textBoxPaneLayout = emailNodeRow.querySelector<HTMLElement>('[data-node-text-box-columns="editor-chat"]');
     const fullHeightChat = emailNodeRow.querySelector<HTMLElement>('[data-node-chat-block-id="node-block-0"]');

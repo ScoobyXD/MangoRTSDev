@@ -627,6 +627,96 @@ func TestMemoryEmailTextboxRelationshipRemovalMatchesTheCanonicalChatGuard(t *te
 	}
 }
 
+func TestMemoryNodeTextboxDeleteReleasesItsMessageAndPreservesTheWideRelationship(t *testing.T) {
+	repo, companyID, user, node, message := setupAtomicEmailConversion(t, "11111111-1111-4111-8111-111111111196")
+	firstTextboxID := "44444444-4444-4444-8444-444444444496"
+	secondTextboxID := "66666666-6666-4666-8666-666666666696"
+	chatID := "55555555-5555-4555-8555-555555555596"
+	result, err := repo.ConvertCommunicationsTriageItems(context.Background(), CommunicationsTriageConversionInput{
+		UserID: user.UserID, CompanyID: companyID, AccountEmail: user.Email,
+		ActorUserID: user.UserID, PermissionUserID: user.UserID,
+		Target:     CommunicationsTriageConversionTarget{Mode: CommunicationsEmailConversionTargetExistingNode, NodeID: node.NodeID},
+		MessageIDs: []string{message.ID},
+		LinkedTextBlock: &NodeInformationInput{
+			InformationID: firstTextboxID, Type: "Text box",
+			Information: editorTextBlockProjectionPrefix + `{"title":"Imported email","document":"","attachments":[],"color":"#0EA5E9"}`,
+			ActorUserID: user.UserID,
+		},
+		InitialChat: &NodeInformationInput{
+			InformationID: chatID, Type: CommunicationsEmailCollaborationChatInformationType,
+			Information: `{"block_id":"44444444-4444-4444-8444-444444444496","selection_source":"email","selection_message_id":"","message":"Anchored chat"}`,
+			ActorUserID: user.UserID,
+		},
+	})
+	if err != nil || len(result.EmailMessageIDs) != 1 || len(result.AttachedEmailInformationIDs) != 1 {
+		t.Fatalf("initial linked textbox=%+v err=%v", result, err)
+	}
+	textboxRelationshipID := ""
+	for informationID, projection := range repo.nodeText[key(companyID, node.NodeID)] {
+		if !strings.EqualFold(projection.Type, "Attached email") {
+			continue
+		}
+		var relationship nodeAttachedEmailPayload
+		if json.Unmarshal([]byte(projection.Information), &relationship) == nil && cleanUUIDText(relationship.BlockID) == firstTextboxID {
+			textboxRelationshipID = informationID
+			break
+		}
+	}
+	if textboxRelationshipID == "" {
+		t.Fatal("initial exact textbox relationship missing")
+	}
+	current := repo.nodeText[key(companyID, node.NodeID)][firstTextboxID]
+	if current.Revision < 1 {
+		current.Revision = 1
+	}
+	if err := repo.DeleteNodeProjectionWithActor(NodeProjectionDeleteInput{
+		CompanyID: companyID, NodeID: node.NodeID, InformationID: firstTextboxID,
+		ExpectedRevision: &current.Revision, ActorUserID: user.UserID,
+	}); err != nil {
+		t.Fatalf("delete first textbox: %v", err)
+	}
+	projections := repo.nodeText[key(companyID, node.NodeID)]
+	if _, exists := projections[chatID]; exists {
+		t.Fatal("textbox delete retained its chat")
+	}
+	if _, exists := projections[textboxRelationshipID]; exists {
+		t.Fatal("textbox delete retained its exact email relationship")
+	}
+	if _, exists := projections[result.AttachedEmailInformationIDs[0]]; !exists {
+		t.Fatal("textbox delete removed the Node-wide email projection")
+	}
+	if _, exists := repo.nodeEmailThreads[memoryNodeEmailThreadKey(companyID, node.NodeID, result.EmailThreadIDs[0])]; !exists {
+		t.Fatal("textbox delete removed the Node-wide email relationship")
+	}
+	details, err := repo.GetNodeDetails(companyID, node.NodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	informationIDs := map[string]bool{}
+	for _, item := range details.Information {
+		informationIDs[item.InformationID] = true
+	}
+	if informationIDs[chatID] || informationIDs[textboxRelationshipID] || !informationIDs[result.AttachedEmailInformationIDs[0]] {
+		t.Fatalf("textbox delete detail cleanup chat/relationship/wide=%v/%v/%v",
+			informationIDs[chatID], informationIDs[textboxRelationshipID], informationIDs[result.AttachedEmailInformationIDs[0]])
+	}
+	if _, err := repo.AddNodeInformation(companyID, node.NodeID, "Text box",
+		editorTextBlockProjectionPrefix+`{"title":"Second textbox","document":"","attachments":[],"color":""}`, secondTextboxID); err != nil {
+		t.Fatalf("create second textbox: %v", err)
+	}
+	linkPayload, _ := json.Marshal(map[string]any{
+		"block_id": secondTextboxID, "email_message_id": result.EmailMessageIDs[0],
+		"link_scope": "message", "textbox_color": "#14B8A6",
+	})
+	linked, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: companyID, NodeID: node.NodeID, InformationID: "77777777-7777-4777-8777-777777777796",
+		Type: "Attached email", Information: string(linkPayload), ActorUserID: user.UserID,
+	})
+	if err != nil || linked.InformationID == "" {
+		t.Fatalf("link released message to second textbox=%+v err=%v", linked, err)
+	}
+}
+
 func TestMemoryEmailConversionRollsBackEveryAtomicImportWrite(t *testing.T) {
 	repo, companyID, user, node, message := setupAtomicEmailConversion(t, "11111111-1111-4111-8111-111111111193")
 	beforeOutbox := maps.Clone(repo.realtimeOutbox)

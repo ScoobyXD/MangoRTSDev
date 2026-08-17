@@ -3,7 +3,6 @@ import {
   parseEditorChatEntityLinks,
   type EditorChatEntityLink,
 } from "./chatEntityLinks.js";
-import { normalizeLinkedEmailMessageIDs } from "./nodeEmailTextBoxRelationships.js";
 
 export type { EditorChatEntityLink } from "./chatEntityLinks.js";
 
@@ -267,7 +266,7 @@ export function parseEditorTextBlockContent(value: string): ParsedEditorTextBloc
     title: stringValue(record, "title"),
     document: rawStringValue(record, "document"),
     attachments: parseEditorChatAttachments(record.attachments),
-    linkedEmailMessageIDs: normalizeLinkedEmailMessageIDs(record.email_message_ids),
+    linkedEmailMessageIDs: stringListValue(record, "email_message_ids"),
     color: stringValue(record, "color") || undefined,
   };
 }

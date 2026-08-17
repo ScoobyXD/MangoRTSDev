@@ -52,9 +52,9 @@ Later membership changes do not rewrite that Huddle Node, while current source d
 20. The email-draft scope cutover deletes only obsolete draft rows that cannot name their required exact owner or exact Node and source message, and retires only their typed `email_draft` attachment relationships before deletion; it never invents an endpoint or changes a valid email relationship.
 21. A stored-thread reader or inline email reference carries the exact internal `email_thread_id`; a provider message ID or provider thread ID never selects a durable Mango thread, and a missing durable ID fails instead of falling back to a provider or collaboration lookup.
 22. Completing a Mango-originated Sent message keeps its original exact `email_message` attachment links and retires only redundant imported links for that same internal message; an attachment with another live owner remains live.
-23. A Node textbox projection exposes its complete ordered `email_message_ids` only as a value derived from canonical `email_relationships`; a client never saves that list or a singular representative as textbox-owned relationship metadata.
+23. A Node textbox projection exposes its complete ordered `email_message_ids` only as a value derived from canonical `email_relationships`; a client never saves that list or a singular representative as textbox-owned relationship metadata, and it renders that backend order without scanning thread cards to infer or reorder membership.
 24. Dragging the noninteractive header of one exact Node email message onto a textbox may create only that exact textbox relationship without creating a chat; a drag never starts from message body content, selected text, a button, a link, or an input.
-25. Dragging one linked message header back to the Node email column may remove only that exact textbox relationship, and the command must atomically reject removal while that exact message anchors a chat in that textbox; removing the last textbox relationship also returns that textbox to its neutral no-color state.
+25. The ordered email list inside a Node textbox gives each exact message an explicit remove control that may remove only that textbox relationship; the command must atomically reject removal while that exact message anchors a chat in that textbox, and removing the last textbox relationship also returns that textbox to its neutral no-color state.
 26. A textbox's stored color may decorate every exact message card linked to it, but never its parent thread container; the textbox email control lists every linked exact message oldest-to-newest by stored message timestamp.
 27. Every email/textbox relationship and email-selection chat command uses Mango's exact internal `email_message_id`; provider message and thread IDs are display/provider context only and never relationship authority.
 
@@ -76,9 +76,9 @@ Opening a highlighted-email chat preview creates no relationship or resource
 ↓
 An ordinary root chat or reply appends directly to an existing grouping without creating an email relationship; a highlighted-email chat links its exact message to the chosen grouping when required, and a failed atomic command creates none of its relationship or chat writes
 ↓
-A direct exact-message header drop may create the same typed textbox edge without a chat; the textbox projection then derives every linked message ID, and its email control renders those exact messages in stored timestamp order without changing thread membership
+A direct exact-message header drop may create the same typed textbox edge without a chat; the textbox projection then derives every linked message ID, and its email control renders those exact messages directly in backend stored-timestamp order without changing thread membership
 ↓
-Dragging a linked message header back to the Node email column removes only that textbox edge when no chat in the textbox is anchored to that message; otherwise the server rejects the removal atomically
+The explicit remove control beside a linked message removes only that textbox edge when no chat in the textbox is anchored to that message; otherwise the server rejects the removal atomically
 ↓
 A highlighted-email or new-grouping send reuses the exact stored message or imports only the missing exact provider message; thread completion remains separate background ingestion
 ↓
@@ -460,7 +460,7 @@ One `email_thread_id` and its exact stored messages MAY have wide `email_relatio
 
 A textbox-specific relationship MUST name one exact `email_message_id`, one exact Node or Project, and one exact textbox in that resource. The same message may be linked to at most one textbox inside each owner, while several exact messages may link to one textbox. Repeating the same owner/message/textbox command converges, a different textbox in that owner is rejected, and a textbox in a different owner is allowed.
 
-Removing one Node-wide or textbox-specific email relationship deletes only that exact relationship. A textbox-specific edge MUST NOT be removed while its exact message anchors a chat in that textbox. Removal MUST NOT delete or rewrite another Node's relationship, the stored thread or message, another Node's textbox or chat, an email chat quote, or any surviving attachment relationship.
+Removing one Node-wide or textbox-specific email relationship deletes only that exact relationship. A textbox-specific edge MUST NOT be removed while its exact message anchors a chat in that textbox. Deleting a Node textbox atomically removes that textbox's owned chats and textbox-specific email relationships while preserving its Node-wide email relationships. Removal MUST NOT delete or rewrite another Node's relationship, the stored thread or message, another Node's textbox or chat, an email chat quote, or any surviving attachment relationship.
 
 ### Law 32 — Huddle ownership and placement use exact Huddle identities
 

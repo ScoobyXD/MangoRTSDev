@@ -68,6 +68,34 @@ func TestNodeLinkedTextboxColorIsAssignedAndPreservedByCanonicalWrites(t *testin
 	}
 }
 
+func TestNodeTextboxDeleteRemovesOnlyItsTypedEmailRelationshipsAfterItsChats(t *testing.T) {
+	source := strings.Join(strings.Fields(readNodeFinalContractFile(t, "postgres_editor_projection_revisions.go")), " ")
+	textboxLock := "select revision,deleted_timestamp is not null from node_textboxes where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid for update"
+	chatDelete := "delete from node_textbox_chats where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid"
+	relationshipDelete := "delete from email_relationships where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid and resource_textbox_id=$3::text"
+	textboxDelete := "update node_textboxes set deleted_timestamp=now()"
+	lockPosition := strings.Index(source, textboxLock)
+	chatPosition := strings.Index(source, chatDelete)
+	relationshipPosition := strings.Index(source, relationshipDelete)
+	textboxPosition := strings.Index(source, textboxDelete)
+	if lockPosition < 0 || chatPosition < 0 || relationshipPosition < 0 || textboxPosition < 0 {
+		t.Fatalf("Node textbox delete cleanup is incomplete: lock=%d chats=%d relationships=%d textbox=%d", lockPosition, chatPosition, relationshipPosition, textboxPosition)
+	}
+	if lockPosition > chatPosition || chatPosition > relationshipPosition || relationshipPosition > textboxPosition {
+		t.Fatal("Node textbox delete must lock the textbox, then remove owned chats, exact textbox relationships, and the textbox")
+	}
+}
+
+func TestNodeTextboxChatWriteLocksItsActiveTextboxBeforeInsert(t *testing.T) {
+	source := strings.Join(strings.Fields(readNodeFinalContractFile(t, "postgres_node_textbox_chats.go")), " ")
+	lock := "select textbox_id::text from node_textboxes where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid and deleted_timestamp is null for update"
+	lockPosition := strings.Index(source, lock)
+	insertPosition := strings.Index(source, "insert into node_textbox_chats(")
+	if lockPosition < 0 || insertPosition < 0 || lockPosition > insertPosition {
+		t.Fatalf("Node textbox chat insert must lock its active textbox first: lock=%d insert=%d", lockPosition, insertPosition)
+	}
+}
+
 func TestNodeProductionSQLUsesOnlyFinalStorage(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {

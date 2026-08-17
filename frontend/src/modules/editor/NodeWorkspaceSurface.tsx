@@ -3096,30 +3096,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             className="mango-pane-layout-transition"
             aria-hidden={!nodeEmailColumnVisible}
             {...(!nodeEmailColumnVisible ? { inert: "" } : {})}
-            onDragOver={(event) => {
-              if (!canEdit || !event.dataTransfer.types.includes(EMAIL_MESSAGE_TEXT_BOX_LINK_DRAG_MIME)) return;
-              const dragged = parseEmailMessageTextBoxLinkDrag(event.dataTransfer);
-              if (!dragged?.sourceTextBoxID) return;
-              const relationship = attachedEmails.find((email) => (
-                email.blockID?.trim() === dragged.sourceTextBoxID
-                && email.emailMessageID === dragged.emailMessageID
-              ));
-              if (!relationship) return;
-              event.preventDefault();
-              event.dataTransfer.dropEffect = "move";
-            }}
-            onDrop={(event) => {
-              if (!canEdit || !event.dataTransfer.types.includes(EMAIL_MESSAGE_TEXT_BOX_LINK_DRAG_MIME)) return;
-              event.preventDefault();
-              const dragged = parseEmailMessageTextBoxLinkDrag(event.dataTransfer);
-              if (!dragged?.sourceTextBoxID) return;
-              const relationship = attachedEmails.find((email) => (
-                email.blockID?.trim() === dragged.sourceTextBoxID
-                && email.emailMessageID === dragged.emailMessageID
-              ));
-              if (!relationship) return;
-              void removeAttachedEmail(relationship.id);
-            }}
             style={{ gridColumn: "1", position: "sticky", top: 38, alignSelf: "start", zIndex: 2, minWidth: 0, height: nodeWorkspaceViewportHeight, minHeight: nodeWorkspaceViewportHeight, boxSizing: "border-box", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: panelBackground, backgroundClip: "padding-box", overflow: "hidden", opacity: nodeEmailColumnVisible ? 1 : 0, transform: nodeEmailColumnVisible ? "translateX(0) scale(1)" : "translateX(-10px) scale(0.985)", pointerEvents: nodeEmailColumnVisible ? "auto" : "none", boxShadow: EDITOR_NEU_SHADOW, transition: "opacity 180ms ease, transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1)" }}
           >
 			<AttachedEmailOrganizerPane
@@ -3441,7 +3417,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                       if (!canEdit || block.temporaryEmailChat || !event.dataTransfer.types.includes(EMAIL_MESSAGE_TEXT_BOX_LINK_DRAG_MIME)) return;
                       event.preventDefault();
                       const dragged = parseEmailMessageTextBoxLinkDrag(event.dataTransfer);
-                      if (!dragged || dragged.sourceTextBoxID || textBoxHasLinkedEmailMessage(block, dragged.emailMessageID)) return;
+                      if (!dragged || textBoxHasLinkedEmailMessage(block, dragged.emailMessageID)) return;
                       void linkEmailMessageToTextBlock(dragged.emailMessageID, block.id).catch((cause) => {
                         onError(cause instanceof Error ? cause.message : "failed_to_link_email_to_text_box");
                       });
@@ -3496,7 +3472,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                             <div data-node-linked-email-content="true" className="mango-pane-enter" style={{ minWidth: 0, minHeight: 0, overflow: "visible" }}>
                               <LinkedEmailPreviewPane
                                 messageIDs={displayedLinkedEmailMessageIDs}
-                                sourceTextBoxID={block.id}
+                                textBoxID={block.id}
+                                allowUnlinkedPreview={Boolean(block.stagedEmailMessageID)}
                                 emails={attachedEmails}
                                 nodeID={nodeID}
                                 apiBase={apiBase}
@@ -3521,6 +3498,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                                 initialReplyTargetMessageID={pendingEmailReply?.blockID === block.id ? pendingEmailReply.targetMessageID : undefined}
                                 initialReplyAll={pendingEmailReply?.blockID === block.id ? pendingEmailReply.replyAll : false}
                                 initialReplyRequestID={pendingEmailReply?.blockID === block.id ? pendingEmailReply.requestID : 0}
+                                onRemoveEmail={(emailID) => { void removeAttachedEmail(emailID); }}
                                 onError={onError}
                               />
                             </div>

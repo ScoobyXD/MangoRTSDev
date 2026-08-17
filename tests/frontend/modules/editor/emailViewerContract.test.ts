@@ -179,9 +179,7 @@ test("node email and linked text boxes use exact canonical message lists and tex
   assert.match(nodeParts, /height: replyComposerOpen \? "clamp\(420px, calc\(100vh - 300px\), 760px\)" : "auto"/);
   assert.match(nodeParts, /minHeight: replyComposerOpen \? undefined : 0/);
   assert.match(nodeParts, /fillHeight\?: boolean/);
-  assert.match(nodeParts, /Promise\.all\(linkedMessageIDs\.map\(\(messageID\) => resolveLinkedEmailPreview/);
   assert.match(nodeParts, /resolvedPreviews\.map\(\(resolvedPreview\) =>/);
-  assert.match(nodeParts, /compareStoredEmailTimestamps/);
   assert.match(nodeParts, /const internalMessageID = selection\.emailMessageID\?\.trim\(\) \?\? ""/);
   assert.match(nodeParts, /messageAccents\[internalThreadMessageID\]/);
   assert.doesNotMatch(nodeParts, /messageAccents\[threadMessageID\]/);
@@ -273,7 +271,7 @@ test("node drag and Universal-picker email attachment retain exact provider mail
   assert.doesNotMatch(editorProjection, /attachments: input\.attachments/);
 });
 
-test("exact Node email headers link and detach text boxes without accepting whole-email provider drags", () => {
+test("exact Node email headers link to text boxes without accepting whole-email provider drags", () => {
   const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
   const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
   const relationships = source("frontend/src/modules/editor/nodeEmailTextBoxRelationships.ts");
@@ -296,25 +294,21 @@ test("exact Node email headers link and detach text boxes without accepting whol
   assert.match(linkFunction, /setBlocks\([\s\S]{0,220}onProjectionMutation\(\)/, "successful link color adoption must request canonical relationship refresh");
   assert.match(nodeSurface, /EMAIL_MESSAGE_TEXT_BOX_LINK_DRAG_MIME/);
   assert.match(nodeSurface, /parseEmailMessageTextBoxLinkDrag\(event\.dataTransfer\)/);
-  assert.match(nodeSurface, /email\.blockID\?\.trim\(\) === dragged\.sourceTextBoxID[\s\S]{0,100}email\.emailMessageID === dragged\.emailMessageID/);
-  assert.match(nodeSurface, /removeAttachedEmail\(relationship\.id\)/);
   assert.doesNotMatch(nodeSurface, /buildEditorAttachedEmailPayload\(\{ \.\.\.dragged, blockID, linkWholeThread: false \}\)/);
 
-  assert.match(nodeParts, /const messageHeaderDraggable = Boolean\(editable && nodeID\.trim\(\) && internalThreadMessageID\)/);
+  assert.match(nodeParts, /const messageHeaderDraggable = Boolean\(editable && nodeID\.trim\(\) && internalThreadMessageID && !singleMessageOnly\)/);
   assert.match(nodeParts, /onPointerDownCapture=\{prepareEmailMessageTextBoxLinkDrag\}/);
   assert.match(nodeParts, /data-email-message-drag-strip="true"[\s\S]{0,180}draggable=\{messageHeaderDraggable\}/);
   assert.match(nodeParts, /data-email-message-drag-region="true"/, "full message headers need a visible noninteractive drag region");
   assert.match(nodeParts, /\) : collapsedSnippet \? \(\s*<div style=/);
   assert.match(nodeParts, /event\.stopPropagation\(\)/);
   assert.match(nodeParts, /EMAIL_MESSAGE_HEADER_INTERACTIVE_SELECTOR/);
-  assert.match(nodeParts, /messageHeaderDragSourceTextBoxID/);
   assert.doesNotMatch(nodeParts, /onMessageActivate\?\.\(email\.messageID\)/, "the neutral thread representative must not navigate as an exact linked message");
   assert.match(nodeParts, /if \(internalMessageID\) onMessageActivate\?\.\(internalMessageID\)/);
   assert.match(nodeParts, /if \(internalThreadMessageID\) onMessageActivate\?\.\(internalThreadMessageID\)/);
 
   assert.match(relationships, /application\/x-mango-email-message-text-box-link/);
   assert.match(relationships, /email_message_id: cleanEmailMessageID/);
-  assert.match(relationships, /source_textbox_id: sourceTextBoxID\.trim\(\)/);
   assert.doesNotMatch(relationships, /\bmessage_id:|\bthread_id:|subject:|application\/x-mango-email-message"/);
 });
 

@@ -387,7 +387,7 @@ func TestPostgresNodeFinalTextboxChatEmailAndAttachmentStorage(t *testing.T) {
 		company.CompanyID, node.NodeID, textboxID, attachmentID, emailMessageID).Scan(&liveChats, &liveEmails, &activeNodeLinks, &activeEmailLinks, &storedMessages); err != nil {
 		t.Fatal(err)
 	}
-	if liveChats != 0 || liveEmails != 1 || activeNodeLinks != 1 || activeEmailLinks != 1 || storedMessages != 1 {
+	if liveChats != 0 || liveEmails != 0 || activeNodeLinks != 1 || activeEmailLinks != 1 || storedMessages != 1 {
 		t.Fatalf("textbox delete chat/email/node-link/email-link/message=%d/%d/%d/%d/%d", liveChats, liveEmails, activeNodeLinks, activeEmailLinks, storedMessages)
 	}
 	var attachmentActive bool
@@ -397,9 +397,6 @@ where company_id=$1::uuid and attachment_id=$2::uuid`, company.CompanyID, attach
 	}
 	if !attachmentActive {
 		t.Fatal("shared attachment was marked pending while its exact email_message owner survived")
-	}
-	if err := repo.DeleteNodeProjection(company.CompanyID, node.NodeID, emailRelationshipID); err != nil {
-		t.Fatalf("delete Node A email relationship: %v", err)
 	}
 	var nodeARelationships, nodeBRelationships, survivingMessages int
 	if err := db.QueryRow(`select
@@ -812,6 +809,62 @@ where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid`,
 	}
 	if leakedTextbox != 0 || leakedChat != 0 {
 		t.Fatalf("provider chat failure leaked textbox/chat=%d/%d", leakedTextbox, leakedChat)
+	}
+
+	var textboxRevision int64
+	if err := db.QueryRow(`select revision from node_textboxes
+where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid`,
+		company.CompanyID, node.NodeID, textboxID).Scan(&textboxRevision); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteNodeProjectionWithActor(NodeProjectionDeleteInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: textboxID,
+		ExpectedRevision: &textboxRevision, ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatalf("delete linked textbox: %v", err)
+	}
+	var oldTextboxLinks, oldTextboxChats, wideLinks int
+	if err := db.QueryRow(`select
+  (select count(*) from email_relationships where company_id=$1::uuid and resource_type='node'
+    and resource_id=$2::uuid and resource_textbox_id=$3::text),
+  (select count(*) from node_textbox_chats where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid),
+  (select count(*) from email_relationships where company_id=$1::uuid and resource_type='node'
+    and resource_id=$2::uuid and resource_textbox_id is null and email_message_id in ($4::uuid,$5::uuid))`,
+		company.CompanyID, node.NodeID, textboxID, messageAID, messageBID).
+		Scan(&oldTextboxLinks, &oldTextboxChats, &wideLinks); err != nil {
+		t.Fatal(err)
+	}
+	if oldTextboxLinks != 0 || oldTextboxChats != 0 || wideLinks != 2 {
+		t.Fatalf("textbox delete links/chats/wide=%d/%d/%d", oldTextboxLinks, oldTextboxChats, wideLinks)
+	}
+	deletedTextboxChatID := "00000000-0000-4000-8000-000000000633"
+	deletedTextboxChatPayload, _ := json.Marshal(map[string]any{
+		"block_id": textboxID, "author_id": owner.UserID,
+		"author_name": "Node Multi Email Owner", "message": "Must not attach to deleted textbox",
+	})
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: deletedTextboxChatID,
+		Type: CommunicationsEmailCollaborationChatInformationType, Information: string(deletedTextboxChatPayload), ActorUserID: owner.UserID,
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("chat on deleted textbox err=%v, want ErrNotFound", err)
+	}
+	if count := countPostgresRows(t, db, `select count(*) from node_textbox_chats
+where company_id=$1::uuid and node_id=$2::uuid and chat_id=$3::uuid`,
+		company.CompanyID, node.NodeID, deletedTextboxChatID); count != 0 {
+		t.Fatalf("deleted textbox accepted %d chat rows", count)
+	}
+	releasedLinkID := "00000000-0000-4000-8000-000000000632"
+	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: company.CompanyID, NodeID: node.NodeID, InformationID: releasedLinkID,
+		Type: "Attached email", Information: string(conflictPayload), ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatalf("link released message to second textbox: %v", err)
+	}
+	if count := countPostgresRows(t, db, `select count(*) from email_relationships
+where company_id=$1::uuid and email_relationship_id=$3::uuid and resource_type='node'
+  and resource_id=$2::uuid and resource_textbox_id=$4::text and email_message_id=$5::uuid`,
+		company.CompanyID, node.NodeID, releasedLinkID, secondTextboxID, messageAID); count != 1 {
+		t.Fatalf("released message links to second textbox=%d, want 1", count)
 	}
 }
 

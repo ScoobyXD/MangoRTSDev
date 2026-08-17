@@ -948,6 +948,39 @@ func (r *MemoryRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error
 	}
 	if projectionExists {
 		if isEditorTextBoxType(existing.Type) {
+			removedProjectionIDs := map[string]bool{}
+			for projectionID, projection := range r.nodeText[k] {
+				if projection.IsDeleted {
+					continue
+				}
+				remove := false
+				switch {
+				case isNodeTextboxChatType(projection.Type):
+					var chat nodeTextboxChatPayload
+					if json.Unmarshal([]byte(projection.Information), &chat) == nil && cleanUUIDText(chat.BlockID) == informationID {
+						remove = true
+					}
+				case strings.EqualFold(strings.TrimSpace(projection.Type), "Attached email"):
+					var relationship nodeAttachedEmailPayload
+					if json.Unmarshal([]byte(projection.Information), &relationship) == nil && cleanUUIDText(relationship.BlockID) == informationID {
+						remove = true
+					}
+				}
+				if remove {
+					delete(r.nodeText[k], projectionID)
+					removedProjectionIDs[projectionID] = true
+				}
+			}
+			if len(removedProjectionIDs) > 0 {
+				information := r.nodeInfo[k]
+				kept := information[:0]
+				for _, item := range information {
+					if !removedProjectionIDs[item.InformationID] {
+						kept = append(kept, item)
+					}
+				}
+				r.nodeInfo[k] = kept
+			}
 			existing.IsDeleted = true
 			existing.Revision++
 			existing.UpdatedTimestamp = time.Now().UTC()

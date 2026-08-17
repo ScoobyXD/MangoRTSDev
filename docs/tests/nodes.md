@@ -13,8 +13,9 @@
 11. The same thread may have a separate shared draft in another Node, and neither Node shows, counts, or edits the other Node's draft.
 12. The draft content, editable **From** account, revision, attachments, and chat are shared only with current users of its exact Node.
 13. Removing one Node's email relationship leaves every other Node relationship, local text box, chat, stored thread/message, and surviving attachment relationship unchanged.
+14. Deleting a Node text box removes its owned chats and textbox-specific email relationships while preserving its Node-wide email relationships and stored email truth.
 
-Last updated: 2026-08-11
+Last updated: 2026-08-16
 
 # Process Story: An email thread can appear in several Nodes while each Node keeps its own text box and chat
 
@@ -128,7 +129,7 @@ The backend stores TipTap JSON in `node_textboxes`, chat rows in `node_textbox_c
 ↓
 The API keeps the stable public `information_id` by assembling projection-shaped responses from current textbox, chat, email, and attachment rows; dormant `change` annotations remain only inside textbox JSON
 ↓
-Deleting a textbox removes its owned chats and retires those chats' file links. Node-owned file and email relationships remain available from the Node header even when their recorded textbox origin is deleted; deleting the final file owner follows pending-delete, S3-before-Postgres, retry-safe cleanup
+Deleting a textbox removes its owned chats, retires those chats' file links, and removes only the textbox-specific email relationships naming it. Node-wide file and email relationships remain available from the Node header; deleting the final file owner follows pending-delete, S3-before-Postgres, retry-safe cleanup
 ↓
 The removed unread-change API, cache, writers, viewer baselines, and database tables are not compatibility dependencies. Deploy the table-free runtime before a human runs the strict forward retirement migration.
 
@@ -150,7 +151,7 @@ Coverage Status:
 
 ### 2026-07-10 Text-Box Deletion Retention And Node-Level Viewers
 
-- Deleting a node text box removes that `node_textboxes` row and its local UI, but it must not treat Node-owned files or attached emails referenced from that box as child records to delete. Node-level `attachment_relationships` and `email_relationships` remain associated with the Node unless an editor separately invokes **Remove from node** for the specific row.
+- Deleting a node text box removes that `node_textboxes` row, its local UI, and every textbox-specific `email_relationships` row naming it. Node-level `attachment_relationships`, Node-wide `email_relationships`, and normalized email truth remain associated with the Node.
 - The node header attachment counter/list remains available independently of text boxes and includes files uploaded from deleted text boxes. A missing `information_id` target is displayed with an explicit deleted-text-box origin label instead of hiding the file or assigning it to another box.
 - The node header attached-email counter/list also remains available independently of text boxes. Opening it uses a standalone node-level attached-email organizer modal with its folders/list and selected conversation, not an automatically created or arbitrarily selected text box.
 - A retained attached email must be viewable from the global node header when the node has no text boxes and when the user has no access. Existing per-text-box email conversation panes remain available for live text boxes and are not the required host for the global viewer.
@@ -820,7 +821,7 @@ Expected:
 
 N112 - Every Node has one optional, independently resizable, full-height email column to the left of its multi-text-box list. Importing one message stores one Node-wide attached-email source and displays every thread as a collapsed neutral card; the same thread may independently be attached to another Node. The exact `/v1/nodes/{node_id}/email-threads/{email_thread_id}` read starts only when that exact card is opened, routes through the Node's authorized durable link, and returns Mango-stored history rather than `not_found`. Expanding an email consumes the column's available viewport instead of retaining the old 620-pixel/72vh ceiling. Once an attachment exists, the Node Email toggle retains one three-track workspace shell: closing animates email width to zero plus a short fade/left transform and makes the pane inert, accessibility-hidden, and pointer-disabled; opening reverses the transition to the saved width. Each text box owns its editor, zero or more exact linked email messages, and optional message-linked chats. One exact message may link to at most one textbox in this Node, several exact messages may share one textbox, and another Node may link that message to its own textbox. Each linked message card uses the permanent color of its exact textbox; a thread container never receives that color. Email-created Nodes bind their initial editor to the selected source message, while the entire thread remains attached Node-wide.
 
-N113 - A new Node text box starts with Editor open and Chat closed unless that exact box already owns durable chat. Legacy email-origin chat resolves to a stable linked/declared/oldest host and never follows list position. Email, Editor, and Chat labels share one horizontal row; their opened panes and linked-email expansion use the shared short, reduced-motion-aware entrance transition without changing persisted open/closed state. The Email control opens every exact message linked to that textbox oldest-to-newest by stored message timestamp in the left content column, sharing that column vertically with Editor when both are open. Chat always owns a separate right column at full row-body height and is never shortened by the email list. Text-box actions expose a visible fixed-position Delete menu. Optional attachment-list network failures stay local to their retryable menu.
+N113 - A new Node text box starts with Editor open and Chat closed unless that exact box already owns durable chat. Legacy email-origin chat resolves to a stable linked/declared/oldest host and never follows list position. Email, Editor, and Chat labels share one horizontal row; their opened panes and linked-email expansion use the shared short, reduced-motion-aware entrance transition without changing persisted open/closed state. The Email control opens every exact message linked to that textbox in backend projection order, oldest-to-newest by stored message timestamp, without scanning attached threads to infer or reorder membership. Each listed message has an explicit remove control governed by its exact relationship and anchored-chat guard. The list shares the left content column vertically with Editor when both are open. Chat always owns a separate right column at full row-body height and is never shortened by the email list. Text-box actions expose a visible fixed-position Delete menu. Optional attachment-list network failures stay local to their retryable menu.
 N114 - Mentions, urgent mentions, ordinary chat, and work-field updates created from a Node editor always route and label recipients through that exact Node's current effective RACI resolver. The resolver may use its active Node customization or inherited Logic Gate source; callers never substitute a parent lookup. Assignment notifications go only to newly effective or effective-role-changed users, not unchanged, removed, unrelated, or actor users.
 N115 - An authenticated user with Node Edit access may edit or delete only a Node chat comment whose stored `author_id` is that user. Comment edits use the exact projection ID through PATCH, preserve the original comment envelope and attachment/source relationships, refresh direct mention notifications and collaboration participants, and publish one compact `chat.message.updated` hint on the existing exact Node chat scope. Generic information/projection POST routes must reject attempts to overwrite an existing chat comment so the author check cannot be bypassed.
 N116 - The Updates row-detail Node panel exposes the shared fullscreen/restore shell action. Fullscreen uses the body-level blocking overlay, shared viewport insets, focus/Escape handling, and app-chrome suppression; restore returns to the existing Updates split ratio without changing the selected update or Node context.
@@ -840,7 +841,7 @@ N128 - The durable email tables store immutable HTML/body and message envelope m
 N129 - The Node email column renders the selected stored message immediately with an explicit thread-download status. While the durable job runs, successfully downloaded messages/files may appear without blanking the conversation. Partial/retry/failed states remain readable and expose a retryable status; successful completion means complete as of that user-initiated download, not permanently synchronized with the provider.
 N130 - Every stored-email and attachment read authorizes the company, Node, and exact Node/thread or Node/attachment link before returning data. Removing/revoking the source mailbox does not erase the imported snapshot. Provider grants, raw errors, signed object URLs, bodies, recipient data, attachment bytes, and secrets must not be logged or copied into editable Node JSON, realtime hints, or job errors.
 
-N131 - `node_textbox_chats` is the authority for current Node textbox comments after cutover. Deleting a textbox deletes all chats owned by it, including chats with an email selection, and tombstones their chat-attachment links; the normalized email message/thread and email attachments remain. Legacy `Text block chat` rows remain rollback evidence but are excluded from runtime reads and receive no new writes.
+N131 - `node_textbox_chats` is the authority for current Node textbox comments after cutover. Deleting a textbox deletes all chats and textbox-specific email relationships owned by it and tombstones the chats' attachment links; Node-wide email relationships, normalized email message/thread data, and email attachments remain. Legacy `Text block chat` rows remain rollback evidence but are excluded from runtime reads and receive no new writes.
 
 N132 - After the table-free application is deployed, the operator-controlled Node unread-highlight retirement must strictly remove only the three retired feature tables and their dedicated indexes, triggers, foreign key, and functions. It must refuse unsupported PostgreSQL versions, shape drift, or unexpected dependencies; it must not use `CASCADE`, alter current/history textbox JSON, or add a fallback reader, writer, API, or replacement table.
 
@@ -873,7 +874,7 @@ N145 - One consolidated Node read supplies its initial timeline events, and Post
 N146 - Every attached-email thread starts collapsed when a Node opens. A collapsed card performs no thread-body or shared-draft read, and only opening that exact card loads it.
 
 N147 - A newly added current-user chat moves the shared ChatPane to its bottom; messages added by other users do not force the reader away from the current position.
-N148 - Only the noninteractive header of one exact Node email message is draggable into a textbox; message bodies, selected text, buttons, links, and inputs never start the drag. Dropping the header onto a textbox creates only that exact relationship without a chat. Dragging a linked message header back to the Node email column removes only that textbox edge when no chat in the textbox is anchored to the exact message. Highlighting an unlinked exact message defaults to a staged new textbox; clicking an existing textbox header highlights its frame and changes the chat destination to Existing Node · Existing Text Box before the first atomic send.
+N148 - Only the noninteractive header of one exact Node email message is draggable into a textbox; message bodies, selected text, buttons, links, and inputs never start the drag. Dropping the header onto a textbox creates only that exact relationship without a chat. Each exact message in Show email has an explicit remove control that removes only that textbox edge when no chat in the textbox is anchored to the message. Highlighting an unlinked exact message defaults to a staged new textbox; clicking an existing textbox header highlights its frame and changes the chat destination to Existing Node · Existing Text Box before the first atomic send.
 
 ### Scenario N-S23: Email, Editor, And Chat Column Correction
 
@@ -944,13 +945,13 @@ Expected:
 - Only the new message's missing content/files run through durable retryable work. Old messages and attachments are not downloaded again.
 - After commit, Joe sees the new Mango-stored card and attachments through Node authorization without obtaining Bob's provider access.
 
-### Scenario N-S26: Deleting a Textbox Removes Its Chats but Keeps Email
+### Scenario N-S26: Deleting a Textbox Removes Its Chats and Textbox Email Edges
 
 Business logic covered:
 - N131
 
 Given:
-- A Node textbox has an ordinary chat, an email-selection chat, and a chat attachment; the selected email is stored in the normalized email tables.
+- A Node textbox has an ordinary chat, an email-selection chat, a chat attachment, and an exact textbox-specific email relationship; the selected email also has a Node-wide relationship and normalized stored truth.
 
 When:
 - An authorized user deletes that textbox.
@@ -958,7 +959,7 @@ When:
 Expected:
 - Both chats and any reply descendants are removed from `node_textbox_chats`.
 - Their active `node_chat_message` attachment links are tombstoned without deleting the underlying attachment content.
-- The normalized email message, thread, and email attachments remain, and the deleted textbox's chats no longer appear in Node reads.
+- The textbox-specific email relationship is removed, while the Node-wide relationship, normalized email message, thread, and email attachments remain; the deleted textbox's chats no longer appear in Node reads.
 
 ### Scenario N-S27: Dormant Change Anchors Survive Unread-Highlight Retirement
 

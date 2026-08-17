@@ -477,15 +477,14 @@ func upsertPostgresNodeTextboxChatTx(ctx context.Context, tx *sql.Tx, input Node
 	if err != nil {
 		return domain.NodeProjection{}, false, err
 	}
-	var textboxExists bool
-	if err := tx.QueryRowContext(ctx, `select exists(
-  select 1 from node_textboxes
-  where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid and deleted_timestamp is null
-)`, input.CompanyID, input.NodeID, chat.TextboxID).Scan(&textboxExists); err != nil {
-		return domain.NodeProjection{}, false, err
-	}
-	if !textboxExists {
+	var lockedTextboxID string
+	if err := tx.QueryRowContext(ctx, `select textbox_id::text
+from node_textboxes
+where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid and deleted_timestamp is null
+for update`, input.CompanyID, input.NodeID, chat.TextboxID).Scan(&lockedTextboxID); errors.Is(err, sql.ErrNoRows) {
 		return domain.NodeProjection{}, false, ErrNotFound
+	} else if err != nil {
+		return domain.NodeProjection{}, false, err
 	}
 	previous, existed, err := postgresNodeTextboxChatProjectionTx(ctx, tx, input.CompanyID, input.NodeID, chatID)
 	if err != nil {
