@@ -438,10 +438,6 @@ func (s *Server) requireFinalEmailAttachmentResourceAccess(w http.ResponseWriter
 		writeAccessResourceNotFound(w)
 		return false
 	}
-	if mutation && store.NormalizeAttachmentResourceType(resourceType) == "email_draft" && access.SendState == "sending" {
-		writeError(w, http.StatusConflict, "email_draft_send_in_progress")
-		return false
-	}
 	return true
 }
 

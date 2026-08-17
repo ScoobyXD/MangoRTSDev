@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
@@ -352,13 +353,6 @@ func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string) error {
 			delete(r.emailCollaborationParticipants, participantKey)
 		}
 	}
-	for draftKey, draft := range r.emailDrafts {
-		if draft.CompanyID == companyID && collaborationIDs[draft.CollaborationID] {
-			draft.CollaborationID = ""
-			draft.IsShared = false
-			r.emailDrafts[draftKey] = draft
-		}
-	}
 	for board, cards := range r.kanbanCards {
 		next := make([]domain.KanbanCard, 0, len(cards))
 		for _, card := range cards {
@@ -533,23 +527,41 @@ func (r *MemoryRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error
 		}
 	}
 	if projectionExists && strings.EqualFold(strings.TrimSpace(existing.Type), "Attached email") {
-		collaborationIDs := map[string]bool{}
+		emailThreadID := ""
+		for _, link := range r.nodeEmailThreads {
+			if link.CompanyID == companyID && link.NodeID == nodeID && link.InformationID == informationID {
+				emailThreadID = link.EmailThreadID
+				break
+			}
+		}
+		if emailThreadID != "" {
+			messageIDs := map[string]bool{}
+			if thread, ok := r.emailThreads[key(companyID, emailThreadID)]; ok {
+				for _, message := range thread.Messages {
+					messageIDs[message.EmailMessageID] = true
+				}
+			}
+			for _, projection := range r.nodeText[k] {
+				if !strings.EqualFold(strings.TrimSpace(projection.Type), "Text block chat") {
+					continue
+				}
+				var payload struct {
+					SelectionSource    string `json:"selection_source"`
+					SelectionMessageID string `json:"selection_message_id"`
+				}
+				if json.Unmarshal([]byte(projection.Information), &payload) == nil && strings.EqualFold(payload.SelectionSource, "email") && messageIDs[cleanUUIDText(payload.SelectionMessageID)] {
+					return ErrEmailRelationshipHasNodeWork
+				}
+			}
+		}
 		for collaborationKey, collaboration := range r.emailCollaborations {
 			if collaboration.CompanyID == companyID && collaboration.NodeID == nodeID && collaboration.AttachedEmailInformationID == informationID {
-				collaborationIDs[collaboration.CollaborationID] = true
 				delete(r.emailCollaborations, collaborationKey)
 			}
 		}
 		for linkKey, link := range r.nodeEmailThreads {
 			if link.CompanyID == companyID && link.NodeID == nodeID && link.InformationID == informationID {
 				delete(r.nodeEmailThreads, linkKey)
-			}
-		}
-		for draftKey, draft := range r.emailDrafts {
-			if draft.CompanyID == companyID && collaborationIDs[draft.CollaborationID] {
-				draft.CollaborationID = ""
-				draft.IsShared = false
-				r.emailDrafts[draftKey] = draft
 			}
 		}
 	}

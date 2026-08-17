@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"miraeopus/backend/internal/domain"
 	"strings"
-	"time"
 )
 
 func ImportedEmailAttachmentID(parts ...string) string {
@@ -269,43 +268,6 @@ where relationship.company_id=$1::uuid
 		return nil, err
 	}
 	return attachmentIDs, nil
-}
-
-func promoteEmailDraftAttachmentRelationshipsTx(ctx context.Context, tx *sql.Tx, companyID, draftID, emailMessageID string) error {
-	rows, err := tx.QueryContext(ctx, `
-select attachment_id::text,coalesce(information_id::text,'') as information_id,
-       message_id,editor_surface,relationship_kind,coalesce(created_by_user_id::text,'') as created_by_user_id
-from attachment_relationships
-where company_id=$1::uuid and resource_type='email_draft' and resource_id=$2
-  and deleted_timestamp is null
-order by attachment_relationship_id`, companyID, draftID)
-	if err != nil {
-		return err
-	}
-	sources := make([]domain.ResourceAttachment, 0)
-	for rows.Next() {
-		var source domain.ResourceAttachment
-		if err := rows.Scan(&source.AttachmentID, &source.InformationID, &source.MessageID, &source.EditorSurface, &source.RelationshipKind, &source.CreatedByUserID); err != nil {
-			rows.Close()
-			return err
-		}
-		sources = append(sources, source)
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	created := time.Now().UTC()
-	for _, source := range sources {
-		source.ResourceAttachmentID = newUUIDv7String()
-		source.CompanyID = companyID
-		source.ResourceType = "email_message"
-		source.ResourceID = emailMessageID
-		source.CreatedTimestamp = created
-		if _, err := insertOrReviveResourceAttachmentTx(ctx, tx, source); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func retireAttachmentOwnerRelationshipsTx(ctx context.Context, tx *sql.Tx, companyID, resourceType, resourceID string) error {

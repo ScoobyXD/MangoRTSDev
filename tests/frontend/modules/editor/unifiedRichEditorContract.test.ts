@@ -201,12 +201,11 @@ test("unified rich editor contract lists every declared target surface", () => {
     "project-text-block",
     "my-triage-compose",
     "shared-triage-compose",
-    "email-collaboration-shared-draft",
     "attached-email-reply",
     "email-signature",
   ]);
   assert.ok(UNIFIED_RICH_EDITOR_SURFACE_CONTRACTS.every((surface) => surface.chatSurface === false));
-  assert.equal(UNIFIED_RICH_EDITOR_SURFACE_CONTRACTS.length, 8);
+  assert.equal(UNIFIED_RICH_EDITOR_SURFACE_CONTRACTS.length, 7);
   assert.equal(
     UNIFIED_RICH_EDITOR_SURFACE_CONTRACTS.find((surface) => surface.id === "email-signature")?.persistenceBoundary,
     "mailbox-signature",
@@ -297,7 +296,7 @@ test("toolbar cancellation and passive format reads preserve keyboard focus", ()
   assert.doesNotMatch(readFormatState, /restoreFormattingSelection|\.focus\(/);
 });
 
-test("attached-email reply focus clears the outer node or project formatting target", () => {
+test("project attached-email replies keep focus isolation while Node email remains read-only", () => {
   const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
   const nodeWorkspace = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
   const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
@@ -305,7 +304,9 @@ test("attached-email reply focus clears the outer node or project formatting tar
   assert.match(nodeWorkspaceParts, /onReplyEditorFocus\?: \(\) => void/);
   assert.match(nodeWorkspaceParts, /onReplyEditorFocus=\{onReplyEditorFocus\}/);
   assert.match(nodeWorkspaceParts, /onFocus=\{onReplyEditorFocus\}/);
-  assert.match(nodeWorkspace, /onReplyEditorFocus=\{\(\) => \{\s*setEmailReplyBlockID\(NODE_EMAIL_COLUMN_LAYOUT_ID\);\s*setFocusedTextBlockID\(""\);\s*if \(formattingControllerRef\) formattingControllerRef\.current = null/);
+  assert.match(nodeWorkspace, /repliesEnabled=\{false\}/);
+  assert.doesNotMatch(nodeWorkspace, /onReplyEditorFocus|setEmailReplyBlockID|pendingEmailReply|onEmailReplyTextBoxRequest/);
+  assert.match(projectSummary, /emails=\{projectAttachedEmails\}\s*repliesEnabled\s*projectID=\{projectID\}/);
   assert.match(projectSummary, /onReplyEditorFocus=\{\(\) => \{\s*setFocusedTextBlockID\(""\);\s*setActiveRichTextBlockID\(""\);\s*projectFormattingControllerRef\.current = null/);
 });
 
@@ -1058,10 +1059,12 @@ test("mail signatures are mailbox scoped unified rich editors and late hydration
   assert.match(homeMailDrafts, /body_editor_html/);
 });
 
-test("node-attached replies load the exact mailbox signature and append it idempotently", () => {
+test("project-attached replies load the exact mailbox signature and append it idempotently", () => {
   const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
+  const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
   const signatureBody = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/emailSignatureBody.ts"), "utf8");
 
+  assert.match(projectSummary, /<AttachedEmailOrganizerPane[\s\S]{0,180}repliesEnabled/);
   assert.match(
     nodeWorkspaceParts,
     /getEmailSignature\(cleanCompanyID, mailboxScope\.sharedInboxID, mailboxScope\.accountEmail\)/,

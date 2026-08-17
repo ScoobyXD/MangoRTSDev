@@ -8,10 +8,11 @@ import (
 )
 
 func (r *MemoryRepo) ListCommunicationsEmailDrafts(input CommunicationsEmailDraftListInput) ([]domain.CommunicationsEmailDraft, error) {
-	scope, companyID, participantOnly, err := normalizeCommunicationsEmailDraftReadScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID, input.ParticipantUserID)
+	scope, err := normalizeCommunicationsEmailScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
 	if err != nil {
 		return nil, ErrInvalid
 	}
+	companyID := scope.companyID
 
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -25,27 +26,28 @@ func (r *MemoryRepo) ListCommunicationsEmailDrafts(input CommunicationsEmailDraf
 			continue
 		}
 		include := scope.matchesDraft(draft)
-		if !participantOnly && strings.TrimSpace(input.ParticipantUserID) != "" {
-			include = include && !draft.IsShared && draft.CreatedByUserID == strings.TrimSpace(input.ParticipantUserID)
-		}
-		if participantOnly {
-			include = r.isSharedEmailDraftParticipantLocked(draft, input.ParticipantUserID)
+		if strings.TrimSpace(input.ParticipantUserID) != "" {
+			include = include && draft.CreatedByUserID == strings.TrimSpace(input.ParticipantUserID)
 		}
 		if include {
 			drafts = append(drafts, draft)
 		}
 	}
 	sort.SliceStable(drafts, func(i, j int) bool {
+		if drafts[i].UpdatedTimestamp.Equal(drafts[j].UpdatedTimestamp) {
+			return drafts[i].DraftID < drafts[j].DraftID
+		}
 		return drafts[i].UpdatedTimestamp.After(drafts[j].UpdatedTimestamp)
 	})
 	return drafts, nil
 }
 
 func (r *MemoryRepo) GetCommunicationsEmailDraft(input CommunicationsEmailDraftGetInput) (domain.CommunicationsEmailDraft, error) {
-	scope, companyID, participantOnly, err := normalizeCommunicationsEmailDraftReadScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID, input.ParticipantUserID)
+	scope, err := normalizeCommunicationsEmailScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
 	if err != nil {
 		return domain.CommunicationsEmailDraft{}, err
 	}
+	companyID := scope.companyID
 	draftID := strings.TrimSpace(input.DraftID)
 	if draftID == "" {
 		return domain.CommunicationsEmailDraft{}, ErrInvalid
@@ -56,11 +58,8 @@ func (r *MemoryRepo) GetCommunicationsEmailDraft(input CommunicationsEmailDraftG
 
 	draft, ok := r.emailDrafts[communicationsEmailDraftKey(companyID, draftID)]
 	authorized := ok && scope.matchesDraft(draft)
-	if !participantOnly && strings.TrimSpace(input.ParticipantUserID) != "" {
-		authorized = authorized && !draft.IsShared && draft.CreatedByUserID == strings.TrimSpace(input.ParticipantUserID)
-	}
-	if participantOnly {
-		authorized = ok && r.isSharedEmailDraftParticipantLocked(draft, input.ParticipantUserID)
+	if strings.TrimSpace(input.ParticipantUserID) != "" {
+		authorized = authorized && draft.CreatedByUserID == strings.TrimSpace(input.ParticipantUserID)
 	}
 	if !authorized || draft.DeletedTimestamp != nil {
 		return domain.CommunicationsEmailDraft{}, ErrNotFound
@@ -70,9 +69,6 @@ func (r *MemoryRepo) GetCommunicationsEmailDraft(input CommunicationsEmailDraftG
 
 func (r *MemoryRepo) UpsertCommunicationsEmailDraft(input CommunicationsEmailDraftInput) (domain.CommunicationsEmailDraft, error) {
 	draft, err := normalizeCommunicationsEmailDraftInput(input)
-	if input.IsShared {
-		return r.upsertSharedCommunicationsEmailDraft(input)
-	}
 	if err != nil {
 		return domain.CommunicationsEmailDraft{}, err
 	}
@@ -113,12 +109,12 @@ func (r *MemoryRepo) UpsertCommunicationsEmailDraft(input CommunicationsEmailDra
 			}
 		}
 		if !found {
-			return domain.CommunicationsEmailDraft{}, ErrNotFound
+			return domain.CommunicationsEmailDraft{}, ErrEmailDraftSourceNotFound
 		}
 	}
 	now := time.Now().UTC()
 	existing, exists := r.emailDrafts[communicationsEmailDraftKey(draft.CompanyID, draft.DraftID)]
-	if exists && (!communicationsEmailDraftScopesMatch(existing, draft) || existing.IsShared || existing.CreatedByUserID != draft.CreatedByUserID) {
+	if exists && (!communicationsEmailDraftScopesMatch(existing, draft) || existing.CreatedByUserID != draft.CreatedByUserID) {
 		return domain.CommunicationsEmailDraft{}, ErrAlreadyExists
 	}
 	if !exists {
@@ -134,10 +130,11 @@ func (r *MemoryRepo) UpsertCommunicationsEmailDraft(input CommunicationsEmailDra
 }
 
 func (r *MemoryRepo) SoftDeleteCommunicationsEmailDraft(input CommunicationsEmailDraftDeleteInput) error {
-	scope, companyID, participantOnly, err := normalizeCommunicationsEmailDraftReadScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID, input.ParticipantUserID)
+	scope, err := normalizeCommunicationsEmailScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
 	if err != nil {
 		return err
 	}
+	companyID := scope.companyID
 	draftID := strings.TrimSpace(input.DraftID)
 	if draftID == "" {
 		return ErrInvalid
@@ -149,31 +146,14 @@ func (r *MemoryRepo) SoftDeleteCommunicationsEmailDraft(input CommunicationsEmai
 	key := communicationsEmailDraftKey(companyID, draftID)
 	draft, ok := r.emailDrafts[key]
 	authorized := ok && scope.matchesDraft(draft)
-	if !participantOnly && strings.TrimSpace(input.ParticipantUserID) != "" {
-		authorized = authorized && !draft.IsShared && draft.CreatedByUserID == strings.TrimSpace(input.ParticipantUserID)
-	}
-	if participantOnly {
-		authorized = ok && r.isSharedEmailDraftParticipantLocked(draft, input.ParticipantUserID)
+	if strings.TrimSpace(input.ParticipantUserID) != "" {
+		authorized = authorized && draft.CreatedByUserID == strings.TrimSpace(input.ParticipantUserID)
 	}
 	if !authorized || draft.DeletedTimestamp != nil {
 		return ErrNotFound
 	}
-	now := sharedEmailDraftSendClaimNow(input.Now)
+	now := time.Now().UTC()
 	draft.UpdatedByUserID = strings.TrimSpace(input.UpdatedByUserID)
-	if draft.IsShared {
-		if input.ExpectedRevision <= 0 {
-			return ErrInvalid
-		}
-		if draft.Revision != input.ExpectedRevision {
-			return versionConflict(draft.Revision)
-		}
-		if draft.SendState == communicationsEmailDraftSendStateSending {
-			if sharedEmailDraftSendClaimActive(draft, now) {
-				return ErrSendInProgress
-			}
-		}
-		draft.Revision++
-	}
 	draft.UpdatedTimestamp = now
 	draft.DeletedTimestamp = &now
 	r.emailDrafts[key] = draft
@@ -260,6 +240,9 @@ func normalizeCommunicationsEmailDraftInput(input CommunicationsEmailDraftInput)
 	if kind == "" {
 		return domain.CommunicationsEmailDraft{}, ErrInvalid
 	}
+	if kind == "reply" && cleanUUIDText(input.SourceMessageID) == "" {
+		return domain.CommunicationsEmailDraft{}, ErrEmailReplySourceNotIngested
+	}
 	replyToJSON := strings.TrimSpace(input.ReplyToMessageJSON)
 	if replyToJSON == "" {
 		replyToJSON = "{}"
@@ -271,12 +254,10 @@ func normalizeCommunicationsEmailDraftInput(input CommunicationsEmailDraftInput)
 		PersonalUserID:         scope.personalUserID,
 		PersonalAccountEmail:   scope.personalAccountEmail,
 		SharedInboxID:          scope.sharedInboxID,
-		EmailThreadID:          cleanUUIDText(input.EmailThreadID),
-		OriginNodeID:           cleanUUIDText(input.OriginNodeID),
 		CreatedByUserID:        strings.TrimSpace(input.CreatedByUserID),
 		UpdatedByUserID:        strings.TrimSpace(input.UpdatedByUserID),
 		Kind:                   kind,
-		SourceMessageID:        strings.TrimSpace(input.SourceMessageID),
+		SourceMessageID:        cleanUUIDText(input.SourceMessageID),
 		AccountEmail:           normalizeEmail(input.AccountEmail),
 		ToRecipients:           input.ToRecipients,
 		CcRecipients:           input.CcRecipients,
@@ -359,8 +340,7 @@ func communicationsEmailDraftScopesMatch(left, right domain.CommunicationsEmailD
 		left.ScopeType == right.ScopeType &&
 		left.PersonalUserID == right.PersonalUserID &&
 		left.PersonalAccountEmail == right.PersonalAccountEmail &&
-		left.SharedInboxID == right.SharedInboxID &&
-		left.IsShared == right.IsShared
+		left.SharedInboxID == right.SharedInboxID
 }
 
 func normalizeCommunicationsEmailDraftKind(kind string) string {
@@ -389,21 +369,4 @@ func communicationsEmailSignatureID(scope communicationsEmailScope) string {
 		return "shared:" + scope.sharedInboxID
 	}
 	return "personal:" + scope.personalUserID + ":" + scope.personalAccountEmail
-}
-
-func normalizeCommunicationsEmailDraftReadScope(companyID, personalUserID, personalAccountEmail, sharedInboxID, participantUserID string) (communicationsEmailScope, string, bool, error) {
-	scope, err := normalizeCommunicationsEmailScope(companyID, personalUserID, personalAccountEmail, sharedInboxID)
-	if err == nil {
-		return scope, scope.companyID, false, nil
-	}
-	companyID = strings.TrimSpace(companyID)
-	participantOnly := companyID != "" &&
-		strings.TrimSpace(participantUserID) != "" &&
-		strings.TrimSpace(personalUserID) == "" &&
-		strings.TrimSpace(personalAccountEmail) == "" &&
-		strings.TrimSpace(sharedInboxID) == ""
-	if !participantOnly {
-		return communicationsEmailScope{}, "", false, err
-	}
-	return communicationsEmailScope{}, companyID, true, nil
 }

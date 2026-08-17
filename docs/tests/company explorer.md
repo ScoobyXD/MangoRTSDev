@@ -112,11 +112,11 @@ E50 - A successful Company Explorer email-to-Logic-Gate, pinned Logic Gate, or n
 E51 - Double-clicking a Company Explorer row label must not enter inline rename mode; renaming folders, projects, and Logic Gates requires an explicit rename action that is already authorized for the target.
 E52 - We want multi browser click-drag ability. So I can drag an email from My Triage or Shared Triage and click drag it to another browser window (but the same account) and drop it off on the company explorer logic gate and create a node within that logic gate's kanban board with an email icon (but obviously not create a node on the company explorer)
 E53 - Permissions opened from Company Explorer for folders, projects, or Logic Gates use the shared permission view and always expose a visible **Save** action when editable. Node search results remain open-only and do not gain Explorer permission actions.
-E54 - An email conversion through Company Explorer sends the exact source mailbox key and persists mailbox provenance in the created node's attached-email projection: personal/My Triage drag and conversion requests carry normalized `account_email`; Shared Triage requests carry `shared_inbox_id` and suppress a personal-account query, while the canonical projection retains both the shared inbox and its company mailbox account email. Later reads, replies, attachments, drafts, and invitation responses use that source scope.
+E54 - An email conversion through Company Explorer sends the exact source mailbox key and persists mailbox provenance in the created Node's attached-email projection: personal/My Triage drag and conversion requests carry normalized `account_email`; Shared Triage requests carry `shared_inbox_id` and suppress a personal-account query, while the canonical projection retains both the shared inbox and its company mailbox account email. Later thread reads, received-attachment reads, and invitation responses use that source scope. The Node email surface is read-only.
 E55 - Every successful Node or Logic Gate rename entry point publishes the concrete committed-title event after commit. Company Explorer patches matching Logic Gate rows, Node search results, and mounted RACI-mode Node/Logic Gate names (including scoped per-user cached rows) immediately alongside the other applicable mounted surfaces; active title drafts/carets are deferred, failed renames publish no event, and another browser still uses canonical reads.
 E56 - Explicit default-folder repair is idempotent and creates or repairs only Unfiled, Projects, and Logic Gates. A healthy default row is not updated, and repair never recreates Unfiled/Nodes or backfills Nodes.
 E57 - A Triage-comment email Node receives its creator/participant Edit grants and creator Responsible RACI directly as an ordinary standalone Node; its privacy never depends on Company Explorer folder placement or visibility.
-E58 - Collaboration ownership, chat, participants, drafts, source-thread links, attachments, and Node policies remain in their typed domain tables. Company Explorer has no collaboration Node projection or lifecycle edge.
+E58 - Collaboration ownership, chat, participants, source-thread links, received attachments, and Node policies remain in their typed domain tables. Company Explorer has no collaboration Node projection or lifecycle edge.
 E59 - Concurrent collaboration retries and future provider messages reuse the same collaboration Node without creating a Company Explorer item or duplicate search result.
 E60 - Existing email-to-Logic-Gate conversion still creates Pending work under its established typed assignment path. Starting chat on an unconverted triage email creates a standalone creator-Responsible-RACI Node with no Company Explorer placement and no initial Logic Gate.
 E61 - Explorer policy reads explain inherited/customized mode, effective source, active reset, and inactive overwritten customization for folders, projects, and Logic Gates.
@@ -399,7 +399,7 @@ Business logic covered:
 
 Given:
 - Default-folder repair runs repeatedly for a company that may still contain historical Unfiled/Nodes rows.
-- Two concurrent first-chat/shared-draft requests target the same previously uncollaborated email thread.
+- Two concurrent first-chat requests target the same previously uncollaborated email thread.
 - Users create ordinary and collaboration Nodes, attempt to place a Node, or drop an email onto a Logic Gate.
 
 Expected:

@@ -2653,6 +2653,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               <div style={{ ...projectEmailPaneWrapStyle, minHeight: 0, overflow: "hidden", borderRight: `1px solid ${EDITOR_NEU_SOFT_BORDER}` }}>
                 <AttachedEmailOrganizerPane
                   emails={projectAttachedEmails}
+                  repliesEnabled
                   projectID={projectID}
                   apiBase={apiBase}
                   companyID={companyID}

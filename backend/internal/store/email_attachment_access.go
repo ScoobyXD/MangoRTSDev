@@ -59,23 +59,14 @@ where message.company_id=$1::uuid and message.email_message_id=$3::uuid`,
 			input.CompanyID, input.UserID, input.ResourceID, input.AccessLevel).Scan(&result.Allowed)
 	case "email_draft":
 		err = r.db.QueryRowContext(ctx, `
-select draft.send_state, (
+select (
   draft.personal_user_id=$2::uuid
   or (draft.shared_inbox_id is not null and mangorts_user_can_access_resource(
     draft.company_id,'shared_inbox',draft.shared_inbox_id,$2::uuid,$4::text))
-  or exists (
-    select 1 from email_relationships relationship
-    where relationship.company_id=draft.company_id
-      and relationship.email_thread_id=draft.email_thread_id
-      and relationship.resource_type='node'
-      and relationship.resource_textbox_id is null
-      and mangorts_user_can_access_resource(relationship.company_id,relationship.resource_type,
-        relationship.resource_id,$2::uuid,$4::text)
-  )
 )
 from email_drafts draft
 where draft.company_id=$1::uuid and draft.draft_id=$3 and draft.deleted_timestamp is null`,
-			input.CompanyID, input.UserID, input.ResourceID, input.AccessLevel).Scan(&result.SendState, &result.Allowed)
+			input.CompanyID, input.UserID, input.ResourceID, input.AccessLevel).Scan(&result.Allowed)
 	case "email_signature":
 		err = r.db.QueryRowContext(ctx, `
 select (
@@ -141,12 +132,7 @@ func (r *MemoryRepo) GetEmailAttachmentResourceAccess(input EmailAttachmentResou
 		}
 		allowed := draft.PersonalUserID == input.UserID ||
 			(draft.SharedInboxID != "" && r.userHasEffectiveAccessLocked(input.CompanyID, input.UserID, EntityTypeSharedInbox, draft.SharedInboxID, input.AccessLevel))
-		if !allowed && draft.CollaborationID != "" {
-			if relationship, ok := r.emailCollaborations[key(input.CompanyID, draft.CollaborationID)]; ok {
-				allowed = r.userHasEffectiveAccessLocked(input.CompanyID, input.UserID, EntityTypeNode, relationship.NodeID, input.AccessLevel)
-			}
-		}
-		return EmailAttachmentResourceAccess{Allowed: allowed, SendState: draft.SendState}, nil
+		return EmailAttachmentResourceAccess{Allowed: allowed}, nil
 	case "email_signature":
 		signature, ok := r.emailSignatures[communicationsEmailSignatureKey(input.CompanyID, input.ResourceID)]
 		if !ok {

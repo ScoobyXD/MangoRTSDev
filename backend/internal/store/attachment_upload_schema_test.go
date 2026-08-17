@@ -95,8 +95,6 @@ func TestAttachmentOwnerDeletionPathsUseSharedRetirement(t *testing.T) {
 		"attachment_relationship_cleanup.go":   {"project_textbox_chats", "project_chat_message", "retireProjectTextboxChatTreeRelationshipsTx"},
 		"postgres_project_final_storage.go":    {"project_chat_message", "attachment_relationships"},
 		"postgres_email_drafts.go":             {"retireAttachmentOwnerRelationshipsTx", "email_draft"},
-		"shared_email_drafts.go":               {"retireAttachmentOwnerRelationshipsTx", "email_draft"},
-		"shared_email_draft_send.go":           {"promoteEmailDraftAttachmentRelationshipsTx", "retireAttachmentOwnerRelationshipsTx"},
 		"postgres_shared_inbox_folders.go":     {"shared_inbox_folder", "shared_inbox", "retireAttachmentOwnerRelationshipsTx"},
 	}
 	for path, required := range contracts {
