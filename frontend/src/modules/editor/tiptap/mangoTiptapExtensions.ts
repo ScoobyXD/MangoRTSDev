@@ -1189,11 +1189,6 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
             parseHTML: (element) => element.getAttribute("data-mango-email-shared-inbox-id"),
             renderHTML: () => ({}),
           },
-          emailMailbox: {
-            default: null,
-            parseHTML: (element) => element.getAttribute("data-mango-email-mailbox"),
-            renderHTML: () => ({}),
-          },
         };
       },
       parseHTML() {
@@ -1217,7 +1212,6 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
             "data-mango-email-thread-id": node.attrs.emailThreadId || undefined,
             "data-mango-email-account-email": node.attrs.emailAccountEmail || undefined,
             "data-mango-email-shared-inbox-id": node.attrs.emailSharedInboxId || undefined,
-            "data-mango-email-mailbox": node.attrs.emailMailbox || undefined,
           } : {}),
           role: "link",
           tabindex: "0",

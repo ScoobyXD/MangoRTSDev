@@ -3,7 +3,7 @@ import type { JSONContent } from "@tiptap/core";
 import { needsMangoTiptapLegacyDateHeadingBreak, type MangoTiptapDocument } from "./mangoTiptapDocument.js";
 import { isDormantMangoTiptapAnnotation, type MangoTiptapAnnotation } from "./mangoTiptapAnnotations.js";
 import { ExplorerEntityIcon } from "../../../icons/index.js";
-import { editorEntityRoute, editorEntityTypeLabel, isEditorEmailMailbox, isEditorEntityType, openEditorEntityLink } from "../editorEntityLinks.js";
+import { editorEntityRoute, editorEntityTypeLabel, isEditorEntityType, openEditorEntityLink } from "../editorEntityLinks.js";
 import "./mangoTiptap.css";
 import { mangoTiptapImagePlacementDOMAttributes } from "./mangoTiptapImagePlacement.js";
 
@@ -140,13 +140,11 @@ function renderNode(
       const entityID = String(attrs.entityId || "");
       const label = String(attrs.label || "Entity");
       if (!isEditorEntityType(entityType) || !entityID) return <span key={key}>{label}</span>;
-      const emailMailbox = String(attrs.emailMailbox || "").trim();
       const emailEntity = entityType === "email_message" ? {
         emailMessageID: String(attrs.emailMessageId || "") || undefined,
         emailThreadID: String(attrs.emailThreadId || "") || undefined,
         emailAccountEmail: String(attrs.emailAccountEmail || "").trim().toLowerCase() || undefined,
         emailSharedInboxID: String(attrs.emailSharedInboxId || "").trim() || undefined,
-        emailMailbox: isEditorEmailMailbox(emailMailbox) ? emailMailbox : undefined,
       } : {};
       return (
         <a
@@ -160,7 +158,6 @@ function renderNode(
           data-mango-email-thread-id={entityType === "email_message" ? emailEntity.emailThreadID : undefined}
           data-mango-email-account-email={entityType === "email_message" ? emailEntity.emailAccountEmail : undefined}
           data-mango-email-shared-inbox-id={entityType === "email_message" ? emailEntity.emailSharedInboxID : undefined}
-          data-mango-email-mailbox={entityType === "email_message" ? emailEntity.emailMailbox : undefined}
           aria-label={`Open ${editorEntityTypeLabel(entityType)} ${label}`}
           href={entityType === "email_message" ? undefined : editorEntityRoute({ entityType, entityID })}
           onClick={(event) => {

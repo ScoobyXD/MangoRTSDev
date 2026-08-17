@@ -50,11 +50,11 @@ The Emails category replaces the workspace list with the connected personal mail
 ↓
 Mango paints authorized stored matches first, always reconciles Nylas second, merges exact messages without losing durable IDs, and groups threads through the same helper as My Triage and Shared Triage
 ↓
-Choosing an email preserves its provider message identity and mailbox scope; if its Mango ID is not known, the picker ingests the exact message before an editor stores a reference or a Node/Project link uses the existing exact-message attachment command
+Choosing an email may use its provider message identity only to ingest it when needed; before an editor stores a reference, the picker replaces that transient identity with the exact durable Mango message/thread IDs and personal-account or shared-inbox authorization scope
 ↓
 The picker creates no generic relationship, translated identity, compose surface, send path, draft path, or compatibility email picker
 
-Last updated: 2026-08-16
+Last updated: 2026-08-17
 
 # Universal Picker Business Logic Laws
 
@@ -110,11 +110,11 @@ UP25 - Email results call the same mailbox-scoped thread-condensation helper as 
 
 UP26 - Arrow keys wrap through loaded email rows and keep the highlighted row in view. Enter, plain Tab, or pointer click chooses the highlighted email only when it has an account scope and the picker is not already completing another action.
 
-UP27 - A chosen email entity uses the provider message ID as its exact provider identity and stores the subject label, normalized account email, active mailbox, provider thread ID when known, internal Mango `email_message_id` when known, and the selected provider message payload for the immediate host command. If the internal ID is not known, selection first runs the exact authorized ingestion command and replaces the entity payload with the returned durable Mango identity. Those identities must not be translated through a generic resource registry.
+UP27 - A chosen email may use its provider message ID only as transient input to the exact authorized ingestion command. Before a reference is inserted, the entity uses the returned durable Mango `email_message_id` as its typed identity and carries the exact durable `email_thread_id`, subject label, and one normalized personal-account or shared-inbox authorization scope; the provider payload remains transient only for the immediate typed host command.
 
-UP28 - An email reference chip is a typed `email_message` atom with the canonical envelope icon. The frontend schema and backend JSON validator both accept that exact type. Its durable Tiptap/legacy attributes preserve the provider message ID plus known internal message ID, thread ID, account, shared-inbox scope, and mailbox so copy/paste, JSON persistence, static rendering, remount, and later activation retain the same email.
+UP28 - An email reference chip is a typed `email_message` atom with the canonical envelope icon. Its durable Tiptap/legacy attributes preserve only the exact Mango `email_message_id`, exact Mango `email_thread_id`, subject label, and one personal-account or shared-inbox authorization scope so copy/paste, JSON persistence, static rendering, remount, and later activation retain the same stored email without provider IDs or mailbox-page identity.
 
-UP29 - Activating a persisted email reference dispatches the exact stored email identity to Home and uses the existing Triage conversation detail. Personal scope opens My Triage; shared-inbox scope opens the matching Shared Triage folder. Mango restores the stored mailbox when valid, selects the exact provider message from loaded state when available, or fetches that exact message with the stored company/account/shared scope. A durable stored thread shows every exact stored message in stored message order. Mango must not invent a fake resource route or a second email viewer.
+UP29 - One ordinary activation from any supported editor dispatches the exact durable email identity to the shared existing Triage preview host. The host reads only the exact stored thread under its personal-account or shared-inbox authorization scope, selects the referenced row only by durable `email_message_id`, and shows every stored row once in persisted message order. It never checks a surrounding resource relationship or falls back to provider, collaboration, mailbox-page, subject, or quoted-history lookup, and it never invents a route or second viewer.
 
 UP30 - Backspace on or immediately after an inline email entity unwraps it to its stored subject label as ordinary text, exactly like the other entity types. This changes only document markup and never detaches, deletes, sends, moves, or otherwise mutates the email.
 
@@ -200,8 +200,8 @@ Given:
 - A user selects an email in `#` reference mode inside a unified editor.
 
 Expected:
-- Mango inserts a durable envelope entity atom containing the provider message ID and known mailbox scope.
-- Activating the chip opens the exact My Triage or Shared Triage message without inventing a resource route.
+- Mango inserts a durable envelope entity atom containing the exact Mango message/thread IDs and one authorized account/shared-inbox scope.
+- Activating the chip opens the exact stored My Triage or Shared Triage thread independently of resource relationships and without inventing a resource route or fallback lookup.
 - Unwrapping or deleting the chip changes only the document and never changes an email or relationship.
 
 ## Scenario UP-S4: Link through an established typed command

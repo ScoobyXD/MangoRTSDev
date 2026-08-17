@@ -55,7 +55,7 @@ func TestMangoTiptapJSONStrictContractAcceptsFeatureDocument(t *testing.T) {
 }
 
 func TestMangoTiptapJSONAcceptsEmailMessageReference(t *testing.T) {
-	raw := json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"mangoEntityLink","attrs":{"entityType":"email_message","entityId":"provider-message-1","label":"Quarterly update","emailMessageId":"11111111-1111-4111-8111-111111111111","emailThreadId":"provider-thread-1","emailAccountEmail":"owner@example.com","emailSharedInboxId":"","emailMailbox":"primary"}}]}]}}`)
+	raw := json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"mangoEntityLink","attrs":{"entityType":"email_message","entityId":"11111111-1111-4111-8111-111111111111","label":"Quarterly update","emailMessageId":"11111111-1111-4111-8111-111111111111","emailThreadId":"22222222-2222-4222-8222-222222222222","emailAccountEmail":"owner@example.com"}}]}]}}`)
 	if _, err := ValidateMangoTiptapJSON(raw); err != nil {
 		t.Fatalf("email message reference rejected: %v", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -87,8 +88,8 @@ func TestCommunicationsStoredThreadReadUsesExactDurableThreadIDWithoutProviderRe
 		ProviderThreadID: "stored-message-thread", SelectedMessageID: "stored-message-3", HistoryComplete: true,
 		Messages: []domain.EmailMessageSnapshot{
 			{ID: "stored-message-3", ThreadID: "stored-message-thread", Body: "Third message with quoted copies of the first and second messages", Date: 300},
+			{ID: "stored-message-2", ThreadID: "stored-message-thread", Body: "Second message", Date: 100},
 			{ID: "stored-message-1", ThreadID: "stored-message-thread", Body: "First message", Date: 100},
-			{ID: "stored-message-2", ThreadID: "stored-message-thread", Body: "Second message", Date: 200},
 		},
 	})
 	if err != nil {
@@ -133,6 +134,32 @@ func TestCommunicationsStoredThreadReadUsesExactDurableThreadIDWithoutProviderRe
 	threadGrants, threadIDs, messageGrants, messageIDs := client.calls()
 	if len(threadGrants)+len(threadIDs)+len(messageGrants)+len(messageIDs) != 0 {
 		t.Fatalf("stored message read called provider: %v %v %v %v", threadGrants, threadIDs, messageGrants, messageIDs)
+	}
+}
+
+func TestCommunicationsStoredThreadReadMissingDurableRowReturnsUnavailableWithoutFallback(t *testing.T) {
+	repo, owner, _, _ := newEmailCollaborationThreadTestRepo(t)
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID: owner.UserID, Provider: "google", AccountEmail: owner.Email,
+		Scope: "personal", GrantID: "must-not-be-used", Status: "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	client := newEmailCollaborationThreadTestClient()
+	client.threadsByID["provider-fallback-must-not-run"] = NylasThread{ID: "provider-fallback-must-not-run"}
+	server := newEmailCollaborationThreadTestServer(repo, client)
+	defer server.Close()
+
+	path := "/v1/communications/threads/00000000-0000-4000-8000-000000000099?company_id=" + emailCollaborationThreadTestCompanyID + "&account_email=" + owner.Email
+	req := emailCollaborationThreadTestRequestWithActor(httptest.NewRequest(http.MethodGet, path, nil), owner, domain.RoleCompanyUser)
+	rec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "stored_email_thread_not_found") {
+		t.Fatalf("missing durable thread status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	threadGrants, threadIDs, messageGrants, messageIDs := client.calls()
+	if len(threadGrants)+len(threadIDs)+len(messageGrants)+len(messageIDs) != 0 {
+		t.Fatalf("missing durable thread used fallback provider calls: %v %v %v %v", threadGrants, threadIDs, messageGrants, messageIDs)
 	}
 }
 

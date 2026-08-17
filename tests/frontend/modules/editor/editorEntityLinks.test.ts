@@ -268,22 +268,20 @@ test("entity clicks navigate inside the app and Node-to-Node links retain a safe
 
     openEditorEntityLink({
       entityType: "email_message",
-      entityID: "provider-message-1",
+      entityID: "11111111-1111-4111-8111-111111111111",
       label: "Quarterly update",
-      emailMessageID: "mango-message-1",
-      emailThreadID: "provider-thread-1",
+      emailMessageID: "11111111-1111-4111-8111-111111111111",
+      emailThreadID: "22222222-2222-4222-8222-222222222222",
       emailAccountEmail: "owner@example.com",
-      emailMailbox: "starred",
     });
     assert.equal(dom.window.location.pathname, "/projects/project-1", "an Email reference opens through the mailbox event without inventing an app route");
     assert.deepEqual(openedEmail, {
       entityType: "email_message",
-      entityID: "provider-message-1",
+      entityID: "11111111-1111-4111-8111-111111111111",
       label: "Quarterly update",
-      emailMessageID: "mango-message-1",
-      emailThreadID: "provider-thread-1",
+      emailMessageID: "11111111-1111-4111-8111-111111111111",
+      emailThreadID: "22222222-2222-4222-8222-222222222222",
       emailAccountEmail: "owner@example.com",
-      emailMailbox: "starred",
     });
   } finally {
     if (previousWindow === undefined) delete (globalThis as Record<string, unknown>).window;
@@ -394,19 +392,22 @@ test("durable Tiptap entity nodes keep their identity through history and Backsp
       type: "mangoEntityLink",
       attrs: {
         entityType: "email_message",
-        entityId: "provider-message-1",
+        entityId: "11111111-1111-4111-8111-111111111111",
         label: "Quarterly update",
-        emailMessageId: "mango-message-1",
-        emailThreadId: "provider-thread-1",
+        emailMessageId: "11111111-1111-4111-8111-111111111111",
+        emailThreadId: "22222222-2222-4222-8222-222222222222",
         emailAccountEmail: "owner@example.com",
-        emailMailbox: "all",
       },
     }] }] });
     const emailNode = editor.getJSON().content?.[0]?.content?.[0] as { attrs?: Record<string, unknown> } | undefined;
     assert.equal(emailNode?.attrs?.entityType, "email_message");
-    assert.equal(emailNode?.attrs?.emailMessageId, "mango-message-1");
+    assert.equal(emailNode?.attrs?.entityId, "11111111-1111-4111-8111-111111111111");
+    assert.equal(emailNode?.attrs?.emailMessageId, "11111111-1111-4111-8111-111111111111");
+    assert.equal(emailNode?.attrs?.emailThreadId, "22222222-2222-4222-8222-222222222222");
     assert.equal(emailNode?.attrs?.emailAccountEmail, "owner@example.com");
-    assert.match(editor.getHTML(), /data-mango-email-message-id="mango-message-1"/);
+    assert.equal(emailNode?.attrs?.emailMailbox, undefined);
+    assert.match(editor.getHTML(), /data-mango-email-message-id="11111111-1111-4111-8111-111111111111"/);
+    assert.doesNotMatch(editor.getHTML(), /data-mango-email-mailbox/);
 
     let entityEnd = -1;
     editor.state.doc.descendants((node, position) => {
