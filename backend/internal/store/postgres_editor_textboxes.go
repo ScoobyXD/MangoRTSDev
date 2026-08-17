@@ -550,14 +550,16 @@ func deletePostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONDelete
 	if err != nil {
 		return EditorJSONCommit{}, err
 	}
-	// A stale delete is a merge conflict. Deletion loses, so preserve the row.
-	if input.BaseRevision != revision || deleted {
+	if deleted {
 		if err := tx.Commit(); err != nil {
 			return EditorJSONCommit{}, err
 		}
 		return EditorJSONCommit{OperationID: input.OperationID, Revision: revision,
 			SchemaVersion: MangoTiptapSchemaVersion, JSONDocument: document,
 			Annotations: annotations, CommittedAt: now, Deduplicated: true}, nil
+	}
+	if input.BaseRevision != revision {
+		return EditorJSONCommit{}, ErrVersionConflict
 	}
 	nextRevision, eventID := revision+1, newUUIDv7String()
 	update := fmt.Sprintf(`update %s set revision=$4,deleted_timestamp=$5,updated_timestamp=$5
@@ -573,6 +575,11 @@ func deletePostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONDelete
 		}
 		if _, err := tx.ExecContext(ctx, `delete from node_textbox_chats
 where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid`,
+			input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID); err != nil {
+			return EditorJSONCommit{}, err
+		}
+		if _, err := tx.ExecContext(ctx, `delete from email_relationships
+where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid and resource_textbox_id=$3::text`,
 			input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID); err != nil {
 			return EditorJSONCommit{}, err
 		}

@@ -3540,6 +3540,19 @@ const TinyDisclosureIcon: React.FC<{ open: boolean; color: string }> = ({ open, 
   </svg>
 );
 
+const EmailTextBoxActionIcon: React.FC<{ color: string; plus?: boolean }> = ({ color, plus = false }) => (
+  <svg aria-hidden="true" data-email-text-box-action-icon={plus ? "create" : "navigate"} width="21" height="16" viewBox="0 0 21 16" style={{ display: "block" }}>
+    <rect x="1.5" y="3.5" width="15" height="10.5" rx="2" fill="none" stroke={color} strokeWidth="1.35" />
+    <path d="M4.2 7h7.7M4.2 10.2h5.4" fill="none" stroke={color} strokeWidth="1.35" strokeLinecap="round" />
+    {plus && (
+      <>
+        <circle cx="17" cy="3.8" r="3.1" fill="#fff" stroke={color} strokeWidth="1.2" />
+        <path d="M17 2.1v3.4M15.3 3.8h3.4" fill="none" stroke={color} strokeWidth="1.2" strokeLinecap="round" />
+      </>
+    )}
+  </svg>
+);
+
 function uniqueAttachedEmailsByMessageID(emails: EditorAttachedEmail[]): EditorAttachedEmail[] {
   const byID = new Map<string, EditorAttachedEmail>();
   for (const email of emails) {
@@ -4030,12 +4043,14 @@ const AttachedEmailThreadCard: React.FC<{
             const relative = formatEmailRelativeTime(message.date);
             const internalMessageID = message.email_message_id?.trim() ?? "";
             const messageAccent = messageAccents[internalMessageID]?.trim() || "";
+            const linkedTextBoxNavigationAvailable = Boolean(
+              internalMessageID
+              && onMessageActivate
+              && Object.prototype.hasOwnProperty.call(messageAccents, internalMessageID),
+            );
             const sent = (message.folders ?? []).some((folder) => folder.trim().toLowerCase() === "sent" || folder.trim().toLowerCase() === "\\sent")
               || (message.from ?? []).some((address) => Boolean(email.accountEmail?.trim()) && address.email.trim().toLowerCase() === email.accountEmail?.trim().toLowerCase());
-            const activateMessage = () => {
-              if (internalMessageID) onMessageActivate?.(internalMessageID);
-              onSelect();
-            };
+            const selectMessage = () => onSelect();
             return (
               <div
                 key={message.id}
@@ -4051,9 +4066,9 @@ const AttachedEmailThreadCard: React.FC<{
                 role="button"
                 tabIndex={0}
                 title={message.subject || email.subject}
-                onClick={activateMessage}
+                onClick={selectMessage}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter") activateMessage();
+                  if (event.target === event.currentTarget && event.key === "Enter") selectMessage();
                 }}
                 style={{ minWidth: 0, display: "grid", gap: 3, border: `1px solid ${strokeColor}`, borderLeft: messageAccent ? `3px solid ${messageAccent}` : undefined, borderRadius: 9, background: messageAccent ? `linear-gradient(135deg, ${messageAccent}26, rgba(255,255,255,0.94))` : "rgba(255,255,255,0.82)", color: surfaceText, cursor: "pointer", padding: "7px 8px", textAlign: "left", boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.78)" }}
               >
@@ -4062,10 +4077,44 @@ const AttachedEmailThreadCard: React.FC<{
                   draggable={Boolean(editable && nodeID.trim() && internalMessageID)}
                   onPointerDownCapture={prepareEmailMessageTextBoxLinkDrag}
                   onDragStart={(event) => startEmailMessageTextBoxLinkDrag(event, internalMessageID, onError)}
-                  style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr) auto${repliesEnabled ? " auto auto" : ""}`, gap: 7, alignItems: "center", cursor: editable && nodeID.trim() && internalMessageID ? "grab" : undefined }}
+                  style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr) auto${linkedTextBoxNavigationAvailable ? " auto" : ""}${onMessageTextBoxRequest ? " auto" : ""}${repliesEnabled ? " auto auto" : ""}`, gap: 7, alignItems: "center", cursor: editable && nodeID.trim() && internalMessageID ? "grab" : undefined }}
                 >
                   <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10.8, fontWeight: 900 }}>{formatAddressList(message.from) || "Unknown sender"}</span>
                   <span style={{ color: "rgba(100,116,139,0.76)", fontSize: 9.3, fontWeight: 760, whiteSpace: "nowrap" }}>{formatTimestamp(message.date)}{relative ? ` (${relative})` : ""}</span>
+                  {linkedTextBoxNavigationAvailable && (
+                    <button
+                      type="button"
+                      title="Open linked text box"
+                      aria-label="Open linked text box for this email"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onMessageActivate?.(internalMessageID);
+                      }}
+                      style={{ minHeight: 22, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: EDITOR_NEU_SURFACE, color: messageAccent || accent, cursor: "pointer", padding: "0 6px", display: "grid", placeItems: "center", boxShadow: "2px 2px 6px rgba(174,174,192,0.14), -2px -2px 6px rgba(255,255,255,0.78)" }}
+                    >
+                      <EmailTextBoxActionIcon color={messageAccent || accent} />
+                    </button>
+                  )}
+                  {onMessageTextBoxRequest && (
+                    <button
+                      type="button"
+                      title="Create text box for this email"
+                      aria-label="Create text box for this email"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (!internalMessageID) {
+                          onError("email_message_id_missing");
+                          return;
+                        }
+                        onMessageTextBoxRequest(internalMessageID);
+                      }}
+                      style={{ minHeight: 22, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: EDITOR_NEU_SURFACE, color: messageAccent || accent, cursor: "pointer", padding: "0 6px", display: "grid", placeItems: "center", boxShadow: "2px 2px 6px rgba(174,174,192,0.14), -2px -2px 6px rgba(255,255,255,0.78)" }}
+                    >
+                      <EmailTextBoxActionIcon color={messageAccent || accent} plus />
+                    </button>
+                  )}
                   {repliesEnabled && (
                     <>
                       <button
@@ -6723,6 +6772,11 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                 || (threadMessageID === messageID ? emailMessageID?.trim() : "")
                 || "";
               const threadMessageAccent = messageAccents[internalThreadMessageID]?.trim() || "";
+              const linkedTextBoxNavigationAvailable = Boolean(
+                internalThreadMessageID
+                && onMessageActivate
+                && Object.prototype.hasOwnProperty.call(messageAccents, internalThreadMessageID),
+              );
               const messageHeaderDraggable = Boolean(editable && nodeID.trim() && internalThreadMessageID && !singleMessageOnly);
               const isSelectedMessage = threadMessage.id === message.id;
               const hideInlineMessageChrome = singleMessageOnly;
@@ -6806,7 +6860,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                         draggable={messageHeaderDraggable}
                         onPointerDownCapture={prepareEmailMessageTextBoxLinkDrag}
                         onDragStart={(event) => startEmailMessageTextBoxLinkDrag(event, internalThreadMessageID, onError)}
-                        style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr)${onMessageTextBoxRequest ? " auto" : ""}${repliesEnabled ? " auto auto" : ""}`, alignItems: "start", gap: 8, cursor: messageHeaderDraggable ? "grab" : undefined }}
+                        style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr)${linkedTextBoxNavigationAvailable ? " auto" : ""}${onMessageTextBoxRequest ? " auto" : ""}${repliesEnabled ? " auto auto" : ""}`, alignItems: "start", gap: 8, cursor: messageHeaderDraggable ? "grab" : undefined }}
                       >
                         <div
                           data-email-message-drag-region="true"
@@ -6826,7 +6880,6 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                             aria-expanded={isExpanded}
                             aria-label={`${isExpanded ? "Collapse" : "Expand"} email from ${fromLine}`}
                             onClick={() => {
-                              if (internalThreadMessageID) onMessageActivate?.(internalThreadMessageID);
                               setExpandedThreadMessageID((current) => current === threadMessageID ? "" : threadMessageID);
                             }}
                             style={{ width: 18, height: 18, display: "grid", placeItems: "center", border: 0, background: "transparent", color: accent, cursor: "pointer", padding: 0 }}
@@ -6840,12 +6893,29 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                             {formatTimestamp(threadMessage.date)}{relativeTime ? ` (${relativeTime})` : ""}
                           </span>
                         </div>
+                        {linkedTextBoxNavigationAvailable && (
+                          <button
+                            type="button"
+                            title="Open linked text box"
+                            aria-label="Open linked text box for this email"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              onMessageActivate?.(internalThreadMessageID);
+                            }}
+                            style={{ minHeight: 22, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: EDITOR_NEU_SURFACE, color: threadMessageAccent || accent, cursor: "pointer", padding: "0 6px", display: "grid", placeItems: "center", boxShadow: "2px 2px 6px rgba(174,174,192,0.14), -2px -2px 6px rgba(255,255,255,0.78)" }}
+                          >
+                            <EmailTextBoxActionIcon color={threadMessageAccent || accent} />
+                          </button>
+                        )}
                         {onMessageTextBoxRequest && (
                           <button
                             type="button"
                             title="Create text box for this email"
                             aria-label="Create text box for this email"
-                            onClick={() => {
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
                               if (!internalThreadMessageID) {
                                 onError("email_message_id_missing");
                                 return;
@@ -6854,7 +6924,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                             }}
                             style={{ minHeight: 22, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: EDITOR_NEU_SURFACE, color: threadMessageAccent || accent, cursor: "pointer", padding: "0 6px", display: "grid", placeItems: "center", boxShadow: "2px 2px 6px rgba(174,174,192,0.14), -2px -2px 6px rgba(255,255,255,0.78)" }}
                           >
-                            <TextEditorIcon color={threadMessageAccent || accent} />
+                            <EmailTextBoxActionIcon color={threadMessageAccent || accent} plus />
                           </button>
                         )}
                         {repliesEnabled && (

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -92,11 +93,8 @@ func TestPostgresEditorTextboxCutoverWorksAfterLegacyTablesAreDropped(t *testing
 		Document:    EditorJSONDocumentRef{CompanyID: companyID, ResourceType: EntityTypeProject, ResourceID: projectID, DocumentID: projectTextboxID},
 		OperationID: newUUIDv7String(), ClientID: "integration-stale-delete", BaseRevision: 0,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !deleteResult.Deduplicated || deleteResult.Revision != merged.Revision {
-		t.Fatalf("stale deletion did not preserve current row: %#v", deleteResult)
+	if !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("stale deletion result=%#v err=%v, want ErrVersionConflict", deleteResult, err)
 	}
 
 	if _, err := repo.CreateNodeEditorSaveVersion(EditorSaveVersionInput{

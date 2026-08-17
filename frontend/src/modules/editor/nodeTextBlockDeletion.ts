@@ -1,8 +1,3 @@
-export type TextBlockChatProjectionReference = {
-  id: string;
-  blockID: string;
-};
-
 export type InitialTextBlockCreationState = {
   canEdit: boolean;
   projectionsLoaded: boolean;
@@ -21,21 +16,6 @@ export function shouldCreateInitialTextBlock(state: InitialTextBlockCreationStat
     && state.loadedTextBlockCount === 0
     && state.renderedTextBlockCount === 0
     && state.suppressAutomaticCreation !== true;
-}
-
-export function projectionIDsForTextBlockDeletion(
-  blockID: string,
-  chatMessages: readonly TextBlockChatProjectionReference[],
-): string[] {
-  const cleanBlockID = blockID.trim();
-  if (!cleanBlockID) return [];
-  const projectionIDs = new Set<string>([cleanBlockID]);
-  for (const message of chatMessages) {
-    if (message.blockID.trim() !== cleanBlockID) continue;
-    const messageID = message.id.trim();
-    if (messageID) projectionIDs.add(messageID);
-  }
-  return Array.from(projectionIDs);
 }
 
 export function resolveAttachedEmailHostBlockID(

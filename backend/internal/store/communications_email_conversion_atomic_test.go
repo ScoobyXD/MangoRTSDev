@@ -627,7 +627,7 @@ func TestMemoryEmailTextboxRelationshipRemovalMatchesTheCanonicalChatGuard(t *te
 	}
 }
 
-func TestMemoryNodeTextboxDeleteReleasesItsMessageAndPreservesTheWideRelationship(t *testing.T) {
+func TestMemoryEditorNodeTextboxDeleteReleasesItsMessageAndPreservesTheWideRelationship(t *testing.T) {
 	repo, companyID, user, node, message := setupAtomicEmailConversion(t, "11111111-1111-4111-8111-111111111196")
 	firstTextboxID := "44444444-4444-4444-8444-444444444496"
 	secondTextboxID := "66666666-6666-4666-8666-666666666696"
@@ -671,15 +671,27 @@ func TestMemoryNodeTextboxDeleteReleasesItsMessageAndPreservesTheWideRelationshi
 	if _, exists := repo.nodeText[key(companyID, node.NodeID)][result.AttachedEmailInformationIDs[0]]; !exists {
 		t.Fatal("blocked Node-wide relationship removal changed state")
 	}
-	current := repo.nodeText[key(companyID, node.NodeID)][firstTextboxID]
-	if current.Revision < 1 {
-		current.Revision = 1
+	ref := EditorJSONDocumentRef{
+		CompanyID: companyID, ResourceType: EntityTypeNode,
+		ResourceID: node.NodeID, DocumentID: firstTextboxID,
 	}
-	if err := repo.DeleteNodeProjectionWithActor(NodeProjectionDeleteInput{
-		CompanyID: companyID, NodeID: node.NodeID, InformationID: firstTextboxID,
-		ExpectedRevision: &current.Revision, ActorUserID: user.UserID,
+	snapshot, err := repo.GetEditorJSONSnapshot(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	versionBeforeDelete, err := repo.CurrentNodeViewVersion(companyID, node.NodeID, user.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.DeleteEditorJSONDocument(EditorJSONDeleteInput{
+		Document: ref, OperationID: "delete-first-textbox", ClientID: "memory-test",
+		ActorUserID: user.UserID, BaseRevision: snapshot.Revision,
 	}); err != nil {
 		t.Fatalf("delete first textbox: %v", err)
+	}
+	versionAfterDelete, err := repo.CurrentNodeViewVersion(companyID, node.NodeID, user.UserID)
+	if err != nil || versionAfterDelete.Shared <= versionBeforeDelete.Shared {
+		t.Fatalf("textbox editor delete view version before=%+v after=%+v err=%v", versionBeforeDelete, versionAfterDelete, err)
 	}
 	projections := repo.nodeText[key(companyID, node.NodeID)]
 	if _, exists := projections[chatID]; exists {

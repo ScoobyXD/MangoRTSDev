@@ -71,20 +71,28 @@ func TestNodeLinkedTextboxColorIsAssignedAndPreservedByCanonicalWrites(t *testin
 }
 
 func TestNodeTextboxDeleteRemovesOnlyItsTypedEmailRelationshipsAfterItsChats(t *testing.T) {
-	source := strings.Join(strings.Fields(readNodeFinalContractFile(t, "postgres_editor_projection_revisions.go")), " ")
-	textboxLock := "select revision,deleted_timestamp is not null from node_textboxes where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid for update"
+	source := strings.Join(strings.Fields(readNodeFinalContractFile(t, "postgres_editor_textboxes.go")), " ")
+	deleteStart := strings.Index(source, "func deletepostgreseditortextboxdocument")
+	if deleteStart < 0 {
+		t.Fatal("canonical editor textbox delete function is missing")
+	}
+	source = source[deleteStart:]
+	textboxLock := "where company_id=$1::uuid and %s=$2::uuid and %s=%s for update"
 	chatDelete := "delete from node_textbox_chats where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid"
 	relationshipDelete := "delete from email_relationships where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid and resource_textbox_id=$3::text"
-	textboxDelete := "update node_textboxes set deleted_timestamp=now()"
+	commit := "if err := tx.commit(); err != nil"
 	lockPosition := strings.Index(source, textboxLock)
 	chatPosition := strings.Index(source, chatDelete)
 	relationshipPosition := strings.Index(source, relationshipDelete)
-	textboxPosition := strings.Index(source, textboxDelete)
-	if lockPosition < 0 || chatPosition < 0 || relationshipPosition < 0 || textboxPosition < 0 {
-		t.Fatalf("Node textbox delete cleanup is incomplete: lock=%d chats=%d relationships=%d textbox=%d", lockPosition, chatPosition, relationshipPosition, textboxPosition)
+	commitPosition := strings.LastIndex(source, commit)
+	if lockPosition < 0 || chatPosition < 0 || relationshipPosition < 0 || commitPosition < 0 {
+		t.Fatalf("Node editor textbox delete cleanup is incomplete: lock=%d chats=%d relationships=%d commit=%d", lockPosition, chatPosition, relationshipPosition, commitPosition)
 	}
-	if lockPosition > chatPosition || chatPosition > relationshipPosition || relationshipPosition > textboxPosition {
-		t.Fatal("Node textbox delete must lock the textbox, then remove owned chats, exact textbox relationships, and the textbox")
+	if lockPosition > chatPosition || chatPosition > relationshipPosition || relationshipPosition > commitPosition {
+		t.Fatal("Node editor textbox delete must lock the textbox, then remove owned chats and exact textbox relationships before commit")
+	}
+	if !strings.Contains(source, "if input.baserevision != revision { return editorjsoncommit{}, errversionconflict }") {
+		t.Fatal("an active Node editor textbox stale delete must return ErrVersionConflict")
 	}
 }
 

@@ -54,7 +54,6 @@ export function linkedEmailMessageAccents(
 ): Record<string, string> {
   return Object.fromEntries(textBoxes.flatMap((textBox) => {
     const color = textBox.color?.trim() ?? "";
-    if (!color) return [];
     return textBox.linkedEmailMessageIDs.map((messageID) => [messageID.trim(), color] as const).filter(([messageID]) => Boolean(messageID));
   }));
 }

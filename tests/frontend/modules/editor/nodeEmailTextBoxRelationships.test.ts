@@ -51,10 +51,11 @@ test("staged message identity is presentation-only for a temporary highlighted-c
 test("every exact linked message receives its textbox color and unrelated thread messages remain neutral", () => {
   const accents = linkedEmailMessageAccents([
     { linkedEmailMessageIDs: ["message-a", "message-b"], color: " #0EA5E9 " },
+    { linkedEmailMessageIDs: ["message-c"], color: "" },
   ]);
 
-  assert.deepEqual(accents, { "message-a": "#0EA5E9", "message-b": "#0EA5E9" });
-  assert.equal(accents["message-c"], undefined);
+  assert.deepEqual(accents, { "message-a": "#0EA5E9", "message-b": "#0EA5E9", "message-c": "" });
+  assert.equal(Object.prototype.hasOwnProperty.call(accents, "message-c"), true, "canonical membership must survive an empty color");
 });
 
 test("exact message-link drag carries only internal relationship identity", () => {

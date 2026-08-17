@@ -369,6 +369,7 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
   const projectProjectionItems = projectProjections(60);
   const serverDocuments = new Map<string, { document: ReturnType<typeof tiptapDocument>; revision: number }>();
   const relationshipInformationWrites: Array<Record<string, unknown>> = [];
+  const chatInformationWrites: Array<Record<string, unknown>> = [];
   const editorMetadataPatchBodies: Array<Record<string, unknown>> = [];
   const nodeMutationRequests: Array<{ path: string; method: string }> = [];
   let failNextRelationshipInformationWrite = false;
@@ -609,12 +610,61 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
         return await response.json() as T;
       }
       if (path === `/v1/nodes/${NODE_ID}/information` && (init?.method ?? "GET").toUpperCase() === "POST") {
-        const command = JSON.parse(String(init?.body ?? "{}")) as { information_id?: string; information?: string };
+        const command = JSON.parse(String(init?.body ?? "{}")) as { information_id?: string; information?: string; type?: string };
         const relationship = JSON.parse(command.information ?? "{}") as {
           block_id?: string;
           email_message_id?: string;
+          email_textbox_color_on_send?: string;
+          ensure_email_textbox_link_on_send?: boolean;
+          message?: string;
+          selection_message_id?: string;
           textbox_color?: string;
         };
+        if (command.type === "Text block chat") {
+          chatInformationWrites.push(relationship as Record<string, unknown>);
+          const blockID = relationship.block_id?.trim() ?? "";
+          const emailMessageID = relationship.selection_message_id?.trim() ?? "";
+          const textBoxColor = relationship.email_textbox_color_on_send?.trim().toUpperCase() ?? "";
+          if (relationship.ensure_email_textbox_link_on_send && blockID && emailMessageID) {
+            currentNodeProjectionItems = currentNodeProjectionItems.map((projection) => {
+              if (projection.type !== "Text box" || projection.information_id !== blockID) return projection;
+              const content = JSON.parse(projection.information.slice(TEXT_BLOCK_PREFIX.length)) as Record<string, unknown>;
+              const linkedMessageIDs = Array.isArray(content.email_message_ids)
+                ? content.email_message_ids.filter((value): value is string => typeof value === "string")
+                : [];
+              return {
+                ...projection,
+                revision: (projection.revision ?? 1) + 1,
+                information: TEXT_BLOCK_PREFIX + JSON.stringify({
+                  ...content,
+                  color: textBoxColor,
+                  email_message_ids: Array.from(new Set([...linkedMessageIDs, emailMessageID])),
+                }),
+              };
+            });
+            const providerMessageID = storedThreadMessages.find((message) => message.email_message_id === emailMessageID)?.id ?? "";
+            if (providerMessageID) {
+              currentNodeProjectionItems = [
+                ...currentNodeProjectionItems,
+                nodeLinkedEmailMessageProjection(blockID, providerMessageID, emailMessageID, command.information_id || `chat-${emailMessageID}`),
+              ];
+            }
+          }
+          currentNodeProjectionItems = [
+            ...currentNodeProjectionItems,
+            {
+              company_id: COMPANY_ID,
+              node_id: NODE_ID,
+              information_id: command.information_id || `chat-${chatInformationWrites.length}`,
+              type: "Text block chat",
+              information: command.information ?? "{}",
+              revision: 1,
+              created_timestamp: timestamp(63),
+              updated_timestamp: timestamp(63),
+            },
+          ];
+          return { information_id: command.information_id } as T;
+        }
         relationshipInformationWrites.push(relationship as Record<string, unknown>);
         if (failNextRelationshipInformationWrite) {
           failNextRelationshipInformationWrite = false;
@@ -936,11 +986,26 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
         assert.doesNotMatch(messageCard.style.borderLeftColor, exactTextBoxColor, `unlinked message ${index + 1} must remain neutral to that text box`);
       }
     }
+    for (const item of storedThreadItems) {
+      const createTextBoxButton = item.querySelector<HTMLButtonElement>('button[aria-label="Create text box for this email"]');
+      assert.ok(createTextBoxButton, `${item.dataset.emailMessageId} should always expose the create-textbox action`);
+      assert.equal(createTextBoxButton.querySelector('[data-email-text-box-action-icon="create"]') !== null, true);
+    }
+    for (const [index, item] of storedThreadItems.entries()) {
+      const navigateTextBoxButton = item.querySelector<HTMLButtonElement>('button[aria-label="Open linked text box for this email"]');
+      assert.equal(Boolean(navigateTextBoxButton), index < 2, "only exact linked messages should expose textbox navigation");
+    }
+    const linkedDisclosure = storedThreadItems[0]?.querySelector<HTMLButtonElement>('button[aria-label^="Collapse email from"], button[aria-label^="Expand email from"]');
+    assert.ok(linkedDisclosure);
+    scrolledIntoView.length = 0;
+    await act(async () => { linkedDisclosure.click(); });
+    await flushWork();
+    assert.equal(scrolledIntoView.length, 0, "email disclosure must only expand or collapse the exact message");
     for (const linkedItem of storedThreadItems.slice(0, 2)) {
-      const exactMessageHeader = linkedItem.querySelector<HTMLButtonElement>('button[aria-label^="Collapse email from"], button[aria-label^="Expand email from"]');
-      assert.ok(exactMessageHeader);
+      const navigateTextBoxButton = linkedItem.querySelector<HTMLButtonElement>('button[aria-label="Open linked text box for this email"]');
+      assert.ok(navigateTextBoxButton);
       scrolledIntoView.length = 0;
-      await act(async () => { exactMessageHeader.click(); });
+      await act(async () => { navigateTextBoxButton.click(); });
       await flushWork();
       assert.ok(
         scrolledIntoView.some((element) => element.dataset.nodeTextBoxRow === "node-block-0"),
@@ -963,6 +1028,7 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     bodySelection?.removeAllRanges();
     bodySelection?.addRange(fourthMessageSelection);
     nodeMutationRequests.length = 0;
+    chatInformationWrites.length = 0;
     editorMetadataPatchBodies.length = 0;
     relationshipInformationWrites.length = 0;
     await act(async () => {
@@ -975,17 +1041,65 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     await flushWork(24);
     assert.equal(nodeContainer.querySelectorAll('[data-email-chat-destination-candidate="true"]').length, 2, "the two existing text boxes should become pending destinations");
     assert.equal(nodeContainer.querySelectorAll('[data-node-text-box-row]').length, 3, "the pending selection should remain in one temporary local text box");
+    const pendingChatDraft = "Draft follows the selected email destination";
+    const temporaryDestinationRow = Array.from(nodeContainer.querySelectorAll<HTMLElement>('[data-node-text-box-row]'))
+      .find((row) => !["node-block-0", "node-block-1"].includes(row.dataset.nodeTextBoxRow ?? ""));
+    const temporaryComposer = temporaryDestinationRow?.querySelector<HTMLTextAreaElement>('[data-chat-composer-shell="true"] textarea');
+    const setTextareaValue = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, "value")?.set;
+    assert.ok(temporaryComposer);
+    assert.ok(setTextareaValue);
+    await act(async () => {
+      setTextareaValue.call(temporaryComposer, pendingChatDraft);
+      Simulate.change(temporaryComposer);
+    });
+    await flushWork();
+    const draftOwnerIDs = () => Array.from(nodeContainer.querySelectorAll<HTMLTextAreaElement>('[data-node-text-box-row] [data-chat-composer-shell="true"] textarea'))
+      .filter((composer) => composer.value === pendingChatDraft)
+      .map((composer) => composer.closest<HTMLElement>('[data-node-text-box-row]')?.dataset.nodeTextBoxRow ?? "");
+    assert.deepEqual(draftOwnerIDs(), [temporaryDestinationRow?.dataset.nodeTextBoxRow], "the pending draft should start in only the temporary composer");
     const pendingDestinationHeader = nodeContainer.querySelector<HTMLElement>('[data-node-text-box-row="node-block-1"] [data-node-text-box-header="true"]');
     assert.ok(pendingDestinationHeader);
     await act(async () => { pendingDestinationHeader.click(); });
     await flushWork(24);
     const selectedDestinationRow = nodeContainer.querySelector<HTMLElement>('[data-node-text-box-row="node-block-1"]');
     assert.ok(selectedDestinationRow?.querySelector('[data-node-chat-block-id="node-block-1"]'), "clicking the noninteractive header should move the local composer to that text box");
-    assert.equal(nodeContainer.querySelectorAll('[data-email-chat-destination-candidate="true"]').length, 0);
+    assert.equal(nodeContainer.querySelectorAll('[data-email-chat-destination-candidate="true"]').length, 2, "destination mode should remain available until Enter or cancel");
     assert.equal(nodeContainer.querySelectorAll('[data-node-text-box-row]').length, 2, "choosing a destination should remove the temporary local text box");
+    assert.deepEqual(draftOwnerIDs(), ["node-block-1"], "temporary-to-saved routing must move the draft without loss or duplication");
+    const activeSelectionOwner = () => nodeContainer.querySelector<HTMLElement>('[data-chat-composer-highlight="true"]')?.closest<HTMLElement>('[data-node-text-box-row]')?.dataset.nodeTextBoxRow;
+    assert.equal(nodeContainer.querySelectorAll('[data-chat-composer-highlight="true"]').length, 1);
+    assert.equal(activeSelectionOwner(), "node-block-1");
+    const firstDestinationHeader = nodeContainer.querySelector<HTMLElement>('[data-node-text-box-row="node-block-0"] [data-node-text-box-header="true"]');
+    assert.ok(firstDestinationHeader);
+    await act(async () => { firstDestinationHeader.click(); });
+    await flushWork(24);
+    assert.equal(nodeContainer.querySelectorAll('[data-chat-composer-highlight="true"]').length, 1);
+    assert.equal(activeSelectionOwner(), "node-block-0", "the same pending selection should move from B to A");
+    assert.deepEqual(draftOwnerIDs(), ["node-block-0"], "B-to-A routing must move the same draft");
+    const secondDestinationHeader = nodeContainer.querySelector<HTMLElement>('[data-node-text-box-row="node-block-1"] [data-node-text-box-header="true"]');
+    assert.ok(secondDestinationHeader);
+    await act(async () => { secondDestinationHeader.click(); });
+    await flushWork(24);
+    assert.equal(nodeContainer.querySelectorAll('[data-chat-composer-highlight="true"]').length, 1);
+    assert.equal(activeSelectionOwner(), "node-block-1", "the same pending selection should move from A back to B");
+    assert.deepEqual(draftOwnerIDs(), ["node-block-1"], "A-to-B routing must move the same draft once");
     assert.deepEqual(nodeMutationRequests, [], "staging and choosing a highlighted-email chat destination must not write before Enter");
     assert.deepEqual(editorMetadataPatchBodies, []);
     assert.deepEqual(relationshipInformationWrites, []);
+    const finalDestinationSend = nodeContainer.querySelector<HTMLButtonElement>('[data-node-text-box-row="node-block-1"] button[aria-label="Send"]');
+    assert.ok(finalDestinationSend);
+    await act(async () => { finalDestinationSend.click(); });
+    await flushWork(24);
+    assert.deepEqual(nodeMutationRequests, [{ path: `/v1/nodes/${NODE_ID}/information`, method: "POST" }], "Enter must make one atomic Node information write");
+    assert.equal(chatInformationWrites.length, 1);
+    assert.equal(chatInformationWrites[0]?.block_id, "node-block-1", "the atomic chat must use the final selected textbox");
+    assert.equal(chatInformationWrites[0]?.selection_message_id, "internal-message-node-block-0-d");
+    assert.equal(chatInformationWrites[0]?.message, pendingChatDraft);
+    assert.equal(chatInformationWrites[0]?.ensure_email_textbox_link_on_send, true);
+    assert.deepEqual(relationshipInformationWrites, [], "the atomic chat must not issue a separate relationship write");
+    assert.equal(nodeContainer.querySelectorAll('[data-email-chat-destination-candidate="true"]').length, 0, "successful Enter should end destination mode");
+    assert.equal(nodeContainer.querySelectorAll('[data-chat-composer-highlight="true"]').length, 0);
+    assert.deepEqual(draftOwnerIDs(), [], "successful Enter should clear the one submitted draft");
 
     const thirdMessageDragStrip = storedThreadItems[2]?.querySelector<HTMLElement>('[data-email-message-drag-strip="true"]');
     const thirdMessageDragRegion = thirdMessageDragStrip?.querySelector<HTMLElement>('[data-email-message-drag-region="true"]');
@@ -1097,17 +1211,17 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     assert.ok(runtimeErrors.some((message) => /already linked to another text box/i.test(message)));
     runtimeErrors.length = 0;
 
-    const fourthMessageCreateTextBox = nodeContainer.querySelector<HTMLButtonElement>(
-      '[data-email-message-id="message-node-block-0-d"] button[aria-label="Create text box for this email"]',
+    const fifthMessageCreateTextBox = nodeContainer.querySelector<HTMLButtonElement>(
+      '[data-email-message-id="message-node-block-0-e"] button[aria-label="Create text box for this email"]',
     );
-    assert.ok(fourthMessageCreateTextBox);
+    assert.ok(fifthMessageCreateTextBox);
     const textBlockIDsBeforeFailedLink = new Set(currentNodeProjectionItems
       .filter((projection) => projection.type === "Text box")
       .map((projection) => projection.information_id));
     relationshipInformationWrites.length = 0;
     editorMetadataPatchBodies.length = 0;
     failNextRelationshipInformationWrite = true;
-    await act(async () => { fourthMessageCreateTextBox.click(); });
+    await act(async () => { fifthMessageCreateTextBox.click(); });
     await flushWork(24);
     const failedLinkProjection = currentNodeProjectionItems.find((projection) => (
       projection.type === "Text box" && !textBlockIDsBeforeFailedLink.has(projection.information_id)
@@ -1117,7 +1231,7 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
       `the textbox metadata save should complete before the forced relationship failure (metadata=${editorMetadataPatchBodies.length}, relationships=${relationshipInformationWrites.length}, errors=${runtimeErrors.join(",")})`,
     );
     assert.equal(relationshipInformationWrites.length, 1);
-    assert.equal(relationshipInformationWrites[0]?.email_message_id, "internal-message-node-block-0-d", "the visible message action must carry its exact internal email_message_id");
+    assert.equal(relationshipInformationWrites[0]?.email_message_id, "internal-message-node-block-0-e", "the visible message action must carry its exact internal email_message_id");
     const failedLinkColor = String(relationshipInformationWrites[0]?.textbox_color ?? "");
     assert.match(failedLinkColor, /^#[0-9A-F]{6}$/);
     assert.equal(editorMetadataPatchBodies.length, 1, "failure cleanup must not issue a second metadata PATCH");

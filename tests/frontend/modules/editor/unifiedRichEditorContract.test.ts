@@ -1506,9 +1506,22 @@ test("canceling selected-text chat clears both temporary annotation and editor s
   const nodeParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
 
   assert.match(tiptap, /onSelectionChatRequest\(selectionAction\);\s*editorRef\.current\?\.commands\.setTextSelection\(selectionAction\.to\);\s*setSelectionAction\(null\);/);
-  assert.match(nodeSurface, /const clearSelectionAnchor = \(\) => \{[\s\S]{0,320}delete next\[chatBlockID\];/);
+  assert.match(nodeSurface, /const clearSelectionAnchor = \(\) => \{[\s\S]{0,220}cancelPendingEmailChatSelection\(\);[\s\S]{0,420}delete next\[chatBlockID\];/);
   assert.match(nodeSurface, /if \(chatPaneIsVisible\) \{\s*clearSelectionAnchor\(\);/);
   assert.match(nodeParts, /aria-label="Clear selected text"[\s\S]{0,260}onClick=\{onClearSelectionAnchor\}/);
+});
+
+test("submitting a pending email chat freezes its textbox destination until the request settles", () => {
+  const nodeSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
+  const submitChat = nodeSurface.slice(
+    nodeSurface.indexOf("const submitChat = useCallback"),
+    nodeSurface.indexOf("const deleteChatMessage = useCallback"),
+  );
+  const clearPendingSelection = submitChat.indexOf("if (pendingEmailSelectionOnSubmit) setPendingEmailChatSelection(null)");
+  const sendRequest = submitChat.indexOf("await requestJSON<unknown>");
+
+  assert.ok(clearPendingSelection >= 0 && sendRequest > clearPendingSelection, "Enter must freeze the selected textbox before sending");
+  assert.match(submitChat, /catch \(cause\) \{[\s\S]*setPendingEmailChatSelection\(\(current\) => current \?\? pendingEmailSelectionOnSubmit\)/);
 });
 
 test("node text-block metadata mutations use permanent JSON and remove deleted boxes optimistically", () => {
@@ -1525,6 +1538,9 @@ test("node text-block metadata mutations use permanent JSON and remove deleted b
   const optimisticRemoval = nodeSurface.indexOf("setBlocks((current) => current.filter((block) => block.id !== blockID));", nodeSurface.indexOf("const deleteTextBlock"));
   const deleteRequest = nodeSurface.indexOf('method: "DELETE"', optimisticRemoval);
   assert.ok(optimisticRemoval >= 0 && deleteRequest > optimisticRemoval, "the deleted node text box must disappear before the server request completes");
+  const textBlockDeletion = nodeSurface.slice(nodeSurface.indexOf("const deleteTextBlock"), nodeSurface.indexOf("const requestDeleteTextBlock"));
+  assert.equal(textBlockDeletion.match(/method: "DELETE"/g)?.length, 1, "a textbox delete must issue one editor-json DELETE");
+  assert.doesNotMatch(textBlockDeletion, /\/projection\//, "the frontend must not loop over backend-owned chat children");
   assert.match(nodeSurface, /catch \(cause\) \{[\s\S]{0,520}previousBlockIndex[\s\S]{0,260}onProjectionMutation\(\);\s*return/);
   assert.match(nodeSurface, /const tiptapDocument = image\.attachmentID \? serializeMangoTiptapDocument/);
   assert.match(nodeSurface, /attachmentID: image\.attachmentID/);

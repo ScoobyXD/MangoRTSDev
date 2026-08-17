@@ -203,7 +203,7 @@ test("node email and linked text boxes use exact canonical message lists and tex
   assert.match(nodeSurface, /<LinkedEmailPreviewPane/);
   assert.match(nodeSurface, /const stageEmailSelectionChatTextBlock = useCallback/);
   assert.match(nodeSurface, /temporaryEmailChatBlocksRef\.current\.set\(blockID, temporaryBlock\)/);
-  assert.match(nodeSurface, /const blockID = stageEmailSelectionChatTextBlock\(messageID\);[\s\S]{0,320}setPendingEmailChatSelection\(existingDestinations\.length > 0 \? anchor : null\)/);
+  assert.match(nodeSurface, /const blockID = stageEmailSelectionChatTextBlock\(messageID\);[\s\S]{0,320}setPendingEmailChatSelection\(existingDestinations\.length > 0 \? \{ \.\.\.anchor, blockID \} : null\)/);
   assert.match(nodeSurface, /const ensureEmailTextBoxLinkOnSend = selectionAnchor\?\.source === "email"/);
   assert.match(nodeSurface, /ensureEmailTextBoxLinkOnSend,/);
   assert.match(nodeSurface, /const choosePendingEmailChatDestination/);
@@ -305,8 +305,28 @@ test("exact Node email headers link to text boxes without accepting whole-email 
   assert.match(nodeParts, /event\.stopPropagation\(\)/);
   assert.match(nodeParts, /EMAIL_MESSAGE_HEADER_INTERACTIVE_SELECTOR/);
   assert.doesNotMatch(nodeParts, /onMessageActivate\?\.\(email\.messageID\)/, "the neutral thread representative must not navigate as an exact linked message");
-  assert.match(nodeParts, /if \(internalMessageID\) onMessageActivate\?\.\(internalMessageID\)/);
-  assert.match(nodeParts, /if \(internalThreadMessageID\) onMessageActivate\?\.\(internalThreadMessageID\)/);
+  const exactMessageDisclosureStart = nodeParts.indexOf('aria-label={`${isExpanded ? "Collapse" : "Expand"} email from ${fromLine}`}');
+  const exactMessageDisclosure = nodeParts.slice(
+    exactMessageDisclosureStart,
+    nodeParts.indexOf("{linkedTextBoxNavigationAvailable && (", exactMessageDisclosureStart),
+  );
+  assert.match(exactMessageDisclosure, /setExpandedThreadMessageID/);
+  assert.doesNotMatch(exactMessageDisclosure, /onMessageActivate/, "message disclosure must not navigate to a text box");
+  assert.match(nodeParts, /aria-label="Open linked text box for this email"[\s\S]{0,260}onMessageActivate\?\.\(internalThreadMessageID\)/);
+  const exactMessageCreateActionStart = nodeParts.indexOf('aria-label="Create text box for this email"', exactMessageDisclosureStart);
+  const exactMessageCreateAction = nodeParts.slice(
+    exactMessageCreateActionStart,
+    nodeParts.indexOf("{repliesEnabled && (", exactMessageCreateActionStart),
+  );
+  assert.match(exactMessageCreateAction, /onMessageTextBoxRequest\(internalThreadMessageID\)/);
+  const compactChildMessages = nodeParts.slice(
+    nodeParts.indexOf("{childMessages.map((message, index) =>"),
+    nodeParts.indexOf("type LinkedEmailPreviewPaneProps"),
+  );
+  assert.match(compactChildMessages, /const selectMessage = \(\) => onSelect\(\)/);
+  assert.doesNotMatch(compactChildMessages, /if \(internalMessageID\) onMessageActivate\?\.\(internalMessageID\)/, "opening a compact child message must not navigate implicitly");
+  assert.match(compactChildMessages, /aria-label="Open linked text box for this email"[\s\S]{0,260}onMessageActivate\?\.\(internalMessageID\)/);
+  assert.match(compactChildMessages, /aria-label="Create text box for this email"[\s\S]{0,420}onMessageTextBoxRequest\(internalMessageID\)/);
 
   assert.match(relationships, /application\/x-mango-email-message-text-box-link/);
   assert.match(relationships, /email_message_id: cleanEmailMessageID/);
