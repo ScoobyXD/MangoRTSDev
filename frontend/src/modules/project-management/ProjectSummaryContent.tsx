@@ -2971,9 +2971,11 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       }}
       style={projectDocumentPaneStyle(projectDocumentFullscreen)}
     >
-      <div style={projectDocumentFullscreenToolbarStyle(projectDocumentFullscreen)}>
-        {projectDocumentFullscreen ? projectEditorToolbar : null}
-      </div>
+      {projectDocumentFullscreen ? (
+        <div style={projectDocumentFullscreenToolbarStyle}>
+          {projectEditorToolbar}
+        </div>
+      ) : null}
       <header
         data-project-document-header="true"
         className="mango-editor-header-scroll"
@@ -3310,7 +3312,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                 </div>
               </div>
             </div>
-            <div data-project-timeline-title="true" style={projectTimelineTitleStyle(projectDocumentDocked)}>Timeline</div>
             <div data-project-timeline-toolbar="true" style={projectTimelineToolbarStyle(projectDocumentDocked)}>
               <div style={toolbarActionsStyle}>
                 {!projectDocumentFullscreen ? projectEditorToolbar : null}
@@ -5186,12 +5187,6 @@ const projectWorkPanelActionsStyle: React.CSSProperties = {
   gap: 8,
 };
 
-const columnTitleStyle: React.CSSProperties = {
-  fontSize: 14,
-  fontWeight: 850,
-  color: "#0f172a",
-};
-
 const toolbarActionsStyle: React.CSSProperties = {
   display: "flex",
   minWidth: 0,
@@ -5849,8 +5844,8 @@ const projectTimelineHeadingGridStyle = (documentDocked: boolean, documentWidth:
   display: "grid",
   gridTemplateColumns: documentDocked
     ? `${documentWidth}px 8px 42px minmax(0, 1fr)`
-    : "minmax(0, 1fr) max-content",
-  gridTemplateRows: "auto auto",
+    : "minmax(0, 1fr) minmax(0, 2fr)",
+  gridTemplateRows: "auto",
   flexShrink: 0,
 });
 
@@ -5866,22 +5861,12 @@ const projectTimelineControlRowStyle: React.CSSProperties = {
   gridRow: "1",
 };
 
-const projectTimelineTitleStyle = (documentDocked: boolean): React.CSSProperties => ({
-  ...columnTitleStyle,
-  minWidth: 0,
-  alignSelf: "center",
-  justifySelf: "start",
-  gridColumn: documentDocked ? "4" : "2",
-  gridRow: "1",
-  padding: "0 2px 8px",
-});
-
 const projectTimelineToolbarStyle = (documentDocked: boolean): React.CSSProperties => ({
   ...columnToolbarStyle,
   minWidth: 0,
   justifyContent: "flex-end",
-  gridColumn: documentDocked ? "4" : "1 / -1",
-  gridRow: "2",
+  gridColumn: documentDocked ? "4" : "2",
+  gridRow: "1",
 });
 
 const projectTimelineControlsStyle: React.CSSProperties = {
@@ -5989,7 +5974,7 @@ const projectDocumentPaneStyle = (fullscreen: boolean): React.CSSProperties => (
   margin: 0,
   padding: 0,
   display: "grid",
-  gridTemplateRows: fullscreen ? "auto 38px minmax(0, 1fr)" : "0 38px minmax(0, 1fr)",
+  gridTemplateRows: fullscreen ? "auto 38px minmax(0, 1fr)" : "38px minmax(0, 1fr)",
   border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
   borderRadius: fullscreen ? 18 : 10,
   background: EDITOR_NEU_SURFACE,
@@ -6070,14 +6055,14 @@ const projectDocumentEditorWrapStyle: React.CSSProperties = {
   overflow: "hidden",
 };
 
-const projectDocumentFullscreenToolbarStyle = (visible: boolean): React.CSSProperties => ({
+const projectDocumentFullscreenToolbarStyle: React.CSSProperties = {
   minWidth: 0,
-  display: visible ? "flex" : "none",
+  display: "flex",
   justifyContent: "flex-end",
   overflowX: "auto",
-  padding: visible ? "6px 8px" : 0,
-  borderBottom: visible ? `1px solid ${PROJECT_SUMMARY_RULE}` : undefined,
-});
+  padding: "6px 8px",
+  borderBottom: `1px solid ${PROJECT_SUMMARY_RULE}`,
+};
 
 
 const relationshipScrollStyle = (dropActive: boolean): React.CSSProperties => ({

@@ -48,6 +48,15 @@ test("Project permanent document reuses its exact Project textbox outside the ti
   assert.match(projectSummary, /pane\.showModal\(\)/);
   assert.match(projectSummary, /projectDocumentOpen && projectDocumentPane \? projectDocumentPane : null/);
   assert.doesNotMatch(projectSummary, /<AppModalPortal[\s\S]{0,900}\{projectDocumentPane\}/);
+  assert.match(
+    projectSummary,
+    /gridTemplateRows: fullscreen \? "auto 38px minmax\(0, 1fr\)" : "38px minmax\(0, 1fr\)"/,
+  );
+  assert.match(
+    projectSummary,
+    /\{projectDocumentFullscreen \? \(\s*<div style=\{projectDocumentFullscreenToolbarStyle\}>\s*\{projectEditorToolbar\}\s*<\/div>\s*\) : null\}/,
+  );
+  assert.doesNotMatch(projectSummary, /projectDocumentFullscreenToolbarStyle\(projectDocumentFullscreen\)/);
 
   const restoreStart = projectSummary.indexOf("const restoreProjectVersion");
   const restoreEnd = projectSummary.indexOf("const addTextBlock", restoreStart);
@@ -100,20 +109,23 @@ test("Project permanent document reuses its exact Project textbox outside the ti
   assert.match(projectSummary, /const projectDocumentFullscreenCloseButtonStyle[\s\S]{0,200}UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE/);
 });
 
-test("Project document and timeline headings share the docked textbox columns", () => {
+test("Project controls and editor toolbar share one header row without a Timeline title", () => {
   assert.match(projectSummary, /const projectDocumentDocked = Boolean\(projectDocumentOpen && projectDocumentBlock && !projectDocumentFullscreen\)/);
   const headingStart = projectSummary.indexOf('data-project-timeline-heading-grid="true"');
   const bodyGridStart = projectSummary.indexOf("gridTemplateColumns: projectDocumentOpen && projectDocumentPane", headingStart);
   assert.ok(headingStart >= 0 && bodyGridStart > headingStart, "the heading grid must be bounded before the document/timeline body grid");
   const headingSource = projectSummary.slice(headingStart, bodyGridStart);
   const controlsIndex = headingSource.indexOf('data-project-timeline-control-row="true"');
-  const titleIndex = headingSource.indexOf('data-project-timeline-title="true"');
   const toolbarIndex = headingSource.indexOf('data-project-timeline-toolbar="true"');
-  assert.ok(controlsIndex >= 0 && titleIndex > controlsIndex && toolbarIndex > titleIndex, "controls, Timeline title, and editor toolbar must keep their two-row order");
+  assert.ok(controlsIndex >= 0 && toolbarIndex > controlsIndex, "controls must precede the editor toolbar in one Project header row");
+  assert.doesNotMatch(headingSource, /data-project-timeline-title/);
+  assert.doesNotMatch(projectSummary, /const projectTimelineTitleStyle/);
   assert.match(projectSummary, /const projectTimelineHeadingGridStyle[\s\S]{0,320}`\$\{documentWidth\}px 8px 42px minmax\(0, 1fr\)`/);
+  assert.match(projectSummary, /const projectTimelineHeadingGridStyle[\s\S]{0,360}: "minmax\(0, 1fr\) minmax\(0, 2fr\)"/);
+  assert.match(projectSummary, /const projectTimelineHeadingGridStyle[\s\S]{0,420}gridTemplateRows: "auto"/);
   assert.match(projectSummary, /const projectTimelineControlRowStyle[\s\S]{0,240}overflowX: "auto"/);
-  assert.match(projectSummary, /const projectTimelineTitleStyle[\s\S]{0,320}gridColumn: documentDocked \? "4" : "2"/);
-  assert.match(projectSummary, /const projectTimelineToolbarStyle[\s\S]{0,320}gridColumn: documentDocked \? "4" : "1 \/ -1"/);
+  assert.match(projectSummary, /const projectTimelineControlRowStyle[\s\S]{0,320}gridRow: "1"/);
+  assert.match(projectSummary, /const projectTimelineToolbarStyle[\s\S]{0,320}gridColumn: documentDocked \? "4" : "2"[\s\S]{0,80}gridRow: "1"/);
   assert.match(projectSummary, /const projectDocumentPaneHeaderContentStyle[\s\S]{0,220}width: "100%"[\s\S]{0,120}minWidth: 0[\s\S]{0,160}gridTemplateColumns: "max-content minmax\(0, 1fr\) 30px"/);
   assert.match(projectSummary, /const projectDocumentPaneHeaderStyle[\s\S]{0,260}background: PROJECT_TEXTBOX_HEADER_BACKGROUND/);
 });
