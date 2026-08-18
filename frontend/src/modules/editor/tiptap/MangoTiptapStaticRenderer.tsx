@@ -192,11 +192,11 @@ function renderNode(
     case "tableRow": return <tr key={key}>{children}</tr>;
     case "tableHeader": {
       const width = Array.isArray(attrs.colwidth) && Number(attrs.colwidth[0]) > 0 ? Number(attrs.colwidth[0]) : undefined;
-      return <th key={key} colSpan={Number(attrs.colspan) || 1} rowSpan={Number(attrs.rowspan) || 1} style={{ width, textAlign: attrs.align as React.CSSProperties["textAlign"], backgroundColor: attrs.backgroundColor ? String(attrs.backgroundColor) : undefined }}>{children}</th>;
+      return <th key={key} colSpan={Number(attrs.colspan) || 1} rowSpan={Number(attrs.rowspan) || 1} style={{ width, maxWidth: width, textAlign: attrs.align as React.CSSProperties["textAlign"], backgroundColor: attrs.backgroundColor ? String(attrs.backgroundColor) : undefined }}>{children}</th>;
     }
     case "tableCell": {
       const width = Array.isArray(attrs.colwidth) && Number(attrs.colwidth[0]) > 0 ? Number(attrs.colwidth[0]) : undefined;
-      return <td key={key} colSpan={Number(attrs.colspan) || 1} rowSpan={Number(attrs.rowspan) || 1} style={{ width, textAlign: attrs.align as React.CSSProperties["textAlign"], backgroundColor: attrs.backgroundColor ? String(attrs.backgroundColor) : undefined }}>{children}</td>;
+      return <td key={key} colSpan={Number(attrs.colspan) || 1} rowSpan={Number(attrs.rowspan) || 1} style={{ width, maxWidth: width, textAlign: attrs.align as React.CSSProperties["textAlign"], backgroundColor: attrs.backgroundColor ? String(attrs.backgroundColor) : undefined }}>{children}</td>;
     }
     case "mention": {
       const kind = attrs.kind === "urgent" ? "urgent" : "normal";

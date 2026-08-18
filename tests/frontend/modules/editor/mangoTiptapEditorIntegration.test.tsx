@@ -113,7 +113,10 @@ function structuredDocument(): MangoTiptapDocument {
           }] },
         ],
       }] },
-      { type: "table", content: [{ type: "tableRow", content: [{ type: "tableCell", attrs: { colspan: 1, rowspan: 1 }, content: [{ type: "paragraph", content: [{ type: "text", text: "Cell" }] }] }] }] },
+      { type: "table", content: [
+        { type: "tableRow", content: [{ type: "tableHeader", attrs: { colspan: 1, rowspan: 1, colwidth: [420] }, content: [{ type: "paragraph", content: [{ type: "text", text: "Heading" }] }] }] },
+        { type: "tableRow", content: [{ type: "tableCell", attrs: { colspan: 1, rowspan: 1, colwidth: [420] }, content: [{ type: "paragraph", content: [{ type: "text", text: "Cell" }] }] }] },
+      ] },
       { type: "mangoAttachmentImage", attrs: { attachmentId: "image-1", filename: "image.png", mimeType: "image/png", alignment: "right", position: "wrap", layout: "content" } },
       { type: "paragraph", attrs: { blockId: "wrapped-text" }, content: [{ type: "text", text: "Text wraps beside the image." }] },
     ] },
@@ -183,6 +186,8 @@ test("static JSON renderer paints true ProseMirror ranges across blocks, lists, 
   assert.match(html, /Third-level item/);
   assert.match(html, /Fourth-level item/);
   assert.match(html, /<table/);
+  assert.match(html, /<th[^>]+style="width:420px;max-width:420px"/, "the sleeping header must honor its saved column width");
+  assert.match(html, /<td[^>]+style="width:420px;max-width:420px"/, "the sleeping cell must honor its saved column width");
   assert.match(html, /data-static-image="image-1"/);
   assert.match(html, /class="mango-tiptap-image-placement" data-mango-image-position="wrap" data-mango-image-alignment="right"/);
   assert.match(html, /Text wraps beside the image/);
@@ -871,6 +876,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     await act(async () => { activeTableCell.dispatchEvent(tableContextEvent); });
     assert.equal(tableContextEvent.defaultPrevented, true, "right-clicking a table cell opens Mango's table menu");
     await waitFor(() => Boolean(dom.window.document.querySelector('[role="menu"][aria-label="Table actions"]')), "the table context menu should become visible");
+    assert.equal(editorRoot.querySelector('[role="toolbar"][aria-label="Table controls"]'), null, "selecting a table must not show the duplicate top-right command strip");
     const tableMenu = dom.window.document.querySelector<HTMLElement>('[role="menu"][aria-label="Table actions"]');
     assert.ok(tableMenu);
     assert.equal(tableMenu.parentElement, dom.window.document.body, "the table menu is portaled above the editor scroll window");

@@ -2069,16 +2069,6 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           />
         </>
       )}
-      {isActive && editable && tableActive && (
-        <div role="toolbar" aria-label="Table controls" contentEditable={false} style={{ position: "absolute", right: 8, top: 8, zIndex: 11, display: "flex", flexWrap: "wrap", gap: 4, padding: 4, border: "1px solid #bae6fd", borderRadius: 8, background: "#ffffff" }}>
-          <button type="button" onClick={() => editorRef.current?.chain().focus().addRowAfter().run()}>Add row</button>
-          <button type="button" onClick={() => editorRef.current?.chain().focus().deleteRow().run()}>Delete row</button>
-          <button type="button" onClick={() => editorRef.current?.chain().focus().addColumnAfter().run()}>Add column</button>
-          <button type="button" onClick={() => editorRef.current?.chain().focus().deleteColumn().run()}>Delete column</button>
-          <button type="button" onClick={() => editorRef.current?.chain().focus().toggleHeaderRow().run()}>Toggle header</button>
-          <button type="button" onClick={() => editorRef.current?.chain().focus().deleteTable().run()}>Delete table</button>
-        </div>
-      )}
       {isActive && editable && selectionAction && (
         <div
           role="toolbar"
